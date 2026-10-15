@@ -2,7 +2,7 @@
 
 **Current phase:** P01 — Engine submodule and single-executable build
 **Status:** Next (P03 may run in parallel)
-**Engine commit:** tracks `main`; not pinned yet (Q-02)
+**Engine commit:** `13ebd2ba50db0e3e68dd473329caf96d1f039e4e` (`main`, pinned 2026-10-15; bump per Q-02)
 **Last updated:** 2026-10-15
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
