@@ -6,6 +6,7 @@ mod engine;
 mod layering;
 mod licenses;
 mod meta;
+mod pg_fetch;
 
 use anyhow::{Result, bail};
 
@@ -18,12 +19,12 @@ usage: cargo xtask <command>
   layering           crate dependency rules from CLAUDE.md
   engine [--smoke] [--force]
                      build the engine single executable into target/engine/<target>
-  run | pg-fetch | ui-check | keymap-doc | package   (not implemented yet)";
+  pg-fetch [--force] download the pinned PostgreSQL binaries into target/pg/<target>
+  run | ui-check | keymap-doc | package   (not implemented yet)";
 
 /// Commands that exist in the CLAUDE.md command list but land in later phases.
-const STUBS: [(&str, &str); 5] = [
+const STUBS: [(&str, &str); 4] = [
     ("run", "P06"),
-    ("pg-fetch", "P03"),
     ("ui-check", "P07"),
     ("keymap-doc", "P06"),
     ("package", "P35"),
@@ -64,6 +65,7 @@ fn main() -> Result<()> {
         Some("licenses") => run_licenses(),
         Some("layering") => run_layering(),
         Some("engine") => engine::engine(&args[1..]),
+        Some("pg-fetch") => pg_fetch::pg_fetch(&args[1..]),
         Some(cmd) => {
             if let Some((_, phase)) = STUBS.iter().find(|(name, _)| *name == cmd) {
                 bail!("`{cmd}` is not implemented yet: lands in {phase}");

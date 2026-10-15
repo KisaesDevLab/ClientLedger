@@ -158,7 +158,7 @@ pub fn manifest_field<'a>(manifest: &'a str, key: &str) -> Option<&'a str> {
     manifest[start..].split('"').next()
 }
 
-fn repo_root() -> Result<PathBuf> {
+pub(crate) fn repo_root() -> Result<PathBuf> {
     // xtask lives at <root>/xtask.
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
