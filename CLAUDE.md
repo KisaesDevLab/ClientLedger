@@ -3,7 +3,7 @@
 ClientLedger is a free, open-source (MIT), fully offline, native, cross-platform desktop bookkeeping app for **US small business owners**. It gives QuickBooks Desktop switchers the workflow they know — form-first entry, two-line registers, keyboard-driven everything — on top of the existing **Vibe MyBooks engine**. When the owner's accountant needs the books, ClientLedger exports a transfer file the accountant imports into MyBooks Online (the firm's browser-based MyBooks).
 
 - **UI:** Rust + egui (eframe), the same approach as PdfCraft. Windows x64, macOS, Linux from one codebase.
-- **Engine:** the existing MyBooks TypeScript engine (public repo, PolyForm Internal Use 1.0.0 plus a ClientLedger redistribution grant), compiled to a single executable with Node SEA and run locally as a sidecar process.
+- **Engine:** the existing MyBooks TypeScript engine (public repo, PolyForm Internal Use 1.0.0, unmodified), compiled to a single executable with Node SEA and run locally as a sidecar process.
 - **Database:** PostgreSQL 16, bundled with the app and managed by ClientLedger.
 - **Network:** none required. The only online features are optional and owner-configured: AI suggestions with the owner's own Anthropic or OpenAI key (or fully offline with a local Ollama model), emailing invoices through the owner's SMTP server, and the manual update check.
 - **License and repo:** ClientLedger code is MIT; the repo is public; outside pull requests are not accepted. No license keys, activation, or seat limits.
@@ -94,7 +94,7 @@ ClientLedger/
 │   ├── agents/               # subagent definitions (models, tools, effort)
 │   └── settings.json         # max 4 concurrent subagents
 ├── LICENSE                   # MIT — ClientLedger code only
-├── NOTICE.md                 # engine/ is PolyForm Internal Use + ClientLedger grant (Q-31)
+├── NOTICE.md                 # engine/ is PolyForm Internal Use 1.0.0, not MIT (Q-31)
 ├── CONTRIBUTING.md           # issues welcome; pull requests not accepted (Q-32)
 ├── ATTRIBUTION.md            # every bundled font, icon, binary, and license
 ├── Cargo.toml                # workspace

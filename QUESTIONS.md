@@ -22,7 +22,7 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 | Q-25 | MyBooks Online = **the existing browser-based MyBooks**. Transfer is **one-way** (ClientLedger → Online) and **export file only**. | P32 |
 | Q-26 | **Windows x64 only** for beta; ARM64 later. | P35 |
 | Q-27 | **No signing certificates yet.** Beta builds are unsigned; CI signing steps run only when secrets exist. | P35 |
-| Q-31 | The MyBooks engine stays **PolyForm Internal Use 1.0.0** with a **special written grant** allowing redistribution inside ClientLedger. The engine repo will be **public**. | P00, P01, P39 |
+| Q-31 | The MyBooks engine stays **PolyForm Internal Use 1.0.0** **unmodified** (no ClientLedger grant; owner decision 2026-10-15, supersedes the grant plan). Only the licensor, Kisaes LLC, distributes the engine, inside official ClientLedger releases. The engine repo will be **public**. | P00, P01, P39 |
 | Q-36 | Audience is **small business owners**. Accountant tools, workpapers, Report Packs, and Tax Estimator move post-beta. | All UI phases |
 | Q-37 | Beta includes credit memos + refunds, statements + finance charges, sales tax, average-cost inventory, LAN multi-user, and payroll import. Estimates, progress invoicing, sales orders, and POs are post-beta. | Phase list |
 | Q-38 | AI is off by default; cloud AI needs the owner's own key and internet; rules categorize offline. | P09, P13, P17, P26 |
@@ -140,12 +140,12 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 | Q-129 | **Multiple contact people with roles**; choose invoice/statement recipients. | P11, P20, P22 |
 | Q-130 | **Dated notes and simple to-dos** on contacts and jobs; to-dos feed Needs attention. | P11, P16 |
 | Q-131 | **No client credit limits.** | P11 |
-| Q-132 | Grant scope: ClientLedger users may use the bundled engine to keep **their own organization's books only** (their outside accountant may review/adjust/receive them). Bookkeeping for others needs a MyBooks commercial license. | Grant, P38 docs |
-| Q-133 | Only **Licensor's official releases** (and personal builds from unmodified source for own use) may include the engine. Forks of the MIT code may not bundle, download, or install the engine. | Grant, NOTICE.md, P35 |
-| Q-134 | Installers show a **license acceptance screen** (MIT + engine grant + PolyForm). | P35 |
+| Q-132 | Scope follows PolyForm Internal Use: ClientLedger users may use the bundled engine for the **internal business operations of their own organization** (their own books). Bookkeeping for others is not internal use and needs a separate license from Kisaes LLC. The earlier explicit allowance for outside accountants is gone with the grant; ordinary file transfer to the accountant is unaffected. | NOTICE.md, P38 docs |
+| Q-133 | Only **Licensor's official releases** may include the engine, because recipients may not distribute it. Forks of the MIT code may not bundle, download, or install the engine. | NOTICE.md, P35 |
+| Q-134 | Installers show a **license acceptance screen** (MIT + PolyForm Internal Use). | P35 |
 | Q-135 | **Short privacy notice** in the app and on ClientLedger.net. | P06, P38 |
 | Q-136 | Cloud AI enablement records **dated consent in the audit trail**. | P09 |
-| Q-137 | The engine's own-books scope appears **in About and docs only**. | P06, P38 |
+| Q-137 | The engine's internal-business-use scope (Q-132) appears **in About and docs only**. | P06, P38 |
 | Q-138 | **AI usage meter and owner-set monthly cap.** | P09 |
 | Q-139 | **Minimum data, redacted** before cloud AI calls. | P09, U-09 |
 | Q-140 | **Per-feature AI toggles.** | P09 |
@@ -242,7 +242,7 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 
 | ID | Question | Raised | Default assumption | Status |
 | --- | --- | --- | --- | --- |
-| Q-35 | Final wording of the engine redistribution grant. | P01 | Draft in `docs/legal/LICENSE-CLIENTLEDGER.draft.md` (2026-10-11) awaiting attorney review; final text goes in the engine repo as `LICENSE-CLIENTLEDGER.md` (U-10). Claude Code must not edit the legal text. | Open — **STOP before the first public release (P39)** |
+| Q-35 | Engine redistribution grant. | P01 | **Superseded 2026-10-15:** the owner chose straight PolyForm Internal Use 1.0.0 with no grant. `docs/legal/LICENSE-CLIENTLEDGER.draft.md` is kept for reference only and is not published. The engine relicense from Small Business is an engine PR (branch `clientledger/license-internal-use`) for the owner to merge. | Superseded; **STOP before P39 remains** only to confirm the engine relicense PR is merged and an attorney has reviewed the NOTICE summary |
 | Q-P00a | Layering for crates CLAUDE.md does not constrain (`cl-host`, `cl-company`, `cl-print`, `cl-automation`, `cl-lan`), and egui usage. | P00 | Each may depend on any library crate below `cl-ui` (never `cl-ui` or apps). Only `cl-grid`, `cl-ui`, and apps may depend directly on egui/eframe, per "nothing below `cl-ui` depends on egui except `cl-grid`". If `cl-automation` needs egui for widget inspection (P07), amend the table in `xtask/src/layering.rs` and CLAUDE.md together. Table lives in `xtask/src/layering.rs`. | Default in force |
 | Q-P00b | `cargo xtask test` sets `CL_OFFLINE_TESTS=1` but cannot block the network itself. | P00 | The variable is a convention: test helpers that could open sockets must check it and refuse. Real network blocking (sandbox or firewall in CI) is deferred to when the first networked test exists (P05). | Default in force |
 | Q-P00c | Secret scanner choice (permissive license required). | P00 | gitleaks (MIT) pinned binary v8.18.4 run directly in `ci.yml`, not the licensed GitHub Action. Not run locally; first CI run confirms the download URL and a clean scan. | Default in force |
