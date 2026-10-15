@@ -1,0 +1,12 @@
+{
+  "name": "clientledger-engine-tools",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Build tooling for the engine single executable (xtask engine). Not shipped.",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "esbuild": "0.25.12",
+    "postject": "1.0.0-alpha.6"
+  }
+}
