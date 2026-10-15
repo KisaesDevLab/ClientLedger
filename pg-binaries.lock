@@ -1,0 +1,16 @@
+# Pinned PostgreSQL binaries for `cargo xtask pg-fetch` (Q-06, Q-P03a).
+#
+# Source: zonky embedded-postgres-binaries on Maven Central
+# (https://github.com/zonkyio/embedded-postgres-binaries, Apache-2.0 packaging
+# of the PostgreSQL License server). Each jar wraps one .txz of the server.
+# Only postgres, initdb, and pg_ctl ship in these archives.
+#
+# Line format:  <target> <sha256 of the downloaded file> <url>
+# Targets are the directory names under target/pg/. Update the version and
+# all four hashes together, and compare each hash with the `.sha256` file that
+# Maven Central publishes next to the jar.
+version = 16.15.0
+windows-x64 51c7812dc1af47c9a2ccb64fe74efb88c515cff2da347ce72aab92b4cc8e1191 https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-windows-amd64/16.15.0/embedded-postgres-binaries-windows-amd64-16.15.0.jar
+macos-arm64 65b953905f0a4d46030767a6b44a52360170d69a7985f1b02aa435f2f6256a83 https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-darwin-arm64v8/16.15.0/embedded-postgres-binaries-darwin-arm64v8-16.15.0.jar
+macos-x64 1229188b99515d2160d5cb6222bc96d9c5f3a248268df3bc2dfe0047e6c233d8 https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-darwin-amd64/16.15.0/embedded-postgres-binaries-darwin-amd64-16.15.0.jar
+linux-x64 653abc065c682b85d3da50168fb95dc524bd85426cdec9ce3695a550ef431df2 https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/16.15.0/embedded-postgres-binaries-linux-amd64-16.15.0.jar

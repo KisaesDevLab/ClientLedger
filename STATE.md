@@ -1,7 +1,7 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P01 — Engine submodule and single-executable build
-**Status:** Next (P03 may run in parallel)
+**Current phase:** P03 — Bundled PostgreSQL manager (parallel lane); P02 — Engine desktop profile is next on the critical path
+**Status:** P03 in progress
 **Engine commit:** `13ebd2ba50db0e3e68dd473329caf96d1f039e4e` (`main`, pinned 2026-10-15; bump per Q-02)
 **Last updated:** 2026-10-15
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
@@ -11,9 +11,9 @@
 | Phase | Title | Tier | Status |
 | --- | --- | --- | --- |
 | P00 | Repository bootstrap | L | Done 2026-10-15 |
-| P01 | Engine submodule and single-executable build | L | Next |
+| P01 | Engine submodule and single-executable build | L | Done 2026-10-15 (one criterion deferred to P02) |
 | P02 | Engine desktop profile (upstream) | H | |
-| P03 | Bundled PostgreSQL manager | L | |
+| P03 | Bundled PostgreSQL manager | L | In progress |
 | P04 | Supervisor | L | |
 | P05 | Engine API client | H | |
 | P06 | Application shell | L | |
@@ -67,18 +67,43 @@
 
 ## Blocked items
 
-None yet. Format: `Pxx — blocked by U-xx/Q-xx — what is pending — workaround in place`.
+Format: `Pxx — blocked by U-xx/Q-xx — what is pending — workaround in place`.
+
+- P39 (release) — owner decision needed on Q-P03e — the bundled PostgreSQL archives ship LGPL libraries (gettext/libiconv on Windows) and OpenSSL, ICU, libxml2 and others on Linux/macOS; the owner must confirm the licensing position (license texts shipped, any written source offer) before beta release — workaround in place: libraries kept unmodified and listed in ATTRIBUTION.md.
 
 ## Placeholders tracked
 
 Screens or actions that link to a later phase. Remove each line when its phase lands.
 
-- (none yet)
+- P34/P08 — restore UI must call `Cluster::restore(src, store, allow_unregistered)` with `allow_unregistered = false` by default and set it to `true` only after an explicit owner confirmation that the file came from a trusted source (Q-P03h).
+
+## Follow-ups from P03 security review
+
+Findings from the P03 security review that were not fixed in P03. Fixed in P03: 1 (crafted backup runs code on restore), 2 and 15 (stop signalling an unrelated process), 3 (backup file mode on Unix), 5, 8, 12, 13, 14. Each item below names the phase that must pick it up; remove the line when it lands.
+
+| # | Follow-up | Target |
+|---|-----------|--------|
+| 4 | Limit extraction size and check free disk space before unpacking a backup (a hostile archive can expand without bound). | before the restore UI: P34 / P08 |
+| 6 | A keychain hiccup must not downgrade an already initialized cluster to the file fallback store. | P09 |
+| 7 | Derive the fallback file key from OS APIs, not environment variables (user name, computer name). | P09 |
+| 9 | Truncate `postgresql.auto.conf` on every start (restore already resets it). | next `cl-pg` touch (P04) |
+| 10 | The engine must connect as a non-superuser application role, not the `postgres` superuser. | P04 |
+| 11 | Owner-only ACL on the data directory, the `.secret` file, and backups on Windows (Unix backups are already 0600). | P04 / P09 |
+| 16 | Treat gvfs `smb-share:`, `sftp:`, and `dav:` mounts as network drives in `check_data_dir`. | P08 |
+| 17 | Canonicalize the parent folder when checking that a backup is not inside the data directory. | next `cl-pg` touch |
+| 18 | `pg-fetch`: pass `--proto-redir =https --tlsv1.2` to curl, and consider verifying the Maven `.asc` signature when the pinned hashes are bumped. | next hash bump / P35 |
+
+Notes kept for later phases:
+
+- `startup.log` (the `pg_ctl -l` file) must stay outside the data directory: on Windows, after a crash the server fsyncs every file in the data directory and fails with a sharing violation on a log file that is still open (stalls startup).
+- Pid-file ownership uses the pid, process name, and data directory from `postmaster.pid`; the process start time is not compared (no portable OS call without more dependencies).
+- A running server whose pid file shows non-loopback settings is stopped and restarted (unit-tested on the pid file fields; no integration test starts a wider server).
 
 ## Log
 
 Newest first. One entry per completed phase: date, phase, summary, acceptance checklist results, notable decisions (Q-xx / U-xx).
 
+- 2026-10-15 — P01 complete (PR #2, squash-merged), with one acceptance criterion deferred: `/health` reporting the pinned engine commit. The pinned engine has no commit field and returns 503 without Redis, so the smoke test accepts 503 with DB ok until U-02/U-03 land in P02 (Q-P01a). Shipped: `engine/` submodule (Vibe-MyBooks `main`, pinned 13ebd2ba), `cargo xtask engine` (esbuild + Node SEA, manifest.json, cache by commit + Node version), `--smoke`, PATH-stripped run test, 4-OS `engine` CI job. Verified: built on Windows x64, macOS arm64/x64, Linux x64 in CI; runs without Node; smoke ran all 325 migrations. Decisions: Q-P01a–c. Engine untouched; bundling workarounds in Q-P01b (puppeteer stubbed, so engine HTML-to-PDF routes fail; P04 sets CL_ENGINE_RUNTIME_DIR). Agents: rust-implementer (sonnet), ci-fixer (sonnet; Windows runner is elevated, so smoke Postgres starts via pg_ctl).
 - 2026-10-15 — P00 complete (PR #1, squash-merged). Workspace skeleton (13 crates, 2 apps, xtask), MIT/NOTICE/community files, deny.toml, `xtask` license + layering + ci gates, three-OS CI with secret scan and report-only coverage. Acceptance: `cargo xtask ci` green on Ubuntu, Windows, macOS arm64 + x64; GPL dep, direct BSD-only dep, and a layering violation each failed their gate (verified once, reverted); gitleaks scan clean. Decisions: Q-P00a–c. Agents: rust-implementer (sonnet), ci-fixer (sonnet; clippy `assert_is_empty` on newer CI toolchain). Not enforced: the rule that only cl-pg/cl-host/cl-company spawn processes (not visible in the dependency graph). Follow-up: consider pinning rust-toolchain.toml to CI's clippy version. Owner enabled branch protection (required: ci x4 + secret scan), auto-merge, and secret scanning with push protection.
 - 2026-10-15 — UI mockups added as the visual reference (Q-226–Q-228): 15 screens in docs/design (HTML + PNG + index); each screen phase names its mockup and gains a mockup-match acceptance item; ui-check gets `--compare`; ui-verifier reviews against mockups; sample company reproduces mockup figures; canvas-example tests now use the mockup numbers.
 - 2026-10-11 — Detailed build plan written: PHASES.md is now an index; phases/M0–M7 hold per-phase decisions, engine items, crates and files, ordered commit-sized steps, tests, acceptance, and Fable checkpoints.
