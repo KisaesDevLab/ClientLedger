@@ -80,3 +80,53 @@ jobs:
       - name: Coverage summary
         # TODO(P05): add `--fail-under-lines 80` and make this job required.
         run: cargo llvm-cov --workspace --exclude xtask --summary-only
+
+  # Engine single executable (P01): built on every OS we ship, smoke-tested
+  # against a temporary PostgreSQL, uploaded for later jobs.
+  engine:
+    name: engine (${{ matrix.os }})
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-14, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    env:
+      CL_SMOKE_REQUIRE: "1"
+      CL_REQUIRE_ENGINE_EXE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: Swatinem/rust-cache@v2
+      - name: Engine commit
+        id: engine
+        shell: bash
+        run: echo "commit=$(git rev-parse HEAD:engine)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: target/engine/.cache
+          key: engine-${{ matrix.os }}-${{ steps.engine.outputs.commit }}-node24
+      - name: PostgreSQL 16 for the smoke run (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-16
+          echo "CL_SMOKE_PG_BIN=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
+      - name: PostgreSQL 16 for the smoke run (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install postgresql@16
+          echo "CL_SMOKE_PG_BIN=$(brew --prefix postgresql@16)/bin" >> "$GITHUB_ENV"
+      - name: Build engine executable and smoke test
+        run: cargo xtask engine --smoke
+      - name: Executable runs without Node on PATH
+        run: cargo test -p xtask -- built_executable_runs_without_node_on_path
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-${{ runner.os }}-${{ runner.arch }}
+          path: target/engine/*/
+          if-no-files-found: error
