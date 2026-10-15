@@ -7,6 +7,8 @@ use std::path::Path;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PidFile {
     pub pid: u32,
+    /// The data directory the server says it runs in.
+    pub data_dir: String,
     pub port: Option<u16>,
     /// Directory of the Unix socket; empty when sockets are off.
     pub socket_dir: String,
@@ -19,13 +21,14 @@ pub(crate) struct PidFile {
 pub(crate) fn parse(text: &str) -> Option<PidFile> {
     let mut lines = text.lines();
     let pid = lines.next()?.trim().parse().ok()?;
-    let _data_dir = lines.next()?;
+    let data_dir = lines.next()?.trim().to_string();
     let _started = lines.next()?;
     let port = lines.next()?.trim().parse().ok();
     let socket_dir = lines.next().unwrap_or("").trim().to_string();
     let listen_addr = lines.next().unwrap_or("").trim().to_string();
     Some(PidFile {
         pid,
+        data_dir,
         port,
         socket_dir,
         listen_addr,
@@ -35,6 +38,32 @@ pub(crate) fn parse(text: &str) -> Option<PidFile> {
 /// Read `postmaster.pid` from a data directory.
 pub(crate) fn read(data_dir: &Path) -> Option<PidFile> {
     parse(&std::fs::read_to_string(data_dir.join("postmaster.pid")).ok()?)
+}
+
+/// Does the data directory a pid file names match `ours`? Slash direction,
+/// case on Windows, and a trailing slash do not matter; symbolic links and
+/// `\\?\\` prefixes are resolved when the folders exist.
+pub(crate) fn same_dir(named: &str, ours: &Path) -> bool {
+    fn norm(text: &str) -> String {
+        let t = text.replace('\\', "/");
+        let t = t.strip_prefix("//?/").unwrap_or(&t).trim_end_matches('/');
+        if cfg!(windows) {
+            t.to_lowercase()
+        } else {
+            t.to_string()
+        }
+    }
+    let named = named.trim();
+    if named.is_empty() {
+        return false;
+    }
+    if norm(named) == norm(&ours.to_string_lossy()) {
+        return true;
+    }
+    match (Path::new(named).canonicalize(), ours.canonicalize()) {
+        (Ok(a), Ok(b)) => norm(&a.to_string_lossy()) == norm(&b.to_string_lossy()),
+        _ => false,
+    }
 }
 
 /// First column of a `tasklist /FO CSV /NH` row, lowercased.
@@ -85,6 +114,29 @@ mod tests {
         assert_eq!(p.port, Some(54321));
         assert_eq!(p.socket_dir, "");
         assert_eq!(p.listen_addr, "127.0.0.1");
+    }
+
+    #[test]
+    fn data_directory_names_are_compared_loosely_but_not_wrongly() {
+        assert!(same_dir("/a/b/pgdata", Path::new("/a/b/pgdata")));
+        assert!(same_dir("/a/b/pgdata/", Path::new("/a/b/pgdata")));
+        assert!(!same_dir("/a/b/other", Path::new("/a/b/pgdata")));
+        assert!(!same_dir("", Path::new("/a/b/pgdata")));
+        if cfg!(windows) {
+            assert!(same_dir(
+                "c:/Users/X/pgdata",
+                Path::new("C:\\Users\\x\\pgdata")
+            ));
+            assert!(same_dir(
+                "//?/C:/Users/X/pgdata",
+                Path::new("C:\\Users\\X\\pgdata")
+            ));
+        }
+    }
+
+    #[test]
+    fn the_data_directory_is_read_from_the_pid_file() {
+        assert_eq!(parse(SAMPLE).unwrap().data_dir, "C:/data/pgdata");
     }
 
     #[test]

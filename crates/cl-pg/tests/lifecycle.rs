@@ -134,3 +134,80 @@ fn a_stale_pid_file_owned_by_another_program_is_cleared() {
     assert_ne!(running.pid, me);
     common::connect(&cluster, running.port, "postgres");
 }
+
+/// A long-running program that is certainly not `PostgreSQL`.
+fn spawn_sleeper() -> std::process::Child {
+    let mut cmd = if cfg!(windows) {
+        let mut c = std::process::Command::new("ping");
+        c.args(["-n", "60", "127.0.0.1"]);
+        c
+    } else {
+        let mut c = std::process::Command::new("sleep");
+        c.arg("60");
+        c
+    };
+    cmd.stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap()
+}
+
+#[test]
+fn stop_never_signals_an_unrelated_program_that_reused_the_pid() {
+    let Some(bins) = common::bins() else { return };
+    let scratch = common::Scratch::new("stopreuse");
+    let cluster = Cluster::ensure(&scratch.data_dir(), bins, &MemoryStore::new()).unwrap();
+
+    let mut other = spawn_sleeper();
+    fs::write(
+        scratch.data_dir().join("postmaster.pid"),
+        format!(
+            "{}\n{}\n1700000000\n5432\n\n127.0.0.1\n  1 1\nready\n",
+            other.id(),
+            scratch.data_dir().display()
+        ),
+    )
+    .unwrap();
+
+    cluster.stop().unwrap();
+    assert!(
+        other.try_wait().unwrap().is_none(),
+        "stop() ended an unrelated program"
+    );
+    // On Windows `pg_ctl status` already says "not running" for a pid that has
+    // no PostgreSQL signal pipe, so the file is simply left for the next start
+    // to replace; on Unix `pg_ctl` would have signalled the process.
+    if cfg!(unix) {
+        assert!(
+            !scratch.data_dir().join("postmaster.pid").exists(),
+            "the leftover pid file should be removed"
+        );
+    }
+    other.kill().unwrap();
+    let _ = other.wait();
+}
+
+#[test]
+fn a_pid_file_naming_another_data_directory_is_not_ours() {
+    let Some(bins) = common::bins() else { return };
+    let scratch = common::Scratch::new("otherdir");
+    let first = Cluster::ensure(&scratch.path("one"), bins.clone(), &MemoryStore::new()).unwrap();
+    let second = Cluster::ensure(&scratch.path("two"), bins, &MemoryStore::new()).unwrap();
+    let running = first.start().unwrap();
+    let _stop = Guard(&first);
+
+    // `two` has a pid file naming a real PostgreSQL process, but one that
+    // belongs to `one`: stopping `two` must leave that server alone.
+    fs::write(
+        scratch.path("two").join("postmaster.pid"),
+        format!(
+            "{}\n{}\n1700000000\n5432\n\n127.0.0.1\n  1 1\nready\n",
+            running.pid,
+            scratch.path("one").display()
+        ),
+    )
+    .unwrap();
+    second.stop().unwrap();
+    assert_eq!(first.running_port(), Some(running.port));
+    assert!(!scratch.path("two").join("postmaster.pid").exists());
+}

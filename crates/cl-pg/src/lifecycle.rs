@@ -34,6 +34,17 @@ const LEFTOVERS: [&str; 3] = [
     "could not create lock file",
 ];
 
+/// Who a `postmaster.pid` belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Owner {
+    /// A `PostgreSQL` process for this data directory.
+    Ours,
+    /// A leftover: the process is another program, or another data directory's server.
+    Foreign,
+    /// The process exists but could not be identified.
+    Unknown,
+}
+
 /// A started server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Running {
@@ -279,6 +290,26 @@ impl Cluster {
         Ok(f.code == Some(0))
     }
 
+    /// Is the process named in `pf` really this data directory's server? The
+    /// number alone proves nothing: after a crash or reboot the operating
+    /// system may have given it to another program, even another `PostgreSQL`.
+    fn owner_of(&self, pf: &pidfile::PidFile) -> Owner {
+        if !pidfile::same_dir(&pf.data_dir, &self.data_dir) {
+            return Owner::Foreign;
+        }
+        match pidfile::process_is_postgres(pf.pid) {
+            Some(true) => Owner::Ours,
+            Some(false) => Owner::Foreign,
+            None => Owner::Unknown,
+        }
+    }
+
+    /// Delete a `postmaster.pid` that belongs to nobody we manage.
+    fn remove_foreign_pid_file(&self) {
+        tracing::warn!("removing postmaster.pid owned by an unrelated program");
+        let _ = fs::remove_file(self.data_dir.join("postmaster.pid"));
+    }
+
     /// If a server for this data directory is up (or coming up), return it.
     /// A pid file whose process now belongs to another program is deleted.
     fn adopt_existing(&self) -> Result<Option<Running>> {
@@ -290,10 +321,9 @@ impl Cluster {
             // replays its write-ahead log.
             return Ok(None);
         }
-        if pidfile::process_is_postgres(pf.pid) == Some(false) {
+        if self.owner_of(&pf) == Owner::Foreign {
             // A crash or reboot left the file and another program reused the pid.
-            tracing::warn!("removing postmaster.pid owned by an unrelated program");
-            let _ = fs::remove_file(self.data_dir.join("postmaster.pid"));
+            self.remove_foreign_pid_file();
             return Ok(None);
         }
         let deadline = Instant::now() + Duration::from_secs(20);
@@ -323,6 +353,13 @@ impl Cluster {
     /// Fails when `pg_ctl` cannot stop the server.
     pub fn stop(&self) -> Result<()> {
         if !self.is_running()? {
+            return Ok(());
+        }
+        if let Some(pf) = pidfile::read(&self.data_dir)
+            && self.owner_of(&pf) == Owner::Foreign
+        {
+            // `pg_ctl stop` would signal whatever owns that pid.
+            self.remove_foreign_pid_file();
             return Ok(());
         }
         let mut cmd = proc::command(&self.bins.program("pg_ctl"));
