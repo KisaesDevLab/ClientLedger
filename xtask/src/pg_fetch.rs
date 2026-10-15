@@ -255,8 +255,13 @@ fn verify_layout(root: &Path) -> Result<()> {
             bail!("expected {} in the unpacked archive", p.display());
         }
     }
-    if !root.join("share").join("postgres.bki").is_file() {
-        bail!("expected share/postgres.bki in the unpacked archive");
+    // Windows archives keep data files in `share/`; Linux and macOS builds use
+    // `share/postgresql/`.
+    let share = root.join("share");
+    if !share.join("postgres.bki").is_file()
+        && !share.join("postgresql").join("postgres.bki").is_file()
+    {
+        bail!("expected postgres.bki under share/ in the unpacked archive");
     }
     Ok(())
 }
