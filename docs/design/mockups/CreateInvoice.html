@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- ClientLedger reference mockup (docs/design). Not production code; synthetic sample data. Fonts: IBM Plex (assets/fonts after P06). -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>ClientLedger — Create Invoice</title>
+</head>
+<body>
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#1E2421;background:#E9E6E0;font-size:13px}
+a{color:#0F5E5A}a:hover{color:#0A4441}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;background:#FFFFFF;border:1px solid #C9C4BA;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:#3A403C;white-space:nowrap}
+.mono{font-family:'IBM Plex Mono',monospace}
+.num{font-family:'IBM Plex Mono',monospace;text-align:right;white-space:nowrap}
+.titlebar{background:#1E2421;color:#E9E6E0;display:flex;align-items:center;gap:16px;padding:0 16px;min-height:36px;flex-wrap:wrap;border-bottom:3px solid #3E7CB1}
+.menu{background:#F7F5F1;border-bottom:1px solid #C9C4BA;display:flex;gap:2px;padding:0 8px;flex-wrap:wrap;align-items:center}
+.menu>button{background:none;border:0;padding:7px 10px;cursor:pointer}
+.rail{flex:1 1 200px;max-width:220px;background:#F7F5F1;border-right:1px solid #C9C4BA;padding:8px;display:flex;flex-direction:column;gap:2px}
+.rail h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6B726D;padding:12px 8px 4px;margin:0}
+.rail a{text-decoration:none;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 8px;border-radius:4px;color:#1E2421}
+.rail a:hover{background:#EEEBE5}
+.rail a.on{background:#0F5E5A;color:#FFFFFF;font-weight:500}
+.badge{background:#B5651D;color:#FFFFFF;border-radius:10px;padding:0 7px;font-size:11px;font-weight:600}
+.tabs{display:flex;gap:2px;padding:8px 12px 0;border-bottom:1px solid #C9C4BA;flex-wrap:wrap}
+.tabs a{text-decoration:none;padding:7px 14px;color:#4F5752;border:1px solid transparent;border-radius:6px 6px 0 0}
+.tabs a.on{border-color:#C9C4BA;border-bottom-color:#FFFFFF;background:#FFFFFF;margin-bottom:-1px;font-weight:600;color:#1E2421}
+.status{background:#F7F5F1;border-top:1px solid #C9C4BA;display:flex;gap:20px;padding:6px 16px;font-size:12px;color:#4F5752;flex-wrap:wrap}
+.btn{border:1px solid #C9C4BA;background:#FFFFFF;border-radius:4px;padding:6px 12px;cursor:pointer;min-height:44px}
+.btnp{border:1px solid #0F5E5A;background:#0F5E5A;color:#FFFFFF;border-radius:4px;padding:8px 16px;font-weight:600;min-height:44px;cursor:pointer}
+.tool{display:flex;gap:2px;flex-wrap:wrap;align-items:center;padding:6px 12px;border-bottom:1px solid #DAD6CE;background:#FBFAF8}
+.tool button{background:none;border:1px solid transparent;border-radius:4px;padding:5px 9px;cursor:pointer}
+.tool button:hover{border-color:#C9C4BA;background:#FFFFFF}
+.sep{width:1px;height:20px;background:#DAD6CE;margin:0 6px}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#4F5752}
+.fld input,.fld select,.fld textarea{font-size:14px;color:#1E2421;padding:6px 8px;border:1px solid #C9C4BA;border-radius:4px;background:#FFFFFF}
+.tb{width:100%;border-collapse:collapse;min-width:720px}
+.tb th{font-weight:500;color:#4F5752;text-align:left;padding:7px 10px;background:#FBFAF8;border-bottom:1px solid #DAD6CE;white-space:nowrap}
+.tb td{padding:7px 10px;border-top:1px solid #EEEBE5;vertical-align:top}
+.card{border:1px solid #DAD6CE;border-radius:6px;background:#FFFFFF;overflow:hidden}
+.card>h2{margin:0;padding:9px 12px;font-size:13px;font-weight:600;border-bottom:1px solid #DAD6CE;background:#FBFAF8}
+.chip{background:#EEEBE5;color:#3A403C;border-radius:10px;padding:1px 8px;font-size:12px;white-space:nowrap}
+.row{display:flex;justify-content:space-between;gap:10px}
+.row span:first-child{color:#4F5752}
+</style>
+<div style="width: 100%; min-height: 940px; display: flex; flex-direction: column; background: #E9E6E0">
+  <header class="titlebar">
+    <div style="font-weight: 700; letter-spacing: 0.02em">ClientLedger</div>
+    <div style="color: #A9B0AB">Ozark Ridge Landscaping LLC</div>
+    <div style="flex-grow: 1"></div>
+    <div style="font-size: 12px; color: #A9B0AB">Wed 11/04/2026 · Books closed through 09/30/2026</div>
+  </header>
+  <nav class="menu" aria-label="Menu">
+    <button>File</button><button>Edit</button><button>Lists</button><button>Clients</button><button>Vendors</button><button>Banking</button><button>Payroll</button><button>Reports</button><button>Company</button><button>Window</button><button>Help</button>
+    <div style="flex-grow: 1"></div>
+    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: #4F5752"><span>Go to</span><input type="search" placeholder="Find a transaction, name, or command…" style="width: 260px; padding: 4px 8px; border: 1px solid #C9C4BA; border-radius: 4px; background: #FFFFFF; font-size: 12px"><kbd>Ctrl K</kbd></label>
+  </nav>
+
+  <div style="display: flex; flex-wrap: wrap; flex-grow: 1; align-items: stretch">
+    <aside class="rail" aria-label="Workspace">
+      <h2>Workspace</h2>
+      <a href="Home.html"><span>Home</span><kbd>Alt H</kbd></a>
+      <a href="CreateInvoice.html"><span>Clients &amp; Jobs</span><span style="color: #6B726D; font-size: 12px">64</span></a>
+      <a href="EnterBill.html"><span>Vendors</span><span style="color: #6B726D; font-size: 12px">38</span></a>
+      <a href="BankFeed.html"><span>Bank Feed</span><span class="badge">37</span></a>
+      <a href="Register.html"><span>Chart of Accounts</span><kbd>Ctrl A</kbd></a>
+      <a href="Reports.html"><span>Reports</span></a>
+      <h2>Tools</h2>
+      <a href="ImportBankFile.html"><span>Import Bank File</span></a>
+      <a href="Home.html"><span>Import Payroll</span></a>
+      <a href="SendToAccountant.html"><span>Send to My Accountant</span></a>
+      <a href="Home.html"><span>Audit Trail</span></a>
+      <h2>Open windows</h2>
+      <a href="WriteCheck.html"><span>Write Check · #4418 ●</span></a>
+      <a href="Register.html"><span>Register · Operating</span></a>
+      <a class="on" href="CreateInvoice.html"><span>Invoice · #1097 ●</span></a>
+    </aside>
+
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+      <nav class="tabs" aria-label="Open windows">
+        <a href="Home.html">Home</a>
+        <a href="WriteCheck.html">Write Check · #4418 ●</a>
+        <a href="Register.html">Register · Operating</a>
+        <a class="on" href="CreateInvoice.html">Invoice · #1097 ●</a>
+      </nav>
+
+      <div style="background: #FFFFFF; flex-grow: 1; display: flex; flex-direction: column">
+        <div class="tool" role="toolbar" aria-label="Invoice tools">
+          <button>◀ Prev</button><button>Next ▶</button>
+          <span class="sep"></span>
+          <button>Find</button><button>Preview</button><button>Print</button><button>Email</button><button>Attach</button>
+          <span class="sep"></span>
+          <button>Add billable costs</button>
+          <div style="flex-grow: 1"></div>
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #4F5752">Template <select style="padding: 3px 6px; border: 1px solid #C9C4BA; border-radius: 4px; background: #FFFFFF"><option>Service invoice with logo</option></select></label>
+        </div>
+
+        <div style="margin: 12px 20px 0; background: #E6F0EF; border: 1px solid #B9C9C6; border-radius: 6px; padding: 9px 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
+          <span style="flex-grow: 1">This job has <b>1 billable cost</b> not yet invoiced (<span class="mono">842.15</span> from Ozark Feed &amp; Seed bill 20931). It was added as the last line.</span>
+          <a href="CreateInvoice.html">Review billable costs</a>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 20px; padding: 14px 20px 16px; flex-grow: 1">
+          <div style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+            <h1 style="margin: 0; font-size: 22px; font-weight: 600">Invoice</h1>
+            <section aria-label="Invoice header" style="background: #F2F6F5; border: 1px solid #B9C9C6; border-radius: 8px; padding: 16px 18px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px 16px">
+              <label class="fld" style="grid-column: span 3">Client:Job<input value="Hollister Family:Fall bed install" style="font-size: 15px; font-weight: 500"></label>
+              <label class="fld">Date<input class="mono" value="11/04/2026"></label>
+              <label class="fld">Invoice #<input class="mono" value="1097"></label>
+              <div class="fld">Tags<div style="display: flex; gap: 4px; flex-wrap: wrap; padding: 7px 0"><span class="chip">Install</span><span class="chip">Crew A</span></div></div>
+              <label class="fld" style="grid-column: span 2">Bill to<textarea rows="3" style="resize: none">Dana &amp; Mark Hollister
+27 Sycamore Ln
+Monett, MO 65708</textarea></label>
+              <label class="fld" style="grid-column: span 2">Job site<textarea rows="3" style="resize: none">Same as bill to
+Back yard beds, east side</textarea></label>
+              <label class="fld">Terms<select><option>Net 30</option></select></label>
+              <label class="fld">Due<input class="mono" value="12/04/2026"></label>
+              <label class="fld" style="grid-column: 5 / span 2">P.O. no.<input></label>
+            </section>
+
+            <div style="overflow-x: auto; border: 1px solid #DAD6CE; border-radius: 6px">
+              <table class="tb">
+                <thead><tr><th>Item</th><th style="width: 34%">Description</th><th>Service date</th><th style="text-align: right">Qty</th><th style="text-align: right">Rate</th><th style="text-align: right">Amount</th><th>Tax</th></tr></thead>
+                <tbody>
+                  <tr><td>Install labor</td><td>Bed preparation and planting, crew of 3</td><td class="mono">10/30/2026</td><td class="num">18</td><td class="num">65.00</td><td class="num">1,170.00</td><td>Non</td></tr>
+                  <tr><td>Shrubs · 3 gal</td><td>Boxwood, 3 gallon</td><td class="mono">10/30/2026</td><td class="num">24</td><td class="num">32.50</td><td class="num">780.00</td><td>Tax</td></tr>
+                  <tr><td>Mulch · yard</td><td>Hardwood mulch, delivered and spread</td><td class="mono">10/31/2026</td><td class="num">6</td><td class="num">48.00</td><td class="num">288.00</td><td>Tax</td></tr>
+                  <tr><td>Billable cost</td><td>Perennials<div style="font-size: 12px; color: #6B726D">From Ozark Feed &amp; Seed bill 20931</div></td><td class="mono">11/03/2026</td><td class="num">1</td><td class="num">842.15</td><td class="num">842.15</td><td>Tax</td></tr>
+                  <tr><td style="color: #8C928E">Item</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start">
+              <div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 10px">
+                <label class="fld">Message to client<textarea rows="2" style="resize: none">Thank you for your business. Payment by check or bank transfer — details below.</textarea></label>
+                <label style="display: flex; gap: 6px; align-items: center"><input type="checkbox" checked> Email a PDF after saving</label>
+                <label style="display: flex; gap: 6px; align-items: center"><input type="checkbox"> Hide $0 lines on the printed invoice</label>
+              </div>
+              <div style="flex: 0 1 300px; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; background: #FBFAF8; border: 1px solid #DAD6CE; border-radius: 6px">
+                <div class="row"><span>Subtotal</span><span class="mono">3,080.15</span></div>
+                <div class="row"><span>Sales tax · Monett (sample rate 8.100%)</span><span class="mono">154.72</span></div>
+                <div class="row" style="border-top: 1px solid #DAD6CE; padding-top: 6px; font-size: 15px; font-weight: 600"><span style="color: #1E2421">Total</span><span class="mono">3,234.87</span></div>
+                <div class="row"><span>Payments applied</span><span class="mono">0.00</span></div>
+                <div class="row" style="font-weight: 600"><span style="color: #1E2421">Balance due</span><span class="mono">3,234.87</span></div>
+              </div>
+            </div>
+
+            <div style="margin-top: auto; display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; padding-top: 8px">
+              <button class="btn">Clear</button>
+              <button class="btn">Save &amp; New <kbd>Alt N</kbd></button>
+              <button class="btnp">Save &amp; Close <kbd style="background: #0A4441; color: #FFFFFF; border-color: #0A4441">Alt S</kbd></button>
+            </div>
+          </div>
+
+          <aside style="flex: 1 1 260px; display: flex; flex-direction: column; gap: 12px" aria-label="Client details">
+            <section class="card">
+              <h2>Hollister Family</h2>
+              <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 6px">
+                <div class="row"><span>Open balance</span><span class="mono">2,140.00</span></div>
+                <div class="row"><span>After this invoice</span><span class="mono" style="font-weight: 600">5,374.87</span></div>
+                <div class="row"><span>Oldest open invoice</span><span>18 days</span></div>
+                <a href="CreateInvoice.html" style="padding-top: 4px">Open client</a>
+              </div>
+            </section>
+            <section class="card">
+              <h2>Job · Fall bed install</h2>
+              <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 6px">
+                <div class="row"><span>Status</span><span>In progress</span></div>
+                <div class="row"><span>Started</span><span class="mono">10/20/2026</span></div>
+                <div class="row"><span>Invoiced so far</span><span class="mono">2,140.00</span></div>
+                <div class="row"><span>Unbilled costs</span><span class="mono">0.00 after this</span></div>
+              </div>
+            </section>
+            <section class="card">
+              <h2>Notes</h2>
+              <div style="padding: 10px 12px; color: #4F5752">Prefers email. Gate code 4471 for the side yard.</div>
+            </section>
+          </aside>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="status">
+    <span>Kurt · Admin</span>
+    <span>Single-user · this computer</span>
+    <span>AI: Ollama, on this computer</span>
+    <div style="flex-grow: 1"></div>
+    <span><kbd>Tab</kbd> next cell</span>
+    <span><kbd>Ctrl Ins</kbd> insert line</span>
+    <span><kbd>Ctrl P</kbd> print</span>
+    <span><kbd>Esc</kbd> revert</span>
+  </footer>
+</div>
+</body>
+</html>

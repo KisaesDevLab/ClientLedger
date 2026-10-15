@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- ClientLedger reference mockup (docs/design). Not production code; synthetic sample data. Fonts: IBM Plex (assets/fonts after P06). -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>ClientLedger — QuickBooks Desktop import tie-out</title>
+</head>
+<body>
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#1E2421;background:#E9E6E0;font-size:13px}
+a{color:#0F5E5A}a:hover{color:#0A4441}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;background:#FFFFFF;border:1px solid #C9C4BA;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:#3A403C;white-space:nowrap}
+.mono{font-family:'IBM Plex Mono',monospace}
+.num{font-family:'IBM Plex Mono',monospace;text-align:right;white-space:nowrap}
+.titlebar{background:#1E2421;color:#E9E6E0;display:flex;align-items:center;gap:16px;padding:0 16px;min-height:36px;flex-wrap:wrap;border-bottom:3px solid #6E8B3D}
+.btn{border:1px solid #C9C4BA;background:#FFFFFF;border-radius:4px;padding:6px 14px;cursor:pointer;min-height:44px}
+.btnp{border:1px solid #0F5E5A;background:#0F5E5A;color:#FFFFFF;border-radius:4px;padding:8px 16px;font-weight:600;min-height:44px;cursor:pointer}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.steps li{display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:4px;color:#4F5752}
+.steps .dot{width:22px;height:22px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;border:1px solid #C9C4BA;background:#FFFFFF;flex-shrink:0}
+.steps li.done .dot{background:#0F5E5A;border-color:#0F5E5A;color:#FFFFFF}
+.steps li.cur{background:#E6F0EF;color:#1E2421;font-weight:600}
+.steps li.cur .dot{border:2px solid #0F5E5A;color:#0F5E5A}
+.tile{flex:1 1 200px;border:1px solid #B9C9C6;background:#F2F6F5;border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.tile .k{font-size:12px;color:#4F5752}
+.tile .v{font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:500;color:#0A4441}
+.tb{width:100%;border-collapse:collapse;min-width:640px}
+.tb th{font-weight:500;color:#4F5752;text-align:left;padding:7px 12px;background:#FBFAF8;border-bottom:1px solid #DAD6CE;white-space:nowrap}
+.tb td{padding:7px 12px;border-top:1px solid #EEEBE5}
+.segc{display:flex;border:1px solid #C9C4BA;border-radius:4px;overflow:hidden}
+.segc button{background:#FFFFFF;border:0;border-right:1px solid #C9C4BA;padding:6px 12px;cursor:pointer}
+.segc button:last-child{border-right:0}
+.segc button.on{background:#0F5E5A;color:#FFFFFF;font-weight:600}
+</style>
+<div style="width: 100%; min-height: 940px; display: flex; flex-direction: column; background: #E9E6E0">
+  <header class="titlebar">
+    <div style="font-weight: 700; letter-spacing: 0.02em">ClientLedger</div>
+    <div style="color: #A9B0AB">Shoal Creek Farm · switching from QuickBooks Desktop</div>
+    <div style="flex-grow: 1"></div>
+    <div style="font-size: 12px; color: #A9B0AB">Backup taken before import · 10/28/2026 2:04 PM</div>
+  </header>
+
+  <div style="flex-grow: 1; display: flex; flex-wrap: wrap; align-items: stretch">
+    <aside aria-label="Switch steps" style="flex: 1 1 240px; max-width: 280px; background: #F7F5F1; border-right: 1px solid #C9C4BA; padding: 20px 14px; display: flex; flex-direction: column; gap: 14px">
+      <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #6B726D; padding: 0 10px">Switch from QuickBooks Desktop</div>
+      <ol class="steps">
+        <li class="done"><span class="dot" aria-hidden="true">✓</span>Export reports from QuickBooks</li>
+        <li class="done"><span class="dot" aria-hidden="true">✓</span>Add the files</li>
+        <li class="done"><span class="dot" aria-hidden="true">✓</span>Review matches</li>
+        <li class="done"><span class="dot" aria-hidden="true">✓</span>History and start date</li>
+        <li class="done"><span class="dot" aria-hidden="true">✓</span>Import</li>
+        <li class="cur" aria-current="step"><span class="dot">6</span>Check that it matches</li>
+        <li><span class="dot">7</span>Spot-check a few items</li>
+      </ol>
+      <div style="margin-top: auto; font-size: 12px; color: #4F5752; padding: 0 10px; display: flex; flex-direction: column; gap: 6px">
+        <span>Not brought over: memorized transactions and QuickBooks users. You'll set those up fresh.</span>
+        <a href="QBDImport.html">Undo this import</a>
+      </div>
+    </aside>
+
+    <main style="flex: 999 1 640px; min-width: 0; background: #FFFFFF; padding: 22px 28px; display: flex; flex-direction: column; gap: 16px">
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <h1 style="margin: 0; font-size: 22px; font-weight: 600">Check that it matches</h1>
+        <div style="color: #4F5752">We compared your books here with the reports you exported from QuickBooks Desktop. Every difference must be 0.00 before the switch is marked verified.</div>
+      </div>
+
+      <div style="display: flex; gap: 12px; flex-wrap: wrap">
+        <div class="tile"><span class="k">Trial balance at 10/27/2026</span><span class="v">0.00 ✓</span><span class="k">46 accounts compared</span></div>
+        <div class="tile"><span class="k">A/R aging · clients owe</span><span class="v">0.00 ✓</span><span class="k">9 open invoices · 6,880.00</span></div>
+        <div class="tile"><span class="k">A/P aging · you owe</span><span class="v">0.00 ✓</span><span class="k">4 unpaid bills · 3,412.50</span></div>
+      </div>
+
+      <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
+        <div class="segc" role="group" aria-label="Compare"><button class="on">Trial balance</button><button>A/R aging</button><button>A/P aging</button></div>
+        <label style="display: flex; gap: 6px; align-items: center; color: #4F5752"><input type="checkbox"> Show only differences</label>
+        <div style="flex-grow: 1"></div>
+        <button class="btn" style="min-height: 32px">Save PDF</button>
+      </div>
+
+      <div style="overflow-x: auto; border: 1px solid #DAD6CE; border-radius: 6px">
+        <table class="tb">
+          <thead><tr><th>Account</th><th style="text-align: right">QuickBooks Desktop</th><th style="text-align: right">ClientLedger</th><th style="text-align: right">Difference</th></tr></thead>
+          <tbody>
+            <tr><td>1000 · Farm Checking</td><td class="num">48,206.14</td><td class="num">48,206.14</td><td class="num" style="color: #0F5E5A">0.00</td></tr>
+            <tr><td>1200 · Accounts Receivable</td><td class="num">6,880.00</td><td class="num">6,880.00</td><td class="num" style="color: #0F5E5A">0.00</td></tr>
+            <tr><td>1400 · Feed &amp; supplies inventory</td><td class="num">12,940.30</td><td class="num">12,940.30</td><td class="num" style="color: #0F5E5A">0.00</td></tr>
+            <tr><td>1500 · Machinery &amp; equipment</td><td class="num">182,400.00</td><td class="num">182,400.00</td><td class="num" style="color: #0F5E5A">0.00</td></tr>
+            <tr><td>1510 · Accumulated depreciation</td><td class="num">-64,215.00</td><td class="num">-64,215.00</td><td class="num" style="color: #0F5E5A">0.00</td></tr>
+            <tr><td>2000 · Accounts Payable</td><td class="num">-3,412.50</td><td class="num">-3,412.50</td><td class="num" style="color: #0F5E5A">0.00</td></tr>
+            <tr><td>2500 · Equipment loan</td><td class="num">-71,800.00</td><td class="num">-71,800.00</td><td class="num" style="color: #0F5E5A">0.00</td></tr>
+            <tr><td>4000 · Cattle sales</td><td class="num">-96,325.00</td><td class="num">-96,325.00</td><td class="num" style="color: #0F5E5A">0.00</td></tr>
+            <tr><td style="color: #6B726D">… 38 more accounts</td><td></td><td></td><td></td></tr>
+          </tbody>
+          <tfoot><tr><td style="font-weight: 600; border-top: 2px solid #DAD6CE; padding: 9px 12px">Total (all 46 accounts)</td><td class="num" style="border-top: 2px solid #DAD6CE; padding: 9px 12px">0.00</td><td class="num" style="border-top: 2px solid #DAD6CE; padding: 9px 12px">0.00</td><td class="num" style="border-top: 2px solid #DAD6CE; padding: 9px 12px; font-weight: 600; color: #0F5E5A">0.00 ✓</td></tr></tfoot>
+        </table>
+      </div>
+
+      <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: auto">
+        <span style="color: #4F5752">Classes from QuickBooks became the tag group <b>Enterprise</b> (Cow-calf, Hay).</span>
+        <div style="flex-grow: 1"></div>
+        <button class="btn">Back</button>
+        <button class="btnp">Mark verified and continue</button>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

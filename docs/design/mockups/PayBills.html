@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- ClientLedger reference mockup (docs/design). Not production code; synthetic sample data. Fonts: IBM Plex (assets/fonts after P06). -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>ClientLedger — Pay Bills</title>
+</head>
+<body>
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#1E2421;background:#E9E6E0;font-size:13px}
+a{color:#0F5E5A}a:hover{color:#0A4441}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;background:#FFFFFF;border:1px solid #C9C4BA;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:#3A403C;white-space:nowrap}
+.mono{font-family:'IBM Plex Mono',monospace}
+.num{font-family:'IBM Plex Mono',monospace;text-align:right;white-space:nowrap}
+.titlebar{background:#1E2421;color:#E9E6E0;display:flex;align-items:center;gap:16px;padding:0 16px;min-height:36px;flex-wrap:wrap;border-bottom:3px solid #3E7CB1}
+.menu{background:#F7F5F1;border-bottom:1px solid #C9C4BA;display:flex;gap:2px;padding:0 8px;flex-wrap:wrap;align-items:center}
+.menu>button{background:none;border:0;padding:7px 10px;cursor:pointer}
+.rail{flex:1 1 200px;max-width:220px;background:#F7F5F1;border-right:1px solid #C9C4BA;padding:8px;display:flex;flex-direction:column;gap:2px}
+.rail h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6B726D;padding:12px 8px 4px;margin:0}
+.rail a{text-decoration:none;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 8px;border-radius:4px;color:#1E2421}
+.rail a:hover{background:#EEEBE5}
+.rail a.on{background:#0F5E5A;color:#FFFFFF;font-weight:500}
+.badge{background:#B5651D;color:#FFFFFF;border-radius:10px;padding:0 7px;font-size:11px;font-weight:600}
+.tabs{display:flex;gap:2px;padding:8px 12px 0;border-bottom:1px solid #C9C4BA;flex-wrap:wrap}
+.tabs a{text-decoration:none;padding:7px 14px;color:#4F5752;border:1px solid transparent;border-radius:6px 6px 0 0}
+.tabs a.on{border-color:#C9C4BA;border-bottom-color:#FFFFFF;background:#FFFFFF;margin-bottom:-1px;font-weight:600;color:#1E2421}
+.status{background:#F7F5F1;border-top:1px solid #C9C4BA;display:flex;gap:20px;padding:6px 16px;font-size:12px;color:#4F5752;flex-wrap:wrap}
+.btn{border:1px solid #C9C4BA;background:#FFFFFF;border-radius:4px;padding:6px 12px;cursor:pointer}
+.btnp{border:1px solid #0F5E5A;background:#0F5E5A;color:#FFFFFF;border-radius:4px;padding:8px 16px;font-weight:600;min-height:44px;cursor:pointer}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#4F5752}
+.fld input,.fld select{font-size:14px;color:#1E2421;padding:6px 8px;border:1px solid #C9C4BA;border-radius:4px;background:#FFFFFF}
+.tb{width:100%;border-collapse:collapse;min-width:820px}
+.tb th{font-weight:500;color:#4F5752;text-align:left;padding:7px 10px;background:#FBFAF8;border-bottom:1px solid #DAD6CE;white-space:nowrap}
+.tb td{padding:7px 10px;border-top:1px solid #EEEBE5;vertical-align:middle}
+.tb tr.sel td{background:#E6F0EF}
+.tb input.amt{width:96px;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:13px;padding:4px 6px;border:1px solid #C9C4BA;border-radius:3px;background:#FFFFFF}
+.card{border:1px solid #DAD6CE;border-radius:6px;background:#FFFFFF;overflow:hidden}
+.card>h2{margin:0;padding:9px 12px;font-size:13px;font-weight:600;border-bottom:1px solid #DAD6CE;background:#FBFAF8}
+.row{display:flex;justify-content:space-between;gap:10px}
+.row span:first-child{color:#4F5752}
+</style>
+<div style="width: 100%; min-height: 940px; display: flex; flex-direction: column; background: #E9E6E0">
+  <header class="titlebar">
+    <div style="font-weight: 700; letter-spacing: 0.02em">ClientLedger</div>
+    <div style="color: #A9B0AB">Ozark Ridge Landscaping LLC</div>
+    <div style="flex-grow: 1"></div>
+    <div style="font-size: 12px; color: #A9B0AB">Wed 11/04/2026 · Books closed through 09/30/2026</div>
+  </header>
+  <nav class="menu" aria-label="Menu">
+    <button>File</button><button>Edit</button><button>Lists</button><button>Clients</button><button>Vendors</button><button>Banking</button><button>Payroll</button><button>Reports</button><button>Company</button><button>Window</button><button>Help</button>
+    <div style="flex-grow: 1"></div>
+    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: #4F5752"><span>Go to</span><input type="search" placeholder="Find a transaction, name, or command…" style="width: 260px; padding: 4px 8px; border: 1px solid #C9C4BA; border-radius: 4px; background: #FFFFFF; font-size: 12px"><kbd>Ctrl K</kbd></label>
+  </nav>
+
+  <div style="display: flex; flex-wrap: wrap; flex-grow: 1; align-items: stretch">
+    <aside class="rail" aria-label="Workspace">
+      <h2>Workspace</h2>
+      <a href="Home.html"><span>Home</span><kbd>Alt H</kbd></a>
+      <a href="CreateInvoice.html"><span>Clients &amp; Jobs</span><span style="color: #6B726D; font-size: 12px">64</span></a>
+      <a href="EnterBill.html"><span>Vendors</span><span style="color: #6B726D; font-size: 12px">38</span></a>
+      <a href="BankFeed.html"><span>Bank Feed</span><span class="badge">37</span></a>
+      <a href="Register.html"><span>Chart of Accounts</span><kbd>Ctrl A</kbd></a>
+      <a href="Reports.html"><span>Reports</span></a>
+      <h2>Tools</h2>
+      <a href="ImportBankFile.html"><span>Import Bank File</span></a>
+      <a href="Home.html"><span>Import Payroll</span></a>
+      <a href="SendToAccountant.html"><span>Send to My Accountant</span></a>
+      <a href="Home.html"><span>Audit Trail</span></a>
+      <h2>Open windows</h2>
+      <a href="WriteCheck.html"><span>Write Check · #4418 ●</span></a>
+      <a href="Register.html"><span>Register · Operating</span></a>
+      <a class="on" href="PayBills.html"><span>Pay Bills</span></a>
+    </aside>
+
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+      <nav class="tabs" aria-label="Open windows">
+        <a href="Home.html">Home</a>
+        <a href="WriteCheck.html">Write Check · #4418 ●</a>
+        <a href="Register.html">Register · Operating</a>
+        <a class="on" href="PayBills.html">Pay Bills</a>
+      </nav>
+
+      <div style="background: #FFFFFF; flex-grow: 1; display: flex; flex-direction: column; gap: 14px; padding: 16px 20px">
+        <div style="display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap">
+          <h1 style="margin: 0; font-size: 22px; font-weight: 600">Pay Bills</h1>
+          <span style="color: #4F5752">Pick the bills to pay, adjust amounts, then pay them all at once.</span>
+        </div>
+
+        <div style="display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; padding: 10px 12px; background: #FBFAF8; border: 1px solid #DAD6CE; border-radius: 6px">
+          <fieldset style="border: 0; padding: 0; margin: 0; display: flex; gap: 12px; align-items: center">
+            <legend style="font-size: 12px; color: #4F5752; padding: 0 0 4px">Show bills</legend>
+            <label style="display: flex; gap: 6px; align-items: center"><input type="radio" name="show" checked> Due on or before <input class="mono" value="11/11/2026" style="width: 96px; padding: 4px 6px; border: 1px solid #C9C4BA; border-radius: 3px"></label>
+            <label style="display: flex; gap: 6px; align-items: center"><input type="radio" name="show"> All bills</label>
+          </fieldset>
+          <label class="fld">Vendor<select style="font-size: 13px; padding: 4px 6px"><option>All vendors</option></select></label>
+          <label class="fld">Sort by<select style="font-size: 13px; padding: 4px 6px"><option>Due date</option></select></label>
+          <label style="display: flex; gap: 6px; align-items: center; padding-bottom: 6px"><input type="checkbox" checked> Take discounts I qualify for</label>
+        </div>
+
+        <div style="overflow-x: auto; border: 1px solid #DAD6CE; border-radius: 6px">
+          <table class="tb">
+            <thead><tr><th style="width: 32px"><input type="checkbox" aria-label="Select all"></th><th>Due</th><th>Vendor</th><th>Ref. no.</th><th>Disc. date</th><th style="text-align: right">Amt. due</th><th style="text-align: right">Discount</th><th style="text-align: right">Credits</th><th style="text-align: right">Amt. to pay</th></tr></thead>
+            <tbody>
+              <tr><td><input type="checkbox" checked aria-label="Select bill 20931"></td><td class="mono">11/05</td><td>Ozark Feed &amp; Seed</td><td class="mono">20931</td><td class="mono">—</td><td class="num">1,286.40</td><td class="num">0.00</td><td class="num">0.00</td><td style="text-align: right"><input class="amt" value="1,286.40" aria-label="Amount to pay"></td></tr>
+              <tr><td><input type="checkbox" checked aria-label="Select statement"></td><td class="mono">11/06</td><td>Riverbend Fuel<div style="font-size: 12px; color: #4F5752">October statement</div></td><td class="mono">STMT-1031</td><td class="mono">—</td><td class="num">1,412.06</td><td class="num">0.00</td><td class="num">0.00</td><td style="text-align: right"><input class="amt" value="1,412.06" aria-label="Amount to pay"></td></tr>
+              <tr><td><input type="checkbox" aria-label="Select bill 2214"></td><td class="mono">11/08</td><td>Monett Tire &amp; Lube</td><td class="mono">2214</td><td class="mono">—</td><td class="num">640.00</td><td class="num">0.00</td><td class="num">0.00</td><td style="text-align: right"><input class="amt" value="0.00" aria-label="Amount to pay"></td></tr>
+              <tr><td><input type="checkbox" checked aria-label="Select bill 7781"></td><td class="mono">11/10</td><td>Ozark Office Supply<div style="font-size: 12px; color: #4F5752">2% 5, Net 15</div></td><td class="mono">7781</td><td class="mono">11/06</td><td class="num">218.44</td><td class="num">4.37</td><td class="num">0.00</td><td style="text-align: right"><input class="amt" value="214.07" aria-label="Amount to pay"></td></tr>
+              <tr class="sel"><td><input type="checkbox" checked aria-label="Select bill 8813"></td><td class="mono">11/11</td><td>Table Rock Nursery<div style="font-size: 12px; color: #4F5752">Credit available 250.00</div></td><td class="mono">8813</td><td class="mono">—</td><td class="num">3,915.00</td><td class="num">0.00</td><td class="num">250.00</td><td style="text-align: right"><input class="amt" value="3,665.00" aria-label="Amount to pay" style="border: 2px solid #0F5E5A"></td></tr>
+            </tbody>
+            <tfoot>
+              <tr><td></td><td colspan="4" style="padding: 9px 10px; border-top: 2px solid #DAD6CE; font-weight: 600">Totals · 4 of 5 selected</td><td class="num" style="border-top: 2px solid #DAD6CE; padding: 9px 10px">7,471.90</td><td class="num" style="border-top: 2px solid #DAD6CE; padding: 9px 10px">4.37</td><td class="num" style="border-top: 2px solid #DAD6CE; padding: 9px 10px">250.00</td><td class="num" style="border-top: 2px solid #DAD6CE; padding: 9px 10px; font-weight: 600">6,577.53</td></tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <div style="display: flex; gap: 14px; flex-wrap: wrap">
+          <section class="card" style="flex: 1 1 300px" aria-labelledby="selbill">
+            <h2 id="selbill">Selected bill · Table Rock Nursery 8813</h2>
+            <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 6px">
+              <div class="row"><span>Terms</span><span>Net 30</span></div>
+              <div class="row"><span>Suggested discount</span><span class="mono">0.00</span></div>
+              <div class="row"><span>Credits used</span><span class="mono">250.00 (credit memo CM-114)</span></div>
+              <div style="display: flex; gap: 8px; padding-top: 4px"><button class="btn">Set discount</button><button class="btn">Set credits</button><button class="btn">Go to bill</button></div>
+            </div>
+          </section>
+          <section class="card" style="flex: 1 1 360px" aria-labelledby="pay">
+            <h2 id="pay">Payment</h2>
+            <div style="padding: 10px 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px">
+              <label class="fld">Payment date<input class="mono" value="11/04/2026"></label>
+              <label class="fld">Method<select><option>Check</option><option>Card</option><option>Bank transfer (record only)</option></select></label>
+              <fieldset style="border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px">
+                <legend style="font-size: 12px; color: #4F5752; padding-bottom: 4px">Check numbers</legend>
+                <label style="display: flex; gap: 6px"><input type="radio" name="num" checked> Print later</label>
+                <label style="display: flex; gap: 6px"><input type="radio" name="num"> Assign numbers now</label>
+              </fieldset>
+              <label class="fld">Pay from<select><option>1010 · Operating Checking</option></select></label>
+              <div style="grid-column: span 2; display: flex; justify-content: space-between; background: #F2F6F5; border-radius: 4px; padding: 8px 10px">
+                <span style="color: #4F5752">Ending balance</span>
+                <span class="mono">84,210.55 → <b>77,633.02</b></span>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: auto; flex-wrap: wrap">
+          <button class="btn" style="min-height: 44px">Clear selections</button>
+          <button class="btnp">Pay 4 bills · <span class="mono">$6,577.53</span></button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="status">
+    <span>Kurt · Admin</span>
+    <span>Single-user · this computer</span>
+    <span>AI: Ollama, on this computer</span>
+    <div style="flex-grow: 1"></div>
+    <span><kbd>Space</kbd> select bill</span>
+    <span><kbd>↑</kbd> <kbd>↓</kbd> move</span>
+    <span><kbd>Alt S</kbd> pay</span>
+  </footer>
+</div>
+</body>
+</html>

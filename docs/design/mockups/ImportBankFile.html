@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- ClientLedger reference mockup (docs/design). Not production code; synthetic sample data. Fonts: IBM Plex (assets/fonts after P06). -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>ClientLedger — Import Bank File</title>
+</head>
+<body>
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#1E2421;background:#E9E6E0;font-size:13px}
+a{color:#0F5E5A}a:hover{color:#0A4441}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;background:#FFFFFF;border:1px solid #C9C4BA;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:#3A403C;white-space:nowrap}
+.mono{font-family:'IBM Plex Mono',monospace}
+.num{font-family:'IBM Plex Mono',monospace;text-align:right;white-space:nowrap}
+.titlebar{background:#1E2421;color:#E9E6E0;display:flex;align-items:center;gap:16px;padding:0 16px;min-height:36px;flex-wrap:wrap;border-bottom:3px solid #3E7CB1}
+.menu{background:#F7F5F1;border-bottom:1px solid #C9C4BA;display:flex;gap:2px;padding:0 8px;flex-wrap:wrap;align-items:center}
+.menu>button{background:none;border:0;padding:7px 10px;cursor:pointer}
+.rail{flex:1 1 200px;max-width:220px;background:#F7F5F1;border-right:1px solid #C9C4BA;padding:8px;display:flex;flex-direction:column;gap:2px}
+.rail h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6B726D;padding:12px 8px 4px;margin:0}
+.rail a{text-decoration:none;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 8px;border-radius:4px;color:#1E2421}
+.rail a:hover{background:#EEEBE5}
+.rail a.on{background:#0F5E5A;color:#FFFFFF;font-weight:500}
+.badge{background:#B5651D;color:#FFFFFF;border-radius:10px;padding:0 7px;font-size:11px;font-weight:600}
+.tabs{display:flex;gap:2px;padding:8px 12px 0;border-bottom:1px solid #C9C4BA;flex-wrap:wrap}
+.tabs a{text-decoration:none;padding:7px 14px;color:#4F5752;border:1px solid transparent;border-radius:6px 6px 0 0}
+.tabs a.on{border-color:#C9C4BA;border-bottom-color:#FFFFFF;background:#FFFFFF;margin-bottom:-1px;font-weight:600;color:#1E2421}
+.status{background:#F7F5F1;border-top:1px solid #C9C4BA;display:flex;gap:20px;padding:6px 16px;font-size:12px;color:#4F5752;flex-wrap:wrap}
+.btn{border:1px solid #C9C4BA;background:#FFFFFF;border-radius:4px;padding:6px 14px;cursor:pointer;min-height:44px}
+.btnp{border:1px solid #0F5E5A;background:#0F5E5A;color:#FFFFFF;border-radius:4px;padding:8px 16px;font-weight:600;min-height:44px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:8px}
+.btnp:hover{background:#0A4441;color:#FFFFFF}
+.steps{display:flex;gap:0;flex-wrap:wrap;list-style:none;margin:0;padding:0;border:1px solid #DAD6CE;border-radius:6px;overflow:hidden}
+.steps li{flex:1 1 160px;padding:10px 14px;display:flex;gap:10px;align-items:center;background:#FBFAF8;border-right:1px solid #DAD6CE;color:#4F5752}
+.steps li:last-child{border-right:0}
+.steps .dot{width:22px;height:22px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;border:1px solid #C9C4BA;background:#FFFFFF;flex-shrink:0}
+.steps li.done .dot{background:#0F5E5A;border-color:#0F5E5A;color:#FFFFFF}
+.steps li.cur{background:#E6F0EF;color:#1E2421;font-weight:600}
+.steps li.cur .dot{border:2px solid #0F5E5A;color:#0F5E5A}
+.tb{width:100%;border-collapse:collapse;min-width:760px}
+.tb th{font-weight:500;color:#4F5752;text-align:left;padding:7px 10px;background:#FBFAF8;border-bottom:1px solid #DAD6CE;white-space:nowrap}
+.tb td{padding:7px 10px;border-top:1px solid #EEEBE5}
+.tb tr.dup td{color:#5C625E;background:#F6F5F2}
+.card{border:1px solid #DAD6CE;border-radius:6px;background:#FFFFFF;overflow:hidden}
+.card>h2{margin:0;padding:9px 12px;font-size:13px;font-weight:600;border-bottom:1px solid #DAD6CE;background:#FBFAF8}
+.row{display:flex;justify-content:space-between;gap:10px}
+.row span:first-child{color:#4F5752}
+.flag{background:#EEEBE5;color:#3A403C;border-radius:10px;padding:1px 8px;font-size:12px;white-space:nowrap}
+</style>
+<div style="width: 100%; min-height: 940px; display: flex; flex-direction: column; background: #E9E6E0">
+  <header class="titlebar">
+    <div style="font-weight: 700; letter-spacing: 0.02em">ClientLedger</div>
+    <div style="color: #A9B0AB">Ozark Ridge Landscaping LLC</div>
+    <div style="flex-grow: 1"></div>
+    <div style="font-size: 12px; color: #A9B0AB">Wed 11/04/2026 · Books closed through 09/30/2026</div>
+  </header>
+  <nav class="menu" aria-label="Menu">
+    <button>File</button><button>Edit</button><button>Lists</button><button>Clients</button><button>Vendors</button><button>Banking</button><button>Payroll</button><button>Reports</button><button>Company</button><button>Window</button><button>Help</button>
+    <div style="flex-grow: 1"></div>
+    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: #4F5752"><span>Go to</span><input type="search" placeholder="Find a transaction, name, or command…" style="width: 260px; padding: 4px 8px; border: 1px solid #C9C4BA; border-radius: 4px; background: #FFFFFF; font-size: 12px"><kbd>Ctrl K</kbd></label>
+  </nav>
+
+  <div style="display: flex; flex-wrap: wrap; flex-grow: 1; align-items: stretch">
+    <aside class="rail" aria-label="Workspace">
+      <h2>Workspace</h2>
+      <a href="Home.html"><span>Home</span><kbd>Alt H</kbd></a>
+      <a href="CreateInvoice.html"><span>Clients &amp; Jobs</span><span style="color: #6B726D; font-size: 12px">64</span></a>
+      <a href="EnterBill.html"><span>Vendors</span><span style="color: #6B726D; font-size: 12px">38</span></a>
+      <a href="BankFeed.html"><span>Bank Feed</span><span class="badge">0</span></a>
+      <a href="Register.html"><span>Chart of Accounts</span><kbd>Ctrl A</kbd></a>
+      <a href="Reports.html"><span>Reports</span></a>
+      <h2>Tools</h2>
+      <a class="on" href="ImportBankFile.html"><span>Import Bank File</span></a>
+      <a href="Home.html"><span>Import Payroll</span></a>
+      <a href="SendToAccountant.html"><span>Send to My Accountant</span></a>
+      <a href="Home.html"><span>Audit Trail</span></a>
+      <h2>Open windows</h2>
+      <a href="Register.html"><span>Register · Operating</span></a>
+    </aside>
+
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+      <nav class="tabs" aria-label="Open windows">
+        <a href="Home.html">Home</a>
+        <a href="Register.html">Register · Operating</a>
+        <a class="on" href="ImportBankFile.html">Import Bank File</a>
+      </nav>
+
+      <div style="background: #FFFFFF; flex-grow: 1; display: flex; flex-direction: column; gap: 14px; padding: 16px 20px">
+        <div style="display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap">
+          <h1 style="margin: 0; font-size: 22px; font-weight: 600">Import Bank File</h1>
+          <span style="color: #4F5752">Download a file from your bank's website, then bring it in here. Nothing connects to your bank.</span>
+        </div>
+
+        <ol class="steps" aria-label="Import steps">
+          <li class="done"><span class="dot" aria-hidden="true">✓</span><span>Choose file</span></li>
+          <li class="done"><span class="dot" aria-hidden="true">✓</span><span>Link account</span></li>
+          <li class="cur" aria-current="step"><span class="dot">3</span><span>Check transactions</span></li>
+          <li><span class="dot">4</span><span>Send to Bank Feed</span></li>
+        </ol>
+
+        <div style="display: flex; gap: 14px; flex-wrap: wrap">
+          <section class="card" style="flex: 1 1 260px" aria-labelledby="file">
+            <h2 id="file">File</h2>
+            <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 6px">
+              <div class="row"><span>Name</span><span class="mono">operating_2026-11-03.qfx</span></div>
+              <div class="row"><span>Format</span><span>QFX (OFX 2.x) · detected</span></div>
+              <div class="row"><span>Dates</span><span class="mono">10/28 – 11/03/2026</span></div>
+              <div class="row"><span>Bank account</span><span class="mono">••••2208</span></div>
+            </div>
+          </section>
+          <section class="card" style="flex: 1 1 260px" aria-labelledby="acct">
+            <h2 id="acct">Goes into</h2>
+            <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 6px">
+              <div style="font-weight: 600">1010 · Operating Checking</div>
+              <div style="color: #4F5752">Linked automatically — this bank account was linked on your first import.</div>
+              <a href="ImportBankFile.html">Change account</a>
+            </div>
+          </section>
+          <section class="card" style="flex: 1 1 300px" aria-labelledby="bal">
+            <h2 id="bal">Balance check</h2>
+            <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 6px">
+              <div class="row"><span>Bank says (11/03)</span><span class="mono">92,431.07</span></div>
+              <div class="row"><span>Your books will say, once all are accepted</span><span class="mono">92,431.07</span></div>
+              <div class="row" style="font-weight: 600; color: #0F5E5A"><span style="color: #0F5E5A">Difference</span><span class="mono">0.00 ✓</span></div>
+            </div>
+          </section>
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+          <span style="font-weight: 600">41 transactions in file</span>
+          <span class="flag" style="background: #E6F0EF; color: #0A4441">37 new</span>
+          <span class="flag">4 already imported — will be skipped</span>
+          <span class="flag">0 problems</span>
+          <div style="flex-grow: 1"></div>
+          <label style="display: flex; gap: 6px; align-items: center; color: #4F5752"><input type="checkbox"> Show only skipped</label>
+        </div>
+
+        <div style="overflow-x: auto; border: 1px solid #DAD6CE; border-radius: 6px">
+          <table class="tb">
+            <thead><tr><th>Date</th><th>Description from bank</th><th>Check no.</th><th style="text-align: right">Amount</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr class="dup"><td class="mono">10/28/2026</td><td class="mono">ACH CREDIT BRANSON HILLS HOA</td><td></td><td class="num">8,450.00</td><td><span class="flag">Already imported 10/29</span></td></tr>
+              <tr class="dup"><td class="mono">10/30/2026</td><td class="mono">SERVICE CHARGE</td><td></td><td class="num">-48.00</td><td><span class="flag">Already imported 10/31</span></td></tr>
+              <tr><td class="mono">10/31/2026</td><td class="mono">MONETT TIRE AND LUBE 0331</td><td></td><td class="num">-186.40</td><td style="color: #0F5E5A">New</td></tr>
+              <tr><td class="mono">10/31/2026</td><td class="mono">SQ *FARMERS MKT BOOTH</td><td></td><td class="num">-45.00</td><td style="color: #0F5E5A">New</td></tr>
+              <tr><td class="mono">11/01/2026</td><td class="mono">LAKESIDE POWER COOP AUTOPAY</td><td></td><td class="num">-301.22</td><td style="color: #0F5E5A">New</td></tr>
+              <tr><td class="mono">11/01/2026</td><td class="mono">OZARK OFFICE SUPPLY 0045</td><td></td><td class="num">-64.38</td><td style="color: #0F5E5A">New</td></tr>
+              <tr><td class="mono">11/02/2026</td><td class="mono">CHECK</td><td class="mono">4412</td><td class="num">-925.00</td><td style="color: #0F5E5A">New</td></tr>
+              <tr><td class="mono">11/02/2026</td><td class="mono">ONLINE TRANSFER TO XXXX4471</td><td></td><td class="num">-3,000.00</td><td style="color: #0F5E5A">New</td></tr>
+              <tr><td class="mono">11/03/2026</td><td class="mono">ACH CREDIT BRANSON HILLS HOA</td><td></td><td class="num">8,450.00</td><td style="color: #0F5E5A">New</td></tr>
+              <tr><td class="mono">11/03/2026</td><td class="mono">RIVERBEND FUEL #212 MONETT MO</td><td></td><td class="num">-84.17</td><td style="color: #0F5E5A">New</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="font-size: 12px; color: #6B726D">Showing 10 of 41 · Amounts are copied exactly from the file. Same file twice? Nothing is added the second time.</div>
+
+        <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: auto; flex-wrap: wrap">
+          <button class="btn">Back</button>
+          <button class="btn">Cancel</button>
+          <a class="btnp" href="BankFeed.html">Send 37 to Bank Feed</a>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="status">
+    <span>Kurt · Admin</span>
+    <span>Single-user · this computer</span>
+    <span>AI: Ollama, on this computer</span>
+    <div style="flex-grow: 1"></div>
+    <span>Accepts QIF, QFX, OFX, and CSV</span>
+    <span><kbd>Alt N</kbd> next step</span>
+  </footer>
+</div>
+</body>
+</html>

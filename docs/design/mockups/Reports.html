@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- ClientLedger reference mockup (docs/design). Not production code; synthetic sample data. Fonts: IBM Plex (assets/fonts after P06). -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>ClientLedger — Profit and Loss</title>
+</head>
+<body>
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#1E2421;background:#E9E6E0;font-size:13px}
+a{color:#0F5E5A}a:hover{color:#0A4441}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;background:#FFFFFF;border:1px solid #C9C4BA;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:#3A403C;white-space:nowrap}
+.mono{font-family:'IBM Plex Mono',monospace}
+.num{font-family:'IBM Plex Mono',monospace;text-align:right;white-space:nowrap}
+.titlebar{background:#1E2421;color:#E9E6E0;display:flex;align-items:center;gap:16px;padding:0 16px;min-height:36px;flex-wrap:wrap;border-bottom:3px solid #3E7CB1}
+.menu{background:#F7F5F1;border-bottom:1px solid #C9C4BA;display:flex;gap:2px;padding:0 8px;flex-wrap:wrap;align-items:center}
+.menu>button{background:none;border:0;padding:7px 10px;cursor:pointer}
+.rail{flex:1 1 200px;max-width:220px;background:#F7F5F1;border-right:1px solid #C9C4BA;padding:8px;display:flex;flex-direction:column;gap:2px}
+.rail h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6B726D;padding:12px 8px 4px;margin:0}
+.rail a{text-decoration:none;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 8px;border-radius:4px;color:#1E2421}
+.rail a:hover{background:#EEEBE5}
+.rail a.on{background:#0F5E5A;color:#FFFFFF;font-weight:500}
+.badge{background:#B5651D;color:#FFFFFF;border-radius:10px;padding:0 7px;font-size:11px;font-weight:600}
+.tabs{display:flex;gap:2px;padding:8px 12px 0;border-bottom:1px solid #C9C4BA;flex-wrap:wrap}
+.tabs a{text-decoration:none;padding:7px 14px;color:#4F5752;border:1px solid transparent;border-radius:6px 6px 0 0}
+.tabs a.on{border-color:#C9C4BA;border-bottom-color:#FFFFFF;background:#FFFFFF;margin-bottom:-1px;font-weight:600;color:#1E2421}
+.status{background:#F7F5F1;border-top:1px solid #C9C4BA;display:flex;gap:20px;padding:6px 16px;font-size:12px;color:#4F5752;flex-wrap:wrap}
+.btn{border:1px solid #C9C4BA;background:#FFFFFF;border-radius:4px;padding:5px 10px;cursor:pointer}
+.btnp{border:1px solid #0F5E5A;background:#0F5E5A;color:#FFFFFF;border-radius:4px;padding:6px 14px;font-weight:600;cursor:pointer}
+.tool{display:flex;gap:4px;flex-wrap:wrap;align-items:center;padding:6px 12px;border-bottom:1px solid #DAD6CE;background:#FBFAF8}
+.tool button{background:none;border:1px solid transparent;border-radius:4px;padding:5px 9px;cursor:pointer}
+.tool button:hover{border-color:#C9C4BA;background:#FFFFFF}
+.sep{width:1px;height:20px;background:#DAD6CE;margin:0 6px}
+.filt{display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:8px 12px;border-bottom:1px solid #DAD6CE}
+.filt label{display:flex;gap:6px;align-items:center;color:#4F5752;font-size:12px}
+.filt select,.filt input[type=text]{padding:4px 6px;border:1px solid #C9C4BA;border-radius:4px;background:#FFFFFF;font-size:13px;color:#1E2421}
+.segc{display:flex;border:1px solid #C9C4BA;border-radius:4px;overflow:hidden}
+.segc button{background:#FFFFFF;border:0;border-right:1px solid #C9C4BA;padding:4px 10px;cursor:pointer}
+.segc button:last-child{border-right:0}
+.segc button.on{background:#0F5E5A;color:#FFFFFF;font-weight:600}
+.cat{flex:1 1 210px;max-width:240px;border-right:1px solid #DAD6CE;background:#FBFAF8;padding:10px 8px;display:flex;flex-direction:column;gap:1px}
+.cat h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6B726D;padding:10px 8px 4px;margin:0}
+.cat a{text-decoration:none;color:#1E2421;padding:5px 8px;border-radius:4px}
+.cat a:hover{background:#EEEBE5}
+.cat a.on{background:#E6F0EF;color:#0A4441;font-weight:600}
+.pl{width:100%;border-collapse:collapse;min-width:640px}
+.pl th{font-weight:600;color:#4F5752;text-align:right;padding:6px 12px;border-bottom:2px solid #1E2421;white-space:nowrap;font-size:12px}
+.pl th:first-child{text-align:left}
+.pl td{padding:4px 12px;white-space:nowrap}
+.pl td.n{font-family:'IBM Plex Mono',monospace;text-align:right}
+.pl td.p{font-family:'IBM Plex Mono',monospace;text-align:right;color:#4F5752}
+.pl tr.h td{font-weight:600;padding-top:10px}
+.pl tr.i td:first-child{padding-left:28px}
+.pl tr.t td{font-weight:600;border-top:1px solid #8C928E}
+.pl tr.g td{font-weight:700;border-top:1px solid #1E2421}
+.pl tr.net td{font-weight:700;border-top:1px solid #1E2421;border-bottom:3px double #1E2421;padding:7px 12px}
+.pl a{color:#1E2421;text-decoration:none;border-bottom:1px dotted #8C928E}
+.pl a:hover{color:#0F5E5A;border-bottom-color:#0F5E5A}
+</style>
+<div style="width: 100%; min-height: 1080px; display: flex; flex-direction: column; background: #E9E6E0">
+  <header class="titlebar">
+    <div style="font-weight: 700; letter-spacing: 0.02em">ClientLedger</div>
+    <div style="color: #A9B0AB">Ozark Ridge Landscaping LLC</div>
+    <div style="flex-grow: 1"></div>
+    <div style="font-size: 12px; color: #A9B0AB">Wed 11/04/2026 · Books closed through 09/30/2026</div>
+  </header>
+  <nav class="menu" aria-label="Menu">
+    <button>File</button><button>Edit</button><button>Lists</button><button>Clients</button><button>Vendors</button><button>Banking</button><button>Payroll</button><button>Reports</button><button>Company</button><button>Window</button><button>Help</button>
+    <div style="flex-grow: 1"></div>
+    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: #4F5752"><span>Go to</span><input type="search" placeholder="Find a transaction, name, or command…" style="width: 260px; padding: 4px 8px; border: 1px solid #C9C4BA; border-radius: 4px; background: #FFFFFF; font-size: 12px"><kbd>Ctrl K</kbd></label>
+  </nav>
+
+  <div style="display: flex; flex-wrap: wrap; flex-grow: 1; align-items: stretch">
+    <aside class="rail" aria-label="Workspace">
+      <h2>Workspace</h2>
+      <a href="Home.html"><span>Home</span><kbd>Alt H</kbd></a>
+      <a href="CreateInvoice.html"><span>Clients &amp; Jobs</span><span style="color: #6B726D; font-size: 12px">64</span></a>
+      <a href="EnterBill.html"><span>Vendors</span><span style="color: #6B726D; font-size: 12px">38</span></a>
+      <a href="BankFeed.html"><span>Bank Feed</span><span class="badge">37</span></a>
+      <a href="Register.html"><span>Chart of Accounts</span><kbd>Ctrl A</kbd></a>
+      <a class="on" href="Reports.html"><span>Reports</span></a>
+      <h2>Tools</h2>
+      <a href="ImportBankFile.html"><span>Import Bank File</span></a>
+      <a href="Home.html"><span>Import Payroll</span></a>
+      <a href="SendToAccountant.html"><span>Send to My Accountant</span></a>
+      <a href="Home.html"><span>Audit Trail</span></a>
+      <h2>Open windows</h2>
+      <a href="Register.html"><span>Register · Operating</span></a>
+      <a href="Reports.html"><span>Profit &amp; Loss</span></a>
+    </aside>
+
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+      <nav class="tabs" aria-label="Open windows">
+        <a href="Home.html">Home</a>
+        <a href="Register.html">Register · Operating</a>
+        <a class="on" href="Reports.html">Profit &amp; Loss</a>
+      </nav>
+
+      <div style="background: #FFFFFF; flex-grow: 1; display: flex; flex-direction: column">
+        <form style="display: flex; gap: 10px; align-items: center; padding: 10px 12px; background: #F2F6F5; border-bottom: 1px solid #B9C9C6; flex-wrap: wrap">
+          <label for="ask" style="font-weight: 600; color: #0A4441">Ask a question</label>
+          <input id="ask" type="text" value="How did October compare with the year so far?" style="flex: 1 1 320px; padding: 7px 10px; border: 1px solid #B9C9C6; border-radius: 4px; font-size: 14px; background: #FFFFFF">
+          <button class="btnp" type="button">Run</button>
+          <span style="flex-basis: 100%; font-size: 12px; color: #4F5752">Ran as: <b>Profit &amp; Loss</b> · 10/01–10/31/2026 · Accrual · with % of income and year to date — <a href="Reports.html">change</a>. AI picks the report; every number comes from your books.</span>
+        </form>
+
+        <div style="display: flex; flex-wrap: wrap; flex-grow: 1; align-items: stretch">
+          <nav class="cat" aria-label="Reports">
+            <input type="search" placeholder="Find a report" style="margin: 0 4px 6px; padding: 5px 8px; border: 1px solid #C9C4BA; border-radius: 4px">
+            <h2>Company</h2>
+            <a class="on" href="Reports.html">Profit &amp; Loss</a>
+            <a href="Reports.html">Profit &amp; Loss by Month</a>
+            <a href="Reports.html">Balance Sheet</a>
+            <a href="Reports.html">Trial Balance</a>
+            <a href="Reports.html">General Ledger</a>
+            <a href="Reports.html">Budget vs. Actual</a>
+            <h2>Who owes what</h2>
+            <a href="Reports.html">A/R Aging</a>
+            <a href="Reports.html">Open Invoices</a>
+            <a href="Reports.html">A/P Aging</a>
+            <a href="Reports.html">Unpaid Bills</a>
+            <h2>Sales &amp; spending</h2>
+            <a href="Reports.html">Sales by Client</a>
+            <a href="Reports.html">Expenses by Vendor</a>
+            <a href="Reports.html">Sales Tax Liability</a>
+            <a href="Reports.html">1099 Summary</a>
+            <h2>Memorized</h2>
+            <a href="Reports.html">Monthly P&amp;L for the bank</a>
+          </nav>
+
+          <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+            <div class="tool" role="toolbar" aria-label="Report tools">
+              <button>Customize</button><button>Memorize</button>
+              <span class="sep"></span>
+              <button>Print <kbd>Ctrl P</kbd></button><button>Export Excel</button><button>Export CSV</button><button>Save PDF</button><button>Email</button>
+              <span class="sep"></span>
+              <button>Collapse</button><button>Refresh</button>
+            </div>
+            <div class="filt">
+              <label>Dates <select><option>Last month</option></select></label>
+              <label>From <input type="text" class="mono" value="10/01/2026" style="width: 92px"></label>
+              <label>To <input type="text" class="mono" value="10/31/2026" style="width: 92px"></label>
+              <label>Columns <select><option>Total only</option><option>Month</option><option>Tag group</option><option>Client</option></select></label>
+              <div class="segc" role="group" aria-label="Basis"><button class="on">Accrual</button><button>Cash</button></div>
+              <label><input type="checkbox" checked> % of income</label>
+              <label><input type="checkbox" checked> Year to date</label>
+              <label><input type="checkbox"> Prior period</label>
+            </div>
+
+            <div style="overflow-x: auto; padding: 18px 24px 24px">
+              <div style="text-align: center; display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px">
+                <div style="font-weight: 600">Ozark Ridge Landscaping LLC</div>
+                <div style="font-size: 18px; font-weight: 600">Profit &amp; Loss</div>
+                <div style="color: #4F5752">October 2026 · Accrual basis · Run 11/04/2026 9:41 AM</div>
+              </div>
+              <table class="pl">
+                <thead><tr><th></th><th>Oct 2026</th><th>% of income</th><th>Jan–Oct 2026</th><th>% of income</th></tr></thead>
+                <tbody>
+                  <tr class="h"><td colspan="5">Income</td></tr>
+                  <tr class="i"><td>4000 · Landscape installation</td><td class="n"><a href="Reports.html">38,420.00</a></td><td class="p">63.7%</td><td class="n">312,640.00</td><td class="p">58.5%</td></tr>
+                  <tr class="i"><td>4010 · Maintenance contracts</td><td class="n"><a href="Reports.html">21,860.00</a></td><td class="p">36.3%</td><td class="n">198,415.00</td><td class="p">37.2%</td></tr>
+                  <tr class="i"><td>4020 · Snow removal</td><td class="n">0.00</td><td class="p">0.0%</td><td class="n">22,960.00</td><td class="p">4.3%</td></tr>
+                  <tr class="t"><td>Total income</td><td class="n">60,280.00</td><td class="p">100.0%</td><td class="n">534,015.00</td><td class="p">100.0%</td></tr>
+                  <tr class="h"><td colspan="5">Cost of goods sold</td></tr>
+                  <tr class="i"><td>5100 · Materials:Plants</td><td class="n"><a href="Reports.html">9,412.35</a></td><td class="p">15.6%</td><td class="n">78,233.10</td><td class="p">14.6%</td></tr>
+                  <tr class="i"><td>5110 · Materials:Mulch &amp; stone</td><td class="n"><a href="Reports.html">4,218.90</a></td><td class="p">7.0%</td><td class="n">36,902.45</td><td class="p">6.9%</td></tr>
+                  <tr class="i"><td>5200 · Subcontractors</td><td class="n"><a href="Reports.html">6,500.00</a></td><td class="p">10.8%</td><td class="n">48,750.00</td><td class="p">9.1%</td></tr>
+                  <tr class="t"><td>Total cost of goods sold</td><td class="n">20,131.25</td><td class="p">33.4%</td><td class="n">163,885.55</td><td class="p">30.7%</td></tr>
+                  <tr class="g"><td>Gross profit</td><td class="n">40,148.75</td><td class="p">66.6%</td><td class="n">370,129.45</td><td class="p">69.3%</td></tr>
+                  <tr class="h"><td colspan="5">Expenses</td></tr>
+                  <tr class="i"><td>6100 · Payroll wages</td><td class="n"><a href="Reports.html">18,240.00</a></td><td class="p">30.3%</td><td class="n">171,880.00</td><td class="p">32.2%</td></tr>
+                  <tr class="i"><td>6110 · Payroll taxes</td><td class="n"><a href="Reports.html">1,395.36</a></td><td class="p">2.3%</td><td class="n">13,148.82</td><td class="p">2.5%</td></tr>
+                  <tr class="i"><td>6200 · Fuel</td><td class="n"><a href="Reports.html">2,384.17</a></td><td class="p">4.0%</td><td class="n">21,604.33</td><td class="p">4.0%</td></tr>
+                  <tr class="i"><td>6210 · Equipment rental</td><td class="n"><a href="Reports.html">1,850.00</a></td><td class="p">3.1%</td><td class="n">14,725.00</td><td class="p">2.8%</td></tr>
+                  <tr class="i"><td>6300 · Insurance</td><td class="n"><a href="Reports.html">1,120.00</a></td><td class="p">1.9%</td><td class="n">11,200.00</td><td class="p">2.1%</td></tr>
+                  <tr class="i"><td>6400 · Repairs &amp; maintenance</td><td class="n"><a href="Reports.html">946.52</a></td><td class="p">1.6%</td><td class="n">8,113.67</td><td class="p">1.5%</td></tr>
+                  <tr class="i"><td>6500 · Office &amp; software</td><td class="n"><a href="Reports.html">312.40</a></td><td class="p">0.5%</td><td class="n">3,084.90</td><td class="p">0.6%</td></tr>
+                  <tr class="i"><td>6600 · Bank fees</td><td class="n"><a href="Reports.html">48.00</a></td><td class="p">0.1%</td><td class="n">492.00</td><td class="p">0.1%</td></tr>
+                  <tr class="t"><td>Total expenses</td><td class="n">26,296.45</td><td class="p">43.6%</td><td class="n">244,248.72</td><td class="p">45.7%</td></tr>
+                  <tr class="g"><td>Net operating income</td><td class="n">13,852.30</td><td class="p">23.0%</td><td class="n">125,880.73</td><td class="p">23.6%</td></tr>
+                  <tr class="h"><td colspan="5">Other income</td></tr>
+                  <tr class="i"><td>7000 · Interest income</td><td class="n"><a href="Reports.html">12.84</a></td><td class="p">0.0%</td><td class="n">104.27</td><td class="p">0.0%</td></tr>
+                  <tr class="net"><td>Net income</td><td class="n">13,865.14</td><td class="p">23.0%</td><td class="n">125,985.00</td><td class="p">23.6%</td></tr>
+                </tbody>
+              </table>
+              <div style="margin-top: 12px; font-size: 12px; color: #6B726D">Click any underlined amount to see the transactions behind it. Double-click a transaction to open its form.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="status">
+    <span>Kurt · Admin</span>
+    <span>Single-user · this computer</span>
+    <span>AI: Ollama, on this computer</span>
+    <div style="flex-grow: 1"></div>
+    <span><kbd>Enter</kbd> drill down</span>
+    <span><kbd>Ctrl P</kbd> print</span>
+    <span><kbd>Ctrl /</kbd> shortcuts</span>
+  </footer>
+</div>
+</body>
+</html>

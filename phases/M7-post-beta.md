@@ -1,0 +1,17 @@
+# M7 — Post-beta (P40–P48)
+
+The owner may reorder these after beta feedback (Q-39). Each phase gets a full detailed write-up, in the same format as M0–M6, as its first step: architect (opus) drafts it in `target/plans/`, and the orchestrator moves it into this file before implementation starts.
+
+| Phase | Tier | Size | Depends on | Scope | Decisions |
+| --- | --- | --- | --- | --- | --- |
+| P40 — Estimates, progress invoicing, sales orders, recurring invoices, retainage | H | L | P20–P22 | Estimates with status and conversion; progress invoicing by percent or line with remaining shown; sales orders (open/partial/closed); recurring invoices via memorized schedules; retainage receivable and release invoice. Acceptance: three progress invoices bring the remaining amount to exactly zero; retainage release clears the receivable. | Q-52, Q-83 |
+| P41 — Purchase orders and item receipts | M | M | P17, P24 | POs (open/partial/closed); receive with or without a bill; convert item receipt to bill; "Select PO" on Enter Bill. Acceptance: converting a receipt never double-posts inventory. | — |
+| P42 — Inventory assemblies | H | M | P24, P41 | One-level bills of materials; build/unbuild; pending builds. Acceptance: component and assembly average costs match reference calculations. | Q-18 |
+| P43 — Plaid bank sync | M | M | P26 | Revisit how sync works (owner's own Plaid credentials vs. via MyBooks Online). Synced items enter the same review queue as file imports. | Q-19 |
+| P44 — Report Packs | L | S | P28 | Builder on the engine's existing bulk PDF Report Packs: memorized reports, order, cover page, period. | — |
+| P45 — Accountant tools | M | L | P28, P29 | Batch reclassify, fix unapplied payments/credits, bulk write-offs, Batch Enter Transactions, forecasts and budgets by job/tag, fixed-asset register (user-entered depreciation), working trial balance export to Vibe Trial Balance, 1099 export to Vibe 1099. | Q-21–Q-23 |
+| P46 — Workpapers and Tax Estimator | M | M | P17, P28 | PDF annotation workpapers on the PDFium viewer (annotations stored by the engine); Tax Estimator screens once the engine feature ships. | — |
+| P47 — Custom fields, form template designer, job costing | M | L | P19, P20, P28 | Custom fields on lists and lines; template designer for invoices, statements, sales receipts, credit memos; job profitability and unbilled-costs reports; group items. | Q-58 |
+| P48 — Statement of cash flows and calendar | M | M | P28 | Statement of Cash Flows (indirect method, account-to-section mapping with defaults); calendar month view of bills, invoices, and memorized entries. | Q-64, Q-67 |
+
+**Deferred options (not scheduled):** ACH vendor payments (Q-10), MICR blank-stock checks (Q-14), Positive Pay export (Q-167), direct upload to MyBooks Online (Q-25), Windows ARM64 (Q-26), opt-in MCP server (Q-16), how-to videos (Q-160), imports from QBO, Wave, or Xero (Q-124).

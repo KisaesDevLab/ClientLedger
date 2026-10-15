@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- ClientLedger reference mockup (docs/design). Not production code; synthetic sample data. Fonts: IBM Plex (assets/fonts after P06). -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>ClientLedger — Send to My Accountant</title>
+</head>
+<body>
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#1E2421;background:#E9E6E0;font-size:13px}
+a{color:#0F5E5A}a:hover{color:#0A4441}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;background:#FFFFFF;border:1px solid #C9C4BA;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:#3A403C;white-space:nowrap}
+.mono{font-family:'IBM Plex Mono',monospace}
+.num{font-family:'IBM Plex Mono',monospace;text-align:right;white-space:nowrap}
+.titlebar{background:#1E2421;color:#E9E6E0;display:flex;align-items:center;gap:16px;padding:0 16px;min-height:36px;flex-wrap:wrap;border-bottom:3px solid #3E7CB1}
+.menu{background:#F7F5F1;border-bottom:1px solid #C9C4BA;display:flex;gap:2px;padding:0 8px;flex-wrap:wrap;align-items:center}
+.menu>button{background:none;border:0;padding:7px 10px;cursor:pointer}
+.rail{flex:1 1 200px;max-width:220px;background:#F7F5F1;border-right:1px solid #C9C4BA;padding:8px;display:flex;flex-direction:column;gap:2px}
+.rail h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6B726D;padding:12px 8px 4px;margin:0}
+.rail a{text-decoration:none;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 8px;border-radius:4px;color:#1E2421}
+.rail a:hover{background:#EEEBE5}
+.rail a.on{background:#0F5E5A;color:#FFFFFF;font-weight:500}
+.badge{background:#B5651D;color:#FFFFFF;border-radius:10px;padding:0 7px;font-size:11px;font-weight:600}
+.tabs{display:flex;gap:2px;padding:8px 12px 0;border-bottom:1px solid #C9C4BA;flex-wrap:wrap}
+.tabs a{text-decoration:none;padding:7px 14px;color:#4F5752;border:1px solid transparent;border-radius:6px 6px 0 0}
+.tabs a.on{border-color:#C9C4BA;border-bottom-color:#FFFFFF;background:#FFFFFF;margin-bottom:-1px;font-weight:600;color:#1E2421}
+.status{background:#F7F5F1;border-top:1px solid #C9C4BA;display:flex;gap:20px;padding:6px 16px;font-size:12px;color:#4F5752;flex-wrap:wrap}
+.btn{border:1px solid #C9C4BA;background:#FFFFFF;border-radius:4px;padding:6px 14px;cursor:pointer;min-height:44px}
+.btnp{border:1px solid #0F5E5A;background:#0F5E5A;color:#FFFFFF;border-radius:4px;padding:8px 18px;font-weight:600;min-height:44px;cursor:pointer}
+.card{border:1px solid #DAD6CE;border-radius:6px;background:#FFFFFF;overflow:hidden}
+.card>h2{margin:0;padding:10px 14px;font-size:14px;font-weight:600;border-bottom:1px solid #DAD6CE;background:#FBFAF8}
+.tb{width:100%;border-collapse:collapse}
+.tb th{font-weight:500;color:#4F5752;text-align:left;padding:7px 14px;border-bottom:1px solid #DAD6CE;white-space:nowrap}
+.tb td{padding:7px 14px;border-top:1px solid #EEEBE5}
+.step{flex:1 1 200px;display:flex;gap:10px;align-items:flex-start;padding:12px 14px;background:#FBFAF8;border:1px solid #DAD6CE;border-radius:6px}
+.step .n{width:26px;height:26px;border-radius:13px;background:#0F5E5A;color:#FFFFFF;display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0}
+.inc{list-style:none;margin:0;padding:10px 14px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 16px}
+.inc li{display:flex;gap:8px;align-items:center}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#4F5752}
+.fld input{font-size:14px;color:#1E2421;padding:7px 9px;border:1px solid #C9C4BA;border-radius:4px;background:#FFFFFF}
+</style>
+<div style="width: 100%; min-height: 1000px; display: flex; flex-direction: column; background: #E9E6E0">
+  <header class="titlebar">
+    <div style="font-weight: 700; letter-spacing: 0.02em">ClientLedger</div>
+    <div style="color: #A9B0AB">Ozark Ridge Landscaping LLC</div>
+    <div style="flex-grow: 1"></div>
+    <div style="font-size: 12px; color: #A9B0AB">Wed 11/04/2026 · Books closed through 09/30/2026</div>
+  </header>
+  <nav class="menu" aria-label="Menu">
+    <button>File</button><button>Edit</button><button>Lists</button><button>Clients</button><button>Vendors</button><button>Banking</button><button>Payroll</button><button>Reports</button><button>Company</button><button>Window</button><button>Help</button>
+    <div style="flex-grow: 1"></div>
+    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: #4F5752"><span>Go to</span><input type="search" placeholder="Find a transaction, name, or command…" style="width: 260px; padding: 4px 8px; border: 1px solid #C9C4BA; border-radius: 4px; background: #FFFFFF; font-size: 12px"><kbd>Ctrl K</kbd></label>
+  </nav>
+
+  <div style="display: flex; flex-wrap: wrap; flex-grow: 1; align-items: stretch">
+    <aside class="rail" aria-label="Workspace">
+      <h2>Workspace</h2>
+      <a href="Home.html"><span>Home</span><kbd>Alt H</kbd></a>
+      <a href="CreateInvoice.html"><span>Clients &amp; Jobs</span><span style="color: #6B726D; font-size: 12px">64</span></a>
+      <a href="EnterBill.html"><span>Vendors</span><span style="color: #6B726D; font-size: 12px">38</span></a>
+      <a href="BankFeed.html"><span>Bank Feed</span><span class="badge">37</span></a>
+      <a href="Register.html"><span>Chart of Accounts</span><kbd>Ctrl A</kbd></a>
+      <a href="Reports.html"><span>Reports</span></a>
+      <h2>Tools</h2>
+      <a href="ImportBankFile.html"><span>Import Bank File</span></a>
+      <a href="Home.html"><span>Import Payroll</span></a>
+      <a class="on" href="SendToAccountant.html"><span>Send to My Accountant</span></a>
+      <a href="Home.html"><span>Audit Trail</span></a>
+    </aside>
+
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+      <nav class="tabs" aria-label="Open windows">
+        <a href="Home.html">Home</a>
+        <a class="on" href="SendToAccountant.html">Send to My Accountant</a>
+      </nav>
+
+      <div style="background: #FFFFFF; flex-grow: 1; display: flex; flex-direction: column; gap: 16px; padding: 18px 24px">
+        <div style="display: flex; flex-direction: column; gap: 4px">
+          <h1 style="margin: 0; font-size: 22px; font-weight: 600">Send to My Accountant</h1>
+          <div style="color: #4F5752">Give your accountant a complete copy of your books for MyBooks Online. Your books here don't change.</div>
+        </div>
+
+        <div style="display: flex; gap: 12px; flex-wrap: wrap">
+          <div class="step"><span class="n">1</span><span><b>Make a transfer file</b><br><span style="color: #4F5752">One file with everything below.</span></span></div>
+          <div class="step"><span class="n">2</span><span><b>Get it to your accountant</b><br><span style="color: #4F5752">Email it, share it, or put it on a drive.</span></span></div>
+          <div class="step"><span class="n">3</span><span><b>They import it</b><br><span style="color: #4F5752">MyBooks Online shows the same check totals you see here.</span></span></div>
+        </div>
+
+        <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start">
+          <div style="flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+            <section class="card" aria-labelledby="inc">
+              <h2 id="inc">What's included</h2>
+              <ul class="inc">
+                <li><span style="color: #0F5E5A">✓</span> All lists and transactions (1,512)</li>
+                <li><span style="color: #0F5E5A">✓</span> Attachments (214 files)</li>
+                <li><span style="color: #0F5E5A">✓</span> Audit trail history</li>
+                <li><span style="color: #0F5E5A">✓</span> Tags and memorized reports</li>
+                <li><span style="color: #0F5E5A">✓</span> Company settings</li>
+                <li><span style="color: #4F5752">✕</span> <span style="color: #4F5752">Never passwords, AI keys, or email logins</span></li>
+              </ul>
+            </section>
+
+            <section class="card" aria-labelledby="tot">
+              <h2 id="tot">Check totals · your accountant should see the same numbers</h2>
+              <table class="tb">
+                <tbody>
+                  <tr><td>Total assets</td><td class="num">412,906.33</td><td>Clients owe you (A/R)</td><td class="num">48,912.40</td></tr>
+                  <tr><td>Total liabilities</td><td class="num">98,214.60</td><td>You owe (A/P)</td><td class="num">9,286.90</td></tr>
+                  <tr><td>Total equity</td><td class="num">314,691.73</td><td>Transactions</td><td class="num">1,512</td></tr>
+                  <tr><td>Net income, Jan–Oct 2026</td><td class="num">125,985.00</td><td>Attachments</td><td class="num">214</td></tr>
+                </tbody>
+              </table>
+            </section>
+
+            <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap">
+              <label class="fld" style="flex: 1 1 300px">File name<input class="mono" value="OzarkRidge_2026-11-04.clxfer"></label>
+              <button class="btnp">Save transfer file…</button>
+            </div>
+            <div style="font-size: 12px; color: #6B726D">A backup is taken first. Need a file for another program instead? <a href="SendToAccountant.html">Export an IIF file</a>.</div>
+
+            <section class="card" aria-labelledby="hist">
+              <h2 id="hist">Sent before</h2>
+              <table class="tb">
+                <thead><tr><th>Date</th><th>How</th><th>File</th><th style="text-align: right">Net income at the time</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">10/06/2026</td><td>Transfer file</td><td class="mono">OzarkRidge_2026-10-06.clxfer</td><td class="num">112,119.86</td></tr>
+                  <tr><td class="mono">07/08/2026</td><td>Transfer file</td><td class="mono">OzarkRidge_2026-07-08.clxfer</td><td class="num">71,402.15</td></tr>
+                </tbody>
+              </table>
+            </section>
+          </div>
+
+          <aside aria-labelledby="direct" style="flex: 1 1 320px; border: 2px dashed #B5651D; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: #FFFCF7">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px">
+              <h2 id="direct" style="margin: 0; font-size: 15px; font-weight: 600">Send directly instead</h2>
+              <span style="background: #FFF4E5; color: #6B3A0C; border: 1px solid #E8C9A0; border-radius: 10px; padding: 1px 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em">PROPOSED</span>
+            </div>
+            <div style="color: #4F5752">Upload the same transfer file straight to your accountant's MyBooks. They review it before it goes into their books.</div>
+            <label class="fld">Connection code from your accountant<input class="mono" placeholder="e.g. 7K4P-2QXM" style="letter-spacing: 0.08em"></label>
+            <button class="btn" style="align-self: flex-start">Connect</button>
+            <div style="border-top: 1px solid #EEEBE5; padding-top: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #4F5752">
+              <span>Off until you connect. Uses a secure connection that this computer starts — nothing on this computer accepts incoming connections.</span>
+              <span>After you send, you'll see the totals your accountant's MyBooks received, side by side with yours.</span>
+              <span>You or your accountant can disconnect at any time.</span>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="status">
+    <span>Kurt · Admin</span>
+    <span>Single-user · this computer</span>
+    <span>AI: Ollama, on this computer</span>
+    <div style="flex-grow: 1"></div>
+    <span>Transfer files open in MyBooks Online</span>
+  </footer>
+</div>
+</body>
+</html>

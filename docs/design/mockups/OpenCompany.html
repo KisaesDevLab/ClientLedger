@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- ClientLedger reference mockup (docs/design). Not production code; synthetic sample data. Fonts: IBM Plex (assets/fonts after P06). -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>ClientLedger — Open Company</title>
+</head>
+<body>
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#1E2421;background:#E9E6E0;font-size:13px}
+a{color:#0F5E5A}a:hover{color:#0A4441}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;background:#FFFFFF;border:1px solid #C9C4BA;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:#3A403C;white-space:nowrap}
+.mono{font-family:'IBM Plex Mono',monospace}
+.titlebar{background:#1E2421;color:#E9E6E0;display:flex;align-items:center;gap:16px;padding:0 16px;min-height:36px;flex-wrap:wrap}
+.btn{border:1px solid #C9C4BA;background:#FFFFFF;border-radius:4px;padding:6px 12px;cursor:pointer}
+.btnp{border:1px solid #0F5E5A;background:#0F5E5A;color:#FFFFFF;border-radius:4px;padding:8px 18px;font-weight:600;min-height:44px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+.btnp:hover{background:#0A4441;color:#FFFFFF}
+.co{display:flex;align-items:stretch;gap:0;border:1px solid #DAD6CE;border-radius:6px;background:#FFFFFF;text-decoration:none;color:#1E2421;overflow:hidden;min-height:64px}
+.co:hover{border-color:#0F5E5A}
+.co .stripe{width:6px;flex-shrink:0}
+.co .body{flex-grow:1;padding:10px 14px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.co .meta{font-size:12px;color:#4F5752}
+.side{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #DAD6CE;border-radius:6px;background:#FFFFFF;text-decoration:none;color:#1E2421;min-height:44px;cursor:pointer;width:100%;text-align:left;box-sizing:border-box}
+.side:hover{border-color:#0F5E5A}
+.side svg{flex-shrink:0;color:#0F5E5A}
+.side small{display:block;color:#4F5752;font-size:12px}
+.eyebrow{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#6B726D;margin:0}
+</style>
+<div style="width: 100%; min-height: 940px; display: flex; flex-direction: column; background: #E9E6E0">
+  <header class="titlebar">
+    <div style="font-weight: 700; letter-spacing: 0.02em">ClientLedger</div>
+    <div style="color: #A9B0AB">No company open</div>
+    <div style="flex-grow: 1"></div>
+    <div style="font-size: 12px; color: #A9B0AB">Version 0.9.0-beta.1</div>
+  </header>
+
+  <div style="flex-grow: 1; display: flex; justify-content: center; align-items: flex-start; padding: 48px 16px">
+    <div style="width: 100%; max-width: 980px; background: #FFFFFF; border: 1px solid #C9C4BA; border-radius: 8px; overflow: hidden">
+      <div style="padding: 28px 32px 20px; border-bottom: 1px solid #DAD6CE; display: flex; gap: 20px; align-items: center; flex-wrap: wrap">
+        <div aria-hidden="true" style="width: 48px; height: 48px; border-radius: 10px; background: #0F5E5A; display: flex; align-items: center; justify-content: center">
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"><rect x="5" y="4" width="18" height="20" rx="2"/><path d="M9 10h10M9 14h10M9 18h6"/></svg>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px; flex-grow: 1">
+          <h1 style="margin: 0; font-size: 22px; font-weight: 600">Open a company</h1>
+          <div style="color: #4F5752">Your books stay on this computer. Nothing is sent anywhere unless you turn it on.</div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 28px; padding: 24px 32px 28px">
+        <section aria-labelledby="recent" style="flex: 999 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+          <h2 id="recent" class="eyebrow">Recent companies</h2>
+          <a class="co" href="Home.html" style="border-color: #0F5E5A; background: #E6F0EF">
+            <span class="stripe" style="background: #3E7CB1"></span>
+            <span class="body">
+              <span style="font-size: 15px; font-weight: 600">Ozark Ridge Landscaping LLC</span>
+              <span class="meta">Last opened today 8:10 AM · Backed up today 8:12 AM · 1,512 transactions</span>
+            </span>
+            <span style="display: flex; align-items: center; padding: 0 14px"><kbd>Enter</kbd></span>
+          </a>
+          <a class="co" href="Home.html">
+            <span class="stripe" style="background: #6E8B3D"></span>
+            <span class="body">
+              <span style="font-size: 15px; font-weight: 600">Shoal Creek Farm</span>
+              <span class="meta">Last opened 10/28/2026 · Converted from QuickBooks Desktop · Verified</span>
+            </span>
+          </a>
+          <a class="co" href="Home.html">
+            <span class="stripe" style="background: #8A5A9E"></span>
+            <span class="body">
+              <span style="font-size: 15px; font-weight: 600">Kurt — Rental Duplex</span>
+              <span class="meta">Last opened 10/02/2026 · Backup reminder: last backup 35 days ago</span>
+            </span>
+          </a>
+          <a class="co" href="Home.html">
+            <span class="stripe" style="background: #C9C4BA"></span>
+            <span class="body">
+              <span style="font-size: 15px; font-weight: 600">Practice company · Ozark Ridge (sample)</span>
+              <span class="meta">Made-up data to try things safely · Reset any time</span>
+            </span>
+          </a>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding-top: 6px">
+            <a class="btnp" href="Home.html">Open</a>
+            <button class="btn" style="min-height: 44px">Browse for a company…</button>
+            <div style="flex-grow: 1"></div>
+            <span style="font-size: 12px; color: #6B726D">Saved in Documents › ClientLedger</span>
+          </div>
+        </section>
+
+        <section aria-labelledby="start" style="flex: 1 1 300px; display: flex; flex-direction: column; gap: 10px">
+          <h2 id="start" class="eyebrow">Start something new</h2>
+          <button class="side">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M11 4v14M4 11h14"/></svg>
+            <span>New company<small>A short interview sets up your accounts</small></span>
+          </button>
+          <a class="side" href="QBDImport.html">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 11h12M12 6l5 5-5 5"/></svg>
+            <span>Switch from QuickBooks Desktop<small>Bring your books over and check they match</small></span>
+          </a>
+          <button class="side">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 12a6 6 0 1 0 2-4.5M5 4v4h4"/></svg>
+            <span>Restore a backup<small>From a .clbackup file</small></span>
+          </button>
+          <button class="side">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><rect x="3" y="5" width="16" height="10" rx="1.5"/><path d="M8 19h6M11 15v4"/></svg>
+            <span>Open a company on my office network<small>Another computer here is sharing it</small></span>
+          </button>
+          <button class="side">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M11 8v3l2 2"/></svg>
+            <span>Try the practice company<small>Explore without touching real books</small></span>
+          </button>
+        </section>
+      </div>
+
+      <div style="padding: 12px 32px; border-top: 1px solid #DAD6CE; background: #FBFAF8; display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #4F5752">
+        <span>Works fully offline</span>
+        <span>Not affiliated with Intuit or QuickBooks</span>
+        <div style="flex-grow: 1"></div>
+        <a href="OpenCompany.html">Check for updates</a>
+        <a href="OpenCompany.html">Help</a>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- ClientLedger reference mockup (docs/design). Not production code; synthetic sample data. Fonts: IBM Plex (assets/fonts after P06). -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>ClientLedger — Bank Feed</title>
+</head>
+<body>
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#1E2421;background:#E9E6E0;font-size:13px}
+a{color:#0F5E5A}a:hover{color:#0A4441}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;background:#FFFFFF;border:1px solid #C9C4BA;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:#3A403C;white-space:nowrap}
+.mono{font-family:'IBM Plex Mono',monospace}
+.num{font-family:'IBM Plex Mono',monospace;text-align:right;white-space:nowrap}
+.titlebar{background:#1E2421;color:#E9E6E0;display:flex;align-items:center;gap:16px;padding:0 16px;min-height:36px;flex-wrap:wrap;border-bottom:3px solid #3E7CB1}
+.menu{background:#F7F5F1;border-bottom:1px solid #C9C4BA;display:flex;gap:2px;padding:0 8px;flex-wrap:wrap;align-items:center}
+.menu>button{background:none;border:0;padding:7px 10px;cursor:pointer}
+.rail{flex:1 1 200px;max-width:220px;background:#F7F5F1;border-right:1px solid #C9C4BA;padding:8px;display:flex;flex-direction:column;gap:2px}
+.rail h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6B726D;padding:12px 8px 4px;margin:0}
+.rail a{text-decoration:none;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 8px;border-radius:4px;color:#1E2421}
+.rail a:hover{background:#EEEBE5}
+.rail a.on{background:#0F5E5A;color:#FFFFFF;font-weight:500}
+.badge{background:#B5651D;color:#FFFFFF;border-radius:10px;padding:0 7px;font-size:11px;font-weight:600}
+.tabs{display:flex;gap:2px;padding:8px 12px 0;border-bottom:1px solid #C9C4BA;flex-wrap:wrap}
+.tabs a{text-decoration:none;padding:7px 14px;color:#4F5752;border:1px solid transparent;border-radius:6px 6px 0 0}
+.tabs a.on{border-color:#C9C4BA;border-bottom-color:#FFFFFF;background:#FFFFFF;margin-bottom:-1px;font-weight:600;color:#1E2421}
+.status{background:#F7F5F1;border-top:1px solid #C9C4BA;display:flex;gap:20px;padding:6px 16px;font-size:12px;color:#4F5752;flex-wrap:wrap}
+.btn{border:1px solid #C9C4BA;background:#FFFFFF;border-radius:4px;padding:6px 12px;cursor:pointer}
+.btnp{border:1px solid #0F5E5A;background:#0F5E5A;color:#FFFFFF;border-radius:4px;padding:6px 14px;font-weight:600;cursor:pointer;min-height:36px}
+.segc{display:flex;border:1px solid #C9C4BA;border-radius:4px;overflow:hidden}
+.segc button{background:#FFFFFF;border:0;border-right:1px solid #C9C4BA;padding:6px 12px;cursor:pointer}
+.segc button:last-child{border-right:0}
+.segc button.on{background:#0F5E5A;color:#FFFFFF;font-weight:600}
+.tb{width:100%;border-collapse:collapse;min-width:780px}
+.tb th{font-weight:500;color:#4F5752;text-align:left;padding:7px 10px;background:#FBFAF8;border-bottom:1px solid #DAD6CE;white-space:nowrap}
+.tb td{padding:7px 10px;border-top:1px solid #EEEBE5;vertical-align:top}
+.tb tr.rev td{background:#FFF8EF}
+.tb tr.sel td{background:#E6F0EF}
+.sub{font-size:12px;color:#4F5752}
+.b{border-radius:10px;padding:1px 8px;font-size:12px;white-space:nowrap;font-weight:500}
+.b-rule{background:#EEEBE5;color:#3A403C}
+.b-ai{background:#E6F0EF;color:#0A4441}
+.b-low{background:#FFF4E5;color:#6B3A0C}
+.b-match{background:#E8EEF8;color:#23406E}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#4F5752}
+.fld input,.fld select{font-size:14px;color:#1E2421;padding:6px 8px;border:1px solid #C9C4BA;border-radius:4px;background:#FFFFFF}
+</style>
+<div style="width: 100%; min-height: 940px; display: flex; flex-direction: column; background: #E9E6E0">
+  <header class="titlebar">
+    <div style="font-weight: 700; letter-spacing: 0.02em">ClientLedger</div>
+    <div style="color: #A9B0AB">Ozark Ridge Landscaping LLC</div>
+    <div style="flex-grow: 1"></div>
+    <div style="font-size: 12px; color: #A9B0AB">Wed 11/04/2026 · Books closed through 09/30/2026</div>
+  </header>
+  <nav class="menu" aria-label="Menu">
+    <button>File</button><button>Edit</button><button>Lists</button><button>Clients</button><button>Vendors</button><button>Banking</button><button>Payroll</button><button>Reports</button><button>Company</button><button>Window</button><button>Help</button>
+    <div style="flex-grow: 1"></div>
+    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: #4F5752"><span>Go to</span><input type="search" placeholder="Find a transaction, name, or command…" style="width: 260px; padding: 4px 8px; border: 1px solid #C9C4BA; border-radius: 4px; background: #FFFFFF; font-size: 12px"><kbd>Ctrl K</kbd></label>
+  </nav>
+
+  <div style="display: flex; flex-wrap: wrap; flex-grow: 1; align-items: stretch">
+    <aside class="rail" aria-label="Workspace">
+      <h2>Workspace</h2>
+      <a href="Home.html"><span>Home</span><kbd>Alt H</kbd></a>
+      <a href="CreateInvoice.html"><span>Clients &amp; Jobs</span><span style="color: #6B726D; font-size: 12px">64</span></a>
+      <a href="EnterBill.html"><span>Vendors</span><span style="color: #6B726D; font-size: 12px">38</span></a>
+      <a class="on" href="BankFeed.html"><span>Bank Feed</span><span class="badge">37</span></a>
+      <a href="Register.html"><span>Chart of Accounts</span><kbd>Ctrl A</kbd></a>
+      <a href="Reports.html"><span>Reports</span></a>
+      <h2>Tools</h2>
+      <a href="ImportBankFile.html"><span>Import Bank File</span></a>
+      <a href="Home.html"><span>Import Payroll</span></a>
+      <a href="SendToAccountant.html"><span>Send to My Accountant</span></a>
+      <a href="Home.html"><span>Audit Trail</span></a>
+      <h2>Open windows</h2>
+      <a href="WriteCheck.html"><span>Write Check · #4418 ●</span></a>
+      <a href="Register.html"><span>Register · Operating</span></a>
+    </aside>
+
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+      <nav class="tabs" aria-label="Open windows">
+        <a href="Home.html">Home</a>
+        <a href="WriteCheck.html">Write Check · #4418 ●</a>
+        <a href="Register.html">Register · Operating</a>
+        <a class="on" href="BankFeed.html">Bank Feed</a>
+      </nav>
+
+      <div style="background: #FFFFFF; flex-grow: 1; display: flex; flex-direction: column">
+        <div style="display: flex; align-items: center; gap: 14px; padding: 14px 16px 10px; flex-wrap: wrap">
+          <h1 style="margin: 0; font-size: 22px; font-weight: 600">Bank Feed</h1>
+          <label style="display: flex; gap: 6px; align-items: center; color: #4F5752">Account <select style="padding: 4px 6px; border: 1px solid #C9C4BA; border-radius: 4px; background: #FFFFFF"><option>1010 · Operating Checking (37)</option><option>2100 · Business Card (0)</option></select></label>
+          <span style="color: #4F5752">Last file imported 11/03/2026</span>
+          <div style="flex-grow: 1"></div>
+          <a href="ImportBankFile.html" class="btn" style="text-decoration: none; color: #1E2421">Import Bank File</a>
+          <button class="btn">Rules</button>
+        </div>
+
+        <div style="display: flex; gap: 12px; align-items: center; padding: 0 16px 10px; flex-wrap: wrap">
+          <div class="segc" role="group" aria-label="Filter">
+            <button class="on">All 37</button><button>Ready 28</button><button>Needs review 6</button><button>Matches 3</button>
+          </div>
+          <div style="flex-grow: 1"></div>
+          <input type="search" placeholder="Filter by description or amount" style="width: 240px; padding: 6px 8px; border: 1px solid #C9C4BA; border-radius: 4px">
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: center; padding: 8px 16px; background: #E6F0EF; border-top: 1px solid #B9C9C6; border-bottom: 1px solid #B9C9C6; flex-wrap: wrap">
+          <span style="font-weight: 600">5 selected</span>
+          <button class="btnp">Accept selected <kbd style="background: #0A4441; color: #FFFFFF; border-color: #0A4441">Ctrl Enter</kbd></button>
+          <button class="btn">Change account</button>
+          <button class="btn">Exclude</button>
+          <div style="flex-grow: 1"></div>
+          <span style="font-size: 12px; color: #4F5752"><kbd>J</kbd> <kbd>K</kbd> move · <kbd>Space</kbd> select · <kbd>A</kbd> accept · <kbd>S</kbd> split · <kbd>R</kbd> make rule</span>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; flex-grow: 1; align-items: stretch">
+          <div style="flex: 999 1 600px; min-width: 0; overflow-x: auto">
+            <table class="tb">
+              <thead><tr><th style="width: 30px"><input type="checkbox" aria-label="Select all"></th><th>Date</th><th>From the bank</th><th style="text-align: right">Amount</th><th>Will be recorded as</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr><td><input type="checkbox" checked aria-label="Select"></td><td class="mono">11/03</td><td class="mono">RIVERBEND FUEL #212 MONETT MO</td><td class="num">-84.17</td><td>Riverbend Fuel<div class="sub">6200 · Fuel · Crew A</div></td><td><span class="b b-rule">Rule</span></td></tr>
+                <tr><td><input type="checkbox" checked aria-label="Select"></td><td class="mono">11/03</td><td class="mono">ACH CREDIT BRANSON HILLS HOA</td><td class="num">8,450.00</td><td>Deposit of payment on Invoice 1093<div class="sub">From Undeposited Funds · received 11/01</div></td><td><span class="b b-match">Match</span></td></tr>
+                <tr><td><input type="checkbox" checked aria-label="Select"></td><td class="mono">11/02</td><td class="mono">CHECK 4412</td><td class="num">-925.00</td><td>Check 4412 · Midwest Equipment Rental<div class="sub">Already in your register · will be marked cleared</div></td><td><span class="b b-match">Match</span></td></tr>
+                <tr><td><input type="checkbox" checked aria-label="Select"></td><td class="mono">11/02</td><td class="mono">ONLINE TRANSFER TO XXXX4471</td><td class="num">-3,000.00</td><td>Transfer to 1020 · Payroll Checking<div class="sub">Matching deposit found in the payroll account</div></td><td><span class="b b-match">Transfer</span></td></tr>
+                <tr><td><input type="checkbox" checked aria-label="Select"></td><td class="mono">11/01</td><td class="mono">OZARK OFFICE SUPPLY 0045</td><td class="num">-64.38</td><td>Ozark Office Supply<div class="sub">6500 · Office &amp; software</div></td><td><span class="b b-ai">AI · high</span></td></tr>
+                <tr><td><input type="checkbox" aria-label="Select"></td><td class="mono">11/01</td><td class="mono">LAKESIDE POWER COOP AUTOPAY</td><td class="num">-301.22</td><td>Lakeside Power Co-op<div class="sub">6700 · Utilities</div></td><td><span class="b b-rule">Rule</span></td></tr>
+                <tr class="sel rev"><td><input type="checkbox" aria-label="Select"></td><td class="mono">10/31</td><td class="mono">MONETT TIRE AND LUBE 0331</td><td class="num">-186.40</td><td>Monett Tire &amp; Lube<div class="sub">6400 · Repairs &amp; maintenance?</div></td><td><span class="b b-low">AI · check this</span></td></tr>
+                <tr class="rev"><td><input type="checkbox" aria-label="Select"></td><td class="mono">10/31</td><td class="mono">SQ *FARMERS MKT BOOTH</td><td class="num">-45.00</td><td style="color: #8C928E">Choose a payee and account</td><td><span class="b b-low">Needs you</span></td></tr>
+              </tbody>
+            </table>
+            <div style="padding: 8px 16px; font-size: 12px; color: #6B726D">Showing 8 of 37 · AI suggests payees and accounts only; amounts always come from the bank file.</div>
+          </div>
+
+          <aside aria-label="Selected transaction" style="flex: 1 1 300px; border-left: 1px solid #DAD6CE; background: #FBFAF8; padding: 14px; display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px">
+              <span style="font-weight: 600">10/31 · <span class="mono">-186.40</span></span>
+              <span class="mono" style="font-size: 12px; color: #4F5752">MONETT TIRE AND LUBE 0331</span>
+            </div>
+            <div style="background: #FFF4E5; color: #6B3A0C; border-radius: 4px; padding: 8px 10px; font-size: 12px">AI isn't sure: past payments to this vendor went to both Repairs &amp; maintenance and Fuel. Pick one — your choice teaches the next suggestion.</div>
+            <label class="fld">Payee<input value="Monett Tire &amp; Lube"></label>
+            <label class="fld">Account<select><option>6400 · Repairs &amp; maintenance</option><option>6200 · Fuel</option></select></label>
+            <label class="fld">Client:Job (optional)<input placeholder="None"></label>
+            <div class="fld">Tags<div style="display: flex; gap: 4px; flex-wrap: wrap"><span class="b b-rule">Crew B</span><button class="btn" style="padding: 1px 8px; font-size: 12px">+ Tag</button></div></div>
+            <label style="display: flex; gap: 6px; align-items: center"><input type="checkbox"> Make a rule for MONETT TIRE</label>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto">
+              <button class="btnp" style="min-height: 44px">Accept <kbd style="background: #0A4441; color: #FFFFFF; border-color: #0A4441">A</kbd></button>
+              <button class="btn" style="min-height: 44px">Split <kbd>S</kbd></button>
+              <button class="btn" style="min-height: 44px">Exclude</button>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="status">
+    <span>Kurt · Admin</span>
+    <span>Single-user · this computer</span>
+    <span>AI: Ollama, on this computer</span>
+    <div style="flex-grow: 1"></div>
+    <span>Accepted items post as "Bank file import" in the audit trail</span>
+  </footer>
+</div>
+</body>
+</html>

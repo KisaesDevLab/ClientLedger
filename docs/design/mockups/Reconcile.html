@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- ClientLedger reference mockup (docs/design). Not production code; synthetic sample data. Fonts: IBM Plex (assets/fonts after P06). -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>ClientLedger — Reconcile</title>
+</head>
+<body>
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#1E2421;background:#E9E6E0;font-size:13px}
+a{color:#0F5E5A}a:hover{color:#0A4441}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;background:#FFFFFF;border:1px solid #C9C4BA;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:#3A403C;white-space:nowrap}
+.mono{font-family:'IBM Plex Mono',monospace}
+.num{font-family:'IBM Plex Mono',monospace;text-align:right;white-space:nowrap}
+.titlebar{background:#1E2421;color:#E9E6E0;display:flex;align-items:center;gap:16px;padding:0 16px;min-height:36px;flex-wrap:wrap;border-bottom:3px solid #3E7CB1}
+.menu{background:#F7F5F1;border-bottom:1px solid #C9C4BA;display:flex;gap:2px;padding:0 8px;flex-wrap:wrap;align-items:center}
+.menu>button{background:none;border:0;padding:7px 10px;cursor:pointer}
+.rail{flex:1 1 200px;max-width:220px;background:#F7F5F1;border-right:1px solid #C9C4BA;padding:8px;display:flex;flex-direction:column;gap:2px}
+.rail h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6B726D;padding:12px 8px 4px;margin:0}
+.rail a{text-decoration:none;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 8px;border-radius:4px;color:#1E2421}
+.rail a:hover{background:#EEEBE5}
+.rail a.on{background:#0F5E5A;color:#FFFFFF;font-weight:500}
+.badge{background:#B5651D;color:#FFFFFF;border-radius:10px;padding:0 7px;font-size:11px;font-weight:600}
+.tabs{display:flex;gap:2px;padding:8px 12px 0;border-bottom:1px solid #C9C4BA;flex-wrap:wrap}
+.tabs a{text-decoration:none;padding:7px 14px;color:#4F5752;border:1px solid transparent;border-radius:6px 6px 0 0}
+.tabs a.on{border-color:#C9C4BA;border-bottom-color:#FFFFFF;background:#FFFFFF;margin-bottom:-1px;font-weight:600;color:#1E2421}
+.status{background:#F7F5F1;border-top:1px solid #C9C4BA;display:flex;gap:20px;padding:6px 16px;font-size:12px;color:#4F5752;flex-wrap:wrap}
+.btn{border:1px solid #C9C4BA;background:#FFFFFF;border-radius:4px;padding:6px 12px;cursor:pointer;min-height:44px}
+.btnp{border:1px solid #0F5E5A;background:#0F5E5A;color:#FFFFFF;border-radius:4px;padding:8px 16px;font-weight:600;min-height:44px;cursor:pointer}
+.btnp[disabled]{background:#B9C9C6;border-color:#B9C9C6;cursor:not-allowed}
+.pane{flex:1 1 420px;min-width:0;border:1px solid #DAD6CE;border-radius:6px;overflow:hidden;display:flex;flex-direction:column}
+.pane h2{margin:0;padding:9px 12px;font-size:13px;font-weight:600;border-bottom:1px solid #DAD6CE;background:#FBFAF8;display:flex;justify-content:space-between}
+.tb{width:100%;border-collapse:collapse}
+.tb th{font-weight:500;color:#4F5752;text-align:left;padding:6px 10px;border-bottom:1px solid #DAD6CE;white-space:nowrap;font-size:12px}
+.tb td{padding:6px 10px;border-top:1px solid #EEEBE5;white-space:nowrap}
+.tb tr.on td{background:#F2F6F5}
+.tb tr.miss td{background:#FFF8EF}
+.imp{display:inline-block;width:7px;height:7px;border-radius:4px;background:#23406E;margin-left:6px;vertical-align:middle}
+.sum{display:flex;justify-content:space-between;gap:10px}
+.sum span:first-child{color:#4F5752}
+</style>
+<div style="width: 100%; min-height: 940px; display: flex; flex-direction: column; background: #E9E6E0">
+  <header class="titlebar">
+    <div style="font-weight: 700; letter-spacing: 0.02em">ClientLedger</div>
+    <div style="color: #A9B0AB">Ozark Ridge Landscaping LLC</div>
+    <div style="flex-grow: 1"></div>
+    <div style="font-size: 12px; color: #A9B0AB">Wed 11/04/2026 · Books closed through 09/30/2026</div>
+  </header>
+  <nav class="menu" aria-label="Menu">
+    <button>File</button><button>Edit</button><button>Lists</button><button>Clients</button><button>Vendors</button><button>Banking</button><button>Payroll</button><button>Reports</button><button>Company</button><button>Window</button><button>Help</button>
+    <div style="flex-grow: 1"></div>
+    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: #4F5752"><span>Go to</span><input type="search" placeholder="Find a transaction, name, or command…" style="width: 260px; padding: 4px 8px; border: 1px solid #C9C4BA; border-radius: 4px; background: #FFFFFF; font-size: 12px"><kbd>Ctrl K</kbd></label>
+  </nav>
+
+  <div style="display: flex; flex-wrap: wrap; flex-grow: 1; align-items: stretch">
+    <aside class="rail" aria-label="Workspace">
+      <h2>Workspace</h2>
+      <a href="Home.html"><span>Home</span><kbd>Alt H</kbd></a>
+      <a href="CreateInvoice.html"><span>Clients &amp; Jobs</span><span style="color: #6B726D; font-size: 12px">64</span></a>
+      <a href="EnterBill.html"><span>Vendors</span><span style="color: #6B726D; font-size: 12px">38</span></a>
+      <a href="BankFeed.html"><span>Bank Feed</span><span class="badge">37</span></a>
+      <a href="Register.html"><span>Chart of Accounts</span><kbd>Ctrl A</kbd></a>
+      <a href="Reports.html"><span>Reports</span></a>
+      <h2>Tools</h2>
+      <a href="ImportBankFile.html"><span>Import Bank File</span></a>
+      <a href="Home.html"><span>Import Payroll</span></a>
+      <a href="SendToAccountant.html"><span>Send to My Accountant</span></a>
+      <a href="Home.html"><span>Audit Trail</span></a>
+      <h2>Open windows</h2>
+      <a href="Register.html"><span>Register · Operating</span></a>
+      <a class="on" href="Reconcile.html"><span>Reconcile · Operating</span></a>
+    </aside>
+
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+      <nav class="tabs" aria-label="Open windows">
+        <a href="Home.html">Home</a>
+        <a href="Register.html">Register · Operating</a>
+        <a class="on" href="Reconcile.html">Reconcile · Operating</a>
+      </nav>
+
+      <div style="background: #FFFFFF; flex-grow: 1; display: flex; flex-direction: column; gap: 12px; padding: 16px 20px">
+        <div style="display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap">
+          <h1 style="margin: 0; font-size: 22px; font-weight: 600">Reconcile · 1010 Operating Checking</h1>
+          <span style="color: #4F5752">Statement ending <span class="mono" style="color: #1E2421">10/31/2026</span></span>
+          <span style="color: #4F5752">Ending balance <span class="mono" style="color: #1E2421">86,902.13</span></span>
+          <div style="flex-grow: 1"></div>
+          <button class="btn" style="min-height: 32px">Change statement info</button>
+        </div>
+
+        <div style="display: flex; gap: 12px; align-items: center; padding: 8px 12px; background: #E8EEF8; color: #23406E; border-radius: 6px; flex-wrap: wrap">
+          <span><span class="imp" style="margin: 0 6px 0 0"></span>Items you accepted from bank files are already checked. Look them over, then check anything else that's on the statement.</span>
+        </div>
+
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
+          <label style="display: flex; gap: 6px; align-items: center"><input type="checkbox" checked> Hide transactions after the statement date</label>
+          <div style="flex-grow: 1"></div>
+          <button class="btn" style="min-height: 32px">Mark all</button>
+          <button class="btn" style="min-height: 32px">Unmark all</button>
+          <button class="btn" style="min-height: 32px">Go To</button>
+        </div>
+
+        <div style="display: flex; gap: 14px; flex-wrap: wrap">
+          <section class="pane" aria-labelledby="dep">
+            <h2 id="dep"><span>Deposits and other credits</span><span class="mono" style="font-weight: 500">6 of 6 · 40,107.84</span></h2>
+            <div style="overflow-x: auto">
+              <table class="tb">
+                <thead><tr><th style="width: 28px">✓</th><th>Date</th><th>Ref</th><th>Payee</th><th style="text-align: right">Amount</th></tr></thead>
+                <tbody>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/03</td><td></td><td>Branson Hills HOA<span class="imp" aria-label="from bank file"></span></td><td class="num">8,450.00</td></tr>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/08</td><td></td><td>Hollister Family<span class="imp" aria-label="from bank file"></span></td><td class="num">12,600.00</td></tr>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/14</td><td></td><td>Table Rock Marina<span class="imp" aria-label="from bank file"></span></td><td class="num">6,210.00</td></tr>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/21</td><td></td><td>Neosho Dental Group<span class="imp" aria-label="from bank file"></span></td><td class="num">4,385.00</td></tr>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/28</td><td></td><td>Branson Hills HOA<span class="imp" aria-label="from bank file"></span></td><td class="num">8,450.00</td></tr>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/31</td><td class="mono">INT</td><td>Interest (from statement info)</td><td class="num">12.84</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section class="pane" aria-labelledby="pay">
+            <h2 id="pay"><span>Checks, payments, and other debits</span><span class="mono" style="font-weight: 500">8 of 9 · 24,229.73</span></h2>
+            <div style="overflow-x: auto">
+              <table class="tb">
+                <thead><tr><th style="width: 28px">✓</th><th>Date</th><th>Ref</th><th>Payee</th><th style="text-align: right">Amount</th></tr></thead>
+                <tbody>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/02</td><td class="mono">4401</td><td>Ozark Feed &amp; Seed<span class="imp" aria-label="from bank file"></span></td><td class="num">2,318.60</td></tr>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/05</td><td class="mono">ACH</td><td>Payroll · 10/05<span class="imp" aria-label="from bank file"></span></td><td class="num">9,120.00</td></tr>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/09</td><td class="mono">4404</td><td>Midwest Equipment Rental<span class="imp" aria-label="from bank file"></span></td><td class="num">1,850.00</td></tr>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/15</td><td class="mono">ACH</td><td>Lakeside Power Co-op<span class="imp" aria-label="from bank file"></span></td><td class="num">286.14</td></tr>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/19</td><td class="mono">ACH</td><td>Payroll · 10/19<span class="imp" aria-label="from bank file"></span></td><td class="num">9,120.00</td></tr>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/22</td><td class="mono">4406</td><td>Ozark Office Supply<span class="imp" aria-label="from bank file"></span></td><td class="num">274.51</td></tr>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/24</td><td class="mono">4407</td><td>Riverbend Fuel<span class="imp" aria-label="from bank file"></span></td><td class="num">1,212.48</td></tr>
+                  <tr class="miss"><td><input type="checkbox" aria-label="Cleared" style="outline: 2px solid #B5651D"></td><td class="mono">10/27</td><td class="mono">4409</td><td>Monett Tire &amp; Lube</td><td class="num">412.18</td></tr>
+                  <tr class="on"><td><input type="checkbox" checked aria-label="Cleared"></td><td class="mono">10/31</td><td class="mono">SVC</td><td>Service charge (from statement info)</td><td class="num">48.00</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div style="display: flex; gap: 14px; flex-wrap: wrap; align-items: stretch; margin-top: auto">
+          <div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 5px; padding: 12px 14px; background: #FBFAF8; border: 1px solid #DAD6CE; border-radius: 6px">
+            <div class="sum"><span>Beginning balance (09/30)</span><span class="mono">71,436.20</span></div>
+            <div class="sum"><span>6 deposits and credits</span><span class="mono">40,107.84</span></div>
+            <div class="sum"><span>8 checks and payments</span><span class="mono">-24,229.73</span></div>
+            <div class="sum" style="border-top: 1px solid #DAD6CE; padding-top: 5px"><span>Cleared balance</span><span class="mono">87,314.31</span></div>
+          </div>
+          <div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 5px; padding: 12px 14px; background: #FFF4E5; border: 1px solid #E8C9A0; border-radius: 6px; color: #6B3A0C">
+            <div class="sum"><span style="color: #6B3A0C">Statement ending balance</span><span class="mono">86,902.13</span></div>
+            <div class="sum" style="font-size: 16px; font-weight: 600"><span style="color: #6B3A0C">Difference</span><span class="mono">-412.18</span></div>
+            <div style="font-size: 12px">One unchecked item equals the difference: check 4409 to Monett Tire &amp; Lube.</div>
+          </div>
+          <div style="flex: 0 1 260px; display: flex; flex-direction: column; gap: 8px; justify-content: flex-end">
+            <button class="btnp" disabled>Reconcile now</button>
+            <div style="display: flex; gap: 8px"><button class="btn" style="flex: 1">Leave for now</button><button class="btn" style="flex: 1">Reports</button></div>
+            <div style="font-size: 12px; color: #6B726D">Reconcile now turns on when the difference is 0.00.</div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="status">
+    <span>Kurt · Admin</span>
+    <span>Single-user · this computer</span>
+    <span>AI: Ollama, on this computer</span>
+    <div style="flex-grow: 1"></div>
+    <span><kbd>Space</kbd> check</span>
+    <span><kbd>Tab</kbd> switch pane</span>
+    <span><kbd>Ctrl E</kbd> open transaction</span>
+  </footer>
+</div>
+</body>
+</html>

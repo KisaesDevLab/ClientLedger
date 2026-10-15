@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- ClientLedger reference mockup (docs/design). Not production code; synthetic sample data. Fonts: IBM Plex (assets/fonts after P06). -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<title>ClientLedger — Preferences, AI</title>
+</head>
+<body>
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#1E2421;background:#E9E6E0;font-size:13px}
+a{color:#0F5E5A}a:hover{color:#0A4441}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;background:#FFFFFF;border:1px solid #C9C4BA;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:#3A403C;white-space:nowrap}
+.mono{font-family:'IBM Plex Mono',monospace}
+.titlebar{background:#1E2421;color:#E9E6E0;display:flex;align-items:center;gap:16px;padding:0 16px;min-height:36px;flex-wrap:wrap;border-bottom:3px solid #3E7CB1}
+.btn{border:1px solid #C9C4BA;background:#FFFFFF;border-radius:4px;padding:6px 14px;cursor:pointer;min-height:44px}
+.btnp{border:1px solid #0F5E5A;background:#0F5E5A;color:#FFFFFF;border-radius:4px;padding:8px 18px;font-weight:600;min-height:44px;cursor:pointer}
+.cats{flex:1 1 200px;max-width:230px;background:#F7F5F1;border-right:1px solid #DAD6CE;padding:12px 8px;display:flex;flex-direction:column;gap:2px}
+.cats h2{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6B726D;padding:10px 8px 4px;margin:0}
+.cats a{text-decoration:none;color:#1E2421;padding:8px;border-radius:4px}
+.cats a:hover{background:#EEEBE5}
+.cats a.on{background:#0F5E5A;color:#FFFFFF;font-weight:500}
+.sec{border:1px solid #DAD6CE;border-radius:6px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.sec h3{margin:0;font-size:14px;font-weight:600}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid #DAD6CE;border-radius:6px;cursor:pointer}
+.opt.on{border-color:#0F5E5A;background:#E6F0EF}
+.opt small{display:block;color:#4F5752;font-size:12px}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#4F5752}
+.fld input,.fld select{font-size:14px;color:#1E2421;padding:6px 8px;border:1px solid #C9C4BA;border-radius:4px;background:#FFFFFF}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:8px 0;border-top:1px solid #EEEBE5}
+.sw:first-of-type{border-top:0}
+.sw small{display:block;color:#4F5752;font-size:12px}
+.toggle{width:40px;height:22px;border-radius:11px;background:#0F5E5A;position:relative;flex-shrink:0;border:0;cursor:pointer}
+.toggle::after{content:"";position:absolute;top:3px;left:21px;width:16px;height:16px;border-radius:8px;background:#FFFFFF}
+.toggle.off{background:#C9C4BA}
+.toggle.off::after{left:3px}
+</style>
+<div style="width: 100%; min-height: 940px; display: flex; flex-direction: column; background: #E9E6E0">
+  <header class="titlebar">
+    <div style="font-weight: 700; letter-spacing: 0.02em">ClientLedger</div>
+    <div style="color: #A9B0AB">Ozark Ridge Landscaping LLC</div>
+    <div style="flex-grow: 1"></div>
+    <div style="font-size: 12px; color: #A9B0AB">Company › Preferences</div>
+  </header>
+
+  <div style="flex-grow: 1; display: flex; justify-content: center; align-items: flex-start; padding: 32px 16px">
+    <div role="dialog" aria-labelledby="ptitle" style="width: 100%; max-width: 1120px; background: #FFFFFF; border: 1px solid #C9C4BA; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column">
+      <div style="display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid #DAD6CE">
+        <h1 id="ptitle" style="margin: 0; font-size: 18px; font-weight: 600">Preferences</h1>
+        <div style="flex-grow: 1"></div>
+        <input type="search" placeholder="Find a setting" style="width: 220px; padding: 6px 8px; border: 1px solid #C9C4BA; border-radius: 4px">
+      </div>
+      <div style="display: flex; flex-wrap: wrap; align-items: stretch">
+        <nav class="cats" aria-label="Preference categories">
+          <h2>Just for me</h2>
+          <a href="Preferences.html">Look and feel</a>
+          <a href="Preferences.html">Dates and numbers</a>
+          <a href="Preferences.html">Reminders</a>
+          <h2>This company</h2>
+          <a href="Preferences.html">Accounting</a>
+          <a href="Preferences.html">Checks and forms</a>
+          <a href="Preferences.html">Sales tax</a>
+          <a href="Preferences.html">Inventory</a>
+          <a class="on" href="Preferences.html">AI suggestions</a>
+          <a href="Preferences.html">Email</a>
+          <a href="Preferences.html">Receipt inbox</a>
+          <a href="Preferences.html">Backups</a>
+          <a href="Preferences.html">Updates</a>
+        </nav>
+
+        <div style="flex: 999 1 560px; min-width: 0; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap">
+            <div>
+              <h2 style="margin: 0; font-size: 18px; font-weight: 600">AI suggestions</h2>
+              <div style="color: #4F5752">Off unless you turn it on. AI suggests accounts, payees, and tags, and reads bills — it never sets an amount, and you accept every suggestion.</div>
+            </div>
+            <label style="display: flex; gap: 10px; align-items: center; font-weight: 600">On <button class="toggle" role="switch" aria-checked="true" aria-label="AI suggestions"></button></label>
+          </div>
+
+          <section class="sec" aria-labelledby="prov">
+            <h3 id="prov">Where AI runs</h3>
+            <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px">
+              <label class="opt on"><input type="radio" name="p" checked> <span>On this computer (Ollama)<small>Works offline. Nothing leaves this computer. Needs Ollama installed.</small></span></label>
+              <label class="opt"><input type="radio" name="p"> <span>Anthropic (your key)<small>Online. Sends the minimum needed, with names and numbers removed.</small></span></label>
+              <label class="opt"><input type="radio" name="p"> <span>OpenAI (your key)<small>Online. Same limits as Anthropic.</small></span></label>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap">
+              <label class="fld" style="flex: 1 1 240px">Ollama address<input class="mono" value="http://localhost:11434"></label>
+              <label class="fld" style="flex: 1 1 200px">Model<select><option>llama3.1:8b</option></select></label>
+              <button class="btn">Test</button>
+              <span style="color: #0F5E5A; padding-bottom: 12px">Connected ✓</span>
+            </div>
+          </section>
+
+          <section class="sec" aria-labelledby="feat">
+            <h3 id="feat">What AI may help with</h3>
+            <div>
+              <div class="sw"><span>Bank Feed suggestions<small>Suggest a payee and account for imported transactions</small></span><button class="toggle" role="switch" aria-checked="true" aria-label="Bank Feed suggestions"></button></div>
+              <div class="sw"><span>Read bills and receipts<small>Fill vendor, date, ref. no., and total from a PDF or photo for you to check</small></span><button class="toggle" role="switch" aria-checked="true" aria-label="Read bills and receipts"></button></div>
+              <div class="sw"><span>Ask a question in Reports<small>Pick the right report and dates; numbers always come from your books</small></span><button class="toggle" role="switch" aria-checked="true" aria-label="Ask a question"></button></div>
+              <div class="sw"><span>Suggest rules<small>Offer a Bank Feed rule after you accept the same suggestion a few times</small></span><button class="toggle off" role="switch" aria-checked="false" aria-label="Suggest rules"></button></div>
+            </div>
+          </section>
+
+          <section class="sec" aria-labelledby="use" style="background: #FBFAF8">
+            <h3 id="use">Online AI usage</h3>
+            <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap">
+              <div style="flex: 1 1 260px; height: 8px; background: #EEEBE5; border-radius: 4px; overflow: hidden"><div style="width: 0%; height: 100%; background: #0F5E5A"></div></div>
+              <span class="mono">$0.00 of $10.00 this month</span>
+              <label class="fld" style="flex-direction: row; align-items: center; gap: 6px">Monthly cap $<input class="mono" value="10.00" style="width: 70px; font-size: 13px; padding: 4px 6px"></label>
+            </div>
+            <div style="font-size: 12px; color: #4F5752">Only applies to Anthropic or OpenAI. Keys are kept in your computer's keychain and never appear in backups, transfer files, or logs. Turning on an online provider asks you to agree to a short notice first; that agreement is recorded in the audit trail.</div>
+          </section>
+        </div>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px; border-top: 1px solid #DAD6CE; background: #FBFAF8">
+        <button class="btn">Cancel</button>
+        <button class="btnp">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
