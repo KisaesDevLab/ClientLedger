@@ -18,6 +18,7 @@
 
 mod binaries;
 mod cluster;
+mod dump;
 mod error;
 mod keychain;
 mod lifecycle;
@@ -29,6 +30,7 @@ mod secret;
 
 pub use binaries::PgBinaries;
 pub use cluster::{Cluster, is_initialized};
+pub use dump::{DumpInfo, RestoreInfo};
 pub use error::PgError;
 pub use keychain::{
     EncryptedFileStore, KeyringStore, MemoryStore, PasswordStore, StoreChoice, StoreNotice,

@@ -168,3 +168,35 @@ pub fn assert_only_loopback(port: u16) {
         "no listening socket found for port {port}:\n{text}"
     );
 }
+
+/// Row count and an order-independent checksum for every table in the
+/// `public` schema of `db`, keyed by `db.table`.
+pub fn table_checksums(
+    cluster: &cl_pg::Cluster,
+    port: u16,
+    db: &str,
+) -> std::collections::BTreeMap<String, (i64, String)> {
+    let mut client = connect(cluster, port, db);
+    let tables: Vec<String> = client
+        .query(
+            "select table_name::text from information_schema.tables \
+             where table_schema = 'public' and table_type = 'BASE TABLE' order by 1",
+            &[],
+        )
+        .unwrap()
+        .iter()
+        .map(|r| r.get(0))
+        .collect();
+    let mut out = std::collections::BTreeMap::new();
+    for t in tables {
+        let sql = format!(
+            "select count(*), coalesce(md5(string_agg(x::text, '|' order by x::text)), '') from \"{t}\" x"
+        );
+        let row = client.query_one(&sql, &[]).unwrap();
+        out.insert(
+            format!("{db}.{t}"),
+            (row.get::<_, i64>(0), row.get::<_, String>(1)),
+        );
+    }
+    out
+}
