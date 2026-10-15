@@ -47,6 +47,10 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
+        if std::env::var("CL_PG_KEEP").as_deref() == Ok("1") {
+            eprintln!("kept {}", self.root.display());
+            return;
+        }
         // Windows can hold files for a moment after a server exits.
         for _ in 0..10 {
             if std::fs::remove_dir_all(&self.root).is_ok() || !self.root.exists() {
@@ -75,4 +79,92 @@ pub fn files_under(dir: &Path) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+/// Connect as the superuser with the cluster's own password.
+pub fn connect(cluster: &cl_pg::Cluster, port: u16, db: &str) -> postgres::Client {
+    let info = cluster.connection(port);
+    connect_with(port, db, info.password.expose()).expect("connect with the real password")
+}
+
+pub fn connect_with(
+    port: u16,
+    db: &str,
+    password: &str,
+) -> Result<postgres::Client, postgres::Error> {
+    let mut cfg = postgres::Config::new();
+    cfg.host("127.0.0.1")
+        .port(port)
+        .user("postgres")
+        .password(password)
+        .dbname(db)
+        .connect_timeout(std::time::Duration::from_secs(10));
+    cfg.connect(postgres::NoTls)
+}
+
+/// Hard-kill a process (`SIGKILL` or `TerminateProcess`), like a crash or power loss.
+pub fn kill_hard(pid: u32) {
+    let status = if cfg!(windows) {
+        std::process::Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .output()
+    } else {
+        std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .output()
+    };
+    assert!(
+        status.is_ok_and(|o| o.status.success()),
+        "could not kill {pid}"
+    );
+    // Wait for the process to disappear.
+    for _ in 0..50 {
+        if !process_alive(pid) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("process {pid} did not exit");
+}
+
+fn process_alive(pid: u32) -> bool {
+    if cfg!(windows) {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .output()
+            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\"")))
+    } else {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+}
+
+/// Every listening socket on `port` is on 127.0.0.1 (uses `netstat`; skipped
+/// with a notice when the tool is missing).
+pub fn assert_only_loopback(port: u16) {
+    let Ok(out) = std::process::Command::new("netstat").arg("-an").output() else {
+        eprintln!("netstat not available; skipped the socket table check");
+        return;
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut seen = 0;
+    for line in text.lines().filter(|l| l.to_uppercase().contains("LISTEN")) {
+        let Some(local) = line
+            .split_whitespace()
+            .find(|t| t.ends_with(&format!(":{port}")) || t.ends_with(&format!(".{port}")))
+        else {
+            continue;
+        };
+        seen += 1;
+        assert!(
+            local.starts_with("127.0.0.1"),
+            "listening on {local}: {line}"
+        );
+    }
+    assert!(
+        seen >= 1,
+        "no listening socket found for port {port}:\n{text}"
+    );
 }

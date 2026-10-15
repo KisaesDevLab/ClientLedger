@@ -20,7 +20,9 @@ mod binaries;
 mod cluster;
 mod error;
 mod keychain;
+mod lifecycle;
 mod paths;
+mod pidfile;
 pub mod ports;
 mod proc;
 mod secret;
@@ -32,6 +34,7 @@ pub use keychain::{
     EncryptedFileStore, KeyringStore, MemoryStore, PasswordStore, StoreChoice, StoreNotice,
     default_store,
 };
+pub use lifecycle::{ConnectionInfo, Running};
 pub use paths::{CloudService, DataDirIssue, check_data_dir};
 pub use secret::Secret;
 
