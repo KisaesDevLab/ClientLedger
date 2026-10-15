@@ -1,0 +1,24 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Do not include real client data.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: input
+    id: version
+    attributes:
+      label: ClientLedger version and operating system
+  - type: textarea
+    id: details
+    attributes:
+      label: Copied error details
+      description: Paste the text from "Copy details" if the app showed an error.
