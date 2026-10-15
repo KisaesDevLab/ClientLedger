@@ -1,7 +1,7 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P00 — Repository bootstrap
-**Status:** Next
+**Current phase:** P01 — Engine submodule and single-executable build
+**Status:** Next (P03 may run in parallel)
 **Engine commit:** tracks `main`; not pinned yet (Q-02)
 **Last updated:** 2026-10-15
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
@@ -10,8 +10,8 @@
 
 | Phase | Title | Tier | Status |
 | --- | --- | --- | --- |
-| P00 | Repository bootstrap | L | Next |
-| P01 | Engine submodule and single-executable build | L | |
+| P00 | Repository bootstrap | L | Done 2026-10-15 |
+| P01 | Engine submodule and single-executable build | L | Next |
 | P02 | Engine desktop profile (upstream) | H | |
 | P03 | Bundled PostgreSQL manager | L | |
 | P04 | Supervisor | L | |
@@ -79,6 +79,7 @@ Screens or actions that link to a later phase. Remove each line when its phase l
 
 Newest first. One entry per completed phase: date, phase, summary, acceptance checklist results, notable decisions (Q-xx / U-xx).
 
+- 2026-10-15 — P00 complete (PR #1, squash-merged). Workspace skeleton (13 crates, 2 apps, xtask), MIT/NOTICE/community files, deny.toml, `xtask` license + layering + ci gates, three-OS CI with secret scan and report-only coverage. Acceptance: `cargo xtask ci` green on Ubuntu, Windows, macOS arm64 + x64; GPL dep, direct BSD-only dep, and a layering violation each failed their gate (verified once, reverted); gitleaks scan clean. Decisions: Q-P00a–c. Agents: rust-implementer (sonnet), ci-fixer (sonnet; clippy `assert_is_empty` on newer CI toolchain). Not enforced: the rule that only cl-pg/cl-host/cl-company spawn processes (not visible in the dependency graph). Follow-up: consider pinning rust-toolchain.toml to CI's clippy version. Owner enabled branch protection (required: ci x4 + secret scan), auto-merge, and secret scanning with push protection.
 - 2026-10-15 — UI mockups added as the visual reference (Q-226–Q-228): 15 screens in docs/design (HTML + PNG + index); each screen phase names its mockup and gains a mockup-match acceptance item; ui-check gets `--compare`; ui-verifier reviews against mockups; sample company reproduces mockup figures; canvas-example tests now use the mockup numbers.
 - 2026-10-11 — Detailed build plan written: PHASES.md is now an index; phases/M0–M7 hold per-phase decisions, engine items, crates and files, ordered commit-sized steps, tests, acceptance, and Fable checkpoints.
 - 2026-10-11 — Added process-reviewer on Fable: 12 checkpoints (PR-P05, PR-P10, PR-1…PR-10), deep end-to-end reviews; security stays on Opus.
