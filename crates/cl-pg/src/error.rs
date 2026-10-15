@@ -1,6 +1,7 @@
 //! Errors for `cl-pg`. Messages are written for a log or a support request:
 //! they never contain the database password.
 
+use crate::paths::DataDirIssue;
 use std::path::PathBuf;
 
 /// Everything that can go wrong while managing the bundled `PostgreSQL`.
@@ -23,6 +24,13 @@ pub enum PgError {
         root: PathBuf,
         /// Name of the missing program.
         missing: String,
+    },
+
+    /// The chosen data folder is not safe for a live database (Q-42).
+    #[error("{issue}")]
+    DataDir {
+        /// What is wrong with the folder.
+        issue: DataDirIssue,
     },
 
     /// A file or folder operation failed.

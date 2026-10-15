@@ -20,6 +20,7 @@ mod binaries;
 mod cluster;
 mod error;
 mod keychain;
+mod paths;
 pub mod ports;
 mod proc;
 mod secret;
@@ -31,6 +32,7 @@ pub use keychain::{
     EncryptedFileStore, KeyringStore, MemoryStore, PasswordStore, StoreChoice, StoreNotice,
     default_store,
 };
+pub use paths::{CloudService, DataDirIssue, check_data_dir};
 pub use secret::Secret;
 
 /// Convenience alias used across the crate.

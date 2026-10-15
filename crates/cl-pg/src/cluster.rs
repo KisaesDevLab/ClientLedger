@@ -44,6 +44,7 @@ impl Cluster {
         store: &dyn crate::PasswordStore,
     ) -> Result<Cluster> {
         let data_dir = absolute(data_dir)?;
+        crate::check_data_dir(&data_dir).map_err(|issue| PgError::DataDir { issue })?;
         if is_initialized(&data_dir) {
             let password = store.get()?.ok_or_else(|| PgError::PasswordMissing {
                 data_dir: data_dir.clone(),
