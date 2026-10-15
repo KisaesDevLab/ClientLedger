@@ -329,6 +329,13 @@ impl Cluster {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             if let Some(port) = pf.port.filter(|p| ports::is_ready(*p)) {
+                if !pf.is_loopback_only() {
+                    // Started by something else (or an older version) with
+                    // wider settings: restart it with ours.
+                    tracing::warn!("restarting a database server that was not loopback-only");
+                    self.stop()?;
+                    return Ok(None);
+                }
                 return Ok(Some(Running {
                     port,
                     pid: pf.pid,
@@ -414,7 +421,7 @@ impl Cluster {
             text.push('\n');
             text.push_str(&fs::read_to_string(path).unwrap_or_default());
         }
-        proc::tail(&text, Some(&self.password))
+        proc::tail(&proc::scrub_log(&text), Some(&self.password))
     }
 }
 

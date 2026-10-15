@@ -52,11 +52,24 @@ pub enum DataDirIssue {
         /// Which service.
         service: CloudService,
     },
+    /// The folder name has a character that is unsafe to hand to the database
+    /// program (it passes folder names through a command line).
+    UnsafeName {
+        /// The folder that was refused.
+        path: PathBuf,
+        /// The character.
+        ch: char,
+    },
 }
 
 impl fmt::Display for DataDirIssue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            DataDirIssue::UnsafeName { path, ch } => write!(
+                f,
+                "{} has the character {ch:?} in its name, which the database program cannot                  handle safely. Choose a folder whose full path does not contain it.",
+                path.display()
+            ),
             DataDirIssue::NetworkShare { path, .. } => write!(
                 f,
                 "{} is on a network drive. A company database must be kept on a drive inside \
@@ -85,6 +98,9 @@ impl fmt::Display for DataDirIssue {
 /// Returns the reason when the folder is on a network share or in a sync folder.
 pub fn check_data_dir(path: &Path) -> Result<(), DataDirIssue> {
     let given = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    if let Some(ch) = unsafe_char(&given.to_string_lossy()) {
+        return Err(DataDirIssue::UnsafeName { path: given, ch });
+    }
     let resolved = resolve(&given);
     let roots = onedrive_roots_from_env();
     let mounts = system_mounts();
@@ -103,6 +119,21 @@ pub fn check_data_dir(path: &Path) -> Result<(), DataDirIssue> {
         }
     }
     Ok(())
+}
+
+/// A character that could break out of the quoted command-line text the
+/// database program is started with: double quote, backtick, dollar sign,
+/// backslash, and control characters on Unix (the shell would interpret
+/// them); percent sign on Windows (`cmd` expands it).
+fn unsafe_char(path: &str) -> Option<char> {
+    path.chars().find(|&c| {
+        c.is_control()
+            || if cfg!(windows) {
+                c == '%' || c == '"'
+            } else {
+                matches!(c, '"' | '`' | '$' | '\\')
+            }
+    })
 }
 
 enum Found {
@@ -367,6 +398,32 @@ fn system_mounts() -> Vec<Mount> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn characters_that_break_command_lines_are_refused() {
+        let bad: &[&str] = if cfg!(windows) {
+            &["C:/data/100%/pgdata", "C:/data/%PATH%/pgdata"]
+        } else {
+            &[
+                "/data/a\"b",
+                "/data/a`b",
+                "/data/$HOME",
+                "/data/a\\b",
+                "/data/a\nb",
+            ]
+        };
+        for p in bad {
+            assert!(
+                matches!(
+                    check_data_dir(Path::new(p)),
+                    Err(DataDirIssue::UnsafeName { .. })
+                ),
+                "{p}"
+            );
+        }
+        assert_eq!(unsafe_char("/home/some one/it's here/pgdata"), None);
+        assert_eq!(unsafe_char("C:/Users/Some One/AppData/pgdata"), None);
+    }
     use std::fs;
 
     fn comp(p: &str) -> Option<CloudService> {

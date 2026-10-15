@@ -16,6 +16,13 @@ pub(crate) struct PidFile {
     pub listen_addr: String,
 }
 
+impl PidFile {
+    /// True when the server listens on `127.0.0.1` only and has no Unix socket.
+    pub(crate) fn is_loopback_only(&self) -> bool {
+        self.listen_addr == "127.0.0.1" && self.socket_dir.is_empty()
+    }
+}
+
 /// Parse the file text: pid, data dir, start time, port, socket dir, listen
 /// address, shared memory key, status.
 pub(crate) fn parse(text: &str) -> Option<PidFile> {
@@ -137,6 +144,17 @@ mod tests {
     #[test]
     fn the_data_directory_is_read_from_the_pid_file() {
         assert_eq!(parse(SAMPLE).unwrap().data_dir, "C:/data/pgdata");
+    }
+
+    #[test]
+    fn only_loopback_without_a_socket_counts_as_ours() {
+        let mut p = parse(SAMPLE).unwrap();
+        assert!(p.is_loopback_only());
+        p.listen_addr = "*".into();
+        assert!(!p.is_loopback_only());
+        p.listen_addr = "127.0.0.1".into();
+        p.socket_dir = "/tmp".into();
+        assert!(!p.is_loopback_only());
     }
 
     #[test]

@@ -46,6 +46,32 @@ pub(crate) fn tail(text: &str, secret: Option<&Secret>) -> String {
     format!("...{}", &trimmed[start..])
 }
 
+/// Remove what a server log can leak into an error report: lines that quote
+/// statements, row values, or object names (`STATEMENT`, `DETAIL`, `CONTEXT`,
+/// `QUERY`, `HINT`), and any password verifier.
+pub(crate) fn scrub_log(text: &str) -> String {
+    const NOISY: [&str; 5] = ["STATEMENT:", "DETAIL:", "CONTEXT:", "QUERY:", "HINT:"];
+    text.lines()
+        .filter(|l| !NOISY.iter().any(|n| l.contains(n)))
+        .map(|l| {
+            l.split(' ')
+                .map(|w| {
+                    if w.contains("SCRAM-SHA-256$") {
+                        "***"
+                    } else {
+                        w
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        )
+}
+
 /// Result of a finished command.
 pub(crate) struct Finished {
     pub success: bool,
@@ -101,6 +127,22 @@ mod tests {
         let t = tail(&long, None);
         assert!(t.starts_with("..."));
         assert_eq!(t.len(), TAIL_BYTES + 3);
+    }
+
+    #[test]
+    fn server_logs_lose_statements_and_verifiers() {
+        let log = "2026-01-01 LOG:  database system is ready
+2026-01-01 ERROR:  duplicate key value violates unique constraint \"x\"
+2026-01-01 DETAIL:  Key (name)=(Jane Doe) already exists.
+2026-01-01 STATEMENT:  insert into customers values ('Jane Doe')
+2026-01-01 LOG:  role verifier SCRAM-SHA-256$4096:abc$def:ghi ok";
+        let clean = scrub_log(log);
+        assert!(clean.contains("database system is ready"));
+        assert!(clean.contains("duplicate key"));
+        assert!(!clean.contains("Jane Doe"));
+        assert!(!clean.contains("customers"));
+        assert!(!clean.contains("abc$def"));
+        assert!(clean.contains("***"));
     }
 
     #[test]

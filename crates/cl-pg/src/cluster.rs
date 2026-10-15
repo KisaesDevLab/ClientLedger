@@ -105,6 +105,7 @@ impl Cluster {
             .ok_or_else(|| PgError::io("data folder", std::io::Error::other("no parent folder")))?;
         fs::create_dir_all(parent).map_err(|e| PgError::io("create data folder parent", e))?;
 
+        remove_stale_password_files(parent);
         let pwfile = PasswordFile::create(parent, &self.password)?;
         let mut last: Option<PgError> = None;
         for locale in LOCALES {
@@ -171,6 +172,23 @@ pub(crate) fn write_file(path: &Path, bytes: &[u8]) -> Result<()> {
     fs::rename(&tmp, path).map_err(|e| PgError::io(format!("write {}", path.display()), e))
 }
 
+/// Delete `.clpg-init-*` files a crashed earlier run left behind. They hold a
+/// password that was never used for a finished cluster, but they should not
+/// linger.
+fn remove_stale_password_files(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        if e.file_name().to_string_lossy().starts_with(INIT_PREFIX) {
+            let _ = fs::remove_file(e.path());
+        }
+    }
+}
+
+/// Name prefix of the temporary `initdb --pwfile` file.
+const INIT_PREFIX: &str = ".clpg-init-";
+
 /// A temporary file holding the password for `initdb --pwfile`, removed on drop.
 struct PasswordFile {
     path: PathBuf,
@@ -180,7 +198,7 @@ impl PasswordFile {
     fn create(dir: &Path, password: &Secret) -> Result<Self> {
         let mut tag = [0u8; 6];
         getrandom::fill(&mut tag).map_err(|e| PgError::Random(e.to_string()))?;
-        let path = dir.join(format!(".clpg-init-{}", crate::secret::hex(&tag)));
+        let path = dir.join(format!("{INIT_PREFIX}{}", crate::secret::hex(&tag)));
         let mut opts = fs::OpenOptions::new();
         opts.write(true).create_new(true);
         #[cfg(unix)]
@@ -219,6 +237,18 @@ mod tests {
         assert!(rules[0].contains("127.0.0.1/32"));
         assert!(rules[0].contains("scram-sha-256"));
         assert!(!HBA.contains("trust"));
+    }
+
+    #[test]
+    fn stale_password_files_are_swept() {
+        let dir = std::env::temp_dir().join(format!("cl-pg-sweep-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(".clpg-init-abc123"), b"old").unwrap();
+        fs::write(dir.join("keep.txt"), b"mine").unwrap();
+        remove_stale_password_files(&dir);
+        assert!(!dir.join(".clpg-init-abc123").exists());
+        assert!(dir.join("keep.txt").exists());
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
