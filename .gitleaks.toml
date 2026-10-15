@@ -1,0 +1,3 @@
+# Default gitleaks rules plus nothing else; fixtures are synthetic (see CLAUDE.md).
+[extend]
+useDefault = true
