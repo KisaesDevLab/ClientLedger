@@ -7,3 +7,7 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+cargo_metadata = "0.23.1"
