@@ -1,7 +1,7 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P01 — Engine submodule and single-executable build
-**Status:** Next (P03 may run in parallel)
+**Current phase:** P03 — Bundled PostgreSQL manager (parallel lane); P02 — Engine desktop profile is next on the critical path
+**Status:** P03 in progress
 **Engine commit:** `13ebd2ba50db0e3e68dd473329caf96d1f039e4e` (`main`, pinned 2026-10-15; bump per Q-02)
 **Last updated:** 2026-10-15
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
@@ -11,9 +11,9 @@
 | Phase | Title | Tier | Status |
 | --- | --- | --- | --- |
 | P00 | Repository bootstrap | L | Done 2026-10-15 |
-| P01 | Engine submodule and single-executable build | L | Next |
+| P01 | Engine submodule and single-executable build | L | Done 2026-10-15 (one criterion deferred to P02) |
 | P02 | Engine desktop profile (upstream) | H | |
-| P03 | Bundled PostgreSQL manager | L | |
+| P03 | Bundled PostgreSQL manager | L | In progress |
 | P04 | Supervisor | L | |
 | P05 | Engine API client | H | |
 | P06 | Application shell | L | |
@@ -79,6 +79,7 @@ Screens or actions that link to a later phase. Remove each line when its phase l
 
 Newest first. One entry per completed phase: date, phase, summary, acceptance checklist results, notable decisions (Q-xx / U-xx).
 
+- 2026-10-15 — P01 complete (PR #2, squash-merged), with one acceptance criterion deferred: `/health` reporting the pinned engine commit. The pinned engine has no commit field and returns 503 without Redis, so the smoke test accepts 503 with DB ok until U-02/U-03 land in P02 (Q-P01a). Shipped: `engine/` submodule (Vibe-MyBooks `main`, pinned 13ebd2ba), `cargo xtask engine` (esbuild + Node SEA, manifest.json, cache by commit + Node version), `--smoke`, PATH-stripped run test, 4-OS `engine` CI job. Verified: built on Windows x64, macOS arm64/x64, Linux x64 in CI; runs without Node; smoke ran all 325 migrations. Decisions: Q-P01a–c. Engine untouched; bundling workarounds in Q-P01b (puppeteer stubbed, so engine HTML-to-PDF routes fail; P04 sets CL_ENGINE_RUNTIME_DIR). Agents: rust-implementer (sonnet), ci-fixer (sonnet; Windows runner is elevated, so smoke Postgres starts via pg_ctl).
 - 2026-10-15 — P00 complete (PR #1, squash-merged). Workspace skeleton (13 crates, 2 apps, xtask), MIT/NOTICE/community files, deny.toml, `xtask` license + layering + ci gates, three-OS CI with secret scan and report-only coverage. Acceptance: `cargo xtask ci` green on Ubuntu, Windows, macOS arm64 + x64; GPL dep, direct BSD-only dep, and a layering violation each failed their gate (verified once, reverted); gitleaks scan clean. Decisions: Q-P00a–c. Agents: rust-implementer (sonnet), ci-fixer (sonnet; clippy `assert_is_empty` on newer CI toolchain). Not enforced: the rule that only cl-pg/cl-host/cl-company spawn processes (not visible in the dependency graph). Follow-up: consider pinning rust-toolchain.toml to CI's clippy version. Owner enabled branch protection (required: ci x4 + secret scan), auto-merge, and secret scanning with push protection.
 - 2026-10-15 — UI mockups added as the visual reference (Q-226–Q-228): 15 screens in docs/design (HTML + PNG + index); each screen phase names its mockup and gains a mockup-match acceptance item; ui-check gets `--compare`; ui-verifier reviews against mockups; sample company reproduces mockup figures; canvas-example tests now use the mockup numbers.
 - 2026-10-11 — Detailed build plan written: PHASES.md is now an index; phases/M0–M7 hold per-phase decisions, engine items, crates and files, ordered commit-sized steps, tests, acceptance, and Fable checkpoints.
