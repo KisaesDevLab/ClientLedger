@@ -156,6 +156,7 @@ cargo xtask licenses       # direct dependencies must be MIT or Apache-2.0
 cargo xtask layering       # crate dependency rules below
 cargo xtask run            # build engine exe if stale, fetch pg if missing, run desktop app
 cargo xtask engine         # build the engine single executable for the host platform
+cargo xtask engine-test -- <vitest args>   # engine api tests on a throwaway bundled PG (port 5434); needs pg-fetch + engine npm ci
 cargo xtask pg-fetch       # download + checksum-verify pinned PostgreSQL binaries
 cargo xtask ui-check <screen>  # launch with control channel, run the screen's scenario, save screenshots
 cargo xtask package        # platform installer for the host OS

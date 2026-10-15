@@ -190,6 +190,16 @@ fn node_cmd(args: &[&str]) -> Command {
     c
 }
 
+pub(crate) fn npx() -> Command {
+    if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "npx"]);
+        c
+    } else {
+        Command::new("npx")
+    }
+}
+
 fn npm() -> Command {
     if cfg!(windows) {
         let mut c = Command::new("cmd");
@@ -200,7 +210,7 @@ fn npm() -> Command {
     }
 }
 
-fn run(mut cmd: Command, what: &str) -> Result<()> {
+pub(crate) fn run(mut cmd: Command, what: &str) -> Result<()> {
     println!("==> {what}");
     let status = cmd
         .status()
@@ -623,7 +633,7 @@ fn start_pg(work: &Path, port: u16) -> Result<Option<TempPg>> {
     Ok(None)
 }
 
-fn wait_for_port(port: u16, what: &str, limit: Duration) -> Result<()> {
+pub(crate) fn wait_for_port(port: u16, what: &str, limit: Duration) -> Result<()> {
     let start = Instant::now();
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     while start.elapsed() < limit {
