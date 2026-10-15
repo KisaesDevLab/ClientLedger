@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod ci;
+mod engine;
 mod layering;
 mod licenses;
 mod meta;
@@ -15,12 +16,13 @@ usage: cargo xtask <command>
   test [args]        cargo test (whole workspace unless -p is given), CL_OFFLINE_TESTS=1
   licenses           direct dependencies must be MIT or Apache-2.0
   layering           crate dependency rules from CLAUDE.md
-  run | engine | pg-fetch | ui-check | keymap-doc | package   (not implemented yet)";
+  engine [--smoke] [--force]
+                     build the engine single executable into target/engine/<target>
+  run | pg-fetch | ui-check | keymap-doc | package   (not implemented yet)";
 
 /// Commands that exist in the CLAUDE.md command list but land in later phases.
-const STUBS: [(&str, &str); 6] = [
+const STUBS: [(&str, &str); 5] = [
     ("run", "P06"),
-    ("engine", "P01"),
     ("pg-fetch", "P03"),
     ("ui-check", "P07"),
     ("keymap-doc", "P06"),
@@ -61,6 +63,7 @@ fn main() -> Result<()> {
         Some("test") => ci::test(&args[1..]),
         Some("licenses") => run_licenses(),
         Some("layering") => run_layering(),
+        Some("engine") => engine::engine(&args[1..]),
         Some(cmd) => {
             if let Some((_, phase)) = STUBS.iter().find(|(name, _)| *name == cmd) {
                 bail!("`{cmd}` is not implemented yet: lands in {phase}");

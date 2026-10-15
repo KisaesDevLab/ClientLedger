@@ -7,8 +7,8 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | ID | Change | Needed by | Branch | Status |
 | --- | --- | --- | --- | --- |
 | U-01 | Queue abstraction with pg-boss adapter (desktop) alongside BullMQ (server) | P02 | clientledger/desktop-profile | Planned |
-| U-02 | `CL_MODE=desktop` profile: no Redis, env-provided bind address and bearer token, file logging | P02 | clientledger/desktop-profile | Planned |
-| U-03 | Connectivity reporting on `/health`; online-only modules return `OfflineUnavailable` fast | P02 | clientledger/desktop-profile | Planned |
+| U-02 | `CL_MODE=desktop` profile: no Redis (also no `REDIS_URL` requirement in `env.ts`; `/health` must return 200 without it, Q-P01a), env-provided bind address and bearer token, file logging | P02 | clientledger/desktop-profile | Planned |
+| U-03 | Connectivity reporting on `/health` plus an `engineCommit` field (Q-P01a); online-only modules return `OfflineUnavailable` fast | P02 | clientledger/desktop-profile | Planned |
 | U-04 | OpenAPI 3.1 export covering all UI routes; committed `openapi.json` | P02 | clientledger/desktop-profile | Planned |
 | U-05 | Tenant lifecycle (list/create/rename/delete) and versioned per-tenant export/import (NDJSON + attachments + manifest) for backups, restores, and transfers | P02, P08 | clientledger/tenant-portability | Planned |
 | U-06 | Endpoint accepting normalized bank-import batches (rows, dedupe keys, source-file hash) into the review queue; parsing is in Rust (Q-11) | P25 | clientledger/bank-import | Planned |
