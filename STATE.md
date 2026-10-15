@@ -11,7 +11,7 @@
 | Phase | Title | Tier | Status |
 | --- | --- | --- | --- |
 | P00 | Repository bootstrap | L | Done 2026-10-15 |
-| P01 | Engine submodule and single-executable build | L | Done 2026-10-15 (one criterion deferred to P02) |
+| P01 | Engine submodule and single-executable build | L | Done 2026-10-15 (deferred criterion closed in P02: smoke requires 200 and the pinned commit, Q-P01a) |
 | P02 | Engine desktop profile (upstream) | H | In progress |
 | P03 | Bundled PostgreSQL manager | L | Done 2026-10-15 |
 | P04 | Supervisor | L | |
