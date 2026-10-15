@@ -113,6 +113,6 @@ mod tests {
     fn workspace_members_are_skipped() {
         let mut ms = member(&[("cl-core", None)]);
         ms[0].deps[0].workspace = true;
-        assert!(check(&ms).is_empty());
+        assert_eq!(check(&ms), Vec::<String>::new());
     }
 }

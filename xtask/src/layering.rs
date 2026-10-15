@@ -167,7 +167,10 @@ mod tests {
             check(&[m("cl-automation", &[("egui_extras", false)])]).len(),
             1
         );
-        assert!(check(&[m("cl-ui", &[("egui_extras", false)])]).is_empty());
+        assert_eq!(
+            check(&[m("cl-ui", &[("egui_extras", false)])]),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
