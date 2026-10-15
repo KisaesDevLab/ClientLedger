@@ -400,8 +400,19 @@ fn http_get(port: u16, path: &str) -> Result<(u16, String)> {
 
 /// A throwaway `PostgreSQL`, from local binaries or Docker. Stops on drop.
 enum TempPg {
-    Local { child: Child, dir: PathBuf },
-    Docker { id: String },
+    Local {
+        child: Child,
+        dir: PathBuf,
+    },
+    /// Started through `pg_ctl`, which drops administrator rights on Windows.
+    /// `postgres.exe` refuses to run elevated, as it is on hosted CI runners.
+    PgCtl {
+        bin: PathBuf,
+        dir: PathBuf,
+    },
+    Docker {
+        id: String,
+    },
 }
 
 impl Drop for TempPg {
@@ -410,6 +421,15 @@ impl Drop for TempPg {
             TempPg::Local { child, dir } => {
                 let _ = child.kill();
                 let _ = child.wait();
+                let _ = fs::remove_dir_all(dir);
+            }
+            TempPg::PgCtl { bin, dir } => {
+                let _ = Command::new(bin.join("pg_ctl.exe"))
+                    .args(["stop", "-m", "immediate", "-w", "-D"])
+                    .arg(&dir)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
                 let _ = fs::remove_dir_all(dir);
             }
             TempPg::Docker { id } => {
@@ -478,6 +498,19 @@ fn start_pg(work: &Path, port: u16) -> Result<Option<TempPg>> {
             .arg(&dir)
             .stdout(Stdio::null());
         run(c, "initdb")?;
+        if cfg!(windows) {
+            let mut c = Command::new(bin.join("pg_ctl.exe"));
+            c.arg("start")
+                .arg("-D")
+                .arg(&dir)
+                .arg("-l")
+                .arg(work.join("postgres.log"))
+                .arg("-o")
+                .arg(format!("-p {port} -c listen_addresses=127.0.0.1"))
+                .stdout(Stdio::null());
+            run(c, "pg_ctl start")?;
+            return Ok(Some(TempPg::PgCtl { bin, dir }));
+        }
         let log = fs::File::create(work.join("postgres.log"))?;
         let mut c = Command::new(bin.join(format!("postgres{ext}")));
         c.arg("-D")
@@ -551,7 +584,16 @@ fn smoke(root: &Path, target: &Target) -> Result<()> {
         println!("engine smoke: SKIPPED: {msg}. CI runs it (CL_SMOKE_REQUIRE=1).");
         return Ok(());
     };
-    wait_for_port(pg_port, "postgres", Duration::from_mins(1))?;
+    if let Err(e) = wait_for_port(pg_port, "postgres", Duration::from_mins(1)) {
+        if let Ok(log) = fs::read_to_string(work.join("postgres.log")) {
+            eprintln!(
+                "--- postgres.log ---
+{log}
+--- end postgres.log ---"
+            );
+        }
+        return Err(e);
+    }
     std::thread::sleep(Duration::from_secs(2)); // let recovery finish for Docker's init restart
 
     let port = free_port()?;
