@@ -150,6 +150,17 @@ pub fn manifest_json(
     )
 }
 
+/// Value baked into the SEA banner and reported as `engineCommit` on `/health`:
+/// the submodule commit, plus `-dirty` when tracked engine files were modified.
+#[must_use]
+pub fn banner_commit(commit: &str, dirty: bool) -> String {
+    if dirty {
+        format!("{commit}-dirty")
+    } else {
+        commit.to_string()
+    }
+}
+
 /// Pull a string field out of the flat manifest we wrote ourselves.
 #[must_use]
 pub fn manifest_field<'a>(manifest: &'a str, key: &str) -> Option<&'a str> {
@@ -306,7 +317,8 @@ fn build(root: &Path, target: &Target, force: bool) -> Result<PathBuf> {
     c.arg(tools.join("bundle.mjs"))
         .arg(&engine)
         .arg(&work)
-        .arg(target.node_tag);
+        .arg(target.node_tag)
+        .arg(banner_commit(&commit, dirty));
     run(c, "bundle engine")?;
     let bundle_sha = fs::read_to_string(work.join("bundle.sha256"))?
         .trim()
@@ -750,6 +762,12 @@ mod tests {
         assert_eq!(manifest_field(&m, "nodeVersion"), Some("24.1.0"));
         assert_eq!(manifest_field(&m, "bundleSha256"), Some("ff00"));
         assert_eq!(manifest_field(&m, "target"), Some("windows-x64"));
+    }
+
+    #[test]
+    fn banner_commit_marks_dirty_trees() {
+        assert_eq!(banner_commit("abc123", false), "abc123");
+        assert_eq!(banner_commit("abc123", true), "abc123-dirty");
     }
 
     #[test]
