@@ -47,7 +47,7 @@ LAN multi-user (P33):
 
 ## Company files
 
-A "company" is an engine **tenant** inside the single local database (Q-05), plus its attachments folder. Company-level backups and transfers use the engine's versioned tenant export/import (U-05); whole-database `pg_dump` is reserved for disaster recovery and PostgreSQL upgrades.
+A "company" is an engine **tenant** inside the single local database (Q-05), plus its attachments folder. Company-level backups and transfers use the engine's versioned tenant export/import (U-05); whole-cluster cold backups (`cl-pg` `dump`/`restore`, Q-P03a) are reserved for disaster recovery and PostgreSQL upgrades.
 
 | User action | Implementation |
 | --- | --- |

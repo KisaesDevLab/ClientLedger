@@ -11,6 +11,8 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CL_OFFLINE_TESTS: "1"
+  # PostgreSQL-backed tests fail instead of skipping when the binaries are missing.
+  CL_PG_REQUIRE: "1"
 
 jobs:
   ci:
@@ -28,4 +30,10 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
+      - uses: actions/cache@v4
+        with:
+          path: target/pg/.cache
+          key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
+      - name: Fetch pinned PostgreSQL (hash-verified, the only networked step)
+        run: cargo xtask pg-fetch
       - run: cargo xtask ci
