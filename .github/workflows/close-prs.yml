@@ -1,0 +1,24 @@
+name: close-outside-prs
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    # Only act on PRs from people who are not members or owners of the org.
+    if: >-
+      github.event.pull_request.author_association != 'OWNER' &&
+      github.event.pull_request.author_association != 'MEMBER'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Comment and close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr close "$PR" --repo "$REPO" --comment "Thanks for the interest. ClientLedger does not accept outside pull requests (see CONTRIBUTING.md). Please open an issue or discussion describing the change instead."

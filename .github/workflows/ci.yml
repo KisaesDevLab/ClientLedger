@@ -1,0 +1,82 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CL_OFFLINE_TESTS: "1"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Every push (Q-114).
+  linux:
+    name: ci (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo xtask ci
+
+  # Pull requests only: the other two platforms (Q-114).
+  other-os:
+    name: ci (${{ matrix.os }})
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo xtask ci
+
+  # Gitleaks is MIT licensed; run the binary directly (no license key needed).
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          curl -sSfL -o gitleaks.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz
+          tar -xzf gitleaks.tgz gitleaks
+      - name: Scan
+        run: ./gitleaks detect --source . --redact --verbose
+
+  # Report only until P05, then enforced at 80% line coverage (Q-116).
+  coverage:
+    name: coverage (report only)
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Coverage summary
+        # TODO(P05): add `--fail-under-lines 80` and make this job required.
+        run: cargo llvm-cov --workspace --exclude xtask --summary-only

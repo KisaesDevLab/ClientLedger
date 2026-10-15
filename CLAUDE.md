@@ -86,8 +86,6 @@ Many screens depend on engine features (estimates, sales tax, inventory, reconci
 
 ## Repository layout
 
-> **Before P00 merges**, the crates, `xtask` and git repo don't exist yet; P00 creates them. Remove this note in the P00 PR.
-
 ```
 ClientLedger/
 ├── CLAUDE.md  PHASES.md  STATE.md  QUESTIONS.md  UPSTREAM.md
@@ -149,8 +147,13 @@ Crate layering rules (enforced by a test in `xtask` from P00):
 All tasks run through `cargo xtask` so no extra tooling is needed:
 
 ```
-cargo xtask ci             # fmt --check, clippy -D warnings, test, deny check, layering test
-cargo xtask test           # cargo test --workspace with network blocked (CL_OFFLINE_TESTS=1)
+cargo xtask ci             # fmt --check, clippy -D warnings, test, deny check, licenses, layering
+cargo xtask test           # cargo test --workspace with CL_OFFLINE_TESTS=1 set (tests must honour it and refuse network access)
+cargo xtask test -p cl-core crate_name          # one crate, tests whose name contains "crate_name"
+cargo xtask test -p cl-api --test <file> # one integration test file
+cargo xtask test -p cl-core -- --exact tests::crate_name_matches   # exact test name (args after -- go to the test binary)
+cargo xtask licenses       # direct dependencies must be MIT or Apache-2.0
+cargo xtask layering       # crate dependency rules below
 cargo xtask run            # build engine exe if stale, fetch pg if missing, run desktop app
 cargo xtask engine         # build the engine single executable for the host platform
 cargo xtask pg-fetch       # download + checksum-verify pinned PostgreSQL binaries
