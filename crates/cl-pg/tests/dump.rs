@@ -163,6 +163,29 @@ fn dumping_a_stopped_cluster_leaves_it_stopped() {
     assert_eq!(cluster.running_port(), None);
 }
 
+#[cfg(unix)]
+#[test]
+fn backup_files_are_readable_by_their_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let Some(bins) = common::bins() else { return };
+    let scratch = common::Scratch::new("mode");
+    let (cluster, _store) = new_cluster(&scratch, "pgdata", bins);
+    let dest = scratch.path("b").join("c.tar.gz");
+    cluster.dump(&dest).unwrap();
+    let mode = fs::metadata(&dest).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "backup mode is {mode:o}");
+    // Writing over an old, more open file also ends up owner-only.
+    fs::write(dest.with_extension("part"), b"stale").unwrap();
+    fs::set_permissions(
+        dest.with_extension("part"),
+        fs::Permissions::from_mode(0o666),
+    )
+    .unwrap();
+    cluster.dump(&dest).unwrap();
+    let mode = fs::metadata(&dest).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "backup mode is {mode:o}");
+}
+
 #[test]
 fn the_backup_cannot_be_written_into_the_data_folder() {
     let Some(bins) = common::bins() else { return };

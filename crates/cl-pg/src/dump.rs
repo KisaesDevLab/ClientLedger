@@ -237,7 +237,17 @@ impl Cluster {
     }
 
     fn write_archive_to(&self, part: &Path) -> Result<(u64, u64)> {
-        let file = fs::File::create(part).map_err(io_err("create backup file"))?;
+        // Owner-only on Unix: the archive holds every table. (Windows folders
+        // inherit the user profile's ACL; tracked in STATE.md follow-ups.)
+        let _ = fs::remove_file(part);
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let file = opts.open(part).map_err(io_err("create backup file"))?;
         let mut builder = tar::Builder::new(GzEncoder::new(file, Compression::fast()));
         builder.follow_symlinks(false);
         let (mut files, mut bytes) = (0u64, 0u64);
