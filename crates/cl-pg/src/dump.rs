@@ -11,6 +11,8 @@
 //! The archive holds the role's password *verifier*, never the password.
 
 use crate::binaries::host_dir_name;
+use crate::cluster::{HBA, INCLUDE_LINE, write_file};
+use crate::lifecycle::overrides_text;
 use crate::secret::hex;
 use crate::{Cluster, PasswordStore, PgError, Result, Running, Secret, proc};
 use flate2::Compression;
@@ -32,7 +34,64 @@ const PREFIX: &str = "data";
 
 /// Names at the top of the data directory that are never archived: runtime
 /// state and logs.
-const EXCLUDED: [&str; 3] = ["postmaster.pid", "postmaster.opts", "log"];
+const EXCLUDED: [&str; 4] = [
+    "postmaster.pid",
+    "postmaster.opts",
+    "current_logfiles",
+    "log",
+];
+
+/// Top-level folders a restored data directory may contain (`PostgreSQL` 16).
+/// Anything else in an archive is refused: a restore must never place a program
+/// or a script next to the database.
+const DATA_DIRS: [&str; 17] = [
+    "base",
+    "global",
+    "pg_wal",
+    "pg_xact",
+    "pg_multixact",
+    "pg_subtrans",
+    "pg_commit_ts",
+    "pg_twophase",
+    "pg_notify",
+    "pg_replslot",
+    "pg_serial",
+    "pg_snapshots",
+    "pg_stat",
+    "pg_stat_tmp",
+    "pg_tblspc",
+    "pg_logical",
+    "pg_dynshmem",
+];
+
+/// Top-level files a restored data directory may contain.
+const DATA_FILES: [&str; 7] = [
+    "PG_VERSION",
+    "postgresql.conf",
+    "postgresql.auto.conf",
+    "pg_hba.conf",
+    "pg_ident.conf",
+    "clientledger.conf",
+    "current_logfiles",
+];
+
+/// Settings from an archived `postgresql.conf` that are carried over because
+/// `initdb` chose them for this database. Everything else is dropped.
+const KEPT_SETTINGS: [&str; 13] = [
+    "max_connections",
+    "shared_buffers",
+    "dynamic_shared_memory_type",
+    "max_wal_size",
+    "min_wal_size",
+    "datestyle",
+    "timezone",
+    "log_timezone",
+    "lc_messages",
+    "lc_monetary",
+    "lc_numeric",
+    "lc_time",
+    "default_text_search_config",
+];
 
 /// What a finished backup contains.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,6 +201,9 @@ impl Cluster {
             None
         };
         let (files, bytes, sha256) = result?;
+        if let Err(e) = self.register_backup(&sha256) {
+            tracing::warn!(error = %e, "could not record the backup; restoring it will need confirmation");
+        }
         tracing::info!(files, bytes, "cluster backup written and verified");
         Ok(DumpInfo {
             path: dest,
@@ -253,23 +315,49 @@ impl Cluster {
 
     /// Replace the cluster with the one in the backup at `src`.
     ///
+    /// **The archive is trusted input.** A cluster backup is a copy of a live
+    /// data directory, so a crafted one could try to run code on this computer.
+    /// Layers limit that: only the known `PostgreSQL` 16 top-level entries are
+    /// accepted; every configuration file is rebuilt by `ClientLedger` (only a
+    /// short list of harmless `initdb` choices is carried over); and the
+    /// superuser password is replaced afterwards. The outer layer is the
+    /// registry (Q-P03h): unless `allow_unregistered` is set, only archives this
+    /// install wrote itself (matched by SHA-256) are restored. A caller sets
+    /// `allow_unregistered` only after the owner confirms the file came from a
+    /// source they trust.
+    ///
     /// The archive is unpacked and checked first (format, platform, major
     /// version, file count and size); only then is the server stopped and the
     /// folders swapped. The data directory that was replaced is **kept** next
     /// to the new one and returned in [`RestoreInfo::previous`], so a restore
     /// never destroys the only copy.
     ///
-    /// The restored database keeps the password it had when it was backed up.
-    /// If that differs from the saved one, use [`Cluster::reset_password`].
+    /// The restored database gets a new random password, saved in `store`,
+    /// because the archive's password is known to whoever made the file. This
+    /// is not available when the program runs elevated on Windows (see
+    /// [`Cluster::reset_password`]); the swap is undone in that case.
     ///
     /// # Errors
-    /// Fails with [`PgError::Backup`] when the archive is damaged or does not
-    /// match this install; nothing is changed in that case.
-    pub fn restore(&self, src: &Path) -> Result<RestoreInfo> {
+    /// Fails with [`PgError::Backup`] when the archive is damaged, was not made
+    /// by this install, or does not match this install; nothing is changed in
+    /// that case.
+    pub fn restore(
+        &mut self,
+        src: &Path,
+        store: &dyn PasswordStore,
+        allow_unregistered: bool,
+    ) -> Result<RestoreInfo> {
+        if !allow_unregistered && !self.is_registered(&sha256_file(src)?) {
+            return Err(backup_err(
+                "this backup file was not made by this copy of ClientLedger, so it cannot be restored without confirmation",
+            ));
+        }
         let staging = sibling(&self.data_dir, ".restoring");
         let _ = fs::remove_dir_all(&staging);
         fs::create_dir_all(&staging).map_err(io_err("create restore folder"))?;
-        let staged = self.unpack_and_check(src, &staging);
+        let staged = self
+            .unpack_and_check(src, &staging)
+            .and_then(|files| sanitize_staged(&staging.join(PREFIX)).map(|()| files));
         let files = match staged {
             Ok(f) => f,
             Err(e) => {
@@ -297,9 +385,42 @@ impl Cluster {
             return Err(PgError::io("put the restored database in place", e));
         }
         let _ = fs::remove_dir_all(&staging);
-        self.write_static_config()?;
+        let finish = self
+            .write_static_config()
+            .and_then(|()| self.reset_password(store));
+        if let Err(e) = finish {
+            // Never leave a database whose password the file's author knows.
+            let rejected = sibling(&self.data_dir, ".rejected-restore");
+            let _ = fs::remove_dir_all(&rejected);
+            if fs::rename(&self.data_dir, &rejected).is_ok() {
+                if let Some(keep) = &previous {
+                    let _ = fs::rename(keep, &self.data_dir);
+                }
+                let _ = fs::remove_dir_all(&rejected);
+            }
+            return Err(e);
+        }
         tracing::info!(files, "cluster restored from backup");
         Ok(RestoreInfo { previous, files })
+    }
+
+    /// Where the SHA-256 of every backup this install wrote is recorded.
+    fn registry_path(&self) -> PathBuf {
+        sibling(&self.data_dir, ".backups")
+    }
+
+    fn register_backup(&self, sha256: &str) -> Result<()> {
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.registry_path())
+            .map_err(io_err("record the backup"))?;
+        writeln!(f, "{sha256}").map_err(io_err("record the backup"))
+    }
+
+    fn is_registered(&self, sha256: &str) -> bool {
+        fs::read_to_string(self.registry_path())
+            .is_ok_and(|t| t.lines().any(|l| l.trim().eq_ignore_ascii_case(sha256)))
     }
 
     fn unpack_and_check(&self, src: &Path, staging: &Path) -> Result<u64> {
@@ -326,6 +447,12 @@ impl Cluster {
             let kind = entry.header().entry_type();
             if !(kind.is_file() || kind.is_dir()) {
                 return Err(backup_err(format!("unsupported entry {}", path.display())));
+            }
+            if first == PREFIX && !allowed_data_entry(&path, kind.is_dir()) {
+                return Err(backup_err(format!(
+                    "unexpected entry {} (not part of a PostgreSQL database)",
+                    path.display()
+                )));
             }
             if kind.is_file() && first == PREFIX {
                 files += 1;
@@ -386,10 +513,32 @@ impl Cluster {
     pub fn reset_password(&mut self, store: &dyn PasswordStore) -> Result<()> {
         self.stop()?;
         let new = Secret::generate()?;
+        // Save first: a saved password the database does not know can be reset
+        // again, but a changed database password nobody saved locks the owner out.
+        let old = self.password.clone();
+        store.set(&new)?;
+        if let Err(e) = self.alter_password(&new) {
+            let _ = store.set(&old);
+            return Err(e);
+        }
+        self.password = new;
+        tracing::info!("database password reset");
+        Ok(())
+    }
+
+    fn alter_password(&self, new: &Secret) -> Result<()> {
         let mut cmd = proc::command(&self.bins.program("postgres"));
         cmd.args(["--single", "-D"])
             .arg(&self.data_dir)
-            .args(["-c", "log_min_error_statement=panic", "postgres"])
+            .args([
+                "-c",
+                "log_min_error_statement=panic",
+                "-c",
+                "shared_preload_libraries=",
+                "-c",
+                "archive_mode=off",
+                "postgres",
+            ])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -417,11 +566,74 @@ impl Cluster {
                 detail: proc::tail(&new.scrub(&text), Some(&self.password)),
             });
         }
-        store.set(&new)?;
-        self.password = new;
-        tracing::info!("database password reset");
         Ok(())
     }
+}
+
+/// Is `path` (an archive entry under `data/`) something a data directory holds?
+fn allowed_data_entry(path: &Path, is_dir: bool) -> bool {
+    let parts: Vec<String> = path
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    if parts.iter().any(|p| p == ".." || p == "." || p.is_empty()) {
+        return false;
+    }
+    let Some(top) = parts.get(1) else {
+        return is_dir; // `data` itself
+    };
+    if DATA_DIRS.contains(&top.as_str()) {
+        return parts.len() > 2 || is_dir;
+    }
+    DATA_FILES.contains(&top.as_str()) && parts.len() == 2 && !is_dir
+}
+
+/// A `postgresql.conf` that keeps only the `initdb` choices in
+/// [`KEPT_SETTINGS`] (with plain values) and ends with the include line.
+fn clean_postgresql_conf(archived: &str) -> String {
+    let mut out = String::from("# Managed by ClientLedger. Rebuilt when a backup is restored.\n");
+    for line in archived.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let (key, value) = (key.trim(), value.trim());
+        let plain = value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || " _.,:+-/'".contains(c));
+        if KEPT_SETTINGS.contains(&key) && plain && !value.is_empty() {
+            for part in [key, " = ", value, "\n"] {
+                out.push_str(part);
+            }
+        }
+    }
+    out.push_str("\n# ClientLedger settings (always last)\n");
+    out.push_str(INCLUDE_LINE);
+    out.push('\n');
+    out
+}
+
+/// Replace every configuration file in an unpacked data directory with
+/// `ClientLedger`-generated content, so nothing the archive's author wrote can
+/// load a library, run a command, or open a login rule.
+fn sanitize_staged(data: &Path) -> Result<()> {
+    let archived = fs::read(data.join("postgresql.conf")).unwrap_or_default();
+    let conf = clean_postgresql_conf(&String::from_utf8_lossy(&archived));
+    write_file(&data.join("postgresql.conf"), conf.as_bytes())?;
+    write_file(
+        &data.join("postgresql.auto.conf"),
+        b"# Do not edit this file manually!\n",
+    )?;
+    write_file(
+        &data.join("pg_ident.conf"),
+        b"# Managed by ClientLedger. No user name maps.\n",
+    )?;
+    write_file(&data.join("pg_hba.conf"), HBA.as_bytes())?;
+    let _ = fs::remove_file(data.join("current_logfiles"));
+    write_file(
+        &data.join("clientledger.conf"),
+        overrides_text(5432).as_bytes(),
+    )
 }
 
 /// `<data_dir><suffix>` next to the data directory.
@@ -543,6 +755,66 @@ mod tests {
             sibling(Path::new("/a/b/pgdata"), ".restoring"),
             PathBuf::from("/a/b/pgdata.restoring")
         );
+    }
+
+    #[test]
+    fn only_known_data_directory_entries_are_allowed() {
+        let ok = |p: &str, dir: bool| allowed_data_entry(Path::new(p), dir);
+        assert!(ok("data", true));
+        assert!(ok("data/PG_VERSION", false));
+        assert!(ok("data/base", true));
+        assert!(ok("data/base/1/1259", false));
+        assert!(ok("data/pg_wal/000000010000000000000001", false));
+        assert!(ok("data/postgresql.auto.conf", false));
+        assert!(!ok("data/evil.so", false));
+        assert!(!ok("data/evil.dll", false));
+        assert!(!ok("data/recovery.signal", false));
+        assert!(!ok("data/standby.signal", false));
+        assert!(!ok("data/postmaster.opts", false));
+        assert!(!ok("data/scripts", true));
+        assert!(!ok("data/scripts/run.sh", false));
+        assert!(!ok("data/base", false), "a file where a folder belongs");
+        assert!(
+            !ok("data/PG_VERSION", true),
+            "a folder where a file belongs"
+        );
+        assert!(!ok("data/PG_VERSION/x", false));
+        assert!(!ok("data/../evil", false));
+        assert!(!ok("data/base/../../evil", false));
+    }
+
+    #[test]
+    fn archived_configuration_is_reduced_to_harmless_choices() {
+        let archived = "\
+max_connections = 100\t\t\t# (change requires restart)
+shared_buffers = 128MB
+shared_preload_libraries = 'evil'
+datestyle = 'iso, mdy'
+timezone = 'America/Chicago'
+lc_messages = 'English_United States.1252'
+dynamic_shared_memory_type = windows
+ssl = on
+archive_command = 'calc.exe'
+unix_socket_directories = '/tmp'
+hba_file = '/tmp/hba'
+include = '/tmp/more.conf'
+max_wal_size = '1GB; drop' # injected
+";
+        let clean = clean_postgresql_conf(archived);
+        for kept in [
+            "max_connections = 100",
+            "shared_buffers = 128MB",
+            "datestyle = 'iso, mdy'",
+            "timezone = 'America/Chicago'",
+            "lc_messages = 'English_United States.1252'",
+            "dynamic_shared_memory_type = windows",
+        ] {
+            assert!(clean.contains(kept), "{kept} missing:\n{clean}");
+        }
+        for gone in ["evil", "ssl", "calc", "/tmp", "include =", "drop"] {
+            assert!(!clean.contains(gone), "{gone} survived:\n{clean}");
+        }
+        assert!(clean.trim_end().ends_with(INCLUDE_LINE));
     }
 
     #[test]

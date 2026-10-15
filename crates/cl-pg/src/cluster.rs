@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Line appended to `postgresql.conf` once, at creation.
-const INCLUDE_LINE: &str = "include_if_exists = 'clientledger.conf'";
+pub(crate) const INCLUDE_LINE: &str = "include_if_exists = 'clientledger.conf'";
 
 /// Locale names to try, best first. `C.UTF-8` gives byte-order sorting with
 /// UTF-8 aware character handling where the OS has it; plain `C` is the
@@ -15,7 +15,7 @@ const INCLUDE_LINE: &str = "include_if_exists = 'clientledger.conf'";
 const LOCALES: [&str; 2] = ["C.UTF-8", "C"];
 
 /// The only login rule: password (SCRAM) over loopback TCP.
-const HBA: &str = "\
+pub(crate) const HBA: &str = "\
 # Managed by ClientLedger. Rewritten on every start; do not edit.
 host    all    all    127.0.0.1/32    scram-sha-256
 ";

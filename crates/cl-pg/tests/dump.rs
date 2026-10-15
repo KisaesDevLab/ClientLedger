@@ -46,6 +46,19 @@ fn all_checksums(cluster: &Cluster, port: u16) -> BTreeMap<String, (i64, String)
     all
 }
 
+/// `Cluster::restore` needs `postgres --single`, which `PostgreSQL` refuses to
+/// run with administrator rights on Windows (Q-P03d). True (after a notice)
+/// for that error so the caller can skip.
+fn elevated_windows(err: &PgError) -> bool {
+    match err {
+        PgError::Command { detail, .. } if detail.to_lowercase().contains("administrat") => {
+            eprintln!("SKIPPED: PostgreSQL refuses to run elevated on Windows: {detail}");
+            true
+        }
+        _ => false,
+    }
+}
+
 fn new_cluster(scratch: &common::Scratch, name: &str, bins: PgBinaries) -> (Cluster, MemoryStore) {
     let store = MemoryStore::new();
     let cluster = Cluster::ensure(&scratch.path(name), bins, &store).unwrap();
@@ -56,9 +69,10 @@ fn new_cluster(scratch: &common::Scratch, name: &str, bins: PgBinaries) -> (Clus
 fn dump_then_restore_gives_identical_tables() {
     let Some(bins) = common::bins() else { return };
     let scratch = common::Scratch::new("roundtrip");
-    let (cluster, store) = new_cluster(&scratch, "pgdata", bins);
+    let (mut cluster, store) = new_cluster(&scratch, "pgdata", bins);
     let running = cluster.start().unwrap();
-    let _stop = Guard(&cluster);
+    let cleanup = cluster.clone();
+    let _stop = Guard(&cleanup);
     populate(&cluster, running.port);
     let before = all_checksums(&cluster, running.port);
     assert_eq!(before["postgres.accounts"].0, 3000);
@@ -106,14 +120,26 @@ fn dump_then_restore_gives_identical_tables() {
     drop(db);
     assert_ne!(all_checksums(&cluster, after_dump.port), before);
 
-    let restored = cluster.restore(&backup).unwrap();
+    let old_pw = store.get().unwrap().unwrap();
+    let restored = match cluster.restore(&backup, &store, false) {
+        Ok(r) => r,
+        Err(e) if elevated_windows(&e) => return,
+        Err(e) => panic!("restore failed: {e}"),
+    };
     assert!(restored.files > 100);
+    // The password was replaced and saved; the backup's password is dead.
+    let new_pw = store.get().unwrap().unwrap();
+    assert_ne!(new_pw, old_pw);
     // The wrecked database was set aside, not deleted.
     let previous = restored.previous.expect("previous data kept");
     assert!(previous.join("PG_VERSION").is_file());
     assert_ne!(previous, scratch.path("pgdata"));
 
     let again = cluster.start().unwrap();
+    assert!(
+        common::connect_with(again.port, "postgres", old_pw.expose()).is_err(),
+        "the backup's password still works"
+    );
     assert_eq!(all_checksums(&cluster, again.port), before);
     // Sequences continue where they were.
     let mut db = common::connect(&cluster, again.port, "postgres");
@@ -183,10 +209,11 @@ fn manifest(platform: &str, major: &str, files: u64, bytes: u64) -> String {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // a table of cases
 fn bad_archives_are_refused_and_change_nothing() {
     let Some(bins) = common::bins() else { return };
     let scratch = common::Scratch::new("bad");
-    let (cluster, _store) = new_cluster(&scratch, "pgdata", bins);
+    let (mut cluster, store) = new_cluster(&scratch, "pgdata", bins);
     let version_before = fs::read(scratch.path("pgdata").join("PG_VERSION")).unwrap();
     let here = {
         // The same platform name the crate uses.
@@ -261,6 +288,46 @@ fn bad_archives_are_refused_and_change_nothing() {
             }),
         ),
         (
+            "program at the top of the data folder",
+            Box::new(|p| {
+                archive(
+                    p,
+                    &[("data/PG_VERSION", b"16\n"), ("data/evil.so", b"x")],
+                    Some(&manifest(here, "16", 2, 4)),
+                );
+            }),
+        ),
+        (
+            "dll at the top of the data folder",
+            Box::new(|p| {
+                archive(
+                    p,
+                    &[("data/PG_VERSION", b"16\n"), ("data/evil.dll", b"x")],
+                    Some(&manifest(here, "16", 2, 4)),
+                );
+            }),
+        ),
+        (
+            "recovery signal file",
+            Box::new(|p| {
+                archive(
+                    p,
+                    &[("data/PG_VERSION", b"16\n"), ("data/recovery.signal", b"")],
+                    Some(&manifest(here, "16", 2, 3)),
+                );
+            }),
+        ),
+        (
+            "unknown folder",
+            Box::new(|p| {
+                archive(
+                    p,
+                    &[("data/PG_VERSION", b"16\n"), ("data/scripts/run.sh", b"x")],
+                    Some(&manifest(here, "16", 2, 4)),
+                );
+            }),
+        ),
+        (
             "stray top-level file",
             Box::new(|p| {
                 archive(p, &[("evil.txt", b"x")], Some(&manifest(here, "16", 0, 0)));
@@ -270,7 +337,7 @@ fn bad_archives_are_refused_and_change_nothing() {
     for (label, make) in cases {
         let file = scratch.path("bad.tar.gz");
         make(&file);
-        let err = cluster.restore(&file).unwrap_err();
+        let err = cluster.restore(&file, &store, true).unwrap_err();
         assert!(matches!(err, PgError::Backup(_)), "{label}: {err:?}");
         assert_eq!(
             fs::read(scratch.path("pgdata").join("PG_VERSION")).unwrap(),
@@ -289,13 +356,10 @@ fn bad_archives_are_refused_and_change_nothing() {
     common::connect(&cluster, running.port, "postgres");
 }
 
-#[test]
-fn a_restored_database_with_another_password_can_be_reset() {
-    let Some(bins) = common::bins() else { return };
-    let scratch = common::Scratch::new("pwreset");
-
-    // Source cluster with a table, backed up while stopped.
-    let (source, _source_store) = new_cluster(&scratch, "source", bins.clone());
+/// A source cluster with a table of 42 rows, backed up while stopped.
+/// Returns the archive path and the source's own password.
+fn make_source_backup(scratch: &common::Scratch, bins: PgBinaries) -> (std::path::PathBuf, String) {
+    let (source, source_store) = new_cluster(scratch, "source", bins);
     let r = source.start().unwrap();
     let mut db = common::connect(&source, r.port, "postgres");
     db.batch_execute("create table t(id int); insert into t select generate_series(1, 42)")
@@ -304,32 +368,200 @@ fn a_restored_database_with_another_password_can_be_reset() {
     let backup = scratch.path("source.tar.gz");
     source.dump(&backup).unwrap();
     source.stop().unwrap();
+    let pw = source_store.get().unwrap().unwrap().expose().to_string();
+    (backup, pw)
+}
 
-    // A different cluster (different password) receives it.
+#[test]
+fn a_restored_database_gets_a_new_password() {
+    let Some(bins) = common::bins() else { return };
+    let scratch = common::Scratch::new("pwreset");
+    let (backup, source_pw) = make_source_backup(&scratch, bins.clone());
+
+    // A different cluster (different password) receives it; the owner has
+    // confirmed the file, so the registry check is waived.
     let (mut target, target_store) = new_cluster(&scratch, "target", bins);
     let old_pw = target_store.get().unwrap().unwrap();
-    target.restore(&backup).unwrap();
-    let running = target.start().unwrap();
-    let cleanup = target.clone();
-    let _stop = Guard(&cleanup);
-    assert!(
-        common::connect_with(running.port, "postgres", old_pw.expose()).is_err(),
-        "restored data carries the source password, not the target's"
-    );
-    target.stop().unwrap();
-
-    match target.reset_password(&target_store) {
-        Ok(()) => {}
-        Err(PgError::Command { detail, .. }) if detail.to_lowercase().contains("administrat") => {
-            eprintln!("SKIPPED: PostgreSQL refuses to run elevated on Windows: {detail}");
+    if let Err(e) = target.restore(&backup, &target_store, true) {
+        if elevated_windows(&e) {
             return;
         }
-        Err(e) => panic!("reset failed: {e}"),
+        panic!("restore failed: {e}");
     }
     let new_pw = target_store.get().unwrap().unwrap();
     assert_ne!(new_pw, old_pw);
     let running = target.start().unwrap();
+    let cleanup = target.clone();
+    let _stop = Guard(&cleanup);
+    // Neither the file's password nor the previous one works any more.
+    assert!(common::connect_with(running.port, "postgres", &source_pw).is_err());
+    assert!(common::connect_with(running.port, "postgres", old_pw.expose()).is_err());
     let mut db = common::connect(&target, running.port, "postgres");
     let n: i64 = db.query_one("select count(*) from t", &[]).unwrap().get(0);
     assert_eq!(n, 42);
+}
+
+#[test]
+fn a_backup_this_install_did_not_write_needs_confirmation() {
+    let Some(bins) = common::bins() else { return };
+    let scratch = common::Scratch::new("unregistered");
+    let (backup, _pw) = make_source_backup(&scratch, bins.clone());
+    let (mut target, target_store) = new_cluster(&scratch, "target", bins);
+    let pw_before = target_store.get().unwrap().unwrap();
+    let version_before = fs::read(scratch.path("target").join("PG_VERSION")).unwrap();
+    let err = target.restore(&backup, &target_store, false).unwrap_err();
+    assert!(
+        matches!(&err, PgError::Backup(m) if m.contains("not made by this")),
+        "{err:?}"
+    );
+    assert_eq!(target_store.get().unwrap().unwrap(), pw_before);
+    assert_eq!(
+        fs::read(scratch.path("target").join("PG_VERSION")).unwrap(),
+        version_before
+    );
+    assert!(!scratch.path("target.restoring").exists());
+}
+
+fn this_platform() -> &'static str {
+    let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+    match (os, arch) {
+        ("windows", _) => "windows-x64",
+        ("macos", "aarch64") => "macos-arm64",
+        ("macos", _) => "macos-x64",
+        _ => "linux-x64",
+    }
+}
+
+/// Copy the backup at `from` to `to`, replacing (or adding) the named files
+/// under `data/` and fixing the manifest so the archive stays consistent.
+fn tamper(from: &Path, to: &Path, edits: &[(&str, &[u8])]) {
+    let mut archive =
+        tar::Archive::new(flate2::read::GzDecoder::new(fs::File::open(from).unwrap()));
+    let mut entries: Vec<(tar::Header, Vec<u8>)> = Vec::new();
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        let mut data = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut data).unwrap();
+        entries.push((entry.header().clone(), data));
+    }
+    let name_of = |h: &tar::Header| h.path().unwrap().to_string_lossy().into_owned();
+    entries.retain(|(h, _)| name_of(h) != "manifest.json");
+    let mut seen = Vec::new();
+    for (h, data) in &mut entries {
+        let name = name_of(h);
+        for (edit, bytes) in edits {
+            if name == format!("data/{edit}") {
+                *data = bytes.to_vec();
+                h.set_size(data.len() as u64);
+                h.set_cksum();
+                seen.push(*edit);
+            }
+        }
+    }
+    for (edit, bytes) in edits {
+        if !seen.contains(edit) {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(bytes.len() as u64);
+            h.set_mode(0o600);
+            h.set_entry_type(tar::EntryType::Regular);
+            let raw = format!("data/{edit}");
+            h.as_old_mut().name[..raw.len()].copy_from_slice(raw.as_bytes());
+            h.set_cksum();
+            entries.push((h, bytes.to_vec()));
+        }
+    }
+    let regular = || entries.iter().filter(|(h, _)| h.entry_type().is_file());
+    let files = regular().count() as u64;
+    let bytes: u64 = regular().map(|(_, d)| d.len() as u64).sum();
+    let gz =
+        flate2::write::GzEncoder::new(fs::File::create(to).unwrap(), flate2::Compression::fast());
+    let mut b = tar::Builder::new(gz);
+    for (h, data) in &entries {
+        b.append(h, &data[..]).unwrap();
+    }
+    let m = manifest(this_platform(), "16", files, bytes);
+    let mut h = tar::Header::new_gnu();
+    h.set_size(m.len() as u64);
+    h.set_mode(0o644);
+    b.append_data(&mut h, "manifest.json", m.as_bytes())
+        .unwrap();
+    b.into_inner().unwrap().finish().unwrap().flush().unwrap();
+}
+
+#[test]
+fn a_crafted_configuration_in_a_backup_is_neutralised() {
+    let Some(bins) = common::bins() else { return };
+    let scratch = common::Scratch::new("crafted");
+    let (backup, _pw) = make_source_backup(&scratch, bins.clone());
+    let crafted = scratch.path("crafted.tar.gz");
+    tamper(
+        &backup,
+        &crafted,
+        &[
+            (
+                "postgresql.auto.conf",
+                b"shared_preload_libraries = 'evil'\narchive_mode = on\narchive_command = 'calc'\n",
+            ),
+            (
+                "postgresql.conf",
+                b"max_connections = 37\nshared_preload_libraries = 'evil2'\nssl = on\nport = 1\nunix_socket_directories = '/tmp'\nhba_file = '/tmp/x'\n",
+            ),
+            (
+                "clientledger.conf",
+                b"shared_preload_libraries = 'evil3'\nlisten_addresses = '*'\n",
+            ),
+            ("pg_hba.conf", b"host all all 0.0.0.0/0 trust\n"),
+            ("pg_ident.conf", b"evil evil postgres\n"),
+        ],
+    );
+    let (mut target, target_store) = new_cluster(&scratch, "target", bins);
+    if let Err(e) = target.restore(&crafted, &target_store, true) {
+        if elevated_windows(&e) {
+            return;
+        }
+        panic!("restore failed: {e}");
+    }
+    let data = scratch.path("target");
+    let auto = fs::read_to_string(data.join("postgresql.auto.conf")).unwrap();
+    assert!(
+        !auto.contains("evil") && !auto.contains("archive"),
+        "{auto}"
+    );
+    let conf = fs::read_to_string(data.join("postgresql.conf")).unwrap();
+    assert!(
+        !conf.contains("evil") && !conf.contains("ssl") && !conf.contains("hba_file"),
+        "{conf}"
+    );
+    assert!(
+        conf.contains("max_connections = 37"),
+        "harmless initdb choices are kept"
+    );
+    let hba = fs::read_to_string(data.join("pg_hba.conf")).unwrap();
+    assert!(!hba.contains("trust") && !hba.contains("0.0.0.0"), "{hba}");
+    assert!(
+        !fs::read_to_string(data.join("pg_ident.conf"))
+            .unwrap()
+            .contains("evil")
+    );
+    assert!(
+        !fs::read_to_string(data.join("clientledger.conf"))
+            .unwrap()
+            .contains("evil")
+    );
+
+    // A server that loaded 'evil' would not start. This one does, and says so.
+    let running = target.start().unwrap();
+    let cleanup = target.clone();
+    let _stop = Guard(&cleanup);
+    let mut db = common::connect(&target, running.port, "postgres");
+    let libs: String = db
+        .query_one("show shared_preload_libraries", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(libs, "");
+    let mode: String = db.query_one("show archive_mode", &[]).unwrap().get(0);
+    assert_eq!(mode, "off");
+    let conns: String = db.query_one("show max_connections", &[]).unwrap().get(0);
+    assert_eq!(conns, "37");
+    common::assert_only_loopback(running.port);
 }

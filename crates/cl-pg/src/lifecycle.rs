@@ -89,9 +89,36 @@ log_filename = 'postgresql-%a.log'
 log_truncate_on_rotation = on
 log_rotation_age = 1d
 log_statement = 'none'
+log_error_verbosity = terse
+shared_preload_libraries = ''
+archive_mode = off
+ssl = off
 log_connections = off
 log_min_error_statement = panic
 "
+    )
+}
+
+/// The security-relevant settings, given on the command line so no file in the
+/// data directory (which a restored backup or another program could have
+/// changed) can override them. Command-line settings beat every configuration
+/// file, including `postgresql.auto.conf`.
+///
+/// Paths are double-quoted because `pg_ctl` hands this text to a shell;
+/// `check_data_dir` refuses folder names that could break out of the quotes.
+pub(crate) fn server_pins(data_dir: &std::path::Path, port: u16) -> String {
+    let file = |name: &str| {
+        let p = data_dir.join(name).to_string_lossy().into_owned();
+        if cfg!(windows) {
+            p.replace('\\', "/")
+        } else {
+            p
+        }
+    };
+    format!(
+        "-c listen_addresses=127.0.0.1 -c port={port}          -c unix_socket_directories= -c shared_preload_libraries=          -c archive_mode=off -c ssl=off -c log_statement=none          -c log_error_verbosity=terse          -c \"hba_file={}\" -c \"ident_file={}\"",
+        file("pg_hba.conf"),
+        file("pg_ident.conf")
     )
 }
 
@@ -159,7 +186,7 @@ impl Cluster {
                 Ok(()) => return self.finish_start(p),
                 Err(e) => e,
             };
-            let log = self.log_tail();
+            let log = self.settled_log_tail();
             last_detail = format!("{err} {log}");
             let lower = log.to_ascii_lowercase();
             if LEFTOVERS.iter().any(|m| lower.contains(m)) && leftover_waits < LEFTOVER_RETRIES {
@@ -209,7 +236,7 @@ impl Cluster {
             .arg("-l")
             .arg(self.startup_log())
             .args(["-w", "-t", "60", "-s", "-o"])
-            .arg(format!("-c listen_addresses=127.0.0.1 -c port={port}"));
+            .arg(server_pins(&self.data_dir, port));
         // The server inherits pg_ctl handles; with pipes, Command::output() waits
         // for the server to exit. Its messages go to startup.log instead.
         cmd.stdout(std::process::Stdio::null())
@@ -315,6 +342,28 @@ impl Cluster {
         (self.is_running().unwrap_or(false) && ports::is_ready(port)).then_some(port)
     }
 
+    /// [`Cluster::log_tail`] after giving the logging collector a moment to
+    /// write the reason the server stopped (it runs in another process, so the
+    /// message can trail `pg_ctl`'s exit by a fraction of a second).
+    fn settled_log_tail(&self) -> String {
+        let known = |t: &str| {
+            let lower = t.to_ascii_lowercase();
+            PORT_TAKEN
+                .iter()
+                .chain(LEFTOVERS.iter())
+                .any(|m| lower.contains(m))
+        };
+        let mut log = self.log_tail();
+        for _ in 0..20 {
+            if known(&log) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            log = self.log_tail();
+        }
+        log
+    }
+
     /// Tail of the newest server logs, for error reports.
     fn log_tail(&self) -> String {
         let mut text = fs::read_to_string(self.startup_log()).unwrap_or_default();
@@ -343,6 +392,31 @@ mod tests {
         assert!(t.contains("port = 54321"));
         assert!(t.contains("unix_socket_directories = ''"));
         assert!(!t.contains('*'));
+    }
+
+    #[test]
+    fn server_pins_fix_the_security_settings_on_the_command_line() {
+        let dir = std::path::PathBuf::from(if cfg!(windows) {
+            "C:/Users/Some One/pgdata"
+        } else {
+            "/home/some one/pgdata"
+        });
+        let pins = server_pins(&dir, 5432);
+        for want in [
+            "-c listen_addresses=127.0.0.1",
+            "-c port=5432",
+            "-c unix_socket_directories= ",
+            "-c shared_preload_libraries= ",
+            "-c archive_mode=off",
+            "-c ssl=off",
+            "-c log_statement=none",
+            "pgdata/pg_hba.conf\"",
+            "pgdata/pg_ident.conf\"",
+            "-c \"hba_file=",
+            "-c \"ident_file=",
+        ] {
+            assert!(pins.contains(want), "{want} missing from {pins}");
+        }
     }
 
     #[test]
