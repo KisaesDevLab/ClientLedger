@@ -249,34 +249,52 @@ fn engine_target_dir() -> Option<&'static str> {
 
 /// Find the engine executable.
 ///
-/// An `explicit` path is used alone. Otherwise the order is: the `CL_ENGINE_EXE` variable, next to the running
-/// program (installed layout, plain or in `engine/`), then
-/// `target/engine/<host>/` of a source checkout, searching upward from the
-/// program and the current folder. The result is always absolute.
+/// An `explicit` path is used alone. Otherwise, in this order: the
+/// `CL_ENGINE_EXE` variable, next to the running program (installed layout,
+/// plain or in `engine/`), and, in debug builds only, the `target/engine/<host>/`
+/// folder of the source checkout the program itself was built in. The current
+/// folder and arbitrary parent folders are never searched: a program planted in
+/// a folder other users can create (`C:\`, `/tmp`) would otherwise run as the
+/// owner with the database password and keys (security review M1).
+///
+/// On Unix a candidate (and its folder) must be owned by the user or root and
+/// not writable by anyone else. The result is always absolute.
 #[must_use]
 pub fn find_engine_exe(explicit: Option<&Path>) -> Option<PathBuf> {
     if let Some(p) = explicit {
         // A path the caller named is used as is, never replaced by a guess.
-        return p.is_file().then(|| std::path::absolute(p).ok()).flatten();
+        return vet_engine_exe(p);
     }
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    candidates.extend(
-        std::env::var_os("CL_ENGINE_EXE")
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from),
-    );
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf));
-    if let Some(dir) = &exe_dir {
-        candidates.push(dir.join(engine_exe_name()));
-        candidates.push(dir.join("engine").join(engine_exe_name()));
-    }
-    if let Some(target) = engine_target_dir() {
-        for start in exe_dir.into_iter().chain(std::env::current_dir().ok()) {
-            for dir in start.ancestors() {
-                candidates.push(
-                    dir.join("target")
+    let env = std::env::var_os("CL_ENGINE_EXE")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
+    engine_candidates(env, exe_dir.as_deref(), cfg!(debug_assertions))
+        .into_iter()
+        .find_map(|c| vet_engine_exe(&c))
+}
+
+/// The places [`find_engine_exe`] looks, in order. `include_dev` adds the
+/// source-checkout location (debug builds only).
+fn engine_candidates(
+    env: Option<PathBuf>,
+    exe_dir: Option<&Path>,
+    include_dev: bool,
+) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = env.into_iter().collect();
+    if let Some(dir) = exe_dir {
+        out.push(dir.join(engine_exe_name()));
+        out.push(dir.join("engine").join(engine_exe_name()));
+        if include_dev && let Some(target) = engine_target_dir() {
+            // Only the cargo `target` folder that contains this very program.
+            if let Some(cargo_target) = dir
+                .ancestors()
+                .find(|d| d.file_name().is_some_and(|n| n == "target"))
+            {
+                out.push(
+                    cargo_target
                         .join("engine")
                         .join(target)
                         .join(engine_exe_name()),
@@ -284,16 +302,115 @@ pub fn find_engine_exe(explicit: Option<&Path>) -> Option<PathBuf> {
             }
         }
     }
-    candidates
-        .into_iter()
-        .find(|c| c.is_file())
-        .and_then(|c| std::path::absolute(c).ok())
+    out
+}
+
+/// The candidate as an absolute path, if it is a file we are willing to run.
+fn vet_engine_exe(p: &Path) -> Option<PathBuf> {
+    if !p.is_file() {
+        return None;
+    }
+    let abs = std::path::absolute(p).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let euid = nix::unistd::geteuid().as_raw();
+        let file = std::fs::metadata(&abs).ok()?;
+        let dir = std::fs::metadata(abs.parent()?).ok()?;
+        if !unix_trusted(file.uid(), file.mode(), euid)
+            || !unix_trusted(dir.uid(), dir.mode(), euid)
+        {
+            tracing::warn!("refusing an engine program with unsafe ownership or permissions");
+            return None;
+        }
+    }
+    Some(abs)
+}
+
+/// Owned by the user or root, and not writable by group or others. (A sticky
+/// shared folder such as `/tmp` is therefore never accepted.)
+#[cfg(unix)]
+fn unix_trusted(uid: u32, mode: u32, euid: u32) -> bool {
+    (uid == euid || uid == 0) && mode & 0o022 == 0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn candidates_never_include_the_current_folder_or_far_parents() {
+        let cwd = std::env::current_dir().unwrap();
+        let exe_dir = std::env::temp_dir().join("some").join("app");
+        for dev in [false, true] {
+            let list = engine_candidates(None, Some(&exe_dir), dev);
+            assert!(
+                list.iter()
+                    .all(|c| !c.starts_with(&cwd) || c.starts_with(&exe_dir))
+            );
+            // Without a `target` folder above the program there is no search upward.
+            assert_eq!(list.len(), 2, "{list:?}");
+        }
+    }
+
+    #[test]
+    fn release_builds_skip_the_source_checkout_search() {
+        let dir = std::env::temp_dir()
+            .join("work")
+            .join("target")
+            .join("debug");
+        let release = engine_candidates(None, Some(&dir), false);
+        assert_eq!(release.len(), 2);
+        assert!(
+            release
+                .iter()
+                .all(|c| !c.to_string_lossy().contains("windows-x64")
+                    && !c.starts_with(dir.parent().unwrap().join("engine")))
+        );
+        let dev = engine_candidates(None, Some(&dir), true);
+        if engine_target_dir().is_some() {
+            assert_eq!(dev.len(), 3);
+            assert!(dev[2].starts_with(dir.parent().unwrap().join("engine")));
+        }
+    }
+
+    #[test]
+    fn the_environment_override_comes_first() {
+        let env = PathBuf::from("/chosen/engine");
+        let list = engine_candidates(Some(env.clone()), Some(Path::new("/app")), false);
+        assert_eq!(list[0], env);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_trust_rules() {
+        assert!(unix_trusted(1000, 0o755, 1000));
+        assert!(unix_trusted(0, 0o755, 1000));
+        assert!(!unix_trusted(2000, 0o755, 1000), "someone else's file");
+        assert!(!unix_trusted(1000, 0o775, 1000), "group writable");
+        assert!(!unix_trusted(1000, 0o757, 1000), "world writable");
+        assert!(!unix_trusted(0, 0o1777, 1000), "sticky shared folder");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_world_writable_program_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("cl-host-vet-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let exe = dir.join(engine_exe_name());
+        std::fs::write(&exe, b"x").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(find_engine_exe(Some(&exe)).is_some());
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(find_engine_exe(Some(&exe)).is_none());
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(find_engine_exe(Some(&exe)).is_none(), "writable folder");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn an_explicit_engine_path_wins_and_is_made_absolute() {

@@ -20,4 +20,4 @@ listeners = "0.6.1"
 win32job = "2.0.3"
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.31.3", default-features = false, features = ["signal", "process"] }
+nix = { version = "0.31.3", default-features = false, features = ["signal", "process", "user"] }
