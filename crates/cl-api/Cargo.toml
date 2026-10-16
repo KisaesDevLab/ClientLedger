@@ -4,6 +4,25 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+description = "Typed client for the local MyBooks engine API (loopback HTTP, sessions, typed errors, safe retries)."
+
+[dependencies]
+cl-core = { path = "../cl-core" }
+# Plain HTTP to 127.0.0.1 only: no TLS, no system proxy, no HTTP/2, no cookie
+# jar (P05 plan §2.2, Q-P05c, Q-P05d).
+reqwest = { version = "0.13.5", default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+tokio = { version = "1.53.3", features = ["rt", "time", "sync", "macros"] }
+tracing = "0.1.44"
+uuid = { version = "1.28.0", default-features = false, features = ["std", "v4"] }
+zeroize = { version = "1.9.1", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+rust_decimal = { version = "1.43.0", default-features = false, features = ["std"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util"] }
+wiremock = "0.6.5"
 
 [lints]
 workspace = true
