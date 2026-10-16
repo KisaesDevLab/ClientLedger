@@ -18,19 +18,13 @@
     clippy::cast_precision_loss
 )]
 
-#[allow(
-    dead_code,
-    reason = "the transport is wired into the public client by the session layer (P05 plan §4 step 16)"
-)]
 mod client;
 pub mod endpoint;
 pub mod errors;
-#[allow(
-    dead_code,
-    reason = "the executor is wired into the public client by the session layer (P05 plan §4 step 16)"
-)]
 pub mod idempotency;
 pub mod resources;
+pub mod session;
+pub mod wire;
 
 pub use client::{Budget, ClientConfig, LOOPBACK_HOST, Method, Timeouts};
 pub use endpoint::{EndpointSource, EndpointState, EngineEndpoint, FixedEndpoint};
@@ -41,3 +35,8 @@ pub use errors::{
 pub use idempotency::IdempotencyKey;
 pub use resources::operations::{OPERATIONS, Operation, RetryClass};
 pub use resources::versioning::RecordVersion;
+pub use session::{
+    Client, CompanySummary, CreatedCompany, LoginOutcome, NewCompany, OpenCompany, Scope, Session,
+    TfaChallenge, TfaMethod,
+};
+pub use wire::{Capabilities, DesktopInfo, Health};

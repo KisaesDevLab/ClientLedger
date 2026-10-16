@@ -247,6 +247,10 @@ pub(crate) struct EngineReply {
     /// From `Retry-After` or `RateLimit-Reset` (whole seconds).
     pub retry_after: Option<Duration>,
     /// `Idempotent-Replayed: true` (U-18).
+    #[allow(
+        dead_code,
+        reason = "read by the keyed-once write path once U-18 lands"
+    )]
     pub replayed: bool,
     /// Generation of the endpoint this attempt used.
     pub generation: u64,

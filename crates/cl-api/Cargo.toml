@@ -22,6 +22,7 @@ zeroize = { version = "1.9.1", default-features = false, features = ["alloc"] }
 [dev-dependencies]
 rust_decimal = { version = "1.43.0", default-features = false, features = ["std"] }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util"] }
+tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt"] }
 wiremock = "0.6.5"
 
 [lints]

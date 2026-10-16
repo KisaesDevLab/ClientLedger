@@ -65,6 +65,10 @@ pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// What outcome reconciliation found out about an ambiguous mutation
 /// (P05 plan §2.6.1).
+#[allow(
+    dead_code,
+    reason = "constructed by the per-operation reconcilers (P05 plan §4 step 20)"
+)]
 pub(crate) enum Reconciled<T> {
     /// The first attempt committed; this is its result.
     Committed(T),
@@ -86,6 +90,10 @@ pub(crate) enum AmbiguityCause {
 }
 
 /// Facts about an ambiguous attempt, handed to the reconciler.
+#[allow(
+    dead_code,
+    reason = "constructed by the per-operation reconcilers (P05 plan §4 step 20)"
+)]
 #[derive(Clone, Debug)]
 pub(crate) struct Ambiguity {
     pub request_id: RequestId,
@@ -100,6 +108,10 @@ impl Ambiguity {
     /// is gone (`PostgreSQL` rolls back a transaction whose client vanished).
     /// A timeout or a broken connection on the same generation is not
     /// settled, because the engine sets no request or statement timeout.
+    #[allow(
+        dead_code,
+        reason = "constructed by the per-operation reconcilers (P05 plan §4 step 20)"
+    )]
     pub(crate) fn settled(&self, now: &EndpointState) -> bool {
         match now {
             EndpointState::Ready(ep) => ep.generation > self.generation,
@@ -207,6 +219,10 @@ impl Executor {
         }
     }
 
+    #[allow(
+        dead_code,
+        reason = "constructed by the per-operation reconcilers (P05 plan §4 step 20)"
+    )]
     pub(crate) fn transport(&self) -> &Transport {
         &self.transport
     }
