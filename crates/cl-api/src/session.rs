@@ -851,7 +851,7 @@ impl AuthHook for SessionInner {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::client::tests::{TOKEN, fast_config};
     use crate::endpoint::FixedEndpoint;
@@ -918,7 +918,7 @@ mod tests {
         );
     }
 
-    fn session_on(server: &MockServer, scope: Scope) -> Session {
+    pub(crate) fn session_on(server: &MockServer, scope: Scope) -> Session {
         let src = Arc::new(FixedEndpoint::new(
             server.address().port(),
             Secret::new(TOKEN),

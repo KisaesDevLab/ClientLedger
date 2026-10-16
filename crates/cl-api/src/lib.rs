@@ -34,9 +34,9 @@ pub use errors::{
 };
 pub use idempotency::IdempotencyKey;
 pub use resources::operations::{OPERATIONS, Operation, RetryClass};
-pub use resources::versioning::RecordVersion;
+pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{
     Client, CompanySummary, CreatedCompany, LoginOutcome, NewCompany, OpenCompany, Scope, Session,
     TfaChallenge, TfaMethod,
 };
-pub use wire::{Capabilities, DesktopInfo, Health};
+pub use wire::{Capabilities, DesktopInfo, Health, Page, PageRequest, ReportAmount};
