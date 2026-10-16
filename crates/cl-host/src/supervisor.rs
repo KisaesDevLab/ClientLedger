@@ -273,9 +273,10 @@ impl HostConfig {
         }
     }
 
-    /// Extra environment for the engine process. Only for tests (a fake
-    /// engine's behaviour switches).
-    #[doc(hidden)]
+    /// Extra environment for the engine process: a fake engine's behaviour
+    /// switches (`FAKE_*` only; anything else is refused when the engine is
+    /// launched). Compiled only with the `test-support` feature (L9).
+    #[cfg(feature = "test-support")]
     #[must_use]
     pub fn with_engine_env(mut self, key: &str, value: &str) -> HostConfig {
         self.extra_engine_env.push((key.into(), value.into()));

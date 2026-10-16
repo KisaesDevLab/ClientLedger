@@ -24,7 +24,7 @@ pub struct DesktopInfo {
 }
 
 /// The owner account created at first run.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AdminAccount {
     /// Login email.
     pub email: String,
@@ -32,6 +32,13 @@ pub struct AdminAccount {
     pub display_name: String,
     /// At least 12 characters. Never logged.
     pub password: Secret,
+}
+
+impl std::fmt::Debug for AdminAccount {
+    /// Shows nothing personal: no email, no name, no password.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AdminAccount").finish_non_exhaustive()
+    }
 }
 
 /// The first company, created together with the owner (optional).
@@ -289,7 +296,10 @@ mod tests {
     fn errors_never_echo_the_password() {
         let err = initialize_body(&admin("tiny"), None).unwrap_err();
         assert!(!err.to_string().contains("tiny"));
-        assert!(!format!("{:?}", admin("tiny")).contains("tiny"));
+        let shown = format!("{:?}", admin("tiny"));
+        for private in ["tiny", "owner@example", "Owner@Example", "Pat Owner"] {
+            assert!(!shown.contains(private), "{shown}");
+        }
     }
 
     #[test]

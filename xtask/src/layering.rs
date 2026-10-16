@@ -71,7 +71,9 @@ pub fn check(members: &[Member]) -> Vec<String> {
             continue;
         };
         for d in &m.deps {
-            if d.workspace && !allowed.contains(&d.name.as_str()) {
+            // A crate may list itself as a dev-dependency to switch on its own
+            // test-only features; that is not a layering edge.
+            if d.workspace && d.name != m.name && !allowed.contains(&d.name.as_str()) {
                 out.push(format!(
                     "forbidden crate edge: {} -> {} (see layering rules in CLAUDE.md)",
                     m.name, d.name
@@ -123,6 +125,16 @@ mod tests {
             m("clientledger", &[("cl-ui", true), ("eframe", false)]),
         ];
         assert_eq!(check(&ms), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_crate_may_dev_depend_on_itself_to_enable_test_features() {
+        assert!(check(&[m("cl-host", &[("cl-host", true)])]).is_empty());
+        // ... but that does not open any other edge.
+        assert_eq!(
+            check(&[m("cl-core", &[("cl-core", true), ("cl-model", true)])]).len(),
+            1
+        );
     }
 
     #[test]

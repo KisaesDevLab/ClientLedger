@@ -113,6 +113,16 @@ pub(crate) fn build_env(plan: &LaunchPlan<'_>) -> Result<Vec<(String, OsString)>
     } else {
         env.push(("PATH".into(), text("/usr/bin:/bin")));
     }
+    for (k, _) in plan.extra_env {
+        // Test-only switches for the fake engine. They can never override the
+        // contract, the PATH, or Node's own options (NODE_OPTIONS and friends).
+        let charset_ok = k
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_');
+        if !(k.starts_with("FAKE_") && charset_ok) {
+            return Err(HostError::BadEngineEnv(k.clone()));
+        }
+    }
     env.extend(
         plan.extra_env
             .iter()
@@ -498,6 +508,47 @@ mod tests {
         for secret_var in ["CL_TOKEN", "DATABASE_URL", "JWT_SECRET", "ENCRYPTION_KEY"] {
             assert!(env.contains_key(secret_var));
         }
+    }
+
+    #[test]
+    fn extra_variables_may_only_be_fake_switches() {
+        let (paths, token, db, secrets) = plan_parts();
+        let exe = std::env::temp_dir().join("engine.exe");
+        for bad in [
+            "NODE_OPTIONS",
+            "NODE_DEBUG",
+            "CL_TOKEN",
+            "PATH",
+            "DATABASE_URL",
+            "fake_lower",
+            "FAKE_x",
+            "LD_PRELOAD",
+            "",
+        ] {
+            let extra = [(bad.to_string(), "1".to_string())];
+            let plan = LaunchPlan {
+                exe: &exe,
+                paths: &paths,
+                token: &token,
+                db_url: &db,
+                secrets: &secrets,
+                extra_env: &extra,
+            };
+            assert!(
+                matches!(build_env(&plan), Err(HostError::BadEngineEnv(_))),
+                "{bad:?} must be refused"
+            );
+        }
+        let ok = [("FAKE_MODE".to_string(), "1".to_string())];
+        let plan = LaunchPlan {
+            exe: &exe,
+            paths: &paths,
+            token: &token,
+            db_url: &db,
+            secrets: &secrets,
+            extra_env: &ok,
+        };
+        assert!(build_env(&plan).is_ok());
     }
 
     #[test]

@@ -21,3 +21,10 @@ win32job = "2.0.3"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31.3", default-features = false, features = ["signal", "process", "user"] }
+
+[features]
+# Test-only hooks (a fake engine's behaviour switches). Never enabled in a build users run.
+test-support = []
+
+[dev-dependencies]
+cl-host = { path = ".", features = ["test-support"] }

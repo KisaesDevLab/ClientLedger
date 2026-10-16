@@ -49,6 +49,10 @@ pub enum HostError {
         data_dir: PathBuf,
     },
 
+    /// A test-only engine variable that is not a plain `FAKE_*` switch.
+    #[error("engine variable {0:?} is not allowed")]
+    BadEngineEnv(String),
+
     /// The bundled database failed.
     #[error(transparent)]
     Pg(#[from] cl_pg::PgError),
