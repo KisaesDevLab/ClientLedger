@@ -24,6 +24,7 @@ use tokio::time::Instant;
 use zeroize::Zeroizing;
 
 use crate::endpoint::{EndpointSource, EndpointState, EngineEndpoint};
+use crate::idempotency::IdempotencyKey;
 
 /// The loopback host. A constant, so this client cannot reach the network.
 pub const LOOPBACK_HOST: &str = "127.0.0.1";
@@ -186,7 +187,7 @@ pub(crate) struct Call {
     pub timeout: TimeoutClass,
     pub request_id: RequestId,
     pub company: Option<CompanyId>,
-    pub idempotency_key: Option<String>,
+    pub idempotency_key: Option<IdempotencyKey>,
     pub if_match: Option<String>,
 }
 
@@ -269,9 +270,9 @@ pub(crate) enum TransportError {
     /// The connection could not be opened: nothing reached the engine.
     NotSent,
     /// The attempt timed out after the request may have been written.
-    Timeout,
+    Timeout { generation: u64 },
     /// The connection failed after the request may have been written.
-    Ambiguous,
+    Ambiguous { generation: u64 },
     /// The response body exceeded the cap.
     TooLarge,
     /// A header value could not be built (a malformed token).
@@ -390,7 +391,7 @@ impl Transport {
             req = req.body(body.to_vec());
         }
         let started = Instant::now();
-        let result = self.send(req).await;
+        let result = self.send(req, ep.generation).await;
         let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         match &result {
             Ok((status, ..)) => tracing::debug!(
@@ -436,13 +437,14 @@ impl Transport {
     async fn send(
         &self,
         req: reqwest::RequestBuilder,
+        generation: u64,
     ) -> Result<(u16, HeaderMap, Zeroizing<Vec<u8>>), TransportError> {
-        let mut resp = req.send().await.map_err(|e| classify(&e))?;
+        let mut resp = req.send().await.map_err(|e| classify(&e, generation))?;
         let status = resp.status().as_u16();
         let headers = std::mem::take(resp.headers_mut());
         let cap = self.cfg.max_body_bytes;
         let mut body = Zeroizing::new(Vec::new());
-        while let Some(chunk) = resp.chunk().await.map_err(|e| classify(&e))? {
+        while let Some(chunk) = resp.chunk().await.map_err(|e| classify(&e, generation))? {
             if body.len().saturating_add(chunk.len()) > cap {
                 return Err(TransportError::TooLarge);
             }
@@ -453,13 +455,13 @@ impl Transport {
 }
 
 /// Connect failures are the only errors that prove nothing was sent.
-fn classify(e: &reqwest::Error) -> TransportError {
+fn classify(e: &reqwest::Error, generation: u64) -> TransportError {
     if e.is_connect() {
         TransportError::NotSent
     } else if e.is_timeout() {
-        TransportError::Timeout
+        TransportError::Timeout { generation }
     } else {
-        TransportError::Ambiguous
+        TransportError::Ambiguous { generation }
     }
 }
 
@@ -530,7 +532,10 @@ fn build_headers(
         );
     }
     if let Some(key) = &call.idempotency_key {
-        h.insert(HeaderName::from_static("idempotency-key"), plain(key)?);
+        h.insert(
+            HeaderName::from_static("idempotency-key"),
+            plain(&key.as_header())?,
+        );
     }
     if let Some(tag) = &call.if_match {
         h.insert(header::IF_MATCH, plain(tag)?);
@@ -628,7 +633,8 @@ pub(crate) mod tests {
         let mut call =
             Call::new(Method::Post, "/api/v1/x/{id}", "/api/v1/x/1").json_body(b"{}".to_vec());
         call.company = Some(company);
-        call.idempotency_key = Some("key-123".into());
+        let key = IdempotencyKey::new();
+        call.idempotency_key = Some(key.clone());
         call.if_match = Some("\"7\"".into());
         call.query = vec![("search".into(), "a b&c".into())];
         let auth = AttemptAuth {
@@ -646,7 +652,10 @@ pub(crate) mod tests {
             h.get("x-company-id").expect("company"),
             "6f1c1e0e-1d7f-4c55-9e3e-1b2f7f3f9a10"
         );
-        assert_eq!(h.get("idempotency-key").expect("key"), "key-123");
+        assert_eq!(
+            h.get("idempotency-key").expect("key"),
+            key.as_header().as_str()
+        );
         assert_eq!(h.get("if-match").expect("if-match"), "\"7\"");
         assert_eq!(h.get("content-type").expect("ct"), "application/json");
     }
@@ -780,7 +789,7 @@ pub(crate) mod tests {
             .attempt(&call, &AttemptAuth::default(), 1, soon())
             .await
             .expect_err("timeout");
-        assert_eq!(e, TransportError::Timeout);
+        assert_eq!(e, TransportError::Timeout { generation: 1 });
     }
 
     #[tokio::test]

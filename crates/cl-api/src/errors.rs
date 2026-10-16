@@ -7,11 +7,6 @@
 //! `Display` is technical and PII-free (status, code, request id) and is the
 //! only thing logs and "Copy details" ever see.
 
-#![allow(
-    dead_code,
-    reason = "the mapping is consumed by the executor (P05 plan §4 step 15)"
-)]
-
 use std::fmt;
 use std::time::Duration;
 

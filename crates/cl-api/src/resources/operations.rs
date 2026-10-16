@@ -1,0 +1,306 @@
+//! The engine operations cl-api covers and how each may be retried
+//! (P05 plan §2.6, §2.8). `crates/cl-api/operations.txt` lists the same rows
+//! and a test keeps the two in step.
+
+use crate::client::{Method, TimeoutClass};
+use crate::errors::RouteKind;
+
+/// How an operation may be retried automatically.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RetryClass {
+    /// GET: retried on timeouts, connect errors and 502/503/504 (up to three
+    /// attempts with full jitter, within the deadline).
+    Idempotent,
+    /// Mutations: retried only when the request provably never reached a
+    /// handler (connect refused, desktop-gate refusal, an expired-token 401),
+    /// or once with the same key when outcome reconciliation proves the first
+    /// attempt did not commit.
+    PreHandlerOnly,
+    /// Mutations once the engine advertises `idempotency-v1` (U-18): retried
+    /// like reads, always with the same key.
+    KeyedOnce,
+    /// Auth and company creation: never retried (rate limits, token
+    /// rotation, duplicate companies).
+    Never,
+}
+
+impl RetryClass {
+    /// Name used in `operations.txt`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            RetryClass::Idempotent => "idempotent",
+            RetryClass::PreHandlerOnly => "pre-handler-only",
+            RetryClass::KeyedOnce => "keyed-once",
+            RetryClass::Never => "never",
+        }
+    }
+
+    /// The class in effect, given whether the engine offers request
+    /// idempotency (U-18).
+    #[must_use]
+    pub const fn effective(self, idempotency_v1: bool) -> RetryClass {
+        match self {
+            RetryClass::PreHandlerOnly if idempotency_v1 => RetryClass::KeyedOnce,
+            other => other,
+        }
+    }
+}
+
+/// One covered engine operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Operation {
+    method: Method,
+    route: &'static str,
+    retry: RetryClass,
+    pub(crate) kind: RouteKind,
+    pub(crate) timeout: TimeoutClass,
+    company_scoped: bool,
+}
+
+impl Operation {
+    /// HTTP method.
+    #[must_use]
+    pub const fn method(&self) -> Method {
+        self.method
+    }
+
+    /// Route template (`/api/v1/accounts/{id}`).
+    #[must_use]
+    pub const fn route(&self) -> &'static str {
+        self.route
+    }
+
+    /// Retry class before capability upgrades.
+    #[must_use]
+    pub const fn retry(&self) -> RetryClass {
+        self.retry
+    }
+
+    /// Needs an open company (sends `X-Company-Id`).
+    #[must_use]
+    pub const fn company_scoped(&self) -> bool {
+        self.company_scoped
+    }
+}
+
+const fn op(
+    method: Method,
+    route: &'static str,
+    retry: RetryClass,
+    kind: RouteKind,
+    timeout: TimeoutClass,
+    company_scoped: bool,
+) -> Operation {
+    Operation {
+        method,
+        route,
+        retry,
+        kind,
+        timeout,
+        company_scoped,
+    }
+}
+
+const fn read(route: &'static str) -> Operation {
+    op(
+        Method::Get,
+        route,
+        RetryClass::Idempotent,
+        RouteKind::Session,
+        TimeoutClass::Read,
+        true,
+    )
+}
+
+const fn write(method: Method, route: &'static str) -> Operation {
+    op(
+        method,
+        route,
+        RetryClass::PreHandlerOnly,
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+const fn auth(route: &'static str, kind: RouteKind) -> Operation {
+    op(
+        Method::Post,
+        route,
+        RetryClass::Never,
+        kind,
+        TimeoutClass::Auth,
+        false,
+    )
+}
+
+const fn public_read(route: &'static str, timeout: TimeoutClass) -> Operation {
+    op(
+        Method::Get,
+        route,
+        RetryClass::Idempotent,
+        RouteKind::Public,
+        timeout,
+        false,
+    )
+}
+
+const fn session_read(route: &'static str) -> Operation {
+    op(
+        Method::Get,
+        route,
+        RetryClass::Idempotent,
+        RouteKind::Session,
+        TimeoutClass::Read,
+        false,
+    )
+}
+
+pub(crate) const HEALTH: Operation = public_read("/health", TimeoutClass::Probe);
+pub(crate) const DESKTOP_INFO: Operation = public_read("/api/v1/desktop/info", TimeoutClass::Probe);
+pub(crate) const OPENAPI: Operation = public_read("/openapi.json", TimeoutClass::Read);
+/// Super-admin only and refused from the workspace, so it is company-scoped.
+pub(crate) const TEST_SMTP: Operation = write(Method::Post, "/api/v1/admin/test-smtp");
+pub(crate) const LOGIN: Operation = auth("/api/v1/auth/login", RouteKind::Login);
+pub(crate) const TFA_VERIFY: Operation = auth("/api/v1/auth/tfa/verify", RouteKind::Tfa);
+pub(crate) const REFRESH: Operation = auth("/api/v1/auth/refresh", RouteKind::Refresh);
+/// Logout is not behind `authenticate`; it only reads the refresh cookie.
+pub(crate) const LOGOUT: Operation = auth("/api/v1/auth/logout", RouteKind::Public);
+pub(crate) const SWITCH_TENANT: Operation = auth("/api/v1/auth/switch-tenant", RouteKind::Session);
+pub(crate) const CREATE_TENANT: Operation = op(
+    Method::Post,
+    "/api/v1/auth/create-tenant",
+    RetryClass::Never,
+    RouteKind::Session,
+    TimeoutClass::CreateTenant,
+    false,
+);
+pub(crate) const AUTH_ME: Operation = session_read("/api/v1/auth/me");
+/// Read without `X-Company-Id`: used while opening a company to learn its id.
+pub(crate) const COMPANY_GET: Operation = session_read("/api/v1/company");
+
+/// Every covered operation, in `operations.txt` order.
+pub const OPERATIONS: [Operation; 40] = [
+    HEALTH,
+    DESKTOP_INFO,
+    OPENAPI,
+    TEST_SMTP,
+    LOGIN,
+    TFA_VERIFY,
+    REFRESH,
+    LOGOUT,
+    SWITCH_TENANT,
+    CREATE_TENANT,
+    AUTH_ME,
+    COMPANY_GET,
+    write(Method::Put, "/api/v1/company"),
+    read("/api/v1/company/settings"),
+    read("/api/v1/accounts"),
+    write(Method::Post, "/api/v1/accounts"),
+    read("/api/v1/accounts/{id}"),
+    write(Method::Put, "/api/v1/accounts/{id}"),
+    write(Method::Delete, "/api/v1/accounts/{id}"),
+    read("/api/v1/contacts"),
+    write(Method::Post, "/api/v1/contacts"),
+    read("/api/v1/contacts/{id}"),
+    write(Method::Put, "/api/v1/contacts/{id}"),
+    write(Method::Delete, "/api/v1/contacts/{id}"),
+    read("/api/v1/items"),
+    write(Method::Post, "/api/v1/items"),
+    read("/api/v1/items/{id}"),
+    write(Method::Put, "/api/v1/items/{id}"),
+    write(Method::Delete, "/api/v1/items/{id}"),
+    read("/api/v1/tags"),
+    write(Method::Post, "/api/v1/tags"),
+    read("/api/v1/tags/{id}"),
+    write(Method::Put, "/api/v1/tags/{id}"),
+    write(Method::Delete, "/api/v1/tags/{id}"),
+    read("/api/v1/transactions"),
+    write(Method::Post, "/api/v1/transactions"),
+    read("/api/v1/transactions/{id}"),
+    write(Method::Put, "/api/v1/transactions/{id}"),
+    write(Method::Post, "/api/v1/transactions/{id}/void"),
+    read("/api/v1/ledger-version"),
+];
+
+/// Looks up a covered operation.
+#[must_use]
+pub fn find(method: Method, route: &str) -> Option<&'static Operation> {
+    OPERATIONS
+        .iter()
+        .find(|o| o.method == method && o.route == route)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn table_matches_operations_txt() {
+        let txt = include_str!("../../operations.txt");
+        let rows: Vec<(String, String, String)> = txt
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .map(|l| {
+                let mut it = l.split_whitespace();
+                let m = it.next().expect("method").to_string();
+                let r = it.next().expect("route").to_string();
+                let c = it.next().expect("class").to_string();
+                assert_eq!(it.next(), None, "extra column in {l:?}");
+                (m, r, c)
+            })
+            .collect();
+        let table: Vec<(String, String, String)> = OPERATIONS
+            .iter()
+            .map(|o| {
+                (
+                    o.method().as_str().to_string(),
+                    o.route().to_string(),
+                    o.retry().as_str().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(rows, table);
+    }
+
+    #[test]
+    fn classification_rules_hold() {
+        let mut seen = HashSet::new();
+        for o in &OPERATIONS {
+            assert!(seen.insert((o.method(), o.route())), "duplicate {o:?}");
+            let auth_route = o.route().starts_with("/api/v1/auth/") && !o.method().is_read();
+            match (o.method().is_read(), auth_route) {
+                (true, _) => assert_eq!(o.retry(), RetryClass::Idempotent, "{o:?}"),
+                (false, true) => assert_eq!(o.retry(), RetryClass::Never, "{o:?}"),
+                (false, false) => assert_eq!(o.retry(), RetryClass::PreHandlerOnly, "{o:?}"),
+            }
+            if o.company_scoped() {
+                assert_eq!(o.kind, RouteKind::Session);
+            }
+        }
+        assert_eq!(
+            find(Method::Post, "/api/v1/auth/create-tenant").map(|o| o.timeout),
+            Some(TimeoutClass::CreateTenant)
+        );
+        assert!(find(Method::Get, "/nope").is_none());
+    }
+
+    #[test]
+    fn idempotency_capability_upgrades_only_mutations() {
+        assert_eq!(
+            RetryClass::PreHandlerOnly.effective(true),
+            RetryClass::KeyedOnce
+        );
+        assert_eq!(
+            RetryClass::PreHandlerOnly.effective(false),
+            RetryClass::PreHandlerOnly
+        );
+        assert_eq!(RetryClass::Never.effective(true), RetryClass::Never);
+        assert_eq!(
+            RetryClass::Idempotent.effective(true),
+            RetryClass::Idempotent
+        );
+    }
+}

@@ -1,0 +1,52 @@
+# Engine operations covered by cl-api (P05 plan section 2.8), one per line:
+#   METHOD  route-template  retry-class
+# Retry classes (P05 plan section 2.6): idempotent = GET, retried on
+# timeouts, connect errors and 502/503/504; pre-handler-only = mutations,
+# retried only when provably not sent or after outcome reconciliation proves
+# "not committed" (upgraded to keyed-once when the engine advertises
+# idempotency-v1, U-18); never = auth and company-creation routes.
+#
+# Read by the cl-api tests (must match src/resources/operations.rs) and by
+# `cargo xtask api-spec` (step 25). Engine Zod sources behind these shapes:
+# engine/packages/shared/src/schemas/{transactions,accounts,contacts,items,tags,company,auth}.ts
+# engine/packages/api/src/routes/tags.routes.ts
+GET     /health                                 idempotent
+GET     /api/v1/desktop/info                    idempotent
+GET     /openapi.json                           idempotent
+POST    /api/v1/admin/test-smtp                 pre-handler-only
+POST    /api/v1/auth/login                      never
+POST    /api/v1/auth/tfa/verify                 never
+POST    /api/v1/auth/refresh                    never
+POST    /api/v1/auth/logout                     never
+POST    /api/v1/auth/switch-tenant              never
+POST    /api/v1/auth/create-tenant              never
+GET     /api/v1/auth/me                         idempotent
+GET     /api/v1/company                         idempotent
+PUT     /api/v1/company                         pre-handler-only
+GET     /api/v1/company/settings                idempotent
+GET     /api/v1/accounts                        idempotent
+POST    /api/v1/accounts                        pre-handler-only
+GET     /api/v1/accounts/{id}                   idempotent
+PUT     /api/v1/accounts/{id}                   pre-handler-only
+DELETE  /api/v1/accounts/{id}                   pre-handler-only
+GET     /api/v1/contacts                        idempotent
+POST    /api/v1/contacts                        pre-handler-only
+GET     /api/v1/contacts/{id}                   idempotent
+PUT     /api/v1/contacts/{id}                   pre-handler-only
+DELETE  /api/v1/contacts/{id}                   pre-handler-only
+GET     /api/v1/items                           idempotent
+POST    /api/v1/items                           pre-handler-only
+GET     /api/v1/items/{id}                      idempotent
+PUT     /api/v1/items/{id}                      pre-handler-only
+DELETE  /api/v1/items/{id}                      pre-handler-only
+GET     /api/v1/tags                            idempotent
+POST    /api/v1/tags                            pre-handler-only
+GET     /api/v1/tags/{id}                       idempotent
+PUT     /api/v1/tags/{id}                       pre-handler-only
+DELETE  /api/v1/tags/{id}                       pre-handler-only
+GET     /api/v1/transactions                    idempotent
+POST    /api/v1/transactions                    pre-handler-only
+GET     /api/v1/transactions/{id}               idempotent
+PUT     /api/v1/transactions/{id}               pre-handler-only
+POST    /api/v1/transactions/{id}/void          pre-handler-only
+GET     /api/v1/ledger-version                  idempotent

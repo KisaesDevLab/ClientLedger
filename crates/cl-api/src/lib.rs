@@ -25,6 +25,10 @@
 mod client;
 pub mod endpoint;
 pub mod errors;
+#[allow(
+    dead_code,
+    reason = "the executor is wired into the public client by the session layer (P05 plan §4 step 16)"
+)]
 pub mod idempotency;
 pub mod resources;
 
@@ -35,4 +39,5 @@ pub use errors::{
     UserText, ValidationError, ValidationIssue,
 };
 pub use idempotency::IdempotencyKey;
+pub use resources::operations::{OPERATIONS, Operation, RetryClass};
 pub use resources::versioning::RecordVersion;
