@@ -88,6 +88,15 @@ pub enum PgError {
         pid: u32,
     },
 
+    /// The server refused an administrative statement.
+    #[error("database setup step failed ({context}): {detail}")]
+    Sql {
+        /// What we were doing.
+        context: String,
+        /// The server's short message and SQLSTATE (no statement text).
+        detail: String,
+    },
+
     /// A backup file is not usable.
     #[error("backup problem: {0}")]
     Backup(String),
