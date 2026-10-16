@@ -355,10 +355,32 @@ impl Supervisor {
         let (stop_tx, stop_rx) = mpsc::channel();
         let start_budget =
             config.policy.ready_timeout * (config.policy.max_restarts + 1) + Duration::from_mins(2);
+        let log_paths = vec![config.paths.host_log(), config.paths.engine_log()];
         let worker = Worker::new(config, Arc::clone(&shared), stop_rx);
+        let on_panic = Arc::clone(&shared);
         let thread = std::thread::Builder::new()
             .name("cl-supervisor".into())
-            .spawn(move || worker.run(database))
+            .spawn(move || {
+                // A bug in the supervisor must end in a visible fault, never in a
+                // silent dead thread that leaves the UI waiting. Unwinding also
+                // drops (and so terminates) the engine process.
+                let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    worker.run(database);
+                }));
+                if ran.is_err() {
+                    on_panic.update(|i| {
+                        i.endpoint = None;
+                        i.status.engine_pid = None;
+                        i.status.state = HostState::Fault(HostFault {
+                            component: Component::Engine,
+                            reason: "an internal error stopped the supervisor".into(),
+                            restarts: 0,
+                            log_paths,
+                            last_output: Vec::new(),
+                        });
+                    });
+                }
+            })
             .ok();
         if thread.is_none() {
             shared.set_state(HostState::Stopped);

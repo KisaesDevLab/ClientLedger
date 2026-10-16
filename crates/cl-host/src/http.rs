@@ -90,11 +90,12 @@ fn decode_chunked(mut data: &[u8]) -> Option<Vec<u8>> {
         if size == 0 {
             return Some(out);
         }
-        if data.len() < size + 2 {
+        let end = size.checked_add(2)?;
+        if data.len() < end {
             return None;
         }
         out.extend_from_slice(&data[..size]);
-        data = &data[size + 2..];
+        data = &data[end..];
     }
 }
 
@@ -115,6 +116,21 @@ mod tests {
         let r = parse_response(raw).unwrap();
         assert_eq!(r.status, 201);
         assert_eq!(r.body, "hello world");
+    }
+
+    #[test]
+    fn an_absurd_chunk_size_is_rejected_without_overflow() {
+        for size in ["ffffffffffffffff", "fffffffffffffffe", "7fffffffffffffff"] {
+            let raw = format!(
+                "HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+
+{size}
+x
+"
+            );
+            assert!(parse_response(raw.as_bytes()).is_none(), "{size}");
+        }
     }
 
     #[test]

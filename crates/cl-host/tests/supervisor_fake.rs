@@ -8,6 +8,7 @@ use cl_host::{
     DbEndpoint, DesktopError, EngineSecrets, HostConfig, HostError, HostState, Result, Secret,
     Supervisor, check_health,
 };
+use cl_pg::PasswordStore as _;
 use common::{Scratch, fake_config, process_alive, wait_until};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -573,6 +574,45 @@ fn a_brand_new_cluster_creates_the_master_secret_once() {
     cfg.secrets_store = Some(Arc::clone(&store) as Arc<dyn cl_pg::PasswordStore>);
     let sup = start(cfg, factory).unwrap();
     sup.stop();
-    use cl_pg::PasswordStore as _;
     assert!(store.get().unwrap().is_some());
+}
+
+#[test]
+fn a_panic_in_the_supervisor_becomes_a_fault_and_stops_the_engine() {
+    struct PanickyDb(Arc<AtomicBool>, FakeDb);
+    impl DatabaseService for PanickyDb {
+        fn start(&mut self) -> Result<DbEndpoint> {
+            self.1.start()
+        }
+        fn is_alive(&mut self, ep: &DbEndpoint) -> bool {
+            assert!(!self.0.load(Ordering::SeqCst), "boom (on purpose)");
+            self.1.is_alive(ep)
+        }
+        fn stop(&mut self) -> Result<()> {
+            self.1.stop()
+        }
+    }
+    let scratch = Scratch::new("panic");
+    let bomb = Arc::new(AtomicBool::new(false));
+    let state = Arc::new(FakeDbState::default());
+    let (b, s) = (Arc::clone(&bomb), Arc::clone(&state));
+    let factory: DatabaseFactory = Box::new(move |_: &EngineSecrets| -> Result<DatabaseParts> {
+        Ok((
+            Box::new(PanickyDb(b, FakeDb(s))) as Box<dyn DatabaseService>,
+            vec![],
+        ))
+    });
+    let sup = start(fake_config(&scratch), factory).unwrap();
+    let pid = sup.status().engine_pid.unwrap();
+    bomb.store(true, Ordering::SeqCst);
+    assert!(sup.wait_for(Duration::from_secs(20), |s| matches!(
+        s.state,
+        HostState::Fault(_)
+    )));
+    assert!(
+        wait_until(Duration::from_secs(10), || !process_alive(pid)),
+        "engine survived the panic"
+    );
+    assert!(sup.endpoint().is_none());
+    sup.stop();
 }

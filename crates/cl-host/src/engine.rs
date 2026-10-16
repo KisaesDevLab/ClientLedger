@@ -149,6 +149,16 @@ pub(crate) struct EngineProcess {
     pub pid: u32,
     pub port: u16,
     output: Arc<Mutex<Output>>,
+    terminated: bool,
+}
+
+impl Drop for EngineProcess {
+    /// A panic or an early return must never leave the engine running.
+    fn drop(&mut self) {
+        if !self.terminated {
+            self.terminate(Duration::from_secs(2));
+        }
+    }
 }
 
 impl EngineProcess {
@@ -167,6 +177,7 @@ impl EngineProcess {
 
     /// Stop the process tree and wait for it.
     pub(crate) fn terminate(&mut self, grace: Duration) {
+        self.terminated = true;
         self.killer.terminate(&mut self.child, grace);
     }
 }
@@ -326,6 +337,7 @@ pub(crate) fn launch(
         pid,
         port: 0,
         output,
+        terminated: false,
     };
 
     let deadline = Instant::now() + ready_timeout;
