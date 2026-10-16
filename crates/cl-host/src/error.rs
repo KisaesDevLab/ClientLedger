@@ -32,6 +32,22 @@ pub enum HostError {
     /// The bundled database failed.
     #[error(transparent)]
     Pg(#[from] cl_pg::PgError),
+
+    /// The supervisor gave up (restarts exhausted or a permanent failure).
+    #[error("{0}")]
+    Fault(crate::HostFault),
+
+    /// Waited for the engine and it did not become ready.
+    #[error("the engine did not become ready within {0:?}")]
+    Timeout(std::time::Duration),
+
+    /// The engine is not running right now.
+    #[error("the engine is not running")]
+    NotRunning,
+
+    /// A first-run endpoint call failed.
+    #[error(transparent)]
+    Desktop(#[from] crate::desktop::DesktopError),
 }
 
 impl HostError {

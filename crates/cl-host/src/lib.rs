@@ -7,12 +7,33 @@
 //! and the child environment, never as command-line arguments.
 #![forbid(unsafe_code)]
 
+mod database;
+mod desktop;
+mod engine;
 mod error;
+mod health;
+mod http;
 mod instance_lock;
+mod logs;
 mod paths;
+mod procs;
+mod secrets;
+mod supervisor;
 
+pub use cl_pg::Secret;
+pub use database::{
+    APP_DATABASE, APP_ROLE, DatabaseFactory, DatabaseParts, DatabaseService, DbEndpoint, PgService,
+};
+pub use desktop::{AdminAccount, CompanySeed, DesktopError, DesktopInfo, Initialized};
 pub use error::{HostError, Result};
+pub use health::{HealthError, HealthReport, check_health, verify_listener};
 pub use instance_lock::{
     Acquired, InstanceGuard, Request, SendError, acquire, acquire_or_focus, send,
 };
+pub use logs::{HostLog, Level};
 pub use paths::{AppPaths, Os};
+pub use secrets::EngineSecrets;
+pub use supervisor::{
+    Component, Endpoint, HostConfig, HostFault, HostState, HostStatus, RestartCounts,
+    RestartPolicy, Supervisor, in_memory_stores,
+};
