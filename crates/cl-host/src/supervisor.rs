@@ -11,7 +11,7 @@ use crate::database::{DatabaseFactory, DatabaseService, DbEndpoint, PgService};
 use crate::desktop::{self, AdminAccount, CompanySeed, DesktopError, DesktopInfo, Initialized};
 use crate::engine::{self, EngineProcess, LaunchError, LaunchPlan, Scrubber};
 use crate::health::{self, HealthError, HealthReport};
-use crate::logs::HostLog;
+use crate::logs::{self, HostLog, LogPolicy};
 use crate::procs;
 use crate::secrets::{EngineSecrets, MASTER_PURPOSE};
 use crate::{AppPaths, HostError, Result};
@@ -609,6 +609,7 @@ impl Worker {
             self.fault(Component::Database, &e.to_string(), 0, vec![], None);
             return;
         }
+        self.prune_logs();
         if procs::reap_stale_child(&self.paths, &self.engine_exe) {
             self.log
                 .warn("stopped an engine left over from a previous run");
@@ -637,6 +638,7 @@ impl Worker {
         let mut engine_fails = 0u32;
         let mut first = true;
         let mut generation = 0u64;
+        let mut last_prune = Instant::now();
 
         'life: loop {
             if self.stop_requested() {
@@ -788,6 +790,10 @@ impl Worker {
                     if self.wait_stop(self.policy.poll_interval) {
                         break 'life;
                     }
+                    if last_prune.elapsed() >= Duration::from_hours(1) {
+                        last_prune = Instant::now();
+                        self.prune_logs();
+                    }
                     let Some(proc) = engine.as_mut() else {
                         continue 'life;
                     };
@@ -930,6 +936,22 @@ impl Worker {
             }
         });
         self.log.info("host stopped");
+    }
+
+    /// Apply the log retention rule (30 days or 100 MB, Q-118).
+    fn prune_logs(&self) {
+        let report = logs::prune_logs(
+            &self.paths.logs_dir(),
+            &LogPolicy::default(),
+            std::time::SystemTime::now(),
+        );
+        if !report.removed.is_empty() {
+            self.log.info(&format!(
+                "removed {} old log file(s), {} bytes",
+                report.removed.len(),
+                report.freed_bytes
+            ));
+        }
     }
 
     /// The database stopped answering: stop the engine, stop the database

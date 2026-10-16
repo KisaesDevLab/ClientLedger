@@ -30,7 +30,7 @@ pub use health::{HealthError, HealthReport, check_health, verify_listener};
 pub use instance_lock::{
     Acquired, InstanceGuard, Request, SendError, acquire, acquire_or_focus, send,
 };
-pub use logs::{HostLog, Level};
+pub use logs::{HostLog, Level, LogPolicy, PruneReport, prune_logs, tail_lines};
 pub use paths::{AppPaths, Os};
 pub use secrets::EngineSecrets;
 pub use supervisor::{
