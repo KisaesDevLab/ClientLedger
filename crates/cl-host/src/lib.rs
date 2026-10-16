@@ -8,7 +8,11 @@
 #![forbid(unsafe_code)]
 
 mod error;
+mod instance_lock;
 mod paths;
 
 pub use error::{HostError, Result};
+pub use instance_lock::{
+    Acquired, InstanceGuard, Request, SendError, acquire, acquire_or_focus, send,
+};
 pub use paths::{AppPaths, Os};
