@@ -579,7 +579,7 @@ mod tests {
         let got = lines_of(b"one\r\ntw\xffo\nlast");
         let bad = format!("tw{}o", char::REPLACEMENT_CHARACTER);
         assert_eq!(got, ["one", bad.as_str(), "last"]);
-        assert!(lines_of(b"").is_empty());
+        assert_eq!(lines_of(b""), Vec::<String>::new());
     }
 
     #[test]

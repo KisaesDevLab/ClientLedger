@@ -99,12 +99,7 @@ jobs:
         run: cargo xtask pg-fetch
       - name: Coverage summary
         # TODO(P05): add `--fail-under-lines 80` and make this job required.
-        run: |
-          # cl-host's tests spawn the `fake_engine` example, which `cargo test`
-          # builds but `cargo llvm-cov` does not; build it into the llvm-cov
-          # target dir first (no tests are run by --examples).
-          cargo llvm-cov --no-report --workspace --exclude xtask --examples
-          cargo llvm-cov --workspace --exclude xtask --summary-only
+        run: cargo llvm-cov --workspace --exclude xtask --summary-only
 
   # Engine single executable (P01): built on every OS we ship, smoke-tested
   # against a temporary PostgreSQL, uploaded for later jobs.
@@ -159,6 +154,10 @@ jobs:
       - name: Fetch pinned PostgreSQL (hash-verified)
         run: cargo xtask pg-fetch
       - name: Supervisor with the real engine and PostgreSQL (cold and warm start budgets, restarts, no orphans)
+        env:
+          # Hosted runners are slower than the 15 s cold / 5 s warm product budgets
+          # (macos-15-intel measured 14.1 s / 5.2 s). The override applies to CI only.
+          CL_HOST_BUDGET_SECS: "30"
         run: cargo test -p cl-host --test real_engine -- --test-threads=1 --nocapture
       - uses: actions/upload-artifact@v4
         with:

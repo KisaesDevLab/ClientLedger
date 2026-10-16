@@ -43,16 +43,36 @@ impl Drop for Scratch {
     }
 }
 
-/// The `fake_engine` example built by `cargo test`.
+/// The `fake_engine` example. `cargo test` builds it next to the test
+/// binaries; `cargo llvm-cov` builds examples as test harnesses under a hashed
+/// name, so when the plain executable is absent it is built on demand into the
+/// same target directory. It must exist afterwards: this never skips.
 pub fn fake_engine() -> PathBuf {
+    static BUILT: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let exe = std::env::current_exe().unwrap();
-    let target_dir = exe.parent().and_then(Path::parent).unwrap();
+    let profile_dir = exe.parent().and_then(Path::parent).unwrap();
     let name = if cfg!(windows) {
         "fake_engine.exe"
     } else {
         "fake_engine"
     };
-    let p = target_dir.join("examples").join(name);
+    let p = profile_dir.join("examples").join(name);
+    let _guard = BUILT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !p.is_file() {
+        let target_dir = profile_dir.parent().unwrap();
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+        let mut cmd = std::process::Command::new(cargo);
+        cmd.args(["build", "--example", "fake_engine", "-p", "cl-host"])
+            .arg("--target-dir")
+            .arg(target_dir);
+        if profile_dir.file_name().is_some_and(|n| n == "release") {
+            cmd.arg("--release");
+        }
+        let status = cmd.status().expect("run cargo build for the fake engine");
+        assert!(status.success(), "building the fake engine failed");
+    }
     assert!(p.is_file(), "fake engine not built at {}", p.display());
     p
 }

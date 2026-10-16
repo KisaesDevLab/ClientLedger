@@ -512,7 +512,10 @@ mod tests {
         fs::write(&p, numbered_lines("line ", 1..=500, 0)).unwrap();
         assert_eq!(tail_lines(&p, 3), ["line 498", "line 499", "line 500"]);
         assert_eq!(tail_lines(&p, 1000).len(), 500);
-        assert!(tail_lines(&dir.join("missing.log"), 5).is_empty());
+        assert_eq!(
+            tail_lines(&dir.join("missing.log"), 5),
+            Vec::<String>::new()
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

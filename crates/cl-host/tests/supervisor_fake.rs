@@ -419,7 +419,7 @@ fn a_database_that_will_not_start_is_a_fault_with_its_log_paths() {
     };
     assert_eq!(fault.component, Component::Database);
     assert_eq!(fault.restarts, 3);
-    assert!(!fault.log_paths.is_empty());
+    assert_ne!(fault.log_paths, Vec::<std::path::PathBuf>::new());
     // 4 attempts consumed 4 of the 100 refusals.
     assert_eq!(db.fail_next_starts.load(Ordering::SeqCst), 96);
     sup.stop();
