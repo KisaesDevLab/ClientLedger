@@ -134,7 +134,7 @@ ClientLedger/
 Crate layering rules (enforced by a test in `xtask` from P00):
 
 - `cl-core` depends on nothing internal.
-- `cl-model`, `cl-api`, `cl-pg`, `cl-settings`, `cl-import` may depend only on `cl-core`.
+- `cl-model`, `cl-api`, `cl-pg`, `cl-settings`, `cl-import` may depend only on `cl-core`. `cl-api` may additionally have dev-dependencies on `cl-host` and `cl-pg`, for its contract harness only.
 - `cl-grid` depends on `cl-core`, `cl-model`, egui.
 - `cl-ui` may depend on everything except `apps/*`.
 - Nothing below `cl-ui` depends on egui except `cl-grid`.
