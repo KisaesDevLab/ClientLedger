@@ -22,7 +22,7 @@ use std::fs::{self, File, TryLockError};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -32,6 +32,10 @@ const CONTROL_FILE: &str = "instance.ctl";
 
 /// How long a client waits for a starting instance to publish its endpoint.
 const PUBLISH_WAIT: Duration = Duration::from_secs(3);
+/// Most connections served at once; more are dropped without an answer.
+const MAX_CONNECTIONS: usize = 8;
+/// Longest reply a client prints.
+const MAX_REPLY_CHARS: usize = 512;
 /// Longest request line accepted.
 const MAX_LINE: u64 = 256;
 
@@ -72,6 +76,8 @@ struct Shared {
     stop: AtomicBool,
     status: Mutex<String>,
     shutdown: AtomicBool,
+    /// Connections being served right now (capped by `MAX_CONNECTIONS`).
+    connections: AtomicUsize,
 }
 
 /// Proof that this process is the one running instance. Dropping it releases
@@ -203,15 +209,31 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     diff == 0
 }
 
-fn serve(listener: &TcpListener, key: &Secret, shared: &Shared) {
+fn serve(listener: &TcpListener, key: &Secret, shared: &Arc<Shared>) {
     // Polling accept: shutting down never depends on a wake-up connection.
     let _ = listener.set_nonblocking(true);
     while !shared.shutdown.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, _)) => {
-                // One slow or malicious client must not block the next one for long.
+                // Each connection gets its own short-lived thread, so one slow or
+                // malicious client cannot hold up the next; a cap keeps a flood
+                // from exhausting threads.
                 let _ = stream.set_nonblocking(false);
-                let _ = handle(stream, key, shared);
+                if shared.connections.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                    shared.connections.fetch_sub(1, Ordering::SeqCst);
+                    continue; // dropped: the client sees a closed connection
+                }
+                let (key, shared) = (key.clone(), Arc::clone(shared));
+                let counter = Arc::clone(&shared);
+                let spawned = std::thread::Builder::new()
+                    .name("cl-instance-conn".into())
+                    .spawn(move || {
+                        let _ = handle(stream, &key, &shared);
+                        shared.connections.fetch_sub(1, Ordering::SeqCst);
+                    });
+                if spawned.is_err() {
+                    counter.connections.fetch_sub(1, Ordering::SeqCst);
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(25));
@@ -308,12 +330,23 @@ fn send_once(control: &Path, request: Request) -> std::result::Result<String, Se
     writeln!(stream, "{key} {}", request.word())?;
     let mut reply = String::new();
     BufReader::new(&stream).read_line(&mut reply)?;
-    let reply = reply.trim().to_string();
+    let reply = sanitize_reply(&reply);
     if reply == "denied" {
         Err(SendError::Denied)
     } else {
         Ok(reply)
     }
+}
+
+/// A reply that is safe to print: control characters (terminal escape
+/// sequences, bell, backspace) are dropped and the length is limited.
+fn sanitize_reply(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_REPLY_CHARS)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 /// The normal start-up check: become the first instance, or ask the running
@@ -463,6 +496,88 @@ mod tests {
         let dir_mode = fs::metadata(paths.run_dir()).unwrap().permissions().mode();
         assert_eq!(file_mode & 0o077, 0, "control file mode {file_mode:o}");
         assert_eq!(dir_mode & 0o077, 0, "run folder mode {dir_mode:o}");
+        drop(first);
+        let _ = fs::remove_dir_all(paths.root());
+    }
+
+    #[test]
+    fn replies_are_stripped_of_control_characters_and_limited() {
+        assert_eq!(sanitize_reply("\u{1b}[31mred\u{7}\u{8}\r\n"), "[31mred");
+        assert_eq!(sanitize_reply(&"x".repeat(5000)).len(), MAX_REPLY_CHARS);
+        assert_eq!(sanitize_reply("state=running"), "state=running");
+    }
+
+    #[test]
+    fn a_hostile_instance_cannot_inject_terminal_escapes_into_a_client() {
+        let dir = std::env::temp_dir().join(format!("cl-host-hostile-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut s, _)) = l.accept() {
+                let mut buf = [0u8; 256];
+                let _ = std::io::Read::read(&mut s, &mut buf);
+                let _ = s.write_all(b"\x1b]0;pwned\x07\x1b[2Jhello\n");
+            }
+        });
+        let ctl = dir.join("instance.ctl");
+        fs::write(&ctl, format!("{port}\nkey\n")).unwrap();
+        let reply = send_once(&ctl, Request::Status).unwrap();
+        assert!(!reply.chars().any(char::is_control), "{reply:?}");
+        assert!(reply.ends_with("hello"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn stalled_clients_do_not_exhaust_threads_or_block_the_endpoint_for_long() {
+        let paths = scratch("flood");
+        let first = guard(acquire(&paths).unwrap());
+        first.set_status("state=running");
+        let text = fs::read_to_string(control_path(&paths)).unwrap();
+        let port: u16 = text.lines().next().unwrap().parse().unwrap();
+        // Open many connections that never send anything.
+        let stalled: Vec<TcpStream> = (0..40)
+            .filter_map(|_| TcpStream::connect((Ipv4Addr::LOCALHOST, port)).ok())
+            .collect();
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            first.shared.connections.load(Ordering::SeqCst) <= MAX_CONNECTIONS,
+            "too many connection threads"
+        );
+        // Once the stalled ones time out, real requests work again.
+        let start = Instant::now();
+        loop {
+            if send(&paths, Request::Status).is_ok_and(|r| r == "state=running") {
+                break;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "endpoint stayed blocked"
+            );
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        drop(stalled);
+        drop(first);
+        let _ = fs::remove_dir_all(paths.root());
+    }
+
+    #[test]
+    fn a_few_stalled_clients_do_not_delay_a_real_request() {
+        let paths = scratch("few-stalled");
+        let first = guard(acquire(&paths).unwrap());
+        first.set_status("state=running");
+        let text = fs::read_to_string(control_path(&paths)).unwrap();
+        let port: u16 = text.lines().next().unwrap().parse().unwrap();
+        let _stalled: Vec<TcpStream> = (0..4)
+            .map(|_| TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap())
+            .collect();
+        let start = Instant::now();
+        assert_eq!(send(&paths, Request::Status).unwrap(), "state=running");
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
+        );
         drop(first);
         let _ = fs::remove_dir_all(paths.root());
     }
