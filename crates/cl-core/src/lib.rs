@@ -15,11 +15,13 @@
 )]
 
 pub mod dates;
+pub mod fiscal;
 pub mod ids;
 pub mod money;
 pub mod secret;
 
 pub use dates::{CalendarDate, DateError, Timestamp, Weekday};
+pub use fiscal::{FiscalError, FiscalYear, FiscalYearSpec, Period, RetailPattern, YearEndRule};
 pub use ids::IdError;
 pub use money::{
     AllocUnit, Money, MoneyError, MoneyInputError, MoneyStyle, NegativeStyle, Quantity, Rate,
