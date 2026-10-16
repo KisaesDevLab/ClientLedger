@@ -200,7 +200,13 @@ fn logs(paths: &AppPaths, lines: usize, engine: bool) -> ExitCode {
         println!("# (empty or missing)");
     }
     for line in tail {
-        println!("{line}");
+        // Log text can contain bytes from other programs: never pass terminal
+        // control sequences through.
+        let safe: String = line
+            .chars()
+            .filter(|c| !c.is_control() || *c == '\t')
+            .collect();
+        println!("{safe}");
     }
     ExitCode::SUCCESS
 }

@@ -92,7 +92,7 @@ fn logs_print_the_tail_of_the_host_and_engine_logs() {
          host line 6\nhost line 7\nhost line 8\nhost line 9\nhost line 10\n",
     )
     .unwrap();
-    std::fs::write(paths.engine_log(), "engine line A\nengine line B\n").unwrap();
+    std::fs::write(paths.engine_log(), "engine line A\x1b[2J\nengine line B\n").unwrap();
 
     let out = cli(&dir, &["logs", "--lines", "3"]);
     let shown = text(&out);
@@ -102,6 +102,10 @@ fn logs_print_the_tail_of_the_host_and_engine_logs() {
 
     let out = cli(&dir, &["logs", "--engine"]);
     assert!(text(&out).contains("engine line B"));
+    assert!(
+        !text(&out).contains('\u{1b}'),
+        "escape sequences must not pass through"
+    );
 
     let empty = scratch("logs-empty");
     let out = cli(&empty, &["logs"]);
