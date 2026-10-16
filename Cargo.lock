@@ -384,6 +384,13 @@ version = "0.0.0"
 [[package]]
 name = "cl-core"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "uuid",
+ "zeroize",
+]
 
 [[package]]
 name = "cl-grid"
