@@ -18,6 +18,7 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | U-11 | Ollama provider adapter for the engine's multi-provider AI (local base URL, model choice, no key) if missing; Anthropic and OpenAI adapters confirmed | P09 | clientledger/desktop-profile | Planned |
 | U-12 | Integrity check endpoints (full Verify and fast weekly subset) with typed findings and safe automatic fixes | P34 | clientledger/verify | Planned |
 | U-10 | Redistribution grant text added to the engine repo (`LICENSE-CLIENTLEDGER.md`) by the owner | P39 | main | Planned — owner (Q-31) |
+| U-16 | Engine identity proof (HMAC challenge in `/health`) and graceful shutdown (`POST /api/v1/desktop/shutdown`) for the supervisor | P04 follow-up (P37 hardening) | clientledger/desktop-supervisor | Proposed |
 
 Add rows as capability checks find gaps (credit memos, statements, finance charges, sales tax, average-cost inventory, reconciliation, permissions granularity, optimistic concurrency, change notifications for LAN mode; post-beta: estimates, sales orders, POs, assemblies, custom fields, form templates).
 
@@ -62,6 +63,19 @@ Add rows as capability checks find gaps (credit memos, statements, finance charg
 - E1 part (done on `clientledger/desktop-mode`, commit `c1635b2a`): `mode`, `version`, `engineCommit`, `schemaVersion`, `schemaTag`, `queueBackend`, `online`/`lastOnlineCheck` (always `null` until E4), `checks.db.superuser`, and `redis: "disabled"`. Returns 200 on desktop with no Redis.
 - E4 part (pending, `clientledger/offline-guard`): connectivity probe, `OfflineUnavailable` (503 `OFFLINE_UNAVAILABLE`), egress guard, SMTP timeouts.
 - Status: In progress — 2026-10-15.
+
+### U-16 — Engine identity proof and graceful shutdown (proposed)
+- Needed by: not blocking. P04 ships without it (Q-P04d, Q-P04e); P37 hardening should decide.
+- Why: (a) If the engine dies, another local program could bind its port and receive the launch token in the `X-CL-Token` header of the next request (security review L11). P04 already checks which process owns the port before sending the token (`cl-host` `verify_listener`), but that is an operating-system lookup and cannot be done the same way everywhere. A proof from the responder removes the dependency. (b) Windows has no graceful stop for a windowless child, so the supervisor terminates the engine's job object; a shutdown endpoint lets the engine finish in-flight requests and background work first.
+- Proposed change, desktop mode only, nothing changes on the appliance:
+  - `/health`, `/api/health` and `/api/v1/health` accept an optional `X-CL-Nonce` header (16 to 64 random bytes, hex). The answer then carries `proof = hex(HMAC-SHA256(key = launch token, message = "cl-health-v1" + nonce))`. The token is never echoed. The host computes the same value and accepts the engine only on a match, before it sends the token anywhere else (the first nonce request itself carries no token, so it is answered to an impostor the same way as to the engine, which reveals nothing).
+  - The desktop gate must let a request that carries only `X-CL-Nonce` reach `/health` (today every request needs the token): it answers 401 with the proof so the host can tell "the engine, wrong token" from "something else".
+  - `POST /api/v1/desktop/shutdown` (gated like every route): stop accepting requests, drain, close the pool, exit 0. The host falls back to terminating the process tree after `stop_grace`.
+- Engine files touched: `middleware/desktop-gate.ts`, `utils/health.ts`, `routes/desktop.routes.ts`, `desktop/profile.ts` (docs).
+- Schema/migrations: none.
+- Tests: gate (nonce without token, wrong nonce length), proof vector, shutdown drain; host side: `cl-host` verifies the proof and tests an impostor that answers 200 without it.
+- Server appliance impact: none (all behind `isDesktop()`).
+- Status: Proposed — 2026-10-15. Not started.
 
 ## Entry template
 
