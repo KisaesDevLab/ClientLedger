@@ -7,6 +7,7 @@ mod engine_test;
 mod layering;
 mod licenses;
 mod meta;
+mod nofloat;
 mod pg_fetch;
 
 use anyhow::{Result, bail};
@@ -18,6 +19,7 @@ usage: cargo xtask <command>
   test [args]        cargo test (whole workspace unless -p is given), CL_OFFLINE_TESTS=1
   licenses           direct dependencies must be MIT or Apache-2.0
   layering           crate dependency rules from CLAUDE.md
+  nofloat            no floating point in cl-core and cl-api src (syn scan)
   engine [--smoke] [--force]
                      build the engine single executable into target/engine/<target>
   engine-test [-- <vitest args>]
@@ -60,6 +62,15 @@ pub(crate) fn run_layering() -> Result<()> {
     )
 }
 
+pub(crate) fn run_nofloat() -> Result<()> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    report(
+        "nofloat",
+        "no floating point in cl-core or cl-api",
+        &nofloat::check(&root)?,
+    )
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -67,6 +78,7 @@ fn main() -> Result<()> {
         Some("test") => ci::test(&args[1..]),
         Some("licenses") => run_licenses(),
         Some("layering") => run_layering(),
+        Some("nofloat") => run_nofloat(),
         Some("engine") => engine::engine(&args[1..]),
         Some("engine-test") => engine_test::engine_test(&args[1..]),
         Some("pg-fetch") => pg_fetch::pg_fetch(&args[1..]),

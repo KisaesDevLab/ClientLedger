@@ -83,6 +83,7 @@ pub fn ci() -> Result<()> {
 
     step("licenses", crate::run_licenses());
     step("layering", crate::run_layering());
+    step("nofloat", crate::run_nofloat());
 
     if failures.is_empty() {
         println!("ci: all gates passed");
