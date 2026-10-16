@@ -236,11 +236,11 @@ fn start(paths: &AppPaths, opts: &Options) -> ExitCode {
     }
 
     println!("starting (engine: {})", engine_exe.display());
-    let sup = Supervisor::spawn(HostConfig::new(paths.clone(), engine_exe));
+    let sup = Supervisor::spawn(HostConfig::new(paths.clone(), engine_exe), guard);
     let mut announced = false;
     let code = loop {
         let status = sup.status();
-        guard.set_status(&status.summary());
+        sup.instance().set_status(&status.summary());
         if !announced {
             for notice in &status.notices {
                 println!("notice: {notice}");
@@ -258,12 +258,12 @@ fn start(paths: &AppPaths, opts: &Options) -> ExitCode {
             HostState::Stopped => break ExitCode::SUCCESS,
             _ => {}
         }
-        if interrupted.load(Ordering::SeqCst) || guard.stop_requested() {
+        if interrupted.load(Ordering::SeqCst) || sup.instance().stop_requested() {
             break ExitCode::SUCCESS;
         }
         std::thread::sleep(Duration::from_millis(250));
     };
-    guard.set_status("state=stopping");
+    sup.instance().set_status("state=stopping");
     println!("stopping");
     sup.stop();
     println!("stopped");

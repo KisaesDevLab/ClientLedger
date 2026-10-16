@@ -73,8 +73,17 @@ fn fake_db() -> (Arc<FakeDbState>, DatabaseFactory) {
     (state, factory)
 }
 
+/// Take the single-instance guard for the config's folders, as the app does.
+fn spawn_with(cfg: HostConfig, factory: DatabaseFactory) -> Supervisor {
+    let guard = match cl_host::acquire(&cfg.paths).unwrap() {
+        cl_host::Acquired::First(g) => g,
+        cl_host::Acquired::Second => panic!("another instance holds the lock"),
+    };
+    Supervisor::spawn_with(cfg, guard, factory)
+}
+
 fn start(cfg: HostConfig, factory: DatabaseFactory) -> Result<Supervisor> {
-    let sup = Supervisor::spawn_with(cfg, factory);
+    let sup = spawn_with(cfg, factory);
     sup.wait_ready(Duration::from_mins(1))?;
     Ok(sup)
 }
@@ -251,7 +260,7 @@ fn three_failed_restarts_become_a_host_fault_with_log_paths() {
     let cfg = fake_config(&scratch)
         .with_engine_env("FAKE_COUNTER", counter.to_str().unwrap())
         .with_engine_env("FAKE_FAIL_FIRST", "100");
-    let sup = Supervisor::spawn_with(cfg, factory);
+    let sup = spawn_with(cfg, factory);
     let err = sup.wait_ready(Duration::from_mins(1)).unwrap_err();
     let HostError::Fault(fault) = err else {
         panic!("expected a fault, got {err:?}");
@@ -298,7 +307,7 @@ fn an_engine_that_keeps_dying_after_it_is_ready_ends_in_a_fault() {
     let cfg = fake_config(&scratch)
         .with_engine_env("FAKE_COUNTER", counter.to_str().unwrap())
         .with_engine_env("FAKE_DIE_AFTER_MS", "400");
-    let sup = Supervisor::spawn_with(cfg, factory);
+    let sup = spawn_with(cfg, factory);
     assert!(
         sup.wait_for(Duration::from_mins(1), |s| matches!(
             s.state,
@@ -319,7 +328,7 @@ fn a_configuration_error_is_not_retried() {
     let cfg = fake_config(&scratch)
         .with_engine_env("FAKE_COUNTER", counter.to_str().unwrap())
         .with_engine_env("FAKE_FATAL", "1");
-    let sup = Supervisor::spawn_with(cfg, factory);
+    let sup = spawn_with(cfg, factory);
     let HostError::Fault(fault) = sup.wait_ready(Duration::from_secs(30)).unwrap_err() else {
         panic!("expected a fault");
     };
@@ -337,7 +346,7 @@ fn a_superuser_engine_is_refused() {
     let scratch = Scratch::new("superuser");
     let (_db, factory) = fake_db();
     let cfg = fake_config(&scratch).with_engine_env("FAKE_SUPERUSER", "1");
-    let sup = Supervisor::spawn_with(cfg, factory);
+    let sup = spawn_with(cfg, factory);
     let HostError::Fault(fault) = sup.wait_ready(Duration::from_secs(30)).unwrap_err() else {
         panic!("expected a fault");
     };
@@ -355,7 +364,7 @@ fn a_wrong_engine_version_is_refused() {
     let (_db, factory) = fake_db();
     let mut cfg = fake_config(&scratch);
     cfg.expected_engine_commit = Some("somethingelse".into());
-    let sup = Supervisor::spawn_with(cfg, factory);
+    let sup = spawn_with(cfg, factory);
     assert!(matches!(
         sup.wait_ready(Duration::from_secs(30)),
         Err(HostError::Fault(_))
@@ -369,7 +378,7 @@ fn an_engine_that_never_says_ready_is_a_fault_after_the_retries() {
     let (_db, factory) = fake_db();
     let mut cfg = fake_config(&scratch).with_engine_env("FAKE_NO_READY", "1");
     cfg.policy.ready_timeout = Duration::from_millis(400);
-    let sup = Supervisor::spawn_with(cfg, factory);
+    let sup = spawn_with(cfg, factory);
     let HostError::Fault(fault) = sup.wait_ready(Duration::from_mins(1)).unwrap_err() else {
         panic!("expected a fault");
     };
@@ -387,7 +396,7 @@ fn an_engine_that_never_answers_health_is_a_fault() {
     let (_db, factory) = fake_db();
     let mut cfg = fake_config(&scratch).with_engine_env("FAKE_HANG_HEALTH", "1");
     cfg.policy.health_ready_timeout = Duration::from_millis(600);
-    let sup = Supervisor::spawn_with(cfg, factory);
+    let sup = spawn_with(cfg, factory);
     let HostError::Fault(fault) = sup.wait_ready(Duration::from_mins(1)).unwrap_err() else {
         panic!("expected a fault");
     };
@@ -404,7 +413,7 @@ fn a_database_that_will_not_start_is_a_fault_with_its_log_paths() {
     let scratch = Scratch::new("fault-db");
     let (db, factory) = fake_db();
     db.fail_next_starts.store(100, Ordering::SeqCst);
-    let sup = Supervisor::spawn_with(fake_config(&scratch), factory);
+    let sup = spawn_with(fake_config(&scratch), factory);
     let HostError::Fault(fault) = sup.wait_ready(Duration::from_mins(1)).unwrap_err() else {
         panic!("expected a fault");
     };
@@ -423,7 +432,7 @@ fn a_database_failure_never_starts_the_engine() {
     db.fail_next_starts.store(100, Ordering::SeqCst);
     let report = scratch.file("report.txt");
     let cfg = fake_config(&scratch).with_engine_env("FAKE_REPORT", report.to_str().unwrap());
-    let sup = Supervisor::spawn_with(cfg, factory);
+    let sup = spawn_with(cfg, factory);
     let _ = sup.wait_ready(Duration::from_mins(1));
     assert!(
         !report.exists(),
@@ -441,7 +450,7 @@ fn a_stale_engine_error_text_never_contains_the_token() {
         .with_engine_env("FAKE_REPORT", report.to_str().unwrap())
         .with_engine_env("FAKE_LEAK_TOKEN", "1")
         .with_engine_env("FAKE_DIE_AFTER_MS", "300");
-    let sup = Supervisor::spawn_with(cfg, factory);
+    let sup = spawn_with(cfg, factory);
     assert!(sup.wait_for(Duration::from_mins(1), |s| matches!(
         s.state,
         HostState::Fault(_)
@@ -505,7 +514,7 @@ fn setup_calls_report_not_running_while_the_engine_is_down() {
     let scratch = Scratch::new("init-down");
     let (db, factory) = fake_db();
     db.fail_next_starts.store(100, Ordering::SeqCst);
-    let sup = Supervisor::spawn_with(fake_config(&scratch), factory);
+    let sup = spawn_with(fake_config(&scratch), factory);
     let _ = sup.wait_ready(Duration::from_mins(1));
     assert!(matches!(sup.engine_info(), Err(HostError::NotRunning)));
     sup.stop();
@@ -529,7 +538,7 @@ fn an_existing_cluster_with_no_master_secret_is_never_given_a_new_one() {
     let scratch = Scratch::new("no-master");
     make_cluster_exist(&scratch);
     let (db, factory) = fake_db();
-    let sup = Supervisor::spawn_with(fake_config(&scratch), factory);
+    let sup = spawn_with(fake_config(&scratch), factory);
     let HostError::Fault(fault) = sup.wait_ready(Duration::from_secs(30)).unwrap_err() else {
         panic!("expected a fault");
     };
@@ -553,7 +562,7 @@ fn a_keychain_that_fails_its_probe_cannot_cause_a_new_secret() {
     let fallback =
         cl_pg::EncryptedFileStore::beside_for_purpose(&scratch.paths().pg_data(), "host-master");
     cfg.secrets_store = Some(Arc::new(fallback.clone()));
-    let sup = Supervisor::spawn_with(cfg, factory);
+    let sup = spawn_with(cfg, factory);
     assert!(matches!(
         sup.wait_ready(Duration::from_secs(30)),
         Err(HostError::Fault(_))
@@ -615,4 +624,33 @@ fn a_panic_in_the_supervisor_becomes_a_fault_and_stops_the_engine() {
     );
     assert!(sup.endpoint().is_none());
     sup.stop();
+}
+
+#[test]
+fn only_one_supervisor_can_run_per_user_and_it_owns_the_instance_endpoint() {
+    let scratch = Scratch::new("one-only");
+    let (_db, factory) = fake_db();
+    let cfg = fake_config(&scratch);
+    let paths = cfg.paths.clone();
+    let sup = start(cfg, factory).unwrap();
+    assert!(matches!(
+        cl_host::acquire(&paths).unwrap(),
+        cl_host::Acquired::Second
+    ));
+    // A stop request from outside (the CLI) is visible through the supervisor.
+    sup.instance().set_status(&sup.status().summary());
+    assert!(
+        cl_host::send(&paths, cl_host::Request::Status)
+            .unwrap()
+            .contains("state=running")
+    );
+    assert!(!sup.instance().stop_requested());
+    assert_eq!(cl_host::send(&paths, cl_host::Request::Stop).unwrap(), "ok");
+    assert!(sup.instance().stop_requested());
+    sup.stop();
+    // After shutdown the next launch can take over.
+    assert!(matches!(
+        cl_host::acquire(&paths).unwrap(),
+        cl_host::Acquired::First(_)
+    ));
 }

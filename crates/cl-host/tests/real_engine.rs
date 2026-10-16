@@ -71,6 +71,14 @@ fn env() -> Option<Env> {
     Some(Env { engine, pg })
 }
 
+fn start_real(cfg: HostConfig) -> Supervisor {
+    let guard = match cl_host::acquire(&cfg.paths).unwrap() {
+        cl_host::Acquired::First(g) => g,
+        cl_host::Acquired::Second => panic!("another instance holds the lock"),
+    };
+    Supervisor::start(cfg, guard).unwrap()
+}
+
 fn budget_secs() -> u64 {
     std::env::var("CL_HOST_BUDGET_SECS")
         .ok()
@@ -105,7 +113,7 @@ fn cold_and_warm_starts_meet_the_budget_and_nothing_is_left_behind() {
 
     // Cold: new cluster, new database role, engine migrations.
     let t0 = Instant::now();
-    let sup = Supervisor::start(real_config(&scratch, &env, &pg_store, &secrets)).unwrap();
+    let sup = start_real(real_config(&scratch, &env, &pg_store, &secrets));
     let cold = t0.elapsed();
     eprintln!("cold start: {cold:?}");
     assert!(
@@ -191,7 +199,7 @@ fn cold_and_warm_starts_meet_the_budget_and_nothing_is_left_behind() {
 
     // Warm: same data, secrets from the same stores.
     let t1 = Instant::now();
-    let sup = Supervisor::start(real_config(&scratch, &env, &pg_store, &secrets)).unwrap();
+    let sup = start_real(real_config(&scratch, &env, &pg_store, &secrets));
     let warm = t1.elapsed();
     eprintln!("warm start: {warm:?}");
     assert!(
@@ -210,7 +218,7 @@ fn killing_the_engine_or_the_database_restarts_them() {
     let scratch = Scratch::new("real-kill");
     let pg_store = Arc::new(MemoryStore::new());
     let secrets = Arc::new(MemoryStore::new());
-    let sup = Supervisor::start(real_config(&scratch, &env, &pg_store, &secrets)).unwrap();
+    let sup = start_real(real_config(&scratch, &env, &pg_store, &secrets));
 
     // Engine killed while idle.
     let first = sup.status();

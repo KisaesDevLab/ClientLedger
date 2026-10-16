@@ -11,6 +11,7 @@ use crate::database::{DatabaseFactory, DatabaseService, DbEndpoint, PgService};
 use crate::desktop::{self, AdminAccount, CompanySeed, DesktopError, DesktopInfo, Initialized};
 use crate::engine::{self, EngineProcess, LaunchError, LaunchPlan, Scrubber};
 use crate::health::{self, HealthError, HealthReport};
+use crate::instance_lock::InstanceGuard;
 use crate::logs::{self, HostLog, LogPolicy};
 use crate::procs;
 use crate::secrets::{EngineSecrets, MASTER_PURPOSE};
@@ -316,13 +317,17 @@ pub struct Supervisor {
     stop_tx: Option<Sender<()>>,
     thread: Option<JoinHandle<()>>,
     start_budget: Duration,
+    /// Held for the supervisor's whole life, so two supervisors can never run
+    /// for one user. Declared last: released after everything has stopped.
+    guard: InstanceGuard,
 }
 
 impl Supervisor {
     /// Start supervising on a background thread and return at once; the state
-    /// is `Starting` until both programs are healthy.
+    /// is `Starting` until both programs are healthy. The caller must already
+    /// hold the single-instance `guard` (see `acquire`); the supervisor keeps it.
     #[must_use]
-    pub fn spawn(config: HostConfig) -> Supervisor {
+    pub fn spawn(config: HostConfig, guard: InstanceGuard) -> Supervisor {
         let paths = config.paths.clone();
         let bins = config.pg_binaries.clone();
         let pg_store = config.pg_password_store.clone();
@@ -331,12 +336,16 @@ impl Supervisor {
                 PgService::open(&paths, bins, pg_store, secrets.app_db_password.clone())?;
             Ok((Box::new(svc) as Box<dyn DatabaseService>, notices))
         });
-        Self::spawn_with(config, factory)
+        Self::spawn_with(config, guard, factory)
     }
 
     /// [`Supervisor::spawn`] with a custom database (tests use a fake).
     #[must_use]
-    pub fn spawn_with(config: HostConfig, database: DatabaseFactory) -> Supervisor {
+    pub fn spawn_with(
+        config: HostConfig,
+        guard: InstanceGuard,
+        database: DatabaseFactory,
+    ) -> Supervisor {
         let shared = Arc::new(Shared {
             inner: Mutex::new(Inner {
                 status: HostStatus {
@@ -391,6 +400,7 @@ impl Supervisor {
             stop_tx: Some(stop_tx),
             thread,
             start_budget,
+            guard,
         }
     }
 
@@ -398,10 +408,17 @@ impl Supervisor {
     ///
     /// # Errors
     /// [`HostError::Fault`] if a component could not be started.
-    pub fn start(config: HostConfig) -> Result<Supervisor> {
-        let sup = Self::spawn(config);
+    pub fn start(config: HostConfig, guard: InstanceGuard) -> Result<Supervisor> {
+        let sup = Self::spawn(config, guard);
         sup.wait_ready(sup.start_budget)?;
         Ok(sup)
+    }
+
+    /// The single-instance guard this supervisor holds: use it to publish
+    /// status and to see `focus` and `stop` requests.
+    #[must_use]
+    pub fn instance(&self) -> &InstanceGuard {
+        &self.guard
     }
 
     /// A snapshot of the state.
