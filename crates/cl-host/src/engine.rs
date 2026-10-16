@@ -246,6 +246,47 @@ impl LaunchError {
     }
 }
 
+/// Longest line kept from the engine; the rest of a longer line is discarded.
+const MAX_LINE_BYTES: usize = 64 * 1024;
+
+/// Call `f` for every line of `reader`, however odd the bytes: invalid UTF-8
+/// is replaced, a line longer than [`MAX_LINE_BYTES`] is cut (the rest is
+/// skipped), and reading continues to the end so the child never blocks on a
+/// full pipe.
+pub(crate) fn for_each_line(reader: impl std::io::Read, mut f: impl FnMut(&str)) {
+    let mut r = BufReader::new(reader);
+    let mut line: Vec<u8> = Vec::new();
+    let emit = |line: &mut Vec<u8>, f: &mut dyn FnMut(&str)| {
+        let text = String::from_utf8_lossy(line);
+        f(text.trim_end_matches('\r'));
+        line.clear();
+    };
+    let keep = |line: &mut Vec<u8>, chunk: &[u8]| {
+        let room = MAX_LINE_BYTES.saturating_sub(line.len());
+        line.extend_from_slice(&chunk[..chunk.len().min(room)]);
+    };
+    loop {
+        let buf = match r.fill_buf() {
+            Ok([]) => break,
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        };
+        if let Some(i) = buf.iter().position(|&b| b == b'\n') {
+            keep(&mut line, &buf[..i]);
+            r.consume(i + 1);
+            emit(&mut line, &mut f);
+        } else {
+            let n = buf.len();
+            keep(&mut line, buf);
+            r.consume(n);
+        }
+    }
+    if !line.is_empty() {
+        emit(&mut line, &mut f);
+    }
+}
+
 /// Read a ready line: `{"event":"listening","host":"127.0.0.1","port":54321}`.
 pub(crate) fn parse_ready_line(line: &str) -> Option<(String, u16)> {
     let v: Value = serde_json::from_str(line.trim()).ok()?;
@@ -309,27 +350,17 @@ pub(crate) fn launch(
     if let Some(stdout) = child.stdout.take() {
         let (out, scrub) = (Arc::clone(&output), scrubber.clone());
         std::thread::spawn(move || {
-            for line in BufReader::new(stdout)
-                .lines()
-                .map_while(std::result::Result::ok)
-            {
-                if let Some(ready) = parse_ready_line(&line) {
+            for_each_line(stdout, |line| {
+                if let Some(ready) = parse_ready_line(line) {
                     let _ = ready_tx.send(ready);
                 }
-                push_line(&out, &scrub, &line);
-            }
+                push_line(&out, &scrub, line);
+            });
         });
     }
     if let Some(stderr) = child.stderr.take() {
         let (out, scrub) = (Arc::clone(&output), scrubber.clone());
-        std::thread::spawn(move || {
-            for line in BufReader::new(stderr)
-                .lines()
-                .map_while(std::result::Result::ok)
-            {
-                push_line(&out, &scrub, &line);
-            }
-        });
+        std::thread::spawn(move || for_each_line(stderr, |line| push_line(&out, &scrub, line)));
     }
     let mut proc = EngineProcess {
         child,
@@ -484,6 +515,32 @@ mod tests {
             build_env(&plan),
             Err(HostError::NotAbsolute { .. })
         ));
+    }
+
+    fn lines_of(bytes: &[u8]) -> Vec<String> {
+        let mut out = Vec::new();
+        for_each_line(bytes, |l| out.push(l.to_string()));
+        out
+    }
+
+    #[test]
+    fn lines_survive_invalid_utf8_crlf_and_a_missing_final_newline() {
+        let got = lines_of(b"one\r\ntw\xffo\nlast");
+        let bad = format!("tw{}o", char::REPLACEMENT_CHARACTER);
+        assert_eq!(got, ["one", bad.as_str(), "last"]);
+        assert!(lines_of(b"").is_empty());
+    }
+
+    #[test]
+    fn a_huge_line_is_cut_and_reading_continues_to_the_ready_line() {
+        let mut data = vec![b'x'; 5 * 1024 * 1024];
+        data.extend_from_slice(
+            b"\n{\"event\":\"listening\",\"host\":\"127.0.0.1\",\"port\":4242}\n",
+        );
+        let got = lines_of(&data);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].len(), MAX_LINE_BYTES);
+        assert_eq!(parse_ready_line(&got[1]), Some(("127.0.0.1".into(), 4242)));
     }
 
     #[test]
