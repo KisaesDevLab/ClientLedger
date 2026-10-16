@@ -42,6 +42,31 @@ pub(crate) struct LaunchPlan<'a> {
     pub secrets: &'a EngineSecrets,
     /// Extra variables for tests (a fake engine's behaviour switches).
     pub extra_env: &'a [(String, String)],
+    /// The "work offline" setting, passed on as `CL_OFFLINE`.
+    pub offline: OfflineSetting,
+}
+
+/// The owner's "work offline" preference (P09 shows it). The engine reads it
+/// as `CL_OFFLINE`: `auto` keeps online features available when the owner has
+/// turned them on, `on` makes every online feature answer `OFFLINE_UNAVAILABLE`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OfflineSetting {
+    /// Online features work when the owner configured them.
+    #[default]
+    Auto,
+    /// Never use the network.
+    On,
+}
+
+impl OfflineSetting {
+    /// The value of `CL_OFFLINE`.
+    #[must_use]
+    pub fn as_env(self) -> &'static str {
+        match self {
+            OfflineSetting::Auto => "auto",
+            OfflineSetting::On => "on",
+        }
+    }
 }
 
 fn require_absolute(what: &'static str, path: &Path) -> Result<()> {
@@ -82,7 +107,7 @@ pub(crate) fn build_env(plan: &LaunchPlan<'_>) -> Result<Vec<(String, OsString)>
             text(&ENGINE_LOG_MAX_BYTES.to_string()),
         ),
         ("CL_LOG_KEEP".into(), text(&ENGINE_LOG_KEEP.to_string())),
-        ("CL_OFFLINE".into(), text("auto")),
+        ("CL_OFFLINE".into(), text(plan.offline.as_env())),
         ("CL_REQUIRE_NON_SUPERUSER".into(), text("1")),
         ("CL_ENGINE_RUNTIME_DIR".into(), path(runtime)),
         ("DATABASE_URL".into(), text(plan.db_url.expose())),
@@ -443,6 +468,7 @@ mod tests {
             db_url: &db,
             secrets: &secrets,
             extra_env: extra,
+            offline: OfflineSetting::Auto,
         };
         build_env(&plan).unwrap().into_iter().collect()
     }
@@ -533,6 +559,7 @@ mod tests {
                 db_url: &db,
                 secrets: &secrets,
                 extra_env: &extra,
+                offline: OfflineSetting::Auto,
             };
             assert!(
                 matches!(build_env(&plan), Err(HostError::BadEngineEnv(_))),
@@ -547,8 +574,42 @@ mod tests {
             db_url: &db,
             secrets: &secrets,
             extra_env: &ok,
+            offline: OfflineSetting::Auto,
         };
         assert!(build_env(&plan).is_ok());
+    }
+
+    #[test]
+    fn the_offline_setting_is_the_only_source_of_cl_offline() {
+        let (paths, token, db, secrets) = plan_parts();
+        let exe = std::env::temp_dir().join("engine.exe");
+        for (setting, want) in [(OfflineSetting::Auto, "auto"), (OfflineSetting::On, "on")] {
+            let plan = LaunchPlan {
+                exe: &exe,
+                paths: &paths,
+                token: &token,
+                db_url: &db,
+                secrets: &secrets,
+                extra_env: &[],
+                offline: setting,
+            };
+            let env: std::collections::BTreeMap<_, _> =
+                build_env(&plan).unwrap().into_iter().collect();
+            assert_eq!(env.get("CL_OFFLINE").unwrap(), want);
+        }
+        assert_eq!(OfflineSetting::default(), OfflineSetting::Auto);
+        // A test hook cannot smuggle in another value.
+        let extra = [("CL_OFFLINE".to_string(), "off".to_string())];
+        let plan = LaunchPlan {
+            exe: &exe,
+            paths: &paths,
+            token: &token,
+            db_url: &db,
+            secrets: &secrets,
+            extra_env: &extra,
+            offline: OfflineSetting::Auto,
+        };
+        assert!(matches!(build_env(&plan), Err(HostError::BadEngineEnv(_))));
     }
 
     #[test]
@@ -561,6 +622,7 @@ mod tests {
             db_url: &db,
             secrets: &secrets,
             extra_env: &[],
+            offline: OfflineSetting::Auto,
         };
         assert!(matches!(
             build_env(&plan),

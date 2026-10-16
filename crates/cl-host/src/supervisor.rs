@@ -9,7 +9,7 @@
 
 use crate::database::{DatabaseFactory, DatabaseService, DbEndpoint, PgService};
 use crate::desktop::{self, AdminAccount, CompanySeed, DesktopError, DesktopInfo, Initialized};
-use crate::engine::{self, EngineProcess, LaunchError, LaunchPlan, Scrubber};
+use crate::engine::{self, EngineProcess, LaunchError, LaunchPlan, OfflineSetting, Scrubber};
 use crate::health::{self, HealthError, HealthReport};
 use crate::instance_lock::InstanceGuard;
 use crate::logs::{self, HostLog, LogPolicy};
@@ -245,6 +245,8 @@ pub struct HostConfig {
     pub policy: RestartPolicy,
     /// When set, the engine must report exactly this source commit.
     pub expected_engine_commit: Option<String>,
+    /// "Work offline": passed to the engine as `CL_OFFLINE` (`Auto` by default).
+    pub offline: OfflineSetting,
     extra_engine_env: Vec<(String, String)>,
 }
 
@@ -270,6 +272,7 @@ impl HostConfig {
             secrets_store: None,
             policy: RestartPolicy::default(),
             expected_engine_commit: None,
+            offline: OfflineSetting::Auto,
             extra_engine_env: Vec::new(),
         }
     }
@@ -289,6 +292,40 @@ impl HostConfig {
 struct Inner {
     status: HostStatus,
     endpoint: Option<Endpoint>,
+}
+
+/// Status and endpoint read together. See [`Supervisor::snapshot`].
+#[derive(Debug, Clone)]
+pub struct HostSnapshot {
+    /// The state; never `Running` without an endpoint.
+    pub status: HostStatus,
+    /// Present only while `Running`.
+    pub endpoint: Option<Endpoint>,
+    /// Same as `status.generation`; the endpoint, when present, has this value.
+    pub generation: u64,
+}
+
+impl Inner {
+    fn snapshot(&self) -> HostSnapshot {
+        let mut status = self.status.clone();
+        let mut endpoint = self.endpoint.clone();
+        match (&status.state, &endpoint) {
+            (HostState::Running, None) => {
+                status.state = HostState::Restarting {
+                    component: Component::Engine,
+                    attempt: status.restarts.engine,
+                };
+            }
+            // An endpoint is only meaningful while the engine is running.
+            (state, Some(_)) if *state != HostState::Running => endpoint = None,
+            _ => {}
+        }
+        HostSnapshot {
+            generation: status.generation,
+            status,
+            endpoint,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -421,23 +458,42 @@ impl Supervisor {
         &self.guard
     }
 
-    /// A snapshot of the state.
+    /// One consistent reading of the host: status, endpoint and generation
+    /// taken under a single lock, so they can never disagree (S2). Use this
+    /// rather than calling [`Supervisor::status`] and [`Supervisor::endpoint`]
+    /// separately.
+    ///
+    /// A state of `Running` with no endpoint (a transition caught half-way) is
+    /// reported as `Restarting` for the engine: the caller should wait.
     #[must_use]
-    pub fn status(&self) -> HostStatus {
-        self.shared
+    pub fn snapshot(&self) -> HostSnapshot {
+        let g = self
+            .shared
             .inner
             .lock()
-            .map_or_else(|p| p.into_inner().status.clone(), |g| g.status.clone())
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        g.snapshot()
     }
 
-    /// Where to reach the engine, or `None` while it is down.
+    /// A snapshot of the state (see [`Supervisor::snapshot`]).
+    #[must_use]
+    pub fn status(&self) -> HostStatus {
+        self.snapshot().status
+    }
+
+    /// Where to reach the engine, or `None` while it is down. Published only
+    /// after the listener check for this generation (see the worker's start
+    /// path), and only while the state is `Running`.
     #[must_use]
     pub fn endpoint(&self) -> Option<Endpoint> {
-        self.shared
-            .inner
-            .lock()
-            .ok()
-            .and_then(|g| g.endpoint.clone())
+        self.snapshot().endpoint
+    }
+
+    /// Overwrite the state and endpoint, to reproduce a torn or hostile
+    /// situation in tests. Compiled only with the `test-support` feature.
+    #[cfg(feature = "test-support")]
+    pub fn force_for_test(&self, f: impl FnOnce(&mut HostStatus, &mut Option<Endpoint>)) {
+        self.shared.update(|i| f(&mut i.status, &mut i.endpoint));
     }
 
     /// Block until `Running`.
@@ -490,13 +546,28 @@ impl Supervisor {
         }
     }
 
+    /// The engine's port and token, after confirming that the operating system
+    /// says our own engine process is the only listener on that port. Nothing
+    /// is sent to anyone else (Q-P04n). An unavailable lookup does not block,
+    /// as in the start path (Q-P04m).
+    fn checked_engine(&self) -> Result<(u16, Secret)> {
+        let snap = self.snapshot();
+        let (Some(ep), Some(pid)) = (snap.endpoint, snap.status.engine_pid) else {
+            return Err(HostError::NotRunning);
+        };
+        match health::verify_listener(ep.port, pid) {
+            Err(HealthError::NotOurProcess) => Err(HostError::ForeignListener),
+            Ok(()) | Err(_) => Ok((ep.port, ep.token)),
+        }
+    }
+
     /// Ask the engine whether first-run setup has happened (`GET /info`).
     ///
     /// # Errors
     /// [`HostError::NotRunning`] while the engine is down.
     pub fn engine_info(&self) -> Result<DesktopInfo> {
-        let ep = self.endpoint().ok_or(HostError::NotRunning)?;
-        Ok(desktop::info(ep.port, &ep.token)?)
+        let (port, token) = self.checked_engine()?;
+        Ok(desktop::info(port, &token)?)
     }
 
     /// First-run setup: create the owner (and optionally the first company)
@@ -510,8 +581,8 @@ impl Supervisor {
         admin: &AdminAccount,
         company: Option<&CompanySeed>,
     ) -> Result<Initialized> {
-        let ep = self.endpoint().ok_or(HostError::NotRunning)?;
-        desktop::initialize(ep.port, &ep.token, admin, company).map_err(|e| match e {
+        let (port, token) = self.checked_engine()?;
+        desktop::initialize(port, &token, admin, company).map_err(|e| match e {
             DesktopError::Unreachable(_) => HostError::NotRunning,
             other => HostError::Desktop(other),
         })
@@ -560,6 +631,7 @@ struct Worker {
     engine_exe: PathBuf,
     policy: RestartPolicy,
     expected_commit: Option<String>,
+    offline: OfflineSetting,
     extra_env: Vec<(String, String)>,
     secrets_store: Option<Arc<dyn PasswordStore>>,
     log: HostLog,
@@ -578,6 +650,7 @@ impl Worker {
             engine_exe: config.engine_exe,
             policy: config.policy,
             expected_commit: config.expected_engine_commit,
+            offline: config.offline,
             extra_env: config.extra_engine_env,
             secrets_store: config.secrets_store,
             stop_rx,
@@ -1069,6 +1142,7 @@ impl Worker {
             db_url: &ep.url,
             secrets,
             extra_env: &self.extra_env,
+            offline: self.offline,
         };
         let cancelled = || self.stop_requested();
         let mut proc = engine::launch(&plan, scrubber, self.policy.ready_timeout, &cancelled)
