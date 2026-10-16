@@ -515,8 +515,10 @@ mod tests {
         let port = l.local_addr().unwrap().port();
         std::thread::spawn(move || {
             if let Ok((mut s, _)) = l.accept() {
-                let mut buf = [0u8; 256];
-                let _ = std::io::Read::read(&mut s, &mut buf);
+                // Read the whole request line first: closing with unread data
+                // would reset the connection and race with the client's read.
+                let mut request = String::new();
+                let _ = BufReader::new(&s).read_line(&mut request);
                 let _ = s.write_all(b"\x1b]0;pwned\x07\x1b[2Jhello\n");
             }
         });
