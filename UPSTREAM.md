@@ -8,7 +8,7 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | --- | --- | --- | --- | --- |
 | U-01 | Queue abstraction with pg-boss adapter (desktop) alongside BullMQ (server) | P02 | clientledger/desktop-profile | Planned |
 | U-02 | `CL_MODE=desktop` profile: no Redis (also no `REDIS_URL` requirement in `env.ts`; `/health` must return 200 without it, Q-P01a), env-provided bind address and launch token (`X-CL-Token`), file logging | P02 | clientledger/desktop-mode (E1) | Done (branch), pushed; PR not yet opened (see entry) |
-| U-03 | Connectivity reporting on `/health` plus an `engineCommit` field (Q-P01a); online-only modules return `OfflineUnavailable` fast | P02 | clientledger/desktop-mode (E1: `/health` v2) + clientledger/offline-guard (E4: connectivity) | Done (branch) — E1 `/health` v2; E4 at `7702a6bf`, local only, not pushed, no PR yet |
+| U-03 | Connectivity reporting on `/health` plus an `engineCommit` field (Q-P01a); online-only modules return `OfflineUnavailable` fast | P02 | clientledger/desktop-mode (E1: `/health` v2) + clientledger/offline-guard (E4: connectivity) | Done (branch) — E1 `/health` v2; E4 at `abc0293b` (incl. security-review fixes), local only, not pushed, no PR yet |
 | U-04 | OpenAPI 3.1 export covering all UI routes; committed `openapi.json` | P02 | clientledger/desktop-profile | Planned |
 | U-05 | Tenant lifecycle (list/create/rename/delete) and versioned per-tenant export/import (NDJSON + attachments + manifest) for backups, restores, and transfers | P02, P08 | clientledger/tenant-portability | Planned |
 | U-06 | Endpoint accepting normalized bank-import batches (rows, dedupe keys, source-file hash) into the review queue; parsing is in Rust (Q-11) | P25 | clientledger/bank-import | Planned |
@@ -78,7 +78,29 @@ Add rows as capability checks find gaps (credit memos, statements, finance charg
 - Schema/migrations: none. API: no new routes. New 503 codes `OFFLINE_UNAVAILABLE` and `EGRESS_BLOCKED` (desktop only); the OpenAPI component is added when E2 is integrated (`openapi.json` does not exist on this branch).
 - Server appliance impact: none. The guard is never installed, `CL_OFFLINE` is always `off` (no probes, errors unchanged), the mail factory is plain `nodemailer.createTransport`, and providers are not wrapped.
 - Tests (Windows, PG16, no Redis): full api suite 4904 passed / 30 failed (the known baseline: Redis tax-estimator, BullMQ queue, one Windows path test) / 16 skipped. Not run: Redis suites, Linux/macOS, SEA runtime, the optional `unshare -rn` CI job.
-- Status: Done (branch) — 2026-10-15. Local only; not pushed, no engine PR (per orchestrator). Security-reviewer pass on the guard is pending (plan R11).
+- Security review (2026-10-15; no Critical, one High), all fixed on the branch, `1ffbd065`..`abc0293b`, one commit per item:
+  - H-1: worker threads now run the guard. OCR language data is local only: `OCR_LANG_PATH`, or `<CL_DATA_DIR>/tessdata` on desktop. Missing data gives 503 `OCR_DATA_MISSING`.
+  - M-1 and L-1: Node's string-port rules, and non-string hosts are blocked.
+  - M-2: SMTP host check runs before the probe. Loopback is never "offline", and an inconclusive probe is not cached.
+  - M-3: report PDFs load only `data:`/`about:` and run Chromium with `--disable-background-networking`.
+  - M-4: desktop SMTP defaults to `requireTLS` (except loopback).
+  - L-2: patches are verified, and `index.ts` exits with `EGRESS_GUARD_MISSING` if the guard is absent.
+  - L-3: proxy env vars are removed.
+  - L-4: only exact `localhost` counts as loopback.
+  - L-5: `CL_OFFLINE=on` allows only loopback and the DB.
+  - L-7: no recipient address in the mail error log.
+- Recorded, not implemented (docs/DESKTOP.md "Rules for features that open egress"), for E6:
+  - L-6: validate Ollama/openai_compat base URLs.
+  - AI hosts come from a fixed provider table.
+  - SMTP host must pass `assertHostSafe` and use ports 25/465/587/2525 only.
+  - Only the owner role may add an allowance, and it is cleared when the feature is turned off.
+  - Never widen the guard with `CL_EGRESS_ALLOW`.
+  - L-8: open keep-alive sockets can be reused after an allowance is removed (documented).
+- Packaging follow-ups for P04/xtask:
+  - Ship `eng.traineddata` (Apache-2.0, add to ATTRIBUTION.md) and set `OCR_LANG_PATH`.
+  - Ship `tesseract.js` and `tesseract.js-core` on disk and set `OCR_WORKER_PATH` for the SEA build.
+  - Verify the worker-thread guard in the 4-OS SEA smoke.
+- Status: Done (branch) — 2026-10-15. Local only; not pushed, no engine PR (per orchestrator).
 
 ### U-16 — Engine identity proof and graceful shutdown (proposed)
 - Needed by: not blocking. P04 ships without it (Q-P04d, Q-P04e); P37 hardening should decide.
