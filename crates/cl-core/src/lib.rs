@@ -14,10 +14,12 @@
     clippy::cast_precision_loss
 )]
 
+pub mod dates;
 pub mod ids;
 pub mod money;
 pub mod secret;
 
+pub use dates::{CalendarDate, DateError, Timestamp, Weekday};
 pub use ids::IdError;
 pub use money::{
     AllocUnit, Money, MoneyError, MoneyInputError, MoneyStyle, NegativeStyle, Quantity, Rate,
