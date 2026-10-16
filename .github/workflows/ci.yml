@@ -99,7 +99,12 @@ jobs:
         run: cargo xtask pg-fetch
       - name: Coverage summary
         # TODO(P05): add `--fail-under-lines 80` and make this job required.
-        run: cargo llvm-cov --workspace --exclude xtask --summary-only
+        run: |
+          # cl-host's tests spawn the `fake_engine` example, which `cargo test`
+          # builds but `cargo llvm-cov` does not; build it into the llvm-cov
+          # target dir first (no tests are run by --examples).
+          cargo llvm-cov --no-report --workspace --exclude xtask --examples
+          cargo llvm-cov --workspace --exclude xtask --summary-only
 
   # Engine single executable (P01): built on every OS we ship, smoke-tested
   # against a temporary PostgreSQL, uploaded for later jobs.

@@ -129,7 +129,10 @@ mod tests {
 
     #[test]
     fn a_crate_may_dev_depend_on_itself_to_enable_test_features() {
-        assert!(check(&[m("cl-host", &[("cl-host", true)])]).is_empty());
+        assert_eq!(
+            check(&[m("cl-host", &[("cl-host", true)])]),
+            Vec::<String>::new()
+        );
         // ... but that does not open any other edge.
         assert_eq!(
             check(&[m("cl-core", &[("cl-core", true), ("cl-model", true)])]).len(),
