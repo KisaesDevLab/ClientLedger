@@ -17,6 +17,7 @@
 #![forbid(unsafe_code)]
 
 mod app_role;
+pub use app_role::{APP_DATABASE, APP_ROLE};
 mod binaries;
 mod cluster;
 mod dump;

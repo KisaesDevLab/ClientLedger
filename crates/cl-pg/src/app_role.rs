@@ -13,9 +13,14 @@ use crate::{Cluster, PgError, Result, Secret};
 use postgres::{Client, Config, NoTls};
 use std::time::Duration;
 
+/// Name of the role the engine connects as.
+pub const APP_ROLE: &str = "clientledger_app";
+/// Name of the database that role owns.
+pub const APP_DATABASE: &str = "clientledger";
+
 /// Attributes the application role must have. Applied on every start, so a
 /// restored or hand-edited cluster is brought back in line.
-const ROLE_ATTRIBUTES: &str = "LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT CONNECTION LIMIT -1";
+const ROLE_ATTRIBUTES: &str = "LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT CONNECTION LIMIT -1 VALID UNTIL 'infinity'";
 
 /// A safe, unquoted-looking SQL name: lowercase letters, digits, underscores.
 fn valid_name(name: &str) -> bool {
@@ -99,6 +104,22 @@ impl Cluster {
     }
 }
 
+/// `(role granted, grantor)` for every role the role belongs to.
+fn memberships_of(client: &mut Client, role: &str) -> Result<Vec<(String, String)>> {
+    Ok(client
+        .query(
+            "SELECT g.rolname, gr.rolname FROM pg_auth_members m \
+             JOIN pg_roles g ON g.oid = m.roleid \
+             JOIN pg_roles gr ON gr.oid = m.grantor \
+             JOIN pg_roles u ON u.oid = m.member WHERE u.rolname = $1",
+            &[&role],
+        )
+        .map_err(|e| sql_error("look up role memberships", &e))?
+        .iter()
+        .map(|r| (r.get::<_, String>(0), r.get::<_, String>(1)))
+        .collect())
+}
+
 fn apply(client: &mut Client, role: &str, database: &str, password: &str) -> Result<()> {
     let role_q = quote(role);
     let db_q = quote(database);
@@ -115,30 +136,48 @@ fn apply(client: &mut Client, role: &str, database: &str, password: &str) -> Res
     // Name and password were validated above, so they are safe to inline.
     // Statements are never logged (`log_statement=none`, Q-P03).
     let verb = if exists { "ALTER" } else { "CREATE" };
+    // The server receives a SCRAM verifier computed here, never the plaintext
+    // password, so the password cannot show up in any server-side text.
+    let verifier = postgres_protocol::password::scram_sha_256(password.as_bytes());
+    if verifier.contains('\'') {
+        return Err(PgError::Sql {
+            context: "set up the application role".into(),
+            detail: "unexpected password verifier".into(),
+        });
+    }
     step(
         client,
         "set up the application role",
-        &format!("{verb} ROLE {role_q} WITH {ROLE_ATTRIBUTES} PASSWORD '{password}'"),
+        &format!("{verb} ROLE {role_q} WITH {ROLE_ATTRIBUTES} PASSWORD '{verifier}'"),
+    )?;
+    // Per-role settings (search_path, session_preload_libraries, ...) set by
+    // someone else are removed.
+    step(
+        client,
+        "reset role settings",
+        &format!("ALTER ROLE {role_q} RESET ALL"),
     )?;
 
     // No membership in any other role (pg_execute_server_program and friends).
-    let memberships: Vec<String> = client
-        .query(
-            "SELECT g.rolname FROM pg_auth_members m \
-             JOIN pg_roles g ON g.oid = m.roleid \
-             JOIN pg_roles u ON u.oid = m.member WHERE u.rolname = $1",
-            &[&role],
-        )
-        .map_err(|e| sql_error("look up role memberships", &e))?
-        .iter()
-        .map(|r| r.get::<_, String>(0))
-        .collect();
-    for granted in memberships {
+    // Every row is revoked under its own grantor (a grant made by another
+    // role is not removed by a plain REVOKE), and the result is verified.
+    let memberships = memberships_of(client, role)?;
+    for (granted, grantor) in memberships {
         step(
             client,
             "remove a role membership",
-            &format!("REVOKE {} FROM {role_q}", quote(&granted)),
+            &format!(
+                "REVOKE {} FROM {role_q} GRANTED BY {}",
+                quote(&granted),
+                quote(&grantor)
+            ),
         )?;
+    }
+    if !memberships_of(client, role)?.is_empty() {
+        return Err(PgError::Sql {
+            context: "remove role memberships".into(),
+            detail: "the application role still belongs to another role".into(),
+        });
     }
 
     let owner: Option<String> = client
@@ -163,6 +202,11 @@ fn apply(client: &mut Client, role: &str, database: &str, password: &str) -> Res
         )?,
     }
 
+    step(
+        client,
+        "reset database settings",
+        &format!("ALTER DATABASE {db_q} RESET ALL"),
+    )?;
     // Nobody but the owner may use the application database, and the role has
     // no business in the system databases.
     step(

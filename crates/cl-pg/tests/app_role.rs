@@ -84,6 +84,8 @@ fn the_app_role_owns_its_database_and_has_no_other_power() {
             "app role must not connect to {db}"
         );
     }
+    // Even the superuser cannot open the books: pg_hba only lets it into `postgres`.
+    assert!(common::connect_with(port, DB, cluster.connection(port).password.expose()).is_err());
     // A wrong password is refused.
     assert!(connect_app(port, DB, &Secret::new("wrong")).is_err());
     cluster.stop().unwrap();
@@ -105,7 +107,7 @@ fn running_it_again_repairs_attributes_memberships_and_the_password() {
         .batch_execute(
             "ALTER ROLE clientledger_app CREATEROLE CREATEDB REPLICATION BYPASSRLS; \
              GRANT pg_read_server_files, pg_execute_server_program TO clientledger_app; \
-             ALTER DATABASE clientledger OWNER TO postgres",
+             ALTER DATABASE clientledger OWNER TO postgres;              ALTER ROLE clientledger_app SET search_path = evil;              ALTER DATABASE clientledger SET search_path = evil;              ALTER ROLE clientledger_app VALID UNTIL '2000-01-01';              CREATE ROLE other_grantor SUPERUSER;              SET ROLE other_grantor; \n             GRANT pg_write_server_files TO clientledger_app; \n             RESET ROLE",
         )
         .unwrap();
 
@@ -139,6 +141,16 @@ fn running_it_again_repairs_attributes_memberships_and_the_password() {
         .unwrap()
         .get(0);
     assert_eq!(owner, ROLE);
+
+    // Settings, expiry and a grant made by another role are gone too.
+    let leftovers: i64 = admin
+        .query_one(
+            "SELECT (SELECT count(*) FROM pg_db_role_setting s WHERE s.setrole = r.oid                        OR s.setdatabase = (SELECT oid FROM pg_database WHERE datname = 'clientledger'))                     + (CASE WHEN r.rolvaliduntil IS NULL OR r.rolvaliduntil = 'infinity' THEN 0 ELSE 1 END)              FROM pg_roles r WHERE r.rolname = $1",
+            &[&ROLE],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(leftovers, 0);
 
     // The new password works and the old one does not.
     assert!(connect_app(port, DB, &second).is_ok());

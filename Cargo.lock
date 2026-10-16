@@ -424,6 +424,7 @@ dependencies = [
  "getrandom",
  "keyring",
  "postgres",
+ "postgres-protocol",
  "sha2",
  "tar",
  "thiserror 2.0.21",

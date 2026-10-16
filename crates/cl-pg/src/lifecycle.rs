@@ -127,7 +127,7 @@ pub(crate) fn server_pins(data_dir: &std::path::Path, port: u16) -> String {
         }
     };
     format!(
-        "-c listen_addresses=127.0.0.1 -c port={port}          -c unix_socket_directories= -c shared_preload_libraries=          -c archive_mode=off -c ssl=off -c log_statement=none          -c log_error_verbosity=terse          -c \"hba_file={}\" -c \"ident_file={}\"",
+        "-c listen_addresses=127.0.0.1 -c port={port}          -c unix_socket_directories= -c shared_preload_libraries=          -c archive_mode=off -c ssl=off -c log_statement=none          -c log_error_verbosity=terse -c log_min_error_statement=panic          -c \"hba_file={}\" -c \"ident_file={}\"",
         file("pg_hba.conf"),
         file("pg_ident.conf")
     )
@@ -454,6 +454,7 @@ mod tests {
             "-c archive_mode=off",
             "-c ssl=off",
             "-c log_statement=none",
+            "-c log_min_error_statement=panic",
             "pgdata/pg_hba.conf\"",
             "pgdata/pg_ident.conf\"",
             "-c \"hba_file=",

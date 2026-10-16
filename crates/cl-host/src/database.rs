@@ -11,10 +11,7 @@ use cl_pg::{Cluster, PasswordStore, PgBinaries, Secret};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Name of the role the engine connects as.
-pub const APP_ROLE: &str = "clientledger_app";
-/// Name of the database that role owns.
-pub const APP_DATABASE: &str = "clientledger";
+pub use cl_pg::{APP_DATABASE, APP_ROLE};
 
 /// Where the engine should connect.
 #[derive(Debug, Clone)]

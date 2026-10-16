@@ -20,7 +20,7 @@ impl Drop for Guard<'_> {
 /// characters, and enough rows to span many pages.
 fn populate(cluster: &Cluster, port: u16) {
     let mut db = common::connect(cluster, port, "postgres");
-    db.batch_execute("create database company").unwrap();
+    db.batch_execute("select 1").unwrap();
     db.batch_execute(
         "create table accounts(id serial primary key, name text not null, balance numeric(14,2));
          insert into accounts(name, balance)
@@ -31,7 +31,7 @@ fn populate(cluster: &Cluster, port: u16) {
     )
     .unwrap();
     drop(db);
-    let mut db = common::connect(cluster, port, "company");
+    let mut db = common::connect(cluster, port, "postgres");
     db.batch_execute(
         "create table invoices(id bigint primary key, total numeric(14,2), memo text);
          insert into invoices select g, g * 10.05, 'memo ' || md5(g::text) from generate_series(1, 2000) g;
@@ -42,7 +42,7 @@ fn populate(cluster: &Cluster, port: u16) {
 
 fn all_checksums(cluster: &Cluster, port: u16) -> BTreeMap<String, (i64, String)> {
     let mut all = common::table_checksums(cluster, port, "postgres");
-    all.extend(common::table_checksums(cluster, port, "company"));
+    all.extend(common::table_checksums(cluster, port, "postgres"));
     all
 }
 
@@ -76,8 +76,8 @@ fn dump_then_restore_gives_identical_tables() {
     populate(&cluster, running.port);
     let before = all_checksums(&cluster, running.port);
     assert_eq!(before["postgres.accounts"].0, 3000);
-    assert_eq!(before["company.invoices"].0, 2000);
-    assert_eq!(before["company.empty_table"].0, 0);
+    assert_eq!(before["postgres.invoices"].0, 2000);
+    assert_eq!(before["postgres.empty_table"].0, 0);
 
     // Back up while running: the server stops, is archived, and comes back.
     let backup = scratch.path("backups").join("cluster.tar.gz");
@@ -110,7 +110,7 @@ fn dump_then_restore_gives_identical_tables() {
     }
 
     // Wreck the data, then restore.
-    let mut db = common::connect(&cluster, after_dump.port, "company");
+    let mut db = common::connect(&cluster, after_dump.port, "postgres");
     db.batch_execute("drop table invoices; insert into empty_table values (1)")
         .unwrap();
     drop(db);

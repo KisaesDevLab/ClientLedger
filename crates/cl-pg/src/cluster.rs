@@ -14,10 +14,13 @@ pub(crate) const INCLUDE_LINE: &str = "include_if_exists = 'clientledger.conf'";
 /// portable fallback (Q-P03b).
 const LOCALES: [&str; 2] = ["C.UTF-8", "C"];
 
-/// The only login rule: password (SCRAM) over loopback TCP.
+/// The only login rules: password (SCRAM) over loopback TCP, the superuser
+/// only to the `postgres` maintenance database and the application role only
+/// to its own database. The superuser can never open the books.
 pub(crate) const HBA: &str = "\
 # Managed by ClientLedger. Rewritten on every start; do not edit.
-host    all    all    127.0.0.1/32    scram-sha-256
+host    postgres          postgres            127.0.0.1/32    scram-sha-256
+host    clientledger      clientledger_app    127.0.0.1/32    scram-sha-256
 ";
 
 /// A `PostgreSQL` cluster `ClientLedger` owns.
@@ -231,11 +234,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hba_has_a_single_scram_loopback_rule() {
+    fn hba_has_two_narrow_scram_loopback_rules() {
         let rules: Vec<&str> = HBA.lines().filter(|l| !l.starts_with('#')).collect();
-        assert_eq!(rules.len(), 1);
-        assert!(rules[0].contains("127.0.0.1/32"));
-        assert!(rules[0].contains("scram-sha-256"));
+        assert_eq!(rules.len(), 2);
+        for r in &rules {
+            assert!(r.contains("127.0.0.1/32"));
+            assert!(r.contains("scram-sha-256"));
+            assert!(!r.contains(" all "), "{r}");
+        }
+        assert!(rules[0].contains("postgres") && !rules[0].contains("clientledger"));
+        assert!(rules[1].contains("clientledger_app"));
         assert!(!HBA.contains("trust"));
     }
 
