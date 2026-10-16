@@ -83,7 +83,6 @@ pub struct InstanceGuard {
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
     control_path: PathBuf,
-    addr: SocketAddr,
 }
 
 /// Result of [`acquire`].
@@ -141,7 +140,6 @@ pub fn acquire(paths: &AppPaths) -> Result<Acquired> {
         shared,
         thread: Some(thread),
         control_path: control,
-        addr,
     }))
 }
 
@@ -169,8 +167,6 @@ impl InstanceGuard {
 impl Drop for InstanceGuard {
     fn drop(&mut self) {
         self.shared.shutdown.store(true, Ordering::SeqCst);
-        // Wake the blocked accept().
-        let _ = TcpStream::connect_timeout(&self.addr, Duration::from_millis(500));
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
@@ -208,13 +204,20 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 }
 
 fn serve(listener: &TcpListener, key: &Secret, shared: &Shared) {
-    for conn in listener.incoming() {
-        if shared.shutdown.load(Ordering::SeqCst) {
-            return;
+    // Polling accept: shutting down never depends on a wake-up connection.
+    let _ = listener.set_nonblocking(true);
+    while !shared.shutdown.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                // One slow or malicious client must not block the next one for long.
+                let _ = stream.set_nonblocking(false);
+                let _ = handle(stream, key, shared);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(100)),
         }
-        let Ok(stream) = conn else { continue };
-        // One slow or malicious client must not block the next one for long.
-        let _ = handle(stream, key, shared);
     }
 }
 
@@ -434,7 +437,15 @@ mod tests {
     fn the_endpoint_listens_on_loopback_only() {
         let paths = scratch("loop");
         let first = guard(acquire(&paths).unwrap());
-        assert!(first.addr.ip().is_loopback());
+        let text = fs::read_to_string(control_path(&paths)).unwrap();
+        let port: u16 = text.lines().next().unwrap().parse().unwrap();
+        let all = listeners::get_all().unwrap();
+        let mine: Vec<_> = all
+            .iter()
+            .filter(|l| l.socket.port() == port && l.process.pid == std::process::id())
+            .collect();
+        assert!(!mine.is_empty(), "our endpoint is listening");
+        assert!(mine.iter().all(|l| l.socket.ip().is_loopback()), "{mine:?}");
         drop(first);
         let _ = fs::remove_dir_all(paths.root());
     }
