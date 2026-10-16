@@ -29,6 +29,26 @@ pub enum HostError {
         source: std::io::Error,
     },
 
+    /// The cluster exists but its master secret is not in secure storage.
+    #[error(
+        "the engine's master secret for {} is not in this computer's secure storage.          Your books are untouched, but they cannot be opened until it is back. If the          keychain was only temporarily unavailable, unlock it and start ClientLedger          again; otherwise restore the data folder together with its saved secrets          (ClientLedger will not invent a new one, because that would lock you out of          data it encrypted earlier)",
+        .data_dir.display()
+    )]
+    MasterSecretMissing {
+        /// The cluster's data directory.
+        data_dir: PathBuf,
+    },
+
+    /// Secure storage holds a different master secret than the one used before.
+    #[error(
+        "the engine's master secret in this computer's secure storage is not the one used          for {}. Restore the matching secret (for example by restoring the data folder          with its saved secrets) rather than continuing",
+        .data_dir.display()
+    )]
+    MasterSecretMismatch {
+        /// The cluster's data directory.
+        data_dir: PathBuf,
+    },
+
     /// The bundled database failed.
     #[error(transparent)]
     Pg(#[from] cl_pg::PgError),

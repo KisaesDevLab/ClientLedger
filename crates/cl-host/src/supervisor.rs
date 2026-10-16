@@ -599,7 +599,16 @@ impl Worker {
             }
             Arc::from(choice.store)
         };
-        Ok((EngineSecrets::load_or_create(store.as_ref())?, notices))
+        // Only a cluster that does not exist yet may get a new secret (M2).
+        let brand_new = !cl_pg::is_initialized(&self.paths.pg_data());
+        let fingerprint = self.paths.run_dir().join("master.fp");
+        let secrets = EngineSecrets::open(
+            store.as_ref(),
+            &self.paths.pg_data(),
+            brand_new,
+            &fingerprint,
+        )?;
+        Ok((secrets, notices))
     }
 
     #[allow(clippy::too_many_lines)] // one linear state machine reads better than pieces

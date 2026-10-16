@@ -515,3 +515,64 @@ fn relative_paths_never_reach_the_engine() {
     // AppPaths refuses relative roots, so a relative CL_DATA_DIR is impossible.
     assert!(cl_host::AppPaths::at("relative/dir").is_err());
 }
+
+/// Pretend the cluster already exists, as it does on every run after the first.
+fn make_cluster_exist(scratch: &Scratch) {
+    let data = scratch.paths().pg_data();
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(data.join("PG_VERSION"), "16\n").unwrap();
+}
+
+#[test]
+fn an_existing_cluster_with_no_master_secret_is_never_given_a_new_one() {
+    let scratch = Scratch::new("no-master");
+    make_cluster_exist(&scratch);
+    let (db, factory) = fake_db();
+    let sup = Supervisor::spawn_with(fake_config(&scratch), factory);
+    let HostError::Fault(fault) = sup.wait_ready(Duration::from_secs(30)).unwrap_err() else {
+        panic!("expected a fault");
+    };
+    assert!(fault.reason.contains("master secret"), "{}", fault.reason);
+    assert_eq!(
+        db.starts.load(Ordering::SeqCst),
+        0,
+        "no database, no engine"
+    );
+    sup.stop();
+}
+
+#[test]
+fn a_keychain_that_fails_its_probe_cannot_cause_a_new_secret() {
+    // `default_store_for` falls back to an (empty) encrypted file when the
+    // keychain probe fails; on an existing cluster that must be an error.
+    let scratch = Scratch::new("probe-fail");
+    make_cluster_exist(&scratch);
+    let (_db, factory) = fake_db();
+    let mut cfg = fake_config(&scratch);
+    let fallback =
+        cl_pg::EncryptedFileStore::beside_for_purpose(&scratch.paths().pg_data(), "host-master");
+    cfg.secrets_store = Some(Arc::new(fallback.clone()));
+    let sup = Supervisor::spawn_with(cfg, factory);
+    assert!(matches!(
+        sup.wait_ready(Duration::from_secs(30)),
+        Err(HostError::Fault(_))
+    ));
+    assert!(
+        !fallback.path().exists(),
+        "no weaker file store was created"
+    );
+    sup.stop();
+}
+
+#[test]
+fn a_brand_new_cluster_creates_the_master_secret_once() {
+    let scratch = Scratch::new("new-master");
+    let store = Arc::new(cl_pg::MemoryStore::new());
+    let (_db, factory) = fake_db();
+    let mut cfg = fake_config(&scratch);
+    cfg.secrets_store = Some(Arc::clone(&store) as Arc<dyn cl_pg::PasswordStore>);
+    let sup = start(cfg, factory).unwrap();
+    sup.stop();
+    use cl_pg::PasswordStore as _;
+    assert!(store.get().unwrap().is_some());
+}
