@@ -7,3 +7,8 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+cl-pg = { path = "../cl-pg" }
+thiserror = "2.0.21"
+tracing = "0.1.44"
