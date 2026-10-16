@@ -24,6 +24,15 @@
 )]
 mod client;
 pub mod endpoint;
+pub mod errors;
+pub mod idempotency;
+pub mod resources;
 
 pub use client::{Budget, ClientConfig, LOOPBACK_HOST, Method, Timeouts};
 pub use endpoint::{EndpointSource, EndpointState, EngineEndpoint, FixedEndpoint};
+pub use errors::{
+    ApiError, AuthFailure, ClosedPeriod, ConflictReason, ErrorCode, FieldPath, LocalValidation,
+    UserText, ValidationError, ValidationIssue,
+};
+pub use idempotency::IdempotencyKey;
+pub use resources::versioning::RecordVersion;
