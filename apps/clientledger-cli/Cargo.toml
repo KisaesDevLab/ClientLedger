@@ -7,3 +7,7 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+cl-host = { path = "../../crates/cl-host" }
+ctrlc = "3.5.2"

@@ -226,10 +226,85 @@ pub(crate) fn create_private_dir(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// File name of the engine program on this operating system.
+#[must_use]
+pub fn engine_exe_name() -> &'static str {
+    if cfg!(windows) {
+        "clientledger-engine.exe"
+    } else {
+        "clientledger-engine"
+    }
+}
+
+/// `target/engine/<name>` directory name for this machine (matches xtask).
+fn engine_target_dir() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => Some("windows-x64"),
+        ("macos", "aarch64") => Some("macos-arm64"),
+        ("macos", "x86_64") => Some("macos-x64"),
+        ("linux", "x86_64") => Some("linux-x64"),
+        _ => None,
+    }
+}
+
+/// Find the engine executable.
+///
+/// An `explicit` path is used alone. Otherwise the order is: the `CL_ENGINE_EXE` variable, next to the running
+/// program (installed layout, plain or in `engine/`), then
+/// `target/engine/<host>/` of a source checkout, searching upward from the
+/// program and the current folder. The result is always absolute.
+#[must_use]
+pub fn find_engine_exe(explicit: Option<&Path>) -> Option<PathBuf> {
+    if let Some(p) = explicit {
+        // A path the caller named is used as is, never replaced by a guess.
+        return p.is_file().then(|| std::path::absolute(p).ok()).flatten();
+    }
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    candidates.extend(
+        std::env::var_os("CL_ENGINE_EXE")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from),
+    );
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    if let Some(dir) = &exe_dir {
+        candidates.push(dir.join(engine_exe_name()));
+        candidates.push(dir.join("engine").join(engine_exe_name()));
+    }
+    if let Some(target) = engine_target_dir() {
+        for start in exe_dir.into_iter().chain(std::env::current_dir().ok()) {
+            for dir in start.ancestors() {
+                candidates.push(
+                    dir.join("target")
+                        .join("engine")
+                        .join(target)
+                        .join(engine_exe_name()),
+                );
+            }
+        }
+    }
+    candidates
+        .into_iter()
+        .find(|c| c.is_file())
+        .and_then(|c| std::path::absolute(c).ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn an_explicit_engine_path_wins_and_is_made_absolute() {
+        let dir = std::env::temp_dir().join(format!("cl-host-find-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join(engine_exe_name());
+        std::fs::write(&exe, b"x").unwrap();
+        assert_eq!(find_engine_exe(Some(&exe)).as_deref(), Some(exe.as_path()));
+        assert!(find_engine_exe(Some(&exe)).unwrap().is_absolute());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<OsString> {
         let map: HashMap<String, OsString> = pairs

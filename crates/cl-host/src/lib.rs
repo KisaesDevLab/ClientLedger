@@ -31,7 +31,7 @@ pub use instance_lock::{
     Acquired, InstanceGuard, Request, SendError, acquire, acquire_or_focus, send,
 };
 pub use logs::{HostLog, Level, LogPolicy, PruneReport, prune_logs, tail_lines};
-pub use paths::{AppPaths, Os};
+pub use paths::{AppPaths, Os, engine_exe_name, find_engine_exe};
 pub use secrets::EngineSecrets;
 pub use supervisor::{
     Component, Endpoint, HostConfig, HostFault, HostState, HostStatus, RestartCounts,
