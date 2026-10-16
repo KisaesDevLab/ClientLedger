@@ -39,11 +39,11 @@ LAN multi-user (P33):
    - macOS `~/Library/Application Support/ClientLedger`
    - Linux `$XDG_DATA_HOME/clientledger`
 3. `cl-pg` checks the cluster: `initdb` on first run (locale C.UTF-8, UTF8 encoding, scram-sha-256 auth, random superuser password stored in the OS keychain), else verifies `PG_VERSION` matches the bundled major version.
-4. `cl-pg` starts Postgres on a random free loopback port, waits for `pg_isready`.
-5. `cl-host` starts `clientledger-engine` with env: `DATABASE_URL`, `CL_MODE=desktop`, `CL_BIND=127.0.0.1:<port>`, `CL_TOKEN=<random 256-bit>`, `CL_OFFLINE=auto`.
+4. `cl-pg` starts Postgres on a random free loopback port, waits until it accepts connections, then idempotently creates the non-superuser application role `clientledger_app` and the database `clientledger` it owns (Q-P04a). The engine never connects as the superuser.
+5. `cl-host` starts `clientledger-engine` with an environment built from scratch (nothing inherited, no command-line arguments): `DATABASE_URL` (application role), `CL_MODE=desktop`, `CL_BIND=127.0.0.1:0` (the real port comes from the engine's ready line), `CL_TOKEN=<random 256-bit, new for every launch>`, `CL_DATA_DIR` and `CL_LOG_FILE` (absolute paths), `CL_REQUIRE_NON_SUPERUSER=1`, `CL_OFFLINE=auto`, plus `JWT_SECRET`, `ENCRYPTION_KEY` and `PLAID_ENCRYPTION_KEY` derived from one keychain secret. Windows runs it in a kill-on-close job object; Unix in its own process group (Q-P04d). Before the token is sent, the host checks that the engine process owns the port (Q-P04e).
 6. Engine runs migrations for the open company database, then reports ready on `/health`.
 7. UI shows the Open Company window (or reopens the last company).
-8. Shutdown: UI asks engine to drain jobs → engine exits → `pg_ctl stop -m fast` → lock released. Crash of either child: supervisor restarts with backoff (max 3), then shows a recovery dialog with log location.
+8. Shutdown: UI asks engine to drain jobs → engine exits → `pg_ctl stop -m fast` → lock released. Crash of either child: supervisor restarts with backoff (max 3, Q-P04f), then shows a recovery dialog with log location. A second launch finds the running instance through the single-instance lock and asks it to focus (Q-P04c).
 
 ## Company files
 
