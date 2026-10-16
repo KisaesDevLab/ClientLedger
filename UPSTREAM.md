@@ -8,7 +8,7 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | --- | --- | --- | --- | --- |
 | U-01 | Queue abstraction with pg-boss adapter (desktop) alongside BullMQ (server) | P02 | clientledger/desktop-profile | Planned |
 | U-02 | `CL_MODE=desktop` profile: no Redis (also no `REDIS_URL` requirement in `env.ts`; `/health` must return 200 without it, Q-P01a), env-provided bind address and launch token (`X-CL-Token`), file logging | P02 | clientledger/desktop-mode (E1) | Done (branch), pushed; PR not yet opened (see entry) |
-| U-03 | Connectivity reporting on `/health` plus an `engineCommit` field (Q-P01a); online-only modules return `OfflineUnavailable` fast | P02 | clientledger/desktop-mode (E1: `/health` v2) + clientledger/offline-guard (E4: connectivity) | In progress — `/health` v2 done on E1; connectivity/`OfflineUnavailable` pending E4 |
+| U-03 | Connectivity reporting on `/health` plus an `engineCommit` field (Q-P01a); online-only modules return `OfflineUnavailable` fast | P02 | clientledger/desktop-mode (E1: `/health` v2) + clientledger/offline-guard (E4: connectivity) | Done (branch) — E1 `/health` v2; E4 at `7702a6bf`, local only, not pushed, no PR yet |
 | U-04 | OpenAPI 3.1 export covering all UI routes; committed `openapi.json` | P02 | clientledger/desktop-profile | Planned |
 | U-05 | Tenant lifecycle (list/create/rename/delete) and versioned per-tenant export/import (NDJSON + attachments + manifest) for backups, restores, and transfers | P02, P08 | clientledger/tenant-portability | Planned |
 | U-06 | Endpoint accepting normalized bank-import batches (rows, dedupe keys, source-file hash) into the review queue; parsing is in Rust (Q-11) | P25 | clientledger/bank-import | Planned |
@@ -57,11 +57,27 @@ Add rows as capability checks find gaps (credit memos, statements, finance charg
   - BullMQ stays the default backend, and `/health` keeps every v1 field and its 503 logic.
   - Visible change: `/health` gains the v2 fields, which are unauthenticated on the server (reviewer item: version and commit disclosure).
 - Status: Done (branch) — 2026-10-15. Local only; not pushed and no engine PR opened yet (per orchestrator instruction). The engine PR is opened with the E-series (plan step 43).
+- **Follow-up 8b/8c — workspace tenant and guards (Q-P02h, review P02-E5-rev2 N1/N2), 2026-10-15.** Two more local commits on `clientledger/desktop-mode` (split because the diff exceeded ~600 lines; both must land before E5 steps 33c/34b/35b/36a–c). Not pushed, no PR.
+  - `79dd153e` feat(desktop): workspace tenant — migration, `desktop/workspace.ts`, `/initialize` rewrite, `/info.workspaceTenantId`, user homing, register/create-client refusal, `createAdminUser`/`adoptRestoredTenants` guards, desktop create-tenant eligibility, switch-tenant `TENANT_NOT_FOUND`.
+  - `7de1e152` feat(desktop): workspace guards — fence in `authenticate` (session JWT, API key, download token), admin `/tenants/:id…` guards (`WORKSPACE_TENANT`, `USE_SAFE_DELETE`, `NOT_AVAILABLE_IN_DESKTOP`), `/api/v1/tenant-export` and `/api/v1/backup` (except `/passphrase-strength`) unmounted, boot invariant warning, docs.
+  - Files: new `desktop/workspace.ts`, `db/migrations/0216_tenants_is_workspace{,.rollback}.sql`; changed `db/schema/auth.ts`, journal, `routes/{desktop,auth,admin}.routes.ts`, `services/{auth,setup}.service.ts`, `middleware/auth.ts`, `desktop/features.ts`, `app.ts`, `index.ts`, `docs/DESKTOP.md`, `docs/API.md`. Tests: new `desktop/workspace.test.ts` (G-E1 + MT20, in-process app on fresh template-copied databases), `desktop/users-insert-sites.test.ts` (R19 enumerator); `desktop/desktop-boot.test.ts` initialize/login rewritten.
+  - Schema/migration: `0216_tenants_is_workspace` — additive `tenants.is_workspace boolean NOT NULL DEFAULT false` + partial unique index `uniq_tenants_workspace`; rollback drops index then column (tested); passes `migrations:check` with no marker.
+  - API changes (desktop only): `/initialize` body `company` optional, response `{workspaceTenantId, userId, companyTenantId|null, warnings}` (was `{tenantId, userId}`); `/info` adds `workspaceTenantId`; new error codes `WORKSPACE_TENANT`, `WORKSPACE_MISSING`, `USE_SAFE_DELETE`, `TENANT_NOT_FOUND`, `COMPANY_NOT_CREATED` (warning). 19 families unmounted (was 17).
+  - Server appliance impact: none apart from the additive column. Express layer table unchanged (1,815 layers); register/create-client gain a pass-through handler; every new check is behind `isDesktop()`. `rollbackPartialSetup` was refactored to share `deleteTenantScopedRows` (same behavior).
 
 ### U-03 — `/health` v2 and connectivity
 - E1 part (done on `clientledger/desktop-mode`, commit `c1635b2a`): `mode`, `version`, `engineCommit`, `schemaVersion`, `schemaTag`, `queueBackend`, `online`/`lastOnlineCheck` (always `null` until E4), `checks.db.superuser`, and `redis: "disabled"`. Returns 200 on desktop with no Redis.
-- E4 part (pending, `clientledger/offline-guard`): connectivity probe, `OfflineUnavailable` (503 `OFFLINE_UNAVAILABLE`), egress guard, SMTP timeouts.
-- Status: In progress — 2026-10-15.
+- E4 part (`clientledger/offline-guard`, stacked on E1 `8213777e`; commits `78f329f1`, `35a6e33e`, `80079385`, `62133728`, `7702a6bf`):
+  - `utils/offline.ts`: `OfflineUnavailableError` (503 `OFFLINE_UNAVAILABLE` + `feature`), `ensureOnline` (CL_OFFLINE `on` fails at once; `auto` probes only the feature's own host, 1.5 s budget, success cached 30 s, failure 5 s), `classifyNetworkError`; `/health` `online`/`lastOnlineCheck` are now real.
+  - `desktop/egress-guard.ts`: default-deny at the socket level (`net.Socket#connect`, all `dns` lookup/resolve forms, `dgram`), installed first in `bootstrap.ts` in desktop mode. Allows loopback, IPC, the `DATABASE_URL` host, new optional env `CL_EGRESS_ALLOW`, and runtime `setEgressAllowance()` (E6 session secrets will register AI/SMTP hosts).
+  - `utils/mail-transport.ts`: all 9 `nodemailer.createTransport` sites; desktop adds 10/10/30 s timeouts and the offline fast-fail.
+  - AI: Anthropic/OpenAI providers wrapped in desktop mode (incl. vision paths); no retry on offline; fallback skips other cloud providers once offline.
+  - Phone-homes: `/api/v1/admin/updates` added to `DESKTOP_UNMOUNTED`; Turnstile skipped in desktop.
+- Files: `utils/offline.ts`, `desktop/egress-guard.ts`, `utils/mail-transport.ts`, `bootstrap.ts`, `app.ts`, `middleware/error-handler.ts`, `utils/health.ts`, `utils/retry.ts`, `utils/turnstile.ts`, `desktop/features.ts`, `ai-providers/index.ts`, 8 mail-sending services, `ai-categorization.service.ts`, `ai-config.service.ts`, `docs/DESKTOP.md`; tests `utils/offline.test.ts`, `desktop/egress-guard.test.ts`, `utils/mail-transport.test.ts`, `ai-providers/offline-fast-fail.test.ts`, `desktop/offline-matrix.test.ts`.
+- Schema/migrations: none. API: no new routes. New 503 codes `OFFLINE_UNAVAILABLE` and `EGRESS_BLOCKED` (desktop only); the OpenAPI component is added when E2 is integrated (`openapi.json` does not exist on this branch).
+- Server appliance impact: none. The guard is never installed, `CL_OFFLINE` is always `off` (no probes, errors unchanged), the mail factory is plain `nodemailer.createTransport`, and providers are not wrapped.
+- Tests (Windows, PG16, no Redis): full api suite 4904 passed / 30 failed (the known baseline: Redis tax-estimator, BullMQ queue, one Windows path test) / 16 skipped. Not run: Redis suites, Linux/macOS, SEA runtime, the optional `unshare -rn` CI job.
+- Status: Done (branch) — 2026-10-15. Local only; not pushed, no engine PR (per orchestrator). Security-reviewer pass on the guard is pending (plan R11).
 
 ## Entry template
 
