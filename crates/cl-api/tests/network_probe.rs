@@ -9,7 +9,7 @@
 //!   and the IPv4 one must fail fast (a rejected connect, not a timeout:
 //!   a silently dropped packet would only look blocked);
 //! - a connect to a listener on 127.0.0.1 must still succeed, because the
-//!   engine, PostgreSQL and the client all talk over loopback.
+//!   engine, `PostgreSQL` and the client all talk over loopback.
 //!
 //! Without `CL_NETWORK_BLOCKED=1` the test is skipped with a clear message
 //! (developer machines and the unrestricted jobs reach the network).
