@@ -897,6 +897,11 @@ dependencies = [
 [[package]]
 name = "clientledger"
 version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "cl-host",
+ "cl-ui",
+]
 
 [[package]]
 name = "clientledger-cli"
