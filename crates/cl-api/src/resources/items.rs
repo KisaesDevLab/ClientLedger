@@ -197,7 +197,16 @@ impl Items<'_> {
         new: &ItemFields,
         key: IdempotencyKey,
     ) -> Result<Versioned<Item>, ApiError> {
-        common::create(self.0, &SPEC, json_body(new)?, key, None).await
+        common::create_named(
+            self.0,
+            &SPEC,
+            "name",
+            new.name.as_str(),
+            &editable_with_active(new, true, Item::EDITABLE),
+            json_body(new)?,
+            key,
+        )
+        .await
     }
 
     /// Saves an item if it is still at `expected` (§2.5).
@@ -227,7 +236,7 @@ impl Items<'_> {
     /// # Errors
     /// Any [`ApiError`].
     pub async fn deactivate(&self, id: ItemId, key: IdempotencyKey) -> Result<(), ApiError> {
-        common::delete(self.0, &SPEC, &id.to_string(), key, None)
+        common::deactivate(self.0, &SPEC, &id.to_string(), key)
             .await
             .map(drop)
     }

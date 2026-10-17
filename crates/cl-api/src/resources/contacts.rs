@@ -347,7 +347,16 @@ impl Contacts<'_> {
         new: &NewContact,
         key: IdempotencyKey,
     ) -> Result<Versioned<Contact>, ApiError> {
-        common::create(self.0, &SPEC, json_body(new)?, key, None).await
+        common::create_named(
+            self.0,
+            &SPEC,
+            "displayName",
+            new.fields.display_name.as_str(),
+            &editable_with_active(&new.fields, true, Contact::EDITABLE),
+            json_body(new)?,
+            key,
+        )
+        .await
     }
 
     /// Saves a contact if it is still at `expected` (§2.5).
@@ -381,7 +390,7 @@ impl Contacts<'_> {
         id: ContactId,
         key: IdempotencyKey,
     ) -> Result<Versioned<Contact>, ApiError> {
-        let reply = common::delete(self.0, &SPEC, &id.to_string(), key, None).await?;
+        let reply = common::deactivate(self.0, &SPEC, &id.to_string(), key).await?;
         versioned_from(&reply.body, SPEC.item_key)
     }
 }

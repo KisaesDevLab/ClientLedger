@@ -43,9 +43,15 @@ pub use resources::contacts::{
     NewContact,
 };
 pub use resources::items::{Item, ItemFields, ItemFilter, ItemSort, ItemUpdate, Items};
+pub use resources::ledger::LedgerStamp;
 pub use resources::operations::{OPERATIONS, Operation, RetryClass};
+pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
 pub use resources::system::{SmtpTest, SmtpTestResult};
 pub use resources::tags::{Tag, TagFields, TagFilter, TagUpdate, Tags};
+pub use resources::transactions::{
+    Basis, JeLine, MAX_LINES, NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter,
+    TransactionLine, TransactionSummary, Transactions, TxnSort, TxnStatus, TxnType,
+};
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{
     Client, CompanySummary, CreatedCompany, LoginOutcome, NewCompany, OpenCompany, Scope, Session,

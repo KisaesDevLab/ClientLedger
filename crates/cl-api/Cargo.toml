@@ -24,6 +24,7 @@ uuid = { version = "1.28.0", default-features = false, features = ["std", "v4"] 
 zeroize = { version = "1.9.1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util"] }
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt"] }
 wiremock = "0.6.5"

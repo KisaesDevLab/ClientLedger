@@ -429,6 +429,7 @@ name = "cl-api"
 version = "0.0.0"
 dependencies = [
  "cl-core",
+ "proptest",
  "reqwest",
  "rust_decimal",
  "serde",

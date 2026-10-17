@@ -20,6 +20,7 @@ use crate::client::{Call, Method};
 use crate::errors::{ApiError, ConflictReason, UserText};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::operations::Operation;
+use crate::resources::reconcile::{OutcomeMatcher, Probe, RowFp};
 use crate::session::Session;
 
 /// The version a record was read at.
@@ -179,13 +180,19 @@ where
 }
 
 /// One guarded update (P05 plan §2.5).
-pub(crate) struct GuardedUpdate<'a> {
-    pub get: &'a Operation,
-    pub put: &'a Operation,
+pub(crate) struct GuardedUpdate {
+    pub get: &'static Operation,
+    pub put: &'static Operation,
     pub path: String,
     pub key: &'static str,
     pub body: Vec<u8>,
     pub idempotency_key: IdempotencyKey,
+    /// Fingerprint the record has once this update committed.
+    pub requested: [u8; 32],
+    /// Fingerprint of a raw record (outcome reconciliation).
+    pub fp: RowFp,
+    /// The update moves the ledger-version stamp (postings).
+    pub stamp_covered: bool,
 }
 
 /// Updates a record only if it is still at `expected`.
@@ -198,17 +205,21 @@ pub(crate) struct GuardedUpdate<'a> {
 pub(crate) async fn update_guarded<T>(
     session: &Session,
     expected: &RecordVersion,
-    u: GuardedUpdate<'_>,
+    u: GuardedUpdate,
 ) -> Result<Versioned<T>, ApiError>
 where
     T: DeserializeOwned + EditableFields,
 {
     let mut call = Call::new(u.put.method(), u.put.route(), u.path.clone()).json_body(u.body);
     call.idempotency_key = Some(u.idempotency_key);
-    match expected {
-        RecordVersion::Server(v) => call.if_match = Some(format!("\"{v}\"")),
+    let pre_image = match expected {
+        RecordVersion::Server(v) => {
+            call.if_match = Some(format!("\"{v}\""));
+            None
+        }
         RecordVersion::Fingerprint(f) => {
-            let current: Versioned<T> = get_versioned(session, u.get, u.path, u.key).await?;
+            let current: Versioned<T> =
+                get_versioned(session, u.get, u.path.clone(), u.key).await?;
             let now = current.record.fingerprint();
             if &now != f {
                 return Err(ApiError::Conflict {
@@ -218,9 +229,19 @@ where
                     message: UserText::default(),
                 });
             }
+            Some(now)
         }
-    }
-    let reply = session.send(u.put, call, None).await?;
+    };
+    let matcher = OutcomeMatcher::Updated {
+        get: u.get,
+        path: u.path,
+        key: u.key,
+        fp: u.fp,
+        requested: u.requested,
+        pre_image,
+    };
+    let probe = Probe::new(session, matcher, u.stamp_covered).await;
+    let reply = session.send(u.put, call, Some(&probe)).await?;
     versioned_from(&reply.body, u.key)
 }
 
@@ -355,7 +376,7 @@ mod tests {
     const ROUTE: &str = "/api/v1/transactions/{id}";
     const PATH: &str = "/api/v1/transactions/t1";
 
-    fn update(body: &str) -> GuardedUpdate<'static> {
+    fn update(body: &str) -> GuardedUpdate {
         GuardedUpdate {
             get: find(Method::Get, ROUTE).expect("get"),
             put: find(Method::Put, ROUTE).expect("put"),
@@ -363,6 +384,9 @@ mod tests {
             key: "transaction",
             body: body.as_bytes().to_vec(),
             idempotency_key: IdempotencyKey::new(),
+            requested: [0; 32],
+            fp: crate::resources::reconcile::row_fp::<Sample>,
+            stamp_covered: false,
         }
     }
 

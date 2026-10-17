@@ -163,6 +163,8 @@ pub enum LocalValidation {
     PageLimit,
     /// A value that cannot be sent (for example a malformed name or id).
     InvalidValue,
+    /// A void needs a reason.
+    MissingReason,
 }
 
 /// A save was refused because its date is on or before the closing date.

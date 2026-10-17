@@ -924,6 +924,10 @@ pub(crate) mod tests {
             Secret::new(TOKEN),
             1,
         ));
+        session_with(src, scope)
+    }
+
+    pub(crate) fn session_with(src: Arc<dyn EndpointSource>, scope: Scope) -> Session {
         let client = Client::new(src, fast_config()).expect("client");
         Session {
             inner: Arc::new(SessionInner {

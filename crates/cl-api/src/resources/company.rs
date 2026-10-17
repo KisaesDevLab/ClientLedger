@@ -18,7 +18,9 @@ use serde_json::Value;
 use crate::client::{Call, Method};
 use crate::errors::ApiError;
 use crate::idempotency::IdempotencyKey;
+use crate::resources::common::requested_fp;
 use crate::resources::operations::{COMPANY_GET, COMPANY_PUT, COMPANY_SETTINGS};
+use crate::resources::reconcile::row_fp;
 use crate::resources::versioning::{
     EditableFields, GuardedUpdate, RecordVersion, Versioned, get_versioned, pick, update_guarded,
 };
@@ -208,13 +210,17 @@ impl Session {
         key: IdempotencyKey,
     ) -> Result<Versioned<CompanyProfile>, ApiError> {
         self.require_company()?;
+        let body = json_body(update)?;
         let u = GuardedUpdate {
             get: &COMPANY_GET,
             put: &COMPANY_PUT,
             path: COMPANY_PUT.route().to_string(),
             key: "company",
-            body: json_body(update)?,
+            requested: requested_fp::<CompanyProfile>(&body),
+            body,
             idempotency_key: key,
+            fp: row_fp::<CompanyProfile>,
+            stamp_covered: false,
         };
         update_guarded(self, expected, u).await
     }

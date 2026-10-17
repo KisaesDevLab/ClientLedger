@@ -168,7 +168,16 @@ impl Tags<'_> {
         new: &TagFields,
         key: IdempotencyKey,
     ) -> Result<Versioned<Tag>, ApiError> {
-        common::create(self.0, &SPEC, json_body(new)?, key, None).await
+        common::create_named(
+            self.0,
+            &SPEC,
+            "name",
+            new.name.as_str(),
+            &editable_with_active(new, true, Tag::EDITABLE),
+            json_body(new)?,
+            key,
+        )
+        .await
     }
 
     /// Saves a tag if it is still at `expected` (§2.5).
@@ -198,7 +207,7 @@ impl Tags<'_> {
     /// # Errors
     /// `Conflict { InUse }` while transactions use it; any [`ApiError`].
     pub async fn delete(&self, id: TagId, key: IdempotencyKey) -> Result<(), ApiError> {
-        common::delete(self.0, &SPEC, &id.to_string(), key, None)
+        common::delete_record(self.0, &SPEC, &id.to_string(), key)
             .await
             .map(drop)
     }

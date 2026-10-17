@@ -265,7 +265,16 @@ impl Accounts<'_> {
         new: &AccountFields,
         key: IdempotencyKey,
     ) -> Result<Versioned<Account>, ApiError> {
-        common::create(self.0, &SPEC, json_body(new)?, key, None).await
+        common::create_named(
+            self.0,
+            &SPEC,
+            "name",
+            new.name.as_str(),
+            &editable_with_active(new, true, Account::EDITABLE),
+            json_body(new)?,
+            key,
+        )
+        .await
     }
 
     /// Saves an account if it is still at `expected` (§2.5).
@@ -299,7 +308,7 @@ impl Accounts<'_> {
         id: AccountId,
         key: IdempotencyKey,
     ) -> Result<Versioned<Account>, ApiError> {
-        let reply = common::delete(self.0, &SPEC, &id.to_string(), key, None).await?;
+        let reply = common::deactivate(self.0, &SPEC, &id.to_string(), key).await?;
         versioned_from(&reply.body, SPEC.item_key)
     }
 }
