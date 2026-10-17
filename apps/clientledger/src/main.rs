@@ -72,9 +72,9 @@ fn main() -> Result<()> {
         } else {
             // Still hold the single-instance lock for this run.
             options.keep_alive = Some(Box::new(guard));
-            shell.host = Some(Arc::new(StaticProbe(HostView::Failed(
-                "the engine program was not found".into(),
-            ))));
+            shell.host = Some(Arc::new(StaticProbe(HostView::Failed(cl_ui::i18n::t(
+                "status.engine.not_found",
+            )))));
         }
     }
     options.shell = shell;

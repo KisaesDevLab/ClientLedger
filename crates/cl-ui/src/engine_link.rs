@@ -22,6 +22,7 @@ use cl_api::endpoint::{EndpointSource, EndpointState, EngineEndpoint};
 use cl_core::Secret;
 use cl_host::{HealthError, HostConfig, HostSnapshot, HostState, InstanceGuard, Supervisor};
 
+use crate::i18n::t;
 use crate::shell::{HostProbe, HostView};
 
 /// How long a successful listener check is trusted for one engine generation.
@@ -169,6 +170,23 @@ impl EndpointSource for VerifiedEndpoint {
     }
 }
 
+/// Owner text for a host fault: a catalog sentence for the component, then
+/// the host's reason with anything recognisable scrubbed. Log paths and
+/// output lines are not shown.
+#[must_use]
+pub fn fault_text(f: &cl_host::HostFault) -> String {
+    let key = match f.component {
+        cl_host::Component::Database => "status.fault.database",
+        cl_host::Component::Engine => "status.fault.engine",
+    };
+    let reason = crate::errors::scrub_line(&f.reason);
+    if reason.is_empty() {
+        t(key)
+    } else {
+        format!("{} ({reason})", t(key))
+    }
+}
+
 /// Status-bar view of a running supervisor.
 pub struct SupervisorProbe(pub Arc<dyn SnapshotSource>);
 
@@ -178,7 +196,7 @@ impl HostProbe for SupervisorProbe {
             HostState::Starting => HostView::Starting,
             HostState::Running => HostView::Running,
             HostState::Restarting { .. } => HostView::Restarting,
-            HostState::Fault(f) => HostView::Failed(format!("{} - {}", f.component, f.reason)),
+            HostState::Fault(f) => HostView::Failed(fault_text(&f)),
             HostState::Stopping | HostState::Stopped => HostView::Stopped,
         }
     }
@@ -492,6 +510,21 @@ mod tests {
     }
 
     #[test]
+    fn fault_text_is_translated_and_scrubbed() {
+        let f = cl_host::HostFault {
+            component: Component::Database,
+            reason: "failed for kurt@example.com amount 12.50".into(),
+            restarts: 3,
+            log_paths: vec![std::path::PathBuf::from("C:/Users/Kurt/logs")],
+            last_output: vec!["secret=abc".into()],
+        };
+        let text = fault_text(&f);
+        assert!(text.starts_with("the database stopped working"), "{text}");
+        assert!(!text.contains("kurt@") && !text.contains("12.50") && !text.contains("Kurt"));
+        assert!(!text.contains("secret"));
+    }
+
+    #[test]
     fn the_status_bar_probe_maps_every_state() {
         let probe = |state: HostState| {
             let fake = Arc::new(Fake(Mutex::new(HostSnapshot {
@@ -521,5 +554,9 @@ mod tests {
             panic!("expected failed");
         };
         assert!(reason.contains("engine") && reason.contains("crashed"));
+        assert!(
+            !reason.contains("status.fault"),
+            "the key must be translated"
+        );
     }
 }
