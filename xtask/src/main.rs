@@ -11,6 +11,7 @@ mod licenses;
 mod meta;
 mod nofloat;
 mod pg_fetch;
+mod run;
 
 use anyhow::{Result, bail};
 
@@ -31,10 +32,12 @@ usage: cargo xtask <command>
   pg-fetch [--force] download the pinned PostgreSQL binaries into target/pg/<target>
   keymap-doc [--check]
                      generate docs/KEYBOARD.md and the shortcut cheat sheet from the cl-model keymap
-  run | ui-check | package   (not implemented yet)";
+  run [--no-prepare] [-- <app args>]
+                     build the engine and fetch PostgreSQL if needed, then start the desktop app
+  ui-check | package   (not implemented yet)";
 
 /// Commands that exist in the CLAUDE.md command list but land in later phases.
-const STUBS: [(&str, &str); 3] = [("run", "P06"), ("ui-check", "P07"), ("package", "P35")];
+const STUBS: [(&str, &str); 2] = [("ui-check", "P07"), ("package", "P35")];
 
 fn report(gate: &str, ok_message: &str, violations: &[String]) -> Result<()> {
     if violations.is_empty() {
@@ -111,6 +114,7 @@ fn main() -> Result<()> {
         Some("engine-test") => engine_test::engine_test(&args[1..]),
         Some("api-spec") => api_spec::api_spec(&args[1..]),
         Some("pg-fetch") => pg_fetch::pg_fetch(&args[1..]),
+        Some("run") => run::run(&args[1..]),
         Some("keymap-doc") => keymap_doc::keymap_doc(&args[1..]),
         Some(cmd) => {
             if let Some((_, phase)) = STUBS.iter().find(|(name, _)| *name == cmd) {
