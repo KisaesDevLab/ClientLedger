@@ -52,8 +52,11 @@ fn allowed_internal(name: &str) -> Option<Vec<&'static str>> {
             v.push("cl-ui");
             Some(v)
         }
-        // cl-core and build tooling depend on nothing internal.
-        "cl-core" | "xtask" => below(&[]),
+        // cl-core depends on nothing internal.
+        "cl-core" => below(&[]),
+        // Build tooling reads the command table to generate docs/KEYBOARD.md
+        // (cl-model has no egui and no I/O).
+        "xtask" => below(&["cl-model"]),
         _ => None,
     }
 }
@@ -252,6 +255,15 @@ mod tests {
         let v = check(&[m("cl-core", &[("cl-model", true)])]);
         assert_eq!(v.len(), 1);
         assert!(v[0].contains("cl-core -> cl-model"));
+    }
+
+    #[test]
+    fn xtask_may_read_the_command_table_but_nothing_else() {
+        assert_eq!(
+            check(&[m("xtask", &[("cl-model", true)])]),
+            Vec::<String>::new()
+        );
+        assert_eq!(check(&[m("xtask", &[("cl-api", true)])]).len(), 1);
     }
 
     #[test]

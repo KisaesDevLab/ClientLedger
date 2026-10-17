@@ -1,16 +1,14 @@
-//! `cl-model` crate (stub; filled in by a later phase).
+//! UI-side state without egui: the command registry and keymap, the form
+//! state machine, undo for unsaved edits, and date-key and date-warning rules.
+//!
+//! Nothing here draws or does I/O, so all of it is unit tested.
 #![forbid(unsafe_code)]
 
-/// Returns the crate name; placeholder so the skeleton has a testable item.
-#[must_use]
-pub fn crate_name() -> &'static str {
-    "cl-model"
-}
+pub mod commands;
+pub mod date_rules;
+pub mod forms;
+pub mod keymap;
+pub mod undo;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_name_matches() {
-        assert_eq!(super::crate_name(), "cl-model");
-    }
-}
+pub use commands::{COMMANDS, Command, CommandId, Menu};
+pub use keymap::{Key, Keymap, KeymapError, Mods, Scope, Shortcut};

@@ -5,6 +5,7 @@ mod api_spec;
 mod ci;
 mod engine;
 mod engine_test;
+mod keymap_doc;
 mod layering;
 mod licenses;
 mod meta;
@@ -28,15 +29,12 @@ usage: cargo xtask <command>
   api-spec [--update | --check]
                      engine OpenAPI / Zod-source fixtures for cl-api (check skips without engine/)
   pg-fetch [--force] download the pinned PostgreSQL binaries into target/pg/<target>
-  run | ui-check | keymap-doc | package   (not implemented yet)";
+  keymap-doc [--check]
+                     generate docs/KEYBOARD.md and the shortcut cheat sheet from the cl-model keymap
+  run | ui-check | package   (not implemented yet)";
 
 /// Commands that exist in the CLAUDE.md command list but land in later phases.
-const STUBS: [(&str, &str); 4] = [
-    ("run", "P06"),
-    ("ui-check", "P07"),
-    ("keymap-doc", "P06"),
-    ("package", "P35"),
-];
+const STUBS: [(&str, &str); 3] = [("run", "P06"), ("ui-check", "P07"), ("package", "P35")];
 
 fn report(gate: &str, ok_message: &str, violations: &[String]) -> Result<()> {
     if violations.is_empty() {
@@ -113,6 +111,7 @@ fn main() -> Result<()> {
         Some("engine-test") => engine_test::engine_test(&args[1..]),
         Some("api-spec") => api_spec::api_spec(&args[1..]),
         Some("pg-fetch") => pg_fetch::pg_fetch(&args[1..]),
+        Some("keymap-doc") => keymap_doc::keymap_doc(&args[1..]),
         Some(cmd) => {
             if let Some((_, phase)) = STUBS.iter().find(|(name, _)| *name == cmd) {
                 bail!("`{cmd}` is not implemented yet: lands in {phase}");

@@ -499,6 +499,10 @@ version = "0.0.0"
 [[package]]
 name = "cl-model"
 version = "0.0.0"
+dependencies = [
+ "cl-core",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "cl-pg"
@@ -3040,6 +3044,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
+ "cl-model",
  "liblzma",
  "proc-macro2",
  "serde_json",

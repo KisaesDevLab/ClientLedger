@@ -9,6 +9,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+cl-model = { path = "../crates/cl-model" }
 anyhow = "1.0.104"
 cargo_metadata = "0.23.1"
 liblzma = "0.4.8"
