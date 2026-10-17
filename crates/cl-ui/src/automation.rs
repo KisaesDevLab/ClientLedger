@@ -904,6 +904,40 @@ mod bridge_tests {
     }
 
     #[test]
+    fn every_tool_in_the_table_is_handled_by_the_app() {
+        let mut rig = Rig::new();
+        let names: Vec<&'static str> = cl_automation::tools::tools()
+            .iter()
+            .map(|t| t.name)
+            .filter(|n| *n != "quit")
+            .collect();
+        let codes = rig.run(move |c| {
+            names
+                .iter()
+                .map(|n| (*n, call(c, n, json!({}))))
+                .map(|(n, r)| {
+                    (
+                        n,
+                        r.err().map(|e| {
+                            matches!(
+                                e,
+                                ClientError::Remote(ref b) if b.code == ErrorCode::UnknownMethod
+                            )
+                        }),
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+        for (name, unknown) in codes {
+            assert_ne!(
+                unknown,
+                Some(true),
+                "{name} is in the tool table but the app does not handle it"
+            );
+        }
+    }
+
+    #[test]
     fn secret_values_never_leave_the_process() {
         let mut pw = accesskit::Node::new(accesskit::Role::PasswordInput);
         pw.set_label("Anything");
