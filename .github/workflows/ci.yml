@@ -159,6 +159,109 @@ jobs:
           # (macos-15-intel measured 14.1 s / 5.2 s). The override applies to CI only.
           CL_HOST_BUDGET_SECS: "30"
         run: cargo test -p cl-host --test real_engine -- --test-threads=1 --nocapture
+      - name: Engine spec fixtures are current (needs the engine submodule)
+        env:
+          CL_API_REQUIRE: "1"
+        run: cargo xtask api-spec --check
+      - name: cl-api contract tests against the real engine and PostgreSQL
+        env:
+          # Fail instead of skipping when the engine, PostgreSQL or engine/ are missing.
+          CL_API_REQUIRE: "1"
+          # Same hosted-runner override as the cl-host step above (cold start is
+          # slower than the 15 s product budget on shared runners). The contract
+          # harness has its own boot limit, CL_API_BOOT_BUDGET_SECS (default 90 s).
+          CL_HOST_BUDGET_SECS: "30"
+        run: cargo test -p cl-api --test contract --test contract_offline --test spec_fixtures
+
+      # Network-blocked run (plan B3, Linux only). The tests run as a dedicated
+      # non-root user (initdb, pg_ctl and postgres refuse to run as root) whose
+      # non-loopback traffic is rejected by an iptables/ip6tables owner-match
+      # rule. Only that user is affected, so the runner agent keeps its
+      # connection. Everything is downloaded and built BEFORE the rule goes in;
+      # the test binaries are then run directly (not through cargo).
+      - name: Build the contract test binaries (before the network is blocked)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p cl-api --test contract --test contract_offline --test network_probe \
+            --no-run --message-format=json > "$RUNNER_TEMP/cl-api-build.json"
+          for name in network_probe contract contract_offline; do
+            exe=$(jq -r --arg n "$name" \
+              'select(.reason == "compiler-artifact" and .target.name == $n and .executable != null) | .executable' \
+              "$RUNNER_TEMP/cl-api-build.json" | head -n 1)
+            test -x "$exe" || { echo "::error::no test binary for $name"; exit 1; }
+            echo "$name=$exe" >> "$RUNNER_TEMP/cl-api-exes.env"
+          done
+          cat "$RUNNER_TEMP/cl-api-exes.env"
+      - name: Create the cltest user and block its network
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v iptables >/dev/null && command -v ip6tables >/dev/null || {
+            echo "::error::iptables/ip6tables are not available on this runner"; exit 1; }
+          sudo useradd --create-home --shell /usr/sbin/nologin cltest
+          sudo -u cltest mkdir -p /home/cltest/tmp
+          # cltest only reads the workspace (owned by the runner user): let it
+          # traverse the path down to target/ and read the binaries, the engine
+          # and PostgreSQL. It writes only under /home/cltest (TMPDIR), so its
+          # data directories are owned by it. The one write into target/ (the
+          # PENDING list) fails and is ignored by the harness.
+          d="$GITHUB_WORKSPACE"
+          while [ "$d" != "/" ]; do sudo chmod o+x "$d"; d=$(dirname "$d"); done
+          sudo chmod o+rx "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE/target/debug" "$GITHUB_WORKSPACE/target/debug/deps"
+          sudo chmod -R o+rX "$GITHUB_WORKSPACE/target/pg" "$GITHUB_WORKSPACE/target/engine"
+          # shellcheck disable=SC1090
+          . "$RUNNER_TEMP/cl-api-exes.env"
+          sudo chmod o+rx "$network_probe" "$contract" "$contract_offline"
+          # TCP gets a reset (the connect fails at once); everything else
+          # an ICMP unreachable. Loopback stays open: the engine, PostgreSQL and
+          # the client all talk over 127.0.0.1.
+          for ipt in iptables ip6tables; do
+            case "$ipt" in
+              iptables) icmp=icmp-port-unreachable ;;
+              ip6tables) icmp=icmp6-port-unreachable ;;
+            esac
+            sudo "$ipt" -I OUTPUT 1 -m owner --uid-owner cltest ! -o lo -j REJECT --reject-with "$icmp"
+            sudo "$ipt" -I OUTPUT 1 -m owner --uid-owner cltest ! -o lo -p tcp -j REJECT --reject-with tcp-reset
+          done
+          sudo iptables -S OUTPUT
+          sudo ip6tables -S OUTPUT
+      - name: cl-api contract tests as cltest with the network blocked
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1090
+          . "$RUNNER_TEMP/cl-api-exes.env"
+          cd "$GITHUB_WORKSPACE"
+          run_blocked() {
+            sudo -u cltest env HOME=/home/cltest TMPDIR=/home/cltest/tmp PATH="$PATH" \
+              CL_OFFLINE_TESTS=1 CL_NETWORK_BLOCKED=1 CL_API_REQUIRE=1 CL_PG_REQUIRE=1 \
+              CL_HOST_REQUIRE=1 CL_HOST_BUDGET_SECS=30 "$@"
+          }
+          # The probe first: if it fails, the block is not working and the
+          # results below would prove nothing.
+          run_blocked "$network_probe" --nocapture 2>&1 | tee "$RUNNER_TEMP/network_probe.log"
+          grep -q "network_probe: blocked OK" "$RUNNER_TEMP/network_probe.log"
+          run_blocked "$contract"
+          run_blocked "$contract_offline"
+      - name: Remove the network block and the cltest user
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          for ipt in iptables ip6tables; do
+            case "$ipt" in
+              iptables) icmp=icmp-port-unreachable ;;
+              ip6tables) icmp=icmp6-port-unreachable ;;
+            esac
+            sudo "$ipt" -D OUTPUT -m owner --uid-owner cltest ! -o lo -p tcp -j REJECT --reject-with tcp-reset || true
+            sudo "$ipt" -D OUTPUT -m owner --uid-owner cltest ! -o lo -j REJECT --reject-with "$icmp" || true
+          done
+          sudo pkill -u cltest || true
+          sudo userdel --remove cltest || true
+
       - uses: actions/upload-artifact@v4
         with:
           name: engine-${{ runner.os }}-${{ runner.arch }}
