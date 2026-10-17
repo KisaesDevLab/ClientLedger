@@ -153,6 +153,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.dialog.title", "Something went wrong"),
     ("error.dialog.id", "Error ID:"),
     ("error.dialog.copy", "Copy details"),
+    ("error.dialog.show_details", "Show what will be copied"),
+    ("error.dialog.details_label", "These details contain no amounts, names, or passwords."),
     ("error.dialog.copied", "Copied"),
     ("error.dialog.close", "Close"),
     ("error.internal", "Something went wrong inside ClientLedger."),

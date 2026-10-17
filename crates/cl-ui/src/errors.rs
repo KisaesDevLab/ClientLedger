@@ -26,7 +26,11 @@ pub const EXCERPT_LINES: usize = 20;
 
 /// Words that mean a log line may carry a credential; such lines are replaced
 /// whole.
-const SECRET_WORDS: [&str; 8] = [
+const SECRET_WORDS: [&str; 12] = [
+    "bearer",
+    "session",
+    "credential",
+    "refresh",
     "password",
     "passwd",
     "secret",
@@ -48,20 +52,63 @@ pub fn fresh_id() -> ErrorId {
     ErrorId::new(h.finish())
 }
 
-fn is_amount(core: &str) -> bool {
-    let core = core.trim_start_matches(['$', '-', '(', '+']);
-    let core = core.trim_end_matches([')', '.', ',', ';', ':']);
-    let Some((whole, cents)) = core.rsplit_once('.') else {
-        return false;
-    };
-    cents.len() == 2
-        && cents.bytes().all(|b| b.is_ascii_digit())
-        && !whole.is_empty()
-        && whole.bytes().all(|b| b.is_ascii_digit() || b == b',')
-        && whole.bytes().any(|b| b.is_ascii_digit())
+/// Keys whose numbers are not money (ports, counts, statuses): the number
+/// after one of these survives.
+const NUMBER_KEYS: [&str; 13] = [
+    "port",
+    "status",
+    "attempt",
+    "attempts",
+    "version",
+    "pid",
+    "generation",
+    "restarts",
+    "code",
+    "schema_version",
+    "schemaversion",
+    "max",
+    "exit",
+];
+
+/// Characters that end a token (whitespace, `=`, `:`, quotes, `,`, `;`,
+/// braces and square brackets).
+fn is_separator(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c,
+            '=' | ':' | '"' | '\'' | ',' | ';' | '{' | '}' | '[' | ']'
+        )
 }
 
-/// Replace the user-name segment of a home-folder path with `<user>`.
+/// `[$(-]?\d[\d,]*(\.\d{1,2})?` as a whole token, with a closing `)` or a
+/// trailing period tolerated. Whole dollars (`1500`) and short decimals
+/// (`12.5`) count; `1.2.3` and `3f2a9c` do not.
+fn is_amount(token: &str) -> bool {
+    let t = token.trim_end_matches([')', '.']);
+    let t = t.strip_prefix(['$', '(', '-', '+']).unwrap_or(t);
+    let t = t.strip_prefix(['$', '(', '-']).unwrap_or(t);
+    let (whole, cents) = match t.split_once('.') {
+        Some((w, c)) => (w, Some(c)),
+        None => (t, None),
+    };
+    let whole_ok = whole.bytes().next().is_some_and(|b| b.is_ascii_digit())
+        && whole.bytes().all(|b| b.is_ascii_digit() || b == b',');
+    let cents_ok =
+        cents.is_none_or(|c| (1..=2).contains(&c.len()) && c.bytes().all(|b| b.is_ascii_digit()));
+    whole_ok && cents_ok
+}
+
+/// A token that looks like a credential by its shape.
+fn is_credential(token: &str) -> bool {
+    (token.starts_with("eyJ") && token.len() > 20)
+        || ((token.starts_with("sk-") || token.starts_with("sk_")) && token.len() > 10)
+        || (token.starts_with("ghp_") && token.len() > 10)
+        || (token.starts_with("github_pat_") && token.len() > 15)
+}
+
+/// Replace the user-name segment of a home-folder path with `<user>`. The
+/// whole segment goes, up to the next path separator, so names with spaces
+/// ("Mary Ann") are covered.
 fn scrub_user_path(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let mut rest = line;
@@ -77,14 +124,30 @@ fn scrub_user_path(line: &str) -> String {
         };
         out.push_str(&rest[..at + len]);
         let after = &rest[at + len..];
-        let end = after
-            .find(['\\', '/', ' ', '"', '\'', ':'])
-            .unwrap_or(after.len());
+        let end = after.find(['\\', '/']).unwrap_or(after.len());
         if end > 0 {
             out.push_str("<user>");
         }
         rest = &after[end..];
     }
+}
+
+fn flush(token: &mut String, prev_key: &mut String, out: &mut String) {
+    if token.is_empty() {
+        return;
+    }
+    let key_ok = NUMBER_KEYS.contains(&prev_key.to_ascii_lowercase().as_str());
+    if token.contains('@') {
+        out.push_str("[email]");
+    } else if is_credential(token) {
+        out.push_str("[credential]");
+    } else if is_amount(token) && !key_ok {
+        out.push_str("[amount]");
+    } else {
+        out.push_str(token);
+    }
+    prev_key.clone_from(token);
+    token.clear();
 }
 
 /// Remove from one log line what must not leave the machine.
@@ -95,18 +158,24 @@ pub fn scrub_line(line: &str) -> String {
         return "[line withheld: may contain a credential]".to_string();
     }
     let line = scrub_user_path(line);
-    line.split(' ')
-        .map(|tok| {
-            if tok.contains('@') {
-                "[email]".to_string()
-            } else if is_amount(tok) {
-                "[amount]".to_string()
-            } else {
-                tok.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    let mut out = String::with_capacity(line.len());
+    let mut token = String::new();
+    let mut prev_key = String::new();
+    let chars: Vec<char> = line.chars().collect();
+    for (i, c) in chars.iter().copied().enumerate() {
+        // A comma between digits is a thousands separator, part of the number.
+        let thousands = c == ','
+            && token.ends_with(|d: char| d.is_ascii_digit())
+            && chars.get(i + 1).is_some_and(char::is_ascii_digit);
+        if is_separator(c) && !thousands {
+            flush(&mut token, &mut prev_key, &mut out);
+            out.push(c);
+        } else {
+            token.push(c);
+        }
+    }
+    flush(&mut token, &mut prev_key, &mut out);
+    out
 }
 
 /// Scrubbed last lines of a log file.
@@ -212,6 +281,22 @@ pub fn show(ctx: &Context, dialog: &mut ErrorDialog) -> DialogAction {
                     .text_style(crate::theme::styles::kbd())
                     .color(tokens.text_tertiary),
             );
+            ui.add_space(8.0);
+            egui::CollapsingHeader::new(t("error.dialog.show_details")).show(ui, |ui| {
+                let label = ui.label(
+                    RichText::new(t("error.dialog.details_label")).color(tokens.text_secondary),
+                );
+                // Read-only and selectable: the owner can see exactly what
+                // "Copy details" will put on the clipboard.
+                let mut shown: &str = &dialog.details;
+                let edit = ui.add(
+                    egui::TextEdit::multiline(&mut shown)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_rows(8)
+                        .desired_width(f32::INFINITY),
+                );
+                edit.labelled_by(label.id);
+            });
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if primary_button(ui, &t("error.dialog.close")).clicked() {
@@ -274,6 +359,82 @@ mod tests {
     }
 
     #[test]
+    fn amounts_in_every_shape_are_removed() {
+        for (input, want) in [
+            ("amount=1250.00 ok", "amount=[amount] ok"),
+            (
+                r#"{"total":"1,250.5","memo":"x"}"#,
+                r#"{"total":"[amount]","memo":"x"}"#,
+            ),
+            ("paid 1500 to vendor", "paid [amount] to vendor"),
+            ("balance 12.5 due", "balance [amount] due"),
+            ("rows\t100.25\t(3,000.00)", "rows\t[amount]\t[amount]"),
+            ("net:-42.10;gross:$9", "net:[amount];gross:[amount]"),
+            ("debit,17.5,credit", "debit,[amount],credit"),
+        ] {
+            assert_eq!(scrub_line(input), want, "{input}");
+        }
+    }
+
+    #[test]
+    fn allow_listed_keys_keep_their_numbers() {
+        for line in [
+            "port=4100 pid=912",
+            "status: 503, attempt: 2, version 1.2.3",
+            r#"{"status":409,"restarts":3,"generation":7}"#,
+        ] {
+            assert_eq!(scrub_line(line), line);
+        }
+    }
+
+    #[test]
+    fn user_names_with_spaces_are_removed_whole() {
+        assert_eq!(
+            scrub_line(r"opened C:\Users\Mary Ann Smith\AppData\x.log"),
+            r"opened C:\Users\<user>\AppData\x.log"
+        );
+        assert_eq!(
+            scrub_line("db /home/mary ann/.local/share"),
+            "db /home/<user>/.local/share"
+        );
+    }
+
+    #[test]
+    fn credentials_without_keywords_are_removed() {
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijk";
+        assert_eq!(scrub_line(&format!("got {jwt} ok")), "got [credential] ok");
+        assert_eq!(
+            scrub_line("key sk-ant-api03-abcdefghijklmnop used"),
+            "key [credential] used"
+        );
+        assert_eq!(
+            scrub_line("tok ghp_abcdefghijklmnop1234"),
+            "tok [credential]"
+        );
+        for l in [
+            "Bearer abc",
+            "session id abc",
+            "credential store",
+            "refresh value",
+        ] {
+            assert!(scrub_line(l).starts_with("[line withheld"), "{l}");
+        }
+    }
+
+    #[test]
+    fn details_text_after_scrubbing_has_no_marker_values() {
+        let id = ErrorId::new(7);
+        let line = scrub_line("save failed amount=987654.32 for bob@example.com");
+        let text = details_text(
+            id,
+            "error.api.validation",
+            &line,
+            std::slice::from_ref(&line),
+        );
+        assert!(!text.contains("987654") && !text.contains("bob@"), "{text}");
+    }
+
+    #[test]
     fn credential_lines_are_withheld_whole() {
         for l in [
             "X-CL-Token: abcdef",
@@ -308,7 +469,7 @@ mod tests {
         let path = dir.join("host.log");
         let mut text = String::new();
         for i in 0..50 {
-            let _ = writeln!(text, "line {i} for kurt@example.com amount 12.50");
+            let _ = writeln!(text, "entry-{i} for kurt@example.com amount 12.50");
         }
         std::fs::write(&path, text).unwrap();
         let ex = log_excerpt(&path, EXCERPT_LINES);
@@ -317,7 +478,7 @@ mod tests {
             ex.iter()
                 .all(|l| l.contains("[email]") && l.contains("[amount]"))
         );
-        assert!(ex.last().unwrap().starts_with("line 49"));
+        assert!(ex.last().unwrap().starts_with("entry-49"));
         assert_eq!(
             log_excerpt(&dir.join("missing.log"), 5),
             Vec::<String>::new()
