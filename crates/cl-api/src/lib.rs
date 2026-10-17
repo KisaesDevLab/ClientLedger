@@ -18,6 +18,15 @@
     clippy::cast_precision_loss
 )]
 
+// Test hooks never reach an optimised build: feature unification
+// (`--workspace --all-targets`) can switch `test-support` on for the apps,
+// so a release build with it fails here (xtask `release-features` checks
+// the normal app build too).
+#[cfg(all(feature = "test-support", not(debug_assertions)))]
+compile_error!(
+    "the `test-support` feature is for tests only and must not be enabled in a release build"
+);
+
 mod client;
 pub mod endpoint;
 pub mod errors;

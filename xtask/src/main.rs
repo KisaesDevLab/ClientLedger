@@ -65,6 +65,33 @@ pub(crate) fn run_layering() -> Result<()> {
     )
 }
 
+/// A normal build of the apps must not switch on a test-only feature,
+/// whatever edge (or feature unification) would bring it in.
+pub(crate) fn run_release_features() -> Result<()> {
+    let out =
+        std::process::Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .args([
+                "tree",
+                "-e",
+                "features,no-dev",
+                "-p",
+                "clientledger",
+                "-p",
+                "clientledger-cli",
+                "--prefix",
+                "none",
+            ])
+            .output()?;
+    if !out.status.success() {
+        bail!("cargo tree failed ({})", out.status);
+    }
+    report(
+        "release-features",
+        "no test-only feature in a normal build of the apps",
+        &layering::test_features_in_tree(&String::from_utf8_lossy(&out.stdout)),
+    )
+}
+
 pub(crate) fn run_nofloat() -> Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     report(

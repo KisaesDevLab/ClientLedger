@@ -83,6 +83,7 @@ pub fn ci() -> Result<()> {
 
     step("licenses", crate::run_licenses());
     step("layering", crate::run_layering());
+    step("release-features", crate::run_release_features());
     step("nofloat", crate::run_nofloat());
     step(
         "api-spec",

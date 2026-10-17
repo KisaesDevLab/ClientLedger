@@ -76,9 +76,31 @@ const TEST_FEATURES: [&str; 2] = ["test-support", "testing"];
 const APPS: [&str; 2] = ["clientledger", "clientledger-cli"];
 
 fn is_test_feature(f: &str) -> bool {
-    // Accept both `test-support` and `dep/test-support` or `dep?/test-support`.
+    // Accept `test-support`, `dep/test-support`, `dep?/test-support` and the
+    // `dep:` forwarding form.
+    let f = f.strip_prefix("dep:").unwrap_or(f);
     let leaf = f.rsplit('/').next().unwrap_or(f);
     TEST_FEATURES.contains(&leaf)
+}
+
+/// Test-only features in `cargo tree -e features,no-dev` output for the
+/// apps (lines like `cl-api feature "test-support"`): what a normal
+/// (release) build of an app would switch on.
+#[must_use]
+pub fn test_features_in_tree(tree: &str) -> Vec<String> {
+    let mut out: Vec<String> = tree
+        .lines()
+        .filter_map(|l| {
+            let (krate, rest) = l.trim().split_once(" feature \"")?;
+            let feature = rest.strip_suffix('"')?;
+            is_test_feature(feature).then(|| {
+                format!("a normal build of the apps enables test-only feature `{krate}/{feature}`")
+            })
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Features reachable from `default` in a member's own `[features]` table.
@@ -140,6 +162,19 @@ pub fn check(members: &[Member]) -> Vec<String> {
                 out.push(format!(
                     "forbidden crate edge: {} -> {} (only cl-grid, cl-ui, and apps may use egui)",
                     m.name, d.name
+                ));
+            }
+        }
+        // Only a test feature may forward a test feature: `dev =
+        // ["cl-api/test-support"]` would let any edge switch it on by name.
+        for (name, values) in &m.features {
+            if is_test_feature(name) {
+                continue;
+            }
+            if let Some(f) = values.iter().find(|f| is_test_feature(f)) {
+                out.push(format!(
+                    "feature `{name}` of {} forwards test-only feature `{f}` (only a test feature may)",
+                    m.name
                 ));
             }
         }
@@ -351,18 +386,59 @@ mod tests {
         mm.features.insert("default".into(), vec!["rt".into()]);
         mm.features
             .insert("rt".into(), vec!["cl-host/test-support".into()]);
-        assert_eq!(check(&[mm]).len(), 1);
+        assert_eq!(
+            check(&[mm]).len(),
+            2,
+            "forwarded by `rt` and reached by default"
+        );
 
         let mut direct = m("cl-host", &[]);
         direct
             .features
             .insert("default".into(), vec!["test-support".into()]);
         direct.features.insert("test-support".into(), vec![]);
-        assert_eq!(check(&[direct]).len(), 1);
+        assert_eq!(check(&[direct]).len(), 2);
 
         let mut ok = m("cl-host", &[]);
         ok.features.insert("default".into(), vec![]);
         ok.features.insert("test-support".into(), vec![]);
         assert_eq!(check(&[ok]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn only_a_test_feature_may_forward_a_test_feature() {
+        for bad in [
+            "cl-api/test-support",
+            "cl-api?/test-support",
+            "dep:test-support",
+            "cl-host/testing",
+        ] {
+            let mut mm = m("cl-ui", &[]);
+            mm.features.insert("dev".into(), vec![bad.into()]);
+            let v = check(&[mm]);
+            assert_eq!(v.len(), 1, "{bad}: {v:?}");
+            assert!(v[0].contains("feature `dev`"), "{v:?}");
+        }
+        let mut ok = m("cl-host", &[]);
+        ok.features
+            .insert("test-support".into(), vec!["cl-api?/test-support".into()]);
+        ok.features.insert("dev".into(), vec!["serde/std".into()]);
+        assert_eq!(check(&[ok]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn release_tree_with_a_test_feature_is_reported() {
+        let clean = "clientledger-cli v0.0.0 (/x)\ncl-host feature \"default\"\n";
+        assert_eq!(test_features_in_tree(clean), Vec::<String>::new());
+        let leaked = "cl-api feature \"test-support\"\n  cl-api feature \"test-support\"\ncl-host feature \"testing\"\n";
+        assert_eq!(
+            test_features_in_tree(leaked),
+            vec![
+                "a normal build of the apps enables test-only feature `cl-api/test-support`"
+                    .to_string(),
+                "a normal build of the apps enables test-only feature `cl-host/testing`"
+                    .to_string(),
+            ]
+        );
     }
 }
