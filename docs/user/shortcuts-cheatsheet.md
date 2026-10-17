@@ -52,6 +52,7 @@
 
 **Window**
 
+- `Alt+H` Home
 - `Ctrl+Tab` Next Window
 - `Ctrl+Shift+Tab` Previous Window
 - `Ctrl+Shift+O` Move Window to Its Own Window
@@ -59,11 +60,10 @@
 - `Ctrl+-` Zoom Out
 - `Ctrl+0` Actual Size
 - `Ctrl+Shift+L` Switch Light, Dark, or Automatic Colors
-- `Alt+H` Home
 
 **Help**
 
-- `Ctrl+K` Go to…
+- `Ctrl+K` Go to
 - `F1` Help for This Screen
 - `Ctrl+/` Keyboard Shortcuts
 

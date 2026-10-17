@@ -30,16 +30,16 @@ When two scopes use the same keys, the innermost one wins: a form beats a window
 | `Ctrl+Shift+E` | Reconcile | `banking.reconcile` |
 | `Ctrl+Shift+T` | Trial Balance | `reports.trial_balance` |
 | `Ctrl+J` | Make Journal Entry | `company.journal_entry` |
+| `Alt+H` | Home | `nav.home` |
 | `Ctrl+Tab` | Next Window | `window.next` |
 | `Ctrl+Shift+Tab` | Previous Window | `window.prev` |
 | `Ctrl++` | Zoom In | `window.zoom_in` |
 | `Ctrl+-` | Zoom Out | `window.zoom_out` |
 | `Ctrl+0` | Actual Size | `window.zoom_reset` |
 | `Ctrl+Shift+L` | Switch Light, Dark, or Automatic Colors | `window.theme` |
-| `Ctrl+K` | Go to… | `help.palette` |
+| `Ctrl+K` | Go to | `help.palette` |
 | `F1` | Help for This Screen | `help.current` |
 | `Ctrl+/` | Keyboard Shortcuts | `help.shortcuts` |
-| `Alt+H` | Home | `nav.home` |
 
 ## In a window
 

@@ -84,13 +84,20 @@ pub fn primary_button(ui: &mut Ui, label: &str) -> Response {
 }
 
 /// A full-width selectable row with painted text, an optional trailing
-/// widget area, and an accessible label. Returns the row response and the
+/// widget area, and an accessible label (which may say more than the text,
+/// for example "unsaved changes"). Returns the row response and the
 /// rectangle the trailing content may use.
-pub fn row_button(ui: &mut Ui, label: &str, selected: bool, height: f32) -> (Response, egui::Rect) {
+pub fn row_button(
+    ui: &mut Ui,
+    label: &str,
+    accessible: &str,
+    selected: bool,
+    height: f32,
+) -> (Response, egui::Rect) {
     let t = Tokens::of(ui.ctx());
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
-    response.widget_info(|| WidgetInfo::selected(Role::Button, true, selected, label));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, selected, accessible));
     if ui.is_rect_visible(rect) {
         let fill = if selected {
             t.accent
