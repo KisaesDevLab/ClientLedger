@@ -1,6 +1,6 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P02 — Engine desktop profile (upstream), engine PRs E1–E6 in flight; P04 and P05 done; next P06
+**Current phase:** P02 — Engine desktop profile (upstream), engine PRs E1–E6 in flight; P06 done; next P07
 **Status:** In progress
 **Engine commit:** `13ebd2ba50db0e3e68dd473329caf96d1f039e4e` (`main`, pinned 2026-10-15; bump per Q-02)
 **Last updated:** 2026-10-17
@@ -16,7 +16,7 @@
 | P03 | Bundled PostgreSQL manager | L | Done 2026-10-15 |
 | P04 | Supervisor | L | Built, CI green, security-reviewed (PR #5, stacked on #4) |
 | P05 | Engine API client | H | Done 2026-10-17 (AC4 real-engine test blocked by U-17) |
-| P06 | Application shell | L | |
+| P06 | Application shell | L | Done 2026-10-17 (AC3/AC4 scenario + --compare deferred to P07) |
 | P07 | Automation and control channel | L | |
 | P08 | Company lifecycle | M | |
 | P09 | Preferences and AI provider keys | M | |
