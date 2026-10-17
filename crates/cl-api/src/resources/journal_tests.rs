@@ -814,3 +814,31 @@ async fn master_data_reconciliation_stops_at_a_switch() {
     assert_eq!(requests(&server, "POST").await.len(), 1);
     assert_eq!(requests(&server, "GET").await.len(), 1, "polling stopped");
 }
+
+#[tokio::test]
+async fn a_saved_entry_the_client_cannot_read_is_saved_reload_not_internal() {
+    use cl_core::OwnerFacing;
+    let server = MockServer::start().await;
+    stamp(&server, 1, None).await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(json(201, &wrapped(T1, "frobnicated")))
+        .mount(&server)
+        .await;
+    let (s, _) = session(&server);
+    let e = s
+        .transactions()
+        .create_journal_entry(&entry(), &PostingOptions::default(), IdempotencyKey::new())
+        .await
+        .expect_err("unreadable");
+    assert_eq!(
+        e,
+        ApiError::SavedUnreadable {
+            what: "transaction"
+        }
+    );
+    let msg = e.owner_message();
+    assert_eq!(msg.key, "error.api.saved_unreadable");
+    assert_eq!(msg.suggestion_key, Some("fix.api.reload_to_see"));
+    assert_eq!(requests(&server, "POST").await.len(), 1, "never re-sent");
+}

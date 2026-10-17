@@ -18,7 +18,7 @@ use crate::resources::common::{
 use crate::resources::operations::{
     ACCOUNT_DELETE, ACCOUNT_GET, ACCOUNT_PUT, ACCOUNTS_CREATE, ACCOUNTS_LIST,
 };
-use crate::resources::versioning::{EditableFields, RecordVersion, Versioned, versioned_from};
+use crate::resources::versioning::{EditableFields, RecordVersion, Versioned, saved_from};
 use crate::session::{Session, json_body};
 use crate::wire::{Page, PageRequest};
 
@@ -309,7 +309,7 @@ impl Accounts<'_> {
         key: IdempotencyKey,
     ) -> Result<Versioned<Account>, ApiError> {
         let reply = common::deactivate(self.0, &SPEC, &id.to_string(), key).await?;
-        versioned_from(&reply.body, SPEC.item_key)
+        saved_from(&reply.body, SPEC.item_key)
     }
 }
 

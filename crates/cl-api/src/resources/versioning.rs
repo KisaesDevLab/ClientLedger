@@ -163,6 +163,24 @@ where
     Ok(Versioned { record, version })
 }
 
+/// [`versioned_from`] for the 2xx answer of a mutation: the save is
+/// recorded, so an answer that cannot be read is `SavedUnreadable` ("Saved —
+/// reload to see it"), never the generic internal error.
+pub(crate) fn saved_from<T>(body: &[u8], key: &'static str) -> Result<Versioned<T>, ApiError>
+where
+    T: DeserializeOwned + EditableFields,
+{
+    versioned_from(body, key).map_err(saved_unreadable)
+}
+
+/// Turns a `Decode` failure of a 2xx save answer into `SavedUnreadable`.
+pub(crate) fn saved_unreadable(e: ApiError) -> ApiError {
+    match e {
+        ApiError::Decode { what } => ApiError::SavedUnreadable { what },
+        other => other,
+    }
+}
+
 /// `GET` one record with its version.
 pub(crate) async fn get_versioned<T>(
     session: &Session,
@@ -244,7 +262,7 @@ where
     };
     let probe = Probe::new(session, matcher, u.stamp_covered).await;
     let reply = session.send(u.put, call, Some(&probe)).await?;
-    versioned_from(&reply.body, u.key)
+    saved_from(&reply.body, u.key)
 }
 
 #[cfg(test)]

@@ -27,8 +27,8 @@ use crate::resources::operations::{TXN_GET, TXN_PUT, TXN_VOID, TXNS_CREATE, TXNS
 use crate::resources::posting::{PostingOptions, posting_body};
 use crate::resources::reconcile::{OutcomeMatcher, Probe, Search, row_fp};
 use crate::resources::versioning::{
-    EditableFields, GuardedUpdate, RecordVersion, Versioned, fingerprint_of, update_guarded,
-    versioned_from,
+    EditableFields, GuardedUpdate, RecordVersion, Versioned, fingerprint_of, saved_from,
+    update_guarded,
 };
 use crate::session::Session;
 use crate::wire::{Page, PageRequest};
@@ -712,6 +712,6 @@ impl Transactions<'_> {
         let mut call = Call::new(Method::Post, TXN_VOID.route(), path).json_body(body);
         call.idempotency_key = Some(key);
         let reply = s.send(&TXN_VOID, call, Some(&probe)).await?;
-        versioned_from(&reply.body, SPEC.item_key)
+        saved_from(&reply.body, SPEC.item_key)
     }
 }

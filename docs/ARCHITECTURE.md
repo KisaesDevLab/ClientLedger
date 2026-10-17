@@ -137,7 +137,7 @@ Opening a connection is limited to 2 s, below every attempt limit, so a refused 
 | 503 `EGRESS_BLOCKED` | `FeatureNotEnabled { feature }`, never retried |
 | other 5xx | `Server` (reads are retried on 502, 503 and 504) |
 
-The queue adds `StaleScope`, `Cancelled` and `Internal`; a failed local check is `Local(..)` and nothing is sent.
+The queue adds `StaleScope`, `Cancelled` and `Internal`; a failed local check is `Local(..)` and nothing is sent. A save the engine answered with 2xx whose answer cannot be read (model drift, an enum value this version does not know) is `SavedUnreadable` (keys `error.api.saved_unreadable` and `fix.api.reload_to_see`, wording "Saved — reload to see it"), never the generic internal error, because the entry is recorded and re-entering it would duplicate it.
 
 ### Money on the wire
 

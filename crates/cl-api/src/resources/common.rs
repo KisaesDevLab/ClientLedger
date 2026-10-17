@@ -11,7 +11,7 @@ use crate::resources::operations::Operation;
 use crate::resources::reconcile::{OutcomeMatcher, Probe, Search, row_fp};
 use crate::resources::versioning::{
     EditableFields, GuardedUpdate, RecordVersion, Versioned, fingerprint_of, get_versioned, pick,
-    update_guarded, versioned_from,
+    saved_from, update_guarded,
 };
 use crate::session::Session;
 use crate::wire::{Page, PageRequest};
@@ -143,7 +143,7 @@ pub(crate) async fn create<T: DeserializeOwned + EditableFields>(
     let mut call = Call::at(Method::Post, spec.create.route()).json_body(body);
     call.idempotency_key = Some(key);
     let reply = s.send(spec.create, call, rec).await?;
-    versioned_from(&reply.body, spec.item_key)
+    saved_from(&reply.body, spec.item_key)
 }
 
 /// A guarded master-data update; the requested fingerprint is the update

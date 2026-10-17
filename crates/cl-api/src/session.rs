@@ -640,7 +640,8 @@ impl Session {
             .json_body(json_body(company)?)
             .timeout(TimeoutClass::CreateTenant);
         let reply = self.send(&CREATE_TENANT, call, None).await?;
-        decode(&reply, "created company")
+        // 2xx: the company exists even if its answer cannot be read.
+        decode(&reply, "created company").map_err(crate::resources::versioning::saved_unreadable)
     }
 
     /// Switches this session to a company. Results of reads issued before

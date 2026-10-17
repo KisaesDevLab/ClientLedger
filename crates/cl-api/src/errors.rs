@@ -325,6 +325,15 @@ pub enum ApiError {
         /// Which part (never the content).
         what: &'static str,
     },
+    /// The engine answered a save with 2xx, so it **is** recorded, but its
+    /// answer could not be read (for example a newer engine sent a value
+    /// this version does not know). Owner wording: "Saved — reload to see
+    /// it". Never "try again": that would enter it twice.
+    #[error("saved, but the answer could not be read ({what})")]
+    SavedUnreadable {
+        /// Which part (never the content).
+        what: &'static str,
+    },
     /// A read result from before a company switch (queue only).
     #[error("result from a previous company")]
     StaleScope,
@@ -384,6 +393,9 @@ impl OwnerFacing for ApiError {
             | ApiError::Protocol { .. }
             | ApiError::Decode { .. }
             | ApiError::Internal => ("error.api.internal", Some("fix.api.report")),
+            ApiError::SavedUnreadable { .. } => {
+                ("error.api.saved_unreadable", Some("fix.api.reload_to_see"))
+            }
             ApiError::StaleScope => ("error.api.stale_scope", None),
             ApiError::Cancelled => ("error.api.cancelled", None),
         };
@@ -1096,6 +1108,7 @@ mod tests {
             ApiError::StaleScope,
             ApiError::Internal,
             ApiError::Decode { what: "x" },
+            ApiError::SavedUnreadable { what: "x" },
             ApiError::EngineUnavailable { permanent: true },
             ApiError::OutcomeUnknown {
                 request_id: RequestId::from_uuid(uuid::Uuid::nil()),
