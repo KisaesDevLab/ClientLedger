@@ -55,8 +55,10 @@ mod tests {
                     name: (*n).into(),
                     license: l.map(Into::into),
                     workspace: false,
+                    ..Dep::default()
                 })
                 .collect(),
+            ..Member::default()
         }]
     }
 

@@ -69,6 +69,10 @@ pub enum HostError {
     #[error("the engine is not running")]
     NotRunning,
 
+    /// Another program holds the engine's port, so nothing was sent to it.
+    #[error("the engine's port is held by another program; nothing was sent")]
+    ForeignListener,
+
     /// A first-run endpoint call failed.
     #[error(transparent)]
     Desktop(#[from] crate::desktop::DesktopError),

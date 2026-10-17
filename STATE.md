@@ -1,9 +1,9 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P02 — Engine desktop profile (upstream), engine PRs E1–E6 in flight; P04 built (PR #5, stacked on #4); P05 planning
+**Current phase:** P02 — Engine desktop profile (upstream), engine PRs E1–E6 in flight; P04 and P05 done; next P06
 **Status:** In progress
 **Engine commit:** `13ebd2ba50db0e3e68dd473329caf96d1f039e4e` (`main`, pinned 2026-10-15; bump per Q-02)
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-17
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
 ## Phase board — beta track
@@ -15,7 +15,7 @@
 | P02 | Engine desktop profile (upstream) | H | In progress |
 | P03 | Bundled PostgreSQL manager | L | Done 2026-10-15 |
 | P04 | Supervisor | L | Built, CI green, security-reviewed (PR #5, stacked on #4) |
-| P05 | Engine API client | H | |
+| P05 | Engine API client | H | Done 2026-10-17 (AC4 real-engine test blocked by U-17) |
 | P06 | Application shell | L | |
 | P07 | Automation and control channel | L | |
 | P08 | Company lifecycle | M | |
@@ -71,6 +71,8 @@ Format: `Pxx — blocked by U-xx/Q-xx — what is pending — workaround in plac
 
 - P39 (release) — owner decision needed on Q-P03e — the bundled PostgreSQL archives ship LGPL libraries (gettext/libiconv on Windows) and OpenSSL, ICU, libxml2 and others on Linux/macOS; the owner must confirm the licensing position (license texts shipped, any written source offer) before beta release — workaround in place: libraries kept unmodified and listed in ATTRIBUTION.md.
 
+- P05 AC4 — blocked by U-17 — real-engine 409 contract test is PENDING(record-version-v1) — stub contract covers the client (`If-Match` sent, 409 `STALE` mapped to `Conflict { Stale }`, fingerprint check sends nothing).
+
 ## Placeholders tracked
 
 Screens or actions that link to a later phase. Remove each line when its phase lands.
@@ -111,10 +113,23 @@ No Critical or High findings. Fixed on `phase/P04-supervisor`: M1, M2, L1, L2, L
 | L8 | Engine exits when stdin closes / `PR_SET_PDEATHSIG` (added to U-16); write `run/engine.pid` atomically with the spawn (Q-P04o). | U-16 / P37 |
 | Info | Suspended start under the job object and fail if job creation fails; no Node diagnostic reports; WER exclusion; secrets never rotate, so P34 recovery guidance must cover them (Q-P04o). | P35 / P34 / P37 |
 
+## Follow-ups from P05 reviews
+
+Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After overflow (L1), Call `Debug` (L2), endpoint unpublished on engine exit (L3), candidate id parsing (L5), test-feature guard (L6), DNS block and checkout credentials (L7), code-review should-fix 1-4 and the nits (Q-P05ad). Recorded, not fixed:
+
+| # | Follow-up | Target |
+|---|-----------|--------|
+| L4 | Best-effort secret wipe: zeroizing/constant-time `cl_pg::Secret` (or re-export `cl_core::Secret`), pre-sized `Zeroizing` body buffers (Q-P05aa). | P09 / P37 |
+| L8 | Lint or review rule against logging `ApiError` payloads, models or amounts with `?value` at info level (Q-P05ab). | P37 |
+| L9 | 64 KiB cap for engine error bodies (Q-P05ac). | P37 |
+| L3b | Production `EndpointSource` adapter runs `verify_listener` before login, TFA verify, switch-tenant and refresh (Q-P05ad item 6). | P06 / P07 |
+| AC5 | No contract test yet moves a transaction OUT of a closed period (old date closed, new date open); the engine checks both dates, the stub suite covers the client mapping. | P07 (with U-15) |
+
 ## Log
 
 Newest first. One entry per completed phase: date, phase, summary, acceptance checklist results, notable decisions (Q-xx / U-xx).
 
+- 2026-10-17 — P05 complete (PR #6, merge commit). `cl-api`: loopback typed engine client, single-flight refresh, typed errors, retry classes with outcome reconciliation, UI request queue, contract harness with PENDING-by-capability tests, 4-OS engine contract job, network-blocked job, 80% coverage gate enforced (required check `coverage`). Opus code and security reviews found scope-pinning (write running in wrong company after a switch), Retry-After overflow, unreadable 2xx saves, reconciliation claiming own earlier entry; all fixed with tests (Q-P05aa–ad); remaining items in "Follow-ups from P05 reviews". Blocked: AC4 (U-17). Agents: architect/rust-implementer x2/reviewer/security-reviewer (opus), ci-fixer (sonnet).
 - 2026-10-15 — Owner: the engine is fully licensed for ClientLedger's use; engine licensing is settled and closed (Q-35, Q-P02a, U-10). Not to be raised again. P04 built on `phase/P04-supervisor` (PR #5 stacked on draft PR #4, all CI green): cl-host supervisor, least-privilege `clientledger_app` DB role, single-instance lock, log rotation, CLI host commands; independent security review fixed M1 (engine search path) and M2 (master-secret replacement) plus lows. Engine PRs: E1 #147 (ready for owner review), E2 #146 (draft), license draft #145 (owner's); E3 (pg-boss) built locally; E4 (offline guard) security fixes in progress; E5/E6 deferred to just before P08/P09 (plan settled).
 - 2026-10-15 — Owner decision: engine license changes to straight PolyForm Internal Use 1.0.0 (no ClientLedger grant). The engine is currently PolyForm Small Business 1.0.0, so this is a relicense of the public `Vibe-MyBooks` repo, prepared as engine branch `clientledger/license-internal-use` for the owner to review and merge (Q-29); resolves Q-P02a. NOTICE.md, README, CLAUDE.md, ARCHITECTURE, M0/M6 and Q-31/Q-35/Q-132/Q-133/Q-134/Q-137 updated; the draft grant stays in docs/legal for reference only. Consequences: recipients may not distribute the engine (only official releases from Kisaes LLC carry it); use is limited to internal business operations, so bookkeeping for others needs a separate license; the explicit accountant-review allowance and third-party mirroring right from the draft grant are gone. Attorney review of the NOTICE summary is still advisable before P39.
 - 2026-10-15 — P03 complete (PR #3, squash-merged). `cl-pg` + `xtask pg-fetch`: pinned zonky PG16 binaries (SHA-256 lock), cluster init with keychain password, data-dir guard, loopback-only start/stop, cold whole-database dump/restore. Acceptance: fresh ensure+start 3.3 s locally; second start reuses; kill -9 recovery; dump→restore identical; loopback-only confirmed by security-reviewer. Security review (opus): no critical; fixed crafted-backup code execution on restore, stop() signalling unrelated processes, world-readable backups and cheap hardening; remaining findings tracked in "Follow-ups from P03 security review". Decisions: Q-P03a–h (no pg_dump/psql in zonky archives → cold copy; restore takes a registry-override flag the restore UI must gate behind owner confirmation). Open for owner: Q-P03e LGPL/OpenSSL/ICU in bundled archives, before P39. Agents: rust-implementer x2 (sonnet), security-reviewer (opus), ci-fixer (sonnet; pg-fetch layout `share/postgresql/` on Unix archives).

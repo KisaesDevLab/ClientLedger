@@ -7,6 +7,15 @@
 //! and the child environment, never as command-line arguments.
 #![forbid(unsafe_code)]
 
+// Test hooks never reach an optimised build: feature unification
+// (`--workspace --all-targets`) can switch `test-support` on for the apps,
+// so a release build with it fails here (xtask `release-features` checks
+// the normal app build too).
+#[cfg(all(feature = "test-support", not(debug_assertions)))]
+compile_error!(
+    "the `test-support` feature is for tests only and must not be enabled in a release build"
+);
+
 mod database;
 mod desktop;
 mod engine;
@@ -25,6 +34,7 @@ pub use database::{
     APP_DATABASE, APP_ROLE, DatabaseFactory, DatabaseParts, DatabaseService, DbEndpoint, PgService,
 };
 pub use desktop::{AdminAccount, CompanySeed, DesktopError, DesktopInfo, Initialized};
+pub use engine::OfflineSetting;
 pub use error::{HostError, Result};
 pub use health::{HealthError, HealthReport, check_health, verify_listener};
 pub use instance_lock::{
@@ -34,6 +44,6 @@ pub use logs::{HostLog, Level, LogPolicy, PruneReport, prune_logs, tail_lines};
 pub use paths::{AppPaths, Os, engine_exe_name, find_engine_exe};
 pub use secrets::EngineSecrets;
 pub use supervisor::{
-    Component, Endpoint, HostConfig, HostFault, HostState, HostStatus, RestartCounts,
+    Component, Endpoint, HostConfig, HostFault, HostSnapshot, HostState, HostStatus, RestartCounts,
     RestartPolicy, Supervisor, in_memory_stores,
 };

@@ -90,6 +90,7 @@ pub fn quick_policy() -> RestartPolicy {
         poll_interval: Duration::from_millis(50),
         listener_check_every: Duration::from_millis(500),
         stop_grace: Duration::from_secs(3),
+        exit_drain: Duration::from_millis(100),
     }
 }
 

@@ -1,0 +1,23 @@
+# cl-core is a money crate: no float conversion may be called here (P05 plan
+# §2.14, Q-P05s). Clippy reads this file for cl-core only (the crate's own
+# manifest folder), so crates that legitimately use f32 (egui) are unaffected.
+#
+# Every entry is proven to resolve and fire by crates/cl-core/tests/float_ban.rs:
+# each call there sits under #[expect(clippy::disallowed_methods)], and an
+# unfulfilled expectation fails `clippy -D warnings`. Conversions that are
+# trait impls on primitive types (`f64::try_from(decimal)`,
+# `Decimal::try_from(1.5_f64)`, `as` casts) cannot be expressed here; the
+# deny-level float lints and the xtask `nofloat` AST scan (any f32/f64 type,
+# float literal or *_f32/*_f64 method) are the backstop.
+disallowed-methods = [
+    { path = "rust_decimal::Decimal::from_f32_retain", reason = "no floats for money (Q-P05s)" },
+    { path = "rust_decimal::Decimal::from_f64_retain", reason = "no floats for money (Q-P05s)" },
+    { path = "rust_decimal::Decimal::as_f64", reason = "no floats for money (Q-P05s)" },
+    { path = "num_traits::FromPrimitive::from_f32", reason = "no floats for money (Q-P05s)" },
+    { path = "num_traits::FromPrimitive::from_f64", reason = "no floats for money (Q-P05s)" },
+    { path = "num_traits::ToPrimitive::to_f32", reason = "no floats for money (Q-P05s)" },
+    { path = "num_traits::ToPrimitive::to_f64", reason = "no floats for money (Q-P05s)" },
+    { path = "serde_json::Number::as_f64", reason = "no floats for money (Q-P05s)" },
+    { path = "serde_json::Number::from_f64", reason = "no floats for money (Q-P05s)" },
+    { path = "serde_json::Value::as_f64", reason = "no floats for money (Q-P05s)" },
+]

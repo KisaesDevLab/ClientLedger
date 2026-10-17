@@ -178,6 +178,28 @@ fn no_secret_reaches_the_host_log() {
 }
 
 #[test]
+fn an_exited_engine_is_unpublished_before_its_output_is_drained() {
+    let scratch = Scratch::new("unpublish");
+    let (_db, factory) = fake_db();
+    let mut cfg = fake_config(&scratch);
+    // A long drain: the endpoint must be gone well before it ends.
+    cfg.policy.exit_drain = Duration::from_secs(5);
+    let sup = start(cfg, factory).unwrap();
+    assert!(sup.endpoint().is_some());
+    let killed = std::time::Instant::now();
+    common::kill_hard(sup.status().engine_pid.unwrap());
+    while sup.endpoint().is_some() {
+        assert!(
+            killed.elapsed() < Duration::from_secs(3),
+            "endpoint still published after the engine exited"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(sup.snapshot().endpoint.is_none());
+    sup.stop();
+}
+
+#[test]
 fn an_engine_killed_while_idle_is_restarted() {
     let scratch = Scratch::new("kill-engine");
     let (_db, factory) = fake_db();
@@ -653,4 +675,142 @@ fn only_one_supervisor_can_run_per_user_and_it_owns_the_instance_endpoint() {
         cl_host::acquire(&paths).unwrap(),
         cl_host::Acquired::First(_)
     ));
+}
+
+fn report_line(report: &std::path::Path, key: &str) -> Option<String> {
+    std::fs::read_to_string(report)
+        .unwrap()
+        .lines()
+        .find_map(|l| l.strip_prefix(&format!("env:{key}=")).map(str::to_string))
+}
+
+#[test]
+fn the_offline_setting_reaches_the_engine_and_defaults_to_auto() {
+    for (setting, want) in [
+        (None, "auto"),
+        (Some(cl_host::OfflineSetting::On), "on"),
+        (Some(cl_host::OfflineSetting::Auto), "auto"),
+    ] {
+        let scratch = Scratch::new("offline");
+        let (_db, factory) = fake_db();
+        let report = scratch.file("report.txt");
+        let mut cfg =
+            fake_config(&scratch).with_engine_env("FAKE_REPORT", report.to_str().unwrap());
+        if let Some(s) = setting {
+            cfg.offline = s;
+        }
+        let sup = start(cfg, factory).unwrap();
+        assert_eq!(report_line(&report, "CL_OFFLINE").as_deref(), Some(want));
+        sup.stop();
+    }
+}
+
+#[test]
+fn a_running_state_without_an_endpoint_reads_as_restarting() {
+    let scratch = Scratch::new("torn");
+    let (_db, factory) = fake_db();
+    let sup = start(fake_config(&scratch), factory).unwrap();
+    let real = sup.snapshot();
+    assert_eq!(real.status.state, HostState::Running);
+    let ep = real.endpoint.clone().unwrap();
+    assert_eq!(ep.generation, real.generation);
+
+    sup.force_for_test(|_, endpoint| *endpoint = None);
+    let torn = sup.snapshot();
+    assert!(matches!(
+        torn.status.state,
+        HostState::Restarting {
+            component: Component::Engine,
+            ..
+        }
+    ));
+    assert!(torn.endpoint.is_none());
+    assert!(matches!(sup.status().state, HostState::Restarting { .. }));
+    assert!(sup.endpoint().is_none());
+
+    // An endpoint left behind by a state that is not Running is never offered.
+    sup.force_for_test(|status, endpoint| {
+        status.state = HostState::Starting;
+        *endpoint = Some(ep);
+    });
+    assert!(sup.snapshot().endpoint.is_none());
+    sup.stop();
+}
+
+#[test]
+fn snapshots_never_tear_while_the_engine_restarts() {
+    let scratch = Scratch::new("race");
+    let (_db, factory) = fake_db();
+    let sup = Arc::new(start(fake_config(&scratch), factory).unwrap());
+    let stop = Arc::new(AtomicBool::new(false));
+    let readers: Vec<_> = (0..4)
+        .map(|_| {
+            let (sup, stop) = (Arc::clone(&sup), Arc::clone(&stop));
+            std::thread::spawn(move || {
+                let mut seen = 0_u64;
+                while !stop.load(Ordering::SeqCst) {
+                    let s = sup.snapshot();
+                    match (&s.status.state, &s.endpoint) {
+                        (HostState::Running, Some(ep)) => {
+                            assert_eq!(ep.generation, s.generation, "torn generation");
+                            assert_eq!(s.status.generation, s.generation);
+                        }
+                        (HostState::Running, None) => panic!("Running without an endpoint"),
+                        (_, Some(_)) => panic!("endpoint offered while not running"),
+                        (_, None) => {}
+                    }
+                    seen += 1;
+                }
+                seen
+            })
+        })
+        .collect();
+    // Kill the engine a few times; the supervisor republishes each time.
+    for _ in 0..3 {
+        let before = sup.snapshot().generation;
+        let pid = sup.status().engine_pid.unwrap();
+        common::kill_hard(pid);
+        assert!(wait_until(Duration::from_secs(30), || {
+            let s = sup.snapshot();
+            s.status.state == HostState::Running && s.generation > before
+        }));
+    }
+    stop.store(true, Ordering::SeqCst);
+    for r in readers {
+        assert!(r.join().unwrap() > 0);
+    }
+    Arc::into_inner(sup).unwrap().stop();
+}
+
+#[test]
+fn info_and_initialize_refuse_a_foreign_listener() {
+    let scratch = Scratch::new("foreign");
+    let (_db, factory) = fake_db();
+    let sup = start(fake_config(&scratch), factory).unwrap();
+    // Some other program (this test) holds a port; the supervisor is made to
+    // believe that is the engine's port.
+    let impostor = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    impostor.set_nonblocking(true).unwrap();
+    let port = impostor.local_addr().unwrap().port();
+    sup.force_for_test(|_, endpoint| {
+        if let Some(ep) = endpoint {
+            ep.port = port;
+        }
+    });
+    assert!(matches!(sup.engine_info(), Err(HostError::ForeignListener)));
+    let admin = AdminAccount {
+        email: "owner@example.com".into(),
+        display_name: "Pat Owner".into(),
+        password: Secret::new("a long enough password"),
+    };
+    assert!(matches!(
+        sup.initialize_engine(&admin, None),
+        Err(HostError::ForeignListener)
+    ));
+    // Nothing (no token, no password) was sent to the impostor.
+    assert_eq!(
+        impostor.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    sup.stop();
 }

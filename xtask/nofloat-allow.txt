@@ -1,0 +1,3 @@
+# Exceptions to the no-float scan (cargo xtask nofloat).
+# Format: <path relative to the repo root>:<line>:<reason>
+# Every entry needs a reason. The scan covers crates/cl-core/src and crates/cl-api/src.
