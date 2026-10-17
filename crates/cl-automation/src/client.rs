@@ -116,7 +116,9 @@ impl Transport for Client {
         if response.ok {
             Ok(response.result.unwrap_or(Value::Null))
         } else {
-            Err(ClientError::Remote(response.error.ok_or(ClientError::Protocol)?))
+            Err(ClientError::Remote(
+                response.error.ok_or(ClientError::Protocol)?,
+            ))
         }
     }
 }

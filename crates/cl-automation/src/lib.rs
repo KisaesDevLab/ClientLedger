@@ -14,6 +14,7 @@ pub mod actions;
 pub mod client;
 pub mod control_file;
 pub mod inspect;
+pub mod scenario;
 pub mod screenshot;
 pub mod server;
 pub mod tools;
