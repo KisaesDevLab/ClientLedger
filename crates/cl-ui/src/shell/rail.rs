@@ -19,10 +19,20 @@ pub fn show(ui: &mut Ui, shell: &mut Shell, tokens: &Tokens) {
     let active_kind = shell.windows.active().map(|w| w.kind);
     let counts = shell.counts;
     let active_id = shell.windows.active_id();
+    // The mockup lists only windows that have no rail entry of their own
+    // (Home and Bank Feed are already in Workspace).
+    let has_entry = |kind: CommandId| {
+        cl_model::commands::ALL
+            .rail_workspace
+            .iter()
+            .chain(cl_model::commands::ALL.rail_tools)
+            .any(|id| *id == kind.as_str())
+    };
     let open: Vec<(crate::windows::WindowId, String, bool)> = shell
         .windows
         .all()
         .iter()
+        .filter(|w| !has_entry(w.kind))
         .map(|w| (w.id, w.title(), w.dirty()))
         .collect();
     let mut queued: Vec<CommandId> = Vec::new();
@@ -36,35 +46,42 @@ pub fn show(ui: &mut Ui, shell: &mut Shell, tokens: &Tokens) {
                 .inner_margin(Margin::symmetric(8, 12)),
         )
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
-            section(ui, "shell.rail.workspace", 0.0);
-            for id in cl_model::commands::ALL.rail_workspace {
-                entry(ui, id, active_kind, counts, &mut queued);
-            }
-            section(ui, "shell.rail.tools", 14.0);
-            for id in cl_model::commands::ALL.rail_tools {
-                entry(ui, id, active_kind, counts, &mut queued);
-            }
-            section(ui, "shell.rail.open_windows", 14.0);
-            for (id, title, dirty) in &open {
-                let active = active_id == Some(*id);
-                let (resp, rect) = row_button(ui, title, &title_label(title, *dirty), active, ROW);
-                if *dirty {
-                    paint_dot(
-                        ui.painter(),
-                        egui::pos2(rect.right() - 12.0, rect.center().y),
-                        4.0,
-                        if active {
-                            tokens.on_accent
-                        } else {
-                            tokens.text_primary
-                        },
-                    );
-                }
-                if resp.clicked() {
-                    activate = Some(*id);
-                }
-            }
+            // The rail scrolls when the window is short (minimum window, 200%
+            // zoom, many open windows) instead of running under the status bar.
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(0.0, 2.0);
+                    section(ui, "shell.rail.workspace", 0.0);
+                    for id in cl_model::commands::ALL.rail_workspace {
+                        entry(ui, id, active_kind, counts, &mut queued);
+                    }
+                    section(ui, "shell.rail.tools", 14.0);
+                    for id in cl_model::commands::ALL.rail_tools {
+                        entry(ui, id, active_kind, counts, &mut queued);
+                    }
+                    section(ui, "shell.rail.open_windows", 14.0);
+                    for (id, title, dirty) in &open {
+                        let active = active_id == Some(*id);
+                        let (resp, rect) =
+                            row_button(ui, title, &title_label(title, *dirty), active, ROW);
+                        if *dirty {
+                            paint_dot(
+                                ui.painter(),
+                                egui::pos2(rect.right() - 12.0, rect.center().y),
+                                4.0,
+                                if active {
+                                    tokens.on_accent
+                                } else {
+                                    tokens.text_primary
+                                },
+                            );
+                        }
+                        if resp.clicked() {
+                            activate = Some(*id);
+                        }
+                    }
+                });
         });
     for id in queued {
         shell.queue(id);
