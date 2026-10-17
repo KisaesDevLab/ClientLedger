@@ -23,7 +23,7 @@ use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use tokio::time::Instant;
 use zeroize::Zeroizing;
 
-use crate::endpoint::{EndpointSource, EndpointState, EngineEndpoint};
+use crate::endpoint::{EndpointSource, EndpointState, EngineEndpoint, Purpose};
 use crate::idempotency::IdempotencyKey;
 
 /// The loopback host. A constant, so this client cannot reach the network.
@@ -350,9 +350,10 @@ impl Transport {
     pub(crate) async fn wait_ready(
         &self,
         deadline: Instant,
+        purpose: Purpose,
     ) -> Result<EngineEndpoint, TransportError> {
         loop {
-            match self.source.current() {
+            match self.source.current_for(purpose) {
                 EndpointState::Ready(ep) => {
                     let prev = self.last_generation.swap(ep.generation, Ordering::Relaxed);
                     if prev != 0 && prev != ep.generation {
@@ -385,7 +386,14 @@ impl Transport {
         attempt_no: u32,
         deadline: Instant,
     ) -> Result<EngineReply, TransportError> {
-        let ep = self.wait_ready(deadline).await?;
+        // Auth calls carry a password, code or refresh token: the source must
+        // verify the engine afresh for them (Q-P06o).
+        let purpose = if call.timeout == TimeoutClass::Auth {
+            Purpose::Credentials
+        } else {
+            Purpose::Ordinary
+        };
+        let ep = self.wait_ready(deadline, purpose).await?;
         let budget = self.cfg.timeouts.budget(call.timeout);
         let per_attempt = if call.method.is_read() {
             budget
@@ -668,6 +676,46 @@ pub(crate) mod tests {
         assert!(h.get("x-company-id").is_none());
         let host = h.get("host").expect("host").to_str().expect("ascii");
         assert_eq!(host, format!("127.0.0.1:{}", server.address().port()));
+    }
+
+    /// Records the purpose of each endpoint read.
+    struct PurposeSource {
+        inner: FixedEndpoint,
+        seen: std::sync::Mutex<Vec<Purpose>>,
+    }
+
+    impl EndpointSource for PurposeSource {
+        fn current(&self) -> EndpointState {
+            self.inner.current()
+        }
+        fn current_for(&self, purpose: Purpose) -> EndpointState {
+            self.seen.lock().expect("lock").push(purpose);
+            self.inner.current()
+        }
+    }
+
+    #[tokio::test]
+    async fn auth_calls_ask_for_a_credentials_grade_endpoint() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::any())
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+        let src = Arc::new(PurposeSource {
+            inner: FixedEndpoint::new(server.address().port(), Secret::new(TOKEN), 1),
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+        let t = Transport::new(src.clone(), fast_config()).expect("client builds");
+        let ordinary = Call::at(Method::Get, "/health");
+        let auth = Call::at(Method::Post, "/login").timeout(TimeoutClass::Auth);
+        t.attempt(&ordinary, &AttemptAuth::default(), 1, soon())
+            .await
+            .expect("answer");
+        t.attempt(&auth, &AttemptAuth::default(), 1, soon())
+            .await
+            .expect("answer");
+        let seen = src.seen.lock().expect("lock").clone();
+        assert_eq!(seen, vec![Purpose::Ordinary, Purpose::Credentials]);
     }
 
     #[tokio::test]

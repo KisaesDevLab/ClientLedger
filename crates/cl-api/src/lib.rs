@@ -39,7 +39,7 @@ pub mod testing;
 pub mod wire;
 
 pub use client::{Budget, ClientConfig, LOOPBACK_HOST, Method, Timeouts};
-pub use endpoint::{EndpointSource, EndpointState, EngineEndpoint, FixedEndpoint};
+pub use endpoint::{EndpointSource, EndpointState, EngineEndpoint, FixedEndpoint, Purpose};
 pub use errors::{
     ApiError, AuthFailure, ClosedPeriod, ConflictReason, ErrorCode, FieldPath, LocalValidation,
     UserText, ValidationError, ValidationIssue,

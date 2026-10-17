@@ -18,6 +18,26 @@ pub trait EndpointSource: Send + Sync + 'static {
     /// Cheap and non-blocking (well under a millisecond). Called for every
     /// attempt and never cached by cl-api.
     fn current(&self) -> EndpointState;
+
+    /// Like [`EndpointSource::current`], told what the attempt is for. A
+    /// source that caches an expensive check (the listener owner check) must
+    /// not use the cache for [`Purpose::Credentials`]: passwords, one-time
+    /// codes and refresh tokens only go to a freshly verified engine
+    /// (P06 security review L1, Q-P06o). The default ignores the purpose.
+    fn current_for(&self, purpose: Purpose) -> EndpointState {
+        let _ = purpose;
+        self.current()
+    }
+}
+
+/// What an attempt is about to send.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Purpose {
+    /// An ordinary call: only the access token travels.
+    Ordinary,
+    /// Login, second-factor verify, refresh, switch-company or logout: a
+    /// password, code or refresh token travels.
+    Credentials,
 }
 
 /// The engine's availability as the host sees it.

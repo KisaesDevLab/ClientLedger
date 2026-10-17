@@ -193,7 +193,11 @@ impl Probe {
         let budget = transport.config().timeouts.reconcile;
         let deadline = Instant::now() + budget;
         let poll = POLL.min(budget / 4);
-        if transport.wait_ready(deadline).await.is_err() {
+        if transport
+            .wait_ready(deadline, crate::endpoint::Purpose::Ordinary)
+            .await
+            .is_err()
+        {
             return Reconciled::Unresolved;
         }
         loop {
