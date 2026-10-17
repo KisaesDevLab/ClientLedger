@@ -110,15 +110,13 @@ impl UiStore {
     }
 
     fn layout_path(&self, company: &str) -> PathBuf {
-        self.dir.join(format!("layout-{}.json", safe_name(company)))
+        self.dir.join(format!("layout-{}.json", key_hash(company)))
     }
 
     /// Load preferences (defaults when missing or unreadable).
     #[must_use]
     pub fn load_prefs(&self) -> UiPrefs {
-        std::fs::read_to_string(self.prefs_path())
-            .map(|t| UiPrefs::parse(&t))
-            .unwrap_or_default()
+        read_capped(&self.prefs_path()).map_or_else(UiPrefs::default, |t| UiPrefs::parse(&t))
     }
 
     /// Save preferences.
@@ -132,7 +130,7 @@ impl UiStore {
     /// Load the tab layout remembered for `company`.
     #[must_use]
     pub fn load_layout(&self, company: &str) -> Option<crate::windows::SessionLayout> {
-        let text = std::fs::read_to_string(self.layout_path(company)).ok()?;
+        let text = read_capped(&self.layout_path(company))?;
         crate::windows::SessionLayout::parse(&text)
     }
 
@@ -147,6 +145,19 @@ impl UiStore {
     ) -> io::Result<()> {
         write_atomic(&self.layout_path(company), &layout.to_text())
     }
+}
+
+/// A 16-digit hex name for a company key (FNV-1a, 64 bit). Layout files are
+/// named by this hash, so no company id can influence a path, and two ids
+/// that `safe_name` would have merged get separate files.
+#[must_use]
+pub fn key_hash(raw: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in raw.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}")
 }
 
 /// A file name made only of letters, digits, `-` and `_`, so a company id can
@@ -167,13 +178,44 @@ pub fn safe_name(raw: &str) -> String {
     if s.is_empty() { "default".into() } else { s }
 }
 
+/// Largest preference or layout file that is read.
+pub const MAX_READ: u64 = 64 * 1024;
+
+/// Read a small text file; anything larger than [`MAX_READ`] or not UTF-8
+/// is treated as unreadable (the caller falls back to defaults).
+fn read_capped(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(MAX_READ + 1)
+        .read_to_end(&mut buf)
+        .ok()?;
+    if buf.len() as u64 > MAX_READ {
+        return None;
+    }
+    String::from_utf8(buf).ok()
+}
+
+/// Write to a per-process temporary file, flush it to disk, then rename it
+/// over the target, so a crash leaves the old file or the new one and two
+/// running programs never share a temporary name.
 fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
+    use std::io::Write;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path)
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    let result = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -247,6 +289,49 @@ mod tests {
         store.save_layout("company-a", &layout).unwrap();
         assert_eq!(store.load_layout("company-a"), Some(layout));
         assert_eq!(store.load_layout("company-b"), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn layout_files_are_named_by_a_hash_of_the_key() {
+        let store = UiStore::new("/x");
+        let a = store.layout_path("co/1");
+        let b = store.layout_path("co_1");
+        assert_ne!(a, b, "ids that look alike must not share a file");
+        assert_eq!(key_hash("co-1").len(), 16);
+        assert_eq!(key_hash("co-1"), key_hash("co-1"));
+        let name = a.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.starts_with("layout-") && !name.contains("co"),
+            "{name}"
+        );
+    }
+
+    #[test]
+    fn oversized_files_are_ignored() {
+        let dir = temp_dir("big");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = UiStore::new(&dir);
+        let big = format!(
+            "{{\"theme\":\"dark\",\"zoom_percent\":150,\"pad\":\"{}\"}}",
+            "x".repeat(70_000)
+        );
+        std::fs::write(dir.join("ui-prefs.json"), big).unwrap();
+        assert_eq!(store.load_prefs(), UiPrefs::default());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn saving_leaves_no_temporary_file_behind() {
+        let dir = temp_dir("tmpname");
+        let store = UiStore::new(&dir);
+        store.save_prefs(&UiPrefs::default()).unwrap();
+        store.save_prefs(&UiPrefs::default()).unwrap();
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["ui-prefs.json"]);
         let _ = std::fs::remove_dir_all(dir);
     }
 
