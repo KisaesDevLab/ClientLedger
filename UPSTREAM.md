@@ -18,6 +18,7 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | U-11 | Ollama provider adapter for the engine's multi-provider AI (local base URL, model choice, no key) if missing; Anthropic and OpenAI adapters confirmed | P09 | clientledger/desktop-profile | Planned |
 | U-12 | Integrity check endpoints (full Verify and fast weekly subset) with typed findings and safe automatic fixes | P34 | clientledger/verify | Planned |
 | U-10 | Redistribution grant text added to the engine repo (`LICENSE-CLIENTLEDGER.md`) by the owner | P39 | main | Planned — owner (Q-31) |
+| U-16 | Engine identity proof (HMAC challenge in `/health`) and graceful shutdown (`POST /api/v1/desktop/shutdown`) for the supervisor | P04 follow-up (P37 hardening) | clientledger/desktop-supervisor | Proposed |
 
 Add rows as capability checks find gaps (credit memos, statements, finance charges, sales tax, average-cost inventory, reconciliation, permissions granularity, optimistic concurrency, change notifications for LAN mode; post-beta: estimates, sales orders, POs, assemblies, custom fields, form templates).
 
@@ -77,7 +78,43 @@ Add rows as capability checks find gaps (credit memos, statements, finance charg
 - Schema/migrations: none. API: no new routes. New 503 codes `OFFLINE_UNAVAILABLE` and `EGRESS_BLOCKED` (desktop only); the OpenAPI component is added when E2 is integrated (`openapi.json` does not exist on this branch).
 - Server appliance impact: none. The guard is never installed, `CL_OFFLINE` is always `off` (no probes, errors unchanged), the mail factory is plain `nodemailer.createTransport`, and providers are not wrapped.
 - Tests (Windows, PG16, no Redis): full api suite 4904 passed / 30 failed (the known baseline: Redis tax-estimator, BullMQ queue, one Windows path test) / 16 skipped. Not run: Redis suites, Linux/macOS, SEA runtime, the optional `unshare -rn` CI job.
-- Status: Done (branch) — 2026-10-15. Local only; not pushed, no engine PR (per orchestrator). Security-reviewer pass on the guard is pending (plan R11).
+- Security review (2026-10-15; no Critical, one High), all fixed on the branch, `1ffbd065`..`abc0293b`, one commit per item:
+  - H-1: worker threads now run the guard. OCR language data is local only: `OCR_LANG_PATH`, or `<CL_DATA_DIR>/tessdata` on desktop. Missing data gives 503 `OCR_DATA_MISSING`.
+  - M-1 and L-1: Node's string-port rules, and non-string hosts are blocked.
+  - M-2: SMTP host check runs before the probe. Loopback is never "offline", and an inconclusive probe is not cached.
+  - M-3: report PDFs load only `data:`/`about:` and run Chromium with `--disable-background-networking`.
+  - M-4: desktop SMTP defaults to `requireTLS` (except loopback).
+  - L-2: patches are verified, and `index.ts` exits with `EGRESS_GUARD_MISSING` if the guard is absent.
+  - L-3: proxy env vars are removed.
+  - L-4: only exact `localhost` counts as loopback.
+  - L-5: `CL_OFFLINE=on` allows only loopback and the DB.
+  - L-7: no recipient address in the mail error log.
+- Recorded, not implemented (docs/DESKTOP.md "Rules for features that open egress"), for E6:
+  - L-6: validate Ollama/openai_compat base URLs.
+  - AI hosts come from a fixed provider table.
+  - SMTP host must pass `assertHostSafe` and use ports 25/465/587/2525 only.
+  - Only the owner role may add an allowance, and it is cleared when the feature is turned off.
+  - Never widen the guard with `CL_EGRESS_ALLOW`.
+  - L-8: open keep-alive sockets can be reused after an allowance is removed (documented).
+- Packaging follow-ups for P04/xtask:
+  - Ship `eng.traineddata` (Apache-2.0, add to ATTRIBUTION.md) and set `OCR_LANG_PATH`.
+  - Ship `tesseract.js` and `tesseract.js-core` on disk and set `OCR_WORKER_PATH` for the SEA build.
+  - Verify the worker-thread guard in the 4-OS SEA smoke.
+- Status: Done (branch) — 2026-10-15. Local only; not pushed, no engine PR (per orchestrator).
+
+### U-16 — Engine identity proof and graceful shutdown (proposed)
+- Needed by: not blocking. P04 ships without it (Q-P04d, Q-P04e); P37 hardening should decide.
+- Why: (a) If the engine dies, another local program could bind its port and receive the launch token in the `X-CL-Token` header of the next request (security review L11). P04 already checks which process owns the port before sending the token (`cl-host` `verify_listener`), but that is an operating-system lookup and cannot be done the same way everywhere. A proof from the responder removes the dependency. (b) Windows has no graceful stop for a windowless child, so the supervisor terminates the engine's job object; a shutdown endpoint lets the engine finish in-flight requests and background work first.
+- Proposed change, desktop mode only, nothing changes on the appliance:
+  - `/health`, `/api/health` and `/api/v1/health` accept an optional `X-CL-Nonce` header (16 to 64 random bytes, hex). The answer then carries `proof = hex(HMAC-SHA256(key = launch token, message = "cl-health-v1" + nonce))`. The token is never echoed. The host computes the same value and accepts the engine only on a match, before it sends the token anywhere else (the first nonce request itself carries no token, so it is answered to an impostor the same way as to the engine, which reveals nothing).
+  - The desktop gate must let a request that carries only `X-CL-Nonce` reach `/health` (today every request needs the token): it answers 401 with the proof so the host can tell "the engine, wrong token" from "something else".
+  - `POST /api/v1/desktop/shutdown` (gated like every route): stop accepting requests, drain, close the pool, exit 0. The host falls back to terminating the process tree after `stop_grace`.
+  - Process lifetime (security review L8): the engine exits when its stdin closes (the host keeps the write end open) and, on Linux, sets `PR_SET_PDEATHSIG`, so a crashed host never leaves an engine behind. The host then also writes `run/engine.pid` atomically with the spawn.
+- Engine files touched: `middleware/desktop-gate.ts`, `utils/health.ts`, `routes/desktop.routes.ts`, `desktop/profile.ts` (docs).
+- Schema/migrations: none.
+- Tests: gate (nonce without token, wrong nonce length), proof vector, shutdown drain; host side: `cl-host` verifies the proof and tests an impostor that answers 200 without it.
+- Server appliance impact: none (all behind `isDesktop()`).
+- Status: Proposed — 2026-10-15. Not started.
 
 ## Entry template
 

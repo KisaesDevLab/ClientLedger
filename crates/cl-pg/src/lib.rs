@@ -16,6 +16,8 @@
 //! (CLAUDE.md layering rules).
 #![forbid(unsafe_code)]
 
+mod app_role;
+pub use app_role::{APP_DATABASE, APP_ROLE};
 mod binaries;
 mod cluster;
 mod dump;
@@ -34,7 +36,7 @@ pub use dump::{DumpInfo, RestoreInfo};
 pub use error::PgError;
 pub use keychain::{
     EncryptedFileStore, KeyringStore, MemoryStore, PasswordStore, StoreChoice, StoreNotice,
-    default_store,
+    default_store, default_store_for,
 };
 pub use lifecycle::{ConnectionInfo, Running};
 pub use paths::{CloudService, DataDirIssue, check_data_dir};

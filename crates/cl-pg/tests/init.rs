@@ -20,8 +20,14 @@ fn fresh_ensure_creates_a_cluster_and_saves_the_password() {
     // UTF8 database encoding and SCRAM only.
     let hba = fs::read_to_string(scratch.data_dir().join("pg_hba.conf")).unwrap();
     let rules: Vec<&str> = hba.lines().filter(|l| !l.starts_with('#')).collect();
-    assert_eq!(rules.len(), 1, "{hba}");
-    assert!(rules[0].contains("127.0.0.1/32") && rules[0].contains("scram-sha-256"));
+    assert_eq!(rules.len(), 2, "{hba}");
+    for r in &rules {
+        assert!(
+            r.contains("127.0.0.1/32") && r.contains("scram-sha-256"),
+            "{r}"
+        );
+        assert!(!r.contains(" all "), "{r}");
+    }
     let conf = fs::read_to_string(scratch.data_dir().join("postgresql.conf")).unwrap();
     assert!(conf.contains("include_if_exists = 'clientledger.conf'"));
 }

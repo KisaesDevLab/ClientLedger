@@ -114,6 +114,8 @@ jobs:
     env:
       CL_SMOKE_REQUIRE: "1"
       CL_REQUIRE_ENGINE_EXE: "1"
+      # The supervisor tests with the real engine and PostgreSQL fail instead of skipping (Q-P04i).
+      CL_HOST_REQUIRE: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -145,6 +147,18 @@ jobs:
         run: cargo xtask engine --smoke
       - name: Executable runs without Node on PATH
         run: cargo test -p xtask -- built_executable_runs_without_node_on_path
+      - uses: actions/cache@v4
+        with:
+          path: target/pg/.cache
+          key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
+      - name: Fetch pinned PostgreSQL (hash-verified)
+        run: cargo xtask pg-fetch
+      - name: Supervisor with the real engine and PostgreSQL (cold and warm start budgets, restarts, no orphans)
+        env:
+          # Hosted runners are slower than the 15 s cold / 5 s warm product budgets
+          # (macos-15-intel measured 14.1 s / 5.2 s). The override applies to CI only.
+          CL_HOST_BUDGET_SECS: "30"
+        run: cargo test -p cl-host --test real_engine -- --test-threads=1 --nocapture
       - uses: actions/upload-artifact@v4
         with:
           name: engine-${{ runner.os }}-${{ runner.arch }}

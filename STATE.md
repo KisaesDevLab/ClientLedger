@@ -1,7 +1,7 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P02 — Engine desktop profile (upstream)
-**Status:** In progress (scout → architect → engine-implementer → reviewer)
+**Current phase:** P02 — Engine desktop profile (upstream), engine PRs E1–E6 in flight; P04 built (PR #5, stacked on #4); P05 planning
+**Status:** In progress
 **Engine commit:** `13ebd2ba50db0e3e68dd473329caf96d1f039e4e` (`main`, pinned 2026-10-15; bump per Q-02)
 **Last updated:** 2026-10-15
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
@@ -14,7 +14,7 @@
 | P01 | Engine submodule and single-executable build | L | Done 2026-10-15 (deferred criterion closed in P02: smoke requires 200 and the pinned commit, Q-P01a) |
 | P02 | Engine desktop profile (upstream) | H | In progress |
 | P03 | Bundled PostgreSQL manager | L | Done 2026-10-15 |
-| P04 | Supervisor | L | |
+| P04 | Supervisor | L | Built, CI green, security-reviewed (PR #5, stacked on #4) |
 | P05 | Engine API client | H | |
 | P06 | Application shell | L | |
 | P07 | Automation and control channel | L | |
@@ -99,10 +99,23 @@ Notes kept for later phases:
 - Pid-file ownership uses the pid, process name, and data directory from `postmaster.pid`; the process start time is not compared (no portable OS call without more dependencies).
 - A running server whose pid file shows non-loopback settings is stopped and restarted (unit-tested on the pid file fields; no integration test starts a wider server).
 
+## Follow-ups from P04 security review
+
+No Critical or High findings. Fixed on `phase/P04-supervisor`: M1, M2, L1, L2, L5, L6, L7, L9, L10, L11 (see Q-P04p). Recorded, not fixed:
+
+| # | Follow-up | Target |
+|---|-----------|--------|
+| M3 | Windows custom or portable data folders inherit "Authenticated Users: Modify": set an owner-only ACL or refuse such roots; the file-store key derivation is not protective on shared folders (Q-P04l, Q-P03c). | P35 / P09 |
+| L3 | Fail closed after N failed listener lookups instead of warning forever (Q-P04m). | P37 |
+| L4 | `cl-api` re-reads endpoint and generation for every request and verifies the listener before the first request after a restart; host `info`/`initialize` should verify the listener first (Q-P04n). | P05 |
+| L8 | Engine exits when stdin closes / `PR_SET_PDEATHSIG` (added to U-16); write `run/engine.pid` atomically with the spawn (Q-P04o). | U-16 / P37 |
+| Info | Suspended start under the job object and fail if job creation fails; no Node diagnostic reports; WER exclusion; secrets never rotate, so P34 recovery guidance must cover them (Q-P04o). | P35 / P34 / P37 |
+
 ## Log
 
 Newest first. One entry per completed phase: date, phase, summary, acceptance checklist results, notable decisions (Q-xx / U-xx).
 
+- 2026-10-15 — Owner: the engine is fully licensed for ClientLedger's use; engine licensing is settled and closed (Q-35, Q-P02a, U-10). Not to be raised again. P04 built on `phase/P04-supervisor` (PR #5 stacked on draft PR #4, all CI green): cl-host supervisor, least-privilege `clientledger_app` DB role, single-instance lock, log rotation, CLI host commands; independent security review fixed M1 (engine search path) and M2 (master-secret replacement) plus lows. Engine PRs: E1 #147 (ready for owner review), E2 #146 (draft), license draft #145 (owner's); E3 (pg-boss) built locally; E4 (offline guard) security fixes in progress; E5/E6 deferred to just before P08/P09 (plan settled).
 - 2026-10-15 — Owner decision: engine license changes to straight PolyForm Internal Use 1.0.0 (no ClientLedger grant). The engine is currently PolyForm Small Business 1.0.0, so this is a relicense of the public `Vibe-MyBooks` repo, prepared as engine branch `clientledger/license-internal-use` for the owner to review and merge (Q-29); resolves Q-P02a. NOTICE.md, README, CLAUDE.md, ARCHITECTURE, M0/M6 and Q-31/Q-35/Q-132/Q-133/Q-134/Q-137 updated; the draft grant stays in docs/legal for reference only. Consequences: recipients may not distribute the engine (only official releases from Kisaes LLC carry it); use is limited to internal business operations, so bookkeeping for others needs a separate license; the explicit accountant-review allowance and third-party mirroring right from the draft grant are gone. Attorney review of the NOTICE summary is still advisable before P39.
 - 2026-10-15 — P03 complete (PR #3, squash-merged). `cl-pg` + `xtask pg-fetch`: pinned zonky PG16 binaries (SHA-256 lock), cluster init with keychain password, data-dir guard, loopback-only start/stop, cold whole-database dump/restore. Acceptance: fresh ensure+start 3.3 s locally; second start reuses; kill -9 recovery; dump→restore identical; loopback-only confirmed by security-reviewer. Security review (opus): no critical; fixed crafted-backup code execution on restore, stop() signalling unrelated processes, world-readable backups and cheap hardening; remaining findings tracked in "Follow-ups from P03 security review". Decisions: Q-P03a–h (no pg_dump/psql in zonky archives → cold copy; restore takes a registry-override flag the restore UI must gate behind owner confirmation). Open for owner: Q-P03e LGPL/OpenSSL/ICU in bundled archives, before P39. Agents: rust-implementer x2 (sonnet), security-reviewer (opus), ci-fixer (sonnet; pg-fetch layout `share/postgresql/` on Unix archives).
 - 2026-10-15 — P01 complete (PR #2, squash-merged), with one acceptance criterion deferred: `/health` reporting the pinned engine commit. The pinned engine has no commit field and returns 503 without Redis, so the smoke test accepts 503 with DB ok until U-02/U-03 land in P02 (Q-P01a). Shipped: `engine/` submodule (Vibe-MyBooks `main`, pinned 13ebd2ba), `cargo xtask engine` (esbuild + Node SEA, manifest.json, cache by commit + Node version), `--smoke`, PATH-stripped run test, 4-OS `engine` CI job. Verified: built on Windows x64, macOS arm64/x64, Linux x64 in CI; runs without Node; smoke ran all 325 migrations. Decisions: Q-P01a–c. Engine untouched; bundling workarounds in Q-P01b (puppeteer stubbed, so engine HTML-to-PDF routes fail; P04 sets CL_ENGINE_RUNTIME_DIR). Agents: rust-implementer (sonnet), ci-fixer (sonnet; Windows runner is elevated, so smoke Postgres starts via pg_ctl).

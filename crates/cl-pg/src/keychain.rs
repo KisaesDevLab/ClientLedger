@@ -56,6 +56,20 @@ impl KeyringStore {
         }
     }
 
+    /// Entry for another secret that belongs to the cluster at `data_dir`,
+    /// such as the engine's application-role password. `purpose` is a short
+    /// lowercase name (letters, digits, dashes).
+    ///
+    /// # Panics
+    /// Panics when `purpose` is not a valid name (a programming error).
+    #[must_use]
+    pub fn for_purpose(data_dir: &Path, purpose: &str) -> Self {
+        assert!(valid_purpose(purpose), "invalid secret purpose");
+        KeyringStore {
+            account: format!("{purpose}-{}", dir_tag(data_dir)),
+        }
+    }
+
     fn entry(&self) -> Result<keyring::Entry> {
         keyring::Entry::new(SERVICE, &self.account).map_err(|e| PgError::SecretStore(e.to_string()))
     }
@@ -118,6 +132,21 @@ impl EncryptedFileStore {
     #[must_use]
     pub fn new(path: impl Into<PathBuf>) -> Self {
         EncryptedFileStore { path: path.into() }
+    }
+
+    /// Fallback file for another secret of the same cluster: a sibling named
+    /// `<name>.<purpose>.secret`.
+    ///
+    /// # Panics
+    /// Panics when `purpose` is not a valid name (a programming error).
+    #[must_use]
+    pub fn beside_for_purpose(data_dir: &Path, purpose: &str) -> Self {
+        assert!(valid_purpose(purpose), "invalid secret purpose");
+        let mut name = data_dir
+            .file_name()
+            .map_or_else(|| "pgdata".into(), std::ffi::OsStr::to_os_string);
+        name.push(format!(".{purpose}.secret"));
+        EncryptedFileStore::new(data_dir.with_file_name(name))
     }
 
     /// Default location: a sibling of the data directory, `<name>.secret`.
@@ -317,7 +346,34 @@ impl std::fmt::Debug for StoreChoice {
 /// stable between runs.
 #[must_use]
 pub fn default_store(data_dir: &Path) -> StoreChoice {
-    let file = EncryptedFileStore::beside(data_dir);
+    choose_store(
+        EncryptedFileStore::beside(data_dir),
+        KeyringStore::for_data_dir(data_dir),
+    )
+}
+
+/// [`default_store`] for another secret of the same cluster (Q-P04a). Same
+/// rule: an existing fallback file wins, then the keychain if it works.
+///
+/// # Panics
+/// Panics when `purpose` is not a valid name (a programming error).
+#[must_use]
+pub fn default_store_for(data_dir: &Path, purpose: &str) -> StoreChoice {
+    choose_store(
+        EncryptedFileStore::beside_for_purpose(data_dir, purpose),
+        KeyringStore::for_purpose(data_dir, purpose),
+    )
+}
+
+fn valid_purpose(purpose: &str) -> bool {
+    !purpose.is_empty()
+        && purpose.len() <= 40
+        && purpose
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+fn choose_store(file: EncryptedFileStore, keyring: KeyringStore) -> StoreChoice {
     if file.path().exists() {
         return StoreChoice {
             store: Box::new(file),
@@ -326,7 +382,7 @@ pub fn default_store(data_dir: &Path) -> StoreChoice {
     }
     match probe_keychain() {
         Ok(()) => StoreChoice {
-            store: Box::new(KeyringStore::for_data_dir(data_dir)),
+            store: Box::new(keyring),
             notice: None,
         },
         Err(reason) => {
@@ -425,6 +481,27 @@ mod tests {
         let a = KeyringStore::for_data_dir(Path::new("/tmp/a-does-not-exist"));
         let b = KeyringStore::for_data_dir(Path::new("/tmp/b-does-not-exist"));
         assert_ne!(a.account, b.account);
+    }
+
+    #[test]
+    fn purposes_get_their_own_accounts_and_files() {
+        let data = Path::new("/tmp/c-does-not-exist/pgdata");
+        let a = KeyringStore::for_purpose(data, "engine-app");
+        assert_ne!(a.account, KeyringStore::for_data_dir(data).account);
+        assert_ne!(
+            a.account,
+            KeyringStore::for_purpose(data, "other-thing").account
+        );
+        assert_eq!(
+            EncryptedFileStore::beside_for_purpose(data, "engine-app").path(),
+            Path::new("/tmp/c-does-not-exist/pgdata.engine-app.secret")
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid secret purpose")]
+    fn a_purpose_cannot_smuggle_path_characters() {
+        let _ = EncryptedFileStore::beside_for_purpose(Path::new("/x/pgdata"), "../evil");
     }
 
     #[test]

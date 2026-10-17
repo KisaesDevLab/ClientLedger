@@ -27,6 +27,21 @@ impl Secret {
         Ok(Secret(hex(&bytes)))
     }
 
+    /// A different secret derived from this one: SHA-256 of a fixed prefix,
+    /// `label`, and the value, as 64 hex characters. Use it to turn one random
+    /// master secret into independent keys (one per `label`). The master must
+    /// itself be random; this is not a password hash.
+    #[must_use]
+    pub fn derive(&self, label: &str) -> Secret {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(b"ClientLedger derived secret v1\0");
+        h.update(label.as_bytes());
+        h.update([0u8]);
+        h.update(self.0.as_bytes());
+        Secret(hex(&h.finalize()))
+    }
+
     /// The raw value. Never log it.
     #[must_use]
     pub fn expose(&self) -> &str {
@@ -83,6 +98,17 @@ mod tests {
         assert_eq!(format!("{s}"), "***");
         assert_eq!(format!("{s:?}"), "Secret(***)");
         assert_eq!(format!("{:?}", Some(&s)), "Some(Secret(***))");
+    }
+
+    #[test]
+    fn derived_secrets_are_stable_distinct_and_hide_the_master() {
+        let m = Secret::new("master-value");
+        let a = m.derive("jwt");
+        assert_eq!(a, m.derive("jwt"));
+        assert_ne!(a, m.derive("encryption"));
+        assert_ne!(a, Secret::new("other").derive("jwt"));
+        assert_eq!(a.expose().len(), 64);
+        assert!(!a.expose().contains("master"));
     }
 
     #[test]
