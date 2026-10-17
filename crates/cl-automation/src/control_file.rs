@@ -115,8 +115,8 @@ fn facts_of(link_meta: &Metadata, meta: &Metadata) -> FileFacts {
     use std::os::windows::fs::MetadataExt;
     const REPARSE_POINT: u32 = 0x400;
     // Owner and ACL cannot be read without unsafe code; the folder rule in
-    // `check_parent` stands in (the file must live under the user's profile,
-    // whose ACL admits the user, SYSTEM and administrators only).
+    // `check_parent` stands in (the file must live under %LOCALAPPDATA%,
+    // which is per user, never roaming and not synced by OneDrive).
     FileFacts {
         is_link: link_meta.file_type().is_symlink()
             || link_meta.file_attributes() & REPARSE_POINT != 0,
@@ -139,7 +139,7 @@ fn facts_of(link_meta: &Metadata, meta: &Metadata) -> FileFacts {
 }
 
 /// The folder rule. Unix: nobody else may be able to replace the file
-/// (no group or world write unless sticky). Windows: under the user profile.
+/// (no group or world write unless sticky). Windows: under the local (non-roaming) app data folder.
 fn check_parent(path: &Path) -> Result<(), ControlFileError> {
     let parent = match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
@@ -159,13 +159,16 @@ fn check_parent(path: &Path) -> Result<(), ControlFileError> {
     }
     #[cfg(windows)]
     {
-        let profile = std::env::var_os("USERPROFILE")
+        let profile = std::env::var_os("LOCALAPPDATA")
             .map(std::path::PathBuf::from)
             .and_then(|p| fs::canonicalize(p).ok())
-            .ok_or_else(|| ControlFileError::Unsafe("the user profile folder is unknown".into()))?;
+            .ok_or_else(|| {
+                ControlFileError::Unsafe("the local app data folder is unknown".into())
+            })?;
         if !real.starts_with(&profile) {
             return Err(ControlFileError::Unsafe(
-                "it must be inside your user profile folder".into(),
+                "it must be inside your local app data folder (never a roaming or synced folder)"
+                    .into(),
             ));
         }
     }
@@ -458,8 +461,8 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn folder_outside_the_profile_is_refused() {
-        // The system folder is outside any user profile.
+    fn folder_outside_local_app_data_is_refused() {
+        // The system folder is outside local app data.
         let r = write_new(Path::new("C:\\Windows\\Temp\\cl-control.json"), &info());
         assert!(matches!(r, Err(ControlFileError::Unsafe(_))), "{r:?}");
     }
