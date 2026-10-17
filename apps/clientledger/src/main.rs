@@ -39,6 +39,10 @@ fn main() -> Result<()> {
     }
     .context("could not find a place for ClientLedger's data")?;
 
+    // Events from the UI go to <logs>/ui.log (rotating); the host keeps host.log.
+    let _ = paths.ensure_dirs();
+    cl_ui::logging::init(paths.logs_dir().join("ui.log"));
+
     let mut shell = ShellOptions {
         store: Some(UiStore::new(paths.root().join("ui"))),
         log_path: Some(paths.host_log()),

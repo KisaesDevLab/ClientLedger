@@ -20,6 +20,7 @@ pub mod fonts;
 pub mod i18n;
 pub mod icon;
 pub mod input;
+pub mod logging;
 pub mod prefs;
 pub mod shell;
 pub mod theme;

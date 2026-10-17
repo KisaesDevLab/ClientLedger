@@ -18,6 +18,7 @@ eframe = { version = "0.37.0", default-features = false, features = ["accesskit"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt", "std", "registry"] }
 
 [lints]
 workspace = true

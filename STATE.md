@@ -81,7 +81,7 @@ Screens or actions that link to a later phase. Remove each line when its phase l
 
 - P06 shell placeholders (Q-P06g): every menu, rail and palette command whose screen is built later opens a placeholder tab. The phase that builds the screen removes its entry: P08 Open or Switch Company (and passes a company id to `Shell::set_company` so layouts are per company instead of `default`), P09 Preferences (and may move `cl-ui::prefs` into `cl-settings`), P11 Chart of Accounts / Item List / Tags / Clients & Jobs / Vendors, P12 Open Register, P13 Write Check, P14 Make Deposit / Transfer Funds / Sales Receipt / Record Card Charge, P15 Make Journal Entry, P16 Home (replaces the Home placeholder and the demo rail counts), P17 Enter Bill, P18 Pay Bills, P20 Create Invoice, P21 Receive Payment, P22 Credit Memo or Refund / Statements, P25 Import Bank File, P26 Bank Feed, P27 Reconcile, P28 Reports / Profit & Loss / Balance Sheet / Trial Balance, P29 Set Closing Date / Users and Permissions / Audit Trail, P30 Import Payroll, P32 Send to My Accountant, P38 bundled help (F1 says "not available yet").
 - P06 native macOS menu bar (Q-70, muda) is deferred (Q-P06b): in-window menu on every platform until macOS packaging.
-- P06 app logging: no `tracing` subscriber is installed yet; rotating log files and scrubbing policy are P37 (Q-P06l).
+- P06 follow-up (security review L1): auth calls should always verify the engine listener; needs a purpose argument on `cl_api::EndpointSource` (Q-P06o), P07 or P37.
 
 ## Follow-ups from P03 security review
 
