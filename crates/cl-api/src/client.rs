@@ -173,8 +173,9 @@ impl Timeouts {
     }
 }
 
-/// One logical request, fixed across attempts.
-#[derive(Debug)]
+/// One logical request, fixed across attempts. Its `Debug` shows only the
+/// method, route template, request id and body length: never the query
+/// (search text is owner data) or the body.
 pub(crate) struct Call {
     pub method: Method,
     /// Route template for logs (`/api/v1/accounts/{id}`); never the query.
@@ -189,6 +190,17 @@ pub(crate) struct Call {
     pub company: Option<CompanyId>,
     pub idempotency_key: Option<IdempotencyKey>,
     pub if_match: Option<String>,
+}
+
+impl std::fmt::Debug for Call {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Call")
+            .field("method", &self.method)
+            .field("route", &self.route)
+            .field("request_id", &self.request_id)
+            .field("body_len", &self.body.as_ref().map_or(0, |b| b.len()))
+            .finish_non_exhaustive()
+    }
 }
 
 impl Call {
@@ -583,6 +595,23 @@ pub(crate) mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     pub(crate) const TOKEN: &str = "launch-token-canary-0123456789";
+
+    #[test]
+    fn call_debug_shows_no_query_or_body() {
+        let mut call = Call::new(
+            Method::Post,
+            "/api/v1/tags/{id}",
+            "/api/v1/tags/x-path-canary",
+        )
+        .json_body(br#"{"name":"body-canary"}"#.to_vec());
+        call.query.push(("search".into(), "query-canary".into()));
+        let d = format!("{call:?}");
+        assert!(d.contains("/api/v1/tags/{id}"), "{d}");
+        assert!(d.contains("body_len: 22"), "{d}");
+        for canary in ["body-canary", "query-canary", "x-path-canary"] {
+            assert!(!d.contains(canary), "{d}");
+        }
+    }
 
     pub(crate) fn fast_config() -> ClientConfig {
         let mut cfg = ClientConfig::default();

@@ -195,6 +195,10 @@ pub struct RestartPolicy {
     pub listener_check_every: Duration,
     /// Time the engine gets to exit after being asked (Unix).
     pub stop_grace: Duration,
+    /// Wait after the engine exited on its own, to collect its last output.
+    /// The endpoint is unpublished *before* this wait, so no client sends
+    /// to a port another program could now take.
+    pub exit_drain: Duration,
 }
 
 impl Default for RestartPolicy {
@@ -214,6 +218,7 @@ impl Default for RestartPolicy {
             poll_interval: Duration::from_millis(250),
             listener_check_every: Duration::from_secs(15),
             stop_grace: Duration::from_secs(10),
+            exit_drain: Duration::from_millis(100),
         }
     }
 }
@@ -922,7 +927,12 @@ impl Worker {
                     let mut engine_problem: Option<(String, Vec<String>, bool)> = None;
 
                     if let Ok(Some(status)) = proc.child.try_wait() {
-                        std::thread::sleep(Duration::from_millis(100));
+                        // Unpublish at once: the port is free from now on.
+                        self.shared.update(|i| {
+                            i.endpoint = None;
+                            i.status.engine_pid = None;
+                        });
+                        std::thread::sleep(self.policy.exit_drain);
                         let code = status.code();
                         let permanent = code == Some(engine::EXIT_CONFIG);
                         let fatal = proc.fatal_code();
@@ -989,11 +999,13 @@ impl Worker {
 
                     if let Some((reason, tail, permanent)) = engine_problem {
                         self.log.error(&reason);
-                        self.stop_engine(&mut engine);
+                        // Unpublish before stopping: no new request may go
+                        // to an engine that is on its way out.
                         self.shared.update(|i| {
                             i.endpoint = None;
                             i.status.engine_pid = None;
                         });
+                        self.stop_engine(&mut engine);
                         if !db.is_alive(&ep) {
                             // An engine without a database is not the engine's
                             // fault: handle the database first.

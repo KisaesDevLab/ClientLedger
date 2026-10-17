@@ -178,6 +178,28 @@ fn no_secret_reaches_the_host_log() {
 }
 
 #[test]
+fn an_exited_engine_is_unpublished_before_its_output_is_drained() {
+    let scratch = Scratch::new("unpublish");
+    let (_db, factory) = fake_db();
+    let mut cfg = fake_config(&scratch);
+    // A long drain: the endpoint must be gone well before it ends.
+    cfg.policy.exit_drain = Duration::from_secs(5);
+    let sup = start(cfg, factory).unwrap();
+    assert!(sup.endpoint().is_some());
+    let killed = std::time::Instant::now();
+    common::kill_hard(sup.status().engine_pid.unwrap());
+    while sup.endpoint().is_some() {
+        assert!(
+            killed.elapsed() < Duration::from_secs(3),
+            "endpoint still published after the engine exited"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(sup.snapshot().endpoint.is_none());
+    sup.stop();
+}
+
+#[test]
 fn an_engine_killed_while_idle_is_restarted() {
     let scratch = Scratch::new("kill-engine");
     let (_db, factory) = fake_db();
