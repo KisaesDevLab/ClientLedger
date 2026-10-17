@@ -46,6 +46,11 @@ fn is_float_ident(s: &str) -> Option<&'static str> {
     None
 }
 
+/// Integer literal suffixes.
+const INT_SUFFIXES: [&str; 12] = [
+    "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize",
+];
+
 /// Does the literal token text denote a float (`1.5`, `1e3`, `2f64`)?
 fn is_float_literal_text(t: &str) -> bool {
     let b = t.as_bytes();
@@ -56,6 +61,10 @@ fn is_float_literal_text(t: &str) -> bool {
         return true;
     }
     if t.starts_with("0x") || t.starts_with("0b") || t.starts_with("0o") {
+        return false;
+    }
+    // Integer suffixes (`1usize` has an `e` but is no float).
+    if INT_SUFFIXES.iter().any(|s| t.ends_with(s)) {
         return false;
     }
     t.contains('.') || t.contains('e') || t.contains('E')
@@ -275,6 +284,15 @@ mod tests {
         assert_eq!(lines("fn f() { let _ = json!({ \"a\": 1.5 }); }"), [1]);
         assert_eq!(lines("fn f() { let _ = format!(\"{}\", x as f64); }"), [1]);
         assert_eq!(lines("fn f() { assert_eq!(a, 3f32); }"), [1]);
+        assert_eq!(
+            lines("fn f() { let _ = vec![1usize, 2isize, 3e2]; assert_eq!(n, 1usize); }"),
+            [1],
+            "only 3e2 is a float"
+        );
+        assert_eq!(
+            lines("fn f() { assert_eq!(n, 1usize); }"),
+            Vec::<usize>::new()
+        );
     }
 
     #[test]
