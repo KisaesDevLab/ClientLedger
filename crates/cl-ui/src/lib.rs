@@ -13,9 +13,12 @@
 )]
 
 pub mod about;
+pub mod app;
+pub mod engine_link;
 pub mod errors;
 pub mod fonts;
 pub mod i18n;
+pub mod icon;
 pub mod input;
 pub mod prefs;
 pub mod shell;

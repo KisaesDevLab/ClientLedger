@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+description = "The ClientLedger desktop application."
+
+[dependencies]
+anyhow = "1.0.104"
+cl-host = { path = "../../crates/cl-host" }
+cl-ui = { path = "../../crates/cl-ui" }
 
 [lints]
 workspace = true
