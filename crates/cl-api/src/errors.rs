@@ -328,6 +328,10 @@ pub enum ApiError {
     /// A read result from before a company switch (queue only).
     #[error("result from a previous company")]
     StaleScope,
+    /// A read was cancelled because its window closed (queue only; writes
+    /// are never cancelled).
+    #[error("cancelled")]
+    Cancelled,
     /// A background job failed unexpectedly (queue only).
     #[error("internal error")]
     Internal,
@@ -381,6 +385,7 @@ impl OwnerFacing for ApiError {
             | ApiError::Decode { .. }
             | ApiError::Internal => ("error.api.internal", Some("fix.api.report")),
             ApiError::StaleScope => ("error.api.stale_scope", None),
+            ApiError::Cancelled => ("error.api.cancelled", None),
         };
         OwnerMessage {
             key,

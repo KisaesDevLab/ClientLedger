@@ -22,6 +22,7 @@ mod client;
 pub mod endpoint;
 pub mod errors;
 pub mod idempotency;
+pub mod queue;
 pub mod resources;
 pub mod session;
 pub mod wire;
@@ -33,6 +34,10 @@ pub use errors::{
     UserText, ValidationError, ValidationIssue,
 };
 pub use idempotency::IdempotencyKey;
+pub use queue::{
+    ApiQueue, OrphanLabel, OrphanOutcome, OrphanResult, Pending, QueueConfig, QueueError,
+    RequestGroup, ScopeSource, ShutdownReport,
+};
 pub use resources::accounts::{
     Account, AccountFields, AccountFilter, AccountSort, AccountType, AccountUpdate, Accounts,
 };
