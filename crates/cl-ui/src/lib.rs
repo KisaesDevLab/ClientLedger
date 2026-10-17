@@ -1,16 +1,9 @@
-//! `cl-ui` crate (stub; filled in by a later phase).
+//! The `ClientLedger` application: theme and fonts, the shell (title bar, menus,
+//! rail, tabs, status bar), the window manager, dialogs, and the glue that
+//! connects the supervised engine to the typed API client.
 #![forbid(unsafe_code)]
 
-/// Returns the crate name; placeholder so the skeleton has a testable item.
-#[must_use]
-pub fn crate_name() -> &'static str {
-    "cl-ui"
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_name_matches() {
-        assert_eq!(super::crate_name(), "cl-ui");
-    }
-}
+pub mod fonts;
+pub mod i18n;
+pub mod theme;
+pub mod widgets;
