@@ -8,11 +8,14 @@
 //! never modified. Results are cached by engine commit + Node version + target.
 
 use anyhow::{Context, Result, anyhow, bail};
+use std::collections::hash_map::RandomState;
 use std::fs;
-use std::io::{Read, Write};
+use std::hash::{BuildHasher, Hasher};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Fuse string baked into every official Node binary (documented by Node's SEA docs).
@@ -150,6 +153,17 @@ pub fn manifest_json(
     )
 }
 
+/// Value baked into the SEA banner and reported as `engineCommit` on `/health`:
+/// the submodule commit, plus `-dirty` when tracked engine files were modified.
+#[must_use]
+pub fn banner_commit(commit: &str, dirty: bool) -> String {
+    if dirty {
+        format!("{commit}-dirty")
+    } else {
+        commit.to_string()
+    }
+}
+
 /// Pull a string field out of the flat manifest we wrote ourselves.
 #[must_use]
 pub fn manifest_field<'a>(manifest: &'a str, key: &str) -> Option<&'a str> {
@@ -176,6 +190,16 @@ fn node_cmd(args: &[&str]) -> Command {
     c
 }
 
+pub(crate) fn npx() -> Command {
+    if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "npx"]);
+        c
+    } else {
+        Command::new("npx")
+    }
+}
+
 fn npm() -> Command {
     if cfg!(windows) {
         let mut c = Command::new("cmd");
@@ -186,7 +210,7 @@ fn npm() -> Command {
     }
 }
 
-fn run(mut cmd: Command, what: &str) -> Result<()> {
+pub(crate) fn run(mut cmd: Command, what: &str) -> Result<()> {
     println!("==> {what}");
     let status = cmd
         .status()
@@ -306,7 +330,8 @@ fn build(root: &Path, target: &Target, force: bool) -> Result<PathBuf> {
     c.arg(tools.join("bundle.mjs"))
         .arg(&engine)
         .arg(&work)
-        .arg(target.node_tag);
+        .arg(target.node_tag)
+        .arg(banner_commit(&commit, dirty));
     run(c, "bundle engine")?;
     let bundle_sha = fs::read_to_string(work.join("bundle.sha256"))?
         .trim()
@@ -375,14 +400,16 @@ fn free_port() -> Result<u16> {
 }
 
 /// Minimal HTTP/1.1 GET against loopback (avoids an HTTP client dependency).
-fn http_get(port: u16, path: &str) -> Result<(u16, String)> {
+/// The `Host` header carries the port because the desktop gate checks it.
+fn http_get(port: u16, path: &str, token: Option<&str>) -> Result<(u16, String)> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(2))?;
     s.set_read_timeout(Some(Duration::from_secs(5)))?;
-    write!(
-        s,
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-    )?;
+    let token_header = token.map_or_else(String::new, |t| format!("X-CL-Token: {t}\r\n"));
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{token_header}Connection: close\r\n\r\n"
+    );
+    s.write_all(request.as_bytes())?;
     let mut raw = Vec::new();
     s.read_to_end(&mut raw)?;
     let text = String::from_utf8_lossy(&raw).into_owned();
@@ -396,6 +423,62 @@ fn http_get(port: u16, path: &str) -> Result<(u16, String)> {
         .map(|(_, b)| b.to_string())
         .unwrap_or_default();
     Ok((status, body))
+}
+
+/// A 256-bit launch token as 64 hex digits, seeded from the OS through
+/// `RandomState` (each hasher gets fresh random keys). Throwaway use only.
+fn random_token() -> String {
+    use std::fmt::Write as _;
+    (0..4).fold(String::new(), |mut acc, _| {
+        let _ = write!(acc, "{:016x}", RandomState::new().build_hasher().finish());
+        acc
+    })
+}
+
+/// Port from the engine's one-line ready message on stdout:
+/// `{"event":"listening","host":"127.0.0.1","port":54321}`.
+#[must_use]
+pub fn parse_ready_port(line: &str) -> Option<u16> {
+    if !line.contains("\"event\":\"listening\"") {
+        return None;
+    }
+    let rest = &line[line.find("\"port\":")? + "\"port\":".len()..];
+    let digits: String = rest
+        .trim_start()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits.parse().ok()
+}
+
+/// Value of a flat string field (`"key":"value"`) in a JSON body.
+#[must_use]
+pub fn json_str_field<'a>(body: &'a str, key: &str) -> Option<&'a str> {
+    let marker = format!("\"{key}\":\"");
+    let start = body.find(&marker)? + marker.len();
+    body[start..].split('"').next()
+}
+
+/// Run SQL statements (one per line) with the engine's own `pg` driver, since
+/// the pinned `PostgreSQL` archives ship no `psql` (Q-P03a). Needs the engine's
+/// npm dependencies (`npm ci` in `engine/`).
+pub(crate) fn node_sql(root: &Path, url: &str, statements: &[&str]) -> Result<()> {
+    const SCRIPT: &str = "const {Client}=require('pg');(async()=>{const c=new Client({connectionString:process.env.CL_PGURL});await c.connect();for(const q of process.env.CL_SQL.split('\\n'))await c.query(q);await c.end()})().catch(e=>{console.error(e.message);process.exit(1)})";
+    let mut c = Command::new("node");
+    c.args(["-e", SCRIPT])
+        .env("CL_PGURL", url)
+        .env("CL_SQL", statements.join("\n"))
+        .current_dir(root.join("engine"));
+    run(c, "node pg (setup SQL)")
+}
+
+/// True when the engine's npm dependencies (including `pg`) are installed.
+pub(crate) fn engine_deps_installed(root: &Path) -> bool {
+    root.join("engine")
+        .join("node_modules")
+        .join("pg")
+        .join("package.json")
+        .exists()
 }
 
 /// A throwaway `PostgreSQL`, from local binaries or Docker. Stops on drop.
@@ -550,7 +633,7 @@ fn start_pg(work: &Path, port: u16) -> Result<Option<TempPg>> {
     Ok(None)
 }
 
-fn wait_for_port(port: u16, what: &str, limit: Duration) -> Result<()> {
+pub(crate) fn wait_for_port(port: u16, what: &str, limit: Duration) -> Result<()> {
     let start = Instant::now();
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     while start.elapsed() < limit {
@@ -596,38 +679,48 @@ fn smoke(root: &Path, target: &Target) -> Result<()> {
     }
     std::thread::sleep(Duration::from_secs(2)); // let recovery finish for Docker's init restart
 
-    let port = free_port()?;
+    let restricted = engine_deps_installed(root);
+    let database_url = smoke_database_url(root, pg_port, restricted)?;
+
+    let token = random_token();
     let log = fs::File::create(work.join("engine.log"))?;
     let mut cmd = Command::new(&exe);
     // Minimal environment: no PATH, so Node cannot be found even if installed.
+    // No REDIS_URL and no PORT: desktop mode needs neither.
     cmd.env_clear()
-        .env(
-            "DATABASE_URL",
-            format!("postgres://postgres@127.0.0.1:{pg_port}/postgres"),
-        )
-        // The engine still requires Redis until U-01/U-02 land (P02); it only degrades /health.
-        .env("REDIS_URL", "redis://127.0.0.1:1")
-        .env("EXPECT_WORKER", "false")
+        .env("CL_MODE", "desktop")
+        .env("CL_BIND", "127.0.0.1:0")
+        .env("CL_TOKEN", &token)
+        .env("CL_DATA_DIR", work.join("data"))
+        .env("DATABASE_URL", database_url)
         .env("JWT_SECRET", "s".repeat(40))
         .env("ENCRYPTION_KEY", "e".repeat(64))
         .env("PLAID_ENCRYPTION_KEY", "p".repeat(64))
-        .env("PORT", port.to_string())
         .env("NODE_ENV", "production")
-        .env("UPLOAD_DIR", work.join("uploads"))
         .env("CL_ENGINE_RUNTIME_DIR", work.join("runtime"))
         .env("TEMP", &work)
         .env("TMP", &work)
         .stdin(Stdio::null())
-        .stdout(Stdio::from(log.try_clone()?))
-        .stderr(Stdio::from(log));
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(log.try_clone()?));
+    if restricted {
+        cmd.env("CL_REQUIRE_NON_SUPERUSER", "1");
+    }
     if let Some(root_dir) = std::env::var_os("SystemRoot") {
         cmd.env("SystemRoot", root_dir);
     }
     let mut child = cmd
         .spawn()
         .with_context(|| format!("start {}", exe.display()))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("engine stdout is not piped"))?;
+    let ready_rx = forward_stdout(stdout, log);
 
-    let result = poll_health(&mut child, port, &commit);
+    let expected = banner_commit(&commit, manifest.contains("\"engineDirty\": true"));
+    let result = wait_ready(&mut child, &ready_rx)
+        .and_then(|port| check_health(port, &token, &expected, restricted));
     let _ = child.kill();
     let _ = child.wait();
     drop(pg);
@@ -645,45 +738,103 @@ fn smoke(root: &Path, target: &Target) -> Result<()> {
     result
 }
 
-fn poll_health(child: &mut Child, port: u16, commit: &str) -> Result<()> {
+/// Database URL for the engine. When the engine's npm dependencies are
+/// installed it is a non-superuser role that owns its own database, the way P04
+/// will run it (E1 supports `CL_REQUIRE_NON_SUPERUSER=1`). Creating the role
+/// needs the engine's `pg` driver (no psql in the pinned archives, Q-P03a), so
+/// without `engine/node_modules` the superuser is used and a note is printed.
+fn smoke_database_url(root: &Path, pg_port: u16, restricted: bool) -> Result<String> {
+    if !restricted {
+        println!(
+            "smoke: note: engine/node_modules missing, so the engine runs as the PostgreSQL superuser (run `npm ci` in engine/ to test a restricted role)"
+        );
+        return Ok(format!("postgres://postgres@127.0.0.1:{pg_port}/postgres"));
+    }
+    node_sql(
+        root,
+        &format!("postgres://postgres@127.0.0.1:{pg_port}/postgres"),
+        &[
+            "CREATE ROLE cl_smoke LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE",
+            "CREATE DATABASE cl_smoke OWNER cl_smoke",
+        ],
+    )?;
+    Ok(format!("postgres://cl_smoke@127.0.0.1:{pg_port}/cl_smoke"))
+}
+
+/// Copy the engine's stdout into `sink` (engine.log) on a thread and report
+/// the port from its ready line.
+fn forward_stdout(stdout: impl Read + Send + 'static, mut sink: fs::File) -> mpsc::Receiver<u16> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            let _ = writeln!(sink, "{line}");
+            if let Some(port) = parse_ready_port(&line) {
+                let _ = tx.send(port);
+            }
+        }
+    });
+    rx
+}
+
+/// Wait for the engine's ready line (it prints it after migrations and bind).
+fn wait_ready(child: &mut Child, ready: &mpsc::Receiver<u16>) -> Result<u16> {
     let start = Instant::now();
     let limit = Duration::from_mins(2);
     loop {
         if let Some(status) = child.try_wait()? {
             bail!("engine exited early ({status})");
         }
-        if let Ok((code, body)) = http_get(port, "/health") {
-            // 200 once Redis is gone (P02); 503 with a healthy database is the
-            // expected state with this engine commit and no Redis.
-            if body.contains("\"db\":\"ok\"") {
+        match ready.recv_timeout(Duration::from_millis(500)) {
+            Ok(port) => {
                 println!(
-                    "smoke: /health HTTP {code} with database ok after {:?}",
+                    "smoke: engine ready on port {port} after {:?}",
                     start.elapsed()
                 );
-                if code != 200 {
-                    println!(
-                        "smoke: note: degraded because Redis is absent (expected until U-02, P02)"
-                    );
-                }
-                if body.contains(commit) && !commit.is_empty() {
-                    println!("smoke: /health reports the pinned engine commit");
-                } else {
-                    println!(
-                        "smoke: note: /health does not report the engine commit yet (U-03, P02); manifest pins {commit}"
-                    );
-                }
-                let (pc, _) = http_get(port, "/ping")?;
-                if pc != 200 {
-                    bail!("/ping returned {pc}");
-                }
-                return Ok(());
+                return Ok(port);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                bail!("engine closed stdout before printing its ready line")
             }
         }
         if start.elapsed() > limit {
-            bail!("engine did not become healthy within {limit:?}");
+            bail!("engine did not print its ready line within {limit:?}");
         }
-        std::thread::sleep(Duration::from_millis(500));
     }
+}
+
+/// The checks the smoke run makes against a ready engine. `/health` must
+/// refuse a request without the launch token, then return HTTP 200 with the
+/// database up, the desktop mode, and exactly the pinned engine commit.
+fn check_health(port: u16, token: &str, expected_commit: &str, restricted: bool) -> Result<()> {
+    let (code, _) = http_get(port, "/health", None)?;
+    if code != 401 {
+        bail!("/health without the launch token returned {code}, expected 401");
+    }
+    let (code, body) = http_get(port, "/health", Some(token))?;
+    let shown: String = body.chars().take(400).collect();
+    if code != 200 {
+        bail!("/health returned {code}, expected 200: {shown}");
+    }
+    if !body.contains("\"db\":\"ok\"") {
+        bail!("/health does not report the database as ok: {shown}");
+    }
+    if !body.contains("\"mode\":\"desktop\"") {
+        bail!("/health does not report desktop mode: {shown}");
+    }
+    let reported = json_str_field(&body, "engineCommit").unwrap_or_default();
+    if reported != expected_commit {
+        bail!("/health engineCommit `{reported}` is not the pinned commit `{expected_commit}`");
+    }
+    if restricted && !body.contains("\"superuser\":false") {
+        bail!("engine is not running as a non-superuser role: {shown}");
+    }
+    let (pc, _) = http_get(port, "/ping", Some(token))?;
+    if pc != 200 {
+        bail!("/ping returned {pc}");
+    }
+    println!("smoke: /health HTTP 200, database ok, engineCommit {reported}");
+    Ok(())
 }
 
 /// `cargo xtask engine [--smoke] [--force]`
@@ -750,6 +901,113 @@ mod tests {
         assert_eq!(manifest_field(&m, "nodeVersion"), Some("24.1.0"));
         assert_eq!(manifest_field(&m, "bundleSha256"), Some("ff00"));
         assert_eq!(manifest_field(&m, "target"), Some("windows-x64"));
+    }
+
+    #[test]
+    fn banner_commit_marks_dirty_trees() {
+        assert_eq!(banner_commit("abc123", false), "abc123");
+        assert_eq!(banner_commit("abc123", true), "abc123-dirty");
+    }
+
+    #[test]
+    fn ready_line_is_parsed() {
+        let line = r#"{"event":"listening","host":"127.0.0.1","port":54321}"#;
+        assert_eq!(parse_ready_port(line), Some(54321));
+        assert_eq!(parse_ready_port(r#"{"event":"fatal","port":1}"#), None);
+        assert_eq!(parse_ready_port("plain log line"), None);
+    }
+
+    #[test]
+    fn json_string_fields_are_read() {
+        let body = r#"{"status":"ok","engineCommit":"abc-dirty","mode":"desktop"}"#;
+        assert_eq!(json_str_field(body, "engineCommit"), Some("abc-dirty"));
+        assert_eq!(json_str_field(body, "missing"), None);
+    }
+
+    #[test]
+    fn tokens_are_256_bit_hex_and_distinct() {
+        let (a, b) = (random_token(), random_token());
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+    }
+
+    /// Serve `handler(request)` -> `(status, body)` to every connection until the test ends.
+    fn fixture_server(handler: fn(&str) -> (u16, String)) -> u16 {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut request = String::new();
+                let mut buf = [0_u8; 512];
+                while !request.contains("\r\n\r\n") {
+                    let n = stream.read(&mut buf).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    request.push_str(&String::from_utf8_lossy(&buf[..n]));
+                }
+                let (status, body) = handler(&request);
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        port
+    }
+
+    const GOOD: &str = r#"{"status":"ok","db":"ok","mode":"desktop","engineCommit":"abc","checks":{"db":{"superuser":false}}}"#;
+
+    fn gated(request: &str, health: &str) -> (u16, String) {
+        if !request.contains("X-CL-Token: tok") {
+            return (401, "{}".into());
+        }
+        if request.starts_with("GET /ping") {
+            return (200, "pong".into());
+        }
+        (200, health.to_string())
+    }
+
+    #[test]
+    fn health_check_passes_for_a_good_engine() {
+        let port = fixture_server(|r| gated(r, GOOD));
+        check_health(port, "tok", "abc", true).unwrap();
+    }
+
+    #[test]
+    fn health_check_rejects_a_commit_mismatch() {
+        let port = fixture_server(|r| gated(r, GOOD));
+        let err = check_health(port, "tok", "def", true).unwrap_err();
+        assert!(err.to_string().contains("pinned commit"), "{err}");
+    }
+
+    #[test]
+    fn health_check_rejects_degraded_503() {
+        let port = fixture_server(|r| {
+            if r.contains("X-CL-Token: tok") {
+                (503, GOOD.replace("ok\",\"mode", "degraded\",\"mode"))
+            } else {
+                (401, "{}".into())
+            }
+        });
+        let err = check_health(port, "tok", "abc", true).unwrap_err();
+        assert!(err.to_string().contains("expected 200"), "{err}");
+    }
+
+    #[test]
+    fn health_check_requires_the_token_to_be_enforced() {
+        let port = fixture_server(|_| (200, GOOD.to_string()));
+        let err = check_health(port, "tok", "abc", true).unwrap_err();
+        assert!(err.to_string().contains("expected 401"), "{err}");
+    }
+
+    #[test]
+    fn health_check_rejects_a_superuser_role() {
+        let port = fixture_server(|r| gated(r, &GOOD.replace("false", "true")));
+        let err = check_health(port, "tok", "abc", true).unwrap_err();
+        assert!(err.to_string().contains("non-superuser"), "{err}");
     }
 
     #[test]

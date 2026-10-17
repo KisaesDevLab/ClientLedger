@@ -16,7 +16,7 @@
 
 **Steps**
 1. Bundle app + engine executable + PostgreSQL + PDFium per target. — `build(package): bundle layout`
-2. Windows x64 MSI (per-user and per-machine) with license acceptance (MIT, grant, PolyForm, Q-134). — `build(package): msi`
+2. Windows x64 MSI (per-user and per-machine) with license acceptance (MIT, PolyForm Internal Use, Q-134). — `build(package): msi`
 3. macOS DMG (arm64/x64 or universal) with license acceptance; notarization hooks. — `build(package): dmg`
 4. Linux AppImage, `.deb`, `.rpm`; license shown on first launch for AppImage/tarball. — `build(package): linux`
 5. Signing steps run only when secrets exist (Q-27); unsigned-install notes; SHA-256 checksums; artifacts to GitHub Releases (Q-121); names say "ClientLedger" (Q-123). — `ci: release workflow`
@@ -105,7 +105,7 @@ Interrupted migrations, rollback, schema/version compatibility of backups and tr
 
 **Steps**
 1. **PR-10** whole-app journeys on the sample company: setup → a month of work → reconcile → reports → close → send to accountant → restore. Fix Blocking findings.
-2. Release checklist: version 0.x bump (Q-46); changelog from conventional commits; artifacts and checksums; release notes and known issues; ATTRIBUTION.md and NOTICE.md complete; engine grant committed in `vibe-mybooks` and engine repo public (Q-35, U-10).
+2. Release checklist: version 0.x bump (Q-46); changelog from conventional commits; artifacts and checksums; release notes and known issues; ATTRIBUTION.md and NOTICE.md complete; engine relicensed to PolyForm Internal Use in `vibe-mybooks` (engine PR merged) and engine repo public (Q-35, U-10).
 3. Log-bundle export (scrubbed) for GitHub issues (Q-47).
 4. Owner actions: ClientLedger.net download link (Q-120, Q-121); stage-1 beta with the owner's clients, then public pre-release (Q-75).
 

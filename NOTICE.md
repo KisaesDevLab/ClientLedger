@@ -10,26 +10,28 @@ are listed with their own licenses in `ATTRIBUTION.md`.
 
 ClientLedger runs on the Vibe MyBooks engine, which is added to this repository
 as the `engine/` git submodule
-(<https://github.com/KisaesDevLab/vibe-mybooks>). The engine is licensed under
-the **PolyForm Internal Use License 1.0.0** plus the **ClientLedger
-Redistribution Grant**, which lives in the engine repository as
-`LICENSE-CLIENTLEDGER.md`. Nothing in this repository's MIT license changes
-those terms.
+(<https://github.com/KisaesDevLab/Vibe-MyBooks>). The engine is licensed under
+the **PolyForm Internal Use License 1.0.0**, unmodified, copyright Kisaes LLC.
+Nothing in this repository's MIT license changes those terms.
 
-## Scope of the engine grant
+## What that means for you
 
-- You may use the engine bundled in an official ClientLedger release to keep
-  the books of **your own organization only**. Your outside accountant or
-  bookkeeper may review, adjust, and receive those books. Keeping books for
-  other people or organizations as a service needs a MyBooks commercial license.
-- Only the Licensor's official releases (and personal builds from unmodified
-  source, for your own use) may include the engine.
-- **Forks of the MIT code may not bundle, download, or install the engine.**
-  A modified or rebranded fork must not include or fetch the engine under the
-  grant.
+This is a plain-language summary; the license text in the engine repository is
+the controlling document.
 
-The grant text is the controlling document; this notice is a summary. The
-grant is still in draft pending attorney review (see `docs/legal/`).
+- You may use the engine for the **internal business operations of you and your
+  company**, which includes keeping your own organization's books with
+  ClientLedger. You may make changes for that same purpose.
+- You may **not distribute** the engine, in source or compiled form, and you
+  may not sublicense or transfer your license. Keeping books for other people
+  or organizations as a service is not internal use and needs a separate
+  license from Kisaes LLC.
+- The engine reaches you inside official ClientLedger releases published by the
+  licensor, Kisaes LLC (KisaesDevLab). **Forks and rebuilt copies of the MIT
+  code may not bundle, download, or install the engine.**
+
+If the license terms are unclear for your situation, write to
+licensing@kisaes.com.
 
 ## Non-affiliation
 

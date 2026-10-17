@@ -22,7 +22,7 @@
 
 **Steps**
 1. Create the workspace with crates `cl-core`, `cl-api`, `cl-pg`, `cl-host`, `cl-company`, `cl-settings`, `cl-import`, `cl-model`, `cl-grid`, `cl-ui`, `cl-automation`, `cl-print`, `cl-lan`; apps `clientledger`, `clientledger-cli`; `xtask`. Each crate has `#![forbid(unsafe_code)]` and one trivial test. — `chore(repo): workspace skeleton`
-2. Licensing files: MIT `LICENSE` scoped to ClientLedger code; `NOTICE.md` explains `engine/` is PolyForm Internal Use 1.0.0 plus the ClientLedger grant, the own-organization-books scope (Q-132), and that forks may not bundle, download, or install the engine (Q-133); README links both. — `docs(license): MIT scope and engine notice`
+2. Licensing files: MIT `LICENSE` scoped to ClientLedger code; `NOTICE.md` explains `engine/` is PolyForm Internal Use 1.0.0 (unmodified, no grant), the internal-business-use scope (Q-132), and that forks may not bundle, download, or install the engine (Q-133); README links both. — `docs(license): MIT scope and engine notice`
 3. Public-repo hygiene: CONTRIBUTING (issues and discussions welcome; PRs closed automatically with a note — Q-32), SECURITY (licensing@kisaes.com until a security address exists), issue templates (bug, question), `.gitignore` with `target/`, `private-fixtures/` (Q-72). Workflow `close-prs.yml` comments and closes PRs from outside the org. — `chore(repo): community files`
 4. `deny.toml`: `[licenses]` allow MIT, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, BSL-1.0 (Boost); deny everything else; `[bans]` deny multiple major versions of egui/wgpu; `[advisories]` deny vulnerabilities. — `chore(deny): license and advisory policy`
 5. `xtask licenses`: read `cargo metadata`, fail if any **direct** dependency of a workspace crate is not MIT or Apache-2.0 (dual allowed). — `feat(xtask): direct-dependency license gate`
@@ -200,7 +200,7 @@
 4. Window manager: tabs, Ctrl+Tab, dirty dots, close prompts, restore per company, drag-out to OS windows via egui multi-viewport (Q-57). — `feat(ui): window manager`
 5. Form framework in `cl-model`: form state machine (clean/dirty/saving/error), Save & New/Save & Close, Enter = Save & New in header fields (Q-190), Esc revert chain, undo/redo stack for unsaved edits (Q-59), date-warning rules (Q-97), payee prefill hooks (Q-191). — `feat(model): form framework`
 6. Error presentation (Q-119): plain message, suggested fix, "Copy details" with scrubbed error id and log excerpt. — `feat(ui): error dialogs`
-7. App zoom 80–200% (Q-66). About box (license notices, grant scope Q-137, privacy notice Q-135, "powered by Vibe MyBooks", non-affiliation notice). — `feat(ui): zoom and about`
+7. App zoom 80–200% (Q-66). About box (license notices, engine license scope Q-137, privacy notice Q-135, "powered by Vibe MyBooks", non-affiliation notice). — `feat(ui): zoom and about`
 8. Three original icon drafts, option 1 wired in (Q-122); record in QUESTIONS.md.
 
 **Tests:** keymap conflict test (no duplicate shortcut in one scope); form state machine unit tests; undo stack tests; date-rule tests; screenshots light/dark after P07 lands (ui-verifier runs then).

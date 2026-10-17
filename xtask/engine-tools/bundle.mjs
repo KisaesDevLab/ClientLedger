@@ -1,5 +1,5 @@
 // Bundle the compiled MyBooks engine (packages/api/dist) into one CommonJS file
-// plus a SEA config. Usage: node bundle.mjs <engineDir> <outDir> <platformTag>
+// plus a SEA config. Usage: node bundle.mjs <engineDir> <outDir> <platformTag> <engineCommit>
 //
 // The engine is never edited. Things it expects on disk (migrations, knowledge
 // files, fonts, the bcrypt native addon) are embedded as SEA assets and
@@ -13,8 +13,10 @@ import { join, relative, resolve, sep } from 'node:path';
 
 const [engineDir, outDir] = process.argv.slice(2, 4).map((p) => resolve(p));
 const tag = process.argv[4];
-if (!engineDir || !outDir || !tag) {
-  console.error('usage: node bundle.mjs <engineDir> <outDir> <platformTag>');
+// Source commit of the engine ('<sha>' or '<sha>-dirty'), reported on /health.
+const engineCommit = process.argv[5];
+if (!engineDir || !outDir || !tag || !/^[0-9a-f]{7,64}(-dirty)?$/.test(engineCommit ?? '')) {
+  console.error('usage: node bundle.mjs <engineDir> <outDir> <platformTag> <engineCommit[-dirty]>');
   process.exit(2);
 }
 const api = join(engineDir, 'packages', 'api');
@@ -64,6 +66,7 @@ module.exports = p; module.exports.default = p; module.exports.__esModule = true
 `);
 
 const banner = `
+process.env['ENGINE_COMMIT'] = ${JSON.stringify(engineCommit)};
 var __cl_boot = (function () {
   const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), url = require('node:url');
   const sea = require('node:sea');

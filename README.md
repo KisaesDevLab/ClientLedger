@@ -17,8 +17,8 @@ import into MyBooks Online.
 ## Licensing
 
 - ClientLedger code: MIT, see [LICENSE](LICENSE).
-- The bundled engine in `engine/`: PolyForm Internal Use 1.0.0 plus the
-  ClientLedger redistribution grant, see [NOTICE.md](NOTICE.md). Forks may not
+- The bundled engine in `engine/`: PolyForm Internal Use License 1.0.0, see
+  [NOTICE.md](NOTICE.md). Recipients may not distribute it, and forks may not
   bundle, download, or install the engine.
 
 ## Contributing

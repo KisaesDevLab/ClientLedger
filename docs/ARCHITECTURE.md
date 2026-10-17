@@ -112,7 +112,7 @@ The engine reports connectivity on `/health` (`online: bool`, last check). The a
 | Component | License | Ships in installer |
 | --- | --- | --- |
 | ClientLedger Rust code (`crates/`, `apps/`, `xtask/`) | MIT | yes |
-| MyBooks engine (`engine/` submodule, public repo) | PolyForm Internal Use 1.0.0 + ClientLedger redistribution grant (Q-31) | yes, as `clientledger-engine` |
+| MyBooks engine (`engine/` submodule, public repo) | PolyForm Internal Use 1.0.0, unmodified (Q-31) | yes, as `clientledger-engine` |
 | Node.js runtime inside the engine executable | MIT (plus bundled third-party notices) | yes |
 | PostgreSQL 16 binaries | PostgreSQL License | yes |
 | PDFium binaries | BSD-3-Clause / Apache-2.0 | yes |
