@@ -11,6 +11,7 @@ mod support;
 
 mod common;
 mod contract_capabilities;
+mod contract_census;
 mod contract_closed_period;
 mod contract_companies;
 mod contract_conflict;
@@ -46,6 +47,11 @@ fn main() -> std::process::ExitCode {
         ("contacts::crud_and_filters", contract_resources::contacts),
         ("items::crud_and_filters", contract_resources::items),
         ("tags::crud_and_filters", contract_resources::tags),
+        (
+            "census::live_spec_matches_fixtures",
+            contract_census::live_spec_matches_fixtures,
+        ),
+        ("census::field_census", contract_census::field_census),
         (
             "journal::round_trip_create_read_update_void_list",
             contract_journal::round_trip_create_read_update_void_list,

@@ -25,6 +25,8 @@
     clippy::too_many_lines
 )]
 
+pub mod spec;
+
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
