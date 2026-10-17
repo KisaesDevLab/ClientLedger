@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+description = "UI-side state without egui: command registry, keymap, form state machine, undo, date rules."
+
+[dependencies]
+cl-core = { path = "../cl-core" }
+thiserror = "2.0.21"
 
 [lints]
 workspace = true

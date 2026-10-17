@@ -1,6 +1,6 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P02 — Engine desktop profile (upstream), engine PRs E1–E6 in flight; P04 and P05 done; next P06
+**Current phase:** P02 — Engine desktop profile (upstream), engine PRs E1–E6 in flight; P06 done; next P07
 **Status:** In progress
 **Engine commit:** `13ebd2ba50db0e3e68dd473329caf96d1f039e4e` (`main`, pinned 2026-10-15; bump per Q-02)
 **Last updated:** 2026-10-17
@@ -16,7 +16,7 @@
 | P03 | Bundled PostgreSQL manager | L | Done 2026-10-15 |
 | P04 | Supervisor | L | Built, CI green, security-reviewed (PR #5, stacked on #4) |
 | P05 | Engine API client | H | Done 2026-10-17 (AC4 real-engine test blocked by U-17) |
-| P06 | Application shell | L | |
+| P06 | Application shell | L | Done 2026-10-17 (AC3/AC4 scenario + --compare deferred to P07) |
 | P07 | Automation and control channel | L | |
 | P08 | Company lifecycle | M | |
 | P09 | Preferences and AI provider keys | M | |
@@ -79,6 +79,10 @@ Screens or actions that link to a later phase. Remove each line when its phase l
 
 - P34/P08 — restore UI must call `Cluster::restore(src, store, allow_unregistered)` with `allow_unregistered = false` by default and set it to `true` only after an explicit owner confirmation that the file came from a trusted source (Q-P03h).
 
+- P06 shell placeholders (Q-P06g): every menu, rail and palette command whose screen is built later opens a placeholder tab. The phase that builds the screen removes its entry: P08 Open or Switch Company (and passes a company id to `Shell::set_company` so layouts are per company instead of `default`), P09 Preferences (and may move `cl-ui::prefs` into `cl-settings`), P11 Chart of Accounts / Item List / Tags / Clients & Jobs / Vendors, P12 Open Register, P13 Write Check, P14 Make Deposit / Transfer Funds / Sales Receipt / Record Card Charge, P15 Make Journal Entry, P16 Home (replaces the Home placeholder and the demo rail counts), P17 Enter Bill, P18 Pay Bills, P20 Create Invoice, P21 Receive Payment, P22 Credit Memo or Refund / Statements, P25 Import Bank File, P26 Bank Feed, P27 Reconcile, P28 Reports / Profit & Loss / Balance Sheet / Trial Balance, P29 Set Closing Date / Users and Permissions / Audit Trail, P30 Import Payroll, P32 Send to My Accountant, P38 bundled help (F1 says "not available yet").
+- P06 native macOS menu bar (Q-70, muda) is deferred (Q-P06b): in-window menu on every platform until macOS packaging.
+- P06 follow-up (security review L1): auth calls should always verify the engine listener; needs a purpose argument on `cl_api::EndpointSource` (Q-P06o), P07 or P37.
+
 ## Follow-ups from P03 security review
 
 Findings from the P03 security review that were not fixed in P03. Fixed in P03: 1 (crafted backup runs code on restore), 2 and 15 (stop signalling an unrelated process), 3 (backup file mode on Unix), 5, 8, 12, 13, 14. Each item below names the phase that must pick it up; remove the line when it lands.
@@ -122,12 +126,13 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 | L4 | Best-effort secret wipe: zeroizing/constant-time `cl_pg::Secret` (or re-export `cl_core::Secret`), pre-sized `Zeroizing` body buffers (Q-P05aa). | P09 / P37 |
 | L8 | Lint or review rule against logging `ApiError` payloads, models or amounts with `?value` at info level (Q-P05ab). | P37 |
 | L9 | 64 KiB cap for engine error bodies (Q-P05ac). | P37 |
-| L3b | Production `EndpointSource` adapter runs `verify_listener` before login, TFA verify, switch-tenant and refresh (Q-P05ad item 6). | P06 / P07 |
 | AC5 | No contract test yet moves a transaction OUT of a closed period (old date closed, new date open); the engine checks both dates, the stub suite covers the client mapping. | P07 (with U-15) |
 
 ## Log
 
 Newest first. One entry per completed phase: date, phase, summary, acceptance checklist results, notable decisions (Q-xx / U-xx).
+
+- DRAFT (implementer note for the orchestrator to close out; not yet a completed-phase entry) - P06 built on `phase/P06-app-shell`, not pushed. Built: `cl-model` command registry (menus, rail, palette, scopes form > window > global), conflict-checked `Keymap`, form state machine, undo stack, date-key and date-warning rules; `xtask keymap-doc` (+ `--check` in `xtask ci`) generating `docs/KEYBOARD.md` and the cheat-sheet source; `cl-ui` theme tokens (light/dark, contrast-tested), embedded IBM Plex, i18n catalog (key scan tests), shell (title bar with company stripe, menus, rail, tabs with dirty dots and pop-out viewports, status bar, palette, shortcut overlay), window manager with per-company saved layout and close prompts, error dialog with scrubbed "Copy details", About and privacy notice, zoom 80-200% and theme remembered; app binary with single-instance lock and supervisor start; `VerifiedEndpoint` (P05 follow-up L3b done); three icon drafts (option 1 wired); `cargo xtask run`. Acceptance: (1) every menu and rail entry has a command id, shortcut where DESIGN.md defines one, and a palette entry - met, unit-tested; (2) KEYBOARD.md generated and committed - met; (3) shell at minimum window and 200% zoom - headless frame tests at 480 x 320 egui points (= 960 x 640 at 200%) and a manual screenshot review pass, formal scenario DEFERRED to P07; (4) mockup `--compare` reviewed by ui-verifier - DEFERRED to P07 (ui-check does not exist yet); a manual side-by-side against `Home.png` was done and deviations are in Q-P06j. Step 3's native macOS menu is deferred (Q-P06b). New decisions Q-P06a to Q-P06n. Screenshots for light, dark and 200% narrow were captured through the temporary `cl-ui` example `shell_shot` (replaced by the control channel in P07). Agents: rust-implementer (sonnet).
 
 - 2026-10-17 — P05 complete (PR #6, merge commit). `cl-api`: loopback typed engine client, single-flight refresh, typed errors, retry classes with outcome reconciliation, UI request queue, contract harness with PENDING-by-capability tests, 4-OS engine contract job, network-blocked job, 80% coverage gate enforced (required check `coverage`). Opus code and security reviews found scope-pinning (write running in wrong company after a switch), Retry-After overflow, unreadable 2xx saves, reconciliation claiming own earlier entry; all fixed with tests (Q-P05aa–ad); remaining items in "Follow-ups from P05 reviews". Blocked: AC4 (U-17). Agents: architect/rust-implementer x2/reviewer/security-reviewer (opus), ci-fixer (sonnet).
 - 2026-10-15 — Owner: the engine is fully licensed for ClientLedger's use; engine licensing is settled and closed (Q-35, Q-P02a, U-10). Not to be raised again. P04 built on `phase/P04-supervisor` (PR #5 stacked on draft PR #4, all CI green): cl-host supervisor, least-privilege `clientledger_app` DB role, single-instance lock, log rotation, CLI host commands; independent security review fixed M1 (engine search path) and M2 (master-secret replacement) plus lows. Engine PRs: E1 #147 (ready for owner review), E2 #146 (draft), license draft #145 (owner's); E3 (pg-boss) built locally; E4 (offline guard) security fixes in progress; E5/E6 deferred to just before P08/P09 (plan settled).

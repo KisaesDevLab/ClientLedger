@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="ClientLedger icon, option 3: open book">
+  <rect width="256" height="256" rx="56" fill="#0F5E5A"/>
+  <path d="M128 78 C104 62 76 62 52 70 L52 188 C76 180 104 180 128 196 Z" fill="#FFFFFF"/>
+  <path d="M128 78 C152 62 180 62 204 70 L204 188 C180 180 152 180 128 196 Z" fill="#FFFFFF" opacity="0.8"/>
+  <rect x="150" y="104" width="38" height="12" rx="6" fill="#D98A45"/>
+  <rect x="150" y="130" width="38" height="12" rx="6" fill="#0F5E5A" opacity="0.35"/>
+</svg>

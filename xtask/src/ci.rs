@@ -86,6 +86,10 @@ pub fn ci() -> Result<()> {
     step("release-features", crate::run_release_features());
     step("nofloat", crate::run_nofloat());
     step(
+        "keymap-doc",
+        crate::keymap_doc::keymap_doc(&["--check".to_string()]),
+    );
+    step(
         "api-spec",
         crate::api_spec::api_spec(&["--check".to_string()]),
     );

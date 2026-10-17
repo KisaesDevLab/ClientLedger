@@ -4,6 +4,21 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+description = "The ClientLedger egui application: shell, theme, fonts, windows, dialogs."
+
+[dependencies]
+cl-api = { path = "../cl-api" }
+cl-core = { path = "../cl-core" }
+cl-host = { path = "../cl-host" }
+cl-model = { path = "../cl-model" }
+# No `default_fonts`: those bundle fonts under licenses outside the cargo-deny
+# allowlist. The UI embeds IBM Plex (OFL, ATTRIBUTION.md) instead.
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "wgpu", "wayland", "x11", "clipboard"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt", "std", "registry"] }
 
 [lints]
 workspace = true
