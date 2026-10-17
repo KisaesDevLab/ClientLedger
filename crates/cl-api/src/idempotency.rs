@@ -444,7 +444,10 @@ impl Executor {
                 },
             ) if rate_limit_ok => {
                 let wait = *wait;
-                if r.transient < MAX_TRANSIENT_RETRIES && Instant::now() + wait < ctx.deadline {
+                let in_time = Instant::now()
+                    .checked_add(wait)
+                    .is_some_and(|t| t < ctx.deadline);
+                if r.transient < MAX_TRANSIENT_RETRIES && in_time {
                     r.transient += 1;
                     tokio::time::sleep(wait).await;
                     Step::Again
@@ -1216,6 +1219,35 @@ pub(crate) mod tests {
             .await
             .expect("mutation after idle");
         assert!(count.load(Ordering::SeqCst) >= 3);
+    }
+
+    #[tokio::test]
+    async fn a_huge_retry_after_is_clamped_and_never_overflows() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                json(429, r#"{"error":{"message":"x"}}"#)
+                    .insert_header("retry-after", u64::MAX.to_string().as_str()),
+            )
+            .mount(&server)
+            .await;
+        let ex = exec_at(server.address().port());
+        let t = Instant::now();
+        let e = ex
+            .run(&get_op(), get_call(), &none(), None)
+            .await
+            .expect_err("limited");
+        assert_eq!(
+            e,
+            ApiError::RateLimited {
+                retry_after: Some(crate::client::MAX_RETRY_AFTER)
+            }
+        );
+        assert!(
+            t.elapsed() < Duration::from_secs(2),
+            "no wait past the deadline"
+        );
+        assert_eq!(count(&server).await, 1);
     }
 
     #[tokio::test]

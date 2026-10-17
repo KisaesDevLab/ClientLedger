@@ -558,13 +558,18 @@ fn build_headers(
     Ok(h)
 }
 
+/// The longest wait a `Retry-After` can ask for. Larger values (up to
+/// `u64::MAX` from a hostile or broken peer) are clamped here, so no later
+/// `Instant + Duration` can overflow.
+pub(crate) const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
+
 fn retry_after(headers: &HeaderMap) -> Option<Duration> {
     ["retry-after", "ratelimit-reset"].iter().find_map(|name| {
         headers
             .get(*name)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.trim().parse::<u64>().ok())
-            .map(Duration::from_secs)
+            .map(|secs| Duration::from_secs(secs).min(MAX_RETRY_AFTER))
     })
 }
 
@@ -861,6 +866,16 @@ pub(crate) mod tests {
         assert_eq!(r.status, 302);
         assert_eq!(r.retry_after, Some(Duration::from_secs(7)));
         assert!(r.replayed);
+        let mut h = HeaderMap::new();
+        h.insert(
+            "retry-after",
+            HeaderValue::from_static("18446744073709551615"),
+        );
+        assert_eq!(
+            retry_after(&h),
+            Some(MAX_RETRY_AFTER),
+            "u64::MAX is clamped"
+        );
         assert_eq!(r.set_cookies.len(), 2);
         assert_eq!(server.received_requests().await.expect("r").len(), 1);
         assert!(!format!("{r:?}").contains("kb_refresh"));
