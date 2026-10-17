@@ -275,7 +275,12 @@ fn parse_user_units(s: &str, rules: UserInput, int_digits: u32) -> Result<i128, 
     let int_plain: String = if int.contains(',') {
         let mut groups = int.split(',');
         let first = groups.next().unwrap_or_default();
-        if first.is_empty() || first.len() > 3 || groups.clone().any(|g| g.len() != 3) {
+        // `0,123` is a European decimal comma, not a thousands group.
+        if first.is_empty()
+            || first.len() > 3
+            || first.starts_with('0')
+            || groups.clone().any(|g| g.len() != 3)
+        {
             return Err(MoneyInputError::AmbiguousSeparator);
         }
         int.chars().filter(|c| *c != ',').collect()
@@ -563,6 +568,8 @@ macro_rules! fixed_decimal {
             }
         }
 
+        /// Prints the amount itself (`Money(12.3400)`): owner data. Never
+        /// log a value with `?value` at info level or above.
         impl fmt::Debug for $name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "{}({})", stringify!($name), self.to_wire())
@@ -971,6 +978,10 @@ mod tests {
             "1,2345",
             "12,34,567",
             "1,000.00,0",
+            "0,123",
+            "0,123.45",
+            "-0,500",
+            "01,234",
         ] {
             assert_eq!(p(s), Err(E::AmbiguousSeparator), "{s:?}");
         }

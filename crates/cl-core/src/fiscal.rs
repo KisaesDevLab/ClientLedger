@@ -181,14 +181,21 @@ impl FiscalYearSpec {
     /// # Errors
     /// As [`FiscalYearSpec::year`].
     pub fn year_containing(&self, date: CalendarDate) -> Result<FiscalYear, FiscalError> {
-        // The label is the date's year or one either side of it.
+        // The label is the date's year or one either side of it. A
+        // candidate that cannot be built (at the edge of the supported
+        // range) is skipped; the first such error is returned only if no
+        // candidate contains the date.
+        let mut first_err = None;
         for label in [date.year(), date.year() + 1, date.year() - 1] {
-            let fy = self.year(label)?;
-            if fy.contains(date) {
-                return Ok(fy);
+            match self.year(label) {
+                Ok(fy) if fy.contains(date) => return Ok(fy),
+                Ok(_) => {}
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                }
             }
         }
-        Err(FiscalError::OutOfRange)
+        Err(first_err.unwrap_or(FiscalError::OutOfRange))
     }
 
     /// The twelve periods of `fy`, contiguous and covering it exactly.
@@ -337,6 +344,9 @@ mod tests {
             (fy.label, fy.start, fy.end),
             (2024, d("2023-01-29"), d("2024-02-03"))
         );
+        // At the start of the range, label 1900 cannot be built (it needs
+        // 1899), but label 1901 contains the date: skip, do not fail.
+        assert_eq!(spec.year_containing(d("1900-06-01")).unwrap().label, 1901);
         assert_eq!(fy.days(), 371);
         let p = spec.periods(&fy).unwrap();
         assert_eq!((p[0].start, p[0].end), (d("2023-01-29"), d("2023-02-25")));
