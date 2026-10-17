@@ -190,6 +190,9 @@ pub(crate) struct Call {
     pub company: Option<CompanyId>,
     pub idempotency_key: Option<IdempotencyKey>,
     pub if_match: Option<String>,
+    /// The body carries a password or similar secret (set by `json_body`):
+    /// the endpoint must be verified afresh for this call.
+    pub sensitive: bool,
 }
 
 impl std::fmt::Debug for Call {
@@ -220,6 +223,7 @@ impl Call {
             company: None,
             idempotency_key: None,
             if_match: None,
+            sensitive: false,
         }
     }
 
@@ -229,6 +233,7 @@ impl Call {
     }
 
     pub(crate) fn json_body(mut self, bytes: Vec<u8>) -> Call {
+        self.sensitive = body_has_secret_key(&bytes);
         self.body = Some(Zeroizing::new(bytes));
         self
     }
@@ -237,6 +242,32 @@ impl Call {
         self.timeout = class;
         self
     }
+}
+
+/// JSON keys that carry a secret (a sign-in, closing-date or SMTP password, a
+/// code, a refresh token). Every body goes through [`Call::json_body`], so any
+/// request that puts a secret under one of these keys is treated as
+/// credential-carrying whichever resource builds it (P07 review L2).
+const SECRET_KEYS: [&str; 5] = [
+    "password",
+    "closingPassword",
+    "code",
+    "refreshToken",
+    "token",
+];
+
+fn body_has_secret_key(body: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(body) else {
+        return false;
+    };
+    SECRET_KEYS.iter().any(|k| {
+        let needle = format!("\"{k}\"");
+        text.match_indices(&needle).any(|(i, _)| {
+            // A key is followed by a colon (a value that merely equals the
+            // word is not).
+            text[i + needle.len()..].trim_start().starts_with(':')
+        })
+    })
 }
 
 /// Credentials of one attempt (they can change between attempts after a
@@ -388,7 +419,7 @@ impl Transport {
     ) -> Result<EngineReply, TransportError> {
         // Auth calls carry a password, code or refresh token: the source must
         // verify the engine afresh for them (Q-P06o).
-        let purpose = if call.timeout == TimeoutClass::Auth {
+        let purpose = if call.timeout == TimeoutClass::Auth || call.sensitive {
             Purpose::Credentials
         } else {
             Purpose::Ordinary
@@ -716,6 +747,40 @@ pub(crate) mod tests {
             .expect("answer");
         let seen = src.seen.lock().expect("lock").clone();
         assert_eq!(seen, vec![Purpose::Ordinary, Purpose::Credentials]);
+    }
+
+    #[test]
+    fn bodies_with_a_secret_key_are_sensitive() {
+        for (body, want) in [
+            (r#"{"closingPassword":"x","memo":"a"}"#, true),
+            (r#"{"host":"h","password": "pw"}"#, true),
+            (r#"{"memo":"password"}"#, false),
+            (r#"{"memo":"my \"code\" word"}"#, false),
+            (r#"{"amount":"12.00"}"#, false),
+        ] {
+            let call = Call::at(Method::Post, "/x").json_body(body.as_bytes().to_vec());
+            assert_eq!(call.sensitive, want, "{body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_write_with_a_closing_password_asks_for_a_credentials_grade_endpoint() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::any())
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+        let src = Arc::new(PurposeSource {
+            inner: FixedEndpoint::new(server.address().port(), Secret::new(TOKEN), 1),
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+        let t = Transport::new(src.clone(), fast_config()).expect("client builds");
+        let call = Call::at(Method::Post, "/txn")
+            .json_body(br#"{"closingPassword":"pw","memo":"m"}"#.to_vec());
+        t.attempt(&call, &AttemptAuth::default(), 1, soon())
+            .await
+            .expect("answer");
+        assert_eq!(*src.seen.lock().expect("lock"), vec![Purpose::Credentials]);
     }
 
     #[tokio::test]
