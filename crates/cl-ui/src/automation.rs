@@ -537,16 +537,7 @@ impl Bridge {
         let Some(key) = key_from(&spec.key) else {
             return fail(ErrorCode::BadRequest, format!("unknown key `{}`", spec.key));
         };
-        let mac = cfg!(target_os = "macos");
-        // `command` is Ctrl on Windows and Linux and Cmd on macOS, as the
-        // keymap expects.
-        let mods = Modifiers {
-            alt: spec.alt,
-            ctrl: spec.ctrl || (spec.cmd && !mac),
-            shift: spec.shift,
-            mac_cmd: spec.cmd && mac,
-            command: (spec.ctrl && !mac) || spec.cmd,
-        };
+        let mods = egui_modifiers(&spec, cfg!(target_os = "macos"));
         let event = |pressed| Event::Key {
             key,
             physical_key: None,
@@ -614,6 +605,21 @@ fn save_screenshot(path: &std::path::Path, image: &ColorImage) -> Response {
 }
 
 /// Look a key up by the names people type (`Esc`, `Enter`, `k`).
+/// Modifiers for a chord. `Ctrl` and `Cmd` both mean the keymap's `command`
+/// modifier: the Control key on Windows and Linux, the Command key on macOS.
+/// Scenarios are written the way DESIGN.md spells shortcuts (`Ctrl+K`) and
+/// must pass on every platform.
+fn egui_modifiers(spec: &KeySpec, mac: bool) -> Modifiers {
+    let command = spec.ctrl || spec.cmd;
+    Modifiers {
+        alt: spec.alt,
+        ctrl: command && !mac,
+        shift: spec.shift,
+        mac_cmd: command && mac,
+        command,
+    }
+}
+
 fn key_from(name: &str) -> Option<Key> {
     let alias = match name.to_ascii_lowercase().as_str() {
         "esc" => "Escape",
@@ -701,6 +707,19 @@ mod tests {
         assert_eq!(key_from("F1"), Some(Key::F1));
         assert_eq!(key_from("tab"), Some(Key::Tab));
         assert_eq!(key_from("nonsense"), None);
+    }
+
+    #[test]
+    fn ctrl_in_a_chord_is_the_platform_command_modifier() {
+        let spec = KeySpec::parse("Ctrl+Shift+K").unwrap();
+        let win = egui_modifiers(&spec, false);
+        assert!(win.ctrl && win.command && win.shift && !win.mac_cmd);
+        let mac = egui_modifiers(&spec, true);
+        assert!(mac.mac_cmd && mac.command && mac.shift && !mac.ctrl);
+        let cmd = egui_modifiers(&KeySpec::parse("Cmd+K").unwrap(), false);
+        assert!(cmd.ctrl && cmd.command && !cmd.mac_cmd);
+        let alt = egui_modifiers(&KeySpec::parse("Alt+N").unwrap(), true);
+        assert!(alt.alt && !alt.command && !alt.ctrl && !alt.mac_cmd);
     }
 }
 

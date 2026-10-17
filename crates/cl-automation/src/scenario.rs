@@ -9,6 +9,9 @@
 //!   - assert_state: {key: palette_open, equals: true}
 //!   - screenshot: palette
 //! ```
+//!
+//! Key chords use the spelling in DESIGN.md. `Ctrl` (or `Cmd`) is the
+//! keymap's command modifier, so `Ctrl+K` presses Cmd+K on macOS.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};

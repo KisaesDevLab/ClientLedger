@@ -250,13 +250,15 @@ pub struct ZoomParams {
 /// A parsed key chord.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeySpec {
-    /// Ctrl held.
+    /// `Ctrl` in the chord. The app treats it as the keymap's command
+    /// modifier: Control on Windows and Linux, Command on macOS, so a
+    /// scenario written as `Ctrl+K` passes on every platform.
     pub ctrl: bool,
     /// Shift held.
     pub shift: bool,
     /// Alt (Option) held.
     pub alt: bool,
-    /// Command (macOS) held; on other systems the same as Ctrl.
+    /// `Cmd` in the chord; the same modifier as `Ctrl`.
     pub cmd: bool,
     /// Key name as egui spells it (`K`, `Enter`, `Escape`, `F1`, `+`).
     pub key: String,
