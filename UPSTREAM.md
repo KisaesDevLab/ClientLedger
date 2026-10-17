@@ -19,6 +19,14 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | U-12 | Integrity check endpoints (full Verify and fast weekly subset) with typed findings and safe automatic fixes | P34 | clientledger/verify | Planned |
 | U-10 | Redistribution grant text added to the engine repo (`LICENSE-CLIENTLEDGER.md`) by the owner | P39 | main | Planned — owner (Q-31) |
 | U-16 | Engine identity proof (HMAC challenge in `/health`) and graceful shutdown (`POST /api/v1/desktop/shutdown`) for the supervisor | P04 follow-up (P37 hardening) | clientledger/desktop-supervisor | Proposed |
+| U-13 | Desktop session secrets for SMTP: the owner's SMTP password is supplied per session from the keychain, never stored by the engine in desktop mode | P09, P20 | clientledger/ai-desktop (E6) | Planned |
+| U-14 | Money as decimal strings beyond the core resources: `/reports/*` (desktop, or `?exact=1` on the server), balance and validation helpers, 1099 corrections, batch, daily-sales and AI amounts (widened per P05 §3.6; replaces the scout's U-20) | P12, P16, P28 | clientledger/exact-money (proposed; plan names no branch) | Planned |
+| U-15 | Closing-date password in the engine: `companies.closing_password_hash`, password-gated `PUT /tb/closing-date` and `/company/settings` `lockDate`, `closingPassword` on the override and safe delete; one PR landing with P08 | P08, every posting screen (P10+) | clientledger/closing-password | Planned |
+| U-17 | Optimistic concurrency: `version` columns, `If-Match` → 409 `STALE` (capability `record-version-v1`) | P05 (AC4 live test), P12/P13, P27; hard for P33 | clientledger/record-versions (proposed; plan names no branch) | Planned |
+| U-18 | Request idempotency: `Idempotency-Key` on posting and master-data creates, stored responses (capability `idempotency-v1`) | P12/P13 (before the first posting form) | clientledger/idempotency (proposed; plan names no branch) | Planned |
+| U-19 | Money wire hardening: strict decimal and date strings, exact 4 dp balance check, `TXN_UNBALANCED` (capability `money-strict-v1`) | P12 | clientledger/money-strict (proposed; plan names no branch) | Planned |
+| U-21 | Stable error codes plus `GET /desktop/info → capabilities` (`error-codes-v1`), and OpenAPI registration of per-`txnType` and list schemas | P15 (first in build order) | clientledger/error-codes (proposed; plan names no branch) | Planned |
+| U-22 | Journal-line `contactId` with in-scope check (capability `je-line-contact-v1`) | P15 | clientledger/je-line-contact (proposed; plan names no branch) | Planned |
 
 Add rows as capability checks find gaps (credit memos, statements, finance charges, sales tax, average-cost inventory, reconciliation, permissions granularity, optimistic concurrency, change notifications for LAN mode; post-beta: estimates, sales orders, POs, assemblies, custom fields, form templates).
 
@@ -115,6 +123,61 @@ Add rows as capability checks find gaps (credit memos, statements, finance charg
 - Tests: gate (nonce without token, wrong nonce length), proof vector, shutdown drain; host side: `cl-host` verifies the proof and tests an impostor that answers 200 without it.
 - Server appliance impact: none (all behind `isDesktop()`).
 - Status: Proposed — 2026-10-15. Not started.
+
+### U-17 — Optimistic concurrency (record versions)
+- Needed by: P05 (AC4 live 409 test, pending), P12/P13 (multiple windows), P27 (reconcile while a JE is open); hard by P33 (LAN)
+- Why: two windows or a LAN client can overwrite each other's edits silently. The second save must get a conflict instead.
+- Branch: `clientledger/record-versions` (proposed); size L (opus). Capability: `record-version-v1`. The §3.1 Revision 2 design (lines triggers, explicit bumps, CAS, `If-Match: *`) must be approved before the engine PR starts (Q-P05r).
+- Engine files touched: posting/ledger, tags, bank-feed, reconciliation, accounts, contacts, items, company services; new `ifMatch()` middleware; migration after `0217` with `.rollback.sql`.
+- Schema/migrations: yes — `version integer NOT NULL DEFAULT 1` on transactions, accounts, contacts, items, tags, companies; header triggers and statement-level `journal_lines` triggers calling `cl_bump_version()`. Rollback drops triggers, then functions, then columns.
+- API changes: optional `If-Match: "<n>"` or `*` on the listed PUT/DELETE/POST routes; mismatch returns 409 `STALE` with `currentVersion`; `version` in single and list responses; `ETag` on successful writes; OpenAPI documents both.
+- Tests: CAS on each route; header and lines triggers; reconcile and tag bumps; concurrent PUT race (50 runs: one 200, one 409); migration up/down on existing rows.
+- Server appliance impact: additive columns and triggers; without `If-Match` behavior is unchanged; web SPA unchanged; server env matrix unchanged.
+- Status: Planned — 2026-10-17
+
+### U-18 — Request idempotency
+- Needed by: P12/P13 (before the first posting form), so that "UI retries safely on timeouts" holds. Not P05.
+- Why: a timed-out posting can be retried without creating a duplicate entry.
+- Branch: `clientledger/idempotency` (proposed); size M (opus, plus security-reviewer because it stores responses). Capability: `idempotency-v1`.
+- Engine files touched: opt-in `idempotent()` middleware; new `idempotency_keys` table; `postTransaction`, `voidTransaction` and master-data `create` services (`markIdempotencyCommitted`, carried by AsyncLocalStorage); route mounts.
+- Schema/migrations: yes — additive `idempotency_keys(tenant_id, user_id, key, request_hash, route, state, response_status, response_body, entity_type, entity_id, created_at)`, 24 h purge; E5 classifies it as derived TTL data.
+- API changes: `Idempotency-Key` header (16–64 chars `[A-Za-z0-9_-]`) on `POST /transactions`, `POST /transactions/:id/void`, `POST /accounts|/contacts|/items|/tags`, `POST /auth/create-tenant`; new 422 `IDEMPOTENCY_KEY_REUSED` and 409 `IDEMPOTENCY_IN_PROGRESS`; `Idempotent-Replayed: true` on replays.
+- Tests: hash match, reuse, replay of `done`, `committed` re-read, in-progress takeover after 60 s, crash-before-commit, 5xx deletes the row.
+- Server appliance impact: opt-in per route; routes without the header behave as today.
+- Status: Planned — 2026-10-17
+
+### U-19 — Money wire hardening
+- Needed by: P12 (first posting UI). Not P05: cl-api already refuses these inputs locally.
+- Why: money and date strings are not validated today (non-numeric input is a 500, N6), and the 0.0001 balance tolerance lets an unbalanced entry persist.
+- Branch: `clientledger/money-strict` (proposed); size S-M (opus, posting validation). Capability: `money-strict-v1`. Built after U-17 and rebased (§3.7).
+- Engine files touched: `shared/src/schemas` (new Zod helpers), `transactions`, `contacts`, `items`, `accounts` schemas; `ledger.service.ts` balance check (`:304`).
+- Schema/migrations: none.
+- API changes: money, quantity, rate and date strings validated (`moneyString`, `nonNegMoney`, `quantityString`, `rateString`, `isoDate`); non-numeric input → 400 `VALIDATION_ERROR`; journal lines reject negative or two-sided amounts; balance exact after rounding each line to 4 dp → 400 `TXN_UNBALANCED`.
+- Tests: rejection of 5 dp and non-numeric input; exact-balance boundary cases; line-side rules.
+- Server appliance impact: clients that send more than 4 dp or non-numeric money now get 400 instead of silent rounding or 500. Called out for owner review in the PR.
+- Status: Planned — 2026-10-17
+
+### U-21 — Stable error codes and capability advertisement
+- Needed by: P15 (JE form error mapping). First in build order because it introduces `capabilities`.
+- Why: the UI must map engine errors to plain messages by code, not by parsing text, and must know which engine features exist.
+- Branch: `clientledger/error-codes` (proposed); size S (sonnet). Capability: `error-codes-v1`; `GET /api/v1/desktop/info → capabilities` is a constant array that later PRs append to.
+- Engine files touched: `ledger.service.ts`, `accounts.service.ts`, `transactions.routes.ts`, `tags.service.ts`, `auth.routes.ts`; `desktop.routes.ts` (info); OpenAPI generator.
+- Schema/migrations: none.
+- API changes: additive `code` fields on `TXN_UNBALANCED`, `TXN_ZERO_AMOUNT`, `TXN_VOID_IMMUTABLE`, `TXN_RECONCILED_LOCKED`, `ACCOUNT_NONZERO_BALANCE`, `ACCOUNT_SYSTEM`, `ACCOUNT_OUT_OF_SCOPE`, `UNKNOWN_TXN_TYPE`, `TAG_NAME_EXISTS`, `REFRESH_TOKEN_MISSING`, `TFA_TOKEN_MISSING`, `TFA_TOKEN_INVALID`, `TFA_CODE_INVALID`; `capabilities` on `/desktop/info`. OpenAPI registers the per-`txnType` `oneOf` request schemas for `POST /transactions` and `PUT /transactions/{id}`, the switch and create-tenant bodies, and list query schemas (spec-only). If that outgrows S, split it into an E2 follow-up PR.
+- Tests: each code asserted on its route; `capabilities` array present; OpenAPI snapshot.
+- Server appliance impact: additive `code` fields only; messages unchanged.
+- Status: Planned — 2026-10-17
+
+### U-22 — Journal-line `contactId`
+- Needed by: P15 (JE form contact lines).
+- Why: a journal line cannot carry a contact, so the entry form cannot record a payee per line.
+- Branch: `clientledger/je-line-contact` (proposed); size S (sonnet). Capability: `je-line-contact-v1`.
+- Engine files touched: `shared/.../transactions.ts` (`journalLineInputSchema`), `postTransaction`, `updateTransaction`.
+- Schema/migrations: none (`journal_lines.contact_id` exists since migration 0099).
+- API changes: `contactId: z.string().uuid().nullable().optional()` on journal lines, persisted through post and update, with a contact-in-scope check.
+- Tests: persist and read back; out-of-scope contact refused; null and absent behave as before.
+- Server appliance impact: additive optional field; absent field unchanged.
+- Status: Planned — 2026-10-17
 
 ## Entry template
 
