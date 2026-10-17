@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use eframe::egui;
 
+use crate::automation::Bridge;
 use crate::shell::{MIN_WINDOW, Shell, ShellOptions};
 
 /// What the binary hands over at start-up.
@@ -22,6 +23,9 @@ pub struct LaunchOptions {
     /// Keep the engine alive for the app's life: dropped on exit, which stops
     /// it.
     pub keep_alive: Option<Box<dyn std::any::Any + Send>>,
+    /// The control channel, present only when the app was started with
+    /// `--control` (P07).
+    pub control: Option<cl_automation::ControlServer>,
 }
 
 impl Default for LaunchOptions {
@@ -32,6 +36,7 @@ impl Default for LaunchOptions {
             stop_request: None,
             inner_size: [1280.0, 820.0],
             keep_alive: None,
+            control: None,
         }
     }
 }
@@ -57,6 +62,7 @@ pub struct ClientLedgerApp {
     shell: Shell,
     focus_request: Option<Arc<AtomicBool>>,
     stop_request: Option<Arc<AtomicBool>>,
+    bridge: Option<Bridge>,
     _keep_alive: Option<Box<dyn std::any::Any + Send>>,
 }
 
@@ -69,6 +75,9 @@ impl ClientLedgerApp {
             shell: Shell::new(options.shell),
             focus_request: options.focus_request,
             stop_request: options.stop_request,
+            bridge: options
+                .control
+                .map(|server| Bridge::install(&cc.egui_ctx, server)),
             _keep_alive: options.keep_alive,
         }
     }
@@ -81,6 +90,9 @@ impl ClientLedgerApp {
 
 impl eframe::App for ClientLedgerApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(bridge) = &mut self.bridge {
+            bridge.poll(ctx, &mut self.shell);
+        }
         if self
             .focus_request
             .as_ref()

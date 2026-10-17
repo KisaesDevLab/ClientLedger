@@ -11,8 +11,10 @@
 #![allow(clippy::struct_excessive_bools)]
 
 pub mod actions;
+pub mod client;
 pub mod control_file;
 pub mod inspect;
+pub mod screenshot;
 pub mod server;
 pub mod tools;
 

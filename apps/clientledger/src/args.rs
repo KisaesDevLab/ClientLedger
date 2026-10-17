@@ -22,6 +22,9 @@ pub struct Args {
     pub zoom: Option<u16>,
     /// Window size override in points.
     pub size: Option<[f32; 2]>,
+    /// Start the control channel and write its port and token here (tests and
+    /// scripts only; absent means no listener at all).
+    pub control: Option<PathBuf>,
     /// Print usage and exit.
     pub help: bool,
 }
@@ -37,6 +40,8 @@ usage: clientledger [options]
   --theme <name>       light, dark, or auto, for this run
   --zoom <percent>     80 to 200, for this run
   --size <WxH>         window size in points, for example 1280x820
+  --control <path>     start the local control channel for scripts and tests; writes a
+                       private file at <path> (off unless given)
   -h, --help           show this help";
 
 /// Parse the arguments after the program name.
@@ -52,6 +57,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, String> {
             "--demo" => out.demo = true,
             "--no-engine" => out.no_engine = true,
             "-h" | "--help" => out.help = true,
+            "--control" => out.control = Some(PathBuf::from(value("--control")?)),
             "--engine-exe" => out.engine_exe = Some(PathBuf::from(value("--engine-exe")?)),
             "--data-dir" => out.data_dir = Some(PathBuf::from(value("--data-dir")?)),
             "--theme" => {
@@ -97,6 +103,7 @@ mod tests {
     #[test]
     fn no_arguments_is_the_normal_start() {
         assert_eq!(p(&[]).unwrap(), Args::default());
+        assert_eq!(p(&[]).unwrap().control, None);
     }
 
     #[test]
@@ -111,6 +118,8 @@ mod tests {
             "1440x940",
             "--data-dir",
             "x",
+            "--control",
+            "c.json",
         ])
         .unwrap();
         assert!(a.demo && !a.no_engine);
@@ -118,6 +127,7 @@ mod tests {
         assert_eq!(a.zoom, Some(150));
         assert_eq!(a.size, Some([1440.0, 940.0]));
         assert_eq!(a.data_dir, Some(PathBuf::from("x")));
+        assert_eq!(a.control, Some(PathBuf::from("c.json")));
     }
 
     #[test]
