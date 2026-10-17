@@ -4,6 +4,29 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+description = "Company lifecycle for ClientLedger: setup interview, open, backup and restore, portable copies, retention, export all data, delete, the practice company."
+
+[dependencies]
+cl-api = { path = "../cl-api" }
+cl-core = { path = "../cl-core" }
+cl-pg = { path = "../cl-pg" }
+cl-settings = { path = "../cl-settings" }
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+tokio = { version = "1.53.3", features = ["rt", "time"] }
+tracing = "0.1.44"
+# Stored (uncompressed) entries only: the engine archive is already
+# encrypted, and Export All Data zips CSV text.
+zip = { version = "9.0.3", default-features = false }
+
+[dev-dependencies]
+cl-api = { path = "../cl-api", features = ["test-support"] }
+tempfile = "3.27.0"
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
+wiremock = "0.6.5"
 
 [lints]
 workspace = true

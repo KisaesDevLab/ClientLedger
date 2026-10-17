@@ -815,6 +815,22 @@ dependencies = [
 [[package]]
 name = "cl-company"
 version = "0.0.0"
+dependencies = [
+ "chrono",
+ "cl-api",
+ "cl-core",
+ "cl-pg",
+ "cl-settings",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "wiremock",
+ "zip",
+]
 
 [[package]]
 name = "cl-core"
