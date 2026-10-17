@@ -8,6 +8,8 @@
 //! - a connect to a public address (1.1.1.1:443 and its IPv6 twin) must fail,
 //!   and the IPv4 one must fail fast (a rejected connect, not a timeout:
 //!   a silently dropped packet would only look blocked);
+//! - a name lookup of a public name must fail (DNS, UDP and TCP port 53, is
+//!   rejected too, including the local stub resolver on 127.0.0.53);
 //! - a connect to a listener on 127.0.0.1 must still succeed, because the
 //!   engine, `PostgreSQL` and the client all talk over loopback.
 //!
@@ -15,7 +17,7 @@
 //! (developer machines and the unrestricted jobs reach the network).
 
 use std::io::ErrorKind;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 const WAIT: Duration = Duration::from_secs(3);
@@ -57,9 +59,15 @@ fn public_addresses_are_unreachable_and_loopback_works() {
     TcpStream::connect_timeout(&v6, WAIT)
         .expect_err("a public IPv6 address must not be reachable in the blocked run");
 
+    let lookup = ("example.com", 443).to_socket_addrs().map(Iterator::count);
+    assert!(
+        lookup.is_err() || lookup.as_ref().is_ok_and(|n| *n == 0),
+        "a public name must not resolve in the blocked run: {lookup:?}"
+    );
+
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
     let local = listener.local_addr().expect("local address");
     TcpStream::connect_timeout(&local, WAIT).expect("loopback must stay reachable");
 
-    eprintln!("network_probe: blocked OK (public IPv4/IPv6 rejected, loopback reachable)");
+    eprintln!("network_probe: blocked OK (public IPv4/IPv6 and DNS rejected, loopback reachable)");
 }

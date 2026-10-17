@@ -25,6 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           submodules: false
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
@@ -50,6 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           submodules: false
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
@@ -70,6 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: Install gitleaks
         run: |
@@ -79,13 +82,16 @@ jobs:
         run: ./gitleaks detect --source . --redact --verbose
 
   # Enforced at 80% workspace line coverage since P05 (Q-116). xtask and generated
-  # code are excluded; the real-engine contract tests run in the engine job.
+  # code are excluded. This job does NOT run the real-engine contract suites
+  # (they need the engine submodule and run in the engine job), so the number
+  # covers unit, stub and offline tests only.
   coverage:
     name: coverage
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           submodules: false
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
@@ -118,6 +124,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           submodules: true
       - uses: actions/setup-node@v4
         with:
@@ -225,6 +232,11 @@ jobs:
             esac
             sudo "$ipt" -I OUTPUT 1 -m owner --uid-owner cltest ! -o lo -j REJECT --reject-with "$icmp"
             sudo "$ipt" -I OUTPUT 1 -m owner --uid-owner cltest ! -o lo -p tcp -j REJECT --reject-with tcp-reset
+            # DNS on any interface, including the local stub resolver
+            # (systemd-resolved on 127.0.0.53, which would otherwise forward
+            # cltest's lookups as another user).
+            sudo "$ipt" -I OUTPUT 1 -m owner --uid-owner cltest -p udp --dport 53 -j REJECT --reject-with "$icmp"
+            sudo "$ipt" -I OUTPUT 1 -m owner --uid-owner cltest -p tcp --dport 53 -j REJECT --reject-with tcp-reset
           done
           sudo iptables -S OUTPUT
           sudo ip6tables -S OUTPUT
@@ -258,6 +270,8 @@ jobs:
             esac
             sudo "$ipt" -D OUTPUT -m owner --uid-owner cltest ! -o lo -p tcp -j REJECT --reject-with tcp-reset || true
             sudo "$ipt" -D OUTPUT -m owner --uid-owner cltest ! -o lo -j REJECT --reject-with "$icmp" || true
+            sudo "$ipt" -D OUTPUT -m owner --uid-owner cltest -p udp --dport 53 -j REJECT --reject-with "$icmp" || true
+            sudo "$ipt" -D OUTPUT -m owner --uid-owner cltest -p tcp --dport 53 -j REJECT --reject-with tcp-reset || true
           done
           sudo pkill -u cltest || true
           sudo userdel --remove cltest || true
