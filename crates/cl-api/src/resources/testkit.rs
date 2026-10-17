@@ -34,3 +34,8 @@ pub(crate) async fn requests(server: &MockServer, method: &str) -> Vec<Request> 
         .filter(|r| r.method.as_str() == method)
         .collect()
 }
+
+/// The query string of a request.
+pub(crate) fn query(r: &Request) -> String {
+    r.url.query().unwrap_or("").to_string()
+}

@@ -33,9 +33,19 @@ pub use errors::{
     UserText, ValidationError, ValidationIssue,
 };
 pub use idempotency::IdempotencyKey;
+pub use resources::accounts::{
+    Account, AccountFields, AccountFilter, AccountSort, AccountType, AccountUpdate, Accounts,
+};
+pub use resources::common::SortDir;
 pub use resources::company::{CompanyProfile, CompanyProfileUpdate, CompanySettings, EntityType};
+pub use resources::contacts::{
+    Contact, ContactFields, ContactFilter, ContactSort, ContactType, ContactUpdate, Contacts,
+    NewContact,
+};
+pub use resources::items::{Item, ItemFields, ItemFilter, ItemSort, ItemUpdate, Items};
 pub use resources::operations::{OPERATIONS, Operation, RetryClass};
 pub use resources::system::{SmtpTest, SmtpTestResult};
+pub use resources::tags::{Tag, TagFields, TagFilter, TagUpdate, Tags};
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{
     Client, CompanySummary, CreatedCompany, LoginOutcome, NewCompany, OpenCompany, Scope, Session,

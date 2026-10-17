@@ -497,7 +497,7 @@ fn conflict(body: &EngineErrorBody) -> ApiError {
     let reason = match body.code.as_ref().map(ErrorCode::as_str) {
         Some("STALE") => ConflictReason::Stale,
         Some("TAG_IN_USE") => ConflictReason::InUse,
-        Some("EMAIL_EXISTS") => ConflictReason::AlreadyExists,
+        Some("EMAIL_EXISTS" | "ACCOUNT_NUMBER_EXISTS") => ConflictReason::AlreadyExists,
         Some("TENANT_BUSY" | "IDEMPOTENCY_IN_PROGRESS") => ConflictReason::Busy,
         _ => ConflictReason::Unspecified,
     };
