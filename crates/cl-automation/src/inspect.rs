@@ -116,14 +116,80 @@ pub fn is_secret_field(role: &str, label: Option<&str>) -> bool {
     .any(|w| l.contains(w))
 }
 
+/// Text that looks like a credential whatever field it sits in: an API key
+/// prefix, a long unbroken mixed token, or a recovery key written as groups
+/// joined by dashes.
+#[must_use]
+pub fn looks_like_secret_text(text: &str) -> bool {
+    let t = text.trim();
+    if t.is_empty() || t.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let lower = t.to_ascii_lowercase();
+    if ["sk-", "sk_", "ghp_", "xoxb-", "pk_live", "sk_live"]
+        .iter()
+        .any(|p| lower.starts_with(p))
+        && t.len() >= 12
+    {
+        return true;
+    }
+    let letters = t.chars().any(|c| c.is_ascii_alphabetic());
+    let digits = t.chars().any(|c| c.is_ascii_digit());
+    if t.len() >= 24 && letters && digits {
+        return true;
+    }
+    let groups: Vec<&str> = t.split('-').collect();
+    groups.len() >= 4
+        && groups
+            .iter()
+            .all(|g| (4..=8).contains(&g.len()) && g.chars().all(|c| c.is_ascii_alphanumeric()))
+}
+
+/// A static label that shows a secret: it names one and carries a value
+/// after a colon ("Recovery key: ABCD-..."), or is itself credential-shaped.
+fn static_label_shows_secret(label: &str) -> bool {
+    if looks_like_secret_text(label) {
+        return true;
+    }
+    match label.split_once(':') {
+        Some((name, rest)) => is_secret_field("label", Some(name)) && !rest.trim().is_empty(),
+        None => false,
+    }
+}
+
 impl Node {
-    /// Replace secret values in this node and its children.
+    /// Hide secrets in this node and everything below it.
+    ///
+    /// A secret input hides its value and every descendant's text (egui puts
+    /// the typed text in child text-run nodes too). Static text that shows a
+    /// secret, and any value or label that looks like a credential, is hidden
+    /// as well.
     pub fn redact(&mut self) {
-        if self.value.is_some() && is_secret_field(&self.role, self.label.as_deref()) {
-            self.value = Some(REDACTED.into());
+        self.redact_inner(false);
+    }
+
+    fn redact_inner(&mut self, inside_secret: bool) {
+        let secret_input =
+            self.role.ends_with("input") && is_secret_field(&self.role, self.label.as_deref());
+        if secret_input || inside_secret {
+            if self.value.is_some() {
+                self.value = Some(REDACTED.into());
+            }
+            if inside_secret && self.label.is_some() {
+                self.label = Some(REDACTED.into());
+            }
+        } else {
+            if self.role == "label" && self.label.as_deref().is_some_and(static_label_shows_secret)
+            {
+                self.label = Some(REDACTED.into());
+            }
+            if self.value.as_deref().is_some_and(looks_like_secret_text) {
+                self.value = Some(REDACTED.into());
+            }
         }
+        let flag = secret_input || inside_secret;
         for c in &mut self.children {
-            c.redact();
+            c.redact_inner(flag);
         }
     }
 
@@ -410,5 +476,51 @@ mod tests {
             height: 100.0,
         };
         assert_eq!(s.clipped_excluding(1.0, &[region]).len(), 0);
+    }
+
+    #[test]
+    fn text_run_children_of_a_secret_input_are_hidden_too() {
+        let mut field = node("1", "text_input", Some("AI key"), None);
+        field.value = Some("sk-live-123".into());
+        let mut run = node("2", "text_run", Some("sk-live-123"), None);
+        run.value = Some("sk-live-123".into());
+        let mut inner = node("3", "text_run", Some("123"), None);
+        inner.value = Some("123".into());
+        run.children.push(inner);
+        field.children.push(run);
+        let mut root = node("0", "window", None, None);
+        root.children.push(field);
+        root.redact();
+        let text = serde_json::to_string(&root).unwrap();
+        assert!(
+            !text.contains("sk-live-123") && !text.contains("\"123\""),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn static_text_that_shows_a_secret_is_hidden() {
+        let mut root = node("0", "window", None, None);
+        root.children = vec![
+            node(
+                "1",
+                "label",
+                Some("Recovery key: ABCD-EFGH-JKLM-NPQR"),
+                None,
+            ),
+            node("2", "label", Some("ABCD-EFGH-JKLM-NPQR-STUV"), None),
+            node("3", "label", Some("Recovery key"), None),
+            node("4", "label", Some("Books closed through 09/30/2026"), None),
+        ];
+        root.redact();
+        let l: Vec<_> = root
+            .children
+            .iter()
+            .map(|c| c.label.clone().unwrap())
+            .collect();
+        assert_eq!(l[0], REDACTED);
+        assert_eq!(l[1], REDACTED);
+        assert_eq!(l[2], "Recovery key", "a heading is not a secret");
+        assert_eq!(l[3], "Books closed through 09/30/2026");
     }
 }

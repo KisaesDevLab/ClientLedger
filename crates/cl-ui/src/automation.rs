@@ -134,7 +134,7 @@ fn build(
         #[allow(clippy::cast_possible_truncation)]
         height: (r.y1 - r.y0) as f32,
     });
-    let children = if depth < 200 {
+    let children = if depth < MAX_DEPTH {
         n.children()
             .iter()
             .filter_map(|c| build(*c, nodes, focus, depth + 1))
@@ -170,6 +170,10 @@ fn snapshot_from(update: &accesskit::TreeUpdate, window: WindowInfo) -> Option<S
         tree,
     })
 }
+
+/// Deepest element level returned: well under the 128 levels a JSON reader
+/// accepts, so `inspect` output always parses.
+const MAX_DEPTH: usize = 50;
 
 /// What to put in the answer when a job finishes.
 enum Finish {
@@ -945,6 +949,9 @@ mod bridge_tests {
         let mut key = accesskit::Node::new(accesskit::Role::TextInput);
         key.set_label("AI key");
         key.set_value("sk-live-abc");
+        let mut run = accesskit::Node::new(accesskit::Role::TextRun);
+        run.set_value("sk-live-abc");
+        key.set_children(vec![accesskit::NodeId(5)]);
         let mut memo = accesskit::Node::new(accesskit::Role::TextInput);
         memo.set_label("Memo");
         memo.set_value("lunch");
@@ -960,6 +967,7 @@ mod bridge_tests {
                 (accesskit::NodeId(2), pw),
                 (accesskit::NodeId(3), key),
                 (accesskit::NodeId(4), memo),
+                (accesskit::NodeId(5), run),
             ],
             tree: Some(accesskit::TreeInfo::new(accesskit::NodeId(1))),
             tree_id: accesskit::TreeId::ROOT,
