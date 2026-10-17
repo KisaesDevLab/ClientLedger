@@ -177,6 +177,18 @@ pub struct Pending<T> {
     rx: oneshot::Receiver<Result<T, ApiError>>,
     done: Arc<AtomicBool>,
     taken: bool,
+    /// For a write: its idempotency key, so a lost result is reported as
+    /// `OutcomeUnknown` (it may have been sent), never as `Internal`.
+    write: IfLost,
+}
+
+/// What a job whose result channel was dropped resolves to.
+#[derive(Clone)]
+enum IfLost {
+    /// A read: `Internal`.
+    Internal,
+    /// A write (with its key): `OutcomeUnknown`.
+    Unknown(Option<IdempotencyKey>),
 }
 
 impl<T> std::fmt::Debug for Pending<T> {
@@ -201,7 +213,13 @@ impl<T> Pending<T> {
             Err(oneshot::error::TryRecvError::Empty) => None,
             Err(oneshot::error::TryRecvError::Closed) => {
                 self.taken = true;
-                Some(Err(ApiError::Internal))
+                Some(Err(match &self.write {
+                    IfLost::Unknown(key) => ApiError::OutcomeUnknown {
+                        request_id: RequestId::from_uuid(uuid::Uuid::new_v4()),
+                        idempotency_key: key.clone(),
+                    },
+                    IfLost::Internal => ApiError::Internal,
+                }))
             }
         }
     }
@@ -482,6 +500,9 @@ impl RequestGroup {
         }
         let (tx, rx) = oneshot::channel();
         let done = Arc::new(AtomicBool::new(false));
+        let write_key = label
+            .as_ref()
+            .map_or(IfLost::Internal, |l| IfLost::Unknown(l.key.clone()));
         // The job runs pinned to the company open now; the orphan record
         // names that company (the one the requests actually used).
         let (epoch, company, job_scope) = scope.pinned();
@@ -558,6 +579,7 @@ impl RequestGroup {
             rx,
             done,
             taken: false,
+            write: write_key,
         })
     }
 }
@@ -648,6 +670,34 @@ mod tests {
             q.shutdown(Duration::from_secs(1), None),
             ShutdownReport::default()
         );
+    }
+
+    #[test]
+    fn a_lost_write_result_is_outcome_unknown_and_a_lost_read_internal() {
+        let key = IdempotencyKey::new();
+        let (tx, rx) = oneshot::channel::<Result<(), ApiError>>();
+        drop(tx);
+        let mut w = Pending {
+            rx,
+            done: Arc::new(AtomicBool::new(true)),
+            taken: false,
+            write: IfLost::Unknown(Some(key.clone())),
+        };
+        match w.try_take() {
+            Some(Err(ApiError::OutcomeUnknown {
+                idempotency_key, ..
+            })) => assert_eq!(idempotency_key, Some(key)),
+            other => panic!("unexpected {other:?}"),
+        }
+        let (tx, rx) = oneshot::channel::<Result<(), ApiError>>();
+        drop(tx);
+        let mut r = Pending {
+            rx,
+            done: Arc::new(AtomicBool::new(true)),
+            taken: false,
+            write: IfLost::Internal,
+        };
+        assert_eq!(r.try_take(), Some(Err(ApiError::Internal)));
     }
 
     #[test]

@@ -226,6 +226,8 @@ impl ReportAmount {
     }
 }
 
+/// Prints the amount text itself: owner data. Never log a value with
+/// `?value` at info level or above.
 impl fmt::Debug for ReportAmount {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ReportAmount({})", self.text())

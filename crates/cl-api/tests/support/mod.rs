@@ -656,6 +656,25 @@ pub async fn find_company(s: &Session, name: &str) -> Result<CompanySummary, Str
 /// A contract test: a plain function over the shared harness.
 pub type TestFn = fn(&Harness);
 
+/// Splits libtest-style arguments into name filters and `--skip` values
+/// (`--skip X` and `--skip=X`); other flags and their values are ignored.
+fn parse_filters(args: &[String]) -> (Vec<String>, Vec<String>) {
+    let (mut filters, mut skips) = (Vec::new(), Vec::new());
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--skip" {
+            skips.extend(it.next().cloned());
+        } else if let Some(v) = a.strip_prefix("--skip=") {
+            skips.push(v.to_string());
+        } else if matches!(a.as_str(), "--test-threads" | "--format" | "--color") {
+            it.next();
+        } else if !a.starts_with("--") {
+            filters.push(a.clone());
+        }
+    }
+    (filters, skips)
+}
+
 /// Run `tests` in order against one engine. Arguments: substring filters;
 /// `--list` lists the tests; libtest flags (`--test-threads`, `--nocapture`,
 /// …) are accepted and ignored (the order is fixed and serial).
@@ -667,25 +686,19 @@ pub fn run_suite(mode: EngineMode, tests: &[(&str, TestFn)]) -> ExitCode {
         }
         return ExitCode::SUCCESS;
     }
-    let mut filters = Vec::new();
-    let mut skip_value = false;
-    for a in &args {
-        if skip_value {
-            skip_value = false;
-            continue;
-        }
-        if a.starts_with("--") {
-            skip_value = matches!(
-                a.as_str(),
-                "--test-threads" | "--format" | "--color" | "--skip"
-            );
-            continue;
-        }
-        filters.push(a.clone());
-    }
+    let (filters, skips) = parse_filters(&args);
+    debug_assert_eq!(
+        parse_filters(&["a".into(), "--skip".into(), "b".into(), "--skip=c".into()]),
+        (
+            vec!["a".to_string()],
+            vec!["b".to_string(), "c".to_string()]
+        ),
+        "argument parsing self-check"
+    );
     let selected: Vec<_> = tests
         .iter()
         .filter(|(n, _)| filters.is_empty() || filters.iter().any(|f| n.contains(f.as_str())))
+        .filter(|(n, _)| !skips.iter().any(|s| n.contains(s.as_str())))
         .collect();
     if selected.is_empty() {
         println!("running 0 tests\n\ntest result: ok. 0 passed; 0 failed");
