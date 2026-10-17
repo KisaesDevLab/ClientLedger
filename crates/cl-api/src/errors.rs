@@ -165,6 +165,11 @@ pub enum LocalValidation {
     InvalidValue,
     /// A void needs a reason.
     MissingReason,
+    /// The closing date cannot be written until the engine gates it with
+    /// the closing-date password (U-15, `closing-password-v1`).
+    ClosingDateWriteUnavailable,
+    /// A tenant delete needs a verified backup file first (Q-185).
+    BackupRequired,
 }
 
 /// A save was refused because its date is on or before the closing date.

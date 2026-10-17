@@ -53,17 +53,35 @@ pub use resources::accounts::{
     Account, AccountFields, AccountFilter, AccountSort, AccountType, AccountUpdate, Accounts,
 };
 pub use resources::common::SortDir;
-pub use resources::company::{CompanyProfile, CompanyProfileUpdate, CompanySettings, EntityType};
+pub use resources::company::{
+    AccountingMethod, ClosingDateChange, CompanyProfile, CompanyProfileUpdate, CompanySettings,
+    CompanySettingsUpdate, EntityType,
+};
 pub use resources::contacts::{
     Contact, ContactFields, ContactFilter, ContactSort, ContactType, ContactUpdate, Contacts,
     NewContact,
 };
+pub use resources::export::{ExportFile, ExportManifest};
 pub use resources::items::{Item, ItemFields, ItemFilter, ItemSort, ItemUpdate, Items};
 pub use resources::ledger::LedgerStamp;
 pub use resources::operations::{OPERATIONS, Operation, RetryClass};
 pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
+pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};
+pub use resources::reports::{
+    BalanceSheet, BalanceSheetEntry, ProfitLoss, Reports, TrialBalance, TrialBalanceRow,
+};
+pub use resources::sales::{BillLine, InvoiceLine, NewBill, NewInvoice, Posted};
+pub use resources::setup::{
+    AccountImportResult, AccountImportRow, AccountRef, CoaTemplateOption, IMPORT_MAX_ROWS,
+    OpeningBalance, OpeningBalancesPosted, SkippedAccount,
+};
 pub use resources::system::{SmtpTest, SmtpTestResult};
 pub use resources::tags::{Tag, TagFields, TagFilter, TagUpdate, Tags};
+pub use resources::tenants::{
+    ArchiveFileName, ArchiveJob, ArchiveJobStatus, ArchiveRequest, ArchiveResult, CreatedTenant,
+    DeleteReceipt, DeleteRequest, HOST_METADATA_MAX_BYTES, ImportRequest, ImportResult,
+    ImportVerification, JobId, JobState, NewTenant, TenantSummary, Tenants,
+};
 pub use resources::transactions::{
     Basis, JeLine, MAX_LINES, NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter,
     TransactionLine, TransactionSummary, Transactions, TxnSort, TxnStatus, TxnType,
