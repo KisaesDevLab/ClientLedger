@@ -24,8 +24,7 @@ use cl_ui::shell::{HostView, ShellOptions};
 /// flag, no listener (P07). A refused control file stops the start-up.
 fn start_control(path: Option<&std::path::Path>) -> Result<Option<cl_automation::ControlServer>> {
     path.map(|p| {
-        cl_automation::ControlServer::start(p)
-            .context("the control channel could not start")
+        cl_automation::ControlServer::start(p).context("the control channel could not start")
     })
     .transpose()
 }

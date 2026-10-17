@@ -922,8 +922,10 @@ dependencies = [
 name = "clientledger-cli"
 version = "0.0.0"
 dependencies = [
+ "cl-automation",
  "cl-host",
  "ctrlc",
+ "serde_json",
 ]
 
 [[package]]
