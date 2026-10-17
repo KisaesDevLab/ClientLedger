@@ -840,6 +840,132 @@ impl SessionInner {
     }
 }
 
+/// Test-only session hooks for the contract harness (feature `test-support`).
+#[cfg(feature = "test-support")]
+impl Session {
+    fn raw_call(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<&serde_json::Value>,
+    ) -> Result<Call, ApiError> {
+        let mut call = Call::new(method, "/raw", path.to_string());
+        call.query = query
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        if let Some(b) = body {
+            call = call.json_body(json_body(b)?);
+        }
+        if let Scope::Company { company_id, .. } = self.scope() {
+            call.company = Some(company_id);
+        }
+        Ok(call)
+    }
+
+    /// One raw attempt with this session's token: any status comes back as is
+    /// (no retry, no refresh, no error mapping). Sends `X-Company-Id` when a
+    /// company is open.
+    ///
+    /// # Errors
+    /// Only transport failures and a body that cannot be encoded.
+    pub async fn raw(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, &str)],
+        body: Option<&serde_json::Value>,
+    ) -> Result<crate::testing::RawReply, ApiError> {
+        let call = self.raw_call(method, path, query, body)?;
+        let creds = self.inner.ensure_fresh().await?;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        let reply = self
+            .client()
+            .exec()
+            .transport()
+            .attempt(&call, &creds.auth, 1, deadline)
+            .await
+            .map_err(|_| ApiError::EngineUnavailable { permanent: false })?;
+        let body = serde_json::from_slice(&reply.body).unwrap_or(serde_json::Value::Null);
+        Ok(crate::testing::RawReply {
+            status: reply.status,
+            body,
+        })
+    }
+
+    /// A raw request through the normal executor: retry policy, refresh and
+    /// the typed error mapping all apply. Returns the 2xx JSON body.
+    ///
+    /// # Errors
+    /// The mapped [`ApiError`].
+    pub async fn raw_mapped(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<serde_json::Value, ApiError> {
+        let op = crate::resources::operations::raw(method);
+        let call = self.raw_call(method, path, &[], body)?;
+        let reply = self.send(&op, call, None).await?;
+        Ok(serde_json::from_slice(&reply.body).unwrap_or(serde_json::Value::Null))
+    }
+
+    /// Rotate the refresh token now (single-flight like any refresh).
+    ///
+    /// # Errors
+    /// `Unauthorized(SessionExpired)` when the engine refuses the cookie.
+    pub async fn force_refresh(&self) -> Result<(), ApiError> {
+        let epoch = lock(&self.inner.state).auth_epoch;
+        self.inner.refresh_if(epoch).await
+    }
+
+    /// A copy of the current refresh cookie (to prove an old one is dead).
+    #[must_use]
+    pub fn refresh_cookie_for_test(&self) -> Option<Secret> {
+        lock(&self.inner.state).refresh.clone()
+    }
+
+    /// The current access token (for the logging canary only).
+    #[must_use]
+    pub fn access_token_for_test(&self) -> Secret {
+        lock(&self.inner.state).access.clone()
+    }
+
+    /// Mark the access token as expiring now, so the next request refreshes
+    /// first (the proactive path).
+    pub fn expire_access_for_test(&self) {
+        lock(&self.inner.state).access_exp = Some(0);
+    }
+
+    /// Replace the access token with one the engine refuses, keeping a
+    /// far-future expiry, so the next request meets a 401 `UNAUTHORIZED` (the
+    /// reactive path).
+    pub fn corrupt_access_for_test(&self) {
+        let mut st = lock(&self.inner.state);
+        st.access = Secret::new("eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjQxMDI0NDQ4MDB9.invalid");
+        st.access_exp = Some(4_102_444_800);
+    }
+}
+
+#[cfg(feature = "test-support")]
+impl Client {
+    /// `POST /auth/refresh` with an explicit cookie, through the normal error
+    /// mapping (to show a rotated-away cookie is refused).
+    ///
+    /// # Errors
+    /// The mapped [`ApiError`].
+    pub async fn refresh_with_cookie_for_test(&self, cookie: &Secret) -> Result<u16, ApiError> {
+        let auth = StaticAuth(AttemptAuth {
+            bearer: None,
+            refresh_cookie: Some(cookie.clone()),
+        });
+        let call = Call::at(Method::Post, REFRESH.route()).timeout(TimeoutClass::Auth);
+        let reply = self.exec().run(&REFRESH, call, &auth, None).await?;
+        Ok(reply.status)
+    }
+}
+
 impl AuthHook for SessionInner {
     fn prepare(&self) -> BoxFuture<'_, Result<AttemptCreds, ApiError>> {
         Box::pin(self.ensure_fresh())

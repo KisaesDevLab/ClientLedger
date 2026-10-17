@@ -290,6 +290,9 @@ pub(crate) struct Transport {
     write: reqwest::Client,
     cfg: ClientConfig,
     last_generation: AtomicU64,
+    /// Test-only request observer (feature `test-support`).
+    #[cfg(feature = "test-support")]
+    pub(crate) observer: crate::testing::ObserverSlot,
 }
 
 impl Transport {
@@ -317,6 +320,8 @@ impl Transport {
             write,
             cfg,
             last_generation: AtomicU64::new(0),
+            #[cfg(feature = "test-support")]
+            observer: crate::testing::ObserverSlot::default(),
         })
     }
 
@@ -395,7 +400,13 @@ impl Transport {
             req = req.body(body.to_vec());
         }
         let started = Instant::now();
+        #[cfg(feature = "test-support")]
+        self.observer.before_send(call.method, call.route);
         let result = self.send(req, ep.generation).await;
+        #[cfg(feature = "test-support")]
+        let result = self
+            .observer
+            .after_reply(call.method, call.route, result, ep.generation);
         let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         match &result {
             Ok((status, ..)) => tracing::debug!(

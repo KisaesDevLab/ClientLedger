@@ -25,6 +25,8 @@ pub mod idempotency;
 pub mod queue;
 pub mod resources;
 pub mod session;
+#[cfg(feature = "test-support")]
+pub mod testing;
 pub mod wire;
 
 pub use client::{Budget, ClientConfig, LOOPBACK_HOST, Method, Timeouts};

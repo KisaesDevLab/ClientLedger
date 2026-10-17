@@ -23,11 +23,32 @@ tracing = "0.1.44"
 uuid = { version = "1.28.0", default-features = false, features = ["std", "v4"] }
 zeroize = { version = "1.9.1", default-features = false, features = ["alloc"] }
 
+[features]
+# Test-only hooks for the contract harness (raw requests, request observer,
+# session token overrides). Never enabled by an app or a non-dev edge (xtask
+# guard, P05 plan §2.10, §2.14).
+test-support = []
+
 [dev-dependencies]
+cl-api = { path = ".", features = ["test-support"] }
+cl-host = { path = "../cl-host", features = ["test-support"] }
+cl-pg = { path = "../cl-pg" }
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util"] }
-tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt"] }
+tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt", "std"] }
 wiremock = "0.6.5"
 
 [lints]
 workspace = true
+
+# The contract binaries use their own runner (one engine per binary, ordered
+# tests, per-test budgets, deterministic teardown with no orphan processes).
+[[test]]
+name = "contract"
+path = "tests/contract/main.rs"
+harness = false
+
+[[test]]
+name = "contract_offline"
+path = "tests/contract_offline.rs"
+harness = false

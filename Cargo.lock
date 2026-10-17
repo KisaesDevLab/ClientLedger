@@ -428,7 +428,10 @@ dependencies = [
 name = "cl-api"
 version = "0.0.0"
 dependencies = [
+ "cl-api",
  "cl-core",
+ "cl-host",
+ "cl-pg",
  "proptest",
  "reqwest",
  "rust_decimal",

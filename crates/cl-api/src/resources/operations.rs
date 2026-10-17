@@ -261,6 +261,31 @@ pub fn find(method: Method, route: &str) -> Option<&'static Operation> {
         .find(|o| o.method == method && o.route == route)
 }
 
+/// Raw operations for the contract harness (feature `test-support`): never
+/// company-scoped locally (the harness adds `X-Company-Id` itself) so the
+/// engine's own scope checks can be observed.
+#[cfg(feature = "test-support")]
+pub(crate) const fn raw(method: Method) -> Operation {
+    match method {
+        Method::Get => op(
+            method,
+            "/raw",
+            RetryClass::Idempotent,
+            RouteKind::Session,
+            TimeoutClass::Read,
+            false,
+        ),
+        _ => op(
+            method,
+            "/raw",
+            RetryClass::PreHandlerOnly,
+            RouteKind::Session,
+            TimeoutClass::Write,
+            false,
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
