@@ -327,7 +327,7 @@ impl Executor {
                 if ctx.class != RetryClass::Never && self.backoff(r, ctx.deadline).await {
                     Step::Again
                 } else {
-                    Step::Done(Err(give_up(e)))
+                    Step::Done(Err(keyed_give_up(ctx, r, give_up(e))))
                 }
             }
             TransportError::Timeout { generation } | TransportError::Ambiguous { generation } => {
@@ -337,7 +337,7 @@ impl Executor {
                         if self.backoff(r, ctx.deadline).await {
                             Step::Again
                         } else {
-                            Step::Done(Err(give_up(e)))
+                            Step::Done(Err(keyed_give_up(ctx, r, give_up(e))))
                         }
                     }
                     RetryClass::Never => Step::Done(Err(give_up(e))),
@@ -434,7 +434,7 @@ impl Executor {
                 if self.backoff(r, ctx.deadline).await {
                     Step::Again
                 } else {
-                    Step::Done(Err(e))
+                    Step::Done(Err(keyed_give_up(ctx, r, e)))
                 }
             }
             (
@@ -522,6 +522,22 @@ impl Executor {
         }
         tokio::time::sleep(wait).await;
         true
+    }
+}
+
+/// Giving up on a keyed mutation (U-18 `KeyedOnce`) after an attempt that
+/// may have reached a handler: the outcome is unknown, and the owner's
+/// "Check again" needs the idempotency key, so it is `OutcomeUnknown`, not
+/// `Timeout` or `EngineUnavailable`.
+fn keyed_give_up(ctx: &Ctx<'_>, r: &Retries, e: ApiError) -> ApiError {
+    if ctx.class == RetryClass::KeyedOnce && r.maybe_committed {
+        tracing::info!(outcome = "unknown", reconciled = false, "mutation outcome");
+        ApiError::OutcomeUnknown {
+            request_id: ctx.call.request_id,
+            idempotency_key: ctx.call.idempotency_key.clone(),
+        }
+    } else {
+        e
     }
 }
 
@@ -1287,6 +1303,39 @@ pub(crate) mod tests {
             }
         );
         assert_eq!(count(&server).await, 3);
+    }
+
+    #[tokio::test]
+    async fn keyed_once_giving_up_after_a_timeout_or_5xx_is_outcome_unknown_with_the_key() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/slow"))
+            .respond_with(json(201, "{}").set_delay(Duration::from_secs(3)))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/accounts"))
+            .respond_with(json(503, r#"{"error":{"message":"x"}}"#))
+            .mount(&server)
+            .await;
+        let ex = exec_at(server.address().port());
+        ex.set_idempotency_v1(true);
+        for call in [
+            Call::new(Method::Post, "/api/v1/accounts", "/slow").json_body(b"{}".to_vec()),
+            post_call(),
+        ] {
+            let key = IdempotencyKey::new();
+            let mut call = call;
+            call.idempotency_key = Some(key.clone());
+            let e = ex
+                .run(&post_op(), call, &none(), None)
+                .await
+                .expect_err("gave up");
+            assert!(
+                matches!(e, ApiError::OutcomeUnknown { idempotency_key: Some(ref k), .. } if *k == key),
+                "{e:?}"
+            );
+        }
     }
 
     #[tokio::test]
