@@ -14,7 +14,7 @@
 //!   email, 10/min per IP) and fails the binary after more than 8 calls to
 //!   rate-limited auth routes.
 //! - Capability-gated assertions print `PENDING(U-xx)` and are listed in
-//!   `target/contract-pending.txt`; `CL_API_REQUIRE_CAPS=a,b` turns a missing
+//!   `target/<binary>-pending.txt`; `CL_API_REQUIRE_CAPS=a,b` turns a missing
 //!   capability into a failure.
 //! - Only loopback traffic: the engine, `PostgreSQL` and the client all use
 //!   `127.0.0.1`.
@@ -27,7 +27,6 @@
 
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::io::Write as _;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -282,6 +281,9 @@ pub struct Harness {
     budget: Duration,
     pending: Mutex<Vec<String>>,
     current_test: Mutex<String>,
+    s2: Mutex<Option<Session>>,
+    s3: Mutex<Option<Session>>,
+    tenant_b: Mutex<Option<TenantId>>,
     scratch: Scratch,
 }
 
@@ -399,6 +401,9 @@ impl Harness {
             budget: env_secs("CL_API_TEST_BUDGET_SECS", 20),
             pending: Mutex::new(Vec::new()),
             current_test: Mutex::new(String::new()),
+            s2: Mutex::new(None),
+            s3: Mutex::new(None),
+            tenant_b: Mutex::new(None),
             scratch,
         })
     }
@@ -435,6 +440,43 @@ impl Harness {
         let s = self.login();
         self.run(s.open_company(self.contract_co))
             .unwrap_or_else(|e| panic!("open company: {e}"));
+        s
+    }
+
+    /// S2: a second owner session on Contract Co (the "other window" of the
+    /// conflict tests). Logged in on first use.
+    pub fn s2(&self) -> Session {
+        let mut slot = self.s2.lock().unwrap_or_else(PoisonError::into_inner);
+        slot.get_or_insert_with(|| self.second_session()).clone()
+    }
+
+    /// Tenant B: a second company, created on first use. Tests that change
+    /// company-wide state (the closing date, the deliberate money-hole probe)
+    /// use it so no other assertion can see their effects.
+    pub fn tenant_b(&self) -> TenantId {
+        let mut slot = self.tenant_b.lock().unwrap_or_else(PoisonError::into_inner);
+        *slot.get_or_insert_with(|| {
+            let made = self
+                .run(self.s1.create_company(&cl_api::NewCompany {
+                    company_name: unique("Tenant B"),
+                    business_type: Some("default".into()),
+                    entity_type: None,
+                }))
+                .unwrap_or_else(|e| panic!("create tenant B: {e}"));
+            made.tenant_id
+        })
+    }
+
+    /// S3: the "switcher" session, opened on tenant B.
+    pub fn s3(&self) -> Session {
+        let b = self.tenant_b();
+        let mut slot = self.s3.lock().unwrap_or_else(PoisonError::into_inner);
+        let s = slot.get_or_insert_with(|| self.login()).clone();
+        drop(slot);
+        if !matches!(s.scope(), cl_api::Scope::Company { tenant_id, .. } if tenant_id == b) {
+            self.run(s.open_company(b))
+                .unwrap_or_else(|e| panic!("open tenant B: {e}"));
+        }
         s
     }
 
@@ -493,13 +535,23 @@ impl Harness {
             source,
             client,
             s1,
+            s2,
+            s3,
             pending,
             scratch,
             ..
         } = self;
         let pending = pending.into_inner().unwrap_or_else(PoisonError::into_inner);
-        let _ =
-            rt.block_on(async { tokio::time::timeout(Duration::from_secs(10), s1.logout()).await });
+        // Every session holds the client, which holds the endpoint source,
+        // which holds the supervisor: log them out and drop them all first.
+        let others = [s2, s3]
+            .into_iter()
+            .filter_map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner));
+        for s in std::iter::once(s1).chain(others) {
+            let _ = rt.block_on(async {
+                tokio::time::timeout(Duration::from_secs(10), s.logout()).await
+            });
+        }
         drop(client);
         drop(source);
         rt.shutdown_timeout(Duration::from_secs(5));
@@ -666,16 +718,21 @@ pub fn run_suite(mode: EngineMode, tests: &[(&str, TestFn)]) -> ExitCode {
         for p in &pending {
             println!("    {p}");
         }
-        if let Some(dir) = target_dir()
-            && let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(dir.join("contract-pending.txt"))
-        {
-            for p in &pending {
-                let _ = writeln!(f, "{p}");
-            }
-        }
+    }
+    // One file per binary, rewritten each run, for the PR body.
+    if let Some(dir) = target_dir() {
+        let tag = match mode {
+            EngineMode::Normal => "contract",
+            EngineMode::Offline => "contract-offline",
+        };
+        let _ = std::fs::write(
+            dir.join(format!("{tag}-pending.txt")),
+            pending.iter().fold(String::new(), |mut acc, p| {
+                acc.push_str(p);
+                acc.push('\n');
+                acc
+            }),
+        );
     }
     println!(
         "\ntest result: {}. {} passed; {} failed",
