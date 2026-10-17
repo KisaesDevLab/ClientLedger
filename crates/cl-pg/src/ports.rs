@@ -80,8 +80,14 @@ mod tests {
 
     #[test]
     fn free_port_is_loopback_bindable() {
-        let p = free_loopback_port().unwrap();
-        assert!(TcpListener::bind((Ipv4Addr::LOCALHOST, p)).is_ok());
+        // The port is released before we bind it again, so another test or
+        // process can take it first; that is the collision the contract says
+        // callers retry on.
+        let rebound = (0..5).any(|_| {
+            let p = free_loopback_port().unwrap();
+            p != 0 && TcpListener::bind((Ipv4Addr::LOCALHOST, p)).is_ok()
+        });
+        assert!(rebound, "no free loopback port could be bound again");
     }
 
     #[test]
