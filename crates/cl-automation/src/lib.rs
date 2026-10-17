@@ -1,16 +1,21 @@
-//! `cl-automation` crate (stub; filled in by a later phase).
+//! The opt-in control channel (Q-16): a loopback server that lets scripts and
+//! tests inspect and drive the running app.
+//!
+//! This crate has no egui. It owns the protocol, the safe control file, the
+//! tool table, the scenario runner and screenshot encoding; `cl-ui` plugs the
+//! real window in on the other side of [`ControlServer::try_next`].
+//!
+//! The server only starts when the app is launched with `--control <path>`.
 #![forbid(unsafe_code)]
+// Key chords and file facts are plain bags of flags.
+#![allow(clippy::struct_excessive_bools)]
 
-/// Returns the crate name; placeholder so the skeleton has a testable item.
-#[must_use]
-pub fn crate_name() -> &'static str {
-    "cl-automation"
-}
+pub mod actions;
+pub mod control_file;
+pub mod inspect;
+pub mod server;
+pub mod tools;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_name_matches() {
-        assert_eq!(super::crate_name(), "cl-automation");
-    }
-}
+pub use actions::{ErrorCode, Request, Response, Target};
+pub use control_file::{ControlFileError, ControlInfo};
+pub use server::{ControlServer, Pending};
