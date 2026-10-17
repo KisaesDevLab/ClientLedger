@@ -10,7 +10,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use cl_automation::actions::Target;
-use cl_automation::client::{Client, ClientError, Transport};
+use cl_automation::client::{Client, ClientError, OwnerCheck, Transport};
 use cl_automation::scenario::{Scenario, run};
 use serde_json::{Value, json};
 
@@ -168,6 +168,12 @@ fn request(sub: &str, args: &[String]) -> Result<(String, Value), String> {
     }
 }
 
+/// The port must belong to the process named in the control file before the
+/// token is sent (P07 review L3). Fails closed.
+fn owner_check() -> &'static OwnerCheck {
+    &|port, pid| cl_host::verify_listener(port, pid).map_err(|e| e.to_string())
+}
+
 fn report(e: &ClientError) -> ExitCode {
     eprintln!("error: {e}");
     ExitCode::from(EXIT_FAILED)
@@ -211,7 +217,11 @@ pub fn run_ui(args: &[String]) -> ExitCode {
                 },
                 _ => return usage_error("usage: wait [--timeout <seconds>]"),
             };
-            match Client::connect_wait(&control, Duration::from_secs(secs)) {
+            match Client::connect_wait_with(
+                &control,
+                Duration::from_secs(secs),
+                Some(owner_check()),
+            ) {
                 Ok(_) => ExitCode::SUCCESS,
                 Err(e) => report(&e),
             }
@@ -222,7 +232,9 @@ pub fn run_ui(args: &[String]) -> ExitCode {
                 Ok(r) => r,
                 Err(m) => return usage_error(&m),
             };
-            match Client::connect(&control).and_then(|mut c| c.call(&method, params)) {
+            match Client::connect_with(&control, Some(owner_check()))
+                .and_then(|mut c| c.call(&method, params))
+            {
                 Ok(v) => {
                     println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
                     ExitCode::SUCCESS
@@ -260,10 +272,11 @@ fn scenario(control: &std::path::Path, args: &[String]) -> ExitCode {
         }
     };
     let out = out.unwrap_or_else(|| PathBuf::from("target/ui-check").join(&scenario.name));
-    let mut client = match Client::connect_wait(control, Duration::from_secs(60)) {
-        Ok(c) => c,
-        Err(e) => return report(&e),
-    };
+    let mut client =
+        match Client::connect_wait_with(control, Duration::from_secs(60), Some(owner_check())) {
+            Ok(c) => c,
+            Err(e) => return report(&e),
+        };
     let result = run(&mut client, &scenario, &out);
     print!("{}", result.summary());
     if result.passed() {

@@ -29,6 +29,10 @@ pub enum ClientError {
     /// The answer was not understood.
     #[error("the app sent an answer that could not be understood")]
     Protocol,
+    /// The program listening on the port is not the app that wrote the
+    /// control file, so the token was not sent.
+    #[error("the control port is not owned by the app that published it; nothing was sent")]
+    WrongListener,
 }
 
 /// Anything that can call a control method (the real client, or a fake).
@@ -39,6 +43,11 @@ pub trait Transport {
     /// [`ClientError`].
     fn call(&mut self, method: &str, params: Value) -> Result<Value, ClientError>;
 }
+
+/// Checks that process `pid` (from the control file) is the only listener on
+/// `port`. The CLI passes `cl_host::verify_listener`; `cl-automation` itself
+/// does not depend on the host crate.
+pub type OwnerCheck = dyn Fn(u16, u32) -> Result<(), String> + Send + Sync;
 
 /// A connection to a running app.
 pub struct Client {
@@ -59,7 +68,20 @@ impl Client {
     /// # Errors
     /// The file is unsafe or missing, or nothing is listening.
     pub fn connect(control: &Path) -> Result<Client, ClientError> {
+        Client::connect_with(control, None)
+    }
+
+    /// Connect, first checking with `owner` that the process named in the
+    /// control file owns the port. The token is sent only after the check
+    /// passes; a failed check (or one that cannot run) is final.
+    ///
+    /// # Errors
+    /// As [`Client::connect`], plus [`ClientError::WrongListener`].
+    pub fn connect_with(control: &Path, owner: Option<&OwnerCheck>) -> Result<Client, ClientError> {
         let info = control_file::read_checked(control)?;
+        if let Some(check) = owner {
+            check(info.port, info.pid).map_err(|_| ClientError::WrongListener)?;
+        }
         let stream = TcpStream::connect_timeout(
             &std::net::SocketAddr::from(([127, 0, 0, 1], info.port)),
             Duration::from_secs(5),
@@ -80,16 +102,33 @@ impl Client {
     /// # Errors
     /// The last connection error when the time runs out.
     pub fn connect_wait(control: &Path, timeout: Duration) -> Result<Client, ClientError> {
+        Client::connect_wait_with(control, timeout, None)
+    }
+
+    /// [`Client::connect_wait`] with an owner check on every attempt.
+    ///
+    /// # Errors
+    /// The last connection error when the time runs out.
+    pub fn connect_wait_with(
+        control: &Path,
+        timeout: Duration,
+        owner: Option<&OwnerCheck>,
+    ) -> Result<Client, ClientError> {
         let start = std::time::Instant::now();
         loop {
-            match Client::connect(control) {
+            match Client::connect_with(control, owner) {
                 Ok(mut c) => match c.call("state", Value::Null) {
                     Ok(_) => return Ok(c),
                     Err(e) if start.elapsed() >= timeout => return Err(e),
                     Err(_) => {}
                 },
                 // An unsafe file is final; do not wait it out.
-                Err(e @ ClientError::File(ControlFileError::Unsafe(_))) => return Err(e),
+                Err(
+                    e @ (ClientError::File(ControlFileError::Unsafe(_))
+                    | ClientError::WrongListener),
+                ) => {
+                    return Err(e);
+                }
                 Err(e) if start.elapsed() >= timeout => return Err(e),
                 Err(_) => {}
             }
@@ -120,5 +159,37 @@ impl Transport for Client {
                 response.error.ok_or(ClientError::Protocol)?,
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::ControlServer;
+
+    #[test]
+    fn a_failed_owner_check_sends_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.json");
+        let server = ControlServer::start(&path).unwrap();
+        let deny: &OwnerCheck = &|_, _| Err("someone else".into());
+        let err = Client::connect_with(&path, Some(deny)).unwrap_err();
+        assert!(matches!(err, ClientError::WrongListener));
+        // No request reached the app.
+        assert!(server.try_next().is_none());
+    }
+
+    #[test]
+    fn the_owner_check_receives_the_published_port_and_pid() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.json");
+        let server = ControlServer::start(&path).unwrap();
+        let port = server.addr().port();
+        let want = (port, std::process::id());
+        let allow: &OwnerCheck = &move |p, pid| {
+            assert_eq!((p, pid), want);
+            Ok(())
+        };
+        assert!(Client::connect_with(&path, Some(allow)).is_ok());
     }
 }
