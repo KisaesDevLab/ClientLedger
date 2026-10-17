@@ -150,13 +150,13 @@ c
 ",
         );
         assert_eq!(d, vec!["- a".to_string(), "+ c".to_string()]);
-        assert!(
+        assert_eq!(
             changed_lines(
                 "x
 ", "x
 "
-            )
-            .is_empty()
+            ),
+            Vec::<String>::new()
         );
     }
 
