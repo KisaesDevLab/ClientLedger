@@ -138,9 +138,16 @@ fn facts_of(link_meta: &Metadata, meta: &Metadata) -> FileFacts {
     }
 }
 
-/// The folder rule. Unix: nobody else may be able to replace the file
-/// (no group or world write unless sticky). Windows: under the local (non-roaming) app data folder.
-fn check_parent(path: &Path) -> Result<(), ControlFileError> {
+/// The folder rule, returning the file's path with the folder resolved (so
+/// later steps cannot be redirected by a symlink swapped into the folder
+/// path). Unix: the folder is owned by the current user, or by root with the
+/// sticky bit (like /tmp), and nobody else may be able to replace the file
+/// (no group or world write unless sticky). Windows: under the local
+/// (non-roaming) app data folder.
+fn check_parent(path: &Path) -> Result<std::path::PathBuf, ControlFileError> {
+    let name = path
+        .file_name()
+        .ok_or_else(|| ControlFileError::Unsafe("it has no file name".into()))?;
     let parent = match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
         _ => std::env::current_dir()?,
@@ -150,8 +157,16 @@ fn check_parent(path: &Path) -> Result<(), ControlFileError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        let mode = fs::metadata(&real)?.mode();
-        if mode & 0o022 != 0 && mode & 0o1000 == 0 {
+        let meta = fs::metadata(&real)?;
+        let mode = meta.mode();
+        let sticky = mode & 0o1000 != 0;
+        let mine = meta.uid() == rustix::process::geteuid().as_raw();
+        if !(mine || (meta.uid() == 0 && sticky)) {
+            return Err(ControlFileError::Unsafe(
+                "its folder belongs to another user".into(),
+            ));
+        }
+        if mode & 0o022 != 0 && !sticky {
             return Err(ControlFileError::Unsafe(
                 "its folder can be changed by other users".into(),
             ));
@@ -172,8 +187,7 @@ fn check_parent(path: &Path) -> Result<(), ControlFileError> {
             ));
         }
     }
-    let _ = real;
-    Ok(())
+    Ok(real.join(name))
 }
 
 /// Check an existing file without trusting it.
@@ -217,7 +231,8 @@ pub fn tokens_equal(a: &str, b: &str) -> bool {
 /// # Errors
 /// [`ControlFileError::Unsafe`] for a refused path, `Io` for disk errors.
 pub fn write_new(path: &Path, info: &ControlInfo) -> Result<(), ControlFileError> {
-    check_parent(path)?;
+    let resolved = check_parent(path)?;
+    let path = resolved.as_path();
     match fs::symlink_metadata(path) {
         Ok(_) => {
             check_existing(path)?;
@@ -249,7 +264,8 @@ pub fn write_new(path: &Path, info: &ControlInfo) -> Result<(), ControlFileError
 /// [`ControlFileError::Unsafe`] when a rule is broken, `Malformed` for bad
 /// content.
 pub fn read_checked(path: &Path) -> Result<ControlInfo, ControlFileError> {
-    check_parent(path)?;
+    let resolved = check_parent(path)?;
+    let path = resolved.as_path();
     check_existing(path)?;
     let mut file = File::open(path)?;
     // The opened file must be the one that was checked.
