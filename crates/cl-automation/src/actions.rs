@@ -25,7 +25,8 @@ impl std::fmt::Debug for Request {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Request")
             .field("method", &self.method)
-            .field("params", &self.params)
+            // Parameters can hold typed text (even a secret): never printed.
+            .field("params", &"<hidden>")
             .finish_non_exhaustive()
     }
 }
@@ -327,10 +328,11 @@ mod tests {
         let r = Request {
             token: "secret-token".into(),
             method: "state".into(),
-            params: Value::Null,
+            params: serde_json::json!({"text": "typed-secret"}),
             id: None,
         };
-        assert!(!format!("{r:?}").contains("secret-token"));
+        let shown = format!("{r:?}");
+        assert!(!shown.contains("secret-token") && !shown.contains("typed-secret"));
     }
 
     #[test]

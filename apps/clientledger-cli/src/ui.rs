@@ -5,6 +5,7 @@
 //! scripts; scenario runs print a plain summary. Nothing here prints the
 //! control token.
 
+use std::io::Read as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -28,6 +29,7 @@ methods:
   click <target>                 click an element
   focus <target>                 move keyboard focus to an element
   type <text> [target]           type text (focus the target first, if given)
+  type --stdin [target]          read the text from standard input instead
   key <chord>                    press a key, for example Ctrl+K or Escape
   command <id>                   run a command by id, for example help.shortcuts
   screenshot <file.png>          save the window as a PNG
@@ -38,6 +40,10 @@ methods:
   call <method> [json]           call any method from `clientledger-cli tools`
   scenario <file.yaml> [--out <folder>]   run a scenario in light and dark
   wait [--timeout <seconds>]     wait until the app answers
+
+Do not put secrets (passwords, keys) in command-line arguments: other programs
+can read them. Scenarios and scripts must not type real secrets; use --stdin
+if a test must type something private.
 
 target flags: --id <id> --role <role> --label <exact text>
               --contains <text> --index <n>
@@ -78,6 +84,18 @@ fn take_target(args: &[String]) -> Result<(Target, Vec<String>), String> {
     Ok((target, rest))
 }
 
+/// Text for `type --stdin`: at most 64 KiB, one trailing newline removed.
+fn read_text(reader: &mut dyn std::io::Read) -> Result<String, String> {
+    let mut text = String::new();
+    std::io::Read::take(reader, 64 * 1024)
+        .read_to_string(&mut text)
+        .map_err(|_| "standard input could not be read as text".to_string())?;
+    if let Some(t) = text.strip_suffix('\n') {
+        text = t.strip_suffix('\r').unwrap_or(t).to_string();
+    }
+    Ok(text)
+}
+
 /// Build the method and parameters for a subcommand.
 fn request(sub: &str, args: &[String]) -> Result<(String, Value), String> {
     let (target, rest) = take_target(args)?;
@@ -108,6 +126,15 @@ fn request(sub: &str, args: &[String]) -> Result<(String, Value), String> {
                 return Err(format!("`{sub}` needs a target"));
             }
             Ok((sub.to_string(), json!({"target": target})))
+        }
+        "type" if rest == ["--stdin"] => {
+            let text = read_text(&mut std::io::stdin().lock())?;
+            let p = if target.is_empty() {
+                json!({"text": text})
+            } else {
+                json!({"text": text, "target": target})
+            };
+            Ok(("type".into(), p))
         }
         "type" => {
             need(1, "the text to type")?;
@@ -328,6 +355,24 @@ mod tests {
         assert!(request("explode", &s(&[])).is_err());
         assert!(request("click", &s(&["--index", "x", "--label", "a"])).is_err());
         assert!(request("call", &s(&["inspect", "{bad"])).is_err());
+    }
+
+    #[test]
+    fn stdin_text_loses_one_trailing_newline() {
+        let crlf = "abc".to_string()
+            + "
+";
+        let two = "a".to_string()
+            + "
+
+";
+        assert_eq!(read_text(&mut crlf.as_bytes()).unwrap(), "abc");
+        assert_eq!(
+            read_text(&mut two.as_bytes()).unwrap(),
+            "a
+"
+        );
+        assert_eq!(read_text(&mut "".as_bytes()).unwrap(), "");
     }
 
     #[test]

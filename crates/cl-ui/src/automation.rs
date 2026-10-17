@@ -340,7 +340,16 @@ impl Bridge {
             ($ty:ty) => {
                 match serde_json::from_value::<$ty>(params) {
                     Ok(p) => p,
-                    Err(e) => return fail(ErrorCode::BadRequest, format!("bad parameters: {e}")),
+                    // The parser's message can quote the value (typed text); say
+                    // only which method and point at the tool table.
+                    Err(_) => {
+                        return fail(
+                            ErrorCode::BadRequest,
+                            format!(
+                                "the parameters for `{method}` are not valid (see the tool table)"
+                            ),
+                        );
+                    }
                 }
             };
         }
