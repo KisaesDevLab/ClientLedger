@@ -1,6 +1,7 @@
 //! Build helper for `ClientLedger`: `cargo xtask <command>`.
 #![forbid(unsafe_code)]
 
+mod api_spec;
 mod ci;
 mod engine;
 mod engine_test;
@@ -24,6 +25,8 @@ usage: cargo xtask <command>
                      build the engine single executable into target/engine/<target>
   engine-test [-- <vitest args>]
                      run the engine's api tests against a throwaway bundled PostgreSQL (port 5434)
+  api-spec [--update | --check]
+                     engine OpenAPI / Zod-source fixtures for cl-api (check skips without engine/)
   pg-fetch [--force] download the pinned PostgreSQL binaries into target/pg/<target>
   run | ui-check | keymap-doc | package   (not implemented yet)";
 
@@ -81,6 +84,7 @@ fn main() -> Result<()> {
         Some("nofloat") => run_nofloat(),
         Some("engine") => engine::engine(&args[1..]),
         Some("engine-test") => engine_test::engine_test(&args[1..]),
+        Some("api-spec") => api_spec::api_spec(&args[1..]),
         Some("pg-fetch") => pg_fetch::pg_fetch(&args[1..]),
         Some(cmd) => {
             if let Some((_, phase)) = STUBS.iter().find(|(name, _)| *name == cmd) {

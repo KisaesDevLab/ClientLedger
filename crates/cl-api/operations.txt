@@ -7,9 +7,18 @@
 # idempotency-v1, U-18); never = auth and company-creation routes.
 #
 # Read by the cl-api tests (must match src/resources/operations.rs) and by
-# `cargo xtask api-spec` (step 25). Engine Zod sources behind these shapes:
-# engine/packages/shared/src/schemas/{transactions,accounts,contacts,items,tags,company,auth}.ts
-# engine/packages/api/src/routes/tags.routes.ts
+# `cargo xtask api-spec`. Engine Zod sources behind these shapes, hashed into
+# tests/fixtures/engine_schemas.sha256 (transactions.routes.ts parses the
+# per-txnType journal bodies inline, plan B6):
+#! schema-source engine/packages/shared/src/schemas/transactions.ts
+#! schema-source engine/packages/shared/src/schemas/accounts.ts
+#! schema-source engine/packages/shared/src/schemas/contacts.ts
+#! schema-source engine/packages/shared/src/schemas/items.ts
+#! schema-source engine/packages/shared/src/schemas/tags.ts
+#! schema-source engine/packages/shared/src/schemas/company.ts
+#! schema-source engine/packages/shared/src/schemas/auth.ts
+#! schema-source engine/packages/api/src/routes/tags.routes.ts
+#! schema-source engine/packages/api/src/routes/transactions.routes.ts
 GET     /health                                 idempotent
 GET     /api/v1/desktop/info                    idempotent
 GET     /openapi.json                           idempotent
