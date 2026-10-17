@@ -65,7 +65,6 @@ jobs:
         run: cargo xtask pg-fetch
       - run: cargo xtask ci
 
-  # Gitleaks is MIT licensed; run the binary directly (no license key needed).
   # Control-channel scenarios (P07): the demo app runs in a real window and the
   # shell scenario drives it in light and dark. Linux runs on every push under
   # Xvfb with a software Vulkan driver; Windows and macOS run on pull requests.
@@ -114,6 +113,7 @@ jobs:
           path: target/ui-check
           if-no-files-found: ignore
 
+  # Gitleaks is MIT licensed; run the binary directly (no license key needed).
   secret-scan:
     name: secret scan
     runs-on: ubuntu-22.04
