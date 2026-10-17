@@ -56,6 +56,8 @@ pub struct VerifiedEndpoint {
     verify: Box<Verifier>,
     ttl: Duration,
     checked: Mutex<Option<Checked>>,
+    /// Generation for which an unreadable socket table was already reported.
+    warned: Mutex<Option<u64>>,
 }
 
 impl VerifiedEndpoint {
@@ -77,6 +79,7 @@ impl VerifiedEndpoint {
             verify,
             ttl,
             checked: Mutex::new(None),
+            warned: Mutex::new(None),
         }
     }
 
@@ -88,6 +91,22 @@ impl VerifiedEndpoint {
                 && c.generation == generation
                 && c.at.elapsed() < self.ttl
         })
+    }
+
+    /// Say once per engine generation that the socket list could not be read,
+    /// so a silently skipped check is visible in the log. Returns whether it
+    /// warned this time.
+    fn warn_unreadable(&self, generation: u64) -> bool {
+        let mut w = self.warned.lock().unwrap_or_else(PoisonError::into_inner);
+        if *w == Some(generation) {
+            return false;
+        }
+        *w = Some(generation);
+        tracing::warn!(
+            generation,
+            "could not read the socket list; the engine port owner was not verified"
+        );
+        true
     }
 
     fn remember(&self, c: Option<Checked>) {
@@ -125,12 +144,21 @@ impl EndpointSource for VerifiedEndpoint {
                 // A socket listing that cannot be read does not block, as in
                 // the supervisor (Q-P04m): the launch token and the health
                 // check still bind the engine.
-                Ok(()) | Err(_) => self.remember(Some(Checked {
+                Ok(()) => self.remember(Some(Checked {
                     port: ep.port,
                     pid,
                     generation: ep.generation,
                     at: Instant::now(),
                 })),
+                Err(_) => {
+                    self.warn_unreadable(ep.generation);
+                    self.remember(Some(Checked {
+                        port: ep.port,
+                        pid,
+                        generation: ep.generation,
+                        at: Instant::now(),
+                    }));
+                }
             }
         }
         EndpointState::Ready(EngineEndpoint {
@@ -373,6 +401,22 @@ mod tests {
             Err(HealthError::Unreachable("no /proc".into()))
         });
         assert!(matches!(ep.current(), EndpointState::Ready(_)));
+    }
+
+    #[test]
+    fn an_unreadable_socket_table_is_reported_once_per_generation() {
+        let (f, ep, calls) = adapter(running(4100, 77, 3), Duration::ZERO, || {
+            Err(HealthError::Unreachable("no /proc".into()))
+        });
+        for _ in 0..4 {
+            let _ = ep.current();
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 4, "still checked each time");
+        assert!(!ep.warn_unreadable(3), "generation 3 was already reported");
+        assert!(ep.warn_unreadable(4), "a new generation is reported again");
+        f.set(running(4100, 77, 5));
+        let _ = ep.current();
+        assert!(!ep.warn_unreadable(5));
     }
 
     #[test]
