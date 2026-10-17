@@ -55,7 +55,7 @@ pub(crate) fn decode<T: DeserializeOwned>(
     serde_json::from_slice(&reply.body).map_err(|_| ApiError::Decode { what })
 }
 
-fn json_body<T: Serialize>(value: &T) -> Result<Vec<u8>, ApiError> {
+pub(crate) fn json_body<T: Serialize>(value: &T) -> Result<Vec<u8>, ApiError> {
     serde_json::to_vec(value).map_err(|_| ApiError::Decode {
         what: "request body",
     })

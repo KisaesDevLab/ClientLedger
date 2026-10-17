@@ -33,7 +33,9 @@ pub use errors::{
     UserText, ValidationError, ValidationIssue,
 };
 pub use idempotency::IdempotencyKey;
+pub use resources::company::{CompanyProfile, CompanyProfileUpdate, CompanySettings, EntityType};
 pub use resources::operations::{OPERATIONS, Operation, RetryClass};
+pub use resources::system::{SmtpTest, SmtpTestResult};
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{
     Client, CompanySummary, CreatedCompany, LoginOutcome, NewCompany, OpenCompany, Scope, Session,

@@ -163,10 +163,6 @@ where
 }
 
 /// `GET` one record with its version.
-#[allow(
-    dead_code,
-    reason = "used by the resource modules (P05 plan §4 steps 18-20)"
-)]
 pub(crate) async fn get_versioned<T>(
     session: &Session,
     op: &Operation,
@@ -183,10 +179,6 @@ where
 }
 
 /// One guarded update (P05 plan §2.5).
-#[allow(
-    dead_code,
-    reason = "used by the resource modules (P05 plan §4 steps 18-20)"
-)]
 pub(crate) struct GuardedUpdate<'a> {
     pub get: &'a Operation,
     pub put: &'a Operation,
@@ -203,10 +195,6 @@ pub(crate) struct GuardedUpdate<'a> {
 /// - `Fingerprint(f)`: re-reads the record; a different fingerprint is
 ///   `Conflict { Stale, Fingerprint(new) }` and nothing is sent; otherwise
 ///   the update goes out without `If-Match`.
-#[allow(
-    dead_code,
-    reason = "used by the resource modules (P05 plan §4 steps 18-20)"
-)]
 pub(crate) async fn update_guarded<T>(
     session: &Session,
     expected: &RecordVersion,

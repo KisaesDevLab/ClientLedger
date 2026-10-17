@@ -180,6 +180,35 @@ pub(crate) const AUTH_ME: Operation = session_read("/api/v1/auth/me");
 /// Read without `X-Company-Id`: used while opening a company to learn its id.
 pub(crate) const COMPANY_GET: Operation = session_read("/api/v1/company");
 
+pub(crate) const COMPANY_PUT: Operation = write(Method::Put, "/api/v1/company");
+pub(crate) const COMPANY_SETTINGS: Operation = read("/api/v1/company/settings");
+pub(crate) const ACCOUNTS_LIST: Operation = read("/api/v1/accounts");
+pub(crate) const ACCOUNTS_CREATE: Operation = write(Method::Post, "/api/v1/accounts");
+pub(crate) const ACCOUNT_GET: Operation = read("/api/v1/accounts/{id}");
+pub(crate) const ACCOUNT_PUT: Operation = write(Method::Put, "/api/v1/accounts/{id}");
+pub(crate) const ACCOUNT_DELETE: Operation = write(Method::Delete, "/api/v1/accounts/{id}");
+pub(crate) const CONTACTS_LIST: Operation = read("/api/v1/contacts");
+pub(crate) const CONTACTS_CREATE: Operation = write(Method::Post, "/api/v1/contacts");
+pub(crate) const CONTACT_GET: Operation = read("/api/v1/contacts/{id}");
+pub(crate) const CONTACT_PUT: Operation = write(Method::Put, "/api/v1/contacts/{id}");
+pub(crate) const CONTACT_DELETE: Operation = write(Method::Delete, "/api/v1/contacts/{id}");
+pub(crate) const ITEMS_LIST: Operation = read("/api/v1/items");
+pub(crate) const ITEMS_CREATE: Operation = write(Method::Post, "/api/v1/items");
+pub(crate) const ITEM_GET: Operation = read("/api/v1/items/{id}");
+pub(crate) const ITEM_PUT: Operation = write(Method::Put, "/api/v1/items/{id}");
+pub(crate) const ITEM_DELETE: Operation = write(Method::Delete, "/api/v1/items/{id}");
+pub(crate) const TAGS_LIST: Operation = read("/api/v1/tags");
+pub(crate) const TAGS_CREATE: Operation = write(Method::Post, "/api/v1/tags");
+pub(crate) const TAG_GET: Operation = read("/api/v1/tags/{id}");
+pub(crate) const TAG_PUT: Operation = write(Method::Put, "/api/v1/tags/{id}");
+pub(crate) const TAG_DELETE: Operation = write(Method::Delete, "/api/v1/tags/{id}");
+pub(crate) const TXNS_LIST: Operation = read("/api/v1/transactions");
+pub(crate) const TXNS_CREATE: Operation = write(Method::Post, "/api/v1/transactions");
+pub(crate) const TXN_GET: Operation = read("/api/v1/transactions/{id}");
+pub(crate) const TXN_PUT: Operation = write(Method::Put, "/api/v1/transactions/{id}");
+pub(crate) const TXN_VOID: Operation = write(Method::Post, "/api/v1/transactions/{id}/void");
+pub(crate) const LEDGER_VERSION: Operation = read("/api/v1/ledger-version");
+
 /// Every covered operation, in `operations.txt` order.
 pub const OPERATIONS: [Operation; 40] = [
     HEALTH,
@@ -194,34 +223,34 @@ pub const OPERATIONS: [Operation; 40] = [
     CREATE_TENANT,
     AUTH_ME,
     COMPANY_GET,
-    write(Method::Put, "/api/v1/company"),
-    read("/api/v1/company/settings"),
-    read("/api/v1/accounts"),
-    write(Method::Post, "/api/v1/accounts"),
-    read("/api/v1/accounts/{id}"),
-    write(Method::Put, "/api/v1/accounts/{id}"),
-    write(Method::Delete, "/api/v1/accounts/{id}"),
-    read("/api/v1/contacts"),
-    write(Method::Post, "/api/v1/contacts"),
-    read("/api/v1/contacts/{id}"),
-    write(Method::Put, "/api/v1/contacts/{id}"),
-    write(Method::Delete, "/api/v1/contacts/{id}"),
-    read("/api/v1/items"),
-    write(Method::Post, "/api/v1/items"),
-    read("/api/v1/items/{id}"),
-    write(Method::Put, "/api/v1/items/{id}"),
-    write(Method::Delete, "/api/v1/items/{id}"),
-    read("/api/v1/tags"),
-    write(Method::Post, "/api/v1/tags"),
-    read("/api/v1/tags/{id}"),
-    write(Method::Put, "/api/v1/tags/{id}"),
-    write(Method::Delete, "/api/v1/tags/{id}"),
-    read("/api/v1/transactions"),
-    write(Method::Post, "/api/v1/transactions"),
-    read("/api/v1/transactions/{id}"),
-    write(Method::Put, "/api/v1/transactions/{id}"),
-    write(Method::Post, "/api/v1/transactions/{id}/void"),
-    read("/api/v1/ledger-version"),
+    COMPANY_PUT,
+    COMPANY_SETTINGS,
+    ACCOUNTS_LIST,
+    ACCOUNTS_CREATE,
+    ACCOUNT_GET,
+    ACCOUNT_PUT,
+    ACCOUNT_DELETE,
+    CONTACTS_LIST,
+    CONTACTS_CREATE,
+    CONTACT_GET,
+    CONTACT_PUT,
+    CONTACT_DELETE,
+    ITEMS_LIST,
+    ITEMS_CREATE,
+    ITEM_GET,
+    ITEM_PUT,
+    ITEM_DELETE,
+    TAGS_LIST,
+    TAGS_CREATE,
+    TAG_GET,
+    TAG_PUT,
+    TAG_DELETE,
+    TXNS_LIST,
+    TXNS_CREATE,
+    TXN_GET,
+    TXN_PUT,
+    TXN_VOID,
+    LEDGER_VERSION,
 ];
 
 /// Looks up a covered operation.
