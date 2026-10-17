@@ -153,6 +153,7 @@ pub struct Shell {
     last_saved_layout: Option<SessionLayout>,
     applied_zoom: Option<u16>,
     applied_theme: Option<theme::ThemeChoice>,
+    run_only: bool,
 }
 
 impl Shell {
@@ -205,6 +206,7 @@ impl Shell {
             last_saved_layout: None,
             applied_zoom: None,
             applied_theme: None,
+            run_only: false,
         };
         if options.demo {
             shell.load_demo();
@@ -212,6 +214,13 @@ impl Shell {
             shell.restore_layout_or_home();
         }
         shell
+    }
+
+    /// Keep theme and zoom changes for this run only: nothing is written to
+    /// the preference file. Set while the control channel is on, so a script
+    /// cannot change what the owner sees next time (P07 review L7).
+    pub fn set_run_only(&mut self, on: bool) {
+        self.run_only = on;
     }
 
     /// Install fonts and both styles. Call once with the egui context.
@@ -531,7 +540,7 @@ impl Shell {
         if self.applied_zoom != Some(self.prefs.zoom_percent) {
             ctx.set_zoom_factor(self.prefs.zoom_factor());
             self.applied_zoom = Some(self.prefs.zoom_percent);
-            if let Some(store) = &self.store
+            if let Some(store) = self.store.as_ref().filter(|_| !self.run_only)
                 && let Err(e) = store.save_prefs(&self.prefs)
             {
                 tracing::warn!(error = %e, "could not save preferences");
@@ -566,6 +575,7 @@ impl Shell {
         self.begin_frame(&ctx);
         if before_theme.is_some()
             && before_theme != self.applied_theme
+            && !self.run_only
             && let Some(store) = &self.store
         {
             let _ = store.save_prefs(&self.prefs);

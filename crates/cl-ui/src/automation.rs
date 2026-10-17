@@ -257,6 +257,8 @@ impl Bridge {
     pub fn poll(&mut self, ctx: &Context, shell: &mut Shell) {
         // Some platforms enable the tree lazily; keep it on.
         ctx.enable_accesskit();
+        // A controlled run never rewrites the owner's saved preferences.
+        shell.set_run_only(true);
         loop {
             if let Some(job) = self.job.take() {
                 match self.finish(ctx, shell, job) {
@@ -723,6 +725,10 @@ mod bridge_tests {
 
     impl Rig {
         pub fn new() -> Rig {
+            Rig::with_options(ShellOptions::default())
+        }
+
+        pub fn with_options(options: ShellOptions) -> Rig {
             let dir = tempfile::tempdir().unwrap();
             let control = dir.path().join("control.json");
             let server = ControlServer::start(&control).unwrap();
@@ -732,7 +738,7 @@ mod bridge_tests {
             let shell = Shell::new(ShellOptions {
                 demo: true,
                 theme: Some(ThemeChoice::Light),
-                ..ShellOptions::default()
+                ..options
             });
             let mut rig = Rig {
                 ctx,
@@ -857,6 +863,27 @@ mod bridge_tests {
         assert_eq!(v["shortcuts_open"], true);
         assert_eq!(v["theme"], "dark");
         assert_eq!(v["zoom_percent"], 200);
+    }
+
+    #[test]
+    fn theme_and_zoom_from_a_script_are_not_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::prefs::UiStore::new(dir.path().to_path_buf());
+        let before = store.load_prefs();
+        let mut rig = Rig::with_options(ShellOptions {
+            store: Some(crate::prefs::UiStore::new(dir.path().to_path_buf())),
+            ..ShellOptions::default()
+        });
+        let v = rig.run(|c| {
+            call(c, "set_theme", json!({"theme": "dark"})).unwrap();
+            call(c, "set_zoom", json!({"percent": 150})).unwrap();
+            call(c, "state", json!({})).unwrap()
+        });
+        assert_eq!(v["theme"], "dark");
+        assert_eq!(v["zoom_percent"], 150);
+        let after = crate::prefs::UiStore::new(dir.path().to_path_buf()).load_prefs();
+        assert_eq!(after.theme, before.theme);
+        assert_eq!(after.zoom_percent, before.zoom_percent);
     }
 
     #[test]
