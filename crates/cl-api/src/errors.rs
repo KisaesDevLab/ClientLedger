@@ -1105,7 +1105,7 @@ mod tests {
         ];
         for e in all {
             assert!(e.owner_message().key.starts_with("error.api."), "{e:?}");
-            assert!(!e.scrubbed_detail().is_empty());
+            assert_ne!(e.scrubbed_detail(), "");
         }
     }
 
