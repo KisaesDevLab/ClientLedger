@@ -12,6 +12,7 @@ mod meta;
 mod nofloat;
 mod pg_fetch;
 mod run;
+mod ui_check;
 
 use anyhow::{Result, bail};
 
@@ -34,10 +35,14 @@ usage: cargo xtask <command>
                      generate docs/KEYBOARD.md and the shortcut cheat sheet from the cl-model keymap
   run [--no-prepare] [-- <app args>]
                      build the engine and fetch PostgreSQL if needed, then start the desktop app
-  ui-check | package   (not implemented yet)";
+  ui-check <screen> [--compare] [--no-build]
+                     launch the app with a temporary control file, run the screen's scenario
+                     (crates/cl-automation/scenarios/<screen>.yaml) in light and dark, save PNGs to
+                     target/ui-check/<screen>/; --compare adds compare.html beside the mockup
+  package            (not implemented yet)";
 
 /// Commands that exist in the CLAUDE.md command list but land in later phases.
-const STUBS: [(&str, &str); 2] = [("ui-check", "P07"), ("package", "P35")];
+const STUBS: [(&str, &str); 1] = [("package", "P35")];
 
 fn report(gate: &str, ok_message: &str, violations: &[String]) -> Result<()> {
     if violations.is_empty() {
@@ -115,6 +120,7 @@ fn main() -> Result<()> {
         Some("api-spec") => api_spec::api_spec(&args[1..]),
         Some("pg-fetch") => pg_fetch::pg_fetch(&args[1..]),
         Some("run") => run::run(&args[1..]),
+        Some("ui-check") => ui_check::ui_check(&args[1..]),
         Some("keymap-doc") => keymap_doc::keymap_doc(&args[1..]),
         Some(cmd) => {
             if let Some((_, phase)) = STUBS.iter().find(|(name, _)| *name == cmd) {

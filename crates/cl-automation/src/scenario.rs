@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 
 use crate::actions::Target;
 use crate::client::{ClientError, Transport};
-use crate::inspect::Snapshot;
+use crate::inspect::{Bounds, Snapshot};
 
 /// How long an assertion keeps retrying before it fails.
 const ASSERT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -130,6 +130,10 @@ pub enum Step {
         /// Points of slack (default 1).
         #[serde(default)]
         tolerance: Option<f32>,
+        /// Areas that scroll by design (the rail, the tab strip): elements
+        /// centred inside are not counted.
+        #[serde(default)]
+        ignore: Vec<Bounds>,
     },
     /// Save a screenshot named `<name>-<theme>.png`.
     Screenshot(String),
@@ -454,10 +458,10 @@ fn run_step(
                 std::thread::sleep(ASSERT_POLL);
             }
         }
-        Step::AssertNoClipping { tolerance } => {
+        Step::AssertNoClipping { tolerance, ignore } => {
             let tol = tolerance.unwrap_or(1.0);
             eventually(t, |s| {
-                let clipped = s.clipped(tol);
+                let clipped = s.clipped_excluding(tol, ignore);
                 if clipped.is_empty() {
                     Ok(())
                 } else {

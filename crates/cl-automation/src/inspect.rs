@@ -214,6 +214,13 @@ impl Snapshot {
     /// wholly outside (scrolled away) are not counted.
     #[must_use]
     pub fn clipped(&self, tolerance: f32) -> Vec<&Node> {
+        self.clipped_excluding(tolerance, &[])
+    }
+
+    /// Like [`Snapshot::clipped`], skipping elements whose centre lies inside
+    /// one of `ignore`: areas that scroll by design.
+    #[must_use]
+    pub fn clipped_excluding(&self, tolerance: f32, ignore: &[Bounds]) -> Vec<&Node> {
         let (w, h) = (self.window.width, self.window.height);
         let mut out = Vec::new();
         let mut stack = vec![&self.tree];
@@ -229,7 +236,11 @@ impl Snapshot {
                     || b.y + b.height > h + tolerance
                     || b.x < -tolerance
                     || b.y < -tolerance;
-                if starts_inside && over {
+                let (cx, cy) = b.center();
+                let skipped = ignore
+                    .iter()
+                    .any(|r| cx >= r.x && cx <= r.x + r.width && cy >= r.y && cy <= r.y + r.height);
+                if starts_inside && over && !skipped {
                     out.push(n);
                 }
             }
@@ -392,5 +403,12 @@ mod tests {
         let clipped = s.clipped(1.0);
         assert_eq!(clipped.len(), 1);
         assert_eq!(clipped[0].id, "9");
+        let region = Bounds {
+            x: 770.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        assert_eq!(s.clipped_excluding(1.0, &[region]).len(), 0);
     }
 }
