@@ -112,6 +112,7 @@ pub struct Observer {
     sent: Mutex<BTreeMap<String, u64>>,
     drop_next: Mutex<Option<(Method, String)>>,
     dropped: Mutex<u64>,
+    on_drop: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 fn key(method: Method, route: &str) -> String {
@@ -144,6 +145,19 @@ impl Observer {
             .drop_next
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some((method, route.to_string()));
+    }
+
+    /// Like [`Observer::drop_next_reply`], and run `then` at that moment
+    /// (for example: kill the engine after it committed, before the client
+    /// saw the answer).
+    pub fn drop_next_reply_then(
+        &self,
+        method: Method,
+        route: &str,
+        then: impl FnOnce() + Send + 'static,
+    ) {
+        *self.on_drop.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(then));
+        self.drop_next_reply(method, route);
     }
 
     /// Replies lost so far.
@@ -189,7 +203,16 @@ impl RequestObserver for Observer {
             .is_some_and(|(m, r)| *m == method && r == route && (200..300).contains(&status));
         if hit {
             *slot = None;
+            drop(slot);
             *self.dropped.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+            let then = self
+                .on_drop
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            if let Some(f) = then {
+                f();
+            }
             return ObserverAction::DropReply;
         }
         ObserverAction::Pass
@@ -592,7 +615,8 @@ fn pid_alive(pid: u32) -> bool {
     }
 }
 
-fn kill_pid(pid: u32) {
+/// Kill one of our own child processes hard.
+pub fn kill_pid(pid: u32) {
     let status = if cfg!(windows) {
         std::process::Command::new("taskkill")
             .args(["/F", "/PID", &pid.to_string()])
