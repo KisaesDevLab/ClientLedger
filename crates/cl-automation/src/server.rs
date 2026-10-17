@@ -25,6 +25,13 @@ use crate::tools::is_method;
 const MAX_LINE: u64 = 64 * 1024;
 /// How long a connection may sit silent.
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
+/// Total time a new connection has to deliver its first complete line (which
+/// must carry the token). A client that drips bytes does not get longer.
+const FIRST_LINE_DEADLINE: Duration = if cfg!(test) {
+    Duration::from_millis(400)
+} else {
+    Duration::from_secs(5)
+};
 /// How long the UI has to answer one request.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 /// Simultaneous connections.
@@ -178,13 +185,40 @@ fn accept_loop(listener: &TcpListener, shared: &Arc<Shared>, token: &str, tx: &S
     }
 }
 
+/// Reads from the socket, enforcing one overall deadline while it is set.
+struct DeadlineReader<'a> {
+    stream: &'a TcpStream,
+    deadline: Option<std::time::Instant>,
+}
+
+impl std::io::Read for DeadlineReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let timeout = match self.deadline {
+            Some(d) => {
+                let left = d.saturating_duration_since(std::time::Instant::now());
+                if left.is_zero() {
+                    return Err(std::io::ErrorKind::TimedOut.into());
+                }
+                left
+            }
+            None => READ_TIMEOUT,
+        };
+        self.stream.set_read_timeout(Some(timeout))?;
+        std::io::Read::read(&mut self.stream, buf)
+    }
+}
+
 fn serve(stream: &TcpStream, shared: &Arc<Shared>, token: &str, tx: &Sender<Pending>) {
     let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
     let Ok(mut writer) = stream.try_clone() else {
         return;
     };
-    let mut reader = BufReader::new(std::io::Read::take(stream, MAX_LINE));
+    let first = DeadlineReader {
+        stream,
+        deadline: Some(std::time::Instant::now() + FIRST_LINE_DEADLINE),
+    };
+    let mut reader = BufReader::new(std::io::Read::take(first, MAX_LINE));
     let mut line = String::new();
     loop {
         line.clear();
@@ -204,6 +238,9 @@ fn serve(stream: &TcpStream, shared: &Arc<Shared>, token: &str, tx: &Sender<Pend
         if write_line(&mut writer, &response).is_err() || close {
             break;
         }
+        // The first line carried a valid token: from now on only the idle
+        // timeout applies.
+        reader.get_mut().get_mut().deadline = None;
     }
     let _ = stream.shutdown(Shutdown::Both);
 }
@@ -442,5 +479,28 @@ mod tests {
             ControlServer::start(&path),
             Err(ControlFileError::Unsafe(_))
         ));
+    }
+
+    #[test]
+    fn a_connection_that_drips_bytes_is_cut_off_at_the_first_line_deadline() {
+        let (_d, _server, info) = start();
+        let mut s = connect(&info);
+        let began = std::time::Instant::now();
+        let mut closed = false;
+        while began.elapsed() < Duration::from_secs(3) {
+            if s.write_all(b" ").is_err() {
+                closed = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+            s.set_read_timeout(Some(Duration::from_millis(1))).unwrap();
+            let mut b = [0u8; 1];
+            if matches!(s.read(&mut b), Ok(0)) {
+                closed = true;
+                break;
+            }
+        }
+        assert!(closed, "the server must close a slow first line");
+        assert!(began.elapsed() < Duration::from_secs(2));
     }
 }
