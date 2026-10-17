@@ -20,6 +20,15 @@ use cl_ui::engine_link::{HostLink, StaticProbe};
 use cl_ui::prefs::UiStore;
 use cl_ui::shell::{HostView, ShellOptions};
 
+/// The control channel exists only when `--control <path>` was given: no
+/// flag, no listener (P07). A refused control file stops the start-up.
+fn start_control(path: Option<&std::path::Path>) -> Result<Option<cl_automation::ControlServer>> {
+    path.map(|p| {
+        cl_automation::ControlServer::start(p).context("the control channel could not start")
+    })
+    .transpose()
+}
+
 fn main() -> Result<()> {
     let args = match args::parse(std::env::args().skip(1)) {
         Ok(a) => a,
@@ -82,6 +91,28 @@ fn main() -> Result<()> {
         }
     }
     options.shell = shell;
+    options.control = start_control(args.control.as_deref())?;
 
     run(options).map_err(|e| anyhow::anyhow!("the window could not start: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::start_control;
+
+    #[test]
+    fn no_flag_means_no_server_and_no_file() {
+        assert!(start_control(None).unwrap().is_none());
+    }
+
+    #[test]
+    fn flag_starts_a_loopback_server_and_stop_removes_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.json");
+        let server = start_control(Some(&path)).unwrap().unwrap();
+        assert!(server.addr().ip().is_loopback());
+        assert!(path.exists());
+        drop(server);
+        assert!(!path.exists());
+    }
 }

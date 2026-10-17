@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use cl_api::endpoint::{EndpointSource, EndpointState, EngineEndpoint};
+use cl_api::endpoint::{EndpointSource, EndpointState, EngineEndpoint, Purpose};
 use cl_core::Secret;
 use cl_host::{HealthError, HostConfig, HostSnapshot, HostState, InstanceGuard, Supervisor};
 
@@ -117,6 +117,18 @@ impl VerifiedEndpoint {
 
 impl EndpointSource for VerifiedEndpoint {
     fn current(&self) -> EndpointState {
+        self.resolve(false)
+    }
+
+    /// Credentials (login, code, refresh) never use the remembered check.
+    fn current_for(&self, purpose: Purpose) -> EndpointState {
+        self.resolve(purpose == Purpose::Credentials)
+    }
+}
+
+impl VerifiedEndpoint {
+    /// `fresh` skips the remembered check and asks the operating system again.
+    fn resolve(&self, fresh: bool) -> EndpointState {
         let snap = self.source.snapshot();
         match &snap.status.state {
             HostState::Starting => return EndpointState::Starting,
@@ -132,7 +144,7 @@ impl EndpointSource for VerifiedEndpoint {
             self.remember(None);
             return EndpointState::Restarting;
         };
-        if !self.already_checked(ep.port, pid, ep.generation) {
+        if fresh || !self.already_checked(ep.port, pid, ep.generation) {
             match (self.verify)(ep.port, pid) {
                 Err(HealthError::NotOurProcess) => {
                     tracing::error!(
@@ -366,6 +378,36 @@ mod tests {
             assert!(matches!(ep.current(), EndpointState::Ready(_)));
         }
         assert_eq!(calls.load(Ordering::SeqCst), 1, "one check for a burst");
+    }
+
+    #[test]
+    fn credentials_always_verify_the_listener_even_inside_the_ttl() {
+        let (_f, ep, calls) = adapter(running(4100, 77, 3), Duration::from_mins(1), || Ok(()));
+        let _ = ep.current(); // remembered
+        let _ = ep.current_for(Purpose::Ordinary);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        for _ in 0..3 {
+            assert!(matches!(
+                ep.current_for(Purpose::Credentials),
+                EndpointState::Ready(_)
+            ));
+        }
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            4,
+            "each credential use re-checks"
+        );
+    }
+
+    #[test]
+    fn a_foreign_listener_never_gets_credentials() {
+        let (_f, ep, _c) = adapter(running(4100, 77, 3), Duration::from_mins(1), || {
+            Err(HealthError::NotOurProcess)
+        });
+        assert!(matches!(
+            ep.current_for(Purpose::Credentials),
+            EndpointState::Down { permanent: true }
+        ));
     }
 
     #[test]

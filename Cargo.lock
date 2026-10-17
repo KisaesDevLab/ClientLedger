@@ -801,6 +801,16 @@ dependencies = [
 [[package]]
 name = "cl-automation"
 version = "0.0.0"
+dependencies = [
+ "getrandom 0.4.3",
+ "png",
+ "rustix 1.1.5",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "cl-company"
@@ -885,12 +895,14 @@ version = "0.0.0"
 dependencies = [
  "chrono",
  "cl-api",
+ "cl-automation",
  "cl-core",
  "cl-host",
  "cl-model",
  "eframe",
  "serde",
  "serde_json",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]
@@ -900,16 +912,20 @@ name = "clientledger"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "cl-automation",
  "cl-host",
  "cl-ui",
+ "tempfile",
 ]
 
 [[package]]
 name = "clientledger-cli"
 version = "0.0.0"
 dependencies = [
+ "cl-automation",
  "cl-host",
  "ctrlc",
+ "serde_json",
 ]
 
 [[package]]
@@ -2049,7 +2065,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -3794,6 +3810,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "ryu"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3930,6 +3952,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "serde_yaml_ng"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b4db627b98b36d4203a7b458cf3573730f2bb591b28871d916dfa9efabfd41f"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
 ]
 
 [[package]]
@@ -4602,6 +4637,12 @@ dependencies = [
  "crypto-common",
  "ctutils",
 ]
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "url"
@@ -5674,6 +5715,7 @@ dependencies = [
  "sha2",
  "syn 3.0.9",
  "tar",
+ "tempfile",
  "zip",
 ]
 

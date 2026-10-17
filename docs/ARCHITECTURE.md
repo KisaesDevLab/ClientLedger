@@ -315,7 +315,7 @@ The engine reports connectivity on `/health` (`online: bool`, last check). The a
 
 - Engine API binds loopback only in single-user mode. Two layers guard it: a random launch token per launch (`X-CL-Token`, passed via env, never on the command line) that every request must carry, and the signed-in user's session token on every account route (see Engine contract). Refresh tokens and passwords stay in memory in zeroized `Secret` values and are never persisted or logged.
 - Postgres binds loopback only, scram-sha-256, superuser password in the OS keychain (Windows Credential Manager, macOS Keychain, Secret Service on Linux; fallback encrypted file with a user notice).
-- Control channel (automation) is off by default; when enabled it uses PdfCraft's safeguards: loopback only, random token in a control file the current user alone can read, refuse symlinked or foreign-owned control files.
+- Control channel (automation) is off by default; when enabled it uses PdfCraft's safeguards: loopback only, random token in a control file the current user alone can read, refuse symlinked or foreign-owned control files. The server starts only from `--control <path>`; details and the Windows location rule are in Q-P07a to Q-P07d.
 - LAN mode: engine binds the chosen interface with TLS (self-signed cert generated on the host); workstations pin the fingerprint at first connect (shown on the host for verification); users authenticate with engine user accounts; brute-force lockout.
 - Company data at rest: OS disk encryption is recommended in the setup guide; optional Postgres data-dir encryption is out of scope for v1 (Q-15).
 

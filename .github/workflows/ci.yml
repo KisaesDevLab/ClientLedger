@@ -65,6 +65,54 @@ jobs:
         run: cargo xtask pg-fetch
       - run: cargo xtask ci
 
+  # Control-channel scenarios (P07): the demo app runs in a real window and the
+  # shell scenario drives it in light and dark. Linux runs on every push under
+  # Xvfb with a software Vulkan driver; Windows and macOS run on pull requests.
+  ui-check-linux:
+    name: ui-check (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+      - uses: Swatinem/rust-cache@v2
+      - name: Display and software graphics
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb mesa-vulkan-drivers libvulkan1 libxkbcommon-x11-0 libgl1
+      - name: Shell scenario under Xvfb
+        run: xvfb-run -a -s "-screen 0 1600x1200x24" cargo xtask ui-check shell
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-check-linux
+          path: target/ui-check
+          if-no-files-found: ignore
+
+  ui-check-other:
+    name: ui-check (${{ matrix.os }})
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+      - uses: Swatinem/rust-cache@v2
+      - name: Shell scenario
+        run: cargo xtask ui-check shell
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-check-${{ runner.os }}
+          path: target/ui-check
+          if-no-files-found: ignore
+
   # Gitleaks is MIT licensed; run the binary directly (no license key needed).
   secret-scan:
     name: secret scan

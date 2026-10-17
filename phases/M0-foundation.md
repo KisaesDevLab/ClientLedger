@@ -206,10 +206,10 @@
 **Tests:** keymap conflict test (no duplicate shortcut in one scope); form state machine unit tests; undo stack tests; date-rule tests; screenshots light/dark after P07 lands (ui-verifier runs then).
 
 **Acceptance**
-- [ ] Every menu and rail entry has a command id, its shortcut, and a palette entry.
-- [ ] KEYBOARD.md generated and committed.
-- [ ] Shell renders at minimum window size and 200% zoom without clipping (verified in P07 scenario).
-- [ ] Screen matches its mockup per docs/design/README.md (`ui-check --compare` reviewed by ui-verifier); any deviation is listed in the PR and QUESTIONS.md.
+- [x] Every menu and rail entry has a command id, its shortcut, and a palette entry.
+- [x] KEYBOARD.md generated and committed.
+- [x] Shell renders at minimum window size and 200% zoom without clipping (verified in P07 scenario, `shell.yaml`, Windows; Q-P07f).
+- [x] Screen matches its mockup per docs/design/README.md (`ui-check home --compare` reviewed by hand; deviations in Q-P07h and Q-P06j).
 
 ---
 
@@ -233,8 +233,8 @@
 **Tests:** control-file safety tests (symlink, foreign owner, world-readable); no-socket test without the flag; shell scenario.
 
 **Acceptance**
-- [ ] Shell scenario passes in Linux CI and on PR runs for Windows and macOS.
-- [ ] Control-file safety tests pass; no listening sockets without `--control`.
+- [ ] Shell scenario passes in Linux CI and on PR runs for Windows and macOS. (Passes on Windows locally; CI jobs `ui-check-linux` and `ui-check-other` pending a push.)
+- [x] Control-file safety tests pass; no listening sockets without `--control`.
 
 ---
 

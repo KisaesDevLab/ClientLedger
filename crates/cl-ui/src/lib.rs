@@ -14,6 +14,7 @@
 
 pub mod about;
 pub mod app;
+pub mod automation;
 pub mod engine_link;
 pub mod errors;
 pub mod fonts;

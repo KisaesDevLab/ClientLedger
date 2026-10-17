@@ -52,7 +52,13 @@ impl DatabaseService for FakeDb {
 
     fn stop(&mut self) -> Result<()> {
         let pid = self.0.engine_pid.load(Ordering::SeqCst);
-        let still_running = (pid != 0 && process_alive(pid)).then_some(pid);
+        // The supervisor kills and reaps the engine before it calls us, but
+        // Windows keeps a reaped process listed until its last handle closes
+        // (scanners on hosted runners hold one briefly). A short wait absorbs
+        // that; it cannot hide the wrong order, because then the engine would
+        // stay alive until after we return.
+        let gone = pid == 0 || wait_until(Duration::from_secs(2), || !process_alive(pid));
+        let still_running = (!gone).then_some(pid);
         self.0
             .engine_pid_at_stop
             .lock()

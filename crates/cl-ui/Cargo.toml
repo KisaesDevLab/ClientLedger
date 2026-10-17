@@ -8,6 +8,7 @@ description = "The ClientLedger egui application: shell, theme, fonts, windows, 
 
 [dependencies]
 cl-api = { path = "../cl-api" }
+cl-automation = { path = "../cl-automation" }
 cl-core = { path = "../cl-core" }
 cl-host = { path = "../cl-host" }
 cl-model = { path = "../cl-model" }
@@ -22,3 +23,6 @@ tracing-subscriber = { version = "0.3.20", default-features = false, features = 
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"

@@ -1,0 +1,100 @@
+# Shell scenario (P07). Runs against `clientledger --demo` in light and dark.
+# Covers the P06 acceptance items that needed the control channel: the shell
+# at the minimum window size and at 200% zoom without clipping, menus, the
+# palette, dialogs, tabs, and the close prompt that never discards work.
+name: shell
+description: Window anatomy, keyboard, dialogs, minimum window and 200% zoom.
+steps:
+  # --- Anatomy at a normal size -------------------------------------------
+  - resize: {width: 1280, height: 820}
+  - set_zoom: {percent: 100}
+  - assert_exists: {role: label, label: ClientLedger}
+  - assert_exists: {role: label, label_contains: Ozark Ridge}
+  - assert_exists: {role: label, label_contains: Books closed through}
+  - assert_count: {target: {role: tab}, count: 4}
+  - assert_exists: {role: tab, label: Home}
+  - assert_exists: {role: button, label: Go to a screen or command}
+  - assert_exists: {role: button, label: File}
+  - assert_exists: {role: label, label: Kurt · Admin}
+  - assert_no_clipping: {}
+  - screenshot: home
+
+  # --- Tabs ----------------------------------------------------------------
+  - click: {role: tab, label: Register · Operating}
+  - assert_exists: {role: label, label: Register · Operating}
+  - click: {role: tab, label: Home}
+  - assert_exists: {role: label, label: Home}
+
+  # --- Menus ---------------------------------------------------------------
+  - click: {role: button, label: File}
+  - assert_exists: {role: button, label_contains: Open or Switch Company}
+  - assert_exists: {role: button, label_contains: Quit ClientLedger}
+  - screenshot: menu-file
+  - key: Escape
+
+  # --- Command palette (Ctrl+K) -------------------------------------------
+  - key: Ctrl+K
+  - assert_state: {key: palette_open, equals: true}
+  - type: {text: bank}
+  - assert_value: {target: {role: text_input}, equals: bank}
+  - screenshot: palette
+  - key: Escape
+  - assert_state: {key: palette_open, equals: false}
+
+  # --- Shortcut overlay (Ctrl+/) ------------------------------------------
+  - key: Ctrl+/
+  - assert_state: {key: shortcuts_open, equals: true}
+  - screenshot: shortcuts
+  - key: Escape
+  - assert_state: {key: shortcuts_open, equals: false}
+
+  # --- About ---------------------------------------------------------------
+  - command: help.about
+  - assert_state: {key: about_open, equals: true}
+  - screenshot: about
+  - key: Escape
+  - assert_state: {key: about_open, equals: false}
+
+  # --- Closing with unsaved work asks first and discards nothing -----------
+  - command: file.quit
+  - assert_state: {key: prompt_open, equals: true}
+  - assert_exists: {role: button, label: Keep editing}
+  - assert_exists: {role: button, label: Discard changes}
+  - screenshot: quit-prompt
+  - click: {role: button, label: Keep editing}
+  - assert_state: {key: prompt_open, equals: false}
+  - assert_state: {key: quit_approved, equals: false}
+  - assert_count: {target: {role: tab}, count: 4}
+  - click: {role: tab, label: Home}
+
+  # --- Minimum window size (960 x 640) -------------------------------------
+  - resize: {width: 960, height: 640}
+  - assert_state: {key: window.width, equals: 960.0}
+  - assert_state: {key: window.height, equals: 640.0}
+  - assert_no_clipping:
+      # The rail (x < 212, below the tab strip) and the tab strip scroll by
+      # design; everything else must fit.
+      ignore:
+        - {x: 0, y: 100, width: 212, height: 10000}
+        - {x: 212, y: 70, width: 10000, height: 45}
+  - screenshot: min-window
+
+  # --- 200% zoom at the minimum window (480 x 320 points) -------------------
+  - set_zoom: {percent: 200}
+  - assert_state: {key: zoom_percent, equals: 200}
+  - assert_state: {key: window.width, equals: 480.0}
+  - assert_state: {key: window.height, equals: 320.0}
+  - assert_exists: {role: button, label: Menu}
+  - assert_exists: {role: label, label: Home}
+  - assert_no_clipping:
+      # The rail (x < 212, below the tab strip) and the tab strip scroll by
+      # design; everything else must fit.
+      ignore:
+        - {x: 0, y: 100, width: 212, height: 10000}
+        - {x: 212, y: 70, width: 10000, height: 45}
+  - screenshot: min-window-zoom-200
+
+  # --- Back to normal ------------------------------------------------------
+  - set_zoom: {percent: 100}
+  - resize: {width: 1280, height: 820}
+  - assert_state: {key: zoom_percent, equals: 100}

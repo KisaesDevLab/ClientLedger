@@ -23,7 +23,7 @@ use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use tokio::time::Instant;
 use zeroize::Zeroizing;
 
-use crate::endpoint::{EndpointSource, EndpointState, EngineEndpoint};
+use crate::endpoint::{EndpointSource, EndpointState, EngineEndpoint, Purpose};
 use crate::idempotency::IdempotencyKey;
 
 /// The loopback host. A constant, so this client cannot reach the network.
@@ -190,6 +190,9 @@ pub(crate) struct Call {
     pub company: Option<CompanyId>,
     pub idempotency_key: Option<IdempotencyKey>,
     pub if_match: Option<String>,
+    /// The body carries a password or similar secret (set by `json_body`):
+    /// the endpoint must be verified afresh for this call.
+    pub sensitive: bool,
 }
 
 impl std::fmt::Debug for Call {
@@ -220,6 +223,7 @@ impl Call {
             company: None,
             idempotency_key: None,
             if_match: None,
+            sensitive: false,
         }
     }
 
@@ -229,6 +233,7 @@ impl Call {
     }
 
     pub(crate) fn json_body(mut self, bytes: Vec<u8>) -> Call {
+        self.sensitive = body_has_secret_key(&bytes);
         self.body = Some(Zeroizing::new(bytes));
         self
     }
@@ -237,6 +242,32 @@ impl Call {
         self.timeout = class;
         self
     }
+}
+
+/// JSON keys that carry a secret (a sign-in, closing-date or SMTP password, a
+/// code, a refresh token). Every body goes through [`Call::json_body`], so any
+/// request that puts a secret under one of these keys is treated as
+/// credential-carrying whichever resource builds it (P07 review L2).
+const SECRET_KEYS: [&str; 5] = [
+    "password",
+    "closingPassword",
+    "code",
+    "refreshToken",
+    "token",
+];
+
+fn body_has_secret_key(body: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(body) else {
+        return false;
+    };
+    SECRET_KEYS.iter().any(|k| {
+        let needle = format!("\"{k}\"");
+        text.match_indices(&needle).any(|(i, _)| {
+            // A key is followed by a colon (a value that merely equals the
+            // word is not).
+            text[i + needle.len()..].trim_start().starts_with(':')
+        })
+    })
 }
 
 /// Credentials of one attempt (they can change between attempts after a
@@ -350,9 +381,10 @@ impl Transport {
     pub(crate) async fn wait_ready(
         &self,
         deadline: Instant,
+        purpose: Purpose,
     ) -> Result<EngineEndpoint, TransportError> {
         loop {
-            match self.source.current() {
+            match self.source.current_for(purpose) {
                 EndpointState::Ready(ep) => {
                     let prev = self.last_generation.swap(ep.generation, Ordering::Relaxed);
                     if prev != 0 && prev != ep.generation {
@@ -385,7 +417,14 @@ impl Transport {
         attempt_no: u32,
         deadline: Instant,
     ) -> Result<EngineReply, TransportError> {
-        let ep = self.wait_ready(deadline).await?;
+        // Auth calls carry a password, code or refresh token: the source must
+        // verify the engine afresh for them (Q-P06o).
+        let purpose = if call.timeout == TimeoutClass::Auth || call.sensitive {
+            Purpose::Credentials
+        } else {
+            Purpose::Ordinary
+        };
+        let ep = self.wait_ready(deadline, purpose).await?;
         let budget = self.cfg.timeouts.budget(call.timeout);
         let per_attempt = if call.method.is_read() {
             budget
@@ -668,6 +707,80 @@ pub(crate) mod tests {
         assert!(h.get("x-company-id").is_none());
         let host = h.get("host").expect("host").to_str().expect("ascii");
         assert_eq!(host, format!("127.0.0.1:{}", server.address().port()));
+    }
+
+    /// Records the purpose of each endpoint read.
+    struct PurposeSource {
+        inner: FixedEndpoint,
+        seen: std::sync::Mutex<Vec<Purpose>>,
+    }
+
+    impl EndpointSource for PurposeSource {
+        fn current(&self) -> EndpointState {
+            self.inner.current()
+        }
+        fn current_for(&self, purpose: Purpose) -> EndpointState {
+            self.seen.lock().expect("lock").push(purpose);
+            self.inner.current()
+        }
+    }
+
+    #[tokio::test]
+    async fn auth_calls_ask_for_a_credentials_grade_endpoint() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::any())
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+        let src = Arc::new(PurposeSource {
+            inner: FixedEndpoint::new(server.address().port(), Secret::new(TOKEN), 1),
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+        let t = Transport::new(src.clone(), fast_config()).expect("client builds");
+        let ordinary = Call::at(Method::Get, "/health");
+        let auth = Call::at(Method::Post, "/login").timeout(TimeoutClass::Auth);
+        t.attempt(&ordinary, &AttemptAuth::default(), 1, soon())
+            .await
+            .expect("answer");
+        t.attempt(&auth, &AttemptAuth::default(), 1, soon())
+            .await
+            .expect("answer");
+        let seen = src.seen.lock().expect("lock").clone();
+        assert_eq!(seen, vec![Purpose::Ordinary, Purpose::Credentials]);
+    }
+
+    #[test]
+    fn bodies_with_a_secret_key_are_sensitive() {
+        for (body, want) in [
+            (r#"{"closingPassword":"x","memo":"a"}"#, true),
+            (r#"{"host":"h","password": "pw"}"#, true),
+            (r#"{"memo":"password"}"#, false),
+            (r#"{"memo":"my \"code\" word"}"#, false),
+            (r#"{"amount":"12.00"}"#, false),
+        ] {
+            let call = Call::at(Method::Post, "/x").json_body(body.as_bytes().to_vec());
+            assert_eq!(call.sensitive, want, "{body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_write_with_a_closing_password_asks_for_a_credentials_grade_endpoint() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::any())
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+        let src = Arc::new(PurposeSource {
+            inner: FixedEndpoint::new(server.address().port(), Secret::new(TOKEN), 1),
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+        let t = Transport::new(src.clone(), fast_config()).expect("client builds");
+        let call = Call::at(Method::Post, "/txn")
+            .json_body(br#"{"closingPassword":"pw","memo":"m"}"#.to_vec());
+        t.attempt(&call, &AttemptAuth::default(), 1, soon())
+            .await
+            .expect("answer");
+        assert_eq!(*src.seen.lock().expect("lock"), vec![Purpose::Credentials]);
     }
 
     #[tokio::test]
