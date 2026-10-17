@@ -78,11 +78,11 @@ jobs:
       - name: Scan
         run: ./gitleaks detect --source . --redact --verbose
 
-  # Report only until P05, then enforced at 80% line coverage (Q-116).
+  # Enforced at 80% workspace line coverage since P05 (Q-116). xtask and generated
+  # code are excluded; the real-engine contract tests run in the engine job.
   coverage:
-    name: coverage (report only)
+    name: coverage
     runs-on: ubuntu-22.04
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,8 +98,7 @@ jobs:
       - name: Fetch pinned PostgreSQL
         run: cargo xtask pg-fetch
       - name: Coverage summary
-        # TODO(P05): add `--fail-under-lines 80` and make this job required.
-        run: cargo llvm-cov --workspace --exclude xtask --summary-only
+        run: cargo llvm-cov --workspace --exclude xtask --summary-only --fail-under-lines 80
 
   # Engine single executable (P01): built on every OS we ship, smoke-tested
   # against a temporary PostgreSQL, uploaded for later jobs.
