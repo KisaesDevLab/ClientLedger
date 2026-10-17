@@ -226,6 +226,8 @@ pub(crate) async fn create_named<T: DeserializeOwned + EditableFields>(
     body: Vec<u8>,
     key: IdempotencyKey,
 ) -> Result<Versioned<T>, ApiError> {
+    // One company for the probe and the write (pinned view).
+    let s = &s.pinned();
     let matcher = OutcomeMatcher::Created {
         search: Search::Named {
             spec,
@@ -246,6 +248,8 @@ pub(crate) async fn deactivate(
     id: &str,
     key: IdempotencyKey,
 ) -> Result<EngineReply, ApiError> {
+    // One company for the probe and the write (pinned view).
+    let s = &s.pinned();
     let matcher = OutcomeMatcher::Field {
         get: spec.get,
         path: spec.path(id),
@@ -264,6 +268,8 @@ pub(crate) async fn delete_record(
     id: &str,
     key: IdempotencyKey,
 ) -> Result<EngineReply, ApiError> {
+    // One company for the probe and the write (pinned view).
+    let s = &s.pinned();
     let matcher = OutcomeMatcher::Deleted {
         get: spec.get,
         path: spec.path(id),

@@ -12,10 +12,13 @@
 //!   (that would make the outcome unknown): they finish, and their result
 //!   goes to [`ApiQueue::take_orphans`]. Cancelling never means "it did not
 //!   happen".
-//! - Scope (S1): a read that finishes after a company switch resolves to
-//!   `StaleScope`. A write under an older scope resolves normally *and* is
-//!   copied to the orphans with the old company, because it committed (or
-//!   may have) there.
+//! - Scope (S1): every job runs on a session view pinned to the company
+//!   open when it was queued ([`Session::pinned`]). A read that finishes
+//!   after a company switch resolves to `StaleScope`. A write never reaches
+//!   the next company: an attempt not yet sent fails with `StaleScope`
+//!   (nothing sent), and one whose earlier attempt may have reached the
+//!   engine is `OutcomeUnknown`. Its result is also copied to the orphans
+//!   with the company it was queued (and sent) in.
 //! - A write job that panics resolves to `OutcomeUnknown`, never to a
 //!   silently closed handle; a read job that panics is `Internal`.
 //! - [`ApiQueue::shutdown`] stops intake, cancels reads, waits for writes
@@ -84,6 +87,11 @@ pub trait ScopeSource: Clone + Send + Sync + 'static {
     fn scope_epoch(&self) -> u64;
     /// The open company, if any.
     fn company(&self) -> Option<CompanyId>;
+    /// The epoch, the company and a view pinned to them, read together. A
+    /// job runs on the pinned view for its whole life.
+    fn pinned(&self) -> (u64, Option<CompanyId>, Self) {
+        (self.scope_epoch(), self.company(), self.clone())
+    }
 }
 
 impl ScopeSource for Session {
@@ -96,6 +104,16 @@ impl ScopeSource for Session {
             Scope::Company { company_id, .. } => Some(company_id),
             Scope::Workspace => None,
         }
+    }
+
+    fn pinned(&self) -> (u64, Option<CompanyId>, Self) {
+        let view = Session::pinned(self);
+        let pin = view.pin_now();
+        let company = match pin.scope {
+            Scope::Company { company_id, .. } => Some(company_id),
+            Scope::Workspace => None,
+        };
+        (pin.epoch, company, view)
     }
 }
 
@@ -464,10 +482,11 @@ impl RequestGroup {
         }
         let (tx, rx) = oneshot::channel();
         let done = Arc::new(AtomicBool::new(false));
-        let epoch = scope.scope_epoch();
-        let company = scope.company();
+        // The job runs pinned to the company open now; the orphan record
+        // names that company (the one the requests actually used).
+        let (epoch, company, job_scope) = scope.pinned();
         let checker = scope.clone();
-        let job_scope = scope.clone();
+
         let mut group_rx = self.cancel.subscribe();
         let mut global_rx = shared.reads_cancel.subscribe();
         let write_id = label.as_ref().map(|l| {
@@ -791,6 +810,71 @@ mod tests {
         assert_eq!(report.abandoned.len(), 1);
         assert_eq!(report.abandoned[0].what, "save.test");
         assert!(t.elapsed() < Duration::from_secs(4));
+    }
+
+    #[test]
+    fn a_write_queued_before_a_switch_sends_nothing_and_its_orphan_says_stale() {
+        use crate::client::{Call, Method};
+        use crate::resources::operations::find;
+        use crate::resources::testkit::{COMPANY, company_session, json};
+        use cl_core::ids::TenantId;
+        use wiremock::{Mock, MockServer};
+        let rt = tokio::runtime::Runtime::new().expect("rt");
+        let server = rt.block_on(async {
+            let server = MockServer::start().await;
+            Mock::given(wiremock::matchers::any())
+                .respond_with(json(201, "{}"))
+                .mount(&server)
+                .await;
+            server
+        });
+        let session = company_session(&server);
+        let (q, _) = queue(QueueConfig {
+            max_concurrent: 1,
+            ..QueueConfig::default()
+        });
+        let g = q.group().expect("group");
+        // Hold the only request slot.
+        let (release, gate) = oneshot::channel::<()>();
+        let _blocker = g
+            .write(&session, label(), move |_| async move {
+                let _ = gate.await;
+                Ok(())
+            })
+            .expect("blocker");
+        let l = OrphanLabel {
+            what: "save.pinned",
+            key: None,
+        };
+        let mut w = g
+            .write(&session, l, |s: Session| async move {
+                let op = *find(Method::Post, "/api/v1/accounts").expect("op");
+                let call = Call::at(Method::Post, op.route()).json_body(b"{}".to_vec());
+                s.send(&op, call, None).await.map(drop)
+            })
+            .expect("write");
+        session.set_scope(Scope::Company {
+            tenant_id: TenantId::parse("1c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("t"),
+            company_id: CompanyId::parse("0c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("c"),
+        });
+        let _ = release.send(());
+        assert_eq!(wait(&mut w), Err(ApiError::StaleScope));
+        let sent = rt.block_on(server.received_requests()).expect("recorded");
+        assert_eq!(sent.len(), 0, "nothing reached the engine");
+        let orphans = q.take_orphans();
+        let o = orphans
+            .iter()
+            .find(|o| o.label.what == "save.pinned")
+            .expect("reported");
+        assert_eq!(o.result, OrphanResult::Failed(ApiError::StaleScope));
+        assert_eq!(
+            o.company,
+            CompanyId::parse(COMPANY).ok(),
+            "the queued company"
+        );
+        assert!(o.stale_scope);
+        drop(g);
+        let _ = q.shutdown(Duration::from_secs(1), None);
     }
 
     #[test]

@@ -678,3 +678,139 @@ proptest::proptest! {
         }
     }
 }
+
+// --- company switch in the middle of a save (pinned scope) ---------------
+
+fn other_company() -> Scope {
+    Scope::Company {
+        tenant_id: TenantId::parse(T2).expect("t"),
+        company_id: CompanyId::parse(B).expect("c"),
+    }
+}
+
+/// Answers `body` and switches the session to another company meanwhile.
+fn switch_then(
+    s: &Session,
+    body: String,
+) -> impl Fn(&Request) -> ResponseTemplate + Send + Sync + 'static {
+    let s = s.clone();
+    move |_: &Request| {
+        s.set_scope(other_company());
+        json(200, &body)
+    }
+}
+
+#[tokio::test]
+async fn posting_aborts_with_nothing_sent_when_the_company_switches_after_the_stamp_read() {
+    let server = MockServer::start().await;
+    let (s, _) = session(&server);
+    Mock::given(method("GET"))
+        .and(path("/api/v1/ledger-version"))
+        .respond_with(switch_then(&s, r#"{"stamp":1}"#.into()))
+        .mount(&server)
+        .await;
+    let e = s
+        .transactions()
+        .create_journal_entry(&entry(), &PostingOptions::default(), IdempotencyKey::new())
+        .await
+        .expect_err("stale");
+    assert_eq!(e, ApiError::StaleScope);
+    assert_eq!(requests(&server, "POST").await.len(), 0);
+}
+
+#[tokio::test]
+async fn guarded_update_aborts_when_the_company_switches_after_the_read() {
+    let server = MockServer::start().await;
+    let (s, _) = session(&server);
+    stamp(&server, 1, None).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/transactions/{T1}")))
+        .respond_with(json(200, &wrapped(T1, "posted")))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/transactions/{T1}")))
+        .respond_with(switch_then(&s, wrapped(T1, "posted")))
+        .mount(&server)
+        .await;
+    let id = TransactionId::parse(T1).expect("id");
+    let v = s.transactions().get(id).await.expect("get");
+    let e = s
+        .transactions()
+        .update_journal_entry(
+            id,
+            &v.version,
+            &entry(),
+            &PostingOptions::default(),
+            IdempotencyKey::new(),
+        )
+        .await
+        .expect_err("stale");
+    assert_eq!(e, ApiError::StaleScope);
+    assert_eq!(requests(&server, "PUT").await.len(), 0);
+}
+
+#[tokio::test]
+async fn not_committed_retry_after_a_switch_is_unknown_not_forbidden() {
+    let server = MockServer::start().await;
+    let (s, src) = session(&server);
+    // The probe's first stamp read; the reconciliation read switches.
+    stamp(&server, 1, Some(1)).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/ledger-version"))
+        .respond_with(switch_then(&s, r#"{"stamp":1}"#.into()))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(fail_and_restart(&src, server.address().port()))
+        .mount(&server)
+        .await;
+    let key = IdempotencyKey::new();
+    let e = s
+        .transactions()
+        .create_journal_entry(&entry(), &PostingOptions::default(), key.clone())
+        .await
+        .expect_err("unknown");
+    assert!(
+        matches!(e, ApiError::OutcomeUnknown { idempotency_key: Some(ref k), .. } if *k == key),
+        "{e:?}"
+    );
+    let reqs = requests(&server, "POST").await;
+    assert_eq!(reqs.len(), 1, "no retry into the other company");
+    assert_eq!(
+        reqs[0].headers.get("x-company-id").expect("id"),
+        COMPANY,
+        "sent in the company it was started in"
+    );
+}
+
+#[tokio::test]
+async fn master_data_reconciliation_stops_at_a_switch() {
+    let server = MockServer::start().await;
+    let (s, _) = session(&server);
+    Mock::given(method("POST"))
+        .and(path("/api/v1/tags"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tags"))
+        .respond_with(switch_then(&s, r#"{"tags":[],"total":0}"#.into()))
+        .mount(&server)
+        .await;
+    let fields = TagFields {
+        name: "Canary Job".into(),
+        color: None,
+        group_id: None,
+        description: None,
+    };
+    let e = s
+        .tags()
+        .create(&fields, IdempotencyKey::new())
+        .await
+        .expect_err("unknown");
+    assert!(matches!(e, ApiError::OutcomeUnknown { .. }), "{e:?}");
+    assert_eq!(requests(&server, "POST").await.len(), 1);
+    assert_eq!(requests(&server, "GET").await.len(), 1, "polling stopped");
+}

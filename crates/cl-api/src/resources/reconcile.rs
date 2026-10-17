@@ -99,9 +99,11 @@ pub(crate) enum OutcomeMatcher {
     },
 }
 
-/// The reconciler of one mutation.
-pub(crate) struct Probe<'s> {
-    session: &'s Session,
+/// The reconciler of one mutation. It runs on a view pinned to the company
+/// of the write: after a company switch it is `Unresolved` at once and
+/// never reads the other company's ledger.
+pub(crate) struct Probe {
+    session: Session,
     stamp_before: Option<u64>,
     /// Client clock (Unix ms), same machine as the engine (P33 revisits).
     sent_at_ms: i64,
@@ -151,22 +153,23 @@ pub(crate) async fn read_stamp(session: &Session) -> Result<u64, ApiError> {
     Ok(crate::session::decode::<Wire>(&reply, "ledger version")?.stamp)
 }
 
-impl<'s> Probe<'s> {
+impl Probe {
     /// Builds the probe just before sending. Postings (`stamp_covered`)
     /// read the ledger-version stamp first; if that read fails the write
     /// still proceeds and only the matcher can resolve it. With engine
     /// idempotency (U-18) nothing is read: reconciliation never runs.
     pub(crate) async fn new(
-        session: &'s Session,
+        session: &Session,
         matcher: OutcomeMatcher,
         stamp_covered: bool,
-    ) -> Probe<'s> {
+    ) -> Probe {
+        let session = session.pinned();
         let keyed = session
             .client()
             .capabilities()
             .has(Capabilities::IDEMPOTENCY);
         let stamp_before = if stamp_covered && !keyed {
-            read_stamp(session).await.ok()
+            read_stamp(&session).await.ok()
         } else {
             None
         };
@@ -188,6 +191,9 @@ impl<'s> Probe<'s> {
             return Reconciled::Unresolved;
         }
         loop {
+            if self.session.pin_moved() {
+                return Reconciled::Unresolved;
+            }
             let settled = amb.settled(&transport.current());
             if let Check::Final(r) = self.check(settled, amb.generation).await {
                 return r;
@@ -201,7 +207,7 @@ impl<'s> Probe<'s> {
 
     async fn check(&self, settled: bool, generation: u64) -> Check {
         if settled && let Some(before) = self.stamp_before {
-            match read_stamp(self.session).await {
+            match read_stamp(&self.session).await {
                 Ok(after) if after == before => return Check::Final(Reconciled::NotCommitted),
                 Ok(_) => {}
                 Err(_) => return Check::Wait,
@@ -382,7 +388,7 @@ impl<'s> Probe<'s> {
     }
 }
 
-impl Reconciler for Probe<'_> {
+impl Reconciler for Probe {
     fn reconcile<'a>(&'a self, ambiguity: &'a Ambiguity) -> BoxFuture<'a, Reconciled<EngineReply>> {
         Box::pin(async move {
             let r = self.run(ambiguity).await;

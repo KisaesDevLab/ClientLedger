@@ -177,11 +177,18 @@ pub(crate) struct Executor {
 
 /// Per-request bookkeeping of the retry loop.
 #[derive(Default)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent once-only flags of one retry loop"
+)]
 struct Retries {
     transient: u32,
     gate_replayed: bool,
     auth_replayed: bool,
     same_key_retried: bool,
+    /// An earlier attempt may have reached a handler (timeout, broken
+    /// connection, 5xx).
+    maybe_committed: bool,
 }
 
 enum Step {
@@ -260,7 +267,20 @@ impl Executor {
         let mut attempt = 0u32;
         loop {
             attempt += 1;
-            let creds = auth.prepare().await?;
+            let creds = match auth.prepare().await {
+                Ok(c) => c,
+                // The company was switched (pinned requests): nothing of
+                // this attempt was sent, but an earlier one may have
+                // committed in the previous company.
+                Err(ApiError::StaleScope) if r.maybe_committed && !call.method.is_read() => {
+                    tracing::info!(outcome = "unknown", reconciled = false, "mutation outcome");
+                    return Err(ApiError::OutcomeUnknown {
+                        request_id: call.request_id,
+                        idempotency_key: call.idempotency_key.clone(),
+                    });
+                }
+                Err(e) => return Err(e),
+            };
             let outcome = self
                 .transport
                 .attempt(call, &creds.auth, attempt, ctx.deadline)
@@ -311,6 +331,7 @@ impl Executor {
                 }
             }
             TransportError::Timeout { generation } | TransportError::Ambiguous { generation } => {
+                r.maybe_committed = true;
                 match ctx.class {
                     RetryClass::Idempotent | RetryClass::KeyedOnce => {
                         if self.backoff(r, ctx.deadline).await {
@@ -396,6 +417,10 @@ impl Executor {
     }
 
     async fn on_final(&self, ctx: &Ctx<'_>, e: ApiError, generation: u64, r: &mut Retries) -> Step {
+        if matches!(e, ApiError::Server { .. }) {
+            r.maybe_committed = true;
+        }
+
         let transient_status = matches!(
             e,
             ApiError::Server {

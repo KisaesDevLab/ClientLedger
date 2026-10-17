@@ -385,9 +385,23 @@ pub struct OpenCompany {
 }
 
 /// A signed-in session. Clones share the same tokens and scope.
+///
+/// A session can be *pinned* to the company open at the moment
+/// ([`Session::pinned`]): every company request of the pinned view checks,
+/// under the state lock before each attempt, that the company has not been
+/// switched since. The request queue pins every job, so a save queued in
+/// one company can never be posted into the next one.
 #[derive(Clone)]
 pub struct Session {
     inner: Arc<SessionInner>,
+    pin: Option<ScopePin>,
+}
+
+/// The company a pinned session belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ScopePin {
+    pub(crate) epoch: u64,
+    pub(crate) scope: Scope,
 }
 
 impl fmt::Debug for Session {
@@ -532,7 +546,39 @@ impl Session {
                 }),
                 rotate: tokio::sync::Mutex::new(()),
             }),
+            pin: None,
         })
+    }
+
+    /// A view of this session pinned to the company open now (or to the one
+    /// this view is already pinned to). Its company requests fail with
+    /// `StaleScope` (nothing sent) once the company is switched, or with
+    /// `OutcomeUnknown` when an earlier attempt of the same save may already
+    /// have reached the engine.
+    #[must_use]
+    pub fn pinned(&self) -> Session {
+        Session {
+            inner: self.inner.clone(),
+            pin: Some(self.pin_now()),
+        }
+    }
+
+    /// The pin of this view, or the current scope for an unpinned one,
+    /// read under one lock.
+    pub(crate) fn pin_now(&self) -> ScopePin {
+        self.pin.unwrap_or_else(|| {
+            let st = lock(&self.inner.state);
+            ScopePin {
+                epoch: st.scope_epoch,
+                scope: st.scope,
+            }
+        })
+    }
+
+    /// The company was switched since this view was pinned.
+    pub(crate) fn pin_moved(&self) -> bool {
+        self.pin
+            .is_some_and(|p| lock(&self.inner.state).scope_epoch != p.epoch)
     }
 
     /// The client this session belongs to.
@@ -674,7 +720,7 @@ impl Session {
         result
     }
 
-    fn set_scope(&self, scope: Scope) {
+    pub(crate) fn set_scope(&self, scope: Scope) {
         let mut st = lock(&self.inner.state);
         st.scope = scope;
         st.scope_epoch += 1;
@@ -707,7 +753,7 @@ impl Session {
         struct Body {
             tenant_id: TenantId,
         }
-        self.inner.ensure_fresh().await?;
+        self.inner.ensure_fresh(None).await?;
         let _g = self.inner.rotate.lock().await;
         let (bearer, cookie) = {
             let st = lock(&self.inner.state);
@@ -735,30 +781,47 @@ impl Session {
     /// Sends one request in this session: checks the scope (company routes
     /// fail locally with `NoCompanyOpen` in the workspace), adds
     /// `X-Company-Id`, and runs it with refresh handling.
+    ///
+    /// A company request is pinned for its whole life (every attempt) to
+    /// this view's pin, or to the scope read once here for an unpinned
+    /// session, so the company id and the token never come from two
+    /// different companies.
     pub(crate) async fn send(
         &self,
         op: &Operation,
         mut call: Call,
         reconciler: Option<&dyn Reconciler>,
     ) -> Result<EngineReply, ApiError> {
-        if op.company_scoped() {
-            match self.scope() {
-                Scope::Company { company_id, .. } => call.company = Some(company_id),
-                Scope::Workspace => return Err(ApiError::NoCompanyOpen),
-            }
+        if !op.company_scoped() {
+            return self
+                .client()
+                .exec()
+                .run(op, call, self.inner.as_ref(), reconciler)
+                .await;
         }
-        self.client()
-            .exec()
-            .run(op, call, self.inner.as_ref(), reconciler)
-            .await
+        let pin = self.pin_now();
+        match pin.scope {
+            Scope::Company { company_id, .. } => call.company = Some(company_id),
+            Scope::Workspace => return Err(ApiError::NoCompanyOpen),
+        }
+        let auth = PinnedAuth {
+            inner: self.inner.as_ref(),
+            epoch: pin.epoch,
+        };
+        self.client().exec().run(op, call, &auth, reconciler).await
     }
 }
 
 impl SessionInner {
-    fn snapshot(&self) -> Result<AttemptCreds, ApiError> {
+    /// Credentials for the next attempt. With `pin`, the scope epoch is
+    /// checked under the same lock: a moved epoch is `StaleScope`.
+    fn snapshot(&self, pin: Option<u64>) -> Result<AttemptCreds, ApiError> {
         let st = lock(&self.state);
         if st.ended {
             return Err(ApiError::Unauthorized(AuthFailure::SessionExpired));
+        }
+        if pin.is_some_and(|e| e != st.scope_epoch) {
+            return Err(ApiError::StaleScope);
         }
         Ok(AttemptCreds {
             auth: AttemptAuth {
@@ -771,12 +834,12 @@ impl SessionInner {
     }
 
     /// Refreshes first when the access token is about to expire.
-    async fn ensure_fresh(&self) -> Result<AttemptCreds, ApiError> {
-        let creds = self.snapshot()?;
+    async fn ensure_fresh(&self, pin: Option<u64>) -> Result<AttemptCreds, ApiError> {
+        let creds = self.snapshot(pin)?;
         match creds.access_exp {
             Some(exp) if exp.saturating_sub(unix_now()) < REFRESH_MARGIN_SECS => {
                 self.refresh_if(creds.epoch).await?;
-                self.snapshot()
+                self.snapshot(pin)
             }
             _ => Ok(creds),
         }
@@ -878,7 +941,7 @@ impl Session {
         body: Option<&serde_json::Value>,
     ) -> Result<crate::testing::RawReply, ApiError> {
         let call = self.raw_call(method, path, query, body)?;
-        let creds = self.inner.ensure_fresh().await?;
+        let creds = self.inner.ensure_fresh(None).await?;
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
         let reply = self
             .client()
@@ -968,11 +1031,27 @@ impl Client {
 
 impl AuthHook for SessionInner {
     fn prepare(&self) -> BoxFuture<'_, Result<AttemptCreds, ApiError>> {
-        Box::pin(self.ensure_fresh())
+        Box::pin(self.ensure_fresh(None))
     }
 
     fn rejected<'a>(&'a self, creds: &'a AttemptCreds) -> BoxFuture<'a, Result<(), ApiError>> {
         Box::pin(self.refresh_if(creds.epoch))
+    }
+}
+
+/// Session credentials for a company request pinned to scope `epoch`.
+struct PinnedAuth<'a> {
+    inner: &'a SessionInner,
+    epoch: u64,
+}
+
+impl AuthHook for PinnedAuth<'_> {
+    fn prepare(&self) -> BoxFuture<'_, Result<AttemptCreds, ApiError>> {
+        Box::pin(self.inner.ensure_fresh(Some(self.epoch)))
+    }
+
+    fn rejected<'a>(&'a self, creds: &'a AttemptCreds) -> BoxFuture<'a, Result<(), ApiError>> {
+        Box::pin(self.inner.refresh_if(creds.epoch))
     }
 }
 
@@ -1070,6 +1149,7 @@ pub(crate) mod tests {
                 }),
                 rotate: tokio::sync::Mutex::new(()),
             }),
+            pin: None,
         }
     }
 

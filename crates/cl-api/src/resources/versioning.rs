@@ -210,6 +210,8 @@ pub(crate) async fn update_guarded<T>(
 where
     T: DeserializeOwned + EditableFields,
 {
+    // The read, the probe and the write all belong to one company.
+    let session = &session.pinned();
     let mut call = Call::new(u.put.method(), u.put.route(), u.path.clone()).json_body(u.body);
     call.idempotency_key = Some(u.idempotency_key);
     let pre_image = match expected {

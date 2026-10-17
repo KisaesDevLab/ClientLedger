@@ -638,7 +638,9 @@ impl Transactions<'_> {
         opts: &PostingOptions,
         key: IdempotencyKey,
     ) -> Result<Versioned<Transaction>, ApiError> {
-        let body = posting_body(self.0, entry.to_value(), opts)?;
+        // One company for the stamp read, the probe and the write.
+        let s = &self.0.pinned();
+        let body = posting_body(s, entry.to_value(), opts)?;
         let matcher = OutcomeMatcher::Created {
             search: Search::JournalEntry {
                 date: entry.txn_date,
@@ -646,8 +648,8 @@ impl Transactions<'_> {
             fp: row_fp::<Transaction>,
             fingerprint: entry.fingerprint(),
         };
-        let probe = Probe::new(self.0, matcher, true).await;
-        common::create(self.0, &SPEC, body, key, Some(&probe)).await
+        let probe = Probe::new(s, matcher, true).await;
+        common::create(s, &SPEC, body, key, Some(&probe)).await
     }
 
     /// Replaces a journal entry if it is still at `expected` (§2.5). The
@@ -691,11 +693,13 @@ impl Transactions<'_> {
         opts: &PostingOptions,
         key: IdempotencyKey,
     ) -> Result<Versioned<Transaction>, ApiError> {
+        // One company for the stamp read, the probe and the write.
+        let s = &self.0.pinned();
         let reason = reason.trim();
         if reason.is_empty() {
             return Err(ApiError::Local(LocalValidation::MissingReason));
         }
-        let body = posting_body(self.0, json!({ "reason": reason }), opts)?;
+        let body = posting_body(s, json!({ "reason": reason }), opts)?;
         let path = format!("{}/{id}/void", SPEC.base);
         let matcher = OutcomeMatcher::Field {
             get: &TXN_GET,
@@ -704,10 +708,10 @@ impl Transactions<'_> {
             field: "status",
             value: Value::String("void".into()),
         };
-        let probe = Probe::new(self.0, matcher, true).await;
+        let probe = Probe::new(s, matcher, true).await;
         let mut call = Call::new(Method::Post, TXN_VOID.route(), path).json_body(body);
         call.idempotency_key = Some(key);
-        let reply = self.0.send(&TXN_VOID, call, Some(&probe)).await?;
+        let reply = s.send(&TXN_VOID, call, Some(&probe)).await?;
         versioned_from(&reply.body, SPEC.item_key)
     }
 }
