@@ -140,29 +140,25 @@ fn html_escape(s: &str) -> String {
 /// Stops the app this run started, and only that process.
 struct AppGuard {
     child: Child,
-    tmp: PathBuf,
+    /// Removed after the app is stopped (field drops follow `Drop::drop`).
+    _tmp: tempfile::TempDir,
 }
 
 impl Drop for AppGuard {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
-        let _ = std::fs::remove_dir_all(&self.tmp);
     }
 }
 
-fn make_private_dir() -> Result<PathBuf> {
-    // Under the user's temp folder (inside the profile on Windows, which the
-    // control file rules require).
-    let dir = std::env::temp_dir().join(format!("clientledger-ui-check-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).context("could not create the temporary folder")?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
-    }
-    Ok(dir)
+fn make_private_dir() -> Result<tempfile::TempDir> {
+    // Created atomically with a random name and owner-only permissions (0700
+    // on Unix). Under the user's temp folder, which on Windows is inside
+    // %LOCALAPPDATA%, as the control file rules require.
+    tempfile::Builder::new()
+        .prefix("clientledger-ui-check-")
+        .tempdir()
+        .context("could not create the temporary folder")
 }
 
 fn cli(control: &Path, args: &[&str]) -> Result<()> {
@@ -208,7 +204,8 @@ pub fn ui_check(args: &[String]) -> Result<()> {
     }
 
     let tmp = make_private_dir()?;
-    let control = tmp.join("control.json");
+    let tmp_path = tmp.path().to_path_buf();
+    let control = tmp_path.join("control.json");
     let (w, h) = if plan.compare {
         MOCKUP_SIZE
     } else {
@@ -217,7 +214,7 @@ pub fn ui_check(args: &[String]) -> Result<()> {
     let child = Command::new(exe("clientledger"))
         .arg("--demo")
         .arg("--data-dir")
-        .arg(tmp.join("data"))
+        .arg(tmp_path.join("data"))
         .arg("--control")
         .arg(&control)
         .args(["--theme", "light", "--size", &format!("{w}x{h}")])
@@ -225,10 +222,7 @@ pub fn ui_check(args: &[String]) -> Result<()> {
         .spawn()
         .context("could not start the app (is a display available?)")?;
     // From here on the guard stops exactly this process.
-    let _guard = AppGuard {
-        child,
-        tmp: tmp.clone(),
-    };
+    let _guard = AppGuard { child, _tmp: tmp };
 
     cli(&control, &["wait", "--timeout", "90"])?;
 
