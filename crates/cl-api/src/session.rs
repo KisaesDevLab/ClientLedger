@@ -14,6 +14,7 @@
 //!   session to a company tenant, after which company routes carry
 //!   `X-Company-Id`. Each switch bumps the scope epoch.
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -418,7 +419,14 @@ struct SessionInner {
     state: Mutex<AuthState>,
     /// Single-flight guard for every call that rotates the refresh token.
     rotate: tokio::sync::Mutex<()>,
+    /// Ids of records this session created, newest last (bounded). Outcome
+    /// reconciliation never takes one of them for a later identical save.
+    created: Mutex<VecDeque<String>>,
 }
+
+/// How many created ids a session remembers. Reconciliation only looks at
+/// rows created a few seconds before a save, so older ids never matter.
+const CREATED_MEMORY: usize = 4096;
 
 struct AuthState {
     access: Secret,
@@ -545,6 +553,7 @@ impl Session {
                     ended: false,
                 }),
                 rotate: tokio::sync::Mutex::new(()),
+                created: Mutex::new(VecDeque::new()),
             }),
             pin: None,
         })
@@ -579,6 +588,20 @@ impl Session {
     pub(crate) fn pin_moved(&self) -> bool {
         self.pin
             .is_some_and(|p| lock(&self.inner.state).scope_epoch != p.epoch)
+    }
+
+    /// Remembers a record this session created (from a create's answer).
+    pub(crate) fn remember_created(&self, id: &str) {
+        let mut ids = lock(&self.inner.created);
+        if ids.len() >= CREATED_MEMORY {
+            ids.pop_front();
+        }
+        ids.push_back(id.to_string());
+    }
+
+    /// This session created the record `id`.
+    pub(crate) fn created_here(&self, id: &str) -> bool {
+        lock(&self.inner.created).iter().any(|c| c == id)
     }
 
     /// The client this session belongs to.
@@ -1149,6 +1172,7 @@ pub(crate) mod tests {
                     ended: false,
                 }),
                 rotate: tokio::sync::Mutex::new(()),
+                created: Mutex::new(VecDeque::new()),
             }),
             pin: None,
         }

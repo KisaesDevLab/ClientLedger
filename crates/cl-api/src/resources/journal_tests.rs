@@ -579,6 +579,18 @@ async fn master_data_create_is_found_by_exact_name_and_delete_by_absence() {
         .respond_with(ResponseTemplate::new(500))
         .mount(&server)
         .await;
+    // The single match is read by id: its full record is the answer.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tags/5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01"))
+        .respond_with(json(
+            200,
+            r#"{"tag":{"id":"5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","name":"Canary Job",
+               "color":null,"groupId":null,"description":"read by id","isActive":true}}"#,
+        ))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
     Mock::given(method("GET"))
         .and(path_regex("^/api/v1/tags/.+"))
         .respond_with(json(404, r#"{"error":{"message":"Tag not found"}}"#))
@@ -596,6 +608,11 @@ async fn master_data_create_is_found_by_exact_name_and_delete_by_absence() {
         .await
         .expect("committed");
     assert_eq!(tag.record.fields.name, "Canary Job");
+    assert_eq!(
+        tag.record.fields.description.as_deref(),
+        Some("read by id"),
+        "the record, not the list row"
+    );
     assert_eq!(requests(&server, "POST").await.len(), 1);
     let search = requests(&server, "GET").await;
     assert_eq!(
@@ -841,4 +858,61 @@ async fn a_saved_entry_the_client_cannot_read_is_saved_reload_not_internal() {
     assert_eq!(msg.key, "error.api.saved_unreadable");
     assert_eq!(msg.suggestion_key, Some("fix.api.reload_to_see"));
     assert_eq!(requests(&server, "POST").await.len(), 1, "never re-sent");
+}
+
+#[tokio::test]
+async fn an_earlier_identical_entry_of_ours_is_never_claimed_as_this_one() {
+    let server = MockServer::start().await;
+    stamp(&server, 1, None).await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(json(201, &wrapped(T1, "posted")))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    list_rows(&server, &[txn(T1, "posted", "2199-01-01T00:00:00.000Z")]).await;
+    get_txn(&server, T1, "posted").await;
+    let (s, _) = session(&server);
+    let tx = s.transactions();
+    let first = tx
+        .create_journal_entry(&entry(), &PostingOptions::default(), IdempotencyKey::new())
+        .await
+        .expect("first saved");
+    assert_eq!(first.record.id.to_string(), T1);
+    let e = tx
+        .create_journal_entry(&entry(), &PostingOptions::default(), IdempotencyKey::new())
+        .await
+        .expect_err("second is not the first");
+    assert!(matches!(e, ApiError::OutcomeUnknown { .. }), "{e:?}");
+    assert_eq!(requests(&server, "POST").await.len(), 2, "never re-sent");
+}
+
+#[tokio::test]
+async fn a_candidate_id_that_is_not_an_id_is_never_put_in_a_path() {
+    let server = MockServer::start().await;
+    stamp(&server, 1, None).await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let bad = txn(T1, "posted", "2199-01-01T00:00:00.000Z").replacen(T1, "../../admin", 1);
+    list_rows(&server, &[bad]).await;
+    let (s, _) = session(&server);
+    let e = s
+        .transactions()
+        .create_journal_entry(&entry(), &PostingOptions::default(), IdempotencyKey::new())
+        .await
+        .expect_err("unknown");
+    assert!(matches!(e, ApiError::OutcomeUnknown { .. }), "{e:?}");
+    let gets = requests(&server, "GET").await;
+    assert!(
+        gets.iter().all(|r| !r.url.path().contains("admin")),
+        "no request built from the raw id"
+    );
 }

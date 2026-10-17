@@ -18,10 +18,16 @@
 //! because the engine normalised a field) makes the outcome unresolved,
 //! so a normalisation mismatch can never cause a duplicate.
 //!
+//! Records this session created itself are never candidates, so an
+//! earlier identical save of ours is not mistaken for this one. A single
+//! match is read back by id (journal entries and master data alike), and
+//! a candidate id that does not parse as an id is never put into a path.
+//!
 //! Only the outcome class is logged: no names, amounts or fingerprints.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use cl_core::ids::TransactionId;
 use cl_core::{CalendarDate, Timestamp};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -313,6 +319,14 @@ impl Probe {
         created.is_none_or(|c| c.unix_millis() >= self.sent_at_ms - CREATED_SLACK_MS)
     }
 
+    /// The row is not a record this session created itself: an earlier
+    /// save of ours with the same fields is never mistaken for this one.
+    fn not_ours_before(&self, row: &Value) -> bool {
+        row.get("id")
+            .and_then(Value::as_str)
+            .is_none_or(|id| !self.session.created_here(id))
+    }
+
     async fn created(
         &self,
         search: &Search,
@@ -331,11 +345,23 @@ impl Probe {
                 let Some(rows) = self.search_rows(&TXNS_LIST, "data", &q).await else {
                     return Check::Wait;
                 };
-                let ids: Vec<String> = rows
+                let rows: Vec<&Value> = rows
                     .iter()
-                    .filter(|r| self.recent(r))
-                    .filter_map(|r| r.get("id").and_then(Value::as_str).map(str::to_string))
+                    .filter(|r| self.recent(r) && self.not_ours_before(r))
                     .collect();
+                // An id that is not a transaction id is never put into a
+                // path; the outcome stays open instead.
+                let Some(ids) = rows
+                    .iter()
+                    .map(|r| {
+                        r.get("id")
+                            .and_then(Value::as_str)
+                            .and_then(|s| TransactionId::parse(s).ok())
+                    })
+                    .collect::<Option<Vec<TransactionId>>>()
+                else {
+                    return Check::Final(Reconciled::Unresolved);
+                };
                 let mut found = Vec::new();
                 for id in &ids {
                     let path = format!("/api/v1/transactions/{id}");
@@ -361,19 +387,33 @@ impl Probe {
                 let cands: Vec<Value> = rows
                     .into_iter()
                     .filter(|r| r.get(*name_field).and_then(Value::as_str) == Some(name.as_str()))
-                    .filter(|r| self.recent(r))
+                    .filter(|r| self.recent(r) && self.not_ours_before(r))
                     .collect();
                 let n = cands.len();
-                let found = cands
+                let ids: Vec<Option<uuid::Uuid>> = cands
                     .into_iter()
                     .filter(|r| fp(r.clone()).as_ref() == Some(fingerprint))
-                    .filter_map(|r| {
-                        let mut wrapper = serde_json::Map::new();
-                        wrapper.insert(spec.item_key.to_string(), r);
-                        serde_json::to_vec(&Value::Object(wrapper)).ok()
+                    .map(|r| {
+                        r.get("id")
+                            .and_then(Value::as_str)
+                            .and_then(|s| cl_core::ids::parse_uuid(s).ok())
                     })
-                    .map(|b| synth(b, generation))
                     .collect();
+                let mut found = Vec::new();
+                match ids.as_slice() {
+                    // Exactly one: read the record itself (as the journal
+                    // path does); a list row may not carry every field.
+                    [Some(id)] => {
+                        let Ok(reply) = self.get(spec.get, &spec.path(&id.to_string())).await
+                        else {
+                            return Check::Wait;
+                        };
+                        found.push(reply);
+                    }
+                    [None] => return Check::Final(Reconciled::Unresolved),
+                    // None or several: only the count matters below.
+                    _ => found.extend(ids.iter().map(|_| synth(Vec::new(), generation))),
+                }
                 (n, found)
             }
         };

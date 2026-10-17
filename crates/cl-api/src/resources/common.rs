@@ -143,7 +143,22 @@ pub(crate) async fn create<T: DeserializeOwned + EditableFields>(
     let mut call = Call::at(Method::Post, spec.create.route()).json_body(body);
     call.idempotency_key = Some(key);
     let reply = s.send(spec.create, call, rec).await?;
+    remember_created(s, &reply.body, spec.item_key);
     saved_from(&reply.body, spec.item_key)
+}
+
+/// Records the id of a record this session just created, so a later
+/// identical save's reconciliation never claims it.
+fn remember_created(s: &Session, body: &[u8], key: &str) {
+    let id = serde_json::from_slice::<Value>(body).ok().and_then(|v| {
+        v.get(key)
+            .and_then(|r| r.get("id"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    });
+    if let Some(id) = id {
+        s.remember_created(&id);
+    }
 }
 
 /// A guarded master-data update; the requested fingerprint is the update
