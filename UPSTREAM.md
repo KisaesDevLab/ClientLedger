@@ -6,10 +6,10 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 
 | ID | Change | Needed by | Branch | Status |
 | --- | --- | --- | --- | --- |
-| U-01 | Queue abstraction with pg-boss adapter (desktop) alongside BullMQ (server) | P02 | clientledger/desktop-profile | Planned |
-| U-02 | `CL_MODE=desktop` profile: no Redis (also no `REDIS_URL` requirement in `env.ts`; `/health` must return 200 without it, Q-P01a), env-provided bind address and launch token (`X-CL-Token`), file logging | P02 | clientledger/desktop-mode (E1) | Done (branch), pushed; PR not yet opened (see entry) |
-| U-03 | Connectivity reporting on `/health` plus an `engineCommit` field (Q-P01a); online-only modules return `OfflineUnavailable` fast | P02 | clientledger/desktop-mode (E1: `/health` v2) + clientledger/offline-guard (E4: connectivity) | Done (branch) — E1 `/health` v2; E4 at `abc0293b` (incl. security-review fixes), local only, not pushed, no PR yet |
-| U-04 | OpenAPI 3.1 export covering all UI routes; committed `openapi.json` | P02 | clientledger/desktop-profile | Planned |
+| U-01 | Queue abstraction with pg-boss adapter (desktop) alongside BullMQ (server) | P02 | clientledger/desktop-profile | Merged (engine main, PR #148, 81653c42) |
+| U-02 | `CL_MODE=desktop` profile: no Redis (also no `REDIS_URL` requirement in `env.ts`; `/health` must return 200 without it, Q-P01a), env-provided bind address and launch token (`X-CL-Token`), file logging | P02 | clientledger/desktop-mode (E1) | Merged (engine main, PR #147, 86b30131) |
+| U-03 | Connectivity reporting on `/health` plus an `engineCommit` field (Q-P01a); online-only modules return `OfflineUnavailable` fast | P02 | clientledger/desktop-mode (E1: `/health` v2) + clientledger/offline-guard (E4: connectivity) | Merged (engine main, PRs #147 health + #149 offline guard, 850e43d2) |
+| U-04 | OpenAPI 3.1 export covering all UI routes; committed `openapi.json` | P02 | clientledger/desktop-profile | Merged (engine main, PR #146, c0ab784a); desktop pieces in the same PR |
 | U-05 | Tenant lifecycle (list/create/rename/delete) and versioned per-tenant export/import (NDJSON + attachments + manifest) for backups, restores, and transfers | P02, P08 | clientledger/tenant-portability | Planned |
 | U-06 | Endpoint accepting normalized bank-import batches (rows, dedupe keys, source-file hash) into the review queue; parsing is in Rust (Q-11) | P25 | clientledger/bank-import | Planned |
 | U-07 | Desktop-mode adjustments to the QBD report-export importer (file paths, progress events, tie-out endpoint); report list and mapping unchanged | P31 | clientledger/qbd-import | Planned |
