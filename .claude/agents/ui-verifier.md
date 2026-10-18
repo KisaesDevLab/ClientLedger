@@ -2,7 +2,7 @@
 name: ui-verifier
 description: Verifies a finished screen through the control channel — runs cargo xtask ui-check, inspects the widget tree, looks at light and dark screenshots against docs/DESIGN.md (tokens, layout, keyboard map, accessibility), and reports discrepancies. Use before closing any phase that adds or changes a screen.
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: opus
 effort: medium
 maxTurns: 60
 color: orange

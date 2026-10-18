@@ -2,7 +2,7 @@
 name: engine-scout
 description: Runs the engine capability check for a phase. Reads engine/openapi.json and engine source to report which endpoints, fields, and behaviors a screen needs already exist, which are partial, and which are missing. Use at the start of every engine-dependent phase.
 tools: Read, Grep, Glob
-model: sonnet
+model: opus
 effort: medium
 maxTurns: 40
 color: cyan
