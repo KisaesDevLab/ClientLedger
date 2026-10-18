@@ -166,6 +166,9 @@ pub struct Shell {
     return_after_prompt: Option<WindowId>,
     /// File > Close Company is waiting for a close prompt to be answered.
     close_company_after_prompt: bool,
+    /// Remembered grid column widths (`grid-widths.json`), shared with the
+    /// grid screens through the egui context.
+    widths: crate::grid_env::WidthsHandle,
 }
 
 impl Shell {
@@ -197,7 +200,14 @@ impl Shell {
                 Arc::new(CompanyLink::demo(&dir))
             })
         });
+        let widths = crate::grid_env::WidthsHandle::default();
+        if let Some(store) = &options.store
+            && let Ok(mut w) = widths.lock()
+        {
+            w.book = store.load_grid_widths();
+        }
         let mut shell = Shell {
+            widths,
             prefs,
             store: options.store,
             company_key: if options.company_key.is_empty() {
@@ -726,6 +736,7 @@ impl Shell {
 
     fn finish_quit(&mut self, ctx: Option<&Context>) {
         self.save_layout();
+        self.flush_widths(None);
         self.allow_close = true;
         if let Some(ctx) = ctx {
             ctx.send_viewport_cmd(ViewportCommand::Close);
@@ -840,6 +851,7 @@ impl Shell {
         let tokens = Tokens::of(&ctx);
 
         self.apply_company_events(Some(&ctx));
+        self.publish_grid_facts(&ctx, egui::ViewportId::ROOT);
         title_bar::show(ui, self, narrow, &tokens);
         menu::show(ui, self, narrow, &tokens);
         status_bar::show(ui, self, narrow, &tokens);
@@ -861,8 +873,42 @@ impl Shell {
         }
         self.apply_company_events(Some(&ctx));
         self.save_layout();
+        let now = ctx.input(|i| i.time);
+        self.flush_widths(Some(now));
+        if self.widths.lock().is_ok_and(|w| w.changed_at.is_some()) {
+            ctx.request_repaint_after(Duration::from_millis(1100));
+        }
         if self.toast.is_some() {
             ctx.request_repaint_after(Duration::from_millis(500));
+        }
+    }
+
+    /// Tell the grid screens of `viewport` today's date, the formats and
+    /// whether a modal is open, and share the remembered column widths.
+    fn publish_grid_facts(&self, ctx: &Context, viewport: egui::ViewportId) {
+        let frame = crate::grid_env::ShellFrame::new(self.today, &self.prefs, self.modal_open());
+        crate::grid_env::publish(ctx, viewport, frame);
+        crate::grid_env::publish_widths(ctx, &self.widths);
+    }
+
+    /// Write changed column widths a second after the last change (`now`
+    /// in egui seconds), or at once with `None` (quitting). Never during a
+    /// controlled run.
+    fn flush_widths(&mut self, now: Option<f64>) {
+        let Some(store) = self.store.as_ref().filter(|_| !self.run_only) else {
+            return;
+        };
+        let Ok(mut w) = self.widths.lock() else {
+            return;
+        };
+        let due = w
+            .changed_at
+            .is_some_and(|at| now.is_none_or(|n| n - at >= 1.0));
+        if due {
+            w.changed_at = None;
+            if let Err(e) = store.save_grid_widths(&w.book) {
+                tracing::warn!(error = %e, "could not save column widths");
+            }
         }
     }
 

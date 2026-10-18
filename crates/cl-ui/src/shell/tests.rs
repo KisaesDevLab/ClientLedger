@@ -360,6 +360,56 @@ fn popped_out_windows_get_their_own_viewport_and_dock_back() {
 }
 
 #[test]
+fn column_widths_are_written_a_second_after_a_change_and_never_when_controlled() {
+    for controlled in [false, true] {
+        let dir = std::env::temp_dir().join(format!(
+            "cl-ui-shell-widths-{controlled}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = crate::prefs::UiStore::new(&dir);
+        let mut shell = Shell::new(ShellOptions {
+            store: Some(store.clone()),
+            ..ShellOptions::default()
+        });
+        shell.set_run_only(controlled);
+        let ctx = context();
+        let at = |ctx: &egui::Context, shell: &mut Shell, time: f64| {
+            let mut raw = input(WIDE, vec![]);
+            raw.time = Some(time);
+            let mut out = ctx.run_ui(raw, |ui| shell.ui(ui));
+            out.textures_delta.clear();
+        };
+        at(&ctx, &mut shell, 0.0);
+        crate::grid_env::store_widths(&ctx, "a/lines", &[(cl_grid::ColumnId(1), 150)]);
+        at(&ctx, &mut shell, 0.5);
+        let path = dir.join(crate::prefs::GridWidths::FILE);
+        assert!(!path.exists(), "debounced");
+        at(&ctx, &mut shell, 1.6);
+        assert_eq!(path.exists(), !controlled, "controlled = {controlled}");
+        if !controlled {
+            assert_eq!(
+                store.load_grid_widths().get("a/lines"),
+                Some(vec![(cl_grid::ColumnId(1), 150)])
+            );
+            let again = Shell::new(ShellOptions {
+                store: Some(store),
+                ..ShellOptions::default()
+            });
+            let ctx2 = context();
+            let mut again = again;
+            settle(&ctx2, &mut again, WIDE);
+            assert_eq!(
+                crate::grid_env::load_widths(&ctx2, "a/lines"),
+                Some(vec![(cl_grid::ColumnId(1), 150)]),
+                "loaded at start"
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
 fn layout_is_remembered_per_company() {
     let dir = std::env::temp_dir().join(format!("cl-ui-shell-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

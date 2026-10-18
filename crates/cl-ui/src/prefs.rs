@@ -73,6 +73,174 @@ impl UiStore {
     }
 }
 
+/// Column widths the owner set by dragging, per screen and grid, kept in
+/// their own file so a bad entry never touches the preferences (P10 plan
+/// §2.13, Q-P10k). Keys look like `dev.grid_demo/lines`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GridWidths {
+    /// Least recently set first.
+    entries: Vec<(String, Vec<(u16, u16)>)>,
+}
+
+impl GridWidths {
+    /// The file under the UI store folder.
+    pub const FILE: &'static str = "grid-widths.json";
+    /// File format version.
+    pub const VERSION: u64 = 1;
+    /// Most grids remembered; setting one more forgets the oldest.
+    pub const MAX_GRIDS: usize = 200;
+    /// Most columns per grid.
+    pub const MAX_COLUMNS: usize = 64;
+    /// Longest grid key.
+    pub const MAX_KEY: usize = 96;
+    /// Narrowest and widest width kept, in points.
+    pub const WIDTH_RANGE: std::ops::RangeInclusive<u16> = 8..=4000;
+
+    fn key_ok(key: &str) -> bool {
+        !key.is_empty()
+            && key.len() <= Self::MAX_KEY
+            && !key.contains("..")
+            && key
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+    }
+
+    fn entry_from(value: &serde_json::Value) -> Option<Vec<(u16, u16)>> {
+        let list = value.as_array()?;
+        if list.len() > Self::MAX_COLUMNS {
+            return None;
+        }
+        let mut out: Vec<(u16, u16)> = Vec::with_capacity(list.len());
+        for pair in list {
+            let pair = pair.as_array()?;
+            let [col, width] = pair.as_slice() else {
+                return None;
+            };
+            let col = u16::try_from(col.as_u64()?).ok()?;
+            let width = u16::try_from(width.as_u64()?).ok()?;
+            if !Self::WIDTH_RANGE.contains(&width) || out.iter().any(|(c, _)| *c == col) {
+                return None;
+            }
+            out.push((col, width));
+        }
+        Some(out)
+    }
+
+    /// Read the file's text. Each grid's entry is checked on its own: an
+    /// entry that is malformed is dropped and the others are kept. Text that
+    /// is not the expected JSON at all gives an empty set.
+    #[must_use]
+    pub fn parse(text: &str) -> GridWidths {
+        let mut out = GridWidths::default();
+        let Ok(serde_json::Value::Object(root)) = serde_json::from_str::<serde_json::Value>(text)
+        else {
+            return out;
+        };
+        if root.get("version").and_then(serde_json::Value::as_u64) != Some(Self::VERSION) {
+            return out;
+        }
+        let Some(serde_json::Value::Object(grids)) = root.get("grids") else {
+            return out;
+        };
+        for (key, value) in grids {
+            if out.entries.len() >= Self::MAX_GRIDS {
+                break;
+            }
+            if Self::key_ok(key)
+                && let Some(widths) = Self::entry_from(value)
+            {
+                out.entries.push((key.clone(), widths));
+            }
+        }
+        out
+    }
+
+    /// The file's text.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let grids: serde_json::Map<String, serde_json::Value> = self
+            .entries
+            .iter()
+            .map(|(k, w)| (k.clone(), serde_json::json!(w)))
+            .collect();
+        serde_json::to_string_pretty(&serde_json::json!({
+            "version": Self::VERSION,
+            "grids": grids,
+        }))
+        .unwrap_or_default()
+    }
+
+    /// The widths remembered for a grid.
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<Vec<(cl_grid::ColumnId, u16)>> {
+        self.entries.iter().find(|(k, _)| k == key).map(|(_, w)| {
+            w.iter()
+                .map(|(c, px)| (cl_grid::ColumnId(*c), *px))
+                .collect()
+        })
+    }
+
+    /// Remember a grid's widths. Widths out of range, repeated columns and
+    /// columns past the cap are not kept, and a key that could not be read
+    /// back is refused. Returns false when nothing changed.
+    pub fn set(&mut self, key: &str, widths: &[(cl_grid::ColumnId, u16)]) -> bool {
+        if !Self::key_ok(key) {
+            return false;
+        }
+        let mut list: Vec<(u16, u16)> = Vec::new();
+        for (c, w) in widths {
+            if list.len() == Self::MAX_COLUMNS {
+                break;
+            }
+            if Self::WIDTH_RANGE.contains(w) && list.iter().all(|(id, _)| *id != c.0) {
+                list.push((c.0, *w));
+            }
+        }
+        if self.entries.iter().any(|(k, w)| k == key && *w == list) {
+            return false;
+        }
+        self.entries.retain(|(k, _)| k != key);
+        self.entries.push((key.to_string(), list));
+        while self.entries.len() > Self::MAX_GRIDS {
+            self.entries.remove(0);
+        }
+        true
+    }
+
+    /// How many grids are remembered.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// True when no grid is remembered.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+impl UiStore {
+    fn widths_path(&self) -> PathBuf {
+        self.dir.join(GridWidths::FILE)
+    }
+
+    /// Load remembered column widths (empty when missing, oversized or
+    /// unreadable; never touches `ui-prefs.json`).
+    #[must_use]
+    pub fn load_grid_widths(&self) -> GridWidths {
+        read_capped(&self.widths_path()).map_or_else(GridWidths::default, |t| GridWidths::parse(&t))
+    }
+
+    /// Save column widths.
+    ///
+    /// # Errors
+    /// Any file error.
+    pub fn save_grid_widths(&self, widths: &GridWidths) -> io::Result<()> {
+        write_atomic(&self.widths_path(), &widths.to_text())
+    }
+}
+
 /// A 16-digit hex name for a company key (FNV-1a, 64 bit). Layout files are
 /// named by this hash, so no company id can influence a path, and two ids
 /// that `safe_name` would have merged get separate files.
@@ -242,6 +410,106 @@ mod tests {
             .collect();
         assert_eq!(names, ["ui-prefs.json"]);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn widths(pairs: &[(u16, u16)]) -> Vec<(cl_grid::ColumnId, u16)> {
+        pairs
+            .iter()
+            .map(|(c, w)| (cl_grid::ColumnId(*c), *w))
+            .collect()
+    }
+
+    /// T19 (S12, A19).
+    #[test]
+    fn grid_widths_survive_preferences_save() {
+        let dir = temp_dir("widths");
+        let store = UiStore::new(&dir);
+        let mut book = store.load_grid_widths();
+        assert!(book.is_empty());
+        assert!(book.set("dev.grid_demo/lines", &widths(&[(1, 180), (2, 96)])));
+        store.save_grid_widths(&book).unwrap();
+        // A Preferences save writes ui-prefs.json only.
+        let p = UiPrefs {
+            zoom_percent: 150,
+            ..UiPrefs::default()
+        };
+        store.save_prefs(&p).unwrap();
+        assert_eq!(
+            store.load_grid_widths().get("dev.grid_demo/lines"),
+            Some(widths(&[(1, 180), (2, 96)]))
+        );
+        assert_eq!(store.load_prefs(), p);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_corrupt_width_entry_drops_only_itself() {
+        let text = r#"{"version":1,"grids":{
+            "a/lines":[[1,120],[2,80]],
+            "b/lines":[[1,"wide"]],
+            "c/lines":[[1,120,3]],
+            "d/lines":[[1,0]],
+            "e/lines":[[1,90],[1,95]],
+            "../x":[[1,90]],
+            "f/lines":[]
+        }}"#;
+        let book = GridWidths::parse(text);
+        assert_eq!(book.get("a/lines"), Some(widths(&[(1, 120), (2, 80)])));
+        assert_eq!(book.get("f/lines"), Some(Vec::new()));
+        for bad in ["b/lines", "c/lines", "d/lines", "e/lines", "../x"] {
+            assert_eq!(book.get(bad), None, "{bad}");
+        }
+        assert_eq!(book.len(), 2);
+        assert!(GridWidths::parse("not json").is_empty());
+        assert!(GridWidths::parse(r#"{"version":2,"grids":{"a":[[1,9]]}}"#).is_empty());
+        assert_eq!(GridWidths::parse(&book.to_text()), book);
+    }
+
+    #[test]
+    fn a_corrupt_widths_file_leaves_preferences_intact() {
+        let dir = temp_dir("widths-corrupt");
+        let store = UiStore::new(&dir);
+        let p = UiPrefs {
+            theme: ThemeChoice::Dark,
+            ..UiPrefs::default()
+        };
+        store.save_prefs(&p).unwrap();
+        let prefs_text = std::fs::read(dir.join("ui-prefs.json")).unwrap();
+        std::fs::write(dir.join(GridWidths::FILE), b"\xff\xfe{{{").unwrap();
+        assert!(store.load_grid_widths().is_empty());
+        let mut book = store.load_grid_widths();
+        book.set("a/lines", &widths(&[(1, 100)]));
+        store.save_grid_widths(&book).unwrap();
+        assert_eq!(
+            std::fs::read(dir.join("ui-prefs.json")).unwrap(),
+            prefs_text
+        );
+        assert_eq!(store.load_prefs(), p);
+        assert_eq!(
+            store.load_grid_widths().get("a/lines"),
+            Some(widths(&[(1, 100)]))
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn width_book_is_capped() {
+        let mut book = GridWidths::default();
+        let many: Vec<(cl_grid::ColumnId, u16)> =
+            (0..100).map(|c| (cl_grid::ColumnId(c), 50)).collect();
+        assert!(book.set("big", &many));
+        assert_eq!(
+            book.get("big").map(|w| w.len()),
+            Some(GridWidths::MAX_COLUMNS)
+        );
+        assert!(!book.set("big", &many), "unchanged widths are not a change");
+        for i in 0..=GridWidths::MAX_GRIDS {
+            book.set(&format!("g{i}"), &widths(&[(1, 60)]));
+        }
+        assert_eq!(book.len(), GridWidths::MAX_GRIDS);
+        assert_eq!(book.get("big"), None, "the oldest grid is forgotten");
+        assert!(!book.set("bad key!", &widths(&[(1, 60)])));
+        assert!(book.to_text().len() < usize::try_from(MAX_READ).unwrap());
     }
 
     #[test]
