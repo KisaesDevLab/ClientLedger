@@ -26,6 +26,9 @@ pub enum SelectionMode {
 pub struct Selection {
     keys: BTreeSet<RowKey>,
     anchor: Option<RowKey>,
+    /// Keys the current Shift extension added (not selected before it), so
+    /// the next extension from the same anchor can replace the range.
+    range: BTreeSet<RowKey>,
 }
 
 impl Selection {
@@ -64,9 +67,19 @@ impl Selection {
         self.anchor
     }
 
+    /// Set the Shift anchor when there is none (the cursor row before a
+    /// Shift move), so the range starts where the owner was.
+    pub fn anchor_if_none(&mut self, key: RowKey) {
+        if self.anchor.is_none() {
+            self.anchor = Some(key);
+            self.range.clear();
+        }
+    }
+
     /// Clear; true when something was selected.
     pub fn clear(&mut self) -> bool {
         self.anchor = None;
+        self.range.clear();
         let had = !self.keys.is_empty();
         self.keys.clear();
         had
@@ -77,6 +90,7 @@ impl Selection {
         self.keys.clear();
         self.keys.insert(key);
         self.anchor = Some(key);
+        self.range.clear();
     }
 
     /// Space or Ctrl+click: toggle one row and make it the anchor.
@@ -95,13 +109,17 @@ impl Selection {
                     self.keys.insert(key);
                 }
                 self.anchor = Some(key);
+                self.range.clear();
             }
         }
     }
 
     /// Shift+click or Shift+arrow: select from the anchor to `to`, through
-    /// the model's current order. The range stops at the first row that is
-    /// not loaded. Without an anchor (or in Single mode) it selects `to`.
+    /// the model's current order. The range the previous extension from the
+    /// same anchor added is replaced, so it grows and shrinks. The range
+    /// stops at the first row that is not loaded. Without an anchor (or in
+    /// Single mode) it selects `to` and makes it the anchor; it never
+    /// deselects rows selected before the extension.
     pub fn extend_to(&mut self, model: &dyn RowModel, to: RowKey, mode: SelectionMode) {
         if mode != SelectionMode::Multi {
             if mode == SelectionMode::Single {
@@ -109,19 +127,28 @@ impl Selection {
             }
             return;
         }
-        let (Some(anchor), Some(end)) = (self.anchor, model.index_of(to)) else {
-            self.toggle(to, mode);
+        let Some(end) = model.index_of(to) else {
             return;
         };
-        let Some(start) = model.index_of(anchor) else {
-            self.toggle(to, mode);
+        let start = self.anchor.and_then(|a| model.index_of(a));
+        let Some(start) = start else {
+            self.anchor = Some(to);
+            self.range.clear();
+            if self.keys.insert(to) {
+                self.range.insert(to);
+            }
             return;
         };
+        for k in std::mem::take(&mut self.range) {
+            self.keys.remove(&k);
+        }
         let step: isize = if end >= start { 1 } else { -1 };
         let mut i = start;
         // A row that is not loaded ends the range.
         while let Some(k) = model.row_key(i) {
-            self.keys.insert(k);
+            if self.keys.insert(k) {
+                self.range.insert(k);
+            }
             if i == end {
                 break;
             }
@@ -137,6 +164,7 @@ impl Selection {
     pub fn retain_existing(&mut self, model: &dyn RowModel) -> bool {
         let before = self.keys.len();
         self.keys.retain(|k| model.index_of(*k).is_some());
+        self.range.retain(|k| model.index_of(*k).is_some());
         if self.anchor.is_some_and(|a| model.index_of(a).is_none()) {
             self.anchor = None;
         }

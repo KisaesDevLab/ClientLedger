@@ -1374,6 +1374,9 @@ impl Core {
                 |c| c.col,
             );
             if let Some(t) = Self::row_at(model, target, col) {
+                if extend && let Some(from) = core.cursor {
+                    core.selection.anchor_if_none(from.row);
+                }
                 core.move_to(t, model, fmt, fx);
                 if extend {
                     core.selection.extend_to(model.rows(), t.row, mode);
@@ -1559,6 +1562,12 @@ impl Core {
         let mut fx = Effects::handled();
         self.focused = true;
         if !self.spec.editable {
+            if mods.shift
+                && !mods.ctrl
+                && let Some(from) = self.cursor
+            {
+                self.selection.anchor_if_none(from.row);
+            }
             self.move_to(pos, model, fmt, &mut fx);
             let sel_mode = self.spec.selection;
             if mods.ctrl {

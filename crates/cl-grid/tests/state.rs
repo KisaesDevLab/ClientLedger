@@ -821,3 +821,54 @@ fn browse_navigation_selection_and_events() {
     assert_eq!(fx.leave, Some(false));
     assert!(b.core.edit().is_none(), "Browse never edits");
 }
+
+proptest::proptest! {
+    /// S3: Shift+Down n times then Shift+Up m times selects exactly the
+    /// rows between the starting row and the cursor: |n - m| + 1 of them.
+    #[test]
+    fn shift_ranges_grow_and_shrink(start in 0usize..10, n in 0usize..20, m in 0usize..20) {
+        proptest::prop_assume!(n + m > 0);
+        let mut b = Browse::new(60);
+        for _ in 0..(20 + start) {
+            b.go(GridInput::Key(GridKey::Down, Mods::NONE));
+        }
+        let origin = b.row();
+        for _ in 0..n {
+            b.go(GridInput::Key(GridKey::Down, Mods::SHIFT));
+        }
+        for _ in 0..m {
+            b.go(GridInput::Key(GridKey::Up, Mods::SHIFT));
+        }
+        proptest::prop_assert_eq!(b.core.selection().len(), n.abs_diff(m) + 1);
+        let cursor = b.row();
+        let (lo, hi) = (origin.min(cursor), origin.max(cursor));
+        for k in lo..=hi {
+            proptest::prop_assert!(b.core.selection().contains(RowKey(k)));
+        }
+    }
+}
+
+/// S3: a Shift extension never deselects rows chosen before it, and a
+/// Shift+click with no anchor starts the range at the cursor row.
+#[test]
+fn shift_extension_keeps_earlier_picks() {
+    let mut b = Browse::new(30);
+    b.go(GridInput::Key(GridKey::Space, Mods::NONE)); // row 1, anchor 1
+    for _ in 0..4 {
+        b.go(GridInput::Key(GridKey::Down, Mods::NONE));
+    }
+    b.go(GridInput::Key(GridKey::Space, Mods::NONE)); // row 5, anchor 5
+    b.go(GridInput::Key(GridKey::Up, Mods::SHIFT));
+    b.go(GridInput::Key(GridKey::Up, Mods::SHIFT)); // 3..=5
+    b.go(GridInput::Key(GridKey::Down, Mods::SHIFT)); // 4..=5
+    let got: Vec<u64> = b.core.selection().iter().map(|k| k.0).collect();
+    assert_eq!(got, [1, 4, 5]);
+    // No anchor: Shift+Down from row 10 selects rows 10 and 11.
+    let mut c = Browse::new(30);
+    for _ in 0..9 {
+        c.go(GridInput::Key(GridKey::Down, Mods::NONE));
+    }
+    c.go(GridInput::Key(GridKey::Down, Mods::SHIFT));
+    let got: Vec<u64> = c.core.selection().iter().map(|k| k.0).collect();
+    assert_eq!(got, [10, 11]);
+}

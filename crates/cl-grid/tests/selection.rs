@@ -72,6 +72,19 @@ proptest! {
     }
 }
 
+proptest! {
+    /// S3: extending from the same anchor replaces the previous range.
+    #[test]
+    fn extending_again_replaces_the_range(a in 0usize..30, b in 0usize..30, c in 0usize..30) {
+        let m = KeysModel::with_keys(30);
+        let mut sel = Selection::new();
+        sel.anchor_if_none(m.row_key(a).unwrap());
+        sel.extend_to(&m, m.row_key(b).unwrap(), SelectionMode::Multi);
+        sel.extend_to(&m, m.row_key(c).unwrap(), SelectionMode::Multi);
+        prop_assert_eq!(sel.len(), a.abs_diff(c) + 1);
+    }
+}
+
 #[test]
 fn shift_range_stops_at_rows_not_loaded() {
     let mut m = KeysModel::with_keys(10);
