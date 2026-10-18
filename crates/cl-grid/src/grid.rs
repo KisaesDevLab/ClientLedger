@@ -28,6 +28,7 @@ use crate::core::spec::{GridCommand, GridEvent, GridSpec, Handled, SpecError};
 use crate::core::state::{Core, Effects};
 use crate::core::viewport::{Heights, RowAlign, Viewport};
 use crate::sequencer;
+use crate::view::a11y::{self, CellInfo, Request, RowInfo, ak_rect};
 use crate::view::input::{self, CursorInfo};
 use crate::view::layout::ColumnLayout;
 use crate::view::overlay::{PopupHit, PopupView};
@@ -147,6 +148,8 @@ pub struct Grid {
     seen_rev: Option<u64>,
     ime_active: bool,
     cells: Vec<(Id, CellPos)>,
+    /// Row nodes drawn last frame (AccessKit `ScrollIntoView` targets).
+    row_nodes: Vec<(Id, RowKey)>,
     rows_drawn: usize,
     row_unit: Option<u64>,
     note_unit: u64,
@@ -214,6 +217,7 @@ impl Grid {
             seen_rev: None,
             ime_active: false,
             cells: Vec::new(),
+            row_nodes: Vec::new(),
             rows_drawn: 0,
             row_unit: None,
             note_unit: units(18.0),
@@ -593,6 +597,61 @@ impl Grid {
         self.id.with("popup")
     }
 
+    /// The open popup's id and its highlighted entry's id.
+    fn popup_owner(&self) -> Option<(Id, Option<Id>)> {
+        let popup = self.core.edit()?.popup.as_ref()?;
+        let list = self.popup_id();
+        Some((
+            list,
+            popup
+                .highlight
+                .map(|i| crate::view::overlay::item_id(list, i)),
+        ))
+    }
+
+    /// AccessKit `SetValue` on a cell: move there, put the text in and commit
+    /// it as one edit. Commit follows the Tab rule but never accepts a
+    /// suggestion; checkboxes, dropdowns and tags ignore it.
+    fn set_value(
+        &mut self,
+        pos: CellPos,
+        value: String,
+        model: &mut ModelRef<'_>,
+        env: &GridEnv<'_>,
+        ctx: &egui::Context,
+    ) -> Vec<GridEvent> {
+        let kind = self.spec().column(pos.col).map(|c| c.kind);
+        if !matches!(
+            kind,
+            Some(
+                CellKind::Text { .. }
+                    | CellKind::Memo { .. }
+                    | CellKind::Amount(_)
+                    | CellKind::Date
+                    | CellKind::Picker { .. }
+            )
+        ) {
+            return Vec::new();
+        }
+        let click = GridInput::Click {
+            pos,
+            double: false,
+            mods: crate::core::keys::Mods::NONE,
+        };
+        let (mut events, _) = self.handle(click, model, env, ctx);
+        if self.core.cursor() != Some(pos) || self.core.edit().is_none() {
+            return events;
+        }
+        for gi in [
+            GridInput::BufferEdited(value),
+            GridInput::Command(GridCommand::Commit),
+        ] {
+            let (ev, _) = self.handle(gi, model, env, ctx);
+            events.extend(ev);
+        }
+        events
+    }
+
     /// What the open popup shows this frame.
     fn popup_view(&self, pos: CellPos, width: f32, env: &GridEnv<'_>) -> Option<PopupView<'_>> {
         let popup = self.core.edit()?.popup.as_ref()?;
@@ -844,40 +903,27 @@ impl Grid {
             }
         }
 
-        // AccessKit requests aimed at last frame's cells and the grid (F5).
+        // AccessKit requests aimed at last frame's cells, rows and the grid
+        // (F5, §2.11).
         let mut presses: Vec<Press> = Vec::new();
-        let mut page: Option<bool> = None;
-        ctx.input_mut(|i| {
-            for (id, pos) in &self.cells {
-                i.consume_accesskit_action_requests(*id, |r| {
-                    let hit = matches!(
-                        r.action,
-                        egui::accesskit::Action::Focus | egui::accesskit::Action::Click
-                    );
-                    if hit {
-                        presses.push(Press {
-                            pos: *pos,
-                            double: false,
-                            mods: crate::core::keys::Mods::NONE,
-                        });
+        let mut set_values: Vec<(CellPos, String)> = Vec::new();
+        let requests =
+            ctx.input_mut(|i| a11y::take_requests(i, self.id, &self.row_nodes, &self.cells));
+        for r in requests {
+            match r {
+                Request::Press(pos) => presses.push(Press {
+                    pos,
+                    double: false,
+                    mods: crate::core::keys::Mods::NONE,
+                }),
+                Request::IntoView(key) => {
+                    if let Some(i) = model.rows().index_of(key) {
+                        self.viewport.ensure_visible(i, &h, model.rows());
                     }
-                    hit
-                });
+                }
+                Request::SetValue(pos, v) => set_values.push((pos, v)),
+                Request::Page(forward) => self.viewport.page(forward, &h, model.rows()),
             }
-            i.consume_accesskit_action_requests(self.id, |r| match r.action {
-                egui::accesskit::Action::ScrollDown => {
-                    page = Some(true);
-                    true
-                }
-                egui::accesskit::Action::ScrollUp => {
-                    page = Some(false);
-                    true
-                }
-                _ => false,
-            });
-        });
-        if let Some(forward) = page {
-            self.viewport.page(forward, &h, model.rows());
         }
 
         // The wheel scrolls the grid, not the screen around it (§12 R3).
@@ -943,6 +989,12 @@ impl Grid {
                 let (ev, _) = self.handle(gi, &mut model, env, &ctx);
                 events.extend(ev);
             }
+            if !focused {
+                ctx.memory_mut(|m| m.request_focus(focus_id));
+            }
+        }
+        for (pos, value) in set_values {
+            events.extend(self.set_value(pos, value, &mut model, env, &ctx));
             if !focused {
                 ctx.memory_mut(|m| m.request_focus(focus_id));
             }
@@ -1139,9 +1191,7 @@ impl Grid {
         );
         grid_ui.set_clip_rect(rect);
         ctx.accesskit_node_builder(self.id, |node| {
-            node.set_bounds(ak_rect(rect));
-            node.set_row_count(total + 1);
-            node.set_column_count(columns.len());
+            a11y::grid_node(node, rect, total, columns.len());
         });
         let resized = self.paint_header(&mut grid_ui, header, env);
 
@@ -1169,6 +1219,7 @@ impl Grid {
             }
         }
         let mut cells = Vec::new();
+        let mut row_nodes = Vec::new();
         let mut grew = false;
         let line_h = if self.two_lines() { row_h / 2.0 } else { row_h };
         let places = self.layout.places.clone();
@@ -1281,15 +1332,28 @@ impl Grid {
                     .accessibility_role(Role::Row),
             );
             row_ui.set_clip_rect(row_rect.intersect(body));
-            ctx.accesskit_node_builder(row_id, |node| {
-                node.set_bounds(ak_rect(row_rect.intersect(body)));
-                node.set_label(label);
-                node.set_row_index(i + 1);
-                node.set_row_index_text(row_of);
-                if selected {
-                    node.set_selected(true);
+            let problem = match model.rows().row_note(i) {
+                Some(crate::core::model::RowNote::Error(k)) => Some(env.t(k)),
+                _ if state.contains(RowState::ERROR) => {
+                    Some(env.t(TextKey("grid.a11y.row_problem")))
                 }
+                _ => None,
+            };
+            let row_info = RowInfo {
+                label,
+                row_of,
+                index: i + 1,
+                selected,
+                problem,
+            };
+            ctx.accesskit_node_builder(row_id, |node| {
+                a11y::row_node(node, row_rect.intersect(body), &row_info);
             });
+            row_nodes.push((row_id, key));
+            let locked_text = state
+                .contains(RowState::LOCKED)
+                .then(|| env.t(TextKey("grid.a11y.locked")));
+            let suggested_text = env.t(TextKey("grid.a11y.suggested"));
             for (ci, place) in places.iter().enumerate() {
                 let Some(col) = columns.iter().find(|c| c.id == place.id).copied() else {
                     continue;
@@ -1392,9 +1456,13 @@ impl Grid {
                         let resp: Response = row_ui.put(at, te);
                         buffer_changed |= resp.changed();
                     }
+                    let owner = self.popup_owner();
                     ctx.accesskit_node_builder(focus_id, |node| {
                         node.set_label(cell_label.clone());
                         node.set_column_index(ci);
+                        if let Some((list, item)) = owner {
+                            a11y::popup_owner(node, list, item);
+                        }
                         if let Some(chips) = chips_text.take().filter(|c| !c.is_empty()) {
                             node.set_description(chips);
                         }
@@ -1423,36 +1491,35 @@ impl Grid {
                 let value = model.rows().cell(i, col.id);
                 let shown = Self::display_text(&value, col.kind, state, &col, env, fmt);
                 let editable = self.spec().editable && col.editable;
+                let info = CellInfo {
+                    label: &cell_label,
+                    value: &shown.text,
+                    column: ci,
+                    editable,
+                    toggled: match &value {
+                        CellValue::Bool(b) => Some(*b),
+                        _ => None,
+                    },
+                    locked: locked_text.as_deref(),
+                    problem: row_info.problem.as_deref(),
+                    suggested: (matches!(value, CellValue::Suggested { .. })
+                        && col.kind.accepts_suggestions())
+                    .then_some(suggested_text.as_str()),
+                };
                 ctx.accesskit_node_builder(cell_id, |node| {
-                    node.set_bounds(ak_rect(cell_rect.intersect(body)));
-                    node.set_role(if editable { Role::GridCell } else { Role::Cell });
-                    node.set_label(cell_label.clone());
-                    node.set_value(shown.text.clone());
-                    node.set_column_index(ci);
-                    node.add_action(egui::accesskit::Action::Focus);
-                    node.add_action(egui::accesskit::Action::Click);
-                    if let CellValue::Bool(b) = &value {
-                        node.set_toggled(if *b {
-                            egui::accesskit::Toggled::True
-                        } else {
-                            egui::accesskit::Toggled::False
-                        });
-                    }
-                    if state.contains(RowState::LOCKED) {
-                        node.set_read_only();
-                        node.set_description(env.t(TextKey("grid.a11y.locked")));
-                    }
-                    if state.contains(RowState::ERROR) {
-                        node.set_invalid(egui::accesskit::Invalid::True);
-                    }
+                    a11y::cell_node(node, cell_rect.intersect(body), &info);
                 });
                 // The cursor cell without a text editor: the focus target's
                 // node speaks for it (a checkbox, a combo box, a cell).
                 if is_cursor && !no_editor {
                     let popup_open = self.core.edit().is_some_and(|e| e.popup.is_some());
+                    let owner = self.popup_owner();
                     ctx.accesskit_node_builder(self.focus_id(), |node| {
                         node.set_label(cell_label);
                         node.set_column_index(ci);
+                        if let Some((list, item)) = owner {
+                            a11y::popup_owner(node, list, item);
+                        }
                         match (col.kind, &value) {
                             (CellKind::Checkbox, CellValue::Bool(b)) => {
                                 crate::editors::checkbox::node(node, *b);
@@ -1498,6 +1565,7 @@ impl Grid {
             }
         }
         self.cells = cells;
+        self.row_nodes = row_nodes;
         self.rows_drawn = range.len();
 
         // Scrollbar (integer thumb maths).
@@ -1524,9 +1592,7 @@ impl Grid {
             }
             let top = self.viewport.top();
             ctx.accesskit_node_builder(bar_id, |node| {
-                node.set_bounds(ak_rect(bar));
-                node.set_role(Role::ScrollBar);
-                node.set_label(env.t(TextKey("grid.a11y.scrollbar")));
+                a11y::scrollbar_node(node, bar, env.t(TextKey("grid.a11y.scrollbar")), top, total);
                 node.set_value(group(top + 1));
             });
         }
@@ -1760,16 +1826,6 @@ impl Grid {
         let needed = galley.size().x + 2.0 * style.pad;
         painter.galley(Pos2::new(x, y), galley, color);
         needed
-    }
-}
-
-/// AccessKit bounds in points, as egui sets them for its own widgets.
-fn ak_rect(r: Rect) -> egui::accesskit::Rect {
-    egui::accesskit::Rect {
-        x0: r.min.x.into(),
-        y0: r.min.y.into(),
-        x1: r.max.x.into(),
-        y1: r.max.y.into(),
     }
 }
 

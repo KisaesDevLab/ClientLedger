@@ -134,12 +134,7 @@ pub fn popup(
                                     .min;
                                 ui.painter().galley(pos, galley, color);
                                 ctx.accesskit_node_builder(rid, |node| {
-                                    node.set_bounds(egui::accesskit::Rect {
-                                        x0: r.min.x.into(),
-                                        y0: r.min.y.into(),
-                                        x1: r.max.x.into(),
-                                        y1: r.max.y.into(),
-                                    });
+                                    node.set_bounds(super::a11y::ak_rect(r));
                                     node.set_role(Role::ListBoxOption);
                                     node.set_label(text);
                                     node.set_selected(highlighted);
