@@ -1,6 +1,7 @@
 //! The command palette (Ctrl+K, "Go to"): type a few letters, press Enter.
 //! Every registered command is listed, with its shortcut.
 
+use cl_model::commands::DEV_COMMANDS;
 use cl_model::{COMMANDS, Command, CommandId, Keymap, Scope};
 use eframe::egui::{self, Align2, Context, Key, Modifiers, RichText};
 
@@ -21,6 +22,8 @@ pub struct State {
     pub query: String,
     /// Highlighted row.
     pub selected: usize,
+    /// Also list the developer-only commands (`--demo` only, S8).
+    pub include_dev: bool,
     just_opened: bool,
 }
 
@@ -85,8 +88,16 @@ pub fn score(label: &str, query: &str) -> Option<u32> {
 /// screens or run app-wide actions come before form-only keys.
 #[must_use]
 pub fn matches(query: &str) -> Vec<&'static Command> {
+    matches_in(query, false)
+}
+
+/// [`matches`], with the developer-only commands when `include_dev`.
+#[must_use]
+pub fn matches_in(query: &str, include_dev: bool) -> Vec<&'static Command> {
+    let dev: &'static [Command] = if include_dev { DEV_COMMANDS } else { &[] };
     let mut scored: Vec<(u32, bool, &'static Command)> = COMMANDS
         .iter()
+        .chain(dev)
         .filter(|c| c.palette)
         .filter_map(|c| {
             score(&t(&format!("cmd.{}", c.id)), query).map(|s| (s, c.scope == Scope::Form, c))
@@ -107,7 +118,7 @@ pub fn show(ctx: &Context, state: &mut State, _keymap: &Keymap) -> Option<Comman
         return None;
     }
     let tokens = Tokens::of(ctx);
-    let results = matches(&state.query);
+    let results = matches_in(&state.query, state.include_dev);
     let rows = rows_that_fit(ctx.content_rect().height());
     let shown = results.len().min(rows);
     if shown > 0 {
@@ -210,6 +221,26 @@ pub fn show(ctx: &Context, state: &mut State, _keymap: &Keymap) -> Option<Comman
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dev_commands_are_listed_only_when_asked() {
+        assert!(
+            matches("")
+                .iter()
+                .all(|c| !c.id.as_str().starts_with("dev."))
+        );
+        assert!(
+            matches("grid demo").is_empty()
+                || matches("grid demo")
+                    .iter()
+                    .all(|c| !c.id.as_str().starts_with("dev."))
+        );
+        assert!(
+            matches_in("grid demo", true)
+                .iter()
+                .any(|c| c.id.as_str() == "dev.grid_demo")
+        );
+    }
 
     fn ids(q: &str) -> Vec<&'static str> {
         matches(q).iter().map(|c| c.id.as_str()).collect()

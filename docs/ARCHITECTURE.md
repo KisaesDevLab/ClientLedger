@@ -299,6 +299,17 @@ None of these is advertised by the pinned engine. Until each lands, `cl-api` shi
 
 `GET /api/v1/tenants` (E5a, `tenants-list-v1`) will replace the `/auth/me` companies list when it is pinned. U-23 is not needed (the refresh cookie is sent by hand, Q-P05c), and U-24 is E5a.
 
+## The ledger grid (cl-grid, P10)
+
+One widget for every line grid: split lines, registers, Pay Bills-style fixed lists. Decisions are Q-P10a-w.
+
+- **Layers.** `core/` is egui-free and pure: row model (`RowModel`, `EditableModel`, `ModelRef`), `RowKey`s and selection, the integer row-anchored viewport, and the editing state machine (`Core::handle(GridInput) -> Effects`). `view/` and `editors/` draw it with egui. `sequencer` is an egui plugin that splits a frame's input at navigation keys, shortcuts and pointer presses, so batched input (remote desktop, scanners) is applied in order.
+- **Presets.** `GridSpec::line_entry` (entry line, insert/delete), `browse` (registers), `fixed_edit` (fixed rows, editable cells).
+- **Focus.** One egui focus id per grid; cells are click targets with explicit AccessKit nodes. Commits happen on cell exit, each one `FormState::edit_step`; the editor reloads when the model's revision changes (undo, recompute).
+- **Money.** Cells hold `Money`; display is `Money::format`; amount entry and the calculator (`cl_model::amount_entry`) are exact and refuse inexact results. The grid never sums; totals come from the screen or the engine.
+- **Screens.** cl-ui's `GridForm` keeps a form's `FormState` and its grid together, so every save, leave and record move commits the open cell first. `grid_env` supplies date order, money style, theme and the modal flag per viewport; column widths live in `grid-widths.json`.
+- **Checks.** `cl-grid/tests` (state tables, keyboard in consecutive frames, virtualization work counts, AccessKit), `cl-ui/tests/grid_keyboard.rs` (the demo in the real shell), `ui-check grid_demo` (`--demo` only), and `cargo xtask grid-bench` (p95 frame time with 200k rows).
+
 ## Online-only features and offline behavior
 
 | Feature | Offline behavior |
@@ -331,7 +342,7 @@ The engine reports connectivity on `/health` (`online: bool`, last check). The a
 | cl-settings | local user preferences; keychain-backed secrets (AI keys, SMTP password) | write secrets to disk in plain text or into backups |
 | cl-import | OFX/QFX/QIF/CSV parsing, CSV mapping profiles, dedupe keys, preview | post transactions (engine does) |
 | cl-model | form state machines, validation, keymap, undo | depend on egui |
-| cl-grid | ledger grid widget | know resource types (generic over row model) |
+| cl-grid | ledger grid widget: row model, viewport, editing state machine, input sequencer, AccessKit nodes | know resource types (generic over row model), sum or round money |
 | cl-ui | screens, navigation, theme, i18n | talk to Postgres |
 | cl-print | check/form/report PDF layout, MICR font placement, print hand-off | depend on the UI |
 | cl-automation | control channel, tool table, scenarios | be enabled without explicit flag |

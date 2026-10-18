@@ -1,0 +1,138 @@
+# Ledger grid scenario (P10, plan §6). Runs against `clientledger --demo`
+# in light and dark: `dev.grid_demo` exists only with `--demo`.
+# Keyboard-only entry of a split check with autofill, the calculator, a
+# billable Client:Job and tags; errors, undo, delete and save; the 200,000
+# row register; Pay bills; the small window at 200% zoom. Amounts are
+# checked by their displayed values, which `Money::format` never rounds.
+name: grid_demo
+description: Split lines, calculator, tags, undo, the 200k register and Pay bills.
+steps:
+  # --- Setup ----------------------------------------------------------------
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: dev.grid_demo
+  - assert_exists: {role: label, label: Grid demo}
+  - type: {text: "1286.40", target: {role: text_input, label: Check amount}}
+
+  # --- Line 1: autofill, amount, memo, date key, job, billable, tag ---------
+  - click: {role: grid_cell, label: "Account, line 1"}
+  # Amount fields settle to the display style once left (DESIGN.md).
+  - assert_value: {target: {role: text_input, label: Check amount}, equals: "1,286.40"}
+  - assert_exists: {role: row, label: Column headers}
+  - type: {text: "51"}
+  - assert_exists: {role: list_box_option, label_contains: "5100"}
+  - screenshot: account-list
+  - key: Tab
+  - type: {text: "842.15"}
+  - key: Tab
+  - type: {text: Perennials}
+  - key: Tab
+  - type: {text: t}
+  - key: Tab
+  - type: {text: Fall}
+  - key: Tab
+  - key: Space
+  - key: Tab
+  - type: {text: Install}
+  - key: Enter
+  - key: Enter
+  - assert_value: {target: {role: grid_cell, label: "Amount, line 1"}, equals: "842.15"}
+
+  # --- Line 2: calculator and the one-tag-per-group rule ----------------------
+  - type: {text: Mulch}
+  - key: Tab
+  - type: {text: "400+44.25"}
+  - assert_exists: {label_contains: "= 444.25"}
+  - screenshot: calculator
+  - key: Tab
+  - type: {text: Hardwood mulch}
+  - key: Tab
+  - type: {text: "+"}
+  - key: Tab
+  - type: {text: Fall}
+  - key: Tab
+  - key: Space
+  - key: Tab
+  - type: {text: Crew A}
+  - key: Enter
+  - type: {text: Crew B}
+  - key: Enter
+  - assert_exists: {label_contains: "one tag per group"}
+  - key: Enter
+
+  # --- The values -------------------------------------------------------------
+  - assert_value: {target: {role: grid_cell, label: "Amount, line 2"}, equals: "444.25"}
+  - assert_exists: {role: label, label_contains: "Lines total 1,286.40"}
+  - assert_state: {key: screen.rows, equals: 3}
+  - screenshot: split-lines
+
+  # --- Errors and Esc on line 3 -----------------------------------------------
+  - type: {text: "6200"}
+  - key: Tab
+  - type: {text: "100/3"}
+  - key: Tab
+  - assert_value: {target: {role: grid_cell, label: "Amount, line 3"}, equals: "33.33"}
+  - assert_exists: {role: label, label_contains: "Lines total 1,319.73"}
+  - screenshot: calc-rounded
+  - key: Escape
+  - assert_state: {key: prompt_open, equals: false}
+  - assert_state: {key: screen.rows, equals: 3}
+  - assert_exists: {role: label, label_contains: "Lines total 1,286.40"}
+
+  # --- Delete, undo, save -----------------------------------------------------
+  - key: Up
+  - key: Ctrl+Delete
+  - assert_exists: {role: label, label_contains: "Lines total 842.15"}
+  - key: Ctrl+Z
+  - assert_exists: {role: label, label_contains: "Lines total 1,286.40"}
+  - assert_value: {target: {role: grid_cell, label: "Amount, line 2"}, equals: "444.25"}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.last_save_balanced, equals: true}
+  - assert_state: {key: screen.dirty, equals: false}
+  - screenshot: saved
+
+  # --- The 200,000-row register (two-line, then one line) ---------------------
+  - click: {role: button, label: "Show 200,000 rows"}
+  - assert_state: {key: screen.rows, equals: 200000}
+  - click: {role: row, label_contains: "row 1 of 200,000"}
+  - assert_exists: {label: Balance}
+  - assert_exists: {role: column_header, label: "Account · Memo"}
+  - assert_exists: {role: cell, label_contains: "Account · Memo, ", index: 0}
+  - screenshot: register-two-line
+  - key: Ctrl+End
+  - assert_exists: {role: row, label_contains: "row 200,000 of 200,000"}
+  - screenshot: register-end
+  - click: {role: check_box, label: One line}
+  - assert_state: {key: screen.rows, equals: 200000}
+  - assert_exists: {label: Balance}
+  - screenshot: register-one-line
+
+  # --- Pay bills (fixed rows) -------------------------------------------------
+  - click: {role: button, label: Show the expense lines}
+  - click: {role: button, label: Pay bills example}
+  - assert_state: {key: screen.mode, equals: bills}
+  - assert_state: {key: screen.rows, equals: 6}
+  - key: Space
+  - assert_exists: {label_contains: "1 selected"}
+  - screenshot: pay-bills
+
+  # --- Small window at 200% (480 x 320 points) --------------------------------
+  - click: {role: button, label: Show the expense lines}
+  - resize: {width: 960, height: 640}
+  - set_zoom: {percent: 200}
+  - assert_state: {key: window.width, equals: 480.0}
+  - assert_no_clipping:
+      # Only the tab strip scrolls sideways by design. The screen body,
+      # the grid included, must stay inside its panel: nothing may reach
+      # past the window (or under the status bar, which the grid's own
+      # clip tests cover).
+      ignore:
+        - {x: 0, y: 70, width: 10000, height: 45}
+  - screenshot: small-200
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}
+
+  # --- Close cleanly so the dark pass starts fresh -----------------------------
+  - key: Alt+S
+  - assert_not_exists: {role: label, label: Grid demo}

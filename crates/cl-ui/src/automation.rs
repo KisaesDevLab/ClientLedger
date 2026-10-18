@@ -22,7 +22,6 @@ use cl_automation::actions::{
 use cl_automation::inspect::{Bounds, Node, Snapshot, WindowInfo};
 use cl_automation::screenshot::{encode_png, write_png};
 use cl_automation::{ControlServer, ErrorCode, Pending, Response};
-use cl_model::commands;
 use eframe::egui::{
     self, ColorImage, Context, Event, FullOutput, Key, Modifiers, PointerButton, Pos2, RawInput,
     ViewportCommand, accesskit,
@@ -92,6 +91,12 @@ impl egui::Plugin for Hooks {
             s.snapshot = Some(snapshot);
         }
     }
+}
+
+/// Events split by the input sequencer are still waiting for a frame: a job
+/// is not done until they have been delivered (P10 plan Rev 2 §2.4.2).
+fn sequencer_busy(ctx: &Context) -> bool {
+    cl_grid::sequencer::pending(ctx, eframe::egui::ViewportId::ROOT)
 }
 
 /// `TextInput` becomes `text_input`.
@@ -317,7 +322,7 @@ impl Bridge {
         }
         match &job.kind {
             JobKind::AfterFrame { until, finish } => {
-                if self.frame() < *until || self.queued() > 0 {
+                if self.frame() < *until || self.queued() > 0 || sequencer_busy(ctx) {
                     return Some(job);
                 }
                 let value = match finish {
@@ -332,7 +337,7 @@ impl Bridge {
                 None
             }
             JobKind::ClickAfterScroll { target, until } => {
-                if self.frame() < *until || self.queued() > 0 {
+                if self.frame() < *until || self.queued() > 0 || sequencer_busy(ctx) {
                     return Some(job);
                 }
                 let target = target.clone();
@@ -638,7 +643,7 @@ impl Bridge {
     }
 
     fn command(shell: &mut Shell, id: &str, bridge: &Bridge) -> Started {
-        let Some(cmd) = commands::find(id) else {
+        let Some(cmd) = shell.find_command(id) else {
             return fail(ErrorCode::NotFound, format!("no command `{id}`"));
         };
         shell.queue(cmd.id);
@@ -851,6 +856,7 @@ mod bridge_tests {
             let ctx = Context::default();
             Shell::install(&ctx);
             let bridge = Bridge::install(&ctx, server);
+            cl_grid::sequencer::install(&ctx);
             let shell = Shell::new(ShellOptions {
                 demo: true,
                 theme: Some(ThemeChoice::Light),

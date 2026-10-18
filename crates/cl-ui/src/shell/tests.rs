@@ -16,6 +16,7 @@ fn demo() -> Shell {
 fn context() -> egui::Context {
     let ctx = egui::Context::default();
     Shell::install(&ctx);
+    cl_grid::sequencer::install(&ctx);
     ctx
 }
 
@@ -359,6 +360,56 @@ fn popped_out_windows_get_their_own_viewport_and_dock_back() {
 }
 
 #[test]
+fn column_widths_are_written_a_second_after_a_change_and_never_when_controlled() {
+    for controlled in [false, true] {
+        let dir = std::env::temp_dir().join(format!(
+            "cl-ui-shell-widths-{controlled}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = crate::prefs::UiStore::new(&dir);
+        let mut shell = Shell::new(ShellOptions {
+            store: Some(store.clone()),
+            ..ShellOptions::default()
+        });
+        shell.set_run_only(controlled);
+        let ctx = context();
+        let at = |ctx: &egui::Context, shell: &mut Shell, time: f64| {
+            let mut raw = input(WIDE, vec![]);
+            raw.time = Some(time);
+            let mut out = ctx.run_ui(raw, |ui| shell.ui(ui));
+            out.textures_delta.clear();
+        };
+        at(&ctx, &mut shell, 0.0);
+        crate::grid_env::store_widths(&ctx, "a/lines", &[(cl_grid::ColumnId(1), 150)]);
+        at(&ctx, &mut shell, 0.5);
+        let path = dir.join(crate::prefs::GridWidths::FILE);
+        assert!(!path.exists(), "debounced");
+        at(&ctx, &mut shell, 1.6);
+        assert_eq!(path.exists(), !controlled, "controlled = {controlled}");
+        if !controlled {
+            assert_eq!(
+                store.load_grid_widths().get("a/lines"),
+                Some(vec![(cl_grid::ColumnId(1), 150)])
+            );
+            let again = Shell::new(ShellOptions {
+                store: Some(store),
+                ..ShellOptions::default()
+            });
+            let ctx2 = context();
+            let mut again = again;
+            settle(&ctx2, &mut again, WIDE);
+            assert_eq!(
+                crate::grid_env::load_widths(&ctx2, "a/lines"),
+                Some(vec![(cl_grid::ColumnId(1), 150)]),
+                "loaded at start"
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
 fn layout_is_remembered_per_company() {
     let dir = std::env::temp_dir().join(format!("cl-ui-shell-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -580,4 +631,122 @@ fn interview_pages_and_escape() {
         1,
         "nothing to post yet"
     );
+}
+
+/// T18 (S8): developer screens exist only with `--demo`, on every path.
+#[test]
+fn dev_screen_needs_demo() {
+    let dev = CommandId::new("dev.grid_demo");
+    // A shell without --demo knows no dev command.
+    let mut plain = Shell::new(ShellOptions::default());
+    assert!(plain.find_command("dev.grid_demo").is_none());
+    plain.dispatch_now(dev);
+    assert!(plain.windows.find_kind(dev).is_none(), "run");
+    assert!(
+        super::palette::matches_in("", plain.palette.include_dev)
+            .iter()
+            .all(|c| !c.id.as_str().starts_with("dev.")),
+        "palette"
+    );
+    // Every window-building path goes through make_any: without --demo a
+    // dev kind is a plain placeholder.
+    let today = plain.today();
+    let s = super::make_any(dev, None, None, today, plain.prefs, false);
+    assert_eq!(s.state(), serde_json::Value::Null, "placeholder");
+    let s = super::make_any(dev, None, None, today, plain.prefs, true);
+    assert_eq!(s.state()["mode"], "lines", "the demo screen");
+
+    // A company event asking for the window.
+    let dir = std::env::temp_dir().join(format!("cl-ui-dev-gate-{}", std::process::id()));
+    let link = std::sync::Arc::new(crate::company::CompanyLink::demo(&dir));
+    let mut linked = Shell::new(ShellOptions {
+        company: Some(std::sync::Arc::clone(&link)),
+        ..ShellOptions::default()
+    });
+    link.push(crate::company::CompanyEvent::OpenWindow(dev));
+    let ctx = context();
+    settle(&ctx, &mut linked, WIDE);
+    if let Some(id) = linked.windows.find_kind(dev) {
+        let w = linked.windows.get(id).unwrap();
+        assert_eq!(w.screen.state(), serde_json::Value::Null, "event");
+    }
+
+    // A remembered layout naming the dev window restores nothing for it.
+    let store_dir = std::env::temp_dir().join(format!("cl-ui-dev-layout-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&store_dir);
+    let store = crate::prefs::UiStore::new(&store_dir);
+    let layout = crate::windows::SessionLayout {
+        version: crate::windows::SessionLayout::VERSION,
+        tabs: vec![
+            crate::windows::SavedTab {
+                kind: "dev.grid_demo".into(),
+                popped_out: false,
+            },
+            crate::windows::SavedTab {
+                kind: "vendors.pay_bills".into(),
+                popped_out: false,
+            },
+        ],
+        active: 0,
+    };
+    store.save_layout("default", &layout).unwrap();
+    let restored = Shell::new(ShellOptions {
+        store: Some(store),
+        ..ShellOptions::default()
+    });
+    assert!(restored.windows.find_kind(dev).is_none(), "layout restore");
+    assert!(
+        restored
+            .windows
+            .find_kind(CommandId::new("vendors.pay_bills"))
+            .is_some()
+    );
+
+    // With --demo it opens, is in the palette, and is never saved in a
+    // layout.
+    let mut demo = demo();
+    assert!(demo.find_command("dev.grid_demo").is_some());
+    assert!(
+        super::palette::matches_in("grid", demo.palette.include_dev)
+            .iter()
+            .any(|c| c.id == dev)
+    );
+    demo.dispatch_now(dev);
+    let id = demo.windows.find_kind(dev).expect("opened");
+    assert_eq!(demo.windows.active_id(), Some(id));
+    assert_eq!(
+        demo.windows.get(id).unwrap().screen.state()["mode"],
+        "lines"
+    );
+    let snap = demo.windows.snapshot();
+    assert!(
+        snap.tabs.iter().all(|t| !t.kind.starts_with("dev.")),
+        "{snap:?}"
+    );
+    assert!(snap.active < snap.tabs.len());
+    let ctx = context();
+    settle(&ctx, &mut demo, WIDE);
+    let _ = std::fs::remove_dir_all(dir);
+    let _ = std::fs::remove_dir_all(store_dir);
+}
+
+#[test]
+fn grid_demo_renders_in_both_themes_and_small_windows() {
+    for theme in [
+        crate::theme::ThemeChoice::Light,
+        crate::theme::ThemeChoice::Dark,
+    ] {
+        for size in [WIDE, vec2(480.0, 320.0)] {
+            let ctx = context();
+            let mut shell = demo();
+            shell.prefs.theme = theme;
+            shell.dispatch_now(CommandId::new("dev.grid_demo"));
+            settle(&ctx, &mut shell, size);
+            let used = ctx.globally_used_rect();
+            assert!(
+                used.max.x <= size.x + 0.5 && used.max.y <= size.y + 0.5,
+                "{theme:?} {size:?}: {used:?}"
+            );
+        }
+    }
 }

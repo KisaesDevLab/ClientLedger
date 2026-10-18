@@ -1,6 +1,7 @@
 //! `cargo xtask nofloat`: money crates must not use floating point (B5).
 //!
-//! A `syn` scan of `crates/cl-core/src` and `crates/cl-api/src` (not `tests/`).
+//! A `syn` scan of `crates/cl-core/src`, `crates/cl-api/src`, `crates/cl-model/src`
+//! and `crates/cl-grid/src/core` (not `tests/`; the last two since P10, Q-P10b).
 //! It reports, one finding per source line:
 //!
 //! 1. an `f32`/`f64` identifier (types, paths, `as f64` casts),
@@ -19,7 +20,13 @@ use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 
 /// Directories scanned, relative to the repo root.
-pub const SCAN_DIRS: [&str; 2] = ["crates/cl-core/src", "crates/cl-api/src"];
+pub const SCAN_DIRS: [&str; 4] = [
+    "crates/cl-core/src",
+    "crates/cl-api/src",
+    // Entry rules (amounts, calculator, dates) and the grid core (Q-P10b).
+    "crates/cl-model/src",
+    "crates/cl-grid/src/core",
+];
 
 /// One offending line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -337,6 +344,12 @@ mod tests {
         .unwrap();
         assert_eq!(check(&dir).unwrap(), Vec::<String>::new());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn entry_rules_and_grid_core_are_scanned() {
+        assert!(SCAN_DIRS.contains(&"crates/cl-model/src"));
+        assert!(SCAN_DIRS.contains(&"crates/cl-grid/src/core"));
     }
 
     #[test]

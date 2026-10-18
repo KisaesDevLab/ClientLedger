@@ -166,6 +166,13 @@ pub struct Shell {
     return_after_prompt: Option<WindowId>,
     /// File > Close Company is waiting for a close prompt to be answered.
     close_company_after_prompt: bool,
+    /// Remembered grid column widths (`grid-widths.json`), shared with the
+    /// grid screens through the egui context.
+    widths: crate::grid_env::WidthsHandle,
+    /// The close prompt whose Save button already got focus.
+    prompt_focused: Option<crate::windows::Prompt>,
+    /// Running with `--demo`: developer-only commands and screens exist.
+    demo: bool,
 }
 
 impl Shell {
@@ -197,7 +204,16 @@ impl Shell {
                 Arc::new(CompanyLink::demo(&dir))
             })
         });
+        let widths = crate::grid_env::WidthsHandle::default();
+        if let Some(store) = &options.store
+            && let Ok(mut w) = widths.lock()
+        {
+            w.book = store.load_grid_widths();
+        }
         let mut shell = Shell {
+            widths,
+            prompt_focused: None,
+            demo: options.demo,
             prefs,
             store: options.store,
             company_key: if options.company_key.is_empty() {
@@ -231,6 +247,7 @@ impl Shell {
             return_after_prompt: None,
             close_company_after_prompt: false,
         };
+        shell.palette.include_dev = options.demo;
         if options.demo {
             shell.load_demo();
         } else if shell.company_link.is_some() {
@@ -264,6 +281,7 @@ impl Shell {
             self.open_tenant.clone(),
             self.today,
             self.prefs,
+            self.demo,
         )
     }
 
@@ -484,15 +502,16 @@ impl Shell {
             .store
             .as_ref()
             .and_then(|s| s.load_layout(&self.company_key));
-        let (link, open, today, prefs) = (
+        let (link, open, today, prefs, demo) = (
             self.company_link.clone(),
             self.open_tenant.clone(),
             self.today,
             self.prefs,
+            self.demo,
         );
         let restored = layout.is_some_and(|l| {
             self.windows.restore(&l, &|k| {
-                make_any(k, link.as_ref(), open.clone(), today, prefs)
+                make_any(k, link.as_ref(), open.clone(), today, prefs, demo)
             });
             !self.windows.is_empty()
         });
@@ -508,15 +527,16 @@ impl Shell {
         self.company_key = key.to_string();
         self.company = banner;
         let layout = self.store.as_ref().and_then(|s| s.load_layout(key));
-        let (link, open, today, prefs) = (
+        let (link, open, today, prefs, demo) = (
             self.company_link.clone(),
             self.open_tenant.clone(),
             self.today,
             self.prefs,
+            self.demo,
         );
         let restored = layout.is_some_and(|l| {
             self.windows.restore(&l, &|k| {
-                make_any(k, link.as_ref(), open.clone(), today, prefs)
+                make_any(k, link.as_ref(), open.clone(), today, prefs, demo)
             })
         });
         if !restored && self.windows.is_empty() {
@@ -613,6 +633,19 @@ impl Shell {
         ctx.request_repaint_after(Duration::from_secs(4));
     }
 
+    /// The command with this id: the shipped table, plus the
+    /// developer-only commands when the shell runs with `--demo` (S8).
+    #[must_use]
+    pub fn find_command(&self, id: &str) -> Option<&'static Command> {
+        commands::find(id).or_else(|| {
+            if self.demo {
+                commands::find_dev(id)
+            } else {
+                None
+            }
+        })
+    }
+
     /// Run a command now (outside a frame; tests and start-up).
     pub fn dispatch_now(&mut self, id: CommandId) {
         self.run(None, id);
@@ -628,7 +661,15 @@ impl Shell {
     }
 
     fn run(&mut self, ctx: Option<&Context>, id: CommandId) {
-        let Some(cmd) = commands::find(id.as_str()) else {
+        let target = self.windows.active_id();
+        self.run_for(ctx, id, target);
+    }
+
+    /// Run a command for the window `target`: window and form commands go
+    /// to that window (a popped-out window's own keys, S2), the rest are
+    /// app-wide.
+    fn run_for(&mut self, ctx: Option<&Context>, id: CommandId, target: Option<WindowId>) {
+        let Some(cmd) = self.find_command(id.as_str()) else {
             return;
         };
         if cmd.opens {
@@ -663,7 +704,7 @@ impl Shell {
             "window.next" => self.windows.next(),
             "window.prev" => self.windows.prev(),
             "window.pop_out" => {
-                if let Some(w) = self.windows.active_id() {
+                if let Some(w) = target {
                     self.windows.pop_out(w);
                 }
             }
@@ -674,7 +715,7 @@ impl Shell {
             "window.zoom_reset" => self.prefs.zoom_percent = prefs::ZOOM_DEFAULT,
             "window.theme" => self.prefs.theme = self.prefs.theme.next(),
             "file.close_window" => {
-                if let Some(w) = self.windows.active_id() {
+                if let Some(w) = target {
                     self.windows.request_close(w);
                 }
             }
@@ -688,23 +729,27 @@ impl Shell {
                     self.toast(ctx, "toast.help_later");
                 }
             }
-            _ => self.forward_to_screen(ctx, cmd),
+            _ => self.forward_to_screen(ctx, cmd, target),
         }
     }
 
     /// Form and window commands go to the screen in front; commands nothing
     /// handles say so instead of silently doing nothing.
-    fn forward_to_screen(&mut self, ctx: Option<&Context>, cmd: &Command) {
-        let handled = self
-            .windows
-            .active_mut()
+    fn forward_to_screen(
+        &mut self,
+        ctx: Option<&Context>,
+        cmd: &Command,
+        target: Option<WindowId>,
+    ) {
+        let handled = target
+            .and_then(|id| self.windows.get_mut(id))
             .is_some_and(|w| w.screen.command(cmd.id));
         // Esc (form.revert): the screen reverts a field when it can; when
         // nothing is left to revert the window closes, asking first when
         // it still has unsaved edits (DESIGN.md form rules).
         if !handled
             && cmd.id.as_str() == "form.revert"
-            && let Some(id) = self.windows.active_id()
+            && let Some(id) = target
         {
             self.windows.request_close(id);
             return;
@@ -726,9 +771,11 @@ impl Shell {
 
     fn finish_quit(&mut self, ctx: Option<&Context>) {
         self.save_layout();
+        self.flush_widths(None);
         self.allow_close = true;
         if let Some(ctx) = ctx {
-            ctx.send_viewport_cmd(ViewportCommand::Close);
+            // Quit may come from a popped-out window's keys: close the app.
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close);
         }
     }
 
@@ -744,14 +791,32 @@ impl Shell {
         ctx.send_viewport_cmd(ViewportCommand::Focus);
     }
 
+    /// The window the main window's keys act on: the tab in front, unless
+    /// it is popped out into its own operating-system window (that window
+    /// handles its own keys).
+    fn root_key_target(&self, ctx: &Context) -> Option<WindowId> {
+        let active = self.windows.active()?;
+        (!active.popped_out || ctx.embed_viewports()).then_some(active.id)
+    }
+
     fn handle_keys(&mut self, ctx: &Context) {
+        let target = self.root_key_target(ctx);
+        self.handle_keys_for(ctx, target);
+    }
+
+    /// Resolve this viewport's shortcuts in `target`'s scope and run them
+    /// for `target`. While a modal is open only the palette and the
+    /// shortcut overlay keys work.
+    fn handle_keys_for(&mut self, ctx: &Context, target: Option<WindowId>) {
         let pressed = ctx.input(input::pressed_shortcuts);
         if pressed.is_empty() {
             return;
         }
         let modal = self.modal_open();
         let text_focus = ctx.egui_wants_keyboard_input();
-        let scope = self.focus_scope();
+        let scope = target
+            .and_then(|id| self.windows.get(id))
+            .map_or(Scope::Global, |w| w.screen.scope());
         let mut handled: Vec<cl_model::Shortcut> = Vec::new();
         for s in pressed {
             let Some(id) = self.keymap.resolve(scope, s) else {
@@ -764,7 +829,7 @@ impl Shell {
                 continue;
             }
             handled.push(s);
-            self.run(Some(ctx), id);
+            self.run_for(Some(ctx), id, target);
         }
         if !handled.is_empty() {
             // The key is ours: keep text fields and focus traversal from also
@@ -822,6 +887,10 @@ impl Shell {
     /// Draw one frame of the whole shell into the root `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        debug_assert!(
+            cl_grid::sequencer::is_installed(&ctx),
+            "install cl_grid::sequencer after Shell::install (and after the bridge)"
+        );
         // Persist prefs changed by commands (theme).
         let before_theme = self.applied_theme;
         self.begin_frame(&ctx);
@@ -836,6 +905,7 @@ impl Shell {
         let tokens = Tokens::of(&ctx);
 
         self.apply_company_events(Some(&ctx));
+        self.publish_grid_facts(&ctx, egui::ViewportId::ROOT);
         title_bar::show(ui, self, narrow, &tokens);
         menu::show(ui, self, narrow, &tokens);
         status_bar::show(ui, self, narrow, &tokens);
@@ -857,8 +927,42 @@ impl Shell {
         }
         self.apply_company_events(Some(&ctx));
         self.save_layout();
+        let now = ctx.input(|i| i.time);
+        self.flush_widths(Some(now));
+        if self.widths.lock().is_ok_and(|w| w.changed_at.is_some()) {
+            ctx.request_repaint_after(Duration::from_millis(1100));
+        }
         if self.toast.is_some() {
             ctx.request_repaint_after(Duration::from_millis(500));
+        }
+    }
+
+    /// Tell the grid screens of `viewport` today's date, the formats and
+    /// whether a modal is open, and share the remembered column widths.
+    fn publish_grid_facts(&self, ctx: &Context, viewport: egui::ViewportId) {
+        let frame = crate::grid_env::ShellFrame::new(self.today, &self.prefs, self.modal_open());
+        crate::grid_env::publish(ctx, viewport, frame);
+        crate::grid_env::publish_widths(ctx, &self.widths);
+    }
+
+    /// Write changed column widths a second after the last change (`now`
+    /// in egui seconds), or at once with `None` (quitting). Never during a
+    /// controlled run.
+    fn flush_widths(&mut self, now: Option<f64>) {
+        let Some(store) = self.store.as_ref().filter(|_| !self.run_only) else {
+            return;
+        };
+        let Ok(mut w) = self.widths.lock() else {
+            return;
+        };
+        let due = w
+            .changed_at
+            .is_some_and(|at| now.is_none_or(|n| n - at >= 1.0));
+        if due {
+            w.changed_at = None;
+            if let Err(e) = store.save_grid_widths(&w.book) {
+                tracing::warn!(error = %e, "could not save column widths");
+            }
         }
     }
 
@@ -923,22 +1027,37 @@ impl Shell {
     /// Windows moved out of the tab strip get their own operating-system
     /// window (egui viewport). Closing that window docks it back (Q-57).
     fn show_popped_out(&mut self, ctx: &Context, tokens: &Tokens) {
+        let popped: Vec<(WindowId, String)> = self
+            .windows
+            .all()
+            .iter()
+            .filter(|w| w.popped_out)
+            .map(|w| (w.id, w.title()))
+            .collect();
         let mut dock: Vec<WindowId> = Vec::new();
-        for w in self.windows.all_mut().iter_mut().filter(|w| w.popped_out) {
-            let title = format!("{} - ClientLedger", w.title());
-            let id = egui::ViewportId::from_hash_of(("cl-window", w.id.raw()));
+        let fill = tokens.surface_window;
+        for (wid, title) in popped {
+            let id = egui::ViewportId::from_hash_of(("cl-window", wid.raw()));
             let builder = ViewportBuilder::default()
-                .with_title(title)
+                .with_title(format!("{title} - ClientLedger"))
                 .with_inner_size([900.0, 640.0])
                 .with_min_inner_size(MIN_WINDOW);
-            let fill = tokens.surface_window;
-            let wid = w.id;
-            let screen = &mut w.screen;
-            ctx.show_viewport_immediate(id, builder, |ui, _class| {
-                egui::CentralPanel::default()
-                    .frame(Frame::new().fill(fill).inner_margin(Margin::same(16)))
-                    .show(ui, |ui| screen.ui(ui));
-                if ui.ctx().input(|i| i.viewport().close_requested()) {
+            ctx.show_viewport_immediate(id, builder, |ui, class| {
+                let vctx = ui.ctx().clone();
+                if class == egui::ViewportClass::Immediate {
+                    // Its own operating-system window: its keys and grid
+                    // facts are its own (S2). Embedded windows share the
+                    // main window's input, handled there.
+                    self.publish_grid_facts(&vctx, vctx.viewport_id());
+                    self.handle_keys_for(&vctx, Some(wid));
+                }
+                if let Some(w) = self.windows.get_mut(wid) {
+                    let screen = &mut w.screen;
+                    egui::CentralPanel::default()
+                        .frame(Frame::new().fill(fill).inner_margin(Margin::same(16)))
+                        .show(ui, |ui| screen.ui(ui));
+                }
+                if vctx.input(|i| i.viewport().close_requested()) {
                     dock.push(wid);
                 }
             });
@@ -966,8 +1085,13 @@ impl Shell {
 
     fn show_close_prompt(&mut self, ctx: &Context) {
         let Some(prompt) = self.windows.prompt() else {
+            self.prompt_focused = None;
             return;
         };
+        // Focus Save on the frame the prompt opens, so typing lands on a
+        // button (nothing happens) and Enter or Space saves (B6, T9).
+        let focus_save = self.prompt_focused != Some(prompt);
+        self.prompt_focused = Some(prompt);
         let title = self
             .windows
             .get(prompt.window)
@@ -982,7 +1106,11 @@ impl Shell {
                 ui.label(crate::windows::prompt_message(&title));
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if crate::widgets::primary_button(ui, &t("window.prompt.save")).clicked() {
+                    let save = crate::widgets::primary_button(ui, &t("window.prompt.save"));
+                    if focus_save {
+                        save.request_focus();
+                    }
+                    if save.clicked() {
                         answer = Some(PromptAnswer::Save);
                     }
                     if ui.button(t("window.prompt.discard")).clicked() {
@@ -1029,14 +1157,24 @@ impl Shell {
     }
 }
 
-/// A screen for `kind` without borrowing the shell (layout restore).
+/// A screen for `kind` without borrowing the shell (layout restore). The
+/// developer-only screens are built only with `--demo` (`demo`); every
+/// path that opens a window (commands, company events, layout restore)
+/// comes through here.
 fn make_any(
     kind: CommandId,
     link: Option<&Arc<CompanyLink>>,
     open: Option<(cl_core::ids::TenantId, String)>,
     today: CalendarDate,
     prefs: UiPrefs,
+    demo: bool,
 ) -> Box<dyn Screen> {
+    if kind.as_str().starts_with("dev.") {
+        if demo && let Some(s) = crate::screens::dev::make(kind, today, link) {
+            return s;
+        }
+        return Box::new(Placeholder::for_command(kind));
+    }
     if let Some(link) = link {
         if let Some(s) = crate::screens::company::make(kind, link, open.clone(), today) {
             return s;
@@ -1060,7 +1198,7 @@ pub fn today() -> CalendarDate {
 /// `MM/DD/YYYY`.
 #[must_use]
 pub fn us_date(d: CalendarDate) -> String {
-    format!("{:02}/{:02}/{}", d.month(), d.day(), d.year())
+    cl_model::date_entry::format(d, cl_model::date_entry::DateOrder::Mdy)
 }
 
 /// `Wed 11/04/2026`.

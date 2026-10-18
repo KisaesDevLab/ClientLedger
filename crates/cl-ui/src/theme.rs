@@ -284,6 +284,44 @@ fn style_for(t: &Tokens, theme: Theme) -> egui::Style {
     style
 }
 
+/// The ledger grid's colours and fonts from the theme tokens (P10 plan
+/// §2.9). Metrics follow DESIGN.md: dense rows 28-32 points, two-line rows
+/// about 44.
+#[must_use]
+pub fn grid_style(t: &Tokens) -> cl_grid::GridStyle {
+    let defaults = cl_grid::GridStyle::default();
+    cl_grid::GridStyle {
+        surface: t.surface_window,
+        header_fill: t.surface_subtle,
+        header_text: t.text_secondary,
+        text: t.text_primary,
+        text_secondary: t.text_secondary,
+        placeholder: t.text_placeholder,
+        row_border: t.border_row,
+        accent: t.accent,
+        accent_tint: t.accent_tint,
+        accent_border: t.accent_border,
+        warn_tint: t.warn_tint,
+        warn_surface: t.warn_surface,
+        warn: t.warn,
+        warn_text: t.warn_text,
+        locked_row: t.locked_row,
+        locked_text: t.locked_text,
+        caption_fill: t.surface_subtle,
+        font: FontId::new(13.0, FontFamily::Proportional),
+        mono: FontId::new(13.0, FontFamily::Monospace),
+        small: FontId::new(12.0, FontFamily::Proportional),
+        header_font: FontId::new(12.0, crate::fonts::semibold()),
+        ..defaults
+    }
+}
+
+/// The grid style for whatever theme `ctx` shows.
+#[must_use]
+pub fn grid_style_of(ctx: &Context) -> cl_grid::GridStyle {
+    grid_style(&Tokens::of(ctx))
+}
+
 /// WCAG relative luminance of an opaque colour.
 #[must_use]
 pub fn luminance(c: Color32) -> f32 {
@@ -353,6 +391,48 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn grid_text_pairs_meet_4_5_to_1_in_both_themes() {
+        let mut failures = Vec::new();
+        for (name, tokens) in [("light", Tokens::LIGHT), ("dark", Tokens::DARK)] {
+            let g = grid_style(&tokens);
+            for (pair, fg, bg) in [
+                ("text on surface", g.text, g.surface),
+                ("text on cursor row", g.text, g.accent_tint),
+                ("text on entry/suggested row", g.text, g.warn_tint),
+                ("text on error row", g.text, g.warn_surface),
+                ("secondary on surface", g.text_secondary, g.surface),
+                ("secondary on cursor row", g.text_secondary, g.accent_tint),
+                ("header text on header", g.header_text, g.header_fill),
+                ("locked text on locked row", g.locked_text, g.locked_row),
+                ("caption text on caption", g.text, g.caption_fill),
+                ("warn caption on caption", g.warn_text, g.caption_fill),
+                ("warn text on error row", g.warn_text, g.warn_surface),
+                ("warn text on warn tint", g.warn_text, g.warn_tint),
+            ] {
+                let c = contrast(fg, bg);
+                if c < AA {
+                    failures.push(format!("{name}: {pair} = {c:.2}"));
+                }
+            }
+            // The placeholder and empty-cell hint keep 3:1 like other hints.
+            assert!(contrast(g.placeholder, g.surface) >= 3.0, "{name}");
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    #[test]
+    fn grid_style_follows_the_theme() {
+        assert_eq!(
+            grid_style(&Tokens::LIGHT).surface,
+            Tokens::LIGHT.surface_window
+        );
+        assert_eq!(grid_style(&Tokens::DARK).accent, Tokens::DARK.accent);
+        let g = grid_style(&Tokens::LIGHT);
+        assert!(g.row_one >= 28.0 && g.row_one <= 32.0);
+        assert!((g.row_two - 44.0).abs() < 0.5);
     }
 
     #[test]

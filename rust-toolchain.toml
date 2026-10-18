@@ -1,3 +1,5 @@
 [toolchain]
-channel = "stable"
+# Pinned so every CI runner uses the same clippy (macOS runners lagged a
+# release and flagged lints the others did not). Bump deliberately.
+channel = "1.99.1"
 components = ["rustfmt", "clippy"]

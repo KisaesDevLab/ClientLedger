@@ -3,8 +3,9 @@
 //! keys, a money field, choice rows, and the action row. The real grid and
 //! form widgets arrive with P10; these are deliberately plain.
 
-use cl_core::{CalendarDate, Money, MoneyInputError, UserInput};
-use cl_model::date_rules::{DateKey, apply_date_key};
+use cl_core::{CalendarDate, Money, MoneyInputError, MoneyStyle, UserInput};
+use cl_model::date_entry::{self, DateOrder, US_FIRST_WEEKDAY};
+use cl_model::date_rules::DateKey;
 use eframe::egui::{self, Color32, CornerRadius, Margin, Response, RichText, Stroke, Ui, Vec2};
 
 use crate::i18n::t;
@@ -187,7 +188,8 @@ pub fn password(ui: &mut Ui, label: &str, value: &mut String) -> Response {
 }
 
 /// A date input in `MM/DD/YYYY` with the date keys (+, -, T, M, H, Y, R,
-/// W, K) applied when typed at the end of the text.
+/// W, K) applied when typed at the end of the text. Parsing and the keys are
+/// the shared `cl_model::date_entry` rules the grid uses (P10, Q-P10f).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DateInput {
     /// The text as typed.
@@ -206,9 +208,17 @@ impl DateInput {
         }
     }
 
-    /// Re-parses the text.
-    pub fn reparse(&mut self) {
-        self.value = parse_us_date(&self.text);
+    /// Re-parses the text (`M/D` uses `today`'s year).
+    pub fn reparse(&mut self, today: CalendarDate) {
+        self.value = date_entry::parse(&self.text, DateOrder::Mdy, today).ok();
+    }
+
+    /// Shows a parsed date in full (`1/5/99` becomes `01/05/2099`, N2), so
+    /// the owner sees which century a short year meant. Unparsed text stays.
+    pub fn settle(&mut self) {
+        if let Some(d) = self.value {
+            self.text = date_entry::format(d, DateOrder::Mdy);
+        }
     }
 
     /// Sets a date and its text.
@@ -216,24 +226,6 @@ impl DateInput {
         self.text = crate::shell::us_date(d);
         self.value = Some(d);
     }
-}
-
-/// Parses `M/D/YYYY`, `MM/DD/YYYY` or `YYYY-MM-DD`.
-#[must_use]
-pub fn parse_us_date(text: &str) -> Option<CalendarDate> {
-    let s = text.trim();
-    if let Ok(d) = CalendarDate::parse_wire(s) {
-        return Some(d);
-    }
-    let parts: Vec<&str> = s.split('/').collect();
-    if parts.len() != 3 {
-        return None;
-    }
-    let m: u32 = parts[0].parse().ok()?;
-    let d: u32 = parts[1].parse().ok()?;
-    let y: i32 = parts[2].parse().ok()?;
-    let y = if (0..100).contains(&y) { y + 2000 } else { y };
-    CalendarDate::from_ymd(y, m, d).ok()
 }
 
 /// Draws a date field and applies date keys.
@@ -254,18 +246,44 @@ pub fn date_field(
         let last = input.text.chars().last();
         if let Some(key) = last.and_then(DateKey::from_char) {
             input.text.pop();
-            let base = parse_us_date(&input.text).or(input.value).unwrap_or(today);
-            if let Some(d) = apply_date_key(key, base, today, cl_core::Weekday::Mon) {
+            // The week starts on Sunday for US businesses (Q-41, Q-P10f).
+            if let Some(d) = date_entry::apply_key(
+                key,
+                &input.text,
+                input.value,
+                DateOrder::Mdy,
+                today,
+                US_FIRST_WEEKDAY,
+            ) {
                 input.set(d);
             }
         } else {
-            input.reparse();
+            input.reparse(today);
         }
+    }
+    if response.lost_focus() {
+        input.settle();
     }
     response
 }
 
-/// A money input; returns the parsed amount (exact) when the text is one.
+/// The text an amount field shows once the owner leaves it: the parsed
+/// amount in the display style (thousands separators, two decimals,
+/// DESIGN.md "Amounts"). `None` when the text is empty or not an amount,
+/// so the owner's typing stays as it was.
+#[must_use]
+pub fn settled_money_text(text: &str, style: MoneyStyle) -> Option<String> {
+    if text.trim().is_empty() {
+        return None;
+    }
+    Money::parse_user(text, UserInput::CENTS)
+        .ok()
+        .map(|m| m.format(style))
+}
+
+/// A money input, right-aligned in mono like every amount; the text settles
+/// to the display style when focus leaves. Returns the parsed amount
+/// (exact) when the text is one.
 ///
 /// # Errors
 /// The owner-facing parse error when the text is not an amount.
@@ -273,12 +291,25 @@ pub fn money_field(
     ui: &mut Ui,
     label: &str,
     text: &mut String,
+    style: MoneyStyle,
 ) -> Result<Option<Money>, MoneyInputError> {
-    ui.horizontal(|ui| {
-        let l = ui.add(egui::Label::new(label).selectable(false));
-        ui.add_sized([140.0, 24.0], egui::TextEdit::singleline(text))
-            .labelled_by(l.id);
-    });
+    let response = ui
+        .horizontal(|ui| {
+            let l = ui.add(egui::Label::new(label).selectable(false));
+            ui.add_sized(
+                [140.0, 24.0],
+                egui::TextEdit::singleline(text)
+                    .font(egui::TextStyle::Monospace)
+                    .align(egui::Align2::RIGHT_CENTER),
+            )
+            .labelled_by(l.id)
+        })
+        .inner;
+    if response.lost_focus()
+        && let Some(settled) = settled_money_text(text, style)
+    {
+        *text = settled;
+    }
     if text.trim().is_empty() {
         return Ok(None);
     }
@@ -453,28 +484,66 @@ pub fn progress_line(ui: &mut Ui, tokens: &Tokens, text: &str) {
 mod tests {
     use super::*;
 
+    /// An amount settles to the display style with thousands separators,
+    /// and the settled text parses back to the very same amount.
     #[test]
-    fn dates_parse_in_the_us_forms() {
-        let d = parse_us_date("11/04/2026").expect("date");
-        assert_eq!(d.to_wire(), "2026-11-04");
+    fn money_text_settles_to_the_display_style_exactly() {
+        let minus = MoneyStyle::default();
+        let parens = MoneyStyle {
+            negative: cl_core::NegativeStyle::Parens,
+            symbol: true,
+        };
         assert_eq!(
-            parse_us_date("1/4/26")
-                .map(CalendarDate::to_wire)
-                .as_deref(),
-            Some("2026-01-04")
+            settled_money_text("1286.40", minus).as_deref(),
+            Some("1,286.40")
         );
         assert_eq!(
-            parse_us_date("2026-11-04")
-                .map(CalendarDate::to_wire)
-                .as_deref(),
-            Some("2026-11-04")
+            settled_money_text("1234567.5", minus).as_deref(),
+            Some("1,234,567.50")
         );
-        assert_eq!(parse_us_date("13/40/2026"), None);
-        assert_eq!(parse_us_date(""), None);
-        let mut input = DateInput::new(d);
+        assert_eq!(settled_money_text("", minus), None);
+        assert_eq!(settled_money_text("12.345", minus), None, "kept as typed");
+        assert_eq!(settled_money_text("abc", minus), None);
+        for typed in ["1286.40", "-42.07", "0.01", "999999.99"] {
+            for style in [minus, parens] {
+                let shown = settled_money_text(typed, style).expect("settles");
+                assert_eq!(
+                    Money::parse_user(&shown, UserInput::CENTS),
+                    Money::parse_user(typed, UserInput::CENTS),
+                    "{typed} -> {shown}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn date_input_uses_the_shared_rules() {
+        let today = CalendarDate::from_ymd(2026, 11, 4).expect("date");
+        let mut input = DateInput::new(today);
         assert_eq!(input.text, "11/04/2026");
+        for (text, want) in [
+            ("1/4/26", Some("2026-01-04")),
+            ("2026-11-04", Some("2026-11-04")),
+            ("3/7", Some("2026-03-07")),
+            ("13/40/2026", None),
+            ("", None),
+            ("bad", None),
+        ] {
+            input.text = text.into();
+            input.reparse(today);
+            assert_eq!(
+                input.value.map(CalendarDate::to_wire).as_deref(),
+                want,
+                "{text}"
+            );
+        }
+        input.text = "1/5/99".into();
+        input.reparse(today);
+        input.settle();
+        assert_eq!(input.text, "01/05/2099");
         input.text = "bad".into();
-        input.reparse();
-        assert_eq!(input.value, None);
+        input.reparse(today);
+        input.settle();
+        assert_eq!(input.text, "bad");
     }
 }

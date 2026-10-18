@@ -19,7 +19,7 @@ use cl_model::commands;
 #[must_use]
 pub fn t(key: &str) -> String {
     if let Some(id) = key.strip_prefix("cmd.")
-        && let Some(c) = commands::find(id)
+        && let Some(c) = commands::find(id).or_else(|| commands::find_dev(id))
     {
         return c.label.to_string();
     }
@@ -42,9 +42,11 @@ pub fn t_with(key: &str, args: &[(&str, &str)]) -> String {
 /// True when `key` has an entry (used by tests and by error presentation).
 #[must_use]
 pub fn has(key: &str) -> bool {
-    key.strip_prefix("cmd.")
-        .is_some_and(|id| commands::find(id).is_some())
-        || catalog().contains_key(key)
+    key.strip_prefix("cmd.").is_some_and(|id| {
+        commands::find(id)
+            .or_else(|| commands::find_dev(id))
+            .is_some()
+    }) || catalog().contains_key(key)
 }
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -678,6 +680,103 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.updates.version", "This is ClientLedger {v}."),
     ("prefs.updates.check", "Check for updates"),
     ("prefs.updates.later", "The check itself is not available yet; releases are on GitHub."),
+    // Ledger grid (cl-grid and cl-model keys, written as `TextKey("...")`)
+    ("grid.a11y.cell", "{column}, {row}"),
+    ("grid.a11y.line", "line {n}"),
+    ("grid.a11y.row_of", "row {n} of {total}"),
+    ("grid.a11y.checked", "Checked"),
+    ("grid.a11y.unchecked", "Not checked"),
+    ("grid.a11y.cleared", "Cleared"),
+    ("grid.a11y.reconciled", "Reconciled"),
+    ("grid.a11y.loading", "Loading\u{2026}"),
+    ("grid.a11y.locked", "Locked: this date is in a closed period"),
+    ("grid.a11y.suggested", "Suggested. Press Tab to accept it, or type to replace it."),
+    ("grid.a11y.row_problem", "This line has a problem"),
+    ("grid.a11y.scrollbar", "Scroll rows"),
+    ("grid.a11y.header_row", "Column headers"),
+    ("grid.popup.loading", "Loading the list\u{2026}"),
+    ("grid.popup.no_matches", "Nothing matches"),
+    ("grid.popup.add_new", "Add \u{201c}{text}\u{201d}\u{2026}"),
+    ("grid.popup.full_list", "All {column}"),
+    ("grid.amount.empty", "Enter an amount."),
+    ("grid.amount.invalid", "That is not an amount."),
+    ("grid.amount.ambiguous", "It is not clear whether the comma or the period marks the cents"),
+    ("grid.amount.ambiguous.fix", "Type the amount with a period for cents, such as 1234.50."),
+    ("grid.amount.too_many_decimals", "Too many digits after the decimal point"),
+    ("grid.amount.too_many_decimals.fix", "Type no more than two digits for cents."),
+    ("grid.amount.too_large", "That amount is too large for this field."),
+    ("grid.amount.sign_conflict", "Use a minus sign or parentheses for a negative amount, not both."),
+    ("grid.amount.no_negative", "This column takes zero or more"),
+    ("grid.amount.no_negative.fix", "Put a negative amount in the other column."),
+    ("grid.calc.preview", "= {value}"),
+    ("grid.calc.no_grouping", "Parentheses only mark a negative number here"),
+    ("grid.calc.no_grouping.fix", "Work the calculation out in steps."),
+    ("grid.calc.divide_by_zero", "Cannot divide by zero."),
+    ("grid.calc.incomplete", "The calculation is not finished."),
+    ("grid.calc.too_long", "The calculation is too long."),
+    ("grid.calc.too_complex", "The calculation is too complex. Work it out in steps."),
+    ("grid.date.empty", "Enter a date."),
+    ("grid.date.invalid", "That is not a date. Type it as MM/DD/YYYY."),
+    ("grid.date.no_such_day", "That day does not exist."),
+    ("grid.date.out_of_range", "That date is too far in the past or the future."),
+    ("grid.paste.one_value", "Paste one amount at a time."),
+    ("grid.picker.not_in_list", "Not in the list. Pick an entry, or choose Add to create it."),
+    ("grid.tags.not_in_list", "That tag is not in the list."),
+    ("grid.tags.replaced", "Only one tag per group: the earlier tag was replaced."),
+    ("grid.tags.duplicate", "That tag is already on this line."),
+    ("grid.text.too_long", "That text is too long for this field."),
+    ("grid.row.gone", "That line is no longer here."),
+    (
+        "grid.form.saving",
+        "Saving. Wait a moment, then make your change again.",
+    ),
+    ("grid.cell.changed_underneath", "This cell changed while you were typing. Press Esc to see the new value."),
+    // Grid demo (developer-only, --demo)
+    ("dev.grid_demo.title", "Grid demo"),
+    ("dev.grid_demo.synthetic", "A developer screen with made-up data. Nothing here is saved to a company."),
+    ("dev.grid_demo.show_register", "Show 200,000 rows"),
+    ("dev.grid_demo.show_bills", "Pay bills example"),
+    ("dev.grid_demo.show_lines", "Show the expense lines"),
+    ("dev.grid_demo.one_line", "One line"),
+    ("dev.grid_demo.check_amount", "Check amount"),
+    ("dev.grid_demo.lines_label", "Expense lines"),
+    ("dev.grid_demo.register_label", "Register"),
+    ("dev.grid_demo.bills_label", "Bills to pay"),
+    ("dev.grid_demo.lines_total", "Lines total {total}"),
+    ("dev.grid_demo.too_large", "too large to add up"),
+    ("dev.grid_demo.matches", "\u{2713} matches the check amount"),
+    ("dev.grid_demo.does_not_match", "does not match the check amount yet"),
+    ("dev.grid_demo.save", "Save"),
+    ("dev.grid_demo.save_new", "Save & New"),
+    ("dev.grid_demo.saved_count", "Saved this session: {n}"),
+    ("dev.grid_demo.bills_selected", "{n} selected"),
+    ("dev.grid_demo.bad_value", "That value does not fit this column."),
+    ("dev.grid_demo.need_account", "Pick an account for this line."),
+    ("dev.grid_demo.billable_needs_job", "A billable line needs a Client:Job."),
+    ("dev.grid_demo.not_balanced", "The lines total does not match the check amount."),
+    ("dev.grid_demo.not_balanced.fix", "Change a line or the check amount so they match."),
+    ("dev.grid_demo.col.account", "Account"),
+    ("dev.grid_demo.col.account_memo", "Account \u{b7} Memo"),
+    ("dev.grid_demo.col.amount", "Amount"),
+    ("dev.grid_demo.col.memo", "Memo"),
+    ("dev.grid_demo.col.service_date", "Service date"),
+    ("dev.grid_demo.col.job", "Client:Job"),
+    ("dev.grid_demo.col.billable", "Billable"),
+    ("dev.grid_demo.col.tags", "Tags"),
+    ("dev.grid_demo.col.date", "Date"),
+    ("dev.grid_demo.col.number", "Number"),
+    ("dev.grid_demo.col.type", "Type"),
+    ("dev.grid_demo.col.payee", "Payee"),
+    ("dev.grid_demo.col.payment", "Payment"),
+    ("dev.grid_demo.col.mark", "\u{2713}"),
+    ("dev.grid_demo.col.mark_help", "R = reconciled, \u{2713} = cleared"),
+    ("dev.grid_demo.col.deposit", "Deposit"),
+    ("dev.grid_demo.col.balance", "Balance"),
+    ("dev.grid_demo.col.select", "Pay"),
+    ("dev.grid_demo.col.vendor", "Vendor"),
+    ("dev.grid_demo.col.due", "Due"),
+    ("dev.grid_demo.col.amount_due", "Amount due"),
+    ("dev.grid_demo.col.to_pay", "Amount to pay"),
 ];
 
 #[cfg(test)]
@@ -741,6 +840,53 @@ mod tests {
             }
         }
         assert!(missing.is_empty(), "{missing:#?}");
+    }
+
+    /// Every `TextKey("…")` written in cl-grid, cl-model and cl-ui code
+    /// (outside test modules and comments) resolves (P10 step 15).
+    #[test]
+    fn every_text_key_in_grid_model_and_ui_is_in_the_catalog() {
+        let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        for dir in ["../cl-grid/src", "../cl-model/src", "src"] {
+            source_files(&here.join(dir), &mut files);
+        }
+        let mut missing = Vec::new();
+        let mut found = 0;
+        for f in files {
+            let text = std::fs::read_to_string(&f).unwrap();
+            let code = text.split("#[cfg(test)]").next().unwrap_or("");
+            for line in code.lines() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                let mut rest = line;
+                while let Some(at) = rest.find("TextKey(\"") {
+                    rest = &rest[at + "TextKey(\"".len()..];
+                    let key = rest.split('"').next().unwrap_or("");
+                    found += 1;
+                    if !has(key) {
+                        missing.push(format!("{}: {key}", f.display()));
+                    }
+                }
+            }
+        }
+        assert!(found > 40, "the scan found only {found} keys");
+        assert!(missing.is_empty(), "{missing:#?}");
+    }
+
+    #[test]
+    fn grid_placeholders_are_the_ones_the_grid_fills() {
+        for (key, names) in [
+            ("grid.popup.add_new", &["{text}"][..]),
+            ("grid.popup.full_list", &["{column}"]),
+            ("grid.a11y.cell", &["{column}", "{row}"]),
+            ("grid.a11y.row_of", &["{n}", "{total}"]),
+        ] {
+            for n in names {
+                assert!(t(key).contains(n), "{key} lacks {n}");
+            }
+        }
     }
 
     #[test]
