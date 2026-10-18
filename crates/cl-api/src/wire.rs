@@ -47,6 +47,8 @@ impl Capabilities {
     pub const AI_DESKTOP: &'static str = "ai-desktop-v1";
     /// E6 SMTP password from the session secret (U-13).
     pub const SMTP_SESSION: &'static str = "smtp-session-v1";
+    /// U-29 monthly token cap enforced by the engine (`monthlyTokenLimit`).
+    pub const AI_TOKEN_CAP: &'static str = "ai-token-cap-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

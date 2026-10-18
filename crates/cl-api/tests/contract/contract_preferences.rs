@@ -339,6 +339,37 @@ pub fn usage_summary_e6(h: &Harness) {
     }
 }
 
+/// U-29: the engine enforces a monthly token cap (`ai-token-cap-v1`);
+/// until then the client never sends `monthlyTokenLimit` and the engine's
+/// config carries no such field.
+pub fn token_cap_u29(h: &Harness) {
+    let s = &h.s1;
+    let capped = AiConfigUpdate {
+        monthly_token_limit: Some(50_000),
+        ..AiConfigUpdate::default()
+    };
+    if h.require_cap(Capabilities::AI_TOKEN_CAP, "U-29") {
+        let cfg = h.run(s.update_ai_config(&capped, key())).expect("cap");
+        let raw = h
+            .run(s.raw(Method::Get, "/api/v1/ai/admin/config", &[], None))
+            .expect("raw");
+        assert_eq!(raw.body["monthlyTokenLimit"], 50_000);
+        assert!(cfg.disclosure_version.is_some());
+    } else {
+        let before = h.observer.total();
+        assert_eq!(
+            h.run(s.update_ai_config(&capped, key()))
+                .expect_err("gated"),
+            ApiError::Local(LocalValidation::InvalidValue)
+        );
+        assert_eq!(h.observer.total(), before, "nothing may be sent");
+        let raw = h
+            .run(s.raw(Method::Get, "/api/v1/ai/admin/config", &[], None))
+            .expect("raw");
+        assert!(raw.body.get("monthlyTokenLimit").is_none());
+    }
+}
+
 /// U-13: with `smtp-session-v1` the SMTP password comes from the session
 /// secret and `GET /company/smtp` reports it configured; until then the
 /// engine reports no password after a desktop write.

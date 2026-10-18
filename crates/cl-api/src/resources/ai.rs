@@ -133,6 +133,10 @@ pub struct AiConfigUpdate {
     /// Usage rows on or off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub track_usage: Option<bool>,
+    /// Monthly cap in tokens (U-29; only sent once the engine advertises
+    /// `ai-token-cap-v1`, see [`Session::update_ai_config`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub monthly_token_limit: Option<u64>,
 }
 
 impl AiConfigUpdate {
@@ -465,6 +469,11 @@ impl Session {
             if !DESKTOP_PROVIDERS.contains(&p) {
                 return Err(ApiError::Local(LocalValidation::InvalidValue));
             }
+        }
+        if update.monthly_token_limit.is_some()
+            && !self.client().capabilities().has(Capabilities::AI_TOKEN_CAP)
+        {
+            return Err(ApiError::Local(LocalValidation::InvalidValue));
         }
         let mut call = Call::at(Method::Put, AI_CONFIG_PUT.route()).json_body(json_body(update)?);
         call.idempotency_key = Some(key);

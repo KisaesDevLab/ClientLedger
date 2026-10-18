@@ -211,6 +211,10 @@ fn main() -> std::process::ExitCode {
             contract_preferences::smtp_session_u13,
         ),
         (
+            "preferences::token_cap_u29",
+            contract_preferences::token_cap_u29,
+        ),
+        (
             "lifecycle::ten_switches_under_two_seconds",
             contract_lifecycle::ten_switches_under_two_seconds,
         ),
