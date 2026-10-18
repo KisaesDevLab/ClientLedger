@@ -56,8 +56,11 @@ steps:
   - assert_exists: {role: label, label_contains: Connected}
 
   # --- Cap and switches (still Ollama: the layout fits without scrolling) --
+  # The light run leaves its saved switches behind for the dark run, so
+  # the switch is flipped and flipped back: either way it marks the edits.
   - click: {role: check_box, label: Suggest rules}
-  - assert_state: {key: screen.ai.suggest_rules, equals: true}
+  - assert_state: {key: screen.dirty, equals: true}
+  - click: {role: check_box, label: Suggest rules}
   - click: {role: text_input, label: Monthly cap (tokens)}
   - key: Ctrl+A
   - type: {text: "250000"}
@@ -109,3 +112,8 @@ steps:
   # --- Esc with nothing to revert closes the window -----------------------
   - key: Escape
   - assert_not_exists: {role: tab, label: Preferences}
+
+  # --- Leave the window open on the AI panel for the mockup comparison ----
+  - command: edit.preferences
+  - assert_state: {key: screen.category, equals: ai}
+  - assert_state: {key: screen.ai.provider, equals: ollama}
