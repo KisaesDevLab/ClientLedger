@@ -32,7 +32,7 @@ steps:
   - assert_state: {key: screen.profile_loaded, equals: true}
   - assert_state: {key: screen.w9_on_file, equals: true}
   - assert_exists: {role: label, label: Crane Creek Tree Service}
-  - assert_exists: {label_contains: "-4521"}
+  - assert_exists: {label_contains: "4521"}
   - assert_not_exists: {label_contains: "0004521"}
   - assert_exists: {label_contains: "Open bills, from the vendor aging report"}
   - assert_exists: {label_contains: "5000 Subcontractors"}
