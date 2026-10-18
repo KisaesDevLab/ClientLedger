@@ -54,8 +54,10 @@ fn column(id: ColumnId, header: &'static str, w: u16, flex: u8) -> Column {
 }
 
 /// The chart grid: read-only, one line per account, one row selected.
+/// `compact` (the add/edit panel is open beside it) keeps only number,
+/// name, type and balance so nothing is cut off.
 #[must_use]
-pub fn chart_spec(numbers: bool) -> GridSpec {
+pub fn chart_spec(numbers: bool, compact: bool) -> GridSpec {
     let mut cols = Vec::new();
     if numbers {
         cols.push(Column {
@@ -63,19 +65,24 @@ pub fn chart_spec(numbers: bool) -> GridSpec {
             ..column(COL_NUMBER, "lists.accounts.col.number", 90, 0)
         });
     }
+    let name_width = if compact { 220 } else { 280 };
     cols.extend([
-        column(COL_NAME, "lists.accounts.col.name", 280, 2),
-        column(COL_TYPE, "lists.accounts.col.type", 150, 0),
-        column(COL_DETAIL, "lists.accounts.col.detail", 170, 1),
-        Column {
-            kind: CellKind::Amount(AmountRules::MONEY),
-            align: Align::Right,
-            mono: true,
-            help: Some(TextKey("lists.accounts.col.balance_help")),
-            ..column(COL_BALANCE, "lists.accounts.col.balance", 140, 0)
-        },
-        column(COL_STATUS, "lists.accounts.col.status", 130, 0),
+        column(COL_NAME, "lists.accounts.col.name", name_width, 2),
+        column(COL_TYPE, "lists.accounts.col.type", 140, 0),
     ]);
+    if !compact {
+        cols.push(column(COL_DETAIL, "lists.accounts.col.detail", 170, 1));
+    }
+    cols.push(Column {
+        kind: CellKind::Amount(AmountRules::MONEY),
+        align: Align::Right,
+        mono: true,
+        help: Some(TextKey("lists.accounts.col.balance_help")),
+        ..column(COL_BALANCE, "lists.accounts.col.balance", 140, 0)
+    });
+    if !compact {
+        cols.push(column(COL_STATUS, "lists.accounts.col.status", 130, 0));
+    }
     let mut s = GridSpec::browse(cols);
     s.height = RowHeight::Uniform { two_lines: false };
     s.selection = SelectionMode::Single;

@@ -355,3 +355,56 @@ fn make_builds_only_the_chart() {
         .expect("screen");
     assert_eq!(s.title(), "Chart of Accounts");
 }
+
+#[test]
+fn the_chart_goes_compact_beside_the_form_and_keeps_the_account() {
+    let mut r = Rig::new(true);
+    let has_detail = |r: &Rig| {
+        r.s.grid
+            .spec()
+            .columns
+            .iter()
+            .any(|c| c.id == super::model::COL_DETAIL)
+    };
+    r.select(6150);
+    assert!(has_detail(&r));
+    r.s.open_edit(r.s.selected());
+    r.frames(2);
+    assert!(!has_detail(&r));
+    assert_eq!(r.s.selected(), Some(account_id(6150)));
+    // The form keeps the keyboard, not the compact chart.
+    assert!(!r.s.grid.has_focus());
+    assert!(r.s.command(cl_model::CommandId::new("form.revert")));
+    r.frames(2);
+    assert!(has_detail(&r));
+    assert_eq!(r.s.selected(), Some(account_id(6150)));
+    assert_eq!(r.s.state()["focused"], true);
+}
+
+#[test]
+fn include_inactive_returns_to_the_account_just_hidden() {
+    let mut r = Rig::new(true);
+    r.select(6721);
+    r.s.toggle_active();
+    r.frames(2);
+    assert_ne!(r.s.selected(), Some(account_id(6721)));
+    r.s.set_show_inactive(true);
+    r.frames(2);
+    assert_eq!(r.s.selected(), Some(account_id(6721)));
+}
+
+#[test]
+fn esc_revert_puts_the_focus_back_in_the_form() {
+    let mut r = Rig::new(true);
+    r.s.open_edit(Some(account_id(6100)));
+    r.frames(1);
+    r.form()
+        .form
+        .edit(F_NAME, |d| d.name = "Fuel and Oil".into());
+    r.form().focus = None;
+    assert!(r.s.command(cl_model::CommandId::new("form.revert")));
+    assert_eq!(
+        r.form().focus,
+        Some(cl_model::lists::accounts::DraftField::Name)
+    );
+}

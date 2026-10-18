@@ -65,6 +65,8 @@ const F_SENSITIVE: u64 = 7;
 
 /// Width of the add/edit panel.
 const PANEL_WIDTH: f32 = 400.0;
+/// Typed letters within this many seconds build one find prefix.
+const TYPE_AHEAD_SECS: f64 = 1.0;
 /// Room the quick report takes under the chart.
 const REPORT_HEIGHT: f32 = 330.0;
 
@@ -186,6 +188,14 @@ pub struct ChartScreen {
     snap: GridSnapshot,
     focus_search: bool,
     want_cursor: Option<AccountId>,
+    /// Type-ahead prefix and when its last letter arrived (egui time).
+    typed: String,
+    typed_at: f64,
+    /// The chart shows its compact columns (the add/edit panel is open).
+    compact: bool,
+    /// The account just made inactive (hidden by the filter): turning on
+    /// Include inactive puts the cursor back on it.
+    just_hidden: Option<AccountId>,
 }
 
 fn new_grid(salt: &str, spec: cl_grid::GridSpec) -> Grid {
@@ -213,7 +223,7 @@ impl ChartScreen {
             numbers: true,
             filter: ChartFilter::default(),
             model: ChartModel::default(),
-            grid: new_grid("coa/chart", chart_spec(true)),
+            grid: new_grid("coa/chart", chart_spec(true, false)),
             load: None,
             loaded: false,
             load_error: None,
@@ -226,9 +236,13 @@ impl ChartScreen {
             snap: GridSnapshot::default(),
             focus_search: false,
             want_cursor: None,
+            typed: String::new(),
+            typed_at: f64::NEG_INFINITY,
+            compact: false,
+            just_hidden: None,
         };
         s.read_prefs();
-        s.grid = new_grid("coa/chart", chart_spec(s.numbers));
+        s.grid = new_grid("coa/chart", chart_spec(s.numbers, false));
         s.start_load();
         s
     }
@@ -278,13 +292,9 @@ impl ChartScreen {
 
     fn apply_accounts(&mut self, accounts: Vec<Account>) {
         let keep = self.want_cursor.take().or_else(|| self.selected());
-        let numbers_before = self.grid.spec().columns.len();
         self.accounts = accounts;
         self.model
             .set_accounts(&self.accounts, &self.sensitive, self.numbers, &self.filter);
-        if chart_spec(self.numbers).columns.len() != numbers_before {
-            self.grid = new_grid("coa/chart", chart_spec(self.numbers));
-        }
         self.loaded = true;
         self.place_cursor(keep);
     }
@@ -299,6 +309,48 @@ impl ChartScreen {
         }
     }
 
+    /// Swaps to the compact chart while the add/edit panel is open (and
+    /// back), keeping the cursor on the same account. The compact chart
+    /// leaves the focus with the form; the full one takes it back.
+    fn sync_compact(&mut self) {
+        let want = matches!(self.panel, Panel::Form(_));
+        if want == self.compact {
+            return;
+        }
+        let keep = self.selected();
+        self.compact = want;
+        let salt = if want {
+            "coa/chart-compact"
+        } else {
+            "coa/chart"
+        };
+        self.grid = new_grid(salt, chart_spec(self.numbers, want));
+        if !want {
+            self.place_cursor(keep);
+            return;
+        }
+        let Some(key) = keep.and_then(|id| self.model.key_of(id)) else {
+            return;
+        };
+        let label = String::new();
+        let env = self
+            .parts
+            .env(&NoLookups, &label, GridHeight::Rows { min: 1, max: 1 });
+        self.grid.set_cursor(
+            CellPos {
+                row: key,
+                col: COL_NAME,
+            },
+            ModelRef::Browse(&mut self.model),
+            &env,
+        );
+        self.grid.scroll_to(
+            key,
+            cl_grid::core::viewport::RowAlign::Nearest,
+            &ModelRef::Browse(&mut self.model),
+        );
+    }
+
     fn focus_row(&mut self, key: RowKey) {
         let label = String::new();
         let env = self
@@ -311,6 +363,11 @@ impl ChartScreen {
             },
             ModelRef::Browse(&mut self.model),
             &env,
+        );
+        self.grid.scroll_to(
+            key,
+            cl_grid::core::viewport::RowAlign::Nearest,
+            &ModelRef::Browse(&mut self.model),
         );
     }
 
@@ -438,7 +495,8 @@ impl ChartScreen {
     /// Ctrl+Shift+H.
     pub fn set_show_inactive(&mut self, on: bool) {
         self.filter.show_inactive = on;
-        let keep = self.selected();
+        let hidden = self.just_hidden.take().filter(|_| on);
+        let keep = hidden.or_else(|| self.selected());
         self.model.apply_filter(&self.filter);
         self.place_cursor(keep);
     }
@@ -693,6 +751,7 @@ impl ChartScreen {
             match result {
                 Ok(saved) => {
                     let active = saved.record.is_active;
+                    self.just_hidden = (!active && !self.filter.show_inactive).then_some(id);
                     if let Some(a) = self.accounts.iter_mut().find(|a| a.id == id) {
                         *a = saved.record;
                     }
@@ -819,7 +878,20 @@ impl ChartScreen {
                     self.open_edit(id);
                 }
                 GridEvent::TypedInBrowse(text) => {
-                    if let Some(key) = self.model.find_prefix(&text) {
+                    // Letters typed close together build one prefix ("67"
+                    // finds 6700); a pause starts a new one.
+                    let now = ui.input(|i| i.time);
+                    if now - self.typed_at > TYPE_AHEAD_SECS {
+                        self.typed.clear();
+                    }
+                    self.typed_at = now;
+                    self.typed.push_str(&text);
+                    let mut key = self.model.find_prefix(&self.typed);
+                    if key.is_none() {
+                        self.typed.clone_from(&text);
+                        key = self.model.find_prefix(&text);
+                    }
+                    if let Some(key) = key {
                         self.focus_row(key);
                     }
                 }
@@ -974,7 +1046,18 @@ impl ChartScreen {
                 panel.form.edit(F_PARENT, |x| x.parent = p);
             }
             let mut description = d.description.clone();
-            let r = form::field(ui, &t("lists.accounts.form.description"), &mut description);
+            let r = ui
+                .horizontal(|ui| {
+                    let l = ui.add(
+                        egui::Label::new(t("lists.accounts.form.description")).selectable(false),
+                    );
+                    ui.add_sized(
+                        [ui.available_width().min(260.0), 24.0],
+                        egui::TextEdit::singleline(&mut description),
+                    )
+                    .labelled_by(l.id)
+                })
+                .inner;
             if r.changed() {
                 panel
                     .form
@@ -1258,6 +1341,7 @@ impl Screen for ChartScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.parts = EnvParts::capture(ui.ctx());
         self.poll();
+        self.sync_compact();
         let tokens = Tokens::of(ui.ctx());
         form::heading(ui, &tokens, &t("cmd.lists.chart_of_accounts"));
         ui.add_space(4.0);
@@ -1345,6 +1429,13 @@ impl Screen for ChartScreen {
                         p.form.revert_form();
                         p.problems.clear();
                         p.error = None;
+                        // egui drops the field's focus on Esc; keep the
+                        // owner in the form.
+                        p.focus = Some(if p.editing.is_some() {
+                            DraftField::Name
+                        } else {
+                            DraftField::Kind
+                        });
                     }
                     Panel::Form(_) | Panel::Report(_) => self.close_panel(),
                     Panel::None if !self.filter.search.is_empty() => {
@@ -1420,6 +1511,7 @@ impl Screen for ChartScreen {
             "selected_depth": depth,
             "panel": self.panel.name(),
             "dirty": form_dirty,
+            "problem": problems.first(),
             "problems": problems,
             "error": error,
             "saving": saving,

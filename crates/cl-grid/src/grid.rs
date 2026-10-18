@@ -319,6 +319,12 @@ impl Grid {
         self.focus_retries = 3;
     }
 
+    /// Move the cursor without taking keyboard focus (a list shown beside
+    /// a form that keeps the focus).
+    pub fn set_cursor(&mut self, pos: CellPos, mut model: ModelRef<'_>, env: &GridEnv<'_>) {
+        self.core.set_cursor(pos, &mut model, env.formats());
+    }
+
     /// Bring a row into view on the next frame.
     pub fn scroll_to(&mut self, key: RowKey, align: RowAlign, model: &ModelRef<'_>) {
         if let Some(i) = model.rows().index_of(key) {
