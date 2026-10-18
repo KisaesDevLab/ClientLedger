@@ -45,6 +45,12 @@ pub trait Screen {
     fn save(&mut self) -> bool {
         true
     }
+
+    /// Screen state for the control channel (`state.screen`); no amounts,
+    /// names or secrets.
+    fn state(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
 }
 
 /// Stand-in for a screen a later phase builds.

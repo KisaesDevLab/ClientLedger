@@ -922,13 +922,16 @@ dependencies = [
  "chrono",
  "cl-api",
  "cl-automation",
+ "cl-company",
  "cl-core",
  "cl-host",
  "cl-model",
+ "cl-settings",
  "eframe",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -938,8 +941,10 @@ name = "clientledger"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "cl-api",
  "cl-automation",
  "cl-host",
+ "cl-settings",
  "cl-ui",
  "tempfile",
 ]

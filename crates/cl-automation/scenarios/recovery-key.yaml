@@ -1,0 +1,48 @@
+# Recovery key (P08 step 3) against `clientledger --demo`: reached from the
+# interview's done panel. The key text is never typed by the scenario and
+# `inspect` hides it; the screenshots show the masked form.
+name: recovery-key
+description: Recovery key shown once, copy, save to file, confirmation.
+steps:
+  - resize: {width: 1280, height: 820}
+  - set_zoom: {percent: 100}
+  - command: file.new_company
+  - click: {role: text_input, label: Business name}
+  - type: {text: Kurt Rental Duplex}
+  - click: {role: button, label: Next}
+  - click: {role: button, label: Next}
+  - click: {role: button, label: Next}
+  - click: {role: button, label: Next}
+  - click: {role: button, label: Next}
+  - assert_state: {key: screen.page, equals: review}
+  - click: {role: button, label: Create company}
+  - assert_state: {key: screen.created, equals: true}
+  - click: {role: button, label: Show my recovery key}
+  - assert_state: {key: screen.screen, equals: recovery_key}
+  - assert_state: {key: screen.has_key, equals: true}
+  - assert_state: {key: screen.revealed, equals: false}
+  - assert_exists: {role: label, label: Your recovery key}
+  - assert_exists: {role: label, label: Recovery key, index: 0}
+  - assert_exists: {role: button, label: Show}
+  - assert_exists: {role: button, label: Copy}
+  - assert_exists: {role: check_box, label: I saved my recovery key somewhere safe}
+  - assert_disabled: {role: button, label: Done}
+  - screenshot: masked
+  - click: {role: button, label: Show}
+  - assert_state: {key: screen.revealed, equals: true}
+  # The key itself never appears in the tree (the label names a secret).
+  - assert_not_exists: {role: label, label_contains: K7F2}
+  - click: {role: button, label: Hide}
+  - assert_state: {key: screen.revealed, equals: false}
+  - click: {role: button, label: Copy}
+  - assert_state: {key: screen.copied, equals: true}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.saved, equals: true}
+  - click: {role: check_box, label: I saved my recovery key somewhere safe}
+  - assert_state: {key: screen.confirmed, equals: true}
+  - assert_enabled: {role: button, label: Done}
+  - assert_no_clipping: {}
+  - screenshot: confirmed
+  - click: {role: button, label: Done}
+  - assert_state: {key: screen.screen, equals: opening_balances}
+  - assert_not_exists: {role: tab, label: Recovery Key}

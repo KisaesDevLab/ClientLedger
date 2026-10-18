@@ -1,0 +1,79 @@
+# Open Company (P08 step 1). Runs against `clientledger --demo` in light,
+# then dark, in the same app. The demo starts with Ozark Ridge open and an
+# unsaved Write Check: switching asks about it first (Q-182/Q-183), which
+# only happens on the first run, so that click is conditional.
+name: open-company
+description: Open Company window, keyboard selection, restore panel, open, switch.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+
+  # --- File > Open or Switch Company from an open company ----------------
+  - command: file.open_company
+  - assert_state: {key: screen.screen, equals: open_company}
+  - click: {role: button, label: Shoal Creek Farm}
+  - click: {role: button, label: Open}
+  # First run only: the dirty demo window asks; after Discard the window
+  # comes back and the switch finishes by itself.
+  - click_if_present: {role: button, label: Discard changes}
+  - assert_state: {key: company_open, equals: true}
+  - assert_exists: {role: label, label_contains: Shoal Creek Farm}
+  - screenshot: opened
+
+  # --- Close the company: the window fills the body as in the mockup -----
+  - command: file.close_company
+  - assert_state: {key: company_open, equals: false}
+  - assert_state: {key: screen.screen, equals: open_company}
+  - assert_exists: {role: label, label: Open a company}
+  - assert_exists: {role: label, label: No company open}
+  - assert_exists: {role: label, label_contains: Recent companies}
+  - assert_exists: {role: button, label: Ozark Ridge Landscaping LLC}
+  - assert_exists: {role: button, label: Shoal Creek Farm}
+  - assert_exists: {role: button, label_contains: Rental Duplex}
+  - assert_exists: {role: button, label_contains: Ozark Ridge (sample)}
+  - assert_exists: {role: label, label_contains: Start something new}
+  - assert_exists: {role: button, label: New company}
+  - assert_exists: {role: button, label: Switch from QuickBooks Desktop}
+  - assert_exists: {role: button, label: Restore a backup}
+  - assert_exists: {role: button, label: Open a company on my office network}
+  - assert_exists: {role: button, label: Try the practice company}
+  - assert_exists: {role: button, label: Open}
+  - assert_exists: {role: label, label: Works fully offline}
+  - assert_exists: {role: label, label: Not affiliated with Intuit or QuickBooks}
+  - assert_state: {key: screen.companies, equals: 4}
+  - assert_no_clipping: {}
+  - screenshot: open-company
+
+  # --- Keyboard: arrows move the selection, Enter opens -------------------
+  - click: {role: button, label: Ozark Ridge Landscaping LLC}
+  - assert_state: {key: screen.selected, equals: 0}
+  - key: ArrowDown
+  - assert_state: {key: screen.selected, equals: 1}
+  - key: ArrowUp
+  - assert_state: {key: screen.selected, equals: 0}
+
+  # --- Restore panel --------------------------------------------------------
+  - click: {role: button, label: Restore a backup}
+  - assert_state: {key: screen.restore_open, equals: true}
+  - assert_exists: {role: text_input, label: Backup file (.clbackup)}
+  - assert_exists: {role: password_input, label: Backup passphrase}
+  - screenshot: restore-panel
+  - click: {role: button, label: Cancel}
+  - assert_state: {key: screen.restore_open, equals: false}
+
+  # --- Practice company opens from the side button --------------------------
+  - click: {role: button, label: Try the practice company}
+  - assert_state: {key: company_open, equals: true}
+  - assert_exists: {role: label, label_contains: Practice company}
+
+  # --- Back to the window with Enter on the first company ------------------
+  - command: file.close_company
+  - assert_state: {key: company_open, equals: false}
+  - key: Enter
+  - assert_state: {key: company_open, equals: true}
+  - assert_exists: {role: label, label_contains: Ozark Ridge}
+
+  # --- Leave the window showing for the mockup comparison -------------------
+  - command: file.close_company
+  - assert_state: {key: company_open, equals: false}
+  - assert_state: {key: screen.screen, equals: open_company}
