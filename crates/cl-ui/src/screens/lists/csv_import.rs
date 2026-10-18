@@ -881,14 +881,14 @@ fn outcome_ui(ui: &mut Ui, tokens: &Tokens, o: &Outcome) {
 
 /// Reads and parses a CSV file: the first row is the header.
 fn read_csv(path: &Path) -> Result<Parsed, String> {
-    let meta = std::fs::metadata(path).map_err(|_| t("csv.read.missing"))?;
+    let meta = std::fs::metadata(path).map_err(|e| read_error_text(&e))?;
     if !meta.is_file() {
         return Err(t("csv.read.missing"));
     }
     if meta.len() > FILE_MAX_BYTES {
         return Err(t("csv.read.too_big"));
     }
-    let bytes = std::fs::read(path).map_err(|_| t("csv.read.missing"))?;
+    let bytes = std::fs::read(path).map_err(|e| read_error_text(&e))?;
     let rows = csv::parse(&csv::decode(&bytes)).map_err(|e| match e {
         csv::CsvError::Empty => t("csv.read.empty"),
         csv::CsvError::UnclosedQuote { line } => {
@@ -906,21 +906,51 @@ fn read_csv(path: &Path) -> Result<Parsed, String> {
     })
 }
 
-/// Writes `text` as `<stem>.csv` in `dir` (a number added when the name is
-/// taken), with a byte-order mark so spreadsheet programs read UTF-8.
-fn write_export(dir: &Path, stem: &str, text: &str) -> std::io::Result<PathBuf> {
-    std::fs::create_dir_all(dir)?;
-    let mut path = dir.join(format!("{stem}.csv"));
-    let mut n = 2;
-    while path.exists() {
-        path = dir.join(format!("{stem} ({n}).csv"));
-        n += 1;
+/// The owner-facing reason a file could not be read: missing, not
+/// allowed, or something else.
+fn read_error_text(e: &std::io::Error) -> String {
+    match e.kind() {
+        std::io::ErrorKind::NotFound => t("csv.read.missing"),
+        std::io::ErrorKind::PermissionDenied => t("csv.read.denied"),
+        _ => t("csv.read.failed"),
     }
-    let mut body = String::with_capacity(text.len() + 3);
-    body.push('\u{FEFF}');
-    body.push_str(text);
-    std::fs::write(&path, body)?;
-    Ok(path)
+}
+
+/// Tries this many names (`<stem>.csv`, `<stem> (2).csv`, ...) before
+/// giving up.
+const EXPORT_NAME_TRIES: u32 = 1000;
+
+/// Writes `text` as `<stem>.csv` in `dir` (a number added when the name is
+/// taken), with a byte-order mark so spreadsheet programs read UTF-8. The
+/// file is created only when no file has the name (`create_new`), so an
+/// export never overwrites one, even if it appears meanwhile.
+fn write_export(dir: &Path, stem: &str, text: &str) -> std::io::Result<PathBuf> {
+    use std::io::Write as _;
+    std::fs::create_dir_all(dir)?;
+    for n in 1..=EXPORT_NAME_TRIES {
+        let path = if n == 1 {
+            dir.join(format!("{stem}.csv"))
+        } else {
+            dir.join(format!("{stem} ({n}).csv"))
+        };
+        let mut file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        };
+        file.write_all("\u{FEFF}".as_bytes())?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        return Ok(path);
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "no free export file name",
+    ))
 }
 
 /// Tags as CSV: name, group, description, color, active.

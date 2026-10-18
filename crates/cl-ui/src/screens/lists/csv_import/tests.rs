@@ -261,3 +261,38 @@ fn unreadable_files_say_why() {
     r.frames(2);
     assert_ne!(r.s.title(), "");
 }
+
+/// S7: an export never overwrites a file, and numbers its name instead.
+#[test]
+fn exports_never_overwrite_a_file() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let first = super::write_export(dir.path(), "items", "a").expect("first");
+    assert_eq!(first, dir.path().join("items.csv"));
+    std::fs::write(dir.path().join("items (2).csv"), "keep").expect("seed");
+    let third = super::write_export(dir.path(), "items", "b").expect("third");
+    assert_eq!(third, dir.path().join("items (3).csv"));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("items (2).csv")).expect("read"),
+        "keep"
+    );
+    let body = std::fs::read(&third).expect("read");
+    assert_eq!(body, "\u{FEFF}b".as_bytes());
+}
+
+/// S7: a missing file and a file that can't be read say different things.
+#[test]
+fn read_errors_tell_missing_from_other_failures() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let missing = super::read_csv(&dir.path().join("nope.csv")).expect_err("missing");
+    assert_eq!(missing, crate::i18n::t("csv.read.missing"));
+    let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+    assert_eq!(
+        super::read_error_text(&denied),
+        crate::i18n::t("csv.read.denied")
+    );
+    let other = std::io::Error::other("busy");
+    assert_eq!(
+        super::read_error_text(&other),
+        crate::i18n::t("csv.read.failed")
+    );
+}

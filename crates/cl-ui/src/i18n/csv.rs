@@ -48,6 +48,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("csv.file", "File"),
     ("csv.read_button", "Read file"),
     ("csv.read.missing", "ClientLedger couldn't open that file. Check the path and try again."),
+    ("csv.read.denied", "ClientLedger isn't allowed to open that file. Check that you can open it, or copy it to another folder first."),
+    ("csv.read.failed", "ClientLedger couldn't read that file. Close it in any program that has it open, then try again."),
     ("csv.read.too_big", "The file is too large to import. Split it into smaller files."),
     ("csv.read.empty", "The file is empty."),
     ("csv.read.quote", "A quoted value starting on line {line} never ends. Check the quotes in the file."),
