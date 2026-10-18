@@ -406,6 +406,31 @@ fn merge_moves_history_and_makes_the_duplicate_inactive() {
     assert!(!gone.is_active);
 }
 
+/// B2: merging a 1099 vendor says so, and a client-and-vendor contact is
+/// offered only client-and-vendor targets.
+#[test]
+fn merge_mentions_1099_and_keeps_both_roles() {
+    let mut r = Rig::new(Role::Vendor);
+    r.select("Crane Creek Tree Service");
+    r.cmd("list.merge");
+    assert_eq!(r.s.state()["panel"], "merge");
+    assert_eq!(r.s.state()["merge_source_1099"], true);
+    r.cmd("edit.cancel");
+    r.s.panel = Panel::None;
+    r.select(BOTH);
+    r.cmd("list.merge");
+    let roles: Vec<Roles> = if let Panel::Merge(m) = &r.s.panel {
+        m.targets
+            .iter()
+            .filter_map(|(id, _)| r.s.model.list().entry(*id).map(|e| e.roles))
+            .collect()
+    } else {
+        assert_eq!(r.s.state()["warning"], "nothing");
+        Vec::new()
+    };
+    assert!(roles.iter().all(|x| *x == Roles::Both), "{roles:?}");
+}
+
 #[test]
 fn quick_report_loads_every_transaction_and_tabs_say_what_waits() {
     let mut r = Rig::new(Role::Client);

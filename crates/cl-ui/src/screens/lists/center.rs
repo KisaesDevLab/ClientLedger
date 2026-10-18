@@ -117,6 +117,8 @@ struct Detail {
 struct MergePanel {
     source: ContactId,
     source_name: String,
+    /// The source is tracked for 1099s (its payments move with the merge).
+    source_1099: bool,
     targets: Vec<(ContactId, String)>,
     choice: usize,
     focus: bool,
@@ -594,9 +596,14 @@ impl CenterScreen {
             return;
         }
         self.warn = None;
+        let source_1099 = self
+            .contacts
+            .iter()
+            .any(|c| c.id == id && c.fields.is1099_eligible);
         self.panel = Panel::Merge(Box::new(MergePanel {
             source: id,
             source_name: source.name,
+            source_1099,
             targets,
             choice: 0,
             focus: true,
@@ -1239,6 +1246,18 @@ impl CenterScreen {
                 )
                 .wrap(),
             );
+            if m.source_1099 {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(t_with(
+                            "center.merge.explain_1099",
+                            &[("source", &m.source_name), ("target", &target)],
+                        ))
+                        .color(tokens.warn_text),
+                    )
+                    .wrap(),
+                );
+            }
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 if crate::widgets::primary_button(ui, &t("center.merge.confirm")).clicked() {
@@ -1462,6 +1481,7 @@ impl Screen for CenterScreen {
             "w9_on_file": d.and_then(|d| d.profile_value.as_ref()).map(|p| p.w9_on_file),
             "merge_available": true,
             "merging": matches!(&self.panel, Panel::Merge(m) if m.task.is_some()),
+            "merge_source_1099": matches!(&self.panel, Panel::Merge(m) if m.source_1099),
             "jobs_available": false,
             "attachments_available": false,
         })

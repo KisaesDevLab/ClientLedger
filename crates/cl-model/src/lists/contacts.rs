@@ -101,6 +101,13 @@ impl Roles {
         )
     }
 
+    /// True when these roles include every role in `other`.
+    #[must_use]
+    pub const fn covers(self, other: Roles) -> bool {
+        (self.has(Role::Client) || !other.has(Role::Client))
+            && (self.has(Role::Vendor) || !other.has(Role::Vendor))
+    }
+
     /// The roles with `role` switched on or off; `None` when that would
     /// leave the contact with no role.
     #[must_use]
@@ -367,12 +374,16 @@ impl ContactList {
     }
 
     /// The contacts `source` may be merged into: active, in `role`, not
-    /// `source` itself, in name order.
+    /// `source` itself, and holding every role `source` has (a client and
+    /// vendor only merges into another client and vendor, so neither its
+    /// sales nor its bills land on a contact of the wrong kind), in name
+    /// order.
     #[must_use]
     pub fn merge_targets(&self, role: Role, source: ContactId) -> Vec<&ContactEntry> {
+        let from = self.entry(source).map_or(Roles::only(role), |e| e.roles);
         self.entries
             .iter()
-            .filter(|e| e.id != source && e.active && e.roles.has(role))
+            .filter(|e| e.id != source && e.active && e.roles.has(role) && e.roles.covers(from))
             .collect()
     }
 }

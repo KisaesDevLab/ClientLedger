@@ -123,6 +123,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("center.merge.vendor", "vendor"),
     ("center.merge.keep", "Into {role}"),
     ("center.merge.explain", "Everything recorded for {source} moves to {target}: invoices, bills, payments, checks and bank rules. {source} is then made inactive. A merge can't be undone."),
+    ("center.merge.explain_1099", "{source} is tracked for 1099s. Its payments move to {target}; make sure {target} is tracked for 1099s too, or those payments won't be on a 1099."),
     ("center.merge.confirm", "Merge"),
     ("center.merge.cancel", "Cancel"),
     ("center.merge.working", "Merging\u{2026}"),

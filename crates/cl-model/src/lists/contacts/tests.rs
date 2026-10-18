@@ -115,6 +115,36 @@ fn merge_targets_are_other_active_contacts_of_the_role() {
     assert_eq!(t, [cid(2)], "inactive and vendors are left out");
 }
 
+/// B2: a client-and-vendor source only merges into another client and
+/// vendor, from either center.
+#[test]
+fn a_both_role_source_merges_only_into_both_role_targets() {
+    let list = ContactList::new(vec![
+        entry(1, Roles::Both, "Ash Hollow", true),
+        entry(2, Roles::Client, "Birch Client", true),
+        entry(3, Roles::Vendor, "Cedar Vendor", true),
+        entry(4, Roles::Both, "Dogwood Both", true),
+        entry(5, Roles::Both, "Elm Inactive", false),
+    ]);
+    for role in [Role::Client, Role::Vendor] {
+        let t: Vec<ContactId> = list
+            .merge_targets(role, cid(1))
+            .iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(t, [cid(4)], "{role:?}");
+    }
+    // A single-role source may still merge into a both-role contact.
+    let t: Vec<ContactId> = list
+        .merge_targets(Role::Vendor, cid(3))
+        .iter()
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(t, [cid(1), cid(4)]);
+    assert!(Roles::Both.covers(Roles::Vendor));
+    assert!(!Roles::Client.covers(Roles::Both));
+}
+
 #[test]
 fn terms_keep_unknown_text_and_round_trip_the_fixed_list() {
     for t in Terms::ALL {
