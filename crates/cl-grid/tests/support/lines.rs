@@ -394,9 +394,18 @@ impl Lookups for TestLookups {
 }
 
 fn col(id: ColumnId, kind: CellKind, editable: bool) -> Column {
+    let header = match id {
+        ACCOUNT => "Account",
+        AMOUNT => "Amount",
+        MEMO => "Memo",
+        DATE => "Service date",
+        BILLABLE => "Billable",
+        TAGS => "Tags",
+        _ => "Balance",
+    };
     Column {
         id,
-        header: TextKey("test.header"),
+        header: TextKey(header),
         placeholder: None,
         kind,
         line: Line::First,
@@ -421,7 +430,11 @@ pub fn columns() -> Vec<Column> {
             },
             true,
         ),
-        col(AMOUNT, CellKind::Amount(AmountRules::MONEY), true),
+        Column {
+            align: Align::Right,
+            mono: true,
+            ..col(AMOUNT, CellKind::Amount(AmountRules::MONEY), true)
+        },
         col(MEMO, CellKind::Text { max_chars: 100 }, true),
         col(DATE, CellKind::Date, true),
         col(BILLABLE, CellKind::Checkbox, true),

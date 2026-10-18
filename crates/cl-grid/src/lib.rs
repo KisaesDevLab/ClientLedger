@@ -8,7 +8,13 @@
 #![forbid(unsafe_code)]
 
 pub mod core;
+pub mod editors;
+mod grid;
 pub mod sequencer;
+pub mod view;
+
+pub use grid::{FULL_FILTER, Grid, GridEnv, GridHeight, GridOutput, GridSnapshot};
+pub use view::style::GridStyle;
 
 pub use crate::core::model::{
     Align, CellInput, CellKind, CellPos, CellProblem, CellValue, Column, ColumnId, EditableModel,

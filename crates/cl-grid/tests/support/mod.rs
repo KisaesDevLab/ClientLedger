@@ -47,3 +47,4 @@ impl RowModel for KeysModel {
     }
 }
 pub mod lines;
+pub mod rig;

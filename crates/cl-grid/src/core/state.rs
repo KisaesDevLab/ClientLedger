@@ -218,6 +218,11 @@ impl Core {
         self.edit.as_ref().is_some_and(Edit::is_dirty)
     }
 
+    /// Show a problem under the open cell (a refused paste).
+    pub fn show_problem(&mut self, p: CellProblem) {
+        self.set_error(p);
+    }
+
     /// Whole rows per page (the view sets it from the viewport).
     pub fn set_page_rows(&mut self, rows: usize) {
         self.page_rows = rows.max(1);
