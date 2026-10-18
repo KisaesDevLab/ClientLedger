@@ -215,6 +215,11 @@ pub async fn restore(
         .as_ref()
         .and_then(|h| h.get("flags"))
         .and_then(|f| serde_json::from_value(f.clone()).ok());
+    let host_prefs: Option<cl_settings::CompanyPrefs> = imported
+        .host
+        .as_ref()
+        .and_then(|h| h.get("prefs"))
+        .and_then(|f| serde_json::from_value(f.clone()).ok());
     let original_name = previous_rec
         .as_ref()
         .map_or_else(|| imported.name.clone(), |r| r.name.clone());
@@ -232,9 +237,14 @@ pub async fn restore(
         let flags = host_flags
             .or_else(|| previous_rec.as_ref().map(|r| r.flags))
             .unwrap_or_default();
+        let mut prefs = host_prefs
+            .or_else(|| previous_rec.as_ref().map(|r| r.prefs.clone()))
+            .unwrap_or_default();
+        prefs.normalize();
         let rec = l.upsert(imported.tenant_id, &imported.name);
         rec.accent = accent;
         rec.flags = flags;
+        rec.prefs = prefs;
         rec.source = Some("restore".into());
     })?;
 

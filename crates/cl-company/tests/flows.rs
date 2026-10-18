@@ -186,6 +186,9 @@ async fn backup_moves_the_archive_verifies_it_and_records_history() {
         .update(|l| {
             let r = l.upsert(t(T1), "Ozark Ridge Landscaping LLC");
             r.flags.sales_tax_enabled = true;
+            r.prefs.bills_due_days = 21;
+            r.prefs.receipt_inbox_dir = Some(std::path::PathBuf::from("C:/Receipts"));
+            r.prefs.ai.suggest_rules = true;
         })
         .expect("store");
     let engine_dir = dir.path().join("engine-archives");
@@ -223,6 +226,21 @@ async fn backup_moves_the_archive_verifies_it_and_records_history() {
     assert_eq!(body["host"]["app"], "ClientLedger");
     assert_eq!(body["host"]["kind"], "backup");
     assert_eq!(body["host"]["flags"]["sales_tax_enabled"], true);
+    assert_eq!(body["host"]["prefs"]["bills_due_days"], 21);
+    assert_eq!(body["host"]["prefs"]["ai"]["suggest_rules"], true);
+    // Preferences travel without secrets: the host object never carries a
+    // key, a password or the passphrase (non-negotiable 11).
+    let host_text = body["host"].to_string().to_ascii_lowercase();
+    for word in [
+        "passphrase",
+        "password",
+        "apikey",
+        "api_key",
+        "canary",
+        "sk-",
+    ] {
+        assert!(!host_text.contains(word), "{word} in host: {host_text}");
+    }
     let list = store.load().expect("load");
     let rec = list.get(t(T1)).expect("rec");
     assert_eq!(rec.backups.len(), 1);
@@ -364,7 +382,10 @@ async fn restore_imports_as_a_new_tenant_swaps_names_and_keeps_the_old_one() {
         &server,
         T2,
         "Ozark Ridge Landscaping LLC",
-        Some(json!({"app":"ClientLedger","accent":"#C23B4A","flags":{"inventory_enabled":true}})),
+        Some(
+            json!({"app":"ClientLedger","accent":"#C23B4A","flags":{"inventory_enabled":true},
+            "prefs":{"bills_due_days":30,"ai":{"suggest_rules":true,"monthly_token_cap":250_000}}}),
+        ),
     )
     .await;
     mount_tenants_list(&server).await;
@@ -444,6 +465,12 @@ async fn restore_imports_as_a_new_tenant_swaps_names_and_keeps_the_old_one() {
         new.flags.inventory_enabled,
         "flags come from the archive host object"
     );
+    assert_eq!(
+        new.prefs.bills_due_days, 30,
+        "company preferences come from the archive host object"
+    );
+    assert_eq!(new.prefs.ai.monthly_token_cap, Some(250_000));
+    assert!(new.prefs.ai.suggest_rules);
     assert_eq!(new.source.as_deref(), Some("restore"));
 }
 

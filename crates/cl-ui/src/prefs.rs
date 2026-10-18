@@ -1,90 +1,14 @@
-//! Per-user look-and-feel choices that are remembered between runs: colour
-//! theme and app zoom (Q-66: 80 to 200 percent). Stored as one small JSON file
-//! in the app data folder. Preferences proper (AI keys, defaults) arrive with
-//! `cl-settings` in P09; these two are needed by the shell now.
+//! UI state kept between runs: the user preferences (`cl_settings::UserPrefs`,
+//! re-exported here as [`UiPrefs`] with the zoom helpers the shell uses)
+//! and one saved tab layout per company. Preferences proper are edited in
+//! the Preferences window (P09); the shell reads theme and zoom from them.
 
 use std::io;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-
-use crate::theme::ThemeChoice;
-
-/// Allowed zoom percentages, smallest to largest.
-pub const ZOOM_STEPS: [u16; 9] = [80, 90, 100, 110, 125, 150, 175, 190, 200];
-
-/// Default zoom.
-pub const ZOOM_DEFAULT: u16 = 100;
-
-/// What is remembered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UiPrefs {
-    /// Light, dark, or follow the system.
-    pub theme: ThemeChoice,
-    /// Zoom in percent; always one of [`ZOOM_STEPS`].
-    pub zoom_percent: u16,
-}
-
-impl Default for UiPrefs {
-    fn default() -> Self {
-        UiPrefs {
-            theme: ThemeChoice::Auto,
-            zoom_percent: ZOOM_DEFAULT,
-        }
-    }
-}
-
-/// The step nearest to `percent`.
-#[must_use]
-pub fn nearest_step(percent: u16) -> u16 {
-    ZOOM_STEPS
-        .iter()
-        .copied()
-        .min_by_key(|s| s.abs_diff(percent))
-        .unwrap_or(ZOOM_DEFAULT)
-}
-
-/// One step up (no change at the top).
-#[must_use]
-pub fn zoom_in(percent: u16) -> u16 {
-    let cur = nearest_step(percent);
-    ZOOM_STEPS.iter().copied().find(|s| *s > cur).unwrap_or(cur)
-}
-
-/// One step down (no change at the bottom).
-#[must_use]
-pub fn zoom_out(percent: u16) -> u16 {
-    let cur = nearest_step(percent);
-    ZOOM_STEPS
-        .iter()
-        .rev()
-        .copied()
-        .find(|s| *s < cur)
-        .unwrap_or(cur)
-}
-
-impl UiPrefs {
-    /// Parse stored text. Unreadable text gives the defaults; a zoom outside
-    /// the allowed range is snapped to the nearest step.
-    #[must_use]
-    pub fn parse(text: &str) -> UiPrefs {
-        let mut p: UiPrefs = serde_json::from_str(text).unwrap_or_default();
-        p.zoom_percent = nearest_step(p.zoom_percent);
-        p
-    }
-
-    /// Text to store.
-    #[must_use]
-    pub fn to_text(&self) -> String {
-        serde_json::to_string_pretty(self).unwrap_or_default()
-    }
-
-    /// The factor egui wants (1.0 = 100 percent).
-    #[must_use]
-    pub fn zoom_factor(&self) -> f32 {
-        f32::from(self.zoom_percent) / 100.0
-    }
-}
+pub use cl_settings::user_prefs::{
+    UserPrefs as UiPrefs, UserPrefsStore, ZOOM_DEFAULT, ZOOM_STEPS, nearest_step, zoom_in, zoom_out,
+};
 
 /// Where UI state is kept: preferences, and one saved tab layout per company.
 #[derive(Debug, Clone)]
@@ -105,8 +29,10 @@ impl UiStore {
         &self.dir
     }
 
-    fn prefs_path(&self) -> PathBuf {
-        self.dir.join("ui-prefs.json")
+    /// The preferences store (the same file `cl-settings` reads).
+    #[must_use]
+    pub fn prefs_store(&self) -> UserPrefsStore {
+        UserPrefsStore::in_dir(&self.dir)
     }
 
     fn layout_path(&self, company: &str) -> PathBuf {
@@ -116,7 +42,7 @@ impl UiStore {
     /// Load preferences (defaults when missing or unreadable).
     #[must_use]
     pub fn load_prefs(&self) -> UiPrefs {
-        read_capped(&self.prefs_path()).map_or_else(UiPrefs::default, |t| UiPrefs::parse(&t))
+        self.prefs_store().load()
     }
 
     /// Save preferences.
@@ -124,7 +50,7 @@ impl UiStore {
     /// # Errors
     /// Any file error.
     pub fn save_prefs(&self, prefs: &UiPrefs) -> io::Result<()> {
-        write_atomic(&self.prefs_path(), &prefs.to_text())
+        self.prefs_store().save(prefs)
     }
 
     /// Load the tab layout remembered for `company`.
@@ -221,6 +147,7 @@ fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::ThemeChoice;
     use crate::windows::{SavedTab, SessionLayout};
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -230,40 +157,13 @@ mod tests {
     }
 
     #[test]
-    fn zoom_steps_stay_inside_80_to_200() {
-        assert_eq!(ZOOM_STEPS.first(), Some(&80));
-        assert_eq!(ZOOM_STEPS.last(), Some(&200));
-        let mut z = 100;
-        for _ in 0..20 {
-            z = zoom_in(z);
-        }
-        assert_eq!(z, 200);
-        for _ in 0..20 {
-            z = zoom_out(z);
-        }
-        assert_eq!(z, 80);
-        assert_eq!(zoom_in(100), 110);
-        assert_eq!(zoom_out(100), 90);
-    }
-
-    #[test]
-    fn odd_values_snap_to_a_step() {
-        assert_eq!(nearest_step(0), 80);
-        assert_eq!(nearest_step(999), 200);
-        assert_eq!(nearest_step(104), 100);
-    }
-
-    #[test]
     fn prefs_round_trip_and_bad_text_gives_defaults() {
         let p = UiPrefs {
             theme: ThemeChoice::Dark,
             zoom_percent: 150,
+            ..UiPrefs::default()
         };
         assert_eq!(UiPrefs::parse(&p.to_text()), p);
-        assert_eq!(UiPrefs::parse("garbage"), UiPrefs::default());
-        let clamped = UiPrefs::parse(r#"{"theme":"light","zoom_percent":500}"#);
-        assert_eq!(clamped.zoom_percent, 200);
-        assert!((clamped.zoom_factor() - 2.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -274,6 +174,7 @@ mod tests {
         let p = UiPrefs {
             theme: ThemeChoice::Light,
             zoom_percent: 125,
+            ..UiPrefs::default()
         };
         store.save_prefs(&p).unwrap();
         assert_eq!(store.load_prefs(), p);
@@ -312,12 +213,20 @@ mod tests {
         let dir = temp_dir("big");
         std::fs::create_dir_all(&dir).unwrap();
         let store = UiStore::new(&dir);
+        // Preferences go through cl-settings (4 MiB cap); layouts keep the
+        // 64 KiB cap here.
         let big = format!(
             "{{\"theme\":\"dark\",\"zoom_percent\":150,\"pad\":\"{}\"}}",
-            "x".repeat(70_000)
+            "x".repeat(5 * 1024 * 1024)
         );
         std::fs::write(dir.join("ui-prefs.json"), big).unwrap();
         assert_eq!(store.load_prefs(), UiPrefs::default());
+        let layout = format!(
+            "{{\"version\":1,\"tabs\":[],\"active\":0,\"pad\":\"{}\"}}",
+            "x".repeat(70_000)
+        );
+        std::fs::write(store.layout_path("co"), layout).unwrap();
+        assert_eq!(store.load_layout("co"), None);
         let _ = std::fs::remove_dir_all(dir);
     }
 

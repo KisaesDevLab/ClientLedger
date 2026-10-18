@@ -1,0 +1,16 @@
+# Synthetic payload lines (no real people or accounts). Each line is fed to
+# cl_settings::ai::redact and must come back without emails, phone numbers,
+# tax IDs or digit runs longer than seven.
+Vendor: Ozark Supply Co, contact books@ozarksupply.example, phone (417) 555-0133
+ACH from Shoal Creek Farm acct 000123456789 routing 081000210 memo mulch delivery
+EIN on W-9: 12-3456789 for Riverbend Nursery LLC
+Owner SSN 123-45-6789 should never leave the computer
+Card purchase 4532 0151 1283 0366 at Hardware Barn
+Call 417.555.0177 about the overdue invoice
+Email kurt.w@kisaesdevlab.example; cc: office@ozarkridge.example.
+Deposit ref 9876543210 from client payment
+Wire confirmation number 20261031000123
+Check 1042 to Clay County Tool Rental, phone 1-417-555-0101
+Statement line: POS 8812 3344 5566 7788 FUEL STOP
+Loan 3300-55512 payment, lender support 800-555-0199
+Mobile +1 (417) 555-0188 texted a photo of the receipt
