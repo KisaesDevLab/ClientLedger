@@ -88,6 +88,8 @@ type Opened = (TenantId, String, Accent, Option<cl_core::CalendarDate>);
 struct SignedIn {
     session: cl_api::Session,
     user: String,
+    /// From first-run setup on an engine with U-23.
+    recovery_key: Option<Secret>,
 }
 
 impl OpenCompanyScreen {
@@ -211,18 +213,22 @@ impl OpenCompanyScreen {
         self.busy = Some("open.setup.working");
         self.signin_task = spawn_lifecycle(&self.link, group, move || async move {
             let seed: Option<CompanySeed> = None;
-            tokio::task::spawn_blocking(move || sup.initialize_engine(&admin, seed.as_ref()))
-                .await
-                .map_err(|_| CompanyError::Metadata)?
-                .map_err(|e| CompanyError::Io {
-                    what: "first-run setup",
-                    source: std::io::Error::other(e.to_string()),
-                })?;
+            let made =
+                tokio::task::spawn_blocking(move || sup.initialize_engine(&admin, seed.as_ref()))
+                    .await
+                    .map_err(|_| CompanyError::Metadata)?
+                    .map_err(|e| CompanyError::Io {
+                        what: "first-run setup",
+                        source: std::io::Error::other(e.to_string()),
+                    })?;
             client.desktop_info().await?;
             match client.login(&email, &password).await? {
                 LoginOutcome::Session(session) => Ok(SignedIn {
                     session,
                     user: user_text(&display, "owner"),
+                    recovery_key: made
+                        .recovery_key
+                        .map(|k| Secret::new(k.expose().to_string())),
                 }),
                 LoginOutcome::TfaRequired(_) => Err(CompanyError::Unavailable("tfa")),
             }
@@ -244,6 +250,7 @@ impl OpenCompanyScreen {
                     Ok(SignedIn {
                         session,
                         user: user_text(&display, "owner"),
+                        recovery_key: None,
                     })
                 }
                 LoginOutcome::TfaRequired(_) => Err(CompanyError::Unavailable("tfa")),
@@ -373,6 +380,13 @@ impl OpenCompanyScreen {
                 Ok(s) => {
                     self.link.set_session(Some(s.session));
                     self.link.push(CompanyEvent::SignedIn { user: s.user });
+                    if let Some(key) = s.recovery_key {
+                        // Shown once by the recovery-key window (Q-210).
+                        self.link.stash_recovery_key(key);
+                        self.link.push(CompanyEvent::OpenWindow(CommandId::new(
+                            super::RECOVERY_KEY,
+                        )));
+                    }
                     self.stage = Stage::Ready;
                     self.loaded_once = false;
                 }

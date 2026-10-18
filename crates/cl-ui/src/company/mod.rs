@@ -64,6 +64,9 @@ pub struct CompanyLink {
     session: Mutex<Option<Session>>,
     events: Mutex<Vec<CompanyEvent>>,
     dirty_windows: std::sync::atomic::AtomicUsize,
+    /// A recovery key the engine returned at first-run setup (U-23), kept
+    /// only until the recovery-key screen shows it once.
+    recovery_key: Mutex<Option<cl_core::Secret>>,
     /// Default folder for backups and exports.
     pub backup_dir: PathBuf,
     /// The demo list and state, in demo mode.
@@ -101,6 +104,7 @@ impl CompanyLink {
             session: Mutex::new(None),
             events: Mutex::new(Vec::new()),
             dirty_windows: std::sync::atomic::AtomicUsize::new(0),
+            recovery_key: Mutex::new(None),
             backup_dir,
             demo: None,
         }
@@ -117,6 +121,7 @@ impl CompanyLink {
             session: Mutex::new(None),
             events: Mutex::new(Vec::new()),
             dirty_windows: std::sync::atomic::AtomicUsize::new(0),
+            recovery_key: Mutex::new(None),
             backup_dir: dir.join("Backups"),
             demo: Some(Mutex::new(demo::DemoState::new())),
         }
@@ -173,6 +178,23 @@ impl CompanyLink {
     pub fn dirty_windows(&self) -> usize {
         self.dirty_windows
             .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Keep a recovery key from first-run setup for the screen that shows it.
+    pub fn stash_recovery_key(&self, key: cl_core::Secret) {
+        *self
+            .recovery_key
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(key);
+    }
+
+    /// Takes the stashed recovery key (once).
+    #[must_use]
+    pub fn take_recovery_key(&self) -> Option<cl_core::Secret> {
+        self.recovery_key
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
     }
 
     /// The signed-in session, if any.

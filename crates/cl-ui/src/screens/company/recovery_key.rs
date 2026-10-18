@@ -40,10 +40,14 @@ impl RecoveryKeyScreen {
     #[must_use]
     pub fn new(link: Arc<CompanyLink>) -> RecoveryKeyScreen {
         let group = link.group().and_then(Result::ok);
-        let unavailable = !link.is_demo() && !link.capabilities().has(Capabilities::RECOVERY_KEY);
-        let key = link
-            .is_demo()
-            .then(|| Secret::new(crate::company::demo::DEMO_RECOVERY_KEY));
+        let stashed = link.take_recovery_key();
+        let unavailable = stashed.is_none()
+            && !link.is_demo()
+            && !link.capabilities().has(Capabilities::RECOVERY_KEY);
+        let key = stashed.or_else(|| {
+            link.is_demo()
+                .then(|| Secret::new(crate::company::demo::DEMO_RECOVERY_KEY))
+        });
         let save_path = link
             .backup_dir
             .join("ClientLedger-recovery-key.txt")
