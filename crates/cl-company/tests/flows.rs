@@ -882,3 +882,73 @@ async fn switching_mid_load_sends_nothing_into_the_other_company() {
             .is_some_and(|v| v.to_str().unwrap_or("") == CO)
     }));
 }
+
+/// A stale previous company (409 STALE on the first rename) does not fail
+/// the restore: the restored company keeps the archive's name and the
+/// local records stay as they were.
+#[tokio::test]
+async fn restore_with_a_stale_previous_company_keeps_both_names() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let server = engine(&["tenant-archive-v1"]).await;
+    let s = session(&server).await;
+    let (store, secrets) = stores(dir.path());
+    let file = write_archive(dir.path(), "arch-9");
+    let sha = cl_company::backup::sha256_file(&file).expect("sha");
+    store
+        .update(|l| {
+            l.upsert(t(T1), "Ozark Ridge Landscaping LLC");
+            l.record_backup(
+                t(T1),
+                BackupRecord {
+                    path: file.clone(),
+                    sha256: sha,
+                    archive_id: "arch-9".into(),
+                    created_at: cl_settings::recent::now(),
+                    kind: BackupKind::Backup,
+                },
+            );
+        })
+        .expect("store");
+    mount_import(&server, T2, "Ozark Ridge Landscaping LLC", None).await;
+    mount_tenants_list(&server).await;
+    Mock::given(method("PATCH"))
+        .and(path_regex(r"^/api/v1/tenants/[^/]+$"))
+        .respond_with(json(
+            409,
+            json!({"error":{"message":"changed","code":"STALE","updatedAt":"2026-11-04T09:00:00.000Z"}}),
+        ))
+        .mount(&server)
+        .await;
+    let out = restore(
+        &s,
+        &store,
+        &secrets,
+        &RestoreRequest {
+            path: file,
+            passphrase: None,
+        },
+        &cl_company::backup::silent(),
+    )
+    .await
+    .expect("the restore itself succeeded");
+    assert!(!out.names_swapped);
+    assert_eq!(out.kept_previous, Some(t(T1)));
+    assert_eq!(out.name, "Ozark Ridge Landscaping LLC");
+    assert_eq!(
+        count(&server, "PATCH", &format!("/api/v1/tenants/{T1}")).await,
+        1
+    );
+    assert_eq!(
+        count(&server, "PATCH", &format!("/api/v1/tenants/{T2}")).await,
+        0
+    );
+    let list = store.load().expect("load");
+    assert_eq!(
+        list.get(t(T1)).expect("old").name,
+        "Ozark Ridge Landscaping LLC"
+    );
+    assert!(
+        list.get(t(T2)).is_some(),
+        "the restored company is recorded"
+    );
+}

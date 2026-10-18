@@ -277,8 +277,9 @@ pub async fn restore(
 /// Renames the previous company out of the way, then the restored one to
 /// the original name. Each rename sends the row's current `updatedAt`
 /// from `GET /api/v1/tenants` (409 `STALE` otherwise). Returns `Ok(false)`
-/// when the engine has no rename route or the second rename failed after
-/// the first succeeded (the restored company keeps the archive name).
+/// when the engine has no rename route, the previous company changed
+/// meanwhile (`STALE`), or the second rename failed after the first
+/// succeeded (the restored company keeps the archive name).
 ///
 /// # Errors
 /// `Api` when the first rename fails for a reason other than a missing
@@ -308,6 +309,15 @@ async fn swap_names(
     {
         Ok(_) => {}
         Err(ApiError::NotFound { .. }) => return Ok(false),
+        Err(ApiError::Conflict {
+            reason: cl_api::ConflictReason::Stale,
+            ..
+        }) => {
+            // Someone changed the previous company meanwhile: the restore
+            // itself succeeded, so keep both names as they are.
+            tracing::warn!("previous company changed; names not swapped");
+            return Ok(false);
+        }
         Err(e) => return Err(e.into()),
     }
     let rows = session.tenants().list().await.unwrap_or_default();

@@ -486,6 +486,25 @@ pub fn tenants_list_create_rename_e5a(h: &Harness) {
     }
 }
 
+/// Offset of the first data byte of the stored zip entry `name` (local
+/// file header `PK\x03\x04`, name at +30, data after name and extra).
+fn stored_entry_data_start(bytes: &[u8], name: &str) -> usize {
+    let sig = [0x50, 0x4B, 0x03, 0x04];
+    let mut i = 0;
+    while i + 30 <= bytes.len() {
+        if bytes[i..i + 4] == sig {
+            let name_len = usize::from(u16::from_le_bytes([bytes[i + 26], bytes[i + 27]]));
+            let extra_len = usize::from(u16::from_le_bytes([bytes[i + 28], bytes[i + 29]]));
+            let name_at = i + 30;
+            if bytes.get(name_at..name_at + name_len) == Some(name.as_bytes()) {
+                return name_at + name_len + extra_len;
+            }
+        }
+        i += 1;
+    }
+    panic!("entry {name} not found in the archive");
+}
+
 /// Polls an archive job to its end.
 fn finish_job(h: &Harness, s: &cl_api::Session, job: &cl_api::JobId) -> cl_api::ArchiveJobStatus {
     let deadline = Instant::now() + Duration::from_secs(120);
@@ -539,10 +558,11 @@ pub fn archive_export_import_e5a(h: &Harness) {
             .expect("desktop export reports its path");
         assert!(path.is_absolute());
 
-        // AC2: a byte flipped past the plaintext envelope is refused.
+        // AC2: a byte flipped inside the encrypted manifest is refused as
+        // ARCHIVE_CORRUPT (an AEAD tag mismatch), with nothing changed.
         let tampered = path.with_extension("tampered.clbackup");
         let mut bytes = std::fs::read(&path).expect("read archive");
-        let at = bytes.len() - 64;
+        let at = stored_entry_data_start(&bytes, "manifest.json.enc") + 40;
         bytes[at] ^= 0xFF;
         std::fs::write(&tampered, &bytes).expect("write tampered");
         let job = h
@@ -558,11 +578,7 @@ pub fn archive_export_import_e5a(h: &Harness) {
             JobState::Failed,
             "a changed file must be refused"
         );
-        assert!(
-            st.error_code().starts_with("ARCHIVE_"),
-            "code {}",
-            st.error_code()
-        );
+        assert_eq!(st.error_code(), "ARCHIVE_CORRUPT");
         let companies = h.run(s.companies()).expect("companies");
         assert!(
             companies.iter().any(|t| t.tenant_id == c),
