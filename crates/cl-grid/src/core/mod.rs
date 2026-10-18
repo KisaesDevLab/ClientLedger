@@ -10,3 +10,8 @@
     clippy::float_cmp,
     clippy::cast_precision_loss
 )]
+
+pub mod model;
+pub mod rowkey;
+pub mod selection;
+pub mod spec;

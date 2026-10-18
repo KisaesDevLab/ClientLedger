@@ -854,6 +854,7 @@ dependencies = [
  "cl-model",
  "egui",
  "proptest",
+ "rust_decimal",
  "thiserror 2.0.21",
 ]
 

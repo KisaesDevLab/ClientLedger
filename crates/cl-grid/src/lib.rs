@@ -8,3 +8,14 @@
 #![forbid(unsafe_code)]
 
 pub mod core;
+
+pub use crate::core::model::{
+    Align, CellInput, CellKind, CellPos, CellProblem, CellValue, Column, ColumnId, EditableModel,
+    GridProblem, Line, ListId, LookupResult, Lookups, MarkKind, ModelRef, NoLookups, OptionSpec,
+    RecordOutcome, RowHeight, RowModel, RowNote, RowState, Source, Suggestion, WidthSpec,
+};
+pub use crate::core::rowkey::{RowKey, RowKeyGen};
+pub use crate::core::selection::{Selection, SelectionMode};
+pub use crate::core::spec::{GridCommand, GridEvent, GridSpec, Handled, SpecError};
+pub use cl_model::TextKey;
+pub use cl_model::tags::TagChip;
