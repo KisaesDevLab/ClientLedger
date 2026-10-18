@@ -170,6 +170,11 @@ pub enum LocalValidation {
     ClosingDateWriteUnavailable,
     /// A tenant delete needs a verified backup file first (Q-185).
     BackupRequired,
+    /// Session secrets cannot be handed to the engine until it advertises
+    /// `session-secrets-v1` (E6); keys stay in the keychain meanwhile.
+    SessionSecretsUnavailable,
+    /// The integer usage summary needs `ai-desktop-v1` (E6).
+    AiUsageSummaryUnavailable,
 }
 
 /// A save was refused because its date is on or before the closing date.

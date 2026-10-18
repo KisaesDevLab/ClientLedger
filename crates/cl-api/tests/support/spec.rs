@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 /// document: the desktop gate and the spec route itself, plus the
 /// documented-but-unmerged P08 contracts (E5 tenant archives and safe
 /// delete, U-23 recovery key) that the desktop-mode export (U-24) will add.
-pub const OUTSIDE_SPEC: [(&str, &str); 12] = [
+pub const OUTSIDE_SPEC: [(&str, &str); 16] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("GET", "/api/v1/tenants"),
@@ -31,6 +31,11 @@ pub const OUTSIDE_SPEC: [(&str, &str); 12] = [
     ("POST", "/api/v1/tenants/{id}/delete"),
     ("POST", "/api/v1/desktop/recover-password"),
     ("POST", "/api/v1/auth/recovery-key/rotate"),
+    // E6 (P09): session secrets and the integer usage summary.
+    ("PUT", "/api/v1/desktop/session-secrets"),
+    ("GET", "/api/v1/desktop/session-secrets"),
+    ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
+    ("GET", "/api/v1/ai/usage/summary"),
 ];
 
 /// Lowercase hex of a SHA-256.

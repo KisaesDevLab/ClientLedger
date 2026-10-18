@@ -259,8 +259,9 @@ impl Call {
 /// code, a refresh token). Every body goes through [`Call::json_body`], so any
 /// request that puts a secret under one of these keys is treated as
 /// credential-carrying whichever resource builds it (P07 review L2).
-const SECRET_KEYS: [&str; 8] = [
+const SECRET_KEYS: [&str; 9] = [
     "password",
+    "apiKey",
     "closingPassword",
     "code",
     "refreshToken",

@@ -794,3 +794,86 @@ pub fn run_suite(mode: EngineMode, tests: &[(&str, TestFn)]) -> ExitCode {
         ExitCode::FAILURE
     }
 }
+
+// ------------------------------------------------------------- ollama stub
+
+/// A tiny loopback HTTP server that plays Ollama's `GET /api/tags` (P09:
+/// "Ollama works with networking disabled"). Everything else answers 404.
+/// Stops when dropped.
+pub struct OllamaStub {
+    /// `http://127.0.0.1:<port>`.
+    pub base_url: String,
+    hits: Arc<std::sync::atomic::AtomicU64>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl OllamaStub {
+    /// Serves `models` as installed.
+    pub fn start(models: &[&str]) -> OllamaStub {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().expect("addr").port();
+        listener.set_nonblocking(true).expect("nonblocking");
+        let body = format!(
+            "{{\"models\":[{}]}}",
+            models
+                .iter()
+                .map(|m| format!("{{\"name\":\"{m}\",\"size\":1}}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let hits = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (h, s) = (Arc::clone(&hits), Arc::clone(&stop));
+        let thread = std::thread::spawn(move || {
+            while !s.load(std::sync::atomic::Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut conn, _)) => {
+                        let _ = conn.set_read_timeout(Some(Duration::from_secs(2)));
+                        let mut buf = [0u8; 4096];
+                        let n = conn.read(&mut buf).unwrap_or(0);
+                        let head = String::from_utf8_lossy(&buf[..n]);
+                        let line = head.lines().next().unwrap_or("");
+                        let (status, payload) = if line.starts_with("GET /api/tags") {
+                            ("200 OK", body.clone())
+                        } else {
+                            ("404 Not Found", "{\"error\":\"not found\"}".to_string())
+                        };
+                        h.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let _ = write!(
+                            conn,
+                            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                            payload.len()
+                        );
+                        let _ = conn.flush();
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        OllamaStub {
+            base_url: format!("http://127.0.0.1:{port}"),
+            hits,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    /// Requests served so far.
+    pub fn hits(&self) -> u64 {
+        self.hits.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Drop for OllamaStub {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}

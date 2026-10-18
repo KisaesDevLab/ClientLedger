@@ -52,6 +52,11 @@ pub use queue::{
 pub use resources::accounts::{
     Account, AccountFields, AccountFilter, AccountSort, AccountType, AccountUpdate, Accounts,
 };
+pub use resources::ai::{
+    AiConfig, AiConfigUpdate, AiDisclosure, AiStatus, AiTaskToggles, AiUsage, AiUsageStamp,
+    AiUsageSummary, CompanyConsent, ConsentRow, ConsentStatus, DESKTOP_PROVIDERS, ProviderModels,
+    ProviderTest, UsageSummaryRow,
+};
 pub use resources::common::SortDir;
 pub use resources::company::{
     AccountingMethod, ClosingDateChange, CompanyProfile, CompanyProfileUpdate, CompanySettings,
@@ -71,10 +76,14 @@ pub use resources::reports::{
     BalanceSheet, BalanceSheetEntry, ProfitLoss, Reports, TrialBalance, TrialBalanceRow,
 };
 pub use resources::sales::{BillLine, InvoiceLine, NewBill, NewInvoice, Posted};
+pub use resources::session_secrets::{
+    OllamaTarget, SecretPresence, SecretPresences, SecretSlot, SessionSecrets,
+};
 pub use resources::setup::{
     AccountImportResult, AccountImportRow, AccountRef, CoaTemplateOption, IMPORT_MAX_ROWS,
     OpeningBalance, OpeningBalancesPosted, SkippedAccount,
 };
+pub use resources::smtp::{SmtpSettings, SmtpSettingsUpdate};
 pub use resources::system::{SmtpTest, SmtpTestResult};
 pub use resources::tags::{Tag, TagFields, TagFilter, TagUpdate, Tags};
 pub use resources::tenants::{

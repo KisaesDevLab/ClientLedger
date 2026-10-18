@@ -21,6 +21,7 @@ mod contract_journal;
 mod contract_lifecycle;
 mod contract_logging;
 mod contract_money;
+mod contract_preferences;
 mod contract_resources;
 mod contract_session;
 
@@ -184,6 +185,30 @@ fn main() -> std::process::ExitCode {
         (
             "lifecycle::recovery_key_u23",
             contract_lifecycle::recovery_key_u23,
+        ),
+        (
+            "preferences::ai_config_disclosure_consent_and_tasks",
+            contract_preferences::ai_config_disclosure_consent_and_tasks,
+        ),
+        (
+            "preferences::provider_test_ollama_stub_and_keyless_cloud",
+            contract_preferences::provider_test_ollama_stub_and_keyless_cloud,
+        ),
+        (
+            "preferences::smtp_settings_round_trip_and_test",
+            contract_preferences::smtp_settings_round_trip_and_test,
+        ),
+        (
+            "preferences::session_secrets_e6",
+            contract_preferences::session_secrets_e6,
+        ),
+        (
+            "preferences::usage_summary_e6",
+            contract_preferences::usage_summary_e6,
+        ),
+        (
+            "preferences::smtp_session_u13",
+            contract_preferences::smtp_session_u13,
         ),
         (
             "lifecycle::ten_switches_under_two_seconds",

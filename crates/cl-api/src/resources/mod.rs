@@ -1,6 +1,7 @@
 //! Engine resources and their shared machinery.
 
 pub mod accounts;
+pub mod ai;
 pub(crate) mod common;
 pub mod company;
 pub mod contacts;
@@ -13,7 +14,9 @@ pub(crate) mod reconcile;
 pub mod recovery;
 pub mod reports;
 pub mod sales;
+pub mod session_secrets;
 pub mod setup;
+pub mod smtp;
 pub mod system;
 pub mod tags;
 pub mod tenants;

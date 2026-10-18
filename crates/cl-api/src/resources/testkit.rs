@@ -35,6 +35,25 @@ pub(crate) async fn requests(server: &MockServer, method: &str) -> Vec<Request> 
         .collect()
 }
 
+/// A company session whose client learned `caps` from `/desktop/info`.
+pub(crate) async fn session_with_caps(server: &MockServer, caps: &[&str]) -> Session {
+    use wiremock::matchers::{method, path};
+    wiremock::Mock::given(method("GET"))
+        .and(path("/api/v1/desktop/info"))
+        .respond_with(json(
+            200,
+            &format!(
+                r#"{{"mode":"desktop","initialized":true,"capabilities":{}}}"#,
+                serde_json::to_string(caps).expect("caps")
+            ),
+        ))
+        .mount(server)
+        .await;
+    let s = company_session(server);
+    s.client().desktop_info().await.expect("desktop info");
+    s
+}
+
 /// The query string of a request.
 pub(crate) fn query(r: &Request) -> String {
     r.url.query().unwrap_or("").to_string()

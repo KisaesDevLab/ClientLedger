@@ -14,13 +14,13 @@ mod common;
 use std::time::{Duration, Instant};
 
 use cl_api::{
-    AccountFilter, AccountType, ApiError, Method, PageRequest, PostingOptions, SmtpTest,
-    TransactionFilter, TxnStatus, TxnType,
+    AccountFilter, AccountType, AiConfigUpdate, ApiError, Method, PageRequest, PostingOptions,
+    SmtpTest, TransactionFilter, TxnStatus, TxnType,
 };
 use cl_core::Secret;
 
 use common::{account_fields, date, je2, key, pair};
-use support::{EngineMode, Harness, TestFn, kill_pid, run_suite, unique};
+use support::{EngineMode, Harness, OllamaStub, TestFn, kill_pid, run_suite, unique};
 
 const TEST_SMTP: &str = "/api/v1/admin/test-smtp";
 
@@ -167,8 +167,62 @@ fn engine_dies_after_commit_is_reconciled_as_committed(h: &Harness) {
     assert_eq!(page.data.len(), 1, "exactly one posting");
 }
 
+/// P09: with "Work offline" on, the Ollama test still reaches a loopback
+/// stub (nothing external is contacted) and a cloud provider test is
+/// `OfflineUnavailable` at once, never retried.
+fn ollama_works_offline_and_cloud_is_unavailable(h: &Harness) {
+    let s = &h.s1;
+    h.run(s.accept_ai_disclosure(key())).expect("disclosure");
+    let stub = OllamaStub::start(&["llama3.1:8b"]);
+    h.run(s.update_ai_config(
+        &AiConfigUpdate {
+            ollama_base_url: Some(stub.base_url.clone()),
+            categorization_model: Some("llama3.1:8b".into()),
+            ..AiConfigUpdate::for_provider("ollama", true)
+        },
+        key(),
+    ))
+    .expect("update");
+    let r = h.run(s.test_ai_provider("ollama")).expect("ollama test");
+    assert!(r.success, "{:?}", r.error);
+    assert_eq!(stub.hits(), 1, "exactly the loopback stub was contacted");
+
+    let before = h
+        .observer
+        .sent(Method::Post, "/api/v1/ai/admin/test/{provider}");
+    let t0 = Instant::now();
+    let e = h.run(s.test_ai_provider("anthropic"));
+    let took = t0.elapsed();
+    match e {
+        Err(ApiError::OfflineUnavailable { .. } | ApiError::FeatureNotEnabled { .. }) => {}
+        Ok(r) => assert!(!r.success, "offline, a cloud test cannot succeed"),
+        Err(other) => panic!("unexpected {other:?}"),
+    }
+    assert!(took < Duration::from_secs(5), "took {took:?}");
+    assert_eq!(
+        h.observer
+            .sent(Method::Post, "/api/v1/ai/admin/test/{provider}")
+            - before,
+        1,
+        "never retried"
+    );
+    assert_eq!(stub.hits(), 1);
+    h.run(s.update_ai_config(
+        &AiConfigUpdate {
+            is_enabled: Some(false),
+            ..AiConfigUpdate::default()
+        },
+        key(),
+    ))
+    .expect("off");
+}
+
 fn main() -> std::process::ExitCode {
     let tests: &[(&str, TestFn)] = &[
+        (
+            "offline::ollama_works_offline_and_cloud_is_unavailable",
+            ollama_works_offline_and_cloud_is_unavailable,
+        ),
         (
             "offline::online_route_is_offline_unavailable_and_not_retried",
             online_route_is_offline_unavailable_and_not_retried,
