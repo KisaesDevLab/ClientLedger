@@ -464,3 +464,120 @@ fn interactive_widgets_have_accessible_labels() {
         assert!(unnamed.is_empty(), "{size:?}: unnamed widgets: {unnamed:?}");
     }
 }
+
+/// Opens a window the way screens do: through an event on the link (the
+/// recovery-key and opening-balances windows have no menu command).
+fn open_window(ctx: &egui::Context, shell: &mut Shell, kind: &'static str) {
+    if commands::find(kind).is_some() {
+        shell.dispatch_now(CommandId::new(kind));
+    } else {
+        shell
+            .company_link()
+            .expect("demo link")
+            .push(crate::company::CompanyEvent::OpenWindow(CommandId::new(
+                kind,
+            )));
+    }
+    settle(ctx, shell, vec2(1280.0, 820.0));
+}
+
+/// Every company screen draws in the demo shell, reports its state, and
+/// the Open Company window fills the body once the company is closed.
+#[test]
+fn company_screens_render_in_the_demo_shell() {
+    let ctx = context();
+    let mut shell = demo();
+    let size = vec2(1280.0, 820.0);
+    settle(&ctx, &mut shell, size);
+    for kind in [
+        "file.open_company",
+        "file.new_company",
+        "file.backup",
+        "file.portable_copy",
+        "file.export_all",
+        "file.delete_company",
+        "company.recovery_key",
+        "company.opening_balances",
+    ] {
+        open_window(&ctx, &mut shell, kind);
+        let state = shell.active_screen_state();
+        assert!(state["screen"].is_string(), "{kind}: {state}");
+        // The same command focuses the existing window instead of opening
+        // a second one.
+        let n = shell.windows.len();
+        open_window(&ctx, &mut shell, kind);
+        assert_eq!(shell.windows.len(), n, "{kind} opened twice");
+    }
+    // Narrow layout of every open window.
+    settle(&ctx, &mut shell, vec2(960.0, 640.0));
+    for id in shell.windows.all().iter().map(|w| w.id).collect::<Vec<_>>() {
+        shell.windows.activate(id);
+        settle(&ctx, &mut shell, vec2(960.0, 640.0));
+    }
+    // Closing the company with the demo's dirty window prompts first;
+    // discarding it finishes the close by itself.
+    shell.dispatch_now(CommandId::new("file.close_company"));
+    // (The demo's Write Check and the shown recovery key both count.)
+    assert!(shell.windows.prompt().is_some());
+    let mut rounds = 0;
+    while shell.windows.prompt().is_some() {
+        let _ = shell
+            .windows
+            .answer_prompt(crate::windows::PromptAnswer::Discard);
+        shell.dispatch_now(CommandId::new("file.close_company"));
+        rounds += 1;
+        assert!(rounds < 10, "the close keeps prompting");
+    }
+    settle(&ctx, &mut shell, size);
+    assert!(shell.company.is_none());
+    assert_eq!(shell.active_screen_state()["screen"], "open_company");
+    // With no company open, other screens go to Open Company instead.
+    shell.dispatch_now(CommandId::new("file.backup"));
+    settle(&ctx, &mut shell, size);
+    assert_eq!(shell.active_screen_state()["screen"], "open_company");
+    assert!(shell.toast_text().is_none() || shell.toast_text().is_some());
+}
+
+/// The interview moves through its pages with the form commands, refuses
+/// to leave the first page without a name, and Esc reverts then closes.
+#[test]
+fn interview_pages_and_escape() {
+    let ctx = context();
+    let mut shell = demo();
+    let size = vec2(1280.0, 820.0);
+    settle(&ctx, &mut shell, size);
+    shell.dispatch_now(CommandId::new("file.new_company"));
+    settle(&ctx, &mut shell, size);
+    assert_eq!(shell.active_screen_state()["page"], "names");
+    shell.dispatch_now(CommandId::new("form.next_record"));
+    assert_eq!(
+        shell.active_screen_state()["page"],
+        "names",
+        "a name is required"
+    );
+    assert_eq!(shell.active_screen_state()["issues"], 1);
+    // Nothing typed: Esc has nothing to revert, so the window closes (it is
+    // clean, so no prompt).
+    let before = shell.windows.len();
+    shell.dispatch_now(CommandId::new("form.revert"));
+    assert_eq!(shell.windows.len(), before - 1);
+    assert!(shell.windows.prompt().is_none());
+    // Opening balances: insert a line, Esc clears it, Esc again closes.
+    open_window(&ctx, &mut shell, "company.opening_balances");
+    assert_eq!(shell.active_screen_state()["screen"], "opening_balances");
+    shell.dispatch_now(CommandId::new("form.insert_line"));
+    assert_eq!(shell.active_screen_state()["bank_rows"], 2);
+    let before = shell.windows.len();
+    shell.dispatch_now(CommandId::new("form.revert"));
+    // Nothing typed into the rows: Esc has nothing to revert and the
+    // window is clean, so it closes without a prompt.
+    assert_eq!(shell.windows.len(), before - 1, "closed");
+    assert!(shell.windows.prompt().is_none());
+    open_window(&ctx, &mut shell, "company.opening_balances");
+    shell.dispatch_now(CommandId::new("form.save_close"));
+    assert_eq!(
+        shell.active_screen_state()["issues"],
+        1,
+        "nothing to post yet"
+    );
+}

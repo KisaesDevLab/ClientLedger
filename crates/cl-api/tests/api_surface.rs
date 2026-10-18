@@ -201,6 +201,7 @@ fn every_request_type_omits_both_keys() {
             company_name: "c".into(),
             business_type: Some("default".into()),
             entity_type: Some("sole_prop".into()),
+            system_accounts_only: None,
         },
     );
 }

@@ -65,6 +65,9 @@ pub struct Initialized {
     pub company_tenant_id: Option<String>,
     /// Non-fatal notes such as `COMPANY_NOT_CREATED`.
     pub warnings: Vec<String>,
+    /// The owner's recovery key, returned once by an engine with U-23
+    /// (`recovery-key-v1`); `None` before that. Never logged.
+    pub recovery_key: Option<Secret>,
 }
 
 /// Why a desktop endpoint call failed.
@@ -232,6 +235,7 @@ pub(crate) fn parse_initialized(body: &str) -> Result<Initialized, DesktopError>
                     .collect()
             })
             .unwrap_or_default(),
+        recovery_key: text("recoveryKey").map(Secret::new),
     })
 }
 

@@ -5,6 +5,7 @@ mod api_spec;
 mod ci;
 mod engine;
 mod engine_test;
+mod gen_sample;
 mod keymap_doc;
 mod layering;
 mod licenses;
@@ -33,6 +34,8 @@ usage: cargo xtask <command>
   pg-fetch [--force] download the pinned PostgreSQL binaries into target/pg/<target>
   keymap-doc [--check]
                      generate docs/KEYBOARD.md and the shortcut cheat sheet from the cl-model keymap
+  gen-sample [--check]
+                     write fixtures/sample/ozark_ridge (the practice company, Q-219); --check verifies
   run [--no-prepare] [-- <app args>]
                      build the engine and fetch PostgreSQL if needed, then start the desktop app
   ui-check <screen> [--compare] [--no-build]
@@ -122,6 +125,7 @@ fn main() -> Result<()> {
         Some("run") => run::run(&args[1..]),
         Some("ui-check") => ui_check::ui_check(&args[1..]),
         Some("keymap-doc") => keymap_doc::keymap_doc(&args[1..]),
+        Some("gen-sample") => gen_sample::gen_sample(&args[1..]),
         Some(cmd) => {
             if let Some((_, phase)) = STUBS.iter().find(|(name, _)| *name == cmd) {
                 bail!("`{cmd}` is not implemented yet: lands in {phase}");

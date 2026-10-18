@@ -4,6 +4,19 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+description = "Local preferences for ClientLedger: the recent-companies store, per-company flags kept outside the engine, and keychain-backed secrets."
+
+[dependencies]
+cl-core = { path = "../cl-core" }
+keyring = "4.2.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+tracing = "0.1.44"
+
+[dev-dependencies]
+tempfile = "3.27.0"
 
 [lints]
 workspace = true

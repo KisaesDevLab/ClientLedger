@@ -15,6 +15,7 @@
 pub mod about;
 pub mod app;
 pub mod automation;
+pub mod company;
 pub mod engine_link;
 pub mod errors;
 pub mod fonts;
@@ -23,6 +24,7 @@ pub mod icon;
 pub mod input;
 pub mod logging;
 pub mod prefs;
+pub mod screens;
 pub mod shell;
 pub mod theme;
 pub mod widgets;

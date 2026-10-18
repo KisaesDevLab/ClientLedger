@@ -1,0 +1,375 @@
+{
+  "id": "farm",
+  "name": "Farm / ranch (Schedule F)",
+  "description": "Crops, livestock, hay, produce; lines follow the Schedule F categories.",
+  "notes": "ClientLedger starter chart (Q-49): synthetic, original names. Numbers avoid the engine system accounts (10100, 10150, 10200, 20100, 20900, 30000, 30120), which every company gets from the engine. The requires field marks accounts added only when that feature is on at setup.",
+  "accounts": [
+    {
+      "number": "1010",
+      "name": "Operating Checking",
+      "type": "asset",
+      "detail": "checking"
+    },
+    {
+      "number": "1020",
+      "name": "Savings",
+      "type": "asset",
+      "detail": "savings"
+    },
+    {
+      "number": "1050",
+      "name": "Petty Cash",
+      "type": "asset",
+      "detail": "cash"
+    },
+    {
+      "number": "1300",
+      "name": "Inventory Asset",
+      "type": "asset",
+      "requires": "inventory"
+    },
+    {
+      "number": "1400",
+      "name": "Prepaid Expenses",
+      "type": "asset"
+    },
+    {
+      "number": "1500",
+      "name": "Equipment",
+      "type": "asset",
+      "detail": "fixed_asset"
+    },
+    {
+      "number": "1510",
+      "name": "Vehicles",
+      "type": "asset",
+      "detail": "fixed_asset"
+    },
+    {
+      "number": "1590",
+      "name": "Accumulated Depreciation",
+      "type": "asset",
+      "detail": "accumulated_depreciation"
+    },
+    {
+      "number": "1310",
+      "name": "Livestock Held for Sale",
+      "type": "asset"
+    },
+    {
+      "number": "1320",
+      "name": "Crops and Feed on Hand",
+      "type": "asset"
+    },
+    {
+      "number": "1520",
+      "name": "Breeding Livestock",
+      "type": "asset",
+      "detail": "fixed_asset"
+    },
+    {
+      "number": "1530",
+      "name": "Land and Improvements",
+      "type": "asset",
+      "detail": "fixed_asset"
+    },
+    {
+      "number": "2050",
+      "name": "Business Credit Card",
+      "type": "liability",
+      "detail": "credit_card"
+    },
+    {
+      "number": "2200",
+      "name": "Vehicle and Equipment Loans",
+      "type": "liability",
+      "detail": "long_term_liability"
+    },
+    {
+      "number": "2300",
+      "name": "Line of Credit",
+      "type": "liability",
+      "detail": "line_of_credit"
+    },
+    {
+      "number": "2400",
+      "name": "Customer Deposits",
+      "type": "liability",
+      "description": "Money received before the work is done (Q-14: customer deposits are a liability)"
+    },
+    {
+      "number": "2500",
+      "name": "Payroll Liabilities",
+      "type": "liability"
+    },
+    {
+      "number": "2210",
+      "name": "Operating Loan",
+      "type": "liability",
+      "detail": "line_of_credit"
+    },
+    {
+      "number": "2220",
+      "name": "Land Mortgage",
+      "type": "liability",
+      "detail": "long_term_liability"
+    },
+    {
+      "number": "3100",
+      "name": "Owner Contributions",
+      "type": "equity"
+    },
+    {
+      "number": "3200",
+      "name": "Owner Draws",
+      "type": "equity"
+    },
+    {
+      "number": "4000",
+      "name": "Sales of Livestock Raised",
+      "type": "revenue"
+    },
+    {
+      "number": "4010",
+      "name": "Sales of Livestock Bought for Resale",
+      "type": "revenue"
+    },
+    {
+      "number": "4100",
+      "name": "Sales of Crops and Produce",
+      "type": "revenue"
+    },
+    {
+      "number": "4150",
+      "name": "Hay and Forage Sales",
+      "type": "revenue"
+    },
+    {
+      "number": "4200",
+      "name": "Custom Hire and Machine Work Income",
+      "type": "revenue"
+    },
+    {
+      "number": "4300",
+      "name": "Agricultural Program Payments",
+      "type": "revenue"
+    },
+    {
+      "number": "4350",
+      "name": "Crop Insurance Proceeds",
+      "type": "revenue"
+    },
+    {
+      "number": "4400",
+      "name": "Cooperative Distributions",
+      "type": "revenue"
+    },
+    {
+      "number": "4500",
+      "name": "Farm Products Sold",
+      "type": "revenue",
+      "requires": "inventory"
+    },
+    {
+      "number": "5000",
+      "name": "Cost of Livestock Bought for Resale",
+      "type": "cogs"
+    },
+    {
+      "number": "5050",
+      "name": "Feed",
+      "type": "cogs"
+    },
+    {
+      "number": "5100",
+      "name": "Seed and Plants",
+      "type": "cogs"
+    },
+    {
+      "number": "5150",
+      "name": "Fertilizer and Lime",
+      "type": "cogs"
+    },
+    {
+      "number": "5200",
+      "name": "Chemicals",
+      "type": "cogs"
+    },
+    {
+      "number": "5250",
+      "name": "Veterinary, Breeding and Medicine",
+      "type": "cogs"
+    },
+    {
+      "number": "5300",
+      "name": "Custom Hire (Machine Work)",
+      "type": "cogs"
+    },
+    {
+      "number": "5350",
+      "name": "Freight and Trucking",
+      "type": "cogs"
+    },
+    {
+      "number": "5400",
+      "name": "Storage and Warehousing",
+      "type": "cogs"
+    },
+    {
+      "number": "5450",
+      "name": "Cost of Goods Sold",
+      "type": "cogs",
+      "requires": "inventory"
+    },
+    {
+      "number": "6000",
+      "name": "Advertising and Marketing",
+      "type": "expense"
+    },
+    {
+      "number": "6050",
+      "name": "Bank and Merchant Fees",
+      "type": "expense"
+    },
+    {
+      "number": "6100",
+      "name": "Fuel",
+      "type": "expense"
+    },
+    {
+      "number": "6150",
+      "name": "Insurance",
+      "type": "expense"
+    },
+    {
+      "number": "6200",
+      "name": "Legal and Professional Fees",
+      "type": "expense"
+    },
+    {
+      "number": "6250",
+      "name": "Office Supplies and Software",
+      "type": "expense"
+    },
+    {
+      "number": "6300",
+      "name": "Rent",
+      "type": "expense"
+    },
+    {
+      "number": "6350",
+      "name": "Repairs and Maintenance",
+      "type": "expense"
+    },
+    {
+      "number": "6400",
+      "name": "Telephone and Internet",
+      "type": "expense"
+    },
+    {
+      "number": "6450",
+      "name": "Travel and Meals",
+      "type": "expense"
+    },
+    {
+      "number": "6500",
+      "name": "Utilities",
+      "type": "expense"
+    },
+    {
+      "number": "6550",
+      "name": "Wages",
+      "type": "expense"
+    },
+    {
+      "number": "6560",
+      "name": "Payroll Taxes",
+      "type": "expense"
+    },
+    {
+      "number": "6600",
+      "name": "Licenses, Permits and Taxes",
+      "type": "expense"
+    },
+    {
+      "number": "6650",
+      "name": "Dues and Subscriptions",
+      "type": "expense"
+    },
+    {
+      "number": "6700",
+      "name": "Vehicle Expenses",
+      "type": "expense"
+    },
+    {
+      "number": "6750",
+      "name": "Training and Education",
+      "type": "expense"
+    },
+    {
+      "number": "6900",
+      "name": "Miscellaneous Expense",
+      "type": "expense"
+    },
+    {
+      "number": "6800",
+      "name": "Gasoline, Fuel and Oil",
+      "type": "expense"
+    },
+    {
+      "number": "6810",
+      "name": "Conservation Expenses",
+      "type": "expense"
+    },
+    {
+      "number": "6820",
+      "name": "Rent or Lease of Land and Animals",
+      "type": "expense"
+    },
+    {
+      "number": "6830",
+      "name": "Rent or Lease of Machinery and Equipment",
+      "type": "expense"
+    },
+    {
+      "number": "6840",
+      "name": "Supplies",
+      "type": "expense"
+    },
+    {
+      "number": "6850",
+      "name": "Labor Hired",
+      "type": "expense"
+    },
+    {
+      "number": "6860",
+      "name": "Employee Benefit Programs",
+      "type": "expense"
+    },
+    {
+      "number": "6870",
+      "name": "Pension and Profit-Sharing Plans",
+      "type": "expense"
+    },
+    {
+      "number": "7000",
+      "name": "Interest Income",
+      "type": "other_revenue"
+    },
+    {
+      "number": "7100",
+      "name": "Other Income",
+      "type": "other_revenue"
+    },
+    {
+      "number": "8000",
+      "name": "Interest Expense",
+      "type": "other_expense"
+    },
+    {
+      "number": "8100",
+      "name": "Depreciation",
+      "type": "other_expense"
+    }
+  ]
+}

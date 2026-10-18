@@ -99,6 +99,7 @@ When two scopes use the same keys, the innermost one wins: a form beats a window
 
 Find these from the menus or with `Ctrl+K`.
 
+- **File:** New Company, Close Company, Back Up Company, Restore a Backup, Make Portable Copy, Export All Data, Full Database Backup (Utilities), Delete Company
 - **Lists:** Item List, Tags
 - **Clients:** Clients & Jobs, Credit Memo or Refund, Statements
 - **Vendors:** Vendors

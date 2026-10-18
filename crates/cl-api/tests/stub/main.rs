@@ -407,6 +407,7 @@ async fn failed_refresh_ends_the_session_before_a_mutation_is_sent() {
             company_name: "Canary Co".into(),
             business_type: Some("default".into()),
             entity_type: None,
+            system_accounts_only: None,
         })
         .await
         .expect_err("expired");
@@ -586,6 +587,7 @@ async fn create_company_is_sent_once() {
         company_name: "Canary Co".into(),
         business_type: Some("default".into()),
         entity_type: None,
+        system_accounts_only: None,
     };
     let created = s.create_company(&new).await.expect("created");
     assert_eq!(created.tenant_id, tid(T1));

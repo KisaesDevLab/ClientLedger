@@ -11,20 +11,24 @@
 //!   change the session's scope.
 
 use cl_core::ids::CompanyId;
-use cl_core::{CalendarDate, Rate, Timestamp};
+use cl_core::{CalendarDate, Rate, Secret, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::client::{Call, Method};
 use crate::errors::ApiError;
+use crate::errors::LocalValidation;
 use crate::idempotency::IdempotencyKey;
 use crate::resources::common::requested_fp;
-use crate::resources::operations::{COMPANY_GET, COMPANY_PUT, COMPANY_SETTINGS};
+use crate::resources::operations::{
+    COMPANY_GET, COMPANY_PUT, COMPANY_SETTINGS, COMPANY_SETTINGS_PUT,
+};
 use crate::resources::reconcile::row_fp;
 use crate::resources::versioning::{
     EditableFields, GuardedUpdate, RecordVersion, Versioned, get_versioned, pick, update_guarded,
 };
 use crate::session::{Scope, Session, decode, json_body};
+use crate::wire::Capabilities;
 
 /// Legal form of the business (`entityType`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -175,6 +179,68 @@ pub struct CompanySettings {
     pub lock_date: Option<CalendarDate>,
 }
 
+/// Accounting basis of the company (`accountingMethod`, Q-44).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountingMethod {
+    /// Accrual (the default).
+    Accrual,
+    /// Cash.
+    Cash,
+}
+
+/// The settings the setup interview and Preferences write
+/// (`PUT /api/v1/company/settings`). Every field is optional and only
+/// present fields are sent. The closing date is deliberately not here:
+/// [`ClosingDateChange`] is the only writer and it is capability-gated.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompanySettingsUpdate {
+    /// First month of the fiscal year (1-12).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fiscal_year_start_month: Option<u8>,
+    /// Basis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accounting_method: Option<AccountingMethod>,
+    /// Default payment terms key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_payment_terms: Option<String>,
+    /// Invoice prefix.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invoice_prefix: Option<String>,
+    /// Next invoice number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invoice_next_number: Option<u64>,
+    /// Default sales tax rate (exact).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_sales_tax_rate: Option<Rate>,
+    /// Currency code (USD, Q-41).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    /// Date format.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date_format: Option<String>,
+}
+
+/// A closing-date change (Q-48, Q-P02d). Sent only when the engine
+/// advertises `closing-password-v1` (U-15), because before that the engine
+/// accepts the lock date without any password.
+#[derive(Clone)]
+pub struct ClosingDateChange {
+    /// The new closing date, or `None` to clear it.
+    pub closing_date: Option<CalendarDate>,
+    /// The closing-date password (set or confirm). Never logged.
+    pub closing_password: Option<Secret>,
+}
+
+impl std::fmt::Debug for ClosingDateChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClosingDateChange")
+            .field("closing_date", &self.closing_date)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Session {
     fn require_company(&self) -> Result<(), ApiError> {
         match self.scope() {
@@ -225,6 +291,70 @@ impl Session {
         update_guarded(self, expected, u).await
     }
 
+    /// Writes company settings (never the closing date).
+    ///
+    /// # Errors
+    /// `Local(InvalidValue)` for a month outside 1-12 (nothing sent);
+    /// `NoCompanyOpen`; `Validation`; any [`ApiError`].
+    pub async fn update_company_settings(
+        &self,
+        update: &CompanySettingsUpdate,
+        key: IdempotencyKey,
+    ) -> Result<CompanySettings, ApiError> {
+        self.require_company()?;
+        if update
+            .fiscal_year_start_month
+            .is_some_and(|m| !(1..=12).contains(&m))
+        {
+            return Err(ApiError::Local(LocalValidation::InvalidValue));
+        }
+        let mut call =
+            Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(json_body(update)?);
+        call.idempotency_key = Some(key);
+        let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
+        settings_from(&reply)
+    }
+
+    /// Sets or clears the closing date with its password (U-15). Refused
+    /// locally until the engine advertises `closing-password-v1`: until
+    /// then nothing in the typed API writes `lockDate` (NN8).
+    ///
+    /// # Errors
+    /// `Local(ClosingDateWriteUnavailable)` without the capability (nothing
+    /// sent); `Unauthorized(InvalidCredentials)` for a wrong password;
+    /// `NoCompanyOpen`; any [`ApiError`].
+    pub async fn set_closing_date(
+        &self,
+        change: &ClosingDateChange,
+        key: IdempotencyKey,
+    ) -> Result<CompanySettings, ApiError> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Body<'a> {
+            lock_date: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            closing_password: Option<&'a str>,
+        }
+        self.require_company()?;
+        if !self
+            .client()
+            .capabilities()
+            .has(Capabilities::CLOSING_PASSWORD)
+        {
+            return Err(ApiError::Local(
+                LocalValidation::ClosingDateWriteUnavailable,
+            ));
+        }
+        let body = json_body(&Body {
+            lock_date: change.closing_date.map(CalendarDate::to_wire),
+            closing_password: change.closing_password.as_ref().map(Secret::expose),
+        })?;
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
+        settings_from(&reply)
+    }
+
     /// The open company's settings (read-only in P05).
     ///
     /// # Errors
@@ -238,6 +368,18 @@ impl Session {
         let reply = self.send(&COMPANY_SETTINGS, call, None).await?;
         Ok(decode::<Wrapper>(&reply, "company settings")?.settings)
     }
+}
+
+/// Reads `{settings}` from a settings write; a 2xx that cannot be read is
+/// `SavedUnreadable` (the change is recorded).
+fn settings_from(reply: &crate::client::EngineReply) -> Result<CompanySettings, ApiError> {
+    #[derive(Deserialize)]
+    struct Wrapper {
+        settings: CompanySettings,
+    }
+    decode::<Wrapper>(reply, "company settings")
+        .map(|w| w.settings)
+        .map_err(crate::resources::versioning::saved_unreadable)
 }
 
 #[cfg(test)]
@@ -381,5 +523,74 @@ mod tests {
             .await
             .expect_err("float");
         assert!(matches!(e, ApiError::Decode { .. }));
+    }
+
+    #[tokio::test]
+    async fn settings_writer_sends_only_present_fields_and_never_the_lock_date() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v1/company/settings"))
+            .respond_with(json(
+                200,
+                r#"{"settings":{"fiscalYearStartMonth":7,"accountingMethod":"cash","lockDate":null}}"#,
+            ))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let st = s
+            .update_company_settings(
+                &CompanySettingsUpdate {
+                    fiscal_year_start_month: Some(7),
+                    accounting_method: Some(AccountingMethod::Cash),
+                    ..CompanySettingsUpdate::default()
+                },
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect("settings");
+        assert_eq!(st.fiscal_year_start_month, Some(7));
+        let puts = requests(&server, "PUT").await;
+        let body: Value = serde_json::from_slice(&puts[0].body).expect("json");
+        assert_eq!(body["fiscalYearStartMonth"], 7);
+        assert_eq!(body["accountingMethod"], "cash");
+        assert!(body.get("lockDate").is_none());
+        assert!(body.get("currency").is_none());
+        let e = s
+            .update_company_settings(
+                &CompanySettingsUpdate {
+                    fiscal_year_start_month: Some(13),
+                    ..CompanySettingsUpdate::default()
+                },
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect_err("month");
+        assert_eq!(e, ApiError::Local(LocalValidation::InvalidValue));
+    }
+
+    #[tokio::test]
+    async fn closing_date_is_refused_locally_without_the_capability() {
+        let server = MockServer::start().await;
+        let s = company_session(&server);
+        let e = s
+            .set_closing_date(
+                &ClosingDateChange {
+                    closing_date: Some(CalendarDate::from_ymd(2026, 9, 30).expect("d")),
+                    closing_password: Some(Secret::new("closing-canary")),
+                },
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect_err("gated");
+        assert_eq!(
+            e,
+            ApiError::Local(LocalValidation::ClosingDateWriteUnavailable)
+        );
+        assert!(server.received_requests().await.expect("r").is_empty());
+        let change = ClosingDateChange {
+            closing_date: None,
+            closing_password: Some(Secret::new("closing-canary")),
+        };
+        assert!(!format!("{change:?}").contains("canary"));
     }
 }

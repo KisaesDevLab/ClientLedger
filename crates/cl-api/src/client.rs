@@ -63,6 +63,8 @@ pub struct Timeouts {
     pub auth: Budget,
     /// Company creation (seeds a chart of accounts).
     pub create_tenant: Budget,
+    /// Archive export start, import and safe delete (P08).
+    pub archive: Budget,
     /// Budget of outcome reconciliation after an ambiguous mutation.
     pub reconcile: Duration,
     /// How often a waiting request re-reads the endpoint.
@@ -77,6 +79,7 @@ impl Default for Timeouts {
             write: Budget::secs(30, 50),
             auth: Budget::secs(15, 20),
             create_tenant: Budget::secs(120, 140),
+            archive: Budget::secs(600, 620),
             reconcile: Duration::from_secs(15),
             poll: Duration::from_millis(150),
         }
@@ -121,6 +124,8 @@ pub enum Method {
     Put,
     /// Delete or deactivate.
     Delete,
+    /// Partial update (tenant rename).
+    Patch,
 }
 
 impl Method {
@@ -138,6 +143,7 @@ impl Method {
             Method::Post => "POST",
             Method::Put => "PUT",
             Method::Delete => "DELETE",
+            Method::Patch => "PATCH",
         }
     }
 
@@ -147,6 +153,7 @@ impl Method {
             Method::Post => reqwest::Method::POST,
             Method::Put => reqwest::Method::PUT,
             Method::Delete => reqwest::Method::DELETE,
+            Method::Patch => reqwest::Method::PATCH,
         }
     }
 }
@@ -159,6 +166,9 @@ pub(crate) enum TimeoutClass {
     Write,
     Auth,
     CreateTenant,
+    /// Tenant archive export, import and safe delete (key derivation plus
+    /// a full copy of the company).
+    Archive,
 }
 
 impl Timeouts {
@@ -169,6 +179,7 @@ impl Timeouts {
             TimeoutClass::Write => self.write,
             TimeoutClass::Auth => self.auth,
             TimeoutClass::CreateTenant => self.create_tenant,
+            TimeoutClass::Archive => self.archive,
         }
     }
 }
@@ -248,12 +259,15 @@ impl Call {
 /// code, a refresh token). Every body goes through [`Call::json_body`], so any
 /// request that puts a secret under one of these keys is treated as
 /// credential-carrying whichever resource builds it (P07 review L2).
-const SECRET_KEYS: [&str; 5] = [
+const SECRET_KEYS: [&str; 8] = [
     "password",
     "closingPassword",
     "code",
     "refreshToken",
     "token",
+    "passphrase",
+    "recoveryKey",
+    "newPassword",
 ];
 
 fn body_has_secret_key(body: &[u8]) -> bool {

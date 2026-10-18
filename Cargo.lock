@@ -815,6 +815,22 @@ dependencies = [
 [[package]]
 name = "cl-company"
 version = "0.0.0"
+dependencies = [
+ "chrono",
+ "cl-api",
+ "cl-core",
+ "cl-pg",
+ "cl-settings",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "wiremock",
+ "zip",
+]
 
 [[package]]
 name = "cl-core"
@@ -879,6 +895,7 @@ dependencies = [
  "tar",
  "thiserror 2.0.21",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]
@@ -888,6 +905,16 @@ version = "0.0.0"
 [[package]]
 name = "cl-settings"
 version = "0.0.0"
+dependencies = [
+ "cl-core",
+ "keyring",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+]
 
 [[package]]
 name = "cl-ui"
@@ -896,13 +923,16 @@ dependencies = [
  "chrono",
  "cl-api",
  "cl-automation",
+ "cl-company",
  "cl-core",
  "cl-host",
  "cl-model",
+ "cl-settings",
  "eframe",
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -912,8 +942,10 @@ name = "clientledger"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "cl-api",
  "cl-automation",
  "cl-host",
+ "cl-settings",
  "cl-ui",
  "tempfile",
 ]

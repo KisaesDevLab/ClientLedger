@@ -15,9 +15,23 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 /// Operations that the engine serves but does not list in its `OpenAPI`
-/// document (the desktop gate and the spec route itself).
-pub const OUTSIDE_SPEC: [(&str, &str); 2] =
-    [("GET", "/api/v1/desktop/info"), ("GET", "/openapi.json")];
+/// document: the desktop gate and the spec route itself, plus the
+/// documented-but-unmerged P08 contracts (E5 tenant archives and safe
+/// delete, U-23 recovery key) that the desktop-mode export (U-24) will add.
+pub const OUTSIDE_SPEC: [(&str, &str); 12] = [
+    ("GET", "/api/v1/desktop/info"),
+    ("GET", "/openapi.json"),
+    ("GET", "/api/v1/tenants"),
+    ("POST", "/api/v1/tenants"),
+    ("PATCH", "/api/v1/tenants/{id}"),
+    ("POST", "/api/v1/tenants/{id}/archives"),
+    ("GET", "/api/v1/tenant-archives/jobs/{jobId}"),
+    ("GET", "/api/v1/tenant-archives/{fileName}/download"),
+    ("POST", "/api/v1/tenant-archives/import"),
+    ("POST", "/api/v1/tenants/{id}/delete"),
+    ("POST", "/api/v1/desktop/recover-password"),
+    ("POST", "/api/v1/auth/recovery-key/rotate"),
+];
 
 /// Lowercase hex of a SHA-256.
 pub fn sha_hex(bytes: &[u8]) -> String {

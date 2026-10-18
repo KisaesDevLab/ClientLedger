@@ -1,0 +1,227 @@
+{
+  "account": "1010",
+  "items": [
+    {
+      "amount": "-184.56",
+      "date": "2026-11-01",
+      "description": "SHEPHERD HILLS OFFICE SUPPLY 4346",
+      "status": "ready"
+    },
+    {
+      "amount": "-348.51",
+      "date": "2026-11-02",
+      "description": "FORSYTH PRINT SHOP 4394",
+      "status": "ready"
+    },
+    {
+      "amount": "-224.76",
+      "date": "2026-11-03",
+      "description": "HIGHWAY 65 TIRE & LUBE 4396",
+      "status": "ready"
+    },
+    {
+      "amount": "-415.27",
+      "date": "2026-11-01",
+      "description": "PINE RIDGE STORAGE UNITS 4401",
+      "status": "ready"
+    },
+    {
+      "amount": "-1813.37",
+      "date": "2026-11-02",
+      "description": "THUNDER RIDGE SUBCONTRACTING 4361",
+      "status": "ready"
+    },
+    {
+      "amount": "-206.25",
+      "date": "2026-11-03",
+      "description": "SHEPHERD HILLS OFFICE SUPPLY 4363",
+      "status": "ready"
+    },
+    {
+      "amount": "1958.00",
+      "date": "2026-11-01",
+      "description": "BARN OWL BOOKS PMT-INV-1283",
+      "status": "ready"
+    },
+    {
+      "amount": "3817.05",
+      "date": "2026-11-02",
+      "description": "INDIAN POINT RESORT PMT-INV-1284",
+      "status": "ready"
+    },
+    {
+      "amount": "-411.16",
+      "date": "2026-11-03",
+      "description": "HIGHWAY 65 TIRE & LUBE 4355",
+      "status": "ready"
+    },
+    {
+      "amount": "1140.51",
+      "date": "2026-11-01",
+      "description": "JUNIPER COURT CONDOS PMT-INV-1294",
+      "status": "ready"
+    },
+    {
+      "amount": "-431.11",
+      "date": "2026-11-02",
+      "description": "BRANSON EQUIPMENT RENTAL 4347",
+      "status": "ready"
+    },
+    {
+      "amount": "-463.83",
+      "date": "2026-11-03",
+      "description": "WALNUT SHADE DIESEL 4400",
+      "status": "ready"
+    },
+    {
+      "amount": "-280.56",
+      "date": "2026-11-01",
+      "description": "CEDAR HOLLOW SIGNS 4413",
+      "status": "ready"
+    },
+    {
+      "amount": "-892.00",
+      "date": "2026-11-02",
+      "description": "LAKEVIEW CREDIT UNION 4416",
+      "status": "ready"
+    },
+    {
+      "amount": "3720.27",
+      "date": "2026-11-03",
+      "description": "BARN OWL BOOKS PMT-INV-1285",
+      "status": "ready"
+    },
+    {
+      "amount": "3461.75",
+      "date": "2026-11-01",
+      "description": "COMPTON RIDGE CHURCH PMT-INV-1304",
+      "status": "ready"
+    },
+    {
+      "amount": "-233.44",
+      "date": "2026-11-02",
+      "description": "LAKESIDE INSURANCE AGENCY 4393",
+      "status": "ready"
+    },
+    {
+      "amount": "-320.43",
+      "date": "2026-11-03",
+      "description": "BLUE EYE LUMBER 4409",
+      "status": "ready"
+    },
+    {
+      "amount": "500.70",
+      "date": "2026-11-01",
+      "description": "TIMBER LAKE LODGE PMT-INV-1319",
+      "status": "ready"
+    },
+    {
+      "amount": "-3099.38",
+      "date": "2026-11-02",
+      "description": "OAK GROVE UNIFORMS 4419",
+      "status": "ready"
+    },
+    {
+      "amount": "2793.55",
+      "date": "2026-11-03",
+      "description": "CARDINAL HILL DAYCARE PMT-INV-1302",
+      "status": "ready"
+    },
+    {
+      "amount": "4188.16",
+      "date": "2026-11-01",
+      "description": "RIDGEDALE CHAPEL PMT-INV-1308",
+      "status": "ready"
+    },
+    {
+      "amount": "-222.97",
+      "date": "2026-11-02",
+      "description": "OAK GROVE UNIFORMS 4399",
+      "status": "ready"
+    },
+    {
+      "amount": "-334.10",
+      "date": "2026-11-03",
+      "description": "MOUNTAIN SOFTWARE CO 4408",
+      "status": "ready"
+    },
+    {
+      "amount": "-2016.92",
+      "date": "2026-11-01",
+      "description": "BUSINESS CREDIT CARD 4415",
+      "status": "ready"
+    },
+    {
+      "amount": "-183.26",
+      "date": "2026-11-02",
+      "description": "PERSIMMON HILL PLANTS 4420",
+      "status": "ready"
+    },
+    {
+      "amount": "669.38",
+      "date": "2026-11-03",
+      "description": "SHEPHERD HILLS CLINIC PMT-INV-1329",
+      "status": "ready"
+    },
+    {
+      "amount": "3382.61",
+      "date": "2026-11-01",
+      "description": "TRI-LAKES INSURANCE PMT-INV-1340",
+      "status": "ready"
+    },
+    {
+      "amount": "-6583.78",
+      "date": "2026-11-02",
+      "description": "POS DEBIT ",
+      "status": "match"
+    },
+    {
+      "amount": "-495.97",
+      "date": "2026-11-02",
+      "description": "POS DEBIT COPPER KETTLE CATERING",
+      "status": "match"
+    },
+    {
+      "amount": "-136.56",
+      "date": "2026-11-02",
+      "description": "POS DEBIT SYCAMORE FENCE CO",
+      "status": "match"
+    },
+    {
+      "amount": "-148.50",
+      "date": "2026-11-03",
+      "description": "SQ *RIDGE TOOL RENTAL",
+      "status": "review"
+    },
+    {
+      "amount": "-62.19",
+      "date": "2026-11-03",
+      "description": "AMZN MKTP US",
+      "status": "review"
+    },
+    {
+      "amount": "925.00",
+      "date": "2026-11-03",
+      "description": "ZELLE FROM T ROCK DENTAL",
+      "status": "review"
+    },
+    {
+      "amount": "-84.25",
+      "date": "2026-11-03",
+      "description": "MO DOR VEHICLE REG",
+      "status": "review"
+    },
+    {
+      "amount": "-310.00",
+      "date": "2026-11-03",
+      "description": "CHECK 4502",
+      "status": "review"
+    },
+    {
+      "amount": "-1124.91",
+      "date": "2026-11-03",
+      "description": "MOBILE DEPOSIT",
+      "status": "review"
+    }
+  ]
+}

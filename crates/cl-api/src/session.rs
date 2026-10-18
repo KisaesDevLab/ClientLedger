@@ -362,6 +362,10 @@ pub struct NewCompany {
     /// Legal entity type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entity_type: Option<String>,
+    /// Seed only the engine's system accounts; the app imports its own
+    /// starter chart afterwards (P08, Q-49).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_accounts_only: Option<bool>,
 }
 
 /// Answer of [`Session::create_company`].
@@ -639,6 +643,24 @@ impl Session {
         #[serde(rename_all = "camelCase")]
         struct Me {
             accessible_tenants: Vec<CompanySummary>,
+        }
+        if self
+            .client()
+            .capabilities()
+            .has(crate::wire::Capabilities::TENANTS_LIST)
+        {
+            return Ok(self
+                .tenants()
+                .list()
+                .await?
+                .into_iter()
+                .map(|t| CompanySummary {
+                    tenant_id: t.id,
+                    tenant_name: t.name,
+                    role: t.role.unwrap_or_default(),
+                    last_accessed_at: t.updated_at,
+                })
+                .collect());
         }
         let reply = self
             .send(&AUTH_ME, Call::at(Method::Get, AUTH_ME.route()), None)

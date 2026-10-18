@@ -67,6 +67,10 @@ pub enum Step {
     },
     /// Click an element.
     Click(Target),
+    /// Click an element if one matches right now; otherwise do nothing
+    /// (for steps that depend on an earlier run's state, such as a dirty
+    /// window that may or may not prompt).
+    ClickIfPresent(Target),
     /// Focus an element.
     Focus(Target),
     /// Type text.
@@ -150,6 +154,7 @@ impl Step {
             Step::Resize { width, height } => format!("resize to {width}x{height}"),
             Step::SetZoom { percent } => format!("zoom {percent}%"),
             Step::Click(t) => format!("click {}", t.describe()),
+            Step::ClickIfPresent(t) => format!("click {} if present", t.describe()),
             Step::Focus(t) => format!("focus {}", t.describe()),
             Step::Type { text, .. } => format!("type {} characters", text.chars().count()),
             Step::Key(k) => format!("key {k}"),
@@ -335,6 +340,24 @@ fn expect_node(
     })
 }
 
+/// How long `click_if_present` waits for its element.
+const PRESENCE_WAIT: Duration = Duration::from_millis(600);
+
+/// Clicks `target` if it appears within [`PRESENCE_WAIT`]; otherwise does
+/// nothing (a dialog that only some runs raise).
+fn click_if_present(t: &mut dyn Transport, target: &Target) -> Result<(), String> {
+    let start = Instant::now();
+    loop {
+        if !snapshot(t)?.find_all(target).is_empty() {
+            return call(t, "click", json!({"target": target})).map(drop);
+        }
+        if start.elapsed() >= PRESENCE_WAIT {
+            return Ok(());
+        }
+        std::thread::sleep(ASSERT_POLL);
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_step(
     t: &mut dyn Transport,
@@ -355,6 +378,7 @@ fn run_step(
             })?;
             call(t, "click", json!({"target": target})).map(drop)
         }
+        Step::ClickIfPresent(target) => click_if_present(t, target),
         Step::Focus(target) => {
             eventually(t, |s| {
                 s.resolve(target).map(drop).map_err(|e| e.to_string())

@@ -182,6 +182,19 @@ const fn screen(
     c
 }
 
+/// A command that opens a window whose screen exists now.
+const fn built(
+    id: &'static str,
+    label: &'static str,
+    menu: Option<Menu>,
+    group: u8,
+    shortcut: Option<Shortcut>,
+) -> Command {
+    let mut c = cmd(id, label, menu, group, shortcut, Scope::Global);
+    c.opens = true;
+    c
+}
+
 /// Rail entries, by command id (DESIGN.md window anatomy item 3).
 pub struct RailLayout {
     /// "Workspace" section.
@@ -212,10 +225,18 @@ pub const ALL: RailLayout = RailLayout {
 #[rustfmt::skip]
 pub const COMMANDS: &[Command] = &[
     // File
-    screen("file.open_company", "Open or Switch Company", Some(Menu::File), 0, ctrl('O'), "P08"),
-    cmd("file.print", "Print", Some(Menu::File), 1, ctrl('P'), Scope::Global),
-    cmd("file.close_window", "Close Window", Some(Menu::File), 2, key(Mods::CMD, Key::F(4)), Scope::Global),
-    cmd("file.quit", "Quit ClientLedger", Some(Menu::File), 3, ctrl('Q'), Scope::Global),
+    built("file.open_company", "Open or Switch Company", Some(Menu::File), 0, ctrl('O')),
+    built("file.new_company", "New Company", Some(Menu::File), 0, None),
+    cmd("file.close_company", "Close Company", Some(Menu::File), 0, None, Scope::Global),
+    built("file.backup", "Back Up Company", Some(Menu::File), 1, None),
+    cmd("file.restore", "Restore a Backup", Some(Menu::File), 1, None, Scope::Global),
+    built("file.portable_copy", "Make Portable Copy", Some(Menu::File), 1, None),
+    built("file.export_all", "Export All Data", Some(Menu::File), 1, None),
+    screen("file.full_backup", "Full Database Backup (Utilities)", Some(Menu::File), 1, None, "P34"),
+    built("file.delete_company", "Delete Company", Some(Menu::File), 2, None),
+    cmd("file.print", "Print", Some(Menu::File), 3, ctrl('P'), Scope::Global),
+    cmd("file.close_window", "Close Window", Some(Menu::File), 4, key(Mods::CMD, Key::F(4)), Scope::Global),
+    cmd("file.quit", "Quit ClientLedger", Some(Menu::File), 5, ctrl('Q'), Scope::Global),
     // Edit
     cmd("edit.undo", "Undo", Some(Menu::Edit), 0, ctrl('Z'), Scope::Form),
     cmd("edit.redo", "Redo", Some(Menu::Edit), 0, ctrl('Y'), Scope::Form),
@@ -323,7 +344,20 @@ mod tests {
 
     #[test]
     fn screens_name_the_phase_that_builds_them() {
+        // Screens that exist today (P08); everything else names its phase.
+        let built_now = [
+            "file.open_company",
+            "file.new_company",
+            "file.backup",
+            "file.portable_copy",
+            "file.export_all",
+            "file.delete_company",
+        ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
+            if built_now.contains(&c.id.as_str()) {
+                assert!(c.arrives.is_none(), "{} is built", c.id);
+                continue;
+            }
             let p = c.arrives.expect("window commands name a phase");
             assert!(p.starts_with('P'), "{p}");
         }

@@ -209,8 +209,93 @@ pub(crate) const TXN_PUT: Operation = write(Method::Put, "/api/v1/transactions/{
 pub(crate) const TXN_VOID: Operation = write(Method::Post, "/api/v1/transactions/{id}/void");
 pub(crate) const LEDGER_VERSION: Operation = read("/api/v1/ledger-version");
 
+// ---- P08 company lifecycle ------------------------------------------------
+
+/// A session-level write that is never company-scoped (tenant management).
+const fn workspace_write(method: Method, route: &'static str, timeout: TimeoutClass) -> Operation {
+    op(
+        method,
+        route,
+        RetryClass::PreHandlerOnly,
+        RouteKind::Session,
+        timeout,
+        false,
+    )
+}
+
+/// A session-level write that is never retried (it creates or destroys a
+/// company, or changes a credential).
+const fn workspace_once(route: &'static str, kind: RouteKind, timeout: TimeoutClass) -> Operation {
+    op(Method::Post, route, RetryClass::Never, kind, timeout, false)
+}
+
+pub(crate) const COMPANY_SETTINGS_PUT: Operation = write(Method::Put, "/api/v1/company/settings");
+pub(crate) const SETUP_COMPLETE: Operation = write(Method::Post, "/api/v1/company/setup-complete");
+pub(crate) const COA_TEMPLATE_OPTIONS: Operation =
+    public_read("/api/v1/coa-templates/options", TimeoutClass::Read);
+pub(crate) const ACCOUNTS_IMPORT: Operation = write(Method::Post, "/api/v1/accounts/import");
+pub(crate) const OPENING_BALANCES: Operation =
+    write(Method::Post, "/api/v1/export/opening-balances");
+pub(crate) const INVOICES_CREATE: Operation = write(Method::Post, "/api/v1/invoices");
+pub(crate) const BILLS_CREATE: Operation = write(Method::Post, "/api/v1/bills");
+pub(crate) const REPORT_BALANCE_SHEET: Operation = read("/api/v1/reports/balance-sheet");
+pub(crate) const REPORT_TRIAL_BALANCE: Operation = read("/api/v1/reports/trial-balance");
+pub(crate) const REPORT_PROFIT_LOSS: Operation = read("/api/v1/reports/profit-loss");
+pub(crate) const EXPORT_FULL: Operation = read("/api/v1/export/full");
+pub(crate) const EXPORT_FULL_FILE: Operation = read("/api/v1/export/full/{fileName}");
+/// E5a (U-05): the companies the user can open, never the workspace.
+pub(crate) const TENANTS_LIST: Operation = session_read("/api/v1/tenants");
+pub(crate) const TENANTS_CREATE: Operation = workspace_once(
+    "/api/v1/tenants",
+    RouteKind::Session,
+    TimeoutClass::CreateTenant,
+);
+pub(crate) const TENANT_RENAME: Operation =
+    workspace_write(Method::Patch, "/api/v1/tenants/{id}", TimeoutClass::Write);
+pub(crate) const TENANT_ARCHIVE_EXPORT: Operation = workspace_write(
+    Method::Post,
+    "/api/v1/tenants/{id}/archives",
+    TimeoutClass::Archive,
+);
+pub(crate) const TENANT_ARCHIVE_JOB: Operation =
+    session_read("/api/v1/tenant-archives/jobs/{jobId}");
+pub(crate) const TENANT_ARCHIVE_DOWNLOAD: Operation =
+    session_read("/api/v1/tenant-archives/{fileName}/download");
+pub(crate) const TENANT_ARCHIVE_IMPORT: Operation = workspace_write(
+    Method::Post,
+    "/api/v1/tenant-archives/import",
+    TimeoutClass::Archive,
+);
+/// E5b: the safe delete (archive first, typed name).
+pub(crate) const TENANT_DELETE: Operation = workspace_once(
+    "/api/v1/tenants/{id}/delete",
+    RouteKind::Session,
+    TimeoutClass::Archive,
+);
+/// U-23: reset the owner password with the recovery key (launch token only).
+pub(crate) const RECOVER_PASSWORD: Operation = workspace_once(
+    "/api/v1/desktop/recover-password",
+    RouteKind::Public,
+    TimeoutClass::Auth,
+);
+/// U-23: a new recovery key, shown once.
+pub(crate) const RECOVERY_KEY_ROTATE: Operation = workspace_once(
+    "/api/v1/auth/recovery-key/rotate",
+    RouteKind::Session,
+    TimeoutClass::Auth,
+);
+
+#[cfg(test)]
+/// Mutations outside `/api/v1/auth/` that are never retried: each creates
+/// or destroys a company, or changes a credential.
+const NEVER_RETRIED: [(&str, &str); 3] = [
+    ("POST", "/api/v1/tenants"),
+    ("POST", "/api/v1/tenants/{id}/delete"),
+    ("POST", "/api/v1/desktop/recover-password"),
+];
+
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 40] = [
+pub const OPERATIONS: [Operation; 62] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -251,6 +336,28 @@ pub const OPERATIONS: [Operation; 40] = [
     TXN_PUT,
     TXN_VOID,
     LEDGER_VERSION,
+    COMPANY_SETTINGS_PUT,
+    SETUP_COMPLETE,
+    COA_TEMPLATE_OPTIONS,
+    ACCOUNTS_IMPORT,
+    OPENING_BALANCES,
+    INVOICES_CREATE,
+    BILLS_CREATE,
+    REPORT_BALANCE_SHEET,
+    REPORT_TRIAL_BALANCE,
+    REPORT_PROFIT_LOSS,
+    EXPORT_FULL,
+    EXPORT_FULL_FILE,
+    TENANTS_LIST,
+    TENANTS_CREATE,
+    TENANT_RENAME,
+    TENANT_ARCHIVE_EXPORT,
+    TENANT_ARCHIVE_JOB,
+    TENANT_ARCHIVE_DOWNLOAD,
+    TENANT_ARCHIVE_IMPORT,
+    TENANT_DELETE,
+    RECOVER_PASSWORD,
+    RECOVERY_KEY_ROTATE,
 ];
 
 /// Looks up a covered operation.
@@ -324,8 +431,9 @@ mod tests {
         let mut seen = HashSet::new();
         for o in &OPERATIONS {
             assert!(seen.insert((o.method(), o.route())), "duplicate {o:?}");
-            let auth_route = o.route().starts_with("/api/v1/auth/") && !o.method().is_read();
-            match (o.method().is_read(), auth_route) {
+            let never = (o.route().starts_with("/api/v1/auth/") && !o.method().is_read())
+                || NEVER_RETRIED.contains(&(o.method().as_str(), o.route()));
+            match (o.method().is_read(), never) {
                 (true, _) => assert_eq!(o.retry(), RetryClass::Idempotent, "{o:?}"),
                 (false, true) => assert_eq!(o.retry(), RetryClass::Never, "{o:?}"),
                 (false, false) => assert_eq!(o.retry(), RetryClass::PreHandlerOnly, "{o:?}"),

@@ -8,8 +8,10 @@ description = "The ClientLedger desktop application."
 
 [dependencies]
 anyhow = "1.0.104"
+cl-api = { path = "../../crates/cl-api" }
 cl-automation = { path = "../../crates/cl-automation" }
 cl-host = { path = "../../crates/cl-host" }
+cl-settings = { path = "../../crates/cl-settings" }
 cl-ui = { path = "../../crates/cl-ui" }
 
 [lints]

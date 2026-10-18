@@ -34,6 +34,12 @@ impl Capabilities {
     pub const TENANTS_LIST: &'static str = "tenants-list-v1";
     /// U-15 closing-date password.
     pub const CLOSING_PASSWORD: &'static str = "closing-password-v1";
+    /// E5a tenant archives (export job, import, rename).
+    pub const TENANT_ARCHIVE: &'static str = "tenant-archive-v1";
+    /// E5b safe tenant delete.
+    pub const TENANT_DELETE: &'static str = "tenant-delete-v1";
+    /// U-23 desktop recovery key.
+    pub const RECOVERY_KEY: &'static str = "recovery-key-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

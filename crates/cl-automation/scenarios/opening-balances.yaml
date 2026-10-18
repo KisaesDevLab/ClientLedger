@@ -1,0 +1,69 @@
+# Guided opening balances (P08 step 4) against `clientledger --demo`:
+# reached from the interview's done panel. Amounts are typed by the
+# scenario (synthetic), never computed by the app.
+name: opening-balances
+description: Start date, bank balance, open invoice, unpaid bill, post, review.
+steps:
+  - resize: {width: 1280, height: 820}
+  - set_zoom: {percent: 100}
+  - command: file.new_company
+  - click: {role: text_input, label: Business name}
+  - type: {text: Ozark Ridge Landscaping LLC}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Create company, index: 0}
+  - assert_state: {key: screen.created, equals: true}
+  - click: {role: button, label: Enter opening balances}
+  - assert_state: {key: screen.screen, equals: opening_balances}
+  - assert_exists: {role: label, label: Opening balances}
+  - assert_exists: {role: text_input, label: Books start on}
+  - assert_state: {key: screen.bank_rows, equals: 1}
+  - assert_state: {key: screen.accounts, equals: 8}
+
+  # Nothing entered yet: posting is refused with a plain message.
+  - click: {role: button, label: Post opening balances}
+  - assert_state: {key: screen.posted, equals: false}
+  - assert_state: {key: screen.issues, equals: 1}
+
+  # Start date, then the date key M (first of the month).
+  - click: {role: text_input, label: Books start on}
+  - key: Ctrl+A
+  - type: {text: "01/15/2026"}
+  - assert_state: {key: screen.start_date, equals: "2026-01-15"}
+  - type: {text: "m"}
+  - assert_state: {key: screen.start_date, equals: "2026-01-01"}
+
+  # Bank balance (first account is picked by default).
+  - click: {role: text_input, label: Balance}
+  - type: {text: "84,210.55"}
+  - click: {role: button, label: Add a line, index: 0}
+  - assert_state: {key: screen.bank_rows, equals: 2}
+  - screenshot: bank
+
+  # One open invoice and one unpaid bill.
+  - click: {role: button, label: Add a line, index: 1}
+  - assert_state: {key: screen.invoice_rows, equals: 1}
+  - click: {role: text_input, label: Client}
+  - type: {text: Riverbend HOA}
+  - click: {role: text_input, label: Amount}
+  - type: {text: "1,250.00"}
+  - click: {role: button, label: Add a line, index: 2}
+  - assert_state: {key: screen.bill_rows, equals: 1}
+  - click: {role: text_input, label: Vendor}
+  - type: {text: Ozark Mulch Supply}
+  - click: {role: text_input, label: Amount, index: 1}
+  - type: {text: "300.00"}
+  - assert_no_clipping: {}
+  - screenshot: filled
+
+  - click: {role: button, label: Post opening balances}
+  - assert_state: {key: screen.posted, equals: true}
+  - assert_state: {key: screen.issues, equals: 0}
+  - assert_exists: {role: label, label: Balance sheet on your start date}
+  - screenshot: review
+  - click: {role: button, label: Done}
+  - assert_not_exists: {role: tab, label: Opening Balances}
+  - assert_exists: {role: tab, label: Home}

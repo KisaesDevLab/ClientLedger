@@ -33,6 +33,13 @@ use crate::prefs;
 use crate::shell::Shell;
 use crate::theme::ThemeChoice;
 
+/// Key of the `Instant` the bridge stores while a screenshot is captured;
+/// a screen that can show a secret masks it until then.
+#[must_use]
+pub fn hide_secrets_id() -> egui::Id {
+    egui::Id::unique("cl.hide_secrets_until")
+}
+
 /// Frames to wait after an input before answering, so the result is drawn and
 /// reported in the tree.
 const SETTLE_FRAMES: u64 = 2;
@@ -118,6 +125,15 @@ fn build(
     let n = nodes.get(&id)?;
     let role = snake(&format!("{:?}", n.role()));
     let mut label = n.label().map(str::to_owned);
+    if label.is_none() {
+        // egui's `labelled_by` clears the node's own label and points at
+        // the visible label widget; name the input after it.
+        label = n
+            .labelled_by()
+            .iter()
+            .filter_map(|id| nodes.get(id))
+            .find_map(|l| l.label().or(l.value()).map(str::to_owned));
+    }
     let mut value = n.value().map(str::to_owned);
     // Plain text is exposed as the node value; treat it as the label so
     // `text equals` works on both buttons and static text.
@@ -185,6 +201,9 @@ enum Finish {
 enum JobKind {
     /// Answer once this frame number has passed.
     AfterFrame { until: u64, finish: Finish },
+    /// The target was scrolled into view; once the frames settle, find it
+    /// again at its new position and click it.
+    ClickAfterScroll { target: Target, until: u64 },
     /// Wait for the rendered pixels.
     Screenshot {
         path: PathBuf,
@@ -311,6 +330,27 @@ impl Bridge {
                 };
                 job.pending.respond(Response::success(value));
                 None
+            }
+            JobKind::ClickAfterScroll { target, until } => {
+                if self.frame() < *until || self.queued() > 0 {
+                    return Some(job);
+                }
+                let target = target.clone();
+                match self.click_now(&target) {
+                    Ok(()) => Some(Job {
+                        pending: job.pending,
+                        kind: JobKind::AfterFrame {
+                            until: self.frame() + self.queued() + SETTLE_FRAMES + 1,
+                            finish: Finish::Empty,
+                        },
+                        deadline: job.deadline,
+                    }),
+                    Err(Started::Done(response)) => {
+                        job.pending.respond(response);
+                        None
+                    }
+                    Err(Started::Job(_)) => None,
+                }
             }
             JobKind::Screenshot { path, slot } => {
                 let image = slot.lock().ok().and_then(|mut s| s.take());
@@ -462,6 +502,42 @@ impl Bridge {
         let Some(b) = node.bounds else {
             return fail(ErrorCode::Failed, "that element has no position on screen");
         };
+        // Below the fold (or above it): ask egui to scroll it into view,
+        // then click where it lands.
+        let window = ctx.content_rect();
+        let (cx, cy) = b.center();
+        if !window.contains(Pos2::new(cx, cy))
+            && let Some(scroll) = Self::scroll_events(&node.id)
+        {
+            self.schedule(vec![scroll]);
+            ctx.request_repaint();
+            return Started::Job(JobKind::ClickAfterScroll {
+                target: target.clone(),
+                until: self.frame() + self.queued() + SETTLE_FRAMES + 1,
+            });
+        }
+        match self.click_now(target) {
+            Ok(()) => {
+                ctx.request_repaint();
+                self.after(Finish::Empty)
+            }
+            Err(e) => e,
+        }
+    }
+
+    /// Schedules the pointer events for a click at the target's current
+    /// position.
+    fn click_now(&self, target: &Target) -> Result<(), Started> {
+        let node = self.resolve(target)?;
+        if !node.enabled {
+            return Err(fail(ErrorCode::Failed, "that element is disabled"));
+        }
+        let Some(b) = node.bounds else {
+            return Err(fail(
+                ErrorCode::Failed,
+                "that element has no position on screen",
+            ));
+        };
         let (x, y) = b.center();
         let pos = Pos2::new(x, y);
         let button = |pressed| Event::PointerButton {
@@ -481,10 +557,20 @@ impl Bridge {
                 events: vec![button(false)],
             },
         ]);
-        ctx.request_repaint();
-        self.after(Finish::Empty)
+        Ok(())
     }
 
+    fn scroll_events(node_id: &str) -> Option<Scheduled> {
+        let id = u64::from_str_radix(node_id, 16).ok()?;
+        Some(Scheduled {
+            events: vec![Event::AccessKitActionRequest(accesskit::ActionRequest {
+                action: accesskit::Action::ScrollIntoView,
+                target_tree: accesskit::TreeId::ROOT,
+                target_node: accesskit::NodeId(id),
+                data: None,
+            })],
+        })
+    }
     fn focus_events(node_id: &str) -> Option<Scheduled> {
         let id = u64::from_str_radix(node_id, 16).ok()?;
         Some(Scheduled {
@@ -568,6 +654,14 @@ impl Bridge {
         if let Err(e) = cl_automation::screenshot::check_destination(&path) {
             return fail(ErrorCode::BadRequest, e.to_string());
         }
+        // Screens that can show a secret (the recovery key) mask it while
+        // the pixels are captured.
+        ctx.data_mut(|d| {
+            d.insert_temp(
+                hide_secrets_id(),
+                std::time::Instant::now() + std::time::Duration::from_millis(500),
+            );
+        });
         let slot: Arc<Mutex<Option<Arc<ColorImage>>>> = Arc::new(Mutex::new(None));
         let cb_slot = Arc::clone(&slot);
         let cb_ctx = ctx.clone();
@@ -684,6 +778,9 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
         "toast": shell.toast_text(),
         "engine": host,
         "quit_approved": shell.quit_approved(),
+        "company_open": shell.company.is_some(),
+        "signed_in": shell.status.user.is_some(),
+        "screen": shell.active_screen_state(),
     })
 }
 

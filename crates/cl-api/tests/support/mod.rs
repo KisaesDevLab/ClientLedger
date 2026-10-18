@@ -167,6 +167,11 @@ impl Observer {
         *self.dropped.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// Rate-limited auth calls made so far (login, TFA, create-tenant).
+    pub fn auth_calls(&self) -> u64 {
+        self.auth_limited()
+    }
+
     fn auth_limited(&self) -> u64 {
         let sent = self.sent.lock().unwrap_or_else(PoisonError::into_inner);
         sent.iter()
@@ -486,6 +491,7 @@ impl Harness {
                     company_name: unique("Tenant B"),
                     business_type: Some("default".into()),
                     entity_type: None,
+                    system_accounts_only: None,
                 }))
                 .unwrap_or_else(|e| panic!("create tenant B: {e}"));
             made.tenant_id

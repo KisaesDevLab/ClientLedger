@@ -14,11 +14,32 @@ mod args;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use cl_api::{ApiQueue, Client, ClientConfig, QueueConfig};
 use cl_host::{AppPaths, HostConfig, acquire_or_focus, find_engine_exe};
+use cl_settings::{KeyringSecrets, RecentStore};
 use cl_ui::app::{LaunchOptions, run};
+use cl_ui::company::CompanyLink;
 use cl_ui::engine_link::{HostLink, StaticProbe};
 use cl_ui::prefs::UiStore;
 use cl_ui::shell::{HostView, ShellOptions};
+
+/// The engine link for the company screens: a client over the verified
+/// endpoint, the request queue, the recent-companies store and the
+/// keychain, all under the app data folder (P08).
+fn company_link(link: &HostLink, paths: &AppPaths) -> Result<Arc<CompanyLink>> {
+    let client = Client::new(link.endpoint_source(), ClientConfig::default())
+        .context("the engine client could not start")?;
+    let queue = ApiQueue::start(Arc::new(|| {}), QueueConfig::default())
+        .context("the request queue could not start")?;
+    Ok(Arc::new(CompanyLink::live(
+        client,
+        queue,
+        Arc::clone(link.supervisor()),
+        RecentStore::in_dir(&paths.root().join("settings")),
+        Arc::new(KeyringSecrets::for_root(paths.root())),
+        paths.root().join("backups"),
+    )))
+}
 
 /// The control channel exists only when `--control <path>` was given: no
 /// flag, no listener (P07). A refused control file stops the start-up.
@@ -77,6 +98,7 @@ fn main() -> Result<()> {
         if let Some(exe) = find_engine_exe(args.engine_exe.as_deref()) {
             let link = HostLink::start(HostConfig::new(paths.clone(), exe), guard);
             shell.host = Some(link.probe());
+            shell.company = Some(company_link(&link, &paths)?);
             options.focus_request = Some(Arc::clone(&link.focus));
             options.stop_request = Some(Arc::clone(&link.stop));
             // Dropped when the window closes, which stops the engine and the
@@ -89,6 +111,9 @@ fn main() -> Result<()> {
                 "status.engine.not_found",
             )))));
         }
+    }
+    if args.demo {
+        shell.company = Some(Arc::new(CompanyLink::demo(&paths.root().join("demo"))));
     }
     options.shell = shell;
     options.control = start_control(args.control.as_deref())?;

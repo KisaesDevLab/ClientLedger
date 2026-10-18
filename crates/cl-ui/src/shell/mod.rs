@@ -23,6 +23,7 @@ use cl_model::{COMMANDS, Command, CommandId, Keymap, Scope, commands};
 use eframe::egui::{self, Color32, Context, Frame, Margin, ViewportBuilder, ViewportCommand};
 
 use crate::about::AboutDialog;
+use crate::company::{CompanyEvent, CompanyLink};
 use crate::errors::{self, ErrorDialog};
 use crate::i18n::t;
 use crate::input;
@@ -115,6 +116,9 @@ pub struct ShellOptions {
     pub theme: Option<theme::ThemeChoice>,
     /// Start at this zoom instead of the remembered one (screenshots).
     pub zoom_percent: Option<u16>,
+    /// The engine link for the company screens (P08). `None` with `demo`
+    /// makes a demo link in a temporary folder.
+    pub company: Option<Arc<CompanyLink>>,
 }
 
 struct Toast {
@@ -154,6 +158,14 @@ pub struct Shell {
     applied_zoom: Option<u16>,
     applied_theme: Option<theme::ThemeChoice>,
     run_only: bool,
+    company_link: Option<Arc<CompanyLink>>,
+    /// The open company's tenant and name (for Back Up, Delete, layouts).
+    open_tenant: Option<(cl_core::ids::TenantId, String)>,
+    /// The window to bring back after a close prompt that a company switch
+    /// raised (the Open Company window).
+    return_after_prompt: Option<WindowId>,
+    /// File > Close Company is waiting for a close prompt to be answered.
+    close_company_after_prompt: bool,
 }
 
 impl Shell {
@@ -178,6 +190,13 @@ impl Shell {
         // The table is checked for conflicts by a unit test, so this cannot
         // fail in a shipped build.
         let keymap = Keymap::new(COMMANDS).expect("the command table has no shortcut conflicts");
+        let company_link = options.company.or_else(|| {
+            options.demo.then(|| {
+                let dir =
+                    std::env::temp_dir().join(format!("clientledger-demo-{}", std::process::id()));
+                Arc::new(CompanyLink::demo(&dir))
+            })
+        });
         let mut shell = Shell {
             prefs,
             store: options.store,
@@ -207,13 +226,179 @@ impl Shell {
             applied_zoom: None,
             applied_theme: None,
             run_only: false,
+            company_link,
+            open_tenant: None,
+            return_after_prompt: None,
+            close_company_after_prompt: false,
         };
         if options.demo {
             shell.load_demo();
+        } else if shell.company_link.is_some() {
+            // With an engine, start on the Open Company window (Q-182); the
+            // remembered layout returns when the company opens.
+            shell.dispatch_now(CommandId::new("file.open_company"));
         } else {
             shell.restore_layout_or_home();
         }
         shell
+    }
+
+    /// The engine link, when the shell has one.
+    #[must_use]
+    pub fn company_link(&self) -> Option<&Arc<CompanyLink>> {
+        self.company_link.as_ref()
+    }
+
+    /// The open company (tenant id and name), if any.
+    #[must_use]
+    pub fn open_tenant(&self) -> Option<&(cl_core::ids::TenantId, String)> {
+        self.open_tenant.as_ref()
+    }
+
+    /// Builds the screen for a window kind: a company screen when the
+    /// kind is one (and the shell has a link), else a placeholder.
+    fn make_screen(&self, kind: CommandId) -> Box<dyn Screen> {
+        if let Some(link) = &self.company_link
+            && let Some(s) =
+                crate::screens::company::make(kind, link, self.open_tenant.clone(), self.today)
+        {
+            return s;
+        }
+        Box::new(Placeholder::for_command(kind))
+    }
+
+    /// Bring the window for `kind` to the front, or open it.
+    fn open_screen(&mut self, kind: CommandId) {
+        // A finished interview (its "done" panel) is not reused: New Company
+        // always starts fresh.
+        if kind.as_str() == "file.new_company"
+            && let Some(id) = self.windows.find_kind(kind)
+            && self
+                .windows
+                .get(id)
+                .is_some_and(|w| w.screen.state()["created"] == true)
+        {
+            self.windows.close_now(id);
+        }
+        if let Some(id) = self.windows.find_kind(kind) {
+            self.windows.activate(id);
+        } else {
+            let screen = self.make_screen(kind);
+            self.windows.open_new(kind, screen);
+        }
+    }
+
+    /// Apply what the company screens reported since the last frame.
+    fn apply_company_events(&mut self, ctx: Option<&Context>) {
+        let Some(link) = self.company_link.clone() else {
+            return;
+        };
+        link.set_dirty_windows(self.windows.dirty_ids().len());
+        for event in link.drain() {
+            match event {
+                CompanyEvent::SignedIn { user } => {
+                    self.status.user = Some(user);
+                }
+                CompanyEvent::Opened {
+                    tenant_id,
+                    name,
+                    accent,
+                    closed_through,
+                } => {
+                    let key = tenant_id.to_string();
+                    // Close the previous company's windows (Q-182) before the
+                    // new company's layout comes back; the interview stays so
+                    // its "done" panel can offer the next steps.
+                    self.save_layout();
+                    let keep = CommandId::new("file.new_company");
+                    for id in self
+                        .windows
+                        .all()
+                        .iter()
+                        .filter(|w| w.kind != keep)
+                        .map(|w| w.id)
+                        .collect::<Vec<_>>()
+                    {
+                        self.windows.close_now(id);
+                    }
+                    self.open_tenant = Some((tenant_id, name.clone()));
+                    self.set_company(
+                        &key,
+                        Some(CompanyBanner {
+                            name,
+                            closed_through,
+                            accent: accent.0,
+                        }),
+                    );
+                    if self.windows.is_empty() {
+                        self.dispatch_now(CommandId::new("nav.home"));
+                    }
+                }
+                CompanyEvent::Closed => {
+                    self.save_layout();
+                    for id in self.windows.all().iter().map(|w| w.id).collect::<Vec<_>>() {
+                        self.windows.close_now(id);
+                    }
+                    self.open_tenant = None;
+                    self.company = None;
+                    self.company_key = "default".into();
+                    self.last_saved_layout = Some(self.windows.snapshot());
+                    self.dispatch_now(CommandId::new("file.open_company"));
+                }
+                CompanyEvent::OpenWindow(id) => {
+                    let kind = id;
+                    self.open_screen(kind);
+                }
+                CompanyEvent::Toast(key) => {
+                    if let Some(ctx) = ctx {
+                        self.toast(ctx, key);
+                    }
+                }
+                CompanyEvent::PromptDirty => {
+                    if let Some(id) = self.windows.dirty_ids().first().copied() {
+                        self.return_after_prompt = self.windows.active_id();
+                        self.windows.request_close(id);
+                    }
+                }
+                CompanyEvent::CloseWindow(kind) => {
+                    if let Some(id) = self.windows.find_kind(kind) {
+                        self.windows.close_now(id);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Close the open company: save or prompt for open forms first, wait
+    /// for pending writes, then return to the Open Company window.
+    fn close_company(&mut self) {
+        let Some(link) = self.company_link.clone() else {
+            return;
+        };
+        if self.open_tenant.is_none() && self.company.is_none() {
+            self.dispatch_now(CommandId::new("file.open_company"));
+            return;
+        }
+        if !self.windows.dirty_ids().is_empty() {
+            // The close prompt handles each dirty window first; the close
+            // continues by itself after Save or Discard.
+            if let Some(id) = self.windows.dirty_ids().first().copied() {
+                self.close_company_after_prompt = true;
+                self.windows.request_close(id);
+            }
+            return;
+        }
+        if link.pending_writes() > 0 {
+            return;
+        }
+        if let Some(mut demo) = link.demo_state() {
+            demo.open = None;
+        } else if let Some(session) = link.session()
+            && let Some(Ok(group)) = link.group()
+        {
+            let _ = group.read(&session, |s| async move { s.close_company().await });
+        }
+        link.push(CompanyEvent::Closed);
     }
 
     /// Keep theme and zoom changes for this run only: nothing is written to
@@ -278,6 +463,12 @@ impl Shell {
         if let Some(first) = self.windows.all().first().map(|w| w.id) {
             self.windows.activate(first);
         }
+        if let Some(link) = &self.company_link
+            && let Some(demo) = link.demo_state()
+            && let Some(c) = demo.companies.first()
+        {
+            self.open_tenant = Some((c.tenant_id, c.name.clone()));
+        }
     }
 
     fn restore_layout_or_home(&mut self) {
@@ -285,10 +476,14 @@ impl Shell {
             .store
             .as_ref()
             .and_then(|s| s.load_layout(&self.company_key));
+        let (link, open, today) = (
+            self.company_link.clone(),
+            self.open_tenant.clone(),
+            self.today,
+        );
         let restored = layout.is_some_and(|l| {
-            self.windows.restore(&l, &|k| {
-                Box::new(Placeholder::for_command(k)) as Box<dyn Screen>
-            });
+            self.windows
+                .restore(&l, &|k| make_any(k, link.as_ref(), open.clone(), today));
             !self.windows.is_empty()
         });
         if !restored {
@@ -303,10 +498,14 @@ impl Shell {
         self.company_key = key.to_string();
         self.company = banner;
         let layout = self.store.as_ref().and_then(|s| s.load_layout(key));
+        let (link, open, today) = (
+            self.company_link.clone(),
+            self.open_tenant.clone(),
+            self.today,
+        );
         let restored = layout.is_some_and(|l| {
-            self.windows.restore(&l, &|k| {
-                Box::new(Placeholder::for_command(k)) as Box<dyn Screen>
-            })
+            self.windows
+                .restore(&l, &|k| make_any(k, link.as_ref(), open.clone(), today))
         });
         if !restored && self.windows.is_empty() {
             self.dispatch_now(CommandId::new("nav.home"));
@@ -405,6 +604,15 @@ impl Shell {
     /// Run a command now (outside a frame; tests and start-up).
     pub fn dispatch_now(&mut self, id: CommandId) {
         self.run(None, id);
+        self.apply_company_events(None);
+    }
+
+    /// State of the window in front, for the control channel.
+    #[must_use]
+    pub fn active_screen_state(&self) -> serde_json::Value {
+        self.windows
+            .active()
+            .map_or(serde_json::Value::Null, |w| w.screen.state())
     }
 
     fn run(&mut self, ctx: Option<&Context>, id: CommandId) {
@@ -413,11 +621,33 @@ impl Shell {
         };
         if cmd.opens {
             let kind = cmd.id;
-            self.windows
-                .open_or_focus(kind, || Box::new(Placeholder::for_command(kind)));
+            if self.company_link.is_some()
+                && self.company.is_none()
+                && kind.as_str() != "file.open_company"
+                && kind.as_str() != "file.new_company"
+            {
+                // Nothing but Open Company and the interview works without a
+                // company (Q-182); the restore panel lives in Open Company.
+                let open = CommandId::new("file.open_company");
+                self.open_screen(open);
+                if let Some(ctx) = ctx {
+                    self.toast(ctx, "toast.open_company_first");
+                }
+                return;
+            }
+            self.open_screen(kind);
             return;
         }
         match id.as_str() {
+            "file.close_company" => self.close_company(),
+            "file.restore" => {
+                let open = CommandId::new("file.open_company");
+                self.open_screen(open);
+                let _ = self
+                    .windows
+                    .active_mut()
+                    .is_some_and(|w| w.screen.command(CommandId::new("file.restore")));
+            }
             "window.next" => self.windows.next(),
             "window.prev" => self.windows.prev(),
             "window.pop_out" => {
@@ -457,6 +687,16 @@ impl Shell {
             .windows
             .active_mut()
             .is_some_and(|w| w.screen.command(cmd.id));
+        // Esc (form.revert): the screen reverts a field when it can; when
+        // nothing is left to revert the window closes, asking first when
+        // it still has unsaved edits (DESIGN.md form rules).
+        if !handled
+            && cmd.id.as_str() == "form.revert"
+            && let Some(id) = self.windows.active_id()
+        {
+            self.windows.request_close(id);
+            return;
+        }
         let quiet = cmd.id.as_str().starts_with("form.") || cmd.id.as_str().starts_with("edit.");
         if !handled
             && !quiet
@@ -583,13 +823,19 @@ impl Shell {
         let narrow = ui.available_width() < NARROW_WIDTH;
         let tokens = Tokens::of(&ctx);
 
+        self.apply_company_events(Some(&ctx));
         title_bar::show(ui, self, narrow, &tokens);
         menu::show(ui, self, narrow, &tokens);
         status_bar::show(ui, self, narrow, &tokens);
-        if !narrow || self.rail_open_when_narrow {
+        // With no company open the Open Company window fills the body, as
+        // in its mockup: no rail and no tab strip until a company opens.
+        let chrome = self.company.is_some() || self.company_link.is_none();
+        if chrome && (!narrow || self.rail_open_when_narrow) {
             rail::show(ui, self, &tokens);
         }
-        tabs::show(ui, self, narrow, &tokens);
+        if chrome {
+            tabs::show(ui, self, narrow, &tokens);
+        }
         self.body(ui, &tokens);
         self.show_popped_out(&ctx, &tokens);
         self.show_overlays(&ctx);
@@ -597,6 +843,7 @@ impl Shell {
         for id in std::mem::take(&mut self.pending) {
             self.run(Some(&ctx), id);
         }
+        self.apply_company_events(Some(&ctx));
         self.save_layout();
         if self.toast.is_some() {
             ctx.request_repaint_after(Duration::from_millis(500));
@@ -623,8 +870,15 @@ impl Shell {
     }
 
     fn body(&mut self, ui: &mut egui::Ui, tokens: &Tokens) {
+        // With no company open the Open Company card sits on the app
+        // background, as in its mockup.
+        let fill = if self.company.is_none() && self.company_link.is_some() {
+            tokens.surface_app
+        } else {
+            tokens.surface_window
+        };
         let frame = Frame::new()
-            .fill(tokens.surface_window)
+            .fill(fill)
             .inner_margin(Margin::symmetric(16, 12));
         let active = self.windows.active_id();
         let mut dock: Option<WindowId> = None;
@@ -730,10 +984,22 @@ impl Shell {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             answer = Some(PromptAnswer::Keep);
         }
-        if let Some(a) = answer
-            && self.windows.answer_prompt(a) == Some(QuitProgress::Ready)
-        {
-            self.finish_quit(Some(ctx));
+        if let Some(a) = answer {
+            let progress = self.windows.answer_prompt(a);
+            if a != PromptAnswer::Keep
+                && let Some(back) = self.return_after_prompt.take()
+            {
+                self.windows.activate(back);
+            }
+            if a == PromptAnswer::Keep {
+                self.return_after_prompt = None;
+                self.close_company_after_prompt = false;
+            } else if std::mem::take(&mut self.close_company_after_prompt) {
+                self.close_company();
+            }
+            if progress == Some(QuitProgress::Ready) {
+                self.finish_quit(Some(ctx));
+            }
         }
     }
 
@@ -749,6 +1015,21 @@ impl Shell {
             Color32::from_rgb(c.accent[0], c.accent[1], c.accent[2])
         })
     }
+}
+
+/// A screen for `kind` without borrowing the shell (layout restore).
+fn make_any(
+    kind: CommandId,
+    link: Option<&Arc<CompanyLink>>,
+    open: Option<(cl_core::ids::TenantId, String)>,
+    today: CalendarDate,
+) -> Box<dyn Screen> {
+    if let Some(link) = link
+        && let Some(s) = crate::screens::company::make(kind, link, open, today)
+    {
+        return s;
+    }
+    Box::new(Placeholder::for_command(kind))
 }
 
 /// Today's local date.

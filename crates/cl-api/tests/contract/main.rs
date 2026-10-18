@@ -18,6 +18,7 @@ mod contract_conflict;
 mod contract_errors;
 mod contract_harness;
 mod contract_journal;
+mod contract_lifecycle;
 mod contract_logging;
 mod contract_money;
 mod contract_resources;
@@ -151,6 +152,42 @@ fn main() -> std::process::ExitCode {
         (
             "queue::a_write_through_the_ui_queue",
             contract_logging::a_write_through_the_ui_queue,
+        ),
+        (
+            "lifecycle::coa_import_settings_and_setup",
+            contract_lifecycle::coa_import_settings_and_setup,
+        ),
+        (
+            "lifecycle::opening_balances_and_review",
+            contract_lifecycle::opening_balances_and_review,
+        ),
+        (
+            "lifecycle::year_boundary_retained_earnings",
+            contract_lifecycle::year_boundary_retained_earnings,
+        ),
+        (
+            "lifecycle::closing_password_u15",
+            contract_lifecycle::closing_password_u15,
+        ),
+        (
+            "lifecycle::tenants_list_create_rename_e5a",
+            contract_lifecycle::tenants_list_create_rename_e5a,
+        ),
+        (
+            "lifecycle::archive_export_import_e5a",
+            contract_lifecycle::archive_export_import_e5a,
+        ),
+        (
+            "lifecycle::safe_delete_e5b",
+            contract_lifecycle::safe_delete_e5b,
+        ),
+        (
+            "lifecycle::recovery_key_u23",
+            contract_lifecycle::recovery_key_u23,
+        ),
+        (
+            "lifecycle::ten_switches_under_two_seconds",
+            contract_lifecycle::ten_switches_under_two_seconds,
         ),
         (
             "session::logout_ends_the_session",

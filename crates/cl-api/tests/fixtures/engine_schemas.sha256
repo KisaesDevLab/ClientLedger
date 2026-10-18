@@ -7,3 +7,5 @@ cce501e7a3b95cc6b27eb37680697b9c2b01b61a84587456d12d2dcc064d511b  engine/package
 caa4d4629f96c011cc83b5a7ce9f066195136df80aaaf779c47d62eaf8e0106c  engine/packages/shared/src/schemas/auth.ts
 44c890ad68a8abdcb26348f73ac9246aee4c066397717505ec07b6464a2a4787  engine/packages/api/src/routes/tags.routes.ts
 05dae35daca98b7d05175e778ab7bcaf4873256cf7fca3193f8a70849fc9c404  engine/packages/api/src/routes/transactions.routes.ts
+d370523607e966393037745ef11d3824367053d35c3326b1044c2260b971d649  engine/packages/shared/src/schemas/ap.ts
+cea4fb6ddebc8af35a3defc7242a0ce2fc68e05cd044f65e63bf564e19fc055d  engine/packages/api/src/routes/desktop.routes.ts
