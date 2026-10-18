@@ -14,12 +14,10 @@ How Claude Code builds ClientLedger with subagents and the right model for each 
 
 | Model alias | Used by | Why |
 | --- | --- | --- |
-| `haiku` | `explorer`, `bookkeeper` | Fast, low-cost search and record keeping; never writes production code or reviews |
-| `sonnet` | orchestrator (main session), `engine-scout`, `rust-implementer` (Tier L/M), `engine-implementer` (S changes), `test-writer`, `ui-verifier`, `ci-fixer`, `docs-writer` | Balanced everyday coding and verification |
-| `opus` | `architect`, `reviewer`, `security-reviewer`, `rust-implementer` (Tier H), `engine-implementer` (M/L or accounting-rule changes) | Hardest reasoning: design, correctness review, money and concurrency logic |
-| `fable` | `process-reviewer` | Deepest end-to-end review of complex processes and the riskiest plans, at fixed checkpoints only; never for security review (Fable carries extra cybersecurity safeguards) |
+| `opus` | orchestrator (main session, unless the owner sets another with `/model`), `explorer`, `bookkeeper`, `engine-scout`, `rust-implementer` (Tier L/M), `engine-implementer` (S changes), `test-writer`, `ui-verifier`, `ci-fixer`, `docs-writer`, `architect` (Tier M), `reviewer` (Tier L/M), `security-reviewer` | Everything that is not complex, crucial or financial code (owner routing, 2026-10-18) |
+| `fable` | `architect` (Tier H), `reviewer` (Tier H), `process-reviewer`, `rust-implementer` (Tier H), `engine-implementer` (M/L or accounting-rule changes, tenant export/import, posting, balances, closing date, sales tax, inventory costing), any work package the architect marks crucial (money, posting, concurrency, data movement, backup/restore, secret handling) | Complex code, crucial functions and financial calculations |
 
-Launch the main session on Sonnet (`claude --model sonnet`). The orchestrator passes a per-invocation `model` when it starts `rust-implementer` or `engine-implementer`; that overrides the agent file's default (Claude Code resolves the invocation parameter first, then the frontmatter, then `CLAUDE_CODE_SUBAGENT_MODEL`, then the main model). Do not set `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, which would disable this routing.
+Owner routing (2026-10-18): **Fable for complex code, crucial functions and financial calculations; Opus for other areas.** Sonnet and Haiku are no longer used. Launch the main session on the model the owner chooses with `/model` (Opus by default). The orchestrator passes a per-invocation `model` when it starts `rust-implementer` or `engine-implementer`; that overrides the agent file's default (Claude Code resolves the invocation parameter first, then the frontmatter, then `CLAUDE_CODE_SUBAGENT_MODEL`, then the main model). Do not set `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, which would disable this routing.
 
 **Effort:** `low` for search and records; `medium` for routine implementation and verification; `high` for architect, reviewers, and Tier H implementation; `xhigh` only for an escalated re-plan.
 
@@ -50,33 +48,33 @@ If `fable` is unavailable on the account, run `process-reviewer` with `model: op
 
 | Tier | Phases | Implementer | Architect plan | Reviews |
 | --- | --- | --- | --- | --- |
-| **H** — money, posting, concurrency, data movement, migrations, core widget | P02, P05, P10, P12, P15, P21, P23, P24, P25, P27, P28, P31, P32, P33, P34, P36; post-beta P40, P42 | `opus`, effort high | required | `reviewer` (opus) + `ui-verifier`; `security-reviewer` where listed below |
-| **M** — feature screens with accounting effects | P08, P09, P11, P13, P14, P17, P18, P20, P22, P26, P29, P30; post-beta P41, P43, P45, P46, P47, P48 | `sonnet`, effort medium | only if engine-scout reports an M/L gap | `reviewer` (opus) + `ui-verifier` |
-| **L** — scaffolding, shell, printing, packaging, docs | P00, P01, P03, P04, P06, P07, P16, P19, P35, P37, P38, P39; post-beta P44 | `sonnet`, effort medium | no | `ui-verifier` for screens; `reviewer` optional |
+| **H** — money, posting, concurrency, data movement, migrations, core widget | P02, P05, P10, P12, P15, P21, P23, P24, P25, P27, P28, P31, P32, P33, P34, P36; post-beta P40, P42 | `fable`, effort high | required (`architect` on fable) | `reviewer` (fable) + `ui-verifier` (opus); `security-reviewer` (opus) where listed below |
+| **M** — feature screens with accounting effects | P08, P09, P11, P13, P14, P17, P18, P20, P22, P26, P29, P30; post-beta P41, P43, P45, P46, P47, P48 | `opus`, effort medium; `fable` for any work package touching money, posting, closing date, backup/restore or secrets | only if engine-scout reports an M/L gap | `reviewer` (opus; fable for the money packages) + `ui-verifier` |
+| **L** — scaffolding, shell, printing, packaging, docs | P00, P01, P03, P04, P06, P07, P16, P19, P35, P37, P38, P39; post-beta P44 | `opus`, effort medium | no | `ui-verifier` for screens; `reviewer` optional |
 
 `security-reviewer` (opus) also runs on P03, P04, P07, P09, P29, P32, P33, P35, P36, and P37, regardless of tier.
 
-Engine changes: `engine-implementer` runs on `sonnet` for S-sized changes and on `opus` for M/L changes or anything touching posting, balances, inventory costing, sales tax math, or tenant export/import.
+Engine changes: `engine-implementer` runs on `opus` for S-sized changes and on `fable` for M/L changes or anything touching posting, balances, inventory costing, sales tax math, closing dates, secrets, or tenant export/import.
 
 ## The loop for one phase
 
 ```
-orchestrator (sonnet)
+orchestrator (opus)
  ├─ in parallel ──────────────────────────────────────────────┐
- │   engine-scout (sonnet)      capability check              │
- │   test-writer (sonnet)       failing tests from criteria   │
- │   explorer ×N (haiku)        locate code/patterns          │
- ├─ architect (opus)            plan → target/plans/Pxx.md    │ Tier H, or M with M/L gap
+ │   engine-scout (opus)        capability check              │
+ │   test-writer (opus)         failing tests from criteria   │
+ │   explorer ×N (opus)         locate code/patterns          │
+ ├─ architect (fable)            plan → target/plans/Pxx.md    │ Tier H, or M with M/L gap
  ├─ engine-implementer          upstream changes first        │ if gaps
  ├─ rust-implementer            model by tier                 │ may split into work packages
  ├─ in parallel ──────────────────────────────────────────────┤
- │   ui-verifier (sonnet)       screens                       │
- │   reviewer (opus)            fresh-eyes diff review        │
+ │   ui-verifier (opus)         screens                       │
+ │   reviewer (opus/fable)      fresh-eyes diff review        │
  │   security-reviewer (opus)   listed phases                 │
- │   docs-writer (sonnet)       help pages                    │
+ │   docs-writer (opus)         help pages                    │
  ├─ rust-implementer            fix Blocking findings         │
- ├─ bookkeeper (haiku)          STATE/QUESTIONS/UPSTREAM      │
- └─ PR → auto-merge on green CI; ci-fixer (sonnet) if red     ┘
+ ├─ bookkeeper (opus)           STATE/QUESTIONS/UPSTREAM      │
+ └─ PR → auto-merge on green CI; ci-fixer (opus)   if red     ┘
 ```
 
 Work packages: when an architect plan lists independent packages (for example, a grid widget's editor types or several report types), the orchestrator may run up to 3 `rust-implementer` subagents at once, each with `isolation: worktree` (passed per invocation) on disjoint files, then merge their branches into the phase branch in plan order. Packages that touch the same crate's public API run sequentially.
@@ -94,12 +92,12 @@ Each runs in its own worktree and branch, with its own PR. Examples that qualify
 
 | Situation | Action |
 | --- | --- |
-| Sonnet implementer fails the same acceptance criterion twice, or `ci-fixer` fails the same error twice | Re-run that work package on `opus`, effort high |
-| Opus implementer fails twice | `architect` re-plans that package on effort `xhigh`; implement the new plan on `opus` |
-| Still failing (non-security work) | Ask `process-reviewer` (fable) to diagnose the root cause; implement its fix on `opus` |
+| Opus implementer fails the same acceptance criterion twice, or `ci-fixer` fails the same error twice | Re-run that work package on `fable`, effort high |
+| Fable implementer fails twice | `architect` (fable) re-plans that package on effort `xhigh`; implement the new plan on `fable` |
+| Still failing (non-security work) | Ask `process-reviewer` (fable) to diagnose the root cause; implement its fix on `fable` |
 | Still failing | Mark only that item blocked in STATE.md, add a QUESTIONS.md row with a default, and continue other work (Q-220) |
 | Reviewer finds a Blocking issue | Fix on the same branch; re-run `reviewer` on the new diff before opening the PR |
-| Engine gap sized L | `architect` plans it first; `engine-implementer` on `opus` |
+| Engine gap sized L | `architect` plans it first; `engine-implementer` on `fable` |
 
 ## Cost and context guardrails
 
@@ -109,4 +107,4 @@ Each runs in its own worktree and branch, with its own PR. Examples that qualify
 - Subagents return summaries with file paths, not file dumps; `explorer` caps replies at about 300 words.
 - `maxTurns` is set on every agent; hitting it counts as one failed attempt for escalation.
 - At most 4 subagents run at once (`.claude/settings.json`), so parallel work stays reviewable.
-- Each phase's STATE.md log entry lists the agents used and their models, for example `agents: scout/sonnet, tests/sonnet, architect/opus, impl/opus, review/opus, ui/sonnet`, so the owner can see where effort went.
+- Each phase's STATE.md log entry lists the agents used and their models, for example `agents: scout/opus, tests/opus, architect/fable, impl/fable, review/fable, ui/opus`, so the owner can see where effort went.
