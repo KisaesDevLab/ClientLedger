@@ -118,3 +118,7 @@ PUT     /api/v1/tags/groups/{id}                pre-handler-only
 DELETE  /api/v1/tags/groups/{id}                pre-handler-only
 GET     /api/v1/tags/{id}/usage                 idempotent
 POST    /api/v1/tags/merge                      pre-handler-only
+GET     /api/v1/accounts/export                 idempotent
+GET     /api/v1/contacts/export                 idempotent
+POST    /api/v1/contacts/import                 pre-handler-only
+GET     /api/v1/items/export                    idempotent

@@ -362,6 +362,17 @@ pub(crate) const TAG_USAGE: Operation = read("/api/v1/tags/{id}/usage");
 /// Merges one tag into another (header tags only until U-41).
 pub(crate) const TAG_MERGE: Operation = write(Method::Post, "/api/v1/tags/merge");
 
+// ---- P11 list import and export ------------------------------------------------
+
+/// The Chart of Accounts as CSV.
+pub(crate) const ACCOUNTS_EXPORT: Operation = read("/api/v1/accounts/export");
+/// Clients and vendors as CSV.
+pub(crate) const CONTACTS_EXPORT: Operation = read("/api/v1/contacts/export");
+/// Creates contacts from mapped CSV rows.
+pub(crate) const CONTACTS_IMPORT: Operation = write(Method::Post, "/api/v1/contacts/import");
+/// Items as CSV.
+pub(crate) const ITEMS_EXPORT: Operation = read("/api/v1/items/export");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -372,7 +383,7 @@ const NEVER_RETRIED: [(&str, &str); 3] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 95] = [
+pub const OPERATIONS: [Operation; 99] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -468,6 +479,10 @@ pub const OPERATIONS: [Operation; 95] = [
     TAG_GROUP_DELETE,
     TAG_USAGE,
     TAG_MERGE,
+    ACCOUNTS_EXPORT,
+    CONTACTS_EXPORT,
+    CONTACTS_IMPORT,
+    ITEMS_EXPORT,
 ];
 
 /// Looks up a covered operation.

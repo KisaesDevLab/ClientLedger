@@ -70,6 +70,7 @@ pub use resources::export::{ExportFile, ExportManifest};
 pub use resources::form1099::{Form1099, TinType, Vendor1099Profile, Vendor1099Update};
 pub use resources::items::{Item, ItemFields, ItemFilter, ItemSort, ItemUpdate, Items};
 pub use resources::ledger::LedgerStamp;
+pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, ContactImportRow};
 pub use resources::operations::{OPERATIONS, Operation, RetryClass};
 pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
 pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};

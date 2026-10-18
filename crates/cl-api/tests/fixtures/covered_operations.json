@@ -93,5 +93,9 @@
   {"method":"PUT","path":"/api/v1/tags/groups/{id}","inSpec":true,"fragmentHash":"b78aec9603bfe4f0fb69c36df3ac29c5ca36c2e28d130a1bba053ef231d26784"},
   {"method":"DELETE","path":"/api/v1/tags/groups/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"GET","path":"/api/v1/tags/{id}/usage","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
-  {"method":"POST","path":"/api/v1/tags/merge","inSpec":true,"fragmentHash":"ccbbc67cecef6368443390cb70381104dad2f9b6b01c641794dd6a2c74eea09a"}
+  {"method":"POST","path":"/api/v1/tags/merge","inSpec":true,"fragmentHash":"ccbbc67cecef6368443390cb70381104dad2f9b6b01c641794dd6a2c74eea09a"},
+  {"method":"GET","path":"/api/v1/accounts/export","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/contacts/export","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/contacts/import","inSpec":true,"fragmentHash":"bc3b1b40aaa14cca26719d0180ce0b0fec8ed34807053ccf3d0effd6950b3474"},
+  {"method":"GET","path":"/api/v1/items/export","inSpec":true,"fragmentHash":null}
 ]

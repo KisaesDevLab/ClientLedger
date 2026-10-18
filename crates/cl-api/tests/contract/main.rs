@@ -22,6 +22,7 @@ mod contract_harness;
 mod contract_items;
 mod contract_journal;
 mod contract_lifecycle;
+mod contract_list_csv;
 mod contract_logging;
 mod contract_money;
 mod contract_preferences;
@@ -131,6 +132,18 @@ fn main() -> std::process::ExitCode {
         (
             "tags::several_line_tags_u45",
             contract_tags::several_line_tags_u45,
+        ),
+        (
+            "list_csv::exports_and_imports",
+            contract_list_csv::exports_and_imports,
+        ),
+        (
+            "list_csv::items_import_u46",
+            contract_list_csv::items_import_u46,
+        ),
+        (
+            "list_csv::terms_lists_u43",
+            contract_list_csv::terms_lists_u43,
         ),
         (
             "census::live_spec_matches_fixtures",

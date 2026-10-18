@@ -48,7 +48,9 @@ pub enum ContactType {
 }
 
 impl ContactType {
-    const fn as_str(self) -> &'static str {
+    /// Wire name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             ContactType::Customer => "customer",
             ContactType::Vendor => "vendor",
