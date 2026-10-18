@@ -9,14 +9,15 @@ ClientLedger is a free, open-source (MIT), fully offline, native, cross-platform
 - **License and repo:** ClientLedger code is MIT; the repo is public; outside pull requests are not accepted. No license keys, activation, or seat limits.
 - **Owner:** KisaesDevLab (Kurt). Branding: "ClientLedger — powered by Vibe MyBooks". The ClientLedger name and ClientLedger.net belong to this desktop app; MyBooks markets under its own name (Q-120).
 
-Read these before every session, in order:
+Read these before every session, in order. Read only what your task needs (token rules, owner 2026-10-18):
 
-1. `STATE.md` — where the build is and what is next
+1. `STATE.md` — the phase board, blocked items, follow-ups and the last few log entries (older history: `docs/history/STATE-log.md`, only when needed)
 2. `PHASES.md` (index) and the milestone file in `phases/` that contains the phase you are working on — read only that phase in detail
-3. `QUESTIONS.md` — open questions and the default assumptions you must follow
-4. `docs/ARCHITECTURE.md`, `docs/DESIGN.md` — when the phase touches those areas; for any screen, also `docs/design/README.md` and that screen's mockup
-5. `UPSTREAM.md` — engine changes requested from or made in the MyBooks engine
-6. `docs/AGENTS.md` — which subagent and model to use for each job and phase tier
+3. `QUESTIONS.md` — cross-cutting decisions and the current phase's open questions. Phase decisions of completed phases live in `docs/history/phase-decisions.md`: **search for the IDs your phase cites; never read the archive whole**
+4. `docs/ARCHITECTURE.md`, `docs/DESIGN.md` — only the sections the phase touches; for any screen, also `docs/design/README.md` and that screen's mockup
+5. `UPSTREAM.md` — only when the phase has engine work, and only the U-rows it names
+6. `docs/AGENTS.md` — which subagent and model to use for each job and phase tier, and the token rules
+7. Plans in `target/plans/` — read the sections and line ranges your brief names, not the whole file
 
 ---
 
@@ -51,12 +52,13 @@ Read these before every session, in order:
 
 ### Agents and models
 
-The main session is the **orchestrator**. Model routing follows the owner's rule (2026-10-18): **Fable for complex code, crucial functions and financial calculations; Opus for other areas.** Sonnet and Haiku are not used. Details in `docs/AGENTS.md` (Q-221):
+The main session is the **orchestrator**. Model routing follows the owner's rules (2026-10-18): **Fable for complex code, crucial functions and financial calculations; Opus for other areas; Sonnet for purely mechanical jobs.** Details and the token rules are in `docs/AGENTS.md` (Q-221):
 
 - `fable` — `architect` and `reviewer` for Tier H, `process-reviewer`, implementers for Tier H phases, engine changes that touch posting, balances, closing dates, sales tax, inventory costing, secrets or tenant export/import, and any work package involving money, posting, concurrency, data movement, backup/restore or secret handling.
-- `opus` — everything else: `explorer`, `bookkeeper`, `engine-scout`, `test-writer`, `ui-verifier`, `ci-fixer`, `docs-writer`, `security-reviewer`, implementers for Tier L/M work, small engine changes.
+- `opus` — `engine-scout`, `test-writer`, `ui-verifier`, `security-reviewer`, `architect`/`reviewer` for Tier L/M, implementers for Tier L/M work, small engine changes, and the fallback for any `fable` job when Fable is unavailable (note it in STATE.md).
+- `sonnet` — mechanical jobs only: `explorer` searches, `bookkeeper` (STATE/QUESTIONS/UPSTREAM upkeep), `ci-fixer` log triage, `docs-writer`. Never production logic, money code or reviews.
 
-Pass the implementer's model per invocation according to the tier table. Reviews are fresh-eyes: never share the implementation transcript with `reviewer` or `security-reviewer`. Escalate after two failed attempts (opus → fable → re-plan → block that item and continue). Log the agents and models used in each phase's STATE.md entry.
+Pass the model per invocation according to `docs/AGENTS.md`. Reviews are fresh-eyes: never share the implementation transcript with `reviewer` or `security-reviewer`. Fix passes after a review start a **fresh** implementer with one combined brief (findings, file:line, plan section) rather than resuming the original implementer. Escalate after two failed attempts (opus → fable → re-plan → block that item and continue). Log the agents and models used in each phase's STATE.md entry.
 
 ### Commits
 

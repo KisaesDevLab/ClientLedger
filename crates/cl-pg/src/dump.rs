@@ -382,14 +382,15 @@ impl Cluster {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs());
             let keep = sibling(&self.data_dir, &format!(".before-restore-{stamp}"));
-            fs::rename(&self.data_dir, &keep).map_err(io_err("set the old database aside"))?;
+            rename_when_released(&self.data_dir, &keep)
+                .map_err(io_err("set the old database aside"))?;
             Some(keep)
         } else {
             None
         };
-        if let Err(e) = fs::rename(staging.join(PREFIX), &self.data_dir) {
+        if let Err(e) = rename_when_released(&staging.join(PREFIX), &self.data_dir) {
             if let Some(keep) = &previous {
-                let _ = fs::rename(keep, &self.data_dir);
+                let _ = rename_when_released(keep, &self.data_dir);
             }
             let _ = fs::remove_dir_all(&staging);
             return Err(PgError::io("put the restored database in place", e));
@@ -404,7 +405,7 @@ impl Cluster {
             let _ = fs::remove_dir_all(&rejected);
             if fs::rename(&self.data_dir, &rejected).is_ok() {
                 if let Some(keep) = &previous {
-                    let _ = fs::rename(keep, &self.data_dir);
+                    let _ = rename_when_released(keep, &self.data_dir);
                 }
                 let _ = fs::remove_dir_all(&rejected);
             }
@@ -647,6 +648,34 @@ fn sanitize_staged(data: &Path) -> Result<()> {
 }
 
 /// `<data_dir><suffix>` next to the data directory.
+/// How long a rename waits for Windows to release the data folder.
+const RELEASE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// True for the errors Windows gives while another process still has a file
+/// in the folder open (sharing violation, lock violation, access denied).
+/// After the server stops, its exiting children, the search indexer or a
+/// virus scanner can hold a handle for a moment.
+fn still_held(e: &std::io::Error) -> bool {
+    cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33))
+}
+
+/// `fs::rename`, retried while Windows still holds a file in the folder.
+/// Any other error, or the folder still held after [`RELEASE_WAIT`], is
+/// returned as is.
+fn rename_when_released(from: &Path, to: &Path) -> std::io::Result<()> {
+    let start = std::time::Instant::now();
+    let mut pause = std::time::Duration::from_millis(50);
+    loop {
+        match fs::rename(from, to) {
+            Err(e) if still_held(&e) && start.elapsed() < RELEASE_WAIT => {
+                std::thread::sleep(pause);
+                pause = (pause * 2).min(std::time::Duration::from_secs(1));
+            }
+            other => return other,
+        }
+    }
+}
+
 fn sibling(data_dir: &Path, suffix: &str) -> PathBuf {
     let mut name = data_dir
         .file_name()
@@ -757,6 +786,26 @@ mod tests {
         );
         assert_eq!(parse_version_major("garbage"), None);
         assert_eq!(parse_version_major(""), None);
+    }
+
+    #[test]
+    fn a_rename_that_is_not_held_returns_at_once() {
+        let dir = std::env::temp_dir().join(format!("cl-pg-rename-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("a")).unwrap();
+        rename_when_released(&dir.join("a"), &dir.join("b")).unwrap();
+        assert!(dir.join("b").is_dir());
+        let missing = rename_when_released(&dir.join("nope"), &dir.join("c")).unwrap_err();
+        assert_eq!(missing.kind(), std::io::ErrorKind::NotFound);
+        assert!(!still_held(&missing));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_windows_sharing_errors_count_as_held() {
+        let sharing = std::io::Error::from_raw_os_error(32);
+        assert_eq!(still_held(&sharing), cfg!(windows));
+        assert!(!still_held(&std::io::Error::other("x")));
     }
 
     #[test]

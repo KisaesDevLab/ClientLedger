@@ -2,7 +2,7 @@
 name: bookkeeper
 description: Housekeeping on plan files — updates STATE.md logs and milestone summaries, QUESTIONS.md and UPSTREAM.md rows, ATTRIBUTION.md entries, CHANGELOG drafts from conventional commits, and license-audit summaries from cargo-deny output. Never edits code.
 tools: Read, Grep, Glob, Edit, Write, Bash
-model: haiku
+model: sonnet
 effort: low
 maxTurns: 30
 color: gray
