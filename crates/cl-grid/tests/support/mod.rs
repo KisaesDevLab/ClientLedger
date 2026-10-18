@@ -46,5 +46,7 @@ impl RowModel for KeysModel {
         String::new()
     }
 }
+pub mod browse;
 pub mod lines;
+pub mod register;
 pub mod rig;

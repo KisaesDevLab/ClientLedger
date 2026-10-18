@@ -58,6 +58,8 @@ pub struct GridStyle {
     pub header_line: f32,
     /// Horizontal cell padding in points.
     pub pad: f32,
+    /// Height of a note line under a row (measured grids), in points.
+    pub note_line: f32,
 }
 
 impl Default for GridStyle {
@@ -88,6 +90,7 @@ impl Default for GridStyle {
             row_two: 44.0,
             header_line: 22.0,
             pad: 6.0,
+            note_line: 18.0,
         }
     }
 }

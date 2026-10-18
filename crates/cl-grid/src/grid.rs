@@ -148,7 +148,15 @@ pub struct Grid {
     cells: Vec<(Id, CellPos)>,
     rows_drawn: usize,
     row_unit: Option<u64>,
+    note_unit: u64,
     pending_reset: bool,
+    /// Horizontal scroll in points when the columns are wider than the grid.
+    hscroll: f32,
+    /// Amount and date columns grown to fit their widest value this
+    /// session; they never shrink (S14).
+    grown: Vec<(ColumnId, u16)>,
+    /// Measured heights, cached by model revision and row count (N3).
+    measured: std::cell::RefCell<Option<(u64, usize, u64, Heights)>>,
 }
 
 fn group(n: usize) -> String {
@@ -203,7 +211,11 @@ impl Grid {
             cells: Vec::new(),
             rows_drawn: 0,
             row_unit: None,
+            note_unit: units(18.0),
             pending_reset: false,
+            hscroll: 0.0,
+            grown: Vec::new(),
+            measured: std::cell::RefCell::new(None),
         })
     }
 
@@ -409,8 +421,53 @@ impl Grid {
     }
 
     fn heights(&self, model: &ModelRef<'_>) -> Heights {
-        let row = units(if self.two_lines() { 44.0 } else { 30.0 });
-        Heights::uniform(self.row_unit.unwrap_or(row), model.rows().row_count())
+        let row = self
+            .row_unit
+            .unwrap_or_else(|| units(if self.two_lines() { 44.0 } else { 30.0 }));
+        let rows = model.rows();
+        let n = rows.row_count();
+        match self.spec().height {
+            RowHeight::Measured { max_rows } if n <= max_rows as usize => {
+                let rev = rows.revision();
+                let mut cache = self.measured.borrow_mut();
+                if let Some((r, c, u, h)) = cache.as_ref()
+                    && *r == rev
+                    && *c == n
+                    && *u == row
+                {
+                    return h.clone();
+                }
+                // A row with a note (caption, suggestion, error) gets one
+                // more line; everything else is the base height.
+                let heights: Vec<u64> = (0..n)
+                    .map(|i| {
+                        row + if rows.row_note(i).is_some() {
+                            self.note_unit
+                        } else {
+                            0
+                        }
+                    })
+                    .collect();
+                let h = Heights::measured(&heights);
+                *cache = Some((rev, n, row, h.clone()));
+                h
+            }
+            // Above the cap (Q-P10m) or uniform: one height for every row.
+            _ => Heights::uniform(row, n),
+        }
+    }
+
+    /// Column widths for layout: the owner's, then grown amount and date
+    /// widths where those are wider.
+    fn effective_widths(&self) -> Vec<(ColumnId, u16)> {
+        let mut out = self.widths.clone();
+        for (id, w) in &self.grown {
+            match out.iter_mut().find(|(i, _)| i == id) {
+                Some(entry) => entry.1 = entry.1.max(*w),
+                None => out.push((*id, *w)),
+            }
+        }
+        out
     }
 
     /// Apply view effects; returns the events.
@@ -538,7 +595,12 @@ impl Grid {
         let mut events = Vec::new();
         // Layout and size.
         let avail_w = ui.available_width().max(120.0);
-        self.layout = ColumnLayout::compute(&self.core.spec().columns, &self.widths, avail_w - BAR);
+        self.layout = ColumnLayout::compute(
+            &self.core.spec().columns,
+            &self.effective_widths(),
+            avail_w - BAR,
+        );
+        self.note_unit = units(style.note_line);
         let row_h = self.row_points(style);
         self.row_unit = Some(units(row_h));
         let header_h = style.header_line * if self.layout.two_lines { 2.0 } else { 1.0 };
@@ -681,12 +743,18 @@ impl Grid {
         }
 
         // The wheel scrolls the grid, not the screen around it (§12 R3).
+        let overflow = (self.layout.content_width - (avail_w - BAR)).max(0.0);
         if ui.rect_contains_pointer(rect) {
-            let dy = ctx.input_mut(|i| {
-                let d = i.smooth_scroll_delta.y;
-                i.smooth_scroll_delta.y = 0.0;
-                d
+            let (dx, dy) = ctx.input_mut(|i| {
+                let d = i.smooth_scroll_delta;
+                i.smooth_scroll_delta = Vec2::ZERO;
+                (d.x, d.y)
             });
+            // Columns wider than the grid scroll sideways, header and body
+            // together.
+            if overflow > 0.0 {
+                self.hscroll = (self.hscroll - dx).clamp(0.0, overflow);
+            }
             if dy != 0.0 {
                 self.viewport.scroll_by(wheel_units(dy), &h, model.rows());
             }
@@ -697,6 +765,9 @@ impl Grid {
         }
         let painted = self.paint(ui, rect, header_h, &mut model, env, focused, leaving);
         presses.extend(painted.presses);
+        if painted.resized {
+            events.push(GridEvent::ColumnsResized);
+        }
         if painted.buffer_changed
             && let Some(text) = self.core.edit().map(|e| e.buffer.clone())
         {
@@ -724,6 +795,7 @@ impl Grid {
         if !leaving {
             self.sync_focus(&ctx, &mut model, env, &mut events);
         }
+        self.hscroll = self.hscroll.clamp(0.0, overflow);
         let range = self.viewport.visible_range(&h);
         model.rows_mut().visible_range(range);
         self.had_focus = ctx.memory(|m| m.has_focus(focus_id));
@@ -738,6 +810,7 @@ impl Grid {
 struct Painted {
     presses: Vec<Press>,
     buffer_changed: bool,
+    resized: bool,
 }
 
 /// A cell's text as drawn.
@@ -768,8 +841,10 @@ impl Grid {
             .replace("{row}", &row)
     }
 
-    fn paint_header(&self, ui: &mut Ui, header: Rect, env: &GridEnv<'_>) {
+    /// Draw the header; returns true when a column was resized.
+    fn paint_header(&mut self, ui: &mut Ui, header: Rect, env: &GridEnv<'_>) -> bool {
         let style = env.style;
+        let mut resized = false;
         let ctx = ui.ctx().clone();
         let header_row = self.id.with("header");
         ui.painter()
@@ -783,24 +858,55 @@ impl Grid {
                 .accessibility_role(Role::Row),
         );
         header_ui.set_clip_rect(header);
-        ctx.accesskit_node_builder(header_row, |node| node.set_row_index(0));
-        let columns = &self.core.spec().columns;
-        for (ci, place) in self.layout.places.iter().enumerate() {
+        ctx.accesskit_node_builder(header_row, |node| {
+            node.set_row_index(0);
+            node.set_bounds(ak_rect(header));
+        });
+        let columns = self.core.spec().columns.clone();
+        let places = self.layout.places.clone();
+        for (ci, place) in places.iter().enumerate() {
             let Some(col) = columns.iter().find(|c| c.id == place.id) else {
                 continue;
             };
             let line = if place.line == Line::Second { 1.0 } else { 0.0 };
             let r = Rect::from_min_size(
                 pos2(
-                    header.left() + place.x,
+                    header.left() + place.x - self.hscroll,
                     header.top() + line * style.header_line,
                 ),
                 vec2(place.width, style.header_line),
             );
+            // A resize handle on the right border: drag only, never in the
+            // Tab order (B1, T25).
+            if place.line == Line::First {
+                let handle = Rect::from_center_size(
+                    pos2(r.right(), r.center().y),
+                    vec2(6.0, style.header_line),
+                );
+                let hid = self.id.with(("resize", col.id.0));
+                let resp = header_ui.interact(handle, hid, Sense::DRAG);
+                if resp.hovered() || resp.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeColumn);
+                }
+                let dx = resp.drag_delta().x;
+                if resp.dragged() && dx != 0.0 {
+                    let w = (place.width + dx)
+                        .max(f32::from(col.width.min))
+                        .min(4_000.0);
+                    let w = u16::try_from(units(w) / 64).unwrap_or(u16::MAX);
+                    match self.widths.iter_mut().find(|(i, _)| *i == col.id) {
+                        Some(e) => e.1 = w,
+                        None => self.widths.push((col.id, w)),
+                    }
+                    self.grown.retain(|(i, _)| *i != col.id);
+                    resized = true;
+                }
+            }
             let text = env.t(col.header);
             let id = self.id.with(("header", col.id.0));
             let _ = header_ui.interact(r, id, Sense::hover());
             ctx.accesskit_node_builder(id, |node| {
+                node.set_bounds(ak_rect(r.intersect(header)));
                 node.set_role(Role::ColumnHeader);
                 node.set_label(text.clone());
                 node.set_column_index(ci);
@@ -818,6 +924,7 @@ impl Grid {
                 style.header_text,
             );
         }
+        resized
     }
 
     fn row_fill(style: &GridStyle, state: RowState, is_cursor_row: bool) -> Option<Color32> {
@@ -850,7 +957,7 @@ impl Grid {
         let fmt = env.formats();
         let mut presses = Vec::new();
         let mut buffer_changed = false;
-        let n = model.rows().row_count();
+        let total = model.rows().row_count();
         let h = self.heights(model);
         let row_h = self.row_points(style);
         let header = Rect::from_min_size(rect.min, vec2(rect.width(), header_h));
@@ -874,10 +981,11 @@ impl Grid {
         );
         grid_ui.set_clip_rect(rect);
         ctx.accesskit_node_builder(self.id, |node| {
-            node.set_row_count(n + 1);
+            node.set_bounds(ak_rect(rect));
+            node.set_row_count(total + 1);
             node.set_column_count(columns.len());
         });
-        self.paint_header(&mut grid_ui, header, env);
+        let resized = self.paint_header(&mut grid_ui, header, env);
 
         // Rows.
         let range = self.viewport.visible_range(&h);
@@ -903,11 +1011,14 @@ impl Grid {
             }
         }
         let mut cells = Vec::new();
+        let mut grew = false;
         let line_h = if self.two_lines() { row_h / 2.0 } else { row_h };
         let places = self.layout.places.clone();
         for i in range.clone() {
             let top = body.top() + points(self.viewport.local_top(i, &h));
-            let row_rect = Rect::from_min_size(pos2(body.left(), top), vec2(body.width(), row_h));
+            // Measured rows may be taller than the base (a note line).
+            let this_h = points(i64::try_from(h.height_of(i)).unwrap_or(0)).max(row_h);
+            let row_rect = Rect::from_min_size(pos2(body.left(), top), vec2(body.width(), this_h));
             let Some(key) = model.rows().row_key(i) else {
                 // Not loaded yet: a skeleton bar.
                 painter.rect_filled(
@@ -926,7 +1037,7 @@ impl Grid {
             if let Some(f) = Self::row_fill(style, state, is_cursor_row) {
                 painter.rect_filled(row_rect.intersect(body), CornerRadius::ZERO, f);
             }
-            let bar_rect = Rect::from_min_size(row_rect.min, vec2(3.0, row_h)).intersect(body);
+            let bar_rect = Rect::from_min_size(row_rect.min, vec2(3.0, this_h)).intersect(body);
             if state.contains(RowState::ERROR) {
                 painter.rect_filled(bar_rect, CornerRadius::ZERO, style.warn);
             }
@@ -944,13 +1055,50 @@ impl Grid {
                 row_rect.bottom() - 0.5,
                 Stroke::new(1.0, style.row_border),
             );
+            // Drawn marks (Plex has no lock glyph, Q-P06h): a lock at the
+            // right end of the row, a 6 pt dirty dot in the left gutter.
+            if state.contains(RowState::LOCKED) {
+                lock(
+                    &painter,
+                    pos2(row_rect.right() - 14.0, top + row_h / 2.0),
+                    style.locked_text,
+                );
+            }
+            if state.contains(RowState::DIRTY) {
+                painter.circle_filled(
+                    pos2(row_rect.left() + 6.0, top + row_h / 2.0),
+                    3.0,
+                    style.accent,
+                );
+            }
+            if let Some(note) = model.rows().row_note(i)
+                && this_h > row_h
+            {
+                let (text, color) = match note {
+                    crate::core::model::RowNote::Caption(t) => {
+                        (t.to_string(), style.text_secondary)
+                    }
+                    crate::core::model::RowNote::Suggestion(t) => (t.to_string(), style.warn_text),
+                    crate::core::model::RowNote::Error(k) => (env.t(k), style.warn_text),
+                };
+                painter.text(
+                    pos2(
+                        body.left() + style.pad + 4.0 - self.hscroll,
+                        top + row_h + style.note_line / 2.0,
+                    ),
+                    Align2::LEFT_CENTER,
+                    text,
+                    style.small.clone(),
+                    color,
+                );
+            }
 
             let row_id = self.row_id(key);
             let row_label_text = model.rows().row_label(i);
             let row_of = env
                 .t(TextKey("grid.a11y.row_of"))
                 .replace("{n}", &group(i + 1))
-                .replace("{total}", &group(n));
+                .replace("{total}", &group(total));
             let label = if row_label_text.is_empty() {
                 row_of.clone()
             } else {
@@ -964,6 +1112,7 @@ impl Grid {
             );
             row_ui.set_clip_rect(row_rect.intersect(body));
             ctx.accesskit_node_builder(row_id, |node| {
+                node.set_bounds(ak_rect(row_rect.intersect(body)));
                 node.set_label(label);
                 node.set_row_index(i + 1);
                 node.set_row_index_text(row_of);
@@ -980,8 +1129,10 @@ impl Grid {
                 } else {
                     top
                 };
-                let cell_rect =
-                    Rect::from_min_size(pos2(body.left() + place.x, y), vec2(place.width, line_h));
+                let cell_rect = Rect::from_min_size(
+                    pos2(body.left() + place.x - self.hscroll, y),
+                    vec2(place.width, line_h),
+                );
                 let pos = CellPos {
                     row: key,
                     col: col.id,
@@ -1053,6 +1204,7 @@ impl Grid {
                 let shown = Self::display_text(&value, col.kind, state, &col, env, fmt);
                 let editable = self.spec().editable && col.editable;
                 ctx.accesskit_node_builder(cell_id, |node| {
+                    node.set_bounds(ak_rect(cell_rect.intersect(body)));
                     node.set_role(if editable { Role::GridCell } else { Role::Cell });
                     node.set_label(cell_label);
                     node.set_value(shown.text.clone());
@@ -1067,7 +1219,7 @@ impl Grid {
                         node.set_invalid(egui::accesskit::Invalid::True);
                     }
                 });
-                Self::paint_cell(
+                let needed = Self::paint_cell(
                     row_ui.painter(),
                     cell_rect,
                     &col,
@@ -1076,6 +1228,16 @@ impl Grid {
                     state,
                     style,
                 );
+                // Numbers are never cut short: the column grows to fit and
+                // never shrinks this session (Q-P10o, S14).
+                if shown.mono && needed > place.width + 0.5 {
+                    let w = u16::try_from(units(needed.ceil()) / 64).unwrap_or(u16::MAX);
+                    match self.grown.iter_mut().find(|(c, _)| *c == col.id) {
+                        Some(e) => e.1 = e.1.max(w),
+                        None => self.grown.push((col.id, w)),
+                    }
+                    grew = true;
+                }
                 if is_cursor && focused {
                     painter.rect_stroke(
                         cell_rect.intersect(body),
@@ -1113,6 +1275,7 @@ impl Grid {
             }
             let top = self.viewport.top();
             ctx.accesskit_node_builder(bar_id, |node| {
+                node.set_bounds(ak_rect(bar));
                 node.set_role(Role::ScrollBar);
                 node.set_label(env.t(TextKey("grid.a11y.scrollbar")));
                 node.set_value(group(top + 1));
@@ -1134,9 +1297,13 @@ impl Grid {
                 style,
             );
         }
+        if grew {
+            ctx.request_repaint();
+        }
         Painted {
             presses,
             buffer_changed,
+            resized,
         }
     }
 
@@ -1256,7 +1423,7 @@ impl Grid {
         shown: &Shown,
         state: RowState,
         style: &GridStyle,
-    ) {
+    ) -> f32 {
         let color = if shown.placeholder {
             style.placeholder
         } else if state.contains(RowState::LOCKED) {
@@ -1278,7 +1445,7 @@ impl Grid {
                 if *b {
                     check(painter, r.shrink(3.0), style.accent);
                 }
-                return;
+                return 0.0;
             }
             CellValue::Mark(MarkKind::Cleared) => {
                 check(
@@ -1286,7 +1453,7 @@ impl Grid {
                     Rect::from_center_size(rect.center(), vec2(10.0, 10.0)),
                     style.text_secondary,
                 );
-                return;
+                return 0.0;
             }
             CellValue::Mark(MarkKind::Reconciled) => {
                 painter.text(
@@ -1296,9 +1463,9 @@ impl Grid {
                     style.mono.clone(),
                     style.text_secondary,
                 );
-                return;
+                return 0.0;
             }
-            CellValue::Mark(MarkKind::None) | CellValue::Loading => return,
+            CellValue::Mark(MarkKind::None) | CellValue::Loading => return 0.0,
             _ => {}
         }
         let font: FontId = if col.line == Line::Second {
@@ -1322,8 +1489,33 @@ impl Grid {
             crate::core::model::Align::Left => inner.left(),
         };
         let y = rect.center().y - galley.size().y / 2.0;
+        let needed = galley.size().x + 2.0 * style.pad;
         painter.galley(Pos2::new(x, y), galley, color);
+        needed
     }
+}
+
+/// AccessKit bounds in points, as egui sets them for its own widgets.
+fn ak_rect(r: Rect) -> egui::accesskit::Rect {
+    egui::accesskit::Rect {
+        x0: r.min.x.into(),
+        y0: r.min.y.into(),
+        x1: r.max.x.into(),
+        y1: r.max.y.into(),
+    }
+}
+
+/// A drawn padlock (Plex has no lock glyph, Q-P06h).
+fn lock(painter: &egui::Painter, center: Pos2, color: Color32) {
+    let body = Rect::from_center_size(center + vec2(0.0, 2.0), vec2(9.0, 7.0));
+    painter.rect_filled(body, CornerRadius::same(1), color);
+    let shackle = Rect::from_center_size(center + vec2(0.0, -2.5), vec2(6.0, 6.0));
+    painter.rect_stroke(
+        shackle,
+        CornerRadius::same(3),
+        Stroke::new(1.4, color),
+        StrokeKind::Inside,
+    );
 }
 
 /// A drawn check mark (Plex has no check glyph, Q-P06h).
