@@ -51,14 +51,12 @@ Read these before every session, in order:
 
 ### Agents and models
 
-The main session is the **orchestrator** and runs on Sonnet. It delegates to the subagents in `.claude/agents/` and routes models by phase tier as described in `docs/AGENTS.md` (Q-221):
+The main session is the **orchestrator**. Model routing follows the owner's rule (2026-10-18): **Fable for complex code, crucial functions and financial calculations; Opus for other areas.** Sonnet and Haiku are not used. Details in `docs/AGENTS.md` (Q-221):
 
-- `haiku` — `explorer` (read-only search) and `bookkeeper` (STATE/QUESTIONS/UPSTREAM upkeep). Never production code or reviews.
-- `sonnet` — `engine-scout`, `test-writer`, `ui-verifier`, `ci-fixer`, `docs-writer`, and implementers for Tier L/M phases and small engine changes.
-- `opus` — `architect`, `reviewer`, `security-reviewer`, and implementers for Tier H phases and M/L or accounting-rule engine changes.
-- `fable` — `process-reviewer` only: deep end-to-end process reviews at the 12 checkpoints in docs/AGENTS.md, the riskiest architect plans, and the last escalation step. Never for security review or writing code.
+- `fable` — `architect` and `reviewer` for Tier H, `process-reviewer`, implementers for Tier H phases, engine changes that touch posting, balances, closing dates, sales tax, inventory costing, secrets or tenant export/import, and any work package involving money, posting, concurrency, data movement, backup/restore or secret handling.
+- `opus` — everything else: `explorer`, `bookkeeper`, `engine-scout`, `test-writer`, `ui-verifier`, `ci-fixer`, `docs-writer`, `security-reviewer`, implementers for Tier L/M work, small engine changes.
 
-Pass the implementer's model per invocation according to the tier table. Reviews are fresh-eyes: never share the implementation transcript with `reviewer` or `security-reviewer`. Escalate after two failed attempts (sonnet → opus → re-plan → block that item and continue). Log the agents and models used in each phase's STATE.md entry.
+Pass the implementer's model per invocation according to the tier table. Reviews are fresh-eyes: never share the implementation transcript with `reviewer` or `security-reviewer`. Escalate after two failed attempts (opus → fable → re-plan → block that item and continue). Log the agents and models used in each phase's STATE.md entry.
 
 ### Commits
 
