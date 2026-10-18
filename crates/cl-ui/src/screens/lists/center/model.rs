@@ -6,8 +6,8 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use cl_api::{Contact, ContactType, ReportAmount, TransactionSummary};
-use cl_core::Money;
 use cl_core::ids::ContactId;
+use cl_core::{MoneyStyle, NegativeStyle};
 use cl_grid::{
     Align, CellKind, CellValue, Column, ColumnId, GridSpec, Line, RowHeight, RowKey, RowKeyGen,
     RowModel, RowState, SelectionMode, TextKey, WidthSpec,
@@ -124,12 +124,55 @@ pub fn entry_of(c: &Contact) -> ContactEntry {
     }
 }
 
-/// An engine report figure for display: rounded to cents for the money
-/// formatter, never compared or summed (the JSON may be a float until
-/// U-14).
+/// An engine report figure as text: rounded to cents and laid out like
+/// money (thousands separators, `$`, the negative style), but never turned
+/// into `Money`, compared or summed (the JSON may be a float until U-14).
 #[must_use]
-pub fn shown_amount(a: &ReportAmount) -> Option<Money> {
-    a.display(2).and_then(|s| Money::parse_wire(&s).ok())
+pub fn report_text(a: &ReportAmount, style: MoneyStyle) -> Option<String> {
+    let shown = a.display(2)?;
+    let (negative, digits) = match shown.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, shown.as_str()),
+    };
+    let (whole, frac) = digits.split_once('.').unwrap_or((digits, ""));
+    let mut body = String::new();
+    if style.symbol {
+        body.push('$');
+    }
+    let n = whole.len();
+    for (i, c) in whole.chars().enumerate() {
+        if i > 0 && (n - i) % 3 == 0 {
+            body.push(',');
+        }
+        body.push(c);
+    }
+    if !frac.is_empty() {
+        body.push('.');
+        body.push_str(frac);
+    }
+    Some(match (negative, style.negative) {
+        (false, _) => body,
+        (true, NegativeStyle::Minus) => format!("-{body}"),
+        (true, NegativeStyle::Parens) => format!("({body})"),
+    })
+}
+
+/// True when a report figure shows as zero at cents (display text only).
+#[must_use]
+pub fn report_is_zero(a: &ReportAmount) -> bool {
+    a.display(2)
+        .is_some_and(|s| s.bytes().all(|b| matches!(b, b'0' | b'.')))
+}
+
+/// A contact's open balance as the report gave it.
+#[derive(Debug, Clone, Copy)]
+pub enum Balance<'a> {
+    /// The report has not arrived.
+    Loading,
+    /// The report leaves the contact out (nothing open, or not reported).
+    NotInReport,
+    /// The report's figure.
+    Report(&'a ReportAmount),
 }
 
 /// The contacts of one center as the grid shows them.
@@ -142,8 +185,10 @@ pub struct ListModel {
     keygen: RowKeyGen,
     row_keys: Vec<RowKey>,
     by_key: HashMap<RowKey, usize>,
-    /// Engine open balance per contact (display only).
-    balances: HashMap<ContactId, Money>,
+    /// Engine open balance per contact (display only, never converted).
+    balances: HashMap<ContactId, ReportAmount>,
+    /// How money is shown (the grid's style).
+    style: MoneyStyle,
     /// The balance report has arrived (absent then means nothing open).
     balances_loaded: bool,
     status: Vec<String>,
@@ -163,6 +208,7 @@ impl ListModel {
             row_keys: Vec::new(),
             by_key: HashMap::new(),
             balances: HashMap::new(),
+            style: MoneyStyle::default(),
             balances_loaded: false,
             status: Vec::new(),
             revision: 0,
@@ -192,7 +238,7 @@ impl ListModel {
     }
 
     /// The engine's open balances (display only).
-    pub fn set_balances(&mut self, balances: HashMap<ContactId, Money>) {
+    pub fn set_balances(&mut self, balances: HashMap<ContactId, ReportAmount>) {
         self.balances = balances;
         self.balances_loaded = true;
         self.revision += 1;
@@ -251,14 +297,33 @@ impl ListModel {
         })
     }
 
-    /// The engine's open balance of `id`: `None` while the report loads;
-    /// zero when the report leaves an active contact out (nothing open).
-    #[must_use]
-    pub fn balance(&self, id: ContactId) -> Option<Money> {
-        if !self.balances_loaded {
-            return None;
+    /// How money is shown; the grid redraws when it changes.
+    pub fn set_style(&mut self, style: MoneyStyle) {
+        if style != self.style {
+            self.style = style;
+            self.revision += 1;
         }
-        self.balances.get(&id).copied().or(Some(Money::ZERO))
+    }
+
+    /// The engine's open balance of `id`, as the report gave it.
+    #[must_use]
+    pub fn balance(&self, id: ContactId) -> Balance<'_> {
+        if !self.balances_loaded {
+            return Balance::Loading;
+        }
+        self.balances
+            .get(&id)
+            .map_or(Balance::NotInReport, Balance::Report)
+    }
+
+    /// The open balance of `id` as text; `None` while loading or when the
+    /// report leaves the contact out.
+    #[must_use]
+    pub fn balance_text(&self, id: ContactId) -> Option<String> {
+        match self.balance(id) {
+            Balance::Report(a) => report_text(a, self.style),
+            Balance::Loading | Balance::NotInReport => None,
+        }
     }
 
     /// The balance report has arrived.
@@ -307,8 +372,8 @@ impl RowModel for ListModel {
             COL_COMPANY => opt(&e.company),
             COL_PHONE => opt(&e.phone),
             COL_BALANCE if e.active || self.role == Role::Vendor => self
-                .balance(e.id)
-                .map_or(CellValue::Empty, CellValue::Money),
+                .balance_text(e.id)
+                .map_or(CellValue::Empty, |text| CellValue::Text(Cow::Owned(text))),
             COL_STATUS => CellValue::Text(Cow::Borrowed(&self.status[r])),
             _ => CellValue::Empty,
         }

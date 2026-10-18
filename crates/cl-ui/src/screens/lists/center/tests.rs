@@ -147,14 +147,13 @@ fn open_balances_are_the_report_figures() {
         .map(|d| crate::company::demo::contacts::customer_balances(&d));
     let summary = demo.expect("demo");
     let riverbend = r.id("Riverbend HOA");
+    let style = r.s.parts.frame.money_style;
     let want = summary
         .balance_of(riverbend)
-        .and_then(super::model::shown_amount);
-    assert_eq!(
-        r.s.model.balance(riverbend),
-        want.or(Some(cl_core::Money::ZERO))
-    );
-    // Someone the report leaves out has nothing open.
+        .and_then(|a| super::model::report_text(a, style));
+    assert!(want.is_some(), "Riverbend is in the report");
+    assert_eq!(r.s.model.balance_text(riverbend), want);
+    // Someone the report leaves out is "not in the report", never a zero.
     let listed: Vec<ContactId> = summary.data.iter().map(|x| x.id).collect();
     let quiet =
         r.s.contacts
@@ -162,7 +161,11 @@ fn open_balances_are_the_report_figures() {
             .find(|c| c.is_active && !listed.contains(&c.id))
             .map(|c| c.id);
     if let Some(q) = quiet {
-        assert_eq!(r.s.model.balance(q), Some(cl_core::Money::ZERO));
+        assert!(matches!(
+            r.s.model.balance(q),
+            super::model::Balance::NotInReport
+        ));
+        assert_eq!(r.s.model.balance_text(q), None);
     }
     r.select("Riverbend HOA");
     assert_eq!(r.s.state()["detail_loaded"], true);
@@ -475,4 +478,39 @@ fn every_key_the_centers_use_has_english_text() {
             }
         }
     }
+}
+
+/// S5: report figures are shown as text, laid out like money, without
+/// becoming `Money`.
+#[test]
+fn report_figures_are_shown_as_text() {
+    use super::model::{report_is_zero, report_text};
+    use cl_core::{MoneyStyle, NegativeStyle};
+    let a = |json: &str| -> cl_api::ReportAmount { serde_json::from_str(json).expect("amount") };
+    let plain = MoneyStyle::default();
+    let dollars = MoneyStyle {
+        negative: NegativeStyle::Parens,
+        symbol: true,
+    };
+    let minus = MoneyStyle {
+        negative: NegativeStyle::Minus,
+        symbol: false,
+    };
+    assert_eq!(
+        report_text(&a("1234567.891"), minus).as_deref(),
+        Some("1,234,567.89")
+    );
+    assert_eq!(
+        report_text(&a("\"-1234.5\""), dollars).as_deref(),
+        Some("($1,234.50)")
+    );
+    assert_eq!(report_text(&a("-0.004"), minus).as_deref(), Some("0.00"));
+    assert_eq!(report_text(&a("999"), minus).as_deref(), Some("999.00"));
+    assert_eq!(
+        report_text(&a("0.30000000000000004"), minus).as_deref(),
+        Some("0.30")
+    );
+    assert!(report_text(&a("\"1e\""), plain).is_none(), "not a number");
+    assert!(report_is_zero(&a("-0.001")));
+    assert!(!report_is_zero(&a("0.01")));
 }

@@ -70,6 +70,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("center.balance.vendor_source", "Open bills, from the vendor aging report in your books."),
     ("center.balance.inactive", "Not shown for inactive clients."),
     ("center.balance.loading", "Loading\u{2026}"),
+    ("center.balance.none", "Nothing open"),
     ("center.balance.unavailable", "The open balance couldn't be loaded. Close and reopen the window to try again."),
     ("center.details.contact", "Contact"),
     ("center.details.addresses", "Addresses"),

@@ -31,8 +31,8 @@ use cl_api::{
     EditableFields, IdempotencyKey, OrphanLabel, Page, PageRequest, RecordVersion, RequestGroup,
     TransactionSummary, Vendor1099Profile, Versioned,
 };
+use cl_core::CalendarDate;
 use cl_core::ids::{ContactId, TenantId};
-use cl_core::{CalendarDate, Money};
 use cl_grid::{CellPos, Grid, GridEvent, GridHeight, GridSnapshot, ModelRef, NoLookups, RowKey};
 use cl_model::lists::contacts::{ContactFilter, Role, Roles, masked_tax_id};
 use cl_model::{CommandId, Scope, commands};
@@ -40,7 +40,9 @@ use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
 use self::form::FormPanel;
-use self::model::{COL_NAME, HistoryModel, ListModel, history_spec, list_spec, shown_amount};
+use self::model::{
+    Balance, COL_NAME, HistoryModel, ListModel, history_spec, list_spec, report_is_zero,
+};
 use crate::company::{CompanyLink, Task};
 use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
@@ -144,7 +146,7 @@ impl Panel {
 }
 
 /// Balances as the report gave them: contact and display amount.
-type Balances = HashMap<ContactId, Money>;
+type Balances = HashMap<ContactId, cl_api::ReportAmount>;
 
 /// A Client or Vendor center window.
 pub struct CenterScreen {
@@ -314,12 +316,12 @@ impl CenterScreen {
                 Role::Client => crate::company::demo::contacts::customer_balances(&d)
                     .data
                     .iter()
-                    .filter_map(|r| shown_amount(&r.balance).map(|m| (r.id, m)))
+                    .map(|r| (r.id, r.balance.clone()))
                     .collect(),
                 Role::Vendor => crate::company::demo::contacts::ap_aging(&d)
                     .vendors
                     .iter()
-                    .filter_map(|r| Some((r.contact_id?, shown_amount(&r.total)?)))
+                    .filter_map(|r| Some((r.contact_id?, r.total.clone())))
                     .collect(),
             });
             self.balances_load = Some(Task::ready(balances.unwrap_or_default()));
@@ -337,7 +339,7 @@ impl CenterScreen {
                     .await?
                     .data
                     .iter()
-                    .filter_map(|r| shown_amount(&r.balance).map(|m| (r.id, m)))
+                    .map(|r| (r.id, r.balance.clone()))
                     .collect(),
                 Role::Vendor => s
                     .reports()
@@ -345,7 +347,7 @@ impl CenterScreen {
                     .await?
                     .vendors
                     .iter()
-                    .filter_map(|r| Some((r.contact_id?, shown_amount(&r.total)?)))
+                    .filter_map(|r| Some((r.contact_id?, r.total.clone())))
                     .collect(),
             })
         });
@@ -912,6 +914,7 @@ impl CenterScreen {
     }
 
     fn list_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        self.model.set_style(self.parts.frame.money_style);
         let label = t(match self.role {
             Role::Client => "center.grid_label_clients",
             Role::Vendor => "center.grid_label_vendors",
@@ -1016,7 +1019,6 @@ impl CenterScreen {
 
     fn details_tab(&self, ui: &mut Ui, tokens: &Tokens, c: &Contact) {
         let f = &c.fields;
-        let style = self.parts.frame.money_style;
         // The engine's open balance (report figure, never summed here).
         let (title, source) = match self.role {
             Role::Client => ("center.balance.client", "center.balance.client_source"),
@@ -1025,8 +1027,10 @@ impl CenterScreen {
         pane::section(ui, tokens, &t(title));
         let shown = if self.role == Role::Client && !c.is_active {
             t("center.balance.inactive")
-        } else if let Some(b) = self.model.balance(c.id) {
-            b.format(style)
+        } else if let Some(text) = self.model.balance_text(c.id) {
+            text
+        } else if matches!(self.model.balance(c.id), Balance::NotInReport) {
+            t("center.balance.none")
         } else if self.balances_error.is_some() {
             t("center.balance.unavailable")
         } else {
@@ -1470,9 +1474,11 @@ impl Screen for CenterScreen {
             "warning": self.warn.map(|w| w.rsplit('.').next().unwrap_or_default()),
             "note": self.note.map(|n| n.rsplit('.').next().unwrap_or_default()),
             "balances_loaded": self.model.balances_loaded(),
-            "selected_has_balance": selected
-                .and_then(|e| self.model.balance(e.id))
-                .map(|b| !b.is_zero()),
+            "selected_has_balance": selected.and_then(|e| match self.model.balance(e.id) {
+                Balance::Loading => None,
+                Balance::NotInReport => Some(false),
+                Balance::Report(a) => Some(!report_is_zero(a)),
+            }),
             "detail_loaded": d.is_some_and(|d| d.total.is_some()),
             "history_rows": d.map_or(0, |d| d.model.len()),
             "history_total": d.and_then(|d| d.total),
