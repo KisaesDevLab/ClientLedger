@@ -303,3 +303,137 @@ fn a_suggestion_is_described_as_one() {
     .clone();
     assert_eq!(cell.description(), Some("grid.a11y.suggested"));
 }
+
+#[test]
+fn the_header_row_is_labelled_and_help_is_described() {
+    let mut spec = line_spec();
+    let amount = spec
+        .columns
+        .iter_mut()
+        .find(|c| c.id == AMOUNT)
+        .expect("amount column");
+    amount.help = Some(cl_grid::TextKey("help.amount"));
+    let mut r = Rig::new(spec, Lines::new(true, 2));
+    r.focus_cell(0, ACCOUNT);
+    r.frame(vec![]);
+    let nodes = r.nodes();
+    let header_row = find(&nodes, r.grid.id().with("header").accesskit_id());
+    assert_eq!(header_row.role(), Role::Row);
+    assert_eq!(header_row.label(), Some("grid.a11y.header_row"));
+    let header = find(
+        &nodes,
+        r.grid.id().with(("header", AMOUNT.0)).accesskit_id(),
+    );
+    assert_eq!(header.role(), Role::ColumnHeader);
+    assert_eq!(header.description(), Some("help.amount"));
+    let cell = find(
+        &nodes,
+        r.grid
+            .cell_id(CellPos {
+                row: r.model.key(1),
+                col: AMOUNT,
+            })
+            .accesskit_id(),
+    );
+    assert_eq!(cell.description(), Some("help.amount"));
+}
+
+#[test]
+fn an_empty_cell_never_reports_its_placeholder_as_its_value() {
+    let mut spec = line_spec();
+    for c in &mut spec.columns {
+        if c.id == ACCOUNT {
+            c.placeholder = Some(cl_grid::TextKey("Account"));
+        }
+    }
+    let mut r = Rig::new(spec, Lines::new(true, 2));
+    r.focus_cell(0, AMOUNT);
+    r.frame(vec![]);
+    let entry = r.model.key(2);
+    let cell = find(
+        &r.nodes(),
+        r.grid
+            .cell_id(CellPos {
+                row: entry,
+                col: ACCOUNT,
+            })
+            .accesskit_id(),
+    )
+    .clone();
+    assert_eq!(cell.value(), Some(""), "empty, not the placeholder");
+    assert_eq!(cell.description(), Some("Account"));
+}
+
+/// A grid scrolled partly out of its panel paints nothing and reports no
+/// node past the panel's edge (the status bar below stays clean).
+#[test]
+fn a_grid_in_a_short_scroll_area_stays_inside_it() {
+    use cl_grid::{Grid, GridEnv, GridHeight, GridStyle};
+    use egui::{Pos2, RawInput, Rect, Vec2};
+    use support::lines::{TestLookups, formats};
+
+    let ctx = support::rig::context();
+    let mut grid = Grid::new("clip", line_spec()).expect("spec");
+    let mut model = Lines::new(true, 8);
+    let lookups = TestLookups::default();
+    let style = GridStyle::default();
+    let panel_bottom = 120.0;
+    let input = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+        ..RawInput::default()
+    };
+    let mut out = ctx.run_ui(input, |ui| {
+        egui::ScrollArea::vertical()
+            .max_height(panel_bottom - ui.cursor().top())
+            .show(ui, |ui| {
+                let env = GridEnv {
+                    style: &style,
+                    text: &support::rig::text,
+                    lookups: &lookups,
+                    today: formats().today,
+                    first_weekday: formats().first_weekday,
+                    date_order: formats().date_order,
+                    money_style: formats().money,
+                    height: GridHeight::Rows { min: 3, max: 12 },
+                    label: "Expense lines",
+                    input_enabled: true,
+                };
+                let _ = grid.show(ui, ModelRef::Edit(&mut model), &env);
+            });
+    });
+    let limit = f64::from(panel_bottom) + 0.5;
+    out.textures_delta.clear();
+    for s in &out.shapes {
+        // What actually reaches the screen: the shape cut by its clip.
+        let seen = s.shape.visual_bounding_rect().intersect(s.clip_rect);
+        if seen.is_positive() {
+            assert!(
+                seen.max.y <= panel_bottom + 0.5,
+                "a shape paints below the panel: {seen:?}"
+            );
+        }
+    }
+    let nodes = out
+        .platform_output
+        .accesskit_update
+        .map(|u| u.nodes)
+        .unwrap_or_default();
+    let grid_node = find(&nodes, grid.id().accesskit_id());
+    assert!(grid_node.bounds().expect("bounds").y1 <= limit);
+    let mut seen = 0;
+    for (_, n) in &nodes {
+        if matches!(n.role(), Role::Row | Role::GridCell | Role::Cell)
+            && let Some(b) = n.bounds()
+            && b.y1 > b.y0
+        {
+            seen += 1;
+            assert!(
+                b.y1 <= limit,
+                "{:?} {:?} reaches past the panel",
+                n.role(),
+                n.label()
+            );
+        }
+    }
+    assert!(seen > 0, "some rows are visible");
+}

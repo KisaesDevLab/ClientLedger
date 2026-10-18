@@ -262,6 +262,7 @@ fn column(id: ColumnId, header: TextKey, kind: CellKind, width: (u16, u16, u8)) 
         id,
         header,
         placeholder: None,
+        help: None,
         kind,
         line: Line::First,
         align: Align::Left,

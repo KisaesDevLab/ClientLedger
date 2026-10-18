@@ -1105,10 +1105,15 @@ impl Grid {
                 .max_rect(header)
                 .accessibility_role(Role::Row),
         );
-        header_ui.set_clip_rect(header);
+        header_ui.shrink_clip_rect(header);
+        // Bounds are what is visible: a grid scrolled partly out of its
+        // panel reports only the part on screen.
+        let vis = ui.clip_rect();
+        let header_label = env.t(TextKey("grid.a11y.header_row"));
         ctx.accesskit_node_builder(header_row, |node| {
             node.set_row_index(0);
-            node.set_bounds(ak_rect(header));
+            node.set_label(header_label);
+            node.set_bounds(ak_rect(header.intersect(vis)));
         });
         let columns = self.core.spec().columns.clone();
         let places = self.layout.places.clone();
@@ -1151,13 +1156,20 @@ impl Grid {
                 }
             }
             let text = env.t(col.header);
+            let help = col.help.map(|k| env.t(k));
             let id = self.id.with(("header", col.id.0));
-            let _ = header_ui.interact(r, id, Sense::hover());
+            let resp = header_ui.interact(r, id, Sense::hover());
+            if let Some(h) = &help {
+                let _ = resp.on_hover_text(h.as_str());
+            }
             ctx.accesskit_node_builder(id, |node| {
-                node.set_bounds(ak_rect(r.intersect(header)));
+                node.set_bounds(ak_rect(r.intersect(header).intersect(vis)));
                 node.set_role(Role::ColumnHeader);
                 node.set_label(text.clone());
                 node.set_column_index(ci);
+                if let Some(h) = help {
+                    node.set_description(h);
+                }
             });
             let (anchor, x) = match col.align {
                 crate::core::model::Align::Right => (Align2::RIGHT_CENTER, r.right() - style.pad),
@@ -1227,9 +1239,12 @@ impl Grid {
                 .accessibility_role(Role::Grid)
                 .accessibility_label(env.label),
         );
-        grid_ui.set_clip_rect(rect);
+        grid_ui.shrink_clip_rect(rect);
+        // What is on screen: node bounds never reach past the panel the
+        // grid sits in (a scrolled screen body, the status bar).
+        let vis = grid_ui.clip_rect();
         ctx.accesskit_node_builder(self.id, |node| {
-            a11y::grid_node(node, rect, total, columns.len());
+            a11y::grid_node(node, rect.intersect(vis), total, columns.len());
         });
         let resized = self.paint_header(&mut grid_ui, header, env);
 
@@ -1369,7 +1384,7 @@ impl Grid {
                     .max_rect(row_rect)
                     .accessibility_role(Role::Row),
             );
-            row_ui.set_clip_rect(row_rect.intersect(body));
+            row_ui.shrink_clip_rect(row_rect.intersect(body));
             let problem = match model.rows().row_note(i) {
                 Some(crate::core::model::RowNote::Error(k)) => Some(env.t(k)),
                 _ if state.contains(RowState::ERROR) => {
@@ -1385,7 +1400,7 @@ impl Grid {
                 problem,
             };
             ctx.accesskit_node_builder(row_id, |node| {
-                a11y::row_node(node, row_rect.intersect(body), &row_info);
+                a11y::row_node(node, row_rect.intersect(body).intersect(vis), &row_info);
             });
             row_nodes.push((row_id, key));
             let locked_text = state
@@ -1512,7 +1527,10 @@ impl Grid {
                     continue;
                 }
                 let cell_id = self.cell_id(pos);
-                let resp = row_ui.interact(cell_rect.intersect(body), cell_id, Sense::CLICK);
+                let mut resp = row_ui.interact(cell_rect.intersect(body), cell_id, Sense::CLICK);
+                if let Some(h) = col.help {
+                    resp = resp.on_hover_text(env.t(h));
+                }
                 if resp.clicked() || resp.double_clicked() {
                     let m = ctx.input(|i| input::mods(i.modifiers));
                     presses.push(Press {
@@ -1525,9 +1543,15 @@ impl Grid {
                 let value = model.rows().cell(i, col.id);
                 let shown = Self::display_text(&value, col.kind, state, &col, env, fmt);
                 let editable = self.spec().editable && col.editable;
+                // An empty cell's placeholder is a hint, not its value.
+                let hint = (shown.placeholder && matches!(value, CellValue::Empty))
+                    .then_some(shown.text.as_str());
+                let help = col.help.map(|k| env.t(k));
                 let info = CellInfo {
                     label: &cell_label,
-                    value: &shown.text,
+                    value: if hint.is_some() { "" } else { &shown.text },
+                    hint,
+                    help: help.as_deref(),
                     column: ci,
                     editable,
                     toggled: match &value {
@@ -1541,7 +1565,7 @@ impl Grid {
                     .then_some(suggested_text.as_str()),
                 };
                 ctx.accesskit_node_builder(cell_id, |node| {
-                    a11y::cell_node(node, cell_rect.intersect(body), &info);
+                    a11y::cell_node(node, cell_rect.intersect(body).intersect(vis), &info);
                 });
                 // The cursor cell without a text editor: the focus target's
                 // node speaks for it (a checkbox, a combo box, a cell).
@@ -1559,7 +1583,13 @@ impl Grid {
                             }
                             _ => {
                                 node.set_role(if editable { Role::GridCell } else { Role::Cell });
-                                node.set_value(shown.text.clone());
+                                match hint {
+                                    Some(h) => {
+                                        node.set_value("");
+                                        node.set_description(h);
+                                    }
+                                    None => node.set_value(shown.text.clone()),
+                                }
                             }
                         }
                     });
@@ -1622,7 +1652,13 @@ impl Grid {
             }
             let top = self.viewport.top();
             ctx.accesskit_node_builder(bar_id, |node| {
-                a11y::scrollbar_node(node, bar, env.t(TextKey("grid.a11y.scrollbar")), top, total);
+                a11y::scrollbar_node(
+                    node,
+                    bar.intersect(vis),
+                    env.t(TextKey("grid.a11y.scrollbar")),
+                    top,
+                    total,
+                );
                 node.set_value(group(top + 1));
             });
         }

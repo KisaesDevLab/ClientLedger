@@ -133,6 +133,7 @@ fn col(
         id,
         header: TextKey(header),
         placeholder: None,
+        help: None,
         kind,
         line,
         align,

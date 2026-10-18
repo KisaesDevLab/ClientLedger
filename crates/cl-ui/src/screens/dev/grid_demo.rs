@@ -199,6 +199,7 @@ impl GridDemo {
             ui,
             &t("dev.grid_demo.check_amount"),
             &mut self.check_text,
+            self.parts.frame.money_style,
         );
         match parsed {
             Ok(amount) => {

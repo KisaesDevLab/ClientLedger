@@ -146,6 +146,11 @@ pub struct CellInfo<'a> {
     pub label: &'a str,
     /// The display text (empty for an amount suggestion, NN4).
     pub value: &'a str,
+    /// The placeholder of an empty cell: spoken as a description, never
+    /// as the value.
+    pub hint: Option<&'a str>,
+    /// The column's explanation ("R = reconciled, C = cleared").
+    pub help: Option<&'a str>,
     /// Column index.
     pub column: usize,
     /// The owner can edit it.
@@ -181,6 +186,9 @@ pub fn cell_node(node: &mut Node, bounds: Rect, cell: &CellInfo<'_>) {
         node.set_toggled(if b { Toggled::True } else { Toggled::False });
     }
     let mut description = Vec::new();
+    if let Some(h) = cell.hint {
+        description.push(h);
+    }
     if let Some(l) = cell.locked {
         node.set_read_only();
         description.push(l);
@@ -191,6 +199,9 @@ pub fn cell_node(node: &mut Node, bounds: Rect, cell: &CellInfo<'_>) {
     }
     if let Some(s) = cell.suggested {
         description.push(s);
+    }
+    if let Some(h) = cell.help {
+        description.push(h);
     }
     if !description.is_empty() {
         node.set_description(description.join(". "));
@@ -279,6 +290,8 @@ mod tests {
             &CellInfo {
                 label: "Amount, line 2",
                 value: "444.25",
+                hint: None,
+                help: None,
                 column: 1,
                 editable: true,
                 toggled: None,

@@ -16,6 +16,9 @@ steps:
 
   # --- Line 1: autofill, amount, memo, date key, job, billable, tag ---------
   - click: {role: grid_cell, label: "Account, line 1"}
+  # Amount fields settle to the display style once left (DESIGN.md).
+  - assert_value: {target: {role: text_input, label: Check amount}, equals: "1,286.40"}
+  - assert_exists: {role: row, label: Column headers}
   - type: {text: "51"}
   - assert_exists: {role: list_box_option, label_contains: "5100"}
   - screenshot: account-list
@@ -94,6 +97,8 @@ steps:
   - assert_state: {key: screen.rows, equals: 200000}
   - click: {role: row, label_contains: "row 1 of 200,000"}
   - assert_exists: {label: Balance}
+  - assert_exists: {role: column_header, label: "Account · Memo"}
+  - assert_exists: {role: cell, label_contains: "Account · Memo, ", index: 0}
   - screenshot: register-two-line
   - key: Ctrl+End
   - assert_exists: {role: row, label_contains: "row 200,000 of 200,000"}
@@ -118,11 +123,12 @@ steps:
   - set_zoom: {percent: 200}
   - assert_state: {key: window.width, equals: 480.0}
   - assert_no_clipping:
-      # The tab strip scrolls by design, and the screen body below the
-      # fold (the grid) scrolls with its scrollbar; everything above must fit.
+      # Only the tab strip scrolls sideways by design. The screen body,
+      # the grid included, must stay inside its panel: nothing may reach
+      # past the window (or under the status bar, which the grid's own
+      # clip tests cover).
       ignore:
         - {x: 0, y: 70, width: 10000, height: 45}
-        - {x: 0, y: 255, width: 10000, height: 10000}
   - screenshot: small-200
   - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}

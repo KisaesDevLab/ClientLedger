@@ -437,6 +437,7 @@ fn col(id: ColumnId, kind: CellKind, editable: bool) -> Column {
         id,
         header: TextKey(header),
         placeholder: None,
+        help: None,
         kind,
         line: Line::First,
         align: Align::Left,

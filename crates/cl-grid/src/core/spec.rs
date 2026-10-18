@@ -284,6 +284,7 @@ mod tests {
             id: ColumnId(id),
             header: TextKey("h"),
             placeholder: None,
+            help: None,
             kind,
             line: Line::First,
             align: Align::Left,

@@ -3,7 +3,7 @@
 //! keys, a money field, choice rows, and the action row. The real grid and
 //! form widgets arrive with P10; these are deliberately plain.
 
-use cl_core::{CalendarDate, Money, MoneyInputError, UserInput};
+use cl_core::{CalendarDate, Money, MoneyInputError, MoneyStyle, UserInput};
 use cl_model::date_entry::{self, DateOrder, US_FIRST_WEEKDAY};
 use cl_model::date_rules::DateKey;
 use eframe::egui::{self, Color32, CornerRadius, Margin, Response, RichText, Stroke, Ui, Vec2};
@@ -267,7 +267,23 @@ pub fn date_field(
     response
 }
 
-/// A money input; returns the parsed amount (exact) when the text is one.
+/// The text an amount field shows once the owner leaves it: the parsed
+/// amount in the display style (thousands separators, two decimals,
+/// DESIGN.md "Amounts"). `None` when the text is empty or not an amount,
+/// so the owner's typing stays as it was.
+#[must_use]
+pub fn settled_money_text(text: &str, style: MoneyStyle) -> Option<String> {
+    if text.trim().is_empty() {
+        return None;
+    }
+    Money::parse_user(text, UserInput::CENTS)
+        .ok()
+        .map(|m| m.format(style))
+}
+
+/// A money input, right-aligned in mono like every amount; the text settles
+/// to the display style when focus leaves. Returns the parsed amount
+/// (exact) when the text is one.
 ///
 /// # Errors
 /// The owner-facing parse error when the text is not an amount.
@@ -275,12 +291,25 @@ pub fn money_field(
     ui: &mut Ui,
     label: &str,
     text: &mut String,
+    style: MoneyStyle,
 ) -> Result<Option<Money>, MoneyInputError> {
-    ui.horizontal(|ui| {
-        let l = ui.add(egui::Label::new(label).selectable(false));
-        ui.add_sized([140.0, 24.0], egui::TextEdit::singleline(text))
-            .labelled_by(l.id);
-    });
+    let response = ui
+        .horizontal(|ui| {
+            let l = ui.add(egui::Label::new(label).selectable(false));
+            ui.add_sized(
+                [140.0, 24.0],
+                egui::TextEdit::singleline(text)
+                    .font(egui::TextStyle::Monospace)
+                    .align(egui::Align2::RIGHT_CENTER),
+            )
+            .labelled_by(l.id)
+        })
+        .inner;
+    if response.lost_focus()
+        && let Some(settled) = settled_money_text(text, style)
+    {
+        *text = settled;
+    }
     if text.trim().is_empty() {
         return Ok(None);
     }
@@ -454,6 +483,38 @@ pub fn progress_line(ui: &mut Ui, tokens: &Tokens, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An amount settles to the display style with thousands separators,
+    /// and the settled text parses back to the very same amount.
+    #[test]
+    fn money_text_settles_to_the_display_style_exactly() {
+        let minus = MoneyStyle::default();
+        let parens = MoneyStyle {
+            negative: cl_core::NegativeStyle::Parens,
+            symbol: true,
+        };
+        assert_eq!(
+            settled_money_text("1286.40", minus).as_deref(),
+            Some("1,286.40")
+        );
+        assert_eq!(
+            settled_money_text("1234567.5", minus).as_deref(),
+            Some("1,234,567.50")
+        );
+        assert_eq!(settled_money_text("", minus), None);
+        assert_eq!(settled_money_text("12.345", minus), None, "kept as typed");
+        assert_eq!(settled_money_text("abc", minus), None);
+        for typed in ["1286.40", "-42.07", "0.01", "999999.99"] {
+            for style in [minus, parens] {
+                let shown = settled_money_text(typed, style).expect("settles");
+                assert_eq!(
+                    Money::parse_user(&shown, UserInput::CENTS),
+                    Money::parse_user(typed, UserInput::CENTS),
+                    "{typed} -> {shown}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn date_input_uses_the_shared_rules() {

@@ -123,6 +123,7 @@ mod tests {
             id: ColumnId(id),
             header: TextKey("h"),
             placeholder: None,
+            help: None,
             kind: CellKind::Display,
             line,
             align: Align::Left,

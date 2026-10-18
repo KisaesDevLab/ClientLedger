@@ -42,11 +42,21 @@ const PAYEES: &[&str] = &[
     "Springdale Stone Supply",
 ];
 const ACCOUNTS: &[&str] = &[
-    "Materials:Plants",
-    "Materials:Mulch & stone",
-    "Fuel",
-    "Equipment rental",
-    "Landscaping income",
+    "5100 \u{b7} Materials:Plants",
+    "5110 \u{b7} Materials:Mulch & stone",
+    "6200 \u{b7} Fuel",
+    "6210 \u{b7} Equipment rental",
+    "4000 \u{b7} Landscaping income",
+];
+/// Synthetic memos; an empty one leaves the account alone on line two.
+const MEMOS: &[&str] = &[
+    "",
+    "September fuel",
+    "Skid steer, 3 days",
+    "Fall install",
+    "",
+    "Hardwood mulch",
+    "Invoice 1084",
 ];
 
 /// SplitMix64: any row's values from its index alone (S9).
@@ -67,6 +77,7 @@ fn column(id: ColumnId, header: TextKey, kind: CellKind, line: Line, w: u16) -> 
         id,
         header,
         placeholder: None,
+        help: None,
         kind,
         line,
         align: Align::Left,
@@ -124,7 +135,7 @@ pub fn spec(one_line: bool) -> GridSpec {
         ),
         column(
             ACCOUNT,
-            TextKey("dev.grid_demo.col.account"),
+            TextKey("dev.grid_demo.col.account_memo"),
             CellKind::Display,
             second,
             220,
@@ -138,6 +149,7 @@ pub fn spec(one_line: bool) -> GridSpec {
         )),
         Column {
             align: Align::Center,
+            help: Some(TextKey("dev.grid_demo.col.mark_help")),
             ..column(
                 MARK,
                 TextKey("dev.grid_demo.col.mark"),
@@ -251,7 +263,14 @@ impl RowModel for Register {
             NUMBER if payment => CellValue::Text(Cow::Owned((1000 + index).to_string())),
             KIND => CellValue::Text(Cow::Borrowed(if payment { "CHK" } else { "DEP" })),
             PAYEE => CellValue::Text(Cow::Borrowed(pick(PAYEES, h >> 8))),
-            ACCOUNT => CellValue::Text(Cow::Borrowed(pick(ACCOUNTS, h >> 16))),
+            // Line two reads "Account · Memo" (mockup `Register.html`).
+            ACCOUNT => {
+                let account = pick(ACCOUNTS, h >> 16);
+                match pick(MEMOS, h >> 24) {
+                    "" => CellValue::Text(Cow::Borrowed(account)),
+                    memo => CellValue::Text(Cow::Owned(format!("{account} \u{b7} {memo}"))),
+                }
+            }
             PAYMENT if payment => CellValue::Money(amount),
             DEPOSIT if !payment => CellValue::Money(amount),
             BALANCE => self
@@ -498,6 +517,34 @@ mod tests {
             assert!(pay != dep, "row {i} is a payment or a deposit");
         }
         assert!(spec(false).validate().is_ok() && spec(true).validate().is_ok());
+    }
+
+    /// Line two is "Account · Memo", or the account alone without a memo;
+    /// the mark column explains its marks.
+    #[test]
+    fn second_line_reads_account_then_memo() {
+        let today = CalendarDate::from_ymd(2026, 11, 4).unwrap();
+        let r = Register::new(200, today);
+        let (mut with_memo, mut without) = (0, 0);
+        for i in 0..200 {
+            let CellValue::Text(t) = r.cell(i, ACCOUNT) else {
+                panic!("row {i} has an account");
+            };
+            assert!(ACCOUNTS.iter().any(|a| t.starts_with(a)), "{t}");
+            if ACCOUNTS.contains(&t.as_ref()) {
+                without += 1;
+            } else {
+                with_memo += 1;
+                let memo = t.rsplit(" \u{b7} ").next().unwrap_or_default();
+                assert!(MEMOS.contains(&memo), "{t}");
+            }
+        }
+        assert!(with_memo > 0 && without > 0);
+        let s = spec(false);
+        let col = s.columns.iter().find(|c| c.id == ACCOUNT).unwrap();
+        assert_eq!(col.header, TextKey("dev.grid_demo.col.account_memo"));
+        let mark = s.columns.iter().find(|c| c.id == MARK).unwrap();
+        assert_eq!(mark.help, Some(TextKey("dev.grid_demo.col.mark_help")));
     }
 
     fn money_at(r: &Register, i: usize, col: ColumnId) -> Money {
