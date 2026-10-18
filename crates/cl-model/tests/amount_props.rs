@@ -193,6 +193,18 @@ proptest! {
     }
 
     #[test]
+    fn trailing_equals_and_sign_order(a in -MAX_CENTS..=MAX_CENTS, b in -MAX_CENTS..=MAX_CENTS) {
+        let (fa, fb) = (cents(a).format(MINUS), cents(b).format(MINUS));
+        let sum = format!("{fa}+{fb}");
+        prop_assert_eq!(parse(&format!("{sum}="), AmountRules::MONEY), parse(&sum, AmountRules::MONEY));
+        let abs = cents(a.abs()).format(MINUS);
+        prop_assert_eq!(
+            parse(&format!("$-{abs}"), AmountRules::MONEY),
+            parse(&format!("-${abs}"), AmountRules::MONEY)
+        );
+    }
+
+    #[test]
     fn arbitrary_text_never_panics(s in "\\PC{0,80}") {
         let _ = parse(&s, AmountRules::MONEY);
         let _ = parse(&s, full());
@@ -210,13 +222,14 @@ proptest! {
                 }
                 Err(e) => {
                     prop_assert!(no_typed_digits(&e.to_string()), "{}", e);
-                    prop_assert!(no_typed_digits(&format!("{e:?}")), "{:?}", e);
+                    let debug = format!("{e:?}");
+                    prop_assert!(!debug.contains(|c: char| c.is_ascii_digit()), "{}", debug);
                     prop_assert!(e.key().as_str().starts_with("grid."));
                 }
             }
             if let Preview::Error(e) = preview(&s, rules) {
                 let debug = format!("{e:?}");
-                prop_assert!(no_typed_digits(&debug), "{}", debug);
+                prop_assert!(!debug.contains(|c: char| c.is_ascii_digit()), "{}", debug);
             }
         }
     }

@@ -1,9 +1,11 @@
 //! Exact amount entry and the calculator (Q-12, P10 plan §2.5, Q-P10c).
 //!
 //! The owner types an amount (`1,234.56`, `-12`, `(12.00)`, `$5`) or a
-//! calculation (`400+44.25`, `100/3`, `12 x 3`). Plain amounts go straight
-//! to [`Money::parse_user`] (or the [`Quantity`]/[`Rate`] equivalent), so
-//! every P05 refusal is kept. Calculations are evaluated with exact rational
+//! calculation (`400+44.25`, `100/3`, `12 x 3`, `400+44.25=`). The text is
+//! first tried as a plain amount with [`Money::parse_user`] (or the
+//! [`Quantity`]/[`Rate`] equivalent), so every P05 rule is kept (`$-5` is
+//! -5.00). Only when that fails and an operator follows a number is it a
+//! calculation (P10 plan Rev 2 §2.6). Calculations are evaluated with exact rational
 //! numbers over whole ten-thousandths; a result that is not a whole number of
 //! the field's smallest unit (a cent for ordinary money fields) is **refused,
 //! never rounded**, and the two nearest values are offered instead.
@@ -177,9 +179,10 @@ impl fmt::Debug for Neighbours {
 }
 
 /// Why typed text is not accepted as an amount. Nothing is ever rounded or
-/// guessed; each case asks the owner to type it again. `Debug` and `Display`
-/// never contain the typed digits.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+/// guessed; each case asks the owner to type it again. `Debug` is written by
+/// hand and prints the variant only, never a digit; `Display` never contains
+/// the typed digits.
+#[derive(Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AmountEntryError {
     /// An amount (or one number in a calculation) was refused by the P05
     /// owner-input rules.
@@ -201,6 +204,10 @@ pub enum AmountEntryError {
     /// The result (or a step of the calculation) is outside the field's range.
     #[error("the result is too large for this field")]
     TooLarge,
+    /// The exact arithmetic ran out of room although the result is not
+    /// large (for example a long chain of thirds and sevenths).
+    #[error("the calculation is too complex")]
+    TooComplex,
     /// The result is not a whole number of the field's smallest unit.
     #[error("the result is not a whole number of cents")]
     NotExact(Neighbours),
@@ -227,6 +234,7 @@ impl AmountEntryError {
             AmountEntryError::Incomplete => TextKey("grid.calc.incomplete"),
             AmountEntryError::TooLong => TextKey("grid.calc.too_long"),
             AmountEntryError::TooLarge => TextKey("grid.amount.too_large"),
+            AmountEntryError::TooComplex => TextKey("grid.calc.too_complex"),
             AmountEntryError::NotExact(_) => TextKey("grid.calc.not_exact"),
             AmountEntryError::Negative => TextKey("grid.amount.no_negative"),
         }
@@ -247,6 +255,35 @@ impl AmountEntryError {
             AmountEntryError::Negative => Some(TextKey("grid.amount.no_negative.fix")),
             _ => None,
         }
+    }
+}
+
+fn input_name(e: MoneyInputError) -> &'static str {
+    match e {
+        MoneyInputError::Empty => "Empty",
+        MoneyInputError::Invalid => "Invalid",
+        MoneyInputError::AmbiguousSeparator => "AmbiguousSeparator",
+        MoneyInputError::TooManyDecimals { .. } => "TooManyDecimals",
+        MoneyInputError::TooLarge => "TooLarge",
+        MoneyInputError::SignConflict => "SignConflict",
+    }
+}
+
+/// The variant only: no amounts, no digits, so the error is safe in any log.
+impl fmt::Debug for AmountEntryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            AmountEntryError::Input(e) => return write!(f, "Input({})", input_name(*e)),
+            AmountEntryError::NoGrouping => "NoGrouping",
+            AmountEntryError::DivideByZero => "DivideByZero",
+            AmountEntryError::Incomplete => "Incomplete",
+            AmountEntryError::TooLong => "TooLong",
+            AmountEntryError::TooLarge => "TooLarge",
+            AmountEntryError::TooComplex => "TooComplex",
+            AmountEntryError::NotExact(_) => "NotExact(..)",
+            AmountEntryError::Negative => "Negative",
+        };
+        f.write_str(name)
     }
 }
 
@@ -277,11 +314,41 @@ pub enum Preview {
     Error(AmountEntryError),
 }
 
-/// The first field of pasted text: up to the first tab or line break,
-/// trimmed (Excel copies end in `\r\n`; Q-P10j).
-#[must_use]
-pub fn first_pasted_field(text: &str) -> &str {
-    text.split(['\t', '\r', '\n']).next().unwrap_or("").trim()
+/// Why pasted text is not put into an amount or date cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum PasteError {
+    /// The clipboard holds more than one value (a tab or line break inside,
+    /// as when cells are copied from a spreadsheet).
+    #[error("paste one value at a time")]
+    SeveralValues,
+}
+
+impl PasteError {
+    /// The i18n key of the owner message ("Paste one amount at a time").
+    #[must_use]
+    pub fn key(self) -> TextKey {
+        TextKey("grid.paste.one_value")
+    }
+}
+
+/// Pasted text for one amount or date cell (Q-P10j rev): one trailing line
+/// break is dropped (spreadsheets add one); anything still holding a tab or
+/// line break is refused, never split or cut short. The result is inserted at
+/// the caret and parsed on commit like typed text.
+///
+/// # Errors
+/// [`PasteError::SeveralValues`].
+pub fn single_paste(text: &str) -> Result<&str, PasteError> {
+    let one = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .or_else(|| text.strip_suffix('\r'))
+        .unwrap_or(text);
+    if one.contains(['\t', '\r', '\n']) {
+        Err(PasteError::SeveralValues)
+    } else {
+        Ok(one)
+    }
 }
 
 /// Is `c` an operand character next to which `x`/`X`/`×` means "times"?
@@ -293,13 +360,16 @@ fn starts_operand(c: char) -> bool {
     c.is_ascii_digit() || matches!(c, '.' | '$' | '(' | '-')
 }
 
-/// Normalize typed text before parsing: trim Unicode whitespace (NBSP
-/// included) at both ends, U+2212 MINUS SIGN → `-`, `÷` → `/`, and `×`, `x`
-/// or `X` between two operands → `*`. Nothing else is rewritten; internal
+/// Normalize typed text before parsing: trim Unicode whitespace (NBSP and
+/// U+202F included) at both ends, drop one trailing `=` ("evaluate"), U+2212
+/// MINUS SIGN → `-`, `÷` → `/`, and `×`, `x` or `X` between two operands →
+/// `*`. Nothing else is rewritten; internal
 /// spaces inside a number stay ambiguous (`1 234` is refused).
 #[must_use]
 pub fn normalize(text: &str) -> String {
-    let chars: Vec<char> = text.trim().chars().collect();
+    let t = text.trim();
+    let t = t.strip_suffix('=').map_or(t, str::trim_end);
+    let chars: Vec<char> = t.chars().collect();
     let mut out = String::with_capacity(chars.len());
     for (i, &c) in chars.iter().enumerate() {
         let mapped = match c {
@@ -368,9 +438,14 @@ fn gcd(a: i128, b: i128) -> i128 {
 
 type CalcResult<T> = Result<T, AmountEntryError>;
 
+/// An `i128` step overflowed. [`Ratio::apply`] decides whether that means
+/// the result is too large or only that the exact fractions grew too big.
 fn over<T>(v: Option<T>) -> CalcResult<T> {
-    v.ok_or(AmountEntryError::TooLarge)
+    v.ok_or(AmountEntryError::TooComplex)
 }
+
+/// The largest magnitude any amount type holds, in units (Money's).
+const MAX_UNITS: u128 = 9_999_999_999_999_999_999;
 
 impl Ratio {
     fn units(n: i128) -> Ratio {
@@ -438,12 +513,36 @@ impl Ratio {
         Ratio::new(n, d)
     }
 
+    /// Whole units, rounded toward zero (an estimate for overflow triage).
+    fn magnitude(self) -> u128 {
+        self.n.unsigned_abs() / self.d.unsigned_abs()
+    }
+
     fn apply(self, op: Op, o: Ratio) -> CalcResult<Ratio> {
-        match op {
+        let r = match op {
             Op::Add => self.add(o),
             Op::Sub => self.sub(o),
             Op::Mul => self.mul(o),
             Op::Div => self.div(o),
+        };
+        match r {
+            Err(AmountEntryError::TooComplex) => {
+                // Estimate the step's size from whole units: beyond every
+                // type's range means too large, otherwise too complex.
+                let (a, b) = (self.magnitude(), o.magnitude());
+                let per = UNITS.unsigned_abs();
+                let size = match op {
+                    Op::Add | Op::Sub => a.saturating_add(b),
+                    Op::Mul => a.saturating_mul(b) / per,
+                    Op::Div => a.saturating_mul(per).checked_div(b).unwrap_or(u128::MAX),
+                };
+                Err(if size > MAX_UNITS {
+                    AmountEntryError::TooLarge
+                } else {
+                    AmountEntryError::TooComplex
+                })
+            }
+            other => other,
         }
     }
 }
@@ -668,18 +767,25 @@ fn parse_plain(t: &str, rules: AmountRules) -> CalcResult<Amount> {
 ///
 /// # Errors
 /// See [`AmountEntryError`]. Plain amounts keep every [`MoneyInputError`]
-/// refusal; calculations are refused when unfinished, too long, grouped with
-/// parentheses, divided by zero, too large or not exact.
+/// refusal; calculations are refused when unfinished, too long, too complex,
+/// grouped with parentheses, divided by zero, too large or not exact.
 pub fn parse(text: &str, rules: AmountRules) -> Result<Parsed, AmountEntryError> {
     let t = normalize(text);
     if t.chars().count() > MAX_CHARS {
         return Err(AmountEntryError::TooLong);
     }
+    // Plain amount first (Q-P05t: `$-5` and `-$5` are both -5.00).
+    let plain_err = match parse_plain(&t, rules) {
+        Ok(value) => {
+            return Ok(Parsed {
+                value,
+                calculated: false,
+            });
+        }
+        Err(e) => e,
+    };
     if !is_expression(&t) {
-        return Ok(Parsed {
-            value: parse_plain(&t, rules)?,
-            calculated: false,
-        });
+        return Err(plain_err);
     }
     let (factors, ops) = tokenize(&t)?;
     let r = evaluate(&factors, &ops)?;
@@ -694,7 +800,7 @@ pub fn parse(text: &str, rules: AmountRules) -> Result<Parsed, AmountEntryError>
 #[must_use]
 pub fn preview(text: &str, rules: AmountRules) -> Preview {
     let t = normalize(text);
-    if !is_expression(&t) {
+    if !is_expression(&t) || parse_plain(&t, rules).is_ok() {
         return Preview::None;
     }
     match parse(text, rules) {
@@ -883,9 +989,9 @@ mod tests {
         assert_eq!(normalize("tax"), "tax");
         assert_eq!(normalize("5x"), "5x");
         assert_eq!(normalize("5 X 2"), "5 * 2");
-        assert_eq!(first_pasted_field(" 12.50\t3\r\n"), "12.50");
-        assert_eq!(first_pasted_field("12.50\r\n"), "12.50");
-        assert_eq!(first_pasted_field(""), "");
+        assert_eq!(normalize("\u{202f}12\u{202f}"), "12");
+        assert_eq!(normalize("400+44.25 = "), "400+44.25");
+        assert_eq!(normalize("=="), "=");
     }
 
     #[test]
@@ -953,6 +1059,7 @@ mod tests {
             AmountEntryError::TooLong,
             AmountEntryError::TooLarge,
             AmountEntryError::Negative,
+            AmountEntryError::TooComplex,
         ];
         let table = [
             ("grid.amount.empty", None),
@@ -973,10 +1080,114 @@ mod tests {
                 "grid.amount.no_negative",
                 Some("grid.amount.no_negative.fix"),
             ),
+            ("grid.calc.too_complex", None),
         ];
         for (e, (key, fix)) in errors.iter().zip(table) {
             assert_eq!(e.key(), TextKey(key), "{e:?}");
             assert_eq!(e.fix_key(), fix.map(TextKey), "{e:?}");
         }
+    }
+
+    #[test]
+    fn plain_parse_comes_first() {
+        // Q-P05t: both sign orders are plain amounts.
+        assert_eq!(wire("$-5"), "-5.0000");
+        assert!(!money("$-5").unwrap().calculated);
+        assert_eq!(money("$-5"), money("-$5"));
+        assert_eq!(wire("5--3"), "8.0000");
+        assert_eq!(wire("5*-3"), "-15.0000");
+        assert_eq!(wire("(5)*2"), "-10.0000");
+        assert_eq!(
+            money("(-3)"),
+            Err(AmountEntryError::Input(MoneyInputError::SignConflict))
+        );
+        assert_eq!(
+            preview("(5)*2", AmountRules::MONEY),
+            Preview::Value(Amount::Money(Money::parse_wire("-10").unwrap()))
+        );
+        assert_eq!(preview("$-5", AmountRules::MONEY), Preview::None);
+    }
+
+    #[test]
+    fn trailing_equals_evaluates() {
+        assert_eq!(wire("400+44.25="), "444.2500");
+        assert!(money("400+44.25=").unwrap().calculated);
+        assert_eq!(wire("12="), "12.0000");
+        assert_eq!(
+            money("="),
+            Err(AmountEntryError::Input(MoneyInputError::Empty))
+        );
+        assert_eq!(
+            preview("400+44.25=", AmountRules::MONEY),
+            Preview::Value(Amount::Money(Money::parse_wire("444.25").unwrap()))
+        );
+    }
+
+    #[test]
+    fn too_complex_is_not_too_large() {
+        // Sixteen fractions over primes near 1000: the exact denominator
+        // outgrows i128 although the sum is tiny.
+        let primes = [
+            997, 991, 983, 977, 971, 967, 953, 947, 941, 937, 929, 919, 911, 907, 887, 883,
+        ];
+        let text = primes
+            .iter()
+            .map(|p| format!("1/{p}"))
+            .collect::<Vec<_>>()
+            .join("+");
+        assert_eq!(money(&text), Err(AmountEntryError::TooComplex));
+        assert_eq!(
+            money("999,999,999,999,999*999,999,999,999,999*999,999,999"),
+            Err(AmountEntryError::TooLarge)
+        );
+        assert_eq!(
+            money(&text).unwrap_err().key(),
+            TextKey("grid.calc.too_complex")
+        );
+    }
+
+    #[test]
+    fn debug_never_prints_digits() {
+        let Err(e) = money("100/3") else {
+            panic!("expected an error");
+        };
+        assert_eq!(format!("{e:?}"), "NotExact(..)");
+        assert_eq!(
+            format!(
+                "{:?}",
+                AmountEntryError::Input(MoneyInputError::TooManyDecimals { max: 2 })
+            ),
+            "Input(TooManyDecimals)"
+        );
+        for e in [
+            AmountEntryError::NoGrouping,
+            AmountEntryError::DivideByZero,
+            AmountEntryError::Incomplete,
+            AmountEntryError::TooLong,
+            AmountEntryError::TooLarge,
+            AmountEntryError::TooComplex,
+            AmountEntryError::Negative,
+        ] {
+            assert!(!format!("{e:?}").contains(|c: char| c.is_ascii_digit()));
+        }
+    }
+
+    #[test]
+    fn pastes_hold_one_value() {
+        assert_eq!(single_paste("12.50"), Ok("12.50"));
+        assert_eq!(single_paste("12.50\r\n"), Ok("12.50"));
+        assert_eq!(single_paste("12.50\n"), Ok("12.50"));
+        assert_eq!(single_paste("12.50\r"), Ok("12.50"));
+        assert_eq!(single_paste(" 1,234.56 "), Ok(" 1,234.56 "));
+        assert_eq!(single_paste("12.50\t3"), Err(PasteError::SeveralValues));
+        assert_eq!(single_paste("1\r\n2\r\n"), Err(PasteError::SeveralValues));
+        assert_eq!(
+            single_paste("12.50\r\n\r\n"),
+            Err(PasteError::SeveralValues)
+        );
+        assert_eq!(
+            PasteError::SeveralValues.key(),
+            TextKey("grid.paste.one_value")
+        );
     }
 }
