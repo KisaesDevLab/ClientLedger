@@ -1,0 +1,15 @@
+# cl-grid draws with egui, so `f32` geometry is allowed here. Money is not:
+# the grid never converts a decimal to or from a float (P10 plan §2.1, §4).
+# `src/core` is also in the xtask `nofloat` AST scan, and `core/mod.rs`
+# denies the float lints. The paths below are the cl-core list's rust_decimal
+# and num-traits entries (proven to resolve by crates/cl-core/tests/float_ban.rs);
+# serde_json is not in this crate's graph.
+disallowed-methods = [
+    { path = "rust_decimal::Decimal::from_f32_retain", reason = "no floats for money (Q-P05s, Q-P10b)" },
+    { path = "rust_decimal::Decimal::from_f64_retain", reason = "no floats for money (Q-P05s, Q-P10b)" },
+    { path = "rust_decimal::Decimal::as_f64", reason = "no floats for money (Q-P05s, Q-P10b)" },
+    { path = "num_traits::FromPrimitive::from_f32", reason = "no floats for money (Q-P05s, Q-P10b)" },
+    { path = "num_traits::FromPrimitive::from_f64", reason = "no floats for money (Q-P05s, Q-P10b)" },
+    { path = "num_traits::ToPrimitive::to_f32", reason = "no floats for money (Q-P05s, Q-P10b)" },
+    { path = "num_traits::ToPrimitive::to_f64", reason = "no floats for money (Q-P05s, Q-P10b)" },
+]

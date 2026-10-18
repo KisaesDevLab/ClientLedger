@@ -105,7 +105,7 @@ pub(crate) fn run_nofloat() -> Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     report(
         "nofloat",
-        "no floating point in cl-core or cl-api",
+        "no floating point in cl-core, cl-api, cl-model or cl-grid core",
         &nofloat::check(&root)?,
     )
 }
