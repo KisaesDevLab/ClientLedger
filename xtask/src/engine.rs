@@ -807,11 +807,41 @@ fn wait_ready(child: &mut Child, ready: &mpsc::Receiver<u16>) -> Result<u16> {
 /// refuse a request without the launch token, then return HTTP 200 with the
 /// database up, the desktop mode, and exactly the pinned engine commit.
 fn check_health(port: u16, token: &str, expected_commit: &str, restricted: bool) -> Result<()> {
+    check_health_within(port, token, expected_commit, restricted, QUEUE_WARMUP)
+}
+
+/// How long the smoke run waits for the job queue to come up after the
+/// ready line (pg-boss initialises after the listener on a slow runner).
+const QUEUE_WARMUP: Duration = Duration::from_secs(30);
+
+/// A 503 that is only the job queue still starting: the database is ok
+/// and the `queue` check is the one that is not.
+fn queue_still_warming(code: u16, body: &str) -> bool {
+    code == 503
+        && body.contains("\"db\":\"ok\"")
+        && json_str_field(body, "queue").is_some_and(|q| q != "ok")
+}
+
+fn check_health_within(
+    port: u16,
+    token: &str,
+    expected_commit: &str,
+    restricted: bool,
+    warmup: Duration,
+) -> Result<()> {
     let (code, _) = http_get(port, "/health", None)?;
     if code != 401 {
         bail!("/health without the launch token returned {code}, expected 401");
     }
-    let (code, body) = http_get(port, "/health", Some(token))?;
+    let started = Instant::now();
+    let (code, body) = loop {
+        let (code, body) = http_get(port, "/health", Some(token))?;
+        if !queue_still_warming(code, &body) || started.elapsed() >= warmup {
+            break (code, body);
+        }
+        println!("smoke: job queue still starting, waiting");
+        std::thread::sleep(Duration::from_secs(1));
+    };
     let shown: String = body.chars().take(400).collect();
     if code != 200 {
         bail!("/health returned {code}, expected 200: {shown}");
@@ -981,6 +1011,56 @@ mod tests {
         let port = fixture_server(|r| gated(r, GOOD));
         let err = check_health(port, "tok", "def", true).unwrap_err();
         assert!(err.to_string().contains("pinned commit"), "{err}");
+    }
+
+    #[test]
+    fn health_check_waits_while_only_the_queue_is_starting() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        const WARMING: &str = r#"{"status":"degraded","db":"ok","queue":"fail","mode":"desktop","engineCommit":"abc","checks":{"db":{"superuser":false}}}"#;
+        let port = fixture_server(|r| {
+            if !r.contains("X-CL-Token: tok") {
+                return (401, "{}".into());
+            }
+            if r.starts_with("GET /ping") {
+                return (200, "pong".into());
+            }
+            if CALLS.fetch_add(1, Ordering::SeqCst) < 2 {
+                (503, WARMING.into())
+            } else {
+                (200, GOOD.into())
+            }
+        });
+        check_health_within(port, "tok", "abc", true, Duration::from_secs(10)).unwrap();
+        assert!(
+            CALLS.load(Ordering::SeqCst) >= 3,
+            "two 503s were waited out"
+        );
+    }
+
+    #[test]
+    fn health_check_gives_up_on_a_queue_that_never_starts() {
+        const WARMING: &str = r#"{"status":"degraded","db":"ok","queue":"fail","mode":"desktop","engineCommit":"abc","checks":{"db":{"superuser":false}}}"#;
+        let port = fixture_server(|r| {
+            if r.contains("X-CL-Token: tok") {
+                (503, WARMING.to_string())
+            } else {
+                (401, "{}".to_string())
+            }
+        });
+        let err =
+            check_health_within(port, "tok", "abc", true, Duration::from_secs(2)).unwrap_err();
+        assert!(err.to_string().contains("expected 200"), "{err}");
+        assert!(queue_still_warming(503, WARMING));
+        assert!(!queue_still_warming(200, WARMING));
+        assert!(!queue_still_warming(
+            503,
+            &WARMING.replace("\"db\":\"ok\"", "\"db\":\"fail\"")
+        ));
+        assert!(
+            !queue_still_warming(503, &GOOD.replace("ok\",\"mode", "degraded\",\"mode")),
+            "no queue key is not a warm-up"
+        );
     }
 
     #[test]
