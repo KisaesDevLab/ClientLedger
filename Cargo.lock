@@ -895,6 +895,7 @@ dependencies = [
  "tar",
  "thiserror 2.0.21",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]
