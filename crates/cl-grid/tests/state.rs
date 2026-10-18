@@ -157,11 +157,11 @@ fn unchanged_cells_commit_nothing() {
 fn invalid_buffer_stays_on_every_exit() {
     let mut r = Rig::line(2);
     r.key(GridKey::Tab);
-    r.typ("100/3");
+    r.typ("5/0");
     for k in [GridKey::Tab, GridKey::Enter, GridKey::Down, GridKey::Up] {
         r.key(k);
         assert_eq!(r.at(), (0, AMOUNT), "{k:?}");
-        assert_eq!(r.error(), Some(TextKey("grid.calc.not_exact")));
+        assert_eq!(r.error(), Some(TextKey("grid.calc.divide_by_zero")));
     }
     r.shift(GridKey::Tab);
     assert_eq!(r.at(), (0, AMOUNT));

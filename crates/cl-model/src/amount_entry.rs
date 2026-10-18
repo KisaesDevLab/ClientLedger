@@ -6,9 +6,11 @@
 //! [`Quantity`]/[`Rate`] equivalent), so every P05 rule is kept (`$-5` is
 //! -5.00). Only when that fails and an operator follows a number is it a
 //! calculation (P10 plan Rev 2 §2.6). Calculations are evaluated with exact rational
-//! numbers over whole ten-thousandths; a result that is not a whole number of
-//! the field's smallest unit (a cent for ordinary money fields) is **refused,
-//! never rounded**, and the two nearest values are offered instead.
+//! numbers over whole ten-thousandths; only the final result is rounded,
+//! once, to the field's smallest unit (a cent for ordinary money fields),
+//! half away from zero: `100/3` is 33.33, `33.335*1` is 33.34 and
+//! `-33.335*1` is -33.34 (owner decision 2026-10-18, Q-P10x). A plain typed
+//! amount is never rounded: `12.345` in a cents field is still refused.
 //!
 //! Grammar (standard precedence, left-associative):
 //!
@@ -139,47 +141,8 @@ impl Amount {
     }
 }
 
-/// The two values nearest an inexact calculation result, and its value cut
-/// short for the caption ("100 / 3 is 33.333…; type 33.33 or 33.34").
-///
-/// These are owner data: `Debug` prints none of them, so an error that
-/// reaches a log line carries no amounts. Show them only on screen.
-#[derive(Clone, PartialEq, Eq)]
-pub struct Neighbours {
-    below: Amount,
-    above: Amount,
-    approx: String,
-}
-
-impl Neighbours {
-    /// The nearest allowed value below the result.
-    #[must_use]
-    pub fn below(&self) -> Amount {
-        self.below
-    }
-
-    /// The nearest allowed value above the result.
-    #[must_use]
-    pub fn above(&self) -> Amount {
-        self.above
-    }
-
-    /// The result truncated to one decimal more than the field allows,
-    /// followed by `…` (`33.333…`). Never used as a value.
-    #[must_use]
-    pub fn approx(&self) -> &str {
-        &self.approx
-    }
-}
-
-impl fmt::Debug for Neighbours {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Neighbours(..)")
-    }
-}
-
-/// Why typed text is not accepted as an amount. Nothing is ever rounded or
-/// guessed; each case asks the owner to type it again. `Debug` is written by
+/// Why typed text is not accepted as an amount. Nothing is guessed; each
+/// case asks the owner to type it again. `Debug` is written by
 /// hand and prints the variant only, never a digit; `Display` never contains
 /// the typed digits.
 #[derive(Clone, PartialEq, Eq, thiserror::Error)]
@@ -208,9 +171,6 @@ pub enum AmountEntryError {
     /// large (for example a long chain of thirds and sevenths).
     #[error("the calculation is too complex")]
     TooComplex,
-    /// The result is not a whole number of the field's smallest unit.
-    #[error("the result is not a whole number of cents")]
-    NotExact(Neighbours),
     /// A negative value in a column that accepts only zero or more.
     #[error("negative amounts go in the other column")]
     Negative,
@@ -235,7 +195,6 @@ impl AmountEntryError {
             AmountEntryError::TooLong => TextKey("grid.calc.too_long"),
             AmountEntryError::TooLarge => TextKey("grid.amount.too_large"),
             AmountEntryError::TooComplex => TextKey("grid.calc.too_complex"),
-            AmountEntryError::NotExact(_) => TextKey("grid.calc.not_exact"),
             AmountEntryError::Negative => TextKey("grid.amount.no_negative"),
         }
     }
@@ -251,7 +210,6 @@ impl AmountEntryError {
                 Some(TextKey("grid.amount.too_many_decimals.fix"))
             }
             AmountEntryError::NoGrouping => Some(TextKey("grid.calc.no_grouping.fix")),
-            AmountEntryError::NotExact(_) => Some(TextKey("grid.calc.not_exact.fix")),
             AmountEntryError::Negative => Some(TextKey("grid.amount.no_negative.fix")),
             _ => None,
         }
@@ -280,7 +238,6 @@ impl fmt::Debug for AmountEntryError {
             AmountEntryError::TooLong => "TooLong",
             AmountEntryError::TooLarge => "TooLarge",
             AmountEntryError::TooComplex => "TooComplex",
-            AmountEntryError::NotExact(_) => "NotExact(..)",
             AmountEntryError::Negative => "Negative",
         };
         f.write_str(name)
@@ -667,82 +624,27 @@ const fn pow10(n: u32) -> i128 {
     v
 }
 
-/// Floor division for a positive divisor.
-fn floor_div(n: i128, d: i128) -> i128 {
-    let q = n / d;
-    if n % d != 0 && n < 0 { q - 1 } else { q }
-}
-
-/// `1234567` → `1,234,567`.
-fn group(digits: &str) -> String {
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
-}
-
-/// The value `r` (in units) truncated toward zero to `decimals` places,
-/// with thousands separators and a trailing `…`.
-fn approx_text(r: Ratio, decimals: u32) -> String {
-    let neg = r.n < 0;
-    let n = r.n.unsigned_abs();
-    let d = r.d.unsigned_abs();
-    let per = UNITS.unsigned_abs();
-    let whole_units = n / d;
-    let mut rem = n % d;
-    let whole = whole_units / per;
-    let mut frac = format!("{:04}", whole_units % per);
-    let mut k = SCALE;
-    while k < decimals {
-        let Some(r10) = rem.checked_mul(10) else {
-            break;
-        };
-        let digit = r10 / d;
-        rem = r10 % d;
-        frac.push(char::from_digit(u32::try_from(digit).unwrap_or(0), 10).unwrap_or('0'));
-        k += 1;
-    }
-    frac.truncate(decimals as usize);
-    let sign = if neg { "-" } else { "" };
-    format!("{sign}{}.{frac}…", group(&whole.to_string()))
-}
-
-/// Turn an exact result into a value of the field's type, or refuse it.
+/// Turn an exact result into a value of the field's type: rounded once to
+/// the field's smallest unit, half away from zero (Q-P10x). Exact integer
+/// arithmetic; no floating point.
 fn finish(r: Ratio, rules: AmountRules) -> CalcResult<Amount> {
     let max_scale = rules.input.max_scale().min(SCALE);
     let step = pow10(SCALE - max_scale);
-    let floor_units = floor_div(r.n, r.d);
-    let exact_units = (r.n % r.d == 0).then_some(floor_units);
-    if let Some(u) = exact_units
-        && u % step == 0
-    {
-        let value = Amount::from_units(rules.kind, u).ok_or(AmountEntryError::TooLarge)?;
-        return check_sign(value, rules.sign);
-    }
-    // Not a whole number of the field's unit: offer the two nearest values.
-    // When either neighbour is outside the type's range (the result is at or
-    // beyond the edge), the honest answer is "too large".
-    let lo = floor_div(floor_units, step) * step;
-    let hi = over(lo.checked_add(step))?;
-    let below = Amount::from_units(rules.kind, lo);
-    let above = Amount::from_units(rules.kind, hi);
-    match (below, above) {
-        (Some(below), Some(above)) => {
-            if rules.sign == Sign::NonNegative && r.n < 0 {
-                return Err(AmountEntryError::Negative);
-            }
-            Err(AmountEntryError::NotExact(Neighbours {
-                below,
-                above,
-                approx: approx_text(r, max_scale + 1),
-            }))
-        }
-        _ => Err(AmountEntryError::TooLarge),
-    }
+    // The result in field units is r.n / (r.d * step).
+    let den = over(r.d.checked_mul(step))?;
+    let q = r.n / den; // toward zero
+    let rem = (r.n % den).unsigned_abs();
+    // 2 * rem fits in u128 (rem < den <= i128::MAX).
+    let rounded = if rem != 0 && rem * 2 >= den.unsigned_abs() {
+        q + r.n.signum()
+    } else {
+        q
+    };
+    let units = rounded
+        .checked_mul(step)
+        .ok_or(AmountEntryError::TooLarge)?;
+    let value = Amount::from_units(rules.kind, units).ok_or(AmountEntryError::TooLarge)?;
+    check_sign(value, rules.sign)
 }
 
 fn check_sign(value: Amount, sign: Sign) -> CalcResult<Amount> {
@@ -768,7 +670,8 @@ fn parse_plain(t: &str, rules: AmountRules) -> CalcResult<Amount> {
 /// # Errors
 /// See [`AmountEntryError`]. Plain amounts keep every [`MoneyInputError`]
 /// refusal; calculations are refused when unfinished, too long, too complex,
-/// grouped with parentheses, divided by zero, too large or not exact.
+/// grouped with parentheses, divided by zero or too large. A calculation's
+/// result is rounded to the field's unit, half away from zero (Q-P10x).
 pub fn parse(text: &str, rules: AmountRules) -> Result<Parsed, AmountEntryError> {
     let t = normalize(text);
     if t.chars().count() > MAX_CHARS {
@@ -874,21 +777,25 @@ mod tests {
     }
 
     #[test]
-    fn inexact_results_are_refused_with_neighbours() {
-        let Err(AmountEntryError::NotExact(n)) = money("100/3") else {
-            panic!("expected NotExact");
-        };
-        assert_eq!(n.below().as_money().unwrap().to_wire(), "33.3300");
-        assert_eq!(n.above().as_money().unwrap().to_wire(), "33.3400");
-        assert_eq!(n.approx(), "33.333…");
-        let Err(AmountEntryError::NotExact(n)) = money("-100/3") else {
-            panic!("expected NotExact");
-        };
-        assert_eq!(n.below().as_money().unwrap().to_wire(), "-33.3400");
-        assert_eq!(n.above().as_money().unwrap().to_wire(), "-33.3300");
-        assert_eq!(n.approx(), "-33.333…");
-        assert_eq!(format!("{n:?}"), "Neighbours(..)");
-        // A four-decimal field accepts what a cents field refuses.
+    fn results_round_to_the_cent_half_away_from_zero() {
+        assert_eq!(wire("100/3"), "33.3300");
+        assert_eq!(wire("-100/3"), "-33.3300");
+        assert_eq!(wire("200/3"), "66.6700");
+        assert_eq!(wire("33.335*1"), "33.3400", "a half rounds away from zero");
+        assert_eq!(wire("-33.335*1"), "-33.3400");
+        assert_eq!(wire("33.3349*1"), "33.3300");
+        assert_eq!(wire("0.005*1"), "0.0100");
+        assert_eq!(wire("-0.004*1"), "0.0000", "zero has no sign");
+        assert_eq!(wire("1234567/3"), "411522.3300");
+        assert!(money("100/3").unwrap().calculated);
+        // A plain typed amount is never rounded.
+        assert_eq!(
+            money("12.345"),
+            Err(AmountEntryError::Input(MoneyInputError::TooManyDecimals {
+                max: 2
+            }))
+        );
+        // A four-decimal field rounds to its own unit.
         let full = AmountRules {
             input: UserInput::FULL,
             ..AmountRules::MONEY
@@ -897,13 +804,12 @@ mod tests {
             parse("1.005*2", full).unwrap().value.to_ten_thousandths(),
             2_0100
         );
-        let Err(AmountEntryError::NotExact(n)) = parse("1/3", full) else {
-            panic!("expected NotExact");
-        };
-        assert_eq!(n.approx(), "0.33333…");
+        assert_eq!(parse("1/3", full).unwrap().value.to_ten_thousandths(), 3333);
+        assert_eq!(parse("2/3", full).unwrap().value.to_ten_thousandths(), 6667);
+        // Rounding past the edge of the range is still too large.
         assert_eq!(
-            parse("1234567/3", AmountRules::MONEY).unwrap_err().key(),
-            TextKey("grid.calc.not_exact")
+            money("999,999,999,999,999.99+0.009"),
+            Err(AmountEntryError::TooLarge)
         );
     }
 
@@ -1034,10 +940,10 @@ mod tests {
             preview("400+44.25", r),
             Preview::Value(Amount::Money(Money::parse_wire("444.25").unwrap()))
         );
-        assert!(matches!(
+        assert_eq!(
             preview("100/3", r),
-            Preview::Error(AmountEntryError::NotExact(_))
-        ));
+            Preview::Value(Amount::Money(Money::parse_wire("33.33").unwrap()))
+        );
         assert_eq!(
             preview("1/0", r),
             Preview::Error(AmountEntryError::DivideByZero)
@@ -1148,10 +1054,6 @@ mod tests {
 
     #[test]
     fn debug_never_prints_digits() {
-        let Err(e) = money("100/3") else {
-            panic!("expected an error");
-        };
-        assert_eq!(format!("{e:?}"), "NotExact(..)");
         assert_eq!(
             format!(
                 "{:?}",

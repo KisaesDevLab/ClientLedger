@@ -24,7 +24,6 @@ pub fn text(k: TextKey) -> String {
         "grid.a11y.row_of" => "row {n} of {total}".into(),
         "grid.calc.preview" => "= {value}".into(),
         "grid.popup.add_new" => "Add \"{text}\"".into(),
-        "grid.calc.not_exact.detail" => "{approx}; type {below} or {above}".into(),
         other => other.into(),
     }
 }

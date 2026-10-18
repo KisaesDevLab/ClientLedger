@@ -714,9 +714,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("grid.calc.incomplete", "The calculation is not finished."),
     ("grid.calc.too_long", "The calculation is too long."),
     ("grid.calc.too_complex", "The calculation is too complex. Work it out in steps."),
-    ("grid.calc.not_exact", "The result is not a whole number of cents"),
-    ("grid.calc.not_exact.detail", "{approx}; type {below} or {above}"),
-    ("grid.calc.not_exact.fix", "Type the amount you want to keep."),
     ("grid.date.empty", "Enter a date."),
     ("grid.date.invalid", "That is not a date. Type it as MM/DD/YYYY."),
     ("grid.date.no_such_day", "That day does not exist."),
@@ -881,10 +878,6 @@ mod tests {
             ("grid.popup.full_list", &["{column}"]),
             ("grid.a11y.cell", &["{column}", "{row}"]),
             ("grid.a11y.row_of", &["{n}", "{total}"]),
-            (
-                "grid.calc.not_exact.detail",
-                &["{approx}", "{below}", "{above}"],
-            ),
         ] {
             for n in names {
                 assert!(t(key).contains(n), "{key} lacks {n}");

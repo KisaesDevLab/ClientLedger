@@ -210,8 +210,11 @@ mod tests {
             Ok((CellInput::Clear, Source::Typed))
         );
         assert_eq!(
-            parse_buffer(amount, "100/3", f).unwrap_err().key,
-            TextKey("grid.calc.not_exact")
+            parse_buffer(amount, "100/3", f),
+            Ok((
+                CellInput::Money(Money::parse_wire("33.33").unwrap()),
+                Source::Calculator
+            ))
         );
         assert_eq!(
             parse_buffer(CellKind::Date, "1/5/99", f),

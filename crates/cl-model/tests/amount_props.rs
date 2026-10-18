@@ -1,7 +1,8 @@
 //! Property tests for exact amount entry and the calculator (P10 AC3, plan
-//! §6): every accepted value equals the exact integer result, inexact results
-//! are refused with the true neighbours, zero has no sign, nothing panics,
-//! and errors never echo the typed digits.
+//! §6): every accepted value equals the exact integer result, a calculation
+//! that is not a whole cent is the exact value rounded half away from zero
+//! (Q-P10x), zero has no sign, nothing panics, and errors never echo the
+//! typed digits.
 
 // Ok/Err arms side by side read better than `if let … else` in these properties.
 #![allow(clippy::single_match_else)]
@@ -111,31 +112,28 @@ proptest! {
     }
 
     #[test]
-    fn division_is_exact_or_refused_with_true_neighbours(
+    fn division_rounds_half_away_from_zero(
         a in -MAX_CENTS..=MAX_CENTS,
         n in prop_oneof![1i64..=1_000, -1_000i64..=-1],
     ) {
         let au = cents(a).to_ten_thousandths();
         let n = i128::from(n);
         let r = parse(&format!("{}/{n}", cents(a).format(MINUS)), AmountRules::MONEY);
-        let exact = au % n == 0 && (au / n) % 100 == 0;
-        match r {
-            Ok(p) => {
-                prop_assert!(exact);
-                prop_assert_eq!(p.value.to_ten_thousandths() * n, au);
-            }
-            Err(AmountEntryError::NotExact(nb)) => {
-                prop_assert!(!exact);
-                let (lo, hi) = (nb.below().to_ten_thousandths(), nb.above().to_ten_thousandths());
-                prop_assert_eq!(hi - lo, 100, "neighbours are one cent apart");
-                prop_assert_eq!(lo % 100, 0);
-                // lo <= a/n <= hi, compared without dividing.
-                let (lo_n, hi_n) = if n > 0 { (lo * n, hi * n) } else { (hi * n, lo * n) };
-                prop_assert!(lo_n <= au && au <= hi_n, "{lo} {hi} {au} {n}");
-                prop_assert_eq!(format!("{nb:?}"), "Neighbours(..)");
-            }
-            Err(e) => prop_assert!(false, "unexpected {e:?}"),
+        // The exact value is au / n units = au / (100 n) cents. Rounded half
+        // away from zero: sign * floor((2|x| + 1) / 2) with x in cents,
+        // computed as floor((2|au| + 100|n|) / (200|n|)).
+        let (num, den) = (au.abs(), 100 * n.abs());
+        let magnitude = (2 * num + den) / (2 * den);
+        let negative = (au < 0) != (n < 0);
+        let want_cents = if negative { -magnitude } else { magnitude };
+        let got = r.unwrap().value.to_ten_thousandths();
+        prop_assert_eq!(got, want_cents * 100);
+        // Already a whole cent: exactly the value, nothing rounded.
+        if au % n == 0 && (au / n) % 100 == 0 {
+            prop_assert_eq!(got, au / n);
         }
+        // Never more than half a cent away from the exact value.
+        prop_assert!((got * n - au).abs() * 2 <= 100 * n.abs());
     }
 
     #[test]
@@ -259,7 +257,6 @@ fn rejection_keys() {
             "1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1",
             "grid.calc.too_long",
         ),
-        ("100/3", "grid.calc.not_exact"),
         ("1 234", "grid.amount.ambiguous"),
         ("1.234", "grid.amount.too_many_decimals"),
         ("abc", "grid.amount.invalid"),

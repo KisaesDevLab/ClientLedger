@@ -5,7 +5,7 @@
 //! the cl-ui i18n coverage test can find every one in the source (P10 plan
 //! F13, step 12).
 
-/// The key of one catalog string (`grid.calc.not_exact`).
+/// The key of one catalog string (`grid.calc.divide_by_zero`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TextKey(pub &'static str);
 

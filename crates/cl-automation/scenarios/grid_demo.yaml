@@ -68,11 +68,9 @@ steps:
   - key: Tab
   - type: {text: "100/3"}
   - key: Tab
-  - assert_exists: {label_contains: "33.33 or 33.34"}
-  - screenshot: not-exact
-  - key: Escape
-  - type: {text: "10"}
-  - key: Tab
+  - assert_value: {target: {role: grid_cell, label: "Amount, line 3"}, equals: "33.33"}
+  - assert_exists: {role: label, label_contains: "Lines total 1,319.73"}
+  - screenshot: calc-rounded
   - key: Escape
   - assert_state: {key: prompt_open, equals: false}
   - assert_state: {key: screen.rows, equals: 3}

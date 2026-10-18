@@ -200,18 +200,21 @@ fn calculator_caption_and_error_are_readable() {
     assert_eq!(r.model.lines()[0].amount, Some(money("444.25")));
     r.frame(shift_tab());
     r.frame(typed("100/3"));
-    r.frame(tab());
     r.frame(vec![]);
     let labels: Vec<String> = r
         .nodes()
         .iter()
         .filter_map(|(_, n)| n.label().map(str::to_string))
         .collect();
-    assert!(
-        labels.iter().any(|l| l.contains("33.33 or 33.34")),
-        "{labels:?}"
-    );
-    assert_eq!(r.at(), (0, AMOUNT), "the invalid buffer kept the cursor");
+    assert!(labels.iter().any(|l| l == "= 33.33"), "{labels:?}");
+    // Rounded to the cent, half away from zero (Q-P10x), and committed.
+    r.frame(tab());
+    assert_eq!(r.model.lines()[0].amount, Some(money("33.33")));
+    assert_eq!(r.at(), (0, MEMO));
+    r.frame(shift_tab());
+    r.frame(typed("5/0"));
+    r.frame(tab());
+    assert_eq!(r.at(), (0, AMOUNT), "an invalid buffer keeps the cursor");
     let _ = TextKey("unused");
     assert_eq!(r.model.row_count(), 2);
 }

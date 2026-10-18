@@ -1679,15 +1679,11 @@ impl Grid {
             _ => None,
         };
         if let Some(p) = edit.error {
-            // An inexact calculation names the two nearest values.
+            // An amount error: the message and its fix.
             if let Some(rules) = rules
                 && let Err(e) = amount_entry::parse(&edit.buffer, rules)
             {
-                return Some(crate::editors::calc::error_text(
-                    &e,
-                    env.money_style,
-                    env.text,
-                ));
+                return Some(crate::editors::calc::error_text(&e, env.text));
             }
             let mut s = env.t(p.key);
             if let Some(fix) = p.fix {
