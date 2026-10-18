@@ -154,6 +154,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("open.practice", "Try the practice company"),
     ("open.practice_sub", "Explore without touching real books"),
     ("open.practice_later", "The practice company is not set up on this computer yet."),
+    ("open.practice_loading", "Building the practice company (about a minute)\u{2026}"),
     ("open.footer.offline", "Works fully offline"),
     ("open.footer.not_affiliated", "Not affiliated with Intuit or QuickBooks"),
     ("open.probing", "Checking the books engine\u{2026}"),

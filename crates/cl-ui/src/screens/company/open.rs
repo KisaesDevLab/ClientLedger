@@ -51,6 +51,7 @@ pub struct OpenCompanyScreen {
     probe_task: Option<Task<Result<bool, CompanyError>>>,
     signin_task: Option<Task<Result<SignedIn, CompanyError>>>,
     restore_task: Option<Task<Result<RestoreOutcome, CompanyError>>>,
+    sample_task: Option<Task<Result<cl_company::Created, CompanyError>>>,
     // First run / sign-in fields.
     name: String,
     email: String,
@@ -110,6 +111,7 @@ impl OpenCompanyScreen {
             probe_task: None,
             signin_task: None,
             restore_task: None,
+            sample_task: None,
             name: String::new(),
             email: String::new(),
             password: String::new(),
@@ -337,6 +339,20 @@ impl OpenCompanyScreen {
         .ok();
     }
 
+    /// Builds the practice company (live engine) and opens it.
+    fn load_sample(&mut self) {
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            self.notice = Some(t("open.practice_later"));
+            return;
+        };
+        let store = self.link.store().clone();
+        self.busy = Some("open.practice_loading");
+        self.sample_task = spawn_lifecycle(&self.link, group, move || async move {
+            cl_company::sample::load_into(&session, &store, &cl_company::backup::silent()).await
+        })
+        .ok();
+    }
+
     fn poll(&mut self) {
         if let Some(t) = self.probe_task.as_mut()
             && let Some(r) = t.poll_result()
@@ -388,6 +404,24 @@ impl OpenCompanyScreen {
                         accent,
                         closed_through,
                     });
+                }
+                Err(e) => self.error = Some(e),
+            }
+        }
+        if let Some(t) = self.sample_task.as_mut()
+            && let Some(r) = t.poll_result()
+        {
+            self.sample_task = None;
+            self.busy = None;
+            match r {
+                Ok(c) => {
+                    self.link.push(CompanyEvent::Opened {
+                        tenant_id: c.tenant_id,
+                        name: cl_company::SAMPLE_NAME.into(),
+                        accent: Accent([0xC9, 0xC4, 0xBA]),
+                        closed_through: None,
+                    });
+                    self.loaded_once = false;
                 }
                 Err(e) => self.error = Some(e),
             }
@@ -824,6 +858,8 @@ impl OpenCompanyScreen {
             ui.horizontal(|ui| {
                 if this.busy == Some("open.opening") {
                     form::progress_line(ui, tokens, &t("open.opening"));
+                } else if this.busy == Some("open.practice_loading") {
+                    form::progress_line(ui, tokens, &t("open.practice_loading"));
                 } else if primary_button(ui, &t("open.open")).clicked() {
                     open_clicked = true;
                 }
@@ -905,7 +941,7 @@ impl OpenCompanyScreen {
                 self.selected = i;
                 self.open_selected();
             } else {
-                self.notice = Some(t("open.practice_later"));
+                self.load_sample();
             }
         }
         if let Some(id) = action {

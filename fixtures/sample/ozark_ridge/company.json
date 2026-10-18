@@ -1,0 +1,294 @@
+{
+  "accounts": [
+    {
+      "detail": "checking",
+      "name": "Operating Checking",
+      "number": "1010",
+      "type": "asset"
+    },
+    {
+      "detail": "savings",
+      "name": "Savings",
+      "number": "1020",
+      "type": "asset"
+    },
+    {
+      "detail": "fixed_asset",
+      "name": "Equipment",
+      "number": "1500",
+      "type": "asset"
+    },
+    {
+      "detail": "fixed_asset",
+      "name": "Vehicles",
+      "number": "1510",
+      "type": "asset"
+    },
+    {
+      "detail": "credit_card",
+      "name": "Business Credit Card",
+      "number": "2050",
+      "type": "liability"
+    },
+    {
+      "detail": "long_term_liability",
+      "name": "Vehicle and Equipment Loans",
+      "number": "2200",
+      "type": "liability"
+    },
+    {
+      "detail": null,
+      "name": "Owner Contributions",
+      "number": "3100",
+      "type": "equity"
+    },
+    {
+      "detail": null,
+      "name": "Owner Draws",
+      "number": "3200",
+      "type": "equity"
+    },
+    {
+      "detail": null,
+      "name": "Service Income",
+      "number": "4000",
+      "type": "revenue"
+    },
+    {
+      "detail": null,
+      "name": "Subcontractors",
+      "number": "5000",
+      "type": "cogs"
+    },
+    {
+      "detail": null,
+      "name": "Job Supplies and Materials",
+      "number": "5200",
+      "type": "cogs"
+    },
+    {
+      "detail": null,
+      "name": "Advertising and Marketing",
+      "number": "6000",
+      "type": "expense"
+    },
+    {
+      "detail": null,
+      "name": "Bank and Merchant Fees",
+      "number": "6050",
+      "type": "expense"
+    },
+    {
+      "detail": null,
+      "name": "Fuel",
+      "number": "6100",
+      "type": "expense"
+    },
+    {
+      "detail": null,
+      "name": "Insurance",
+      "number": "6150",
+      "type": "expense"
+    },
+    {
+      "detail": null,
+      "name": "Office Supplies and Software",
+      "number": "6250",
+      "type": "expense"
+    },
+    {
+      "detail": null,
+      "name": "Rent",
+      "number": "6300",
+      "type": "expense"
+    },
+    {
+      "detail": null,
+      "name": "Repairs and Maintenance",
+      "number": "6350",
+      "type": "expense"
+    },
+    {
+      "detail": null,
+      "name": "Telephone and Internet",
+      "number": "6400",
+      "type": "expense"
+    },
+    {
+      "detail": null,
+      "name": "Utilities",
+      "number": "6500",
+      "type": "expense"
+    },
+    {
+      "detail": null,
+      "name": "Wages",
+      "number": "6550",
+      "type": "expense"
+    },
+    {
+      "detail": null,
+      "name": "Payroll Taxes",
+      "number": "6560",
+      "type": "expense"
+    },
+    {
+      "detail": null,
+      "name": "Vehicle Expenses",
+      "number": "6700",
+      "type": "expense"
+    },
+    {
+      "detail": null,
+      "name": "Interest Expense",
+      "number": "8000",
+      "type": "other_expense"
+    }
+  ],
+  "bank": {
+    "lastFileBalance": "92431.07",
+    "lastFileDate": "2026-11-03",
+    "lastReconciliation": {
+      "balance": "71436.20",
+      "date": "2026-09-30"
+    },
+    "octoberStatement": {
+      "date": "2026-10-31",
+      "endingBalance": "86902.13"
+    }
+  },
+  "basis": "accrual",
+  "chart": "general_service",
+  "clients": [
+    "Riverbend HOA",
+    "Table Rock Dental",
+    "Hollister Family Trust",
+    "Brightwater Apartments",
+    "Cedar Hollow Church",
+    "Maple Street Bakery",
+    "Northfork Veterinary",
+    "Pine Ridge Storage",
+    "Sunset Trail Realty",
+    "Lakeview Credit Union",
+    "Branson Hills Inn",
+    "Juniper Court Condos",
+    "Ozark Mountain Daycare",
+    "Silver Dollar Rentals",
+    "Whitetail Hunting Lodge",
+    "Greenway Fitness",
+    "Highway 65 Auto",
+    "Kimberling Marina",
+    "Bluff View Estates",
+    "Forsyth Public Library",
+    "Walnut Shade Farmhouse",
+    "Copper Kettle Coffee",
+    "Taney County Title",
+    "Shepherd Hills Clinic",
+    "Reeds Spring Hardware",
+    "Bull Shoals Cabins",
+    "Indian Point Resort",
+    "Rockaway Beach Diner",
+    "Crane Creek Nursery",
+    "Galena Gun Club",
+    "Lampe Country Store",
+    "Blue Eye Feed Co",
+    "Protem Lakeside HOA",
+    "Powersite Dam Tours",
+    "Mincy Hollow Ranch",
+    "Ridgedale Chapel",
+    "Oak Grove Orchard",
+    "Sycamore Log Homes",
+    "Cedar Creek Winery",
+    "Bear Creek Campground",
+    "Dogwood Canyon Rentals",
+    "Elm Street Flats",
+    "Persimmon Hill Farm",
+    "Roark Creek Dentistry",
+    "Swan Creek Outfitters",
+    "Thunder Ridge Stables",
+    "Tri-Lakes Insurance",
+    "Wildwood Pediatrics",
+    "Mountain Grove Antiques",
+    "Stone Mill Bistro",
+    "Hickory Ridge Apartments",
+    "Lost Canyon Golf",
+    "White River Lumber",
+    "Compton Ridge Church",
+    "Turkey Creek Nursery",
+    "Barn Owl Books",
+    "Hilltop Veterinary",
+    "Cardinal Hill Daycare",
+    "Long Creek Marina",
+    "Mill Creek Pottery",
+    "Spring Branch Law",
+    "Sugar Creek Bakery",
+    "Timber Lake Lodge",
+    "Valley View Assisted Living"
+  ],
+  "closingDate": "2026-09-30",
+  "entityType": "single_member_llc",
+  "figures": {
+    "attachments": 214,
+    "bankFeedWaiting": {
+      "match": 3,
+      "ready": 28,
+      "review": 6
+    },
+    "billsDueThrough": "2026-11-11",
+    "billsDueWithin7Days": "7471.90",
+    "netIncomeJanToOct": "125985.00",
+    "netIncomeOctober": "13865.14",
+    "openAr": "48912.40",
+    "operatingCheckingEnding": "84210.55",
+    "transactions": 1512
+  },
+  "fiscalYearStartMonth": 1,
+  "legalName": "Ozark Ridge Landscaping LLC",
+  "name": "Ozark Ridge Landscaping LLC",
+  "storyDate": "2026-11-04",
+  "systemAccounts": {
+    "accountsPayable": "20100",
+    "accountsReceivable": "10200",
+    "openingBalances": "30000"
+  },
+  "vendors": [
+    "Ozark Mulch Supply",
+    "Tri-Lakes Nursery Wholesale",
+    "Branson Equipment Rental",
+    "Hollister Fuel Stop",
+    "White River Stone Yard",
+    "Midwest Irrigation Parts",
+    "Taney County Landfill",
+    "Table Rock Small Engine",
+    "Lakeside Insurance Agency",
+    "Ozark Cellular",
+    "Empire Electric Cooperative",
+    "City of Hollister Water",
+    "Shepherd Hills Office Supply",
+    "Cedar Hollow Signs",
+    "Highway 65 Tire & Lube",
+    "Riverbend Hardware",
+    "Bluff View Trucking",
+    "Forsyth Print Shop",
+    "Kimberling Fertilizer",
+    "Lampe Seed & Feed",
+    "Reeds Spring Welding",
+    "Stone County Permits",
+    "Pine Ridge Storage Units",
+    "Walnut Shade Diesel",
+    "Mountain Software Co",
+    "Oak Grove Uniforms",
+    "Galena Gravel",
+    "Powersite Trailer Sales",
+    "Thunder Ridge Subcontracting",
+    "Crane Creek Tree Service",
+    "Bear Creek Hauling",
+    "Copper Kettle Catering",
+    "Blue Eye Lumber",
+    "Rockaway Auto Glass",
+    "Sycamore Fence Co",
+    "Dogwood Canyon Supply",
+    "Elm Street Accountants",
+    "Persimmon Hill Plants"
+  ]
+}
