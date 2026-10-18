@@ -199,8 +199,14 @@ pub enum GridEvent {
         /// Which row.
         key: RowKey,
     },
-    /// A row could not be recorded or vanished (`grid.row.gone`).
+    /// A row could not be recorded.
     RecordRefused {
+        /// Which row.
+        key: RowKey,
+    },
+    /// The cursor's row vanished after an outside change (`grid.row.gone`
+    /// is shown and the cursor moved to a nearby row).
+    RowGone {
         /// Which row.
         key: RowKey,
     },
@@ -251,6 +257,7 @@ impl fmt::Debug for GridEvent {
             GridEvent::CellCommitted { .. } => "CellCommitted",
             GridEvent::RowRecorded { .. } => "RowRecorded",
             GridEvent::RecordRefused { .. } => "RecordRefused",
+            GridEvent::RowGone { .. } => "RowGone",
             GridEvent::Activate { .. } => "Activate",
             GridEvent::SelectionChanged => "SelectionChanged",
             GridEvent::AddNew { .. } => "AddNew",

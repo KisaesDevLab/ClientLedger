@@ -1614,7 +1614,7 @@ impl Core {
         self.pending.retain(|k| rows.index_of(*k).is_some());
         let Some(pos) = self.cursor else { return fx };
         let Some(index) = model.rows().index_of(pos.row) else {
-            fx.events.push(GridEvent::RecordRefused { key: pos.row });
+            fx.events.push(GridEvent::RowGone { key: pos.row });
             self.recover_cursor(model, fmt);
             return fx;
         };
@@ -1653,6 +1653,28 @@ impl Core {
             None if editable && self.focused => self.open_editor(model, fmt, &mut fx),
             Some(_) | None => {}
         }
+        fx
+    }
+
+    /// A different record was loaded (Save & New, Prev/Next, Clear): drop
+    /// the editor, a parked edit, the selection, pending rows and any
+    /// notice, and put the cursor on row 0's first editable cell. Nothing
+    /// is reported: the old rows did not vanish, the record changed.
+    pub fn reset(&mut self, model: &mut ModelRef<'_>, fmt: Formats) -> Effects {
+        self.edit = None;
+        self.parked = false;
+        self.selection.clear();
+        self.pending.clear();
+        self.notice = None;
+        self.entered = None;
+        self.cursor = None;
+        self.last_index = 0;
+        let mut fx = Effects::default();
+        if let Some(pos) = self.edge_cell(model, 0, false) {
+            self.move_to(pos, model, fmt, &mut fx);
+        }
+        fx.events.clear();
+        fx.reset_editor = true;
         fx
     }
 

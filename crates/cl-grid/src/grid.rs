@@ -376,6 +376,15 @@ impl Grid {
         self.apply(fx, &model, None)
     }
 
+    /// A different record was loaded (Save & New, Prev/Next, Clear): clear
+    /// the editor, selection, pending rows and notice, and put the cursor on
+    /// row 0's first editable cell. Emits no events.
+    pub fn reset(&mut self, mut model: ModelRef<'_>, env: &GridEnv<'_>) {
+        let fx = self.core.reset(&mut model, env.formats());
+        self.seen_rev = Some(model.rows().revision());
+        let _ = self.apply(fx, &model, None);
+    }
+
     /// After a save stored new lines under the same keys (T20).
     pub fn rebind(&mut self, mut model: ModelRef<'_>, env: &GridEnv<'_>) {
         let fx = self.core.rebind(&mut model, env.formats());

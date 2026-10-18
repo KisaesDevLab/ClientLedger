@@ -599,6 +599,13 @@ fn enter_on_the_empty_entry_line_saves_and_starts_new() {
     rig.enter();
     assert_eq!(rig.saved(), 1, "{}", rig.state());
     assert_eq!(rig.state()["rows"], 1);
+    // S1: the new record is not a vanished row.
+    assert!(!rig.shows("no longer here"), "{}", rig.state());
+    assert_eq!(
+        rig.cursor(),
+        (0, 1),
+        "line 1's Account (the first editable cell)"
+    );
 }
 
 /// The 200,000-row register: Ctrl+End reaches the last row exactly.

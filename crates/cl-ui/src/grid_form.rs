@@ -205,17 +205,13 @@ impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
     /// Show another record (Prev/Next, Find, Save & New).
     pub fn load(&mut self, record: V, lookups: &dyn Lookups) {
         self.form.load(record);
-        self.with(lookups, |g, m, env| {
-            g.resync(m, env, false);
-        });
+        self.with(lookups, Grid::reset);
     }
 
     /// Throw the unsaved edits away (Clear, Discard).
     pub fn revert_form(&mut self, lookups: &dyn Lookups) {
         self.form.revert_form();
-        self.with(lookups, |g, m, env| {
-            g.resync(m, env, false);
-        });
+        self.with(lookups, Grid::reset);
     }
 
     /// Move the cursor to a cell and focus the grid next frame.

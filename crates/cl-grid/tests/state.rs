@@ -509,7 +509,8 @@ fn a_vanished_cursor_row_moves_to_the_nearest_and_says_so() {
     let gone = r.m.key(2);
     r.m.form.edit_step(|l| l.retain(|x| x.key != gone));
     let fx = r.resync(false);
-    assert!(has(&fx, |e| matches!(e, GridEvent::RecordRefused { .. })));
+    assert!(has(&fx, |e| matches!(e, GridEvent::RowGone { .. })));
+    assert!(!has(&fx, |e| matches!(e, GridEvent::RecordRefused { .. })));
     assert_eq!(r.core.notice(), Some(ROW_GONE));
     assert_eq!(r.at().0, 2);
 }
@@ -525,6 +526,29 @@ fn rebind_after_save_keeps_the_cursor_quietly() {
     assert!(fx.events.is_empty());
     assert_eq!(r.core.notice(), None);
     assert_eq!(r.at(), (1, ACCOUNT));
+}
+
+/// S1: loading a different record (Save & New, Prev/Next, Clear) puts the
+/// cursor on row 0's first editable cell with no notice and no events, even
+/// though every old row key is gone.
+#[test]
+fn reset_after_loading_another_record_is_quiet() {
+    let mut r = Rig::line(3);
+    r.key(GridKey::Down);
+    r.key(GridKey::Down);
+    r.typ("12");
+    let fresh: Vec<_> = (0..2)
+        .map(|_| support::lines::LineValue::blank(r.m.keygen.next_key()))
+        .collect();
+    r.m.form.load(fresh);
+    let mut mr = ModelRef::Edit(&mut r.m);
+    let fx = r.core.reset(&mut mr, formats());
+    assert!(fx.events.is_empty(), "{:?}", fx.events);
+    assert_eq!(r.core.notice(), None);
+    assert_eq!(r.at(), (0, ACCOUNT));
+    assert!(!r.core.has_uncommitted_edit());
+    assert!(r.core.pending().is_empty());
+    assert!(r.core.selection().is_empty());
 }
 
 #[test]
