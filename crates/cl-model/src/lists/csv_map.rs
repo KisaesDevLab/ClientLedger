@@ -349,6 +349,9 @@ pub enum RowProblem {
     PriceInvalid,
     /// The price is below zero.
     PriceNegative,
+    /// The file is semicolon separated and the price has a comma, which
+    /// may be a decimal comma (`12,50`); refused rather than guessed.
+    PriceComma,
     /// The income account isn't in the chart, or isn't an income account.
     IncomeAccountUnknown,
     /// No income account in the row and none chosen for the file.
@@ -371,6 +374,7 @@ impl RowProblem {
             RowProblem::TypeUnknown => TextKey("csv.row.type_unknown"),
             RowProblem::PriceInvalid => TextKey("csv.row.price_invalid"),
             RowProblem::PriceNegative => TextKey("csv.row.price_negative"),
+            RowProblem::PriceComma => TextKey("csv.row.price_comma"),
             RowProblem::IncomeAccountUnknown => TextKey("csv.row.income_unknown"),
             RowProblem::IncomeAccountMissing => TextKey("csv.row.income_missing"),
             RowProblem::EmailInvalid => TextKey("csv.row.email_invalid"),
@@ -406,12 +410,16 @@ pub struct ItemLookups<'a> {
     pub default_income: Option<AccountId>,
     /// True when an item (inactive ones too) already has the name.
     pub name_taken: &'a dyn Fn(&str) -> bool,
+    /// The file's column separator. With `;` a comma in a price may be a
+    /// decimal comma, so such prices are refused.
+    pub separator: char,
 }
 
 impl std::fmt::Debug for ItemLookups<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ItemLookups")
             .field("default_income", &self.default_income)
+            .field("separator", &self.separator)
             .finish_non_exhaustive()
     }
 }
@@ -466,11 +474,15 @@ fn parse_yes_no(cell: &str) -> Result<Option<bool>, ()> {
 }
 
 /// A sales price from a file: blank is none; `$`, thousands separators and
-/// up to four decimals allowed; never below zero.
-fn parse_price(cell: &str) -> Result<Option<Money>, RowProblem> {
+/// up to four decimals allowed; never below zero. In a semicolon-separated
+/// file (`separator` `;`) a comma may be a decimal comma, so it is refused.
+fn parse_price(cell: &str, separator: char) -> Result<Option<Money>, RowProblem> {
     let s = cell.trim();
     if s.is_empty() {
         return Ok(None);
+    }
+    if separator == ';' && s.contains(',') {
+        return Err(RowProblem::PriceComma);
     }
     let m = Money::parse_user(s, UserInput::FULL).map_err(|_| RowProblem::PriceInvalid)?;
     if m.is_negative() {
@@ -623,7 +635,10 @@ fn item_row(
         Target::Description,
         2000,
     )?;
-    let price = parse_price(cell(mapping, row, Target::Price).unwrap_or_default())?;
+    let price = parse_price(
+        cell(mapping, row, Target::Price).unwrap_or_default(),
+        l.separator,
+    )?;
     let income_account = match cell(mapping, row, Target::IncomeAccount) {
         Some(a) => (l.income_account)(a).ok_or(RowProblem::IncomeAccountUnknown)?,
         None => l.default_income.ok_or(RowProblem::IncomeAccountMissing)?,

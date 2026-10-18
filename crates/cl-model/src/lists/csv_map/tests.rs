@@ -221,6 +221,7 @@ fn item_rows_exact_prices_and_accounts() {
         income_account: &resolve,
         default_income: Some(income),
         name_taken: &taken,
+        separator: ',',
     };
     assert!(format!("{l:?}").contains("default_income"));
     let m = guess(
@@ -274,6 +275,7 @@ fn item_rows_exact_prices_and_accounts() {
         income_account: &resolve,
         default_income: None,
         name_taken: &|_| false,
+        separator: ',',
     };
     let b = build(
         CsvList::Items,
@@ -332,4 +334,43 @@ fn every_row_problem_has_text() {
     ] {
         assert!(p.key().as_str().starts_with("csv.row."));
     }
+}
+
+/// A semicolon-separated file may write `12,50` for twelve fifty: a comma
+/// in its prices is refused, never read as a thousands separator.
+#[test]
+fn semicolon_files_refuse_commas_in_prices() {
+    let resolve = |_: &str| None;
+    let l = ItemLookups {
+        income_account: &resolve,
+        default_income: Some(acct(1)),
+        name_taken: &|_| false,
+        separator: ';',
+    };
+    let m = vec![Some(Target::ItemName), Some(Target::Price)];
+    let rows = vec![
+        (2, s(&["Comma", "12,50"])),
+        (3, s(&["Thousands", "1,234.50"])),
+        (4, s(&["Point", "$1234.5000"])),
+    ];
+    let b = build(CsvList::Items, &m, &rows, Some(&l), None);
+    let problems: Vec<_> = b.issues.iter().map(|i| (i.line, i.problem)).collect();
+    assert_eq!(
+        problems,
+        vec![(2, RowProblem::PriceComma), (3, RowProblem::PriceComma)]
+    );
+    match &b.rows[..] {
+        [(4, Mapped::Item(i))] => {
+            assert_eq!(i.price, Some(Money::parse_wire("1234.5000").expect("m")));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(RowProblem::PriceComma.key().0, "csv.row.price_comma");
+    // The same cells in a comma file read the thousands separator.
+    let comma = ItemLookups {
+        separator: ',',
+        ..l
+    };
+    let b = build(CsvList::Items, &m, &rows[1..2], Some(&comma), None);
+    assert!(b.issues.is_empty(), "{:?}", b.issues);
 }

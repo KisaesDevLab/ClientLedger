@@ -28,6 +28,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("csv.row.too_long", "{field} is too long."),
     ("csv.row.type_unknown", "The account type isn't one ClientLedger knows. Use Asset, Liability, Equity, Income, Cost of goods sold, Expense, Other income or Other expense."),
     ("csv.row.price_invalid", "The price isn't an amount ClientLedger can read (up to four decimals)."),
+    ("csv.row.price_comma", "This file uses semicolons between columns, so a comma in the price could mean cents. Write the price with a point and no commas, such as 1234.50."),
     ("csv.row.price_negative", "The price is below zero."),
     ("csv.row.income_unknown", "The income account isn't in your Chart of Accounts."),
     ("csv.row.income_missing", "No income account. Choose one for rows that don't name it."),

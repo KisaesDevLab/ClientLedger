@@ -111,6 +111,8 @@ impl ListChoice {
 struct Parsed {
     headers: Vec<String>,
     rows: Vec<(usize, Vec<String>)>,
+    /// The column separator the file uses.
+    separator: char,
 }
 
 /// Why a row was not imported.
@@ -405,6 +407,7 @@ impl CsvScreen {
             income_account: &resolve,
             default_income: self.default_income,
             name_taken: &taken,
+            separator: p.separator,
         };
         let items = (list == CsvList::Items && self.lookups.is_some()).then_some(&lookups);
         let contacts: Option<&dyn Fn(&str) -> bool> =
@@ -898,7 +901,9 @@ fn read_csv(path: &Path) -> Result<Parsed, String> {
         return Err(t("csv.read.too_big"));
     }
     let bytes = std::fs::read(path).map_err(|e| read_error_text(&e))?;
-    let rows = csv::parse(&csv::decode(&bytes)).map_err(|e| match e {
+    let text = csv::decode(&bytes);
+    let separator = csv::sniff_separator(&text);
+    let rows = csv::parse_with(&text, separator).map_err(|e| match e {
         csv::CsvError::Empty => t("csv.read.empty"),
         csv::CsvError::UnclosedQuote { line } => {
             t_with("csv.read.quote", &[("line", &line.to_string())])
@@ -912,6 +917,7 @@ fn read_csv(path: &Path) -> Result<Parsed, String> {
     Ok(Parsed {
         headers,
         rows: it.map(|r| (r.line, r.fields)).collect(),
+        separator,
     })
 }
 

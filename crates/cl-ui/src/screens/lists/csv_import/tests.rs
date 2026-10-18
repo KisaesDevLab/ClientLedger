@@ -245,6 +245,17 @@ fn imports_items_with_exact_prices() {
     assert_eq!(r.state("left_out"), 1);
 }
 
+/// A semicolon file's `12,50` is left out, never read as 1250.
+#[test]
+fn semicolon_item_files_refuse_comma_prices() {
+    let mut r = Rig::new();
+    r.s.set_list(ListChoice::Items);
+    r.frames(2);
+    r.read("eu.csv", "Item;Price\nHedge;12,50\nShrub;12.50\n");
+    assert_eq!(r.state("ready"), 1);
+    assert_eq!(r.state("left_out"), 1);
+}
+
 /// Only a used name skips an item row; other conflicts are errors.
 #[test]
 fn only_a_used_name_skips_an_item() {
