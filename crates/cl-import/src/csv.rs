@@ -246,24 +246,33 @@ pub fn field(value: &str) -> String {
     }
 }
 
-/// Text a spreadsheet would run as a formula (`=`, `+`, `@`, or a `-` not
-/// starting a number) gets a leading apostrophe. Use it for names and
-/// notes, never for amounts.
+/// Text a spreadsheet would run as a formula (a leading `=`, `+`, `-`,
+/// `@`, `|`, `%`, tab or carriage return) gets a leading apostrophe. Only a
+/// whole plain number (`-12.50`, `^-?\d+(\.\d+)?$`) is left as it is, so
+/// `-2+3+cmd|...` is still neutralized. Use it for names and notes, never
+/// for amounts.
 #[must_use]
 pub fn cell_text(value: &str) -> String {
-    let risky = match value.chars().next() {
-        Some('=' | '+' | '@' | '\t' | '\r') => true,
-        Some('-') => !value[1..]
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_digit() || c == '.'),
-        _ => false,
-    };
+    let risky = matches!(
+        value.chars().next(),
+        Some('=' | '+' | '-' | '@' | '|' | '%' | '\t' | '\r')
+    ) && !plain_number(value);
     if risky {
         format!("'{value}")
     } else {
         value.to_owned()
     }
+}
+
+/// `^-?\d+(\.\d+)?$`.
+fn plain_number(s: &str) -> bool {
+    let s = s.strip_prefix('-').unwrap_or(s);
+    let (whole, frac) = match s.split_once('.') {
+        Some((w, f)) => (w, Some(f)),
+        None => (s, None),
+    };
+    let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+    digits(whole) && frac.is_none_or(digits)
 }
 
 /// A whole file: comma separated, CRLF line ends (what spreadsheet

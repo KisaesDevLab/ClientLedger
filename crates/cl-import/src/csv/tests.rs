@@ -71,11 +71,53 @@ fn writing_quotes_and_formulas() {
     assert_eq!(cell_text("-x"), "'-x");
     assert_eq!(cell_text("-12.50"), "-12.50");
     assert_eq!(cell_text("Route"), "Route");
+    assert_eq!(cell_text("-12"), "-12");
+    assert_eq!(
+        cell_text("-2+3+cmd|' /C calc'!A0"),
+        "'-2+3+cmd|' /C calc'!A0"
+    );
+    assert_eq!(cell_text("-.5"), "'-.5");
+    assert_eq!(cell_text("-1,234.56"), "'-1,234.56");
+    assert_eq!(cell_text("-12."), "'-12.");
+    assert_eq!(cell_text("|cmd"), "'|cmd");
+    assert_eq!(cell_text("%0A"), "'%0A");
+    assert_eq!(cell_text("\tx"), "'\tx");
+    assert_eq!(cell_text(""), "");
     let out = write([["Tag", "Group"], ["North, East", ""]]);
     assert_eq!(out, "Tag,Group\r\n\"North, East\",\r\n");
 }
 
 proptest! {
+    /// A cell starting with a formula trigger always comes out neutralized
+    /// unless it is a whole plain number; anything else is unchanged.
+    #[test]
+    fn cell_text_neutralizes_every_trigger(
+        lead in proptest::sample::select(vec!['=', '+', '-', '@', '|', '%', '\t', '\r']),
+        rest in "[-+0-9.|!' /A-Za-z]{0,16}",
+    ) {
+        let v = format!("{lead}{rest}");
+        let out = cell_text(&v);
+        let whole_number = lead == '-'
+            && !rest.is_empty()
+            && rest.split_once('.').map_or_else(
+                || rest.bytes().all(|b| b.is_ascii_digit()),
+                |(w, f)| !w.is_empty() && !f.is_empty()
+                    && w.bytes().all(|b| b.is_ascii_digit())
+                    && f.bytes().all(|b| b.is_ascii_digit()),
+            );
+        if whole_number {
+            prop_assert_eq!(out, v);
+        } else {
+            prop_assert_eq!(out, format!("'{v}"));
+        }
+    }
+
+    /// Text without a trigger is never changed.
+    #[test]
+    fn cell_text_leaves_plain_text(v in "[A-Za-z0-9 ][-+=@|%A-Za-z0-9 ]{0,16}") {
+        prop_assert_eq!(cell_text(&v), v);
+    }
+
     /// Whatever is written reads back the same (rows that are not all blank).
     #[test]
     fn write_then_parse_round_trips(
