@@ -215,3 +215,72 @@ fn calculator_caption_and_error_are_readable() {
     let _ = TextKey("unused");
     assert_eq!(r.model.row_count(), 2);
 }
+
+/// Ids registered as focusable in the last pass (what egui adds to its
+/// focus cache, `Memory::interested_in_focus`).
+fn focusable_ids(r: &Rig) -> std::collections::BTreeSet<u64> {
+    r.ctx.viewport(|v| {
+        [&v.prev_pass.widgets, &v.this_pass.widgets]
+            .into_iter()
+            .flat_map(|w| {
+                w.layers()
+                    .flat_map(|(_, rects)| rects.iter())
+                    .filter(|w| w.enabled && w.sense.is_focusable())
+                    .map(|w| w.id.value())
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    })
+}
+
+/// B1/F4: egui's focus cache keeps every focusable id it sees. Across a
+/// full scroll and a thousand moves the grid registers exactly one, its
+/// focus id, next to the header and footer fields.
+#[test]
+fn focus_cache_stays_bounded() {
+    let mut r = rig(2_000);
+    r.focus_cell(0, ACCOUNT);
+    let mut seen = focusable_ids(&r);
+    for i in 0..1_000 {
+        let k = if i < 400 { Key::PageDown } else { Key::ArrowUp };
+        r.frame(key(k, Modifiers::NONE));
+        seen.extend(focusable_ids(&r));
+    }
+    r.frame(key(Key::End, Modifiers::CTRL));
+    seen.extend(focusable_ids(&r));
+    let want: std::collections::BTreeSet<u64> =
+        [r.grid.focus_id(), Rig::header_id(), Rig::footer_id()]
+            .iter()
+            .map(egui::Id::value)
+            .collect();
+    assert_eq!(seen, want, "only the grid's focus id and the two fields");
+}
+
+/// T25: no column's resize handle is in the Tab order, and Tab never stops
+/// on one.
+#[test]
+fn column_resize_handles_are_not_focusable() {
+    let mut r = rig(2);
+    r.focus_cell(0, ACCOUNT);
+    for col in [ACCOUNT, AMOUNT, MEMO, DATE, TAGS, BILLABLE] {
+        if let Some(resp) = r.ctx.read_response(r.grid.id().with(("resize", col.0))) {
+            assert!(!resp.sense.is_focusable(), "{col:?} resize handle");
+        }
+    }
+    let handles: Vec<egui::Id> = [ACCOUNT, AMOUNT, MEMO, DATE, TAGS, BILLABLE]
+        .iter()
+        .map(|c| r.grid.id().with(("resize", c.0)))
+        .collect();
+    assert!(
+        handles.iter().any(|h| r.ctx.read_response(*h).is_some()),
+        "the line grid draws resize handles"
+    );
+    for _ in 0..40 {
+        r.frame(tab());
+        let f = r.focused();
+        assert!(
+            f.is_none_or(|f| !handles.contains(&f)),
+            "Tab stopped on a handle"
+        );
+    }
+}
