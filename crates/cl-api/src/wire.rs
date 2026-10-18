@@ -58,6 +58,16 @@ impl Capabilities {
     pub const ACCOUNT_SENSITIVE: &'static str = "account-sensitive-v1";
     /// U-34 masked bank/card number with an audited Admin reveal.
     pub const ACCOUNT_MASKED_NUMBER: &'static str = "account-masked-number-v1";
+    /// U-35 jobs under a client (status, type, start and end dates).
+    pub const CONTACT_JOBS: &'static str = "contact-jobs-v1";
+    /// U-36 several ship-to addresses (one default) and contact people.
+    pub const CONTACT_ADDRESSES: &'static str = "contact-addresses-v1";
+    /// U-37 dated notes and to-dos on contacts and jobs.
+    pub const CONTACT_NOTES: &'static str = "contact-notes-v1";
+    /// U-38 the engine's open balance on each contact read.
+    pub const CONTACT_OPEN_BALANCE: &'static str = "contact-open-balance-v1";
+    /// U-44 "W-9 on file" recorded by the owner (a paper W-9).
+    pub const VENDOR_W9_ON_FILE: &'static str = "vendor-w9-on-file-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

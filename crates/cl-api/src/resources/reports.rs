@@ -1,7 +1,8 @@
 //! The three statements P08 reads: balance sheet (opening-balance review,
 //! year-end check), trial balance (restore verification) and profit and
 //! loss (sample-company golden figures), plus the account quick report the
-//! Chart of Accounts opens (P11).
+//! Chart of Accounts opens and the client and vendor balance summaries the
+//! centers show (P11).
 //!
 //! Report JSON carries JavaScript numbers (`Number(Decimal.toFixed(4))`)
 //! until U-14, so every amount is a display-only [`ReportAmount`] that keeps
@@ -9,14 +10,15 @@
 //! matters (restore verification, acceptance tests) the CSV form is used:
 //! `format=csv` keeps the engine's decimal strings.
 
-use cl_core::ids::{AccountId, TransactionId};
+use cl_core::ids::{AccountId, ContactId, TransactionId};
 use cl_core::{CalendarDate, Money, Timestamp};
 use serde::{Deserialize, Deserializer};
 
 use crate::client::{Call, Method};
 use crate::errors::ApiError;
 use crate::resources::operations::{
-    REPORT_ACCOUNT, REPORT_BALANCE_SHEET, REPORT_PROFIT_LOSS, REPORT_TRIAL_BALANCE,
+    REPORT_ACCOUNT, REPORT_AP_AGING, REPORT_BALANCE_SHEET, REPORT_CUSTOMER_BALANCE,
+    REPORT_PROFIT_LOSS, REPORT_TRIAL_BALANCE,
 };
 use crate::resources::transactions::ReportBasis;
 use crate::session::{Session, decode};
@@ -292,6 +294,123 @@ impl Reports<'_> {
         let reply = self.0.send(&REPORT_ACCOUNT, call, None).await?;
         decode(&reply, "account report")
     }
+
+    /// Each active client's open invoice balance
+    /// (`/reports/customer-balance-summary`). Clients with nothing open are
+    /// left out by the engine; inactive clients are never listed.
+    ///
+    /// # Errors
+    /// `NoCompanyOpen`; any [`ApiError`].
+    pub async fn customer_balance_summary(&self) -> Result<CustomerBalanceSummary, ApiError> {
+        let call = Call::at(Method::Get, REPORT_CUSTOMER_BALANCE.route());
+        let reply = self.0.send(&REPORT_CUSTOMER_BALANCE, call, None).await?;
+        decode(&reply, "client balance summary")
+    }
+
+    /// What is owed to each vendor on open bills as of `as_of`, by age
+    /// (`/reports/ap-aging-summary`). Vendors with nothing open are left
+    /// out.
+    ///
+    /// # Errors
+    /// `NoCompanyOpen`; any [`ApiError`].
+    pub async fn ap_aging_summary(&self, as_of: CalendarDate) -> Result<ApAgingSummary, ApiError> {
+        let mut call = Call::at(Method::Get, REPORT_AP_AGING.route());
+        call.query = vec![("as_of_date".into(), as_of.to_wire())];
+        let reply = self.0.send(&REPORT_AP_AGING, call, None).await?;
+        decode(&reply, "vendor aging summary")
+    }
+}
+
+/// One client's row of the client balance summary.
+#[derive(Clone, Debug, Deserialize)]
+pub struct CustomerBalanceRow {
+    /// The client.
+    pub id: ContactId,
+    /// Name (display only).
+    #[serde(default)]
+    pub display_name: Option<String>,
+    /// Open invoice balance (display only; the engine's sum).
+    pub balance: ReportAmount,
+}
+
+/// `GET /api/v1/reports/customer-balance-summary`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct CustomerBalanceSummary {
+    /// Clients with an open balance.
+    #[serde(default)]
+    pub data: Vec<CustomerBalanceRow>,
+}
+
+impl CustomerBalanceSummary {
+    /// The open balance of `client`, if the report lists it.
+    #[must_use]
+    pub fn balance_of(&self, client: ContactId) -> Option<&ReportAmount> {
+        self.data
+            .iter()
+            .find(|r| r.id == client)
+            .map(|r| &r.balance)
+    }
+}
+
+/// One vendor's row of the vendor aging summary. Bills without a vendor
+/// come as one row with no `contact_id`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct ApAgingVendor {
+    /// The vendor (`None` for bills without one).
+    #[serde(default, deserialize_with = "blank_contact")]
+    pub contact_id: Option<ContactId>,
+    /// Name (display only).
+    #[serde(default)]
+    pub vendor_name: Option<String>,
+    /// Not yet due.
+    pub current: ReportAmount,
+    /// 1 to 30 days past due.
+    #[serde(rename = "bucket1to30")]
+    pub days_1_30: ReportAmount,
+    /// 31 to 60 days past due.
+    #[serde(rename = "bucket31to60")]
+    pub days_31_60: ReportAmount,
+    /// 61 to 90 days past due.
+    #[serde(rename = "bucket61to90")]
+    pub days_61_90: ReportAmount,
+    /// More than 90 days past due.
+    #[serde(rename = "bucketOver90")]
+    pub over_90: ReportAmount,
+    /// Everything open (display only; the engine's sum).
+    pub total: ReportAmount,
+}
+
+/// `GET /api/v1/reports/ap-aging-summary` (the per-vendor part).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApAgingSummary {
+    /// As-of date.
+    #[serde(default)]
+    pub as_of_date: Option<CalendarDate>,
+    /// Vendors with open bills.
+    #[serde(default)]
+    pub vendors: Vec<ApAgingVendor>,
+}
+
+impl ApAgingSummary {
+    /// What is open for `vendor`, if the report lists it.
+    #[must_use]
+    pub fn total_of(&self, vendor: ContactId) -> Option<&ReportAmount> {
+        self.vendors
+            .iter()
+            .find(|r| r.contact_id == Some(vendor))
+            .map(|r| &r.total)
+    }
+}
+
+fn blank_contact<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ContactId>, D::Error> {
+    match Option::<String>::deserialize(d)? {
+        None => Ok(None),
+        Some(s) if s.is_empty() => Ok(None),
+        Some(s) => ContactId::parse(&s)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+    }
 }
 
 fn tb_query(
@@ -450,6 +569,59 @@ mod tests {
         assert_eq!(
             query(&requests(&server, "GET").await[1]),
             format!("account_id={ACCT}")
+        );
+    }
+
+    #[tokio::test]
+    async fn balance_summaries_keep_the_engine_text() {
+        let server = MockServer::start().await;
+        let client = "3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+        let vendor = "3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02";
+        Mock::given(method("GET"))
+            .and(path("/api/v1/reports/customer-balance-summary"))
+            .respond_with(json(
+                200,
+                &format!(
+                    r#"{{"title":"Customer Balance Summary","data":[
+                    {{"id":"{client}","display_name":"Riverbend HOA","balance":"1234.5600"}}]}}"#
+                ),
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/reports/ap-aging-summary"))
+            .respond_with(json(
+                200,
+                &format!(
+                    r#"{{"title":"AP Aging Summary","asOfDate":"2026-11-04","vendors":[
+                    {{"contact_id":"{vendor}","vendor_name":"Galena Gravel","current":0.1,
+                      "bucket1to30":0.2,"bucket31to60":0,"bucket61to90":0,"bucketOver90":0,
+                      "total":0.30000000000000004}},
+                    {{"contact_id":"","vendor_name":"Unknown","current":5,"bucket1to30":0,
+                      "bucket31to60":0,"bucket61to90":0,"bucketOver90":0,"total":5}}],
+                    "totals":{{}},"details":[]}}"#
+                ),
+            ))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let c = s.reports().customer_balance_summary().await.expect("ar");
+        let id = ContactId::parse(client).expect("id");
+        assert_eq!(c.balance_of(id).map(ReportAmount::text), Some("1234.5600"));
+        let v = s
+            .reports()
+            .ap_aging_summary(d(2026, 11, 4))
+            .await
+            .expect("ap");
+        let vid = ContactId::parse(vendor).expect("id");
+        assert_eq!(
+            v.total_of(vid).and_then(|t| t.display(2)).as_deref(),
+            Some("0.30")
+        );
+        assert_eq!(v.vendors[1].contact_id, None, "bills without a vendor");
+        assert_eq!(
+            query(&requests(&server, "GET").await[1]),
+            "as_of_date=2026-11-04"
         );
     }
 

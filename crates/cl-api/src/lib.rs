@@ -67,14 +67,16 @@ pub use resources::contacts::{
     NewContact,
 };
 pub use resources::export::{ExportFile, ExportManifest};
+pub use resources::form1099::{Form1099, TinType, Vendor1099Profile, Vendor1099Update};
 pub use resources::items::{Item, ItemFields, ItemFilter, ItemSort, ItemUpdate, Items};
 pub use resources::ledger::LedgerStamp;
 pub use resources::operations::{OPERATIONS, Operation, RetryClass};
 pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
 pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};
 pub use resources::reports::{
-    AccountReport, AccountReportLine, BalanceSheet, BalanceSheetEntry, ProfitLoss, ReportDate,
-    Reports, TrialBalance, TrialBalanceRow,
+    AccountReport, AccountReportLine, ApAgingSummary, ApAgingVendor, BalanceSheet,
+    BalanceSheetEntry, CustomerBalanceRow, CustomerBalanceSummary, ProfitLoss, ReportDate, Reports,
+    TrialBalance, TrialBalanceRow,
 };
 pub use resources::sales::{BillLine, InvoiceLine, NewBill, NewInvoice, Posted};
 pub use resources::session_secrets::{

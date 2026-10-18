@@ -16,6 +16,7 @@ mod contract_census;
 mod contract_closed_period;
 mod contract_companies;
 mod contract_conflict;
+mod contract_contacts;
 mod contract_errors;
 mod contract_harness;
 mod contract_journal;
@@ -74,6 +75,34 @@ fn main() -> std::process::ExitCode {
             contract_accounts::masked_number_u34,
         ),
         ("contacts::crud_and_filters", contract_resources::contacts),
+        ("contacts::both_roles", contract_contacts::both_roles),
+        (
+            "contacts::default_expense_account",
+            contract_contacts::default_expense_account,
+        ),
+        (
+            "contacts::history_balance_and_merge",
+            contract_contacts::history_balance_and_merge,
+        ),
+        (
+            "contacts::client_open_balance",
+            contract_contacts::client_open_balance,
+        ),
+        (
+            "contacts::vendor_1099_profile",
+            contract_contacts::vendor_1099_profile,
+        ),
+        ("contacts::jobs_u35", contract_contacts::jobs_u35),
+        ("contacts::addresses_u36", contract_contacts::addresses_u36),
+        ("contacts::notes_u37", contract_contacts::notes_u37),
+        (
+            "contacts::open_balance_u38",
+            contract_contacts::open_balance_u38,
+        ),
+        (
+            "contacts::w9_on_file_u44",
+            contract_contacts::w9_on_file_u44,
+        ),
         ("items::crud_and_filters", contract_resources::items),
         ("tags::crud_and_filters", contract_resources::tags),
         (

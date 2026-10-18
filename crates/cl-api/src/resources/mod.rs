@@ -6,6 +6,7 @@ pub(crate) mod common;
 pub mod company;
 pub mod contacts;
 pub mod export;
+pub mod form1099;
 pub mod items;
 pub mod ledger;
 pub mod operations;

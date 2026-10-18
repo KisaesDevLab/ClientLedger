@@ -327,6 +327,26 @@ pub(crate) const SESSION_SECRETS_DELETE: Operation = workspace_write(
     TimeoutClass::Auth,
 );
 
+// ---- P11 contacts and centers -----------------------------------------------
+
+/// Merge two contacts (moves their transactions, deactivates the source).
+pub(crate) const CONTACTS_MERGE: Operation = write(Method::Post, "/api/v1/contacts/merge");
+/// A contact's transactions (the ledger list filtered to it).
+pub(crate) const CONTACT_TRANSACTIONS: Operation = read("/api/v1/contacts/{id}/transactions");
+/// Open invoice balance per client.
+pub(crate) const REPORT_CUSTOMER_BALANCE: Operation =
+    read("/api/v1/reports/customer-balance-summary");
+/// Open bill balance per vendor, by age.
+pub(crate) const REPORT_AP_AGING: Operation = read("/api/v1/reports/ap-aging-summary");
+/// A vendor's 1099 profile (W-9 on file, tax ID type, backup withholding).
+pub(crate) const VENDOR_1099_PROFILE: Operation =
+    read("/api/v1/practice/1099/vendors/{contactId}/profile");
+/// Changes a vendor's 1099 profile.
+pub(crate) const VENDOR_1099_PROFILE_PUT: Operation = write(
+    Method::Put,
+    "/api/v1/practice/1099/vendors/{contactId}/profile",
+);
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -337,7 +357,7 @@ const NEVER_RETRIED: [(&str, &str); 3] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 83] = [
+pub const OPERATIONS: [Operation; 89] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -421,6 +441,12 @@ pub const OPERATIONS: [Operation; 83] = [
     SESSION_SECRETS_PUT,
     SESSION_SECRETS_GET,
     SESSION_SECRETS_DELETE,
+    CONTACTS_MERGE,
+    CONTACT_TRANSACTIONS,
+    REPORT_CUSTOMER_BALANCE,
+    REPORT_AP_AGING,
+    VENDOR_1099_PROFILE,
+    VENDOR_1099_PROFILE_PUT,
 ];
 
 /// Looks up a covered operation.
