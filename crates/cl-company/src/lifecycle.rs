@@ -64,7 +64,7 @@ pub async fn list_companies(
                 tenant_id: c.tenant_id,
                 name: c.tenant_name,
                 accent: rec.map_or(cl_settings::ACCENT_PALETTE[0], |r| r.accent),
-                last_opened: rec.and_then(|r| r.last_opened).or(c.last_accessed_at),
+                last_opened: rec.and_then(|r| r.last_opened),
                 last_backup: rec.and_then(|r| r.last_backup),
                 transaction_count: rec.and_then(|r| r.transaction_count),
                 is_sample: rec.is_some_and(|r| r.is_sample),

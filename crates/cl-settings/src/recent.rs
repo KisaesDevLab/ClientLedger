@@ -152,6 +152,13 @@ pub struct CompanyRecord {
     /// The practice company (reset any time, never backed up by schedule).
     #[serde(default)]
     pub is_sample: bool,
+    /// Deleted through the safe delete: the record stays as a tombstone
+    /// with the before-delete backup and the engine's receipt (Q-185).
+    #[serde(default)]
+    pub deleted_at: Option<Timestamp>,
+    /// The engine's delete receipt (ids and times only).
+    #[serde(default)]
+    pub delete_receipt: Option<serde_json::Value>,
 }
 
 /// Backups remembered per company.
@@ -172,7 +179,15 @@ impl CompanyRecord {
             transaction_count: None,
             source: None,
             is_sample: false,
+            deleted_at: None,
+            delete_receipt: None,
         }
+    }
+
+    /// True for a deleted company kept as a tombstone.
+    #[must_use]
+    pub fn is_tombstone(&self) -> bool {
+        self.deleted_at.is_some()
     }
 
     /// The backup with this SHA-256, if the app wrote it.
@@ -294,10 +309,29 @@ impl RecentCompanies {
         Some(self.companies.remove(i))
     }
 
+    /// Marks a company deleted: the record stays with its backup history,
+    /// the delete time and the engine's receipt, and leaves every listing.
+    pub fn tombstone(&mut self, id: TenantId, at: Timestamp, receipt: serde_json::Value) {
+        if self.last_open == Some(id) {
+            self.last_open = None;
+        }
+        if let Some(c) = self.get_mut(id) {
+            c.deleted_at = Some(at);
+            c.delete_receipt = Some(receipt);
+        }
+    }
+
+    /// Companies that exist (not tombstones), in file order.
+    pub fn live(&self) -> impl Iterator<Item = &CompanyRecord> {
+        self.companies.iter().filter(|c| !c.is_tombstone())
+    }
+
     /// Drops companies the engine no longer lists (keeps the practice
-    /// company record only while it exists in the engine too).
+    /// company record only while it exists in the engine too). Tombstones
+    /// stay.
     pub fn retain_existing(&mut self, existing: &[TenantId]) {
-        self.companies.retain(|c| existing.contains(&c.tenant_id));
+        self.companies
+            .retain(|c| c.is_tombstone() || existing.contains(&c.tenant_id));
         if self.last_open.is_some_and(|l| !existing.contains(&l)) {
             self.last_open = None;
         }
@@ -457,6 +491,15 @@ mod tests {
         assert_eq!(list.last_open, None);
         list.retain_existing(&[]);
         assert_eq!(list.companies.len(), 0);
+        // A tombstone survives retain_existing and leaves `live()`.
+        list.upsert(id(3), "Gone Co");
+        list.touch_opened(id(3), ts(5));
+        list.tombstone(id(3), ts(9), serde_json::json!({"archiveId": "a-3"}));
+        assert_eq!(list.last_open, None);
+        list.retain_existing(&[]);
+        assert_eq!(list.companies.len(), 1);
+        assert_eq!(list.live().count(), 0);
+        assert!(list.get(id(3)).expect("kept").is_tombstone());
     }
 
     #[test]

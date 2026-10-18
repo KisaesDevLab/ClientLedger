@@ -329,12 +329,15 @@ pub async fn backup(
         created_at: now,
         kind: req.kind,
     };
-    store.update(|l| l.record_backup(req.tenant_id, record.clone()))?;
-    let pruned = if req.apply_retention && req.kind == BackupKind::Backup {
-        prune_company_backups(&req.dest_dir, &rec.name, now)
-    } else {
-        Vec::new()
-    };
+    let apply = req.apply_retention && req.kind == BackupKind::Backup;
+    let dest_dir = req.dest_dir.clone();
+    let pruned = store.update(|l| {
+        l.record_backup(req.tenant_id, record.clone());
+        match (apply, l.get_mut(req.tenant_id)) {
+            (true, Some(r)) => prune_company_backups(r, &dest_dir, now),
+            _ => Vec::new(),
+        }
+    })?;
     progress(Progress::Done);
     Ok(BackupOutcome {
         record,
@@ -343,62 +346,35 @@ pub async fn backup(
     })
 }
 
-/// Deletes older `<company>-*.clbackup` files in `dir` by the retention
-/// rule (last 10 plus monthly for 12 months). Portable and before-delete
-/// copies are never pruned.
+/// Applies the retention rule (last 10 plus monthly for 12 months) to a
+/// company's **own backup history**: only regular backups recorded under
+/// `dir` are candidates (never portable or before-delete copies, never a
+/// file of another company that happens to share a name stem). Deleted
+/// files leave the history; a file already gone is dropped from the
+/// history too.
 #[must_use]
-pub fn prune_company_backups(dir: &Path, company: &str, now: Timestamp) -> Vec<PathBuf> {
-    let prefix = backup_file_name(company, now, BackupKind::Backup);
-    let Some(prefix) = prefix
-        .rsplit_once('-')
-        .and_then(|(a, _)| a.rsplit_once('-').map(|(p, _)| p.to_string()))
-    else {
-        return Vec::new();
-    };
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut files = Vec::new();
-    for e in entries.flatten() {
-        let path = e.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        if !name.starts_with(&format!("{prefix}-")) || !name.ends_with(".clbackup") {
-            continue;
+pub fn prune_company_backups(
+    rec: &mut cl_settings::CompanyRecord,
+    dir: &Path,
+    now: Timestamp,
+) -> Vec<PathBuf> {
+    let candidates: Vec<(PathBuf, Timestamp)> = rec
+        .backups
+        .iter()
+        .filter(|b| b.kind == BackupKind::Backup && b.path.parent() == Some(dir))
+        .map(|b| (b.path.clone(), b.created_at))
+        .collect();
+    let delete = prune_plan(&candidates, now, KEEP_LAST, KEEP_MONTHS);
+    let mut removed = Vec::new();
+    for path in delete {
+        match std::fs::remove_file(&path) {
+            Ok(()) => removed.push(path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => removed.push(path),
+            Err(_) => {}
         }
-        if name.contains("-portable.") || name.contains("-before-delete.") {
-            continue;
-        }
-        let Some(at) = parse_stamp(name, &prefix) else {
-            continue;
-        };
-        files.push((path, at));
     }
-    let delete = prune_plan(&files, now, KEEP_LAST, KEEP_MONTHS);
-    delete
-        .into_iter()
-        .filter(|p| std::fs::remove_file(p).is_ok())
-        .collect()
-}
-
-fn parse_stamp(name: &str, prefix: &str) -> Option<Timestamp> {
-    let rest = name.strip_prefix(prefix)?.strip_prefix('-')?;
-    let stamp = rest.get(..15)?;
-    let (date, time) = stamp.split_once('-')?;
-    if date.len() != 8 || time.len() != 6 {
-        return None;
-    }
-    Timestamp::parse_wire(&format!(
-        "{}-{}-{}T{}:{}:{}.000Z",
-        &date[..4],
-        &date[4..6],
-        &date[6..8],
-        &time[..2],
-        &time[2..4],
-        &time[4..6]
-    ))
-    .ok()
+    rec.backups.retain(|b| !removed.contains(&b.path));
+    removed
 }
 
 #[cfg(test)]
@@ -417,10 +393,6 @@ mod tests {
             name,
             "Ozark-Ridge-Landscaping-LLC-2026-20261104-081200.clbackup"
         );
-        assert_eq!(
-            parse_stamp(&name, "Ozark-Ridge-Landscaping-LLC-2026"),
-            Some(at)
-        );
         assert!(backup_file_name("", at, BackupKind::Portable).starts_with("Company-"));
         assert!(backup_file_name("x", at, BackupKind::Portable).ends_with("-portable.clbackup"));
     }
@@ -437,36 +409,55 @@ mod tests {
     }
 
     #[test]
-    fn pruning_touches_only_this_companys_regular_backups() {
+    fn pruning_follows_the_history_not_the_folder() {
         let dir = tempfile::tempdir().expect("tmp");
         let now = Timestamp::parse_wire("2026-11-04T08:12:00.000Z").expect("ts");
+        let mut rec = cl_settings::CompanyRecord::new(
+            cl_core::ids::TenantId::parse("1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
+            "Ozark",
+            cl_settings::ACCENT_PALETTE[0],
+        );
+        let add =
+            |rec: &mut cl_settings::CompanyRecord, at: Timestamp, kind: BackupKind, sub: &Path| {
+                let path = sub.join(backup_file_name("Ozark", at, kind));
+                std::fs::write(&path, b"x").expect("write");
+                rec.backups.push(BackupRecord {
+                    path,
+                    sha256: "0".repeat(64),
+                    archive_id: at.to_wire(),
+                    created_at: at,
+                    kind,
+                });
+            };
         for i in 0..12 {
             let at =
                 Timestamp::parse_wire(&format!("2026-10-{:02}T08:00:00.000Z", i + 1)).expect("ts");
-            std::fs::write(
-                dir.path()
-                    .join(backup_file_name("Ozark", at, BackupKind::Backup)),
-                b"x",
-            )
-            .expect("write");
+            add(&mut rec, at, BackupKind::Backup, dir.path());
         }
         let old = Timestamp::parse_wire("2024-01-01T08:00:00.000Z").expect("ts");
+        add(&mut rec, old, BackupKind::Portable, dir.path());
+        // A same-stem file of another company in the folder is not ours.
         std::fs::write(
             dir.path()
-                .join(backup_file_name("Ozark", old, BackupKind::Portable)),
+                .join(backup_file_name("Ozark", old, BackupKind::Backup)),
             b"x",
         )
         .expect("write");
-        std::fs::write(
-            dir.path()
-                .join(backup_file_name("Other", old, BackupKind::Backup)),
-            b"x",
-        )
-        .expect("write");
-        let pruned = prune_company_backups(dir.path(), "Ozark", now);
+        // An old backup recorded in another folder is left alone.
+        let elsewhere = tempfile::tempdir().expect("tmp");
+        add(&mut rec, old, BackupKind::Backup, elsewhere.path());
+        let before = rec.backups.len();
+        let pruned = prune_company_backups(&mut rec, dir.path(), now);
         assert_eq!(pruned.len(), 2, "{pruned:?}");
+        assert_eq!(
+            rec.backups.len(),
+            before - 2,
+            "pruned files leave the history"
+        );
+        assert!(rec.backups.iter().all(|b| b.path.exists()));
         let left = std::fs::read_dir(dir.path()).expect("dir").count();
-        assert_eq!(left, 12);
+        assert_eq!(left, 12, "10 kept + portable + the other company's file");
+        assert_eq!(std::fs::read_dir(elsewhere.path()).expect("dir").count(), 1);
         for p in &pruned {
             assert!(
                 p.to_string_lossy().contains("Ozark-20261001")

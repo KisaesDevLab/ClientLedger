@@ -451,7 +451,7 @@ impl Serialize for DeleteRequest {
 }
 
 /// The engine's delete receipt (kept with the backup history).
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteReceipt {
     /// The deleted tenant.

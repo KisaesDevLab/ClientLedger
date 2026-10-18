@@ -118,11 +118,11 @@ impl BackupScreen {
         };
         if self.passphrase_needed {
             if self.passphrase.chars().count() < 12 {
-                self.error = Some(CompanyError::NoPassphrase);
+                self.error = Some(CompanyError::PassphraseTooShort);
                 return;
             }
             if self.passphrase != self.passphrase_confirm {
-                self.error = Some(CompanyError::NameMismatch);
+                self.error = Some(CompanyError::PassphraseMismatch);
                 return;
             }
             let secret = Secret::new(std::mem::take(&mut self.passphrase));

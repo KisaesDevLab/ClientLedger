@@ -547,7 +547,20 @@ async fn delete_needs_the_capability_the_exact_name_and_a_fresh_backup() {
     assert_eq!(del.len(), 1);
     assert_eq!(del[0]["confirmName"], "Ozark Ridge Landscaping LLC");
     assert_eq!(del[0]["archive"]["sha256"], sha256(b"ciphered"));
-    assert!(store.load().expect("load").get(t(T1)).is_none());
+    let kept = store.load().expect("load");
+    let tomb = kept.get(t(T1)).expect("a tombstone keeps the record");
+    assert!(tomb.is_tombstone());
+    assert_eq!(
+        tomb.delete_receipt.as_ref().map(|r| r["archiveId"].clone()),
+        Some(json!("arch-1"))
+    );
+    assert_eq!(
+        tomb.backups.len(),
+        1,
+        "the before-delete backup stays in the history"
+    );
+    assert_eq!(kept.live().count(), 0);
+    assert_eq!(del[0]["confirmName"], "Ozark Ridge Landscaping LLC");
 }
 
 #[tokio::test]

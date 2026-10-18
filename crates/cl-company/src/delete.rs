@@ -105,7 +105,7 @@ pub async fn delete_company(
         .delete(
             req.tenant_id,
             &cl_api::DeleteRequest {
-                confirm_name: rec.name.clone(),
+                confirm_name: req.typed_name.trim().to_string(),
                 archive_path: std::path::absolute(&taken.record.path)
                     .map_err(CompanyError::io("resolve backup"))?,
                 archive_sha256: taken.record.sha256.clone(),
@@ -114,9 +114,9 @@ pub async fn delete_company(
             },
         )
         .await?;
-    store.update(|l| {
-        l.remove(req.tenant_id);
-    })?;
+    let now = cl_settings::recent::now();
+    let receipt_json = serde_json::to_value(&receipt).unwrap_or_default();
+    store.update(|l| l.tombstone(req.tenant_id, now, receipt_json))?;
     Ok(DeleteOutcome {
         backup: taken.record,
         receipt,

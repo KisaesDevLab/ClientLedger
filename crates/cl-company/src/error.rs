@@ -34,6 +34,12 @@ pub enum CompanyError {
     /// No backup passphrase is set yet (Q-P02i).
     #[error("no backup passphrase")]
     NoPassphrase,
+    /// A new backup passphrase needs 12+ characters.
+    #[error("passphrase too short")]
+    PassphraseTooShort,
+    /// The two passphrase entries differ.
+    #[error("passphrase mismatch")]
+    PassphraseMismatch,
     /// An archive job (export or import) failed or disappeared (engine
     /// restarted).
     #[error("archive job failed ({code})")]
@@ -88,6 +94,14 @@ impl OwnerFacing for CompanyError {
             CompanyError::NoPassphrase => {
                 OwnerMessage::with_fix("error.company.no_passphrase", "fix.company.no_passphrase")
             }
+            CompanyError::PassphraseTooShort => OwnerMessage::with_fix(
+                "error.company.passphrase_short",
+                "fix.company.passphrase_short",
+            ),
+            CompanyError::PassphraseMismatch => OwnerMessage::with_fix(
+                "error.company.passphrase_mismatch",
+                "fix.company.passphrase_mismatch",
+            ),
             CompanyError::JobFailed { code } => match code.as_str() {
                 "ARCHIVE_PASSPHRASE_INVALID" => {
                     OwnerMessage::with_fix("error.company.passphrase", "fix.company.passphrase")
