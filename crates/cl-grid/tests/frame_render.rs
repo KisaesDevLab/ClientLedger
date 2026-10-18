@@ -117,7 +117,7 @@ fn the_widest_amount_is_never_cut_and_the_column_only_grows() {
     for _ in 0..3 {
         b.frame(vec![]);
     }
-    assert_eq!(width(&b), grown);
+    assert!((width(&b) - grown).abs() < f32::EPSILON, "the column kept its width");
 }
 
 fn has_rect(b: &Browse<Register>, color: Color32, y_range: (f32, f32), x: f32) -> bool {
