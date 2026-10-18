@@ -1,9 +1,9 @@
 //! The demo "engine" lists beyond the chart and the contacts (P11 steps
 //! 4-5): Ozark Ridge's service items and its tags. Synthetic.
 
-use cl_api::{Item, ItemFields};
+use cl_api::{Item, ItemFields, Tag, TagFields, TagGroup, TagGroupFields, TagUsage};
 use cl_core::Money;
-use cl_core::ids::ItemId;
+use cl_core::ids::{ItemId, TagGroupId, TagId};
 
 use super::{DemoState, account_id};
 
@@ -88,9 +88,116 @@ pub fn items() -> Vec<Item> {
         .collect()
 }
 
+/// A demo tag id (stable across runs).
+#[must_use]
+pub fn tag_id(n: u32) -> TagId {
+    TagId::parse(&format!("d0000000-0000-4000-8000-c{n:011}"))
+        .unwrap_or_else(|_| unreachable!("a well-formed demo id"))
+}
+
+/// A demo tag group id (stable across runs).
+#[must_use]
+pub fn group_id(n: u32) -> TagGroupId {
+    TagGroupId::parse(&format!("d0000000-0000-4000-8000-e{n:011}"))
+        .unwrap_or_else(|_| unreachable!("a well-formed demo id"))
+}
+
+/// The demo tag groups: Route (one per line) and Crew (any number).
+#[must_use]
+pub fn tag_groups() -> Vec<TagGroup> {
+    [
+        (1, "Route", "Where the work is", true),
+        (2, "Crew", "Who did the work", false),
+    ]
+    .into_iter()
+    .map(|(n, name, description, single)| TagGroup {
+        id: group_id(n),
+        fields: TagGroupFields {
+            name: name.to_string(),
+            description: Some(description.to_string()),
+            is_single_select: single,
+        },
+        sort_order: Some(i64::from(n)),
+        tags: Vec::new(),
+    })
+    .collect()
+}
+
+/// The demo tags: three routes, two crews, two ungrouped tags and an
+/// inactive promotion.
+#[must_use]
+pub fn tags() -> Vec<Tag> {
+    [
+        (1, "North Route", Some(1), true),
+        (2, "South Route", Some(1), true),
+        (3, "Lake Area", Some(1), true),
+        (4, "Crew 1", Some(2), true),
+        (5, "Crew 2", Some(2), true),
+        (6, "Warranty Work", None, true),
+        (7, "Storm Cleanup", None, true),
+        (8, "Spring Promo 2025", None, false),
+    ]
+    .into_iter()
+    .map(|(n, name, group, active)| Tag {
+        id: tag_id(n),
+        fields: TagFields {
+            name: name.to_string(),
+            color: None,
+            group_id: group.map(group_id),
+            description: None,
+        },
+        is_active: active,
+        usage_count: Some(0),
+        sort_order: Some(0),
+        created_at: Some(DemoState::now()),
+        updated_at: Some(DemoState::now()),
+    })
+    .collect()
+}
+
+/// Where a demo tag is used: Lake Area on transaction lines (so it can't be
+/// merged yet, U-41), Storm Cleanup on three transactions (header tags
+/// only), Crew 1 as an item's default; the rest unused.
+#[must_use]
+pub fn tag_usage(id: TagId) -> TagUsage {
+    if id == tag_id(3) {
+        TagUsage {
+            transaction_lines: 12,
+            transactions: 4,
+            total: 16,
+            ..TagUsage::default()
+        }
+    } else if id == tag_id(7) {
+        TagUsage {
+            transactions: 3,
+            total: 3,
+            ..TagUsage::default()
+        }
+    } else if id == tag_id(4) {
+        TagUsage {
+            items: 1,
+            total: 1,
+            ..TagUsage::default()
+        }
+    } else {
+        TagUsage::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn demo_tags_have_groups_and_usage() {
+        let groups = tag_groups();
+        let tags = tags();
+        assert!(groups[0].fields.is_single_select && !groups[1].fields.is_single_select);
+        assert_eq!(tags.iter().filter(|t| !t.is_active).count(), 1);
+        assert!(!tag_usage(tag_id(3)).merge_safe());
+        assert!(tag_usage(tag_id(7)).merge_safe());
+        assert_eq!(tag_usage(tag_id(1)).total, 0);
+    }
 
     #[test]
     fn demo_items_are_services_on_service_income() {

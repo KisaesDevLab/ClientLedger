@@ -49,6 +49,17 @@ pub struct DemoState {
     /// The open company's items as the demo "engine" keeps them (built on
     /// first use, P11 step 4).
     pub items: Option<Vec<cl_api::Item>>,
+    /// The open company's tags and tag groups (built on first use, P11
+    /// step 5).
+    pub tags: Option<Vec<cl_api::Tag>>,
+    /// Tag groups.
+    pub tag_groups: Option<Vec<cl_api::TagGroup>>,
+    /// Required tag groups by account type (the demo company's local
+    /// preference, Q-180).
+    pub required_tag_groups:
+        std::collections::BTreeMap<cl_core::ids::TagGroupId, std::collections::BTreeSet<String>>,
+    /// Tags merged or deleted in the demo (their usage moved or gone).
+    pub tags_gone: std::collections::BTreeSet<cl_core::ids::TagId>,
 }
 
 fn id(n: u8) -> TenantId {
@@ -104,6 +115,10 @@ impl DemoState {
             merged: Vec::new(),
             profiles: std::collections::BTreeMap::new(),
             items: None,
+            tags: None,
+            tag_groups: None,
+            required_tag_groups: std::collections::BTreeMap::new(),
+            tags_gone: std::collections::BTreeSet::new(),
         }
     }
 
@@ -134,6 +149,16 @@ impl DemoState {
     /// The demo items, built on first use.
     pub fn items_mut(&mut self) -> &mut Vec<cl_api::Item> {
         self.items.get_or_insert_with(lists::items)
+    }
+
+    /// The demo tags, built on first use.
+    pub fn tags_mut(&mut self) -> &mut Vec<cl_api::Tag> {
+        self.tags.get_or_insert_with(lists::tags)
+    }
+
+    /// The demo tag groups, built on first use.
+    pub fn tag_groups_mut(&mut self) -> &mut Vec<cl_api::TagGroup> {
+        self.tag_groups.get_or_insert_with(lists::tag_groups)
     }
 
     /// A fresh fake tenant id for a company made in the demo.

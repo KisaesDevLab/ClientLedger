@@ -52,6 +52,7 @@ pub fn has(key: &str) -> bool {
 mod contacts;
 mod items;
 mod lists;
+mod tags;
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
     static CATALOG: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
@@ -61,6 +62,7 @@ fn catalog() -> &'static HashMap<&'static str, &'static str> {
             .chain(lists::ENGLISH)
             .chain(contacts::ENGLISH)
             .chain(items::ENGLISH)
+            .chain(tags::ENGLISH)
             .copied()
             .collect()
     })
@@ -911,6 +913,7 @@ mod tests {
             .chain(lists::ENGLISH)
             .chain(contacts::ENGLISH)
             .chain(items::ENGLISH)
+            .chain(tags::ENGLISH)
         {
             assert!(seen.insert(*k), "duplicate key {k}");
             assert_ne!(*v, "", "{k}");

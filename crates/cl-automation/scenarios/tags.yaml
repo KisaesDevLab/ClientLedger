@@ -1,0 +1,123 @@
+# Tags (P11 step 5) against `clientledger --demo`: tags by group, where
+# the selected tag is used, merge offered only for a tag used on
+# transactions alone (U-41), a used tag not deleted, a new group with one
+# tag per line and required on income lines (Q-179, Q-180), and a
+# keyboard-only create (a used name refused), edit with Esc revert, make
+# inactive / active again and delete. What the scenario makes is removed
+# again (the tag deleted, the group deleted) so the dark run repeats it.
+# The demo data is synthetic.
+name: tags
+description: Groups, usage, merge rule, keyboard create/edit/inactivate/delete, group rules.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: lists.tags
+  - assert_exists: {role: tab, label: Tags}
+  - assert_state: {key: screen.screen, equals: tags}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.groups, equals: 2}
+  - assert_state: {key: screen.focused, equals: true}
+  - assert_exists: {role: row, label_contains: "Lake Area, Route"}
+  - assert_state: {key: screen.usage_loaded, equals: true}
+  - assert_state: {key: screen.merge_available, equals: false}
+  - assert_exists: {label_contains: "Merging a tag used on transaction lines"}
+  - assert_not_exists: {role: button, label_contains: "Merge"}
+  - assert_exists: {label_contains: "One per line"}
+  - assert_no_clipping: {}
+  - screenshot: list
+
+  # A tag used on transactions only can be merged; a used tag isn't deleted.
+  - type: {text: Storm}
+  - assert_state: {key: screen.usage_total, equals: 3}
+  - assert_state: {key: screen.merge_available, equals: true}
+  - assert_exists: {role: button, label_contains: "Merge"}
+  - key: Ctrl+D
+  - assert_state: {key: screen.warning, equals: in_use}
+  - focus: {role: button, label_contains: "Merge"}
+  - key: Space
+  - assert_state: {key: screen.panel, equals: merge}
+  - assert_exists: {label_contains: "A merge can't be undone"}
+  - screenshot: merge
+  - key: Escape
+  - assert_state: {key: screen.panel, equals: none}
+
+  # --- Include inactive (Ctrl+Shift+H), twice ---------------------------------
+  - key: Ctrl+Shift+H
+  - assert_exists: {role: row, label_contains: "Spring Promo 2025, Inactive"}
+  - key: Ctrl+Shift+H
+  - assert_state: {key: screen.show_inactive, equals: false}
+
+  # --- A group: one per line, required on income lines ----------------------
+  - focus: {role: button, label: New group}
+  - key: Space
+  - assert_state: {key: screen.panel, equals: new_group}
+  - type: {text: "Job Type {theme}"}
+  - key: Tab
+  - type: {text: Install or repair}
+  - key: Tab
+  - key: Space
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Space
+  - assert_exists: {label_contains: "kept on this computer"}
+  - assert_no_clipping: {}
+  - screenshot: group
+  - key: Alt+S
+  - assert_state: {key: screen.panel, equals: none}
+  - assert_state: {key: screen.note, equals: group_saved}
+  - assert_state: {key: screen.groups, equals: 3}
+  - assert_exists: {label_contains: "Required on Income lines"}
+
+  # --- Keyboard-only create: a used name is refused, then Alt+S --------------
+  - key: Ctrl+N
+  - assert_state: {key: screen.panel, equals: new_tag}
+  - type: {text: storm cleanup}
+  - key: Alt+S
+  - assert_state: {key: screen.problem, equals: name_taken}
+  - assert_exists: {label_contains: "already has this name"}
+  - key: Escape
+  - assert_state: {key: screen.dirty, equals: false}
+  - type: {text: "Install {theme}"}
+  - key: Tab
+  - type: {text: J}
+  - key: Alt+S
+  - assert_state: {key: screen.panel, equals: none}
+  - assert_state: {key: screen.note, equals: saved}
+  - assert_exists: {role: row, label_contains: "Install"}
+  - assert_state: {key: screen.usage_total, equals: 0}
+
+  # --- Keyboard-only edit (Ctrl+E), Esc reverts, then closes -----------------
+  - key: Ctrl+E
+  - assert_state: {key: screen.panel, equals: edit_tag}
+  - key: End
+  - type: {text: " Work"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: Escape
+  - assert_state: {key: screen.dirty, equals: false}
+  - key: Escape
+  - assert_state: {key: screen.panel, equals: none}
+
+  # --- Make inactive, active again; then delete (unused) ---------------------
+  - key: Ctrl+Shift+I
+  - assert_state: {key: screen.note, equals: made_inactive}
+  - key: Ctrl+Shift+H
+  - assert_state: {key: screen.selected_active, equals: false}
+  - key: Ctrl+Shift+I
+  - assert_state: {key: screen.note, equals: made_active}
+  - key: Ctrl+Shift+H
+  - key: Ctrl+D
+  - assert_state: {key: screen.note, equals: deleted}
+  - assert_not_exists: {role: row, label_contains: "Install"}
+
+  # --- Delete the group again (its tags would stay, ungrouped) ---------------
+  - focus: {role: button, label_contains: "Edit group Job Type"}
+  - key: Space
+  - assert_state: {key: screen.panel, equals: edit_group}
+  - focus: {role: button, label: Delete group}
+  - key: Space
+  - assert_state: {key: screen.note, equals: group_deleted}
+  - assert_state: {key: screen.groups, equals: 2}
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Tags}

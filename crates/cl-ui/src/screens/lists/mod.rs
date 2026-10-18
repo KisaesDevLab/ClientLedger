@@ -7,6 +7,7 @@ pub mod center;
 pub mod detail_pane;
 pub mod items;
 pub mod rows;
+pub mod tags;
 
 use std::sync::Arc;
 
@@ -44,6 +45,7 @@ pub fn make(
             today,
         ))),
         items::KIND => Some(Box::new(items::ItemsScreen::new(Arc::clone(link), open))),
+        tags::KIND => Some(Box::new(tags::TagsScreen::new(Arc::clone(link), open))),
         _ => None,
     }
 }

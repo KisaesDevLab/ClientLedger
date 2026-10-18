@@ -256,7 +256,7 @@ pub const COMMANDS: &[Command] = &[
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
-    screen("lists.tags", "Tags", Some(Menu::Lists), 0, None, "P11"),
+    built("lists.tags", "Tags", Some(Menu::Lists), 0, None),
     // List windows (Chart of Accounts first; the other lists use the same keys)
     cmd("list.new", "New List Entry", None, 3, ctrl('N'), Scope::Window),
     cmd("list.toggle_active", "Make Inactive or Active Again", None, 3, ctrl_shift('I'), Scope::Window),
@@ -391,6 +391,7 @@ mod tests {
             "edit.preferences",
             "lists.chart_of_accounts",
             "lists.items",
+            "lists.tags",
             "clients.center",
             "vendors.center",
         ];
