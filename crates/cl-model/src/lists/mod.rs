@@ -3,6 +3,7 @@
 //! types only arrange and check what the screen loaded.
 
 pub mod accounts;
+pub mod contacts;
 
 /// Characters counted the way the engine's schemas count them (UTF-16 code
 /// units, as JavaScript's `String.length`), so a local length check never
