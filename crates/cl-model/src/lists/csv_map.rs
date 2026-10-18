@@ -505,14 +505,17 @@ fn limit(value: Option<&str>, t: Target, max: usize) -> Result<Option<String>, R
     }
 }
 
-/// Turns data rows (line, cells) into checked rows. Names are checked for
-/// duplicates within the file for accounts and items, ignoring case.
+/// Turns data rows (line, cells) into checked rows. Item and contact
+/// names are checked for duplicates within the file, ignoring case;
+/// `contact_taken` says whether an active contact (in either center)
+/// already has a name, and such rows are left out as `NameTaken`.
 #[must_use]
 pub fn build(
     list: CsvList,
     mapping: &[Option<Target>],
     rows: &[(usize, Vec<String>)],
     items: Option<&ItemLookups<'_>>,
+    contact_taken: Option<&dyn Fn(&str) -> bool>,
 ) -> Built {
     let mut out = Built::default();
     let mut seen: HashSet<String> = HashSet::new();
@@ -528,10 +531,16 @@ pub fn build(
         let r = r.and_then(|m| {
             let name = match &m {
                 Mapped::Item(i) => Some(&i.name),
-                Mapped::Account(_) | Mapped::Contact(_) => None,
+                Mapped::Contact(c) => Some(&c.name),
+                Mapped::Account(_) => None,
             };
             match name {
                 Some(n) if !seen.insert(n.to_lowercase()) => Err(RowProblem::NameTaken),
+                Some(n)
+                    if matches!(m, Mapped::Contact(_)) && contact_taken.is_some_and(|f| f(n)) =>
+                {
+                    Err(RowProblem::NameTaken)
+                }
                 _ => Ok(m),
             }
         });

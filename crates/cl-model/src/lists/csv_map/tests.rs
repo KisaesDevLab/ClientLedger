@@ -145,7 +145,7 @@ fn account_rows() {
         (6, s(&["", "Moon", "Spaceship", ""])),
         (7, s(&[long_num.as_str(), "Long", "Asset", ""])),
     ];
-    let b = build(CsvList::Accounts, &m, &rows, None);
+    let b = build(CsvList::Accounts, &m, &rows, None, None);
     assert_eq!(b.rows.len(), 3);
     assert_eq!(
         b.rows[0].1,
@@ -190,7 +190,7 @@ fn contact_rows() {
         (4, s(&["Cy", "", "", &"1".repeat(31)])),
         (5, s(&["Di"])),
     ];
-    let b = build(CsvList::Contacts, &m, &rows, None);
+    let b = build(CsvList::Contacts, &m, &rows, None, None);
     assert_eq!(b.rows.len(), 2);
     assert_eq!(
         b.rows[1].1,
@@ -237,7 +237,7 @@ fn item_rows_exact_prices_and_accounts() {
         (8, s(&["Maybe", "", "", "", "perhaps"])),
         (9, s(&["trim", "", "", "", ""])),
     ];
-    let b = build(CsvList::Items, &m, &rows, Some(&l));
+    let b = build(CsvList::Items, &m, &rows, Some(&l), None);
     assert_eq!(b.rows.len(), 2);
     assert_eq!(
         b.rows[0].1,
@@ -280,6 +280,7 @@ fn item_rows_exact_prices_and_accounts() {
         &[Some(Target::ItemName)],
         &[(2, s(&["X"]))],
         Some(&none),
+        None,
     );
     assert_eq!(b.issues[0].problem, RowProblem::IncomeAccountMissing);
     let b = build(
@@ -287,8 +288,32 @@ fn item_rows_exact_prices_and_accounts() {
         &[Some(Target::ItemName)],
         &[(2, s(&["X"]))],
         None,
+        None,
     );
     assert_eq!(b.issues[0].problem, RowProblem::IncomeAccountMissing);
+}
+
+/// S2: a contact name already on an active contact, or twice in the file,
+/// is left out as taken.
+#[test]
+fn contact_names_already_used_are_taken() {
+    let m = guess(CsvList::Contacts, &s(&["Name"]));
+    let rows = vec![
+        (2, s(&["Ada Park"])),
+        (3, s(&["ada park"])),
+        (4, s(&["Pine Ridge Storage"])),
+        (5, s(&["New Name"])),
+    ];
+    let active = ["pine ridge storage".to_string()];
+    let taken = |n: &str| active.contains(&n.to_lowercase());
+    let b = build(CsvList::Contacts, &m, &rows, None, Some(&taken));
+    let ok: Vec<usize> = b.rows.iter().map(|(l, _)| *l).collect();
+    assert_eq!(ok, [2, 5]);
+    let issues: Vec<(usize, RowProblem)> = b.issues.iter().map(|i| (i.line, i.problem)).collect();
+    assert_eq!(
+        issues,
+        [(3, RowProblem::NameTaken), (4, RowProblem::NameTaken)]
+    );
 }
 
 #[test]

@@ -20,8 +20,8 @@ use std::sync::Arc;
 
 use cl_api::{
     Account, AccountFields, AccountFilter, AccountImportRow, AccountType, ApiError, ConflictReason,
-    ContactFields, ContactImportRow, ContactType, IdempotencyKey, ItemFields, ItemFilter,
-    OrphanLabel, RequestGroup, Tag, TagFilter, TagGroup,
+    ContactFields, ContactFilter, ContactImportRow, ContactType, IdempotencyKey, ItemFields,
+    ItemFilter, OrphanLabel, RequestGroup, Tag, TagFilter, TagGroup,
 };
 use cl_core::ids::{AccountId, TenantId};
 use cl_import::csv;
@@ -66,6 +66,12 @@ impl ListChoice {
         ListChoice::Items,
         ListChoice::Tags,
     ];
+
+    /// The import checks names (and items accounts) against what the
+    /// company already has.
+    fn needs_lookups(self) -> bool {
+        matches!(self, ListChoice::Contacts | ListChoice::Items)
+    }
 
     fn csv(self) -> Option<CsvList> {
         match self {
@@ -132,6 +138,8 @@ struct Outcome {
 struct Lookups {
     accounts: Vec<Account>,
     item_names: Vec<String>,
+    /// Active contacts' names, either center (names are unique across both).
+    contact_names: Vec<String>,
 }
 
 /// The Import or Export a List window.
@@ -203,7 +211,7 @@ impl CsvScreen {
         if let (Some(l), Some(p)) = (list.csv(), self.parsed.as_ref()) {
             self.mapping = csv_map::guess(l, &p.headers);
         }
-        if list == ListChoice::Items {
+        if list.needs_lookups() {
             self.load_lookups();
         }
         self.rebuild();
@@ -275,7 +283,7 @@ impl CsvScreen {
                     self.mapping = csv_map::guess(l, &p.headers);
                 }
                 self.parsed = Some(p);
-                if self.list == ListChoice::Items {
+                if self.list.needs_lookups() {
                     self.load_lookups();
                 }
             }
@@ -298,9 +306,16 @@ impl CsvScreen {
                 .iter()
                 .map(|i| i.fields.name.clone())
                 .collect();
+            let contact_names = d
+                .contacts_mut()
+                .iter()
+                .filter(|c| c.is_active)
+                .map(|c| c.fields.display_name.clone())
+                .collect();
             self.lookups_task = Some(Task::ready(Lookups {
                 accounts,
                 item_names,
+                contact_names,
             }));
             return;
         }
@@ -310,9 +325,19 @@ impl CsvScreen {
         if let Ok(p) = group.read(&session, |s| async move {
             let accounts = s.accounts().list_all(&AccountFilter::default()).await?;
             let items = s.items().list_all(&ItemFilter::default()).await?;
+            let active = ContactFilter {
+                is_active: Some(true),
+                ..ContactFilter::default()
+            };
+            let contacts = s.contacts().list_all(&active).await?;
             Ok(Lookups {
                 accounts,
                 item_names: items.into_iter().map(|i| i.fields.name).collect(),
+                contact_names: contacts
+                    .into_iter()
+                    .filter(|c| c.is_active)
+                    .map(|c| c.fields.display_name)
+                    .collect(),
             })
         }) {
             self.lookups_task = Some(Task::Pending(p));
@@ -370,13 +395,21 @@ impl CsvScreen {
                 .map(|(id, _, _)| *id)
         };
         let taken = |n: &str| names.contains(&n.to_lowercase());
+        let contact_names: Vec<String> = self
+            .lookups
+            .as_ref()
+            .map(|l| l.contact_names.iter().map(|n| n.to_lowercase()).collect())
+            .unwrap_or_default();
+        let contact_taken = |n: &str| contact_names.contains(&n.to_lowercase());
         let lookups = ItemLookups {
             income_account: &resolve,
             default_income: self.default_income,
             name_taken: &taken,
         };
         let items = (list == CsvList::Items && self.lookups.is_some()).then_some(&lookups);
-        self.built = csv_map::build(list, &self.mapping, &p.rows, items);
+        let contacts: Option<&dyn Fn(&str) -> bool> =
+            (list == CsvList::Contacts && self.lookups.is_some()).then_some(&contact_taken);
+        self.built = csv_map::build(list, &self.mapping, &p.rows, items, contacts);
     }
 
     fn can_import(&self) -> bool {
@@ -385,7 +418,7 @@ impl CsvScreen {
             && self.problems.is_empty()
             && !self.built.rows.is_empty()
             && self.import.is_none()
-            && (self.list != ListChoice::Items || self.lookups.is_some())
+            && (!self.list.needs_lookups() || self.lookups.is_some())
     }
 
     /// Sends the ready rows.
@@ -524,25 +557,41 @@ impl CsvScreen {
         }
         if let Some(r) = self.import.as_mut().and_then(Task::try_take) {
             self.import = None;
-            match r {
-                Ok(o) => {
-                    tracing::info!(
-                        list = self.list.key(),
-                        imported = o.imported,
-                        left_out = o.skipped.len(),
-                        "list imported"
-                    );
-                    // Names now taken: read them again before another import.
-                    self.lookups = None;
-                    self.outcome = Some(o);
-                    self.parsed = None;
-                    self.built = Built::default();
-                    self.problems.clear();
-                    if self.list == ListChoice::Items {
-                        self.load_lookups();
-                    }
+            self.import_finished(r);
+        }
+    }
+
+    /// What an import answered. Either way the names are read again before
+    /// another import is allowed: after an error some rows may have gone
+    /// in (S2).
+    fn import_finished(&mut self, r: Result<Outcome, ApiError>) {
+        match r {
+            Ok(o) => {
+                tracing::info!(
+                    list = self.list.key(),
+                    imported = o.imported,
+                    left_out = o.skipped.len(),
+                    "list imported"
+                );
+                // Names now taken: read them again before another import.
+                self.lookups = None;
+                self.outcome = Some(o);
+                self.parsed = None;
+                self.built = Built::default();
+                self.problems.clear();
+                if self.list.needs_lookups() {
+                    self.load_lookups();
                 }
-                Err(e) => self.import_error = Some(e),
+            }
+            Err(e) => {
+                // Some rows may have gone in: read the names again
+                // before another import is allowed (S2).
+                self.import_error = Some(e);
+                self.lookups = None;
+                if self.list.needs_lookups() {
+                    self.load_lookups();
+                }
+                self.rebuild();
             }
         }
     }

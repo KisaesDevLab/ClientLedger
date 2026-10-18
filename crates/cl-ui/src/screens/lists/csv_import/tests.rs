@@ -182,6 +182,39 @@ fn imports_contacts_with_the_chosen_role() {
     assert_eq!(vendor, Some(ContactType::Vendor));
 }
 
+/// S2: a name an active contact already has is left out, the file's own
+/// duplicates too, and the names are read again after an import, whether
+/// it worked or failed.
+#[test]
+fn contact_import_leaves_out_names_already_used() {
+    let mut r = Rig::new();
+    r.s.set_list(ListChoice::Contacts);
+    r.frames(2);
+    assert!(r.s.lookups.is_some(), "contact names read");
+    r.read(
+        "people.csv",
+        "Display Name\nCrane Creek Tree Service\nNew Person\nnew person\n",
+    );
+    assert_eq!(r.state("ready"), 1);
+    assert_eq!(r.state("left_out"), 2);
+    r.s.start_import();
+    r.frames(2);
+    assert_eq!(r.state("imported"), 1);
+    assert!(r.s.lookups.is_some(), "read again after the import");
+    r.read("people2.csv", "Display Name\nNEW PERSON\n");
+    assert_eq!(r.state("ready"), 0, "now taken");
+
+    // A failed import: no second import until the names are read again.
+    r.read("people3.csv", "Display Name\nAnother Person\n");
+    assert_eq!(r.state("ready"), 1);
+    r.s.import_finished(Err(cl_api::ApiError::NotFound { code: None }));
+    assert!(r.s.lookups.is_none());
+    assert!(!r.s.can_import(), "blocked until the names are read");
+    r.frames(2);
+    assert!(r.s.lookups.is_some());
+    assert!(r.s.can_import());
+}
+
 #[test]
 fn imports_items_with_exact_prices() {
     let mut r = Rig::new();
