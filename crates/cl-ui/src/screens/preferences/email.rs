@@ -138,6 +138,31 @@ impl EmailEdits {
         })
     }
 
+    /// The SMTP session secret for the engine (password from the typed
+    /// field or the keychain, with the server it is for), or `None` when
+    /// the form is blank or invalid.
+    #[must_use]
+    pub fn session_secret(&self, store: &dyn SecretStore) -> Option<cl_api::SmtpSessionSecret> {
+        if self.is_blank() || self.form.validate().is_err() {
+            return None;
+        }
+        let password = if self.password_input.is_empty() {
+            store.get(SMTP_PASSWORD).ok().flatten()
+        } else {
+            Some(Secret::new(self.password_input.clone()))
+        };
+        Some(cl_api::SmtpSessionSecret {
+            password,
+            host: self.form.host.trim().to_string(),
+            port: self.form.port_number()?,
+            security: match self.form.security {
+                SmtpSecurity::StartTls => cl_api::SmtpSecurityWire::Starttls,
+                SmtpSecurity::Tls => cl_api::SmtpSecurityWire::Tls,
+                SmtpSecurity::None => cl_api::SmtpSecurityWire::None,
+            },
+        })
+    }
+
     /// Control-channel view (no values).
     #[must_use]
     pub fn state(&self, saved: &SecretsSaved) -> Value {

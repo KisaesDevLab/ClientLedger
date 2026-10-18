@@ -6,9 +6,11 @@
 //! them to the engine for the life of the process:
 //!
 //! - `PUT /api/v1/desktop/session-secrets {ai?:{anthropic?:{apiKey},
-//!   openai?:{apiKey}, ollama?:{baseUrl, model}}, smtp?:{password}}` — kept
-//!   in memory by the engine, registered with its log scrubber, never
-//!   written to the database;
+//!   openai?:{apiKey}, ollama?:{baseUrl, model}}, smtp?:{password, host,
+//!   port, security}}` (engine branch `clientledger/ai-desktop`) — kept in
+//!   memory by the engine, registered with its log scrubber, never written
+//!   to the database; the mail server named with the password is the only
+//!   one the session may reach;
 //! - `GET` → `{name: {present, fingerprint}}`, never a value;
 //! - `DELETE /api/v1/desktop/session-secrets/{name}`.
 //!
@@ -76,6 +78,41 @@ pub struct OllamaTarget {
     pub model: Option<String>,
 }
 
+/// How the SMTP connection is secured (`smtp.security`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SmtpSecurityWire {
+    /// Implicit TLS (465).
+    Tls,
+    /// STARTTLS (587).
+    Starttls,
+    /// Plain (loopback or private relays only).
+    None,
+}
+
+/// The SMTP password with the mail server it is for.
+#[derive(Clone)]
+pub struct SmtpSessionSecret {
+    /// The password (omitted when only the server changes).
+    pub password: Option<Secret>,
+    /// Mail server host.
+    pub host: String,
+    /// Mail server port.
+    pub port: u16,
+    /// Connection security.
+    pub security: SmtpSecurityWire,
+}
+
+impl std::fmt::Debug for SmtpSessionSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmtpSessionSecret")
+            .field("password", &self.password.is_some())
+            .field("port", &self.port)
+            .field("security", &self.security)
+            .finish_non_exhaustive()
+    }
+}
+
 /// What to hand the engine for this session. `None` fields are left as
 /// they are.
 #[derive(Clone, Default)]
@@ -86,8 +123,8 @@ pub struct SessionSecrets {
     pub openai_key: Option<Secret>,
     /// Ollama address and model.
     pub ollama: Option<OllamaTarget>,
-    /// SMTP password.
-    pub smtp_password: Option<Secret>,
+    /// SMTP password and server.
+    pub smtp: Option<SmtpSessionSecret>,
 }
 
 impl SessionSecrets {
@@ -97,7 +134,7 @@ impl SessionSecrets {
         self.anthropic_key.is_none()
             && self.openai_key.is_none()
             && self.ollama.is_none()
-            && self.smtp_password.is_none()
+            && self.smtp.is_none()
     }
 }
 
@@ -106,8 +143,8 @@ impl std::fmt::Debug for SessionSecrets {
         f.debug_struct("SessionSecrets")
             .field("anthropic_key", &self.anthropic_key.is_some())
             .field("openai_key", &self.openai_key.is_some())
-            .field("ollama", &self.ollama.as_ref().map(|o| &o.base_url))
-            .field("smtp_password", &self.smtp_password.is_some())
+            .field("ollama", &self.ollama.is_some())
+            .field("smtp", &self.smtp.is_some())
             .finish()
     }
 }
@@ -137,7 +174,11 @@ impl Serialize for SessionSecrets {
         }
         #[derive(Serialize)]
         struct Smtp<'a> {
-            password: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            password: Option<&'a str>,
+            host: &'a str,
+            port: u16,
+            security: SmtpSecurityWire,
         }
         let ai = Ai {
             anthropic: self.anthropic_key.as_ref().map(|k| Key {
@@ -156,11 +197,14 @@ impl Serialize for SessionSecrets {
         if has_ai {
             st.serialize_field("ai", &ai)?;
         }
-        if let Some(p) = &self.smtp_password {
+        if let Some(m) = &self.smtp {
             st.serialize_field(
                 "smtp",
                 &Smtp {
-                    password: p.expose(),
+                    password: m.password.as_ref().map(Secret::expose),
+                    host: &m.host,
+                    port: m.port,
+                    security: m.security,
                 },
             )?;
         }
@@ -264,7 +308,12 @@ mod tests {
                 base_url: "http://localhost:11434".into(),
                 model: Some("llama3.1:8b".into()),
             }),
-            smtp_password: Some(Secret::new("smtp-canary-0003")),
+            smtp: Some(SmtpSessionSecret {
+                password: Some(Secret::new("smtp-canary-0003")),
+                host: "smtp.example.com".into(),
+                port: 587,
+                security: SmtpSecurityWire::Starttls,
+            }),
         }
     }
 
@@ -276,14 +325,31 @@ mod tests {
         assert_eq!(v["ai"]["ollama"]["baseUrl"], "http://localhost:11434");
         assert_eq!(v["ai"]["ollama"]["model"], "llama3.1:8b");
         assert_eq!(v["smtp"]["password"], "smtp-canary-0003");
+        assert_eq!(v["smtp"]["host"], "smtp.example.com");
+        assert_eq!(v["smtp"]["port"], 587);
+        assert_eq!(v["smtp"]["security"], "starttls");
         let only_smtp = SessionSecrets {
-            smtp_password: Some(Secret::new("x")),
+            smtp: Some(SmtpSessionSecret {
+                password: None,
+                host: "10.0.0.9".into(),
+                port: 25,
+                security: SmtpSecurityWire::None,
+            }),
             ..SessionSecrets::default()
         };
         let v = serde_json::to_value(&only_smtp).expect("json");
         assert!(v.get("ai").is_none());
+        assert!(
+            v["smtp"].get("password").is_none(),
+            "no password key when none"
+        );
+        assert_eq!(v["smtp"]["security"], "none");
         let dbg = format!("{:?}", all());
         assert!(!dbg.contains("canary"), "{dbg}");
+        assert!(
+            !dbg.contains("11434") && !dbg.contains("example"),
+            "no URL or host in Debug: {dbg}"
+        );
         assert!(SessionSecrets::default().is_empty());
         for s in SecretSlot::ALL {
             assert!(s.wire().contains('.'));

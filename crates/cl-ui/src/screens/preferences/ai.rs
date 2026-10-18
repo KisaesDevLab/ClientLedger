@@ -293,10 +293,9 @@ impl AiEdits {
                 }
             }
         }
-        if email.form.host.trim().is_empty() {
-            return s;
+        if let Some(m) = email.session_secret(store) {
+            s.smtp = Some(m);
         }
-        s.smtp_password = key(cl_settings::smtp::SMTP_PASSWORD);
         s
     }
 
@@ -680,7 +679,10 @@ pub fn panel(
                 tokens,
                 &t_with(
                     "prefs.ai.estimate",
-                    &[("calls", &u.total_calls.to_string()), ("dollars", &est)],
+                    &[
+                        ("calls", &u.total_calls.unwrap_or(0).to_string()),
+                        ("dollars", &est),
+                    ],
                 ),
             );
         }
@@ -844,7 +846,7 @@ mod tests {
         let email = super::super::email::EmailEdits::default();
         e.enabled = true;
         let s = e.session_secrets(&store, &email);
-        assert!(s.anthropic_key.is_some() && s.smtp_password.is_none());
+        assert!(s.anthropic_key.is_some() && s.smtp.is_none());
         assert!(!format!("{s:?}").contains("canary"));
         let mut prefs = CompanyPrefs::default();
         e.consent_agreed = true;

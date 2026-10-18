@@ -55,7 +55,7 @@ pub use resources::accounts::{
 pub use resources::ai::{
     AiConfig, AiConfigUpdate, AiDisclosure, AiStatus, AiTaskToggles, AiUsage, AiUsageStamp,
     AiUsageSummary, CompanyConsent, ConsentRow, ConsentStatus, DESKTOP_PROVIDERS, ProviderModels,
-    ProviderTest, UsageSummaryRow,
+    ProviderTest, UsageSummaryRow, UsageTotals,
 };
 pub use resources::common::SortDir;
 pub use resources::company::{
@@ -77,7 +77,8 @@ pub use resources::reports::{
 };
 pub use resources::sales::{BillLine, InvoiceLine, NewBill, NewInvoice, Posted};
 pub use resources::session_secrets::{
-    OllamaTarget, SecretPresence, SecretPresences, SecretSlot, SessionSecrets,
+    OllamaTarget, SecretPresence, SecretPresences, SecretSlot, SessionSecrets, SmtpSecurityWire,
+    SmtpSessionSecret,
 };
 pub use resources::setup::{
     AccountImportResult, AccountImportRow, AccountRef, CoaTemplateOption, IMPORT_MAX_ROWS,

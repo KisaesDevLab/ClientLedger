@@ -7,7 +7,8 @@
 
 use cl_api::{
     AiConfigUpdate, AiTaskToggles, ApiError, Capabilities, IdempotencyKey, LocalValidation, Method,
-    OllamaTarget, SecretSlot, SessionSecrets, SmtpSettingsUpdate, SmtpTest,
+    OllamaTarget, SecretSlot, SessionSecrets, SmtpSecurityWire, SmtpSessionSecret,
+    SmtpSettingsUpdate, SmtpTest,
 };
 use cl_core::Secret;
 
@@ -85,11 +86,26 @@ pub fn ai_config_disclosure_consent_and_tasks(h: &Harness) {
         .expect("the company is listed as consented");
     assert!(!row.is_stale);
 
+    // Switching providers after consent: the plan accepts again, and the
+    // company's consent is current afterwards (B2).
+    h.run(s.update_ai_config(&AiConfigUpdate::for_provider("anthropic", true), key()))
+        .expect("switch provider");
+    let after = h
+        .run(s.accept_company_ai_consent(key()))
+        .expect("re-accept");
+    assert!(!after.is_stale);
+    assert_eq!(after.accepted_version, after.system_version);
+    let disclosure = h.run(s.company_ai_disclosure()).expect("disclosure");
+    assert!(!disclosure.is_stale && disclosure.ai_enabled);
+    h.run(s.update_ai_config(&update, key()))
+        .expect("back to ollama");
+
     let status = h.run(s.ai_status()).expect("status");
     assert!(status.is_enabled && status.has_categorization);
     let usage = h.run(s.ai_usage(1)).expect("usage");
-    assert_eq!(usage.total_calls, 0, "nothing was asked of a model");
-    assert_eq!(usage.total_input + usage.total_output, 0);
+    assert_eq!(usage.total_calls, Some(0), "nothing was asked of a model");
+    assert_eq!(usage.total_input_tokens, Some(0), "the field is present");
+    assert_eq!(usage.total_output_tokens, Some(0));
     assert_eq!(stub.hits(h), hits, "config writes never contact Ollama");
 }
 
@@ -250,15 +266,27 @@ pub fn session_secrets_e6(h: &Harness) {
             base_url: "http://localhost:11434".into(),
             model: Some(MODEL.into()),
         }),
-        smtp_password: Some(Secret::new("smtp-session-canary-2")),
+        smtp: Some(SmtpSessionSecret {
+            password: Some(Secret::new("smtp-session-canary-2")),
+            host: "smtp.example.com".into(),
+            port: 587,
+            security: SmtpSecurityWire::Starttls,
+        }),
         ..SessionSecrets::default()
     };
     if h.require_cap(Capabilities::SESSION_SECRETS, "U-09") {
         let p = h.run(s.put_session_secrets(&secrets)).expect("put");
+        assert_eq!(p.len(), 4, "every slot is reported: {p:?}");
         assert!(p[SecretSlot::AiAnthropic.wire()].present);
         assert!(p[SecretSlot::SmtpPassword.wire()].present);
+        assert!(p[SecretSlot::AiOllamaBaseUrl.wire()].present);
+        assert!(!p[SecretSlot::AiOpenai.wire()].present);
         let got = h.run(s.session_secrets()).expect("get");
-        assert!(got[SecretSlot::AiAnthropic.wire()].fingerprint.is_some());
+        let fp = got[SecretSlot::AiAnthropic.wire()]
+            .fingerprint
+            .as_deref()
+            .expect("fingerprint");
+        assert!(fp.starts_with("sha256:") && fp.len() == 15, "{fp}");
         assert!(
             !format!("{got:?}").contains("canary"),
             "GET never returns a value"
@@ -292,7 +320,15 @@ pub fn usage_summary_e6(h: &Harness) {
     let (from, to) = (date(2026, 1, 1), date(2026, 12, 31));
     if h.require_cap(Capabilities::AI_DESKTOP, "U-09") {
         let sum = h.run(s.ai_usage_summary(from, to)).expect("summary");
-        assert_eq!(sum.input_tokens + sum.output_tokens, 0);
+        assert!(sum.from.starts_with("2026-01-01"), "{}", sum.from);
+        assert!(sum.to.starts_with("2026-12-31"), "{}", sum.to);
+        assert_eq!(sum.totals.calls, 0);
+        assert_eq!(sum.totals.input_tokens + sum.totals.output_tokens, 0);
+        assert!(sum.rows.is_empty(), "no model was called: {:?}", sum.rows);
+        let e = h
+            .run(s.ai_usage_summary(to, from))
+            .expect_err("to before from");
+        assert!(matches!(e, ApiError::Validation(_)), "{e:?}");
     } else {
         let before = h.observer.total();
         assert_eq!(
@@ -311,7 +347,12 @@ pub fn smtp_session_u13(h: &Harness) {
     let got = h.run(s.smtp_settings()).expect("get");
     if h.require_cap(Capabilities::SMTP_SESSION, "U-13") {
         h.run(s.put_session_secrets(&SessionSecrets {
-            smtp_password: Some(Secret::new("smtp-session-canary-3")),
+            smtp: Some(SmtpSessionSecret {
+                password: Some(Secret::new("smtp-session-canary-3")),
+                host: "smtp.example.com".into(),
+                port: 587,
+                security: SmtpSecurityWire::Starttls,
+            }),
             ..SessionSecrets::default()
         }))
         .expect("put");

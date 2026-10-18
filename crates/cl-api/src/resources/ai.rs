@@ -242,6 +242,10 @@ pub struct CompanyConsent {
     /// The disclosure text shown to the owner.
     #[serde(default)]
     pub text: Option<String>,
+    /// Consent was given for an older disclosure version (the engine's
+    /// `isStale`): it must be accepted again.
+    #[serde(default)]
+    pub is_stale: bool,
 }
 
 /// One company row of `GET /api/v1/ai/consent`.
@@ -328,16 +332,17 @@ pub struct AiStatus {
 }
 
 /// `GET /api/v1/ai/usage?months=N`: integer counts plus the engine's float
-/// cost estimate (display only).
+/// cost estimate (display only). The counts are `Option`s so a reply that
+/// does not carry them is visibly empty, never a silent zero.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AiUsage {
     /// Calls made.
-    pub total_calls: u64,
-    /// Input tokens.
-    pub total_input: u64,
-    /// Output tokens.
-    pub total_output: u64,
+    pub total_calls: Option<u64>,
+    /// Input tokens (`totalInputTokens`).
+    pub total_input_tokens: Option<u64>,
+    /// Output tokens (`totalOutputTokens`).
+    pub total_output_tokens: Option<u64>,
     /// Estimated dollars (float in the engine; never money here).
     pub total_cost: Option<ReportAmount>,
     /// Per provider, as sent.
@@ -346,16 +351,31 @@ pub struct AiUsage {
     pub by_job_type: Value,
 }
 
+/// Totals of the E6 usage summary (every field required: a reply without
+/// them is a decode error, not a zero).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageTotals {
+    /// Calls.
+    pub calls: u64,
+    /// Input tokens.
+    pub input_tokens: u64,
+    /// Output tokens.
+    pub output_tokens: u64,
+}
+
 /// One row of the E6 usage summary.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UsageSummaryRow {
     /// Provider.
     pub provider: String,
     /// Model.
-    pub model: Option<String>,
-    /// Feature (job type).
-    pub feature: Option<String>,
+    pub model: String,
+    /// Job type (feature).
+    pub job_type: String,
+    /// Calls.
+    pub calls: u64,
     /// Input tokens.
     pub input_tokens: u64,
     /// Output tokens.
@@ -363,15 +383,17 @@ pub struct UsageSummaryRow {
 }
 
 /// `GET /api/v1/ai/usage/summary?from&to` (E6, `ai-desktop-v1`): integer
-/// tokens only.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+/// tokens only, as the engine branch `clientledger/ai-desktop` sends them.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AiUsageSummary {
-    /// Total input tokens.
-    pub input_tokens: u64,
-    /// Total output tokens.
-    pub output_tokens: u64,
-    /// Breakdown.
+    /// Range start (ISO).
+    pub from: String,
+    /// Range end (ISO, exclusive).
+    pub to: String,
+    /// Totals.
+    pub totals: UsageTotals,
+    /// Breakdown per provider, model and job type.
     pub rows: Vec<UsageSummaryRow>,
 }
 
@@ -807,7 +829,7 @@ mod tests {
             .and(path("/api/v1/ai/usage"))
             .respond_with(json(
                 200,
-                r#"{"totalCalls":3,"totalInput":1200,"totalOutput":300,"totalCost":0.0123,"byProvider":{},"byJobType":{}}"#,
+                r#"{"totalCalls":3,"totalInputTokens":1200,"totalOutputTokens":300,"totalCost":0.0123,"byProvider":{},"byJobType":{}}"#,
             ))
             .mount(&server)
             .await;
@@ -861,8 +883,8 @@ mod tests {
         assert!(st.is_enabled && st.has_categorization && !st.has_bill_ocr);
         let u = s.ai_usage(1).await.expect("usage");
         assert_eq!(
-            (u.total_calls, u.total_input, u.total_output),
-            (3, 1200, 300)
+            (u.total_calls, u.total_input_tokens, u.total_output_tokens),
+            (Some(3), Some(1200), Some(300))
         );
         assert_eq!(
             u.total_cost.as_ref().and_then(|c| c.display(2)).as_deref(),

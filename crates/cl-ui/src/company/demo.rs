@@ -133,7 +133,7 @@ pub fn preferences_loaded() -> crate::screens::preferences::Loaded {
     }))
     .unwrap_or_default();
     let usage: cl_api::AiUsage = serde_json::from_value(serde_json::json!({
-        "totalCalls": 0, "totalInput": 0, "totalOutput": 0, "totalCost": 0,
+        "totalCalls": 0, "totalInputTokens": 0, "totalOutputTokens": 0, "totalCost": 0,
         "byProvider": {}, "byJobType": {},
     }))
     .unwrap_or_default();
