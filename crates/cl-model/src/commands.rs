@@ -254,9 +254,14 @@ pub const COMMANDS: &[Command] = &[
     cmd("form.delete_line", "Delete Line", None, 2, key(Mods::CMD, Key::Delete), Scope::Form),
     cmd("form.delete_item", "Delete Transaction", None, 2, ctrl('D'), Scope::Form),
     // Lists
-    screen("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A'), "P11"),
+    built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     screen("lists.items", "Item List", Some(Menu::Lists), 0, None, "P11"),
     screen("lists.tags", "Tags", Some(Menu::Lists), 0, None, "P11"),
+    // List windows (Chart of Accounts first; the other lists use the same keys)
+    cmd("list.new", "New List Entry", None, 3, ctrl('N'), Scope::Window),
+    cmd("list.toggle_active", "Make Inactive or Active Again", None, 3, ctrl_shift('I'), Scope::Window),
+    cmd("list.show_inactive", "Include Inactive Entries", None, 3, ctrl_shift('H'), Scope::Window),
+    cmd("list.quick_report", "QuickReport", None, 3, ctrl_shift('Q'), Scope::Window),
     // Clients
     screen("clients.center", "Clients & Jobs", Some(Menu::Clients), 0, None, "P11"),
     screen("clients.create_invoice", "Create Invoice", Some(Menu::Clients), 1, ctrl('I'), "P20"),
@@ -383,6 +388,7 @@ mod tests {
             "file.export_all",
             "file.delete_company",
             "edit.preferences",
+            "lists.chart_of_accounts",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

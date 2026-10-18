@@ -724,7 +724,7 @@ fn undo_falls_back_to_the_form() {
     );
 }
 
-/// No screen that uses a grid holds its own `FormState` save path: they
+/// No screen that uses an editable grid holds its own `FormState` save path: they
 /// all go through `GridForm::begin_save` (plan §2.3).
 #[test]
 fn grid_screens_never_call_form_state_begin_save() {
@@ -751,13 +751,14 @@ fn grid_screens_never_call_form_state_begin_save() {
     assert!(bad.is_empty(), "{bad:#?}");
 
     // The check itself catches the mistake.
-    let wrong =
-        "use cl_grid::Grid;\nfn s(&mut self) { let _ = self.state.begin_save(SaveIntent::Save); }";
+    let wrong = "use cl_grid::EditableModel;\nfn s(&mut self) { let _ = self.state.begin_save(SaveIntent::Save); }";
     assert!(direct_save(wrong).is_some());
-    let right = "use cl_grid::Grid;\nfn s(&mut self) { let _ = self.form.begin_save(SaveIntent::Save, &self.lookups); }";
+    let right = "use cl_grid::EditableModel;\nfn s(&mut self) { let _ = self.form.begin_save(SaveIntent::Save, &self.lookups); }";
     assert_eq!(direct_save(right), None);
     let no_grid = "fn s(&mut self) { let _ = self.state.begin_save(SaveIntent::Save); }";
     assert_eq!(direct_save(no_grid), None);
+    let browse = "use cl_grid::Grid;\nfn s(&mut self) { show(ModelRef::Browse(m)); let _ = self.state.begin_save(SaveIntent::Save); }";
+    assert_eq!(direct_save(browse), None);
 }
 
 /// Why `source` (one screen file) saves around its grid, if it does: the
@@ -765,7 +766,11 @@ fn grid_screens_never_call_form_state_begin_save() {
 /// `FormState::begin_save`; `GridForm::begin_save` also takes the lookups).
 fn direct_save(source: &str) -> Option<String> {
     let code = source.split("#[cfg(test)]").next().unwrap_or("");
-    let uses_grid = code.contains("cl_grid") || code.contains("GridForm");
+    // Only editable grids hold uncommitted cell edits; a browse-only grid
+    // beside a plain field form (the P11 lists) saves through `FormState`.
+    let uses_grid = code.contains("GridForm")
+        || code.contains("ModelRef::Edit")
+        || code.contains("EditableModel");
     if !uses_grid {
         return None;
     }
