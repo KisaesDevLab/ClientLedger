@@ -214,12 +214,21 @@ impl TagList {
             .flatten()
     }
 
-    /// The tags `source` may be merged into: active, not `source`.
+    /// The tags `source` may be merged into: active, not `source`, and in
+    /// `source`'s own group, ungrouped, or in a group that takes any number
+    /// of tags per line. A tag of another one-per-line group is left out,
+    /// since the merge could give a line two tags of that group (Q-179).
+    /// A tag whose group is gone counts as ungrouped.
     #[must_use]
     pub fn merge_targets(&self, source: TagId) -> Vec<&TagEntry> {
+        let own = self.group_of(source).map(|g| g.id);
         self.tags
             .iter()
             .filter(|t| t.id != source && t.active)
+            .filter(|t| match t.group.and_then(|g| self.group(g)) {
+                None => true,
+                Some(g) => Some(g.id) == own || !g.single,
+            })
             .collect()
     }
 }

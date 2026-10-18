@@ -106,7 +106,33 @@ fn names_are_unique_ignoring_case_inactive_included() {
     assert_eq!(l.group_name_owner("", None), None);
     let targets: Vec<TagId> = l.merge_targets(tid(5)).iter().map(|t| t.id).collect();
     assert!(!targets.contains(&tid(5)) && !targets.contains(&tid(6)));
-    assert_eq!(targets.len(), 5);
+    assert_eq!(targets.len(), 3);
+}
+
+/// S4: a tag merges into its own group, ungrouped tags, or a group that
+/// takes several tags per line, never into another one-per-line group.
+#[test]
+fn merge_targets_keep_one_per_line_groups_apart() {
+    let l = sample();
+    let ids = |src: u32| -> Vec<TagId> { l.merge_targets(tid(src)).iter().map(|t| t.id).collect() };
+    // Region (one per line): its own group, Crew (any number), ungrouped,
+    // and the orphan.
+    let from_region = ids(1);
+    assert!(from_region.contains(&tid(2)), "own group");
+    assert!(
+        from_region.contains(&tid(3)) && from_region.contains(&tid(4)),
+        "multi group"
+    );
+    assert!(
+        from_region.contains(&tid(5)) && from_region.contains(&tid(7)),
+        "ungrouped"
+    );
+    // Crew and ungrouped tags never merge into Region's one-per-line tags.
+    for src in [3, 5, 7] {
+        let t = ids(src);
+        assert!(!t.contains(&tid(1)) && !t.contains(&tid(2)), "{src}: {t:?}");
+    }
+    assert!(ids(3).contains(&tid(4)) && ids(3).contains(&tid(5)));
 }
 
 #[test]
