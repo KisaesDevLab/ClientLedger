@@ -152,6 +152,7 @@ pub struct FormState<V> {
     current: V,
     phase: Phase,
     undo: UndoStack<V>,
+    revision: u64,
 }
 
 impl<V: Clone + PartialEq> FormState<V> {
@@ -163,7 +164,21 @@ impl<V: Clone + PartialEq> FormState<V> {
             current: initial,
             phase: Phase::Clean,
             undo: UndoStack::new(UNDO_LIMIT),
+            revision: 0,
         }
+    }
+
+    /// A counter that changes whenever the value on screen changes (an edit,
+    /// undo, redo, save, revert or load). Grids compare it with the revision
+    /// their open editor started from and reload the cell when it moved
+    /// (P10 plan Rev 2 §2.5, B3).
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn bump(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
     }
 
     /// The value on screen.
@@ -210,10 +225,28 @@ impl<V: Clone + PartialEq> FormState<V> {
         if self.is_saving() {
             return false;
         }
+        self.change(Some(field), f)
+    }
+
+    /// Change the value as one undo step of its own that never merges with
+    /// the step before or after, even for the same field (every grid cell
+    /// commit, a row revert). Returns false (and changes nothing) while
+    /// saving.
+    pub fn edit_step(&mut self, f: impl FnOnce(&mut V)) -> bool {
+        if self.is_saving() {
+            return false;
+        }
+        let changed = self.change(None, f);
+        self.undo.break_run();
+        changed
+    }
+
+    fn change(&mut self, key: Option<u64>, f: impl FnOnce(&mut V)) -> bool {
         let before = self.current.clone();
         f(&mut self.current);
         if self.current != before {
-            self.undo.record(&before, Some(field));
+            self.undo.record(&before, key);
+            self.bump();
         }
         self.settle();
         true
@@ -227,6 +260,7 @@ impl<V: Clone + PartialEq> FormState<V> {
         match self.undo.undo(&self.current) {
             Some(prev) => {
                 self.current = prev;
+                self.bump();
                 self.settle();
                 true
             }
@@ -242,6 +276,7 @@ impl<V: Clone + PartialEq> FormState<V> {
         match self.undo.redo(&self.current) {
             Some(next) => {
                 self.current = next;
+                self.bump();
                 self.settle();
                 true
             }
@@ -285,6 +320,7 @@ impl<V: Clone + PartialEq> FormState<V> {
         self.current = stored;
         self.undo.clear();
         self.phase = Phase::Clean;
+        self.bump();
         after
     }
 
@@ -339,6 +375,7 @@ impl<V: Clone + PartialEq> FormState<V> {
         self.current = self.original.clone();
         self.undo.clear();
         self.phase = Phase::Clean;
+        self.bump();
     }
 
     /// Show a different record (Prev/Next, Find). Clean afterwards.
@@ -347,6 +384,7 @@ impl<V: Clone + PartialEq> FormState<V> {
         self.current = record;
         self.undo.clear();
         self.phase = Phase::Clean;
+        self.bump();
     }
 }
 
@@ -584,5 +622,63 @@ mod tests {
         });
         assert_eq!(f.phase(), &Phase::Clean);
         assert_eq!(f.original().payee, "next");
+    }
+
+    #[test]
+    fn edit_steps_never_merge() {
+        let mut f = FormState::new(Check::default());
+        // The same cell committed twice (Tab out, Shift+Tab back, retype).
+        f.edit_step(|c| c.amount_cents = 100);
+        f.edit_step(|c| c.amount_cents = 200);
+        assert!(f.undo());
+        assert_eq!(f.current().amount_cents, 100, "first typed value (T5)");
+        assert!(f.undo());
+        assert_eq!(f.current().amount_cents, 0);
+        assert!(f.redo());
+        assert_eq!(f.current().amount_cents, 100);
+        // A typed field edit right after a step does not merge into it.
+        let mut g = FormState::new(Check::default());
+        g.edit_step(|c| c.memo = "a".into());
+        g.edit(7, |c| c.memo = "ab".into());
+        g.edit(7, |c| c.memo = "abc".into());
+        assert!(g.undo());
+        assert_eq!(g.current().memo, "a");
+        // Steps that change nothing record nothing.
+        let mut h = FormState::new(Check::default());
+        assert!(h.edit_step(|_| {}));
+        assert!(!h.can_undo());
+    }
+
+    #[test]
+    fn revision_moves_on_every_change() {
+        let mut f = FormState::new(Check::default());
+        let r0 = f.revision();
+        f.edit_step(|_| {});
+        assert_eq!(f.revision(), r0, "no change, no revision");
+        f.edit_step(|c| c.amount_cents = 5);
+        let r1 = f.revision();
+        assert_ne!(r1, r0);
+        f.edit(1, |c| c.memo = "m".into());
+        let r2 = f.revision();
+        assert_ne!(r2, r1);
+        f.undo();
+        let r3 = f.revision();
+        assert_ne!(r3, r2);
+        f.redo();
+        let r4 = f.revision();
+        assert_ne!(r4, r3);
+        f.revert_form();
+        let r5 = f.revision();
+        assert_ne!(r5, r4);
+        f.load(Check::default());
+        let r6 = f.revision();
+        assert_ne!(r6, r5);
+        f.edit_step(|c| c.amount_cents = 9);
+        let _ = f.begin_save(SaveIntent::Save);
+        assert!(!f.edit_step(|c| c.amount_cents = 10), "locked while saving");
+        let r7 = f.revision();
+        f.save_ok(Check::default());
+        assert_ne!(f.revision(), r7);
+        assert!(!f.undo(), "no undo after save");
     }
 }
