@@ -7,6 +7,7 @@ pub mod contacts;
 pub mod csv_map;
 pub mod items;
 pub mod tags;
+pub mod terms;
 
 /// Characters counted the way the engine's schemas count them (UTF-16 code
 /// units, as JavaScript's `String.length`), so a local length check never

@@ -1198,7 +1198,7 @@ impl ChartScreen {
 }
 
 /// Saves into the demo chart at once (no engine).
-fn demo_save(
+pub(crate) fn demo_save(
     link: &CompanyLink,
     editing: Option<AccountId>,
     existing: Option<Account>,

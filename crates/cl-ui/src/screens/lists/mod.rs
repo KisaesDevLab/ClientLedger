@@ -4,10 +4,12 @@
 
 pub mod accounts;
 pub mod center;
+pub mod csv_import;
 pub mod detail_pane;
 pub mod items;
 pub mod rows;
 pub mod tags;
+pub mod terms;
 
 use std::sync::Arc;
 
@@ -46,6 +48,13 @@ pub fn make(
         ))),
         items::KIND => Some(Box::new(items::ItemsScreen::new(Arc::clone(link), open))),
         tags::KIND => Some(Box::new(tags::TagsScreen::new(Arc::clone(link), open))),
+        terms::TERMS_KIND => Some(Box::new(terms::FixedListScreen::new(
+            terms::FixedList::Terms,
+        ))),
+        terms::METHODS_KIND => Some(Box::new(terms::FixedListScreen::new(
+            terms::FixedList::Methods,
+        ))),
+        csv_import::KIND => Some(Box::new(csv_import::CsvScreen::new(Arc::clone(link), open))),
         _ => None,
     }
 }

@@ -220,7 +220,8 @@ impl Scenario {
     /// # Errors
     /// I/O or parse errors.
     pub fn load(path: &Path) -> Result<Scenario, ScenarioError> {
-        Scenario::parse(&std::fs::read_to_string(path)?)
+        let text = std::fs::read_to_string(path)?;
+        Scenario::parse(&with_scenario_dir(&text, path))
     }
 }
 
@@ -358,6 +359,21 @@ fn click_if_present(t: &mut dyn Transport, target: &Target) -> Result<(), String
         }
         std::thread::sleep(ASSERT_POLL);
     }
+}
+
+/// `text` with `{scenario_dir}` replaced by the folder of the scenario file
+/// (absolute, forward slashes), so a step can type the path of a fixture
+/// file kept next to the scenarios.
+fn with_scenario_dir(text: &str, path: &Path) -> String {
+    if !text.contains("{scenario_dir}") {
+        return text.to_owned();
+    }
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let dir = std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf());
+    text.replace(
+        "{scenario_dir}",
+        &dir.display().to_string().replace('\\', "/"),
+    )
 }
 
 /// `text` with `{theme}` replaced by `theme`.
@@ -715,5 +731,10 @@ mod tests {
     fn typed_text_names_the_theme() {
         assert_eq!(themed("Leaf Removal {theme}", "dark"), "Leaf Removal dark");
         assert_eq!(themed("plain", "light"), "plain");
+        let p = Path::new("some/where/s.yaml");
+        let out = with_scenario_dir("type: {scenario_dir}/x.csv", p);
+        assert!(out.ends_with("some/where/x.csv"), "{out}");
+        assert!(!out.contains('\\'));
+        assert_eq!(with_scenario_dir("plain", p), "plain");
     }
 }

@@ -990,7 +990,11 @@ impl ItemsScreen {
 }
 
 /// Saves into the demo items at once (no engine).
-fn demo_save(link: &CompanyLink, existing: Option<Item>, fields: ItemFields) -> Versioned<Item> {
+pub(crate) fn demo_save(
+    link: &CompanyLink,
+    existing: Option<Item>,
+    fields: ItemFields,
+) -> Versioned<Item> {
     let mut d = link.demo_state();
     let item = if let Some(mut i) = existing {
         i.fields = fields;

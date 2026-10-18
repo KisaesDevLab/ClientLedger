@@ -13,6 +13,7 @@ cl-company = { path = "../cl-company" }
 cl-core = { path = "../cl-core" }
 cl-grid = { path = "../cl-grid" }
 cl-host = { path = "../cl-host" }
+cl-import = { path = "../cl-import" }
 cl-model = { path = "../cl-model" }
 cl-settings = { path = "../cl-settings" }
 # No `default_fonts`: those bundle fonts under licenses outside the cargo-deny
