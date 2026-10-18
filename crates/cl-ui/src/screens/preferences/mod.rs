@@ -150,7 +150,7 @@ impl Category {
             Category::LookAndFeel => "theme dark light zoom colour color",
             Category::DatesNumbers => "date format negative parentheses warning",
             Category::Reminders => "bills due backup remind",
-            Category::Accounting => "basis cash accrual fiscal year closing date",
+            Category::Accounting => "basis cash accrual fiscal year closing date account numbers",
             Category::ChecksForms => "check number print form",
             Category::SalesTax => "tax rate",
             Category::Inventory => "stock items cost",
@@ -1088,6 +1088,7 @@ impl Screen for PreferencesScreen {
             "status": self.status.is_some(),
             "ai": self.edits.ai.state(&self.secrets_saved, &self.link.capabilities()),
             "email": self.edits.email.state(&self.secrets_saved),
+            "account_numbers": self.edits.company.account_numbers,
             "user": {
                 "theme": format!("{:?}", self.edits.user.theme).to_ascii_lowercase(),
                 "zoom": self.edits.user.zoom_percent,
@@ -1205,10 +1206,25 @@ mod tests {
             .store()
             .load()
             .expect("load")
-            .get(s.tenant.expect("tenant").0)
+            .get(s.tenant.as_ref().expect("tenant").0)
             .expect("rec")
             .clone();
         assert_eq!(rec.prefs.bills_due_days, 14);
+        // Q-79: the account-number preference is saved on the company.
+        assert!(rec.prefs.account_numbers);
+        assert_eq!(s.state()["account_numbers"], true);
+        s.edits_mut().company.account_numbers = false;
+        assert!(s.dirty());
+        assert!(Screen::save(&mut s));
+        let rec = s
+            .link
+            .store()
+            .load()
+            .expect("load")
+            .get(s.tenant.as_ref().expect("tenant").0)
+            .expect("rec")
+            .clone();
+        assert!(!rec.prefs.account_numbers);
     }
 
     #[test]

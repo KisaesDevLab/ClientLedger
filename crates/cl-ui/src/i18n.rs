@@ -568,6 +568,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.company.closing_none", "No closing date is set."),
     ("prefs.company.closing_through", "Books are closed through {date}."),
     ("prefs.company.closing_hint", "Change the closing date and its password under Company > Set Closing Date."),
+    ("prefs.company.account_numbers", "Use account numbers"),
+    ("prefs.company.account_numbers_hint", "Shows each account's number before its name in the Chart of Accounts and in account lists, and sorts accounts by number."),
     ("prefs.company.checks_intro", "Check numbering, printing and form defaults."),
     ("prefs.company.checks_later", "Check options and default accounts are not available yet; they come with Write Check and printing."),
     ("prefs.company.finance_later", "Finance charge settings are not available yet; they come with Statements."),

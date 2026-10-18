@@ -3,9 +3,11 @@
 //! record and travel in a backup's `manifest.host` (Q-P09c), never in the
 //! engine. Nothing here is a secret or an amount.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use cl_core::Timestamp;
+use cl_core::ids::AccountId;
 use serde::{Deserialize, Serialize};
 
 use crate::ai::{AiLocalPrefs, AiProvider, DEFAULT_MONTHLY_TOKEN_CAP as DEFAULT_LOCAL_CAP};
@@ -54,6 +56,11 @@ pub struct CompanyPrefs {
     pub ai_consent: Option<AiConsentNote>,
     /// SMTP connection security (the rest of SMTP lives in the engine).
     pub smtp_security: SmtpSecurity,
+    /// Show account numbers in lists and pickers (Q-79, on by default).
+    pub account_numbers: bool,
+    /// Accounts marked sensitive (Q-157). Kept here until the engine stores
+    /// the flag (U-33); hiding them from other roles waits for P29.
+    pub sensitive_accounts: BTreeSet<AccountId>,
 }
 
 impl Default for CompanyPrefs {
@@ -64,6 +71,8 @@ impl Default for CompanyPrefs {
             ai: AiLocalPrefs::default(),
             ai_consent: None,
             smtp_security: SmtpSecurity::default(),
+            account_numbers: true,
+            sensitive_accounts: BTreeSet::new(),
         }
     }
 }
@@ -118,6 +127,8 @@ impl CompanyPrefs {
             },
             ai_consent: None,
             smtp_security: self.smtp_security,
+            account_numbers: self.account_numbers,
+            sensitive_accounts: self.sensitive_accounts.clone(),
         }
     }
 
@@ -147,6 +158,8 @@ impl CompanyPrefs {
             },
             ai_consent: local.and_then(|l| l.ai_consent.clone()),
             smtp_security: archive.smtp_security,
+            account_numbers: archive.account_numbers,
+            sensitive_accounts: archive.sensitive_accounts.clone(),
         };
         out.normalize();
         out
@@ -173,6 +186,11 @@ mod tests {
     fn defaults_round_trip_and_normalize() {
         let d = CompanyPrefs::default();
         assert_eq!(d.bills_due_days, 7);
+        assert!(
+            d.account_numbers,
+            "account numbers are on by default (Q-79)"
+        );
+        assert!(d.sensitive_accounts.is_empty());
         assert_eq!(
             d.ai.monthly_token_cap,
             Some(crate::ai::DEFAULT_MONTHLY_TOKEN_CAP)
@@ -232,6 +250,20 @@ mod tests {
         );
         assert_eq!(merged.ai.usage.tokens, 15);
         assert!(merged.ai_consent.is_some());
+        // The account-number choice and sensitive marks travel (Q-79, Q-157).
+        let mut chart = local.clone();
+        chart.account_numbers = false;
+        let sensitive =
+            cl_core::ids::AccountId::parse("2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
+        chart.sensitive_accounts.insert(sensitive);
+        let back = CompanyPrefs::merged_from_archive(&chart.for_archive(), Some(&local));
+        assert!(!back.account_numbers);
+        assert!(back.sensitive_accounts.contains(&sensitive));
+        let old: CompanyPrefs = serde_json::from_str(r#"{"bills_due_days":7}"#).expect("old");
+        assert!(
+            old.account_numbers,
+            "records from before P11 keep numbers on"
+        );
         archive.ai.monthly_token_cap = Some(1000);
         assert_eq!(
             CompanyPrefs::merged_from_archive(&archive, Some(&local))
