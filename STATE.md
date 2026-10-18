@@ -137,6 +137,10 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 | L9 | 64 KiB cap for engine error bodies (Q-P05ac). | P37 |
 | AC5 | No contract test yet moves a transaction OUT of a closed period (old date closed, new date open); the engine checks both dates, the stub suite covers the client mapping. | P07 (with U-15) |
 
+## Follow-ups from P10
+
+- S14 tag gap (Q-P10t): engine lines hold one `tagId`; the grid allows several tag chips per line. P11's capability check opens the UPSTREAM row (several tags per line); until it lands, P13 refuses to save a line with more than one tag, with a plain message.
+
 ## Log
 
 Newest first. One entry per completed phase: date, phase, summary, acceptance checklist results, notable decisions (Q-xx / U-xx).
