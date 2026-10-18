@@ -15,3 +15,4 @@ pub mod model;
 pub mod rowkey;
 pub mod selection;
 pub mod spec;
+pub mod viewport;
