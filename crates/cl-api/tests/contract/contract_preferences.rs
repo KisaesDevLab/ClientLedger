@@ -30,7 +30,8 @@ pub fn ai_config_disclosure_consent_and_tasks(h: &Harness) {
     let accepted = h.run(s.accept_ai_disclosure(key())).expect("accept");
     assert!(accepted.accepted_at.is_some(), "accept records a time");
 
-    let stub = OllamaStub::start(&[MODEL]);
+    let stub = OllamaStub::shared(h);
+    let hits = stub.hits(h);
     let update = AiConfigUpdate {
         ollama_base_url: Some(stub.base_url.clone()),
         categorization_model: Some(MODEL.into()),
@@ -89,7 +90,7 @@ pub fn ai_config_disclosure_consent_and_tasks(h: &Harness) {
     let usage = h.run(s.ai_usage(1)).expect("usage");
     assert_eq!(usage.total_calls, 0, "nothing was asked of a model");
     assert_eq!(usage.total_input + usage.total_output, 0);
-    assert_eq!(stub.hits(), 0, "config writes never contact Ollama");
+    assert_eq!(stub.hits(h), hits, "config writes never contact Ollama");
 }
 
 /// The Ollama test reaches only the loopback stub and reports the model
@@ -97,7 +98,8 @@ pub fn ai_config_disclosure_consent_and_tasks(h: &Harness) {
 /// providers fail without a key and nothing leaves the computer.
 pub fn provider_test_ollama_stub_and_keyless_cloud(h: &Harness) {
     let s = &h.s1;
-    let stub = OllamaStub::start(&[MODEL, "qwen2.5:7b"]);
+    let stub = OllamaStub::shared(h);
+    let hits = stub.hits(h);
     h.run(s.update_ai_config(
         &AiConfigUpdate {
             ollama_base_url: Some(stub.base_url.clone()),
@@ -109,7 +111,7 @@ pub fn provider_test_ollama_stub_and_keyless_cloud(h: &Harness) {
     .expect("update");
     let r = h.run(s.test_ai_provider("ollama")).expect("test");
     assert!(r.success, "{:?}", r.error);
-    assert_eq!(stub.hits(), 1);
+    assert_eq!(stub.hits(h), hits + 1);
 
     h.run(s.update_ai_config(
         &AiConfigUpdate {
@@ -128,7 +130,7 @@ pub fn provider_test_ollama_stub_and_keyless_cloud(h: &Harness) {
         "{:?}",
         r.error
     );
-    assert_eq!(stub.hits(), 2);
+    assert_eq!(stub.hits(h), hits + 2);
 
     // No key in the engine and none in the session: the cloud test fails
     // inside the engine before any provider client exists.
@@ -144,7 +146,11 @@ pub fn provider_test_ollama_stub_and_keyless_cloud(h: &Harness) {
         1,
         "one engine call, never retried"
     );
-    assert_eq!(stub.hits(), 2, "the cloud test never touches Ollama");
+    assert_eq!(
+        stub.hits(h),
+        hits + 2,
+        "the cloud test never touches Ollama"
+    );
     // Providers outside the allowlist are refused before anything is sent.
     assert_eq!(
         h.run(s.test_ai_provider("gemini")).expect_err("gemini"),

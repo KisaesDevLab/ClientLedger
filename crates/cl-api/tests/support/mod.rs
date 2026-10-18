@@ -797,24 +797,27 @@ pub fn run_suite(mode: EngineMode, tests: &[(&str, TestFn)]) -> ExitCode {
 
 // ------------------------------------------------------------- ollama stub
 
-/// A tiny loopback HTTP server that plays Ollama's `GET /api/tags` (P09:
+/// A loopback HTTP server that plays Ollama's `GET /api/tags` (P09:
 /// "Ollama works with networking disabled"). Everything else answers 404.
-/// Stops when dropped.
+/// Backed by wiremock on the harness runtime.
 pub struct OllamaStub {
     /// `http://127.0.0.1:<port>`.
     pub base_url: String,
-    hits: Arc<std::sync::atomic::AtomicU64>,
-    stop: Arc<std::sync::atomic::AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    server: wiremock::MockServer,
 }
 
 impl OllamaStub {
+    /// One stub for the whole binary (the engine may keep a provider built
+    /// for the last base URL for a short while, so every test uses the same
+    /// address). Serves `llama3.1:8b` and `qwen2.5:7b`.
+    pub fn shared(h: &Harness) -> &'static OllamaStub {
+        static STUB: std::sync::OnceLock<OllamaStub> = std::sync::OnceLock::new();
+        STUB.get_or_init(|| OllamaStub::start(h, &["llama3.1:8b", "qwen2.5:7b"]))
+    }
+
     /// Serves `models` as installed.
-    pub fn start(models: &[&str]) -> OllamaStub {
-        use std::io::{Read, Write};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-        let port = listener.local_addr().expect("addr").port();
-        listener.set_nonblocking(true).expect("nonblocking");
+    pub fn start(h: &Harness, models: &[&str]) -> OllamaStub {
+        use wiremock::matchers::{method, path};
         let body = format!(
             "{{\"models\":[{}]}}",
             models
@@ -823,57 +826,30 @@ impl OllamaStub {
                 .collect::<Vec<_>>()
                 .join(",")
         );
-        let hits = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (h, s) = (Arc::clone(&hits), Arc::clone(&stop));
-        let thread = std::thread::spawn(move || {
-            while !s.load(std::sync::atomic::Ordering::SeqCst) {
-                match listener.accept() {
-                    Ok((mut conn, _)) => {
-                        let _ = conn.set_read_timeout(Some(Duration::from_secs(2)));
-                        let mut buf = [0u8; 4096];
-                        let n = conn.read(&mut buf).unwrap_or(0);
-                        let head = String::from_utf8_lossy(&buf[..n]);
-                        let line = head.lines().next().unwrap_or("");
-                        let (status, payload) = if line.starts_with("GET /api/tags") {
-                            ("200 OK", body.clone())
-                        } else {
-                            ("404 Not Found", "{\"error\":\"not found\"}".to_string())
-                        };
-                        h.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        let _ = write!(
-                            conn,
-                            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
-                            payload.len()
-                        );
-                        let _ = conn.flush();
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(20));
-                    }
-                    Err(_) => break,
-                }
-            }
+        let server = h.run(async move {
+            let server = wiremock::MockServer::start().await;
+            wiremock::Mock::given(method("GET"))
+                .and(path("/api/tags"))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(200).set_body_raw(body, "application/json"),
+                )
+                .mount(&server)
+                .await;
+            server
         });
         OllamaStub {
-            base_url: format!("http://127.0.0.1:{port}"),
-            hits,
-            stop,
-            thread: Some(thread),
+            base_url: server.uri(),
+            server,
         }
     }
 
     /// Requests served so far.
-    pub fn hits(&self) -> u64 {
-        self.hits.load(std::sync::atomic::Ordering::SeqCst)
-    }
-}
-
-impl Drop for OllamaStub {
-    fn drop(&mut self) {
-        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
+    pub fn hits(&self, h: &Harness) -> u64 {
+        h.run(async {
+            self.server
+                .received_requests()
+                .await
+                .map_or(0, |r| r.len() as u64)
+        })
     }
 }

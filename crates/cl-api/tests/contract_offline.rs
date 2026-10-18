@@ -173,7 +173,7 @@ fn engine_dies_after_commit_is_reconciled_as_committed(h: &Harness) {
 fn ollama_works_offline_and_cloud_is_unavailable(h: &Harness) {
     let s = &h.s1;
     h.run(s.accept_ai_disclosure(key())).expect("disclosure");
-    let stub = OllamaStub::start(&["llama3.1:8b"]);
+    let stub = OllamaStub::start(h, &["llama3.1:8b"]);
     h.run(s.update_ai_config(
         &AiConfigUpdate {
             ollama_base_url: Some(stub.base_url.clone()),
@@ -185,7 +185,7 @@ fn ollama_works_offline_and_cloud_is_unavailable(h: &Harness) {
     .expect("update");
     let r = h.run(s.test_ai_provider("ollama")).expect("ollama test");
     assert!(r.success, "{:?}", r.error);
-    assert_eq!(stub.hits(), 1, "exactly the loopback stub was contacted");
+    assert_eq!(stub.hits(h), 1, "exactly the loopback stub was contacted");
 
     let before = h
         .observer
@@ -206,7 +206,7 @@ fn ollama_works_offline_and_cloud_is_unavailable(h: &Harness) {
         1,
         "never retried"
     );
-    assert_eq!(stub.hits(), 1);
+    assert_eq!(stub.hits(h), 1);
     h.run(s.update_ai_config(
         &AiConfigUpdate {
             is_enabled: Some(false),
