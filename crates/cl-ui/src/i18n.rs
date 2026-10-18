@@ -49,9 +49,11 @@ pub fn has(key: &str) -> bool {
     }) || catalog().contains_key(key)
 }
 
+mod lists;
+
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
     static CATALOG: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
-    CATALOG.get_or_init(|| ENGLISH.iter().copied().collect())
+    CATALOG.get_or_init(|| ENGLISH.iter().chain(lists::ENGLISH).copied().collect())
 }
 
 /// The English catalog.
@@ -892,7 +894,7 @@ mod tests {
     #[test]
     fn catalog_has_no_duplicate_keys_and_no_empty_text() {
         let mut seen = std::collections::HashSet::new();
-        for (k, v) in ENGLISH {
+        for (k, v) in ENGLISH.iter().chain(lists::ENGLISH) {
             assert!(seen.insert(*k), "duplicate key {k}");
             assert_ne!(*v, "", "{k}");
         }
