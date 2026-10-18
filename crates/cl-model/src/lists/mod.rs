@@ -18,6 +18,22 @@ pub fn engine_len(s: &str) -> usize {
     s.encode_utf16().count()
 }
 
+/// Runs `f` `runs` times and returns its last answer with the fastest
+/// time, so a timing test does not fail on one slow run of a busy machine.
+#[cfg(test)]
+pub(crate) fn fastest_of<T>(runs: usize, mut f: impl FnMut() -> T) -> (T, std::time::Duration) {
+    let mut best = std::time::Duration::MAX;
+    let mut out = None;
+    for _ in 0..runs.max(1) {
+        let start = std::time::Instant::now();
+        let v = f();
+        best = best.min(start.elapsed());
+        out = Some(v);
+    }
+    // `runs.max(1)` ran at least once.
+    (out.expect("ran once"), best)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

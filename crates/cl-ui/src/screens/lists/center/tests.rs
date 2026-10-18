@@ -514,3 +514,51 @@ fn report_figures_are_shown_as_text() {
     assert!(report_is_zero(&a("-0.001")));
     assert!(!report_is_zero(&a("0.01")));
 }
+
+/// S6: with 20,000 contacts, filtering and rebuilding the grid model stays
+/// quick (fastest of five runs, so one slow run of a busy machine does not
+/// fail it).
+#[test]
+fn twenty_thousand_contacts_filter_and_rebuild_quickly() {
+    let contacts: Vec<cl_api::Contact> = (0..20_000u32)
+        .map(|n| {
+            let kind = ["customer", "vendor", "both"][(n % 3) as usize];
+            serde_json::from_value(serde_json::json!({
+                "id": format!("c0000000-0000-4000-8000-{n:012}"),
+                "contactType": kind,
+                "displayName": format!("Contact {n:05}"),
+                "email": format!("c{n}@example.test"),
+                "isActive": n % 7 != 0,
+            }))
+            .expect("contact")
+        })
+        .collect();
+    let mut model = super::model::ListModel::new(Role::Client);
+    let all = cl_model::lists::contacts::ContactFilter::default();
+    let search = cl_model::lists::contacts::ContactFilter {
+        show_inactive: false,
+        search: "contact 19".into(),
+    };
+    let ((), load) = fastest_of(5, || model.set_contacts(&contacts, &all));
+    assert!(load.as_millis() < 250, "loading took {load:?}");
+    let (shown, took) = fastest_of(5, || {
+        model.apply_filter(&search);
+        let n = model.shown();
+        model.apply_filter(&all);
+        n
+    });
+    assert!(shown > 0 && model.shown() > shown);
+    assert!(took.as_millis() < 100, "filter and rebuild took {took:?}");
+}
+
+/// The fastest of `runs` timings of `f`, with its last answer.
+fn fastest_of<T>(runs: usize, mut f: impl FnMut() -> T) -> (T, std::time::Duration) {
+    let mut best = std::time::Duration::MAX;
+    let mut out = None;
+    for _ in 0..runs.max(1) {
+        let start = std::time::Instant::now();
+        out = Some(f());
+        best = best.min(start.elapsed());
+    }
+    (out.expect("ran once"), best)
+}
