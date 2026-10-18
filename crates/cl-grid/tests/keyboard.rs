@@ -287,3 +287,25 @@ fn column_resize_handles_are_not_focusable() {
         );
     }
 }
+
+/// N3: an ISO date typed one key per frame commits; `+` typed in the same
+/// frame right after digits applies to those digits.
+#[test]
+fn iso_date_and_same_frame_date_key() {
+    let mut r = rig(2);
+    r.focus_cell(0, DATE);
+    for c in "2026-11-04".chars() {
+        r.frame(typed(&c.to_string()));
+    }
+    r.frame(tab());
+    let want = cl_core::CalendarDate::from_ymd(2026, 11, 4).ok();
+    assert_eq!(r.model.lines()[0].date, want);
+    r.focus_cell(1, DATE);
+    r.frame(vec![
+        egui::Event::Text("3/1/2026".into()),
+        egui::Event::Text("+".into()),
+    ]);
+    r.frame(tab());
+    let next = cl_core::CalendarDate::from_ymd(2026, 3, 2).ok();
+    assert_eq!(r.model.lines()[1].date, next);
+}

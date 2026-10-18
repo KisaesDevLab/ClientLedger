@@ -394,7 +394,9 @@ impl Screen for GridDemo {
     }
 
     fn save(&mut self) -> bool {
-        self.save_with(SaveIntent::SaveAndClose)
+        // The close or quit prompt closes the window itself once this
+        // returns true: a plain save, so no second CloseWindow is queued.
+        self.save_with(SaveIntent::Save)
     }
 
     fn state(&self) -> serde_json::Value {

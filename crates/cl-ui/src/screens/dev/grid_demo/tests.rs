@@ -346,3 +346,27 @@ fn rig_shows(rig: &mut Rig, text: &str) -> bool {
         })
     })
 }
+
+/// N6: the close prompt's Save (`Screen::save`) saves without queuing a
+/// CloseWindow of its own; the prompt closes the window.
+#[test]
+fn prompt_save_does_not_queue_a_second_close() {
+    let dir = tempfile::tempdir().unwrap();
+    let link = std::sync::Arc::new(crate::company::CompanyLink::demo(dir.path()));
+    let today = CalendarDate::from_ymd(2026, 11, 4).unwrap();
+    let mut demo = GridDemo::new(today, Some(std::sync::Arc::clone(&link)));
+    demo.lines.edit_step(|c| {
+        c.amount = Some(money("10.00"));
+        c.lines[0].account = Pick::Id(5100);
+        c.lines[0].amount = Some(money("10.00"));
+    });
+    assert!(Screen::save(&mut demo), "the balanced check saves");
+    assert_eq!(demo.saved.len(), 1);
+    assert!(
+        !link
+            .drain()
+            .iter()
+            .any(|e| matches!(e, crate::company::CompanyEvent::CloseWindow(_))),
+        "no CloseWindow from the prompt's save"
+    );
+}

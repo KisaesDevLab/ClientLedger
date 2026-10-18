@@ -8,6 +8,7 @@
 //! every row of the plan's tables is unit-tested.
 
 use std::collections::BTreeSet;
+use std::fmt;
 
 use cl_model::TextKey;
 use cl_model::date_entry;
@@ -44,8 +45,8 @@ pub enum PopupKind {
     Choices,
 }
 
-/// An open popup.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// An open popup. `Debug` prints counts and flags only (no names).
+#[derive(Clone, PartialEq, Eq)]
 pub struct Popup {
     /// What it lists.
     pub kind: PopupKind,
@@ -59,8 +60,9 @@ pub struct Popup {
     pub add_new: Option<String>,
 }
 
-/// The open editor on the cursor cell.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The open editor on the cursor cell. `Debug` never prints the buffer,
+/// the origin text or chip names.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Edit {
     /// The text being edited.
     pub buffer: String,
@@ -81,6 +83,45 @@ pub struct Edit {
     pub chips: Vec<TagChip>,
 }
 
+impl fmt::Debug for Popup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Popup")
+            .field("kind", &self.kind)
+            .field("items", &self.items.len())
+            .field("highlight", &self.highlight)
+            .field("loading", &self.loading)
+            .field("add_new", &self.add_new.is_some())
+            .finish()
+    }
+}
+
+impl fmt::Debug for Edit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Edit")
+            .field("dirty", &self.is_dirty())
+            .field("origin_rev", &self.origin_rev)
+            .field("fresh", &self.fresh)
+            .field("popup", &self.popup)
+            .field("error", &self.error)
+            .field("caption", &self.caption)
+            .field("chips", &self.chips.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for Effects {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Effects")
+            .field("events", &self.events)
+            .field("handled", &self.handled)
+            .field("scroll_to", &self.scroll_to)
+            .field("leave", &self.leave)
+            .field("copy", &self.copy.is_some())
+            .field("reset_editor", &self.reset_editor)
+            .finish()
+    }
+}
+
 impl Edit {
     /// The buffer differs from the cell's value.
     #[must_use]
@@ -89,8 +130,9 @@ impl Edit {
     }
 }
 
-/// What the view must do after an input.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+/// What the view must do after an input. `Debug` never prints the
+/// clipboard text.
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct Effects {
     /// Events for the screen.
     pub events: Vec<GridEvent>,
@@ -116,7 +158,7 @@ impl Effects {
     }
 }
 
-/// The grid's editing state.
+/// The grid's editing state. `Debug` goes through the redacting `Edit`.
 #[derive(Debug, Clone)]
 pub struct Core {
     spec: GridSpec,
@@ -935,11 +977,13 @@ impl Core {
             self.close_popup();
             return Effects::handled();
         }
+        // "Not in the list" stays while the committed value is unresolved:
+        // Esc on such a clean cell goes on to the row revert (N5).
         if let Some(e) = self.edit.as_mut()
-            && (e.is_dirty() || e.error.is_some())
+            && (e.is_dirty() || e.error.is_some_and(|p| p.key != NOT_IN_LIST))
         {
             e.buffer.clone_from(&e.origin);
-            e.error = None;
+            e.error = e.error.filter(|p| p.key == NOT_IN_LIST);
             e.caption = None;
             e.fresh = true;
             return Effects {

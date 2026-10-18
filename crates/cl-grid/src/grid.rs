@@ -205,6 +205,12 @@ fn wheel_units(dy: f32) -> i64 {
 impl Grid {
     /// A grid with this spec.
     ///
+    /// `id_salt` becomes the grid's egui id (its single focus id and its
+    /// memory), so it must be unique among the grids alive at the same
+    /// time in every window and viewport: screens that can be open more
+    /// than once include their window id (`"{window}/lines"`). Two grids
+    /// with one salt would share focus and editor state.
+    ///
     /// # Errors
     /// See [`SpecError`].
     pub fn new(id_salt: &str, spec: GridSpec) -> Result<Grid, SpecError> {
@@ -887,7 +893,14 @@ impl Grid {
             let mut kept = Vec::with_capacity(raw.len());
             for event in raw {
                 let mut out = Vec::new();
-                if let Some(keep) = collector.event(&event, self.cursor_info(), &mut out) {
+                // The text typing appends to (none while the first key
+                // replaces the selected text).
+                let buffer = self
+                    .core
+                    .edit()
+                    .filter(|e| !e.fresh)
+                    .map_or_else(String::new, |e| e.buffer.clone());
+                if let Some(keep) = collector.event(&event, self.cursor_info(), &buffer, &mut out) {
                     kept.push(keep);
                 }
                 for gi in out {
@@ -898,6 +911,7 @@ impl Grid {
                     }
                 }
             }
+            kept.extend(collector.finish());
             ctx.input_mut(|i| i.events = kept);
             if let Some(p) = collector.paste {
                 self.core.show_problem(p);

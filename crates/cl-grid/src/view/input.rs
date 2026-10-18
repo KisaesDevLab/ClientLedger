@@ -66,6 +66,22 @@ pub struct Collector {
     swallow_space_text: bool,
     /// What happened to a paste this frame.
     pub paste: Option<CellProblem>,
+    /// Plain text typed into a date cell this frame, held back so a later
+    /// date-key character in the same frame applies after it (N3).
+    held: Vec<String>,
+}
+
+/// `2026` or `2026-11`: the start of an ISO date, where `-` is a separator
+/// and not the "previous day" key.
+fn iso_prefix(s: &str) -> bool {
+    let mut parts = s.split('-');
+    let year_ok = parts
+        .next()
+        .is_some_and(|y| y.len() == 4 && y.bytes().all(|b| b.is_ascii_digit()));
+    let month_ok = parts
+        .next()
+        .is_none_or(|m| (1..=2).contains(&m.len()) && m.bytes().all(|b| b.is_ascii_digit()));
+    year_ok && month_ok && parts.next().is_none()
 }
 
 impl Collector {
@@ -75,8 +91,37 @@ impl Collector {
         &mut self,
         event: &Event,
         info: CursorInfo,
+        buffer: &str,
         out: &mut Vec<GridInput>,
     ) -> Option<Event> {
+        // Text in an open date cell: a date-key character applies after the
+        // text typed before it in this frame, and `-` after `2026` or
+        // `2026-11` is a separator (ISO dates, N3). `buffer` is the editor's
+        // text when typing appends to it (empty when the first key replaces
+        // it).
+        if let Event::Text(t) = event
+            && info.editable_grid
+            && info.editing
+            && info.kind == Some(CellKind::Date)
+            && !info.ime_active
+        {
+            let mut chars = t.chars();
+            let key = match (chars.next(), chars.next()) {
+                (Some(c), None) => DateKey::from_char(c),
+                _ => None,
+            };
+            let typed: String = std::iter::once(buffer)
+                .chain(self.held.iter().map(String::as_str))
+                .collect();
+            let separator = t == "-" && iso_prefix(&typed);
+            if key.is_some() && !separator {
+                out.extend(self.held.drain(..).map(GridInput::Text));
+                out.push(GridInput::Text(t.clone()));
+            } else {
+                self.held.push(t.clone());
+            }
+            return None;
+        }
         let mut paste = PasteOutcome::None;
         let keep = map(event, info, out, &mut paste, &mut self.swallow_space_text);
         if let PasteOutcome::Refused(p) = paste {
@@ -84,19 +129,34 @@ impl Collector {
         }
         keep
     }
+
+    /// The end of the frame: held date text goes to the editor, in order.
+    pub fn finish(&mut self) -> Vec<Event> {
+        self.held.drain(..).map(Event::Text).collect()
+    }
 }
 
 /// Collect and consume all of `input`'s grid events with one cursor info
 /// (tests and simple callers).
 pub fn collect(input: &mut InputState, info: CursorInfo) -> (Vec<GridInput>, PasteOutcome) {
+    collect_after(input, info, "")
+}
+
+/// [`collect`] for an editor whose text `buffer` typing appends to.
+pub fn collect_after(
+    input: &mut InputState,
+    info: CursorInfo,
+    buffer: &str,
+) -> (Vec<GridInput>, PasteOutcome) {
     let mut c = Collector::default();
     let mut out = Vec::new();
     let mut kept = Vec::with_capacity(input.events.len());
     for event in std::mem::take(&mut input.events) {
-        if let Some(keep) = c.event(&event, info, &mut out) {
+        if let Some(keep) = c.event(&event, info, buffer, &mut out) {
             kept.push(keep);
         }
     }
+    kept.extend(c.finish());
     input.events = kept;
     let paste = c.paste.map_or(PasteOutcome::None, PasteOutcome::Refused);
     (out, paste)
@@ -200,16 +260,7 @@ fn map(
                 out.push(GridInput::Text(t.clone()));
                 return None;
             }
-            let mut chars = t.chars();
-            let single = matches!((chars.next(), chars.next()), (Some(_), None));
-            if info.kind == Some(CellKind::Date)
-                && single
-                && !info.ime_active
-                && t.chars().next().and_then(DateKey::from_char).is_some()
-            {
-                out.push(GridInput::Text(t.clone()));
-                return None;
-            }
+            // Date cells are handled in `Collector::event`.
             keep
         }
         Event::Paste(text)
@@ -373,6 +424,49 @@ mod tests {
                 GridInput::Key(GridKey::Down, alt)
             ]
         );
+        assert_eq!(left, Vec::<Event>::new());
+    }
+
+    fn run_after(events: Vec<Event>, buffer: &str) -> (Vec<GridInput>, Vec<Event>) {
+        let mut i = InputState::default();
+        i.events = events;
+        let (out, _) = collect_after(&mut i, info(Some(CellKind::Date), true), buffer);
+        (out, i.events)
+    }
+
+    fn texts(s: &[&str]) -> Vec<Event> {
+        s.iter().map(|t| Event::Text((*t).into())).collect()
+    }
+
+    /// N3: an ISO date can be typed; `-` is a separator after `2026` and
+    /// `2026-11`, and the "previous day" key otherwise.
+    #[test]
+    fn iso_dates_type_through() {
+        let (out, left) = run_after(texts(&["-"]), "2026");
+        assert_eq!(out, Vec::<GridInput>::new());
+        assert_eq!(left, texts(&["-"]));
+        let all = ["2", "0", "2", "6", "-", "1", "1", "-", "0", "4"];
+        let (out, left) = run_after(texts(&all), "");
+        assert!(out.is_empty(), "{out:?}");
+        assert_eq!(left, texts(&all), "all of it reaches the editor in order");
+        // After a whole date, `-` is the date key again.
+        let (out, _) = run_after(texts(&["-"]), "11/04/2026");
+        assert_eq!(out, vec![GridInput::Text("-".into())]);
+        let (out, _) = run_after(texts(&["-"]), "2026-11-04");
+        assert_eq!(out, vec![GridInput::Text("-".into())]);
+        let (out, _) = run_after(texts(&["-"]), "");
+        assert_eq!(out, vec![GridInput::Text("-".into())]);
+    }
+
+    /// N3: digits typed earlier in the same frame apply before a date key.
+    #[test]
+    fn digits_before_a_date_key_in_one_frame_apply_first() {
+        let (out, left) = run_after(texts(&["1", "1", "/", "4", "+"]), "");
+        let want: Vec<GridInput> = ["1", "1", "/", "4", "+"]
+            .iter()
+            .map(|t| GridInput::Text((*t).into()))
+            .collect();
+        assert_eq!(out, want);
         assert_eq!(left, Vec::<Event>::new());
     }
 

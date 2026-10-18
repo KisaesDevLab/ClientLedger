@@ -75,8 +75,9 @@ impl Mods {
     };
 }
 
-/// One input to the state machine.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One input to the state machine. `Debug` never prints typed text or
+/// list labels.
+#[derive(Clone, PartialEq, Eq)]
 pub enum GridInput {
     /// A key press.
     Key(GridKey, Mods),
@@ -111,6 +112,31 @@ pub enum GridInput {
     /// Space or Alt+Down on a dropdown cell: open its choices (labels
     /// already resolved by the view).
     OpenChoices(Vec<super::model::Suggestion>),
+}
+
+impl std::fmt::Debug for GridInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GridInput::Key(k, m) => f.debug_tuple("Key").field(k).field(m).finish(),
+            GridInput::Text(_) => f.write_str("Text(..)"),
+            GridInput::BufferEdited(_) => f.write_str("BufferEdited(..)"),
+            GridInput::Click { pos, double, mods } => f
+                .debug_struct("Click")
+                .field("pos", pos)
+                .field("double", double)
+                .field("mods", mods)
+                .finish(),
+            GridInput::Command(c) => f.debug_tuple("Command").field(c).finish(),
+            GridInput::FocusLost => f.write_str("FocusLost"),
+            GridInput::FocusGained { from_below } => f
+                .debug_struct("FocusGained")
+                .field("from_below", from_below)
+                .finish(),
+            GridInput::AddNewPicked => f.write_str("AddNewPicked"),
+            GridInput::PopupPicked(i) => f.debug_tuple("PopupPicked").field(i).finish(),
+            GridInput::OpenChoices(items) => write!(f, "OpenChoices({} items)", items.len()),
+        }
+    }
 }
 
 /// Values the state machine needs from its surroundings ("today" and the

@@ -699,6 +699,15 @@ fn unresolved_picker_text_and_add_new() {
     assert!(has(&fx, |e| matches!(e, GridEvent::AddNew { .. })));
     assert_eq!(r.m.lines()[0].account, Account::Unresolved("Gas".into()));
     assert_eq!(r.error(), Some(TextKey("grid.picker.not_in_list")));
+    // N5: Esc on the clean cell does not hide the problem while the value
+    // is unresolved (here the row has nothing to revert to).
+    let mut esc = Rig::line(0);
+    esc.typ("Gas");
+    esc.input(GridInput::AddNewPicked);
+    esc.m.snapshot = Some((esc.m.key(0), esc.m.lines()[0].clone()));
+    esc.cmd(GridCommand::Revert);
+    assert_eq!(esc.m.lines()[0].account, Account::Unresolved("Gas".into()));
+    assert_eq!(esc.error(), Some(TextKey("grid.picker.not_in_list")));
     let pos = r.core.cursor().unwrap();
     let mut mr = ModelRef::Edit(&mut r.m);
     r.core.resolve_pending(pos, 6210, &mut mr, formats());
@@ -899,4 +908,33 @@ fn computed_money_column_is_locked() {
     assert!(r.core.edit().is_none(), "no editor on the balance");
     r.typ("5");
     assert!(r.m.set_calls.is_empty());
+}
+
+/// N2: Debug output never carries typed text, memos, amounts or names.
+#[test]
+fn debug_output_is_redacted() {
+    let mut r = Rig::line(1);
+    r.key(GridKey::Tab);
+    r.key(GridKey::Tab);
+    r.typ("Hollister 842.15 secret");
+    let core = format!("{:?}", r.core);
+    assert!(
+        !core.contains("Hollister") && !core.contains("842"),
+        "{core}"
+    );
+    let input = format!("{:?}", GridInput::Text("Hollister 842.15".into()));
+    assert_eq!(input, "Text(..)");
+    let edited = format!("{:?}", GridInput::BufferEdited("842.15".into()));
+    assert!(!edited.contains("842"));
+    let fx = Effects {
+        copy: Some("Hollister 842.15".into()),
+        ..Effects::default()
+    };
+    assert!(!format!("{fx:?}").contains("Hollister"));
+    let choices = GridInput::OpenChoices(vec![cl_grid::Suggestion {
+        id: 1,
+        label: "Hollister Family".into(),
+        group: None,
+    }]);
+    assert!(!format!("{choices:?}").contains("Hollister"));
 }

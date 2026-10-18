@@ -647,7 +647,6 @@ fn sanitize_staged(data: &Path) -> Result<()> {
     )
 }
 
-/// `<data_dir><suffix>` next to the data directory.
 /// How long a rename waits for Windows to release the data folder.
 const RELEASE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
@@ -676,6 +675,7 @@ fn rename_when_released(from: &Path, to: &Path) -> std::io::Result<()> {
     }
 }
 
+/// `<data_dir><suffix>` next to the data directory.
 fn sibling(data_dir: &Path, suffix: &str) -> PathBuf {
     let mut name = data_dir
         .file_name()
