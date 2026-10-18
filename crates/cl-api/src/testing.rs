@@ -122,6 +122,9 @@ impl EndpointSource for CountingSource {
 /// The answer to a raw request: status and JSON body (`Null` when empty or
 /// not JSON). Numbers in the body are never read as floats by the harness:
 /// tests compare JSON strings only.
+pub use crate::session::stub_session;
+
+/// A raw engine reply (status and JSON body) for the contract harness.
 #[derive(Debug)]
 pub struct RawReply {
     /// HTTP status.

@@ -143,6 +143,9 @@ pub struct CompanyRecord {
     /// Local setup flags.
     #[serde(default)]
     pub flags: CompanyFlags,
+    /// Company-local preferences (P09).
+    #[serde(default)]
+    pub prefs: crate::CompanyPrefs,
     /// Transactions the engine reported when last opened (a count only).
     #[serde(default)]
     pub transaction_count: Option<u64>,
@@ -176,6 +179,7 @@ impl CompanyRecord {
             last_backup: None,
             backups: Vec::new(),
             flags: CompanyFlags::default(),
+            prefs: crate::CompanyPrefs::default(),
             transaction_count: None,
             source: None,
             is_sample: false,

@@ -794,3 +794,62 @@ pub fn run_suite(mode: EngineMode, tests: &[(&str, TestFn)]) -> ExitCode {
         ExitCode::FAILURE
     }
 }
+
+// ------------------------------------------------------------- ollama stub
+
+/// A loopback HTTP server that plays Ollama's `GET /api/tags` (P09:
+/// "Ollama works with networking disabled"). Everything else answers 404.
+/// Backed by wiremock on the harness runtime.
+pub struct OllamaStub {
+    /// `http://127.0.0.1:<port>`.
+    pub base_url: String,
+    server: wiremock::MockServer,
+}
+
+impl OllamaStub {
+    /// One stub for the whole binary (the engine may keep a provider built
+    /// for the last base URL for a short while, so every test uses the same
+    /// address). Serves `llama3.1:8b` and `qwen2.5:7b`.
+    pub fn shared(h: &Harness) -> &'static OllamaStub {
+        static STUB: std::sync::OnceLock<OllamaStub> = std::sync::OnceLock::new();
+        STUB.get_or_init(|| OllamaStub::start(h, &["llama3.1:8b", "qwen2.5:7b"]))
+    }
+
+    /// Serves `models` as installed.
+    pub fn start(h: &Harness, models: &[&str]) -> OllamaStub {
+        use wiremock::matchers::{method, path};
+        let body = format!(
+            "{{\"models\":[{}]}}",
+            models
+                .iter()
+                .map(|m| format!("{{\"name\":\"{m}\",\"size\":1}}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let server = h.run(async move {
+            let server = wiremock::MockServer::start().await;
+            wiremock::Mock::given(method("GET"))
+                .and(path("/api/tags"))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(200).set_body_raw(body, "application/json"),
+                )
+                .mount(&server)
+                .await;
+            server
+        });
+        OllamaStub {
+            base_url: server.uri(),
+            server,
+        }
+    }
+
+    /// Requests served so far.
+    pub fn hits(&self, h: &Harness) -> u64 {
+        h.run(async {
+            self.server
+                .received_requests()
+                .await
+                .map_or(0, |r| r.len() as u64)
+        })
+    }
+}

@@ -290,9 +290,18 @@ impl OpenCompanyScreen {
             return;
         };
         let store = self.link.store().clone();
+        let secrets = self.link.secrets();
         self.busy = Some("open.opening");
         self.open_task = spawn_lifecycle(&self.link, group, move || async move {
             cl_company::open_company(&session, &store, row.tenant_id).await?;
+            // The session's secrets (SMTP password, the AI key or Ollama
+            // address) go to the engine now, from the keychain (Q-P09a).
+            let prefs = store
+                .load()
+                .ok()
+                .and_then(|l| l.get(row.tenant_id).map(|r| r.prefs.clone()))
+                .unwrap_or_default();
+            crate::screens::preferences::ai::push_at_open(&session, secrets.as_ref(), &prefs).await;
             let settings = session.company_settings().await.ok();
             Ok((
                 row.tenant_id,

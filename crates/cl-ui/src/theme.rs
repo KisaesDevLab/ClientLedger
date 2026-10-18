@@ -10,48 +10,15 @@ use eframe::egui::{
     self, Color32, Context, CornerRadius, FontFamily, FontId, Margin, Stroke, TextStyle, Theme,
     ThemePreference, Vec2, Visuals,
 };
-use serde::{Deserialize, Serialize};
 
-/// The owner's colour choice (Window menu, Preferences).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ThemeChoice {
-    /// Light colours.
-    Light,
-    /// Dark colours.
-    Dark,
-    /// Follow the operating system.
-    #[default]
-    Auto,
-}
+pub use cl_settings::ThemeChoice;
 
-impl ThemeChoice {
-    /// Next in the Light, Dark, Automatic cycle.
-    #[must_use]
-    pub fn next(self) -> ThemeChoice {
-        match self {
-            ThemeChoice::Light => ThemeChoice::Dark,
-            ThemeChoice::Dark => ThemeChoice::Auto,
-            ThemeChoice::Auto => ThemeChoice::Light,
-        }
-    }
-
-    /// i18n key of the name.
-    #[must_use]
-    pub fn label_key(self) -> &'static str {
-        match self {
-            ThemeChoice::Light => "theme.light",
-            ThemeChoice::Dark => "theme.dark",
-            ThemeChoice::Auto => "theme.auto",
-        }
-    }
-
-    fn preference(self) -> ThemePreference {
-        match self {
-            ThemeChoice::Light => ThemePreference::Light,
-            ThemeChoice::Dark => ThemePreference::Dark,
-            ThemeChoice::Auto => ThemePreference::System,
-        }
+/// egui's view of a theme choice.
+fn preference(choice: ThemeChoice) -> ThemePreference {
+    match choice {
+        ThemeChoice::Light => ThemePreference::Light,
+        ThemeChoice::Dark => ThemePreference::Dark,
+        ThemeChoice::Auto => ThemePreference::System,
     }
 }
 
@@ -226,7 +193,7 @@ pub mod styles {
 
 /// Install fonts (once) and both styles, and choose the theme preference.
 pub fn apply(ctx: &Context, choice: ThemeChoice) {
-    ctx.set_theme(choice.preference());
+    ctx.set_theme(preference(choice));
     ctx.set_style_of(Theme::Light, style_for(&Tokens::LIGHT, Theme::Light));
     ctx.set_style_of(Theme::Dark, style_for(&Tokens::DARK, Theme::Dark));
 }

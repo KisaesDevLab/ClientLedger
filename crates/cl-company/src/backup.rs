@@ -40,6 +40,10 @@ pub struct HostMetadata {
     pub accent: String,
     /// Local setup flags (Q-P08c).
     pub flags: CompanyFlags,
+    /// Company-local preferences that make sense on another computer
+    /// (`CompanyPrefs::for_archive`, Q-P09c); absent in P08 archives.
+    #[serde(default)]
+    pub prefs: cl_settings::CompanyPrefs,
 }
 
 impl HostMetadata {
@@ -50,6 +54,7 @@ impl HostMetadata {
         name: &str,
         accent: cl_settings::Accent,
         flags: CompanyFlags,
+        prefs: cl_settings::CompanyPrefs,
     ) -> Self {
         HostMetadata {
             app: "ClientLedger".into(),
@@ -63,6 +68,7 @@ impl HostMetadata {
             name: name.into(),
             accent: accent.hex(),
             flags,
+            prefs,
         }
     }
 }
@@ -297,7 +303,13 @@ pub async fn backup(
         .get(req.tenant_id)
         .cloned()
         .ok_or(CompanyError::UnknownCompany)?;
-    let host = HostMetadata::new(req.kind, &rec.name, rec.accent, rec.flags);
+    let host = HostMetadata::new(
+        req.kind,
+        &rec.name,
+        rec.accent,
+        rec.flags,
+        rec.prefs.for_archive(),
+    );
     progress(Progress::Starting);
     let job = session
         .tenants()
@@ -473,9 +485,21 @@ mod tests {
             "Shoal Creek Farm",
             cl_settings::ACCENT_PALETTE[1],
             CompanyFlags::default(),
+            cl_settings::CompanyPrefs {
+                bills_due_days: 14,
+                ..cl_settings::CompanyPrefs::default()
+            },
         );
         let v = serde_json::to_value(&h).expect("json");
         assert_eq!(v["kind"], "portable");
+        assert_eq!(v["prefs"]["bills_due_days"], 14);
+        // A P08 archive has no `prefs`: defaults apply.
+        let old: HostMetadata = serde_json::from_value(serde_json::json!({
+            "app": "ClientLedger", "appVersion": "0.1", "kind": "backup",
+            "name": "x", "accent": "#6E8B3D", "flags": {}
+        }))
+        .expect("old");
+        assert_eq!(old.prefs, cl_settings::CompanyPrefs::default());
         assert_eq!(v["accent"], "#6E8B3D");
         let back: HostMetadata = serde_json::from_value(v).expect("back");
         assert_eq!(back, h);

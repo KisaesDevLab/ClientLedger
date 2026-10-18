@@ -108,6 +108,56 @@ impl Default for DemoState {
     }
 }
 
+/// What the Preferences window shows in the demo: the mockup's AI panel
+/// (on, Ollama, `llama3.1:8b`, nothing spent) over Ozark Ridge's settings.
+#[must_use]
+pub fn preferences_loaded() -> crate::screens::preferences::Loaded {
+    let settings: Option<cl_api::CompanySettings> = serde_json::from_value(serde_json::json!({
+        "fiscalYearStartMonth": 1,
+        "accountingMethod": "accrual",
+        "defaultSalesTaxRate": "0.0825",
+        "lockDate": "2026-09-30",
+    }))
+    .ok();
+    let ai: cl_api::AiConfig = serde_json::from_value(serde_json::json!({
+        "isEnabled": true,
+        "fallbackChain": ["ollama"],
+        "categorizationProvider": "ollama",
+        "categorizationModel": "llama3.1:8b",
+        "ollamaBaseUrl": "http://localhost:11434",
+        "piiProtectionLevel": "strict",
+        "trackUsage": true,
+        "monthlyBudgetLimit": 10,
+        "adminDisclosureAcceptedAt": "2026-10-01T08:00:00.000Z",
+        "disclosureVersion": 1,
+    }))
+    .unwrap_or_default();
+    let usage: cl_api::AiUsage = serde_json::from_value(serde_json::json!({
+        "totalCalls": 0, "totalInputTokens": 0, "totalOutputTokens": 0, "totalCost": 0,
+        "byProvider": {}, "byJobType": {},
+    }))
+    .unwrap_or_default();
+    let consent: Option<cl_api::CompanyConsent> = serde_json::from_value(serde_json::json!({
+        "companyId": "d0000000-0000-4000-8000-0000000000c1",
+        "companyName": "Ozark Ridge Landscaping LLC",
+        "systemVersion": 1,
+        "acceptedVersion": 1,
+        "acceptedAt": "2026-10-01T08:05:00.000Z",
+        "aiEnabled": true,
+        "enabledTasks": {"categorization": true, "receipt_ocr": true, "report_summary": true},
+        "isStale": false,
+    }))
+    .ok();
+    crate::screens::preferences::Loaded {
+        settings,
+        ai: Some(ai),
+        consent,
+        smtp: None,
+        usage: Some(usage),
+        done: true,
+    }
+}
+
 /// The demo recovery key shown by the recovery-key screen (synthetic;
 /// redacted by `inspect` like any key).
 pub const DEMO_RECOVERY_KEY: &str = "K7F2-9QMD-3XTB-8RVC-PL6N-WY4H";

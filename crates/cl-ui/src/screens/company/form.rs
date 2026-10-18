@@ -11,6 +11,107 @@ use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::widgets::primary_button;
 
+/// Text typed into a secret field: zeroized when dropped or cleared, so a
+/// key or password does not linger in freed memory (security low).
+///
+/// Limit: egui's `TextEdit` keeps its own undo history of the text in
+/// `Memory` (plain `String`s), so a typed secret can outlive this buffer
+/// inside egui until that state is dropped. Follow-up: clear the undoer
+/// for secret fields, or give them a `TextEdit` without undo (Q-P09h).
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct SecretText(zeroize::Zeroizing<String>);
+
+impl SecretText {
+    /// Empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The text without surrounding whitespace (borrowed; never copied).
+    #[must_use]
+    pub fn trimmed(&self) -> &str {
+        self.0.trim()
+    }
+
+    /// Wipes the text.
+    pub fn clear(&mut self) {
+        zeroize::Zeroize::zeroize(&mut *self.0);
+    }
+}
+
+impl std::fmt::Debug for SecretText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SecretText(..)")
+    }
+}
+
+impl From<&str> for SecretText {
+    fn from(s: &str) -> SecretText {
+        SecretText(zeroize::Zeroizing::new(s.to_string()))
+    }
+}
+
+impl egui::TextBuffer for SecretText {
+    fn is_mutable(&self) -> bool {
+        true
+    }
+
+    fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    fn insert_text(&mut self, text: &str, char_index: egui::text::CharIndex) -> usize {
+        egui::TextBuffer::insert_text(&mut *self.0, text, char_index)
+    }
+
+    fn delete_char_range(&mut self, char_range: std::ops::Range<egui::text::CharIndex>) {
+        egui::TextBuffer::delete_char_range(&mut *self.0, char_range);
+    }
+
+    fn type_id(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<SecretText>()
+    }
+}
+
+/// A password input over a zeroizing buffer (masked on screen and in the
+/// accessibility tree).
+pub fn password_secret(ui: &mut Ui, label: &str, value: &mut SecretText) -> Response {
+    ui.horizontal(|ui| {
+        let l = ui.add(egui::Label::new(label).selectable(false));
+        // A secret: masked on screen and in the accessibility tree.
+        ui.add_sized(
+            [ui.available_width().min(360.0), 24.0],
+            egui::TextEdit::singleline(value).password(true),
+        )
+        .labelled_by(l.id)
+    })
+    .inner
+}
+
+/// A single-line input that takes the whole row (paths).
+pub fn field_wide(ui: &mut Ui, label: &str, value: &mut String) -> Response {
+    ui.horizontal(|ui| {
+        let l = ui.add(egui::Label::new(label).selectable(false));
+        ui.add_sized(
+            [ui.available_width(), 24.0],
+            egui::TextEdit::singleline(value).hint_text(""),
+        )
+        .labelled_by(l.id)
+    })
+    .inner
+}
+
+/// True when a focusable choice was clicked, or has keyboard focus and
+/// Space or Enter was pressed.
+#[must_use]
+pub fn activated(r: &Response) -> bool {
+    r.clicked()
+        || (r.has_focus()
+            && r.ctx
+                .input(|i| i.key_pressed(egui::Key::Space) || i.key_pressed(egui::Key::Enter)))
+}
+
 /// A bordered section on the subtle surface.
 pub fn card<R>(ui: &mut Ui, tokens: &Tokens, add: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::new()
@@ -20,6 +121,21 @@ pub fn card<R>(ui: &mut Ui, tokens: &Tokens, add: impl FnOnce(&mut Ui) -> R) -> 
         .inner_margin(Margin::symmetric(14, 12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
+            add(ui)
+        })
+        .inner
+}
+
+/// A bordered section with less vertical padding (dense panels).
+pub fn card_tight<R>(ui: &mut Ui, tokens: &Tokens, add: impl FnOnce(&mut Ui) -> R) -> R {
+    egui::Frame::new()
+        .fill(tokens.surface_subtle)
+        .stroke(Stroke::new(1.0, tokens.border_default))
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(Margin::symmetric(14, 7))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 3.0;
             add(ui)
         })
         .inner
@@ -169,7 +285,11 @@ pub fn money_field(
     Money::parse_user(text, UserInput::CENTS).map(Some)
 }
 
-/// One selectable row with a title and a description (a radio choice).
+/// One selectable card with a title and a description (a radio choice).
+/// Allocated like a button, so every card is in the Tab order, the arrow
+/// keys move focus between cards (egui's own focus movement) and Space or
+/// Enter selects the focused one; it shows a radio mark, left-aligned
+/// text and a focus ring.
 pub fn choice(
     ui: &mut Ui,
     tokens: &Tokens,
@@ -177,36 +297,82 @@ pub fn choice(
     title: &str,
     description: &str,
 ) -> Response {
-    let fill = if selected {
-        tokens.accent_tint
-    } else {
-        tokens.surface_window
-    };
-    let stroke = if selected {
-        tokens.accent
-    } else {
-        tokens.border_default
-    };
-    let response = egui::Frame::new()
-        .fill(fill)
-        .stroke(Stroke::new(1.0, stroke))
-        .corner_radius(CornerRadius::same(6))
-        .inner_margin(Margin::symmetric(12, 8))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.add(egui::Label::new(RichText::new(title).strong()).selectable(false));
-            ui.add(
-                egui::Label::new(
-                    RichText::new(description)
-                        .size(12.0)
-                        .color(tokens.text_secondary),
-                )
-                .selectable(false)
-                .wrap(),
+    let width = ui.available_width();
+    let pad = Vec2::new(12.0, 8.0);
+    let mark = 14.0;
+    let text_width = (width - pad.x * 2.0 - mark - 6.0).max(40.0);
+    let title_galley = ui.painter().layout(
+        title.to_string(),
+        egui::FontId::proportional(14.0),
+        tokens.text_primary,
+        text_width,
+    );
+    let desc_galley = ui.painter().layout(
+        description.to_string(),
+        egui::FontId::proportional(12.0),
+        tokens.text_secondary,
+        width - pad.x * 2.0,
+    );
+    let height = pad.y * 2.0 + title_galley.size().y + 4.0 + desc_galley.size().y;
+    let (rect, response) = ui.allocate_at_least(Vec2::new(width, height), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let fill = if selected {
+            tokens.accent_tint
+        } else {
+            tokens.surface_window
+        };
+        let stroke = if selected {
+            tokens.accent
+        } else {
+            tokens.border_default
+        };
+        let painter = ui.painter();
+        painter.rect(
+            rect,
+            CornerRadius::same(6),
+            fill,
+            Stroke::new(1.0, stroke),
+            egui::StrokeKind::Inside,
+        );
+        if response.has_focus() {
+            painter.rect_stroke(
+                rect.expand(2.0),
+                CornerRadius::same(8),
+                Stroke::new(2.0, tokens.accent),
+                egui::StrokeKind::Outside,
             );
-        })
-        .response
-        .interact(egui::Sense::click());
+        }
+        let title_top = rect.top() + pad.y;
+        let center = egui::Pos2::new(
+            rect.left() + pad.x + mark / 2.0,
+            title_top + title_galley.size().y / 2.0,
+        );
+        painter.circle_stroke(
+            center,
+            6.0,
+            Stroke::new(
+                1.5,
+                if selected {
+                    tokens.accent
+                } else {
+                    tokens.border_strong
+                },
+            ),
+        );
+        if selected {
+            painter.circle_filled(center, 3.0, tokens.accent);
+        }
+        painter.galley(
+            egui::Pos2::new(rect.left() + pad.x + mark + 6.0, title_top),
+            title_galley.clone(),
+            tokens.text_primary,
+        );
+        painter.galley(
+            egui::Pos2::new(rect.left() + pad.x, title_top + title_galley.size().y + 4.0),
+            desc_galley,
+            tokens.text_secondary,
+        );
+    }
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::Role::RadioButton, true, selected, title.to_string())
     });

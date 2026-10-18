@@ -258,13 +258,13 @@ impl Shell {
     /// Builds the screen for a window kind: a company screen when the
     /// kind is one (and the shell has a link), else a placeholder.
     fn make_screen(&self, kind: CommandId) -> Box<dyn Screen> {
-        if let Some(link) = &self.company_link
-            && let Some(s) =
-                crate::screens::company::make(kind, link, self.open_tenant.clone(), self.today)
-        {
-            return s;
-        }
-        Box::new(Placeholder::for_command(kind))
+        make_any(
+            kind,
+            self.company_link.as_ref(),
+            self.open_tenant.clone(),
+            self.today,
+            self.prefs,
+        )
     }
 
     /// Bring the window for `kind` to the front, or open it.
@@ -352,6 +352,14 @@ impl Shell {
                 CompanyEvent::Toast(key) => {
                     if let Some(ctx) = ctx {
                         self.toast(ctx, key);
+                    }
+                }
+                CompanyEvent::UserPrefs(p) => {
+                    self.prefs = p;
+                    if let Some(store) = self.store.as_ref().filter(|_| !self.run_only)
+                        && let Err(e) = store.save_prefs(&self.prefs)
+                    {
+                        tracing::warn!(error = %e, "could not save preferences");
                     }
                 }
                 CompanyEvent::PromptDirty => {
@@ -476,14 +484,16 @@ impl Shell {
             .store
             .as_ref()
             .and_then(|s| s.load_layout(&self.company_key));
-        let (link, open, today) = (
+        let (link, open, today, prefs) = (
             self.company_link.clone(),
             self.open_tenant.clone(),
             self.today,
+            self.prefs,
         );
         let restored = layout.is_some_and(|l| {
-            self.windows
-                .restore(&l, &|k| make_any(k, link.as_ref(), open.clone(), today));
+            self.windows.restore(&l, &|k| {
+                make_any(k, link.as_ref(), open.clone(), today, prefs)
+            });
             !self.windows.is_empty()
         });
         if !restored {
@@ -498,14 +508,16 @@ impl Shell {
         self.company_key = key.to_string();
         self.company = banner;
         let layout = self.store.as_ref().and_then(|s| s.load_layout(key));
-        let (link, open, today) = (
+        let (link, open, today, prefs) = (
             self.company_link.clone(),
             self.open_tenant.clone(),
             self.today,
+            self.prefs,
         );
         let restored = layout.is_some_and(|l| {
-            self.windows
-                .restore(&l, &|k| make_any(k, link.as_ref(), open.clone(), today))
+            self.windows.restore(&l, &|k| {
+                make_any(k, link.as_ref(), open.clone(), today, prefs)
+            })
         });
         if !restored && self.windows.is_empty() {
             self.dispatch_now(CommandId::new("nav.home"));
@@ -1023,11 +1035,15 @@ fn make_any(
     link: Option<&Arc<CompanyLink>>,
     open: Option<(cl_core::ids::TenantId, String)>,
     today: CalendarDate,
+    prefs: UiPrefs,
 ) -> Box<dyn Screen> {
-    if let Some(link) = link
-        && let Some(s) = crate::screens::company::make(kind, link, open, today)
-    {
-        return s;
+    if let Some(link) = link {
+        if let Some(s) = crate::screens::company::make(kind, link, open.clone(), today) {
+            return s;
+        }
+        if let Some(s) = crate::screens::preferences::make(kind, link, open, prefs) {
+            return s;
+        }
     }
     Box::new(Placeholder::for_command(kind))
 }

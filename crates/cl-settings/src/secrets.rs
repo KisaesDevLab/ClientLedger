@@ -48,6 +48,16 @@ pub trait SecretStore: Send + Sync {
 
     /// Short description for logs (`os-keychain`, `memory`).
     fn kind(&self) -> &'static str;
+
+    /// True when a non-empty secret is saved under `name` (the value is
+    /// read and dropped at once; callers that only need presence use this
+    /// so the value never sits in their own state).
+    ///
+    /// # Errors
+    /// `InvalidName`, `Keychain`.
+    fn has(&self, name: &str) -> Result<bool, SecretError> {
+        Ok(self.get(name)?.is_some_and(|s| !s.is_empty()))
+    }
 }
 
 /// Secret names: lowercase letters, digits and dashes, 1-40 characters.
@@ -200,8 +210,10 @@ mod tests {
             Some("pw-canary".into())
         );
         assert!(!format!("{s:?}").contains("canary"));
+        assert!(s.has(BACKUP_PASSPHRASE).expect("has"));
         s.delete(BACKUP_PASSPHRASE).expect("delete");
         assert_eq!(s.get(BACKUP_PASSPHRASE).expect("get"), None);
+        assert!(!s.has(BACKUP_PASSPHRASE).expect("has"));
         assert_eq!(
             s.get("Bad Name").expect_err("name"),
             SecretError::InvalidName

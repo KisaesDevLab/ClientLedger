@@ -1,0 +1,143 @@
+# Preferences, AI panel (P09 step 3) against `clientledger --demo`: the
+# mockup's panel (on, Ollama), switching to an online provider, the key
+# typed into a password field (never in the tree or a screenshot), the
+# notice that must be agreed before Save, the saved state with the key in
+# the keychain, removal, and the Ollama test. Light then dark.
+name: preferences-ai
+description: AI suggestions panel, provider choice, key, consent, cap, test.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: edit.preferences
+  - assert_state: {key: screen.screen, equals: preferences}
+  - assert_state: {key: screen.category, equals: ai}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: label, label: Preferences}
+  - assert_exists: {role: text_input, label: Find a setting}
+  - assert_exists: {role: label, label: JUST FOR ME}
+  - assert_exists: {role: label, label: THIS COMPANY}
+  - assert_exists: {role: button, label: Look and feel}
+  - assert_exists: {role: button, label: Dates and numbers}
+  - assert_exists: {role: button, label: Reminders}
+  - assert_exists: {role: button, label: Accounting}
+  - assert_exists: {role: button, label: Checks and forms}
+  - assert_exists: {role: button, label: Sales tax}
+  - assert_exists: {role: button, label: Inventory}
+  - assert_exists: {role: button, label: AI suggestions}
+  - assert_exists: {role: button, label: Email}
+  - assert_exists: {role: button, label: Receipt inbox}
+  - assert_exists: {role: button, label: Backups}
+  - assert_exists: {role: button, label: Updates}
+  - assert_exists: {role: label, label: Where AI runs}
+  - assert_exists: {role: radio_button, label: On this computer (Ollama)}
+  - assert_exists: {role: radio_button, label: Anthropic (your key)}
+  - assert_exists: {role: radio_button, label: OpenAI (your key)}
+  - assert_exists: {role: text_input, label: Ollama address}
+  - assert_exists: {role: text_input, label: Model}
+  - assert_exists: {role: button, label: Test}
+  - assert_exists: {role: label, label: What AI may help with}
+  - assert_exists: {role: check_box, label: Bank Feed suggestions}
+  - assert_exists: {role: check_box, label: Read bills and receipts}
+  - assert_exists: {role: check_box, label: Ask a question in Reports}
+  - assert_exists: {role: check_box, label: Suggest rules}
+  - assert_exists: {role: label, label: Online AI usage}
+  - assert_exists: {role: text_input, label: Monthly cap}
+  - assert_exists: {role: button, label: Cancel}
+  - assert_exists: {role: button, label: Save}
+  - assert_state: {key: screen.ai.enabled, equals: true}
+  - assert_state: {key: screen.ai.provider, equals: ollama}
+  - assert_state: {key: screen.ai.consent_agreed, equals: true}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_no_clipping: {}
+  - screenshot: ai
+
+  # --- Keyboard: Shift+Tab from the address field lands on the last
+  # card, Left moves focus between cards, Space selects the focused one
+  # (ui-verifier High) ------------------------------------------------
+  - click: {role: text_input, label: Ollama address}
+  - key: Shift+Tab
+  - key: ArrowLeft
+  - key: Space
+  - assert_state: {key: screen.ai.provider, equals: anthropic}
+  - assert_state: {key: screen.dirty, equals: true}
+  # Esc reverts the keyboard choice (the window stays: it was dirty).
+  - key: Escape
+  - assert_state: {key: screen.ai.provider, equals: ollama}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_exists: {role: tab, label: Preferences}
+
+  # --- 200% zoom: the footer stays reachable ---------------------------
+  - set_zoom: {percent: 200}
+  - assert_exists: {role: button, label: Save}
+  - assert_exists: {role: button, label: Cancel}
+  - screenshot: ai-zoom-200
+  - set_zoom: {percent: 100}
+
+  # --- Ollama test (demo answers at once) ---------------------------------
+  - click: {role: button, label: Test}
+  - assert_exists: {role: label, label_contains: Connected}
+
+  # --- Cap and switches (still Ollama: the layout fits without scrolling) --
+  # The light run leaves its saved switches behind for the dark run, so
+  # the switch is flipped and flipped back: either way it marks the edits.
+  - click: {role: check_box, label: Suggest rules}
+  - assert_state: {key: screen.dirty, equals: true}
+  - click: {role: check_box, label: Suggest rules}
+  - click: {role: text_input, label: Monthly cap}
+  - key: Ctrl+A
+  - type: {text: "250000"}
+  - assert_state: {key: screen.ai.cap, equals: 250000}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dirty, equals: false}
+
+  # --- An online provider: key, notice, consent. The notice card makes the
+  # layout taller than the window, so the body scrolls from here on. --------
+  - click: {role: radio_button, label: Anthropic (your key)}
+  - assert_state: {key: screen.ai.provider, equals: anthropic}
+  - assert_state: {key: screen.ai.key_saved, equals: false}
+  - assert_state: {key: screen.ai.waiting_engine, equals: true}
+  - assert_exists: {role: password_input, label: API key}
+  - assert_exists: {role: label, label_contains: No key saved yet}
+  - assert_exists: {role: label, label_contains: "not available yet: your key"}
+  - assert_exists: {role: label, label: Before anything goes online}
+  - assert_exists: {role: check_box, label_contains: I agree}
+  - assert_state: {key: screen.ai.consent_agreed, equals: false}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.blocked, equals: AiNeedsKey}
+  - click: {role: password_input, label: API key}
+  - type: {text: sk-ant-scenario-key-0001}
+  - assert_state: {key: screen.ai.key_typed, equals: true}
+  - assert_not_exists: {role: label, label_contains: sk-ant-scenario}
+  # The notice card makes the online layout taller than 940 px: the body
+  # scrolls by design, so no clipping check here.
+  - screenshot: anthropic-key
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.blocked, equals: AiNeedsConsentAgain}
+  - click: {role: check_box, label_contains: I agree}
+  - assert_state: {key: screen.ai.consent_agreed, equals: true}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.ai.key_saved, equals: true}
+  - assert_state: {key: screen.ai.key_typed, equals: false}
+  - assert_exists: {role: label, label_contains: A key is saved in your computer's keychain}
+  - assert_exists: {role: label, label_contains: Saved. Your key stays}
+  - assert_not_exists: {role: label, label_contains: sk-ant-scenario}
+  - screenshot: anthropic-saved
+  - click: {role: button, label: Remove key}
+  - assert_state: {key: screen.ai.key_saved, equals: false}
+
+  # --- Minimum window: the panel scrolls, the footer stays ---------------
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: button, label: Save}
+  - assert_exists: {role: button, label: Cancel}
+  - screenshot: ai-minimum
+  - resize: {width: 1440, height: 940}
+
+  # --- Esc with nothing to revert closes the window -----------------------
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Preferences}
+
+  # --- Leave the window open on the AI panel for the mockup comparison ----
+  - command: edit.preferences
+  - assert_state: {key: screen.category, equals: ai}
+  - assert_state: {key: screen.ai.provider, equals: ollama}

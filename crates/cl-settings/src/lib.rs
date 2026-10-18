@@ -1,6 +1,10 @@
-//! Local settings for `ClientLedger` (P08 part; P09 adds user preferences,
-//! AI and SMTP settings).
+//! Local settings for `ClientLedger`.
 //!
+//! - [`user_prefs`]: per-user look-and-feel and entry choices (P09).
+//! - [`company_prefs`]: company-local choices the engine has no column for
+//!   (receipt inbox, bills-due window, AI switches and cap, consent note).
+//! - [`ai`] and [`smtp`]: provider names, keychain entry names, the token
+//!   cap, the Ollama address check, and SMTP field checks.
 //! - [`recent`]: the recent-companies store, a JSON file in the app data
 //!   folder. It remembers, per company, what the engine does not store yet:
 //!   the accent colour (Q-184), when the company was last opened and backed
@@ -14,15 +18,26 @@
 //! database.
 #![forbid(unsafe_code)]
 
+pub mod ai;
+pub mod company_prefs;
 pub mod recent;
 pub mod secrets;
+pub mod smtp;
 mod store;
+pub mod user_prefs;
 
+pub use ai::{AiLocalPrefs, AiProvider, CapCheck, OllamaUrlError, validate_ollama_url};
+pub use company_prefs::{AiConsentNote, CompanyPrefs, FolderError, check_inbox_folder};
 pub use recent::{
     ACCENT_PALETTE, Accent, BackupKind, BackupRecord, CompanyFlags, CompanyRecord, FiscalCalendar,
     RecentCompanies, RecentError, RecentStore,
 };
 pub use secrets::{KeyringSecrets, MemorySecrets, SecretError, SecretStore};
+pub use smtp::{SmtpFieldError, SmtpForm, SmtpSecurity};
+pub use user_prefs::{
+    DateFormat, DateWarnings, NegativeStyle, StartScreen, ThemeChoice, UpdateCheck, UserPrefs,
+    UserPrefsStore,
+};
 
 /// Returns the crate name; placeholder kept from the skeleton.
 #[must_use]

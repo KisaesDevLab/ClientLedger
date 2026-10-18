@@ -40,6 +40,15 @@ impl Capabilities {
     pub const TENANT_DELETE: &'static str = "tenant-delete-v1";
     /// U-23 desktop recovery key.
     pub const RECOVERY_KEY: &'static str = "recovery-key-v1";
+    /// E6 per-session secrets (AI keys, SMTP password; U-09, U-13).
+    pub const SESSION_SECRETS: &'static str = "session-secrets-v1";
+    /// E6 desktop AI: provider allowlist, credential resolution, usage
+    /// stamps and the integer usage summary (U-09).
+    pub const AI_DESKTOP: &'static str = "ai-desktop-v1";
+    /// E6 SMTP password from the session secret (U-13).
+    pub const SMTP_SESSION: &'static str = "smtp-session-v1";
+    /// U-29 monthly token cap enforced by the engine (`monthlyTokenLimit`).
+    pub const AI_TOKEN_CAP: &'static str = "ai-token-cap-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

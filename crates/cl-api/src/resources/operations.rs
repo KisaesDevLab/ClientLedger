@@ -285,6 +285,46 @@ pub(crate) const RECOVERY_KEY_ROTATE: Operation = workspace_once(
     TimeoutClass::Auth,
 );
 
+// ---- P09 preferences, AI and SMTP ---------------------------------------
+
+/// AI admin routes are super-admin + session; the owner always has a company
+/// open in Preferences, so they are company-scoped like the consent routes.
+pub(crate) const AI_CONFIG: Operation = read("/api/v1/ai/admin/config");
+pub(crate) const AI_CONFIG_PUT: Operation = write(Method::Put, "/api/v1/ai/admin/config");
+pub(crate) const AI_DISCLOSURE: Operation = read("/api/v1/ai/admin/disclosure");
+pub(crate) const AI_DISCLOSURE_ACCEPT: Operation =
+    write(Method::Post, "/api/v1/ai/admin/disclosure/accept");
+pub(crate) const AI_CONSENT: Operation = read("/api/v1/ai/consent");
+pub(crate) const AI_CONSENT_DISCLOSURE: Operation =
+    read("/api/v1/ai/consent/{companyId}/disclosure");
+pub(crate) const AI_CONSENT_ACCEPT: Operation =
+    write(Method::Post, "/api/v1/ai/consent/{companyId}/accept");
+pub(crate) const AI_CONSENT_REVOKE: Operation =
+    write(Method::Post, "/api/v1/ai/consent/{companyId}/revoke");
+pub(crate) const AI_CONSENT_TASKS: Operation =
+    write(Method::Patch, "/api/v1/ai/consent/{companyId}/tasks");
+pub(crate) const AI_TEST_PROVIDER: Operation =
+    write(Method::Post, "/api/v1/ai/admin/test/{provider}");
+pub(crate) const AI_MODELS: Operation = read("/api/v1/ai/admin/models/{provider}");
+pub(crate) const AI_STATUS: Operation = read("/api/v1/ai/status");
+pub(crate) const AI_USAGE: Operation = read("/api/v1/ai/usage");
+pub(crate) const AI_USAGE_SUMMARY: Operation = read("/api/v1/ai/usage/summary");
+pub(crate) const COMPANY_SMTP: Operation = read("/api/v1/company/smtp");
+pub(crate) const COMPANY_SMTP_PUT: Operation = write(Method::Put, "/api/v1/company/smtp");
+pub(crate) const COMPANY_SMTP_TEST: Operation = write(Method::Post, "/api/v1/company/smtp/test");
+pub(crate) const SESSION_SECRETS_PUT: Operation = workspace_write(
+    Method::Put,
+    "/api/v1/desktop/session-secrets",
+    TimeoutClass::Auth,
+);
+/// E6 session secrets: session-level, launch-token gated, never company-scoped.
+pub(crate) const SESSION_SECRETS_GET: Operation = session_read("/api/v1/desktop/session-secrets");
+pub(crate) const SESSION_SECRETS_DELETE: Operation = workspace_write(
+    Method::Delete,
+    "/api/v1/desktop/session-secrets/{name}",
+    TimeoutClass::Auth,
+);
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -295,7 +335,7 @@ const NEVER_RETRIED: [(&str, &str); 3] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 62] = [
+pub const OPERATIONS: [Operation; 82] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -358,6 +398,26 @@ pub const OPERATIONS: [Operation; 62] = [
     TENANT_DELETE,
     RECOVER_PASSWORD,
     RECOVERY_KEY_ROTATE,
+    AI_CONFIG,
+    AI_CONFIG_PUT,
+    AI_DISCLOSURE,
+    AI_DISCLOSURE_ACCEPT,
+    AI_CONSENT,
+    AI_CONSENT_DISCLOSURE,
+    AI_CONSENT_ACCEPT,
+    AI_CONSENT_REVOKE,
+    AI_CONSENT_TASKS,
+    AI_TEST_PROVIDER,
+    AI_MODELS,
+    AI_STATUS,
+    AI_USAGE,
+    AI_USAGE_SUMMARY,
+    COMPANY_SMTP,
+    COMPANY_SMTP_PUT,
+    COMPANY_SMTP_TEST,
+    SESSION_SECRETS_PUT,
+    SESSION_SECRETS_GET,
+    SESSION_SECRETS_DELETE,
 ];
 
 /// Looks up a covered operation.
