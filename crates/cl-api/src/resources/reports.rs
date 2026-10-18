@@ -575,7 +575,7 @@ mod tests {
     #[tokio::test]
     async fn balance_summaries_keep_the_engine_text() {
         let server = MockServer::start().await;
-        let client = "3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+        let customer_id = "3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
         let vendor = "3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02";
         Mock::given(method("GET"))
             .and(path("/api/v1/reports/customer-balance-summary"))
@@ -583,7 +583,7 @@ mod tests {
                 200,
                 &format!(
                     r#"{{"title":"Customer Balance Summary","data":[
-                    {{"id":"{client}","display_name":"Riverbend HOA","balance":"1234.5600"}}]}}"#
+                    {{"id":"{customer_id}","display_name":"Riverbend HOA","balance":"1234.5600"}}]}}"#
                 ),
             ))
             .mount(&server)
@@ -606,7 +606,7 @@ mod tests {
             .await;
         let s = company_session(&server);
         let c = s.reports().customer_balance_summary().await.expect("ar");
-        let id = ContactId::parse(client).expect("id");
+        let id = ContactId::parse(customer_id).expect("id");
         assert_eq!(c.balance_of(id).map(ReportAmount::text), Some("1234.5600"));
         let v = s
             .reports()
