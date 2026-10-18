@@ -511,7 +511,12 @@ impl Core {
                 }
             }
             CellKind::Dropdown { .. } => {
-                if let Some(s) = self.highlighted() {
+                let current = match model.rows().cell(index, pos.col) {
+                    CellValue::Choice(id) => Some(id),
+                    _ => None,
+                };
+                // Picking the current choice again is not an edit.
+                if let Some(s) = self.highlighted().filter(|s| Some(s.id) != current) {
                     self.commit_value(model, CellInput::Choice(s.id), Source::Picked, fx)
                 } else {
                     Ok(())
@@ -716,7 +721,36 @@ impl Core {
                 fx
             }
             GridInput::AddNewPicked => self.add_new(model, fmt),
+            GridInput::OpenChoices(items) => self.open_choices(items, model),
         }
+    }
+
+    fn open_choices(&mut self, items: Vec<Suggestion>, model: &ModelRef<'_>) -> Effects {
+        let Some(pos) = self.cursor else {
+            return Effects::default();
+        };
+        if !matches!(self.column_kind(pos.col), Some(CellKind::Dropdown { .. })) {
+            return Effects::default();
+        }
+        let current =
+            model
+                .rows()
+                .index_of(pos.row)
+                .and_then(|i| match model.rows().cell(i, pos.col) {
+                    CellValue::Choice(id) => items.iter().position(|s| s.id == id),
+                    _ => None,
+                });
+        let Some(edit) = self.edit.as_mut() else {
+            return Effects::default();
+        };
+        edit.popup = Some(Popup {
+            kind: PopupKind::Choices,
+            highlight: current.or((!items.is_empty()).then_some(0)),
+            loading: false,
+            add_new: None,
+            items,
+        });
+        Effects::handled()
     }
 
     fn add_new(&mut self, model: &mut ModelRef<'_>, fmt: Formats) -> Effects {
@@ -1429,6 +1463,23 @@ impl Core {
                 self.toggle_checkbox(model, &mut fx);
             }
             return fx;
+        }
+        if matches!(kind, Some(CellKind::Dropdown { .. })) {
+            // First-letter jump in an open choice list.
+            let first = t
+                .chars()
+                .next()
+                .map(|c| c.to_lowercase().collect::<String>());
+            if let (Some(first), Some(popup)) =
+                (first, self.edit.as_mut().and_then(|e| e.popup.as_mut()))
+                && let Some(i) = popup
+                    .items
+                    .iter()
+                    .position(|s| s.label.to_lowercase().starts_with(&first))
+            {
+                popup.highlight = Some(i);
+            }
+            return Effects::handled();
         }
         let Some(edit) = self.edit.as_mut() else {
             return Effects::default();

@@ -203,6 +203,55 @@ impl Rig {
         )
     }
 
+    /// A node's bounds in the last frame, in points.
+    // AccessKit bounds are f64 copies of egui's f32 points.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn bounds(&self, id: Id) -> Option<Rect> {
+        self.nodes()
+            .into_iter()
+            .find(|(n, _)| *n == id.accesskit_id())
+            .and_then(|(_, n)| n.bounds())
+            .map(|r| {
+                Rect::from_min_max(
+                    Pos2::new(r.x0 as f32, r.y0 as f32),
+                    Pos2::new(r.x1 as f32, r.y1 as f32),
+                )
+            })
+    }
+
+    /// The node with this id in the last frame.
+    pub fn node(&self, id: Id) -> Option<egui::accesskit::Node> {
+        self.nodes()
+            .into_iter()
+            .find(|(n, _)| *n == id.accesskit_id())
+            .map(|(_, n)| n)
+    }
+
+    /// A primary click at `p`: press in one frame, release in the next.
+    pub fn click_at(&mut self, p: Pos2) -> Vec<cl_grid::GridEvent> {
+        let mut events = self
+            .frame(vec![
+                Event::PointerMoved(p),
+                Event::PointerButton {
+                    pos: p,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Modifiers::NONE,
+                },
+            ])
+            .events;
+        events.extend(
+            self.frame(vec![Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::NONE,
+            }])
+            .events,
+        );
+        events
+    }
+
     /// The AccessKit nodes of the last frame.
     pub fn nodes(&self) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
         self.last

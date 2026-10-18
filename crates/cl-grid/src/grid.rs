@@ -30,6 +30,7 @@ use crate::core::viewport::{Heights, RowAlign, Viewport};
 use crate::sequencer;
 use crate::view::input::{self, CursorInfo};
 use crate::view::layout::ColumnLayout;
+use crate::view::overlay::{PopupHit, PopupView};
 use crate::view::style::GridStyle;
 
 /// The focus-lock filter the grid's focus widget uses: Tab, both arrow
@@ -156,7 +157,11 @@ pub struct Grid {
     /// session; they never shrink (S14).
     grown: Vec<(ColumnId, u16)>,
     /// Measured heights, cached by model revision and row count (N3).
-    measured: std::cell::RefCell<Option<(u64, usize, u64, Heights)>>,
+    measured: std::cell::RefCell<Option<MeasuredCache>>,
+    /// The open popup's rect last frame (presses there keep focus).
+    popup_rect: Option<Rect>,
+    /// The popup's first shown entry.
+    popup_top: usize,
 }
 
 fn group(n: usize) -> String {
@@ -216,6 +221,8 @@ impl Grid {
             hscroll: 0.0,
             grown: Vec::new(),
             measured: std::cell::RefCell::new(None),
+            popup_rect: None,
+            popup_top: 0,
         })
     }
 
@@ -429,27 +436,36 @@ impl Grid {
         match self.spec().height {
             RowHeight::Measured { max_rows } if n <= max_rows as usize => {
                 let rev = rows.revision();
+                // The open multiline memo grows its row while typing.
+                let editing = self.editing_memo_lines(rows);
                 let mut cache = self.measured.borrow_mut();
-                if let Some((r, c, u, h)) = cache.as_ref()
+                if let Some((r, c, u, e, h)) = cache.as_ref()
                     && *r == rev
                     && *c == n
                     && *u == row
+                    && *e == editing
                 {
                     return h.clone();
                 }
                 // A row with a note (caption, suggestion, error) gets one
-                // more line; everything else is the base height.
+                // more line, and a multiline memo one line per extra text
+                // line; everything else is the base height.
                 let heights: Vec<u64> = (0..n)
                     .map(|i| {
-                        row + if rows.row_note(i).is_some() {
+                        let note = if rows.row_note(i).is_some() {
                             self.note_unit
                         } else {
                             0
-                        }
+                        };
+                        let memo = match editing {
+                            Some((ei, lines)) if ei == i => lines,
+                            _ => self.memo_extra_lines(rows, i),
+                        };
+                        row + note + memo * self.note_unit
                     })
                     .collect();
                 let h = Heights::measured(&heights);
-                *cache = Some((rev, n, row, h.clone()));
+                *cache = Some((rev, n, row, editing, h.clone()));
                 h
             }
             // Above the cap (Q-P10m) or uniform: one height for every row.
@@ -527,6 +543,138 @@ impl Grid {
 /// Width of the grid's own scrollbar track.
 const BAR: f32 = 12.0;
 
+/// Measured heights keyed by (revision, rows, row unit, open memo).
+type MeasuredCache = (u64, usize, u64, Option<(usize, u64)>, Heights);
+
+impl Grid {
+    /// The multiline memo columns.
+    fn memo_columns(&self) -> impl Iterator<Item = ColumnId> + '_ {
+        self.spec().columns.iter().filter_map(|c| {
+            matches!(
+                c.kind,
+                CellKind::Memo {
+                    multiline: true,
+                    ..
+                }
+            )
+            .then_some(c.id)
+        })
+    }
+
+    /// Extra text lines the row's multiline memos need (the tallest).
+    fn memo_extra_lines(&self, rows: &dyn crate::core::model::RowModel, index: usize) -> u64 {
+        self.memo_columns()
+            .map(|col| match rows.cell(index, col) {
+                CellValue::Text(t) => crate::editors::memo::extra_lines(&t),
+                _ => 0,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The open multiline memo's row index
+    /// and its extra lines, so the row grows while the owner types.
+    fn editing_memo_lines(&self, rows: &dyn crate::core::model::RowModel) -> Option<(usize, u64)> {
+        let pos = self.core.cursor()?;
+        let edit = self.core.edit()?;
+        if !self.memo_columns().any(|c| c == pos.col) {
+            return None;
+        }
+        Some((
+            rows.index_of(pos.row)?,
+            crate::editors::memo::extra_lines(&edit.buffer),
+        ))
+    }
+
+    /// The open popup's id (its `ListBox` node; entries are
+    /// `view::overlay::item_id(popup_id, index)`).
+    #[must_use]
+    pub fn popup_id(&self) -> Id {
+        self.id.with("popup")
+    }
+
+    /// What the open popup shows this frame.
+    fn popup_view(&self, pos: CellPos, width: f32, env: &GridEnv<'_>) -> Option<PopupView<'_>> {
+        use crate::core::state::{POPUP_ROWS, PopupKind};
+        let popup = self.core.edit()?.popup.as_ref()?;
+        let col = self.spec().column(pos.col)?;
+        let status = if popup.loading {
+            Some(env.t(TextKey("grid.popup.loading")))
+        } else if popup.items.is_empty() && popup.add_new.is_none() {
+            Some(env.t(TextKey("grid.popup.no_matches")))
+        } else {
+            None
+        };
+        let add_new = popup
+            .add_new
+            .as_ref()
+            .map(|t| env.t(TextKey("grid.popup.add_new")).replace("{text}", t));
+        let header = env.t(col.header);
+        let label = match popup.kind {
+            PopupKind::Full => env
+                .t(TextKey("grid.popup.full_list"))
+                .replace("{column}", &header),
+            PopupKind::List | PopupKind::Choices => header,
+        };
+        Some(PopupView {
+            items: &popup.items,
+            highlight: popup.highlight,
+            top: crate::view::overlay::window_top(
+                self.popup_top,
+                popup.highlight,
+                POPUP_ROWS,
+                popup.items.len(),
+            ),
+            rows: POPUP_ROWS,
+            add_new,
+            status,
+            label,
+            width: width.max(220.0),
+        })
+    }
+
+    /// Dropdown inputs the core cannot resolve alone: Space, Alt+Down, a
+    /// letter or a click on the open cell open the column's choices, whose
+    /// labels are i18n keys resolved here.
+    fn translate(&self, gi: GridInput, env: &GridEnv<'_>) -> Vec<GridInput> {
+        use crate::core::keys::{GridKey, Mods};
+        let kind = self
+            .core
+            .cursor()
+            .and_then(|c| self.spec().column(c.col))
+            .map(|c| c.kind);
+        let Some(CellKind::Dropdown { options }) = kind else {
+            return vec![gi];
+        };
+        let Some(edit) = self.core.edit() else {
+            return vec![gi];
+        };
+        let open = edit.popup.is_some();
+        let choices = || GridInput::OpenChoices(crate::editors::dropdown::items(options, env.text));
+        let alt = Mods {
+            alt: true,
+            ..Mods::NONE
+        };
+        match gi {
+            GridInput::Key(GridKey::Space, Mods::NONE) if open => {
+                vec![GridInput::Key(GridKey::Enter, Mods::NONE)]
+            }
+            GridInput::Key(GridKey::Down, m) if m == alt && open => {
+                vec![GridInput::Key(GridKey::Down, Mods::NONE)]
+            }
+            GridInput::Key(GridKey::Space, Mods::NONE) => vec![choices()],
+            GridInput::Key(GridKey::Down, m) if m == alt => vec![choices()],
+            GridInput::Text(t) if !open && !t.trim().is_empty() => {
+                vec![choices(), GridInput::Text(t)]
+            }
+            GridInput::Click { pos, .. } if !open && self.core.cursor() == Some(pos) => {
+                vec![gi, choices()]
+            }
+            other => vec![other],
+        }
+    }
+}
+
 /// One cell press seen while painting.
 struct Press {
     pos: CellPos,
@@ -550,6 +698,14 @@ impl Grid {
             buffer_empty: edit.is_none_or(|e| e.buffer.is_empty()),
             selects: self.spec().selection != crate::core::selection::SelectionMode::None,
             ime_active: self.ime_active,
+            multiline: matches!(
+                kind,
+                Some(CellKind::Memo {
+                    multiline: true,
+                    ..
+                })
+            ),
+            has_newline: edit.is_some_and(|e| e.buffer.contains('\n')),
         }
     }
 
@@ -657,6 +813,13 @@ impl Grid {
         }
         self.sync_focus(&ctx, &mut model, env, &mut events);
         let focused = ctx.memory(|m| m.has_focus(focus_id));
+        let popup_rect = self.popup_rect;
+        let press_inside = ctx.input(|i| {
+            (i.pointer.any_pressed() || i.pointer.any_click())
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| rect.contains(p) || popup_rect.is_some_and(|r| r.contains(p)))
+        });
         ctx.input(|i| {
             for e in &i.events {
                 match e {
@@ -681,9 +844,11 @@ impl Grid {
                     kept.push(keep);
                 }
                 for gi in out {
-                    let (ev, leave) = self.handle(gi, &mut model, env, &ctx);
-                    leaving |= leave;
-                    events.extend(ev);
+                    for gi in self.translate(gi, env) {
+                        let (ev, leave) = self.handle(gi, &mut model, env, &ctx);
+                        leaving |= leave;
+                        events.extend(ev);
+                    }
                 }
             }
             ctx.input_mut(|i| i.events = kept);
@@ -764,7 +929,28 @@ impl Grid {
             self.reset_editor(&ctx);
         }
         let painted = self.paint(ui, rect, header_h, &mut model, env, focused, leaving);
+        // A press anywhere else makes egui's focused widget give up focus
+        // while it registers. A press on a cell, the scrollbar or the popup
+        // is the grid's own: take focus straight back, filter included, so
+        // the click commits like Tab instead of parking the editor (S11).
+        if focused && press_inside && !ctx.memory(|m| m.has_focus(focus_id)) {
+            ctx.memory_mut(|m| {
+                m.request_focus(focus_id);
+                m.set_focus_lock_filter(focus_id, FULL_FILTER);
+            });
+        }
         presses.extend(painted.presses);
+        match painted.popup_hit {
+            Some(PopupHit::Item(i)) => {
+                let (ev, _) = self.handle(GridInput::PopupPicked(i), &mut model, env, &ctx);
+                events.extend(ev);
+            }
+            Some(PopupHit::AddNew) => {
+                let (ev, _) = self.handle(GridInput::AddNewPicked, &mut model, env, &ctx);
+                events.extend(ev);
+            }
+            None => {}
+        }
         if painted.resized {
             events.push(GridEvent::ColumnsResized);
         }
@@ -775,17 +961,15 @@ impl Grid {
             events.extend(ev);
         }
         for p in presses {
-            let (ev, _) = self.handle(
-                GridInput::Click {
-                    pos: p.pos,
-                    double: p.double,
-                    mods: p.mods,
-                },
-                &mut model,
-                env,
-                &ctx,
-            );
-            events.extend(ev);
+            let click = GridInput::Click {
+                pos: p.pos,
+                double: p.double,
+                mods: p.mods,
+            };
+            for gi in self.translate(click, env) {
+                let (ev, _) = self.handle(gi, &mut model, env, &ctx);
+                events.extend(ev);
+            }
             if !focused {
                 ctx.memory_mut(|m| m.request_focus(focus_id));
             }
@@ -809,6 +993,7 @@ impl Grid {
 /// What painting saw.
 struct Painted {
     presses: Vec<Press>,
+    popup_hit: Option<PopupHit>,
     buffer_changed: bool,
     resized: bool,
 }
@@ -1032,6 +1217,18 @@ impl Grid {
                 continue;
             };
             let state = model.rows().row_state(i);
+            // A multiline memo's extra lines (measured rows only).
+            let note_pts = if model.rows().row_note(i).is_some() {
+                style.note_line
+            } else {
+                0.0
+            };
+            let memo_pts = (this_h - row_h - note_pts).max(0.0);
+            let memo_lines = if memo_pts > 0.5 {
+                self.memo_extra_lines(model.rows(), i)
+            } else {
+                0
+            };
             let selected = self.core.selection().contains(key);
             let is_cursor_row = cursor.is_some_and(|c| c.row == key);
             if let Some(f) = Self::row_fill(style, state, is_cursor_row) {
@@ -1084,7 +1281,7 @@ impl Grid {
                 painter.text(
                     pos2(
                         body.left() + style.pad + 4.0 - self.hscroll,
-                        top + row_h + style.note_line / 2.0,
+                        top + row_h + memo_pts + style.note_line / 2.0,
                     ),
                     Align2::LEFT_CENTER,
                     text,
@@ -1129,9 +1326,16 @@ impl Grid {
                 } else {
                     top
                 };
+                let is_memo = matches!(
+                    col.kind,
+                    CellKind::Memo {
+                        multiline: true,
+                        ..
+                    }
+                );
                 let cell_rect = Rect::from_min_size(
                     pos2(body.left() + place.x - self.hscroll, y),
-                    vec2(place.width, line_h),
+                    vec2(place.width, line_h + if is_memo { memo_pts } else { 0.0 }),
                 );
                 let pos = CellPos {
                     row: key,
@@ -1153,16 +1357,38 @@ impl Grid {
                         _ => None,
                     };
                     let focus_id = self.focus_id();
+                    let mut cell_rect = cell_rect;
                     if let Some(edit) = self.core.edit_mut() {
-                        let te = if matches!(col.kind, CellKind::Amount(_)) {
-                            crate::editors::amount::editor(
+                        let te = match col.kind {
+                            CellKind::Amount(_) => crate::editors::amount::editor(
                                 &mut edit.buffer,
                                 focus_id,
                                 style,
                                 place.width,
-                            )
-                        } else {
-                            crate::editors::text::editor(
+                            ),
+                            CellKind::Date => crate::editors::date::editor(
+                                &mut edit.buffer,
+                                focus_id,
+                                style,
+                                place.width,
+                            ),
+                            CellKind::Memo {
+                                multiline: true,
+                                max_chars,
+                            } => {
+                                let extra = crate::editors::memo::extra_lines(&edit.buffer);
+                                cell_rect.max.y +=
+                                    points(i64::try_from(extra * self.note_unit).unwrap_or(0));
+                                crate::editors::memo::editor(
+                                    &mut edit.buffer,
+                                    focus_id,
+                                    font,
+                                    place.width,
+                                    usize::try_from(extra + 1).unwrap_or(1),
+                                    usize::try_from(max_chars).unwrap_or(usize::MAX),
+                                )
+                            }
+                            _ => crate::editors::text::editor(
                                 &mut edit.buffer,
                                 focus_id,
                                 font,
@@ -1170,7 +1396,7 @@ impl Grid {
                                 place.width,
                                 style.pad,
                                 max,
-                            )
+                            ),
                         };
                         let resp: Response = row_ui.put(cell_rect, te);
                         buffer_changed |= resp.changed();
@@ -1206,11 +1432,18 @@ impl Grid {
                 ctx.accesskit_node_builder(cell_id, |node| {
                     node.set_bounds(ak_rect(cell_rect.intersect(body)));
                     node.set_role(if editable { Role::GridCell } else { Role::Cell });
-                    node.set_label(cell_label);
+                    node.set_label(cell_label.clone());
                     node.set_value(shown.text.clone());
                     node.set_column_index(ci);
                     node.add_action(egui::accesskit::Action::Focus);
                     node.add_action(egui::accesskit::Action::Click);
+                    if let CellValue::Bool(b) = &value {
+                        node.set_toggled(if *b {
+                            egui::accesskit::Toggled::True
+                        } else {
+                            egui::accesskit::Toggled::False
+                        });
+                    }
                     if state.contains(RowState::LOCKED) {
                         node.set_read_only();
                         node.set_description(env.t(TextKey("grid.a11y.locked")));
@@ -1219,6 +1452,27 @@ impl Grid {
                         node.set_invalid(egui::accesskit::Invalid::True);
                     }
                 });
+                // The cursor cell without a text editor: the focus target's
+                // node speaks for it (a checkbox, a combo box, a cell).
+                if is_cursor && !no_editor {
+                    let popup_open = self.core.edit().is_some_and(|e| e.popup.is_some());
+                    ctx.accesskit_node_builder(self.focus_id(), |node| {
+                        node.set_label(cell_label);
+                        node.set_column_index(ci);
+                        match (col.kind, &value) {
+                            (CellKind::Checkbox, CellValue::Bool(b)) => {
+                                crate::editors::checkbox::node(node, *b);
+                            }
+                            (CellKind::Dropdown { .. }, _) => {
+                                crate::editors::dropdown::node(node, &shown.text, popup_open);
+                            }
+                            _ => {
+                                node.set_role(if editable { Role::GridCell } else { Role::Cell });
+                                node.set_value(shown.text.clone());
+                            }
+                        }
+                    });
+                }
                 let needed = Self::paint_cell(
                     row_ui.painter(),
                     cell_rect,
@@ -1227,6 +1481,7 @@ impl Grid {
                     &shown,
                     state,
                     style,
+                    if is_memo { memo_lines + 1 } else { 1 },
                 );
                 // Numbers are never cut short: the column grows to fit and
                 // never shrinks this session (Q-P10o, S14).
@@ -1282,17 +1537,38 @@ impl Grid {
             });
         }
 
-        // The caption under the open cell: calculator preview, error, notice.
+        // The popup under the open cell (choices, type-ahead, full list).
+        let mut popup_hit = None;
+        self.popup_rect = None;
+        let mut caption_top = None;
         if let (Some(pos), Some(i)) = (cursor, cursor_index)
             && range.contains(&i)
             && let Some(place) = self.layout.place(pos.col)
+        {
+            let mut top = body.top() + points(self.viewport.local_top(i, &h)) + row_h;
+            if !no_editor && let Some(view) = self.popup_view(pos, place.width, env) {
+                let (hit, r) = crate::view::overlay::popup(
+                    &ctx,
+                    self.popup_id(),
+                    pos2(body.left() + place.x - self.hscroll, top),
+                    &view,
+                    style,
+                );
+                self.popup_top = view.top;
+                popup_hit = hit;
+                self.popup_rect = Some(r);
+                top = r.bottom();
+            }
+            caption_top = Some((top, place.x));
+        }
+        // The caption under the open cell: calculator preview, error, notice.
+        if let (Some(pos), Some((top, x))) = (cursor, caption_top)
             && let Some(text) = self.caption(pos, env)
         {
-            let top = body.top() + points(self.viewport.local_top(i, &h)) + row_h;
             crate::view::overlay::caption(
                 &ctx,
                 self.id.with("caption"),
-                pos2(body.left() + place.x, top),
+                pos2(body.left() + x - self.hscroll, top),
                 &text,
                 style,
             );
@@ -1302,6 +1578,7 @@ impl Grid {
         }
         Painted {
             presses,
+            popup_hit,
             buffer_changed,
             resized,
         }
@@ -1415,6 +1692,8 @@ impl Grid {
         }
     }
 
+    // The cell, its value and how it is shown, plus the row it sits in.
+    #[allow(clippy::too_many_arguments)]
     fn paint_cell(
         painter: &egui::Painter,
         rect: Rect,
@@ -1423,6 +1702,7 @@ impl Grid {
         shown: &Shown,
         state: RowState,
         style: &GridStyle,
+        max_rows: u64,
     ) -> f32 {
         let color = if shown.placeholder {
             style.placeholder
@@ -1481,6 +1761,8 @@ impl Grid {
         // an ellipsis.
         if !shown.mono {
             job.wrap = egui::text::TextWrapping::truncate_at_width(inner.width().max(1.0));
+            // A multiline memo shows its lines, up to the row's height.
+            job.wrap.max_rows = usize::try_from(max_rows.max(1)).unwrap_or(1);
         }
         let galley = painter.layout_job(job);
         let x = match col.align {

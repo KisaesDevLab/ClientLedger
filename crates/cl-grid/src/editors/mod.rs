@@ -3,4 +3,8 @@
 
 pub mod amount;
 pub mod calc;
+pub mod checkbox;
+pub mod date;
+pub mod dropdown;
+pub mod memo;
 pub mod text;

@@ -32,6 +32,11 @@ pub struct CursorInfo {
     pub selects: bool,
     /// An IME composition is active (no date-key interception, R6).
     pub ime_active: bool,
+    /// The editor is a multiline memo (Shift+Enter is a newline; the arrows
+    /// move the caret while the text has several lines).
+    pub multiline: bool,
+    /// The memo's text already has a line break.
+    pub has_newline: bool,
 }
 
 /// Exact modifiers (Cmd counts as Ctrl).
@@ -98,6 +103,8 @@ pub fn collect(input: &mut InputState, info: CursorInfo) -> (Vec<GridInput>, Pas
 }
 
 /// One event: push inputs, return the event if it stays for egui.
+// One match over the event kinds reads best in one place.
+#[allow(clippy::too_many_lines)]
 fn map(
     event: &Event,
     info: CursorInfo,
@@ -121,7 +128,32 @@ fn map(
             {
                 return None; // the shell acted on the first press
             }
+            let is_dropdown = matches!(info.kind, Some(CellKind::Dropdown { .. }));
+            if info.multiline
+                && info.editing
+                && ((*key == Key::Enter && m == Mods::SHIFT)
+                    || (info.has_newline
+                        && matches!(key, Key::ArrowUp | Key::ArrowDown)
+                        && m == Mods::NONE))
+            {
+                return keep; // the memo's own newline and caret moves
+            }
             let grid_key = match (key, m) {
+                (
+                    Key::ArrowDown,
+                    Mods {
+                        alt: true,
+                        ctrl: false,
+                        shift: false,
+                    },
+                ) if is_dropdown => {
+                    out.push(GridInput::Key(GridKey::Down, m));
+                    return None;
+                }
+                (Key::Space, Mods::NONE) if is_dropdown => {
+                    *swallow_space_text = true;
+                    Some(GridKey::Space)
+                }
                 (Key::Tab, Mods::NONE | Mods::SHIFT) => Some(GridKey::Tab),
                 (Key::Enter, Mods::NONE | Mods::SHIFT) => Some(GridKey::Enter),
                 (Key::Escape, Mods::NONE) => Some(GridKey::Escape),
@@ -212,6 +244,8 @@ mod tests {
             buffer_empty: false,
             selects: false,
             ime_active: false,
+            multiline: false,
+            has_newline: false,
         }
     }
 
@@ -286,6 +320,63 @@ mod tests {
     }
 
     #[test]
+    fn multiline_memo_keeps_shift_enter_and_caret_arrows() {
+        let mut memo = info(
+            Some(CellKind::Memo {
+                multiline: true,
+                max_chars: 100,
+            }),
+            true,
+        );
+        memo.multiline = true;
+        let (out, left, _) = run(
+            vec![
+                press(Key::Enter, Modifiers::SHIFT, false),
+                press(Key::ArrowUp, Modifiers::NONE, false),
+            ],
+            memo,
+        );
+        assert_eq!(out, vec![GridInput::Key(GridKey::Up, Mods::NONE)]);
+        assert_eq!(left.len(), 1, "Shift+Enter stays for the editor");
+        memo.has_newline = true;
+        let (out, left, _) = run(
+            vec![
+                press(Key::ArrowUp, Modifiers::NONE, false),
+                press(Key::Enter, Modifiers::NONE, false),
+            ],
+            memo,
+        );
+        assert_eq!(out, vec![GridInput::Key(GridKey::Enter, Mods::NONE)]);
+        assert_eq!(left.len(), 1, "the arrow moves the caret");
+    }
+
+    #[test]
+    fn dropdown_space_and_alt_down() {
+        const OPTS: &[crate::core::model::OptionSpec] = &[];
+        let dd = info(Some(CellKind::Dropdown { options: OPTS }), false);
+        let (out, left, _) = run(
+            vec![
+                press(Key::Space, Modifiers::NONE, false),
+                Event::Text(" ".into()),
+                press(Key::ArrowDown, Modifiers::ALT, false),
+            ],
+            dd,
+        );
+        let alt = Mods {
+            alt: true,
+            ..Mods::NONE
+        };
+        assert_eq!(
+            out,
+            vec![
+                GridInput::Key(GridKey::Space, Mods::NONE),
+                GridInput::Key(GridKey::Down, alt)
+            ]
+        );
+        assert_eq!(left, Vec::<Event>::new());
+    }
+
+    #[test]
     fn date_keys_and_pastes() {
         let (out, left, _) = run(
             vec![Event::Text("t".into()), Event::Text("1".into())],
@@ -322,6 +413,8 @@ mod tests {
             buffer_empty: true,
             selects: true,
             ime_active: false,
+            multiline: false,
+            has_newline: false,
         };
         let (out, left, _) = run(
             vec![

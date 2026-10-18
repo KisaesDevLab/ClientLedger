@@ -15,6 +15,8 @@ pub struct Browse<M: RowModel> {
     pub outer_offset: f32,
     pub outer: bool,
     pub size: Vec2,
+    /// The last frame's grid events.
+    pub events: Vec<cl_grid::GridEvent>,
 }
 
 impl<M: RowModel> Browse<M> {
@@ -28,6 +30,7 @@ impl<M: RowModel> Browse<M> {
             outer_offset: 0.0,
             outer: false,
             size: Vec2::new(1440.0, 940.0),
+            events: Vec::new(),
         }
     }
 
@@ -41,6 +44,7 @@ impl<M: RowModel> Browse<M> {
         let (grid, model) = (&mut self.grid, &mut self.model);
         let outer = self.outer;
         let mut offset = 0.0;
+        let mut events = Vec::new();
         let mut out = self.ctx.run_ui(input, |ui| {
             let env = GridEnv {
                 style: &style,
@@ -61,17 +65,18 @@ impl<M: RowModel> Browse<M> {
                 let o = egui::ScrollArea::both().id_salt("outer").show(ui, |ui| {
                     ui.set_min_height(3_000.0);
                     let r = ui.allocate_ui(Vec2::new(1400.0, 600.0), |ui| {
-                        grid.show(ui, ModelRef::Browse(model), &env);
+                        events = grid.show(ui, ModelRef::Browse(model), &env).events;
                     });
                     let _ = r;
                 });
                 offset = o.state.clamped_offset().y;
             } else {
-                grid.show(ui, ModelRef::Browse(model), &env);
+                events = grid.show(ui, ModelRef::Browse(model), &env).events;
             }
         });
         out.textures_delta.clear();
         self.outer_offset = offset;
+        self.events = events;
         let shapes = out.shapes.len();
         self.last = Some(out);
         shapes

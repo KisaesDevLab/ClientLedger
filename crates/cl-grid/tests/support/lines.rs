@@ -8,8 +8,8 @@ use cl_core::{CalendarDate, Money, MoneyStyle, NegativeStyle, Weekday};
 use cl_grid::core::keys::Formats;
 use cl_grid::{
     Align, CellInput, CellKind, CellPos, CellProblem, CellValue, Column, ColumnId, EditableModel,
-    GridSpec, Line, ListId, LookupResult, Lookups, RecordOutcome, RowKey, RowKeyGen, RowModel,
-    RowState, Source, Suggestion, TagChip, TextKey, WidthSpec,
+    GridSpec, Line, ListId, LookupResult, Lookups, OptionSpec, RecordOutcome, RowHeight, RowKey,
+    RowKeyGen, RowModel, RowState, Source, Suggestion, TagChip, TextKey, WidthSpec,
 };
 use cl_model::amount_entry::AmountRules;
 use cl_model::date_entry::DateOrder;
@@ -23,6 +23,21 @@ pub const DATE: ColumnId = ColumnId(4);
 pub const BILLABLE: ColumnId = ColumnId(5);
 pub const TAGS: ColumnId = ColumnId(6);
 pub const BALANCE: ColumnId = ColumnId(7);
+pub const STATUS: ColumnId = ColumnId(8);
+pub const STATUS_OPTIONS: &[OptionSpec] = &[
+    OptionSpec {
+        id: 1,
+        label: TextKey("Open"),
+    },
+    OptionSpec {
+        id: 2,
+        label: TextKey("Billed"),
+    },
+    OptionSpec {
+        id: 3,
+        label: TextKey("Paid"),
+    },
+];
 pub const ACCOUNTS: ListId = ListId(1);
 pub const TAG_LIST: ListId = ListId(2);
 pub const CREW: u64 = 70;
@@ -45,6 +60,7 @@ pub struct LineValue {
     pub date: Option<CalendarDate>,
     pub billable: bool,
     pub tags: Vec<TagChip>,
+    pub status: Option<u64>,
     pub locked: bool,
 }
 
@@ -59,6 +75,7 @@ impl LineValue {
             date: None,
             billable: false,
             tags: Vec::new(),
+            status: None,
             locked: false,
         }
     }
@@ -192,6 +209,7 @@ impl RowModel for Lines {
             DATE => l.date.map_or(CellValue::Empty, CellValue::Date),
             BILLABLE => CellValue::Bool(l.billable),
             TAGS => CellValue::Tags(&l.tags),
+            STATUS => l.status.map_or(CellValue::Empty, CellValue::Choice),
             _ => CellValue::Empty,
         }
     }
@@ -237,6 +255,7 @@ impl EditableModel for Lines {
                 (DATE, CellInput::Clear) => l.date = None,
                 (BILLABLE, CellInput::Bool(b)) => l.billable = b,
                 (TAGS, CellInput::Tags(t)) => l.tags = t,
+                (STATUS, CellInput::Choice(id)) => l.status = Some(id),
                 _ => bad = Some(CellProblem::new(TextKey("test.bad_input"))),
             }
             Lines::ensure_entry(lines, keygen, entry);
@@ -401,6 +420,7 @@ fn col(id: ColumnId, kind: CellKind, editable: bool) -> Column {
         DATE => "Service date",
         BILLABLE => "Billable",
         TAGS => "Tags",
+        STATUS => "Status",
         _ => "Balance",
     };
     Column {
@@ -441,6 +461,38 @@ pub fn columns() -> Vec<Column> {
         col(TAGS, CellKind::Tags { list: TAG_LIST }, true),
         col(BALANCE, CellKind::Display, false),
     ]
+}
+
+/// The editors suite's columns: a multiline Memo and a Status dropdown
+/// after Billable, in a measured grid so memo rows grow.
+pub fn extras_spec() -> GridSpec {
+    let mut cols = columns();
+    for c in &mut cols {
+        if c.id == MEMO {
+            c.kind = CellKind::Memo {
+                multiline: true,
+                max_chars: 400,
+            };
+        }
+    }
+    let at = cols
+        .iter()
+        .position(|c| c.id == BILLABLE)
+        .map_or(0, |i| i + 1);
+    cols.insert(
+        at,
+        col(
+            STATUS,
+            CellKind::Dropdown {
+                options: STATUS_OPTIONS,
+            },
+            true,
+        ),
+    );
+    GridSpec {
+        height: RowHeight::Measured { max_rows: 5_000 },
+        ..GridSpec::line_entry(cols)
+    }
 }
 
 pub fn line_spec() -> GridSpec {

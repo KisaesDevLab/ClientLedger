@@ -108,6 +108,9 @@ pub enum GridInput {
     AddNewPicked,
     /// A highlighted popup item was clicked.
     PopupPicked(usize),
+    /// Space or Alt+Down on a dropdown cell: open its choices (labels
+    /// already resolved by the view).
+    OpenChoices(Vec<super::model::Suggestion>),
 }
 
 /// Values the state machine needs from its surroundings ("today" and the
