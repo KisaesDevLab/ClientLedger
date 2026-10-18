@@ -595,42 +595,15 @@ impl Grid {
 
     /// What the open popup shows this frame.
     fn popup_view(&self, pos: CellPos, width: f32, env: &GridEnv<'_>) -> Option<PopupView<'_>> {
-        use crate::core::state::{POPUP_ROWS, PopupKind};
         let popup = self.core.edit()?.popup.as_ref()?;
         let col = self.spec().column(pos.col)?;
-        let status = if popup.loading {
-            Some(env.t(TextKey("grid.popup.loading")))
-        } else if popup.items.is_empty() && popup.add_new.is_none() {
-            Some(env.t(TextKey("grid.popup.no_matches")))
-        } else {
-            None
-        };
-        let add_new = popup
-            .add_new
-            .as_ref()
-            .map(|t| env.t(TextKey("grid.popup.add_new")).replace("{text}", t));
-        let header = env.t(col.header);
-        let label = match popup.kind {
-            PopupKind::Full => env
-                .t(TextKey("grid.popup.full_list"))
-                .replace("{column}", &header),
-            PopupKind::List | PopupKind::Choices => header,
-        };
-        Some(PopupView {
-            items: &popup.items,
-            highlight: popup.highlight,
-            top: crate::view::overlay::window_top(
-                self.popup_top,
-                popup.highlight,
-                POPUP_ROWS,
-                popup.items.len(),
-            ),
-            rows: POPUP_ROWS,
-            add_new,
-            status,
-            label,
-            width: width.max(220.0),
-        })
+        Some(crate::editors::picker::view(
+            popup,
+            env.t(col.header),
+            width,
+            self.popup_top,
+            env.text,
+        ))
     }
 
     /// Dropdown inputs the core cannot resolve alone: Space, Alt+Down, a
@@ -1358,7 +1331,20 @@ impl Grid {
                     };
                     let focus_id = self.focus_id();
                     let mut cell_rect = cell_rect;
+                    let mut chips_text = None;
                     if let Some(edit) = self.core.edit_mut() {
+                        // Tag chips sit before the text being typed.
+                        let mut edit_rect = cell_rect;
+                        if matches!(col.kind, CellKind::Tags { .. }) {
+                            let used = crate::editors::tags::paint_chips(
+                                row_ui.painter(),
+                                cell_rect,
+                                &edit.chips,
+                                style,
+                            );
+                            edit_rect.min.x = (edit_rect.min.x + used).min(edit_rect.max.x - 24.0);
+                            chips_text = Some(crate::editors::tags::chips_text(&edit.chips));
+                        }
                         let te = match col.kind {
                             CellKind::Amount(_) => crate::editors::amount::editor(
                                 &mut edit.buffer,
@@ -1393,17 +1379,25 @@ impl Grid {
                                 focus_id,
                                 font,
                                 egui_align(col.align),
-                                place.width,
+                                edit_rect.width(),
                                 style.pad,
                                 max,
                             ),
                         };
-                        let resp: Response = row_ui.put(cell_rect, te);
+                        let at = if matches!(col.kind, CellKind::Tags { .. }) {
+                            edit_rect
+                        } else {
+                            cell_rect
+                        };
+                        let resp: Response = row_ui.put(at, te);
                         buffer_changed |= resp.changed();
                     }
                     ctx.accesskit_node_builder(focus_id, |node| {
                         node.set_label(cell_label.clone());
                         node.set_column_index(ci);
+                        if let Some(chips) = chips_text.take().filter(|c| !c.is_empty()) {
+                            node.set_description(chips);
+                        }
                     });
                     if focused {
                         painter.rect_stroke(
@@ -1635,11 +1629,9 @@ impl Grid {
         };
         match value {
             CellValue::Suggested { display, .. } => {
-                // NN4: an amount cell never shows a suggestion.
-                debug_assert!(
-                    kind.accepts_suggestions(),
-                    "Suggested in a non-picker column"
-                );
+                // NN4: only picker and tag cells show a suggestion. Anywhere
+                // else (an amount) it renders empty, so a model bug can never
+                // put an AI amount on screen.
                 if kind.accepts_suggestions() {
                     Shown {
                         text: display.to_string(),
@@ -1666,13 +1658,7 @@ impl Grid {
                 };
                 plain(label)
             }
-            CellValue::Tags(chips) => plain(
-                chips
-                    .iter()
-                    .map(|c| c.label.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" · "),
-            ),
+            CellValue::Tags(chips) => plain(crate::editors::tags::chips_text(chips)),
             CellValue::Bool(b) => plain(env.t(if *b {
                 TextKey("grid.a11y.checked")
             } else {

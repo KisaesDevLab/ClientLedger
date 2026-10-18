@@ -99,6 +99,8 @@ pub struct Lines {
     pub accounts: Vec<(u64, &'static str)>,
     /// `record_row` answers `Pending` (an async save, P12).
     pub async_records: bool,
+    /// A broken model that offers an AI amount (NN4: never shown).
+    pub suggest_amount: bool,
 }
 
 pub fn accounts() -> Vec<(u64, &'static str)> {
@@ -127,6 +129,7 @@ impl Lines {
             set_calls: Vec::new(),
             accounts: accounts(),
             async_records: false,
+            suggest_amount: false,
         }
     }
 
@@ -204,7 +207,14 @@ impl RowModel for Lines {
                     None => CellValue::Empty,
                 },
             },
-            AMOUNT => l.amount.map_or(CellValue::Empty, CellValue::Money),
+            AMOUNT => match l.amount {
+                Some(m) => CellValue::Money(m),
+                None if self.suggest_amount => CellValue::Suggested {
+                    id: 1,
+                    display: Cow::Borrowed("999.00"),
+                },
+                None => CellValue::Empty,
+            },
             MEMO => CellValue::Text(Cow::Borrowed(&l.memo)),
             DATE => l.date.map_or(CellValue::Empty, CellValue::Date),
             BILLABLE => CellValue::Bool(l.billable),

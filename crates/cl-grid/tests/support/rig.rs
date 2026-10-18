@@ -23,6 +23,7 @@ pub fn text(k: TextKey) -> String {
         "grid.a11y.line" => "line {n}".into(),
         "grid.a11y.row_of" => "row {n} of {total}".into(),
         "grid.calc.preview" => "= {value}".into(),
+        "grid.popup.add_new" => "Add \"{text}\"".into(),
         "grid.calc.not_exact.detail" => "{approx}; type {below} or {above}".into(),
         other => other.into(),
     }
@@ -193,6 +194,37 @@ impl Rig {
         self.grid.focus(pos, ModelRef::Edit(&mut self.model), &env);
         self.frame(vec![]);
         self.frame(vec![]);
+    }
+
+    /// Run `f` with the grid, the model and a frame-free env (commands and
+    /// saves arrive between frames, as from `Screen::command`).
+    pub fn with_env<R>(&mut self, f: impl FnOnce(&mut Grid, ModelRef<'_>, &GridEnv<'_>) -> R) -> R {
+        let style = self.style.clone();
+        let env = GridEnv {
+            style: &style,
+            text: &text,
+            lookups: &self.lookups,
+            today: formats().today,
+            first_weekday: formats().first_weekday,
+            date_order: formats().date_order,
+            money_style: formats().money,
+            height: GridHeight::Rows { min: 3, max: 12 },
+            label: "Expense lines",
+            input_enabled: true,
+        };
+        f(&mut self.grid, ModelRef::Edit(&mut self.model), &env)
+    }
+
+    /// A forwarded command, then one frame.
+    pub fn command(&mut self, cmd: cl_grid::GridCommand) -> cl_grid::Handled {
+        let (h, _) = self.with_env(|g, m, env| g.command(cmd, m, env));
+        self.frame(vec![]);
+        h
+    }
+
+    /// `Grid::commit_pending` (a save path).
+    pub fn commit_pending(&mut self) -> Result<(), cl_grid::CellProblem> {
+        self.with_env(Grid::commit_pending)
     }
 
     pub fn at(&self) -> (usize, cl_grid::ColumnId) {

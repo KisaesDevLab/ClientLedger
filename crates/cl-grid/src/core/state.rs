@@ -434,10 +434,16 @@ impl Core {
         };
         let dirty = edit.is_dirty();
         let buffer = edit.buffer.clone();
+        // An entry the owner moved to in the full list (Ctrl+L) counts as
+        // chosen even though nothing was typed.
+        let full_pick = edit
+            .popup
+            .as_ref()
+            .is_some_and(|p| p.kind == PopupKind::Full && p.highlight.is_some());
         let result = match kind {
             CellKind::Picker { list, .. } => {
                 let picked = self.highlighted();
-                if let Some(s) = picked.filter(|_| dirty) {
+                if let Some(s) = picked.filter(|_| dirty || full_pick) {
                     self.commit_value(model, CellInput::Ref(s.id), Source::Picked, fx)
                 } else if !dirty {
                     let suggested = match model.rows().cell(index, pos.col) {
@@ -478,7 +484,7 @@ impl Core {
                 }
             }
             CellKind::Tags { list } => {
-                if buffer.trim().is_empty() {
+                if buffer.trim().is_empty() && !full_pick {
                     let suggested = match model.rows().cell(index, pos.col) {
                         CellValue::Suggested { id, display } => Some((id, display.to_string())),
                         _ => None,
@@ -653,8 +659,13 @@ impl Core {
             return true;
         }
         let last = popup.items.len() - 1;
-        let cur = popup.highlight.unwrap_or(0);
-        let next = cur.saturating_add_signed(by).min(last);
+        // Nothing highlighted yet (a full list): the first move lands on
+        // the first or last entry.
+        let next = match popup.highlight {
+            Some(cur) => cur.saturating_add_signed(by).min(last),
+            None if by < 0 => last,
+            None => 0,
+        };
         popup.highlight = Some(next);
         true
     }
@@ -883,7 +894,7 @@ impl Core {
             GridCommand::Revert => self.revert(model, fmt),
             GridCommand::InsertLine => self.insert_line(model, lookups, fmt),
             GridCommand::DeleteLine => self.delete_line(model, fmt),
-            GridCommand::OpenList => self.open_list(lookups),
+            GridCommand::OpenList => self.open_list(model, lookups),
             GridCommand::PageUp => self.page(false, model, lookups, fmt),
             GridCommand::PageDown => self.page(true, model, lookups, fmt),
             GridCommand::Undo => match self.edit.as_mut() {
@@ -1045,10 +1056,21 @@ impl Core {
         fx
     }
 
-    fn open_list(&mut self, lookups: &dyn Lookups) -> Effects {
+    fn open_list(&mut self, model: &ModelRef<'_>, lookups: &dyn Lookups) -> Effects {
         let Some(pos) = self.cursor else {
             return Effects::default();
         };
+        // The full list starts on the cell's current entry, or on nothing:
+        // a save or Tab right after Ctrl+L must not pick the first entry
+        // the owner never chose (B4).
+        let current =
+            model
+                .rows()
+                .index_of(pos.row)
+                .and_then(|i| match model.rows().cell(i, pos.col) {
+                    CellValue::Ref { id, .. } => Some(id),
+                    _ => None,
+                });
         let Some(CellKind::Picker { list, .. } | CellKind::Tags { list }) =
             self.column_kind(pos.col)
         else {
@@ -1060,7 +1082,7 @@ impl Core {
         edit.popup = Some(match lookups.all(list) {
             LookupResult::Ready(items) => Popup {
                 kind: PopupKind::Full,
-                highlight: (!items.is_empty()).then_some(0),
+                highlight: current.and_then(|id| items.iter().position(|s| s.id == id)),
                 loading: false,
                 add_new: None,
                 items,
