@@ -56,6 +56,15 @@ fn errors() {
     assert_eq!(parse(&quoted_long), Err(CsvError::FieldTooLong { line: 1 }));
     let many = "a\n".repeat(MAX_ROWS + 2);
     assert_eq!(parse(&many), Err(CsvError::TooManyRows));
+    // The cap counts the header row: MAX_ROWS rows in all, no more.
+    assert_eq!(
+        parse(&"a\n".repeat(MAX_ROWS)).map(|r| r.len()),
+        Ok(MAX_ROWS)
+    );
+    assert_eq!(
+        parse(&"a\n".repeat(MAX_ROWS + 1)),
+        Err(CsvError::TooManyRows)
+    );
     assert!(CsvError::TooManyRows.to_string().contains("rows"));
 }
 

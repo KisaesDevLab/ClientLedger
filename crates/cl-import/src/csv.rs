@@ -222,7 +222,7 @@ fn end_row(
         fields.clear();
         return Ok(());
     }
-    if rows.len() > MAX_ROWS {
+    if rows.len() >= MAX_ROWS {
         return Err(CsvError::TooManyRows);
     }
     rows.push(Row {
