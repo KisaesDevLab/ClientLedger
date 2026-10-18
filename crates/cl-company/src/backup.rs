@@ -40,7 +40,8 @@ pub struct HostMetadata {
     pub accent: String,
     /// Local setup flags (Q-P08c).
     pub flags: CompanyFlags,
-    /// Company-local preferences (Q-P09c); absent in P08 archives.
+    /// Company-local preferences that make sense on another computer
+    /// (`CompanyPrefs::for_archive`, Q-P09c); absent in P08 archives.
     #[serde(default)]
     pub prefs: cl_settings::CompanyPrefs,
 }
@@ -307,7 +308,7 @@ pub async fn backup(
         &rec.name,
         rec.accent,
         rec.flags,
-        rec.prefs.clone(),
+        rec.prefs.for_archive(),
     );
     progress(Progress::Starting);
     let job = session

@@ -80,6 +80,13 @@ pub enum SmtpFieldError {
     /// Sender is not an email address.
     #[error("sender address")]
     From,
+    /// Plain (no TLS) is only allowed for a server on this computer or the
+    /// office network.
+    #[error("plain connection to a public server")]
+    PlainNotLocal,
+    /// Implicit TLS needs port 465 and STARTTLS another port.
+    #[error("security does not match the port")]
+    SecurityPort,
 }
 
 impl SmtpFieldError {
@@ -90,8 +97,16 @@ impl SmtpFieldError {
             SmtpFieldError::Host => "prefs.email.err_host",
             SmtpFieldError::Port => "prefs.email.err_port",
             SmtpFieldError::From => "prefs.email.err_from",
+            SmtpFieldError::PlainNotLocal => "prefs.email.err_plain",
+            SmtpFieldError::SecurityPort => "prefs.email.err_security_port",
         }
     }
+}
+
+/// True when `s` holds a control character (CR, LF, NUL, …).
+#[must_use]
+pub fn has_control(s: &str) -> bool {
+    s.chars().any(char::is_control)
 }
 
 /// A plain email-address shape check (one `@`, a dot after it, no spaces).
@@ -118,20 +133,34 @@ impl SmtpForm {
         self.port.trim().parse::<u16>().ok().filter(|p| *p >= 1)
     }
 
-    /// Checks the fields; nothing is sent while this fails.
+    /// Checks the fields; nothing is sent while this fails. Host, user
+    /// name, sender and display name may not carry control characters
+    /// (header injection); plain connections only reach local or private
+    /// servers; implicit TLS is port 465 and STARTTLS any other port.
     ///
     /// # Errors
     /// The first field that is wrong.
     pub fn validate(&self) -> Result<(), SmtpFieldError> {
         let host = self.host.trim();
-        if host.is_empty() || host.len() > 255 || host.contains(' ') {
+        if host.is_empty() || host.len() > 255 || host.contains(' ') || has_control(host) {
             return Err(SmtpFieldError::Host);
         }
-        if self.port_number().is_none() {
+        let Some(port) = self.port_number() else {
             return Err(SmtpFieldError::Port);
-        }
-        if !looks_like_email(&self.from) {
+        };
+        if !looks_like_email(&self.from) || has_control(&self.from) {
             return Err(SmtpFieldError::From);
+        }
+        if has_control(&self.user) || has_control(&self.from_name) {
+            return Err(SmtpFieldError::Host);
+        }
+        match self.security {
+            SmtpSecurity::None if !crate::ai::is_local_host(host) => {
+                return Err(SmtpFieldError::PlainNotLocal);
+            }
+            SmtpSecurity::Tls if port != 465 => return Err(SmtpFieldError::SecurityPort),
+            SmtpSecurity::StartTls if port == 465 => return Err(SmtpFieldError::SecurityPort),
+            _ => {}
         }
         Ok(())
     }
@@ -180,5 +209,42 @@ mod tests {
         assert!(!looks_like_email("@b.co"));
         assert!(!looks_like_email("a@.co"));
         assert!(!looks_like_email("a b@c.co"));
+    }
+
+    #[test]
+    fn security_must_match_the_port_and_plain_stays_local() {
+        let base = SmtpForm {
+            host: "smtp.example.test".into(),
+            port: "587".into(),
+            security: SmtpSecurity::StartTls,
+            user: "books".into(),
+            from: "books@example.test".into(),
+            from_name: String::new(),
+        };
+        let mut f = base.clone();
+        f.security = SmtpSecurity::Tls;
+        assert_eq!(f.validate(), Err(SmtpFieldError::SecurityPort));
+        f.port = "465".into();
+        assert_eq!(f.validate(), Ok(()));
+        f.security = SmtpSecurity::StartTls;
+        assert_eq!(f.validate(), Err(SmtpFieldError::SecurityPort));
+        let mut f = base.clone();
+        f.security = SmtpSecurity::None;
+        f.port = "25".into();
+        assert_eq!(f.validate(), Err(SmtpFieldError::PlainNotLocal));
+        f.host = "192.168.1.5".into();
+        assert_eq!(f.validate(), Ok(()));
+        f.host = "mailhub".into();
+        assert_eq!(f.validate(), Ok(()));
+        let mut f = base.clone();
+        f.user = "books\r\nX-Injected: 1".into();
+        assert_eq!(f.validate(), Err(SmtpFieldError::Host));
+        let mut f = base.clone();
+        f.from = "books@example.test\n".into();
+        assert_eq!(f.validate(), Err(SmtpFieldError::From));
+        let mut f = base;
+        f.host = "smtp.exam\rple.test".into();
+        assert_eq!(f.validate(), Err(SmtpFieldError::Host));
+        assert!(has_control("a\u{0}b"));
     }
 }

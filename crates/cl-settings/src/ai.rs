@@ -2,8 +2,9 @@
 //! names, the keychain entry names, the per-company local switches, the
 //! client-side monthly token cap (Q-138, Q-P02e: the engine's dollar
 //! figures are floats, so the enforced cap is integer tokens), and the
-//! redaction pass applied to anything the app would send to a cloud model
-//! (Q-139). No I/O here; nothing in this module touches a network.
+//! check of an Ollama address (local or private hosts only, security M1).
+//! Payload redaction before a cloud call is the engine's job (E6 strict
+//! sanitizer and error scrubbing, Q-139); nothing here touches a network.
 
 use serde::{Deserialize, Serialize};
 
@@ -192,145 +193,116 @@ pub fn month_key(year: i32, month: u32) -> String {
     format!("{year:04}-{month:02}")
 }
 
-// ---------------------------------------------------------------- redaction
+// ------------------------------------------------------------ ollama url
 
-/// What a redacted span was.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Redacted {
-    /// An email address.
-    Email,
-    /// A phone number.
-    Phone,
-    /// An EIN or SSN.
-    TaxId,
-    /// A long digit run (account, card or routing number).
-    Number,
+/// Why an Ollama address was refused (security M1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum OllamaUrlError {
+    /// Not `http://host[:port][/path]` or `https://…`.
+    #[error("not an http or https address")]
+    Scheme,
+    /// A user name or password in the URL.
+    #[error("credentials in the address")]
+    Credentials,
+    /// Not a local or private network host.
+    #[error("not a local or private address")]
+    NotLocal,
+    /// Not a well-formed address.
+    #[error("malformed address")]
+    Malformed,
 }
 
-impl Redacted {
-    fn placeholder(self) -> &'static str {
-        match self {
-            Redacted::Email => "[email]",
-            Redacted::Phone => "[phone]",
-            Redacted::TaxId => "[tax id]",
-            Redacted::Number => "[number]",
-        }
-    }
-}
-
-/// Output of [`redact`].
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Redaction {
-    /// The text with placeholders.
-    pub text: String,
-    /// What was replaced, in order (counts only; never the values).
-    pub kinds: Vec<Redacted>,
-}
-
-fn is_sep(c: char) -> bool {
-    matches!(c, ' ' | '-' | '.' | '(' | ')' | ',')
-}
-
-/// Classifies a digit-and-separator run by its shape.
-fn classify_run(run: &str, digits: usize) -> Option<Redacted> {
-    let b = run.as_bytes();
-    // EIN `12-3456789`, SSN `123-45-6789`.
-    let ein = run.len() == 10 && b[2] == b'-' && run.chars().filter(|c| *c == '-').count() == 1;
-    let ssn = run.len() == 11 && b[3] == b'-' && b[6] == b'-';
-    if digits == 9 && (ein || ssn) {
-        return Some(Redacted::TaxId);
-    }
-    // A date such as 2026-10-31 (eight digits, two dashes) is not a number.
-    if run.len() == 10 && digits == 8 && b[4] == b'-' && b[7] == b'-' {
+/// Parses an IPv4 dotted quad.
+fn ipv4(host: &str) -> Option<[u8; 4]> {
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.len() != 4 {
         return None;
     }
-    let dashes_or_spaces = run
-        .chars()
-        .filter(|c| matches!(c, '-' | ' ' | '(' | ')' | '.'))
-        .count();
-    if (10..=11).contains(&digits) && dashes_or_spaces > 0 && !run.contains(',') {
-        return Some(Redacted::Phone);
+    let mut out = [0u8; 4];
+    for (i, p) in parts.iter().enumerate() {
+        if p.is_empty() || p.len() > 3 || !p.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        out[i] = p.parse().ok()?;
     }
-    if digits >= 8 {
-        return Some(Redacted::Number);
-    }
-    None
+    Some(out)
 }
 
-/// Removes emails, phone numbers, tax IDs and long digit runs from `text`
-/// before it could be sent to a cloud model (Q-139). Amounts are never in
-/// these payloads to begin with (non-negotiable 4); short numbers such as
-/// check numbers and dates stay.
+/// True for a host this computer may reach without the internet: loopback,
+/// `localhost`, RFC 1918 private ranges, CGNAT (100.64/10), IPv6 loopback
+/// and unique-local (`fc00::/7`), or a `.local` / single-label name.
 #[must_use]
-pub fn redact(text: &str) -> Redaction {
-    let mut out = String::with_capacity(text.len());
-    let mut kinds = Vec::new();
-    // Pass 1: emails, token by token.
-    let mut emailed = String::with_capacity(text.len());
-    let mut token = String::new();
-    let flush = |token: &mut String, emailed: &mut String, kinds: &mut Vec<Redacted>| {
-        if token.is_empty() {
-            return;
-        }
-        let trimmed = token.trim_end_matches(['.', ',', ';', ':', ')']);
-        let tail = &token[trimmed.len()..];
-        if let Some(at) = trimmed.find('@')
-            && at > 0
-            && trimmed[at + 1..].contains('.')
-            && !trimmed[at + 1..].starts_with('.')
-        {
-            emailed.push_str(Redacted::Email.placeholder());
-            emailed.push_str(tail);
-            kinds.push(Redacted::Email);
-        } else {
-            emailed.push_str(token);
-        }
-        token.clear();
-    };
-    for c in text.chars() {
-        if c.is_whitespace() {
-            flush(&mut token, &mut emailed, &mut kinds);
-            emailed.push(c);
-        } else {
-            token.push(c);
-        }
+pub fn is_local_host(host: &str) -> bool {
+    let h = host
+        .trim()
+        .trim_matches(|c| c == '[' || c == ']')
+        .to_ascii_lowercase();
+    if h.is_empty() {
+        return false;
     }
-    flush(&mut token, &mut emailed, &mut kinds);
+    if h == "localhost"
+        || h.rsplit_once('.')
+            .is_some_and(|(_, tld)| tld == "local" || tld == "localhost")
+    {
+        return true;
+    }
+    if let Some([a, b, _, _]) = ipv4(&h) {
+        return a == 127
+            || a == 10
+            || (a == 172 && (16..=31).contains(&b))
+            || (a == 192 && b == 168)
+            || (a == 100 && (64..=127).contains(&b));
+    }
+    if h.contains(':') {
+        // IPv6: loopback or unique-local only.
+        return h == "::1" || h.starts_with("fc") || h.starts_with("fd");
+    }
+    // A bare machine name (no dot) resolves on the LAN, never on the internet.
+    !h.contains('.') && h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
 
-    // Pass 2: digit runs with their separators.
-    let chars: Vec<char> = emailed.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        if c.is_ascii_digit() || (c == '(' && chars.get(i + 1).is_some_and(char::is_ascii_digit)) {
-            let start = i;
-            let mut end = i;
-            let mut digits = 0;
-            let mut j = i;
-            while j < chars.len() && (chars[j].is_ascii_digit() || is_sep(chars[j])) {
-                if chars[j].is_ascii_digit() {
-                    digits += 1;
-                    end = j + 1;
-                } else if chars[j] == ')' {
-                    end = j + 1;
-                }
-                j += 1;
-            }
-            let run: String = chars[start..end].iter().collect();
-            match classify_run(&run, digits) {
-                Some(kind) => {
-                    out.push_str(kind.placeholder());
-                    kinds.push(kind);
-                }
-                None => out.push_str(&run),
-            }
-            i = end;
-        } else {
-            out.push(c);
-            i += 1;
-        }
+/// Checks an Ollama address: `http`/`https`, no credentials, and a host
+/// that is loopback, a private network, or a local name. The engine makes
+/// the same check (`validateOllamaBaseUrl`); this refuses earlier, before
+/// the address is saved or sent. Returns the trimmed address.
+///
+/// # Errors
+/// [`OllamaUrlError`].
+pub fn validate_ollama_url(raw: &str) -> Result<String, OllamaUrlError> {
+    let url = raw.trim();
+    let rest = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))
+        .ok_or(OllamaUrlError::Scheme)?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.contains('@') {
+        return Err(OllamaUrlError::Credentials);
     }
-    Redaction { text: out, kinds }
+    if authority.is_empty()
+        || authority
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err(OllamaUrlError::Malformed);
+    }
+    let host = if let Some(end) = authority.strip_prefix('[').and_then(|a| a.find(']')) {
+        &authority[1..=end]
+    } else {
+        authority.rsplit_once(':').map_or(authority, |(h, port)| {
+            if port.bytes().all(|b| b.is_ascii_digit()) && !port.is_empty() {
+                h
+            } else {
+                authority
+            }
+        })
+    };
+    if host.is_empty() {
+        return Err(OllamaUrlError::Malformed);
+    }
+    if !is_local_host(host) {
+        return Err(OllamaUrlError::NotLocal);
+    }
+    Ok(url.to_string())
 }
 
 #[cfg(test)]
@@ -390,79 +362,40 @@ mod tests {
     }
 
     #[test]
-    fn redaction_removes_emails_phones_tax_ids_and_account_numbers() {
-        let cases: [(&str, &str, &[Redacted]); 9] = [
+    fn ollama_addresses_must_be_local_and_clean() {
+        for ok in [
+            "http://localhost:11434",
+            "https://127.0.0.1:11434/",
+            "http://10.0.0.5:11434",
+            "http://172.20.1.2:11434/v1",
+            "http://192.168.1.40:11434",
+            "http://100.64.3.3:11434",
+            "http://[::1]:11434",
+            "http://[fd00::1]:11434",
+            "http://ollama-box:11434",
+            "http://studio.local:11434",
+            "http://localhost",
+        ] {
+            assert_eq!(validate_ollama_url(ok).as_deref(), Ok(ok), "{ok}");
+        }
+        let cases = [
+            ("ftp://localhost:11434", OllamaUrlError::Scheme),
+            ("localhost:11434", OllamaUrlError::Scheme),
             (
-                "Call Ozark Supply at (417) 555-0133 or 417-555-0134.",
-                "Call Ozark Supply at [phone] or [phone].",
-                &[Redacted::Phone, Redacted::Phone],
+                "http://user:pw@localhost:11434",
+                OllamaUrlError::Credentials,
             ),
-            (
-                "Send the W-9 to books@ozarkridge.example, thanks.",
-                "Send the W-9 to [email], thanks.",
-                &[Redacted::Email],
-            ),
-            (
-                "EIN 12-3456789 and SSN 123-45-6789 on file",
-                "EIN [tax id] and SSN [tax id] on file",
-                &[Redacted::TaxId, Redacted::TaxId],
-            ),
-            (
-                "Acct 4532 0151 1283 0366 routing 081000210",
-                "Acct [number] routing [number]",
-                &[Redacted::Number, Redacted::Number],
-            ),
-            (
-                "Check 1042 dated 2026-10-31 for invoice INV-2041",
-                "Check 1042 dated 2026-10-31 for invoice INV-2041",
-                &[],
-            ),
-            (
-                "Fuel 10/31/2026 ref 55512",
-                "Fuel 10/31/2026 ref 55512",
-                &[],
-            ),
-            (
-                "Card ending 0366, memo 123456789012",
-                "Card ending 0366, memo [number]",
-                &[Redacted::Number],
-            ),
-            ("", "", &[]),
-            (
-                "Mixed: kurt@example.com 555-0100 12345678",
-                // Adjacent digit groups merge into one run: over-redaction
-                // is the safe side.
-                "Mixed: [email] [number]",
-                &[Redacted::Email, Redacted::Number],
-            ),
+            ("http://api.example.com:11434", OllamaUrlError::NotLocal),
+            ("http://8.8.8.8:11434", OllamaUrlError::NotLocal),
+            ("http://172.32.0.1:11434", OllamaUrlError::NotLocal),
+            ("http://[2001:db8::1]:11434", OllamaUrlError::NotLocal),
+            ("http://169.254.169.254/latest", OllamaUrlError::NotLocal),
+            ("http://", OllamaUrlError::Malformed),
+            ("http://local host:11434", OllamaUrlError::Malformed),
         ];
-        for (input, want, kinds) in cases {
-            let r = redact(input);
-            assert_eq!(r.text, want, "{input}");
-            assert_eq!(r.kinds, kinds, "{input}");
+        for (bad, why) in cases {
+            assert_eq!(validate_ollama_url(bad), Err(why), "{bad}");
         }
-    }
-
-    #[test]
-    fn redaction_fixtures_leave_no_identifiers_behind() {
-        let fixtures = include_str!("../tests/fixtures/redaction.txt");
-        let mut lines = 0;
-        for line in fixtures
-            .lines()
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        {
-            lines += 1;
-            let r = redact(line).text;
-            assert!(!r.contains('@'), "email left in {r:?}");
-            let longest_digit_run = r
-                .split(|c: char| !c.is_ascii_digit())
-                .map(str::len)
-                .max()
-                .unwrap_or(0);
-            assert!(longest_digit_run <= 7, "long digit run left in {r:?}");
-            assert!(!r.contains("555-01"), "phone left in {r:?}");
-            assert!(!r.contains("-45-"), "ssn left in {r:?}");
-        }
-        assert!(lines >= 12, "fixture lines: {lines}");
+        assert!(!is_local_host(""));
     }
 }

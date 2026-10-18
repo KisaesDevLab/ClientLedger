@@ -4,7 +4,7 @@
 //! - [`company_prefs`]: company-local choices the engine has no column for
 //!   (receipt inbox, bills-due window, AI switches and cap, consent note).
 //! - [`ai`] and [`smtp`]: provider names, keychain entry names, the token
-//!   cap, the redaction pass, and SMTP field checks.
+//!   cap, the Ollama address check, and SMTP field checks.
 //! - [`recent`]: the recent-companies store, a JSON file in the app data
 //!   folder. It remembers, per company, what the engine does not store yet:
 //!   the accent colour (Q-184), when the company was last opened and backed
@@ -26,8 +26,8 @@ pub mod smtp;
 mod store;
 pub mod user_prefs;
 
-pub use ai::{AiLocalPrefs, AiProvider, CapCheck, Redaction, redact};
-pub use company_prefs::{AiConsentNote, CompanyPrefs};
+pub use ai::{AiLocalPrefs, AiProvider, CapCheck, OllamaUrlError, validate_ollama_url};
+pub use company_prefs::{AiConsentNote, CompanyPrefs, FolderError, check_inbox_folder};
 pub use recent::{
     ACCENT_PALETTE, Accent, BackupKind, BackupRecord, CompanyFlags, CompanyRecord, FiscalCalendar,
     RecentCompanies, RecentError, RecentStore,

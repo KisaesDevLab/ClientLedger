@@ -237,10 +237,17 @@ pub async fn restore(
         let flags = host_flags
             .or_else(|| previous_rec.as_ref().map(|r| r.flags))
             .unwrap_or_default();
-        let mut prefs = host_prefs
-            .or_else(|| previous_rec.as_ref().map(|r| r.prefs.clone()))
-            .unwrap_or_default();
-        prefs.normalize();
+        // Machine-local fields (receipt inbox, this month's token count,
+        // the consent note) come from this computer's record, never the
+        // archive; the token cap is the stricter of the two (M5).
+        let local = previous_rec.as_ref().map(|r| &r.prefs);
+        let prefs = if let Some(p) = host_prefs {
+            cl_settings::CompanyPrefs::merged_from_archive(&p, local)
+        } else {
+            let mut p = local.cloned().unwrap_or_default();
+            p.normalize();
+            p
+        };
         let rec = l.upsert(imported.tenant_id, &imported.name);
         rec.accent = accent;
         rec.flags = flags;
