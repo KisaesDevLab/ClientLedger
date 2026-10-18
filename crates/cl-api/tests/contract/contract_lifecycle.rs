@@ -21,8 +21,7 @@ use cl_api::{
     AccountFilter, AccountImportRow, AccountRef, AccountType, AccountingMethod, ApiError,
     ArchiveRequest, BillLine, Capabilities, ClosingDateChange, CompanySettingsUpdate,
     ContactFields, ContactType, DeleteRequest, ImportRequest, InvoiceLine, JobState,
-    LocalValidation, Method, NewBill, NewCompany, NewContact, NewInvoice, NewTenant, PageRequest,
-    ReportBasis,
+    LocalValidation, Method, NewBill, NewCompany, NewContact, NewInvoice, NewTenant, ReportBasis,
 };
 use cl_core::ids::TenantId;
 use cl_core::{Money, Quantity, Rate, Secret};
@@ -464,18 +463,13 @@ pub fn tenants_list_create_rename_e5a(h: &Harness) {
             .into_iter()
             .find(|t| t.id == made.tenant_id)
             .expect("listed");
+        let at = row.updated_at.expect("updatedAt is listed");
         let renamed = h
-            .run(
-                s.tenants()
-                    .rename(made.tenant_id, "E5 Renamed", row.updated_at, key()),
-            )
+            .run(s.tenants().rename(made.tenant_id, "E5 Renamed", at, key()))
             .expect("rename");
         assert_eq!(renamed.name, "E5 Renamed");
         let stale = h
-            .run(
-                s.tenants()
-                    .rename(made.tenant_id, "Again", row.updated_at, key()),
-            )
+            .run(s.tenants().rename(made.tenant_id, "Again", at, key()))
             .expect_err("stale");
         assert!(matches!(
             stale,
@@ -492,8 +486,25 @@ pub fn tenants_list_create_rename_e5a(h: &Harness) {
     }
 }
 
-/// E5a: export job, poll, import as a new tenant with the engine's
-/// verification, and the trial balance string-equal before and after.
+/// Polls an archive job to its end.
+fn finish_job(h: &Harness, s: &cl_api::Session, job: &cl_api::JobId) -> cl_api::ArchiveJobStatus {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        let st = h.run(s.tenants().archive_job(job)).expect("job");
+        match st.status {
+            JobState::Succeeded | JobState::Failed => return st,
+            JobState::Queued | JobState::Running => {
+                assert!(Instant::now() < deadline, "job did not finish");
+                std::thread::sleep(Duration::from_millis(300));
+            }
+        }
+    }
+}
+
+/// E5a: export job, poll, import job as a new tenant with the engine's
+/// verification and the echoed `host`, the trial balance string-equal
+/// before and after, and (AC2) a file changed after the envelope refused
+/// with the source company and its trial balance untouched.
 pub fn archive_export_import_e5a(h: &Harness) {
     let s = h.s3();
     let c = tenant_c(h);
@@ -514,39 +525,86 @@ pub fn archive_export_import_e5a(h: &Harness) {
                 &ArchiveRequest {
                     include_attachments: true,
                     include_audit: true,
-                    host: json!({"app": "ClientLedger", "appVersion": "test", "kind": "backup"}),
+                    host: json!({"app": "ClientLedger", "appVersion": "test", "kind": "backup", "accent": "#3E7CB1"}),
                     passphrase: passphrase.clone(),
                 },
             ))
             .expect("export job");
-        let deadline = Instant::now() + Duration::from_secs(120);
-        let result = loop {
-            let st = h.run(s.tenants().archive_job(&job.job_id)).expect("job");
-            match st.status {
-                JobState::Done => break st.result.expect("result"),
-                JobState::Failed => panic!("export failed: {:?}", st.code),
-                JobState::Queued | JobState::Running => {
-                    assert!(Instant::now() < deadline, "export did not finish");
-                    std::thread::sleep(Duration::from_millis(300));
-                }
-            }
-        };
+        let st = finish_job(h, &s, &job.job_id);
+        assert_eq!(st.status, JobState::Succeeded, "{:?}", st.error);
+        let result = st.export_result().expect("export result");
         let path = result
             .path
             .clone()
             .expect("desktop export reports its path");
         assert!(path.is_absolute());
-        let imported = h
-            .run_for(
-                Duration::from_secs(120),
-                s.tenants().import_archive(&ImportRequest {
-                    path,
-                    passphrase,
-                    scratch: false,
-                }),
-            )
-            .expect("import");
+
+        // AC2: a byte flipped past the plaintext envelope is refused.
+        let tampered = path.with_extension("tampered.clbackup");
+        let mut bytes = std::fs::read(&path).expect("read archive");
+        let at = bytes.len() - 64;
+        bytes[at] ^= 0xFF;
+        std::fs::write(&tampered, &bytes).expect("write tampered");
+        let job = h
+            .run(s.tenants().import_archive(&ImportRequest {
+                path: tampered.clone(),
+                passphrase: passphrase.clone(),
+                scratch: false,
+            }))
+            .expect("import job");
+        let st = finish_job(h, &s, &job.job_id);
+        assert_eq!(
+            st.status,
+            JobState::Failed,
+            "a changed file must be refused"
+        );
+        assert!(
+            st.error_code().starts_with("ARCHIVE_"),
+            "code {}",
+            st.error_code()
+        );
+        let companies = h.run(s.companies()).expect("companies");
+        assert!(
+            companies.iter().any(|t| t.tenant_id == c),
+            "source company gone"
+        );
+        h.run(s.open_company(c)).expect("open source");
+        let still = h
+            .run(s.reports().trial_balance_csv(
+                date(2025, 1, 1),
+                date(2026, 12, 31),
+                ReportBasis::Accrual,
+            ))
+            .expect("tb after refusal");
+        assert_eq!(
+            before, still,
+            "the live company changed after a refused import"
+        );
+        h.run(s.close_company()).expect("workspace");
+        let _ = std::fs::remove_file(&tampered);
+
+        // The good file imports as a new tenant.
+        let job = h
+            .run(s.tenants().import_archive(&ImportRequest {
+                path,
+                passphrase,
+                scratch: false,
+            }))
+            .expect("import job");
+        let st = finish_job(h, &s, &job.job_id);
+        assert_eq!(st.status, JobState::Succeeded, "{:?}", st.error);
+        let imported = st.import_result().expect("import result");
         assert_ne!(imported.tenant_id, c, "import creates a new tenant");
+        assert_eq!(imported.source_tenant_id, Some(c));
+        assert_eq!(
+            imported
+                .host
+                .as_ref()
+                .and_then(|h| h.get("accent"))
+                .and_then(|v| v.as_str()),
+            Some("#3E7CB1"),
+            "the manifest host object is echoed"
+        );
         let v = imported.verification.expect("verification");
         assert_eq!(v.trial_balance_equal, Some(true));
         assert_eq!(v.content_equal, Some(true));
@@ -694,5 +752,4 @@ pub fn closing_password_u15(h: &Harness) {
         let settings = h.run(s.company_settings()).expect("settings");
         assert_eq!(settings.lock_date, None);
     }
-    let _ = PageRequest::first_max();
 }

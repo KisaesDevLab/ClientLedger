@@ -128,13 +128,24 @@ pub struct RestoreOutcome {
     pub names_swapped: bool,
 }
 
-/// Restores a backup as a new company and records it. The session ends
-/// in the workspace; the caller opens the restored company.
+/// Restores a backup as a new company and records it. The session must
+/// be in the workspace (the shell closes the open company first, which
+/// saves or prompts for open forms and waits for pending writes); the
+/// caller opens the restored company afterwards.
+///
+/// Order: the file is checked locally, the import job runs and the engine
+/// verifies it, the local record is written (colour and flags from the
+/// archive's `host`, else from the company it came from), and only then
+/// are names swapped, which needs the previous company's `updatedAt` from
+/// `GET /api/v1/tenants`. A failed swap is not fatal: the restored
+/// company keeps the archive's name and `names_swapped` is false.
 ///
 /// # Errors
-/// `NotABackup`, `Tampered`, `Io` (nothing sent); `NoPassphrase`; `Api`
-/// (a wrong passphrase or a corrupt file is `Validation`; an engine
-/// without `tenant-archive-v1` answers `NotFound`); `Settings`.
+/// `NotABackup`, `Tampered`, `Io` (nothing sent); `NoPassphrase`;
+/// `Api(NoCompanyOpen)` when a company is still open; `JobFailed` with
+/// the engine's code (`ARCHIVE_PASSPHRASE_INVALID`, `ARCHIVE_CORRUPT`,
+/// `ARCHIVE_TOO_NEW`); `Api`; `Settings`.
+#[allow(clippy::too_many_lines, reason = "one linear sequence of steps")]
 pub async fn restore(
     session: &Session,
     store: &RecentStore,
@@ -143,15 +154,25 @@ pub async fn restore(
     progress: &ProgressSink,
 ) -> Result<RestoreOutcome, CompanyError> {
     let list = store.load()?;
-    let info = inspect_archive(&req.path, &list)?;
+    let path = std::path::absolute(&req.path).map_err(CompanyError::io("resolve archive"))?;
+    let info = {
+        let (path, list) = (path.clone(), list.clone());
+        tokio::task::spawn_blocking(move || inspect_archive(&path, &list))
+            .await
+            .map_err(|_| CompanyError::Io {
+                what: "read archive",
+                source: std::io::Error::other("worker stopped"),
+            })??
+    };
     let passphrase = match &req.passphrase {
         Some(p) if !p.is_empty() => p.clone(),
         _ => crate::backup::passphrase(secrets)?,
     };
-    let path = std::path::absolute(&req.path).map_err(CompanyError::io("resolve archive"))?;
-    session.close_company().await?;
+    if session.scope() != cl_api::Scope::Workspace {
+        return Err(CompanyError::Api(ApiError::NoCompanyOpen));
+    }
     progress(Progress::Starting);
-    let imported = session
+    let job = session
         .tenants()
         .import_archive(&ImportRequest {
             path,
@@ -159,6 +180,12 @@ pub async fn restore(
             scratch: false,
         })
         .await?;
+    let imported = crate::backup::wait_for_job(session, &job.job_id, progress)
+        .await?
+        .import_result()
+        .ok_or(CompanyError::JobFailed {
+            code: "NO_RESULT".into(),
+        })?;
     progress(Progress::Verifying);
 
     // The company the file came from, if it still exists here.
@@ -166,64 +193,76 @@ pub async fn restore(
         .known
         .as_ref()
         .map(|(id, _)| *id)
+        .or(imported.source_tenant_id)
         .or_else(|| {
             list.companies
                 .iter()
                 .find(|c| c.backup_by_archive_id(&info.archive_id).is_some())
                 .map(|c| c.tenant_id)
         })
-        .filter(|id| *id != imported.tenant_id);
+        .filter(|id| *id != imported.tenant_id && list.get(*id).is_some());
     let previous_rec = previous.and_then(|id| list.get(id).cloned());
+    // Read what the exporting app wrote, field by field (another version
+    // may have written more or less than today's `HostMetadata`).
+    let host_accent = imported
+        .host
+        .as_ref()
+        .and_then(|h| h.get("accent"))
+        .and_then(serde_json::Value::as_str)
+        .and_then(cl_settings::Accent::parse);
+    let host_flags: Option<cl_settings::CompanyFlags> = imported
+        .host
+        .as_ref()
+        .and_then(|h| h.get("flags"))
+        .and_then(|f| serde_json::from_value(f.clone()).ok());
     let original_name = previous_rec
         .as_ref()
         .map_or_else(|| imported.name.clone(), |r| r.name.clone());
-    let when = cl_settings::recent::now();
-    let mut names_swapped = false;
-    let mut final_name = imported.name.clone();
-    if let (Some(prev_id), Some(prev)) = (previous, previous_rec.as_ref()) {
-        let stamp = when.as_utc().format("%m/%d/%Y");
-        let old_name = format!("{} (before restore {stamp})", prev.name);
-        match session
-            .tenants()
-            .rename(prev_id, &old_name, None, IdempotencyKey::new())
-            .await
-        {
-            Ok(_) => {
-                session
-                    .tenants()
-                    .rename(
-                        imported.tenant_id,
-                        &original_name,
-                        None,
-                        IdempotencyKey::new(),
-                    )
-                    .await?;
-                names_swapped = true;
-                final_name = original_name.clone();
-            }
-            Err(ApiError::NotFound { .. }) => {
-                // No rename route yet: both names stay as the engine set
-                // them (the restored copy carries the archive's name).
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }
 
+    // Local record first, so a failed name swap still leaves a company
+    // the window can list and open.
     store.update(|l| {
-        if let (Some(prev_id), true) = (previous, names_swapped)
-            && let Some(p) = l.get_mut(prev_id)
-        {
-            p.name = format!("{} (before restore)", p.name);
-        }
-        let accent = previous_rec
-            .as_ref()
-            .map_or_else(|| cl_settings::recent::next_accent(&[]), |r| r.accent);
-        let flags = previous_rec.as_ref().map(|r| r.flags).unwrap_or_default();
-        let rec = l.upsert(imported.tenant_id, &final_name);
+        let accent = host_accent
+            .or_else(|| previous_rec.as_ref().map(|r| r.accent))
+            .unwrap_or_else(|| {
+                cl_settings::recent::next_accent(
+                    &l.companies.iter().map(|c| c.accent).collect::<Vec<_>>(),
+                )
+            });
+        let flags = host_flags
+            .or_else(|| previous_rec.as_ref().map(|r| r.flags))
+            .unwrap_or_default();
+        let rec = l.upsert(imported.tenant_id, &imported.name);
         rec.accent = accent;
         rec.flags = flags;
         rec.source = Some("restore".into());
     })?;
+
+    let mut names_swapped = false;
+    let mut final_name = imported.name.clone();
+    if let (Some(prev_id), Some(prev)) = (previous, previous_rec.as_ref()) {
+        let stamp = cl_settings::recent::now().as_utc().format("%m/%d/%Y");
+        let old_name = format!("{} (before restore {stamp})", prev.name);
+        names_swapped = swap_names(
+            session,
+            prev_id,
+            &old_name,
+            imported.tenant_id,
+            &original_name,
+        )
+        .await?;
+        if names_swapped {
+            final_name = original_name.clone();
+            store.update(|l| {
+                if let Some(p) = l.get_mut(prev_id) {
+                    p.name.clone_from(&old_name);
+                }
+                if let Some(n) = l.get_mut(imported.tenant_id) {
+                    n.name.clone_from(&final_name);
+                }
+            })?;
+        }
+    }
     progress(Progress::Done);
     Ok(RestoreOutcome {
         new_tenant: imported.tenant_id,
@@ -233,6 +272,60 @@ pub async fn restore(
         file_known: info.known.is_some(),
         names_swapped,
     })
+}
+
+/// Renames the previous company out of the way, then the restored one to
+/// the original name. Each rename sends the row's current `updatedAt`
+/// from `GET /api/v1/tenants` (409 `STALE` otherwise). Returns `Ok(false)`
+/// when the engine has no rename route or the second rename failed after
+/// the first succeeded (the restored company keeps the archive name).
+///
+/// # Errors
+/// `Api` when the first rename fails for a reason other than a missing
+/// route.
+async fn swap_names(
+    session: &Session,
+    prev_id: TenantId,
+    old_name: &str,
+    new_id: TenantId,
+    original_name: &str,
+) -> Result<bool, CompanyError> {
+    let updated_at = |id: TenantId, rows: &[cl_api::TenantSummary]| {
+        rows.iter().find(|t| t.id == id).and_then(|t| t.updated_at)
+    };
+    let rows = match session.tenants().list().await {
+        Ok(r) => r,
+        Err(ApiError::NotFound { .. }) => return Ok(false),
+        Err(e) => return Err(e.into()),
+    };
+    let Some(prev_at) = updated_at(prev_id, &rows) else {
+        return Ok(false);
+    };
+    match session
+        .tenants()
+        .rename(prev_id, old_name, prev_at, IdempotencyKey::new())
+        .await
+    {
+        Ok(_) => {}
+        Err(ApiError::NotFound { .. }) => return Ok(false),
+        Err(e) => return Err(e.into()),
+    }
+    let rows = session.tenants().list().await.unwrap_or_default();
+    let Some(new_at) = updated_at(new_id, &rows) else {
+        tracing::warn!("restored company could not be renamed to the original name");
+        return Ok(false);
+    };
+    match session
+        .tenants()
+        .rename(new_id, original_name, new_at, IdempotencyKey::new())
+        .await
+    {
+        Ok(_) => Ok(true),
+        Err(e) => {
+            tracing::warn!(error = %e, "restored company keeps the archive name");
+            Ok(false)
+        }
+    }
 }
 
 #[cfg(test)]

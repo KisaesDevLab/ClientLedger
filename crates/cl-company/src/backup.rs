@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use cl_api::{ArchiveRequest, ArchiveResult, JobState, Session};
+use cl_api::{ArchiveJobStatus, ArchiveRequest, JobId, JobState, Session};
 use cl_core::Timestamp;
 use cl_core::ids::TenantId;
 use cl_settings::{BackupKind, BackupRecord, CompanyFlags, RecentStore, SecretStore};
@@ -189,32 +189,33 @@ pub(crate) fn passphrase(secrets: &dyn SecretStore) -> Result<cl_core::Secret, C
         .ok_or(CompanyError::NoPassphrase)
 }
 
-/// Polls an export job to its end.
-pub(crate) async fn wait_for_export(
+/// Polls an archive job (export or import) to its end, reporting the
+/// engine's progress and step. A job the engine no longer knows (it
+/// restarted) is `JobFailed { JOB_UNKNOWN }`: start again.
+///
+/// # Errors
+/// `JobFailed` with the engine's code, `TIMEOUT` or `JOB_UNKNOWN`; `Api`.
+pub async fn wait_for_job(
     session: &Session,
-    job: &cl_api::JobId,
+    job: &JobId,
     progress: &ProgressSink,
-) -> Result<ArchiveResult, CompanyError> {
+) -> Result<ArchiveJobStatus, CompanyError> {
     let deadline = tokio::time::Instant::now() + EXPORT_DEADLINE;
     loop {
         let status = match session.tenants().archive_job(job).await {
             Ok(s) => s,
             Err(cl_api::ApiError::NotFound { .. }) => {
-                return Err(CompanyError::ExportFailed {
+                return Err(CompanyError::JobFailed {
                     code: "JOB_UNKNOWN".into(),
                 });
             }
             Err(e) => return Err(e.into()),
         };
         match status.status {
-            JobState::Done => {
-                return status.result.ok_or(CompanyError::ExportFailed {
-                    code: "NO_RESULT".into(),
-                });
-            }
+            JobState::Succeeded => return Ok(status),
             JobState::Failed => {
-                return Err(CompanyError::ExportFailed {
-                    code: status.code.unwrap_or_else(|| "FAILED".into()),
+                return Err(CompanyError::JobFailed {
+                    code: status.error_code(),
                 });
             }
             JobState::Queued | JobState::Running => {
@@ -223,7 +224,7 @@ pub(crate) async fn wait_for_export(
                     step: status.step,
                 });
                 if tokio::time::Instant::now() > deadline {
-                    return Err(CompanyError::ExportFailed {
+                    return Err(CompanyError::JobFailed {
                         code: "TIMEOUT".into(),
                     });
                 }
@@ -233,13 +234,14 @@ pub(crate) async fn wait_for_export(
     }
 }
 
-/// Moves the finished archive to `dest` and checks its hash.
+/// Moves the finished archive to `dest` and checks its hash. The source is
+/// removed only after the copy verified.
 pub(crate) async fn place_archive(
-    result: &ArchiveResult,
+    result: &cl_api::ArchiveResult,
     dest: &Path,
     progress: &ProgressSink,
 ) -> Result<u64, CompanyError> {
-    let src = result.path.clone().ok_or(CompanyError::ExportFailed {
+    let src = result.path.clone().ok_or(CompanyError::JobFailed {
         code: "NO_PATH".into(),
     })?;
     let expected = result.sha256.to_ascii_lowercase();
@@ -250,15 +252,19 @@ pub(crate) async fn place_archive(
         if let Some(dir) = dest.parent() {
             std::fs::create_dir_all(dir).map_err(CompanyError::io("create backup folder"))?;
         }
-        if std::fs::rename(&src, &dest).is_err() {
+        let moved = std::fs::rename(&src, &dest).is_ok();
+        if !moved {
             std::fs::copy(&src, &dest).map_err(CompanyError::io("copy backup"))?;
-            let _ = std::fs::remove_file(&src);
         }
         p2(Progress::Verifying);
         let got = sha256_file(&dest).map_err(CompanyError::io("hash backup"))?;
         if got != expected {
+            // The bad copy goes; the engine's file stays for another try.
             let _ = std::fs::remove_file(&dest);
             return Err(CompanyError::CopyMismatch);
+        }
+        if !moved {
+            let _ = std::fs::remove_file(&src);
         }
         let bytes = std::fs::metadata(&dest)
             .map(|m| m.len())
@@ -305,7 +311,12 @@ pub async fn backup(
             },
         )
         .await?;
-    let result = wait_for_export(session, &job.job_id, progress).await?;
+    let result = wait_for_job(session, &job.job_id, progress)
+        .await?
+        .export_result()
+        .ok_or(CompanyError::JobFailed {
+            code: "NO_RESULT".into(),
+        })?;
     let now = cl_settings::recent::now();
     let dest = req
         .dest_dir

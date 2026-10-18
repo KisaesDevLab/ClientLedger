@@ -34,10 +34,12 @@ pub enum CompanyError {
     /// No backup passphrase is set yet (Q-P02i).
     #[error("no backup passphrase")]
     NoPassphrase,
-    /// The export job disappeared (engine restarted) or failed.
-    #[error("export failed ({code})")]
-    ExportFailed {
-        /// The engine's code, or `JOB_UNKNOWN`.
+    /// An archive job (export or import) failed or disappeared (engine
+    /// restarted).
+    #[error("archive job failed ({code})")]
+    JobFailed {
+        /// The engine's code (`ARCHIVE_PASSPHRASE_INVALID`, `ARCHIVE_CORRUPT`,
+        /// `ARCHIVE_TOO_NEW`, ...), or `JOB_UNKNOWN` / `TIMEOUT`.
         code: String,
     },
     /// The file is not a `ClientLedger` backup.
@@ -86,9 +88,18 @@ impl OwnerFacing for CompanyError {
             CompanyError::NoPassphrase => {
                 OwnerMessage::with_fix("error.company.no_passphrase", "fix.company.no_passphrase")
             }
-            CompanyError::ExportFailed { .. } => {
-                OwnerMessage::with_fix("error.company.export_failed", "fix.api.try_again_soon")
-            }
+            CompanyError::JobFailed { code } => match code.as_str() {
+                "ARCHIVE_PASSPHRASE_INVALID" => {
+                    OwnerMessage::with_fix("error.company.passphrase", "fix.company.passphrase")
+                }
+                "ARCHIVE_CORRUPT" | "ARCHIVE_UNSUPPORTED" => {
+                    OwnerMessage::with_fix("error.company.tampered", "fix.company.tampered")
+                }
+                "ARCHIVE_TOO_NEW" => {
+                    OwnerMessage::with_fix("error.company.too_new", "fix.company.too_new")
+                }
+                _ => OwnerMessage::with_fix("error.company.job_failed", "fix.api.try_again_soon"),
+            },
             CompanyError::NotABackup => {
                 OwnerMessage::with_fix("error.company.not_a_backup", "fix.company.not_a_backup")
             }
@@ -119,7 +130,7 @@ impl OwnerFacing for CompanyError {
                 cl_settings::SecretError::Keychain(_) => "keychain".into(),
             },
             CompanyError::Setup(issues) => format!("setup issues: {issues:?}"),
-            CompanyError::ExportFailed { code } => format!("export {code}"),
+            CompanyError::JobFailed { code } => format!("job {code}"),
             CompanyError::Unavailable(cap) => format!("capability {cap}"),
             other => format!("{other}"),
         }

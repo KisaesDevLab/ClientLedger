@@ -17,7 +17,7 @@ use cl_core::ids::TenantId;
 use cl_settings::secrets::BACKUP_PASSPHRASE;
 use cl_settings::{BackupKind, BackupRecord, MemorySecrets, RecentStore, SecretStore};
 use serde_json::{Value, json};
-use wiremock::matchers::{method, path, path_regex};
+use wiremock::matchers::{body_string_contains, method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const WS: &str = "0a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a00";
@@ -158,7 +158,7 @@ async fn mount_export(server: &MockServer, archive_path: &Path, sha: &str) {
         .and(path("/api/v1/tenant-archives/jobs/job_1"))
         .respond_with(json(
             200,
-            json!({"status":"running","progress":40,"step":"tables"}),
+            json!({"jobId":"job_1","kind":"export","status":"running","progress":40,"step":"tables"}),
         ))
         .up_to_n_times(1)
         .mount(server)
@@ -167,7 +167,8 @@ async fn mount_export(server: &MockServer, archive_path: &Path, sha: &str) {
         .and(path("/api/v1/tenant-archives/jobs/job_1"))
         .respond_with(json(
             200,
-            json!({"status":"done","progress":100,"result":{"archiveId":"arch-1","fileName":"arch-1.zip",
+            json!({"jobId":"job_1","kind":"export","status":"succeeded","progress":100,"step":"done",
+                   "result":{"archiveId":"arch-1","fileName":"arch-1.zip",
                    "path":archive_path.to_string_lossy(),"sha256":sha,"bytes":8}}),
         ))
         .mount(server)
@@ -283,6 +284,39 @@ async fn backup_refuses_without_a_passphrase_and_a_bad_copy_is_removed() {
     );
 }
 
+async fn mount_import(server: &MockServer, tenant: &str, name: &str, host: Option<Value>) {
+    Mock::given(method("POST"))
+        .and(path("/api/v1/tenant-archives/import"))
+        .respond_with(json(202, json!({"jobId":"imp_1"})))
+        .mount(server)
+        .await;
+    let mut result = json!({"tenantId":tenant,"name":name,"scratch":false,"archiveId":"arch-9",
+        "verification":{"tables":40,"rows":500,"contentEqual":true,"trialBalanceEqual":true,"files":0,
+        "identity":{"matched":1,"created":0},"warnings":[]},"warnings":[]});
+    if let Some(h) = host {
+        result["host"] = h;
+    }
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tenant-archives/jobs/imp_1"))
+        .respond_with(json(200, json!({"jobId":"imp_1","kind":"import","status":"succeeded","progress":100,"step":"done","result":result})))
+        .mount(server)
+        .await;
+}
+
+async fn mount_tenants_list(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tenants"))
+        .respond_with(json(
+            200,
+            json!([
+                {"id":T1,"name":"Ozark Ridge Landscaping LLC","role":"owner","createdAt":null,"updatedAt":"2026-11-01T08:00:00.000Z"},
+                {"id":T2,"name":"Ozark Ridge Landscaping LLC","role":"owner","createdAt":null,"updatedAt":"2026-11-04T08:12:00.000Z"}
+            ]),
+        ))
+        .mount(server)
+        .await;
+}
+
 fn write_archive(dir: &Path, archive_id: &str) -> PathBuf {
     let p = abs(dir, "restore-me.clbackup");
     let env = format!(
@@ -301,6 +335,7 @@ fn write_archive(dir: &Path, archive_id: &str) -> PathBuf {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn restore_imports_as_a_new_tenant_swaps_names_and_keeps_the_old_one() {
     let dir = tempfile::tempdir().expect("tmp");
     let server = engine(&["tenant-archive-v1"]).await;
@@ -324,18 +359,30 @@ async fn restore_imports_as_a_new_tenant_swaps_names_and_keeps_the_old_one() {
             );
         })
         .expect("store");
-    Mock::given(method("POST"))
-        .and(path("/api/v1/tenant-archives/import"))
+    mount_import(
+        &server,
+        T2,
+        "Ozark Ridge Landscaping LLC",
+        Some(json!({"app":"ClientLedger","accent":"#C23B4A","flags":{"inventory_enabled":true}})),
+    )
+    .await;
+    mount_tenants_list(&server).await;
+    // A rename without expectedUpdatedAt is a 400 (the engine validates it).
+    Mock::given(method("PATCH"))
+        .and(path_regex(r"^/api/v1/tenants/[^/]+$"))
+        .and(body_string_contains("expectedUpdatedAt"))
         .respond_with(json(
-            201,
-            json!({"tenantId":T2,"name":"Ozark Ridge Landscaping LLC","scratch":false,
-                   "verification":{"tables":40,"contentEqual":true,"trialBalanceEqual":true,"files":0}}),
+            200,
+            json!({"id":T2,"name":"x","updatedAt":"2026-11-04T08:12:00.000Z"}),
         ))
         .mount(&server)
         .await;
     Mock::given(method("PATCH"))
         .and(path_regex(r"^/api/v1/tenants/[^/]+$"))
-        .respond_with(json(200, json!({"tenant":{"id":T2,"name":"x"}})))
+        .respond_with(json(
+            400,
+            json!({"error":{"message":"expectedUpdatedAt required","code":"VALIDATION_ERROR"}}),
+        ))
         .mount(&server)
         .await;
     let out = restore(
@@ -389,8 +436,12 @@ async fn restore_imports_as_a_new_tenant_swaps_names_and_keeps_the_old_one() {
     let new = list.get(t(T2)).expect("new");
     assert_eq!(
         new.accent,
-        cl_settings::ACCENT_PALETTE[2],
-        "colour carried over"
+        cl_settings::Accent([0xC2, 0x3B, 0x4A]),
+        "colour comes from the archive host object"
+    );
+    assert!(
+        new.flags.inventory_enabled,
+        "flags come from the archive host object"
     );
     assert_eq!(new.source.as_deref(), Some("restore"));
 }

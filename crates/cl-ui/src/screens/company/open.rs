@@ -653,16 +653,36 @@ impl OpenCompanyScreen {
                 }
             }
             ui.add_space(6.0);
+            // A restore runs from the workspace only: closing the company
+            // first saves or prompts for open forms and waits for writes.
+            let company_open = self.link.demo_state().map_or_else(
+                || {
+                    self.link
+                        .session()
+                        .is_some_and(|s| s.scope() != cl_api::Scope::Workspace)
+                },
+                |d| d.open.is_some(),
+            );
+            if company_open {
+                form::hint(ui, tokens, &t("open.restore.close_first"));
+            }
             if self.busy == Some("open.restore.working") {
                 form::progress_line(ui, tokens, &t("open.restore.working"));
-            } else if let Some(i) =
-                form::actions(ui, &t("open.restore.go"), &[&t("open.restore.cancel")])
-            {
-                if i == 0 {
-                    self.start_restore();
-                } else {
-                    self.restore_open = false;
-                    self.restore_result = None;
+            } else {
+                let mut clicked = None;
+                ui.add_enabled_ui(!company_open, |ui| {
+                    clicked = form::actions(ui, &t("open.restore.go"), &[]);
+                });
+                if ui.button(t("open.restore.cancel")).clicked() {
+                    clicked = Some(1);
+                }
+                match clicked {
+                    Some(0) => self.start_restore(),
+                    Some(_) => {
+                        self.restore_open = false;
+                        self.restore_result = None;
+                    }
+                    None => {}
                 }
             }
         });

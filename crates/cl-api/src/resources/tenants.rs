@@ -225,7 +225,7 @@ fn path_safe(s: &str, max: usize) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// Where an export job stands.
+/// Where an archive job stands (`jobs.ts` `JobStatus`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum JobState {
@@ -234,29 +234,83 @@ pub enum JobState {
     /// Running.
     Running,
     /// Finished; `result` is present.
-    Done,
-    /// Failed; nothing was written.
+    #[serde(alias = "done")]
+    Succeeded,
+    /// Failed; `error` says why and nothing was written.
     Failed,
 }
 
-/// `GET /api/v1/tenant-archives/jobs/{jobId}`.
+/// Why a job failed (`error: {code, message}`); only the code is used.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct JobError {
+    /// Stable code (`ARCHIVE_PASSPHRASE_INVALID`, `ARCHIVE_CORRUPT`, ...).
+    pub code: String,
+    /// The engine's message (owner data may be absent; never logged).
+    #[serde(default)]
+    pub message: String,
+}
+
+/// `GET /api/v1/tenant-archives/jobs/{jobId}`: an export or import job.
+/// `result` is the job's own shape; use [`ArchiveJobStatus::export_result`]
+/// or [`ArchiveJobStatus::import_result`].
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchiveJobStatus {
+    /// The job.
+    #[serde(default)]
+    pub job_id: Option<JobId>,
+    /// `export` or `import`.
+    #[serde(default)]
+    pub kind: Option<String>,
     /// State.
     pub status: JobState,
     /// 0-100, when reported.
     #[serde(default)]
     pub progress: Option<u8>,
-    /// Current step name, when reported.
+    /// Current step name (`queued`, `tables`, `files`, `verify`, `done`).
     #[serde(default)]
     pub step: Option<String>,
-    /// The finished archive.
+    /// The result, once `Succeeded`.
     #[serde(default)]
-    pub result: Option<ArchiveResult>,
-    /// Error code of a failed job (never message text).
+    pub result: Option<Value>,
+    /// The failure, once `Failed`.
     #[serde(default)]
-    pub code: Option<String>,
+    pub error: Option<JobError>,
+}
+
+impl ArchiveJobStatus {
+    /// The finished export (a succeeded export job).
+    #[must_use]
+    pub fn export_result(&self) -> Option<ArchiveResult> {
+        self.result
+            .clone()
+            .and_then(|v| serde_json::from_value(v).ok())
+    }
+
+    /// The finished import (a succeeded import job).
+    #[must_use]
+    pub fn import_result(&self) -> Option<ImportResult> {
+        self.result
+            .clone()
+            .and_then(|v| serde_json::from_value(v).ok())
+    }
+
+    /// The failure code, or `FAILED` when none was given.
+    #[must_use]
+    pub fn error_code(&self) -> String {
+        self.error
+            .as_ref()
+            .map_or_else(|| "FAILED".to_string(), |e| e.code.clone())
+    }
+}
+
+/// A started import job (202 `{jobId}`); poll with
+/// [`Tenants::archive_job`] and read [`ArchiveJobStatus::import_result`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportJob {
+    /// Poll handle.
+    pub job_id: JobId,
 }
 
 /// A finished export.
@@ -326,7 +380,7 @@ pub struct ImportVerification {
     pub other: Value,
 }
 
-/// Answer of [`Tenants::import_archive`].
+/// Result of an import job (`import.service.ts` `ImportResult`).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
@@ -338,9 +392,23 @@ pub struct ImportResult {
     /// Whether it is a scratch tenant.
     #[serde(default)]
     pub scratch: bool,
+    /// The archive that was imported.
+    #[serde(default)]
+    pub archive_id: Option<String>,
+    /// The tenant the archive was exported from.
+    #[serde(default)]
+    pub source_tenant_id: Option<TenantId>,
     /// The engine's verification report.
     #[serde(default)]
     pub verification: Option<ImportVerification>,
+    /// Non-fatal notes.
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    /// The manifest's `host` object (what the exporting app wrote), echoed
+    /// by the engine so a restore on another computer keeps the app's
+    /// colour and flags.
+    #[serde(default)]
+    pub host: Option<Value>,
 }
 
 /// Input of [`Tenants::delete`] (E5b safe delete, Q-185).
@@ -465,7 +533,7 @@ impl Tenants<'_> {
         &self,
         id: TenantId,
         name: &str,
-        expected_updated_at: Option<Timestamp>,
+        expected_updated_at: Timestamp,
         key: IdempotencyKey,
     ) -> Result<TenantSummary, ApiError> {
         #[derive(Deserialize)]
@@ -476,8 +544,7 @@ impl Tenants<'_> {
         #[serde(rename_all = "camelCase")]
         struct Body<'a> {
             name: &'a str,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            expected_updated_at: Option<String>,
+            expected_updated_at: String,
         }
         let name = name.trim();
         if name.is_empty() || name.len() > 255 {
@@ -490,7 +557,7 @@ impl Tenants<'_> {
         )
         .json_body(json_body(&Body {
             name,
-            expected_updated_at: expected_updated_at.map(Timestamp::to_wire),
+            expected_updated_at: expected_updated_at.to_wire(),
         })?);
         call.idempotency_key = Some(key);
         let reply = self.0.send(&TENANT_RENAME, call, None).await?;
@@ -563,15 +630,17 @@ impl Tenants<'_> {
         Ok(reply.body.to_vec())
     }
 
-    /// `POST /api/v1/tenant-archives/import`: import a `.clbackup` as a new
-    /// tenant. The engine verifies counts, digests, the trial balance and
-    /// files before it commits; a failure leaves nothing behind.
+    /// `POST /api/v1/tenant-archives/import`: start importing a `.clbackup`
+    /// as a new tenant (202 `{jobId}`). The job verifies counts, digests,
+    /// the trial balance and files before it commits; a failure leaves
+    /// nothing behind and shows as `Failed` with an `error` code
+    /// (`ARCHIVE_PASSPHRASE_INVALID`, `ARCHIVE_CORRUPT`, `ARCHIVE_TOO_NEW`).
     ///
     /// # Errors
     /// `Local(InvalidValue)` for a relative path or empty passphrase
-    /// (nothing sent); `Validation` for a wrong passphrase or a corrupt or
-    /// tampered file; `Conflict` for a newer schema; any [`ApiError`].
-    pub async fn import_archive(&self, request: &ImportRequest) -> Result<ImportResult, ApiError> {
+    /// (nothing sent); `Validation` for a path the engine refuses; any
+    /// [`ApiError`].
+    pub async fn import_archive(&self, request: &ImportRequest) -> Result<ImportJob, ApiError> {
         require_absolute_file(&request.path)?;
         if request.passphrase.is_empty() {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
@@ -580,7 +649,7 @@ impl Tenants<'_> {
             .json_body(json_body(request)?)
             .timeout(crate::client::TimeoutClass::Archive);
         let reply = self.0.send(&TENANT_ARCHIVE_IMPORT, call, None).await?;
-        decode(&reply, "import result").map_err(saved_unreadable)
+        decode(&reply, "import job").map_err(saved_unreadable)
     }
 
     /// `POST /api/v1/tenants/{id}/delete`: the safe delete (Q-185). The
@@ -698,7 +767,7 @@ mod tests {
         let at = Timestamp::parse_wire("2026-10-02T10:00:00.000Z").expect("ts");
         let renamed = s
             .tenants()
-            .rename(made.tenant_id, "Renamed", Some(at), IdempotencyKey::new())
+            .rename(made.tenant_id, "Renamed", at, IdempotencyKey::new())
             .await
             .expect("rename");
         assert_eq!(renamed.name, "Renamed");
@@ -724,7 +793,7 @@ mod tests {
             .rename(
                 TenantId::parse(TENANT).expect("id"),
                 "x",
-                None,
+                Timestamp::parse_wire("2026-10-02T10:00:00.000Z").expect("ts"),
                 IdempotencyKey::new(),
             )
             .await
@@ -750,8 +819,8 @@ mod tests {
             .and(path("/api/v1/tenant-archives/jobs/job_1"))
             .respond_with(json(
                 200,
-                r#"{"status":"done","progress":100,"result":{"archiveId":"a-1","fileName":"a-1.zip",
-                    "path":"/tmp/x/a-1.zip","sha256":"ab","bytes":10}}"#,
+                r#"{"jobId":"job_1","kind":"export","status":"succeeded","progress":100,"step":"done",
+                    "result":{"archiveId":"a-1","fileName":"a-1.zip","path":"/tmp/x/a-1.zip","sha256":"ab","bytes":10}}"#,
             ))
             .mount(&server)
             .await;
@@ -774,10 +843,36 @@ mod tests {
         assert_eq!(body["host"]["kind"], "backup");
         assert!(!format!("{req:?}").contains("pass-canary"));
         let st = s.tenants().archive_job(&job.job_id).await.expect("status");
-        assert_eq!(st.status, JobState::Done);
-        let r = st.result.expect("result");
+        assert_eq!(st.status, JobState::Succeeded);
+        assert!(
+            st.import_result().is_none(),
+            "an export job has no import result"
+        );
+        let r = st.export_result().expect("result");
         assert_eq!(r.file_name.as_str(), "a-1.zip");
         assert_eq!(r.path.as_deref(), Some(Path::new("/tmp/x/a-1.zip")));
+    }
+
+    #[tokio::test]
+    async fn a_failed_job_carries_its_error_code() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/tenant-archives/jobs/bad"))
+            .respond_with(json(
+                200,
+                r#"{"jobId":"bad","kind":"import","status":"failed","progress":30,"step":"verify",
+                    "error":{"code":"ARCHIVE_PASSPHRASE_INVALID","message":"wrong passphrase"}}"#,
+            ))
+            .mount(&server)
+            .await;
+        let st = ws(&server)
+            .tenants()
+            .archive_job(&JobId::parse("bad").expect("id"))
+            .await
+            .expect("status");
+        assert_eq!(st.status, JobState::Failed);
+        assert_eq!(st.error_code(), "ARCHIVE_PASSPHRASE_INVALID");
+        assert!(st.export_result().is_none() && st.import_result().is_none());
     }
 
     #[tokio::test]
@@ -800,15 +895,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn import_sends_an_absolute_path_and_reads_verification() {
+    async fn import_sends_an_absolute_path_and_reads_the_job_result() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/tenant-archives/import"))
+            .respond_with(json(202, r#"{"jobId":"imp_1"}"#))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/tenant-archives/jobs/imp_1"))
             .respond_with(json(
-                201,
-                r#"{"tenantId":"1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","name":"Restored","scratch":false,
-                    "verification":{"tables":42,"contentEqual":true,"trialBalanceEqual":true,"files":3,
-                    "identity":{"matched":1,"created":0}}}"#,
+                200,
+                r##"{"jobId":"imp_1","kind":"import","status":"succeeded","progress":100,"step":"done",
+                    "result":{"tenantId":"1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","name":"Restored","scratch":false,
+                    "archiveId":"a-9","sourceTenantId":"1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02",
+                    "verification":{"tables":42,"rows":900,"contentEqual":true,"trialBalanceEqual":true,"files":3,
+                    "identity":{"matched":1,"created":0},"warnings":[]},"warnings":[],
+                    "host":{"app":"ClientLedger","accent":"#3E7CB1"}}}"##,
             ))
             .mount(&server)
             .await;
@@ -818,7 +921,7 @@ mod tests {
         } else {
             PathBuf::from("/backups/co.clbackup")
         };
-        let r = s
+        let job = s
             .tenants()
             .import_archive(&ImportRequest {
                 path: abs,
@@ -827,6 +930,14 @@ mod tests {
             })
             .await
             .expect("import");
+        let st = s.tenants().archive_job(&job.job_id).await.expect("job");
+        assert_eq!(st.status, JobState::Succeeded);
+        let r = st.import_result().expect("import result");
+        assert_eq!(r.archive_id.as_deref(), Some("a-9"));
+        assert_eq!(
+            r.host.as_ref().map(|h| h["accent"].clone()),
+            Some(serde_json::json!("#3E7CB1"))
+        );
         let v = r.verification.expect("verification");
         assert_eq!(v.trial_balance_equal, Some(true));
         assert_eq!(v.other["identity"]["matched"], 1);

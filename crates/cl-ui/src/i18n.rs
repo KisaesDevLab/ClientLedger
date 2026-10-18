@@ -188,6 +188,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("open.restore.passphrase", "Backup passphrase"),
     ("open.restore.passphrase_hint", "Leave blank to use the passphrase saved on this computer. A file from another computer needs its passphrase."),
     ("open.restore.need_file", "Enter the path of the backup file."),
+    ("open.restore.close_first", "Close the open company first (File, Close Company) so nothing is being saved while the backup comes in."),
     ("open.restore.go", "Restore"),
     ("open.restore.cancel", "Cancel"),
     ("open.restore.working", "Restoring and checking\u{2026}"),

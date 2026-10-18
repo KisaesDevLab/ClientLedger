@@ -30,7 +30,9 @@ pub mod templates;
 pub mod year_end;
 mod zipfile;
 
-pub use backup::{BackupOutcome, BackupRequest, HostMetadata, Progress, ProgressSink, backup};
+pub use backup::{
+    BackupOutcome, BackupRequest, HostMetadata, Progress, ProgressSink, backup, wait_for_job,
+};
 pub use delete::{DeleteOutcome, DeleteRequest, delete_company};
 pub use error::CompanyError;
 pub use export_all::{ExportAllOutcome, export_all};

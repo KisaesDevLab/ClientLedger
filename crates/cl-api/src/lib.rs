@@ -79,8 +79,8 @@ pub use resources::system::{SmtpTest, SmtpTestResult};
 pub use resources::tags::{Tag, TagFields, TagFilter, TagUpdate, Tags};
 pub use resources::tenants::{
     ArchiveFileName, ArchiveJob, ArchiveJobStatus, ArchiveRequest, ArchiveResult, CreatedTenant,
-    DeleteReceipt, DeleteRequest, HOST_METADATA_MAX_BYTES, ImportRequest, ImportResult,
-    ImportVerification, JobId, JobState, NewTenant, TenantSummary, Tenants,
+    DeleteReceipt, DeleteRequest, HOST_METADATA_MAX_BYTES, ImportJob, ImportRequest, ImportResult,
+    ImportVerification, JobError, JobId, JobState, NewTenant, TenantSummary, Tenants,
 };
 pub use resources::transactions::{
     Basis, JeLine, MAX_LINES, NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter,
