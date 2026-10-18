@@ -4,6 +4,7 @@
 
 pub mod accounts;
 pub mod contacts;
+pub mod csv_map;
 pub mod items;
 pub mod tags;
 
