@@ -199,6 +199,9 @@ pub async fn create_company(
         })
         .await?;
     let open = session.open_company(made.tenant_id).await?;
+    // Every call from here is pinned to the new company: a switch in the
+    // middle makes them fail with `StaleScope` instead of landing elsewhere.
+    let session = &session.pinned();
 
     // Profile: legal name and legal form (the business name is the tenant
     // name the engine already set).

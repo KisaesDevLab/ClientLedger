@@ -287,6 +287,9 @@ pub async fn load_into(
         StarterChart::from_id(&sample.company.chart).unwrap_or(StarterChart::GeneralService);
     setup.accent = cl_settings::Accent([0xC9, 0xC4, 0xBA]);
     let created = create_company(session, store, &setup).await?;
+    // Pinned: a switch while the sample loads stops the posts (StaleScope)
+    // instead of sending them into the other company.
+    let session = &session.pinned();
 
     // Accounts the chart lacks.
     let existing = session

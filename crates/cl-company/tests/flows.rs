@@ -24,6 +24,7 @@ const WS: &str = "0a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a00";
 const T1: &str = "1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
 const T2: &str = "1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02";
 const CO: &str = "0b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+const CO_B: &str = "0b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02";
 const JWT: &str = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjQxMDI0NDQ4MDB9.sig";
 
 fn json(status: u16, body: Value) -> ResponseTemplate {
@@ -717,4 +718,154 @@ async fn create_company_runs_the_interview_steps_in_order() {
     let e = create_company(&s, &store, &setup).await.expect_err("gated");
     assert!(matches!(e, CompanyError::Setup(_)), "{e:?}");
     assert_eq!(server.received_requests().await.expect("r").len(), before);
+}
+
+/// B3: a company switch in the middle of the practice-company load must
+/// never send a post into the other company. The loader runs on a pinned
+/// session, so after the switch its posts fail with `StaleScope` and
+/// nothing carries the other tenant's company id.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn switching_mid_load_sends_nothing_into_the_other_company() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let server = engine(&[]).await;
+    // The first `GET /company` (the sample tenant) reports CO; every later
+    // one (after the switch to T1) reports CO_B.
+    Mock::given(method("GET"))
+        .and(path("/api/v1/company"))
+        .respond_with(json(
+            200,
+            json!({"company":{"id":CO,"businessName":"Practice","country":"US"}}),
+        ))
+        .with_priority(1)
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/company"))
+        .respond_with(json(
+            200,
+            json!({"company":{"id":CO_B,"businessName":"Other","country":"US"}}),
+        ))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    let s = session(&server).await;
+    let store = RecentStore::in_dir(&dir.path().join("settings"));
+    Mock::given(method("POST"))
+        .and(path("/api/v1/auth/create-tenant"))
+        .respond_with(json(
+            201,
+            json!({"tenantId":T2,"companyId":CO,"tenantName":"Practice"}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/company"))
+        .respond_with(json(
+            200,
+            json!({"company":{"id":CO,"businessName":"Practice","country":"US"}}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/company/settings"))
+        .respond_with(json(200, json!({"settings":{"fiscalYearStartMonth":1}})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/accounts/import"))
+        .respond_with(json(201, json!({"imported":40,"updated":0,"skipped":[]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/company/setup-complete"))
+        .respond_with(json(200, json!({"message":"ok"})))
+        .mount(&server)
+        .await;
+    let accounts: Vec<Value> = cl_company::Sample::load()
+        .company
+        .accounts
+        .iter()
+        .enumerate()
+        .map(|(i, a)| json!({"id": format!("2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e{:04x}", i), "accountNumber": a.number,
+            "name": a.name, "accountType": a.account_type, "isActive": true, "isSystem": false}))
+        .chain([
+            json!({"id":"2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8ea001","accountNumber":"10200","name":"A/R","accountType":"asset","isSystem":true}),
+            json!({"id":"2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8ea002","accountNumber":"20100","name":"A/P","accountType":"liability","isSystem":true}),
+            json!({"id":"2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8ea003","accountNumber":"30000","name":"Opening","accountType":"equity","isSystem":true}),
+        ])
+        .collect();
+    let total = accounts.len();
+    Mock::given(method("GET"))
+        .and(path("/api/v1/accounts"))
+        .respond_with(json(
+            200,
+            json!({"data": accounts, "total": total, "limit": 500, "offset": 0}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/contacts"))
+        .respond_with(json(201, json!({"contact":{"id":"4a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","contactType":"customer","displayName":"x","isActive":true}})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(
+            json(201, json!({"transaction":{"id":"3b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","txnType":"journal_entry","txnDate":"2026-01-01","status":"posted","lines":[]}}))
+                .set_delay(std::time::Duration::from_millis(15)),
+        )
+        .mount(&server)
+        .await;
+
+    let loader = {
+        let s = s.clone();
+        let store = store.clone();
+        tokio::spawn(async move {
+            cl_company::sample::load_into(&s, &store, &cl_company::backup::silent()).await
+        })
+    };
+    // Let a few posts go out, then switch companies underneath the loader.
+    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    s.open_company(t(T1)).await.expect("switch");
+    let result = loader.await.expect("join");
+    let seen: Vec<String> = server
+        .received_requests()
+        .await
+        .expect("recorded")
+        .iter()
+        .map(|r| format!("{} {}", r.method, r.url.path()))
+        .collect();
+    assert!(
+        result.is_err(),
+        "the load must stop after the switch: {seen:?}"
+    );
+    let err = result.expect_err("stopped");
+
+    let posts: Vec<_> = server
+        .received_requests()
+        .await
+        .expect("recorded")
+        .into_iter()
+        .filter(|r| r.method.as_str() == "POST" && r.url.path() == "/api/v1/transactions")
+        .collect();
+    assert!(
+        !posts.is_empty(),
+        "some posts went out before the switch; error {err:?}; seen {seen:?}"
+    );
+    let into_other = posts
+        .iter()
+        .filter(|r| {
+            r.headers
+                .get("x-company-id")
+                .is_some_and(|v| v.to_str().unwrap_or("") == CO_B)
+        })
+        .count();
+    assert_eq!(into_other, 0, "a post carried the other company's id");
+    assert!(posts.iter().all(|r| {
+        r.headers
+            .get("x-company-id")
+            .is_some_and(|v| v.to_str().unwrap_or("") == CO)
+    }));
 }

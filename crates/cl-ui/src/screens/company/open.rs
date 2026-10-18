@@ -263,7 +263,7 @@ impl OpenCompanyScreen {
         let Some(row) = self.companies.get(self.selected).cloned() else {
             return;
         };
-        if self.link.pending_writes() > 0 {
+        if self.link.switch_blocked() {
             self.notice = Some(t("open.wait_for_saves"));
             return;
         }

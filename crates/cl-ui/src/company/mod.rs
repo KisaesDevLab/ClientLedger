@@ -12,7 +12,9 @@ pub mod demo;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use cl_api::{ApiQueue, Capabilities, Client, Pending, QueueError, RequestGroup, Session};
+use cl_api::{
+    ApiQueue, Capabilities, Client, OrphanLabel, Pending, QueueError, RequestGroup, Session,
+};
 use cl_core::ids::TenantId;
 use cl_host::Supervisor;
 use cl_settings::{Accent, RecentStore, SecretStore};
@@ -64,6 +66,9 @@ pub struct CompanyLink {
     session: Mutex<Option<Session>>,
     events: Mutex<Vec<CompanyEvent>>,
     dirty_windows: std::sync::atomic::AtomicUsize,
+    /// Lifecycle operations (create, open, restore, backup, delete, sample
+    /// load) still running; a company switch waits for zero.
+    lifecycle_running: Arc<std::sync::atomic::AtomicUsize>,
     /// A recovery key the engine returned at first-run setup (U-23), kept
     /// only until the recovery-key screen shows it once.
     recovery_key: Mutex<Option<cl_core::Secret>>,
@@ -104,6 +109,7 @@ impl CompanyLink {
             session: Mutex::new(None),
             events: Mutex::new(Vec::new()),
             dirty_windows: std::sync::atomic::AtomicUsize::new(0),
+            lifecycle_running: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             recovery_key: Mutex::new(None),
             backup_dir,
             demo: None,
@@ -121,6 +127,7 @@ impl CompanyLink {
             session: Mutex::new(None),
             events: Mutex::new(Vec::new()),
             dirty_windows: std::sync::atomic::AtomicUsize::new(0),
+            lifecycle_running: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             recovery_key: Mutex::new(None),
             backup_dir: dir.join("Backups"),
             demo: Some(Mutex::new(demo::DemoState::new())),
@@ -178,6 +185,20 @@ impl CompanyLink {
     pub fn dirty_windows(&self) -> usize {
         self.dirty_windows
             .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Lifecycle operations still running (see [`spawn_lifecycle`]).
+    #[must_use]
+    pub fn lifecycle_running(&self) -> usize {
+        self.lifecycle_running
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// True while a company may not be switched: a lifecycle operation or
+    /// a write is still running.
+    #[must_use]
+    pub fn switch_blocked(&self) -> bool {
+        self.lifecycle_running() > 0 || self.pending_writes() > 0
     }
 
     /// Keep a recovery key from first-run setup for the screen that shows it.
@@ -293,15 +314,32 @@ where
     }
 }
 
-/// Spawn `f` (a future over a session) on `group` as a read, pinned to
-/// the client scope so a company switch in the middle does not discard
-/// the result. Lifecycle operations use this; ordinary reads inside a
-/// company use the session scope.
+/// Counts a running lifecycle operation for as long as it lives.
+struct Running(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Running {
+    fn start(counter: &Arc<std::sync::atomic::AtomicUsize>) -> Running {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Running(Arc::clone(counter))
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Spawn `f` (a future over a session) on `group` as a **write** on the
+/// client scope: it is never cancelled, `pending_writes()` stays above
+/// zero until it ends (so a company switch waits), and the link counts
+/// it as a running lifecycle operation. Ordinary reads inside a company
+/// use the session scope instead.
 ///
 /// # Errors
 /// `QueueFull` or `QueueClosed`.
 pub fn spawn_lifecycle<T, F, Fut>(
-    link: &CompanyLink,
+    link: &Arc<CompanyLink>,
     group: &RequestGroup,
     f: F,
 ) -> Result<Task<T>, QueueError>
@@ -311,7 +349,15 @@ where
     Fut: std::future::Future<Output = T> + Send + 'static,
 {
     let client = link.client().ok_or(QueueError::QueueClosed)?.clone();
-    let pending = group.read(&client, move |_c| async move { Ok(f().await) })?;
+    let running = Running::start(&link.lifecycle_running);
+    let label = OrphanLabel {
+        what: "orphan.lifecycle",
+        key: None,
+    };
+    let pending = group.write(&client, label, move |_c| async move {
+        let _running = running;
+        Ok(f().await)
+    })?;
     Ok(Task::Pending(pending))
 }
 
@@ -337,6 +383,8 @@ mod tests {
         assert!(link.client().is_none());
         assert!(link.group().is_none());
         assert_eq!(link.pending_writes(), 0);
+        assert_eq!(link.lifecycle_running(), 0);
+        assert!(!link.switch_blocked());
         assert!(link.session().is_none());
         link.push(CompanyEvent::Closed);
         assert_eq!(link.drain(), vec![CompanyEvent::Closed]);

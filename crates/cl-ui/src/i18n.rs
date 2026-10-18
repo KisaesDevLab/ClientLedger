@@ -134,6 +134,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("shortcuts.close", "Close"),
     // Company lifecycle (P08)
     ("toast.open_company_first", "Open a company first."),
+    ("orphan.lifecycle", "a company operation (open, create, back up, restore)"),
     ("open.tab", "Open Company"),
     ("open.title", "Open a company"),
     ("open.subtitle", "Your books stay on this computer. Nothing is sent anywhere unless you turn it on."),

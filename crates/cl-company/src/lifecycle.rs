@@ -126,12 +126,10 @@ pub async fn new_from_existing(
         ]));
     }
     session.open_company(source).await?;
-    let accounts = session
-        .accounts()
-        .list_all(&AccountFilter::default())
-        .await?;
-    let settings = session.company_settings().await?;
-    let profile = session.company_profile().await?.record.profile;
+    let src = &session.pinned();
+    let accounts = src.accounts().list_all(&AccountFilter::default()).await?;
+    let settings = src.company_settings().await?;
+    let profile = src.company_profile().await?.record.profile;
     let flags = store
         .load()?
         .get(source)
@@ -147,6 +145,7 @@ pub async fn new_from_existing(
         })
         .await?;
     let open = session.open_company(made.tenant_id).await?;
+    let session = &session.pinned();
 
     let rows: Vec<cl_api::AccountImportRow> = accounts
         .iter()
