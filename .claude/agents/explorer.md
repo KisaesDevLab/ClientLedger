@@ -2,7 +2,7 @@
 name: explorer
 description: Fast read-only search of the ClientLedger repo or the engine/ submodule. Use to locate files, symbols, endpoints, schema tables, or existing patterns before planning or editing. Returns conclusions with file paths and line numbers, not file dumps.
 tools: Read, Grep, Glob
-model: haiku
+model: sonnet
 effort: low
 omitClaudeMd: true
 maxTurns: 25

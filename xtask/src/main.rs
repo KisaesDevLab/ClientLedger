@@ -20,7 +20,8 @@ use anyhow::{Result, bail};
 const USAGE: &str = "\
 usage: cargo xtask <command>
 
-  ci                 fmt --check, clippy -D warnings, test, deny, licenses, layering
+  ci [--verbose]     fmt --check, clippy -D warnings, test, deny, licenses, layering
+                     (quiet locally: failures only; full output in CI or with --verbose)
   test [args]        cargo test (whole workspace unless -p is given), CL_OFFLINE_TESTS=1
   licenses           direct dependencies must be MIT or Apache-2.0
   layering           crate dependency rules from CLAUDE.md
@@ -113,7 +114,7 @@ pub(crate) fn run_nofloat() -> Result<()> {
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("ci") => ci::ci(),
+        Some("ci") => ci::ci(&args[1..]),
         Some("test") => ci::test(&args[1..]),
         Some("licenses") => run_licenses(),
         Some("layering") => run_layering(),
