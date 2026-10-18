@@ -1,6 +1,10 @@
 //! The grid demo's register (200,000 two-line rows computed from the row
-//! index, nothing stored) and its fixed-row "Pay bills" example. All data
-//! is synthetic.
+//! index) and its fixed-row "Pay bills" example. All data is synthetic.
+//!
+//! The running Balance column (Q-187, mockup `Register.html`) is computed
+//! once when the register is built: exact `Money` sums in date order from
+//! the fixture's opening balance, never per frame. P12 feeds the engine's
+//! true running balance into the same read-only column instead.
 
 use std::borrow::Cow;
 
@@ -23,6 +27,10 @@ const MARK: ColumnId = ColumnId(5);
 const DEPOSIT: ColumnId = ColumnId(6);
 const KIND: ColumnId = ColumnId(7);
 const ACCOUNT: ColumnId = ColumnId(8);
+const BALANCE: ColumnId = ColumnId(9);
+
+/// The fixture's opening balance (synthetic).
+const OPENING_CENTS: i64 = 2_500_000;
 
 const PAYEES: &[&str] = &[
     "Ozark Feed & Seed",
@@ -145,6 +153,15 @@ pub fn spec(one_line: bool) -> GridSpec {
             Line::First,
             110,
         )),
+        // Read-only (Browse grids never edit; `editable: false` also keeps
+        // it locked and out of the Tab order in editable grids).
+        right(column(
+            BALANCE,
+            TextKey("dev.grid_demo.col.balance"),
+            money,
+            Line::First,
+            120,
+        )),
     ]);
     s.height = RowHeight::Uniform {
         two_lines: !one_line,
@@ -152,11 +169,15 @@ pub fn spec(one_line: bool) -> GridSpec {
     s
 }
 
-/// The demo register: row `i` is computed from `i`.
+/// The demo register: row `i` is computed from `i`, except the running
+/// balance, which is summed once here.
 #[derive(Debug, Clone)]
 pub struct Register {
     rows: usize,
     start: CalendarDate,
+    /// The balance after each row (`None` past an overflow, which this
+    /// fixture never reaches).
+    balances: Vec<Option<Money>>,
 }
 
 impl Register {
@@ -164,9 +185,24 @@ impl Register {
     #[must_use]
     pub fn new(rows: usize, today: CalendarDate) -> Register {
         let back = i64::try_from(rows / 40).unwrap_or(0);
+        let mut running = Money::from_cents(OPENING_CENTS).ok();
+        let balances = (0..rows)
+            .map(|i| {
+                let (payment, amount) = Register::amount(i);
+                running = running.and_then(|b| {
+                    if payment {
+                        b.checked_sub(amount).ok()
+                    } else {
+                        b.checked_add(amount).ok()
+                    }
+                });
+                running
+            })
+            .collect();
         Register {
             rows,
             start: today.add_days(-back).unwrap_or(today),
+            balances,
         }
     }
 
@@ -218,6 +254,12 @@ impl RowModel for Register {
             ACCOUNT => CellValue::Text(Cow::Borrowed(pick(ACCOUNTS, h >> 16))),
             PAYMENT if payment => CellValue::Money(amount),
             DEPOSIT if !payment => CellValue::Money(amount),
+            BALANCE => self
+                .balances
+                .get(index)
+                .copied()
+                .flatten()
+                .map_or(CellValue::Empty, CellValue::Money),
             MARK => CellValue::Mark(match self.row_state(index) {
                 s if s.contains(RowState::RECONCILED) => MarkKind::Reconciled,
                 s if s.contains(RowState::CLEARED) => MarkKind::Cleared,
@@ -441,8 +483,8 @@ mod tests {
     #[test]
     fn rows_come_from_their_index() {
         let today = CalendarDate::from_ymd(2026, 11, 4).unwrap();
-        let r = Register::new(10_000_000, today);
-        assert_eq!(r.row_count(), 10_000_000);
+        let r = Register::new(1_000_000, today);
+        assert_eq!(r.row_count(), 1_000_000);
         let last = r.row_count() - 1;
         assert_eq!(r.index_of(r.row_key(last).unwrap()), Some(last));
         assert_eq!(r.cell(last, PAYEE), r.cell(last, PAYEE));
@@ -456,6 +498,49 @@ mod tests {
             assert!(pay != dep, "row {i} is a payment or a deposit");
         }
         assert!(spec(false).validate().is_ok() && spec(true).validate().is_ok());
+    }
+
+    fn money_at(r: &Register, i: usize, col: ColumnId) -> Money {
+        match r.cell(i, col) {
+            CellValue::Money(m) => m,
+            _ => Money::ZERO,
+        }
+    }
+
+    /// The Balance column: last, right-aligned, mono, on the first line in
+    /// both layouts, never editable; each row's balance is the previous
+    /// one minus the payment plus the deposit, exactly.
+    #[test]
+    fn running_balance_column() {
+        for one_line in [false, true] {
+            let s = spec(one_line);
+            let last = s.columns.last().expect("columns");
+            assert_eq!(last.id, BALANCE);
+            assert!(!last.editable, "Balance is locked");
+            assert_eq!(last.line, Line::First);
+            assert_eq!(last.align, Align::Right);
+            assert!(last.mono);
+            assert!(!s.editable, "the register is read-only");
+        }
+        let today = CalendarDate::from_ymd(2026, 11, 4).unwrap();
+        let r = Register::new(REGISTER_ROWS, today);
+        let opening = Money::from_cents(OPENING_CENTS).unwrap();
+        let first = opening
+            .checked_sub(money_at(&r, 0, PAYMENT))
+            .and_then(|b| b.checked_add(money_at(&r, 0, DEPOSIT)))
+            .unwrap();
+        assert_eq!(money_at(&r, 0, BALANCE), first);
+        let mut rows: Vec<usize> = (1..200).collect();
+        rows.extend((1..REGISTER_ROWS).step_by(997));
+        rows.push(REGISTER_ROWS - 1);
+        for n in rows {
+            let want = money_at(&r, n - 1, BALANCE)
+                .checked_sub(money_at(&r, n, PAYMENT))
+                .and_then(|b| b.checked_add(money_at(&r, n, DEPOSIT)))
+                .unwrap();
+            assert_eq!(money_at(&r, n, BALANCE), want, "row {n}");
+        }
+        assert!(matches!(r.cell(REGISTER_ROWS, BALANCE), CellValue::Empty));
     }
 
     #[test]

@@ -768,6 +768,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("dev.grid_demo.col.payment", "Payment"),
     ("dev.grid_demo.col.mark", "\u{2713}"),
     ("dev.grid_demo.col.deposit", "Deposit"),
+    ("dev.grid_demo.col.balance", "Balance"),
     ("dev.grid_demo.col.select", "Pay"),
     ("dev.grid_demo.col.vendor", "Vendor"),
     ("dev.grid_demo.col.due", "Due"),

@@ -93,12 +93,14 @@ steps:
   - click: {role: button, label: "Show 200,000 rows"}
   - assert_state: {key: screen.rows, equals: 200000}
   - click: {role: row, label_contains: "row 1 of 200,000"}
+  - assert_exists: {label: Balance}
   - screenshot: register-two-line
   - key: Ctrl+End
   - assert_exists: {role: row, label_contains: "row 200,000 of 200,000"}
   - screenshot: register-end
   - click: {role: check_box, label: One line}
   - assert_state: {key: screen.rows, equals: 200000}
+  - assert_exists: {label: Balance}
   - screenshot: register-one-line
 
   # --- Pay bills (fixed rows) -------------------------------------------------

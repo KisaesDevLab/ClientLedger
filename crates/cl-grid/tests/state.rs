@@ -872,3 +872,31 @@ fn shift_extension_keeps_earlier_picks() {
     let got: Vec<u64> = c.core.selection().iter().map(|k| k.0).collect();
     assert_eq!(got, [10, 11]);
 }
+
+/// A read-only computed money column (a register's running balance, fed
+/// by the screen or the engine): never opens an editor, Tab skips it, and
+/// typing on it changes nothing.
+#[test]
+fn computed_money_column_is_locked() {
+    let mut spec = line_spec();
+    for c in &mut spec.columns {
+        if c.id == support::lines::BALANCE {
+            c.kind = cl_grid::CellKind::Amount(cl_model::amount_entry::AmountRules::MONEY);
+            c.align = cl_grid::Align::Right;
+            c.mono = true;
+        }
+    }
+    let mut r = Rig {
+        core: Core::new(spec),
+        m: Lines::new(true, 2),
+        l: TestLookups::default(),
+    };
+    r.input(GridInput::FocusGained { from_below: false });
+    r.click(0, TAGS);
+    r.key(GridKey::Tab);
+    assert_eq!(r.at(), (1, ACCOUNT), "Tab skips the balance");
+    r.click(0, support::lines::BALANCE);
+    assert!(r.core.edit().is_none(), "no editor on the balance");
+    r.typ("5");
+    assert!(r.m.set_calls.is_empty());
+}
