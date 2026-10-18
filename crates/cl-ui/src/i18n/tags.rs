@@ -77,7 +77,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("tags.group_form.delete", "Delete group"),
     ("tags.group_form.delete_hint", "The group's tags are kept, without a group."),
     ("tags.merge.title", "Merge {tag} into another tag"),
-    ("tags.merge.explain", "Every transaction tagged with this tag gets the tag you choose, and this tag is removed."),
+    ("tags.merge.explain", "Every transaction tagged with this tag gets the tag you choose, and this tag is removed. This includes transactions dated on or before your closing date."),
     ("tags.merge.into", "Merge into"),
     ("tags.merge.cant_undo", "A merge can't be undone."),
     ("tags.merge.working", "Merging\u{2026}"),
