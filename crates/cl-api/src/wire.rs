@@ -49,6 +49,15 @@ impl Capabilities {
     pub const SMTP_SESSION: &'static str = "smtp-session-v1";
     /// U-29 monthly token cap enforced by the engine (`monthlyTokenLimit`).
     pub const AI_TOKEN_CAP: &'static str = "ai-token-cap-v1";
+    /// U-31 account merge that moves the journal lines (`/accounts/merge`).
+    pub const ACCOUNT_MERGE: &'static str = "account-merge-v1";
+    /// U-32 checked sub-accounts (same type, no cycles) and an engine
+    /// subtree balance.
+    pub const ACCOUNT_TREE: &'static str = "account-tree-v1";
+    /// U-33 per-account sensitive flag stored and enforced by the engine.
+    pub const ACCOUNT_SENSITIVE: &'static str = "account-sensitive-v1";
+    /// U-34 masked bank/card number with an audited Admin reveal.
+    pub const ACCOUNT_MASKED_NUMBER: &'static str = "account-masked-number-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

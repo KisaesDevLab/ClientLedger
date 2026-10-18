@@ -73,7 +73,8 @@ pub use resources::operations::{OPERATIONS, Operation, RetryClass};
 pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
 pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};
 pub use resources::reports::{
-    BalanceSheet, BalanceSheetEntry, ProfitLoss, Reports, TrialBalance, TrialBalanceRow,
+    AccountReport, AccountReportLine, BalanceSheet, BalanceSheetEntry, ProfitLoss, ReportDate,
+    Reports, TrialBalance, TrialBalanceRow,
 };
 pub use resources::sales::{BillLine, InvoiceLine, NewBill, NewInvoice, Posted};
 pub use resources::session_secrets::{

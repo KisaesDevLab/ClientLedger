@@ -10,6 +10,7 @@
 mod support;
 
 mod common;
+mod contract_accounts;
 mod contract_capabilities;
 mod contract_census;
 mod contract_closed_period;
@@ -46,6 +47,32 @@ fn main() -> std::process::ExitCode {
             contract_companies::profile_round_trip_and_settings,
         ),
         ("accounts::crud_and_filters", contract_resources::accounts),
+        (
+            "accounts::unique_numbers",
+            contract_accounts::unique_numbers,
+        ),
+        (
+            "accounts::deactivate_and_reactivate",
+            contract_accounts::deactivate_and_reactivate,
+        ),
+        (
+            "accounts::own_balance_only",
+            contract_accounts::own_balance_only,
+        ),
+        ("accounts::quick_report", contract_accounts::quick_report),
+        ("accounts::merge_u31", contract_accounts::merge_u31),
+        (
+            "accounts::parent_rules_u32",
+            contract_accounts::parent_rules_u32,
+        ),
+        (
+            "accounts::sensitive_flag_u33",
+            contract_accounts::sensitive_flag_u33,
+        ),
+        (
+            "accounts::masked_number_u34",
+            contract_accounts::masked_number_u34,
+        ),
         ("contacts::crud_and_filters", contract_resources::contacts),
         ("items::crud_and_filters", contract_resources::items),
         ("tags::crud_and_filters", contract_resources::tags),

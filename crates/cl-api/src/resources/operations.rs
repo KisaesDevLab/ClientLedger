@@ -241,6 +241,8 @@ pub(crate) const BILLS_CREATE: Operation = write(Method::Post, "/api/v1/bills");
 pub(crate) const REPORT_BALANCE_SHEET: Operation = read("/api/v1/reports/balance-sheet");
 pub(crate) const REPORT_TRIAL_BALANCE: Operation = read("/api/v1/reports/trial-balance");
 pub(crate) const REPORT_PROFIT_LOSS: Operation = read("/api/v1/reports/profit-loss");
+/// The quick report of one account (P11).
+pub(crate) const REPORT_ACCOUNT: Operation = read("/api/v1/reports/account-report");
 pub(crate) const EXPORT_FULL: Operation = read("/api/v1/export/full");
 pub(crate) const EXPORT_FULL_FILE: Operation = read("/api/v1/export/full/{fileName}");
 /// E5a (U-05): the companies the user can open, never the workspace.
@@ -335,7 +337,7 @@ const NEVER_RETRIED: [(&str, &str); 3] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 82] = [
+pub const OPERATIONS: [Operation; 83] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -386,6 +388,7 @@ pub const OPERATIONS: [Operation; 82] = [
     REPORT_BALANCE_SHEET,
     REPORT_TRIAL_BALANCE,
     REPORT_PROFIT_LOSS,
+    REPORT_ACCOUNT,
     EXPORT_FULL,
     EXPORT_FULL_FILE,
     TENANTS_LIST,

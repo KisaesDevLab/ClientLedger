@@ -49,6 +49,7 @@
   {"method":"GET","path":"/api/v1/reports/balance-sheet","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/reports/trial-balance","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/reports/profit-loss","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/reports/account-report","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/export/full","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/export/full/{fileName}","inSpec":true,"fragmentHash":"adc5a313da07d6ed32d154d9e0de2b2a7cdf0cf3f8958bc635a57e5280ba788d"},
   {"method":"GET","path":"/api/v1/tenants","inSpec":false,"fragmentHash":null},

@@ -72,6 +72,7 @@ POST    /api/v1/bills                           pre-handler-only
 GET     /api/v1/reports/balance-sheet           idempotent
 GET     /api/v1/reports/trial-balance           idempotent
 GET     /api/v1/reports/profit-loss             idempotent
+GET     /api/v1/reports/account-report          idempotent
 GET     /api/v1/export/full                     idempotent
 GET     /api/v1/export/full/{fileName}          idempotent
 GET     /api/v1/tenants                         idempotent
