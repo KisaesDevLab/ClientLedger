@@ -5,6 +5,8 @@ use cl_core::ids::TenantId;
 use cl_core::{CalendarDate, Timestamp};
 use cl_settings::{ACCENT_PALETTE, Accent};
 
+pub mod contacts;
+
 /// One demo company card.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DemoCompany {
@@ -34,6 +36,15 @@ pub struct DemoState {
     pub chart: Option<Vec<cl_api::Account>>,
     /// Accounts marked sensitive in the demo (Q-157).
     pub sensitive: std::collections::BTreeSet<cl_core::ids::AccountId>,
+    /// The open company's clients and vendors as the demo "engine" keeps
+    /// them (built on first use from the sample fixture, P11).
+    pub contacts: Option<Vec<cl_api::Contact>>,
+    /// Each demo contact's fixture name (history follows a rename).
+    pub contact_names: std::collections::BTreeMap<cl_core::ids::ContactId, String>,
+    /// Merges done in the demo: (merged away, kept).
+    pub merged: Vec<(cl_core::ids::ContactId, cl_core::ids::ContactId)>,
+    /// Vendors' 1099 profiles saved in the demo.
+    pub profiles: std::collections::BTreeMap<cl_core::ids::ContactId, cl_api::Vendor1099Profile>,
 }
 
 fn id(n: u8) -> TenantId {
@@ -84,6 +95,10 @@ impl DemoState {
             open: Some(id(1)),
             chart: None,
             sensitive: std::collections::BTreeSet::new(),
+            contacts: None,
+            contact_names: std::collections::BTreeMap::new(),
+            merged: Vec::new(),
+            profiles: std::collections::BTreeMap::new(),
         }
     }
 
@@ -99,6 +114,16 @@ impl DemoState {
         Timestamp::parse_wire("2026-11-04T08:10:00.000Z").unwrap_or_else(|_| {
             Timestamp::from_unix_millis(0).unwrap_or_else(|_| unreachable!("epoch"))
         })
+    }
+
+    /// The demo contacts, built from the sample on first use.
+    pub fn contacts_mut(&mut self) -> &mut Vec<cl_api::Contact> {
+        if self.contacts.is_none() {
+            let cs = contacts::contacts();
+            self.contact_names = contacts::original_names(&cs);
+            self.contacts = Some(cs);
+        }
+        self.contacts.get_or_insert_with(Vec::new)
     }
 
     /// A fresh fake tenant id for a company made in the demo.

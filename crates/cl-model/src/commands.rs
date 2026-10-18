@@ -262,15 +262,16 @@ pub const COMMANDS: &[Command] = &[
     cmd("list.toggle_active", "Make Inactive or Active Again", None, 3, ctrl_shift('I'), Scope::Window),
     cmd("list.show_inactive", "Include Inactive Entries", None, 3, ctrl_shift('H'), Scope::Window),
     cmd("list.quick_report", "QuickReport", None, 3, ctrl_shift('Q'), Scope::Window),
+    cmd("list.merge", "Merge Into Another Entry", None, 3, None, Scope::Window),
     // Clients
-    screen("clients.center", "Clients & Jobs", Some(Menu::Clients), 0, None, "P11"),
+    built("clients.center", "Clients & Jobs", Some(Menu::Clients), 0, None),
     screen("clients.create_invoice", "Create Invoice", Some(Menu::Clients), 1, ctrl('I'), "P20"),
     screen("clients.receive_payment", "Receive Payment", Some(Menu::Clients), 1, ctrl('R'), "P21"),
     screen("clients.sales_receipt", "Sales Receipt", Some(Menu::Clients), 1, ctrl_shift('R'), "P14"),
     screen("clients.credit_memo", "Credit Memo or Refund", Some(Menu::Clients), 2, None, "P22"),
     screen("clients.statements", "Statements", Some(Menu::Clients), 2, None, "P22"),
     // Vendors
-    screen("vendors.center", "Vendors", Some(Menu::Vendors), 0, None, "P11"),
+    built("vendors.center", "Vendors", Some(Menu::Vendors), 0, None),
     screen("vendors.enter_bill", "Enter Bill", Some(Menu::Vendors), 1, ctrl('B'), "P17"),
     screen("vendors.pay_bills", "Pay Bills", Some(Menu::Vendors), 1, ctrl_shift('B'), "P18"),
     screen("vendors.write_check", "Write Check", Some(Menu::Vendors), 1, ctrl('W'), "P13"),
@@ -389,6 +390,8 @@ mod tests {
             "file.delete_company",
             "edit.preferences",
             "lists.chart_of_accounts",
+            "clients.center",
+            "vendors.center",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

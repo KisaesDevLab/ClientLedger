@@ -278,3 +278,17 @@ fn twenty_thousand_contacts_filter_quickly() {
     assert!(!rows.is_empty() && !all.is_empty());
     assert!(took.as_millis() < 100, "filtering took {took:?}");
 }
+
+#[test]
+fn removing_a_tax_id_only_counts_for_a_vendor_with_nothing_typed() {
+    let list = sample();
+    let mut d = ContactDraft::new(Role::Vendor);
+    d.name = "Bull Shoals Docks".into();
+    d.clear_tax_id = true;
+    assert!(check(&d, &list, None, |_| true).expect("ok").clear_tax_id);
+    d.tax_id = "12-3456789".into();
+    let typed = check(&d, &list, None, |_| true).expect("ok");
+    assert!(!typed.clear_tax_id, "a new one replaces it");
+    d.roles = Roles::Client;
+    assert!(!check(&d, &list, None, |_| true).expect("ok").clear_tax_id);
+}

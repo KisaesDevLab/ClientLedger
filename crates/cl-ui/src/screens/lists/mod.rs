@@ -1,7 +1,10 @@
-//! The master lists (P11). Step 1 builds the Chart of Accounts; the other
-//! lists follow in later steps of the phase.
+//! The master lists (P11): the Chart of Accounts (step 1) and the Client
+//! and Vendor centers (steps 2-3); the other lists follow in later steps
+//! of the phase.
 
 pub mod accounts;
+pub mod center;
+pub mod detail_pane;
 
 use std::sync::Arc;
 
@@ -22,6 +25,18 @@ pub fn make(
 ) -> Option<Box<dyn Screen>> {
     match kind.as_str() {
         accounts::KIND => Some(Box::new(accounts::ChartScreen::new(
+            Arc::clone(link),
+            open,
+            today,
+        ))),
+        center::CLIENTS_KIND => Some(Box::new(center::CenterScreen::new(
+            cl_model::lists::contacts::Role::Client,
+            Arc::clone(link),
+            open,
+            today,
+        ))),
+        center::VENDORS_KIND => Some(Box::new(center::CenterScreen::new(
+            cl_model::lists::contacts::Role::Vendor,
             Arc::clone(link),
             open,
             today,

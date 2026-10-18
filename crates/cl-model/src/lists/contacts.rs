@@ -432,8 +432,11 @@ pub struct ContactDraft {
     pub vendor_account: String,
     /// Vendor: payments are tracked for a 1099 (Q-53).
     pub track_1099: bool,
-    /// Vendor: tax ID (SSN or EIN).
+    /// Vendor: tax ID (SSN or EIN). When editing, empty keeps the one on
+    /// file (it is never shown in full).
     pub tax_id: String,
+    /// Vendor: remove the tax ID on file.
+    pub clear_tax_id: bool,
     /// Vendor: the kind of tax ID.
     pub tax_id_kind: Option<TaxIdKind>,
     /// Vendor: backup withholding applies.
@@ -460,6 +463,7 @@ impl ContactDraft {
             vendor_account: String::new(),
             track_1099: false,
             tax_id: String::new(),
+            clear_tax_id: false,
             tax_id_kind: None,
             backup_withholding: false,
         }
@@ -505,6 +509,8 @@ pub struct CheckedContact {
     pub track_1099: bool,
     /// Tax ID as typed (trimmed).
     pub tax_id: Option<String>,
+    /// Remove the tax ID on file (nothing typed instead).
+    pub clear_tax_id: bool,
     /// Kind of tax ID.
     pub tax_id_kind: Option<TaxIdKind>,
     /// Backup withholding.
@@ -782,6 +788,7 @@ pub fn check(
         expense_account,
         vendor_account,
         track_1099: vendor && draft.track_1099,
+        clear_tax_id: vendor && draft.clear_tax_id && tax_id.is_none(),
         tax_id,
         tax_id_kind: draft.tax_id_kind.filter(|_| vendor),
         backup_withholding: vendor && draft.backup_withholding,
