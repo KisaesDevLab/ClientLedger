@@ -61,3 +61,47 @@ pub fn extra_title(kind: CommandId) -> Option<String> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_company_kind_makes_its_screen_and_others_do_not() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(CompanyLink::demo(dir.path()));
+        let today = CalendarDate::from_ymd(2026, 11, 4).expect("date");
+        let open = Some((
+            TenantId::parse("d0000000-0000-4000-8000-000000000001").expect("id"),
+            "Ozark".to_string(),
+        ));
+        let kinds = [
+            ("file.open_company", "Open Company"),
+            ("file.new_company", "New Company"),
+            ("file.backup", "Back Up Company"),
+            ("file.portable_copy", "Make Portable Copy"),
+            ("file.export_all", "Export All Data"),
+            ("file.delete_company", "Delete Company"),
+            (RECOVERY_KEY, "Recovery Key"),
+            (OPENING_BALANCES, "Opening Balances"),
+        ];
+        for (kind, title) in kinds {
+            let screen = make(CommandId::new(kind), &link, open.clone(), today)
+                .unwrap_or_else(|| panic!("{kind} makes a screen"));
+            assert_eq!(screen.title(), title, "{kind}");
+            assert!(screen.state().is_object(), "{kind} reports state");
+            // The recovery key counts as unsaved work until confirmed.
+            assert_eq!(screen.dirty(), kind == RECOVERY_KEY, "{kind} dirty");
+        }
+        assert!(make(CommandId::new("nav.home"), &link, None, today).is_none());
+        assert_eq!(
+            extra_title(CommandId::new(RECOVERY_KEY)).as_deref(),
+            Some("Recovery Key")
+        );
+        assert_eq!(
+            extra_title(CommandId::new(OPENING_BALANCES)).as_deref(),
+            Some("Opening Balances")
+        );
+        assert_eq!(extra_title(CommandId::new("nav.home")), None);
+    }
+}

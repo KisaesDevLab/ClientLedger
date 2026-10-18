@@ -83,20 +83,80 @@ fn go_to_box(ui: &mut Ui, queued: &mut Vec<CommandId>, narrow: bool, tokens: &To
     }
 }
 
-fn items(ui: &mut Ui, menu: Menu, queued: &mut Vec<CommandId>) {
+/// One menu row as drawn: label, shortcut text, and whether a separator
+/// comes before it (a new group).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenuRow {
+    /// Command id.
+    pub id: CommandId,
+    /// Label from the catalog.
+    pub label: String,
+    /// Shortcut text, when the command has one.
+    pub shortcut: Option<String>,
+    /// A separator is drawn above this row.
+    pub separator_before: bool,
+}
+
+/// The rows of a menu in table order (pure, so it is unit-tested).
+#[must_use]
+pub fn rows(menu: Menu) -> Vec<MenuRow> {
     let mut last_group: Option<u8> = None;
-    for c in commands::in_menu(menu) {
-        if last_group.is_some_and(|g| g != c.group) {
+    commands::in_menu(menu)
+        .map(|c| {
+            let separator_before = last_group.is_some_and(|g| g != c.group);
+            last_group = Some(c.group);
+            MenuRow {
+                id: c.id,
+                label: t(&format!("cmd.{}", c.id)),
+                shortcut: c.shortcut.map(input::shortcut_text),
+                separator_before,
+            }
+        })
+        .collect()
+}
+
+fn items(ui: &mut Ui, menu: Menu, queued: &mut Vec<CommandId>) {
+    for row in rows(menu) {
+        if row.separator_before {
             ui.separator();
         }
-        last_group = Some(c.group);
-        let mut button = egui::Button::new(t(&format!("cmd.{}", c.id)));
-        if let Some(s) = c.shortcut {
-            button = button.shortcut_text(input::shortcut_text(s));
+        let mut button = egui::Button::new(row.label);
+        if let Some(s) = row.shortcut {
+            button = button.shortcut_text(s);
         }
         if ui.add(button).clicked() {
-            queued.push(c.id);
+            queued.push(row.id);
             ui.close();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_menu_rows_follow_the_command_table() {
+        let file = rows(Menu::File);
+        assert_eq!(file[0].id.as_str(), "file.open_company");
+        assert_eq!(file[0].label, "Open or Switch Company");
+        assert!(file[0].shortcut.as_deref().is_some_and(|s| s.contains('O')));
+        assert!(!file[0].separator_before);
+        // Back Up starts the next group.
+        let backup = file
+            .iter()
+            .find(|r| r.id.as_str() == "file.backup")
+            .expect("backup row");
+        assert!(backup.separator_before);
+        assert_eq!(backup.shortcut, None);
+        assert_eq!(
+            file.iter().filter(|r| r.separator_before).count(),
+            5,
+            "six groups in the File menu"
+        );
+        for m in Menu::ALL {
+            assert!(!rows(*m).is_empty(), "{m:?} has rows");
+            assert_ne!(title_key(*m), "");
         }
     }
 }

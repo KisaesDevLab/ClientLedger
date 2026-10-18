@@ -123,3 +123,25 @@ pub const DEMO_ACCOUNTS: [(&str, &str, &str); 8] = [
     ("3100", "Owner Contributions", "equity"),
     ("2300", "Line of Credit", "liability"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_demo_list_is_the_mockup() {
+        let d = DemoState::new();
+        assert_eq!(d.companies.len(), 4);
+        assert_eq!(d.companies[0].name, "Ozark Ridge Landscaping LLC");
+        assert_eq!(d.open, Some(d.companies[0].tenant_id));
+        assert!(d.companies[3].is_sample);
+        assert!(d.companies[0].closed_through.is_some());
+        let fresh = d.fresh_id();
+        assert!(d.companies.iter().all(|c| c.tenant_id != fresh));
+        assert_eq!(DemoState::today().to_wire(), "2026-11-04");
+        assert_eq!(DemoState::now().to_wire(), "2026-11-04T08:10:00.000Z");
+        assert_eq!(DemoState::default().companies.len(), 4);
+        assert_eq!(DEMO_ACCOUNTS.len(), 8);
+        assert!(DEMO_RECOVERY_KEY.contains('-'));
+    }
+}
