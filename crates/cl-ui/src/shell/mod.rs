@@ -169,6 +169,8 @@ pub struct Shell {
     /// Remembered grid column widths (`grid-widths.json`), shared with the
     /// grid screens through the egui context.
     widths: crate::grid_env::WidthsHandle,
+    /// The close prompt whose Save button already got focus.
+    prompt_focused: Option<crate::windows::Prompt>,
 }
 
 impl Shell {
@@ -208,6 +210,7 @@ impl Shell {
         }
         let mut shell = Shell {
             widths,
+            prompt_focused: None,
             prefs,
             store: options.store,
             company_key: if options.company_key.is_empty() {
@@ -638,6 +641,14 @@ impl Shell {
     }
 
     fn run(&mut self, ctx: Option<&Context>, id: CommandId) {
+        let target = self.windows.active_id();
+        self.run_for(ctx, id, target);
+    }
+
+    /// Run a command for the window `target`: window and form commands go
+    /// to that window (a popped-out window's own keys, S2), the rest are
+    /// app-wide.
+    fn run_for(&mut self, ctx: Option<&Context>, id: CommandId, target: Option<WindowId>) {
         let Some(cmd) = commands::find(id.as_str()) else {
             return;
         };
@@ -673,7 +684,7 @@ impl Shell {
             "window.next" => self.windows.next(),
             "window.prev" => self.windows.prev(),
             "window.pop_out" => {
-                if let Some(w) = self.windows.active_id() {
+                if let Some(w) = target {
                     self.windows.pop_out(w);
                 }
             }
@@ -684,7 +695,7 @@ impl Shell {
             "window.zoom_reset" => self.prefs.zoom_percent = prefs::ZOOM_DEFAULT,
             "window.theme" => self.prefs.theme = self.prefs.theme.next(),
             "file.close_window" => {
-                if let Some(w) = self.windows.active_id() {
+                if let Some(w) = target {
                     self.windows.request_close(w);
                 }
             }
@@ -698,23 +709,27 @@ impl Shell {
                     self.toast(ctx, "toast.help_later");
                 }
             }
-            _ => self.forward_to_screen(ctx, cmd),
+            _ => self.forward_to_screen(ctx, cmd, target),
         }
     }
 
     /// Form and window commands go to the screen in front; commands nothing
     /// handles say so instead of silently doing nothing.
-    fn forward_to_screen(&mut self, ctx: Option<&Context>, cmd: &Command) {
-        let handled = self
-            .windows
-            .active_mut()
+    fn forward_to_screen(
+        &mut self,
+        ctx: Option<&Context>,
+        cmd: &Command,
+        target: Option<WindowId>,
+    ) {
+        let handled = target
+            .and_then(|id| self.windows.get_mut(id))
             .is_some_and(|w| w.screen.command(cmd.id));
         // Esc (form.revert): the screen reverts a field when it can; when
         // nothing is left to revert the window closes, asking first when
         // it still has unsaved edits (DESIGN.md form rules).
         if !handled
             && cmd.id.as_str() == "form.revert"
-            && let Some(id) = self.windows.active_id()
+            && let Some(id) = target
         {
             self.windows.request_close(id);
             return;
@@ -739,7 +754,8 @@ impl Shell {
         self.flush_widths(None);
         self.allow_close = true;
         if let Some(ctx) = ctx {
-            ctx.send_viewport_cmd(ViewportCommand::Close);
+            // Quit may come from a popped-out window's keys: close the app.
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Close);
         }
     }
 
@@ -755,14 +771,32 @@ impl Shell {
         ctx.send_viewport_cmd(ViewportCommand::Focus);
     }
 
+    /// The window the main window's keys act on: the tab in front, unless
+    /// it is popped out into its own operating-system window (that window
+    /// handles its own keys).
+    fn root_key_target(&self, ctx: &Context) -> Option<WindowId> {
+        let active = self.windows.active()?;
+        (!active.popped_out || ctx.embed_viewports()).then_some(active.id)
+    }
+
     fn handle_keys(&mut self, ctx: &Context) {
+        let target = self.root_key_target(ctx);
+        self.handle_keys_for(ctx, target);
+    }
+
+    /// Resolve this viewport's shortcuts in `target`'s scope and run them
+    /// for `target`. While a modal is open only the palette and the
+    /// shortcut overlay keys work.
+    fn handle_keys_for(&mut self, ctx: &Context, target: Option<WindowId>) {
         let pressed = ctx.input(input::pressed_shortcuts);
         if pressed.is_empty() {
             return;
         }
         let modal = self.modal_open();
         let text_focus = ctx.egui_wants_keyboard_input();
-        let scope = self.focus_scope();
+        let scope = target
+            .and_then(|id| self.windows.get(id))
+            .map_or(Scope::Global, |w| w.screen.scope());
         let mut handled: Vec<cl_model::Shortcut> = Vec::new();
         for s in pressed {
             let Some(id) = self.keymap.resolve(scope, s) else {
@@ -775,7 +809,7 @@ impl Shell {
                 continue;
             }
             handled.push(s);
-            self.run(Some(ctx), id);
+            self.run_for(Some(ctx), id, target);
         }
         if !handled.is_empty() {
             // The key is ours: keep text fields and focus traversal from also
@@ -973,22 +1007,37 @@ impl Shell {
     /// Windows moved out of the tab strip get their own operating-system
     /// window (egui viewport). Closing that window docks it back (Q-57).
     fn show_popped_out(&mut self, ctx: &Context, tokens: &Tokens) {
+        let popped: Vec<(WindowId, String)> = self
+            .windows
+            .all()
+            .iter()
+            .filter(|w| w.popped_out)
+            .map(|w| (w.id, w.title()))
+            .collect();
         let mut dock: Vec<WindowId> = Vec::new();
-        for w in self.windows.all_mut().iter_mut().filter(|w| w.popped_out) {
-            let title = format!("{} - ClientLedger", w.title());
-            let id = egui::ViewportId::from_hash_of(("cl-window", w.id.raw()));
+        let fill = tokens.surface_window;
+        for (wid, title) in popped {
+            let id = egui::ViewportId::from_hash_of(("cl-window", wid.raw()));
             let builder = ViewportBuilder::default()
-                .with_title(title)
+                .with_title(format!("{title} - ClientLedger"))
                 .with_inner_size([900.0, 640.0])
                 .with_min_inner_size(MIN_WINDOW);
-            let fill = tokens.surface_window;
-            let wid = w.id;
-            let screen = &mut w.screen;
-            ctx.show_viewport_immediate(id, builder, |ui, _class| {
-                egui::CentralPanel::default()
-                    .frame(Frame::new().fill(fill).inner_margin(Margin::same(16)))
-                    .show(ui, |ui| screen.ui(ui));
-                if ui.ctx().input(|i| i.viewport().close_requested()) {
+            ctx.show_viewport_immediate(id, builder, |ui, class| {
+                let vctx = ui.ctx().clone();
+                if class == egui::ViewportClass::Immediate {
+                    // Its own operating-system window: its keys and grid
+                    // facts are its own (S2). Embedded windows share the
+                    // main window's input, handled there.
+                    self.publish_grid_facts(&vctx, vctx.viewport_id());
+                    self.handle_keys_for(&vctx, Some(wid));
+                }
+                if let Some(w) = self.windows.get_mut(wid) {
+                    let screen = &mut w.screen;
+                    egui::CentralPanel::default()
+                        .frame(Frame::new().fill(fill).inner_margin(Margin::same(16)))
+                        .show(ui, |ui| screen.ui(ui));
+                }
+                if vctx.input(|i| i.viewport().close_requested()) {
                     dock.push(wid);
                 }
             });
@@ -1016,8 +1065,13 @@ impl Shell {
 
     fn show_close_prompt(&mut self, ctx: &Context) {
         let Some(prompt) = self.windows.prompt() else {
+            self.prompt_focused = None;
             return;
         };
+        // Focus Save on the frame the prompt opens, so typing lands on a
+        // button (nothing happens) and Enter or Space saves (B6, T9).
+        let focus_save = self.prompt_focused != Some(prompt);
+        self.prompt_focused = Some(prompt);
         let title = self
             .windows
             .get(prompt.window)
@@ -1032,7 +1086,11 @@ impl Shell {
                 ui.label(crate::windows::prompt_message(&title));
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    if crate::widgets::primary_button(ui, &t("window.prompt.save")).clicked() {
+                    let save = crate::widgets::primary_button(ui, &t("window.prompt.save"));
+                    if focus_save {
+                        save.request_focus();
+                    }
+                    if save.clicked() {
                         answer = Some(PromptAnswer::Save);
                     }
                     if ui.button(t("window.prompt.discard")).clicked() {

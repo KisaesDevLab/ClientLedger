@@ -137,6 +137,9 @@ impl EditableModel for View<'_> {
         let Some(snap) = self.adapter.snapshot.clone().filter(|s| s.key == key) else {
             return false;
         };
+        if self.rows().contains(&snap) {
+            return false;
+        }
         self.form.edit_step(|rows| {
             if let Some(r) = rows.iter_mut().find(|r| r.key == key) {
                 *r = snap;
@@ -185,8 +188,12 @@ fn column(id: ColumnId, kind: CellKind) -> Column {
 type Form = GridForm<Vec<Row>, Adapter>;
 
 fn grid_form() -> Form {
+    grid_form_with(2)
+}
+
+fn grid_form_with(n: usize) -> Form {
     let mut keys = RowKeyGen::new();
-    let rows = vec![Row::blank(keys.next_key()), Row::blank(keys.next_key())];
+    let rows: Vec<Row> = (0..n).map(|_| Row::blank(keys.next_key())).collect();
     let spec = GridSpec::line_entry(vec![
         column(AMOUNT, CellKind::Amount(AmountRules::MONEY)),
         column(MEMO, CellKind::Text { max_chars: 80 }),
@@ -212,11 +219,20 @@ struct Probe {
     blocked: u32,
     save_rect: Option<Rect>,
     next_rect: Option<Rect>,
+    /// Ask the screen to focus line 1's Amount on its next frame.
+    refocus: bool,
+    /// The grid's positions after the last frame.
+    snap: cl_grid::GridSnapshot,
+    /// The form revision after the last frame.
+    revision: u64,
+    /// Lines in the form after the last frame.
+    rows: usize,
 }
 
 struct TestScreen {
     form: Form,
     probe: Rc<RefCell<Probe>>,
+    scope: Scope,
 }
 
 impl TestScreen {
@@ -264,13 +280,27 @@ impl Screen for TestScreen {
                 self.next_record();
             }
         });
+        if std::mem::take(&mut self.probe.borrow_mut().refocus) {
+            let first = self.form.form().current()[0].key;
+            self.form.focus(
+                CellPos {
+                    row: first,
+                    col: AMOUNT,
+                },
+                &NoLookups,
+            );
+        }
         self.form.ui(ui, &NoLookups);
+        let mut p = self.probe.borrow_mut();
+        p.snap = self.form.snapshot();
+        p.revision = self.form.form().revision();
+        p.rows = self.form.form().current().len();
     }
     fn dirty(&self) -> bool {
         self.form.dirty()
     }
     fn scope(&self) -> Scope {
-        Scope::Form
+        self.scope
     }
     fn command(&mut self, id: CommandId) -> bool {
         match self.form.command(id, &NoLookups) {
@@ -312,12 +342,16 @@ const SIZE: egui::Vec2 = vec2(1200.0, 800.0);
 
 impl Rig {
     fn new() -> Rig {
+        Rig::with(2, Scope::Form)
+    }
+
+    fn with(rows: usize, scope: Scope) -> Rig {
         let ctx = egui::Context::default();
         Shell::install(&ctx);
         cl_grid::sequencer::install(&ctx);
         let mut shell = Shell::new(ShellOptions::default());
         let probe = Rc::new(RefCell::new(Probe::default()));
-        let mut form = grid_form();
+        let mut form = grid_form_with(rows);
         let first = form.form().current()[0].key;
         form.focus(
             CellPos {
@@ -331,6 +365,7 @@ impl Rig {
             Box::new(TestScreen {
                 form,
                 probe: Rc::clone(&probe),
+                scope,
             }),
         );
         let mut rig = Rig {
@@ -357,10 +392,45 @@ impl Rig {
     fn idle(&mut self) {
         for _ in 0..20 {
             self.frame(vec![]);
-            if !cl_grid::sequencer::pending(&self.ctx, egui::ViewportId::ROOT) {
+            if !cl_grid::sequencer::pending(&self.ctx, egui::ViewportId::ROOT)
+                && !cl_grid::sequencer::pending(&self.ctx, self.popout_viewport())
+            {
                 break;
             }
         }
+    }
+
+    fn popout_viewport(&self) -> egui::ViewportId {
+        egui::ViewportId::from_hash_of(("cl-window", self.window.raw()))
+    }
+
+    /// Pop the test window out into its own (test-rendered) viewport.
+    fn pop_out(&mut self) {
+        self.ctx.set_embed_viewports(false);
+        egui::Context::set_immediate_viewport_renderer(|ctx, vp| {
+            let events = POPOUT_EVENTS.with(|e| std::mem::take(&mut *e.borrow_mut()));
+            let input = RawInput {
+                viewport_id: vp.ids.this,
+                viewports: std::iter::once((vp.ids.this, egui::ViewportInfo::default())).collect(),
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 640.0))),
+                events,
+                ..RawInput::default()
+            };
+            let mut cb = vp.viewport_ui_cb;
+            let mut out = ctx.run_ui(input, |ui| cb(ui));
+            out.textures_delta.clear();
+            POPOUT_PASSES.with(|n| *n.borrow_mut() += 1);
+        });
+        self.shell.windows.pop_out(self.window);
+        self.probe.borrow_mut().refocus = true;
+        self.idle();
+    }
+
+    /// One main-window frame with these events for the popped-out window.
+    fn pop_frame(&mut self, events: Vec<Event>) {
+        POPOUT_EVENTS.with(|e| e.borrow_mut().extend(events));
+        self.frame(vec![]);
+        self.idle();
     }
 
     fn type_text(&mut self, s: &str) {
@@ -399,6 +469,36 @@ impl Rig {
         self.probe.borrow().saved.last().and_then(|v| v[0].amount)
     }
 }
+
+thread_local! {
+    static POPOUT_EVENTS: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
+    static POPOUT_PASSES: RefCell<u32> = const { RefCell::new(0) };
+}
+
+fn tap(k: Key, modifiers: Modifiers) -> Vec<Event> {
+    vec![
+        key_event(k, modifiers, true),
+        key_event(k, modifiers, false),
+    ]
+}
+
+fn repeat(k: Key) -> Event {
+    Event::Key {
+        key: k,
+        physical_key: None,
+        pressed: true,
+        repeat: true,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+const CTRL: Modifiers = Modifiers {
+    alt: false,
+    ctrl: true,
+    shift: false,
+    mac_cmd: false,
+    command: true,
+};
 
 fn money(s: &str) -> Money {
     Money::parse_wire(s).expect("money")
@@ -624,4 +724,155 @@ fn direct_save(source: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// T9 (B6, A4): with the close prompt open, keys never reach the grid;
+/// Esc answers Keep and the grid takes focus back.
+#[test]
+fn modal_blocks_grid_input() {
+    let mut rig = Rig::new();
+    rig.type_text("12");
+    rig.frame(tap(Key::Enter, Modifiers::NONE));
+    rig.idle();
+    assert_eq!(
+        rig.probe.borrow().snap.cursor_row,
+        Some(1),
+        "on the entry line"
+    );
+    assert!(rig.dirty());
+    // Esc on the pristine entry line: nothing to revert, so the window
+    // asks before closing.
+    rig.frame(tap(Key::Escape, Modifiers::NONE));
+    rig.idle();
+    assert!(rig.shell.windows.prompt().is_some(), "the prompt is open");
+    let before = (rig.probe.borrow().revision, rig.probe.borrow().snap);
+    assert!(!before.1.focused, "the grid gave up focus");
+    for events in [
+        vec![Event::Text("y".into())],
+        tap(Key::Tab, Modifiers::NONE),
+        tap(Key::ArrowDown, Modifiers::NONE),
+        vec![Event::Text("9".into())],
+    ] {
+        rig.frame(events);
+        rig.idle();
+        let p = rig.probe.borrow();
+        assert_eq!(p.revision, before.0, "the model is unchanged");
+        assert_eq!(p.snap.cursor_row, before.1.cursor_row);
+        assert!(!p.snap.focused && !p.snap.uncommitted);
+        drop(p);
+        assert!(rig.shell.windows.prompt().is_some(), "still asking");
+    }
+    rig.frame(tap(Key::Escape, Modifiers::NONE));
+    rig.idle();
+    assert!(rig.shell.windows.prompt().is_none(), "Esc answers Keep");
+    assert!(rig.shell.windows.get(rig.window).is_some());
+    assert!(rig.probe.borrow().snap.focused, "the grid has focus back");
+    assert_eq!(rig.probe.borrow().revision, before.0);
+    assert_eq!(rig.probe.borrow().saved.len(), 0);
+}
+
+/// T9: the prompt's Save button has focus when the prompt opens, so Enter
+/// saves.
+#[test]
+fn close_prompt_focuses_save() {
+    let mut rig = Rig::new();
+    rig.type_text("12");
+    rig.frame(tap(Key::Enter, Modifiers::NONE));
+    rig.idle();
+    rig.frame(tap(Key::Escape, Modifiers::NONE));
+    rig.idle();
+    assert!(rig.shell.windows.prompt().is_some());
+    rig.frame(tap(Key::Enter, Modifiers::NONE));
+    rig.idle();
+    assert_eq!(rig.last_saved_amount(), Some(money("12.00")));
+    assert!(
+        rig.shell.windows.get(rig.window).is_none(),
+        "saved and closed"
+    );
+}
+
+/// T13 (S3), in Form and Window scope: Page Down pages the grid, its
+/// repeats (the key held down) keep paging, and Esc repeats are dropped.
+#[test]
+fn pagedown_repeat_pages_and_esc_repeat_ignored() {
+    for scope in [Scope::Form, Scope::Window] {
+        let mut rig = Rig::with(60, scope);
+        assert_eq!(rig.probe.borrow().snap.top_row, 0);
+        rig.frame(vec![key_event(Key::PageDown, Modifiers::NONE, true)]);
+        rig.idle();
+        let first = rig.probe.borrow().snap;
+        assert!(first.top_row > 0, "{scope:?}: the first press pages");
+        assert!(rig.probe.borrow().left_with.is_none(), "no record move");
+        // Still held: egui reports the next press as a repeat.
+        rig.frame(vec![repeat(Key::PageDown)]);
+        rig.idle();
+        let second = rig.probe.borrow().snap;
+        assert!(second.top_row > first.top_row, "{scope:?}: a repeat pages");
+        assert!(second.cursor_row > first.cursor_row);
+        rig.frame(vec![key_event(Key::PageDown, Modifiers::NONE, false)]);
+        rig.idle();
+
+        // Esc held down: the first press reverts the open cell, the
+        // repeats do nothing (a second Esc would close the window).
+        rig.type_text("5");
+        assert!(rig.dirty());
+        rig.frame(vec![key_event(Key::Escape, Modifiers::NONE, true)]);
+        rig.idle();
+        if scope == Scope::Form {
+            assert!(!rig.dirty(), "the first Esc reverted the cell");
+        }
+        let rev = rig.probe.borrow().revision;
+        rig.frame(vec![repeat(Key::Escape)]);
+        rig.frame(vec![repeat(Key::Escape)]);
+        rig.idle();
+        rig.frame(vec![key_event(Key::Escape, Modifiers::NONE, false)]);
+        rig.idle();
+        assert!(rig.shell.windows.prompt().is_none(), "{scope:?}");
+        assert!(rig.shell.windows.get(rig.window).is_some(), "{scope:?}");
+        assert_eq!(rig.probe.borrow().revision, rev);
+        assert!(rig.probe.borrow().snap.focused, "{scope:?}");
+    }
+}
+
+/// T17 (S2, A18): a popped-out window handles its own keys even when
+/// another tab is in front of the main window.
+#[test]
+fn popout_grid_receives_commands() {
+    let mut rig = Rig::with(3, Scope::Form);
+    rig.pop_out();
+    rig.shell.dispatch_now(CommandId::new("nav.home"));
+    assert_ne!(rig.shell.active_window(), Some(rig.window));
+    rig.idle();
+    assert!(
+        POPOUT_PASSES.with(|n| *n.borrow()) > 0,
+        "drawn in its viewport"
+    );
+    assert!(rig.probe.borrow().snap.focused, "the grid has focus there");
+
+    // Esc reverts the open cell.
+    rig.pop_frame(vec![Event::Text("5".into())]);
+    assert!(rig.dirty());
+    rig.pop_frame(tap(Key::Escape, Modifiers::NONE));
+    assert!(!rig.dirty(), "Esc reverted the cell");
+    assert!(rig.shell.windows.prompt().is_none());
+
+    // Ctrl+Delete deletes the line.
+    assert_eq!(rig.probe.borrow().rows, 3);
+    rig.pop_frame(tap(Key::Delete, CTRL));
+    assert_eq!(rig.probe.borrow().rows, 2, "Ctrl+Delete deleted line 1");
+
+    // Keys in the main window go to the tab in front there, not here.
+    let mut main = vec![Event::Text("1".into())];
+    main.extend(tap(Key::S, Modifiers::ALT));
+    rig.frame(main);
+    rig.idle();
+    assert_eq!(rig.probe.borrow().saved.len(), 0);
+
+    // Alt+S saves, committing the open cell first.
+    let mut pop = vec![Event::Text("7".into())];
+    pop.extend(tap(Key::S, Modifiers::ALT));
+    rig.pop_frame(pop);
+    let saved = rig.probe.borrow().saved.last().cloned().expect("saved");
+    assert_eq!(saved[0].amount, Some(money("7.00")));
+    assert_eq!(saved.len(), 2);
 }
