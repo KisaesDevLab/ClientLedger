@@ -13,11 +13,14 @@
     clippy::cast_precision_loss
 )]
 
+pub mod amount_entry;
 pub mod commands;
 pub mod date_rules;
 pub mod forms;
 pub mod keymap;
+pub mod text;
 pub mod undo;
 
 pub use commands::{COMMANDS, Command, CommandId, Menu};
 pub use keymap::{Key, Keymap, KeymapError, Mods, Scope, Shortcut};
+pub use text::TextKey;
