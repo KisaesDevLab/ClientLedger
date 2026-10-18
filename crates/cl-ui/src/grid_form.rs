@@ -303,7 +303,10 @@ impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
                 self.grid.set_column_widths(&w);
             }
         }
-        let env = self.parts.env(lookups, &self.label, self.height);
+        let mut env = self.parts.env(lookups, &self.label, self.height);
+        // While a save is in flight the grid takes no input (its edits
+        // would be refused); it gets focus back when the save finishes.
+        env.input_enabled &= !self.form.is_saving();
         let mut model = self.adapter.model(&mut self.form);
         let out = self.grid.show(ui, ModelRef::Edit(&mut *model), &env);
         self.snapshot = self.grid.snapshot(&ModelRef::Edit(&mut *model));

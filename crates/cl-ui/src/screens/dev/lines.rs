@@ -487,7 +487,7 @@ impl EditableModel for View<'_> {
     ) -> Result<(), CellProblem> {
         let keys = &mut self.state.keys;
         let mut ok = true;
-        self.form.edit_step(|check| {
+        let applied = self.form.edit_step(|check| {
             let Some(l) = check.lines.iter_mut().find(|l| l.key == pos.row) else {
                 return;
             };
@@ -534,6 +534,10 @@ impl EditableModel for View<'_> {
             };
             View::ensure_entry(&mut check.lines, keys);
         });
+        if !applied {
+            // A save is in flight: refuse, so the grid keeps the text.
+            return Err(CellProblem::new(SAVING).at(pos.col));
+        }
         if ok {
             Ok(())
         } else {
@@ -553,18 +557,18 @@ impl EditableModel for View<'_> {
                 *l = snap;
             }
             View::ensure_entry(&mut check.lines, keys);
-        });
-        true
+        })
     }
     fn insert_line(&mut self, before: Option<RowKey>) -> Option<RowKey> {
         let key = self.state.keys.next_key();
-        self.form.edit_step(|check| {
-            let at = before
-                .and_then(|b| check.lines.iter().position(|l| l.key == b))
-                .unwrap_or(check.lines.len());
-            check.lines.insert(at, DemoLine::blank(key));
-        });
-        Some(key)
+        self.form
+            .edit_step(|check| {
+                let at = before
+                    .and_then(|b| check.lines.iter().position(|l| l.key == b))
+                    .unwrap_or(check.lines.len());
+                check.lines.insert(at, DemoLine::blank(key));
+            })
+            .then_some(key)
     }
     fn delete_line(&mut self, key: RowKey) -> bool {
         if self.index_of(key).is_none() {
@@ -574,8 +578,7 @@ impl EditableModel for View<'_> {
         self.form.edit_step(|check| {
             check.lines.retain(|l| l.key != key);
             View::ensure_entry(&mut check.lines, keys);
-        });
-        true
+        })
     }
     fn record_row(&mut self, key: RowKey) -> RecordOutcome {
         let Some(i) = self.index_of(key) else {
@@ -600,6 +603,9 @@ impl EditableModel for View<'_> {
         validate(self.form.current())
     }
 }
+
+/// Shown when a cell is committed while the record is being saved.
+pub const SAVING: TextKey = TextKey("grid.form.saving");
 
 /// What a save sends: the check without its blank lines, so the entry
 /// line is never part of a saved record (P10 plan §4, T23).
@@ -695,6 +701,30 @@ mod tests {
             Some(CREW_GROUP)
         );
         assert_eq!(l.display(TAG_LIST, 1).as_deref(), Some("Install"));
+    }
+
+    /// S2: while a save is in flight, commits and line edits are refused
+    /// (never silently dropped).
+    #[test]
+    fn edits_while_saving_are_refused() {
+        let mut st = LinesState::new();
+        let mut form = FormState::new(st.new_check());
+        let key = form.current().lines[0].key;
+        form.edit_step(|c| c.amount = Some(money("1.00")));
+        let _ = form.begin_save(cl_model::forms::SaveIntent::Save);
+        assert!(form.is_saving());
+        let mut model = st.model(&mut form);
+        let pos = CellPos {
+            row: key,
+            col: MEMO,
+        };
+        let got = model.set_cell(pos, CellInput::Text("Mulch".into()), Source::Typed);
+        assert_eq!(got.map_err(|p| p.key), Err(SAVING));
+        assert_eq!(model.insert_line(None), None);
+        assert!(!model.delete_line(key));
+        drop(model);
+        assert_eq!(form.current().lines[0].memo, "");
+        assert_eq!(form.current().lines.len(), 1);
     }
 
     #[test]

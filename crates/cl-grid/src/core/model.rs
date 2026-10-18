@@ -477,8 +477,15 @@ pub trait EditableModel: RowModel {
     fn row_entered(&mut self, key: RowKey);
     /// Commit a value.
     ///
+    /// A model over a `FormState` must return an error (for example
+    /// `grid.form.saving`) when `edit_step` refuses because a save is in
+    /// flight: an `Ok` with nothing stored would silently lose the typed
+    /// text, while an error keeps it in the editor. `revert_row`,
+    /// `insert_line` and `delete_line` likewise report "nothing changed"
+    /// (`false` / `None`) then.
+    ///
     /// # Errors
-    /// The value is not accepted for this cell.
+    /// The value is not accepted for this cell, or the record is saving.
     fn set_cell(
         &mut self,
         pos: CellPos,

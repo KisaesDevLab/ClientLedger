@@ -728,6 +728,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("grid.tags.duplicate", "That tag is already on this line."),
     ("grid.text.too_long", "That text is too long for this field."),
     ("grid.row.gone", "That line is no longer here."),
+    (
+        "grid.form.saving",
+        "Saving. Wait a moment, then make your change again.",
+    ),
     ("grid.cell.changed_underneath", "This cell changed while you were typing. Press Esc to see the new value."),
     // Grid demo (developer-only, --demo)
     ("dev.grid_demo.title", "Grid demo"),

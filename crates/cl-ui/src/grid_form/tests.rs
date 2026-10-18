@@ -117,7 +117,7 @@ impl EditableModel for View<'_> {
         _source: Source,
     ) -> Result<(), CellProblem> {
         let keys = &mut self.adapter.keys;
-        self.form.edit_step(|rows| {
+        let applied = self.form.edit_step(|rows| {
             if let Some(r) = rows.iter_mut().find(|r| r.key == pos.row) {
                 match (pos.col, value) {
                     (AMOUNT, CellInput::Money(m)) => r.amount = Some(m),
@@ -131,7 +131,11 @@ impl EditableModel for View<'_> {
                 rows.push(Row::blank(keys.next_key()));
             }
         });
-        Ok(())
+        if applied {
+            Ok(())
+        } else {
+            Err(CellProblem::new(TextKey("grid.form.saving")).at(pos.col))
+        }
     }
     fn revert_row(&mut self, key: RowKey) -> bool {
         let Some(snap) = self.adapter.snapshot.clone().filter(|s| s.key == key) else {
@@ -148,13 +152,14 @@ impl EditableModel for View<'_> {
     }
     fn insert_line(&mut self, before: Option<RowKey>) -> Option<RowKey> {
         let key = self.adapter.keys.next_key();
-        self.form.edit_step(|rows| {
-            let at = before
-                .and_then(|b| rows.iter().position(|r| r.key == b))
-                .unwrap_or(rows.len());
-            rows.insert(at, Row::blank(key));
-        });
-        Some(key)
+        self.form
+            .edit_step(|rows| {
+                let at = before
+                    .and_then(|b| rows.iter().position(|r| r.key == b))
+                    .unwrap_or(rows.len());
+                rows.insert(at, Row::blank(key));
+            })
+            .then_some(key)
     }
     fn delete_line(&mut self, key: RowKey) -> bool {
         self.form.edit_step(|rows| rows.retain(|r| r.key != key))
@@ -227,6 +232,12 @@ struct Probe {
     revision: u64,
     /// Lines in the form after the last frame.
     rows: usize,
+    /// Keep saves in flight (an engine that has not answered yet).
+    hold: bool,
+    /// The value of the save in flight.
+    held: Option<Vec<Row>>,
+    /// Finish the held save on the next frame.
+    release: bool,
 }
 
 struct TestScreen {
@@ -238,6 +249,10 @@ struct TestScreen {
 impl TestScreen {
     fn finish(&mut self, start: SaveStart<Vec<Row>>) -> bool {
         match start {
+            SaveStart::Send(v) if self.probe.borrow().hold => {
+                self.probe.borrow_mut().held = Some(v);
+                true
+            }
             SaveStart::Send(v) => {
                 self.probe.borrow_mut().saved.push(v.clone());
                 self.form.save_ok(v, &NoLookups);
@@ -280,6 +295,13 @@ impl Screen for TestScreen {
                 self.next_record();
             }
         });
+        if std::mem::take(&mut self.probe.borrow_mut().release) {
+            let held = self.probe.borrow_mut().held.take();
+            if let Some(v) = held {
+                self.probe.borrow_mut().saved.push(v.clone());
+                self.form.save_ok(v, &NoLookups);
+            }
+        }
         if std::mem::take(&mut self.probe.borrow_mut().refocus) {
             let first = self.form.form().current()[0].key;
             self.form.focus(
@@ -543,6 +565,54 @@ fn mouse_save_commits_first() {
     rig.click(r);
     assert_eq!(rig.last_saved_amount(), Some(money("842.15")));
     assert!(!rig.dirty());
+}
+
+/// S2: typing and Tab while a save is in flight never changes the lines
+/// behind the owner's back: the grid takes no input until the save ends,
+/// then gets focus back.
+#[test]
+fn typing_while_a_save_is_in_flight_is_not_lost() {
+    let mut rig = Rig::new();
+    rig.probe.borrow_mut().hold = true;
+    rig.type_text("12");
+    let r = rig.probe.borrow().save_rect;
+    rig.click(r);
+    assert!(rig.probe.borrow().held.is_some(), "the save is in flight");
+    let before = rig.probe.borrow().revision;
+    rig.type_text("34");
+    rig.frame(tap(Key::Tab, Modifiers::NONE));
+    rig.idle();
+    assert_eq!(rig.probe.borrow().revision, before, "nothing changed");
+    assert!(
+        !rig.probe.borrow().snap.focused,
+        "no grid input while saving"
+    );
+    rig.probe.borrow_mut().release = true;
+    rig.idle();
+    assert_eq!(rig.last_saved_amount(), Some(money("12.00")));
+    assert!(rig.probe.borrow().snap.focused, "focus comes back");
+    assert!(!rig.dirty());
+}
+
+/// S2: the model contract: a commit or line edit during a save is
+/// refused, never silently dropped.
+#[test]
+fn model_refuses_edits_while_saving() {
+    let mut form = grid_form();
+    let key = form.form.current()[0].key;
+    form.form
+        .edit_step(|rows| rows[0].amount = Some(money("1.00")));
+    let _ = form.form.begin_save(SaveIntent::Save);
+    assert!(form.form.is_saving());
+    let mut model = form.adapter.model(&mut form.form);
+    let pos = CellPos {
+        row: key,
+        col: MEMO,
+    };
+    let got = model.set_cell(pos, CellInput::Text("x".into()), Source::Typed);
+    assert_eq!(got.map_err(|p| p.key), Err(TextKey("grid.form.saving")));
+    assert_eq!(model.insert_line(None), None);
+    assert!(!model.delete_line(key));
 }
 
 #[test]
