@@ -516,10 +516,7 @@ impl CsvScreen {
             for (line, fields) in items {
                 match s.items().create(&fields, IdempotencyKey::new()).await {
                     Ok(_) => out.imported += 1,
-                    Err(ApiError::Conflict {
-                        reason: ConflictReason::AlreadyExists | ConflictReason::Unspecified,
-                        ..
-                    }) => out.skipped.push((line, Skip::Exists)),
+                    Err(e) if name_taken(&e) => out.skipped.push((line, Skip::Exists)),
                     Err(e) => {
                         out.stopped = Some(e);
                         break;
@@ -827,6 +824,18 @@ impl CsvScreen {
             self.rebuild();
         }
     }
+}
+
+/// Whether an item create failed only because the name is used (the row is
+/// skipped); any other conflict stops the import and shows as an error.
+fn name_taken(e: &ApiError) -> bool {
+    matches!(
+        e,
+        ApiError::Conflict {
+            reason: ConflictReason::AlreadyExists,
+            ..
+        }
+    )
 }
 
 fn mapping_problem_text(p: MappingProblem) -> String {

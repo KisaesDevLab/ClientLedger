@@ -5,7 +5,8 @@
 //! `PENDING(U-xx)` until the capability is advertised.
 
 use cl_api::{
-    AccountType, ApiError, Capabilities, ItemFields, ItemFilter, ItemUpdate, Method, PageRequest,
+    AccountType, ApiError, Capabilities, ConflictReason, ItemFields, ItemFilter, ItemUpdate,
+    Method, PageRequest,
 };
 use cl_core::Money;
 use serde_json::json;
@@ -57,7 +58,16 @@ pub fn reactivate_and_unique_names(h: &Harness) {
     let dup = h
         .run(s.items().create(&item.fields, key()))
         .expect_err("used name");
-    assert!(matches!(dup, ApiError::Conflict { .. }), "{dup:?}");
+    assert!(
+        matches!(
+            dup,
+            ApiError::Conflict {
+                reason: ConflictReason::AlreadyExists,
+                ..
+            }
+        ),
+        "{dup:?}"
+    );
 
     let on = h
         .run(s.items().update(

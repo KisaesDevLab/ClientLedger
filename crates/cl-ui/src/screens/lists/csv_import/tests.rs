@@ -245,6 +245,28 @@ fn imports_items_with_exact_prices() {
     assert_eq!(r.state("left_out"), 1);
 }
 
+/// Only a used name skips an item row; other conflicts are errors.
+#[test]
+fn only_a_used_name_skips_an_item() {
+    use cl_api::{ApiError, ConflictReason};
+    let conflict = |reason| ApiError::Conflict {
+        reason,
+        current_version: None,
+        code: None,
+        message: cl_api::UserText::default(),
+    };
+    assert!(super::name_taken(&conflict(ConflictReason::AlreadyExists)));
+    for other in [
+        ConflictReason::Unspecified,
+        ConflictReason::Busy,
+        ConflictReason::Stale,
+        ConflictReason::InUse,
+    ] {
+        assert!(!super::name_taken(&conflict(other)), "{other:?}");
+    }
+    assert!(!super::name_taken(&ApiError::NotFound { code: None }));
+}
+
 #[test]
 fn unreadable_files_say_why() {
     let mut r = Rig::new();
