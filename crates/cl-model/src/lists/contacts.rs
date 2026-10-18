@@ -728,16 +728,20 @@ pub fn tax_id_digits(s: &str) -> Option<String> {
     (digits.len() == 9).then_some(digits)
 }
 
-/// A tax ID shown with only its last four digits (`•••-••-1234`); never
-/// the whole number on screen once saved.
+/// A tax ID shown with only its last four digits, in the shape of its
+/// kind: `•••-••-1234` for an SSN (or an unknown kind), `••-•••1234` for an
+/// EIN; never the whole number on screen once saved.
 #[must_use]
-pub fn masked_tax_id(s: &str) -> Option<String> {
+pub fn masked_tax_id(s: &str, kind: Option<TaxIdKind>) -> Option<String> {
     let digits: String = s.chars().filter(char::is_ascii_digit).collect();
     if digits.len() < 4 {
         return None;
     }
     let last = &digits[digits.len() - 4..];
-    Some(format!("\u{2022}\u{2022}\u{2022}-\u{2022}\u{2022}-{last}"))
+    Some(match kind {
+        Some(TaxIdKind::Ein) => format!("\u{2022}\u{2022}-\u{2022}\u{2022}\u{2022}{last}"),
+        Some(TaxIdKind::Ssn) | None => format!("\u{2022}\u{2022}\u{2022}-\u{2022}\u{2022}-{last}"),
+    })
 }
 
 fn address(

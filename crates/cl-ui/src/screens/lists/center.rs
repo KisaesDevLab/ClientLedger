@@ -1116,10 +1116,15 @@ impl CenterScreen {
             &t("center.field.track_1099"),
             &yes_no(f.is1099_eligible),
         );
+        let tin = self
+            .detail
+            .as_ref()
+            .and_then(|d| d.profile_value.as_ref())
+            .and_then(|p| p.tin_type);
         let tax = f
             .tax_id
             .as_deref()
-            .and_then(masked_tax_id)
+            .and_then(|s| masked_tax_id(s, form::kind_of(tin)))
             .unwrap_or_default();
         pane::row(ui, tokens, &t("center.field.tax_id"), &tax);
         let d = self.detail.as_ref();

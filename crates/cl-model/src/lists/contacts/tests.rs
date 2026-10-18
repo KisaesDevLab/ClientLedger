@@ -175,10 +175,19 @@ fn email_and_tax_id_checks() {
     assert_eq!(tax_id_digits("12-34567890"), None);
     assert_eq!(tax_id_digits("12-34567B9"), None);
     assert_eq!(
-        masked_tax_id("12-3456789").as_deref(),
+        masked_tax_id("123-45-6789", Some(TaxIdKind::Ssn)).as_deref(),
         Some("\u{2022}\u{2022}\u{2022}-\u{2022}\u{2022}-6789")
     );
-    assert_eq!(masked_tax_id("12"), None);
+    assert_eq!(
+        masked_tax_id("12-3456789", None).as_deref(),
+        Some("\u{2022}\u{2022}\u{2022}-\u{2022}\u{2022}-6789")
+    );
+    assert_eq!(
+        masked_tax_id("12-3456789", Some(TaxIdKind::Ein)).as_deref(),
+        Some("\u{2022}\u{2022}-\u{2022}\u{2022}\u{2022}6789"),
+        "EIN shape"
+    );
+    assert_eq!(masked_tax_id("12", None), None);
 }
 
 #[test]

@@ -76,7 +76,7 @@ pub(super) struct FormPanel {
     warn: Option<&'static str>,
 }
 
-fn kind_of(t: Option<TinType>) -> Option<TaxIdKind> {
+pub(super) fn kind_of(t: Option<TinType>) -> Option<TaxIdKind> {
     t.map(|t| match t {
         TinType::Ssn => TaxIdKind::Ssn,
         TinType::Ein => TaxIdKind::Ein,
@@ -689,7 +689,9 @@ impl CenterScreen {
                     .horizontal(|ui| {
                         let l = pane::caption(ui, RichText::new(t("center.field.tax_id")));
                         let hint = match (&panel.saved_tax_id, d.clear_tax_id) {
-                            (Some(saved), false) => masked_tax_id(saved).unwrap_or_default(),
+                            (Some(saved), false) => {
+                                masked_tax_id(saved, d.tax_id_kind).unwrap_or_default()
+                            }
                             _ => String::new(),
                         };
                         ui.add_sized(
