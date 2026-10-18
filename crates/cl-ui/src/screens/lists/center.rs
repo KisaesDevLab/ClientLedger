@@ -55,7 +55,7 @@ pub const CLIENTS_KIND: &str = "clients.center";
 pub const VENDORS_KIND: &str = "vendors.center";
 
 /// Width of the detail pane and the add/edit panel.
-const PANEL_WIDTH: f32 = 440.0;
+const PANEL_WIDTH: f32 = 500.0;
 /// Typed letters within this many seconds build one find prefix.
 const TYPE_AHEAD_SECS: f64 = 1.0;
 /// Transactions the pane shows at first.
@@ -1027,6 +1027,9 @@ impl CenterScreen {
         };
         ui.label(RichText::new(shown).monospace().size(18.0));
         pane::pending(ui, tokens, &t(source));
+        if self.role == Role::Vendor {
+            self.vendor_details(ui, tokens, c);
+        }
 
         pane::section(ui, tokens, &t("center.details.contact"));
         let person = [f.first_name.as_deref(), f.last_name.as_deref()]
@@ -1076,62 +1079,65 @@ impl CenterScreen {
         pane::pending(ui, tokens, &t("center.ship_to.later"));
         pane::section(ui, tokens, &t("center.details.people"));
         pane::pending(ui, tokens, &t("center.people.later"));
+    }
 
-        if self.role == Role::Vendor {
-            pane::section(ui, tokens, &t("center.details.vendor"));
-            let account = f
-                .default_expense_account_id
-                .map(|a| form::account_label(&self.accounts, a))
-                .unwrap_or_default();
-            pane::row(ui, tokens, &t("center.field.expense_account"), &account);
-            pane::row(
-                ui,
-                tokens,
-                &t("center.field.vendor_account"),
-                f.vendor_account_number.as_deref().unwrap_or_default(),
-            );
-            pane::section(ui, tokens, &t("center.details.1099"));
-            let yes_no = |b: bool| t(if b { "center.yes" } else { "center.no" });
-            pane::row(
-                ui,
-                tokens,
-                &t("center.field.track_1099"),
-                &yes_no(f.is1099_eligible),
-            );
-            let tax = f
-                .tax_id
-                .as_deref()
-                .and_then(masked_tax_id)
-                .unwrap_or_default();
-            pane::row(ui, tokens, &t("center.field.tax_id"), &tax);
-            let d = self.detail.as_ref();
-            match (
-                d.and_then(|d| d.profile_value.as_ref()),
-                d.and_then(|d| d.profile_error.as_ref()),
-            ) {
-                (Some(p), _) => {
-                    let w9 = if p.w9_on_file {
-                        t("center.yes")
-                    } else {
-                        t("center.no")
-                    };
-                    pane::row(ui, tokens, &t("center.field.w9"), &w9);
-                    let kind = match p.tin_type {
-                        Some(cl_api::TinType::Ssn) => t("center.tin.ssn"),
-                        Some(cl_api::TinType::Ein) => t("center.tin.ein"),
-                        None => String::new(),
-                    };
-                    pane::row(ui, tokens, &t("center.field.tin_type"), &kind);
-                    pane::row(
-                        ui,
-                        tokens,
-                        &t("center.field.backup"),
-                        &yes_no(p.backup_withholding),
-                    );
-                }
-                (None, Some(e)) => cform::inline_error(ui, tokens, e),
-                (None, None) => pane::pending(ui, tokens, &t("center.profile.loading")),
+    /// A vendor's own details and 1099 tracking, shown right after what
+    /// you owe so they stay in view without scrolling.
+    fn vendor_details(&self, ui: &mut Ui, tokens: &Tokens, c: &Contact) {
+        let f = &c.fields;
+        pane::section(ui, tokens, &t("center.details.vendor"));
+        let account = f
+            .default_expense_account_id
+            .map(|a| form::account_label(&self.accounts, a))
+            .unwrap_or_default();
+        pane::row(ui, tokens, &t("center.field.expense_account"), &account);
+        pane::row(
+            ui,
+            tokens,
+            &t("center.field.vendor_account"),
+            f.vendor_account_number.as_deref().unwrap_or_default(),
+        );
+        pane::section(ui, tokens, &t("center.details.1099"));
+        let yes_no = |b: bool| t(if b { "center.yes" } else { "center.no" });
+        pane::row(
+            ui,
+            tokens,
+            &t("center.field.track_1099"),
+            &yes_no(f.is1099_eligible),
+        );
+        let tax = f
+            .tax_id
+            .as_deref()
+            .and_then(masked_tax_id)
+            .unwrap_or_default();
+        pane::row(ui, tokens, &t("center.field.tax_id"), &tax);
+        let d = self.detail.as_ref();
+        match (
+            d.and_then(|d| d.profile_value.as_ref()),
+            d.and_then(|d| d.profile_error.as_ref()),
+        ) {
+            (Some(p), _) => {
+                let w9 = if p.w9_on_file {
+                    t("center.yes")
+                } else {
+                    t("center.no")
+                };
+                pane::row(ui, tokens, &t("center.field.w9"), &w9);
+                let kind = match p.tin_type {
+                    Some(cl_api::TinType::Ssn) => t("center.tin.ssn"),
+                    Some(cl_api::TinType::Ein) => t("center.tin.ein"),
+                    None => String::new(),
+                };
+                pane::row(ui, tokens, &t("center.field.tin_type"), &kind);
+                pane::row(
+                    ui,
+                    tokens,
+                    &t("center.field.backup"),
+                    &yes_no(p.backup_withholding),
+                );
             }
+            (None, Some(e)) => cform::inline_error(ui, tokens, e),
+            (None, None) => pane::pending(ui, tokens, &t("center.profile.loading")),
         }
     }
 

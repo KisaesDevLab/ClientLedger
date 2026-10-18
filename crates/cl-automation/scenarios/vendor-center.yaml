@@ -1,0 +1,85 @@
+# Vendor center (P11 steps 2-3) against `clientledger --demo`: the list
+# with a contact that is also a client, a vendor's details (what you owe
+# from the vendor aging report, default expense account, 1099 tracking, the
+# tax ID shown masked, W-9 on file), the edit form's 1099 section, and a
+# keyboard-only create of a duplicate vendor that is then merged into the
+# original after a confirmation. The merge leaves the duplicate inactive,
+# so the dark run can create and merge it again. Synthetic demo data.
+name: vendor-center
+description: List, both roles, vendor details and 1099, keyboard create, merge.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: vendors.center
+  - assert_exists: {role: tab, label: Vendors}
+  - assert_state: {key: screen.screen, equals: vendor_center}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.balances_loaded, equals: true}
+  - assert_state: {key: screen.focused, equals: true}
+  - assert_exists: {role: row, label_contains: "Blue Eye Feed Co, Client and vendor"}
+  - assert_exists: {role: row, label_contains: "Galena Gravel"}
+  - assert_not_exists: {role: row, label_contains: "Riverbend HOA"}
+  - assert_no_clipping:
+      # The detail pane body (right of the list, below its tabs) scrolls by
+      # design; a vendor's contact rows run past the bottom.
+      ignore:
+        - {x: 900, y: 270, width: 10000, height: 10000}
+  - screenshot: center
+
+  # A 1099 vendor: the tax ID is only ever shown masked.
+  - type: {text: Crane}
+  - assert_state: {key: screen.detail_loaded, equals: true}
+  - assert_state: {key: screen.profile_loaded, equals: true}
+  - assert_state: {key: screen.w9_on_file, equals: true}
+  - assert_exists: {role: label, label: Crane Creek Tree Service}
+  - assert_exists: {label_contains: "-4521"}
+  - assert_not_exists: {label_contains: "0004521"}
+  - assert_exists: {label_contains: "Open bills, from the vendor aging report"}
+  - assert_exists: {label_contains: "5000 Subcontractors"}
+  - screenshot: vendor-details
+
+  # The edit form's 1099 section; nothing changed, so Esc closes it.
+  - key: Ctrl+E
+  - assert_state: {key: screen.panel, equals: edit}
+  - assert_exists: {role: label, label: Edit vendor}
+  - assert_exists: {role: check_box, label: Track payments for a 1099}
+  - assert_exists: {role: check_box, label: Backup withholding}
+  - assert_exists: {label_contains: "A tax ID is on file"}
+  - assert_exists: {label_contains: "Recording a paper W-9 isn't available yet"}
+  - assert_not_exists: {label_contains: "0004521"}
+  - screenshot: vendor-form
+  - key: Escape
+  - assert_state: {key: screen.panel, equals: none}
+
+  # --- Keyboard-only create of a duplicate (Ctrl+N, Alt+S) -------------------
+  - key: Ctrl+N
+  - assert_state: {key: screen.panel, equals: new}
+  - assert_exists: {role: label, label: New vendor}
+  - type: {text: Galena Gravel Co}
+  - key: Tab
+  - type: {text: Galena Gravel Company}
+  - key: Alt+S
+  - assert_state: {key: screen.panel, equals: none}
+  - assert_state: {key: screen.note, equals: saved}
+  - assert_exists: {role: row, label_contains: "Galena Gravel Co"}
+
+  # --- Merge it into Galena Gravel after the confirmation ---------------------
+  - command: list.merge
+  - assert_state: {key: screen.panel, equals: merge}
+  - assert_exists: {label_contains: "Merge Galena Gravel Co"}
+  - assert_exists: {label_contains: "A merge can't be undone"}
+  - type: {text: g}
+  - assert_exists: {label_contains: "moves to Galena Gravel:"}
+  - assert_no_clipping: {}
+  - screenshot: merge
+  - click: {role: button, label: Merge}
+  - assert_state: {key: screen.panel, equals: none}
+  - assert_state: {key: screen.note, equals: done}
+  - assert_not_exists: {role: row, label_contains: "Galena Gravel Co"}
+  - assert_exists: {role: row, label_contains: "Galena Gravel"}
+  - key: Ctrl+Shift+H
+  # Earlier runs leave merged duplicates too; the first match is enough.
+  - assert_exists: {role: row, label_contains: "Galena Gravel Co, Inactive", index: 0}
+  - key: Ctrl+Shift+H
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Vendors}

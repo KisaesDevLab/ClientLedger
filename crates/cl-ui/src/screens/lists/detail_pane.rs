@@ -12,6 +12,17 @@ const LABEL_WIDTH: f32 = 130.0;
 /// Widest a field gets.
 const FIELD_WIDTH: f32 = 260.0;
 
+/// A left-aligned caption padded to the label column; returns it for
+/// `labelled_by`.
+pub fn caption(ui: &mut Ui, text: RichText) -> egui::Response {
+    let l = ui.add(egui::Label::new(text).selectable(false));
+    let used = l.rect.width();
+    if used < LABEL_WIDTH {
+        ui.add_space(LABEL_WIDTH - used);
+    }
+    l
+}
+
 /// A section title inside the pane.
 pub fn section(ui: &mut Ui, tokens: &Tokens, title: &str) {
     ui.add_space(6.0);
@@ -21,16 +32,15 @@ pub fn section(ui: &mut Ui, tokens: &Tokens, title: &str) {
 /// A label and its value on one line; an empty value shows a dash.
 pub fn row(ui: &mut Ui, tokens: &Tokens, label: &str, value: &str) {
     ui.horizontal(|ui| {
-        let l = ui.add_sized(
-            [LABEL_WIDTH, 18.0],
-            egui::Label::new(RichText::new(label).color(tokens.text_secondary)).selectable(false),
-        );
+        // Plain text read in order (caption, then value); `labelled_by`
+        // would replace the value's own text for screen readers.
+        caption(ui, RichText::new(label).color(tokens.text_secondary));
         let shown = if value.trim().is_empty() {
             "\u{2014}"
         } else {
             value
         };
-        ui.add(egui::Label::new(shown).wrap()).labelled_by(l.id);
+        ui.add(egui::Label::new(shown).wrap());
     });
 }
 
@@ -45,7 +55,11 @@ pub fn tabs(ui: &mut Ui, labels: &[String], current: usize) -> Option<usize> {
     let mut picked = None;
     ui.horizontal_wrapped(|ui| {
         for (i, l) in labels.iter().enumerate() {
-            if ui.selectable_label(i == current, l).clicked() && i != current {
+            let r = ui.selectable_label(i == current, l);
+            r.widget_info(|| {
+                egui::WidgetInfo::selected(egui::Role::Tab, true, i == current, l.clone())
+            });
+            if r.clicked() && i != current {
                 picked = Some(i);
             }
         }
@@ -63,10 +77,7 @@ pub fn text_row(
 ) -> egui::Response {
     let r = ui
         .horizontal(|ui| {
-            let l = ui.add_sized(
-                [LABEL_WIDTH, 24.0],
-                egui::Label::new(label).selectable(false),
-            );
+            let l = caption(ui, RichText::new(label));
             ui.add_sized(
                 [ui.available_width().min(FIELD_WIDTH), 24.0],
                 egui::TextEdit::singleline(value).id(id),
@@ -116,10 +127,7 @@ pub fn picker(
 ) -> Option<usize> {
     let mut picked = None;
     ui.horizontal(|ui| {
-        let caption = ui.add_sized(
-            [LABEL_WIDTH, 24.0],
-            egui::Label::new(label).selectable(false),
-        );
+        let caption = caption(ui, RichText::new(label));
         let shown = options.get(current).cloned().unwrap_or_default();
         let inner = egui::ComboBox::from_id_salt(id)
             .selected_text(shown)

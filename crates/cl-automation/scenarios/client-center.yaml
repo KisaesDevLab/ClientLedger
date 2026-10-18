@@ -1,0 +1,119 @@
+# Client center (P11 steps 2-3) against `clientledger --demo`: the list
+# with a client that is also a vendor, the detail pane (open balance from
+# the client balance report, recent transactions, Jobs and Notes tabs that
+# say what isn't available yet), Include inactive, QuickReport, and a
+# keyboard-only create (a used name refused), edit with Esc revert, and
+# make inactive. The demo data is synthetic; balances are the demo
+# engine's report figures, never added up by the app. The new client is
+# left inactive at the end so the dark run can create it again.
+name: client-center
+description: List, both roles, detail tabs, QuickReport, keyboard create/edit/inactivate.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: clients.center
+  - assert_exists: {role: tab, label: Clients & Jobs}
+  - assert_state: {key: screen.screen, equals: client_center}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.balances_loaded, equals: true}
+  - assert_state: {key: screen.jobs_available, equals: false}
+  - assert_state: {key: screen.focused, equals: true}
+  - assert_exists: {role: row, label_contains: "Blue Eye Feed Co, Client and vendor"}
+  - assert_not_exists: {role: row, label_contains: "Galena Gravel"}
+  - assert_no_clipping: {}
+  - screenshot: center
+
+  # Typing in the list jumps to the client; the pane follows.
+  - type: {text: Riverbend}
+  - assert_state: {key: screen.detail_loaded, equals: true}
+  - assert_state: {key: screen.history_rows, equals: 10}
+  - assert_exists: {role: label, label: Riverbend HOA}
+  - assert_exists: {label_contains: "From the client balance report"}
+  - assert_exists: {label_contains: "One ship-to address for now"}
+  - screenshot: details
+
+  # --- Include inactive (Ctrl+Shift+H), twice ---------------------------------
+  - assert_not_exists: {role: row, label_contains: "Powersite Dam Tours"}
+  - key: Ctrl+Shift+H
+  - assert_state: {key: screen.show_inactive, equals: true}
+  - assert_exists: {role: row, label_contains: "Powersite Dam Tours, Inactive"}
+  - key: Ctrl+Shift+H
+  - assert_state: {key: screen.show_inactive, equals: false}
+
+  # --- QuickReport (Ctrl+Shift+Q): every transaction; Esc back to Details ----
+  - key: Ctrl+Shift+Q
+  - assert_state: {key: screen.tab, equals: transactions}
+  - assert_state: {key: screen.history_all, equals: true}
+  - assert_exists: {label_contains: "All transactions"}
+  - assert_no_clipping: {}
+  - screenshot: transactions
+  - key: Escape
+  - assert_state: {key: screen.tab, equals: details}
+
+  # --- Jobs and Notes say what isn't available yet ----------------------------
+  - click: {role: tab, label: Jobs}
+  - assert_state: {key: screen.tab, equals: jobs}
+  - assert_exists: {label_contains: "Jobs aren't available yet"}
+  - screenshot: jobs
+  - click: {role: tab, label: Notes}
+  - assert_exists: {label_contains: "Gate code at the clubhouse"}
+  - assert_exists: {label_contains: "to-dos aren't available yet"}
+  - assert_exists: {label_contains: "Attaching files to a client or vendor"}
+  - click: {role: tab, label: Details}
+  - assert_state: {key: screen.tab, equals: details}
+
+  # --- Keyboard-only create (Ctrl+N); a used name is refused ------------------
+  - key: Ctrl+N
+  - assert_state: {key: screen.panel, equals: new}
+  - assert_exists: {role: label, label: New client}
+  - type: {text: Riverbend HOA}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: Alt+S
+  - assert_state: {key: screen.panel, equals: new}
+  - assert_state: {key: screen.problem, equals: name_taken}
+  - assert_exists: {label_contains: "already uses this name"}
+  - screenshot: name-taken
+  - key: Ctrl+A
+  - type: {text: Table Rock Marina}
+  - key: Tab
+  - type: {text: Table Rock Marina LLC}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: dock@trm.example}
+  - key: Alt+S
+  - assert_state: {key: screen.panel, equals: none}
+  - assert_state: {key: screen.note, equals: saved}
+  - assert_exists: {role: row, label_contains: "Table Rock Marina"}
+  - assert_state: {key: screen.selected_active, equals: true}
+
+  # --- Keyboard-only edit (Ctrl+E): Esc reverts, then closes ------------------
+  - key: Ctrl+E
+  - assert_state: {key: screen.panel, equals: edit}
+  - assert_exists: {role: label, label: Edit client}
+  - key: End
+  - type: {text: " East"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: Escape
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.panel, equals: edit}
+  - assert_no_clipping: {}
+  - screenshot: edit
+  - key: Escape
+  - assert_state: {key: screen.panel, equals: none}
+
+  # --- Make inactive (Ctrl+Shift+I), active again, inactive (clean up) -------
+  - key: Ctrl+Shift+I
+  - assert_state: {key: screen.note, equals: made_inactive}
+  - assert_not_exists: {role: row, label_contains: "Table Rock Marina"}
+  - key: Ctrl+Shift+H
+  - assert_state: {key: screen.selected_active, equals: false}
+  - assert_exists: {role: button, label: Make active again}
+  - key: Ctrl+Shift+I
+  - assert_state: {key: screen.note, equals: made_active}
+  - key: Ctrl+Shift+I
+  - assert_state: {key: screen.note, equals: made_inactive}
+  - key: Ctrl+Shift+H
+  - assert_state: {key: screen.show_inactive, equals: false}
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Clients & Jobs}

@@ -98,8 +98,8 @@ fn names_are_unique_across_both_lists() {
     assert_eq!(list.name_owner("Galena Gravel", Some(cid(4))), None);
     assert_eq!(
         list.name_owner("answering co", None),
-        Some(cid(3)),
-        "inactive too"
+        None,
+        "an inactive contact does not hold its name"
     );
     assert_eq!(list.name_owner(" ", None), None);
 }

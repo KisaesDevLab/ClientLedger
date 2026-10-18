@@ -534,10 +534,7 @@ impl CenterScreen {
 
             // Roles (Q-77): a contact keeps at least one.
             ui.horizontal(|ui| {
-                ui.add_sized(
-                    [130.0, 24.0],
-                    egui::Label::new(t("center.form.roles")).selectable(false),
-                );
+                pane::caption(ui, RichText::new(t("center.form.roles")));
                 for (r, key) in [
                     (Role::Client, "center.form.is_client"),
                     (Role::Vendor, "center.form.is_vendor"),
@@ -684,10 +681,7 @@ impl CenterScreen {
                 let mut tax = d.tax_id.clone();
                 let r = ui
                     .horizontal(|ui| {
-                        let l = ui.add_sized(
-                            [130.0, 24.0],
-                            egui::Label::new(t("center.field.tax_id")).selectable(false),
-                        );
+                        let l = pane::caption(ui, RichText::new(t("center.field.tax_id")));
                         let hint = match (&panel.saved_tax_id, d.clear_tax_id) {
                             (Some(saved), false) => masked_tax_id(saved).unwrap_or_default(),
                             _ => String::new(),

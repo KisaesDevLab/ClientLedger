@@ -351,8 +351,9 @@ impl ContactList {
             .collect()
     }
 
-    /// Another contact (any role, active or not) already called `name`,
-    /// ignoring case and outer spaces.
+    /// Another active contact (either role) already called `name`, ignoring
+    /// case and outer spaces. Inactive contacts do not hold their name: a
+    /// merge leaves the merged-away duplicate inactive under the same name.
     #[must_use]
     pub fn name_owner(&self, name: &str, except: Option<ContactId>) -> Option<ContactId> {
         let want = name.trim().to_lowercase();
@@ -361,7 +362,7 @@ impl ContactList {
         }
         self.entries
             .iter()
-            .find(|e| Some(e.id) != except && e.name.trim().to_lowercase() == want)
+            .find(|e| e.active && Some(e.id) != except && e.name.trim().to_lowercase() == want)
             .map(|e| e.id)
     }
 
@@ -557,7 +558,7 @@ pub enum ContactProblem {
     NameMissing,
     /// Longer than the engine takes.
     NameTooLong,
-    /// Another client or vendor has this name.
+    /// Another active client or vendor has this name.
     NameTaken,
     /// Longer than the engine takes.
     CompanyTooLong,

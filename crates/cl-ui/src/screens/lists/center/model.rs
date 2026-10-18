@@ -66,23 +66,23 @@ pub fn list_spec(role: Role, compact: bool) -> GridSpec {
             COL_BALANCE,
             "center.col.balance_client",
             "center.col.balance_client_help",
-            130,
+            110,
         ),
         Role::Vendor => money_column(
             COL_BALANCE,
             "center.col.balance_vendor",
             "center.col.balance_vendor_help",
-            130,
+            110,
         ),
     };
-    let mut cols = vec![column(COL_NAME, "center.col.name", 240, 2)];
+    let mut cols = vec![column(COL_NAME, "center.col.name", 180, 2)];
     if !compact {
-        cols.push(column(COL_COMPANY, "center.col.company", 180, 1));
-        cols.push(column(COL_PHONE, "center.col.phone", 120, 0));
+        cols.push(column(COL_COMPANY, "center.col.company", 120, 1));
+        cols.push(column(COL_PHONE, "center.col.phone", 112, 0));
     }
     cols.push(balance);
     if !compact {
-        cols.push(column(COL_STATUS, "center.col.status", 150, 0));
+        cols.push(column(COL_STATUS, "center.col.status", 130, 0));
     }
     let mut s = GridSpec::browse(cols);
     s.height = RowHeight::Uniform { two_lines: false };
@@ -352,16 +352,16 @@ pub fn history_spec() -> GridSpec {
         Column {
             kind: CellKind::Date,
             mono: true,
-            ..column(H_DATE, "center.history.col.date", 100, 0)
+            ..column(H_DATE, "center.history.col.date", 88, 0)
         },
-        column(H_TYPE, "center.history.col.type", 130, 0),
-        column(H_NUMBER, "center.history.col.number", 90, 0),
-        column(H_MEMO, "center.history.col.memo", 160, 2),
+        column(H_TYPE, "center.history.col.type", 100, 0),
+        column(H_NUMBER, "center.history.col.number", 84, 0),
+        column(H_MEMO, "center.history.col.memo", 100, 2),
         Column {
             kind: CellKind::Amount(AmountRules::MONEY),
             align: Align::Right,
             mono: true,
-            ..column(H_AMOUNT, "center.history.col.amount", 110, 0)
+            ..column(H_AMOUNT, "center.history.col.amount", 104, 0)
         },
     ]);
     s.height = RowHeight::Uniform { two_lines: false };

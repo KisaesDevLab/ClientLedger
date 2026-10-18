@@ -23,7 +23,7 @@ const AR: &str = "10200";
 const AP: &str = "20100";
 
 /// The client that is also a vendor in the demo (Q-77).
-pub const BOTH: &str = "Reeds Spring Hardware";
+pub const BOTH: &str = "Blue Eye Feed Co";
 /// The inactive client of the demo.
 pub const INACTIVE: &str = "Powersite Dam Tours";
 
