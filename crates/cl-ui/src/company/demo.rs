@@ -6,6 +6,7 @@ use cl_core::{CalendarDate, Timestamp};
 use cl_settings::{ACCENT_PALETTE, Accent};
 
 pub mod contacts;
+pub mod lists;
 
 /// One demo company card.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +46,9 @@ pub struct DemoState {
     pub merged: Vec<(cl_core::ids::ContactId, cl_core::ids::ContactId)>,
     /// Vendors' 1099 profiles saved in the demo.
     pub profiles: std::collections::BTreeMap<cl_core::ids::ContactId, cl_api::Vendor1099Profile>,
+    /// The open company's items as the demo "engine" keeps them (built on
+    /// first use, P11 step 4).
+    pub items: Option<Vec<cl_api::Item>>,
 }
 
 fn id(n: u8) -> TenantId {
@@ -99,6 +103,7 @@ impl DemoState {
             contact_names: std::collections::BTreeMap::new(),
             merged: Vec::new(),
             profiles: std::collections::BTreeMap::new(),
+            items: None,
         }
     }
 
@@ -124,6 +129,11 @@ impl DemoState {
             self.contacts = Some(cs);
         }
         self.contacts.get_or_insert_with(Vec::new)
+    }
+
+    /// The demo items, built on first use.
+    pub fn items_mut(&mut self) -> &mut Vec<cl_api::Item> {
+        self.items.get_or_insert_with(lists::items)
     }
 
     /// A fresh fake tenant id for a company made in the demo.

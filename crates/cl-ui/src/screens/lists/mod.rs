@@ -1,10 +1,12 @@
-//! The master lists (P11): the Chart of Accounts (step 1) and the Client
-//! and Vendor centers (steps 2-3); the other lists follow in later steps
-//! of the phase.
+//! The master lists (P11): the Chart of Accounts (step 1), the Client and
+//! Vendor centers (steps 2-3), the Item List (step 4), Tags (step 5), and
+//! terms, payment methods and CSV import/export (step 6).
 
 pub mod accounts;
 pub mod center;
 pub mod detail_pane;
+pub mod items;
+pub mod rows;
 
 use std::sync::Arc;
 
@@ -41,6 +43,7 @@ pub fn make(
             open,
             today,
         ))),
+        items::KIND => Some(Box::new(items::ItemsScreen::new(Arc::clone(link), open))),
         _ => None,
     }
 }

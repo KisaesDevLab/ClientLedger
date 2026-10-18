@@ -19,6 +19,7 @@ mod contract_conflict;
 mod contract_contacts;
 mod contract_errors;
 mod contract_harness;
+mod contract_items;
 mod contract_journal;
 mod contract_lifecycle;
 mod contract_logging;
@@ -105,6 +106,12 @@ fn main() -> std::process::ExitCode {
         ),
         ("items::crud_and_filters", contract_resources::items),
         ("tags::crud_and_filters", contract_resources::tags),
+        (
+            "items::reactivate_and_unique_names",
+            contract_items::reactivate_and_unique_names,
+        ),
+        ("items::item_types_u39", contract_items::item_types_u39),
+        ("items::price_levels_u40", contract_items::price_levels_u40),
         (
             "census::live_spec_matches_fixtures",
             contract_census::live_spec_matches_fixtures,

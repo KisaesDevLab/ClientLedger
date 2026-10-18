@@ -91,6 +91,8 @@ Format: `Pxx — blocked by U-xx/Q-xx — what is pending — workaround in plac
 - P11 dated notes and to-dos (Q-130) — blocked by U-37 — `contacts::notes_u37` is PENDING — in place: the single notes field in the Notes tab, with a note that dated notes and to-dos arrive later (Q-P11l).
 - P11 per-contact open balance — blocked by U-38 — `contacts::open_balance_u38` is PENDING — in place: figures from the client balance summary and vendor aging reports, labelled with their source, never summed in the UI (Q-P11m).
 - P11 recording a paper W-9 — blocked by U-44 — `contacts::w9_on_file_u44` is PENDING — in place: W-9 on file shown read-only, the form says recording it isn't available yet (Q-P11n).
+- P11 item kinds other than service, the purchase side of two-sided items and the unit label (Q-58, Q-96, Q-99) � blocked by U-39 � `items::item_types_u39` is PENDING � in place: service items only, the panel says the rest isn't available yet (Q-P11q).
+- P11 price levels (Q-58) � blocked by U-40 � `items::price_levels_u40` is PENDING � in place: a note under the Item List (Q-P11r).
 
 ## Placeholders tracked
 

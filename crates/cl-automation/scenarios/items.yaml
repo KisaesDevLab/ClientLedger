@@ -1,0 +1,96 @@
+# Item List (P11 step 4) against `clientledger --demo`: the list with exact
+# prices, type-to-find, Include inactive, a keyboard-only create (a used
+# name refused), edit with Esc revert, and make inactive / active again.
+# The engine keeps service items only (U-39) and has no price levels
+# (U-40); the panel and the list say so. Item names stay taken by inactive
+# items, so the item made here is named after the theme (`{theme}`) and
+# left inactive. The demo data is synthetic.
+name: items
+description: List, exact prices, keyboard create/edit/inactivate, used name, pending kinds.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: lists.items
+  - assert_exists: {role: tab, label: Item List}
+  - assert_state: {key: screen.screen, equals: items}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.kinds_available, equals: 1}
+  - assert_state: {key: screen.price_levels_available, equals: false}
+  - assert_state: {key: screen.focused, equals: true}
+  - assert_exists: {role: row, label_contains: "Weekly Mowing, 45.00"}
+  - assert_exists: {label_contains: "Price levels (a different price for some clients) aren't available yet"}
+  - assert_not_exists: {role: row, label_contains: "Snow Plowing"}
+  - assert_no_clipping: {}
+  - screenshot: list
+
+  # Typing in the list jumps to the item; prices are exact (four decimals).
+  - type: {text: Design}
+  - assert_exists: {role: row, label_contains: "Design Consultation, 0.045"}
+  - assert_state: {key: screen.selected_price, equals: "0.0450"}
+
+  # --- Include inactive (Ctrl+Shift+H), twice ---------------------------------
+  - key: Ctrl+Shift+H
+  - assert_state: {key: screen.show_inactive, equals: true}
+  - assert_exists: {role: row, label_contains: "Snow Plowing, 75.00, Inactive"}
+  - key: Ctrl+Shift+H
+  - assert_state: {key: screen.show_inactive, equals: false}
+
+  # --- Keyboard-only create: a used name is refused, then Alt+S --------------
+  - key: Ctrl+N
+  - assert_state: {key: screen.panel, equals: new}
+  - assert_exists: {role: label, label: New item}
+  - assert_exists: {label_contains: "discounts and subtotals aren't available yet"}
+  - assert_exists: {label_contains: "A purchase price and expense account"}
+  - type: {text: weekly mowing}
+  - key: Alt+S
+  - assert_state: {key: screen.panel, equals: new}
+  - assert_state: {key: screen.problem, equals: name_taken}
+  - assert_exists: {label_contains: "already has this name"}
+  - assert_no_clipping: {}
+  - screenshot: name-taken
+  # Esc reverts the form and leaves the cursor in the name.
+  - key: Escape
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.panel, equals: new}
+  - type: {text: "Leaf Removal {theme}"}
+  - key: Tab
+  - type: {text: Per bag hauled away}
+  - key: Tab
+  - type: {text: "12.5"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: Alt+S
+  - assert_state: {key: screen.panel, equals: none}
+  - assert_state: {key: screen.note, equals: saved}
+  - assert_exists: {role: row, label_contains: "Leaf Removal"}
+  - assert_state: {key: screen.selected_price, equals: "12.5000"}
+  - assert_state: {key: screen.selected_active, equals: true}
+
+  # --- Keyboard-only edit (Ctrl+E), Esc reverts, then closes -----------------
+  - key: Ctrl+E
+  - assert_state: {key: screen.panel, equals: edit}
+  - key: End
+  - type: {text: " Plus"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_no_clipping: {}
+  - screenshot: edit
+  - key: Escape
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.panel, equals: edit}
+  - key: Escape
+  - assert_state: {key: screen.panel, equals: none}
+
+  # --- Make inactive, active again, inactive (clean up) -----------------------
+  - key: Ctrl+Shift+I
+  - assert_state: {key: screen.note, equals: made_inactive}
+  - assert_not_exists: {role: row, label_contains: "Leaf Removal"}
+  - key: Ctrl+Shift+H
+  - assert_state: {key: screen.selected_active, equals: false}
+  - assert_exists: {role: button, label: Make active again}
+  - key: Ctrl+Shift+I
+  - assert_state: {key: screen.note, equals: made_active}
+  - key: Ctrl+Shift+I
+  - assert_state: {key: screen.note, equals: made_inactive}
+  - key: Ctrl+Shift+H
+  - assert_state: {key: screen.show_inactive, equals: false}
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Item List}

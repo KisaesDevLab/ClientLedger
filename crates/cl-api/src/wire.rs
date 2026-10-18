@@ -68,6 +68,23 @@ impl Capabilities {
     pub const CONTACT_OPEN_BALANCE: &'static str = "contact-open-balance-v1";
     /// U-44 "W-9 on file" recorded by the owner (a paper W-9).
     pub const VENDOR_W9_ON_FILE: &'static str = "vendor-w9-on-file-v1";
+    /// U-39 item types (non-inventory, other charge, discount, subtotal),
+    /// the purchase side of two-sided items and a unit-of-measure label.
+    pub const ITEM_TYPES: &'static str = "item-types-v1";
+    /// U-40 price levels.
+    pub const PRICE_LEVELS: &'static str = "price-levels-v1";
+    /// U-41 tag merge that moves line tags and defaults, audited group
+    /// changes, one tag per group on every path, a working group reorder.
+    pub const TAG_MERGE: &'static str = "tag-merge-v1";
+    /// U-42 tag groups required for chosen account types.
+    pub const TAG_REQUIRED_GROUPS: &'static str = "tag-required-groups-v1";
+    /// U-43 editable payment terms (with discount terms) and payment
+    /// methods.
+    pub const TERMS_LISTS: &'static str = "terms-lists-v1";
+    /// U-45 several tags on one transaction line (one per group).
+    pub const LINE_TAGS: &'static str = "line-tags-v1";
+    /// U-46 the item CSV import resolves the income account by name.
+    pub const ITEMS_IMPORT: &'static str = "items-import-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

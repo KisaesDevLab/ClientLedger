@@ -73,7 +73,9 @@ pub enum Step {
     ClickIfPresent(Target),
     /// Focus an element.
     Focus(Target),
-    /// Type text.
+    /// Type text. `{theme}` in the text becomes the theme being run, so a
+    /// record a scenario creates gets a name of its own in each run (lists
+    /// whose names stay taken after a record is made inactive).
     Type {
         /// The text.
         text: String,
@@ -358,6 +360,11 @@ fn click_if_present(t: &mut dyn Transport, target: &Target) -> Result<(), String
     }
 }
 
+/// `text` with `{theme}` replaced by `theme`.
+fn themed(text: &str, theme: &str) -> String {
+    text.replace("{theme}", theme)
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_step(
     t: &mut dyn Transport,
@@ -386,6 +393,7 @@ fn run_step(
             call(t, "focus", json!({"target": target})).map(drop)
         }
         Step::Type { text, target } => {
+            let text = themed(text, theme);
             call(t, "type", json!({"text": text, "target": target})).map(drop)
         }
         Step::Key(k) => call(t, "key", json!({"key": k})).map(drop),
@@ -701,5 +709,11 @@ mod tests {
         let v = json!({"a": {"b": 3}});
         assert_eq!(dotted(&v, "a.b"), Some(&json!(3)));
         assert_eq!(dotted(&v, "a.c"), None);
+    }
+
+    #[test]
+    fn typed_text_names_the_theme() {
+        assert_eq!(themed("Leaf Removal {theme}", "dark"), "Leaf Removal dark");
+        assert_eq!(themed("plain", "light"), "plain");
     }
 }

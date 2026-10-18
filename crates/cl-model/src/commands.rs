@@ -255,7 +255,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("form.delete_item", "Delete Transaction", None, 2, ctrl('D'), Scope::Form),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
-    screen("lists.items", "Item List", Some(Menu::Lists), 0, None, "P11"),
+    built("lists.items", "Item List", Some(Menu::Lists), 0, None),
     screen("lists.tags", "Tags", Some(Menu::Lists), 0, None, "P11"),
     // List windows (Chart of Accounts first; the other lists use the same keys)
     cmd("list.new", "New List Entry", None, 3, ctrl('N'), Scope::Window),
@@ -390,6 +390,7 @@ mod tests {
             "file.delete_company",
             "edit.preferences",
             "lists.chart_of_accounts",
+            "lists.items",
             "clients.center",
             "vendors.center",
         ];
