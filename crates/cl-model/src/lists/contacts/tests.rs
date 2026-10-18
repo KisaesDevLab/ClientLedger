@@ -292,3 +292,19 @@ fn removing_a_tax_id_only_counts_for_a_vendor_with_nothing_typed() {
     d.roles = Roles::Client;
     assert!(!check(&d, &list, None, |_| true).expect("ok").clear_tax_id);
 }
+
+/// B1: `Debug` never prints a tax ID, only whether there is one.
+#[test]
+fn debug_hides_the_tax_id() {
+    let list = sample();
+    let mut d = ContactDraft::new(Role::Vendor);
+    d.name = "Canary Tree".into();
+    d.tax_id = "98-7654321".into();
+    let shown = format!("{d:?}");
+    assert!(!shown.contains("7654321"), "{shown}");
+    assert!(shown.contains("has_tax_id: true"), "{shown}");
+    let c = check(&d, &list, None, |_| true).expect("valid");
+    let shown = format!("{c:?} {c:#?}");
+    assert!(!shown.contains("7654321"), "{shown}");
+    assert!(shown.contains("has_tax_id: true"), "{shown}");
+}

@@ -402,8 +402,8 @@ impl AddressDraft {
     }
 }
 
-/// The add/edit contact form's content.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The add/edit contact form's content. `Debug` hides the tax ID.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ContactDraft {
     /// Roles.
     pub roles: Roles,
@@ -477,8 +477,8 @@ impl ContactDraft {
 }
 
 /// A draft that passed the checks, trimmed, ready for the engine
-/// (`None` = empty).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// (`None` = empty). `Debug` hides the tax ID.
+#[derive(Clone, PartialEq, Eq)]
 pub struct CheckedContact {
     /// Roles.
     pub roles: Roles,
@@ -516,6 +516,59 @@ pub struct CheckedContact {
     pub tax_id_kind: Option<TaxIdKind>,
     /// Backup withholding.
     pub backup_withholding: bool,
+}
+
+impl std::fmt::Debug for ContactDraft {
+    /// Every field except the tax ID, which shows only whether one was
+    /// typed (B1: a tax ID never reaches a log or a panic message).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContactDraft")
+            .field("roles", &self.roles)
+            .field("name", &self.name)
+            .field("company", &self.company)
+            .field("first", &self.first)
+            .field("last", &self.last)
+            .field("email", &self.email)
+            .field("phone", &self.phone)
+            .field("billing", &self.billing)
+            .field("shipping", &self.shipping)
+            .field("terms", &self.terms)
+            .field("notes", &self.notes)
+            .field("expense_account", &self.expense_account)
+            .field("vendor_account", &self.vendor_account)
+            .field("track_1099", &self.track_1099)
+            .field("has_tax_id", &!self.tax_id.trim().is_empty())
+            .field("clear_tax_id", &self.clear_tax_id)
+            .field("tax_id_kind", &self.tax_id_kind)
+            .field("backup_withholding", &self.backup_withholding)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for CheckedContact {
+    /// Every field except the tax ID, which shows only whether one is set.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CheckedContact")
+            .field("roles", &self.roles)
+            .field("name", &self.name)
+            .field("company", &self.company)
+            .field("first", &self.first)
+            .field("last", &self.last)
+            .field("email", &self.email)
+            .field("phone", &self.phone)
+            .field("billing", &self.billing)
+            .field("shipping", &self.shipping)
+            .field("terms", &self.terms)
+            .field("notes", &self.notes)
+            .field("expense_account", &self.expense_account)
+            .field("vendor_account", &self.vendor_account)
+            .field("track_1099", &self.track_1099)
+            .field("has_tax_id", &self.tax_id.is_some())
+            .field("clear_tax_id", &self.clear_tax_id)
+            .field("tax_id_kind", &self.tax_id_kind)
+            .field("backup_withholding", &self.backup_withholding)
+            .finish()
+    }
 }
 
 /// The form field a problem belongs to.

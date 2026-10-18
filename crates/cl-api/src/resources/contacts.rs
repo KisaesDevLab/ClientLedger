@@ -61,8 +61,9 @@ impl ContactType {
 
 /// The fields the contact form edits. `None` clears a nullable field;
 /// the two country codes cannot be cleared, so `None` leaves them as they
-/// are (the engine defaults them to `US`).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// are (the engine defaults them to `US`). `Debug` hides the tax ID, so
+/// a [`Contact`], [`NewContact`] or [`ContactUpdate`] never prints it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(
     missing_docs,
@@ -154,6 +155,44 @@ impl ContactFields {
             notes: None,
             default_tag_id: None,
         }
+    }
+}
+
+impl std::fmt::Debug for ContactFields {
+    /// Every field except the tax ID, which shows only whether one is set
+    /// (B1: a tax ID never reaches a log or a panic message).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContactFields")
+            .field("contact_type", &self.contact_type)
+            .field("display_name", &self.display_name)
+            .field("company_name", &self.company_name)
+            .field("first_name", &self.first_name)
+            .field("last_name", &self.last_name)
+            .field("email", &self.email)
+            .field("phone", &self.phone)
+            .field("billing_line1", &self.billing_line1)
+            .field("billing_line2", &self.billing_line2)
+            .field("billing_city", &self.billing_city)
+            .field("billing_state", &self.billing_state)
+            .field("billing_zip", &self.billing_zip)
+            .field("billing_country", &self.billing_country)
+            .field("shipping_line1", &self.shipping_line1)
+            .field("shipping_line2", &self.shipping_line2)
+            .field("shipping_city", &self.shipping_city)
+            .field("shipping_state", &self.shipping_state)
+            .field("shipping_zip", &self.shipping_zip)
+            .field("shipping_country", &self.shipping_country)
+            .field("default_payment_terms", &self.default_payment_terms)
+            .field(
+                "default_expense_account_id",
+                &self.default_expense_account_id,
+            )
+            .field("has_tax_id", &self.tax_id.is_some())
+            .field("vendor_account_number", &self.vendor_account_number)
+            .field("is1099_eligible", &self.is1099_eligible)
+            .field("notes", &self.notes)
+            .field("default_tag_id", &self.default_tag_id)
+            .finish()
     }
 }
 
@@ -475,6 +514,20 @@ pub(crate) mod tests {
 
     fn id() -> ContactId {
         ContactId::parse("3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id")
+    }
+
+    /// B1: `Debug` of a contact never prints its tax ID.
+    #[test]
+    fn debug_hides_the_tax_id() {
+        let mut c: Contact = serde_json::from_str(CONTACT).expect("contact");
+        c.fields.tax_id = Some("98-7654321".into());
+        let update = ContactUpdate {
+            fields: c.fields.clone(),
+            is_active: true,
+        };
+        let shown = format!("{c:?} {update:?} {:#?}", c.fields);
+        assert!(!shown.contains("7654321"), "{shown}");
+        assert!(shown.contains("has_tax_id: true"), "{shown}");
     }
 
     #[test]

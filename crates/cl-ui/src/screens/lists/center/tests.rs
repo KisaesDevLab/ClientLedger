@@ -264,6 +264,67 @@ fn vendor_fields_tax_id_masked_and_1099_profile() {
     assert_eq!(gone.fields.tax_id, None);
 }
 
+/// B1 canary: a typed tax ID never shows in the state, the accessibility
+/// tree, or `Debug` output.
+#[test]
+fn a_typed_tax_id_never_leaks() {
+    const CANARY: &str = "98-7654321";
+    let mut r = Rig::new(Role::Vendor);
+    r.select("Crane Creek Tree Service");
+    r.cmd("edit.edit_transaction");
+    r.form().focus_tax_id_for_test();
+    r.frames(2);
+    r.ctx.enable_accesskit();
+    let mut texts = Vec::new();
+    for events in [
+        vec![egui::Event::Text(CANARY.into())],
+        Vec::new(),
+        Vec::new(),
+    ] {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+            events,
+            ..RawInput::default()
+        };
+        let s = &mut r.s;
+        let mut out = r.ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        if let Some(tree) = out.platform_output.accesskit_update {
+            for (_, node) in tree.nodes {
+                texts.extend(node.value().map(str::to_string));
+                texts.extend(node.label().map(str::to_string));
+            }
+        }
+    }
+    assert_eq!(
+        r.form().form.current().tax_id,
+        CANARY,
+        "typed into the field"
+    );
+    assert!(!texts.is_empty(), "the tree was read");
+    let digits = "7654321";
+    assert!(
+        !texts
+            .join(
+                "
+"
+            )
+            .contains(digits),
+        "accessibility tree"
+    );
+    assert!(!r.s.state().to_string().contains(digits), "state");
+    let draft = r.form().form.current().clone();
+    assert!(!format!("{draft:?}").contains(digits), "draft Debug");
+    assert!(r.s.save_form(SaveIntent::SaveAndClose));
+    r.frames(2);
+    let id = r.id("Crane Creek Tree Service");
+    let saved = r.s.contacts.iter().find(|c| c.id == id).expect("vendor");
+    assert_eq!(saved.fields.tax_id.as_deref(), Some(CANARY));
+    assert!(!format!("{saved:?}").contains(digits), "contact Debug");
+}
+
 #[test]
 fn a_new_vendor_gets_a_default_expense_account() {
     let mut r = Rig::new(Role::Vendor);

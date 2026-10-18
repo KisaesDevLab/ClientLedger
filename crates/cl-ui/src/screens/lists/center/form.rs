@@ -217,6 +217,12 @@ impl FormPanel {
         self.form.edit(F_TAX_ID, |x| x.clear_tax_id = true);
     }
 
+    /// Puts the keyboard in the tax ID field on the next frame.
+    #[cfg(test)]
+    pub(super) fn focus_tax_id_for_test(&mut self) {
+        self.focus = Some(ContactField::TaxId);
+    }
+
     fn save_failed(&mut self, e: ApiError) {
         self.form.save_failed(cl_model::forms::SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
@@ -688,7 +694,10 @@ impl CenterScreen {
                         };
                         ui.add_sized(
                             [ui.available_width().min(260.0), 24.0],
+                            // A tax ID is masked on screen and in the
+                            // accessibility tree, like a password.
                             egui::TextEdit::singleline(&mut tax)
+                                .password(true)
                                 .id(field_id(ContactField::TaxId))
                                 .hint_text(hint),
                         )
