@@ -155,6 +155,11 @@ impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
         r
     }
 
+    /// The grid model's whole-grid rules (`EditableModel::validate_grid`).
+    pub fn validate(&mut self) -> Vec<cl_grid::GridProblem> {
+        self.adapter.model(&mut self.form).validate_grid()
+    }
+
     /// Commit the open cell (B4).
     ///
     /// # Errors

@@ -73,6 +73,9 @@ When two scopes use the same keys, the innermost one wins: a form beats a window
 | `Arrow keys` | Move between rows and cells |
 | `Page Up / Page Down` | Previous / next record in forms; page in grids |
 | `Esc` | Revert the field, then the form, then close (asks first if there are unsaved changes) |
+| `Ctrl+Home / Ctrl+End` | First / last row in grids |
+| `Space` | Tick a checkbox or open the choices in a grid cell; select the row in registers |
+| `+ - * / in an amount` | Work the amount out; the exact result shows under the cell before you leave it |
 
 ## Date fields
 

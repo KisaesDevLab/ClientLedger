@@ -313,6 +313,23 @@ pub fn find(id: &str) -> Option<&'static Command> {
     COMMANDS.iter().find(|c| c.id.as_str() == id)
 }
 
+/// Developer-only commands (P10 plan §2.12, S8). They are not in
+/// [`COMMANDS`], so no menu, keymap, palette or `KEYBOARD.md` sees them;
+/// the shell looks here only when it runs with `--demo`.
+pub const DEV_COMMANDS: &[Command] = &[built(
+    "dev.grid_demo",
+    "Grid Demo (developer)",
+    None,
+    0,
+    None,
+)];
+
+/// Look a developer-only command up by id.
+#[must_use]
+pub fn find_dev(id: &str) -> Option<&'static Command> {
+    DEV_COMMANDS.iter().find(|c| c.id.as_str() == id)
+}
+
 /// Commands in a menu, in table order.
 pub fn in_menu(menu: Menu) -> impl Iterator<Item = &'static Command> {
     COMMANDS.iter().filter(move |c| c.menu == Some(menu))
@@ -321,6 +338,19 @@ pub fn in_menu(menu: Menu) -> impl Iterator<Item = &'static Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dev_commands_stay_out_of_the_shipped_table() {
+        for c in DEV_COMMANDS {
+            assert!(c.id.as_str().starts_with("dev."), "{}", c.id);
+            assert!(find(c.id.as_str()).is_none(), "{} is shipped", c.id);
+            assert!(c.shortcut.is_none() && c.menu.is_none(), "{}", c.id);
+            assert!(c.opens && c.arrives.is_none());
+        }
+        assert!(COMMANDS.iter().all(|c| !c.id.as_str().starts_with("dev.")));
+        assert_eq!(find_dev("dev.grid_demo").map(|c| c.opens), Some(true));
+        assert!(find_dev("nav.home").is_none());
+    }
 
     #[test]
     fn find_and_menu_listing() {

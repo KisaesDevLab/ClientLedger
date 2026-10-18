@@ -19,7 +19,7 @@ use cl_model::commands;
 #[must_use]
 pub fn t(key: &str) -> String {
     if let Some(id) = key.strip_prefix("cmd.")
-        && let Some(c) = commands::find(id)
+        && let Some(c) = commands::find(id).or_else(|| commands::find_dev(id))
     {
         return c.label.to_string();
     }
@@ -42,9 +42,11 @@ pub fn t_with(key: &str, args: &[(&str, &str)]) -> String {
 /// True when `key` has an entry (used by tests and by error presentation).
 #[must_use]
 pub fn has(key: &str) -> bool {
-    key.strip_prefix("cmd.")
-        .is_some_and(|id| commands::find(id).is_some())
-        || catalog().contains_key(key)
+    key.strip_prefix("cmd.").is_some_and(|id| {
+        commands::find(id)
+            .or_else(|| commands::find_dev(id))
+            .is_some()
+    }) || catalog().contains_key(key)
 }
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -727,6 +729,49 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("grid.text.too_long", "That text is too long for this field."),
     ("grid.row.gone", "That line is no longer here."),
     ("grid.cell.changed_underneath", "This cell changed while you were typing. Press Esc to see the new value."),
+    // Grid demo (developer-only, --demo)
+    ("dev.grid_demo.title", "Grid demo"),
+    ("dev.grid_demo.synthetic", "A developer screen with made-up data. Nothing here is saved to a company."),
+    ("dev.grid_demo.show_register", "Show 200,000 rows"),
+    ("dev.grid_demo.show_bills", "Pay bills example"),
+    ("dev.grid_demo.show_lines", "Show the expense lines"),
+    ("dev.grid_demo.one_line", "One line"),
+    ("dev.grid_demo.check_amount", "Check amount"),
+    ("dev.grid_demo.lines_label", "Expense lines"),
+    ("dev.grid_demo.register_label", "Register"),
+    ("dev.grid_demo.bills_label", "Bills to pay"),
+    ("dev.grid_demo.lines_total", "Lines total {total}"),
+    ("dev.grid_demo.too_large", "too large to add up"),
+    ("dev.grid_demo.matches", "\u{2713} matches the check amount"),
+    ("dev.grid_demo.does_not_match", "does not match the check amount yet"),
+    ("dev.grid_demo.save", "Save"),
+    ("dev.grid_demo.save_new", "Save & New"),
+    ("dev.grid_demo.saved_count", "Saved this session: {n}"),
+    ("dev.grid_demo.bills_selected", "{n} selected"),
+    ("dev.grid_demo.bad_value", "That value does not fit this column."),
+    ("dev.grid_demo.need_account", "Pick an account for this line."),
+    ("dev.grid_demo.billable_needs_job", "A billable line needs a Client:Job."),
+    ("dev.grid_demo.not_balanced", "The lines total does not match the check amount."),
+    ("dev.grid_demo.not_balanced.fix", "Change a line or the check amount so they match."),
+    ("dev.grid_demo.col.account", "Account"),
+    ("dev.grid_demo.col.amount", "Amount"),
+    ("dev.grid_demo.col.memo", "Memo"),
+    ("dev.grid_demo.col.service_date", "Service date"),
+    ("dev.grid_demo.col.job", "Client:Job"),
+    ("dev.grid_demo.col.billable", "Billable"),
+    ("dev.grid_demo.col.tags", "Tags"),
+    ("dev.grid_demo.col.date", "Date"),
+    ("dev.grid_demo.col.number", "Number"),
+    ("dev.grid_demo.col.type", "Type"),
+    ("dev.grid_demo.col.payee", "Payee"),
+    ("dev.grid_demo.col.payment", "Payment"),
+    ("dev.grid_demo.col.mark", "\u{2713}"),
+    ("dev.grid_demo.col.deposit", "Deposit"),
+    ("dev.grid_demo.col.select", "Pay"),
+    ("dev.grid_demo.col.vendor", "Vendor"),
+    ("dev.grid_demo.col.due", "Due"),
+    ("dev.grid_demo.col.amount_due", "Amount due"),
+    ("dev.grid_demo.col.to_pay", "Amount to pay"),
 ];
 
 #[cfg(test)]

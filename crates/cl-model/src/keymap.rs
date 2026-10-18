@@ -275,6 +275,15 @@ pub const FIXED_KEYS: &[(&str, &str)] = &[
         "Esc",
         "Revert the field, then the form, then close (asks first if there are unsaved changes)",
     ),
+    ("Ctrl+Home / Ctrl+End", "First / last row in grids"),
+    (
+        "Space",
+        "Tick a checkbox or open the choices in a grid cell; select the row in registers",
+    ),
+    (
+        "+ - * / in an amount",
+        "Work the amount out; the exact result shows under the cell before you leave it",
+    ),
 ];
 
 /// Date field keys (DESIGN.md "Date fields").

@@ -171,6 +171,8 @@ pub struct Shell {
     widths: crate::grid_env::WidthsHandle,
     /// The close prompt whose Save button already got focus.
     prompt_focused: Option<crate::windows::Prompt>,
+    /// Running with `--demo`: developer-only commands and screens exist.
+    demo: bool,
 }
 
 impl Shell {
@@ -211,6 +213,7 @@ impl Shell {
         let mut shell = Shell {
             widths,
             prompt_focused: None,
+            demo: options.demo,
             prefs,
             store: options.store,
             company_key: if options.company_key.is_empty() {
@@ -244,6 +247,7 @@ impl Shell {
             return_after_prompt: None,
             close_company_after_prompt: false,
         };
+        shell.palette.include_dev = options.demo;
         if options.demo {
             shell.load_demo();
         } else if shell.company_link.is_some() {
@@ -277,6 +281,7 @@ impl Shell {
             self.open_tenant.clone(),
             self.today,
             self.prefs,
+            self.demo,
         )
     }
 
@@ -497,15 +502,16 @@ impl Shell {
             .store
             .as_ref()
             .and_then(|s| s.load_layout(&self.company_key));
-        let (link, open, today, prefs) = (
+        let (link, open, today, prefs, demo) = (
             self.company_link.clone(),
             self.open_tenant.clone(),
             self.today,
             self.prefs,
+            self.demo,
         );
         let restored = layout.is_some_and(|l| {
             self.windows.restore(&l, &|k| {
-                make_any(k, link.as_ref(), open.clone(), today, prefs)
+                make_any(k, link.as_ref(), open.clone(), today, prefs, demo)
             });
             !self.windows.is_empty()
         });
@@ -521,15 +527,16 @@ impl Shell {
         self.company_key = key.to_string();
         self.company = banner;
         let layout = self.store.as_ref().and_then(|s| s.load_layout(key));
-        let (link, open, today, prefs) = (
+        let (link, open, today, prefs, demo) = (
             self.company_link.clone(),
             self.open_tenant.clone(),
             self.today,
             self.prefs,
+            self.demo,
         );
         let restored = layout.is_some_and(|l| {
             self.windows.restore(&l, &|k| {
-                make_any(k, link.as_ref(), open.clone(), today, prefs)
+                make_any(k, link.as_ref(), open.clone(), today, prefs, demo)
             })
         });
         if !restored && self.windows.is_empty() {
@@ -626,6 +633,19 @@ impl Shell {
         ctx.request_repaint_after(Duration::from_secs(4));
     }
 
+    /// The command with this id: the shipped table, plus the
+    /// developer-only commands when the shell runs with `--demo` (S8).
+    #[must_use]
+    pub fn find_command(&self, id: &str) -> Option<&'static Command> {
+        commands::find(id).or_else(|| {
+            if self.demo {
+                commands::find_dev(id)
+            } else {
+                None
+            }
+        })
+    }
+
     /// Run a command now (outside a frame; tests and start-up).
     pub fn dispatch_now(&mut self, id: CommandId) {
         self.run(None, id);
@@ -649,7 +669,7 @@ impl Shell {
     /// to that window (a popped-out window's own keys, S2), the rest are
     /// app-wide.
     fn run_for(&mut self, ctx: Option<&Context>, id: CommandId, target: Option<WindowId>) {
-        let Some(cmd) = commands::find(id.as_str()) else {
+        let Some(cmd) = self.find_command(id.as_str()) else {
             return;
         };
         if cmd.opens {
@@ -1137,14 +1157,24 @@ impl Shell {
     }
 }
 
-/// A screen for `kind` without borrowing the shell (layout restore).
+/// A screen for `kind` without borrowing the shell (layout restore). The
+/// developer-only screens are built only with `--demo` (`demo`); every
+/// path that opens a window (commands, company events, layout restore)
+/// comes through here.
 fn make_any(
     kind: CommandId,
     link: Option<&Arc<CompanyLink>>,
     open: Option<(cl_core::ids::TenantId, String)>,
     today: CalendarDate,
     prefs: UiPrefs,
+    demo: bool,
 ) -> Box<dyn Screen> {
+    if kind.as_str().starts_with("dev.") {
+        if demo && let Some(s) = crate::screens::dev::make(kind, today, link) {
+            return s;
+        }
+        return Box::new(Placeholder::for_command(kind));
+    }
     if let Some(link) = link {
         if let Some(s) = crate::screens::company::make(kind, link, open.clone(), today) {
             return s;

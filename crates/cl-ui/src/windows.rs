@@ -459,9 +459,11 @@ impl Windows {
     pub fn snapshot(&self) -> SessionLayout {
         SessionLayout {
             version: SessionLayout::VERSION,
+            // Developer-only windows are never remembered (S8).
             tabs: self
                 .items
                 .iter()
+                .filter(|w| !w.kind.as_str().starts_with("dev."))
                 .map(|w| SavedTab {
                     kind: w.kind.as_str().to_string(),
                     popped_out: w.popped_out,
@@ -469,7 +471,12 @@ impl Windows {
                 .collect(),
             active: self
                 .active
-                .and_then(|id| self.index_of(id))
+                .and_then(|id| {
+                    self.items
+                        .iter()
+                        .filter(|w| !w.kind.as_str().starts_with("dev."))
+                        .position(|w| w.id == id)
+                })
                 .unwrap_or_default(),
         }
     }

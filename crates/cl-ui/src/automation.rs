@@ -22,7 +22,6 @@ use cl_automation::actions::{
 use cl_automation::inspect::{Bounds, Node, Snapshot, WindowInfo};
 use cl_automation::screenshot::{encode_png, write_png};
 use cl_automation::{ControlServer, ErrorCode, Pending, Response};
-use cl_model::commands;
 use eframe::egui::{
     self, ColorImage, Context, Event, FullOutput, Key, Modifiers, PointerButton, Pos2, RawInput,
     ViewportCommand, accesskit,
@@ -644,7 +643,7 @@ impl Bridge {
     }
 
     fn command(shell: &mut Shell, id: &str, bridge: &Bridge) -> Started {
-        let Some(cmd) = commands::find(id) else {
+        let Some(cmd) = shell.find_command(id) else {
             return fail(ErrorCode::NotFound, format!("no command `{id}`"));
         };
         shell.queue(cmd.id);
