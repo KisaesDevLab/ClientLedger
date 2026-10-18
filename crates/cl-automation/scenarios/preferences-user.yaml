@@ -75,10 +75,14 @@ steps:
   - assert_exists: {role: label, label_contains: Books are closed through 09/30/2026}
   - screenshot: accounting
   - click: {role: button, label: Checks and forms}
-  - assert_exists: {role: label, label_contains: arrive with Write Check}
+  - assert_exists: {role: label, label_contains: come with Write Check}
   - click: {role: button, label: Sales tax}
   - assert_exists: {role: check_box, label: This company charges sales tax}
   - assert_exists: {role: text_input, label: Default rate (%)}
+  - assert_disabled: {role: text_input, label: Default rate (%)}
+  - click: {role: check_box, label: This company charges sales tax}
+  - assert_enabled: {role: text_input, label: Default rate (%)}
+  - click: {role: check_box, label: This company charges sales tax}
   - screenshot: sales-tax
   - click: {role: button, label: Inventory}
   - assert_exists: {role: check_box, label: This company tracks inventory}

@@ -13,7 +13,17 @@ use serde_json::{Value, json};
 use super::ai::SecretsSaved;
 use super::{Edits, SaveBlock};
 use crate::i18n::t;
-use crate::screens::company::form;
+use crate::screens::company::form::{self, SecretText};
+
+/// The wire name of a local security choice.
+#[must_use]
+pub fn security_wire(s: SmtpSecurity) -> cl_api::SmtpSecurityWire {
+    match s {
+        SmtpSecurity::StartTls => cl_api::SmtpSecurityWire::Starttls,
+        SmtpSecurity::Tls => cl_api::SmtpSecurityWire::Tls,
+        SmtpSecurity::None => cl_api::SmtpSecurityWire::None,
+    }
+}
 use crate::theme::Tokens;
 
 /// What the Email panel edits.
@@ -21,8 +31,8 @@ use crate::theme::Tokens;
 pub struct EmailEdits {
     /// The non-secret fields.
     pub form: SmtpForm,
-    /// A password typed this session (cleared after it is saved).
-    pub password_input: String,
+    /// A password typed this session (zeroized; cleared after it is saved).
+    pub password_input: SecretText,
     /// Where the test message goes (optional).
     pub test_email: String,
 }
@@ -86,7 +96,7 @@ impl EmailEdits {
         if self.password_input.is_empty() {
             return Ok(());
         }
-        store.set(SMTP_PASSWORD, &Secret::new(self.password_input.clone()))?;
+        store.set(SMTP_PASSWORD, &Secret::new(self.password_input.trimmed()))?;
         saved.smtp_password = true;
         Ok(())
     }
@@ -125,7 +135,7 @@ impl EmailEdits {
         let password = if self.password_input.is_empty() {
             store.get(SMTP_PASSWORD).ok().flatten()
         } else {
-            Some(Secret::new(self.password_input.clone()))
+            Some(Secret::new(self.password_input.trimmed()))
         };
         Some(SmtpTest {
             host: self.form.host.trim().to_string(),
@@ -149,17 +159,13 @@ impl EmailEdits {
         let password = if self.password_input.is_empty() {
             store.get(SMTP_PASSWORD).ok().flatten()
         } else {
-            Some(Secret::new(self.password_input.clone()))
+            Some(Secret::new(self.password_input.trimmed()))
         };
         Some(cl_api::SmtpSessionSecret {
             password,
             host: self.form.host.trim().to_string(),
             port: self.form.port_number()?,
-            security: match self.form.security {
-                SmtpSecurity::StartTls => cl_api::SmtpSecurityWire::Starttls,
-                SmtpSecurity::Tls => cl_api::SmtpSecurityWire::Tls,
-                SmtpSecurity::None => cl_api::SmtpSecurityWire::None,
-            },
+            security: security_wire(self.form.security),
         })
     }
 
@@ -206,8 +212,14 @@ pub fn panel(
         ui.horizontal_wrapped(|ui| {
             ui.add(egui::Label::new(t("prefs.email.security")).selectable(false));
             for s in SmtpSecurity::ALL {
+                let tip = match s {
+                    SmtpSecurity::StartTls => "prefs.email.starttls_tip",
+                    SmtpSecurity::Tls => "prefs.email.tls_tip",
+                    SmtpSecurity::None => "prefs.email.plain_tip",
+                };
                 if ui
                     .radio_value(&mut e.form.security, s, t(s.label_key()))
+                    .on_hover_text(t(tip))
                     .clicked()
                     && e.form
                         .port_number()
@@ -219,7 +231,7 @@ pub fn panel(
         });
         form::field(ui, &t("prefs.email.user"), &mut e.form.user);
         // The SMTP password is a secret: masked on screen and in the tree.
-        form::password(ui, &t("prefs.email.password"), &mut e.password_input);
+        form::password_secret(ui, &t("prefs.email.password"), &mut e.password_input);
         ui.horizontal(|ui| {
             let status = if saved.smtp_password {
                 t("prefs.email.password_saved")
@@ -269,7 +281,7 @@ mod tests {
                 from: "books@example.test".into(),
                 from_name: String::new(),
             },
-            password_input: "smtp-canary-9".into(),
+            password_input: SecretText::from("smtp-canary-9"),
             test_email: String::new(),
         };
         assert_eq!(e.validate(), Ok(()));

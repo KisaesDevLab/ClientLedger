@@ -65,12 +65,25 @@ pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) {
                     ui.label(small(ai.clone()));
                 }
                 if let Some(toast) = shell.toast_text() {
-                    ui.label(
-                        RichText::new(toast)
-                            .size(12.0)
-                            .color(tokens.accent)
-                            .strong(),
-                    );
+                    // Leave room for the shortcut chips on the right so the
+                    // text never runs under them.
+                    let room = if narrow {
+                        ui.available_width()
+                    } else {
+                        (ui.available_width() - 460.0).max(0.0)
+                    };
+                    ui.scope(|ui| {
+                        ui.set_max_width(room);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(toast)
+                                    .size(12.0)
+                                    .color(tokens.accent)
+                                    .strong(),
+                            )
+                            .truncate(),
+                        );
+                    });
                 }
                 if !narrow {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

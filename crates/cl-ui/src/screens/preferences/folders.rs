@@ -9,6 +9,16 @@ use crate::i18n::t;
 use crate::screens::company::form;
 use crate::theme::Tokens;
 
+/// i18n key for a refused folder.
+#[must_use]
+pub fn folder_error_key(e: cl_settings::FolderError) -> &'static str {
+    match e {
+        cl_settings::FolderError::NotAbsolute => "prefs.inbox.err_absolute",
+        cl_settings::FolderError::Network => "prefs.inbox.err_network",
+        cl_settings::FolderError::Missing => "prefs.inbox.err_missing",
+    }
+}
+
 /// Draws the Receipt inbox panel.
 pub fn receipt_inbox(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
     form::heading(ui, tokens, &t("prefs.cat.inbox"));
@@ -26,11 +36,20 @@ pub fn receipt_inbox(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
             .map(|p| p.display().to_string())
             .unwrap_or_default();
         ui.add_enabled_ui(on, |ui| {
-            if form::field(ui, &t("prefs.inbox.folder"), &mut text).changed() {
+            if form::field_wide(ui, &t("prefs.inbox.folder"), &mut text).changed() {
                 edits.company.receipt_inbox_dir = Some(std::path::PathBuf::from(text.trim()));
             }
         });
         form::hint(ui, tokens, &t("prefs.inbox.folder_hint"));
+        if let Some(p) = edits
+            .company
+            .receipt_inbox_dir
+            .as_ref()
+            .filter(|p| !p.as_os_str().is_empty())
+            && let Err(e) = cl_settings::check_inbox_folder(p)
+        {
+            form::hint(ui, tokens, &t(folder_error_key(e)));
+        }
         ui.add(egui::Label::new(t("prefs.inbox.later")).selectable(false));
     });
 }

@@ -137,10 +137,21 @@ pub fn preferences_loaded() -> crate::screens::preferences::Loaded {
         "byProvider": {}, "byJobType": {},
     }))
     .unwrap_or_default();
+    let consent: Option<cl_api::CompanyConsent> = serde_json::from_value(serde_json::json!({
+        "companyId": "d0000000-0000-4000-8000-0000000000c1",
+        "companyName": "Ozark Ridge Landscaping LLC",
+        "systemVersion": 1,
+        "acceptedVersion": 1,
+        "acceptedAt": "2026-10-01T08:05:00.000Z",
+        "aiEnabled": true,
+        "enabledTasks": {"categorization": true, "receipt_ocr": true, "report_summary": true},
+        "isStale": false,
+    }))
+    .ok();
     crate::screens::preferences::Loaded {
         settings,
         ai: Some(ai),
-        consent: None,
+        consent,
         smtp: None,
         usage: Some(usage),
         done: true,

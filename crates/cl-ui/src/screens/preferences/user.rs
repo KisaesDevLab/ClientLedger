@@ -111,7 +111,7 @@ pub fn backups(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
     form::hint(ui, tokens, &t("prefs.backups.intro"));
     ui.add_space(8.0);
     form::card(ui, tokens, |ui| {
-        form::field(ui, &t("prefs.backups.folder"), &mut edits.backup_folder);
+        form::field_wide(ui, &t("prefs.backups.folder"), &mut edits.backup_folder);
         form::hint(ui, tokens, &t("prefs.backups.folder_hint"));
         ui.checkbox(&mut edits.backup_on_close, t("prefs.user.backup_on_close"));
         form::hint(ui, tokens, &t("prefs.backups.schedule_later"));

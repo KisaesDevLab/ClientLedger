@@ -41,18 +41,40 @@ steps:
   - assert_exists: {role: check_box, label: Ask a question in Reports}
   - assert_exists: {role: check_box, label: Suggest rules}
   - assert_exists: {role: label, label: Online AI usage}
-  - assert_exists: {role: text_input, label: Monthly cap (tokens)}
+  - assert_exists: {role: text_input, label: Monthly cap}
   - assert_exists: {role: button, label: Cancel}
   - assert_exists: {role: button, label: Save}
   - assert_state: {key: screen.ai.enabled, equals: true}
   - assert_state: {key: screen.ai.provider, equals: ollama}
+  - assert_state: {key: screen.ai.consent_agreed, equals: true}
   - assert_state: {key: screen.dirty, equals: false}
   - assert_no_clipping: {}
   - screenshot: ai
 
+  # --- Keyboard: Shift+Tab from the address field lands on the last
+  # card, Left moves focus between cards, Space selects the focused one
+  # (ui-verifier High) ------------------------------------------------
+  - click: {role: text_input, label: Ollama address}
+  - key: Shift+Tab
+  - key: ArrowLeft
+  - key: Space
+  - assert_state: {key: screen.ai.provider, equals: anthropic}
+  - assert_state: {key: screen.dirty, equals: true}
+  # Esc reverts the keyboard choice (the window stays: it was dirty).
+  - key: Escape
+  - assert_state: {key: screen.ai.provider, equals: ollama}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_exists: {role: tab, label: Preferences}
+
+  # --- 200% zoom: the footer stays reachable ---------------------------
+  - set_zoom: {percent: 200}
+  - assert_exists: {role: button, label: Save}
+  - assert_exists: {role: button, label: Cancel}
+  - screenshot: ai-zoom-200
+  - set_zoom: {percent: 100}
+
   # --- Ollama test (demo answers at once) ---------------------------------
   - click: {role: button, label: Test}
-  - assert_state: {key: screen.status, equals: true}
   - assert_exists: {role: label, label_contains: Connected}
 
   # --- Cap and switches (still Ollama: the layout fits without scrolling) --
@@ -61,7 +83,7 @@ steps:
   - click: {role: check_box, label: Suggest rules}
   - assert_state: {key: screen.dirty, equals: true}
   - click: {role: check_box, label: Suggest rules}
-  - click: {role: text_input, label: Monthly cap (tokens)}
+  - click: {role: text_input, label: Monthly cap}
   - key: Ctrl+A
   - type: {text: "250000"}
   - assert_state: {key: screen.ai.cap, equals: 250000}
@@ -76,9 +98,10 @@ steps:
   - assert_state: {key: screen.ai.waiting_engine, equals: true}
   - assert_exists: {role: password_input, label: API key}
   - assert_exists: {role: label, label_contains: No key saved yet}
-  - assert_exists: {role: label, label_contains: Waiting for engine support}
+  - assert_exists: {role: label, label_contains: "not available yet: your key"}
   - assert_exists: {role: label, label: Before anything goes online}
   - assert_exists: {role: check_box, label_contains: I agree}
+  - assert_state: {key: screen.ai.consent_agreed, equals: false}
   - click: {role: button, label: Save}
   - assert_state: {key: screen.blocked, equals: AiNeedsKey}
   - click: {role: password_input, label: API key}
@@ -103,9 +126,10 @@ steps:
   - click: {role: button, label: Remove key}
   - assert_state: {key: screen.ai.key_saved, equals: false}
 
-  # --- Minimum window: the body scrolls by design (shell ScrollArea) ------
+  # --- Minimum window: the panel scrolls, the footer stays ---------------
   - resize: {width: 960, height: 640}
   - assert_exists: {role: button, label: Save}
+  - assert_exists: {role: button, label: Cancel}
   - screenshot: ai-minimum
   - resize: {width: 1440, height: 940}
 

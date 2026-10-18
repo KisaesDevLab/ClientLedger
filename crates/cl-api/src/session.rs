@@ -1101,6 +1101,45 @@ impl AuthHook for PinnedAuth<'_> {
     }
 }
 
+/// A company-scoped session over a stub engine at `port` with fixed
+/// tokens (test builds only): for tests in other crates that count what
+/// the client sends.
+///
+/// # Panics
+/// Never in practice: the fixed ids and the default client config are valid.
+#[cfg(feature = "test-support")]
+#[must_use]
+pub fn stub_session(port: u16) -> Session {
+    let src: Arc<dyn EndpointSource> = Arc::new(crate::endpoint::FixedEndpoint::new(
+        port,
+        Secret::new("stub-launch-token-0123456789abcdef"),
+        1,
+    ));
+    let client = Client::new(src, crate::client::ClientConfig::default()).expect("client");
+    Session {
+        inner: Arc::new(SessionInner {
+            client,
+            user_id: None,
+            state: Mutex::new(AuthState {
+                access: Secret::new("access"),
+                access_exp: None,
+                refresh: Some(Secret::new("r".repeat(32))),
+                auth_epoch: 0,
+                scope: Scope::Company {
+                    tenant_id: TenantId::parse("1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
+                    company_id: CompanyId::parse("0b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01")
+                        .expect("id"),
+                },
+                scope_epoch: 0,
+                ended: false,
+            }),
+            rotate: tokio::sync::Mutex::new(()),
+            created: Mutex::new(VecDeque::new()),
+        }),
+        pin: None,
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

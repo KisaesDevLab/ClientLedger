@@ -250,6 +250,12 @@ pub enum SaveBlock {
     AiNeedsConsent,
     /// The tax rate is not a rate.
     BadRate,
+    /// The Ollama address is not local.
+    OllamaUrl(cl_settings::OllamaUrlError),
+    /// The receipt-inbox folder is not usable.
+    Folder(cl_settings::FolderError),
+    /// The engine's settings have not been read yet.
+    NotLoaded,
 }
 
 impl SaveBlock {
@@ -262,16 +268,23 @@ impl SaveBlock {
             SaveBlock::AiNeedsKey => "prefs.ai.needs_key",
             SaveBlock::AiNeedsConsent => "prefs.ai.needs_consent",
             SaveBlock::BadRate => "prefs.err.rate",
+            SaveBlock::OllamaUrl(_) => "prefs.ai.err_ollama_url",
+            SaveBlock::Folder(e) => folders::folder_error_key(*e),
+            SaveBlock::NotLoaded => "prefs.err.not_loaded",
         }
     }
 }
 
 /// What a save did on the engine side.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SaveOutcome {
     /// Cloud keys stayed in the keychain because the engine has no
     /// session-secrets support yet.
     pub ai_waiting_engine: bool,
+    /// The monthly cap is reached: the online provider stays off.
+    pub cap_reached: bool,
+    /// The engine recorded the company's consent in this save.
+    pub consent: Option<ai::ConsentRecorded>,
 }
 
 /// The Preferences window.
@@ -286,7 +299,13 @@ pub struct PreferencesScreen {
     loaded: Loaded,
     load_task: Option<Task<Result<Loaded, CompanyError>>>,
     save_task: Option<Task<Result<SaveOutcome, CompanyError>>>,
+    /// The edits a running save will commit when the engine answers.
+    pending: Option<Edits>,
     test_task: Option<Task<Result<String, CompanyError>>>,
+    /// Last provider-test result, shown next to the Test button.
+    ai_test_status: Option<String>,
+    /// A session-secret delete running after "Remove key".
+    forget_task: Option<Task<Result<(), CompanyError>>>,
     /// Which cloud keys and the SMTP password are in the keychain.
     pub(crate) secrets_saved: ai::SecretsSaved,
     block: Option<SaveBlock>,
@@ -306,15 +325,12 @@ impl PreferencesScreen {
     ) -> PreferencesScreen {
         let group = link.group().and_then(Result::ok);
         let secrets_saved = ai::SecretsSaved::read(link.secrets().as_ref());
+        let list = link.store().load().unwrap_or_default();
         let (company_prefs, flags) = tenant
             .as_ref()
-            .and_then(|(id, _)| {
-                let list = link.store().load().ok()?;
-                let rec = list.get(*id)?;
-                Some((rec.prefs.clone(), rec.flags))
-            })
+            .and_then(|(id, _)| list.get(*id))
+            .map(|rec| (rec.prefs.clone(), rec.flags))
             .unwrap_or_default();
-        let list = link.store().load().unwrap_or_default();
         let edits = Edits {
             past_days: user.date_warnings.past_days.to_string(),
             future_days: user.date_warnings.future_days.to_string(),
@@ -344,7 +360,10 @@ impl PreferencesScreen {
             loaded: Loaded::default(),
             load_task: None,
             save_task: None,
+            pending: None,
             test_task: None,
+            ai_test_status: None,
+            forget_task: None,
             secrets_saved,
             block: None,
             error: None,
@@ -388,9 +407,11 @@ impl PreferencesScreen {
 
     fn apply_loaded(&mut self, loaded: Loaded) {
         self.edits.accounting = company::AccountingEdits::from_settings(loaded.settings.as_ref());
-        self.edits
-            .ai
-            .apply_engine(loaded.ai.as_ref(), loaded.consent.as_ref());
+        self.edits.ai.apply_engine(
+            loaded.ai.as_ref(),
+            loaded.consent.as_ref(),
+            self.edits.company.ai_consent.as_ref(),
+        );
         self.edits
             .email
             .apply_engine(loaded.smtp.as_ref(), self.edits.company.smtp_security);
@@ -449,6 +470,14 @@ impl PreferencesScreen {
         e.company.bills_due_days = bills;
         e.company.normalize();
         e.user.normalize();
+        if let Some(p) = e
+            .company
+            .receipt_inbox_dir
+            .as_ref()
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            cl_settings::check_inbox_folder(p).map_err(SaveBlock::Folder)?;
+        }
         e.accounting.validate()?;
         e.ai.validate(&self.secrets_saved)?;
         e.email.validate()?;
@@ -461,6 +490,10 @@ impl PreferencesScreen {
         self.block = None;
         self.error = None;
         self.status = None;
+        if !self.loaded.done || self.save_task.is_some() {
+            self.block = Some(SaveBlock::NotLoaded);
+            return false;
+        }
         let edits = match self.validate() {
             Ok(e) => e,
             Err(b) => {
@@ -521,6 +554,7 @@ impl PreferencesScreen {
             self.loaded.ai.as_ref(),
             self.loaded.consent.as_ref(),
             &self.link.capabilities(),
+            company_prefs.ai.check(&ai::this_month()),
         );
         let settings = edits.accounting.update_for(self.loaded.settings.as_ref());
         let smtp = edits.email.update_for(self.loaded.smtp.as_ref());
@@ -529,21 +563,34 @@ impl PreferencesScreen {
         after.email.clear_typed();
         after.company = company_prefs;
         if self.link.is_demo() || self.tenant.is_none() {
+            // No engine: the consent is "recorded" with the version shown.
+            let consent = plan.accept_company_consent.then(|| ai::ConsentRecorded {
+                provider: plan.provider,
+                version: self
+                    .loaded
+                    .consent
+                    .as_ref()
+                    .and_then(|c| c.system_version)
+                    .unwrap_or(1),
+                at: Some(cl_settings::recent::now()),
+            });
             self.finish_save(
-                SaveOutcome {
+                &SaveOutcome {
                     ai_waiting_engine: plan.waiting_engine,
+                    cap_reached: plan.cap_reached,
+                    consent,
                 },
                 after,
             );
             return true;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
-            self.finish_save(SaveOutcome::default(), after);
+            self.finish_save(&SaveOutcome::default(), after);
             return true;
         };
         let secrets_for_engine = edits.ai.session_secrets(secrets.as_ref(), &edits.email);
-        self.committed = after;
-        self.edits = self.committed.clone();
+        // The edits stay dirty until the engine answers (S2).
+        self.pending = Some(after);
         self.save_task = spawn_lifecycle(&self.link, group, move || async move {
             if let Some(u) = settings {
                 session
@@ -561,10 +608,30 @@ impl PreferencesScreen {
         true
     }
 
-    fn finish_save(&mut self, outcome: SaveOutcome, after: Edits) {
+    fn finish_save(&mut self, outcome: &SaveOutcome, after: Edits) {
         self.committed = after;
         self.edits = self.committed.clone();
-        self.status = Some(if outcome.ai_waiting_engine {
+        // The consent note is written only once the engine recorded the
+        // accept, with the version it reports (S4).
+        if let Some(c) = &outcome.consent {
+            let note = cl_settings::AiConsentNote {
+                provider: c.provider,
+                disclosure_version: c.version,
+                accepted_at: c.at.or_else(|| Some(cl_settings::recent::now())),
+            };
+            self.committed.company.ai_consent = Some(note.clone());
+            self.edits.company.ai_consent = Some(note.clone());
+            if let Some((id, _)) = self.tenant {
+                let _ = self.link.store().update(|l| {
+                    if let Some(rec) = l.get_mut(id) {
+                        rec.prefs.ai_consent = Some(note);
+                    }
+                });
+            }
+        }
+        self.status = Some(if outcome.cap_reached {
+            t("prefs.saved_cap")
+        } else if outcome.ai_waiting_engine {
             t("prefs.saved_waiting")
         } else {
             t("prefs.saved")
@@ -604,12 +671,16 @@ impl PreferencesScreen {
             && let Some(r) = task.poll_result()
         {
             self.save_task = None;
-            match r {
-                Ok(o) => {
-                    let after = self.committed.clone();
-                    self.finish_save(o, after);
+            let after = self.pending.take();
+            match (r, after) {
+                (Ok(o), Some(after)) => self.finish_save(&o, after),
+                (Ok(_), None) => {}
+                (Err(e), _) => {
+                    // The edits stay dirty; the engine's view is re-read
+                    // so the next save starts from what it holds (S2).
+                    self.error = Some(e);
+                    self.start_load();
                 }
-                Err(e) => self.error = Some(e),
             }
         }
         if let Some(task) = self.test_task.as_mut()
@@ -617,8 +688,22 @@ impl PreferencesScreen {
         {
             self.test_task = None;
             match r {
-                Ok(text) => self.status = Some(text),
+                Ok(text) => {
+                    if self.category == Category::Ai {
+                        self.ai_test_status = Some(text);
+                    } else {
+                        self.status = Some(text);
+                    }
+                }
                 Err(e) => self.error = Some(e),
+            }
+        }
+        if let Some(task) = self.forget_task.as_mut()
+            && let Some(r) = task.poll_result()
+        {
+            self.forget_task = None;
+            if let Err(e) = r {
+                self.error = Some(e);
             }
         }
     }
@@ -687,6 +772,7 @@ impl PreferencesScreen {
                     &self.secrets_saved,
                     &caps,
                     self.test_task.is_some(),
+                    self.ai_test_status.as_deref(),
                 );
                 self.handle_ai_action(action);
             }
@@ -717,17 +803,52 @@ impl PreferencesScreen {
                         Err(e) => self.error = Some(e.into()),
                     }
                 }
+                // The engine forgets it for this session too (S3).
+                self.forget_slot(match provider {
+                    cl_settings::AiProvider::Anthropic => cl_api::SecretSlot::AiAnthropic,
+                    cl_settings::AiProvider::OpenAi => cl_api::SecretSlot::AiOpenai,
+                    cl_settings::AiProvider::Ollama => cl_api::SecretSlot::AiOllamaBaseUrl,
+                });
             }
             ai::PanelAction::Test => self.test_ai(),
         }
     }
 
+    /// Asks the engine to forget one session secret, when it holds them.
+    fn forget_slot(&mut self, slot: cl_api::SecretSlot) {
+        if !self
+            .link
+            .capabilities()
+            .has(cl_api::Capabilities::SESSION_SECRETS)
+        {
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        self.forget_task = spawn_lifecycle(&self.link, group, move || async move {
+            match session.delete_session_secret(slot).await {
+                Ok(()) | Err(cl_api::ApiError::NotFound { .. }) => Ok(()),
+                Err(e) => Err(e.into()),
+            }
+        })
+        .ok();
+    }
+
     fn test_ai(&mut self) {
         self.error = None;
-        self.status = None;
+        self.block = None;
+        self.ai_test_status = None;
         let provider = self.edits.ai.provider;
+        let update = match self.edits.ai.config_for_test() {
+            Ok(u) => u,
+            Err(b) => {
+                self.block = Some(b);
+                return;
+            }
+        };
         if self.link.is_demo() {
-            self.status = Some(
+            self.ai_test_status = Some(
                 if provider.is_cloud() && !self.secrets_saved.key(provider) {
                     t("prefs.ai.test_needs_key")
                 } else {
@@ -739,7 +860,6 @@ impl PreferencesScreen {
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
-        let update = self.edits.ai.config_for_test();
         self.test_task = spawn_lifecycle(&self.link, group, move || async move {
             if let Some(u) = update {
                 session
@@ -750,7 +870,13 @@ impl PreferencesScreen {
             Ok(if r.success {
                 t("prefs.ai.test_ok")
             } else {
-                t("prefs.ai.test_failed")
+                // The engine's reason, once scrubbed of anything personal.
+                match r.error.as_deref().map(crate::errors::scrub_line) {
+                    Some(reason) if !reason.is_empty() => {
+                        format!("{} ({reason})", t("prefs.ai.test_failed"))
+                    }
+                    _ => t("prefs.ai.test_failed"),
+                }
             })
         })
         .ok();
@@ -830,29 +956,43 @@ impl Screen for PreferencesScreen {
             });
         });
         ui.add_space(6.0);
-        // The shell scrolls the whole window body; the list and the panel
-        // sit side by side and grow with their content.
-        ui.horizontal_top(|ui| {
-            egui::Frame::new()
-                .fill(tokens.surface_subtle)
-                .corner_radius(egui::CornerRadius::same(6))
-                .inner_margin(egui::Margin::symmetric(8, 10))
-                .show(ui, |ui| {
+        // The list and the panel scroll inside the visible part of the
+        // window, so Cancel and Save stay in view at any size: the height
+        // is what is visible below this point minus the footer.
+        // The footer: separator, buttons, and one line of block/error/status
+        // text when there is one.
+        let lines = u8::from(self.block.is_some())
+            + u8::from(self.error.is_some())
+            + u8::from(self.status.is_some());
+        let footer_h = 66.0 + 24.0 * f32::from(lines);
+        let body_h = (ui.clip_rect().bottom() - ui.cursor().top() - footer_h).max(160.0);
+        egui::ScrollArea::vertical()
+            .id_salt("prefs-body")
+            .max_height(body_h)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.horizontal_top(|ui| {
+                    egui::Frame::new()
+                        .fill(tokens.surface_subtle)
+                        .corner_radius(egui::CornerRadius::same(6))
+                        .inner_margin(egui::Margin::symmetric(8, 10))
+                        .show(ui, |ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(190.0);
+                                self.nav(ui, &tokens);
+                            });
+                        });
+                    ui.add_space(12.0);
                     ui.vertical(|ui| {
-                        ui.set_width(190.0);
-                        self.nav(ui, &tokens);
+                        ui.set_width((ui.available_width() - 8.0).max(200.0));
+                        if !self.loaded.done {
+                            form::progress_line(ui, &tokens, &t("prefs.loading"));
+                        }
+                        self.panel(ui, &tokens);
                     });
                 });
-            ui.add_space(12.0);
-            ui.vertical(|ui| {
-                ui.set_width(ui.available_width().max(200.0));
-                if !self.loaded.done {
-                    form::progress_line(ui, &tokens, &t("prefs.loading"));
-                }
-                self.panel(ui, &tokens);
             });
-        });
-        ui.add_space(8.0);
+        ui.add_space(4.0);
         ui.separator();
         if let Some(b) = &self.block {
             form::hint(ui, &tokens, &t(b.message_key()));
@@ -867,8 +1007,15 @@ impl Screen for PreferencesScreen {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if self.save_task.is_some() {
                     form::progress_line(ui, &tokens, &t("prefs.saving"));
-                } else if primary_button(ui, &t("prefs.save")).clicked() {
-                    self.save();
+                } else {
+                    let can_save = self.loaded.done;
+                    if ui
+                        .add_enabled_ui(can_save, |ui| primary_button(ui, &t("prefs.save")))
+                        .inner
+                        .clicked()
+                    {
+                        self.save();
+                    }
                 }
                 if ui
                     .add(egui::Button::new(t("prefs.cancel")).min_size(Vec2::new(0.0, 44.0)))
@@ -1044,16 +1191,20 @@ mod tests {
     fn a_cloud_provider_without_a_key_or_agreement_cannot_be_saved_on() {
         let (_d, mut s) = demo_screen(true);
         s.edits_mut().ai.enabled = true;
-        s.edits_mut().ai.provider = AiProvider::Anthropic;
+        s.edits_mut().ai.choose(AiProvider::Anthropic);
         assert!(!Screen::save(&mut s));
         assert_eq!(s.block, Some(SaveBlock::AiNeedsKey));
-        s.edits_mut().ai.key_input = "sk-ant-canary-xyz".into();
+        s.edits_mut().ai.key_input =
+            crate::screens::company::form::SecretText::from("sk-ant-canary-xyz");
         assert!(!Screen::save(&mut s));
         assert_eq!(s.block, Some(SaveBlock::AiNeedsConsent));
         s.edits_mut().ai.consent_agreed = true;
         assert!(Screen::save(&mut s));
         assert!(s.secrets_saved.key(AiProvider::Anthropic));
-        assert_eq!(s.edits().ai.key_input, "", "the typed key is cleared");
+        assert!(
+            s.edits().ai.key_input.is_empty(),
+            "the typed key is cleared"
+        );
         let state = s.state().to_string();
         assert!(!state.contains("canary"), "{state}");
         assert_eq!(
@@ -1061,6 +1212,14 @@ mod tests {
             true,
             "no session-secrets capability in demo"
         );
+        let note = s
+            .edits()
+            .company
+            .ai_consent
+            .clone()
+            .expect("the consent note is written once the accept is recorded");
+        assert_eq!(note.provider, AiProvider::Anthropic);
+        assert!(note.accepted_at.is_some());
         let saved = s
             .link
             .secrets()
@@ -1077,8 +1236,10 @@ mod tests {
     fn every_category_renders_headlessly_without_leaking_a_secret() {
         let (_d, mut s) = demo_screen(true);
         s.edits_mut().ai.provider = AiProvider::Anthropic;
-        s.edits_mut().ai.key_input = "sk-ant-render-canary".into();
-        s.edits_mut().email.password_input = "smtp-render-canary".into();
+        s.edits_mut().ai.key_input =
+            crate::screens::company::form::SecretText::from("sk-ant-render-canary");
+        s.edits_mut().email.password_input =
+            crate::screens::company::form::SecretText::from("smtp-render-canary");
         for size in [egui::vec2(1440.0, 940.0), egui::vec2(960.0, 640.0)] {
             for c in Category::ALL {
                 s.select(c);

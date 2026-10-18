@@ -210,11 +210,13 @@ pub fn sales_tax(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
             &mut edits.flags.sales_tax_enabled,
             t("prefs.company.tax_on"),
         );
-        form::field(
-            ui,
-            &t("prefs.company.tax_rate"),
-            &mut edits.accounting.tax_percent,
-        );
+        ui.add_enabled_ui(edits.flags.sales_tax_enabled, |ui| {
+            form::field(
+                ui,
+                &t("prefs.company.tax_rate"),
+                &mut edits.accounting.tax_percent,
+            );
+        });
         form::hint(ui, tokens, &t("prefs.company.tax_hint"));
     });
 }

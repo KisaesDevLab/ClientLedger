@@ -56,6 +56,11 @@ steps:
   - click: {role: button, label: Test connection}
   - assert_state: {key: screen.status, equals: true}
   - assert_exists: {role: label, label_contains: Connected}
+  # Plain to a public server is refused before anything is sent.
+  - click: {role: radio_button, label: None (office server only)}
+  - click: {role: button, label: Test connection}
+  - assert_state: {key: screen.blocked, equals: "Smtp(PlainNotLocal)"}
+  - click: {role: radio_button, label: TLS (465)}
   - screenshot: email-saved
   - click: {role: button, label: Remove password}
   - assert_state: {key: screen.email.password_saved, equals: false}
