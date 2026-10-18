@@ -49,9 +49,25 @@ pub fn has(key: &str) -> bool {
     }) || catalog().contains_key(key)
 }
 
+mod contacts;
+mod csv;
+mod items;
+mod lists;
+mod tags;
+
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
     static CATALOG: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
-    CATALOG.get_or_init(|| ENGLISH.iter().copied().collect())
+    CATALOG.get_or_init(|| {
+        ENGLISH
+            .iter()
+            .chain(lists::ENGLISH)
+            .chain(contacts::ENGLISH)
+            .chain(items::ENGLISH)
+            .chain(tags::ENGLISH)
+            .chain(csv::ENGLISH)
+            .copied()
+            .collect()
+    })
 }
 
 /// The English catalog.
@@ -566,6 +582,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.company.closing_none", "No closing date is set."),
     ("prefs.company.closing_through", "Books are closed through {date}."),
     ("prefs.company.closing_hint", "Change the closing date and its password under Company > Set Closing Date."),
+    ("prefs.company.account_numbers", "Use account numbers"),
+    ("prefs.company.account_numbers_hint", "Shows each account's number before its name in the Chart of Accounts and in account lists, and sorts accounts by number."),
     ("prefs.company.checks_intro", "Check numbering, printing and form defaults."),
     ("prefs.company.checks_later", "Check options and default accounts are not available yet; they come with Write Check and printing."),
     ("prefs.company.finance_later", "Finance charge settings are not available yet; they come with Statements."),
@@ -892,7 +910,14 @@ mod tests {
     #[test]
     fn catalog_has_no_duplicate_keys_and_no_empty_text() {
         let mut seen = std::collections::HashSet::new();
-        for (k, v) in ENGLISH {
+        for (k, v) in ENGLISH
+            .iter()
+            .chain(lists::ENGLISH)
+            .chain(contacts::ENGLISH)
+            .chain(items::ENGLISH)
+            .chain(tags::ENGLISH)
+            .chain(csv::ENGLISH)
+        {
             assert!(seen.insert(*k), "duplicate key {k}");
             assert_ne!(*v, "", "{k}");
         }

@@ -1179,6 +1179,9 @@ fn make_any(
         if let Some(s) = crate::screens::company::make(kind, link, open.clone(), today) {
             return s;
         }
+        if let Some(s) = crate::screens::lists::make(kind, link, open.clone(), today) {
+            return s;
+        }
         if let Some(s) = crate::screens::preferences::make(kind, link, open, prefs) {
             return s;
         }

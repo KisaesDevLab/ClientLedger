@@ -1,0 +1,27 @@
+# Terms and Payment Methods (P11 step 6) against `clientledger --demo`: the
+# engine's fixed lists shown read-only, with the note that editing them
+# isn't available yet (U-43).
+name: terms
+description: Terms and payment methods as read-only fixed lists.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: lists.terms
+  - assert_exists: {role: tab, label: Terms}
+  - assert_state: {key: screen.screen, equals: terms}
+  - assert_state: {key: screen.rows, equals: 6}
+  - assert_state: {key: screen.editable, equals: false}
+  - assert_exists: {label: Net 30}
+  - assert_exists: {label_contains: "Due 30 days after"}
+  - assert_exists: {label_contains: "isn't available yet"}
+  - assert_no_clipping: {}
+  - screenshot: terms
+  - command: lists.payment_methods
+  - assert_exists: {role: tab, label: Payment Methods}
+  - assert_state: {key: screen.screen, equals: payment_methods}
+  - assert_state: {key: screen.rows, equals: 5}
+  - assert_exists: {label: ACH bank transfer}
+  - screenshot: payment-methods
+  - command: file.close_window
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label: Terms}

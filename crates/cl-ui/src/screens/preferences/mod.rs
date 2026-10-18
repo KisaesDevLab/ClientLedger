@@ -150,7 +150,7 @@ impl Category {
             Category::LookAndFeel => "theme dark light zoom colour color",
             Category::DatesNumbers => "date format negative parentheses warning",
             Category::Reminders => "bills due backup remind",
-            Category::Accounting => "basis cash accrual fiscal year closing date",
+            Category::Accounting => "basis cash accrual fiscal year closing date account numbers",
             Category::ChecksForms => "check number print form",
             Category::SalesTax => "tax rate",
             Category::Inventory => "stock items cost",
@@ -554,7 +554,10 @@ impl PreferencesScreen {
             let prefs = company_prefs.clone();
             if let Err(e) = self.link.store().update(|l| {
                 if let Some(rec) = l.get_mut(id) {
-                    rec.prefs = prefs;
+                    // Only the fields this screen edits: lists, the AI
+                    // usage count and the consent note write theirs while
+                    // Preferences is open (B3).
+                    write_owned_prefs(&prefs, &mut rec.prefs);
                     rec.flags = flags;
                 }
             }) {
@@ -1088,6 +1091,7 @@ impl Screen for PreferencesScreen {
             "status": self.status.is_some(),
             "ai": self.edits.ai.state(&self.secrets_saved, &self.link.capabilities()),
             "email": self.edits.email.state(&self.secrets_saved),
+            "account_numbers": self.edits.company.account_numbers,
             "user": {
                 "theme": format!("{:?}", self.edits.user.theme).to_ascii_lowercase(),
                 "zoom": self.edits.user.zoom_percent,
@@ -1120,6 +1124,18 @@ pub fn make(
         user,
         category,
     )))
+}
+
+/// Copies the company-local fields Preferences edits from `from` onto
+/// `to`, leaving every other field (sensitive accounts, required tag
+/// groups, the AI usage count, the consent note) as `to` has it.
+fn write_owned_prefs(from: &cl_settings::CompanyPrefs, to: &mut cl_settings::CompanyPrefs) {
+    to.receipt_inbox_dir.clone_from(&from.receipt_inbox_dir);
+    to.bills_due_days = from.bills_due_days;
+    to.ai.suggest_rules = from.ai.suggest_rules;
+    to.ai.monthly_token_cap = from.ai.monthly_token_cap;
+    to.smtp_security = from.smtp_security;
+    to.account_numbers = from.account_numbers;
 }
 
 #[cfg(test)]
@@ -1205,10 +1221,69 @@ mod tests {
             .store()
             .load()
             .expect("load")
-            .get(s.tenant.expect("tenant").0)
+            .get(s.tenant.as_ref().expect("tenant").0)
             .expect("rec")
             .clone();
         assert_eq!(rec.prefs.bills_due_days, 14);
+        // Q-79: the account-number preference is saved on the company.
+        assert!(rec.prefs.account_numbers);
+        assert_eq!(s.state()["account_numbers"], true);
+        s.edits_mut().company.account_numbers = false;
+        assert!(s.dirty());
+        assert!(Screen::save(&mut s));
+        let rec = s
+            .link
+            .store()
+            .load()
+            .expect("load")
+            .get(s.tenant.as_ref().expect("tenant").0)
+            .expect("rec")
+            .clone();
+        assert!(!rec.prefs.account_numbers);
+    }
+
+    /// B3: a list writes its company-local fields while Preferences is
+    /// open; saving Preferences afterwards keeps them.
+    #[test]
+    fn saving_keeps_what_lists_wrote_while_open() {
+        let (_d, mut s) = demo_screen(true);
+        let id = s.tenant.as_ref().expect("tenant").0;
+        let account =
+            cl_core::ids::AccountId::parse("a0000000-0000-4000-8000-000000000007").expect("id");
+        let group =
+            cl_core::ids::TagGroupId::parse("b0000000-0000-4000-8000-000000000003").expect("id");
+        s.link
+            .store()
+            .update(|l| {
+                if let Some(rec) = l.get_mut(id) {
+                    rec.prefs.sensitive_accounts.insert(account);
+                    rec.prefs
+                        .required_tag_groups
+                        .insert(group, std::iter::once("expense".to_string()).collect());
+                    rec.prefs.ai.usage.tokens = 42;
+                }
+            })
+            .expect("list write");
+        s.edits_mut().bills_due_days = "21".into();
+        assert!(Screen::save(&mut s));
+        let rec = s
+            .link
+            .store()
+            .load()
+            .expect("load")
+            .get(id)
+            .expect("rec")
+            .clone();
+        assert_eq!(rec.prefs.bills_due_days, 21, "Preferences saved");
+        assert!(
+            rec.prefs.sensitive_accounts.contains(&account),
+            "sensitive kept"
+        );
+        assert!(
+            rec.prefs.required_tag_groups.contains_key(&group),
+            "required kept"
+        );
+        assert_eq!(rec.prefs.ai.usage.tokens, 42, "usage kept");
     }
 
     #[test]

@@ -46,6 +46,10 @@ When two scopes use the same keys, the innermost one wins: a form beats a window
 | Keys | Command | Id |
 | --- | --- | --- |
 | `Ctrl+E` | Edit Transaction | `edit.edit_transaction` |
+| `Ctrl+N` | New List Entry | `list.new` |
+| `Ctrl+Shift+I` | Make Inactive or Active Again | `list.toggle_active` |
+| `Ctrl+Shift+H` | Include Inactive Entries | `list.show_inactive` |
+| `Ctrl+Shift+Q` | QuickReport | `list.quick_report` |
 | `Ctrl+Shift+O` | Move Window to Its Own Window | `window.pop_out` |
 
 ## In a form or grid
@@ -103,7 +107,7 @@ When two scopes use the same keys, the innermost one wins: a form beats a window
 Find these from the menus or with `Ctrl+K`.
 
 - **File:** New Company, Close Company, Back Up Company, Restore a Backup, Make Portable Copy, Export All Data, Full Database Backup (Utilities), Delete Company
-- **Lists:** Item List, Tags
+- **Lists:** Item List, Tags, Terms, Payment Methods, Import or Export a List
 - **Clients:** Clients & Jobs, Credit Memo or Refund, Statements
 - **Vendors:** Vendors
 - **Banking:** Import Bank File, Bank Feed

@@ -49,6 +49,42 @@ impl Capabilities {
     pub const SMTP_SESSION: &'static str = "smtp-session-v1";
     /// U-29 monthly token cap enforced by the engine (`monthlyTokenLimit`).
     pub const AI_TOKEN_CAP: &'static str = "ai-token-cap-v1";
+    /// U-31 account merge that moves the journal lines (`/accounts/merge`).
+    pub const ACCOUNT_MERGE: &'static str = "account-merge-v1";
+    /// U-32 checked sub-accounts (same type, no cycles) and an engine
+    /// subtree balance.
+    pub const ACCOUNT_TREE: &'static str = "account-tree-v1";
+    /// U-33 per-account sensitive flag stored and enforced by the engine.
+    pub const ACCOUNT_SENSITIVE: &'static str = "account-sensitive-v1";
+    /// U-34 masked bank/card number with an audited Admin reveal.
+    pub const ACCOUNT_MASKED_NUMBER: &'static str = "account-masked-number-v1";
+    /// U-35 jobs under a client (status, type, start and end dates).
+    pub const CONTACT_JOBS: &'static str = "contact-jobs-v1";
+    /// U-36 several ship-to addresses (one default) and contact people.
+    pub const CONTACT_ADDRESSES: &'static str = "contact-addresses-v1";
+    /// U-37 dated notes and to-dos on contacts and jobs.
+    pub const CONTACT_NOTES: &'static str = "contact-notes-v1";
+    /// U-38 the engine's open balance on each contact read.
+    pub const CONTACT_OPEN_BALANCE: &'static str = "contact-open-balance-v1";
+    /// U-44 "W-9 on file" recorded by the owner (a paper W-9).
+    pub const VENDOR_W9_ON_FILE: &'static str = "vendor-w9-on-file-v1";
+    /// U-39 item types (non-inventory, other charge, discount, subtotal),
+    /// the purchase side of two-sided items and a unit-of-measure label.
+    pub const ITEM_TYPES: &'static str = "item-types-v1";
+    /// U-40 price levels.
+    pub const PRICE_LEVELS: &'static str = "price-levels-v1";
+    /// U-41 tag merge that moves line tags and defaults, audited group
+    /// changes, one tag per group on every path, a working group reorder.
+    pub const TAG_MERGE: &'static str = "tag-merge-v1";
+    /// U-42 tag groups required for chosen account types.
+    pub const TAG_REQUIRED_GROUPS: &'static str = "tag-required-groups-v1";
+    /// U-43 editable payment terms (with discount terms) and payment
+    /// methods.
+    pub const TERMS_LISTS: &'static str = "terms-lists-v1";
+    /// U-45 several tags on one transaction line (one per group).
+    pub const LINE_TAGS: &'static str = "line-tags-v1";
+    /// U-46 the item CSV import resolves the income account by name.
+    pub const ITEMS_IMPORT: &'static str = "items-import-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

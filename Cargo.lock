@@ -876,6 +876,10 @@ dependencies = [
 [[package]]
 name = "cl-import"
 version = "0.0.0"
+dependencies = [
+ "proptest",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "cl-lan"
@@ -936,6 +940,7 @@ dependencies = [
  "cl-core",
  "cl-grid",
  "cl-host",
+ "cl-import",
  "cl-model",
  "cl-settings",
  "eframe",

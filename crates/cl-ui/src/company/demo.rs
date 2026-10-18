@@ -5,6 +5,9 @@ use cl_core::ids::TenantId;
 use cl_core::{CalendarDate, Timestamp};
 use cl_settings::{ACCENT_PALETTE, Accent};
 
+pub mod contacts;
+pub mod lists;
+
 /// One demo company card.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DemoCompany {
@@ -29,6 +32,34 @@ pub struct DemoState {
     pub companies: Vec<DemoCompany>,
     /// Which one is open.
     pub open: Option<TenantId>,
+    /// The open company's chart of accounts as the demo "engine" keeps it
+    /// (built on first use from the sample fixture, P11).
+    pub chart: Option<Vec<cl_api::Account>>,
+    /// Accounts marked sensitive in the demo (Q-157).
+    pub sensitive: std::collections::BTreeSet<cl_core::ids::AccountId>,
+    /// The open company's clients and vendors as the demo "engine" keeps
+    /// them (built on first use from the sample fixture, P11).
+    pub contacts: Option<Vec<cl_api::Contact>>,
+    /// Each demo contact's fixture name (history follows a rename).
+    pub contact_names: std::collections::BTreeMap<cl_core::ids::ContactId, String>,
+    /// Merges done in the demo: (merged away, kept).
+    pub merged: Vec<(cl_core::ids::ContactId, cl_core::ids::ContactId)>,
+    /// Vendors' 1099 profiles saved in the demo.
+    pub profiles: std::collections::BTreeMap<cl_core::ids::ContactId, cl_api::Vendor1099Profile>,
+    /// The open company's items as the demo "engine" keeps them (built on
+    /// first use, P11 step 4).
+    pub items: Option<Vec<cl_api::Item>>,
+    /// The open company's tags and tag groups (built on first use, P11
+    /// step 5).
+    pub tags: Option<Vec<cl_api::Tag>>,
+    /// Tag groups.
+    pub tag_groups: Option<Vec<cl_api::TagGroup>>,
+    /// Required tag groups by account type (the demo company's local
+    /// preference, Q-180).
+    pub required_tag_groups:
+        std::collections::BTreeMap<cl_core::ids::TagGroupId, std::collections::BTreeSet<String>>,
+    /// Tags merged or deleted in the demo (their usage moved or gone).
+    pub tags_gone: std::collections::BTreeSet<cl_core::ids::TagId>,
 }
 
 fn id(n: u8) -> TenantId {
@@ -77,6 +108,17 @@ impl DemoState {
                 },
             ],
             open: Some(id(1)),
+            chart: None,
+            sensitive: std::collections::BTreeSet::new(),
+            contacts: None,
+            contact_names: std::collections::BTreeMap::new(),
+            merged: Vec::new(),
+            profiles: std::collections::BTreeMap::new(),
+            items: None,
+            tags: None,
+            tag_groups: None,
+            required_tag_groups: std::collections::BTreeMap::new(),
+            tags_gone: std::collections::BTreeSet::new(),
         }
     }
 
@@ -92,6 +134,31 @@ impl DemoState {
         Timestamp::parse_wire("2026-11-04T08:10:00.000Z").unwrap_or_else(|_| {
             Timestamp::from_unix_millis(0).unwrap_or_else(|_| unreachable!("epoch"))
         })
+    }
+
+    /// The demo contacts, built from the sample on first use.
+    pub fn contacts_mut(&mut self) -> &mut Vec<cl_api::Contact> {
+        if self.contacts.is_none() {
+            let cs = contacts::contacts();
+            self.contact_names = contacts::original_names(&cs);
+            self.contacts = Some(cs);
+        }
+        self.contacts.get_or_insert_with(Vec::new)
+    }
+
+    /// The demo items, built on first use.
+    pub fn items_mut(&mut self) -> &mut Vec<cl_api::Item> {
+        self.items.get_or_insert_with(lists::items)
+    }
+
+    /// The demo tags, built on first use.
+    pub fn tags_mut(&mut self) -> &mut Vec<cl_api::Tag> {
+        self.tags.get_or_insert_with(lists::tags)
+    }
+
+    /// The demo tag groups, built on first use.
+    pub fn tag_groups_mut(&mut self) -> &mut Vec<cl_api::TagGroup> {
+        self.tag_groups.get_or_insert_with(lists::tag_groups)
     }
 
     /// A fresh fake tenant id for a company made in the demo.
@@ -173,6 +240,185 @@ pub const DEMO_ACCOUNTS: [(&str, &str, &str); 8] = [
     ("3100", "Owner Contributions", "equity"),
     ("2300", "Line of Credit", "liability"),
 ];
+
+/// A demo account id from its number (stable across runs).
+#[must_use]
+pub fn account_id(n: u32) -> cl_core::ids::AccountId {
+    cl_core::ids::AccountId::parse(&format!("d0000000-0000-4000-8000-a{n:011}"))
+        .unwrap_or_else(|_| unreachable!("a well-formed demo id"))
+}
+
+/// One demo chart row before it becomes an engine-shaped account.
+struct DemoRow {
+    number: String,
+    name: String,
+    kind: cl_api::AccountType,
+    detail: Option<String>,
+    parent: Option<u32>,
+    active: bool,
+    system: bool,
+}
+
+/// The demo chart: the sample company's accounts, the engine's system
+/// accounts the sample posts to, and a few sub-accounts and an inactive
+/// account so the hierarchy and the filter have something to show. The
+/// balances are the fixture's own figures at the story date, standing in
+/// for the engine (credit-normal accounts shown positive). Synthetic.
+#[must_use]
+pub fn chart() -> Vec<cl_api::Account> {
+    use cl_api::{Account, AccountFields, AccountType};
+    let sample = cl_company::Sample::load();
+    let story = DemoState::today();
+    let mut rows: Vec<DemoRow> = sample
+        .company
+        .accounts
+        .iter()
+        .map(|a| {
+            let detail = match a.detail.as_deref() {
+                Some("checking" | "savings") => Some("bank".to_string()),
+                other => other.map(str::to_string),
+            };
+            DemoRow {
+                number: a.number.clone(),
+                name: a.name.clone(),
+                kind: a.account_type,
+                detail,
+                parent: None,
+                active: true,
+                system: false,
+            }
+        })
+        .collect();
+    for (number, name, t, detail, system) in [
+        (
+            "1200",
+            "Accounts Receivable",
+            AccountType::Asset,
+            "accounts_receivable",
+            true,
+        ),
+        (
+            "2000",
+            "Accounts Payable",
+            AccountType::Liability,
+            "accounts_payable",
+            true,
+        ),
+        (
+            "3900",
+            "Retained Earnings",
+            AccountType::Equity,
+            "retained_earnings",
+            true,
+        ),
+    ] {
+        rows.push(DemoRow {
+            number: number.into(),
+            name: name.into(),
+            kind: t,
+            detail: Some(detail.into()),
+            parent: None,
+            active: true,
+            system,
+        });
+    }
+    for (number, name, parent, active) in [
+        ("6710", "Truck Repairs", 6700, true),
+        ("6720", "Trailer Registration", 6700, true),
+        ("6721", "Plates and Permits", 6720, true),
+        ("6450", "Answering Service", 0, false),
+    ] {
+        rows.push(DemoRow {
+            number: number.into(),
+            name: name.into(),
+            kind: AccountType::Expense,
+            detail: None,
+            parent: (parent > 0).then_some(parent),
+            active,
+            system: false,
+        });
+    }
+    rows.into_iter()
+        .map(|r| {
+            let DemoRow {
+                number,
+                name,
+                kind: t,
+                detail,
+                parent,
+                active,
+                system,
+            } = r;
+            let n: u32 = number.parse().unwrap_or(0);
+            let net = sample.balance(&number, story);
+            let credit_normal = matches!(
+                t,
+                AccountType::Liability
+                    | AccountType::Equity
+                    | AccountType::Revenue
+                    | AccountType::OtherRevenue
+            );
+            let balance = if credit_normal {
+                net.checked_neg().ok()
+            } else {
+                Some(net)
+            };
+            Account {
+                id: account_id(n),
+                fields: AccountFields {
+                    name,
+                    account_number: Some(number),
+                    account_type: t,
+                    detail_type: detail,
+                    description: None,
+                    parent_id: parent.map(account_id),
+                },
+                is_active: active,
+                is_system: system,
+                system_tag: None,
+                balance,
+                created_at: Some(DemoState::now()),
+                updated_at: Some(DemoState::now()),
+            }
+        })
+        .collect()
+}
+
+/// The demo quick report of an account: the fixture's lines on it, newest
+/// first (at most 200).
+#[must_use]
+pub fn account_report(account: &cl_api::Account) -> cl_api::AccountReport {
+    let sample = cl_company::Sample::load();
+    let number = account.fields.account_number.clone().unwrap_or_default();
+    let mut data: Vec<cl_api::AccountReportLine> = Vec::new();
+    for t in sample.transactions.iter().rev() {
+        for l in t.lines.iter().filter(|l| l.account == number) {
+            if data.len() >= 200 {
+                break;
+            }
+            let id = cl_core::ids::TransactionId::parse(&format!(
+                "d0000000-0000-4000-8000-b{:011}",
+                t.id
+            ))
+            .unwrap_or_else(|_| unreachable!("a well-formed demo id"));
+            data.push(cl_api::AccountReportLine {
+                transaction_id: id,
+                txn_type: t.kind.clone(),
+                txn_number: Some(t.number.clone()),
+                txn_date: cl_api::ReportDate::Day(t.date),
+                memo: Some(t.memo.clone()),
+                check_number: None,
+                payee: t.contact.clone(),
+                debit: l.debit,
+                credit: l.credit,
+            });
+        }
+    }
+    cl_api::AccountReport {
+        account_id: account.id,
+        data,
+    }
+}
 
 #[cfg(test)]
 mod tests {

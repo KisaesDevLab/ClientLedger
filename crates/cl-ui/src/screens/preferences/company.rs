@@ -185,6 +185,13 @@ pub fn accounting(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits, loaded: &Load
             );
         ui.add(egui::Label::new(closed).selectable(false));
         form::hint(ui, tokens, &t("prefs.company.closing_hint"));
+        ui.add_space(6.0);
+        // Q-79: a company preference kept on the company record.
+        ui.checkbox(
+            &mut edits.company.account_numbers,
+            t("prefs.company.account_numbers"),
+        );
+        form::hint(ui, tokens, &t("prefs.company.account_numbers_hint"));
     });
 }
 

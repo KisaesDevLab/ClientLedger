@@ -10,20 +10,25 @@
 mod support;
 
 mod common;
+mod contract_accounts;
 mod contract_capabilities;
 mod contract_census;
 mod contract_closed_period;
 mod contract_companies;
 mod contract_conflict;
+mod contract_contacts;
 mod contract_errors;
 mod contract_harness;
+mod contract_items;
 mod contract_journal;
 mod contract_lifecycle;
+mod contract_list_csv;
 mod contract_logging;
 mod contract_money;
 mod contract_preferences;
 mod contract_resources;
 mod contract_session;
+mod contract_tags;
 
 use support::{EngineMode, TestFn, run_suite};
 
@@ -46,9 +51,100 @@ fn main() -> std::process::ExitCode {
             contract_companies::profile_round_trip_and_settings,
         ),
         ("accounts::crud_and_filters", contract_resources::accounts),
+        (
+            "accounts::unique_numbers",
+            contract_accounts::unique_numbers,
+        ),
+        (
+            "accounts::deactivate_and_reactivate",
+            contract_accounts::deactivate_and_reactivate,
+        ),
+        (
+            "accounts::own_balance_only",
+            contract_accounts::own_balance_only,
+        ),
+        ("accounts::quick_report", contract_accounts::quick_report),
+        ("accounts::merge_u31", contract_accounts::merge_u31),
+        (
+            "accounts::parent_rules_u32",
+            contract_accounts::parent_rules_u32,
+        ),
+        (
+            "accounts::sensitive_flag_u33",
+            contract_accounts::sensitive_flag_u33,
+        ),
+        (
+            "accounts::masked_number_u34",
+            contract_accounts::masked_number_u34,
+        ),
         ("contacts::crud_and_filters", contract_resources::contacts),
+        ("contacts::both_roles", contract_contacts::both_roles),
+        (
+            "contacts::default_expense_account",
+            contract_contacts::default_expense_account,
+        ),
+        (
+            "contacts::history_balance_and_merge",
+            contract_contacts::history_balance_and_merge,
+        ),
+        (
+            "contacts::client_open_balance",
+            contract_contacts::client_open_balance,
+        ),
+        (
+            "contacts::vendor_1099_profile",
+            contract_contacts::vendor_1099_profile,
+        ),
+        ("contacts::jobs_u35", contract_contacts::jobs_u35),
+        ("contacts::addresses_u36", contract_contacts::addresses_u36),
+        ("contacts::notes_u37", contract_contacts::notes_u37),
+        (
+            "contacts::open_balance_u38",
+            contract_contacts::open_balance_u38,
+        ),
+        (
+            "contacts::w9_on_file_u44",
+            contract_contacts::w9_on_file_u44,
+        ),
         ("items::crud_and_filters", contract_resources::items),
         ("tags::crud_and_filters", contract_resources::tags),
+        (
+            "items::reactivate_and_unique_names",
+            contract_items::reactivate_and_unique_names,
+        ),
+        ("items::item_types_u39", contract_items::item_types_u39),
+        ("items::price_levels_u40", contract_items::price_levels_u40),
+        ("tags::groups_round_trip", contract_tags::groups_round_trip),
+        (
+            "tags::rename_usage_and_header_merge",
+            contract_tags::rename_usage_and_header_merge,
+        ),
+        (
+            "tags::line_tag_merge_u41",
+            contract_tags::line_tag_merge_u41,
+        ),
+        ("tags::group_reorder_u41", contract_tags::group_reorder_u41),
+        ("tags::single_select_u41", contract_tags::single_select_u41),
+        (
+            "tags::required_groups_u42",
+            contract_tags::required_groups_u42,
+        ),
+        (
+            "tags::several_line_tags_u45",
+            contract_tags::several_line_tags_u45,
+        ),
+        (
+            "list_csv::exports_and_imports",
+            contract_list_csv::exports_and_imports,
+        ),
+        (
+            "list_csv::items_import_u46",
+            contract_list_csv::items_import_u46,
+        ),
+        (
+            "list_csv::terms_lists_u43",
+            contract_list_csv::terms_lists_u43,
+        ),
         (
             "census::live_spec_matches_fixtures",
             contract_census::live_spec_matches_fixtures,

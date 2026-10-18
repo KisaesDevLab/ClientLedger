@@ -241,6 +241,8 @@ pub(crate) const BILLS_CREATE: Operation = write(Method::Post, "/api/v1/bills");
 pub(crate) const REPORT_BALANCE_SHEET: Operation = read("/api/v1/reports/balance-sheet");
 pub(crate) const REPORT_TRIAL_BALANCE: Operation = read("/api/v1/reports/trial-balance");
 pub(crate) const REPORT_PROFIT_LOSS: Operation = read("/api/v1/reports/profit-loss");
+/// The quick report of one account (P11).
+pub(crate) const REPORT_ACCOUNT: Operation = read("/api/v1/reports/account-report");
 pub(crate) const EXPORT_FULL: Operation = read("/api/v1/export/full");
 pub(crate) const EXPORT_FULL_FILE: Operation = read("/api/v1/export/full/{fileName}");
 /// E5a (U-05): the companies the user can open, never the workspace.
@@ -325,6 +327,52 @@ pub(crate) const SESSION_SECRETS_DELETE: Operation = workspace_write(
     TimeoutClass::Auth,
 );
 
+// ---- P11 contacts and centers -----------------------------------------------
+
+/// Merge two contacts (moves their transactions, deactivates the source).
+pub(crate) const CONTACTS_MERGE: Operation = write(Method::Post, "/api/v1/contacts/merge");
+/// A contact's transactions (the ledger list filtered to it).
+pub(crate) const CONTACT_TRANSACTIONS: Operation = read("/api/v1/contacts/{id}/transactions");
+/// Open invoice balance per client.
+pub(crate) const REPORT_CUSTOMER_BALANCE: Operation =
+    read("/api/v1/reports/customer-balance-summary");
+/// Open bill balance per vendor, by age.
+pub(crate) const REPORT_AP_AGING: Operation = read("/api/v1/reports/ap-aging-summary");
+/// A vendor's 1099 profile (W-9 on file, tax ID type, backup withholding).
+pub(crate) const VENDOR_1099_PROFILE: Operation =
+    read("/api/v1/practice/1099/vendors/{contactId}/profile");
+/// Changes a vendor's 1099 profile.
+pub(crate) const VENDOR_1099_PROFILE_PUT: Operation = write(
+    Method::Put,
+    "/api/v1/practice/1099/vendors/{contactId}/profile",
+);
+
+// ---- P11 tags ----------------------------------------------------------------
+
+/// Tag groups with their active tags.
+pub(crate) const TAG_GROUPS_LIST: Operation = read("/api/v1/tags/groups/list");
+/// New tag group.
+pub(crate) const TAG_GROUPS_CREATE: Operation = write(Method::Post, "/api/v1/tags/groups");
+/// Changes a tag group.
+pub(crate) const TAG_GROUP_PUT: Operation = write(Method::Put, "/api/v1/tags/groups/{id}");
+/// Deletes a tag group (its tags stay, ungrouped).
+pub(crate) const TAG_GROUP_DELETE: Operation = write(Method::Delete, "/api/v1/tags/groups/{id}");
+/// Where a tag is used.
+pub(crate) const TAG_USAGE: Operation = read("/api/v1/tags/{id}/usage");
+/// Merges one tag into another (header tags only until U-41).
+pub(crate) const TAG_MERGE: Operation = write(Method::Post, "/api/v1/tags/merge");
+
+// ---- P11 list import and export ------------------------------------------------
+
+/// The Chart of Accounts as CSV.
+pub(crate) const ACCOUNTS_EXPORT: Operation = read("/api/v1/accounts/export");
+/// Clients and vendors as CSV.
+pub(crate) const CONTACTS_EXPORT: Operation = read("/api/v1/contacts/export");
+/// Creates contacts from mapped CSV rows.
+pub(crate) const CONTACTS_IMPORT: Operation = write(Method::Post, "/api/v1/contacts/import");
+/// Items as CSV.
+pub(crate) const ITEMS_EXPORT: Operation = read("/api/v1/items/export");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -335,7 +383,7 @@ const NEVER_RETRIED: [(&str, &str); 3] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 82] = [
+pub const OPERATIONS: [Operation; 99] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -386,6 +434,7 @@ pub const OPERATIONS: [Operation; 82] = [
     REPORT_BALANCE_SHEET,
     REPORT_TRIAL_BALANCE,
     REPORT_PROFIT_LOSS,
+    REPORT_ACCOUNT,
     EXPORT_FULL,
     EXPORT_FULL_FILE,
     TENANTS_LIST,
@@ -418,6 +467,22 @@ pub const OPERATIONS: [Operation; 82] = [
     SESSION_SECRETS_PUT,
     SESSION_SECRETS_GET,
     SESSION_SECRETS_DELETE,
+    CONTACTS_MERGE,
+    CONTACT_TRANSACTIONS,
+    REPORT_CUSTOMER_BALANCE,
+    REPORT_AP_AGING,
+    VENDOR_1099_PROFILE,
+    VENDOR_1099_PROFILE_PUT,
+    TAG_GROUPS_LIST,
+    TAG_GROUPS_CREATE,
+    TAG_GROUP_PUT,
+    TAG_GROUP_DELETE,
+    TAG_USAGE,
+    TAG_MERGE,
+    ACCOUNTS_EXPORT,
+    CONTACTS_EXPORT,
+    CONTACTS_IMPORT,
+    ITEMS_EXPORT,
 ];
 
 /// Looks up a covered operation.

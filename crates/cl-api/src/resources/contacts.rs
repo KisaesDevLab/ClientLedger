@@ -9,14 +9,17 @@ use cl_core::{CalendarDate, Money, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::client::{Call, Method};
 use crate::errors::ApiError;
 use crate::idempotency::IdempotencyKey;
 use crate::resources::common::{
     self, Query, SortDir, Spec, editable_with_active, null_false, null_true, yes,
 };
 use crate::resources::operations::{
-    CONTACT_DELETE, CONTACT_GET, CONTACT_PUT, CONTACTS_CREATE, CONTACTS_LIST,
+    CONTACT_DELETE, CONTACT_GET, CONTACT_PUT, CONTACT_TRANSACTIONS, CONTACTS_CREATE, CONTACTS_LIST,
+    CONTACTS_MERGE,
 };
+use crate::resources::transactions::TransactionSummary;
 use crate::resources::versioning::{EditableFields, RecordVersion, Versioned, saved_from};
 use crate::session::{Session, json_body};
 use crate::wire::{Page, PageRequest};
@@ -45,7 +48,9 @@ pub enum ContactType {
 }
 
 impl ContactType {
-    const fn as_str(self) -> &'static str {
+    /// Wire name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             ContactType::Customer => "customer",
             ContactType::Vendor => "vendor",
@@ -56,8 +61,9 @@ impl ContactType {
 
 /// The fields the contact form edits. `None` clears a nullable field;
 /// the two country codes cannot be cleared, so `None` leaves them as they
-/// are (the engine defaults them to `US`).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// are (the engine defaults them to `US`). `Debug` hides the tax ID, so
+/// a [`Contact`], [`NewContact`] or [`ContactUpdate`] never prints it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(
     missing_docs,
@@ -149,6 +155,44 @@ impl ContactFields {
             notes: None,
             default_tag_id: None,
         }
+    }
+}
+
+impl std::fmt::Debug for ContactFields {
+    /// Every field except the tax ID, which shows only whether one is set
+    /// (B1: a tax ID never reaches a log or a panic message).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContactFields")
+            .field("contact_type", &self.contact_type)
+            .field("display_name", &self.display_name)
+            .field("company_name", &self.company_name)
+            .field("first_name", &self.first_name)
+            .field("last_name", &self.last_name)
+            .field("email", &self.email)
+            .field("phone", &self.phone)
+            .field("billing_line1", &self.billing_line1)
+            .field("billing_line2", &self.billing_line2)
+            .field("billing_city", &self.billing_city)
+            .field("billing_state", &self.billing_state)
+            .field("billing_zip", &self.billing_zip)
+            .field("billing_country", &self.billing_country)
+            .field("shipping_line1", &self.shipping_line1)
+            .field("shipping_line2", &self.shipping_line2)
+            .field("shipping_city", &self.shipping_city)
+            .field("shipping_state", &self.shipping_state)
+            .field("shipping_zip", &self.shipping_zip)
+            .field("shipping_country", &self.shipping_country)
+            .field("default_payment_terms", &self.default_payment_terms)
+            .field(
+                "default_expense_account_id",
+                &self.default_expense_account_id,
+            )
+            .field("has_tax_id", &self.tax_id.is_some())
+            .field("vendor_account_number", &self.vendor_account_number)
+            .field("is1099_eligible", &self.is1099_eligible)
+            .field("notes", &self.notes)
+            .field("default_tag_id", &self.default_tag_id)
+            .finish()
     }
 }
 
@@ -393,6 +437,65 @@ impl Contacts<'_> {
         let reply = common::deactivate(self.0, &SPEC, &id.to_string(), key).await?;
         saved_from(&reply.body, SPEC.item_key)
     }
+
+    /// Merges `source` into `target` (`POST /contacts/merge`): in one
+    /// engine transaction every transaction, line, bank rule and suggestion
+    /// naming `source` moves to `target`, and `source` is made inactive.
+    /// Returns the kept contact. Audit-logged by the engine.
+    ///
+    /// Repeating a merge that already happened moves nothing and only
+    /// deactivates `source` again, so the write may be resent safely.
+    ///
+    /// # Errors
+    /// `Local(InvalidValue)` when both are the same contact (nothing sent);
+    /// `NotFound`; any [`ApiError`].
+    pub async fn merge(
+        &self,
+        source: ContactId,
+        target: ContactId,
+        key: IdempotencyKey,
+    ) -> Result<Versioned<Contact>, ApiError> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Body {
+            source_id: ContactId,
+            target_id: ContactId,
+        }
+        if source == target {
+            return Err(ApiError::Local(
+                crate::errors::LocalValidation::InvalidValue,
+            ));
+        }
+        let mut call =
+            Call::at(Method::Post, CONTACTS_MERGE.route()).json_body(json_body(&Body {
+                source_id: source,
+                target_id: target,
+            })?);
+        call.idempotency_key = Some(key);
+        let reply = self.0.send(&CONTACTS_MERGE, call, None).await?;
+        saved_from(&reply.body, SPEC.item_key)
+    }
+
+    /// One page of the contact's transactions, newest first (the engine's
+    /// transaction list filtered to this contact, so amounts and statuses
+    /// read exactly as there).
+    ///
+    /// # Errors
+    /// `NotFound` for an unknown contact; any [`ApiError`].
+    pub async fn transactions(
+        &self,
+        id: ContactId,
+        page: PageRequest,
+    ) -> Result<Page<TransactionSummary>, ApiError> {
+        let mut call = Call::new(
+            Method::Get,
+            CONTACT_TRANSACTIONS.route(),
+            format!("{}/{id}/transactions", SPEC.base),
+        );
+        call.query = page.query();
+        let reply = self.0.send(&CONTACT_TRANSACTIONS, call, None).await?;
+        Page::from_json(&reply.body, "data")
+    }
 }
 
 #[cfg(test)]
@@ -411,6 +514,20 @@ pub(crate) mod tests {
 
     fn id() -> ContactId {
         ContactId::parse("3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id")
+    }
+
+    /// B1: `Debug` of a contact never prints its tax ID.
+    #[test]
+    fn debug_hides_the_tax_id() {
+        let mut c: Contact = serde_json::from_str(CONTACT).expect("contact");
+        c.fields.tax_id = Some("98-7654321".into());
+        let update = ContactUpdate {
+            fields: c.fields.clone(),
+            is_active: true,
+        };
+        let shown = format!("{c:?} {update:?} {:#?}", c.fields);
+        assert!(!shown.contains("7654321"), "{shown}");
+        assert!(shown.contains("has_tax_id: true"), "{shown}");
     }
 
     #[test]
@@ -507,5 +624,59 @@ pub(crate) mod tests {
             .deactivate(id(), IdempotencyKey::new())
             .await
             .expect("off");
+    }
+
+    #[tokio::test]
+    async fn merge_sends_both_ids_and_history_pages() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/contacts/merge"))
+            .respond_with(json(200, &format!(r#"{{"contact":{CONTACT}}}"#)))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/contacts/{}/transactions", id())))
+            .respond_with(json(
+                200,
+                r#"{"data":[{"id":"4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","txnType":"bill",
+                "txnNumber":"B-11","txnDate":"2026-01-01","status":"posted",
+                "total":"202.1600","displayTotal":"202.1600"}],"total":41}"#,
+            ))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let other = ContactId::parse("3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a09").expect("id");
+        let kept = s
+            .contacts()
+            .merge(other, id(), IdempotencyKey::new())
+            .await
+            .expect("merge");
+        assert_eq!(kept.record.id, id());
+        let post: Value =
+            serde_json::from_slice(&requests(&server, "POST").await[0].body).expect("json");
+        assert_eq!(post["sourceId"], other.to_string());
+        assert_eq!(post["targetId"], id().to_string());
+        let same = s
+            .contacts()
+            .merge(id(), id(), IdempotencyKey::new())
+            .await
+            .expect_err("self merge");
+        assert!(matches!(same, ApiError::Local(_)), "{same:?}");
+        assert_eq!(requests(&server, "POST").await.len(), 1, "nothing sent");
+
+        let page = s
+            .contacts()
+            .transactions(id(), PageRequest::new(10, 0).expect("p"))
+            .await
+            .expect("history");
+        assert_eq!(page.total, 41);
+        assert_eq!(
+            page.data[0].display_total.map(Money::to_wire).as_deref(),
+            Some("202.1600")
+        );
+        assert_eq!(
+            query(&requests(&server, "GET").await[0]),
+            "limit=10&offset=0"
+        );
     }
 }

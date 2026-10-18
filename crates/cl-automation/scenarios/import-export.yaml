@@ -1,0 +1,52 @@
+# Import or Export a List (P11 step 6) against `clientledger --demo`: the
+# tags exported to a CSV file (written by ClientLedger; the engine has no
+# tag export), then a chart-of-accounts file read, its columns matched from
+# the header, a row with an unknown type left out with the reason, and the
+# import run. The file's numbered rows are already in the demo chart, so
+# the import adds nothing and the dark run repeats it. The fixture is
+# synthetic (fixtures/lists/chart-import.csv).
+name: import-export
+description: Export a list, read a CSV, match columns, show left-out rows, import.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: lists.import_export
+  - assert_exists: {role: tab, label: Import or Export a List}
+  - assert_state: {key: screen.screen, equals: import_export}
+  - assert_state: {key: screen.list, equals: accounts}
+
+  # --- Export the tags -------------------------------------------------------
+  - focus: {role: radio_button, label: Tags}
+  - key: Space
+  - assert_state: {key: screen.list, equals: tags}
+  - assert_exists: {label_contains: "Importing tags isn't available"}
+  - focus: {role: button, label: Export Tags}
+  - key: Space
+  - assert_state: {key: screen.exported, equals: true}
+  - assert_exists: {label_contains: "Saved to"}
+
+  # --- Import a chart of accounts -------------------------------------------
+  - focus: {role: radio_button, label: Chart of Accounts}
+  - key: Space
+  - assert_state: {key: screen.list, equals: accounts}
+  - focus: {role: text_input, label: File}
+  - type: {text: "{scenario_dir}/../../../fixtures/lists/chart-import.csv"}
+  - key: Enter
+  - assert_state: {key: screen.file_read, equals: true}
+  - assert_state: {key: screen.columns, equals: 4}
+  - assert_state: {key: screen.mapped, equals: 4}
+  - assert_state: {key: screen.ready, equals: 2}
+  - assert_state: {key: screen.left_out, equals: 1}
+  - assert_exists: {label_contains: "Line 4: The account type"}
+  - assert_exists: {label_contains: "2 rows ready to import, 1 left out"}
+  - assert_no_clipping: {}
+  - screenshot: mapping
+  - focus: {role: button, label: Import 2 rows}
+  - key: Space
+  - assert_state: {key: screen.imported, equals: 0}
+  - assert_state: {key: screen.skipped, equals: 3}
+  - assert_exists: {role: label, label_contains: "Line 2: Already in the list"}
+  - assert_exists: {label_contains: "Imported 0. Left out 3."}
+  - screenshot: imported
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label: Import or Export a List}

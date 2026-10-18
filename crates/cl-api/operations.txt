@@ -22,6 +22,7 @@
 #! schema-source engine/packages/api/src/routes/transactions.routes.ts
 #! schema-source engine/packages/shared/src/schemas/ap.ts
 #! schema-source engine/packages/api/src/routes/desktop.routes.ts
+#! schema-source engine/packages/api/src/routes/portal-1099.routes.ts
 GET     /health                                 idempotent
 GET     /api/v1/desktop/info                    idempotent
 GET     /openapi.json                           idempotent
@@ -72,6 +73,7 @@ POST    /api/v1/bills                           pre-handler-only
 GET     /api/v1/reports/balance-sheet           idempotent
 GET     /api/v1/reports/trial-balance           idempotent
 GET     /api/v1/reports/profit-loss             idempotent
+GET     /api/v1/reports/account-report          idempotent
 GET     /api/v1/export/full                     idempotent
 GET     /api/v1/export/full/{fileName}          idempotent
 GET     /api/v1/tenants                         idempotent
@@ -104,3 +106,19 @@ POST    /api/v1/company/smtp/test               pre-handler-only
 PUT     /api/v1/desktop/session-secrets         pre-handler-only
 GET     /api/v1/desktop/session-secrets         idempotent
 DELETE  /api/v1/desktop/session-secrets/{name}  pre-handler-only
+POST    /api/v1/contacts/merge                  pre-handler-only
+GET     /api/v1/contacts/{id}/transactions      idempotent
+GET     /api/v1/reports/customer-balance-summary idempotent
+GET     /api/v1/reports/ap-aging-summary        idempotent
+GET     /api/v1/practice/1099/vendors/{contactId}/profile idempotent
+PUT     /api/v1/practice/1099/vendors/{contactId}/profile pre-handler-only
+GET     /api/v1/tags/groups/list                idempotent
+POST    /api/v1/tags/groups                     pre-handler-only
+PUT     /api/v1/tags/groups/{id}                pre-handler-only
+DELETE  /api/v1/tags/groups/{id}                pre-handler-only
+GET     /api/v1/tags/{id}/usage                 idempotent
+POST    /api/v1/tags/merge                      pre-handler-only
+GET     /api/v1/accounts/export                 idempotent
+GET     /api/v1/contacts/export                 idempotent
+POST    /api/v1/contacts/import                 pre-handler-only
+GET     /api/v1/items/export                    idempotent

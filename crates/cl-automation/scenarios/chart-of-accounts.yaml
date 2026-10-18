@@ -1,0 +1,126 @@
+# Chart of Accounts (P11 step 1) against `clientledger --demo`: Ctrl+A
+# opens it; hierarchy and inactive filter; keyboard-only create, edit and
+# make inactive / active again; a used number refused; QuickReport; Esc
+# closes the panel, then the window. The demo chart is synthetic; balances
+# are the demo engine's own figures, never added up by the app.
+name: chart-of-accounts
+description: Hierarchy, filter, keyboard create/edit/inactivate, used number, QuickReport.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+A
+  - assert_exists: {role: tab, label: Chart of Accounts}
+  - assert_state: {key: screen.screen, equals: chart_of_accounts}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.numbers, equals: true}
+  - assert_state: {key: screen.merge_available, equals: false}
+  - assert_exists: {role: row, label_contains: "1010 Operating Checking"}
+  - assert_exists: {label_contains: "a parent's total with its sub-accounts is not available yet"}
+  - assert_state: {key: screen.focused, equals: true}
+  - assert_no_clipping: {}
+  - screenshot: chart
+  # Typing in the list jumps to the account; sub-accounts show their path.
+  - type: {text: "6721"}
+  - assert_exists: {role: row, label_contains: "6721 Vehicle Expenses:Trailer Registration:Plates and Permits"}
+  - assert_state: {key: screen.selected_depth, equals: 2}
+  - screenshot: sub-accounts
+  - assert_not_exists: {role: row, label_contains: "Answering Service"}
+
+  # --- Include inactive (Ctrl+Shift+H), twice --------------------------------
+  - key: Ctrl+Shift+H
+  - assert_state: {key: screen.show_inactive, equals: true}
+  - assert_exists: {role: row, label_contains: "Answering Service, Inactive"}
+  - key: Ctrl+Shift+H
+  - assert_state: {key: screen.show_inactive, equals: false}
+
+  # --- Keyboard-only create: type, detail, name, number; Alt+S ---------------
+  - key: Ctrl+N
+  - assert_state: {key: screen.panel, equals: new}
+  - assert_exists: {role: label, label: New account}
+  - key: Tab
+  - key: Tab
+  - type: {text: Tolls and Parking}
+  - key: Tab
+  - type: {text: "1010"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: Alt+S
+  # 1010 belongs to Operating Checking: refused in plain words, on the field.
+  - assert_state: {key: screen.panel, equals: new}
+  - assert_state: {key: screen.problem, equals: number_taken}
+  - assert_exists: {label_contains: "already uses this number"}
+  - screenshot: number-taken
+  - key: Ctrl+A
+  - type: {text: "6730"}
+  - key: Alt+S
+  - assert_state: {key: screen.panel, equals: none}
+  - assert_state: {key: screen.note, equals: saved}
+  - assert_exists: {role: row, label_contains: "6730 Tolls and Parking"}
+  - assert_state: {key: screen.selected_active, equals: true}
+
+  # --- Keyboard-only edit (Ctrl+E), Esc reverts, then closes -----------------
+  - key: Ctrl+E
+  - assert_state: {key: screen.panel, equals: edit}
+  - key: End
+  - type: {text: " Fees"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: Escape
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.panel, equals: edit}
+  - key: End
+  - type: {text: " Fees"}
+  - key: Alt+S
+  - assert_state: {key: screen.panel, equals: none}
+  - assert_exists: {role: row, label_contains: "6730 Tolls and Parking Fees"}
+
+  # --- Make inactive, then active again (Ctrl+Shift+I) ------------------------
+  - key: Ctrl+Shift+I
+  - assert_state: {key: screen.note, equals: made_inactive}
+  - assert_not_exists: {role: row, label_contains: "6730 Tolls and Parking Fees"}
+  - key: Ctrl+Shift+H
+  - assert_exists: {role: row, label_contains: "6730 Tolls and Parking Fees, Inactive"}
+  - assert_state: {key: screen.selected_active, equals: false}
+  - assert_exists: {role: button, label: Make active again}
+  - key: Ctrl+Shift+I
+  - assert_state: {key: screen.note, equals: made_active}
+  - assert_state: {key: screen.selected_active, equals: true}
+  - key: Ctrl+Shift+H
+  # Clear the number again so the next theme's run can reuse 6730 (the demo
+  # chart lives as long as the app).
+  - key: Ctrl+E
+  - key: Tab
+  - key: Ctrl+A
+  - key: Backspace
+  - key: Alt+S
+  - assert_state: {key: screen.panel, equals: none}
+  - assert_not_exists: {role: row, label_contains: "6730 Tolls"}
+
+  # --- An account with a balance can't go inactive ----------------------------
+  - type: {text: Operating}
+  - assert_exists: {role: row, label_contains: "1010 Operating Checking"}
+  - key: Ctrl+Shift+I
+  - assert_state: {key: screen.warning, equals: cant_deactivate_balance}
+
+  # --- QuickReport (Ctrl+Shift+Q) --------------------------------------------
+  - key: Ctrl+Shift+Q
+  - assert_state: {key: screen.panel, equals: report}
+  - assert_state: {key: screen.report_loaded, equals: true}
+  - assert_exists: {label_contains: "QuickReport: 1010"}
+  - assert_exists: {label_contains: "Balance in your books"}
+  - click: {role: radio_button, label: All dates}
+  - assert_state: {key: screen.report_loaded, equals: true}
+  - assert_no_clipping: {}
+  - screenshot: quick-report
+  - key: Escape
+  - assert_state: {key: screen.panel, equals: none}
+
+  # --- The bank number field is switched off until the engine keeps it -------
+  # A new account takes the selected account's type: a bank account here.
+  - key: Ctrl+N
+  - assert_exists: {role: check_box, label: Sensitive account}
+  - assert_disabled: {role: text_input, label: Bank or card number}
+  - assert_exists: {label_contains: "shown masked, is not available yet"}
+  - screenshot: new-bank-account
+  - key: Escape
+  - assert_state: {key: screen.panel, equals: none}
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Chart of Accounts}

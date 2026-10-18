@@ -724,7 +724,7 @@ fn undo_falls_back_to_the_form() {
     );
 }
 
-/// No screen that uses a grid holds its own `FormState` save path: they
+/// No screen that uses an editable grid holds its own `FormState` save path: they
 /// all go through `GridForm::begin_save` (plan §2.3).
 #[test]
 fn grid_screens_never_call_form_state_begin_save() {
@@ -741,31 +741,84 @@ fn grid_screens_never_call_form_state_begin_save() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/screens");
     let mut all = Vec::new();
     files(&root, &mut all);
+    // A screen's folder is its first directory under `screens/` (a top-level
+    // file is its own screen). An `EditableModel` impl anywhere in the folder
+    // (say a `model.rs` beside the screen) makes every file in it a grid user.
+    let screen_of = |p: &std::path::Path| -> std::path::PathBuf {
+        let rel = p.strip_prefix(&root).unwrap();
+        root.join(rel.components().next().unwrap())
+    };
+    let texts: Vec<_> = all
+        .iter()
+        .map(|f| (f.clone(), std::fs::read_to_string(f).unwrap()))
+        .collect();
+    let editable_screens: std::collections::HashSet<_> = texts
+        .iter()
+        .filter(|(_, t)| implements_editable_model(t))
+        .map(|(f, _)| screen_of(f))
+        .collect();
     let mut bad = Vec::new();
-    for f in all {
-        let text = std::fs::read_to_string(&f).unwrap();
-        if let Some(why) = direct_save(&text) {
+    for (f, text) in &texts {
+        let folder_edits = editable_screens.contains(&screen_of(f));
+        if let Some(why) = direct_save(text, folder_edits) {
             bad.push(format!("{}: {why}", f.display()));
         }
     }
     assert!(bad.is_empty(), "{bad:#?}");
 
     // The check itself catches the mistake.
-    let wrong =
-        "use cl_grid::Grid;\nfn s(&mut self) { let _ = self.state.begin_save(SaveIntent::Save); }";
-    assert!(direct_save(wrong).is_some());
-    let right = "use cl_grid::Grid;\nfn s(&mut self) { let _ = self.form.begin_save(SaveIntent::Save, &self.lookups); }";
-    assert_eq!(direct_save(right), None);
+    let wrong = "use cl_grid::EditableModel;\nfn s(&mut self) { let _ = self.state.begin_save(SaveIntent::Save); }";
+    assert!(direct_save(wrong, false).is_some());
+    let right = "use cl_grid::EditableModel;\nfn s(&mut self) { let _ = self.form.begin_save(SaveIntent::Save, &self.lookups); }";
+    assert_eq!(direct_save(right, false), None);
     let no_grid = "fn s(&mut self) { let _ = self.state.begin_save(SaveIntent::Save); }";
-    assert_eq!(direct_save(no_grid), None);
+    assert_eq!(direct_save(no_grid, false), None);
+    let browse = "use cl_grid::Grid;\nfn s(&mut self) { show(ModelRef::Browse(m)); let _ = self.state.begin_save(SaveIntent::Save); }";
+    assert_eq!(direct_save(browse, false), None);
+    // The model lives in a sibling file of the same screen folder.
+    assert!(direct_save(no_grid, true).is_some());
+    assert!(implements_editable_model(
+        "impl cl_grid::EditableModel for Lines {}"
+    ));
+    assert!(!implements_editable_model("use cl_grid::EditableModel;"));
+    // `ModelRef` imported and its `Edit` variant used unqualified.
+    let bare = "use cl_grid::ModelRef::{self, Edit};\nfn s(&mut self) { show(Edit(m)); let _ = self.state.begin_save(SaveIntent::Save); }";
+    assert!(direct_save(bare, false).is_some());
+    let other_edit = "fn s(&mut self) { let _ = Mode::Edit(1); let _ = self.state.begin_save(SaveIntent::Save); }";
+    assert_eq!(direct_save(other_edit, false), None);
+}
+
+/// Whether `source` implements `EditableModel` for some type.
+fn implements_editable_model(source: &str) -> bool {
+    let code = source.split("#[cfg(test)]").next().unwrap_or("");
+    code.contains("EditableModel for")
+}
+
+/// Whether `code` calls `Edit(` unqualified (not `X::Edit(`, `.Edit(` or
+/// part of a longer name).
+fn bare_edit_call(code: &str) -> bool {
+    code.match_indices("Edit(").any(|(at, _)| {
+        code[..at]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_' || c == ':' || c == '.'))
+    })
 }
 
 /// Why `source` (one screen file) saves around its grid, if it does: the
 /// file uses a grid and calls a one-argument `begin_save` (that is
 /// `FormState::begin_save`; `GridForm::begin_save` also takes the lookups).
-fn direct_save(source: &str) -> Option<String> {
+/// `folder_edits` says another file of the same screen implements
+/// `EditableModel`.
+fn direct_save(source: &str, folder_edits: bool) -> Option<String> {
     let code = source.split("#[cfg(test)]").next().unwrap_or("");
-    let uses_grid = code.contains("cl_grid") || code.contains("GridForm");
+    // Only editable grids hold uncommitted cell edits; a browse-only grid
+    // beside a plain field form (the P11 lists) saves through `FormState`.
+    let uses_grid = folder_edits
+        || code.contains("GridForm")
+        || code.contains("ModelRef::Edit")
+        || code.contains("EditableModel")
+        || (code.contains("ModelRef") && bare_edit_call(code));
     if !uses_grid {
         return None;
     }

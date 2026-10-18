@@ -6,7 +6,7 @@ use cl_core::{Money, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::errors::ApiError;
+use crate::errors::{ApiError, ConflictReason};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::common::{self, Query, SortDir, Spec, editable_with_active, null_true, yes};
 use crate::resources::operations::{ITEM_DELETE, ITEM_GET, ITEM_PUT, ITEMS_CREATE, ITEMS_LIST};
@@ -191,7 +191,8 @@ impl Items<'_> {
     /// Creates an item.
     ///
     /// # Errors
-    /// `Conflict` for a used name; `Validation`; any [`ApiError`].
+    /// `Conflict { AlreadyExists }` for a used name; `Validation`; any
+    /// [`ApiError`].
     pub async fn create(
         &self,
         new: &ItemFields,
@@ -207,6 +208,7 @@ impl Items<'_> {
             key,
         )
         .await
+        .map_err(name_taken)
     }
 
     /// Saves an item if it is still at `expected` (§2.5).
@@ -239,6 +241,26 @@ impl Items<'_> {
         common::deactivate(self.0, &SPEC, &id.to_string(), key)
             .await
             .map(drop)
+    }
+}
+
+/// The engine's item create answers a used name with a 409 that carries no
+/// code (its only codeless 409 there); say so, so callers can tell it from
+/// coded conflicts such as `IDEMPOTENCY_IN_PROGRESS`.
+fn name_taken(e: ApiError) -> ApiError {
+    match e {
+        ApiError::Conflict {
+            reason: ConflictReason::Unspecified,
+            current_version,
+            code: None,
+            message,
+        } => ApiError::Conflict {
+            reason: ConflictReason::AlreadyExists,
+            current_version,
+            code: None,
+            message,
+        },
+        other => other,
     }
 }
 
@@ -347,5 +369,63 @@ pub(crate) mod tests {
             .deactivate(it.id, IdempotencyKey::new())
             .await
             .expect("off");
+    }
+
+    /// A codeless 409 on create is the used-name answer; coded ones stay.
+    #[tokio::test]
+    async fn used_name_is_already_exists_coded_conflicts_stay() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(json(
+                409,
+                r#"{"error":{"message":"An item with this name already exists"}}"#,
+            ))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .respond_with(json(
+                409,
+                r#"{"error":{"message":"busy","code":"TENANT_BUSY"}}"#,
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .respond_with(json(200, r#"{"data":[],"total":0}"#))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let it: Item = serde_json::from_str(ITEM).expect("item");
+        let e = s
+            .items()
+            .create(&it.fields, IdempotencyKey::new())
+            .await
+            .expect_err("taken");
+        assert!(
+            matches!(
+                e,
+                ApiError::Conflict {
+                    reason: ConflictReason::AlreadyExists,
+                    code: None,
+                    ..
+                }
+            ),
+            "{e:?}"
+        );
+        let e = s
+            .items()
+            .create(&it.fields, IdempotencyKey::new())
+            .await
+            .expect_err("busy");
+        assert!(
+            matches!(
+                e,
+                ApiError::Conflict {
+                    reason: ConflictReason::Busy,
+                    ..
+                }
+            ),
+            "{e:?}"
+        );
     }
 }

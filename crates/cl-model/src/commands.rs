@@ -254,18 +254,27 @@ pub const COMMANDS: &[Command] = &[
     cmd("form.delete_line", "Delete Line", None, 2, key(Mods::CMD, Key::Delete), Scope::Form),
     cmd("form.delete_item", "Delete Transaction", None, 2, ctrl('D'), Scope::Form),
     // Lists
-    screen("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A'), "P11"),
-    screen("lists.items", "Item List", Some(Menu::Lists), 0, None, "P11"),
-    screen("lists.tags", "Tags", Some(Menu::Lists), 0, None, "P11"),
+    built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
+    built("lists.items", "Item List", Some(Menu::Lists), 0, None),
+    built("lists.tags", "Tags", Some(Menu::Lists), 0, None),
+    built("lists.terms", "Terms", Some(Menu::Lists), 1, None),
+    built("lists.payment_methods", "Payment Methods", Some(Menu::Lists), 1, None),
+    built("lists.import_export", "Import or Export a List", Some(Menu::Lists), 2, None),
+    // List windows (Chart of Accounts first; the other lists use the same keys)
+    cmd("list.new", "New List Entry", None, 3, ctrl('N'), Scope::Window),
+    cmd("list.toggle_active", "Make Inactive or Active Again", None, 3, ctrl_shift('I'), Scope::Window),
+    cmd("list.show_inactive", "Include Inactive Entries", None, 3, ctrl_shift('H'), Scope::Window),
+    cmd("list.quick_report", "QuickReport", None, 3, ctrl_shift('Q'), Scope::Window),
+    cmd("list.merge", "Merge Into Another Entry", None, 3, None, Scope::Window),
     // Clients
-    screen("clients.center", "Clients & Jobs", Some(Menu::Clients), 0, None, "P11"),
+    built("clients.center", "Clients & Jobs", Some(Menu::Clients), 0, None),
     screen("clients.create_invoice", "Create Invoice", Some(Menu::Clients), 1, ctrl('I'), "P20"),
     screen("clients.receive_payment", "Receive Payment", Some(Menu::Clients), 1, ctrl('R'), "P21"),
     screen("clients.sales_receipt", "Sales Receipt", Some(Menu::Clients), 1, ctrl_shift('R'), "P14"),
     screen("clients.credit_memo", "Credit Memo or Refund", Some(Menu::Clients), 2, None, "P22"),
     screen("clients.statements", "Statements", Some(Menu::Clients), 2, None, "P22"),
     // Vendors
-    screen("vendors.center", "Vendors", Some(Menu::Vendors), 0, None, "P11"),
+    built("vendors.center", "Vendors", Some(Menu::Vendors), 0, None),
     screen("vendors.enter_bill", "Enter Bill", Some(Menu::Vendors), 1, ctrl('B'), "P17"),
     screen("vendors.pay_bills", "Pay Bills", Some(Menu::Vendors), 1, ctrl_shift('B'), "P18"),
     screen("vendors.write_check", "Write Check", Some(Menu::Vendors), 1, ctrl('W'), "P13"),
@@ -383,6 +392,14 @@ mod tests {
             "file.export_all",
             "file.delete_company",
             "edit.preferences",
+            "lists.chart_of_accounts",
+            "lists.items",
+            "lists.tags",
+            "lists.terms",
+            "lists.payment_methods",
+            "lists.import_export",
+            "clients.center",
+            "vendors.center",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

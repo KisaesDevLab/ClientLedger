@@ -1,3 +1,10 @@
 # Default gitleaks rules plus nothing else; fixtures are synthetic (see CLAUDE.md).
 [extend]
 useDefault = true
+
+# Synthetic test UUID once bound to a variable named `client` in a cl-api unit
+# test (commit ea05b40); gitleaks' generic-api-key rule reads the name as a
+# credential. Allowed by exact value only.
+[allowlist]
+description = "synthetic test ids"
+regexes = ['''3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a0[12]''']
