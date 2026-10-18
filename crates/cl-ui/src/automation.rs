@@ -33,6 +33,13 @@ use crate::prefs;
 use crate::shell::Shell;
 use crate::theme::ThemeChoice;
 
+/// Key of the `Instant` the bridge stores while a screenshot is captured;
+/// a screen that can show a secret masks it until then.
+#[must_use]
+pub fn hide_secrets_id() -> egui::Id {
+    egui::Id::unique("cl.hide_secrets_until")
+}
+
 /// Frames to wait after an input before answering, so the result is drawn and
 /// reported in the tree.
 const SETTLE_FRAMES: u64 = 2;
@@ -647,6 +654,14 @@ impl Bridge {
         if let Err(e) = cl_automation::screenshot::check_destination(&path) {
             return fail(ErrorCode::BadRequest, e.to_string());
         }
+        // Screens that can show a secret (the recovery key) mask it while
+        // the pixels are captured.
+        ctx.data_mut(|d| {
+            d.insert_temp(
+                hide_secrets_id(),
+                std::time::Instant::now() + std::time::Duration::from_millis(500),
+            );
+        });
         let slot: Arc<Mutex<Option<Arc<ColorImage>>>> = Arc::new(Mutex::new(None));
         let cb_slot = Arc::clone(&slot);
         let cb_ctx = ctx.clone();

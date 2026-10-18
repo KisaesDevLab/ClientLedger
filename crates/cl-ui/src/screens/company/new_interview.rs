@@ -556,11 +556,24 @@ impl NewCompanyScreen {
                 ),
             );
             ui.add_space(8.0);
-            if let Some(i) = form::actions(
-                ui,
-                &t("interview.done.recovery"),
-                &[&t("interview.done.opening"), &t("interview.done.later")],
-            ) {
+            // The recovery key is offered only when first-run setup produced
+            // one that has not been shown yet (M1); it is never made here.
+            let offer_key = self.link.has_recovery_key() || self.link.is_demo();
+            let clicked = if offer_key {
+                form::actions(
+                    ui,
+                    &t("interview.done.recovery"),
+                    &[&t("interview.done.opening"), &t("interview.done.later")],
+                )
+            } else {
+                form::actions(
+                    ui,
+                    &t("interview.done.opening"),
+                    &[&t("interview.done.later")],
+                )
+                .map(|i| i + 1)
+            };
+            if let Some(i) = clicked {
                 let next = match i {
                     0 => "company.recovery_key",
                     1 => "company.opening_balances",

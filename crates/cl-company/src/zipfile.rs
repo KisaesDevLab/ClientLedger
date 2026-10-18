@@ -10,6 +10,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 /// Largest plaintext entry read from an archive (the envelope is tiny).
 const ENTRY_CAP: u64 = 256 * 1024;
+/// Most entry names listed (an archive has about a dozen top-level ones).
+const NAMES_CAP: usize = 64;
 
 /// Writes `entries` (name, bytes) as stored entries.
 pub(crate) fn write_stored(path: &Path, entries: &[(String, Vec<u8>)]) -> std::io::Result<()> {
@@ -29,14 +31,19 @@ pub(crate) fn read_entry(path: &Path, name: &str) -> std::io::Result<Option<Vec<
     let Ok(mut archive) = ZipArchive::new(file) else {
         return Ok(None);
     };
-    let Ok(mut entry) = archive.by_name(name) else {
+    let Ok(entry) = archive.by_name(name) else {
         return Ok(None);
     };
     if entry.size() > ENTRY_CAP {
         return Ok(None);
     }
+    // The declared size is not trusted: read at most the cap plus one byte
+    // and refuse anything that keeps going.
     let mut out = Vec::new();
-    entry.read_to_end(&mut out)?;
+    entry.take(ENTRY_CAP + 1).read_to_end(&mut out)?;
+    if out.len() as u64 > ENTRY_CAP {
+        return Ok(None);
+    }
     Ok(Some(out))
 }
 
@@ -50,6 +57,7 @@ pub(crate) fn entry_names(path: &Path) -> std::io::Result<Vec<String>> {
         .file_names()
         .filter_map(Result::ok)
         .map(std::borrow::Cow::into_owned)
+        .take(NAMES_CAP)
         .collect())
 }
 

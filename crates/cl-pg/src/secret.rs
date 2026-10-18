@@ -2,19 +2,20 @@
 
 use crate::{PgError, Result};
 use std::fmt;
+use zeroize::Zeroizing;
 
 /// A secret value (database password, connection URL with a password).
 ///
 /// `Debug` and `Display` print `***`. Call [`Secret::expose`] at the single
 /// place the value is really needed.
 #[derive(Clone, PartialEq, Eq)]
-pub struct Secret(String);
+pub struct Secret(Zeroizing<String>);
 
 impl Secret {
     /// Wrap an existing value.
     #[must_use]
     pub fn new(value: impl Into<String>) -> Self {
-        Secret(value.into())
+        Secret(Zeroizing::new(value.into()))
     }
 
     /// 256 random bits as 64 hex characters (safe inside URLs and SQL).
@@ -24,7 +25,7 @@ impl Secret {
     pub fn generate() -> Result<Self> {
         let mut bytes = [0u8; 32];
         getrandom::fill(&mut bytes).map_err(|e| PgError::Random(e.to_string()))?;
-        Ok(Secret(hex(&bytes)))
+        Ok(Secret(Zeroizing::new(hex(&bytes))))
     }
 
     /// A different secret derived from this one: SHA-256 of a fixed prefix,
@@ -39,7 +40,7 @@ impl Secret {
         h.update(label.as_bytes());
         h.update([0u8]);
         h.update(self.0.as_bytes());
-        Secret(hex(&h.finalize()))
+        Secret(Zeroizing::new(hex(&h.finalize())))
     }
 
     /// The raw value. Never log it.
@@ -54,7 +55,7 @@ impl Secret {
         if self.0.is_empty() {
             return text.to_string();
         }
-        text.replace(&self.0, "***")
+        text.replace(self.0.as_str(), "***")
     }
 }
 

@@ -1,8 +1,10 @@
-//! Recovery key (P08 step 3, Q-210): shown once with Copy and Save to a
-//! file; the owner confirms they kept it before the window closes. The
-//! engine stores only a hash (U-23). Until the engine advertises
-//! `recovery-key-v1` the screen says the key is not available yet; a new
-//! key can be made later from Users and Permissions (P29).
+//! Recovery key (P08 step 3, Q-210): the key from first-run setup is
+//! shown once with Copy and Save to a file, and the owner confirms they
+//! kept it before the window closes. The engine stores only a hash
+//! (U-23). The window never makes a new key by itself: "Make a new
+//! recovery key" is an explicit button that says the old key stops
+//! working. Until the engine advertises `recovery-key-v1` the screen says
+//! the key is not available yet.
 
 use std::sync::Arc;
 
@@ -48,9 +50,18 @@ impl RecoveryKeyScreen {
             link.is_demo()
                 .then(|| Secret::new(crate::company::demo::DEMO_RECOVERY_KEY))
         });
-        let save_path = link
-            .backup_dir
-            .join("ClientLedger-recovery-key.txt")
+        // Outside the app data folder (a backup or a copied data folder
+        // must not carry the key): the user's Documents, else home. The
+        // demo (scripted runs) stays inside its own temporary folder. A
+        // time stamp in the name keeps every save a new file.
+        let folder = if link.is_demo() {
+            link.backup_dir.clone()
+        } else {
+            default_key_folder()
+        };
+        let stamp = cl_settings::recent::now().as_utc().format("%Y%m%d-%H%M%S");
+        let save_path = folder
+            .join(format!("ClientLedger-recovery-key-{stamp}.txt"))
             .display()
             .to_string();
         RecoveryKeyScreen {
@@ -77,10 +88,16 @@ impl RecoveryKeyScreen {
         self
     }
 
-    fn fetch(&mut self) {
+    /// Makes a new key on the owner's explicit request; the old key stops
+    /// working the moment the engine answers.
+    fn rotate(&mut self) {
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
+        self.revealed = false;
+        self.confirmed = false;
+        self.saved_to = None;
+        self.copied = false;
         self.task = spawn_lifecycle(&self.link, group, move || async move {
             session
                 .rotate_recovery_key()
@@ -112,7 +129,7 @@ impl RecoveryKeyScreen {
         let result = path
             .parent()
             .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&path, text));
+            .and_then(|()| write_private_new(&path, text.as_bytes()));
         match result {
             Ok(()) => self.saved_to = Some(path.display().to_string()),
             Err(source) => {
@@ -149,9 +166,6 @@ impl Screen for RecoveryKeyScreen {
                 Err(e) => self.error = Some(e),
             }
         }
-        if self.key.is_none() && self.task.is_none() && !self.unavailable && !self.link.is_demo() {
-            self.fetch();
-        }
         ui.add_space(8.0);
         ui.heading(t("recovery.title"));
         form::hint(ui, &tokens, &t("recovery.intro"));
@@ -174,12 +188,35 @@ impl Screen for RecoveryKeyScreen {
             form::inline_error(ui, &tokens, e);
         }
         let Some(key) = self.key.clone() else {
-            form::progress_line(ui, &tokens, &t("recovery.working"));
+            if self.task.is_some() {
+                form::progress_line(ui, &tokens, &t("recovery.working"));
+                return;
+            }
+            form::card(ui, &tokens, |ui| {
+                form::heading(ui, &tokens, &t("recovery.none_title"));
+                form::hint(ui, &tokens, &t("recovery.none_body"));
+                ui.add_space(6.0);
+                if let Some(i) = form::actions(ui, &t("recovery.rotate"), &[&t("recovery.close")]) {
+                    if i == 0 {
+                        self.rotate();
+                    } else {
+                        self.done = true;
+                        self.link.push(CompanyEvent::CloseWindow(CommandId::new(
+                            "company.recovery_key",
+                        )));
+                    }
+                }
+            });
             return;
         };
+        // A control-channel screenshot is being taken: show the masked form.
+        let masked_for_screenshot = ui.ctx().data(|d| {
+            d.get_temp::<std::time::Instant>(crate::automation::hide_secrets_id())
+                .is_some_and(|until| std::time::Instant::now() < until)
+        });
         form::card(ui, &tokens, |ui| {
             form::heading(ui, &tokens, &t("recovery.your_key"));
-            let shown = if self.revealed {
+            let shown = if self.revealed && !masked_for_screenshot {
                 Self::groups(key.expose())
             } else {
                 "\u{2022}\u{2022}\u{2022}\u{2022}-\u{2022}\u{2022}\u{2022}\u{2022}-\u{2022}\u{2022}\u{2022}\u{2022}-\u{2022}\u{2022}\u{2022}\u{2022}".to_string()
@@ -229,6 +266,7 @@ impl Screen for RecoveryKeyScreen {
                 );
             }
             form::hint(ui, &tokens, &t("recovery.print_later"));
+            form::hint(ui, &tokens, &t("recovery.save_where"));
         });
         ui.add_space(10.0);
         ui.checkbox(&mut self.confirmed, t("recovery.confirm"));
@@ -261,9 +299,53 @@ impl Screen for RecoveryKeyScreen {
     }
 }
 
+/// The user's Documents folder when it exists, else the home folder, else
+/// the current folder: never the app data folder.
+fn default_key_folder() -> std::path::PathBuf {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from);
+    if let Some(h) = &home {
+        let docs = h.join("Documents");
+        if docs.is_dir() {
+            return docs;
+        }
+        return h.clone();
+    }
+    std::path::PathBuf::from(".")
+}
+
+/// Writes a new file only (never over an existing one), readable by the
+/// owner alone on Unix.
+fn write_private_new(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut f = options.open(path)?;
+    f.write_all(bytes)?;
+    f.flush()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saving_never_overwrites_and_defaults_outside_the_app_folder() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let p = dir.path().join("key.txt");
+        write_private_new(&p, b"one").expect("first write");
+        let e = write_private_new(&p, b"two").expect_err("second write refused");
+        assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&p).expect("read"), b"one");
+        let folder = default_key_folder();
+        assert!(!folder.ends_with("backups"));
+    }
 
     #[test]
     fn keys_are_grouped_in_fours() {

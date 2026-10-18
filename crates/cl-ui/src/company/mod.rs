@@ -209,6 +209,15 @@ impl CompanyLink {
             .unwrap_or_else(PoisonError::into_inner) = Some(key);
     }
 
+    /// True while a first-run recovery key waits to be shown.
+    #[must_use]
+    pub fn has_recovery_key(&self) -> bool {
+        self.recovery_key
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+    }
+
     /// Takes the stashed recovery key (once).
     #[must_use]
     pub fn take_recovery_key(&self) -> Option<cl_core::Secret> {
