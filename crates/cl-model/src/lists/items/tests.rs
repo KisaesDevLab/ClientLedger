@@ -103,6 +103,17 @@ fn prices_are_exact_to_four_decimals() {
     assert_eq!(parse_price("1.23456"), Err(ItemProblem::PriceInvalid));
 }
 
+/// Q-P10x rounds a calculation once to the field's unit; a price's unit is
+/// a ten-thousandth, not a cent, and halves round away from zero.
+#[test]
+fn calculated_prices_round_to_four_decimals() {
+    assert_eq!(parse_price("100/3"), Ok(Some(m("33.3333"))));
+    assert_eq!(parse_price("2/3"), Ok(Some(m("0.6667"))));
+    assert_eq!(parse_price("0.0001/2"), Ok(Some(m("0.0001"))));
+    assert_eq!(parse_price("0.0003/2"), Ok(Some(m("0.0002"))));
+    assert_eq!(parse_price("0.0001/3"), Ok(Some(m("0.0000"))));
+}
+
 #[test]
 fn price_text_trims_past_the_cents() {
     assert_eq!(price_text(m("12.5000")), "12.50");

@@ -161,7 +161,7 @@ fn save_and_new_keeps_the_income_account_and_problems_focus_their_field() {
         .edit(super::F_NAME, |d| d.name = "Gutter Cleaning".into());
     r.form()
         .form
-        .edit(super::F_PRICE, |d| d.price = "40*2".into());
+        .edit(super::F_PRICE, |d| d.price = "40/3".into());
     assert!(r.s.save_form(SaveIntent::SaveAndNew));
     r.frames(2);
     assert_eq!(r.state("panel"), "new");
@@ -176,7 +176,8 @@ fn save_and_new_keeps_the_income_account_and_problems_focus_their_field() {
         .expect("saved");
     assert_eq!(
         g.fields.unit_price.map(cl_core::Money::to_wire).as_deref(),
-        Some("80.0000")
+        Some("13.3333"),
+        "a calculated price keeps four decimals, not cents"
     );
     // A kind the engine can't keep is refused.
     r.form()
