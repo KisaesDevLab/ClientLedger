@@ -231,7 +231,9 @@ fn serve(stream: &TcpStream, shared: &Arc<Shared>, token: &str, tx: &Sender<Pend
         if !line.ends_with('\n') {
             // Too long, or the client closed mid-line.
             let r = Response::failure(ErrorCode::BadRequest, "request line too long or incomplete");
-            let _ = write_line(&mut writer, &r);
+            if write_line(&mut writer, &r).is_ok() {
+                drain_before_close(stream);
+            }
             break;
         }
         let (response, close) = handle_line(line.trim_end(), shared, token, tx);
@@ -243,6 +245,32 @@ fn serve(stream: &TcpStream, shared: &Arc<Shared>, token: &str, tx: &Sender<Pend
         reader.get_mut().get_mut().deadline = None;
     }
     let _ = stream.shutdown(Shutdown::Both);
+}
+
+/// Longest a refused connection is drained before it is closed.
+const DRAIN_TIME: Duration = Duration::from_millis(500);
+/// Most bytes read and thrown away while draining.
+const DRAIN_BYTES: u64 = 4 * MAX_LINE;
+
+/// Close politely after a refusal. Closing a socket that still has unread
+/// input makes the OS send a reset, and a reset can throw away the refusal
+/// before the client reads it. So: stop writing, then read and discard what
+/// the client is still sending, bounded in time and bytes.
+fn drain_before_close(stream: &TcpStream) {
+    let _ = stream.shutdown(Shutdown::Write);
+    let until = std::time::Instant::now() + DRAIN_TIME;
+    let mut buf = [0u8; 8192];
+    let mut total = 0u64;
+    while total < DRAIN_BYTES {
+        let left = until.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() || stream.set_read_timeout(Some(left)).is_err() {
+            break;
+        }
+        match std::io::Read::read(&mut &*stream, &mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => total += n as u64,
+        }
+    }
 }
 
 fn write_line(w: &mut TcpStream, r: &Response) -> std::io::Result<()> {
@@ -444,16 +472,24 @@ mod tests {
 
     #[test]
     fn oversized_line_is_refused() {
-        let (_d, _server, info) = start();
-        let mut s = connect(&info);
-        let big = "a".repeat(70_000);
-        s.write_all(big.as_bytes()).unwrap();
-        s.write_all(b"\n").unwrap();
+        let (_d, server, info) = start();
+        let s = connect(&info);
+        // Write from another thread: the server stops reading at 64 KiB, so
+        // the tail of the write may fail once it closes. That is fine; what
+        // matters is the refusal the server sends first.
+        let mut w = s.try_clone().unwrap();
+        let writer = thread::spawn(move || {
+            let mut big = "a".repeat(70_000);
+            big.push('\n');
+            let _ = w.write_all(big.as_bytes());
+        });
         let mut line = String::new();
-        BufReader::new(s.try_clone().unwrap())
-            .read_line(&mut line)
-            .unwrap();
+        let read = BufReader::new(s).read_line(&mut line);
+        writer.join().unwrap();
+        assert!(read.is_ok(), "{read:?}");
         assert!(line.contains("bad_request"), "{line}");
+        assert!(line.contains("too long"), "{line}");
+        assert!(server.try_next().is_none());
     }
 
     #[test]
