@@ -13,6 +13,11 @@ use crate::widgets::primary_button;
 
 /// Text typed into a secret field: zeroized when dropped or cleared, so a
 /// key or password does not linger in freed memory (security low).
+///
+/// Limit: egui's `TextEdit` keeps its own undo history of the text in
+/// `Memory` (plain `String`s), so a typed secret can outlive this buffer
+/// inside egui until that state is dropped. Follow-up: clear the undoer
+/// for secret fields, or give them a `TextEdit` without undo (Q-P09h).
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct SecretText(zeroize::Zeroizing<String>);
 

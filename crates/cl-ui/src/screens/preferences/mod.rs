@@ -246,8 +246,10 @@ pub enum SaveBlock {
     Smtp(cl_settings::SmtpFieldError),
     /// A cloud provider needs its key first.
     AiNeedsKey,
-    /// A cloud provider needs the owner's agreement to the notice.
+    /// A provider needs the owner's agreement to the notice.
     AiNeedsConsent,
+    /// AI was already on: the changed panel needs the notice ticked again.
+    AiNeedsConsentAgain,
     /// The tax rate is not a rate.
     BadRate,
     /// The Ollama address is not local.
@@ -267,6 +269,7 @@ impl SaveBlock {
             SaveBlock::Smtp(e) => e.message_key(),
             SaveBlock::AiNeedsKey => "prefs.ai.needs_key",
             SaveBlock::AiNeedsConsent => "prefs.ai.needs_consent",
+            SaveBlock::AiNeedsConsentAgain => "prefs.ai.needs_consent_again",
             SaveBlock::BadRate => "prefs.err.rate",
             SaveBlock::OllamaUrl(_) => "prefs.ai.err_ollama_url",
             SaveBlock::Folder(e) => folders::folder_error_key(*e),
@@ -405,17 +408,28 @@ impl PreferencesScreen {
         }
     }
 
+    /// Overlays what the engine reported. With unsaved edits (a re-read
+    /// after a failed save), only the committed baseline is refreshed and
+    /// the edits are left as the owner typed them (S2).
     fn apply_loaded(&mut self, loaded: Loaded) {
-        self.edits.accounting = company::AccountingEdits::from_settings(loaded.settings.as_ref());
-        self.edits.ai.apply_engine(
+        let dirty = self.edits != self.committed;
+        let mut base = if dirty {
+            self.committed.clone()
+        } else {
+            self.edits.clone()
+        };
+        base.accounting = company::AccountingEdits::from_settings(loaded.settings.as_ref());
+        base.ai.apply_engine(
             loaded.ai.as_ref(),
             loaded.consent.as_ref(),
-            self.edits.company.ai_consent.as_ref(),
+            base.company.ai_consent.as_ref(),
         );
-        self.edits
-            .email
-            .apply_engine(loaded.smtp.as_ref(), self.edits.company.smtp_security);
-        self.committed = self.edits.clone();
+        base.email
+            .apply_engine(loaded.smtp.as_ref(), base.company.smtp_security);
+        self.committed = base;
+        if !dirty {
+            self.edits = self.committed.clone();
+        }
         self.loaded = loaded;
         self.loaded.done = true;
     }
@@ -479,7 +493,17 @@ impl PreferencesScreen {
             cl_settings::check_inbox_folder(p).map_err(SaveBlock::Folder)?;
         }
         e.accounting.validate()?;
-        e.ai.validate(&self.secrets_saved)?;
+        // A save that leaves the AI panel alone is never blocked by a
+        // stale or unknown consent read; a changed panel is checked, and
+        // the message says so when AI was already on.
+        if e.ai != self.committed.ai {
+            match e.ai.validate(&self.secrets_saved) {
+                Err(SaveBlock::AiNeedsConsent) if self.committed.ai.enabled => {
+                    return Err(SaveBlock::AiNeedsConsentAgain);
+                }
+                other => other?,
+            }
+        }
         e.email.validate()?;
         Ok(e)
     }
@@ -1197,7 +1221,8 @@ mod tests {
         s.edits_mut().ai.key_input =
             crate::screens::company::form::SecretText::from("sk-ant-canary-xyz");
         assert!(!Screen::save(&mut s));
-        assert_eq!(s.block, Some(SaveBlock::AiNeedsConsent));
+        // AI was already on in the demo: the message says "again".
+        assert_eq!(s.block, Some(SaveBlock::AiNeedsConsentAgain));
         s.edits_mut().ai.consent_agreed = true;
         assert!(Screen::save(&mut s));
         assert!(s.secrets_saved.key(AiProvider::Anthropic));
@@ -1281,6 +1306,46 @@ mod tests {
             }
         }
         assert!(!s.state().to_string().contains("canary"));
+    }
+
+    /// A re-read after a failed save refreshes the baseline but keeps the
+    /// owner's unsaved edits (S2).
+    #[test]
+    fn a_reload_keeps_unsaved_edits_and_refreshes_the_baseline() {
+        let (_d, mut s) = demo_screen(true);
+        s.edits_mut().user.theme = cl_settings::ThemeChoice::Dark;
+        s.edits_mut().ai.ollama_model = "qwen2.5:7b".into();
+        assert!(s.dirty());
+        s.apply_loaded(crate::company::demo::preferences_loaded());
+        assert_eq!(s.edits().user.theme, cl_settings::ThemeChoice::Dark);
+        assert_eq!(s.edits().ai.ollama_model, "qwen2.5:7b");
+        assert!(s.dirty(), "the edits survived the reload");
+        assert_eq!(
+            s.committed.ai.ollama_model, "llama3.1:8b",
+            "the baseline is the engine's"
+        );
+        assert!(s.revert());
+        assert_eq!(s.edits().ai.ollama_model, "llama3.1:8b");
+        // Clean: the reload refreshes both.
+        s.apply_loaded(crate::company::demo::preferences_loaded());
+        assert!(!s.dirty());
+    }
+
+    /// A save that does not touch the AI panel is not blocked by its
+    /// consent state; a changed panel on an already-on AI says "again".
+    #[test]
+    fn untouched_ai_panel_never_blocks_a_save() {
+        let (_d, mut s) = demo_screen(true);
+        s.edits_mut().ai.consent_agreed = false;
+        s.committed.ai.consent_agreed = false;
+        s.edits_mut().user.theme = cl_settings::ThemeChoice::Dark;
+        assert!(Screen::save(&mut s), "theme-only save: {:?}", s.block);
+        s.edits_mut().ai.ollama_model = "qwen2.5:7b".into();
+        assert!(!Screen::save(&mut s));
+        assert_eq!(s.block, Some(SaveBlock::AiNeedsConsentAgain));
+        assert!(crate::i18n::has(
+            SaveBlock::AiNeedsConsentAgain.message_key()
+        ));
     }
 
     #[test]

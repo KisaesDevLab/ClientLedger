@@ -87,6 +87,12 @@ pub enum SmtpFieldError {
     /// Implicit TLS needs port 465 and STARTTLS another port.
     #[error("security does not match the port")]
     SecurityPort,
+    /// User name carries a control character.
+    #[error("user name")]
+    User,
+    /// Display name carries a control character.
+    #[error("from name")]
+    FromName,
 }
 
 impl SmtpFieldError {
@@ -99,6 +105,8 @@ impl SmtpFieldError {
             SmtpFieldError::From => "prefs.email.err_from",
             SmtpFieldError::PlainNotLocal => "prefs.email.err_plain",
             SmtpFieldError::SecurityPort => "prefs.email.err_security_port",
+            SmtpFieldError::User => "prefs.email.err_user",
+            SmtpFieldError::FromName => "prefs.email.err_from_name",
         }
     }
 }
@@ -151,8 +159,11 @@ impl SmtpForm {
         if !looks_like_email(&self.from) || has_control(&self.from) {
             return Err(SmtpFieldError::From);
         }
-        if has_control(&self.user) || has_control(&self.from_name) {
-            return Err(SmtpFieldError::Host);
+        if has_control(&self.user) {
+            return Err(SmtpFieldError::User);
+        }
+        if has_control(&self.from_name) {
+            return Err(SmtpFieldError::FromName);
         }
         match self.security {
             SmtpSecurity::None if !crate::ai::is_local_host(host) => {
@@ -238,7 +249,10 @@ mod tests {
         assert_eq!(f.validate(), Ok(()));
         let mut f = base.clone();
         f.user = "books\r\nX-Injected: 1".into();
-        assert_eq!(f.validate(), Err(SmtpFieldError::Host));
+        assert_eq!(f.validate(), Err(SmtpFieldError::User));
+        let mut f = base.clone();
+        f.from_name = "Ozark\u{0}Ridge".into();
+        assert_eq!(f.validate(), Err(SmtpFieldError::FromName));
         let mut f = base.clone();
         f.from = "books@example.test\n".into();
         assert_eq!(f.validate(), Err(SmtpFieldError::From));

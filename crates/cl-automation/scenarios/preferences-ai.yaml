@@ -112,7 +112,7 @@ steps:
   # scrolls by design, so no clipping check here.
   - screenshot: anthropic-key
   - click: {role: button, label: Save}
-  - assert_state: {key: screen.blocked, equals: AiNeedsConsent}
+  - assert_state: {key: screen.blocked, equals: AiNeedsConsentAgain}
   - click: {role: check_box, label_contains: I agree}
   - assert_state: {key: screen.ai.consent_agreed, equals: true}
   - click: {role: button, label: Save}

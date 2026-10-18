@@ -466,6 +466,10 @@ impl AiSavePlan {
             };
         }
         let mut config = AiConfigUpdate::for_provider(e.provider.wire(), true);
+        if caps.has(Capabilities::AI_TOKEN_CAP) {
+            // U-29: the engine enforces the same cap once it can.
+            config.monthly_token_limit = e.cap();
+        }
         if e.provider == AiProvider::Ollama {
             config.ollama_base_url = Some(e.ollama_url.trim().to_string());
             config.categorization_model = Some(e.ollama_model.trim().to_string());
@@ -484,7 +488,9 @@ impl AiSavePlan {
         AiSavePlan {
             accept_system_disclosure: !disclosure_accepted,
             config: Some(config),
-            accept_company_consent: cloud || !company_consented || stale,
+            // The engine bumps the consent when AI is turned back on, so a
+            // reactivation accepts again too.
+            accept_company_consent: cloud || !company_consented || stale || !was_on,
             revoke_company_consent: false,
             tasks: Some(AiTaskToggles {
                 categorization: Some(e.bank_feed),
@@ -1108,6 +1114,24 @@ mod tests {
             "an online provider with the notice ticked is accepted again (B2)"
         );
         assert_eq!(
+            with.config.as_ref().and_then(|c| c.monthly_token_limit),
+            None,
+            "no token-cap capability"
+        );
+        let capped = AiSavePlan::build(
+            &e,
+            &saved,
+            Some(&on_engine(true)),
+            Some(&consent(true, false)),
+            &caps(&[Capabilities::SESSION_SECRETS, Capabilities::AI_TOKEN_CAP]),
+            CapCheck::Allowed,
+        );
+        assert_eq!(
+            capped.config.as_ref().and_then(|c| c.monthly_token_limit),
+            Some(cl_settings::ai::DEFAULT_MONTHLY_TOKEN_CAP),
+            "U-29: the engine gets the cap once it advertises it"
+        );
+        assert_eq!(
             with.forget,
             vec![SecretSlot::AiAnthropic, SecretSlot::AiOllamaBaseUrl],
             "the other providers' slots are forgotten"
@@ -1125,11 +1149,23 @@ mod tests {
         );
         let c = plan.config.as_ref().expect("config");
         assert_eq!(c.ollama_base_url.as_deref(), Some(OLLAMA_DEFAULT_URL));
+        assert!(
+            plan.accept_company_consent,
+            "AI was off in the engine: turning it on accepts again"
+        );
+        let plan = AiSavePlan::build(
+            &o,
+            &SecretsSaved::default(),
+            Some(&on_engine(true)),
+            Some(&consent(true, false)),
+            &caps(&[]),
+            CapCheck::Allowed,
+        );
         assert!(!plan.waiting_engine && !plan.accept_company_consent);
         let stale = AiSavePlan::build(
             &o,
             &SecretsSaved::default(),
-            None,
+            Some(&on_engine(true)),
             Some(&consent(true, true)),
             &caps(&[]),
             CapCheck::Allowed,

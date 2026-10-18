@@ -227,6 +227,12 @@ async fn backup_moves_the_archive_verifies_it_and_records_history() {
     assert_eq!(body["host"]["kind"], "backup");
     assert_eq!(body["host"]["flags"]["sales_tax_enabled"], true);
     assert_eq!(body["host"]["prefs"]["bills_due_days"], 21);
+    assert!(
+        body["host"]["prefs"]["receipt_inbox_dir"].is_null(),
+        "a folder on this computer never travels in an archive"
+    );
+    assert_eq!(body["host"]["prefs"]["ai"]["usage"]["tokens"], 0);
+    assert!(body["host"]["prefs"]["ai_consent"].is_null());
     assert_eq!(body["host"]["prefs"]["ai"]["suggest_rules"], true);
     // Preferences travel without secrets: the host object never carries a
     // key, a password or the passphrase (non-negotiable 11).

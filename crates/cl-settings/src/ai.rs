@@ -257,8 +257,13 @@ pub fn is_local_host(host: &str) -> bool {
         // IPv6: loopback or unique-local only.
         return h == "::1" || h.starts_with("fc") || h.starts_with("fd");
     }
-    // A bare machine name (no dot) resolves on the LAN, never on the internet.
-    !h.contains('.') && h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    // A bare machine name (no dot) resolves on the LAN, never on the
+    // internet; it needs a letter so an all-digit or `0x…` form cannot
+    // normalise to a public IPv4 address.
+    !h.contains('.')
+        && h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        && h.bytes().any(|b| b.is_ascii_alphabetic())
+        && !h.starts_with("0x")
 }
 
 /// Checks an Ollama address: `http`/`https`, no credentials, and a host
@@ -391,6 +396,9 @@ mod tests {
             ("http://[2001:db8::1]:11434", OllamaUrlError::NotLocal),
             ("http://169.254.169.254/latest", OllamaUrlError::NotLocal),
             ("http://", OllamaUrlError::Malformed),
+            ("http://2130706433:11434", OllamaUrlError::NotLocal),
+            ("http://0x7f000001:11434", OllamaUrlError::NotLocal),
+            ("http://0xC0A80105:11434", OllamaUrlError::NotLocal),
             ("http://local host:11434", OllamaUrlError::Malformed),
         ];
         for (bad, why) in cases {
