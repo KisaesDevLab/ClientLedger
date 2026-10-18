@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod core;
+pub mod sequencer;
 
 pub use crate::core::model::{
     Align, CellInput, CellKind, CellPos, CellProblem, CellValue, Column, ColumnId, EditableModel,

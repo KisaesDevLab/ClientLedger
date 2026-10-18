@@ -1270,6 +1270,7 @@ mod tests {
                 s.select(c);
                 let ctx = egui::Context::default();
                 crate::shell::Shell::install(&ctx);
+                cl_grid::sequencer::install(&ctx);
                 ctx.enable_accesskit();
                 let mut texts = Vec::new();
                 for _ in 0..2 {

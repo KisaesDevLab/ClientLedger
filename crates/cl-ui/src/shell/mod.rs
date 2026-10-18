@@ -822,6 +822,10 @@ impl Shell {
     /// Draw one frame of the whole shell into the root `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        debug_assert!(
+            cl_grid::sequencer::is_installed(&ctx),
+            "install cl_grid::sequencer after Shell::install (and after the bridge)"
+        );
         // Persist prefs changed by commands (theme).
         let before_theme = self.applied_theme;
         self.begin_frame(&ctx);

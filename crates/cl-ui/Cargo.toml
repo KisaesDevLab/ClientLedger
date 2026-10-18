@@ -11,6 +11,7 @@ cl-api = { path = "../cl-api" }
 cl-automation = { path = "../cl-automation" }
 cl-company = { path = "../cl-company" }
 cl-core = { path = "../cl-core" }
+cl-grid = { path = "../cl-grid" }
 cl-host = { path = "../cl-host" }
 cl-model = { path = "../cl-model" }
 cl-settings = { path = "../cl-settings" }

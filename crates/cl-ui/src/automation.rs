@@ -94,6 +94,12 @@ impl egui::Plugin for Hooks {
     }
 }
 
+/// Events split by the input sequencer are still waiting for a frame: a job
+/// is not done until they have been delivered (P10 plan Rev 2 §2.4.2).
+fn sequencer_busy(ctx: &Context) -> bool {
+    cl_grid::sequencer::pending(ctx, eframe::egui::ViewportId::ROOT)
+}
+
 /// `TextInput` becomes `text_input`.
 fn snake(name: &str) -> String {
     let mut out = String::new();
@@ -317,7 +323,7 @@ impl Bridge {
         }
         match &job.kind {
             JobKind::AfterFrame { until, finish } => {
-                if self.frame() < *until || self.queued() > 0 {
+                if self.frame() < *until || self.queued() > 0 || sequencer_busy(ctx) {
                     return Some(job);
                 }
                 let value = match finish {
@@ -332,7 +338,7 @@ impl Bridge {
                 None
             }
             JobKind::ClickAfterScroll { target, until } => {
-                if self.frame() < *until || self.queued() > 0 {
+                if self.frame() < *until || self.queued() > 0 || sequencer_busy(ctx) {
                     return Some(job);
                 }
                 let target = target.clone();
@@ -851,6 +857,7 @@ mod bridge_tests {
             let ctx = Context::default();
             Shell::install(&ctx);
             let bridge = Bridge::install(&ctx, server);
+            cl_grid::sequencer::install(&ctx);
             let shell = Shell::new(ShellOptions {
                 demo: true,
                 theme: Some(ThemeChoice::Light),

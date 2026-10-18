@@ -16,6 +16,7 @@ fn demo() -> Shell {
 fn context() -> egui::Context {
     let ctx = egui::Context::default();
     Shell::install(&ctx);
+    cl_grid::sequencer::install(&ctx);
     ctx
 }
 

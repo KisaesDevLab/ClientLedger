@@ -934,6 +934,7 @@ dependencies = [
  "cl-automation",
  "cl-company",
  "cl-core",
+ "cl-grid",
  "cl-host",
  "cl-model",
  "cl-settings",

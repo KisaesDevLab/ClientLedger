@@ -70,14 +70,19 @@ impl ClientLedgerApp {
     /// Build the app inside eframe's creation callback.
     #[must_use]
     pub fn new(cc: &eframe::CreationContext<'_>, options: LaunchOptions) -> ClientLedgerApp {
+        // Plugin order matters (P10 plan Rev 2 §2.4.2): the bridge injects
+        // events in its input hook, and the sequencer must see them, so it
+        // is installed last.
         Shell::install(&cc.egui_ctx);
+        let bridge = options
+            .control
+            .map(|server| Bridge::install(&cc.egui_ctx, server));
+        cl_grid::sequencer::install(&cc.egui_ctx);
         ClientLedgerApp {
             shell: Shell::new(options.shell),
             focus_request: options.focus_request,
             stop_request: options.stop_request,
-            bridge: options
-                .control
-                .map(|server| Bridge::install(&cc.egui_ctx, server)),
+            bridge,
             _keep_alive: options.keep_alive,
         }
     }
