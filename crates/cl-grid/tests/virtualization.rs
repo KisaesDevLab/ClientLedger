@@ -113,5 +113,7 @@ fn the_wheel_scrolls_the_grid_not_the_screen() {
     }
     let top = b.grid.snapshot(&ModelRef::Browse(&mut b.model)).top_row;
     assert!(top > 0, "the grid scrolled");
-    assert_eq!(b.outer_offset, 0.0, "the screen did not");
+    // The outer area must not have moved at all; any offset above zero is a
+    // scroll that leaked out of the grid.
+    assert!(b.outer_offset.abs() < f32::EPSILON, "the screen did not");
 }
