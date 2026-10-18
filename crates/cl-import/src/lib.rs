@@ -1,7 +1,11 @@
-//! `cl-import` crate (stub; filled in by a later phase).
+//! `cl-import`: readers for the files owners bring in. P11 adds the CSV
+//! reader and writer the list import/export uses; bank files (OFX, QFX,
+//! QIF, bank CSV profiles, Q-11) arrive in P25.
 #![forbid(unsafe_code)]
 
-/// Returns the crate name; placeholder so the skeleton has a testable item.
+pub mod csv;
+
+/// Returns the crate name; kept so the skeleton test stays meaningful.
 #[must_use]
 pub fn crate_name() -> &'static str {
     "cl-import"
