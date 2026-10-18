@@ -243,7 +243,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("edit.find", "Find / Go To", Some(Menu::Edit), 1, ctrl('F'), Scope::Global),
     cmd("edit.edit_transaction", "Edit Transaction", Some(Menu::Edit), 1, ctrl('E'), Scope::Window),
     cmd("edit.open_list", "Open List for This Field", Some(Menu::Edit), 1, ctrl('L'), Scope::Form),
-    screen("edit.preferences", "Preferences", Some(Menu::Edit), 2, key(Mods::CMD, Key::Comma), "P09"),
+    built("edit.preferences", "Preferences", Some(Menu::Edit), 2, key(Mods::CMD, Key::Comma)),
     // Form and grid commands (not in a menu; listed in the palette and overlay)
     cmd("form.save_new", "Save & New", None, 0, alt('N'), Scope::Form),
     cmd("form.save_close", "Save & Close", None, 0, alt('S'), Scope::Form),
@@ -352,6 +352,7 @@ mod tests {
             "file.portable_copy",
             "file.export_all",
             "file.delete_company",
+            "edit.preferences",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

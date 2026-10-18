@@ -1,0 +1,110 @@
+# Preferences, "Just for me" and the other company panels (P09 steps 1
+# and 5) against `clientledger --demo`: look and feel, dates and numbers
+# (a saved change reaches the shell), reminders, accounting, checks and
+# forms placeholder, sales tax, inventory, receipt inbox, backups, updates;
+# search; Esc reverts then closes.
+name: preferences-user
+description: Every non-AI panel, search, save, Esc revert then close.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: edit.preferences
+  - assert_state: {key: screen.screen, equals: preferences}
+
+  # --- Look and feel ---------------------------------------------------------
+  - click: {role: button, label: Look and feel}
+  - assert_state: {key: screen.category, equals: look}
+  - assert_exists: {role: radio_button, label: Light}
+  - assert_exists: {role: radio_button, label: Dark}
+  - assert_exists: {role: radio_button, label: Automatic}
+  - assert_exists: {role: radio_button, label: Home}
+  - assert_exists: {role: radio_button, label: The windows I had open}
+  - assert_no_clipping: {}
+  - screenshot: look
+  # "Automatic" differs from both the light and the dark run's theme.
+  - click: {role: radio_button, label: Automatic}
+  - assert_state: {key: screen.user.theme, equals: auto}
+  - assert_state: {key: screen.dirty, equals: true}
+  # Esc reverts the edits first; a second Esc closes the clean window.
+  - key: Escape
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_exists: {role: tab, label: Preferences}
+
+  # --- Dates and numbers -------------------------------------------------
+  - click: {role: button, label: Dates and numbers}
+  - assert_state: {key: screen.category, equals: dates}
+  - assert_exists: {role: radio_button, label: MM/DD/YYYY}
+  - assert_exists: {role: radio_button, label: YYYY-MM-DD}
+  - assert_exists: {role: radio_button, label: "-1,234.56"}
+  - assert_exists: {role: radio_button, label: "(1,234.56)"}
+  - assert_exists: {role: text_input, label_contains: days in the past}
+  - assert_exists: {role: text_input, label_contains: days ahead}
+  - click: {role: radio_button, label: "(1,234.56)"}
+  - assert_state: {key: screen.user.negatives, equals: parentheses}
+  - click: {role: text_input, label_contains: days in the past}
+  - key: Ctrl+A
+  - type: {text: "abc"}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.blocked, equals: "BadNumber(\"past_days\")"}
+  - click: {role: text_input, label_contains: days in the past}
+  - key: Ctrl+A
+  - type: {text: "120"}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.user.negatives, equals: parentheses}
+  - screenshot: dates
+
+  # --- Reminders, backups, updates -----------------------------------------
+  - click: {role: button, label: Reminders}
+  - assert_exists: {role: text_input, label: Show bills due within this many days}
+  - assert_exists: {role: check_box, label: Back up when I close a company}
+  - screenshot: reminders
+  - click: {role: button, label: Backups}
+  - assert_exists: {role: text_input, label: Backup folder}
+  - screenshot: backups
+  - click: {role: button, label: Updates}
+  - assert_exists: {role: label, label: Updates are checked only when you ask.}
+  - assert_disabled: {role: button, label: Check for updates}
+  - screenshot: updates
+
+  # --- This company ----------------------------------------------------------
+  - click: {role: button, label: Accounting}
+  - assert_state: {key: screen.category, equals: accounting}
+  - assert_exists: {role: radio_button, label: Accrual}
+  - assert_exists: {role: radio_button, label: Cash}
+  - assert_exists: {role: label, label_contains: Books are closed through 09/30/2026}
+  - screenshot: accounting
+  - click: {role: button, label: Checks and forms}
+  - assert_exists: {role: label, label_contains: arrive with Write Check}
+  - click: {role: button, label: Sales tax}
+  - assert_exists: {role: check_box, label: This company charges sales tax}
+  - assert_exists: {role: text_input, label: Default rate (%)}
+  - screenshot: sales-tax
+  - click: {role: button, label: Inventory}
+  - assert_exists: {role: check_box, label: This company tracks inventory}
+  - click: {role: button, label: Receipt inbox}
+  - assert_exists: {role: check_box, label: Watch a folder for receipts}
+  - click: {role: check_box, label: Watch a folder for receipts}
+  - assert_exists: {role: text_input, label: Folder}
+  - screenshot: inbox
+
+  # --- Search narrows the list ------------------------------------------
+  - click: {role: text_input, label: Find a setting}
+  - type: {text: ollama}
+  - assert_exists: {role: button, label: AI suggestions}
+  - assert_not_exists: {role: button, label: Backups}
+  - key: Ctrl+A
+  - key: Backspace
+  - assert_exists: {role: button, label: Backups}
+
+  # --- Minimum window: the body scrolls by design (shell ScrollArea) ------
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: button, label: Save}
+  - screenshot: inbox-minimum
+  - resize: {width: 1440, height: 940}
+
+  # --- Esc: revert the inbox change, then close -------------------------------
+  - key: Escape
+  - assert_state: {key: screen.dirty, equals: false}
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Preferences}

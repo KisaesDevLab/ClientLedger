@@ -1,0 +1,63 @@
+# Preferences, Email panel (P09 step 4) against `clientledger --demo`: SMTP
+# fields, the password in a password field (keychain only; never in the
+# tree or a screenshot), a bad sender refused before anything is sent, the
+# connection test, and removal of the saved password.
+name: preferences-email
+description: SMTP settings, password in the keychain, test connection.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: edit.preferences
+  - assert_state: {key: screen.screen, equals: preferences}
+  - click: {role: button, label: Email}
+  - assert_state: {key: screen.category, equals: email}
+  - assert_exists: {role: text_input, label: Server}
+  - assert_exists: {role: text_input, label: Port}
+  - assert_exists: {role: radio_button, label: STARTTLS (587)}
+  - assert_exists: {role: radio_button, label: TLS (465)}
+  - assert_exists: {role: text_input, label: User name}
+  - assert_exists: {role: password_input, label: Password}
+  - assert_exists: {role: label, label: No password saved yet.}
+  - assert_exists: {role: text_input, label: From address}
+  - assert_exists: {role: text_input, label: From name}
+  - assert_exists: {role: button, label: Test connection}
+  - assert_state: {key: screen.email.password_saved, equals: false}
+  - assert_no_clipping: {}
+  - screenshot: email-empty
+
+  - click: {role: text_input, label: Server}
+  - type: {text: smtp.example.com}
+  - click: {role: radio_button, label: TLS (465)}
+  - assert_state: {key: screen.email.security, equals: tls}
+  - click: {role: text_input, label: User name}
+  - type: {text: books}
+  - click: {role: password_input, label: Password}
+  - type: {text: smtp-scenario-password-77}
+  - assert_state: {key: screen.email.password_typed, equals: true}
+  - assert_not_exists: {role: label, label_contains: smtp-scenario}
+  - click: {role: text_input, label: From address}
+  - type: {text: not-an-address}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.blocked, equals: "Smtp(From)"}
+  - assert_exists: {role: label, label_contains: From address must be an email address}
+  - click: {role: text_input, label: From address}
+  - key: Ctrl+A
+  - type: {text: books@ozarkridge.example}
+  - click: {role: text_input, label: From name}
+  - type: {text: Ozark Ridge Landscaping}
+  - assert_no_clipping: {}
+  - screenshot: email-filled
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.email.password_saved, equals: true}
+  - assert_state: {key: screen.email.password_typed, equals: false}
+  - assert_exists: {role: label, label_contains: A password is saved in your computer's keychain}
+  - assert_not_exists: {role: label, label_contains: smtp-scenario}
+  - click: {role: button, label: Test connection}
+  - assert_state: {key: screen.status, equals: true}
+  - assert_exists: {role: label, label_contains: Connected}
+  - screenshot: email-saved
+  - click: {role: button, label: Remove password}
+  - assert_state: {key: screen.email.password_saved, equals: false}
+  - click: {role: button, label: Cancel}
+  - assert_not_exists: {role: tab, label: Preferences}

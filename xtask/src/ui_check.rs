@@ -83,9 +83,18 @@ fn exe(name: &str) -> PathBuf {
 }
 
 /// Find the reference PNG for a screen: `Home.png` for `home`,
-/// `WriteCheck.png` for `write-check`.
+/// `WriteCheck.png` for `write-check`. A scenario that covers one panel of
+/// a screen (`preferences-ai`) falls back to the screen's mockup
+/// (`Preferences.png`) by dropping its last `-part`.
 #[must_use]
 pub fn find_mockup(dir: &Path, screen: &str) -> Option<PathBuf> {
+    find_mockup_exact(dir, screen).or_else(|| {
+        let (head, _) = screen.rsplit_once('-')?;
+        find_mockup_exact(dir, head)
+    })
+}
+
+fn find_mockup_exact(dir: &Path, screen: &str) -> Option<PathBuf> {
     let want: String = screen
         .chars()
         .filter(char::is_ascii_alphanumeric)
@@ -309,6 +318,14 @@ mod tests {
                 .ends_with("WriteCheck.png")
         );
         assert!(find_mockup(&dir, "nope").is_none());
+        std::fs::write(dir.join("Preferences.png"), b"x").unwrap();
+        assert!(
+            find_mockup(&dir, "preferences-ai")
+                .unwrap()
+                .ends_with("Preferences.png"),
+            "a panel scenario falls back to its screen's mockup"
+        );
+        assert!(find_mockup(&dir, "nope-ai").is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

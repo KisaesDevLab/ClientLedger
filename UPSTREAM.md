@@ -14,12 +14,12 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | U-06 | Endpoint accepting normalized bank-import batches (rows, dedupe keys, source-file hash) into the review queue; parsing is in Rust (Q-11) | P25 | clientledger/bank-import | Planned |
 | U-07 | Desktop-mode adjustments to the QBD report-export importer (file paths, progress events, tie-out endpoint); report list and mapping unchanged | P31 | clientledger/qbd-import | Planned |
 | U-08 | Import of `.clxfer` transfer files in MyBooks Online, showing verification totals; accepts any older `formatVersion`, refuses newer with an update message (Q-43) | P32 | clientledger/transfer | Planned |
-| U-09 | AI provider credentials supplied by the desktop app per session (owner's own key); never stored by the engine in desktop mode; AI disabled without key or offline; redaction of bank/card numbers, tax IDs, emails, phones before provider calls; per-call token usage reported for the meter and cap | P02, P09 | clientledger/desktop-profile | Planned |
-| U-11 | Ollama provider adapter for the engine's multi-provider AI (local base URL, model choice, no key) if missing; Anthropic and OpenAI adapters confirmed | P09 | clientledger/desktop-profile | Planned |
+| U-09 | AI provider credentials supplied by the desktop app per session (owner's own key); never stored by the engine in desktop mode; AI disabled without key or offline; redaction of bank/card numbers, tax IDs, emails, phones before provider calls; per-call token usage reported for the meter and cap | P02, P09 | clientledger/desktop-profile | Planned — P09 built the client side: keys in the keychain, `cl-api` session-secrets/usage-stamp/summary types, contract tests PENDING(`session-secrets-v1`, `ai-desktop-v1`) (Q-P09a) |
+| U-11 | Ollama provider adapter for the engine's multi-provider AI (local base URL, model choice, no key) if missing; Anthropic and OpenAI adapters confirmed | P09 | clientledger/desktop-profile | Adapter present (P09 scout): the live contract tests drive it against a loopback stub, online and with `CL_OFFLINE=on`; the engine-side stub/mocked-SDK tests remain for E6 |
 | U-12 | Integrity check endpoints (full Verify and fast weekly subset) with typed findings and safe automatic fixes | P34 | clientledger/verify | Planned |
 | U-10 | Redistribution grant text added to the engine repo (`LICENSE-CLIENTLEDGER.md`) by the owner | P39 | main | Planned — owner (Q-31) |
 | U-16 | Engine identity proof (HMAC challenge in `/health`) and graceful shutdown (`POST /api/v1/desktop/shutdown`) for the supervisor | P04 follow-up (P37 hardening) | clientledger/desktop-supervisor | Proposed |
-| U-13 | Desktop session secrets for SMTP: the owner's SMTP password is supplied per session from the keychain, never stored by the engine in desktop mode | P09, P20 | clientledger/ai-desktop (E6) | Planned |
+| U-13 | Desktop session secrets for SMTP: the owner's SMTP password is supplied per session from the keychain, never stored by the engine in desktop mode | P09, P20 | clientledger/ai-desktop (E6) | Planned — P09 keeps the password in the keychain and tests with the body password; contract test PENDING(`smtp-session-v1`) (Q-P09b) |
 | U-14 | Money as decimal strings beyond the core resources: `/reports/*` (desktop, or `?exact=1` on the server), balance and validation helpers, 1099 corrections, batch, daily-sales and AI amounts (widened per P05 §3.6; replaces the scout's U-20) | P12, P16, P28 | clientledger/exact-money (proposed; plan names no branch) | Planned |
 | U-15 | Closing-date password in the engine: `companies.closing_password_hash`, password-gated `PUT /tb/closing-date` and `/company/settings` `lockDate` (which must also stamp `lock_date_set_by/at`, as `/tb/closing-date` does today), `closingPassword` on the override and safe delete; capability `closing-password-v1`; one PR landing with P08 | P08, every posting screen (P10+) | clientledger/closing-password | Planned |
 | U-17 | Optimistic concurrency: `version` columns, `If-Match` → 409 `STALE` (capability `record-version-v1`) | P05 (AC4 live test), P12/P13, P27; hard for P33 | clientledger/record-versions (proposed; plan names no branch) | Planned |
@@ -33,6 +33,8 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | U-26 | Optional: `companies.metadata jsonb` with allowlisted keys (`accentColor`) | P08 | - | Proposed; default is the local store plus `manifest.host`, likely dropped |
 | U-27 | Optional: trial balance `?exact=1` adding `debitExact/creditExact` strings | P08 restore verification | - | Proposed; CSV strings suffice |
 | U-28 | Optional: register ClientLedger's four starter charts as engine COA templates | P08 | - | Proposed; `systemAccountsOnly` + `POST /accounts/import` is the workaround |
+| U-29 | Monthly AI cap on integer tokens: `ai_config.monthly_token_limit` and a `SUM(input_tokens+output_tokens)` check in `createJob` (the dollar cap stays a float estimate); `GET /ai/usage/summary` reports tokens | P09 (client-side cap until then, Q-P09e) | clientledger/ai-desktop (E6) | Proposed |
+| U-30 | Consent audit payload: `company_ai_consent_accepted` adds `provider` (and the system accept adds `disclosureVersion`), so the audit row alone answers Q-136 | P09 (local consent note until then, Q-P09f) | clientledger/ai-desktop (E6) | Proposed, S |
 
 Add rows as capability checks find gaps (credit memos, statements, finance charges, sales tax, average-cost inventory, reconciliation, permissions granularity, optimistic concurrency, change notifications for LAN mode; post-beta: estimates, sales orders, POs, assemblies, custom fields, form templates).
 
@@ -206,6 +208,22 @@ Add rows as capability checks find gaps (credit memos, statements, finance charg
 - cl-settings keeps the same three flags per company and writes them into `manifest.host`; when U-25 lands, P09 moves them to the engine and drops the local copy.
 - Schema/migrations: additive columns with defaults (+ rollback). Server appliance impact: none.
 - Status: Planned — 2026-10-17.
+
+### U-29 — Monthly AI cap on integer tokens (proposed)
+- Needed by: P09 (Q-138, Q-P02e); the client enforces a token cap locally until then.
+- Why: the engine's `monthlyBudgetLimit` and the usage cost sum are floats (`parseFloat` of `decimal(19,4)` estimates), which the desktop may show only as estimates (non-negotiable 6). Tokens are integers end to end (`ai_usage_log.input_tokens/output_tokens`).
+- Proposed change: `ai_config.monthly_token_limit integer null`; `createJob` refuses with 400 `AI_TOKEN_CAP` when `SUM(input_tokens + output_tokens)` since the month start reaches it; `GET /api/v1/ai/usage/summary?from&to` (E6) reports integer totals per provider/model/feature. `PUT /ai/admin/config` accepts `monthlyTokenLimit`.
+- cl-api already types the summary (`AiUsageSummary`, gated on `ai-desktop-v1`) and the per-reply `usage` stamp.
+- Schema/migrations: one additive column (+ rollback). Server appliance impact: none (the dollar budget keeps working).
+- Status: Proposed — 2026-10-17.
+
+### U-30 — Provider and version in the consent audit rows (proposed)
+- Needed by: P09 (Q-136: consent recorded with date, user, provider and disclosure version).
+- Why: `acceptCompanyDisclosure` writes `company_ai_consent_accepted` with the version and tasks but not the provider; `acceptSystemDisclosure` writes neither provider nor version. There is no audit-log write route for the desktop to add a row.
+- Proposed change: include `fallbackChain[0]` (or the configured providers) as `provider` in both payloads and `disclosureVersion` in the system row. One-line payload changes; no schema change.
+- Until then ClientLedger keeps `{provider, disclosure_version, accepted_at}` in `CompanyPrefs.ai_consent` (travels in `manifest.host`).
+- Server appliance impact: none.
+- Status: Proposed — 2026-10-17.
 
 ## Entry template
 

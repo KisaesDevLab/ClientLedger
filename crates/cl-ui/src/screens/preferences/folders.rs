@@ -1,0 +1,36 @@
+//! The Receipt inbox panel (P09 step 5, Q-54): the folder the app watches
+//! for new photos and PDFs to attach to bills, checks and bank items
+//! (the watcher itself arrives with P17).
+
+use eframe::egui::{self, Ui};
+
+use super::Edits;
+use crate::i18n::t;
+use crate::screens::company::form;
+use crate::theme::Tokens;
+
+/// Draws the Receipt inbox panel.
+pub fn receipt_inbox(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
+    form::heading(ui, tokens, &t("prefs.cat.inbox"));
+    form::hint(ui, tokens, &t("prefs.inbox.intro"));
+    ui.add_space(8.0);
+    form::card(ui, tokens, |ui| {
+        let mut on = edits.company.receipt_inbox_dir.is_some();
+        if ui.checkbox(&mut on, t("prefs.inbox.watch")).changed() {
+            edits.company.receipt_inbox_dir = on.then(std::path::PathBuf::new);
+        }
+        let mut text = edits
+            .company
+            .receipt_inbox_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        ui.add_enabled_ui(on, |ui| {
+            if form::field(ui, &t("prefs.inbox.folder"), &mut text).changed() {
+                edits.company.receipt_inbox_dir = Some(std::path::PathBuf::from(text.trim()));
+            }
+        });
+        form::hint(ui, tokens, &t("prefs.inbox.folder_hint"));
+        ui.add(egui::Label::new(t("prefs.inbox.later")).selectable(false));
+    });
+}
