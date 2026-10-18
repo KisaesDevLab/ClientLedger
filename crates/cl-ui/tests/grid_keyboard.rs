@@ -1,7 +1,9 @@
 //! The ledger grid in the real shell (P10 plan §6, "U" tests): the demo
-//! screen opened with `--demo` rules, the input sequencer installed, and
-//! input fed in consecutive frames with no idle frames, or in one batched
-//! frame where a test says so.
+//! screen opened with `--demo` rules and the input sequencer installed.
+//! Most helpers feed one input frame and then idle until the sequencer has
+//! delivered everything (up to 22 frames); batched tests put several events
+//! in one frame. `split_line_in_back_to_back_frames` enters the split line
+//! with one input per frame and no idle frames in between.
 //!
 //! Values are read back from the AccessKit tree, the same place the control
 //! channel reads them, and parsed into `Money` for exact comparison:
@@ -572,6 +574,33 @@ fn an_open_picker_follows_the_tab_rule_on_save() {
     rig.click("Save", Some(accesskit::Role::Button));
     assert_eq!(rig.cell("Account", 1), by_tab);
     assert_eq!(rig.state()["popup_open"], false);
+}
+
+/// S4: the two split lines typed with one input per frame, back to back,
+/// with no idle frames between keys (a fast typist or the control channel).
+#[test]
+fn split_line_in_back_to_back_frames() {
+    let mut rig = Rig::new();
+    rig.start_check("1286.40");
+    let inputs: Vec<Vec<Event>> = vec![
+        vec![Event::Text("51".into())],
+        tap(Key::Tab, Modifiers::NONE),
+        vec![Event::Text("842.15".into())],
+        tap(Key::Enter, Modifiers::NONE),
+        vec![Event::Text("Mulch".into())],
+        tap(Key::Tab, Modifiers::NONE),
+        vec![Event::Text("400+44.25".into())],
+        tap(Key::Tab, Modifiers::NONE),
+    ];
+    for events in inputs {
+        rig.frame(events);
+    }
+    assert!(rig.cell("Account", 1).contains("5100"));
+    assert!(rig.cell("Account", 2).contains("Mulch"));
+    assert_eq!(rig.money("Amount", 1), Some(money("842.15")));
+    assert_eq!(rig.money("Amount", 2), Some(money("444.25")));
+    assert_eq!(rig.lines_total(), money("1286.40"));
+    assert_eq!(rig.cursor().0, 1, "still on line 2 (its Memo)");
 }
 
 /// T20: a save keeps the rows: no "line is no longer here" and the cursor
