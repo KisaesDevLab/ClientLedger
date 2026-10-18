@@ -4,7 +4,8 @@
 //! form widgets arrive with P10; these are deliberately plain.
 
 use cl_core::{CalendarDate, Money, MoneyInputError, UserInput};
-use cl_model::date_rules::{DateKey, apply_date_key};
+use cl_model::date_entry::{self, DateOrder, US_FIRST_WEEKDAY};
+use cl_model::date_rules::DateKey;
 use eframe::egui::{self, Color32, CornerRadius, Margin, Response, RichText, Stroke, Ui, Vec2};
 
 use crate::i18n::t;
@@ -187,7 +188,8 @@ pub fn password(ui: &mut Ui, label: &str, value: &mut String) -> Response {
 }
 
 /// A date input in `MM/DD/YYYY` with the date keys (+, -, T, M, H, Y, R,
-/// W, K) applied when typed at the end of the text.
+/// W, K) applied when typed at the end of the text. Parsing and the keys are
+/// the shared `cl_model::date_entry` rules the grid uses (P10, Q-P10f).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DateInput {
     /// The text as typed.
@@ -206,9 +208,9 @@ impl DateInput {
         }
     }
 
-    /// Re-parses the text.
-    pub fn reparse(&mut self) {
-        self.value = parse_us_date(&self.text);
+    /// Re-parses the text (`M/D` uses `today`'s year).
+    pub fn reparse(&mut self, today: CalendarDate) {
+        self.value = date_entry::parse(&self.text, DateOrder::Mdy, today).ok();
     }
 
     /// Sets a date and its text.
@@ -216,24 +218,6 @@ impl DateInput {
         self.text = crate::shell::us_date(d);
         self.value = Some(d);
     }
-}
-
-/// Parses `M/D/YYYY`, `MM/DD/YYYY` or `YYYY-MM-DD`.
-#[must_use]
-pub fn parse_us_date(text: &str) -> Option<CalendarDate> {
-    let s = text.trim();
-    if let Ok(d) = CalendarDate::parse_wire(s) {
-        return Some(d);
-    }
-    let parts: Vec<&str> = s.split('/').collect();
-    if parts.len() != 3 {
-        return None;
-    }
-    let m: u32 = parts[0].parse().ok()?;
-    let d: u32 = parts[1].parse().ok()?;
-    let y: i32 = parts[2].parse().ok()?;
-    let y = if (0..100).contains(&y) { y + 2000 } else { y };
-    CalendarDate::from_ymd(y, m, d).ok()
 }
 
 /// Draws a date field and applies date keys.
@@ -254,12 +238,19 @@ pub fn date_field(
         let last = input.text.chars().last();
         if let Some(key) = last.and_then(DateKey::from_char) {
             input.text.pop();
-            let base = parse_us_date(&input.text).or(input.value).unwrap_or(today);
-            if let Some(d) = apply_date_key(key, base, today, cl_core::Weekday::Mon) {
+            // The week starts on Sunday for US businesses (Q-41, Q-P10f).
+            if let Some(d) = date_entry::apply_key(
+                key,
+                &input.text,
+                input.value,
+                DateOrder::Mdy,
+                today,
+                US_FIRST_WEEKDAY,
+            ) {
                 input.set(d);
             }
         } else {
-            input.reparse();
+            input.reparse(today);
         }
     }
     response
@@ -454,27 +445,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn dates_parse_in_the_us_forms() {
-        let d = parse_us_date("11/04/2026").expect("date");
-        assert_eq!(d.to_wire(), "2026-11-04");
-        assert_eq!(
-            parse_us_date("1/4/26")
-                .map(CalendarDate::to_wire)
-                .as_deref(),
-            Some("2026-01-04")
-        );
-        assert_eq!(
-            parse_us_date("2026-11-04")
-                .map(CalendarDate::to_wire)
-                .as_deref(),
-            Some("2026-11-04")
-        );
-        assert_eq!(parse_us_date("13/40/2026"), None);
-        assert_eq!(parse_us_date(""), None);
-        let mut input = DateInput::new(d);
+    fn date_input_uses_the_shared_rules() {
+        let today = CalendarDate::from_ymd(2026, 11, 4).expect("date");
+        let mut input = DateInput::new(today);
         assert_eq!(input.text, "11/04/2026");
-        input.text = "bad".into();
-        input.reparse();
-        assert_eq!(input.value, None);
+        for (text, want) in [
+            ("1/4/26", Some("2026-01-04")),
+            ("2026-11-04", Some("2026-11-04")),
+            ("3/7", Some("2026-03-07")),
+            ("13/40/2026", None),
+            ("", None),
+            ("bad", None),
+        ] {
+            input.text = text.into();
+            input.reparse(today);
+            assert_eq!(
+                input.value.map(CalendarDate::to_wire).as_deref(),
+                want,
+                "{text}"
+            );
+        }
     }
 }

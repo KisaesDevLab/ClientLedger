@@ -1060,7 +1060,7 @@ pub fn today() -> CalendarDate {
 /// `MM/DD/YYYY`.
 #[must_use]
 pub fn us_date(d: CalendarDate) -> String {
-    format!("{:02}/{:02}/{}", d.month(), d.day(), d.year())
+    cl_model::date_entry::format(d, cl_model::date_entry::DateOrder::Mdy)
 }
 
 /// `Wed 11/04/2026`.

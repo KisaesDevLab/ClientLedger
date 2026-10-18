@@ -1,5 +1,6 @@
 //! UI-side state without egui: the command registry and keymap, the form
-//! state machine, undo for unsaved edits, and date-key and date-warning rules.
+//! state machine, undo for unsaved edits, date entry with the date keys and
+//! date warnings, and exact amount entry with the calculator.
 //!
 //! Nothing here draws or does I/O, so all of it is unit tested.
 //!
@@ -15,6 +16,7 @@
 
 pub mod amount_entry;
 pub mod commands;
+pub mod date_entry;
 pub mod date_rules;
 pub mod forms;
 pub mod keymap;
