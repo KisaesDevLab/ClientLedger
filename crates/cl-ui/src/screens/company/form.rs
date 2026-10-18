@@ -213,6 +213,14 @@ impl DateInput {
         self.value = date_entry::parse(&self.text, DateOrder::Mdy, today).ok();
     }
 
+    /// Shows a parsed date in full (`1/5/99` becomes `01/05/2099`, N2), so
+    /// the owner sees which century a short year meant. Unparsed text stays.
+    pub fn settle(&mut self) {
+        if let Some(d) = self.value {
+            self.text = date_entry::format(d, DateOrder::Mdy);
+        }
+    }
+
     /// Sets a date and its text.
     pub fn set(&mut self, d: CalendarDate) {
         self.text = crate::shell::us_date(d);
@@ -252,6 +260,9 @@ pub fn date_field(
         } else {
             input.reparse(today);
         }
+    }
+    if response.lost_focus() {
+        input.settle();
     }
     response
 }
@@ -465,5 +476,13 @@ mod tests {
                 "{text}"
             );
         }
+        input.text = "1/5/99".into();
+        input.reparse(today);
+        input.settle();
+        assert_eq!(input.text, "01/05/2099");
+        input.text = "bad".into();
+        input.reparse(today);
+        input.settle();
+        assert_eq!(input.text, "bad");
     }
 }
