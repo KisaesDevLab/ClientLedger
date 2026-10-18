@@ -172,7 +172,7 @@ impl GridDemo {
         }
         let after = match self.lines.begin_save(intent, &self.lists) {
             Ok(SaveStart::Send(value)) => {
-                self.saved.push(value.clone());
+                self.saved.push(lines::for_save(&value));
                 self.lines.save_ok(value, &self.lists)
             }
             Ok(SaveStart::Skip(after)) => after,

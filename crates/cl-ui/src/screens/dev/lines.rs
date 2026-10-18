@@ -392,7 +392,13 @@ impl View<'_> {
         &self.form.current().lines
     }
 
+    /// Exactly one blank entry line at the end: add one after a line is
+    /// used, and drop the extra one left when a line is put back to blank
+    /// (Esc on a row the owner had started).
     fn ensure_entry(lines: &mut Vec<DemoLine>, keys: &mut RowKeyGen) {
+        while lines.len() >= 2 && lines[lines.len() - 2..].iter().all(DemoLine::is_blank) {
+            lines.pop();
+        }
         if lines.last().is_none_or(|l| !l.is_blank()) {
             lines.push(DemoLine::blank(keys.next_key()));
         }
@@ -595,6 +601,21 @@ impl EditableModel for View<'_> {
     }
 }
 
+/// What a save sends: the check without its blank lines, so the entry
+/// line is never part of a saved record (P10 plan §4, T23).
+#[must_use]
+pub fn for_save(check: &DemoCheck) -> DemoCheck {
+    DemoCheck {
+        amount: check.amount,
+        lines: check
+            .lines
+            .iter()
+            .filter(|l| !l.is_blank())
+            .cloned()
+            .collect(),
+    }
+}
+
 /// The lines total; `None` when it does not fit (never rounded).
 #[must_use]
 pub fn lines_total(check: &DemoCheck) -> Option<Money> {
@@ -674,6 +695,21 @@ mod tests {
             Some(CREW_GROUP)
         );
         assert_eq!(l.display(TAG_LIST, 1).as_deref(), Some("Install"));
+    }
+
+    #[test]
+    fn one_entry_line_at_the_end() {
+        let mut keys = RowKeyGen::new();
+        let mut lines: Vec<DemoLine> = (0..3).map(|_| DemoLine::blank(keys.next_key())).collect();
+        lines[0].account = Pick::Id(5100);
+        let kept = lines[1].key;
+        View::ensure_entry(&mut lines, &mut keys);
+        assert_eq!(lines.len(), 2, "the extra blank line goes");
+        assert_eq!(lines[1].key, kept, "the earlier blank line stays");
+        lines[1].account = Pick::Id(6200);
+        View::ensure_entry(&mut lines, &mut keys);
+        assert_eq!(lines.len(), 3);
+        assert!(lines[2].is_blank());
     }
 
     #[test]

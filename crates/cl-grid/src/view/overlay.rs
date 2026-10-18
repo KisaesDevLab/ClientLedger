@@ -3,8 +3,8 @@
 //! node so screen readers and the control channel can read them.
 
 use egui::{
-    Align2, Area, Context, CornerRadius, Frame, Id, Label, Margin, Order, Pos2, Rect, RichText,
-    Role, Sense, Stroke, UiBuilder, vec2,
+    Align2, Area, Context, CornerRadius, Frame, Id, Label, Margin, Order, Pos2, Rect, Role, Sense,
+    Stroke, UiBuilder, vec2,
 };
 
 use super::style::GridStyle;
@@ -172,6 +172,9 @@ pub fn popup(
     (hit, shown.response.rect)
 }
 
+/// Widest a caption gets before it wraps (points).
+const CAPTION_WRAP: f32 = 320.0;
+
 /// Show `text` under a cell whose bottom-left corner is `at`.
 pub fn caption(ctx: &Context, id: Id, at: Pos2, text: &str, style: &GridStyle) {
     Area::new(id)
@@ -184,14 +187,18 @@ pub fn caption(ctx: &Context, id: Id, at: Pos2, text: &str, style: &GridStyle) {
                 .stroke(Stroke::new(1.0, style.row_border))
                 .inner_margin(Margin::symmetric(6, 3))
                 .show(ui, |ui| {
-                    let r = ui.add(
-                        Label::new(
-                            RichText::new(text)
-                                .font(style.small.clone())
-                                .color(style.warn_text),
-                        )
-                        .selectable(false),
+                    // Laid out here at a fixed wrap width: an `Area` keeps
+                    // last frame's size, so a label left to wrap itself
+                    // would wrap to the width of an earlier, shorter
+                    // caption (one word per line under a narrow cell).
+                    let galley = ui.painter().layout(
+                        text.to_owned(),
+                        style.small.clone(),
+                        style.warn_text,
+                        CAPTION_WRAP,
                     );
+                    ui.set_min_width(galley.size().x);
+                    let r = ui.add(Label::new(galley).selectable(false));
                     ctx.accesskit_node_builder(r.id, |node| {
                         node.set_role(Role::Status);
                         node.set_label(text);

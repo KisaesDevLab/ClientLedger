@@ -145,6 +145,10 @@ pub struct Grid {
     had_focus: bool,
     restore_focus: bool,
     want_focus: bool,
+    /// Passes left to retry an explicit [`Grid::focus`]: a grid shown for
+    /// the first time in the pass that asked has no focus widget yet, and
+    /// egui drops focus on a widget it did not see.
+    focus_retries: u8,
     seen_rev: Option<u64>,
     ime_active: bool,
     cells: Vec<(Id, CellPos)>,
@@ -214,6 +218,7 @@ impl Grid {
             had_focus: false,
             restore_focus: false,
             want_focus: false,
+            focus_retries: 0,
             seen_rev: None,
             ime_active: false,
             cells: Vec::new(),
@@ -305,6 +310,7 @@ impl Grid {
     pub fn focus(&mut self, pos: CellPos, mut model: ModelRef<'_>, env: &GridEnv<'_>) {
         self.core.set_cursor(pos, &mut model, env.formats());
         self.want_focus = true;
+        self.focus_retries = 3;
     }
 
     /// Bring a row into view on the next frame.
@@ -1008,6 +1014,15 @@ impl Grid {
         let range = self.viewport.visible_range(&h);
         model.rows_mut().visible_range(range);
         self.had_focus = ctx.memory(|m| m.has_focus(focus_id));
+        if self.focus_retries > 0 {
+            if self.had_focus {
+                self.focus_retries = 0;
+            } else {
+                self.focus_retries -= 1;
+                self.want_focus = true;
+                ctx.request_repaint();
+            }
+        }
         GridOutput {
             events,
             focused: self.had_focus,
@@ -1456,13 +1471,9 @@ impl Grid {
                         let resp: Response = row_ui.put(at, te);
                         buffer_changed |= resp.changed();
                     }
-                    let owner = self.popup_owner();
                     ctx.accesskit_node_builder(focus_id, |node| {
                         node.set_label(cell_label.clone());
                         node.set_column_index(ci);
-                        if let Some((list, item)) = owner {
-                            a11y::popup_owner(node, list, item);
-                        }
                         if let Some(chips) = chips_text.take().filter(|c| !c.is_empty()) {
                             node.set_description(chips);
                         }
@@ -1513,13 +1524,9 @@ impl Grid {
                 // node speaks for it (a checkbox, a combo box, a cell).
                 if is_cursor && !no_editor {
                     let popup_open = self.core.edit().is_some_and(|e| e.popup.is_some());
-                    let owner = self.popup_owner();
                     ctx.accesskit_node_builder(self.focus_id(), |node| {
                         node.set_label(cell_label);
                         node.set_column_index(ci);
-                        if let Some((list, item)) = owner {
-                            a11y::popup_owner(node, list, item);
-                        }
                         match (col.kind, &value) {
                             (CellKind::Checkbox, CellValue::Bool(b)) => {
                                 crate::editors::checkbox::node(node, *b);
@@ -1618,6 +1625,18 @@ impl Grid {
                 popup_hit = hit;
                 self.popup_rect = Some(r);
                 top = r.bottom();
+                // Relations only to nodes that exist this pass: egui gives a
+                // popup no nodes in its first (invisible, sizing) pass, and a
+                // relation to a missing node makes the platform adapter
+                // panic (accesskit_consumer `controls`).
+                if let Some((list, item)) = self.popup_owner()
+                    && ctx.has_accesskit_node(list)
+                {
+                    let item = item.filter(|i| ctx.has_accesskit_node(*i));
+                    ctx.accesskit_node_builder(self.focus_id(), |node| {
+                        a11y::popup_owner(node, list, item);
+                    });
+                }
             }
             caption_top = Some((top, place.x));
         }

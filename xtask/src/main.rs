@@ -6,6 +6,7 @@ mod ci;
 mod engine;
 mod engine_test;
 mod gen_sample;
+mod grid_bench;
 mod keymap_doc;
 mod layering;
 mod licenses;
@@ -35,6 +36,8 @@ usage: cargo xtask <command>
   pg-fetch [--force] download the pinned PostgreSQL binaries into target/pg/<target>
   keymap-doc [--check]
                      generate docs/KEYBOARD.md and the shortcut cheat sheet from the cl-model keymap
+  grid-bench         ledger grid scroll benchmark (200k rows, real shell), optimised; fails
+                     when p95 frame time is over 8 ms (AccessKit off) or 12 ms (on), one retry
   gen-sample [--check]
                      write fixtures/sample/ozark_ridge (the practice company, Q-219); --check verifies
   run [--no-prepare] [-- <app args>]
@@ -127,6 +130,7 @@ fn main() -> Result<()> {
         Some("ui-check") => ui_check::ui_check(&args[1..]),
         Some("keymap-doc") => keymap_doc::keymap_doc(&args[1..]),
         Some("gen-sample") => gen_sample::gen_sample(&args[1..]),
+        Some("grid-bench") => grid_bench::grid_bench(&args[1..]),
         Some(cmd) => {
             if let Some((_, phase)) = STUBS.iter().find(|(name, _)| *name == cmd) {
                 bail!("`{cmd}` is not implemented yet: lands in {phase}");

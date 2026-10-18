@@ -849,13 +849,15 @@ impl Core {
     ) -> Effects {
         self.focused = false;
         let mut fx = Effects::handled();
-        self.close_popup();
+        // Commit before closing the list: a highlighted entry follows the
+        // Tab rule, as on every save path (a mouse Save loses focus first).
         if self
             .commit(model, lookups, fmt, Accept::Other, &mut fx)
             .is_err()
         {
             self.parked = true;
         }
+        self.close_popup();
         fx
     }
 

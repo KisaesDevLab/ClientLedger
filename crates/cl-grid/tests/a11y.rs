@@ -260,7 +260,23 @@ fn the_editor_owns_the_open_list() {
     let mut r = Rig::new(line_spec(), Lines::new(true, 2));
     r.focus_cell(0, ACCOUNT);
     r.frame(typed("51"));
-    r.frame(vec![]);
+    // egui sizes a new popup invisibly first: it has no nodes yet, so the
+    // editor must not point at it (a relation to a missing node makes the
+    // platform adapter panic).
+    let mut frames = 0;
+    loop {
+        let nodes = r.nodes();
+        let editor = find(&nodes, r.grid.focus_id().accesskit_id());
+        let list = r.grid.popup_id().accesskit_id();
+        let shown = nodes.iter().any(|(id, _)| *id == list);
+        assert_eq!(!editor.controls().is_empty(), shown);
+        if shown {
+            break;
+        }
+        frames += 1;
+        assert!(frames < 4, "the popup never got its nodes");
+        r.frame(vec![]);
+    }
     let editor = find(&r.nodes(), r.grid.focus_id().accesskit_id()).clone();
     assert_eq!(editor.controls(), [r.grid.popup_id().accesskit_id()]);
     assert_eq!(

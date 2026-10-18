@@ -42,6 +42,37 @@ impl Rig {
         out.textures_delta.clear();
     }
 
+    /// The open editor's or cell's AccessKit node with this label, after
+    /// one more frame: (value, description).
+    fn node(&mut self, label: &str) -> Option<(String, String)> {
+        self.ctx.enable_accesskit();
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+            ..RawInput::default()
+        };
+        let demo = &mut self.demo;
+        let mut out = self.ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| demo.ui(ui));
+        });
+        out.textures_delta.clear();
+        let update = out.platform_output.accesskit_update?;
+        let mut found: Vec<_> = update
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.label() == Some(label))
+            .map(|(_, n)| {
+                (
+                    n.role() == egui::accesskit::Role::TextInput,
+                    n.value().unwrap_or_default().to_owned(),
+                    n.description().unwrap_or_default().to_owned(),
+                )
+            })
+            .collect();
+        // The editor first.
+        found.sort_by_key(|(editor, _, _)| !editor);
+        found.into_iter().next().map(|(_, v, d)| (v, d))
+    }
+
     fn idle(&mut self) {
         for _ in 0..20 {
             self.frame(vec![]);
@@ -209,4 +240,109 @@ fn state_has_no_values() {
     assert_eq!(found, ["lines"], "only the mode is text");
     let text = rig.demo.state().to_string();
     assert!(!text.contains("1286") && !text.contains("1,286"));
+}
+
+fn focus_amount(rig: &mut Rig) {
+    let first = rig.demo.lines.form().current().lines[0].key;
+    rig.demo.lines.focus(
+        CellPos {
+            row: first,
+            col: super::lines::AMOUNT,
+        },
+        &rig.demo.lists,
+    );
+    rig.idle();
+}
+
+/// T23: the saved record never holds the blank entry line, and Enter on a
+/// pristine entry line is Save & New.
+#[test]
+fn entry_line_never_in_snapshot() {
+    let mut rig = Rig::new();
+    rig.demo.check_text = "842.15".into();
+    rig.idle();
+    let first = rig.demo.lines.form().current().lines[0].key;
+    rig.demo.lines.focus(
+        CellPos {
+            row: first,
+            col: ACCOUNT,
+        },
+        &rig.demo.lists,
+    );
+    rig.idle();
+    rig.text("5100");
+    rig.key(Key::Tab);
+    rig.text("842.15");
+    rig.key(Key::Enter);
+    assert_eq!(rig.demo.lines.form().current().lines.len(), 2);
+    // On the pristine entry line: Enter saves and starts a new check.
+    rig.key(Key::Enter);
+    assert_eq!(rig.demo.saved.len(), 1);
+    let saved = &rig.demo.saved[0];
+    assert_eq!(saved.lines.len(), 1, "the entry line is not saved");
+    assert!(saved.lines.iter().all(|l| !l.is_blank()));
+    assert_eq!(saved.lines[0].amount, Some(money("842.15")));
+    assert_eq!(saved.amount, Some(money("842.15")));
+    assert_eq!(rig.demo.lines.form().current().lines.len(), 1);
+    assert!(rig.demo.lines.form().current().lines[0].is_blank());
+}
+
+/// T27: the screen changes a cell under the open editor. A clean editor
+/// shows the new value; a dirty one keeps the typed text and says so.
+#[test]
+fn model_change_under_editor() {
+    let mut rig = Rig::new();
+    focus_amount(&mut rig);
+    let (value, _) = rig.node("Amount, line 1").expect("the editor");
+    assert_eq!(value, "");
+    // A recompute (P20 qty x rate) writes Amount while its editor is open.
+    rig.demo
+        .lines
+        .edit_step(|c| c.lines[0].amount = Some(money("500.00")));
+    rig.idle();
+    let (value, _) = rig.node("Amount, line 1").expect("the editor");
+    assert_eq!(value, "500.00", "a clean editor follows the model");
+
+    rig.text("12");
+    rig.demo
+        .lines
+        .edit_step(|c| c.lines[0].amount = Some(money("600.00")));
+    rig.idle();
+    let (value, description) = rig.node("Amount, line 1").expect("the editor");
+    assert!(value.ends_with("12"), "the typed text is kept: {value}");
+    let shown = crate::i18n::t("grid.cell.changed_underneath");
+    assert!(
+        description.contains(&shown) || rig_shows(&mut rig, &shown),
+        "the owner is told the cell changed"
+    );
+    // Esc shows the new value; Tab would have committed the typed one.
+    assert!(rig.demo.command(cl_model::CommandId::new("form.revert")));
+    rig.idle();
+    let (value, _) = rig.node("Amount, line 1").expect("the editor");
+    assert_eq!(value, "600.00");
+    assert_eq!(
+        rig.demo.lines.form().current().lines[0].amount,
+        Some(money("600.00"))
+    );
+}
+
+/// Any node shows `text` as its label, value or description.
+fn rig_shows(rig: &mut Rig, text: &str) -> bool {
+    rig.ctx.enable_accesskit();
+    let input = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+        ..RawInput::default()
+    };
+    let demo = &mut rig.demo;
+    let out = rig.ctx.run_ui(input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| demo.ui(ui));
+    });
+    out.platform_output.accesskit_update.is_some_and(|u| {
+        u.nodes.iter().any(|(_, n)| {
+            [n.label(), n.value(), n.description()]
+                .into_iter()
+                .flatten()
+                .any(|s| s.contains(text))
+        })
+    })
 }

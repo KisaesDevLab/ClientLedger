@@ -14,3 +14,10 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
+
+# `cargo xtask grid-bench`: optimised, but with debug assertions on, because
+# cl-ui's dev-dependencies switch on cl-api's `test-support`, which refuses
+# to build without them (a guard against test hooks in release builds).
+[profile.grid-bench]
+inherits = "release"
+debug-assertions = true
