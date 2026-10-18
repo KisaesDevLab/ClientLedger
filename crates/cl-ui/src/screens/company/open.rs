@@ -689,6 +689,11 @@ impl OpenCompanyScreen {
     }
 
     fn handle_keys(&mut self, ui: &mut Ui) {
+        if self.restore_open && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.restore_open = false;
+            self.restore_result = None;
+            return;
+        }
         if ui.ctx().egui_wants_keyboard_input() || self.companies.is_empty() {
             return;
         }
@@ -914,7 +919,7 @@ impl OpenCompanyScreen {
                     .size(12.0)
                     .color(tokens.text_tertiary),
                 )
-                .truncate(),
+                .wrap(),
             );
         };
         let right = |ui: &mut Ui,

@@ -12,7 +12,7 @@ steps:
   - assert_exists: {role: text_input, label: Legal name (if different)}
 
   # Validation: a name is required before moving on.
-  - click: {role: button, label: Next}
+  - click: {role: button, label: Next, index: 0}
   - assert_state: {key: screen.page, equals: names}
   - assert_state: {key: screen.issues, equals: 1}
   - assert_exists: {role: label, label: The business needs a name.}
@@ -23,17 +23,17 @@ steps:
   - type: {text: Shoal Creek Farm LLC}
   - click: {role: radio_button, label: Single-member LLC}
   - screenshot: names
-  - click: {role: button, label: Next}
+  - click: {role: button, label: Next, index: 0}
   - assert_state: {key: screen.page, equals: year}
   - assert_exists: {role: radio_button, label: Standard months}
   - click: {role: radio_button, label: 4-4-5 weeks}
   - screenshot: year
-  - click: {role: button, label: Next}
+  - click: {role: button, label: Next, index: 0}
   - assert_state: {key: screen.page, equals: chart}
   - click: {role: radio_button, label_contains: Farm / ranch}
   - assert_state: {key: screen.chart, equals: farm}
   - screenshot: chart
-  - click: {role: button, label: Next}
+  - click: {role: button, label: Next, index: 0}
   - assert_state: {key: screen.page, equals: features}
   - click: {role: check_box, label: I collect sales tax}
   - assert_state: {key: screen.sales_tax, equals: true}
@@ -41,24 +41,24 @@ steps:
   - type: {text: "8.25"}
   - click: {role: radio_button, label: Cash (when money moves)}
   - screenshot: features
-  - click: {role: button, label: Next}
+  - click: {role: button, label: Next, index: 0}
   - assert_state: {key: screen.page, equals: security}
   - assert_exists: {role: radio_button, label: Color 1}
   - click: {role: radio_button, label: Color 3}
   - screenshot: security
-  - click: {role: button, label: Next}
+  - click: {role: button, label: Next, index: 0}
   - assert_state: {key: screen.page, equals: review}
   - assert_exists: {role: label, label: Shoal Creek Farm, index: 0}
   - assert_exists: {role: label, label: 4-4-5 weeks, index: 0}
   - screenshot: review
 
   # Back and forward keep the answers.
-  - click: {role: button, label: Back}
+  - click: {role: button, label: Back, index: 0}
   - assert_state: {key: screen.page, equals: security}
-  - click: {role: button, label: Next}
+  - click: {role: button, label: Next, index: 0}
   - assert_state: {key: screen.page, equals: review}
 
-  - click: {role: button, label: Create company}
+  - click: {role: button, label: Create company, index: 0}
   - assert_state: {key: screen.created, equals: true}
   - assert_state: {key: company_open, equals: true}
   - assert_exists: {role: label, label_contains: Shoal Creek Farm, index: 0}

@@ -9,12 +9,12 @@ steps:
   - command: file.new_company
   - click: {role: text_input, label: Business name}
   - type: {text: Ozark Ridge Landscaping LLC}
-  - click: {role: button, label: Next}
-  - click: {role: button, label: Next}
-  - click: {role: button, label: Next}
-  - click: {role: button, label: Next}
-  - click: {role: button, label: Next}
-  - click: {role: button, label: Create company}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Create company, index: 0}
   - assert_state: {key: screen.created, equals: true}
   - click: {role: button, label: Enter opening balances}
   - assert_state: {key: screen.screen, equals: opening_balances}

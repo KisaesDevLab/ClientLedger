@@ -33,7 +33,8 @@ struct AccountChoice {
 /// One balance row.
 #[derive(Clone, Debug, Default)]
 struct BalanceRow {
-    account: usize,
+    /// Picked account, or none yet ("Pick an account").
+    account: Option<usize>,
     amount: String,
 }
 
@@ -103,7 +104,10 @@ impl OpeningBalancesScreen {
             start: DateInput::new(today.start_of_year()),
             accounts,
             accounts_task: None,
-            bank_rows: vec![BalanceRow::default()],
+            bank_rows: vec![BalanceRow {
+                account: Some(0),
+                amount: String::new(),
+            }],
             other_rows: Vec::new(),
             invoices: Vec::new(),
             bills: Vec::new(),
@@ -152,7 +156,7 @@ impl OpeningBalancesScreen {
                 if r.amount.trim().is_empty() {
                     continue;
                 }
-                let Some(acct) = self.accounts.get(r.account) else {
+                let Some(acct) = r.account.and_then(|i| self.accounts.get(i)) else {
                     issues.push(t_with(
                         "opening.issue.account",
                         &[("row", &(i + 1).to_string())],
@@ -352,24 +356,30 @@ impl OpeningBalancesScreen {
 
     fn account_picker(&self, ui: &mut Ui, id: &str, row: &mut BalanceRow) -> bool {
         let mut changed = false;
-        let current = self.accounts.get(row.account).map_or_else(
+        let current = row.account.and_then(|i| self.accounts.get(i)).map_or_else(
             || t("opening.pick_account"),
             |a| format!("{} {}", a.number, a.name),
         );
+        let label = ui.add(egui::Label::new(t("opening.account")).selectable(false));
         egui::ComboBox::from_id_salt(id)
             .width(260.0)
             .selected_text(current)
             .show_ui(ui, |ui| {
                 for (i, a) in self.accounts.iter().enumerate() {
                     if ui
-                        .selectable_label(row.account == i, format!("{} {}", a.number, a.name))
+                        .selectable_label(
+                            row.account == Some(i),
+                            format!("{} {}", a.number, a.name),
+                        )
                         .clicked()
                     {
-                        row.account = i;
+                        row.account = Some(i);
                         changed = true;
                     }
                 }
-            });
+            })
+            .response
+            .labelled_by(label.id);
         changed
     }
 
@@ -468,21 +478,52 @@ impl OpeningBalancesScreen {
         }
     }
 
+    /// "Posted: 3 lines in the opening entry, 1 invoice, 2 bills."
+    fn summary_text(p: &PostedSummary) -> String {
+        let count = |n: usize, one: &str, many: &str| {
+            format!("{n} {}", if n == 1 { t(one) } else { t(many) })
+        };
+        t_with(
+            "opening.review.summary",
+            &[
+                ("lines", &p.lines.to_string()),
+                (
+                    "invoices",
+                    &count(p.invoices, "opening.one_invoice", "opening.many_invoices"),
+                ),
+                (
+                    "bills",
+                    &count(p.bills, "opening.one_bill", "opening.many_bills"),
+                ),
+            ],
+        )
+    }
+
+    /// Esc: clear what was typed (rows go back to one empty bank line).
+    /// Returns false when nothing was typed.
+    fn revert_fields(&mut self) -> bool {
+        let typed = self.bank_rows.iter().any(|r| !r.amount.trim().is_empty())
+            || self.other_rows.iter().any(|r| !r.amount.trim().is_empty())
+            || !self.invoices.is_empty()
+            || !self.bills.is_empty();
+        if !typed {
+            return false;
+        }
+        self.bank_rows = vec![BalanceRow {
+            account: Some(0),
+            amount: String::new(),
+        }];
+        self.other_rows.clear();
+        self.invoices.clear();
+        self.bills.clear();
+        self.issues.clear();
+        true
+    }
+
     fn review(ui: &mut Ui, tokens: &Tokens, p: &PostedSummary) {
         form::card(ui, tokens, |ui| {
             form::heading(ui, tokens, &t("opening.review.title"));
-            form::hint(
-                ui,
-                tokens,
-                &t_with(
-                    "opening.review.summary",
-                    &[
-                        ("lines", &p.lines.to_string()),
-                        ("invoices", &p.invoices.to_string()),
-                        ("bills", &p.bills.to_string()),
-                    ],
-                ),
-            );
+            form::hint(ui, tokens, &Self::summary_text(p));
             let Some(bs) = &p.balance_sheet else {
                 form::hint(ui, tokens, &t("opening.review.no_report"));
                 return;
@@ -654,6 +695,7 @@ impl Screen for OpeningBalancesScreen {
                 }
                 true
             }
+            "form.revert" => self.revert_fields(),
             "form.insert_line" => {
                 self.bank_rows.push(BalanceRow::default());
                 true

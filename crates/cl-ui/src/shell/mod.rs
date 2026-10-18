@@ -164,6 +164,8 @@ pub struct Shell {
     /// The window to bring back after a close prompt that a company switch
     /// raised (the Open Company window).
     return_after_prompt: Option<WindowId>,
+    /// File > Close Company is waiting for a close prompt to be answered.
+    close_company_after_prompt: bool,
 }
 
 impl Shell {
@@ -227,6 +229,7 @@ impl Shell {
             company_link,
             open_tenant: None,
             return_after_prompt: None,
+            close_company_after_prompt: false,
         };
         if options.demo {
             shell.load_demo();
@@ -377,8 +380,10 @@ impl Shell {
             return;
         }
         if !self.windows.dirty_ids().is_empty() {
-            // The close prompt handles each dirty window first.
+            // The close prompt handles each dirty window first; the close
+            // continues by itself after Save or Discard.
             if let Some(id) = self.windows.dirty_ids().first().copied() {
+                self.close_company_after_prompt = true;
                 self.windows.request_close(id);
             }
             return;
@@ -682,6 +687,16 @@ impl Shell {
             .windows
             .active_mut()
             .is_some_and(|w| w.screen.command(cmd.id));
+        // Esc (form.revert): the screen reverts a field when it can; when
+        // nothing is left to revert the window closes, asking first when
+        // it still has unsaved edits (DESIGN.md form rules).
+        if !handled
+            && cmd.id.as_str() == "form.revert"
+            && let Some(id) = self.windows.active_id()
+        {
+            self.windows.request_close(id);
+            return;
+        }
         let quiet = cmd.id.as_str().starts_with("form.") || cmd.id.as_str().starts_with("edit.");
         if !handled
             && !quiet
@@ -978,6 +993,9 @@ impl Shell {
             }
             if a == PromptAnswer::Keep {
                 self.return_after_prompt = None;
+                self.close_company_after_prompt = false;
+            } else if std::mem::take(&mut self.close_company_after_prompt) {
+                self.close_company();
             }
             if progress == Some(QuitProgress::Ready) {
                 self.finish_quit(Some(ctx));

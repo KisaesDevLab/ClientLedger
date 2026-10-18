@@ -9,13 +9,13 @@ steps:
   - command: file.new_company
   - click: {role: text_input, label: Business name}
   - type: {text: Kurt Rental Duplex}
-  - click: {role: button, label: Next}
-  - click: {role: button, label: Next}
-  - click: {role: button, label: Next}
-  - click: {role: button, label: Next}
-  - click: {role: button, label: Next}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Next, index: 0}
+  - click: {role: button, label: Next, index: 0}
   - assert_state: {key: screen.page, equals: review}
-  - click: {role: button, label: Create company}
+  - click: {role: button, label: Create company, index: 0}
   - assert_state: {key: screen.created, equals: true}
   - click: {role: button, label: Show my recovery key}
   - assert_state: {key: screen.screen, equals: recovery_key}

@@ -104,9 +104,47 @@ pub struct NewCompanyScreen {
     created: Option<Created>,
     error: Option<CompanyError>,
     closing_supported: bool,
+    /// The page's fields as they were when the page was entered (Esc
+    /// reverts to this before it asks to close).
+    committed: Committed,
+}
+
+/// The editable text of a page, for Esc.
+#[derive(Clone, Default, PartialEq, Eq)]
+struct Committed {
+    name: String,
+    legal_name: String,
+    tax_rate_text: String,
+    closing_password: String,
+    closing_confirm: String,
 }
 
 impl NewCompanyScreen {
+    fn snapshot(&self) -> Committed {
+        Committed {
+            name: self.setup.name.clone(),
+            legal_name: self.legal_name.clone(),
+            tax_rate_text: self.tax_rate_text.clone(),
+            closing_password: self.closing_password.clone(),
+            closing_confirm: self.closing_confirm.clone(),
+        }
+    }
+
+    /// Esc: put the page's fields back as they were on entry. Returns
+    /// false when nothing differed (the shell then closes the window).
+    fn revert_fields(&mut self) -> bool {
+        if self.snapshot() == self.committed {
+            return false;
+        }
+        let c = self.committed.clone();
+        self.setup.name = c.name;
+        self.legal_name = c.legal_name;
+        self.tax_rate_text = c.tax_rate_text;
+        self.closing_password = c.closing_password;
+        self.closing_confirm = c.closing_confirm;
+        self.issues.clear();
+        true
+    }
     /// A fresh interview.
     #[must_use]
     pub fn new(link: Arc<CompanyLink>) -> NewCompanyScreen {
@@ -132,6 +170,7 @@ impl NewCompanyScreen {
             created: None,
             error: None,
             closing_supported,
+            committed: Committed::default(),
         }
     }
 
@@ -175,6 +214,7 @@ impl NewCompanyScreen {
         }
         if let Some(p) = self.page.next() {
             self.page = p;
+            self.committed = self.snapshot();
         } else {
             self.create();
         }
@@ -225,6 +265,34 @@ impl NewCompanyScreen {
             cl_company::create_company(&session, &store, &setup).await
         })
         .ok();
+    }
+
+    fn action_row(&mut self, ui: &mut Ui, salt: &str) {
+        let primary = if self.page == Page::Review {
+            t("interview.create")
+        } else {
+            t("interview.next")
+        };
+        let back = t("interview.back");
+        let others: Vec<&str> = if self.page.prev().is_some() {
+            vec![&back]
+        } else {
+            vec![]
+        };
+        let clicked = ui
+            .push_id(salt, |ui| form::actions(ui, &primary, &others))
+            .inner;
+        match clicked {
+            Some(0) => self.next(),
+            Some(_) => {
+                if let Some(p) = self.page.prev() {
+                    self.page = p;
+                    self.issues.clear();
+                    self.committed = self.snapshot();
+                }
+            }
+            None => {}
+        }
     }
 
     fn poll(&mut self) {
@@ -288,6 +356,8 @@ impl NewCompanyScreen {
             )
         {
             self.dirty = true;
+            // Typing answers the message, so it goes away.
+            self.issues.clear();
         }
     }
 
@@ -359,13 +429,14 @@ impl NewCompanyScreen {
         form::hint(ui, tokens, &t("interview.chart.intro"));
         for chart in StarterChart::ALL {
             let tpl = chart.template();
+            // The count the owner will get with the features chosen so far.
+            let n = tpl
+                .import_rows(self.setup.sales_tax, self.setup.inventory)
+                .len();
             let title = format!(
                 "{} \u{b7} {}",
                 tpl.name,
-                t_with(
-                    "interview.chart.count",
-                    &[("n", &tpl.accounts.len().to_string())]
-                )
+                t_with("interview.chart.count", &[("n", &n.to_string())])
             );
             if form::choice(
                 ui,
@@ -656,6 +727,12 @@ impl Screen for NewCompanyScreen {
             }
         });
         ui.add_space(8.0);
+        // Next and Back stay in view at the minimum window size: once above
+        // the page and once below it.
+        if self.task.is_none() {
+            self.action_row(ui, "top");
+            ui.add_space(6.0);
+        }
         form::card(ui, &tokens, |ui| {
             form::heading(ui, &tokens, &t(self.page.key()));
             ui.add_space(4.0);
@@ -679,27 +756,7 @@ impl Screen for NewCompanyScreen {
             form::progress_line(ui, &tokens, &t("interview.creating"));
             return;
         }
-        let primary = if self.page == Page::Review {
-            t("interview.create")
-        } else {
-            t("interview.next")
-        };
-        let back = t("interview.back");
-        let others: Vec<&str> = if self.page.prev().is_some() {
-            vec![&back]
-        } else {
-            vec![]
-        };
-        match form::actions(ui, &primary, &others) {
-            Some(0) => self.next(),
-            Some(_) => {
-                if let Some(p) = self.page.prev() {
-                    self.page = p;
-                    self.issues.clear();
-                }
-            }
-            None => {}
-        }
+        self.action_row(ui, "bottom");
     }
 
     fn command(&mut self, id: CommandId) -> bool {
@@ -710,9 +767,11 @@ impl Screen for NewCompanyScreen {
                 }
                 true
             }
+            "form.revert" => self.revert_fields(),
             "form.prev_record" => {
                 if let Some(p) = self.page.prev() {
                     self.page = p;
+                    self.committed = self.snapshot();
                 }
                 true
             }
