@@ -48,6 +48,7 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | U-41 | Tag merge moves line tags and defaults; audit-log merge and group changes; enforce single-select on line and replace paths; fix the reorder route order (tables: journal_lines, contacts, items, budgets; size S) | P11 step 5 (until merged: Hide tag merge for tags used on lines) | - (proposed, P11 scout) | Planned |
 | U-42 | Required tag groups by account type (tables: tag_groups; size S) | P11 step 5 (until merged: Enforce in the UI only, marked PENDING) | - (proposed, P11 scout) | Planned |
 | U-43 | Editable terms (including discount terms) and payment-methods lists (tables: payment_terms, payment_methods; size M) | P11 step 6 (until merged: Read-only fixed lists) | - (proposed, P11 scout) | Planned |
+| U-44 | Vendor 1099 profile update accepts `w9OnFile` (and the date received) so the owner can record a paper W-9 (tables: vendor 1099 profile; size S) | P11 step 2 (until merged: W-9 on file shown read-only; `contacts::w9_on_file_u44` PENDING) | - (proposed, P11 package B) | Planned |
 
 Add rows as capability checks find gaps (credit memos, statements, finance charges, sales tax, average-cost inventory, reconciliation, permissions granularity, optimistic concurrency, change notifications for LAN mode; post-beta: estimates, sales orders, POs, assemblies, custom fields, form templates).
 
