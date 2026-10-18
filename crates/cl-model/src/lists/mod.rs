@@ -3,6 +3,7 @@
 //! types only arrange and check what the screen loaded.
 
 pub mod accounts;
+pub mod class_map;
 pub mod contacts;
 pub mod csv_map;
 pub mod items;

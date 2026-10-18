@@ -93,4 +93,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("methods.other", "Other"),
     ("methods.col.name", "Payment method"),
     ("methods.fixed_note", "These are the payment methods ClientLedger offers when you receive or make a payment. Adding your own methods isn't available yet."),
+    ("classes.problem.blank", "The class has no name."),
+    ("classes.problem.too_long", "The class name is too long for a tag or tag group (100 characters at most). Rename it in the file first."),
 ];
