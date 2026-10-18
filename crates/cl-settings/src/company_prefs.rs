@@ -3,11 +3,11 @@
 //! record and travel in a backup's `manifest.host` (Q-P09c), never in the
 //! engine. Nothing here is a secret or an amount.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use cl_core::Timestamp;
-use cl_core::ids::AccountId;
+use cl_core::ids::{AccountId, TagGroupId};
 use serde::{Deserialize, Serialize};
 
 use crate::ai::{AiLocalPrefs, AiProvider, DEFAULT_MONTHLY_TOKEN_CAP as DEFAULT_LOCAL_CAP};
@@ -61,6 +61,10 @@ pub struct CompanyPrefs {
     /// Accounts marked sensitive (Q-157). Kept here until the engine stores
     /// the flag (U-33); hiding them from other roles waits for P29.
     pub sensitive_accounts: BTreeSet<AccountId>,
+    /// Tag groups a line must use for the account types listed (engine
+    /// account-type names such as `expense`, Q-180). Kept here and checked
+    /// by the forms until the engine stores and enforces the rule (U-42).
+    pub required_tag_groups: BTreeMap<TagGroupId, BTreeSet<String>>,
 }
 
 impl Default for CompanyPrefs {
@@ -73,6 +77,7 @@ impl Default for CompanyPrefs {
             smtp_security: SmtpSecurity::default(),
             account_numbers: true,
             sensitive_accounts: BTreeSet::new(),
+            required_tag_groups: BTreeMap::new(),
         }
     }
 }
@@ -129,6 +134,7 @@ impl CompanyPrefs {
             smtp_security: self.smtp_security,
             account_numbers: self.account_numbers,
             sensitive_accounts: self.sensitive_accounts.clone(),
+            required_tag_groups: self.required_tag_groups.clone(),
         }
     }
 
@@ -160,6 +166,7 @@ impl CompanyPrefs {
             smtp_security: archive.smtp_security,
             account_numbers: archive.account_numbers,
             sensitive_accounts: archive.sensitive_accounts.clone(),
+            required_tag_groups: archive.required_tag_groups.clone(),
         };
         out.normalize();
         out
@@ -168,6 +175,8 @@ impl CompanyPrefs {
     /// Snaps fields into range.
     pub fn normalize(&mut self) {
         self.bills_due_days = self.bills_due_days.clamp(1, BILLS_DUE_DAYS_MAX);
+        self.required_tag_groups
+            .retain(|_, kinds| !kinds.is_empty());
         if self
             .receipt_inbox_dir
             .as_ref()
@@ -259,6 +268,16 @@ mod tests {
         let back = CompanyPrefs::merged_from_archive(&chart.for_archive(), Some(&local));
         assert!(!back.account_numbers);
         assert!(back.sensitive_accounts.contains(&sensitive));
+        // Required tag groups travel too (Q-180, U-42); empty rules drop.
+        let g = TagGroupId::parse("6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
+        let empty = TagGroupId::parse("6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02").expect("id");
+        chart
+            .required_tag_groups
+            .insert(g, BTreeSet::from(["expense".to_string()]));
+        chart.required_tag_groups.insert(empty, BTreeSet::new());
+        let back = CompanyPrefs::merged_from_archive(&chart.for_archive(), Some(&local));
+        assert_eq!(back.required_tag_groups.len(), 1);
+        assert!(back.required_tag_groups[&g].contains("expense"));
         let old: CompanyPrefs = serde_json::from_str(r#"{"bills_due_days":7}"#).expect("old");
         assert!(
             old.account_numbers,

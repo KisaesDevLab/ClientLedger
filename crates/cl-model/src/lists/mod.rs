@@ -5,6 +5,7 @@
 pub mod accounts;
 pub mod contacts;
 pub mod items;
+pub mod tags;
 
 /// Characters counted the way the engine's schemas count them (UTF-16 code
 /// units, as JavaScript's `String.length`), so a local length check never

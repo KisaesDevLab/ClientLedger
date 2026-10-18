@@ -93,6 +93,9 @@ Format: `Pxx â€” blocked by U-xx/Q-xx â€” what is pending â€” workaround in plac
 - P11 recording a paper W-9 â€” blocked by U-44 â€” `contacts::w9_on_file_u44` is PENDING â€” in place: W-9 on file shown read-only, the form says recording it isn't available yet (Q-P11n).
 - P11 item kinds other than service, the purchase side of two-sided items and the unit label (Q-58, Q-96, Q-99) — blocked by U-39 — `items::item_types_u39` is PENDING — in place: service items only, the panel says the rest isn't available yet (Q-P11q).
 - P11 price levels (Q-58) — blocked by U-40 — `items::price_levels_u40` is PENDING — in place: a note under the Item List (Q-P11r).
+- P11 tag merge for tags used on lines or as defaults, one tag per group in the engine, group reorder — blocked by U-41 — `tags::line_tag_merge_u41`, `tags::single_select_u41`, `tags::group_reorder_u41` are PENDING — in place: merge offered only for header-only tags, the forms enforce one per group, groups keep the engine's order (Q-P11t, Q-P11v).
+- P11 required tag groups by account type (Q-180) — blocked by U-42 — `tags::required_groups_u42` is PENDING — in place: kept on the company record and enforced by the forms' rule check (Q-P11u).
+- P11/P13 several tags on one line (Q-179, Q-P10t) — blocked by U-45 — `tags::several_line_tags_u45` is PENDING — in place: one tag per line, refused in plain words before saving (Q-P11w).
 
 ## Placeholders tracked
 
@@ -150,7 +153,7 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 
 ## Follow-ups from P10
 
-- S14 tag gap (Q-P10t): engine lines hold one `tagId`; the grid allows several tag chips per line. P11's capability check opens the UPSTREAM row (several tags per line); until it lands, P13 refuses to save a line with more than one tag, with a plain message.
+- S14 tag gap (Q-P10t): engine lines hold one `tagId`; the grid allows several tag chips per line. P11 opened U-45 (several tags per line, Q-P11w); until it lands, P13 refuses to save a line with more than one tag through `cl_model::lists::tags::engine_line_tag`.
 
 ## Log
 
