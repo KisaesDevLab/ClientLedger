@@ -87,5 +87,11 @@
   {"method":"GET","path":"/api/v1/reports/customer-balance-summary","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/reports/ap-aging-summary","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/practice/1099/vendors/{contactId}/profile","inSpec":true,"fragmentHash":"189e286dc6077b10e05af1535087b49b052b33ccf924f8ade9c9be08c67c0e79"},
-  {"method":"PUT","path":"/api/v1/practice/1099/vendors/{contactId}/profile","inSpec":true,"fragmentHash":"e9f993417222bcfa370f00f45fa8e6438edf2cd20d9d559af4faa2aaac1570d3"}
+  {"method":"PUT","path":"/api/v1/practice/1099/vendors/{contactId}/profile","inSpec":true,"fragmentHash":"e9f993417222bcfa370f00f45fa8e6438edf2cd20d9d559af4faa2aaac1570d3"},
+  {"method":"GET","path":"/api/v1/tags/groups/list","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/tags/groups","inSpec":true,"fragmentHash":"daa3bd220ea9695ad93249a4b07d2a6fcd4dda3be7d095ebf6ebfba239b7f6f1"},
+  {"method":"PUT","path":"/api/v1/tags/groups/{id}","inSpec":true,"fragmentHash":"b78aec9603bfe4f0fb69c36df3ac29c5ca36c2e28d130a1bba053ef231d26784"},
+  {"method":"DELETE","path":"/api/v1/tags/groups/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
+  {"method":"GET","path":"/api/v1/tags/{id}/usage","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
+  {"method":"POST","path":"/api/v1/tags/merge","inSpec":true,"fragmentHash":"ccbbc67cecef6368443390cb70381104dad2f9b6b01c641794dd6a2c74eea09a"}
 ]

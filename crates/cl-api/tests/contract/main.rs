@@ -27,6 +27,7 @@ mod contract_money;
 mod contract_preferences;
 mod contract_resources;
 mod contract_session;
+mod contract_tags;
 
 use support::{EngineMode, TestFn, run_suite};
 
@@ -112,6 +113,25 @@ fn main() -> std::process::ExitCode {
         ),
         ("items::item_types_u39", contract_items::item_types_u39),
         ("items::price_levels_u40", contract_items::price_levels_u40),
+        ("tags::groups_round_trip", contract_tags::groups_round_trip),
+        (
+            "tags::rename_usage_and_header_merge",
+            contract_tags::rename_usage_and_header_merge,
+        ),
+        (
+            "tags::line_tag_merge_u41",
+            contract_tags::line_tag_merge_u41,
+        ),
+        ("tags::group_reorder_u41", contract_tags::group_reorder_u41),
+        ("tags::single_select_u41", contract_tags::single_select_u41),
+        (
+            "tags::required_groups_u42",
+            contract_tags::required_groups_u42,
+        ),
+        (
+            "tags::several_line_tags_u45",
+            contract_tags::several_line_tags_u45,
+        ),
         (
             "census::live_spec_matches_fixtures",
             contract_census::live_spec_matches_fixtures,

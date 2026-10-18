@@ -89,7 +89,9 @@ pub use resources::setup::{
 };
 pub use resources::smtp::{SmtpSettings, SmtpSettingsUpdate};
 pub use resources::system::{SmtpTest, SmtpTestResult};
-pub use resources::tags::{Tag, TagFields, TagFilter, TagUpdate, Tags};
+pub use resources::tags::{
+    Tag, TagFields, TagFilter, TagGroup, TagGroupFields, TagUpdate, TagUsage, Tags,
+};
 pub use resources::tenants::{
     ArchiveFileName, ArchiveJob, ArchiveJobStatus, ArchiveRequest, ArchiveResult, CreatedTenant,
     DeleteReceipt, DeleteRequest, HOST_METADATA_MAX_BYTES, ImportJob, ImportRequest, ImportResult,
