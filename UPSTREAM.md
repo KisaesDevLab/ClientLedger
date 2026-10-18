@@ -10,7 +10,7 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | U-02 | `CL_MODE=desktop` profile: no Redis (also no `REDIS_URL` requirement in `env.ts`; `/health` must return 200 without it, Q-P01a), env-provided bind address and launch token (`X-CL-Token`), file logging | P02 | clientledger/desktop-mode (E1) | Merged (engine main, PR #147, 86b30131) |
 | U-03 | Connectivity reporting on `/health` plus an `engineCommit` field (Q-P01a); online-only modules return `OfflineUnavailable` fast | P02 | clientledger/desktop-mode (E1: `/health` v2) + clientledger/offline-guard (E4: connectivity) | Merged (engine main, PRs #147 health + #149 offline guard, 850e43d2) |
 | U-04 | OpenAPI 3.1 export covering all UI routes; committed `openapi.json` | P02 | clientledger/desktop-profile | Merged (engine main, PR #146, c0ab784a); desktop pieces in the same PR |
-| U-05 | Tenant lifecycle (list/create/rename/delete) and versioned per-tenant export/import (NDJSON + attachments + manifest) for backups, restores, and transfers | P02, P08 | clientledger/tenant-portability | Planned |
+| U-05 | Tenant lifecycle (list/create/rename/delete) and versioned per-tenant export/import (NDJSON + attachments + manifest) for backups, restores, and transfers | P02, P08 | clientledger/tenant-portability (E5a: lifecycle + archives); clientledger/tenant-delete (E5b: safe delete, scratch) | In progress — E5a built on the branch (list/create/rename, export job, download, import by upload or desktop path; `scratch:true` → 400 `SCRATCH_NOT_AVAILABLE`); PR not yet opened. Files: `packages/api/src/services/tenant-portability/*` (plan, session, fingerprint, archive-crypto, archive-container, files, archive-reader, compat, remap, identity, jobs, export.service, import.service, verify), `routes/tenants.routes.ts`, `routes/tenant-archives.routes.ts`, `app.ts`, `desktop/features.ts`, `auth.service.ts` (`SCRATCH_TENANT`), `index.ts` (boot/hourly sweep), `docs/DESKTOP.md`, `openapi.json`. Migration: additive `0217_tenant_archive_imports` (+ rollback), no policy marker; server appliance unaffected (routes mounted in both modes, BullMQ path untouched). E5b (delete) is a later PR. |
 | U-06 | Endpoint accepting normalized bank-import batches (rows, dedupe keys, source-file hash) into the review queue; parsing is in Rust (Q-11) | P25 | clientledger/bank-import | Planned |
 | U-07 | Desktop-mode adjustments to the QBD report-export importer (file paths, progress events, tie-out endpoint); report list and mapping unchanged | P31 | clientledger/qbd-import | Planned |
 | U-08 | Import of `.clxfer` transfer files in MyBooks Online, showing verification totals; accepts any older `formatVersion`, refuses newer with an update message (Q-43) | P32 | clientledger/transfer | Planned |
@@ -21,12 +21,18 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | U-16 | Engine identity proof (HMAC challenge in `/health`) and graceful shutdown (`POST /api/v1/desktop/shutdown`) for the supervisor | P04 follow-up (P37 hardening) | clientledger/desktop-supervisor | Proposed |
 | U-13 | Desktop session secrets for SMTP: the owner's SMTP password is supplied per session from the keychain, never stored by the engine in desktop mode | P09, P20 | clientledger/ai-desktop (E6) | Planned |
 | U-14 | Money as decimal strings beyond the core resources: `/reports/*` (desktop, or `?exact=1` on the server), balance and validation helpers, 1099 corrections, batch, daily-sales and AI amounts (widened per P05 §3.6; replaces the scout's U-20) | P12, P16, P28 | clientledger/exact-money (proposed; plan names no branch) | Planned |
-| U-15 | Closing-date password in the engine: `companies.closing_password_hash`, password-gated `PUT /tb/closing-date` and `/company/settings` `lockDate`, `closingPassword` on the override and safe delete; one PR landing with P08 | P08, every posting screen (P10+) | clientledger/closing-password | Planned |
+| U-15 | Closing-date password in the engine: `companies.closing_password_hash`, password-gated `PUT /tb/closing-date` and `/company/settings` `lockDate` (which must also stamp `lock_date_set_by/at`, as `/tb/closing-date` does today), `closingPassword` on the override and safe delete; capability `closing-password-v1`; one PR landing with P08 | P08, every posting screen (P10+) | clientledger/closing-password | Planned |
 | U-17 | Optimistic concurrency: `version` columns, `If-Match` → 409 `STALE` (capability `record-version-v1`) | P05 (AC4 live test), P12/P13, P27; hard for P33 | clientledger/record-versions (proposed; plan names no branch) | Planned |
 | U-18 | Request idempotency: `Idempotency-Key` on posting and master-data creates, stored responses (capability `idempotency-v1`) | P12/P13 (before the first posting form) | clientledger/idempotency (proposed; plan names no branch) | Planned |
 | U-19 | Money wire hardening: strict decimal and date strings, exact 4 dp balance check, `TXN_UNBALANCED` (capability `money-strict-v1`) | P12 | clientledger/money-strict (proposed; plan names no branch) | Planned |
 | U-21 | Stable error codes plus `GET /desktop/info → capabilities` (`error-codes-v1`), and OpenAPI registration of per-`txnType` and list schemas | P15 (first in build order) | clientledger/error-codes (proposed; plan names no branch) | Planned |
 | U-22 | Journal-line `contactId` with in-scope check (capability `je-line-contact-v1`) | P15 | clientledger/je-line-contact (proposed; plan names no branch) | Planned |
+| U-23 | Desktop recovery key (Q-210): `users.recovery_key_hash`, the key returned once by `POST /api/v1/desktop/initialize`, `POST /api/v1/desktop/recover-password {email, recoveryKey, newPassword}` (launch-token gated, rate-limited, audit row), `POST /api/v1/auth/recovery-key/rotate`; capability `recovery-key-v1` | P08 (screen built against the contract, tests PENDING), P29 | clientledger/recovery-key (proposed) | Planned |
+| U-24 | Desktop OpenAPI export: `openapi-export --desktop` (or `openapi.desktop.json`) so `/api/v1/desktop/*` and the tenant routes are in a spec the cl-api fixtures can cover | P08 contract tests (hand-written shapes until then) | clientledger/openapi-desktop (proposed) | Planned |
+| U-25 | Company setup flags as storage: `sales_tax_enabled`, `inventory_enabled`, `fiscal_calendar ∈ {standard,445,454,544}` on `/company/settings` | P08 (local flags until then, Q-P08c), P09, P23, P24 | clientledger/company-flags (proposed) | Planned |
+| U-26 | Optional: `companies.metadata jsonb` with allowlisted keys (`accentColor`) | P08 | - | Proposed; default is the local store plus `manifest.host`, likely dropped |
+| U-27 | Optional: trial balance `?exact=1` adding `debitExact/creditExact` strings | P08 restore verification | - | Proposed; CSV strings suffice |
+| U-28 | Optional: register ClientLedger's four starter charts as engine COA templates | P08 | - | Proposed; `systemAccountsOnly` + `POST /accounts/import` is the workaround |
 
 Add rows as capability checks find gaps (credit memos, statements, finance charges, sales tax, average-cost inventory, reconciliation, permissions granularity, optimistic concurrency, change notifications for LAN mode; post-beta: estimates, sales orders, POs, assemblies, custom fields, form templates).
 
@@ -178,6 +184,28 @@ Add rows as capability checks find gaps (credit memos, statements, finance charg
 - Tests: persist and read back; out-of-scope contact refused; null and absent behave as before.
 - Server appliance impact: additive optional field; absent field unchanged.
 - Status: Planned — 2026-10-17
+
+### U-23 — Desktop recovery key (proposed)
+- Needed by: P08 (recovery-key screen, first-run setup), P29 (password reset, rotate from Users and Permissions).
+- Why: the owner password cannot be reset by anyone else on a single-user desktop; a recovery key shown once at setup (Q-210) is the only way back in. The engine's existing recovery key is the appliance `.env` passphrase and its routes are unmounted on desktop.
+- Proposed change (desktop mode): `users.recovery_key_hash` (argon2/bcrypt like passwords); `POST /api/v1/desktop/initialize` returns `recoveryKey` once (cl-host `Initialized.recovery_key`); `POST /api/v1/desktop/recover-password {email, recoveryKey, newPassword}` launch-token gated, rate-limited, writes an audit row and invalidates sessions; `POST /api/v1/auth/recovery-key/rotate` (owner only) returns a new key once; `desktop/info.capabilities` gains `recovery-key-v1`.
+- cl-api already types the contract (`resources/recovery.rs`): keys are normalised (uppercase, alphanumeric only), bodies are credential-carrying, nothing is retried; contract tests print `PENDING(U-23)` until the capability is advertised.
+- Schema/migrations: one additive column on `users` (+ rollback).
+- Server appliance impact: none (routes mounted only under `isDesktop()`).
+- Status: Planned — 2026-10-17.
+
+### U-24 — Desktop OpenAPI export (proposed)
+- Needed by: P08 contract tests and `cargo xtask api-spec`: the desktop router and the E5 tenant routes are absent from `openapi.json` because the export script never sets `CL_MODE=desktop`.
+- Proposed change: `scripts/openapi-export.ts --desktop` writing `openapi.desktop.json` (or a merged document with `x-desktop` markers); `xtask/src/api_spec.rs` reads it when present. Until then `tests/support/spec.rs` lists the twelve desktop-only operations in `OUTSIDE_SPEC`.
+- Schema/migrations: none. Server appliance impact: none.
+- Status: Planned — 2026-10-17.
+
+### U-25 — Company setup flags (proposed)
+- Needed by: P08 interview (kept locally until then, Q-P08c), P09 Preferences, P23 sales tax, P24 inventory.
+- Proposed change: `companies.sales_tax_enabled boolean`, `companies.inventory_enabled boolean`, `companies.fiscal_calendar text` (`standard|445|454|544`) read and written through `GET/PUT /api/v1/company/settings`; storage only, no behaviour change in the engine (reports keep calendar months until a later item).
+- cl-settings keeps the same three flags per company and writes them into `manifest.host`; when U-25 lands, P09 moves them to the engine and drops the local copy.
+- Schema/migrations: additive columns with defaults (+ rollback). Server appliance impact: none.
+- Status: Planned — 2026-10-17.
 
 ## Entry template
 

@@ -53,7 +53,7 @@ A "company" is an engine **tenant** inside the single local database (Q-05), plu
 | --- | --- |
 | New Company | engine creates a tenant and seeds the chart-of-accounts template |
 | Open Company | UI session scoped to the tenant; lists load |
-| Back Up | engine tenant export (NDJSON) + attachments + `manifest.json` (app version, engine commit, schema version, trial balance, SHA-256 of parts) → one `.clbackup` zip |
+| Back Up | `.clbackup` = the engine tenant archive byte-for-byte (encrypted with the owner's backup passphrase from the keychain, shown once with Print/Save; manifest with engine commit, schema version, trial balance and part hashes inside), with app metadata (app version, kind, name, colour, local flags) in `manifest.host` (Q-P02i, Q-P08g) |
 | Restore | verify manifest + checksums → import into a new tenant → compare trial balance → swap names; old tenant kept until the user confirms |
 | Portable copy | same as backup, flagged portable |
 | Full data backup | whole-database `pg_dump -Fc` of all companies (File › Utilities), for disaster recovery |
