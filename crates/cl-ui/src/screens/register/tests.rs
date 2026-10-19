@@ -315,3 +315,87 @@ fn later_lane_commands_are_routed_but_not_handled_yet() {
     }
     assert!(s.command(CommandId::new(KIND)), "Ctrl+G stays");
 }
+
+#[test]
+fn void_rows_are_muted_with_a_void_prefix() {
+    let body = include_str!("../../../../../fixtures/engine/register-legacy.json");
+    let mut page = cl_api::resources::register::page_from_json(body.as_bytes()).expect("page");
+    page.lines[0].status = cl_api::TxnStatus::Void;
+    let mut model = RegisterModel::new(1);
+    let req = model.wanted(None)[0];
+    let mapping = Mapping {
+        class: Some(AccountClass::Bank),
+        ..Mapping::default()
+    };
+    model.accept(req, &page, &mapping);
+    assert!(model.row_state(0).contains(cl_grid::RowState::MUTED));
+    let row = model.row_at(0).expect("row");
+    assert!(row.account_memo.starts_with("VOID"), "{}", row.account_memo);
+    assert!(!row.editable);
+    assert!(model.row_label(0).contains("Void"));
+    if page.lines.len() > 1 {
+        assert!(!model.row_state(1).contains(cl_grid::RowState::MUTED));
+    }
+}
+
+fn shared_prefs() -> (egui::Context, crate::grid_env::WidthsHandle) {
+    let ctx = egui::Context::default();
+    let handle = crate::grid_env::WidthsHandle::default();
+    crate::grid_env::publish_widths(&ctx, &handle);
+    (ctx, handle)
+}
+
+fn demo_tenant(link: &Arc<CompanyLink>) -> Option<(TenantId, String)> {
+    link.demo_state()
+        .and_then(|d| d.companies.first().map(|c| (c.tenant_id, c.name.clone())))
+}
+
+#[test]
+fn range_sort_and_one_line_are_remembered_per_account() {
+    let (_d, link) = link();
+    let (ctx, handle) = shared_prefs();
+    let mut s = RegisterScreen::new(Arc::clone(&link), demo_tenant(&link), today(), None);
+    s.sync_prefs(&ctx);
+    s.set_range(cl_model::register::RangePreset::AllDates);
+    s.set_sort(SortChoice::Number);
+    s.set_one_line(true);
+    s.sync_prefs(&ctx);
+    let changed = handle
+        .lock()
+        .map(|w| (w.registers.len(), w.registers_changed_at.is_some()))
+        .expect("lock");
+    assert_eq!(changed, (1, true));
+
+    // A new window on the same account starts from the remembered choices.
+    let mut again = RegisterScreen::new(Arc::clone(&link), demo_tenant(&link), today(), None);
+    again.sync_prefs(&ctx);
+    assert_eq!(again.prefs.range, cl_model::register::RangePreset::AllDates);
+    assert_eq!(again.prefs.sort, SortChoice::Number);
+    assert!(again.prefs.one_line);
+    assert_eq!(again.state()["range"], "all_dates");
+    assert_eq!(
+        again.query.as_ref().map(|q| q.sort),
+        Some(RegisterSort::Number)
+    );
+
+    // Without a company nothing is remembered.
+    let mut none = screen(&link);
+    none.sync_prefs(&ctx);
+    assert_eq!(none.prefs, RegisterPrefs::default());
+}
+
+#[test]
+fn an_own_write_reloads_and_rereads_the_stamp() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, Some(&(0..5)));
+    let rev = cl_grid::RowModel::revision(&s.model);
+    s.after_own_write();
+    assert!(cl_grid::RowModel::revision(&s.model) > rev);
+    assert!(s.stamp.now && s.stamp.quiet);
+    let ctx = egui::Context::default();
+    s.watch_stamp(&ctx);
+    // The demo has no stamp to read; the request is consumed.
+    assert!(!s.stamp.now);
+    assert!(s.stamp.read_at.is_some());
+}

@@ -1865,7 +1865,7 @@ impl Grid {
             style.placeholder
         } else if state.contains(RowState::LOCKED) {
             style.locked_text
-        } else if col.line == Line::Second {
+        } else if col.line == Line::Second || state.contains(RowState::MUTED) {
             style.text_secondary
         } else {
             style.text

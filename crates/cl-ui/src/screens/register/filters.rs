@@ -188,18 +188,21 @@ impl RegisterScreen {
     /// Changes the "Show" range.
     pub(crate) fn set_range(&mut self, range: RangePreset) {
         self.prefs.range = range;
+        self.prefs_dirty = true;
         self.apply_query();
     }
 
     /// Changes the sort.
     pub(crate) fn set_sort(&mut self, sort: SortChoice) {
         self.prefs.sort = sort;
+        self.prefs_dirty = true;
         self.apply_query();
     }
 
     /// One-line display on or off.
     pub(crate) fn set_one_line(&mut self, on: bool) {
         self.prefs.one_line = on;
+        self.prefs_dirty = true;
         self.sync_grid();
     }
 

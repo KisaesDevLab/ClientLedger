@@ -96,6 +96,34 @@ pub struct WidthsState {
     pub book: GridWidths,
     /// When an entry last changed and is not written yet (egui time).
     pub changed_at: Option<f64>,
+    /// The register choices per company and account (P12), shared the same
+    /// way and written by the same rules.
+    pub registers: crate::prefs::RegisterPrefsBook,
+    /// When a register entry last changed and is not written yet.
+    pub registers_changed_at: Option<f64>,
+}
+
+/// The register choices remembered for `key` (see
+/// [`crate::prefs::RegisterPrefsBook::key`]).
+#[must_use]
+pub fn load_register_prefs(ctx: &Context, key: &str) -> Option<cl_model::register::RegisterPrefs> {
+    let handle: WidthsHandle = ctx.data(|d| d.get_temp(widths_id()))?;
+    let state = handle.lock().ok()?;
+    state.registers.get(key)
+}
+
+/// Remember a register's choices; the shell writes the file a second
+/// after the last change, and never during a controlled run.
+pub fn store_register_prefs(ctx: &Context, key: &str, prefs: cl_model::register::RegisterPrefs) {
+    let Some(handle): Option<WidthsHandle> = ctx.data(|d| d.get_temp(widths_id())) else {
+        return;
+    };
+    let now = ctx.input(|i| i.time);
+    if let Ok(mut state) = handle.lock()
+        && state.registers.set(key, prefs)
+    {
+        state.registers_changed_at = Some(now);
+    }
 }
 
 /// The shared widths.

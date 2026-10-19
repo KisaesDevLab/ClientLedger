@@ -24,8 +24,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use cl_api::{
-    Account, AccountFilter, ApiError, CompanySettings, EntryType, RegisterPage, RegisterQuery,
-    RegisterSort, RequestGroup, SortDir,
+    Account, AccountFilter, ApiError, CompanySettings, EntryType, LedgerStamp, RegisterPage,
+    RegisterQuery, RegisterSort, RequestGroup, SortDir,
 };
 use cl_core::CalendarDate;
 use cl_core::fiscal::FiscalYearSpec;
@@ -150,7 +150,30 @@ pub struct RegisterScreen {
     custom: CustomRange,
     parts: EnvParts,
     snap: GridSnapshot,
+    /// The account whose remembered choices were applied.
+    prefs_for: Option<AccountId>,
+    /// The choices changed and are not handed to the shell yet.
+    prefs_dirty: bool,
+    stamp: StampWatch,
 }
+
+/// Watches the ledger stamp (Q-P12n): read on window focus, every
+/// [`STAMP_EVERY`] seconds while the window is drawn, and after each own
+/// write; a change reloads the shown pages.
+#[derive(Debug, Default)]
+struct StampWatch {
+    last: Option<LedgerStamp>,
+    task: Option<Task<LedgerStamp>>,
+    read_at: Option<f64>,
+    focused: bool,
+    /// Read again at once (after an own write); the answer only resets the
+    /// baseline because the register already reloaded.
+    now: bool,
+    quiet: bool,
+}
+
+/// Seconds between ledger-stamp reads while the register is visible.
+const STAMP_EVERY: f64 = 5.0;
 
 impl RegisterScreen {
     /// The register of `account` (or the default account) in the open
@@ -192,6 +215,9 @@ impl RegisterScreen {
             custom: CustomRange::default(),
             parts: EnvParts::default(),
             snap: GridSnapshot::default(),
+            prefs_for: None,
+            prefs_dirty: false,
+            stamp: StampWatch::default(),
         };
         s.start_load();
         // The demo answers at once: the tab title is right before the
@@ -531,6 +557,98 @@ impl RegisterScreen {
         }
     }
 
+    /// The key of this register's remembered choices (company + account).
+    fn prefs_key(&self) -> Option<String> {
+        let (tenant, _) = self.tenant.as_ref()?;
+        Some(crate::prefs::RegisterPrefsBook::key(
+            &tenant.to_string(),
+            &self.account?.to_string(),
+        ))
+    }
+
+    /// Applies the choices remembered for a newly shown account, and hands
+    /// changed choices to the shell (which writes them, never during a
+    /// controlled run).
+    fn sync_prefs(&mut self, ctx: &egui::Context) {
+        if self.account.is_none() {
+            return;
+        }
+        if self.prefs_for != self.account {
+            self.prefs_for = self.account;
+            if let Some(p) = self
+                .prefs_key()
+                .and_then(|k| crate::grid_env::load_register_prefs(ctx, &k))
+                && p != self.prefs
+            {
+                self.prefs = p;
+                self.prefs_dirty = false;
+                self.apply_query();
+            }
+        } else if self.prefs_dirty {
+            self.prefs_dirty = false;
+            if let Some(k) = self.prefs_key() {
+                crate::grid_env::store_register_prefs(ctx, &k, self.prefs);
+            }
+        }
+    }
+
+    /// After this window saved a change: reload now and re-read the stamp
+    /// so the change is not taken for someone else's (WP6-WP8 call it).
+    #[allow(dead_code, reason = "called by the WP6-WP8 writes")]
+    pub(crate) fn after_own_write(&mut self) {
+        self.model.invalidate();
+        self.stamp.now = true;
+        self.stamp.quiet = true;
+    }
+
+    /// The ledger moved: the shown pages reload (rows stay on screen until
+    /// their pages return).
+    fn ledger_changed(&mut self) {
+        self.model.invalidate();
+    }
+
+    /// Polls and starts ledger-stamp reads (Q-P12n).
+    fn watch_stamp(&mut self, ctx: &egui::Context) {
+        if let Some(task) = self.stamp.task.as_mut()
+            && let Some(result) = task.try_take()
+        {
+            self.stamp.task = None;
+            if let Ok(s) = result {
+                let moved = self.stamp.last.is_some_and(|old| old != s);
+                self.stamp.last = Some(s);
+                if moved && !std::mem::take(&mut self.stamp.quiet) {
+                    self.ledger_changed();
+                }
+                self.stamp.quiet = false;
+            }
+        }
+        let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        let gained = focused && !self.stamp.focused;
+        self.stamp.focused = focused;
+        let now = ctx.input(|i| i.time);
+        let due =
+            gained || self.stamp.now || self.stamp.read_at.is_none_or(|t| now - t >= STAMP_EVERY);
+        if due && self.stamp.task.is_none() && self.account.is_some() {
+            self.stamp.now = false;
+            self.stamp.read_at = Some(now);
+            self.stamp.task = self.read_stamp();
+        }
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(STAMP_EVERY));
+    }
+
+    fn read_stamp(&self) -> Option<Task<LedgerStamp>> {
+        if self.link.is_demo() {
+            // The demo ledger only changes through this window.
+            return None;
+        }
+        let session = self.link.session()?;
+        let group = self.group.as_ref()?;
+        group
+            .read(&session, |s| async move { s.ledger_version().await })
+            .ok()
+            .map(Task::Pending)
+    }
+
     fn heading(&self, ui: &mut Ui, tokens: &Tokens) {
         let Some(a) = self.account_record() else {
             form::heading(ui, tokens, &t("cmd.banking.register"));
@@ -688,6 +806,8 @@ impl Screen for RegisterScreen {
             self.model.touch();
         }
         self.poll();
+        self.sync_prefs(ui.ctx());
+        self.watch_stamp(ui.ctx());
         let tokens = Tokens::of(ui.ctx());
         self.heading(ui, &tokens);
         ui.add_space(4.0);

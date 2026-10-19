@@ -520,6 +520,9 @@ impl RowModel for RegisterModel {
         if self.locked(r) {
             s = s | RowState::LOCKED;
         }
+        if r.void {
+            s = s | RowState::MUTED;
+        }
         s
     }
 

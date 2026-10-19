@@ -241,6 +241,131 @@ impl UiStore {
     }
 }
 
+/// The register's Show range, Sort by and one-line choice per company and
+/// account (P12, Q-186), in their own capped file like [`GridWidths`].
+/// Keys are `<company hash>/<account id>`, so no company name or id is
+/// written in clear.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RegisterPrefsBook {
+    /// Least recently set first.
+    entries: Vec<(String, cl_model::register::RegisterPrefs)>,
+}
+
+impl RegisterPrefsBook {
+    /// The file under the UI store folder.
+    pub const FILE: &'static str = "register-prefs.json";
+    /// File format version.
+    pub const VERSION: u64 = 1;
+    /// Most registers remembered; one more forgets the oldest.
+    pub const MAX_ENTRIES: usize = 300;
+
+    /// The key for `company`'s register of `account`.
+    #[must_use]
+    pub fn key(company: &str, account: &str) -> String {
+        format!("{}/{}", key_hash(company), safe_name(account))
+    }
+
+    fn key_ok(key: &str) -> bool {
+        GridWidths::key_ok(key)
+    }
+
+    /// Read the file's text; a malformed entry drops only itself.
+    #[must_use]
+    pub fn parse(text: &str) -> RegisterPrefsBook {
+        let mut out = RegisterPrefsBook::default();
+        let Ok(serde_json::Value::Object(root)) = serde_json::from_str::<serde_json::Value>(text)
+        else {
+            return out;
+        };
+        if root.get("version").and_then(serde_json::Value::as_u64) != Some(Self::VERSION) {
+            return out;
+        }
+        let Some(serde_json::Value::Object(list)) = root.get("registers") else {
+            return out;
+        };
+        for (key, value) in list {
+            if out.entries.len() >= Self::MAX_ENTRIES {
+                break;
+            }
+            if Self::key_ok(key)
+                && let Ok(p) = serde_json::from_value(value.clone())
+            {
+                out.entries.push((key.clone(), p));
+            }
+        }
+        out
+    }
+
+    /// The file's text.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let list: serde_json::Map<String, serde_json::Value> = self
+            .entries
+            .iter()
+            .filter_map(|(k, p)| Some((k.clone(), serde_json::to_value(p).ok()?)))
+            .collect();
+        serde_json::to_string_pretty(&serde_json::json!({
+            "version": Self::VERSION,
+            "registers": list,
+        }))
+        .unwrap_or_default()
+    }
+
+    /// The choices remembered for a register.
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<cl_model::register::RegisterPrefs> {
+        self.entries.iter().find(|(k, _)| k == key).map(|(_, p)| *p)
+    }
+
+    /// Remember a register's choices. Returns false when nothing changed or
+    /// the key could not be read back.
+    pub fn set(&mut self, key: &str, prefs: cl_model::register::RegisterPrefs) -> bool {
+        if !Self::key_ok(key) || self.get(key) == Some(prefs) {
+            return false;
+        }
+        self.entries.retain(|(k, _)| k != key);
+        self.entries.push((key.to_string(), prefs));
+        while self.entries.len() > Self::MAX_ENTRIES {
+            self.entries.remove(0);
+        }
+        true
+    }
+
+    /// How many registers are remembered.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// True when none is remembered.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+impl UiStore {
+    fn register_prefs_path(&self) -> PathBuf {
+        self.dir.join(RegisterPrefsBook::FILE)
+    }
+
+    /// Load the remembered register choices (empty when missing, oversized
+    /// or unreadable).
+    #[must_use]
+    pub fn load_register_prefs(&self) -> RegisterPrefsBook {
+        read_capped(&self.register_prefs_path())
+            .map_or_else(RegisterPrefsBook::default, |t| RegisterPrefsBook::parse(&t))
+    }
+
+    /// Save the register choices.
+    ///
+    /// # Errors
+    /// Any file error.
+    pub fn save_register_prefs(&self, book: &RegisterPrefsBook) -> io::Result<()> {
+        write_atomic(&self.register_prefs_path(), &book.to_text())
+    }
+}
+
 /// A 16-digit hex name for a company key (FNV-1a, 64 bit). Layout files are
 /// named by this hash, so no company id can influence a path, and two ids
 /// that `safe_name` would have merged get separate files.
@@ -510,6 +635,43 @@ mod tests {
         assert_eq!(book.get("big"), None, "the oldest grid is forgotten");
         assert!(!book.set("bad key!", &widths(&[(1, 60)])));
         assert!(book.to_text().len() < usize::try_from(MAX_READ).unwrap());
+    }
+
+    #[test]
+    fn register_prefs_round_trip_capped_and_keyed_by_hash() {
+        use cl_model::register::{RangePreset, RegisterPrefs, SortChoice};
+        let dir = temp_dir("register-prefs");
+        let store = UiStore::new(&dir);
+        assert!(store.load_register_prefs().is_empty());
+        let key = RegisterPrefsBook::key("tenant-1", "acct-1");
+        assert!(!key.contains("tenant"), "{key}");
+        let p = RegisterPrefs {
+            range: RangePreset::AllDates,
+            sort: SortChoice::Number,
+            one_line: true,
+        };
+        let mut book = RegisterPrefsBook::default();
+        assert!(book.set(&key, p));
+        assert!(!book.set(&key, p), "unchanged choices are not a change");
+        assert!(!book.set("../x", p));
+        store.save_register_prefs(&book).unwrap();
+        assert_eq!(store.load_register_prefs().get(&key), Some(p));
+        // Preferences proper are untouched by it.
+        assert!(!dir.join("ui-prefs.json").exists());
+        for i in 0..=RegisterPrefsBook::MAX_ENTRIES {
+            book.set(&RegisterPrefsBook::key("t", &format!("a{i}")), p);
+        }
+        assert_eq!(book.len(), RegisterPrefsBook::MAX_ENTRIES);
+        assert_eq!(book.get(&key), None, "the oldest register is forgotten");
+        assert!(book.to_text().len() < usize::try_from(MAX_READ).unwrap());
+        assert!(RegisterPrefsBook::parse("not json").is_empty());
+        let bad = format!(
+            r#"{{"version":1,"registers":{{"{key}":{{"v":1,"one_line":"yes"}},"ok/a":{{}}}}}}"#
+        );
+        let parsed = RegisterPrefsBook::parse(&bad);
+        assert_eq!(parsed.get(&key), None);
+        assert_eq!(parsed.get("ok/a"), Some(RegisterPrefs::default()));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
