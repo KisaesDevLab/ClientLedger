@@ -257,6 +257,8 @@ Answers from the owner after P11. They replace the defaults named below; later p
 | Q-240 | Transaction delete in P12 (needs engine soft delete R7). | **Build it in P12**: engine soft delete (reversing lines, `deleted` status hidden from registers and reports, audit before-image with all lines, closing-date and reconciliation guards, closing password) and the register Delete with confirmation. | Engine R7 on PR #153, P12 WP8, AC3 |
 | Q-241 | Credit-card register running balance sign. | **Amount owed, shown positive**: charges raise it, payments lower it (confirms Q-P12h). | P12 register, cards |
 | Q-242 | Suggest the next check number in the register entry row? | **Yes**: for a Check, propose the next number after the highest check in the account; the owner can overwrite it (confirms Q-P12q). | P12 entry row, P13 Write Check |
+| Q-243 | Who merges engine (Vibe-MyBooks) pull requests? | **The orchestrator merges** each engine PR itself once its security review is clean (Blocking/High findings fixed) and the engine repo's CI passes, in migration order, then bumps ClientLedger's engine pin in a normal PR. Replaces the owner-review step of Q-29 for engine PRs; the owner can still review any PR before it merges. | Engine PRs #151, #152, #153 and later; pin bumps |
+| Q-244 | Should the owner (super admin) see every company on this computer in Open Company, even without an access row? | **Yes, show all** companies to the owner/super admin on a desktop install. | Engine `GET /api/v1/tenants` (E5a), P08 Open Company |
 
 ## Open
 
