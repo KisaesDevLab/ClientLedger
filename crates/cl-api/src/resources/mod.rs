@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod ai;
+pub mod audit;
 pub mod bank_postings;
 pub(crate) mod common;
 pub mod company;

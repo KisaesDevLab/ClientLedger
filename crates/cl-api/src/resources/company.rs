@@ -10,7 +10,7 @@
 //! - Company list, create, open and close live on [`Session`] because they
 //!   change the session's scope.
 
-use cl_core::ids::CompanyId;
+use cl_core::ids::{CompanyId, UserId};
 use cl_core::{CalendarDate, Rate, Secret, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -21,7 +21,8 @@ use crate::errors::LocalValidation;
 use crate::idempotency::IdempotencyKey;
 use crate::resources::common::requested_fp;
 use crate::resources::operations::{
-    COMPANY_GET, COMPANY_PUT, COMPANY_SETTINGS, COMPANY_SETTINGS_PUT,
+    CLOSING_PASSWORD_GET, CLOSING_PASSWORD_PUT, COMPANY_GET, COMPANY_PUT, COMPANY_SETTINGS,
+    COMPANY_SETTINGS_PUT,
 };
 use crate::resources::reconcile::row_fp;
 use crate::resources::versioning::{
@@ -370,6 +371,106 @@ impl Session {
     }
 }
 
+/// The closing date and whether a closing-date password is set
+/// (`GET /company/closing-password`, U-15). Never the password or its hash.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClosingPasswordStatus {
+    /// The closing date.
+    #[serde(default)]
+    pub closing_date: Option<CalendarDate>,
+    /// Who set the closing date.
+    #[serde(default)]
+    pub set_by: Option<UserId>,
+    /// When it was set.
+    #[serde(default)]
+    pub set_at: Option<Timestamp>,
+    /// A closing-date password is set.
+    #[serde(rename = "closingPasswordSet")]
+    pub password_set: bool,
+}
+
+/// Shortest closing-date password (characters).
+pub const CLOSING_PASSWORD_MIN_CHARS: usize = 4;
+/// Longest closing-date password (UTF-8 bytes).
+pub const CLOSING_PASSWORD_MAX_BYTES: usize = 72;
+
+impl Session {
+    fn require_closing_password(&self) -> Result<(), ApiError> {
+        self.require_company()?;
+        if self
+            .client()
+            .capabilities()
+            .has(Capabilities::CLOSING_PASSWORD)
+        {
+            Ok(())
+        } else {
+            Err(ApiError::Local(LocalValidation::ClosingPasswordUnavailable))
+        }
+    }
+
+    /// The closing date and whether a closing-date password is set.
+    ///
+    /// # Errors
+    /// `Local(ClosingPasswordUnavailable)` without `closing-password-v1`
+    /// (nothing sent); `NoCompanyOpen`; any [`ApiError`].
+    pub async fn closing_password_status(&self) -> Result<ClosingPasswordStatus, ApiError> {
+        self.require_closing_password()?;
+        let call = Call::at(Method::Get, CLOSING_PASSWORD_GET.route());
+        let reply = self.send(&CLOSING_PASSWORD_GET, call, None).await?;
+        decode(&reply, "closing password status")
+    }
+
+    /// Sets, changes (`current` required once one is set) or clears (`new`
+    /// = `None`) the closing-date password. Returns whether one is set now.
+    /// Never retried; the passwords are never logged.
+    ///
+    /// # Errors
+    /// `Local(ClosingPasswordUnavailable)` without `closing-password-v1`,
+    /// `Local(InvalidValue)` for a new password under 4 characters or over
+    /// 72 bytes (nothing sent); `ClosingPasswordRejected` (wrong current
+    /// password), `ClosingPasswordOwnerRequired`,
+    /// `ClosingPasswordRateLimited`; any [`ApiError`].
+    pub async fn set_closing_password(
+        &self,
+        current: Option<&Secret>,
+        new: Option<&Secret>,
+        key: IdempotencyKey,
+    ) -> Result<bool, ApiError> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Body<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            current_password: Option<&'a str>,
+            new_password: Option<&'a str>,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Answer {
+            closing_password_set: bool,
+        }
+        self.require_closing_password()?;
+        if let Some(n) = new {
+            let n = n.expose();
+            if n.chars().count() < CLOSING_PASSWORD_MIN_CHARS
+                || n.len() > CLOSING_PASSWORD_MAX_BYTES
+            {
+                return Err(ApiError::Local(LocalValidation::InvalidValue));
+            }
+        }
+        let body = json_body(&Body {
+            current_password: current.map(Secret::expose),
+            new_password: new.map(Secret::expose),
+        })?;
+        let mut call = Call::at(Method::Put, CLOSING_PASSWORD_PUT.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self.send(&CLOSING_PASSWORD_PUT, call, None).await?;
+        decode::<Answer>(&reply, "closing password")
+            .map(|a| a.closing_password_set)
+            .map_err(crate::resources::versioning::saved_unreadable)
+    }
+}
+
 /// Reads `{settings}` from a settings write; a 2xx that cannot be read is
 /// `SavedUnreadable` (the change is recorded).
 fn settings_from(reply: &crate::client::EngineReply) -> Result<CompanySettings, ApiError> {
@@ -592,5 +693,76 @@ mod tests {
             closing_password: Some(Secret::new("closing-canary")),
         };
         assert!(!format!("{change:?}").contains("canary"));
+    }
+
+    #[tokio::test]
+    async fn closing_password_status_and_set() {
+        let server = MockServer::start().await;
+        let s = company_session(&server);
+        assert_eq!(
+            s.closing_password_status().await.expect_err("gated"),
+            ApiError::Local(LocalValidation::ClosingPasswordUnavailable)
+        );
+        assert_eq!(
+            s.set_closing_password(None, Some(&Secret::new("pw-canary")), IdempotencyKey::new())
+                .await
+                .expect_err("gated"),
+            ApiError::Local(LocalValidation::ClosingPasswordUnavailable)
+        );
+        assert!(server.received_requests().await.expect("r").is_empty());
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/company/closing-password"))
+            .respond_with(json(
+                200,
+                r#"{"closingDate":"2026-09-30","setBy":"5b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+                    "setAt":"2026-10-01T10:00:00.000Z","closingPasswordSet":true}"#,
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v1/company/closing-password"))
+            .respond_with(json(200, r#"{"closingPasswordSet":false}"#))
+            .mount(&server)
+            .await;
+        let s = crate::resources::testkit::session_with_caps(
+            &server,
+            &[Capabilities::CLOSING_PASSWORD],
+        )
+        .await;
+        let st = s.closing_password_status().await.expect("status");
+        assert!(st.password_set);
+        assert_eq!(st.closing_date, CalendarDate::from_ymd(2026, 9, 30).ok());
+        assert_eq!(
+            s.set_closing_password(None, Some(&Secret::new("abc")), IdempotencyKey::new())
+                .await
+                .expect_err("short"),
+            ApiError::Local(LocalValidation::InvalidValue)
+        );
+        assert_eq!(
+            s.set_closing_password(
+                None,
+                Some(&Secret::new("x".repeat(73))),
+                IdempotencyKey::new()
+            )
+            .await
+            .expect_err("long"),
+            ApiError::Local(LocalValidation::InvalidValue)
+        );
+        let set = s
+            .set_closing_password(
+                Some(&Secret::new("old-canary")),
+                None,
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect("cleared");
+        assert!(!set);
+        let puts = requests(&server, "PUT").await;
+        assert_eq!(puts.len(), 1);
+        let body: Value = serde_json::from_slice(&puts[0].body).expect("json");
+        assert_eq!(body["currentPassword"], "old-canary");
+        assert_eq!(body["newPassword"], Value::Null);
     }
 }

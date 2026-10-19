@@ -57,13 +57,15 @@ pub use resources::ai::{
     AiUsageSummary, CompanyConsent, ConsentRow, ConsentStatus, DESKTOP_PROVIDERS, ProviderModels,
     ProviderTest, UsageSummaryRow, UsageTotals,
 };
+pub use resources::audit::{Audit, AuditAction, AuditEntity, AuditEntry, AuditImage, AuditLine};
 pub use resources::bank_postings::{
     BankPosting, BankPostingKind, CardChargeDraft, CheckDraft, DepositDraft, PAYEE_NAME_MAX,
     SplitLine, TransferDraft,
 };
 pub use resources::common::SortDir;
 pub use resources::company::{
-    AccountingMethod, ClosingDateChange, CompanyProfile, CompanyProfileUpdate, CompanySettings,
+    AccountingMethod, CLOSING_PASSWORD_MAX_BYTES, CLOSING_PASSWORD_MIN_CHARS, ClosingDateChange,
+    ClosingPasswordStatus, CompanyProfile, CompanyProfileUpdate, CompanySettings,
     CompanySettingsUpdate, EntityType,
 };
 pub use resources::contacts::{
