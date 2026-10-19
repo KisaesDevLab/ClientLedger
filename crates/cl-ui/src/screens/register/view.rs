@@ -475,7 +475,18 @@ impl RegisterModel {
         self.visible.clone()
     }
 
-    fn locked(&self, r: &RegRow) -> bool {
+    /// The loaded row behind a key (edits start from its transaction).
+    #[must_use]
+    pub fn row_for_key(&self, key: RowKey) -> Option<&RegRow> {
+        let line = self.line_of(key)?;
+        let index = *self.row_of.get(&line)?;
+        self.row_at(usize::try_from(index).ok()?)
+            .filter(|r| r.line_id == line)
+    }
+
+    /// The row is dated on or before the closing date (NN8).
+    #[must_use]
+    pub fn locked(&self, r: &RegRow) -> bool {
         self.closing.is_some_and(|c| r.date <= c)
     }
 

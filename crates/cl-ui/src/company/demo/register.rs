@@ -461,18 +461,24 @@ impl DemoLedger {
         let deposit = t.kind == "deposit";
         let mut lines = Vec::new();
         for (i, l) in t.lines.iter().enumerate() {
+            // A fixture account outside the demo chart keeps its number.
             let a = chart
                 .iter()
-                .find(|a| number_of(a) == Some(l.account.as_str()))?;
-            let own_side = matches!(
-                a.fields.detail_type.as_deref(),
-                Some("bank" | "credit_card")
-            );
+                .find(|a| number_of(a) == Some(l.account.as_str()));
+            let own_side = a.is_some_and(|a| {
+                matches!(
+                    a.fields.detail_type.as_deref(),
+                    Some("bank" | "credit_card")
+                )
+            });
             lines.push(cl_api::TransactionLine {
                 id: line_id(&t, i),
-                account_id: a.id,
-                account_name: Some(a.fields.name.clone()),
-                account_number: a.fields.account_number.clone(),
+                account_id: a.map_or_else(
+                    || super::account_id(l.account.parse().unwrap_or(0)),
+                    |a| a.id,
+                ),
+                account_name: a.map(|a| a.fields.name.clone()),
+                account_number: Some(l.account.clone()),
                 debit: l.debit,
                 credit: l.credit,
                 description: None,

@@ -312,7 +312,6 @@ fn later_lane_commands_are_routed_but_not_handled_yet() {
     let mut s = screen(&link);
     for c in [
         "edit.find",
-        "edit.edit_transaction",
         "form.delete_item",
         "edit.void_transaction",
         "list.quick_report",
@@ -606,4 +605,133 @@ fn the_entry_row_refuses_plainly_and_enter_on_an_empty_row_does_nothing() {
     );
     assert!(s.start_record());
     assert_eq!(s.entry.last_saved, Some("transfer"));
+}
+
+fn last_key(s: &mut RegisterScreen) -> cl_grid::RowKey {
+    let total = s.model.total().expect("total");
+    settle(s, Some(&((total - 1)..total)));
+    let last = usize::try_from(total - 1).expect("idx");
+    s.model.row_key(last).expect("key")
+}
+
+#[test]
+fn an_edit_starts_from_the_transaction_and_updates_it() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let fuel = demo_account(&link, "6100");
+    let vendor = demo_contact(&link, "Hollister Fuel Stop");
+    s.entry.form.edit_step(|d| {
+        d.payee = Some(vendor);
+        d.account = Some(fuel);
+        d.payment = Some(money("125.50"));
+    });
+    assert!(s.start_record());
+    settle(&mut s, None);
+    let total = s.model.total().expect("total");
+    let key = last_key(&mut s);
+    s.begin_edit(key, false);
+    let e = s.entry.editing.clone().expect("editing");
+    assert_eq!(e.kind, cl_model::register::EntryKind::Check);
+    assert_eq!(s.entry.draft().payment, Some(money("125.50")));
+    assert_eq!(s.entry.draft().account, Some(fuel));
+    assert_eq!(s.state()["entry"]["mode"], "edit");
+    assert!(!s.entry_dirty(), "a fresh edit has nothing unsaved");
+    // Moving the amount to the other column is refused.
+    s.entry.form.edit_step(|d| {
+        d.payment = None;
+        d.deposit = Some(money("1.00"));
+    });
+    assert!(!s.start_record());
+    assert_eq!(
+        s.entry.problems,
+        vec![cl_grid::TextKey("register.entry.problem.side_changed")]
+    );
+    s.entry.form.edit_step(|d| {
+        d.deposit = None;
+        d.payment = Some(money("130.00"));
+    });
+    assert!(s.start_record());
+    assert_eq!(s.entry.last_saved, Some("update"));
+    assert!(s.entry.editing.is_none());
+    settle(&mut s, None);
+    assert_eq!(s.model.total(), Some(total), "changed, not added");
+    let key = last_key(&mut s);
+    s.begin_edit(key, false);
+    assert_eq!(s.entry.draft().payment, Some(money("130.00")));
+    s.finish_edit();
+    assert!(s.entry.editing.is_none());
+}
+
+#[test]
+fn splits_record_a_check_once_the_lines_add_up() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let before = s.model.total().expect("total");
+    let fuel = demo_account(&link, "6100");
+    let repairs = demo_account(&link, "6350");
+    let vendor = demo_contact(&link, "Hollister Fuel Stop");
+    s.entry.form.edit_step(|d| {
+        d.payee = Some(vendor);
+        d.account = Some(fuel);
+        d.payment = Some(money("200.00"));
+    });
+    s.toggle_splits();
+    assert_eq!(s.state()["entry"]["splits"]["open"], true);
+    assert_eq!(s.state()["entry"]["splits"]["lines"], 1);
+    assert_eq!(s.state()["entry"]["splits"]["remaining_zero"], true);
+    s.splits.as_mut().expect("panel").form_mut().edit_step(|v| {
+        v.lines[0].amount = Some(money("150.00"));
+        let mut extra = splits::SplitRow::blank(v.lines[1].key);
+        extra.account = Some(repairs);
+        extra.amount = Some(money("40.00"));
+        v.lines[1] = extra;
+    });
+    assert_eq!(s.state()["entry"]["splits"]["remaining_zero"], false);
+    assert!(!s.start_record());
+    assert_eq!(
+        s.entry.problems,
+        vec![cl_grid::TextKey("register.splits.not_assigned")]
+    );
+    // More than one line: the panel stays open.
+    s.toggle_splits();
+    assert!(s.splits.is_some());
+    s.splits
+        .as_mut()
+        .expect("panel")
+        .form_mut()
+        .edit_step(|v| v.lines[1].amount = Some(money("50.00")));
+    assert!(s.start_record());
+    assert_eq!(s.entry.last_saved, Some("check"));
+    assert!(s.splits.is_none());
+    settle(&mut s, None);
+    assert_eq!(s.model.total(), Some(before + 1));
+    // The split check opens again with Splits.
+    let key = last_key(&mut s);
+    s.begin_edit(key, false);
+    assert_eq!(s.state()["entry"]["splits"]["lines"], 2);
+    assert_eq!(s.state()["entry"]["splits"]["remaining_zero"], true);
+}
+
+#[test]
+fn rows_the_register_cant_change_show_read_only() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let total = s.model.total().expect("total");
+    settle(&mut s, Some(&(0..total)));
+    // A customer payment (PMT) from the demo sample.
+    let key = (0..usize::try_from(total).expect("n"))
+        .filter_map(|i| {
+            s.model
+                .row_at(i)
+                .map(|r| (i, r.kind.clone(), r.editable && !s.model.locked(r)))
+        })
+        .find(|(_, k, e)| k == "PMT" && *e)
+        .and_then(|(i, _, _)| s.model.row_key(i))
+        .expect("a payment row");
+    s.begin_edit(key, false);
+    assert!(s.entry.editing.is_none());
+    assert_eq!(s.state()["entry"]["read_only"], true);
 }

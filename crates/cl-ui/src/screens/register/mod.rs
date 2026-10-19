@@ -17,6 +17,7 @@
 //!
 //! Every engine call runs on the request queue and is polled each frame.
 
+mod edit;
 pub mod entry_row;
 pub mod filters;
 pub mod footer;
@@ -165,6 +166,15 @@ pub struct RegisterScreen {
     lists: Arc<lists::RegisterLists>,
     /// The entry row pinned under the grid.
     entry: record::EntryState,
+    /// The Splits panel, when open.
+    splits: Option<splits::SplitsPanel>,
+    /// The edited transaction's other-side lines as read (a single line's
+    /// memo and tag are kept).
+    edit_lines: Vec<splits::SplitRow>,
+    /// A transaction being read for an edit.
+    edit_load: Option<edit::EditLoad>,
+    /// A transaction the register can't change, shown read-only.
+    read_only: Option<Vec<edit::ReadLine>>,
 }
 
 /// Watches the ledger stamp (Q-P12n): read on window focus, every
@@ -232,6 +242,10 @@ impl RegisterScreen {
             footer: footer::Footer::default(),
             entry: record::EntryState::new(Arc::clone(&shared), today),
             lists: shared,
+            splits: None,
+            edit_lines: Vec::new(),
+            edit_load: None,
+            read_only: None,
         };
         s.start_load();
         s.load_lists();
@@ -469,6 +483,7 @@ impl RegisterScreen {
 
     fn poll(&mut self) {
         self.poll_entry();
+        self.poll_edit();
         if let Some(task) = self.accounts_task.as_mut()
             && let Some(result) = task.try_take()
         {
@@ -524,7 +539,9 @@ impl RegisterScreen {
     /// Once the newest line has arrived, scroll to it and put the cursor
     /// there.
     fn finish_jump(&mut self) {
-        if !self.jump_to_end {
+        // Wait for the pages being read (after an own write the old rows
+        // stay on screen until the new ones arrive).
+        if !self.jump_to_end || !self.pages.is_empty() || self.model.window().in_flight() > 0 {
             return;
         }
         let Some(total) = self.model.total() else {
@@ -782,23 +799,40 @@ impl RegisterScreen {
     reason = "event handlers that WP6-WP8 fill in; WP5 only routes to them"
 )]
 impl RegisterScreen {
-    /// Enter or a double-click on a row (WP6: edit in place).
-    fn on_activate(&mut self, _key: cl_grid::RowKey) {}
+    /// Enter or a double-click on a row: change it in the pinned row.
+    fn on_activate(&mut self, key: cl_grid::RowKey) {
+        self.begin_edit(key, false);
+    }
 
     /// Typing on a locked row (WP8: the closing-date password flow).
     fn on_locked_edit(&mut self, _key: cl_grid::RowKey) {}
 
-    /// Typing on a row while browsing (WP6: starts an edit).
-    fn on_typed(&mut self, _text: &str) {}
+    /// Typing on a row while browsing starts an edit of it.
+    fn on_typed(&mut self, _text: &str) {
+        if let Some(key) = self.grid.core().cursor().map(|c| c.row) {
+            self.begin_edit(key, false);
+        }
+    }
 
     /// Ctrl+F (WP7: Go To).
     fn on_find(&mut self) -> bool {
         false
     }
 
-    /// Ctrl+E (WP6: Edit Transaction).
+    /// Ctrl+E: Splits for the row being entered, else Edit Transaction on
+    /// the register's row (with Splits for checks and card charges).
     fn on_edit_transaction(&mut self) -> bool {
-        false
+        let in_entry = self.entry.form.grid().has_focus()
+            || self
+                .splits
+                .as_ref()
+                .is_some_and(splits::SplitsPanel::has_focus);
+        if in_entry || self.entry.editing.is_some() {
+            self.toggle_splits();
+        } else if let Some(key) = self.grid.core().cursor().map(|c| c.row) {
+            self.begin_edit(key, true);
+        }
+        true
     }
 
     /// Ctrl+D (WP8: delete, or the void offer before R7).

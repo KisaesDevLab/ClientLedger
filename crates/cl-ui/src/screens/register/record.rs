@@ -45,7 +45,7 @@ pub(super) struct EntryState {
     /// The save in flight.
     pub task: Option<Task<TransactionId>>,
     /// The idempotency key of the draft being retried.
-    key: Option<(EntryDraft, IdempotencyKey)>,
+    pub key: Option<(EntryDraft, IdempotencyKey)>,
     /// The next check number (Q-P12q).
     pub next_check: Option<u32>,
     next_check_task: Option<Task<Option<u32>>>,
@@ -579,6 +579,8 @@ impl RegisterScreen {
         self.entry.form.load(fresh, &*lists);
         self.entry.editing = None;
         self.entry.proposed = None;
+        self.edit_lines.clear();
+        self.read_only = None;
         let a = self.entry.form.adapter_mut();
         a.lock_number = false;
         a.label = t("register.entry.row_new");
@@ -668,6 +670,8 @@ impl RegisterScreen {
             }
             self.entry_grid_ui(ui);
             self.entry_actions_ui(ui, tokens);
+            self.splits_ui(ui, tokens);
+            self.edit_ui(ui, tokens);
             for key in &self.entry.problems {
                 ui.add(egui::Label::new(RichText::new(t(key.0)).color(tokens.warn_text)).wrap());
             }
@@ -767,6 +771,8 @@ impl RegisterScreen {
             "error": self.entry.error.is_some(),
             "dirty": self.entry_dirty(),
             "splits": self.splits_state(),
+            "read_only": self.read_only.is_some(),
+            "edit_loading": self.edit_load.is_some(),
         })
     }
 }
