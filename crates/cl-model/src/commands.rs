@@ -242,6 +242,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("edit.redo", "Redo", Some(Menu::Edit), 0, ctrl('Y'), Scope::Form),
     cmd("edit.find", "Find / Go To", Some(Menu::Edit), 1, ctrl('F'), Scope::Global),
     cmd("edit.edit_transaction", "Edit Transaction", Some(Menu::Edit), 1, ctrl('E'), Scope::Window),
+    cmd("edit.void_transaction", "Void Transaction", Some(Menu::Edit), 1, None, Scope::Window),
     cmd("edit.open_list", "Open List for This Field", Some(Menu::Edit), 1, ctrl('L'), Scope::Form),
     built("edit.preferences", "Preferences", Some(Menu::Edit), 2, key(Mods::CMD, Key::Comma)),
     // Form and grid commands (not in a menu; listed in the palette and overlay)
@@ -266,6 +267,8 @@ pub const COMMANDS: &[Command] = &[
     cmd("list.show_inactive", "Include Inactive Entries", None, 3, ctrl_shift('H'), Scope::Window),
     cmd("list.quick_report", "QuickReport", None, 3, ctrl_shift('Q'), Scope::Window),
     cmd("list.merge", "Merge Into Another Entry", None, 3, None, Scope::Window),
+    // Register windows (P12; Ctrl+F, Ctrl+E, Ctrl+D and Ctrl+Shift+Q above apply too)
+    cmd("register.one_line", "One-Line Display", None, 4, None, Scope::Window),
     // Clients
     built("clients.center", "Clients & Jobs", Some(Menu::Clients), 0, None),
     screen("clients.create_invoice", "Create Invoice", Some(Menu::Clients), 1, ctrl('I'), "P20"),
@@ -280,7 +283,7 @@ pub const COMMANDS: &[Command] = &[
     screen("vendors.write_check", "Write Check", Some(Menu::Vendors), 1, ctrl('W'), "P13"),
     screen("vendors.card_charge", "Record Card Charge", Some(Menu::Vendors), 1, ctrl_shift('C'), "P14"),
     // Banking
-    screen("banking.register", "Open Register", Some(Menu::Banking), 0, ctrl('G'), "P12"),
+    built("banking.register", "Open Register", Some(Menu::Banking), 0, ctrl('G')),
     screen("banking.deposit", "Make Deposit", Some(Menu::Banking), 0, ctrl('D'), "P14"),
     screen("banking.transfer", "Transfer Funds", Some(Menu::Banking), 0, ctrl('T'), "P14"),
     screen("banking.reconcile", "Reconcile", Some(Menu::Banking), 1, ctrl_shift('E'), "P27"),
@@ -400,6 +403,7 @@ mod tests {
             "lists.import_export",
             "clients.center",
             "vendors.center",
+            "banking.register",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -409,6 +413,44 @@ mod tests {
             let p = c.arrives.expect("window commands name a phase");
             assert!(p.starts_with('P'), "{p}");
         }
+    }
+
+    #[test]
+    fn register_keys() {
+        use crate::keymap::Keymap;
+        let km = Keymap::new(COMMANDS).unwrap();
+        let at = |focus: Scope, mods: Mods, c: char| {
+            km.resolve(focus, Shortcut::new(mods, Key::Letter(c)))
+                .map(CommandId::as_str)
+        };
+        // In the register grid or entry row (Form scope).
+        assert_eq!(at(Scope::Form, Mods::CMD, 'D'), Some("form.delete_item"));
+        assert_eq!(
+            at(Scope::Form, Mods::CMD, 'E'),
+            Some("edit.edit_transaction")
+        );
+        assert_eq!(at(Scope::Form, Mods::CMD, 'F'), Some("edit.find"));
+        assert_eq!(
+            at(Scope::Form, Mods::CMD_SHIFT, 'Q'),
+            Some("list.quick_report")
+        );
+        assert_eq!(at(Scope::Form, Mods::CMD, 'G'), Some("banking.register"));
+        // Outside a form Ctrl+D still makes a deposit.
+        assert_eq!(at(Scope::Global, Mods::CMD, 'D'), Some("banking.deposit"));
+        let void = find("edit.void_transaction").unwrap();
+        assert_eq!(void.label, "Void Transaction");
+        assert_eq!(
+            (void.menu, void.shortcut, void.scope),
+            (Some(Menu::Edit), None, Scope::Window)
+        );
+        let one = find("register.one_line").unwrap();
+        assert_eq!(one.label, "One-Line Display");
+        assert_eq!(
+            (one.menu, one.shortcut, one.scope),
+            (None, None, Scope::Window)
+        );
+        let reg = find("banking.register").unwrap();
+        assert!(reg.opens && reg.arrives.is_none(), "the register is built");
     }
 
     #[test]
