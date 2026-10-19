@@ -175,6 +175,19 @@ pub enum LocalValidation {
     SessionSecretsUnavailable,
     /// The integer usage summary needs `ai-desktop-v1` (E6).
     AiUsageSummaryUnavailable,
+    /// A range whose start is after its end (dates or amounts).
+    BadRange,
+    /// The register's cleared and tag filters need `register-exact-v1`
+    /// (P12 R3); nothing was sent.
+    RegisterFilterUnavailable,
+    /// The split lines do not add up to the amount of the transaction.
+    TotalMismatch,
+    /// The same account is on both sides (a transfer to itself, or a split
+    /// line to the register's own account).
+    SameAccount,
+    /// Setting or changing the closing-date password needs
+    /// `closing-password-v1` (U-15); nothing was sent.
+    ClosingPasswordUnavailable,
 }
 
 /// A save was refused because its date is on or before the closing date.
@@ -184,7 +197,8 @@ pub struct ClosedPeriod {
     pub lock_date: Option<CalendarDate>,
     /// Whether this user could override (there is no override until U-15).
     pub can_override: bool,
-    /// Whether a closing-date password is required (U-15; `None` until then).
+    /// Whether a closing-date password is required (U-15
+    /// `details.closingPasswordRequired`; `None` from engines without it).
     pub password_required: Option<bool>,
     /// The engine's message.
     pub message: UserText,
@@ -251,6 +265,34 @@ pub enum ApiError {
     /// The date is in a closed period.
     #[error("closed period (TB_PERIOD_LOCKED)")]
     ClosedPeriod(ClosedPeriod),
+    /// The closing-date password was wrong (403 `CLOSING_PASSWORD_INVALID`,
+    /// U-15). Nothing changed. The password is never echoed.
+    #[error("closing-date password rejected (CLOSING_PASSWORD_INVALID)")]
+    ClosingPasswordRejected,
+    /// A closing-date password is set and this change needs it (403
+    /// `CLOSING_PASSWORD_REQUIRED`, U-15).
+    #[error("closing-date password required (CLOSING_PASSWORD_REQUIRED)")]
+    ClosingPasswordRequired,
+    /// Only the owner may set the first closing-date password (403
+    /// `CLOSING_PASSWORD_OWNER_REQUIRED`, U-15).
+    #[error("closing-date password: owner required (CLOSING_PASSWORD_OWNER_REQUIRED)")]
+    ClosingPasswordOwnerRequired,
+    /// Too many wrong closing-date passwords (429
+    /// `CLOSING_PASSWORD_RATE_LIMIT`: 10 in 15 minutes per user).
+    #[error("closing-date password attempts rate limited")]
+    ClosingPasswordRateLimited {
+        /// How long to wait, if the engine said.
+        retry_after: Option<Duration>,
+    },
+    /// The engine sent money as a JSON number where cl-api needs the exact
+    /// decimal string (for example a register from an engine without
+    /// `register-exact-v1`). Amounts that may have been rounded are never
+    /// shown or used.
+    #[error("the engine sent inexact amounts ({what})")]
+    InexactMoney {
+        /// Which part (never the content).
+        what: &'static str,
+    },
     /// The feature needs the internet and the app works offline.
     #[error("offline: feature unavailable ({})", feature.as_deref().unwrap_or("-"))]
     OfflineUnavailable {
@@ -373,6 +415,18 @@ impl OwnerFacing for ApiError {
                 ConflictReason::Unspecified => ("error.api.conflict", None),
             },
             ApiError::ClosedPeriod(_) => ("error.api.closed_period", Some("fix.api.closed_period")),
+            ApiError::ClosingPasswordRejected => ("error.api.closing_password_wrong", None),
+            ApiError::ClosingPasswordRequired => (
+                "error.api.closing_password_required",
+                Some("fix.api.closing_password_required"),
+            ),
+            ApiError::ClosingPasswordOwnerRequired => {
+                ("error.api.closing_password_owner", Some("fix.api.ask_owner"))
+            }
+            ApiError::ClosingPasswordRateLimited { .. } => {
+                ("error.api.closing_password_attempts", Some("fix.api.wait"))
+            }
+            ApiError::InexactMoney { .. } => ("error.api.inexact_money", Some("fix.api.report")),
             ApiError::OfflineUnavailable { .. } => ("error.api.offline", Some("fix.api.offline")),
             ApiError::FeatureNotEnabled { .. } => {
                 ("error.api.feature_off", Some("fix.api.feature_off"))
@@ -558,7 +612,8 @@ fn closed_period(body: &EngineErrorBody) -> ClosedPeriod {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         password_required: body
-            .pointer("/error/details/passwordRequired")
+            .pointer("/error/details/closingPasswordRequired")
+            .or_else(|| body.pointer("/error/details/passwordRequired"))
             .and_then(Value::as_bool),
         message: body.text(),
     }
@@ -636,6 +691,11 @@ pub(crate) fn map_failure(
         })),
         403 if has("ACCOUNT_DEACTIVATED") => fin(ApiError::Unauthorized(AuthFailure::Deactivated)),
         403 if has("ORIGIN_NOT_ALLOWED") => fin(ApiError::Protocol { status, code }),
+        403 if has("CLOSING_PASSWORD_INVALID") => fin(ApiError::ClosingPasswordRejected),
+        403 if has("CLOSING_PASSWORD_REQUIRED") => fin(ApiError::ClosingPasswordRequired),
+        403 if has("CLOSING_PASSWORD_OWNER_REQUIRED") => {
+            fin(ApiError::ClosingPasswordOwnerRequired)
+        }
         403 => fin(ApiError::Forbidden { code }),
         404 => match code {
             Some(c) if c.as_str() == "NOT_AVAILABLE_IN_DESKTOP" => {
@@ -664,6 +724,9 @@ pub(crate) fn map_failure(
             Some(b) if b.is("TB_PERIOD_LOCKED") => fin(ApiError::ClosedPeriod(closed_period(b))),
             _ => fin(ApiError::Forbidden { code }),
         },
+        429 if has("CLOSING_PASSWORD_RATE_LIMIT") => {
+            fin(ApiError::ClosingPasswordRateLimited { retry_after })
+        }
         429 => fin(ApiError::RateLimited { retry_after }),
         503 if has("OFFLINE_UNAVAILABLE") => fin(ApiError::OfflineUnavailable {
             feature: feature(parsed.as_ref()),
@@ -1065,6 +1128,60 @@ mod tests {
         assert_eq!(cp.lock_date, None);
         assert!(!cp.can_override);
         assert_eq!(cp.password_required, Some(true));
+        // U-15 (engine PR #153) names it `closingPasswordRequired`.
+        let u15 = r#"{"error":{"message":"locked","code":"TB_PERIOD_LOCKED",
+            "details":{"lockDate":"2026-03-31","canOverride":false,"closingPasswordRequired":true}}}"#;
+        let ApiError::ClosedPeriod(cp) = err(423, u15, S) else {
+            panic!("closed")
+        };
+        assert_eq!(cp.password_required, Some(true));
+        assert_eq!(cp.lock_date.map(CalendarDate::to_wire).as_deref(), Some("2026-03-31"));
+    }
+
+    #[test]
+    fn closing_password_refusals_are_typed_and_never_echo() {
+        let body = |code: &str| {
+            format!(r#"{{"error":{{"message":"Closing password hunter2 is wrong","code":"{code}"}}}}"#)
+        };
+        assert_eq!(
+            err(403, &body("CLOSING_PASSWORD_INVALID"), S),
+            ApiError::ClosingPasswordRejected
+        );
+        assert_eq!(
+            err(403, &body("CLOSING_PASSWORD_REQUIRED"), S),
+            ApiError::ClosingPasswordRequired
+        );
+        assert_eq!(
+            err(403, &body("CLOSING_PASSWORD_OWNER_REQUIRED"), S),
+            ApiError::ClosingPasswordOwnerRequired
+        );
+        let Mapped::Final(e) = map_failure(
+            429,
+            body("CLOSING_PASSWORD_RATE_LIMIT").as_bytes(),
+            Some(Duration::from_secs(900)),
+            S,
+        ) else {
+            panic!("final")
+        };
+        assert_eq!(
+            e,
+            ApiError::ClosingPasswordRateLimited {
+                retry_after: Some(Duration::from_secs(900))
+            }
+        );
+        // Other 403s and 429s are unchanged.
+        assert!(matches!(err(403, &body("FORBIDDEN"), S), ApiError::Forbidden { .. }));
+        assert!(matches!(err(429, &body("RATE_LIMIT"), S), ApiError::RateLimited { .. }));
+        for code in [
+            "CLOSING_PASSWORD_INVALID",
+            "CLOSING_PASSWORD_REQUIRED",
+            "CLOSING_PASSWORD_OWNER_REQUIRED",
+        ] {
+            let e = err(403, &body(code), S);
+            let shown = format!("{e} | {e:?} | {}", e.scrubbed_detail());
+            assert!(!shown.contains("hunter2"), "{shown}");
+            assert!(e.owner_message().key.starts_with("error.api.closing_password"));
+        }
     }
 
     #[test]

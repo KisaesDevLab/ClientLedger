@@ -743,10 +743,13 @@ pub fn closing_password_u15(h: &Harness) {
                 key(),
             ))
             .expect_err("wrong password");
-        assert!(matches!(
-            wrong,
-            ApiError::Unauthorized(_) | ApiError::Forbidden { .. }
-        ));
+        assert!(
+            matches!(
+                wrong,
+                ApiError::ClosingPasswordRejected | ApiError::ClosingPasswordRequired
+            ),
+            "{wrong:?}"
+        );
         h.run(s.set_closing_date(
             &ClosingDateChange {
                 closing_date: None,
