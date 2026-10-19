@@ -1192,11 +1192,12 @@ mod tests {
             let e = err(403, &body(code), S);
             let shown = format!("{e} | {e:?} | {}", e.scrubbed_detail());
             assert!(!shown.contains("hunter2"), "{shown}");
-            assert!(
-                e.owner_message()
-                    .key
-                    .starts_with("error.api.closing_password")
-            );
+            assert!(matches!(
+                e.owner_message().key,
+                "error.api.closing_password_wrong"
+                    | "error.api.closing_password_required"
+                    | "error.api.closing_password_owner"
+            ));
         }
     }
 

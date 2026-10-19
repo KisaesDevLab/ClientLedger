@@ -195,6 +195,10 @@ fn bodies_carry_exact_strings_and_explicit_tags() {
         for body in [p.create_value(), p.update_value()] {
             let text = body.to_string();
             assert!(!text.contains("\"amount\":1"), "{text}");
+            // NN8: no way past a closed period but the password (U-15).
+            for bad in ["overrideConfirmed", "lockDate", "closingPassword"] {
+                assert!(!text.contains(bad), "{bad} in {text}");
+            }
         }
     }
 }
