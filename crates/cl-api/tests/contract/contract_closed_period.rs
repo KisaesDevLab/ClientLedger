@@ -6,7 +6,9 @@
 //! typed way to set it (P05 plan §2.7, N7). The ledger checks both the new
 //! and the original date (`ledger.service.ts` `checkLockDate`).
 
-use cl_api::{ApiError, ClosedPeriodAuthorization, LocalValidation, Method, PostingOptions};
+use cl_api::{
+    ApiError, Capabilities, ClosedPeriodAuthorization, LocalValidation, Method, PostingOptions,
+};
 use cl_core::Secret;
 use serde_json::json;
 
@@ -17,7 +19,7 @@ fn assert_closed(e: &ApiError) {
     match e {
         ApiError::ClosedPeriod(c) => {
             assert_eq!(c.lock_date, Some(date(2026, 1, 31)), "{e:?}");
-            assert_eq!(c.password_required, None);
+            assert_ne!(c.password_required, Some(true), "no password is set");
             eprintln!("    closed period: can_override={}", c.can_override);
         }
         other => panic!("expected ClosedPeriod, got {other:?}"),
@@ -89,6 +91,135 @@ pub fn locked_dates_are_refused_both_ways(h: &Harness) {
     assert_eq!(h.observer.total(), before, "nothing may be sent");
 
     // Clear the closing date again.
+    h.run(s.raw_mapped(
+        Method::Put,
+        "/api/v1/company/settings",
+        Some(&json!({"lockDate": null})),
+    ))
+    .expect("clear the closing date");
+}
+
+/// Checks, deposits, transfers and card charges in a closed period (P12
+/// WP2): create, update into it and void are refused with `ClosedPeriod`.
+/// With `closing-password-v1` (U-15) a wrong password is
+/// `ClosingPasswordRejected`, the right one saves and leaves a
+/// `closing_date_override` audit row; PENDING(U-15) until then.
+pub fn bank_postings_in_a_closed_period(h: &Harness) {
+    use crate::contract_bank_postings::{accounts, check};
+    use cl_api::{AuditAction, AuditEntity};
+
+    let s = h.s3();
+    let a = accounts(h, &s);
+    let memo = unique("closed bank");
+    let posted = |on| {
+        h.run(s.transactions().create_bank_posting(
+            &check(&a, on, &memo, ("10.0000", "2.5000")),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect("open check")
+    };
+    let inside = posted(date(2026, 1, 10));
+    let open = posted(date(2026, 2, 15));
+    h.run(s.raw_mapped(
+        Method::Put,
+        "/api/v1/company/settings",
+        Some(&json!({"lockDate": "2026-01-31"})),
+    ))
+    .expect("set the closing date");
+    let is_closed = |e: &ApiError| match e {
+        ApiError::ClosedPeriod(c) => {
+            assert_eq!(c.lock_date, Some(date(2026, 1, 31)), "{e:?}");
+            assert_ne!(c.password_required, Some(true), "no password is set");
+        }
+        other => panic!("expected ClosedPeriod, got {other:?}"),
+    };
+    let e = h
+        .run(s.transactions().create_bank_posting(
+            &check(&a, date(2026, 1, 15), &memo, ("1.0000", "1.0000")),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect_err("closed create");
+    is_closed(&e);
+    let e = h
+        .run(s.transactions().update_bank_posting(
+            open.record.id,
+            &open.version,
+            &check(&a, date(2026, 1, 20), &memo, ("10.0000", "2.5000")),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect_err("closed update");
+    is_closed(&e);
+    let e = h
+        .run(s.transactions().void(
+            inside.record.id,
+            "closed",
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect_err("closed void");
+    is_closed(&e);
+
+    if h.require_cap(Capabilities::CLOSING_PASSWORD, "U-15") {
+        let pw = Secret::new("closing-pass-1");
+        assert!(
+            h.run(s.set_closing_password(None, Some(&pw), key()))
+                .expect("set password")
+        );
+        let with = |p: &str| PostingOptions {
+            closed_period: Some(ClosedPeriodAuthorization::with_password(Secret::new(p))),
+        };
+        let e = h
+            .run(s.transactions().create_bank_posting(
+                &check(&a, date(2026, 1, 16), &memo, ("1.0000", "1.0000")),
+                &PostingOptions::default(),
+                key(),
+            ))
+            .expect_err("password required");
+        assert!(
+            matches!(&e, ApiError::ClosedPeriod(c) if c.password_required == Some(true)),
+            "{e:?}"
+        );
+        let e = h
+            .run(s.transactions().create_bank_posting(
+                &check(&a, date(2026, 1, 16), &memo, ("1.0000", "1.0000")),
+                &with("not-the-password"),
+                key(),
+            ))
+            .expect_err("wrong password");
+        assert_eq!(e, ApiError::ClosingPasswordRejected);
+        let saved = h
+            .run(s.transactions().create_bank_posting(
+                &check(&a, date(2026, 1, 16), &memo, ("1.0000", "1.0000")),
+                &with("closing-pass-1"),
+                key(),
+            ))
+            .expect("right password");
+        let rows = h
+            .run(
+                s.audit()
+                    .for_record(AuditEntity::ClosingDateOverride, *saved.record.id.as_uuid()),
+            )
+            .expect("audit");
+        assert!(
+            rows.iter().any(|r| r.action == AuditAction::Override),
+            "closed-period change is audited"
+        );
+        let voided = h
+            .run(
+                s.transactions()
+                    .void(inside.record.id, "closed", &with("closing-pass-1"), key()),
+            )
+            .expect("void with password");
+        assert_eq!(voided.record.status, cl_api::TxnStatus::Void);
+        assert!(
+            !h.run(s.set_closing_password(Some(&pw), None, key()))
+                .expect("clear password")
+        );
+    }
+
     h.run(s.raw_mapped(
         Method::Put,
         "/api/v1/company/settings",

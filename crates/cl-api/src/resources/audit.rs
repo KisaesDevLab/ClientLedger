@@ -179,8 +179,8 @@ impl AuditImage {
 /// One audit row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuditEntry {
-    /// Row id.
-    pub id: uuid::Uuid,
+    /// Row id (the engine's row counter).
+    pub id: u64,
     /// What happened.
     pub action: AuditAction,
     /// When.
@@ -195,7 +195,8 @@ pub struct AuditEntry {
 
 #[derive(Deserialize)]
 struct WireRow {
-    id: String,
+    /// `bigserial`: a JSON string of digits from the raw query, or a number.
+    id: Value,
     action: String,
     entity_id: Option<String>,
     #[serde(default)]
@@ -213,8 +214,40 @@ struct WirePage {
     total: u64,
 }
 
+/// The engine stores each image as a JSON string inside the `jsonb`
+/// column, so the row usually carries the image as text; both forms are
+/// read.
 fn image(v: Option<Value>) -> Option<AuditImage> {
-    v.filter(|v| !v.is_null()).map(AuditImage)
+    match v? {
+        Value::Null => None,
+        Value::String(text) => Some(AuditImage(
+            serde_json::from_str(&text).unwrap_or(Value::String(text)),
+        )),
+        other => Some(AuditImage(other)),
+    }
+}
+
+/// The audit time: RFC 3339, or the PostgreSQL text form the engine's raw
+/// query sends (`2026-10-19 17:36:05.208999-05`: a space before the time
+/// and an hour-only offset), which is rewritten to RFC 3339 first.
+fn audit_time(text: &str) -> Option<Timestamp> {
+    if let Ok(t) = Timestamp::parse_wire(text) {
+        return Some(t);
+    }
+    if text.as_bytes().get(10) != Some(&b' ') || !text.is_ascii() {
+        return None;
+    }
+    let mut s = format!("{}T{}", &text[..10], &text[11..]);
+    // The offset starts at the last sign after the time.
+    let sign = s.rfind(['+', '-']).filter(|&i| i >= 19)?;
+    let offset = &s[sign + 1..];
+    let fixed = match offset.len() {
+        2 => format!("{offset}:00"),
+        4 if !offset.contains(':') => format!("{}:{}", &offset[..2], &offset[2..]),
+        _ => offset.to_string(),
+    };
+    s.replace_range(sign + 1.., &fixed);
+    Timestamp::parse_wire(&s).ok()
 }
 
 /// Audit trail reads of a session (`session.audit()`).
@@ -259,11 +292,15 @@ impl Audit<'_> {
                     continue;
                 }
                 out.push(AuditEntry {
-                    id: cl_core::ids::parse_uuid(&row.id)
-                        .map_err(|_| ApiError::Decode { what: "audit id" })?,
+                    id: match &row.id {
+                        Value::String(t) => t.parse().ok(),
+                        Value::Number(n) => n.as_u64(),
+                        _ => None,
+                    }
+                    .ok_or(ApiError::Decode { what: "audit id" })?,
                     action: AuditAction::parse(&row.action),
-                    at: Timestamp::parse_wire(&row.created_at)
-                        .map_err(|_| ApiError::Decode { what: "audit time" })?,
+                    at: audit_time(&row.created_at)
+                        .ok_or(ApiError::Decode { what: "audit time" })?,
                     user: row.user_id,
                     before: image(row.before_data),
                     after: image(row.after_data),
@@ -294,7 +331,7 @@ mod tests {
             r#"{{"id":"{id}","tenant_id":"t","user_id":null,"action":"{action}",
                "entity_type":"transaction","entity_id":"{entity}","before_data":{before},
                "after_data":null,"ip_address":null,"user_agent":null,
-               "created_at":"2026-10-19T12:00:00.000Z"}}"#
+               "created_at":"2026-10-19 12:00:00.123456-05"}}"#
         )
     }
 
@@ -308,18 +345,14 @@ mod tests {
         );
         let body = format!(
             r#"{{"data":[{},{},{}],"total":3}}"#,
-            row("0a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01", "void", TXN, &before),
+            row("101", "void", TXN, &before),
+            row("102", "update", OTHER, "null"),
             row(
-                "0a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02",
-                "update",
-                OTHER,
-                "null"
-            ),
-            row(
-                "0a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a03",
+                "103",
                 "update",
                 TXN,
-                &format!(r#"{{"id":"{TXN}"}}"#)
+                // As the engine stores it: the image as a JSON string.
+                &serde_json::to_string(&format!(r#"{{"id":"{TXN}"}}"#)).expect("text")
             ),
         );
         Mock::given(method("GET"))
@@ -338,6 +371,7 @@ mod tests {
             .expect("audit");
         assert_eq!(rows.len(), 2, "only this record's rows");
         assert_eq!(rows[0].action, AuditAction::Void);
+        assert_eq!((rows[0].id, rows[1].id), (101, 103));
         let lines = rows[0]
             .before
             .as_ref()
@@ -348,7 +382,9 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].debit.to_wire(), "12.3456");
         assert_eq!(lines[1].credit.to_wire(), "12.3456");
-        assert_eq!(rows[1].before.as_ref().expect("b").lines(), Ok(None));
+        let b1 = rows[1].before.as_ref().expect("b");
+        assert_eq!(b1.raw()["id"], TXN, "string image decoded");
+        assert_eq!(b1.lines(), Ok(None));
         let shown = format!("{rows:?} {lines:?}");
         assert!(
             !shown.contains("Secret") && !shown.contains("12.3456") && !shown.contains("Owner")
@@ -356,6 +392,31 @@ mod tests {
         let q = query(&requests(&server, "GET").await[0]);
         assert!(q.contains("entity_type=transaction"), "{q}");
         assert!(q.contains(&format!("search={TXN}")), "{q}");
+    }
+
+    #[test]
+    fn audit_times_in_both_forms() {
+        let want = Timestamp::parse_wire("2026-10-19T22:36:05.208999Z").expect("t");
+        for text in [
+            "2026-10-19 17:36:05.208999-05",
+            "2026-10-19 17:36:05.208999-0500",
+            "2026-10-19 17:36:05.208999-05:00",
+            "2026-10-19T22:36:05.208999Z",
+        ] {
+            assert_eq!(audit_time(text), Some(want), "{text}");
+        }
+        assert_eq!(
+            audit_time("2026-10-19 22:36:05+00"),
+            Timestamp::parse_wire("2026-10-19T22:36:05Z").ok()
+        );
+        for bad in [
+            "2026-10-19",
+            "2026-10-19 17:36:05",
+            "yesterday",
+            "2026-10-19 17:36:05.2-5",
+        ] {
+            assert_eq!(audit_time(bad), None, "{bad}");
+        }
     }
 
     #[test]
