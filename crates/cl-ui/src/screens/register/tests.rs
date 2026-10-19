@@ -399,3 +399,78 @@ fn an_own_write_reloads_and_rereads_the_stamp() {
     assert!(!s.stamp.now);
     assert!(s.stamp.read_at.is_some());
 }
+
+#[test]
+fn the_footer_shows_the_engines_summary_as_sent() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    s.footer_load();
+    let chart = link
+        .demo_state()
+        .and_then(|d| d.chart.clone())
+        .expect("chart");
+    let q = s.query.clone().expect("q");
+    let sum = crate::company::demo::register::summary(&chart, operating(&link), Some(q.end))
+        .expect("summary");
+    let text = |a: &cl_api::RegisterAmount| {
+        crate::screens::lists::center::model::layout_plain(
+            &a.display(false).expect("display"),
+            s.model.style,
+        )
+    };
+    let shown = s.footer_shown();
+    assert_eq!(shown.ending, text(sum.ending_balance.as_ref().expect("R4")));
+    assert_eq!(
+        shown.cleared.as_deref(),
+        Some(text(sum.cleared_balance.as_ref().expect("R4")).as_str())
+    );
+    assert_eq!(
+        shown.last_reconciled.as_deref(),
+        Some("Last reconciled 09/30/2026")
+    );
+    assert_eq!(
+        shown.uncleared,
+        Some(format!("{} uncleared", sum.uncleared_count))
+    );
+    assert!(!shown.failed);
+    assert_eq!(s.state()["footer"]["ending"], shown.ending.as_str());
+    // A reload keeps the figures until the new ones arrive.
+    s.ledger_changed();
+    assert!(s.footer.key.is_none());
+    assert_eq!(s.footer_shown().ending, shown.ending);
+    s.footer_load();
+    assert_eq!(s.footer_shown(), shown);
+}
+
+#[test]
+fn the_footer_falls_back_only_to_engine_figures() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    s.footer_load();
+    let mut sum = s.footer.summary.clone().expect("summary");
+    // An engine without R1/R4: no ending or cleared balance anywhere.
+    sum.ending_balance = None;
+    sum.cleared_balance = None;
+    s.footer.summary = Some(sum.clone());
+    s.footer.page_ending = None;
+    let shown = s.footer_shown();
+    assert!(shown.cleared.is_none());
+    let current = crate::screens::lists::center::model::layout_plain(
+        &sum.current_balance.display(false).expect("display"),
+        s.model.style,
+    );
+    assert_eq!(shown.ending, current, "range reaches today: stored balance");
+    // A range that ends before today has no engine figure: a dash.
+    if let Some(q) = s.query.as_mut() {
+        q.end = CalendarDate::from_ymd(2026, 10, 1).expect("date");
+    }
+    assert_eq!(s.footer_shown().ending, "\u{2014}");
+    // A failed summary shows a dash and never blocks the register.
+    s.footer.summary = None;
+    s.footer.summary_failed = true;
+    let shown = s.footer_shown();
+    assert_eq!(shown.ending, "\u{2014}");
+    assert!(shown.failed && shown.last_reconciled.is_none());
+}

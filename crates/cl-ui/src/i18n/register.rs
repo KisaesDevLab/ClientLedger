@@ -124,4 +124,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.empty_filtered", "Nothing matches these filters."),
     ("register.show_all_dates", "Show all dates"),
     ("lists.accounts.open_register", "Open Register"),
+    ("register.footer.cleared", "Cleared balance"),
+    ("register.footer.cleared_help", "What the bank has cleared: the transactions marked cleared or reconciled."),
+    ("register.footer.ending", "Ending balance"),
+    ("register.footer.ending_help", "The account's balance through the last date shown, with every transaction counted, whatever the filters."),
+    ("register.footer.last_reconciled", "Last reconciled {date}"),
+    ("register.footer.uncleared", "{count} uncleared"),
+    ("register.footer.unavailable", "Balances couldn't be loaded"),
 ];

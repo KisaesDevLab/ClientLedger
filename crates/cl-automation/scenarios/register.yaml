@@ -21,6 +21,12 @@ steps:
   # Newest at the bottom, with the cursor on it.
   - assert_state: {key: screen.focused, equals: true}
   - assert_exists: {role: row, label_contains: "11/04/2026"}
+  # Footer: the engine's summary, never added up on screen.
+  - assert_state: {key: screen.footer.failed, equals: false}
+  - assert_state: {key: screen.footer.last_reconciled, equals: "Last reconciled 09/30/2026"}
+  - assert_exists: {role: label, label: Ending balance}
+  - assert_exists: {role: label, label: Cleared balance}
+  - assert_exists: {role: label, label_contains: uncleared}
   - assert_no_clipping: {}
   - screenshot: register
 

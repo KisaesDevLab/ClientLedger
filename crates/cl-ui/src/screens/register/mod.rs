@@ -18,6 +18,7 @@
 //! Every engine call runs on the request queue and is polled each frame.
 
 pub mod filters;
+pub mod footer;
 pub mod view;
 
 use std::hash::{Hash, Hasher};
@@ -155,6 +156,7 @@ pub struct RegisterScreen {
     /// The choices changed and are not handed to the shell yet.
     prefs_dirty: bool,
     stamp: StampWatch,
+    footer: footer::Footer,
 }
 
 /// Watches the ledger stamp (Q-P12n): read on window focus, every
@@ -218,6 +220,7 @@ impl RegisterScreen {
             prefs_for: None,
             prefs_dirty: false,
             stamp: StampWatch::default(),
+            footer: footer::Footer::default(),
         };
         s.start_load();
         // The demo answers at once: the tab title is right before the
@@ -481,6 +484,7 @@ impl RegisterScreen {
                 Ok(page) => {
                     if self.model.is_current(&req) {
                         self.allowed.clone_from(&page.allowed);
+                        self.footer.page_arrived(&page);
                         self.load_error = None;
                     }
                     self.model.accept(req, &page, &self.mapping);
@@ -597,6 +601,7 @@ impl RegisterScreen {
     #[allow(dead_code, reason = "called by the WP6-WP8 writes")]
     pub(crate) fn after_own_write(&mut self) {
         self.model.invalidate();
+        self.footer.invalidate();
         self.stamp.now = true;
         self.stamp.quiet = true;
     }
@@ -605,6 +610,7 @@ impl RegisterScreen {
     /// their pages return).
     fn ledger_changed(&mut self) {
         self.model.invalidate();
+        self.footer.invalidate();
     }
 
     /// Polls and starts ledger-stamp reads (Q-P12n).
@@ -672,7 +678,7 @@ impl RegisterScreen {
                 self.retry();
             }
         }
-        if self.model.display_only() {
+        if self.model.display_only() || self.footer.display_only() {
             ui.add(
                 egui::Label::new(
                     RichText::new(t("register.display_only"))
@@ -829,11 +835,13 @@ impl Screen for RegisterScreen {
         if self.model.total().is_none() {
             form::progress_line(ui, &tokens, &t("register.loading"));
         } else {
-            self.grid_ui(ui, 8.0);
+            self.grid_ui(ui, footer::HEIGHT);
+            self.footer_ui(ui, &tokens);
         }
         self.request_pages();
+        self.footer_load();
         self.finish_jump();
-        if !self.pages.is_empty() {
+        if !self.pages.is_empty() || self.footer.loading() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
         }
@@ -906,6 +914,7 @@ impl Screen for RegisterScreen {
             "in_flight": self.model.window().in_flight(),
             "failed_pages": self.model.failed_pages(),
             "entry_types": self.allowed.len(),
+            "footer": self.footer_state(),
         })
     }
 }
