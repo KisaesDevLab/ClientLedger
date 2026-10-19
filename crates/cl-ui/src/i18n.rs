@@ -53,6 +53,7 @@ mod contacts;
 mod csv;
 mod items;
 mod lists;
+mod register;
 mod tags;
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -65,6 +66,7 @@ fn catalog() -> &'static HashMap<&'static str, &'static str> {
             .chain(items::ENGLISH)
             .chain(tags::ENGLISH)
             .chain(csv::ENGLISH)
+            .chain(register::ENGLISH)
             .copied()
             .collect()
     })
@@ -917,6 +919,7 @@ mod tests {
             .chain(items::ENGLISH)
             .chain(tags::ENGLISH)
             .chain(csv::ENGLISH)
+            .chain(register::ENGLISH)
         {
             assert!(seen.insert(*k), "duplicate key {k}");
             assert_ne!(*v, "", "{k}");

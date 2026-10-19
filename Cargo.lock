@@ -891,6 +891,8 @@ version = "0.0.0"
 dependencies = [
  "cl-core",
  "proptest",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
