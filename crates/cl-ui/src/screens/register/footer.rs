@@ -168,8 +168,13 @@ impl RegisterScreen {
                 .chart
                 .get_or_insert_with(crate::company::demo::chart)
                 .clone();
-            return crate::company::demo::register::summary(&chart, account, Some(end))
-                .map(Task::ready);
+            return crate::company::demo::register::summary(
+                &demo.ledger,
+                &chart,
+                account,
+                Some(end),
+            )
+            .map(Task::ready);
         }
         let session = self.link.session()?;
         let group = self.group.as_ref()?;
@@ -192,8 +197,15 @@ impl RegisterScreen {
                 .chart
                 .get_or_insert_with(crate::company::demo::chart)
                 .clone();
-            return crate::company::demo::register::page(&chart, account, query, 1, 1)
-                .map(Task::ready);
+            return crate::company::demo::register::page(
+                &demo.ledger,
+                &chart,
+                account,
+                query,
+                1,
+                1,
+            )
+            .map(Task::ready);
         }
         let session = self.link.session()?;
         let group = self.group.as_ref()?;

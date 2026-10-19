@@ -63,14 +63,13 @@ fn number_of(a: &Account) -> Option<&str> {
 
 /// Every line of `account` in date order with its running balance, and the
 /// account's balance before each date (for the balance forward).
-fn build(chart: &[Account], account: &Account) -> Vec<Built> {
+fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Vec<Built> {
     let Some(number) = number_of(account) else {
         return Vec::new();
     };
-    let sample = Sample::load();
+    let all = ledger.transactions();
     let reconciled_through = last_reconciled();
-    let mut txns: Vec<&SampleTransaction> = sample
-        .transactions
+    let mut txns: Vec<&SampleTransaction> = all
         .iter()
         .filter(|t| t.lines.iter().any(|l| l.account == number))
         .collect();
@@ -191,6 +190,7 @@ fn type_name(t: TxnType) -> String {
 /// sort). `page` counts from 1.
 #[must_use]
 pub fn page(
+    ledger: &DemoLedger,
     chart: &[Account],
     account: AccountId,
     q: &RegisterQuery,
@@ -198,7 +198,7 @@ pub fn page(
     per_page: u16,
 ) -> Option<RegisterPage> {
     let acct = chart.iter().find(|a| a.id == account)?;
-    let all = build(chart, acct);
+    let all = build(ledger, chart, acct);
     let balance_forward = all
         .iter()
         .take_while(|b| b.line.date < q.start)
@@ -271,12 +271,13 @@ pub fn page(
 /// The demo register footer through `end` (all dates when `None`).
 #[must_use]
 pub fn summary(
+    ledger: &DemoLedger,
     chart: &[Account],
     account: AccountId,
     end: Option<CalendarDate>,
 ) -> Option<RegisterSummary> {
     let acct = chart.iter().find(|a| a.id == account)?;
-    let all = build(chart, acct);
+    let all = build(ledger, chart, acct);
     let through = |b: &&Built| end.is_none_or(|e| b.line.date <= e);
     let last_balance = |it: &mut dyn Iterator<Item = &Built>| {
         it.last()
@@ -319,6 +320,190 @@ pub fn summary(
     })
 }
 
+/// Ids of transactions recorded in the demo start here (the fixture's are
+/// below).
+const NEW_BASE: u32 = 900_000;
+
+/// The demo's own changes to the sample ledger: transactions recorded or
+/// changed through a register (P12). Synthetic.
+#[derive(Clone, Debug, Default)]
+pub struct DemoLedger {
+    changed: std::collections::BTreeMap<u32, SampleTransaction>,
+}
+
+/// A posting as the demo engine stores it (built by the register screen
+/// from the owner's typed values; amounts exact).
+#[derive(Clone, Debug)]
+pub struct DemoPosting {
+    /// `check`, `deposit`, `transfer`, `card_charge` or `journal_entry`.
+    pub kind: &'static str,
+    /// Date.
+    pub date: CalendarDate,
+    /// Number (empty for none).
+    pub number: String,
+    /// Payee name.
+    pub contact: Option<String>,
+    /// Memo.
+    pub memo: String,
+    /// The register's account.
+    pub own: AccountId,
+    /// The register's account is debited (money in).
+    pub own_debit: bool,
+    /// The other side's accounts and amounts.
+    pub lines: Vec<(AccountId, Money)>,
+}
+
+fn sample_id(id: TransactionId) -> Option<u32> {
+    let s = id.to_string();
+    let tail = s.rsplit('-').next()?;
+    tail.strip_prefix('b')?.parse().ok()
+}
+
+impl DemoLedger {
+    /// The sample's transactions with the demo's changes, then the ones
+    /// recorded in the demo.
+    #[must_use]
+    pub fn transactions(&self) -> Vec<SampleTransaction> {
+        let mut v: Vec<SampleTransaction> = Sample::load()
+            .transactions
+            .into_iter()
+            .map(|t| self.changed.get(&t.id).cloned().unwrap_or(t))
+            .collect();
+        v.extend(self.changed.range(NEW_BASE..).map(|(_, t)| t.clone()));
+        v
+    }
+
+    fn find(&self, id: u32) -> Option<SampleTransaction> {
+        self.changed
+            .get(&id)
+            .cloned()
+            .or_else(|| Sample::load().transactions.into_iter().find(|t| t.id == id))
+    }
+
+    /// The next check number in `account` (the highest numeric one + 1).
+    #[must_use]
+    pub fn next_check_number(&self, chart: &[Account], account: AccountId) -> Option<u32> {
+        let number = chart.iter().find(|a| a.id == account).and_then(number_of)?;
+        self.transactions()
+            .iter()
+            .filter(|t| t.kind == "check" && t.lines.iter().any(|l| l.account == number))
+            .filter_map(|t| t.number.parse::<u32>().ok())
+            .max()
+            .map(|n| n.saturating_add(1))
+    }
+
+    /// Records (or, with `existing`, replaces) a posting; `None` when an
+    /// account is not in the chart or the transaction is unknown.
+    pub fn save(
+        &mut self,
+        chart: &[Account],
+        p: &DemoPosting,
+        existing: Option<TransactionId>,
+    ) -> Option<TransactionId> {
+        let num = |id: AccountId| {
+            chart
+                .iter()
+                .find(|a| a.id == id)
+                .and_then(number_of)
+                .map(str::to_string)
+        };
+        let side = |account: String, amount: Money, debit: bool| cl_company::sample::SampleLine {
+            account,
+            debit: if debit { amount } else { Money::ZERO },
+            credit: if debit { Money::ZERO } else { amount },
+        };
+        let mut lines = Vec::new();
+        for (a, m) in &p.lines {
+            lines.push(side(num(*a)?, *m, !p.own_debit));
+        }
+        let total = Money::sum(p.lines.iter().map(|(_, m)| *m)).ok()?;
+        lines.push(side(num(p.own)?, total, p.own_debit));
+        let (id, cleared) = if let Some(t) = existing {
+            let id = sample_id(t)?;
+            (id, self.find(id)?.cleared)
+        } else {
+            let last = self.changed.range(NEW_BASE..).next_back().map(|(k, _)| *k);
+            (last.map_or(NEW_BASE, |k| k + 1), false)
+        };
+        let t = SampleTransaction {
+            id,
+            date: p.date,
+            kind: p.kind.to_string(),
+            number: p.number.clone(),
+            contact: p.contact.clone(),
+            memo: p.memo.clone(),
+            due: None,
+            cleared,
+            attachment: false,
+            lines,
+        };
+        let tid = txn_id(&t);
+        self.changed.insert(id, t);
+        Some(tid)
+    }
+
+    /// One transaction as `GET /transactions/{id}` answers it.
+    #[must_use]
+    pub fn get(
+        &self,
+        chart: &[Account],
+        contacts: &[cl_api::Contact],
+        id: TransactionId,
+    ) -> Option<cl_api::Versioned<cl_api::Transaction>> {
+        use cl_api::EditableFields;
+        let t = self.find(sample_id(id)?)?;
+        let contact = t.contact.as_deref().and_then(|n| {
+            contacts
+                .iter()
+                .find(|c| c.fields.display_name == n)
+                .map(|c| c.id)
+        });
+        let deposit = t.kind == "deposit";
+        let mut lines = Vec::new();
+        for (i, l) in t.lines.iter().enumerate() {
+            let a = chart
+                .iter()
+                .find(|a| number_of(a) == Some(l.account.as_str()))?;
+            let own_side = matches!(
+                a.fields.detail_type.as_deref(),
+                Some("bank" | "credit_card")
+            );
+            lines.push(cl_api::TransactionLine {
+                id: line_id(&t, i),
+                account_id: a.id,
+                account_name: Some(a.fields.name.clone()),
+                account_number: a.fields.account_number.clone(),
+                debit: l.debit,
+                credit: l.credit,
+                description: None,
+                line_order: i64::try_from(i).ok(),
+                tag_id: None,
+                tag_name: None,
+                contact_id: if deposit && !own_side { contact } else { None },
+            });
+        }
+        let record = cl_api::Transaction {
+            id: txn_id(&t),
+            txn_type: txn_type(&t.kind),
+            txn_number: (!t.number.is_empty() && t.kind != "check").then(|| t.number.clone()),
+            check_number: (t.kind == "check").then(|| t.number.parse().ok()).flatten(),
+            txn_date: t.date,
+            status: TxnStatus::Posted,
+            basis: cl_api::Basis::Both,
+            contact_id: if deposit { None } else { contact },
+            contact_name: if deposit { None } else { t.contact.clone() },
+            memo: (!t.memo.is_empty()).then(|| t.memo.clone()),
+            total: None,
+            void_reason: None,
+            created_at: Some(super::DemoState::now()),
+            updated_at: Some(super::DemoState::now()),
+            lines,
+        };
+        let version = cl_api::RecordVersion::Fingerprint(record.fingerprint());
+        Some(cl_api::Versioned { record, version })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,13 +521,13 @@ mod tests {
         let chart = super::super::chart();
         let id = operating(&chart);
         let all = RegisterQuery::new(CalendarDate::min(), CalendarDate::max());
-        let first = page(&chart, id, &all, 1, 200).expect("page");
+        let first = page(&DemoLedger::default(), &chart, id, &all, 1, 200).expect("page");
         assert!(first.exact);
         assert!(first.total_rows > 200, "{}", first.total_rows);
         let mut seen = std::collections::BTreeSet::new();
         let mut last = None;
         for p in 1..=u32::try_from(first.total_pages).expect("pages") {
-            let pg = page(&chart, id, &all, p, 200).expect("page");
+            let pg = page(&DemoLedger::default(), &chart, id, &all, p, 200).expect("page");
             for l in &pg.lines {
                 assert!(seen.insert(l.line_id), "a line once");
                 last = l.balance.exact();
@@ -351,7 +536,7 @@ mod tests {
         assert_eq!(seen.len() as u64, first.total_rows);
         let acct = chart.iter().find(|a| a.id == id).expect("acct");
         assert_eq!(last, acct.balance, "the last balance is the account's");
-        let s = summary(&chart, id, None).expect("summary");
+        let s = summary(&DemoLedger::default(), &chart, id, None).expect("summary");
         assert_eq!(s.ending_balance.and_then(|a| a.exact()), acct.balance);
         assert_eq!(s.last_reconciled, Some(last_reconciled()));
         assert!(s.uncleared_count > 0);
@@ -365,7 +550,7 @@ mod tests {
             CalendarDate::from_ymd(2026, 9, 1).expect("d"),
             CalendarDate::from_ymd(2026, 10, 31).expect("d"),
         );
-        let base = page(&chart, id, &q, 1, 200).expect("page");
+        let base = page(&DemoLedger::default(), &chart, id, &q, 1, 200).expect("page");
         let by_line = |p: &RegisterPage| -> Vec<(JournalLineId, Option<Money>)> {
             let mut v: Vec<_> = p
                 .lines
@@ -377,10 +562,10 @@ mod tests {
         };
         q.sort = RegisterSort::Amount;
         q.dir = SortDir::Desc;
-        let sorted = page(&chart, id, &q, 1, 200).expect("page");
+        let sorted = page(&DemoLedger::default(), &chart, id, &q, 1, 200).expect("page");
         assert_eq!(by_line(&sorted), by_line(&base));
         q.min = Some(Money::parse_wire("1000").expect("m"));
-        let filtered = page(&chart, id, &q, 1, 200).expect("page");
+        let filtered = page(&DemoLedger::default(), &chart, id, &q, 1, 200).expect("page");
         assert!(filtered.lines.len() < base.lines.len());
         let all = by_line(&base);
         for (k, b) in by_line(&filtered) {
@@ -388,6 +573,7 @@ mod tests {
         }
         assert!(
             page(
+                &DemoLedger::default(),
                 &chart,
                 AccountId::parse("d0000000-0000-4000-8000-a99999999999").expect("id"),
                 &q,

@@ -17,8 +17,12 @@
 //!
 //! Every engine call runs on the request queue and is polled each frame.
 
+pub mod entry_row;
 pub mod filters;
 pub mod footer;
+pub mod lists;
+mod record;
+mod splits;
 pub mod view;
 
 use std::hash::{Hash, Hasher};
@@ -157,6 +161,10 @@ pub struct RegisterScreen {
     prefs_dirty: bool,
     stamp: StampWatch,
     footer: footer::Footer,
+    /// The entry row and Splits pickers.
+    lists: Arc<lists::RegisterLists>,
+    /// The entry row pinned under the grid.
+    entry: record::EntryState,
 }
 
 /// Watches the ledger stamp (Q-P12n): read on window focus, every
@@ -190,6 +198,7 @@ impl RegisterScreen {
         let group = link.group().and_then(Result::ok);
         let class = AccountClass::Bank;
         let balance = BalanceMode::Engine;
+        let shared = Arc::new(lists::RegisterLists::default());
         let mut s = RegisterScreen {
             link,
             tenant,
@@ -221,8 +230,11 @@ impl RegisterScreen {
             prefs_dirty: false,
             stamp: StampWatch::default(),
             footer: footer::Footer::default(),
+            entry: record::EntryState::new(Arc::clone(&shared), today),
+            lists: shared,
         };
         s.start_load();
+        s.load_lists();
         // The demo answers at once: the tab title is right before the
         // window is first drawn.
         s.poll();
@@ -311,6 +323,7 @@ impl RegisterScreen {
             .iter()
             .map(|a| (a.id, account_text(a)))
             .collect();
+        self.rebuild_lists();
         let wanted = self
             .want_account
             .or(self.account)
@@ -334,6 +347,7 @@ impl RegisterScreen {
         self.class = class;
         self.mapping.class = Some(class);
         self.allowed.clear();
+        self.reset_entry();
         self.apply_query();
     }
 
@@ -432,8 +446,15 @@ impl RegisterScreen {
                 .chart
                 .get_or_insert_with(crate::company::demo::chart)
                 .clone();
-            return crate::company::demo::register::page(&chart, account, query, page, per_page())
-                .map(Task::ready);
+            return crate::company::demo::register::page(
+                &demo.ledger,
+                &chart,
+                account,
+                query,
+                page,
+                per_page(),
+            )
+            .map(Task::ready);
         }
         let session = self.link.session()?;
         let group = self.group.as_ref()?;
@@ -447,6 +468,7 @@ impl RegisterScreen {
     }
 
     fn poll(&mut self) {
+        self.poll_entry();
         if let Some(task) = self.accounts_task.as_mut()
             && let Some(result) = task.try_take()
         {
@@ -530,6 +552,10 @@ impl RegisterScreen {
             ModelRef::Browse(&mut self.model),
             &env,
         );
+        // The keyboard goes to the entry row, as on paper (plan WP5).
+        if !self.view_only() && self.entry.editing.is_none() {
+            self.entry.focus = Some(entry_row::E_DATE);
+        }
         self.jump_to_end = false;
     }
 
@@ -598,7 +624,6 @@ impl RegisterScreen {
 
     /// After this window saved a change: reload now and re-read the stamp
     /// so the change is not taken for someone else's (WP6-WP8 call it).
-    #[allow(dead_code, reason = "called by the WP6-WP8 writes")]
     pub(crate) fn after_own_write(&mut self) {
         self.model.invalidate();
         self.footer.invalidate();
@@ -791,9 +816,11 @@ impl RegisterScreen {
         false
     }
 
-    /// Alt+N / Alt+S / Enter on the entry row (WP6).
+    /// Alt+N / Alt+S on the entry row (WP6): record the row. The register
+    /// stays open either way.
     fn on_record(&mut self, _id: CommandId) -> bool {
-        false
+        self.start_record();
+        true
     }
 }
 
@@ -835,7 +862,8 @@ impl Screen for RegisterScreen {
         if self.model.total().is_none() {
             form::progress_line(ui, &tokens, &t("register.loading"));
         } else {
-            self.grid_ui(ui, footer::HEIGHT);
+            self.grid_ui(ui, footer::HEIGHT + self.entry.height);
+            self.entry_ui(ui, &tokens);
             self.footer_ui(ui, &tokens);
         }
         self.request_pages();
@@ -852,7 +880,18 @@ impl Screen for RegisterScreen {
         Scope::Form
     }
 
+    fn dirty(&self) -> bool {
+        self.entry_dirty()
+    }
+
+    fn save(&mut self) -> bool {
+        self.start_record()
+    }
+
     fn command(&mut self, id: CommandId) -> bool {
+        if let Some(handled) = self.entry_command(id) {
+            return handled;
+        }
         match id.as_str() {
             // Ctrl+G inside a register stays on it.
             KIND => true,
@@ -915,6 +954,7 @@ impl Screen for RegisterScreen {
             "failed_pages": self.model.failed_pages(),
             "entry_types": self.allowed.len(),
             "footer": self.footer_state(),
+            "entry": self.entry_state(),
         })
     }
 }

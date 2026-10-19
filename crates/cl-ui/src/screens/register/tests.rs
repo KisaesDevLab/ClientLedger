@@ -79,8 +79,15 @@ fn rows_are_engine_lines_with_their_balance_as_sent() {
         .and_then(|d| d.chart.clone())
         .expect("chart");
     let page_no = u32::try_from(last / 200 + 1).expect("page");
-    let page = crate::company::demo::register::page(&chart, operating(&link), &q, page_no, 200)
-        .expect("page");
+    let page = crate::company::demo::register::page(
+        &crate::company::demo::register::DemoLedger::default(),
+        &chart,
+        operating(&link),
+        &q,
+        page_no,
+        200,
+    )
+    .expect("page");
     let engine_line = page.lines.last().expect("line");
     let shown = match s.model.cell(last, view::COL_BALANCE) {
         cl_grid::CellValue::Text(t) => t.into_owned(),
@@ -309,7 +316,6 @@ fn later_lane_commands_are_routed_but_not_handled_yet() {
         "form.delete_item",
         "edit.void_transaction",
         "list.quick_report",
-        "form.save_new",
     ] {
         assert!(!s.command(CommandId::new(c)), "{c}");
     }
@@ -411,8 +417,13 @@ fn the_footer_shows_the_engines_summary_as_sent() {
         .and_then(|d| d.chart.clone())
         .expect("chart");
     let q = s.query.clone().expect("q");
-    let sum = crate::company::demo::register::summary(&chart, operating(&link), Some(q.end))
-        .expect("summary");
+    let sum = crate::company::demo::register::summary(
+        &crate::company::demo::register::DemoLedger::default(),
+        &chart,
+        operating(&link),
+        Some(q.end),
+    )
+    .expect("summary");
     let text = |a: &cl_api::RegisterAmount| {
         crate::screens::lists::center::model::layout_plain(
             &a.display(false).expect("display"),
@@ -473,4 +484,126 @@ fn the_footer_falls_back_only_to_engine_figures() {
     let shown = s.footer_shown();
     assert_eq!(shown.ending, "\u{2014}");
     assert!(shown.failed && shown.last_reconciled.is_none());
+}
+
+fn demo_account(link: &Arc<CompanyLink>, number: &str) -> AccountId {
+    link.demo_state()
+        .and_then(|mut d| {
+            d.chart
+                .get_or_insert_with(crate::company::demo::chart)
+                .iter()
+                .find(|a| a.fields.account_number.as_deref() == Some(number))
+                .map(|a| a.id)
+        })
+        .expect("account")
+}
+
+fn demo_contact(link: &Arc<CompanyLink>, name: &str) -> cl_core::ids::ContactId {
+    link.demo_state()
+        .and_then(|mut d| {
+            d.contacts_mut()
+                .iter()
+                .find(|c| c.fields.display_name == name)
+                .map(|c| c.id)
+        })
+        .expect("contact")
+}
+
+fn money(s: &str) -> cl_core::Money {
+    cl_core::Money::parse_wire(s).expect("money")
+}
+
+#[test]
+fn the_entry_row_records_a_check_then_a_deposit() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let before = s.model.total().expect("total");
+    assert_eq!(s.entry.next_check, Some(4427), "highest check number + 1");
+    let fuel = demo_account(&link, "6100");
+    let vendor = demo_contact(&link, "Hollister Fuel Stop");
+    s.entry.form.edit_step(|d| {
+        d.payee = Some(vendor);
+        d.account = Some(fuel);
+        d.payment = Some(money("125.50"));
+    });
+    assert_eq!(s.draft_kind(), Some(cl_model::register::EntryKind::Check));
+    s.sync_proposal();
+    assert_eq!(s.entry.draft().number, "4427");
+    assert_eq!(s.state()["entry"]["number_proposed"], true);
+    assert!(s.entry_dirty());
+    assert!(s.start_record(), "the demo saves at once");
+    assert_eq!(s.entry.last_saved, Some("check"));
+    assert!(s.entry.draft().is_empty(), "cleared after the save");
+    assert_eq!(s.entry.draft().date, Some(today()), "the date stays");
+    assert!(!s.entry_dirty());
+    settle(&mut s, None);
+    assert_eq!(s.model.total(), Some(before + 1));
+    assert_eq!(s.entry.next_check, Some(4428));
+
+    // A deposit: the second column, a customer and an income account.
+    let income = demo_account(&link, "4000");
+    let customer = demo_contact(&link, "Riverbend HOA");
+    s.entry.form.edit_step(|d| {
+        d.payee = Some(customer);
+        d.account = Some(income);
+        d.deposit = Some(money("300.00"));
+    });
+    assert_eq!(s.draft_kind(), Some(cl_model::register::EntryKind::Deposit));
+    s.sync_proposal();
+    assert!(s.entry.draft().number.is_empty(), "no number for a deposit");
+    assert!(s.start_record());
+    assert_eq!(s.entry.last_saved, Some("deposit"));
+    settle(&mut s, None);
+    assert_eq!(s.model.total(), Some(before + 2));
+    assert_eq!(s.state()["entry"]["saved_count"], 2);
+}
+
+#[test]
+fn the_entry_row_refuses_plainly_and_enter_on_an_empty_row_does_nothing() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    assert!(s.start_record(), "nothing to record");
+    assert_eq!(s.entry.saved, 0);
+    s.entry.form.edit_step(|d| d.payment = Some(money("10.00")));
+    assert!(!s.start_record());
+    assert_eq!(
+        s.entry.problems,
+        vec![cl_grid::TextKey("register.entry.problem.account_missing")]
+    );
+    assert_eq!(s.entry.focus, Some(entry_row::E_ACCOUNT));
+    // A check needs a payee; a deposit takes no number.
+    let fuel = demo_account(&link, "6100");
+    s.entry.form.edit_step(|d| d.account = Some(fuel));
+    assert!(!s.start_record());
+    assert_eq!(
+        s.entry.problems,
+        vec![cl_grid::TextKey("register.entry.problem.check_payee")]
+    );
+    let income = demo_account(&link, "4000");
+    s.entry.form.edit_step(|d| {
+        d.payment = None;
+        d.deposit = Some(money("10.00"));
+        d.account = Some(income);
+        d.number = "77".into();
+    });
+    assert!(!s.start_record());
+    assert_eq!(
+        s.entry.problems,
+        vec![cl_grid::TextKey("register.entry.problem.no_number")]
+    );
+    assert_eq!(s.entry.saved, 0);
+    // A transfer to savings: no name, no number.
+    let savings = demo_account(&link, "1020");
+    s.entry.form.edit_step(|d| {
+        d.number.clear();
+        d.account = Some(savings);
+    });
+    assert_eq!(
+        s.draft_kind(),
+        Some(cl_model::register::EntryKind::Transfer)
+    );
+    assert!(s.start_record());
+    assert_eq!(s.entry.last_saved, Some("transfer"));
 }

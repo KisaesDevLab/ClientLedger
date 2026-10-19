@@ -61,6 +61,8 @@ pub struct DemoState {
         std::collections::BTreeMap<cl_core::ids::TagGroupId, std::collections::BTreeSet<String>>,
     /// Tags merged or deleted in the demo (their usage moved or gone).
     pub tags_gone: std::collections::BTreeSet<cl_core::ids::TagId>,
+    /// Transactions recorded or changed in the demo registers (P12).
+    pub ledger: register::DemoLedger,
 }
 
 fn id(n: u8) -> TenantId {
@@ -120,6 +122,7 @@ impl DemoState {
             tag_groups: None,
             required_tag_groups: std::collections::BTreeMap::new(),
             tags_gone: std::collections::BTreeSet::new(),
+            ledger: register::DemoLedger::default(),
         }
     }
 
