@@ -122,3 +122,5 @@ GET     /api/v1/accounts/export                 idempotent
 GET     /api/v1/contacts/export                 idempotent
 POST    /api/v1/contacts/import                 pre-handler-only
 GET     /api/v1/items/export                    idempotent
+GET     /api/v1/accounts/{id}/register          idempotent
+GET     /api/v1/accounts/{id}/register/summary  idempotent

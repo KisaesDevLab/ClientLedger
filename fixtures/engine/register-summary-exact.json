@@ -1,0 +1,9 @@
+{
+  "currentBalance": "2084.6612",
+  "endingBalance": "2084.6612",
+  "clearedBalance": "2069.3224",
+  "asOfDate": "2026-09-30",
+  "unclearedCount": 2,
+  "lastReconciliationDate": "2026-08-31",
+  "transactionsThisPeriod": 4
+}

@@ -26,6 +26,7 @@ mod contract_list_csv;
 mod contract_logging;
 mod contract_money;
 mod contract_preferences;
+mod contract_register;
 mod contract_resources;
 mod contract_session;
 mod contract_tags;
@@ -157,6 +158,10 @@ fn main() -> std::process::ExitCode {
         (
             "journal::lost_reply_is_reconciled_to_exactly_one_posting",
             contract_journal::lost_reply_is_reconciled_to_exactly_one_posting,
+        ),
+        (
+            "register::dates_paging_and_exact_money",
+            contract_register::dates_paging_and_exact_money,
         ),
         (
             "money::seeded_amounts_round_trip_string_equal",

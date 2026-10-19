@@ -1,0 +1,37 @@
+{
+  "account": {
+    "id": "5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+    "name": "Sample Checking",
+    "accountType": "asset",
+    "detailType": "bank",
+    "accountNumber": "1010"
+  },
+  "balanceForward": 1000,
+  "pagination": { "page": 1, "perPage": 50, "totalRows": 1, "totalPages": 1 },
+  "allowedEntryTypes": ["expense", "deposit", "transfer", "journal_entry"],
+  "lines": [
+    {
+      "lineId": "6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+      "transactionId": "7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+      "txnType": "expense",
+      "txnNumber": null,
+      "checkNumber": 1042,
+      "txnDate": "2026-09-03",
+      "payeeName": "Sample Supply Co",
+      "contactId": null,
+      "accountName": "Office Supplies",
+      "accountId": "9a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+      "categoryName": "Office Supplies",
+      "categoryAccountId": "9a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+      "memo": "Paper",
+      "payment": 1084.66,
+      "deposit": null,
+      "runningBalance": -0,
+      "reconciliationStatus": "uncleared",
+      "hasAttachments": false,
+      "hasSplits": false,
+      "isEditable": true,
+      "status": "posted"
+    }
+  ]
+}

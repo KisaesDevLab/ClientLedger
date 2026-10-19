@@ -14,6 +14,7 @@ pub mod operations;
 pub mod posting;
 pub(crate) mod reconcile;
 pub mod recovery;
+pub mod register;
 pub mod reports;
 pub mod sales;
 pub mod session_secrets;

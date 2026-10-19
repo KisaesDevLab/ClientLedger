@@ -420,9 +420,10 @@ impl OwnerFacing for ApiError {
                 "error.api.closing_password_required",
                 Some("fix.api.closing_password_required"),
             ),
-            ApiError::ClosingPasswordOwnerRequired => {
-                ("error.api.closing_password_owner", Some("fix.api.ask_owner"))
-            }
+            ApiError::ClosingPasswordOwnerRequired => (
+                "error.api.closing_password_owner",
+                Some("fix.api.ask_owner"),
+            ),
             ApiError::ClosingPasswordRateLimited { .. } => {
                 ("error.api.closing_password_attempts", Some("fix.api.wait"))
             }
@@ -1135,13 +1136,18 @@ mod tests {
             panic!("closed")
         };
         assert_eq!(cp.password_required, Some(true));
-        assert_eq!(cp.lock_date.map(CalendarDate::to_wire).as_deref(), Some("2026-03-31"));
+        assert_eq!(
+            cp.lock_date.map(CalendarDate::to_wire).as_deref(),
+            Some("2026-03-31")
+        );
     }
 
     #[test]
     fn closing_password_refusals_are_typed_and_never_echo() {
         let body = |code: &str| {
-            format!(r#"{{"error":{{"message":"Closing password hunter2 is wrong","code":"{code}"}}}}"#)
+            format!(
+                r#"{{"error":{{"message":"Closing password hunter2 is wrong","code":"{code}"}}}}"#
+            )
         };
         assert_eq!(
             err(403, &body("CLOSING_PASSWORD_INVALID"), S),
@@ -1158,7 +1164,7 @@ mod tests {
         let Mapped::Final(e) = map_failure(
             429,
             body("CLOSING_PASSWORD_RATE_LIMIT").as_bytes(),
-            Some(Duration::from_secs(900)),
+            Some(Duration::from_mins(15)),
             S,
         ) else {
             panic!("final")
@@ -1166,12 +1172,18 @@ mod tests {
         assert_eq!(
             e,
             ApiError::ClosingPasswordRateLimited {
-                retry_after: Some(Duration::from_secs(900))
+                retry_after: Some(Duration::from_mins(15))
             }
         );
         // Other 403s and 429s are unchanged.
-        assert!(matches!(err(403, &body("FORBIDDEN"), S), ApiError::Forbidden { .. }));
-        assert!(matches!(err(429, &body("RATE_LIMIT"), S), ApiError::RateLimited { .. }));
+        assert!(matches!(
+            err(403, &body("FORBIDDEN"), S),
+            ApiError::Forbidden { .. }
+        ));
+        assert!(matches!(
+            err(429, &body("RATE_LIMIT"), S),
+            ApiError::RateLimited { .. }
+        ));
         for code in [
             "CLOSING_PASSWORD_INVALID",
             "CLOSING_PASSWORD_REQUIRED",
@@ -1180,7 +1192,11 @@ mod tests {
             let e = err(403, &body(code), S);
             let shown = format!("{e} | {e:?} | {}", e.scrubbed_detail());
             assert!(!shown.contains("hunter2"), "{shown}");
-            assert!(e.owner_message().key.starts_with("error.api.closing_password"));
+            assert!(
+                e.owner_message()
+                    .key
+                    .starts_with("error.api.closing_password")
+            );
         }
     }
 

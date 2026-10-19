@@ -74,6 +74,10 @@ pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, Cont
 pub use resources::operations::{OPERATIONS, Operation, RetryClass};
 pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
 pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};
+pub use resources::register::{
+    Category, ClearState, ClearedFilter, EntryType, REGISTER_MAX_PER_PAGE, Register,
+    RegisterAccount, RegisterLine, RegisterPage, RegisterQuery, RegisterSort, RegisterSummary,
+};
 pub use resources::reports::{
     AccountReport, AccountReportLine, ApAgingSummary, ApAgingVendor, BalanceSheet,
     BalanceSheetEntry, CustomerBalanceRow, CustomerBalanceSummary, ProfitLoss, ReportDate, Reports,

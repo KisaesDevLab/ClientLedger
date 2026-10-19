@@ -70,7 +70,7 @@ pub enum TxnType {
 }
 
 impl TxnType {
-    fn as_str(self) -> String {
+    pub(crate) fn as_str(self) -> String {
         serde_json::to_value(self)
             .ok()
             .and_then(|v| v.as_str().map(str::to_string))

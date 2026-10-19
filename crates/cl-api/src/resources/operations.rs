@@ -373,6 +373,13 @@ pub(crate) const CONTACTS_IMPORT: Operation = write(Method::Post, "/api/v1/conta
 /// Items as CSV.
 pub(crate) const ITEMS_EXPORT: Operation = read("/api/v1/items/export");
 
+// ---- P12 register, bank postings, audit, closing-date password ---------------
+
+/// One page of an account register.
+pub(crate) const REGISTER: Operation = read("/api/v1/accounts/{id}/register");
+/// The register footer.
+pub(crate) const REGISTER_SUMMARY: Operation = read("/api/v1/accounts/{id}/register/summary");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -383,7 +390,7 @@ const NEVER_RETRIED: [(&str, &str); 3] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 99] = [
+pub const OPERATIONS: [Operation; 101] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -483,6 +490,8 @@ pub const OPERATIONS: [Operation; 99] = [
     CONTACTS_EXPORT,
     CONTACTS_IMPORT,
     ITEMS_EXPORT,
+    REGISTER,
+    REGISTER_SUMMARY,
 ];
 
 /// Looks up a covered operation.
