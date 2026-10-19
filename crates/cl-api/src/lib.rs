@@ -57,6 +57,10 @@ pub use resources::ai::{
     AiUsageSummary, CompanyConsent, ConsentRow, ConsentStatus, DESKTOP_PROVIDERS, ProviderModels,
     ProviderTest, UsageSummaryRow, UsageTotals,
 };
+pub use resources::bank_postings::{
+    BankPosting, BankPostingKind, CardChargeDraft, CheckDraft, DepositDraft, PAYEE_NAME_MAX,
+    SplitLine, TransferDraft,
+};
 pub use resources::common::SortDir;
 pub use resources::company::{
     AccountingMethod, ClosingDateChange, CompanyProfile, CompanyProfileUpdate, CompanySettings,

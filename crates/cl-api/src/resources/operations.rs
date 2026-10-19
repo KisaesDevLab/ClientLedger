@@ -379,18 +379,35 @@ pub(crate) const ITEMS_EXPORT: Operation = read("/api/v1/items/export");
 pub(crate) const REGISTER: Operation = read("/api/v1/accounts/{id}/register");
 /// The register footer.
 pub(crate) const REGISTER_SUMMARY: Operation = read("/api/v1/accounts/{id}/register/summary");
+/// Write a check (posts an `expense` with a check number).
+pub(crate) const CHECKS_CREATE: Operation = write(Method::Post, "/api/v1/checks");
+/// The audit trail (filtered by entity type and text).
+pub(crate) const AUDIT_LOG: Operation = read("/api/v1/audit-log");
+/// The closing date and whether a closing-date password is set (U-15).
+pub(crate) const CLOSING_PASSWORD_GET: Operation = read("/api/v1/company/closing-password");
+/// Sets, changes or clears the closing-date password (U-15): a credential
+/// change, never retried.
+pub(crate) const CLOSING_PASSWORD_PUT: Operation = op(
+    Method::Put,
+    "/api/v1/company/closing-password",
+    RetryClass::Never,
+    RouteKind::Session,
+    TimeoutClass::Auth,
+    true,
+);
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
-const NEVER_RETRIED: [(&str, &str); 3] = [
+const NEVER_RETRIED: [(&str, &str); 4] = [
     ("POST", "/api/v1/tenants"),
     ("POST", "/api/v1/tenants/{id}/delete"),
     ("POST", "/api/v1/desktop/recover-password"),
+    ("PUT", "/api/v1/company/closing-password"),
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 101] = [
+pub const OPERATIONS: [Operation; 105] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -492,6 +509,10 @@ pub const OPERATIONS: [Operation; 101] = [
     ITEMS_EXPORT,
     REGISTER,
     REGISTER_SUMMARY,
+    CHECKS_CREATE,
+    AUDIT_LOG,
+    CLOSING_PASSWORD_GET,
+    CLOSING_PASSWORD_PUT,
 ];
 
 /// Looks up a covered operation.

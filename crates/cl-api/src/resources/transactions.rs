@@ -149,7 +149,7 @@ pub struct NewJournalEntry {
     lines: Vec<JeLine>,
 }
 
-fn non_empty(s: Option<String>) -> Option<String> {
+pub(crate) fn non_empty(s: Option<String>) -> Option<String> {
     s.filter(|v| !v.is_empty())
 }
 
@@ -286,7 +286,7 @@ impl NewJournalEntry {
     }
 }
 
-fn line_editable(
+pub(crate) fn line_editable(
     account: AccountId,
     debit: &str,
     credit: &str,
@@ -306,7 +306,7 @@ fn line_editable(
     })
 }
 
-fn txn_editable(
+pub(crate) fn txn_editable(
     txn_type: TxnType,
     date: CalendarDate,
     memo: Option<&str>,
@@ -373,6 +373,9 @@ pub struct Transaction {
     /// Number.
     #[serde(default)]
     pub txn_number: Option<String>,
+    /// Check number (checks and printed bill payments).
+    #[serde(default)]
+    pub check_number: Option<u64>,
     /// Date.
     pub txn_date: CalendarDate,
     /// Status.
@@ -642,8 +645,10 @@ impl Transactions<'_> {
         let s = &self.0.pinned();
         let body = posting_body(s, entry.to_value(), opts)?;
         let matcher = OutcomeMatcher::Created {
-            search: Search::JournalEntry {
+            search: Search::Txn {
+                kind: TxnType::JournalEntry,
                 date: entry.txn_date,
+                account: None,
             },
             fp: row_fp::<Transaction>,
             fingerprint: entry.fingerprint(),

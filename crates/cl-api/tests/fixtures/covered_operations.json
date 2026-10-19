@@ -99,5 +99,9 @@
   {"method":"POST","path":"/api/v1/contacts/import","inSpec":true,"fragmentHash":"bc3b1b40aaa14cca26719d0180ce0b0fec8ed34807053ccf3d0effd6950b3474"},
   {"method":"GET","path":"/api/v1/items/export","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/accounts/{id}/register","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
-  {"method":"GET","path":"/api/v1/accounts/{id}/register/summary","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"}
+  {"method":"GET","path":"/api/v1/accounts/{id}/register/summary","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
+  {"method":"POST","path":"/api/v1/checks","inSpec":true,"fragmentHash":"7845bca21c36757ba976518ed83485ff9ac2ee9b6a54ffbf9d60bddfe3a5e3aa"},
+  {"method":"GET","path":"/api/v1/audit-log","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/company/closing-password","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/company/closing-password","inSpec":false,"fragmentHash":null}
 ]
