@@ -263,7 +263,7 @@ impl Viewport {
         let pos = self.pos(h);
         let fits = h.height_of(i) <= self.height;
         let target = match align {
-            RowAlign::Bottom if fits => bottom - self.height,
+            RowAlign::Bottom if fits => bottom.saturating_sub(self.height),
             RowAlign::Top | RowAlign::Bottom => top,
             RowAlign::Nearest => {
                 if top < pos || !fits {
@@ -388,5 +388,53 @@ mod tests {
             3,
             "zero heights count as one unit"
         );
+    }
+
+    struct Rows(usize);
+
+    impl RowModel for Rows {
+        fn revision(&self) -> u64 {
+            0
+        }
+        fn row_count(&self) -> usize {
+            self.0
+        }
+        fn row_key(&self, index: usize) -> Option<RowKey> {
+            (index < self.0).then(|| RowKey(index as u64 + 1))
+        }
+        fn index_of(&self, key: RowKey) -> Option<usize> {
+            usize::try_from(key.0.checked_sub(1)?).ok()
+        }
+        fn row_state(&self, _index: usize) -> crate::core::model::RowState {
+            crate::core::model::RowState::empty()
+        }
+        fn cell(
+            &self,
+            _index: usize,
+            _col: crate::core::model::ColumnId,
+        ) -> crate::core::model::CellValue<'_> {
+            crate::core::model::CellValue::Empty
+        }
+        fn row_label(&self, _index: usize) -> String {
+            String::new()
+        }
+    }
+
+    /// Bottom alignment of a row near the top of a tall viewport (a short
+    /// register scrolled to its newest line) stays at the start instead of
+    /// overflowing.
+    #[test]
+    fn bottom_alignment_near_the_top_stays_at_the_start() {
+        let model = Rows(3);
+        let h = Heights::uniform(10, 3);
+        let mut v = Viewport::new(100);
+        v.scroll_to(2, RowAlign::Bottom, &h, &model);
+        assert_eq!(v.pos(&h), 0);
+        let long = Rows(50);
+        let h = Heights::uniform(10, 50);
+        v.scroll_to(49, RowAlign::Bottom, &h, &long);
+        assert_eq!(v.pos(&h), 400);
+        v.scroll_to(0, RowAlign::Bottom, &h, &long);
+        assert_eq!(v.pos(&h), 0);
     }
 }
