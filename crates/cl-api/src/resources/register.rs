@@ -3,13 +3,15 @@
 //!
 //! - The engine is the ledger: every balance here is a value the engine
 //!   sent (NN7). Nothing is added up on this side.
-//! - Money is exact or refused. Requests always ask for `exact=1`; engines
-//!   with `register-exact-v1` answer every amount as a decimal string, which
-//!   becomes [`Money`]. An engine without it answers JSON numbers, and those
-//!   are refused as [`ApiError::InexactMoney`] instead of being parsed: a
-//!   register amount that may have gone through a float is never shown and
-//!   can never feed a posting. Screens check
-//!   [`Capabilities::REGISTER_EXACT`] before asking.
+//! - Money is exact or display-only. Requests always ask for `exact=1`;
+//!   engines with `register-exact-v1` answer every amount as a decimal
+//!   string, which becomes [`Money`] ([`RegisterAmount::Exact`]). An engine
+//!   without it (the pinned engine) answers JSON numbers; each is kept as
+//!   the number text exactly as sent ([`RegisterAmount::DisplayOnly`], the
+//!   P05 [`ReportAmount`] pattern) and the page is marked `exact: false`.
+//!   Display-only amounts are never turned into `Money`, compared, summed
+//!   or used for an edit: edits always start from `GET /transactions/{id}`,
+//!   so postings stay exact either way (P12 plan WP6, Q-P12b).
 //! - Both dates are always sent: [`RegisterQuery`] cannot be built without
 //!   them, so the engine's "last 90 days" default can never apply silently.
 //! - `Debug` of a line or a page shows no amounts, names or memo text.
@@ -18,6 +20,7 @@ use std::fmt;
 
 use cl_core::ids::{AccountId, ContactId, JournalLineId, TagId, TransactionId};
 use cl_core::{CalendarDate, Money};
+use rust_decimal::RoundingStrategy;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
@@ -28,7 +31,7 @@ use crate::resources::common::{Query, SortDir};
 use crate::resources::operations::{REGISTER, REGISTER_SUMMARY};
 use crate::resources::transactions::{TxnStatus, TxnType};
 use crate::session::Session;
-use crate::wire::Capabilities;
+use crate::wire::{Capabilities, ReportAmount};
 
 /// The most rows the engine serves in one register page.
 pub const REGISTER_MAX_PER_PAGE: u16 = 200;
@@ -286,9 +289,82 @@ pub enum ClearState {
     Reconciled,
 }
 
-/// One register line: one journal line of this account. Amounts are exact
-/// engine values; `Debug` prints none of them.
-#[derive(Clone, PartialEq, Eq)]
+/// A register amount as the engine sent it.
+///
+/// There is deliberately no `PartialEq` or arithmetic: an exact value is
+/// reached through [`RegisterAmount::exact`], and a display-only value has
+/// no path into `Money` at all. `Debug` prints no digits.
+#[derive(Clone)]
+pub enum RegisterAmount {
+    /// A decimal string (`register-exact-v1`): exact.
+    Exact(Money),
+    /// A JSON number from an engine without `register-exact-v1`: the text
+    /// as sent, for display only.
+    DisplayOnly(ReportAmount),
+}
+
+impl RegisterAmount {
+    /// The exact value, `None` for a display-only amount.
+    #[must_use]
+    pub fn exact(&self) -> Option<Money> {
+        match self {
+            RegisterAmount::Exact(m) => Some(*m),
+            RegisterAmount::DisplayOnly(_) => None,
+        }
+    }
+
+    /// True for an exact amount.
+    #[must_use]
+    pub fn is_exact(&self) -> bool {
+        matches!(self, RegisterAmount::Exact(_))
+    }
+
+    /// Plain display text at cents (`-1084.66`), half away from zero,
+    /// never `-0.00`. `negated` flips the shown sign (the display sign of a
+    /// credit-normal register, Q-P12h); for either kind that is a change of
+    /// the text's sign, not arithmetic on the value. `None` when the
+    /// engine's number text is not readable as a decimal.
+    #[must_use]
+    pub fn display(&self, negated: bool) -> Option<String> {
+        let plain = match self {
+            RegisterAmount::Exact(m) => {
+                let mut d = m
+                    .as_decimal()
+                    .round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero);
+                if d.is_zero() {
+                    d.set_sign_positive(true);
+                }
+                format!("{d:.2}")
+            }
+            RegisterAmount::DisplayOnly(r) => r.display(2)?,
+        };
+        Some(if negated { flip_sign(&plain) } else { plain })
+    }
+}
+
+/// Flips the sign of plain display text; zero stays unsigned.
+fn flip_sign(plain: &str) -> String {
+    if let Some(rest) = plain.strip_prefix('-') {
+        rest.to_string()
+    } else if plain.bytes().all(|b| matches!(b, b'0' | b'.')) {
+        plain.to_string()
+    } else {
+        format!("-{plain}")
+    }
+}
+
+impl fmt::Debug for RegisterAmount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            RegisterAmount::Exact(_) => "RegisterAmount::Exact(..)",
+            RegisterAmount::DisplayOnly(_) => "RegisterAmount::DisplayOnly(..)",
+        })
+    }
+}
+
+/// One register line: one journal line of this account. Amounts are the
+/// engine's values (exact or display-only); `Debug` prints none of them.
+#[derive(Clone)]
 pub struct RegisterLine {
     /// The journal line.
     pub line_id: JournalLineId,
@@ -311,12 +387,12 @@ pub struct RegisterLine {
     /// Memo (owner data).
     pub memo: Option<String>,
     /// Money out of the account (the credit side for an asset).
-    pub payment: Option<Money>,
+    pub payment: Option<RegisterAmount>,
     /// Money into the account.
-    pub deposit: Option<Money>,
+    pub deposit: Option<RegisterAmount>,
     /// The account's balance after this line, as the engine computed it
     /// (filter-independent with `register-exact-v1`).
-    pub balance: Money,
+    pub balance: RegisterAmount,
     /// Cleared state.
     pub cleared: ClearState,
     /// The transaction has more than two lines.
@@ -353,14 +429,18 @@ pub struct RegisterAccount {
 }
 
 /// One page of the register.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct RegisterPage {
     /// The account.
     pub account: RegisterAccount,
+    /// True when every amount on the page is exact; false when the engine
+    /// sent JSON numbers (display only).
+    pub exact: bool,
     /// Balance before `start` (engine value).
-    pub balance_forward: Money,
-    /// Unfiltered balance at `end` (engine value).
-    pub ending_balance: Money,
+    pub balance_forward: RegisterAmount,
+    /// Unfiltered balance at `end` (engine value; an engine without
+    /// `register-exact-v1` does not send it).
+    pub ending_balance: Option<RegisterAmount>,
     /// Page number (from 1).
     pub page: u32,
     /// Rows per page.
@@ -379,6 +459,7 @@ impl fmt::Debug for RegisterPage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RegisterPage")
             .field("account", &self.account)
+            .field("exact", &self.exact)
             .field("page", &self.page)
             .field("per_page", &self.per_page)
             .field("total_rows", &self.total_rows)
@@ -390,14 +471,16 @@ impl fmt::Debug for RegisterPage {
 }
 
 /// The register footer (`/register/summary`).
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct RegisterSummary {
-    /// The account's stored balance (display only).
-    pub current_balance: Money,
+    /// True when every amount is exact (see [`RegisterPage::exact`]).
+    pub exact: bool,
+    /// The account's stored balance.
+    pub current_balance: RegisterAmount,
     /// Unfiltered balance of posted lines through `as_of` (P12 R4).
-    pub ending_balance: Option<Money>,
+    pub ending_balance: Option<RegisterAmount>,
     /// The part of it cleared in any reconciliation (P12 R4).
-    pub cleared_balance: Option<Money>,
+    pub cleared_balance: Option<RegisterAmount>,
     /// The date the ending balance is at (`None`: all dates).
     pub as_of: Option<CalendarDate>,
     /// Posted lines not cleared.
@@ -409,6 +492,7 @@ pub struct RegisterSummary {
 impl fmt::Debug for RegisterSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RegisterSummary")
+            .field("exact", &self.exact)
             .field("as_of", &self.as_of)
             .field("uncleared_count", &self.uncleared_count)
             .field("last_reconciled", &self.last_reconciled)
@@ -418,23 +502,34 @@ impl fmt::Debug for RegisterSummary {
 
 // ------------------------------------------------------------------ wire
 
-/// A money field as sent: a decimal string becomes `Money`; a JSON number
-/// is refused (`InexactMoney`), never parsed.
-fn exact(raw: &RawValue, what: &'static str) -> Result<Money, ApiError> {
+/// A money field as sent: a decimal string becomes exact `Money`; a JSON
+/// number is kept as its text for display only (never parsed into money).
+fn amount(raw: &RawValue, what: &'static str) -> Result<RegisterAmount, ApiError> {
     let text = raw.get();
     match text.strip_prefix('"').and_then(|t| t.strip_suffix('"')) {
-        Some(s) => Money::parse_wire(s).map_err(|_| ApiError::Decode { what }),
+        Some(s) => Money::parse_wire(s)
+            .map(RegisterAmount::Exact)
+            .map_err(|_| ApiError::Decode { what }),
         None if text == "null" => Err(ApiError::Decode { what }),
-        None => Err(ApiError::InexactMoney { what }),
+        None => serde_json::from_str::<ReportAmount>(text)
+            .map(RegisterAmount::DisplayOnly)
+            .map_err(|_| ApiError::Decode { what }),
     }
 }
 
-fn exact_opt(raw: Option<&RawValue>, what: &'static str) -> Result<Option<Money>, ApiError> {
+fn amount_opt(
+    raw: Option<&RawValue>,
+    what: &'static str,
+) -> Result<Option<RegisterAmount>, ApiError> {
     match raw {
         None => Ok(None),
         Some(r) if r.get() == "null" => Ok(None),
-        Some(r) => exact(r, what).map(Some),
+        Some(r) => amount(r, what).map(Some),
     }
+}
+
+fn all_exact<'a>(amounts: impl IntoIterator<Item = Option<&'a RegisterAmount>>) -> bool {
+    amounts.into_iter().flatten().all(RegisterAmount::is_exact)
 }
 
 #[derive(Deserialize)]
@@ -551,9 +646,9 @@ impl WireLine {
             contact: self.contact_id,
             category,
             memo: self.memo,
-            payment: exact_opt(self.payment.as_deref(), "register payment")?,
-            deposit: exact_opt(self.deposit.as_deref(), "register deposit")?,
-            balance: exact(&self.running_balance, "register balance")?,
+            payment: amount_opt(self.payment.as_deref(), "register payment")?,
+            deposit: amount_opt(self.deposit.as_deref(), "register deposit")?,
+            balance: amount(&self.running_balance, "register balance")?,
             cleared,
             has_splits: self.has_splits,
             engine_editable: self.is_editable,
@@ -565,30 +660,41 @@ impl WireLine {
 /// Reads a register page answer.
 ///
 /// # Errors
-/// `InexactMoney` when any amount is a JSON number; `Decode` for any other
-/// shape problem.
+/// `Decode` for any shape problem (a money string outside the engine
+/// grammar, a `null` balance, an unknown cleared state, an exact page
+/// without its ending balance).
 pub fn page_from_json(body: &[u8]) -> Result<RegisterPage, ApiError> {
     let w: WirePage =
         serde_json::from_slice(body).map_err(|_| ApiError::Decode { what: "register" })?;
-    // The balance forward first: an engine without exact money is refused
-    // as inexact (whatever else its answer lacks).
-    let balance_forward = exact(&w.balance_forward, "register balance forward")?;
+    let balance_forward = amount(&w.balance_forward, "register balance forward")?;
+    let ending_balance = amount_opt(w.ending_balance.as_deref(), "register ending balance")?;
+    // An exact engine (R1/R4) always sends the ending balance.
+    if balance_forward.is_exact() && ending_balance.is_none() {
+        return Err(ApiError::Decode {
+            what: "register ending balance",
+        });
+    }
     let lines = w
         .lines
         .into_iter()
         .map(WireLine::into_line)
         .collect::<Result<Vec<_>, _>>()?;
-    let ending_balance = exact_opt(w.ending_balance.as_deref(), "register ending balance")?.ok_or(
-        ApiError::Decode {
-            what: "register ending balance",
-        },
-    )?;
+    let exact = all_exact(
+        [Some(&balance_forward), ending_balance.as_ref()]
+            .into_iter()
+            .chain(
+                lines
+                    .iter()
+                    .flat_map(|l| [l.payment.as_ref(), l.deposit.as_ref(), Some(&l.balance)]),
+            ),
+    );
     Ok(RegisterPage {
         account: RegisterAccount {
             id: w.account.id,
             account_type: w.account.account_type,
             detail_type: w.account.detail_type,
         },
+        exact,
         balance_forward,
         ending_balance,
         page: w.pagination.page,
@@ -607,15 +713,24 @@ pub fn page_from_json(body: &[u8]) -> Result<RegisterPage, ApiError> {
 /// Reads a register summary answer.
 ///
 /// # Errors
-/// `InexactMoney` when any amount is a JSON number; `Decode` otherwise.
+/// `Decode` for any shape problem.
 pub fn summary_from_json(body: &[u8]) -> Result<RegisterSummary, ApiError> {
     let w: WireSummary = serde_json::from_slice(body).map_err(|_| ApiError::Decode {
         what: "register summary",
     })?;
+    let current_balance = amount(&w.current_balance, "register current balance")?;
+    let ending_balance = amount_opt(w.ending_balance.as_deref(), "register ending balance")?;
+    let cleared_balance = amount_opt(w.cleared_balance.as_deref(), "register cleared balance")?;
+    let exact = all_exact([
+        Some(&current_balance),
+        ending_balance.as_ref(),
+        cleared_balance.as_ref(),
+    ]);
     Ok(RegisterSummary {
-        current_balance: exact(&w.current_balance, "register current balance")?,
-        ending_balance: exact_opt(w.ending_balance.as_deref(), "register ending balance")?,
-        cleared_balance: exact_opt(w.cleared_balance.as_deref(), "register cleared balance")?,
+        exact,
+        current_balance,
+        ending_balance,
+        cleared_balance,
         as_of: w.as_of_date,
         uncleared_count: w.uncleared_count,
         last_reconciled: w.last_reconciliation_date,
@@ -642,7 +757,6 @@ impl Register<'_> {
     ///
     /// # Errors
     /// `Local(..)` from [`RegisterQuery::to_query`] (nothing sent);
-    /// `InexactMoney` from an engine without `register-exact-v1`;
     /// `NotFound`; any [`ApiError`].
     pub async fn page(
         &self,
@@ -669,7 +783,6 @@ impl Register<'_> {
     /// on or before it (all dates when `None`).
     ///
     /// # Errors
-    /// `InexactMoney` from an engine without `register-exact-v1`;
     /// `NotFound`; any [`ApiError`].
     pub async fn summary(
         &self,

@@ -2,8 +2,9 @@
 //! every row once, the entry kinds per account, and exact money.
 //!
 //! At the pinned engine the register answers money as JSON numbers, so the
-//! typed client refuses every page (`InexactMoney`); the shape checks below
-//! read the raw JSON for the non-money fields only. With
+//! typed client marks every page display-only (`exact: false`, no amount
+//! convertible to `Money`); the shape checks below read the raw JSON for
+//! the non-money fields only. With
 //! `register-exact-v1` (engine PR #153, R1–R4) the typed pages are checked
 //! too: exact strings, payment = credit and deposit = debit against
 //! `GET /transactions/{id}`, the same balance per line whatever the sort or
@@ -12,7 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use cl_api::{
-    AccountFields, AccountType, ApiError, Capabilities, Method, RegisterQuery, RegisterSort,
+    AccountFields, AccountType, Capabilities, Method, RegisterAmount, RegisterQuery, RegisterSort,
     SortDir,
 };
 use cl_core::Money;
@@ -134,23 +135,31 @@ pub fn dates_paging_and_exact_money(h: &Harness) {
     let q = RegisterQuery::new(date(1900, 1, 1), date(2199, 12, 31));
     let typed = h.run(s.register().page(acct, &q, 1, 200));
     let summary = h.run(s.register().summary(acct, None));
+    let exact = |a: Option<&RegisterAmount>| a.and_then(RegisterAmount::exact);
     if !h.require_cap(Capabilities::REGISTER_EXACT, "R1-R4") {
-        // Float money is refused, never parsed.
+        // Number money is display-only, never parsed into Money.
+        let page = typed.expect("display-only page");
+        assert!(!page.exact);
+        assert_eq!(page.total_rows, 3);
+        assert!(page.lines.iter().all(|l| !l.balance.is_exact()));
         assert!(
-            matches!(typed, Err(ApiError::InexactMoney { .. })),
-            "{typed:?}"
+            page.lines
+                .iter()
+                .all(|l| l.balance.display(false).is_some())
         );
-        assert!(
-            matches!(summary, Err(ApiError::InexactMoney { .. })),
-            "{summary:?}"
-        );
+        let summary = summary.expect("display-only summary");
+        assert!(!summary.exact);
+        assert!(summary.current_balance.exact().is_none());
         return;
     }
     let page = typed.expect("exact page");
+    assert!(page.exact);
     assert_eq!(page.total_rows, 3);
-    assert_eq!(page.ending_balance.to_wire(), "-94.7100");
+    let ending = exact(page.ending_balance.as_ref()).expect("ending");
+    assert_eq!(ending.to_wire(), "-94.7100");
     let summary = summary.expect("exact summary");
-    assert_eq!(summary.ending_balance, Some(page.ending_balance));
+    assert!(summary.exact);
+    assert_eq!(exact(summary.ending_balance.as_ref()), Some(ending));
     // Payment = credit and deposit = debit of this account's line.
     for l in &page.lines {
         let t = h.run(s.transactions().get(l.txn_id)).expect("txn").record;
@@ -160,15 +169,26 @@ pub fn dates_paging_and_exact_money(h: &Harness) {
             .find(|x| x.account_id == acct)
             .expect("bank line");
         let side = |m: Money| (!m.is_zero()).then_some(m);
-        assert_eq!(l.deposit, side(mine.debit), "deposit = debit");
-        assert_eq!(l.payment, side(mine.credit), "payment = credit");
+        assert_eq!(
+            exact(l.deposit.as_ref()),
+            side(mine.debit),
+            "deposit = debit"
+        );
+        assert_eq!(
+            exact(l.payment.as_ref()),
+            side(mine.credit),
+            "payment = credit"
+        );
         assert!(made.iter().any(|m| m.id == l.txn_id));
     }
     // The same balance per line whatever the sort (R1).
     let by_line = |p: &cl_api::RegisterPage| -> BTreeMap<String, String> {
         p.lines
             .iter()
-            .map(|l| (l.line_id.to_string(), l.balance.to_wire()))
+            .map(|l| {
+                let b = exact(Some(&l.balance)).expect("exact balance");
+                (l.line_id.to_string(), b.to_wire())
+            })
             .collect()
     };
     let base = by_line(&page);
@@ -193,5 +213,9 @@ pub fn dates_paging_and_exact_money(h: &Harness) {
     for (id, bal) in by_line(&p) {
         assert_eq!(base.get(&id), Some(&bal), "filtered balance");
     }
-    assert_eq!(p.ending_balance, page.ending_balance, "unfiltered ending");
+    assert_eq!(
+        exact(p.ending_balance.as_ref()),
+        Some(ending),
+        "unfiltered ending"
+    );
 }
