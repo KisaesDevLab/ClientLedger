@@ -573,6 +573,8 @@ impl Grid {
 
 /// Width of the grid's own scrollbar track.
 const BAR: f32 = 12.0;
+/// Room kept for the lock glyph at the right end of a locked row.
+const LOCK_GUTTER: f32 = 22.0;
 
 /// Measured heights keyed by (revision, rows, row unit, open memo).
 type MeasuredCache = (u64, usize, u64, Option<(usize, u64)>, Heights);
@@ -1413,6 +1415,18 @@ impl Grid {
                 .contains(RowState::LOCKED)
                 .then(|| env.t(TextKey("grid.a11y.locked")));
             let suggested_text = env.t(TextKey("grid.a11y.suggested"));
+            // The lock glyph sits at the right end of a locked row: the
+            // rightmost first-line cell keeps its text clear of it.
+            let lock_col = state
+                .contains(RowState::LOCKED)
+                .then(|| {
+                    places
+                        .iter()
+                        .filter(|p| p.line == Line::First)
+                        .max_by(|a, b| (a.x + a.width).total_cmp(&(b.x + b.width)))
+                        .map(|p| p.id)
+                })
+                .flatten();
             for (ci, place) in places.iter().enumerate() {
                 let Some(col) = columns.iter().find(|c| c.id == place.id).copied() else {
                     continue;
@@ -1600,16 +1614,27 @@ impl Grid {
                         }
                     });
                 }
+                let paint_rect = if lock_col == Some(col.id) {
+                    let mut r = cell_rect;
+                    r.max.x = (r.max.x - LOCK_GUTTER).max(r.min.x);
+                    r
+                } else {
+                    cell_rect
+                };
                 let needed = Self::paint_cell(
                     row_ui.painter(),
-                    cell_rect,
+                    paint_rect,
                     &col,
                     &value,
                     &shown,
                     state,
                     style,
                     if is_memo { memo_lines + 1 } else { 1 },
-                );
+                ) + if paint_rect == cell_rect {
+                    0.0
+                } else {
+                    LOCK_GUTTER
+                };
                 // Numbers are never cut short: the column grows to fit and
                 // never shrinks this session (Q-P10o, S14).
                 if shown.mono && needed > place.width + 0.5 {
