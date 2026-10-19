@@ -18,6 +18,7 @@
 )]
 
 pub mod amount_entry;
+pub mod closing;
 pub mod commands;
 pub mod date_entry;
 pub mod date_rules;

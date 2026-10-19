@@ -48,4 +48,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.entry.problem.two_named_accounts", "Accounts receivable and accounts payable can't both be on one entry. Use one of them."),
     ("register.entry.problem.too_many_tags", "A line can have only one tag for now. Keep one tag on this line."),
     ("register.entry.problem.kind_not_allowed", "This kind of transaction can't be entered in this register. Use its own form instead."),
+    // Closing-date password dialog (cl-model closing::ClosingFlow; shared with the forms)
+    ("closing.ask", "This transaction is dated on or before your closing date ({date}). Enter the closing-date password to change it."),
+    ("closing.wrong_password", "That password isn't right."),
+    ("closing.unavailable", "Changing transactions in a closed period isn't available yet."),
 ];
