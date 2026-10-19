@@ -20,8 +20,8 @@ steps:
   - screenshot: home
 
   # --- Tabs ----------------------------------------------------------------
-  - click: {role: tab, label: Register · Operating}
-  - assert_exists: {role: label, label: Register · Operating}
+  - click: {role: tab, label: Register · Operating Checking}
+  - assert_exists: {role: label, label: 1010 · Operating Checking}
   - click: {role: tab, label: Home}
   - assert_exists: {role: label, label: Home}
 

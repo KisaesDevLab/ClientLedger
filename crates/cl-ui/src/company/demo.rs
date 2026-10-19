@@ -7,6 +7,7 @@ use cl_settings::{ACCENT_PALETTE, Accent};
 
 pub mod contacts;
 pub mod lists;
+pub mod register;
 
 /// One demo company card.
 #[derive(Clone, Debug, PartialEq, Eq)]

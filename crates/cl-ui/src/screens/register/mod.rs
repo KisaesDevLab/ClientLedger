@@ -1,0 +1,794 @@
+//! The account register (P12, `banking.register`): one tab per account,
+//! the engine's register on the ledger grid, newest at the bottom.
+//!
+//! The engine is the ledger. Every row, amount and balance is what the
+//! engine sent for the shown dates (`GET /accounts/{id}/register`, paged
+//! 200 lines at a time through [`cl_model::register::WindowCache`]); the
+//! screen never adds anything up (non-negotiable 7, Q-187). On an engine
+//! without `register-exact-v1` the amounts are display-only text and a
+//! small note says so; edits (WP6) always start from the transaction
+//! itself, never from register figures.
+//!
+//! Keyboard: Ctrl+G opens the register (the selected account in the Chart
+//! of Accounts, else the last one used, else the first bank account);
+//! Page Up/Down move a page; arrows move between rows. WP6-WP8 add the
+//! entry row, editing, Go To, filters and the closed-period flow; their
+//! commands are routed to the handlers at the end of this file.
+//!
+//! Every engine call runs on the request queue and is polled each frame.
+
+pub mod filters;
+pub mod view;
+
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+
+use cl_api::{
+    Account, AccountFilter, ApiError, CompanySettings, EntryType, RegisterPage, RegisterQuery,
+    RegisterSort, RequestGroup, SortDir,
+};
+use cl_core::CalendarDate;
+use cl_core::fiscal::FiscalYearSpec;
+use cl_core::ids::{AccountId, TenantId};
+use cl_grid::core::viewport::RowAlign;
+use cl_grid::{CellPos, Grid, GridEvent, GridHeight, GridSnapshot, ModelRef, NoLookups};
+use cl_model::register::{
+    AccountClass, BalanceMode, Filters, PAGE, PageRequest, RegisterPrefs, SortChoice,
+};
+use cl_model::{CommandId, Scope};
+use eframe::egui::{self, RichText, Ui};
+use serde_json::{Value, json};
+
+use self::view::{COL_DATE, Mapping, RegisterModel};
+use crate::company::{CompanyEvent, CompanyLink, Task};
+use crate::grid_env::EnvParts;
+use crate::i18n::{t, t_with};
+use crate::screens::company::form;
+use crate::screens::lists::accounts::model::kind_of;
+use crate::theme::Tokens;
+use crate::windows::Screen;
+
+/// The command and window kind.
+pub const KIND: &str = "banking.register";
+
+/// The register window for `kind`, if it is one.
+#[must_use]
+pub fn make(
+    kind: CommandId,
+    link: &Arc<CompanyLink>,
+    open: Option<(TenantId, String)>,
+    today: CalendarDate,
+) -> Option<Box<dyn crate::windows::Screen>> {
+    (kind.as_str() == KIND)
+        .then(|| Box::new(RegisterScreen::new(Arc::clone(link), open, today, None)) as Box<_>)
+}
+
+/// The register class of an account (`None` for income and expense
+/// accounts, which have no register).
+#[must_use]
+pub fn class_of(a: &Account) -> Option<AccountClass> {
+    let c = AccountClass::of(
+        kind_of(a.fields.account_type),
+        a.fields.detail_type.as_deref(),
+    );
+    c.has_register().then_some(c)
+}
+
+/// "1010 · Operating Checking", or the name alone.
+#[must_use]
+pub fn account_text(a: &Account) -> String {
+    match a.fields.account_number.as_deref().filter(|n| !n.is_empty()) {
+        Some(n) => format!("{n} \u{b7} {}", a.fields.name),
+        None => a.fields.name.clone(),
+    }
+}
+
+/// The engine sort and direction for a "Sort by" choice.
+#[must_use]
+pub fn sort_of(c: SortChoice) -> (RegisterSort, SortDir) {
+    let sort = match c {
+        SortChoice::DateOldest | SortChoice::DateNewest => RegisterSort::Date,
+        SortChoice::Number => RegisterSort::Number,
+        SortChoice::Amount => RegisterSort::Amount,
+        SortChoice::Type => RegisterSort::Type,
+    };
+    let dir = if c.descending() {
+        SortDir::Desc
+    } else {
+        SortDir::Asc
+    };
+    (sort, dir)
+}
+
+/// Engine page size as the API takes it.
+fn per_page() -> u16 {
+    u16::try_from(PAGE).unwrap_or(cl_api::REGISTER_MAX_PER_PAGE)
+}
+
+fn new_grid(spec: cl_grid::GridSpec) -> Grid {
+    // The register specs are fixed and covered by tests; a failure is a
+    // programming error in `view::spec`.
+    Grid::new("register/grid", spec).expect("the register grid specs are valid")
+}
+
+/// A custom "Show" range being typed.
+#[derive(Debug, Default)]
+struct CustomRange {
+    open: bool,
+    from: String,
+    to: String,
+    problem: Option<&'static str>,
+}
+
+/// The register window.
+pub struct RegisterScreen {
+    link: Arc<CompanyLink>,
+    tenant: Option<(TenantId, String)>,
+    group: Option<RequestGroup>,
+    today: CalendarDate,
+    fiscal: FiscalYearSpec,
+    accounts: Vec<Account>,
+    accounts_task: Option<Task<Vec<Account>>>,
+    accounts_loaded: bool,
+    settings_task: Option<Task<CompanySettings>>,
+    /// The account asked for when the window opened.
+    want_account: Option<AccountId>,
+    account: Option<AccountId>,
+    class: AccountClass,
+    mapping: Mapping,
+    prefs: RegisterPrefs,
+    filters: Filters,
+    query: Option<RegisterQuery>,
+    model: RegisterModel,
+    grid: Grid,
+    grid_shape: (bool, AccountClass, BalanceMode),
+    pages: Vec<(PageRequest, Task<RegisterPage>)>,
+    allowed: Vec<EntryType>,
+    /// Scroll to the newest line once it arrives (date order, oldest first).
+    jump_to_end: bool,
+    load_error: Option<ApiError>,
+    custom: CustomRange,
+    parts: EnvParts,
+    snap: GridSnapshot,
+}
+
+impl RegisterScreen {
+    /// The register of `account` (or the default account) in the open
+    /// company.
+    #[must_use]
+    pub fn new(
+        link: Arc<CompanyLink>,
+        tenant: Option<(TenantId, String)>,
+        today: CalendarDate,
+        account: Option<AccountId>,
+    ) -> RegisterScreen {
+        let group = link.group().and_then(Result::ok);
+        let class = AccountClass::Bank;
+        let balance = BalanceMode::Engine;
+        let mut s = RegisterScreen {
+            link,
+            tenant,
+            group,
+            today,
+            fiscal: FiscalYearSpec::CALENDAR_YEAR,
+            accounts: Vec::new(),
+            accounts_task: None,
+            accounts_loaded: false,
+            settings_task: None,
+            want_account: account,
+            account: None,
+            class,
+            mapping: Mapping::default(),
+            prefs: RegisterPrefs::default(),
+            filters: Filters::default(),
+            query: None,
+            model: RegisterModel::new(0),
+            grid: new_grid(view::spec(false, class, balance)),
+            grid_shape: (false, class, balance),
+            pages: Vec::new(),
+            allowed: Vec::new(),
+            jump_to_end: false,
+            load_error: None,
+            custom: CustomRange::default(),
+            parts: EnvParts::default(),
+            snap: GridSnapshot::default(),
+        };
+        s.start_load();
+        // The demo answers at once: the tab title is right before the
+        // window is first drawn.
+        s.poll();
+        s
+    }
+
+    /// The account shown.
+    #[must_use]
+    pub fn account(&self) -> Option<AccountId> {
+        self.account
+    }
+
+    fn account_record(&self) -> Option<&Account> {
+        let id = self.account?;
+        self.accounts.iter().find(|a| a.id == id)
+    }
+
+    /// True when the engine reports balances that ignore filters (R1).
+    fn register_exact(&self) -> bool {
+        // The demo engine behaves like `register-exact-v1`.
+        self.link.is_demo()
+            || self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::REGISTER_EXACT)
+    }
+
+    fn balance_mode(&self) -> BalanceMode {
+        BalanceMode::choose(self.filters.is_active(), self.register_exact())
+    }
+
+    fn start_load(&mut self) {
+        self.load_error = None;
+        if self.link.is_demo() {
+            let accounts = self.link.demo_state().map(|mut d| {
+                d.chart
+                    .get_or_insert_with(crate::company::demo::chart)
+                    .clone()
+            });
+            let closing = self.link.demo_state().and_then(|d| {
+                let open = d.open?;
+                d.companies
+                    .iter()
+                    .find(|c| c.tenant_id == open)
+                    .and_then(|c| c.closed_through)
+            });
+            self.model.closing = closing;
+            self.accounts_task = Some(Task::ready(accounts.unwrap_or_default()));
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            self.accounts_loaded = true;
+            return;
+        };
+        if let Ok(p) = group.read(&session, |s| async move {
+            s.accounts().list_all(&AccountFilter::default()).await
+        }) {
+            self.accounts_task = Some(Task::Pending(p));
+        } else {
+            self.accounts_loaded = true;
+        }
+        if let Ok(p) = group.read(&session, |s| async move { s.company_settings().await }) {
+            self.settings_task = Some(Task::Pending(p));
+        }
+    }
+
+    /// The account to show when none was asked for: the first active bank
+    /// account, else the first account with a register.
+    fn default_account(&self) -> Option<AccountId> {
+        let with_register = || {
+            self.accounts
+                .iter()
+                .filter(|a| a.is_active && class_of(a).is_some())
+        };
+        with_register()
+            .find(|a| class_of(a) == Some(AccountClass::Bank))
+            .or_else(|| with_register().next())
+            .map(|a| a.id)
+    }
+
+    fn apply_accounts(&mut self, accounts: Vec<Account>) {
+        self.accounts = accounts;
+        self.accounts_loaded = true;
+        self.mapping.names = self
+            .accounts
+            .iter()
+            .map(|a| (a.id, account_text(a)))
+            .collect();
+        let wanted = self
+            .want_account
+            .or(self.account)
+            .filter(|id| {
+                self.accounts
+                    .iter()
+                    .any(|a| a.id == *id && class_of(a).is_some())
+            })
+            .or_else(|| self.default_account());
+        if let Some(id) = wanted {
+            self.show_account(id);
+        }
+    }
+
+    /// Shows `id` in this window.
+    pub(crate) fn show_account(&mut self, id: AccountId) {
+        let Some(class) = self.accounts.iter().find(|a| a.id == id).and_then(class_of) else {
+            return;
+        };
+        self.account = Some(id);
+        self.class = class;
+        self.mapping.class = Some(class);
+        self.allowed.clear();
+        self.apply_query();
+    }
+
+    /// Rebuilds the engine query from the range, sort and filters, and
+    /// starts over when it changed.
+    pub(crate) fn apply_query(&mut self) {
+        let Some(account) = self.account else { return };
+        let range = self.prefs.range.resolve(self.today, &self.fiscal);
+        let mut q = RegisterQuery::new(range.start, range.end);
+        (q.sort, q.dir) = sort_of(self.prefs.sort);
+        q.payee = self.filters.payee_text().map(str::to_string);
+        q.min = self.filters.min;
+        q.max = self.filters.max;
+        if self.register_exact() {
+            q.tag = self.filters.tag;
+            q.cleared = self
+                .filters
+                .uncleared
+                .then_some(cl_api::ClearedFilter::Uncleared);
+        }
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        account.to_string().hash(&mut h);
+        format!("{q:?}").hash(&mut h);
+        (q.payee.as_deref(), q.min, q.max, q.tag).hash(&mut h);
+        let fp = h.finish();
+        self.query = Some(q);
+        if self.model.set_query(fp) {
+            self.jump_to_end = self.prefs.sort == SortChoice::DateOldest;
+        }
+        self.sync_grid();
+    }
+
+    /// Rebuilds the grid when its columns change (one line, labels,
+    /// balance help).
+    fn sync_grid(&mut self) {
+        let shape = (self.prefs.one_line, self.class, self.balance_mode());
+        self.model.one_line = shape.0;
+        self.model.balance = shape.2;
+        self.model.touch();
+        if shape != self.grid_shape {
+            let keep = self.grid.core().cursor().map(|c| c.row);
+            self.grid = new_grid(view::spec(shape.0, shape.1, shape.2));
+            self.grid_shape = shape;
+            // The cursor stays on its line in the new layout.
+            if let Some(key) = keep
+                && cl_grid::RowModel::index_of(&self.model, key).is_some()
+            {
+                let label = String::new();
+                let env = self
+                    .parts
+                    .env(&NoLookups, &label, GridHeight::Rows { min: 1, max: 1 });
+                self.grid
+                    .scroll_to(key, RowAlign::Nearest, &ModelRef::Browse(&mut self.model));
+                self.grid.focus(
+                    CellPos {
+                        row: key,
+                        col: COL_DATE,
+                    },
+                    ModelRef::Browse(&mut self.model),
+                    &env,
+                );
+            }
+        }
+    }
+
+    /// Starts the page fetches the grid needs.
+    fn request_pages(&mut self) {
+        let Some(account) = self.account else { return };
+        let Some(query) = self.query.clone() else {
+            return;
+        };
+        let rows = if self.jump_to_end {
+            self.model.total().filter(|t| *t > 0).map(|t| (t - 1)..t)
+        } else {
+            None
+        };
+        for req in self.model.wanted(rows) {
+            match self.fetch_page(account, &query, req) {
+                Some(task) => self.pages.push((req, task)),
+                None => {
+                    self.model.fail(req);
+                }
+            }
+        }
+    }
+
+    fn fetch_page(
+        &self,
+        account: AccountId,
+        query: &RegisterQuery,
+        req: PageRequest,
+    ) -> Option<Task<RegisterPage>> {
+        let page = u32::try_from(req.page.engine_page()).ok()?;
+        if let Some(mut demo) = self.link.demo_state() {
+            let chart = demo
+                .chart
+                .get_or_insert_with(crate::company::demo::chart)
+                .clone();
+            return crate::company::demo::register::page(&chart, account, query, page, per_page())
+                .map(Task::ready);
+        }
+        let session = self.link.session()?;
+        let group = self.group.as_ref()?;
+        let q = query.clone();
+        group
+            .read(&session, move |s| async move {
+                s.register().page(account, &q, page, per_page()).await
+            })
+            .ok()
+            .map(Task::Pending)
+    }
+
+    fn poll(&mut self) {
+        if let Some(task) = self.accounts_task.as_mut()
+            && let Some(result) = task.try_take()
+        {
+            self.accounts_task = None;
+            match result {
+                Ok(accounts) => self.apply_accounts(accounts),
+                Err(e) => {
+                    self.accounts_loaded = true;
+                    self.load_error = Some(e);
+                }
+            }
+        }
+        if let Some(task) = self.settings_task.as_mut()
+            && let Some(result) = task.try_take()
+        {
+            self.settings_task = None;
+            if let Ok(s) = result {
+                self.model.closing = s.lock_date;
+                if let Some(m) = s.fiscal_year_start_month {
+                    self.fiscal = FiscalYearSpec::Calendar { start_month: m };
+                }
+                self.model.touch();
+                // Quarters and years may have moved with the fiscal start.
+                self.apply_query();
+            }
+        }
+        let mut i = 0;
+        while i < self.pages.len() {
+            let Some(result) = self.pages[i].1.try_take() else {
+                i += 1;
+                continue;
+            };
+            let (req, _) = self.pages.swap_remove(i);
+            match result {
+                Ok(page) => {
+                    if self.model.is_current(&req) {
+                        self.allowed.clone_from(&page.allowed);
+                        self.load_error = None;
+                    }
+                    self.model.accept(req, &page, &self.mapping);
+                }
+                Err(e) => {
+                    if self.model.is_current(&req) && self.model.total().is_none() {
+                        self.load_error = Some(e);
+                    }
+                    self.model.fail(req);
+                }
+            }
+        }
+    }
+
+    /// Once the newest line has arrived, scroll to it and put the cursor
+    /// there.
+    fn finish_jump(&mut self) {
+        if !self.jump_to_end {
+            return;
+        }
+        let Some(total) = self.model.total() else {
+            return;
+        };
+        if total == 0 {
+            self.jump_to_end = false;
+            return;
+        }
+        let last = usize::try_from(total - 1).unwrap_or(usize::MAX);
+        let Some(key) = cl_grid::RowModel::row_key(&self.model, last) else {
+            return;
+        };
+        let label = String::new();
+        let env = self
+            .parts
+            .env(&NoLookups, &label, GridHeight::Rows { min: 1, max: 1 });
+        self.grid
+            .scroll_to(key, RowAlign::Bottom, &ModelRef::Browse(&mut self.model));
+        self.grid.focus(
+            CellPos {
+                row: key,
+                col: COL_DATE,
+            },
+            ModelRef::Browse(&mut self.model),
+            &env,
+        );
+        self.jump_to_end = false;
+    }
+
+    fn grid_ui(&mut self, ui: &mut Ui, reserve: f32) {
+        let label = t("register.grid_label");
+        let env = self.parts.env(
+            &NoLookups,
+            &label,
+            GridHeight::Fill {
+                reserve_below: reserve,
+                min_rows: 4,
+            },
+        );
+        let out = self.grid.show(ui, ModelRef::Browse(&mut self.model), &env);
+        self.snap = self.grid.snapshot(&ModelRef::Browse(&mut self.model));
+        for e in out.events {
+            match e {
+                GridEvent::Activate { key } => {
+                    self.on_activate(key);
+                }
+                GridEvent::LockedRowEditAttempt { key } => {
+                    self.on_locked_edit(key);
+                }
+                GridEvent::TypedInBrowse(text) => {
+                    self.on_typed(&text);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn heading(&self, ui: &mut Ui, tokens: &Tokens) {
+        let Some(a) = self.account_record() else {
+            form::heading(ui, tokens, &t("cmd.banking.register"));
+            return;
+        };
+        ui.horizontal_wrapped(|ui| {
+            form::heading(ui, tokens, &account_text(a));
+            ui.add(
+                egui::Label::new(
+                    RichText::new(t(filters::class_key(self.class))).color(tokens.text_secondary),
+                )
+                .selectable(false),
+            );
+        });
+    }
+
+    fn messages(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        if let Some(e) = &self.load_error {
+            form::inline_error(ui, tokens, e);
+            if ui.button(t("register.try_again")).clicked() {
+                self.retry();
+            }
+        }
+        if self.model.display_only() {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(t("register.display_only"))
+                        .size(12.0)
+                        .color(tokens.text_secondary),
+                )
+                .wrap(),
+            );
+        }
+        if self.model.failed_pages() > 0
+            && self.load_error.is_none()
+            && ui.button(t("register.try_again")).clicked()
+        {
+            self.model.retry_failed();
+        }
+    }
+
+    fn retry(&mut self) {
+        self.load_error = None;
+        if self.accounts_loaded && self.accounts.is_empty() {
+            self.accounts_loaded = false;
+            self.start_load();
+        } else {
+            self.model.retry_failed();
+        }
+    }
+
+    fn empty_ui(&mut self, ui: &mut Ui, tokens: &Tokens) -> bool {
+        if self.account.is_none() {
+            if self.load_error.is_some() {
+                return true;
+            }
+            ui.label(RichText::new(t("register.no_accounts")).color(tokens.text_secondary));
+            if ui.button(t("register.open_chart")).clicked() {
+                self.link.push(CompanyEvent::OpenWindow(CommandId::new(
+                    crate::screens::lists::accounts::KIND,
+                )));
+            }
+            return true;
+        }
+        if self.model.total() == Some(0) {
+            let Some(q) = &self.query else { return true };
+            let key = if self.filters.is_active() {
+                "register.empty_filtered"
+            } else {
+                "register.empty_range"
+            };
+            ui.label(
+                RichText::new(t_with(
+                    key,
+                    &[
+                        ("from", &crate::shell::us_date(q.start)),
+                        ("to", &crate::shell::us_date(q.end)),
+                    ],
+                ))
+                .color(tokens.text_secondary),
+            );
+            if !self.filters.is_active()
+                && self.prefs.range != cl_model::register::RangePreset::AllDates
+                && ui.link(t("register.show_all_dates")).clicked()
+            {
+                self.prefs.range = cl_model::register::RangePreset::AllDates;
+                self.apply_query();
+            }
+            return true;
+        }
+        false
+    }
+}
+
+// ----------------------------------------------------------------------
+// Later lanes (WP6-WP8) fill these in; WP5 routes the events here so the
+// lanes do not collide in this file.
+#[allow(
+    clippy::unused_self,
+    reason = "event handlers that WP6-WP8 fill in; WP5 only routes to them"
+)]
+impl RegisterScreen {
+    /// Enter or a double-click on a row (WP6: edit in place).
+    fn on_activate(&mut self, _key: cl_grid::RowKey) {}
+
+    /// Typing on a locked row (WP8: the closing-date password flow).
+    fn on_locked_edit(&mut self, _key: cl_grid::RowKey) {}
+
+    /// Typing on a row while browsing (WP6: starts an edit).
+    fn on_typed(&mut self, _text: &str) {}
+
+    /// Ctrl+F (WP7: Go To).
+    fn on_find(&mut self) -> bool {
+        false
+    }
+
+    /// Ctrl+E (WP6: Edit Transaction).
+    fn on_edit_transaction(&mut self) -> bool {
+        false
+    }
+
+    /// Ctrl+D (WP8: delete, or the void offer before R7).
+    fn on_delete(&mut self) -> bool {
+        false
+    }
+
+    /// Void Transaction (WP8).
+    fn on_void(&mut self) -> bool {
+        false
+    }
+
+    /// Ctrl+Shift+Q (WP7: QuickReport).
+    fn on_quick_report(&mut self) -> bool {
+        false
+    }
+
+    /// Alt+N / Alt+S / Enter on the entry row (WP6).
+    fn on_record(&mut self, _id: CommandId) -> bool {
+        false
+    }
+}
+
+impl Screen for RegisterScreen {
+    fn title(&self) -> String {
+        self.account_record().map_or_else(
+            || t("cmd.banking.register"),
+            |a| t_with("register.title", &[("account", &a.fields.name)]),
+        )
+    }
+
+    fn ui(&mut self, ui: &mut Ui) {
+        self.parts = EnvParts::capture(ui.ctx());
+        if self.model.style != self.parts.frame.money_style {
+            self.model.style = self.parts.frame.money_style;
+            self.model.touch();
+        }
+        self.poll();
+        let tokens = Tokens::of(ui.ctx());
+        self.heading(ui, &tokens);
+        ui.add_space(4.0);
+        if !self.accounts_loaded {
+            form::progress_line(ui, &tokens, &t("register.loading"));
+            if self.accounts_task.is_some() {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(100));
+            }
+            return;
+        }
+        self.toolbar(ui, &tokens);
+        self.messages(ui, &tokens);
+        ui.add_space(4.0);
+        if self.empty_ui(ui, &tokens) {
+            self.request_pages();
+            return;
+        }
+        if self.model.total().is_none() {
+            form::progress_line(ui, &tokens, &t("register.loading"));
+        } else {
+            self.grid_ui(ui, 8.0);
+        }
+        self.request_pages();
+        self.finish_jump();
+        if !self.pages.is_empty() {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(50));
+        }
+    }
+
+    fn scope(&self) -> Scope {
+        // A grid screen: Esc arrives as `form.revert` (Q-P10d).
+        Scope::Form
+    }
+
+    fn command(&mut self, id: CommandId) -> bool {
+        match id.as_str() {
+            // Ctrl+G inside a register stays on it.
+            KIND => true,
+            "register.one_line" => {
+                self.set_one_line(!self.prefs.one_line);
+                true
+            }
+            "edit.find" => self.on_find(),
+            "edit.edit_transaction" => self.on_edit_transaction(),
+            "form.delete_item" => self.on_delete(),
+            "edit.void_transaction" => self.on_void(),
+            "list.quick_report" => self.on_quick_report(),
+            "form.save_new" | "form.save_close" => self.on_record(id),
+            "form.prev_record" | "form.next_record" => {
+                let cmd = if id.as_str() == "form.prev_record" {
+                    cl_grid::GridCommand::PageUp
+                } else {
+                    cl_grid::GridCommand::PageDown
+                };
+                let label = String::new();
+                let env = self
+                    .parts
+                    .env(&NoLookups, &label, GridHeight::Rows { min: 1, max: 1 });
+                self.grid
+                    .command(cmd, ModelRef::Browse(&mut self.model), &env)
+                    .0
+                    .yes()
+            }
+            _ => false,
+        }
+    }
+
+    fn state(&self) -> Value {
+        let total = self.model.total();
+        json!({
+            "screen": "register",
+            "company_open": self.tenant.is_some(),
+            "account_id": self.account.map(|a| a.to_string()),
+            "account_class": self.account.map(|_| filters::class_name(self.class)),
+            "loaded": self.accounts_loaded && total.is_some(),
+            "load_error": self.load_error.is_some(),
+            "no_accounts": self.accounts_loaded && self.account.is_none(),
+            "rows": total,
+            "range": self.prefs.range.to_pref(),
+            "range_start": self.query.as_ref().map(|q| q.start.to_wire()),
+            "range_end": self.query.as_ref().map(|q| q.end.to_wire()),
+            "sort": format!("{:?}", self.prefs.sort),
+            "one_line": self.prefs.one_line,
+            "balance_mode": match self.balance_mode() {
+                BalanceMode::Engine => "engine",
+                BalanceMode::HiddenFiltered => "hidden_filtered",
+            },
+            "display_only": self.model.display_only(),
+            "filters_active": self.filters.is_active(),
+            "cursor_row": self.snap.cursor_row,
+            "top_row": self.snap.top_row,
+            "focused": self.snap.focused,
+            "pages_cached": self.model.window().cached_pages(),
+            "in_flight": self.model.window().in_flight(),
+            "failed_pages": self.model.failed_pages(),
+            "entry_types": self.allowed.len(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests;

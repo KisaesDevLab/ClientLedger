@@ -306,6 +306,33 @@ impl Shell {
         }
     }
 
+    /// Bring the register tab of `account` to the front, or open one (one
+    /// tab per account, P12).
+    fn open_register(&mut self, account: cl_core::ids::AccountId) {
+        let kind = CommandId::new(crate::screens::register::KIND);
+        let want = account.to_string();
+        let found = self
+            .windows
+            .all()
+            .iter()
+            .find(|w| w.kind == kind && w.screen.state()["account_id"] == want.as_str())
+            .map(|w| w.id);
+        if let Some(id) = found {
+            self.windows.activate(id);
+            return;
+        }
+        let Some(link) = self.company_link.clone() else {
+            return;
+        };
+        let screen = crate::screens::register::RegisterScreen::new(
+            link,
+            self.open_tenant.clone(),
+            self.today,
+            Some(account),
+        );
+        self.windows.open_new(kind, Box::new(screen));
+    }
+
     /// Apply what the company screens reported since the last frame.
     fn apply_company_events(&mut self, ctx: Option<&Context>) {
         let Some(link) = self.company_link.clone() else {
@@ -391,6 +418,7 @@ impl Shell {
                         self.windows.close_now(id);
                     }
                 }
+                CompanyEvent::OpenRegister(account) => self.open_register(account),
             }
         }
     }
@@ -462,6 +490,12 @@ impl Shell {
             mode: Some("Single-user \u{b7} this computer".into()),
             ai: Some("AI: Ollama, on this computer".into()),
         };
+        if let Some(link) = &self.company_link
+            && let Some(demo) = link.demo_state()
+            && let Some(c) = demo.companies.first()
+        {
+            self.open_tenant = Some((c.tenant_id, c.name.clone()));
+        }
         let mk = |id: &str| commands::find(id).map_or_else(|| CommandId::new("nav.home"), |c| c.id);
         self.windows.open_new(
             mk("nav.home"),
@@ -475,25 +509,15 @@ impl Shell {
                     .with_dirty(true),
             ),
         );
-        self.windows.open_new(
-            mk("banking.register"),
-            Box::new(
-                Placeholder::for_command(mk("banking.register"))
-                    .with_title("Register \u{b7} Operating"),
-            ),
-        );
+        // The real register of the demo's operating account (P12).
+        let register = self.make_screen(mk("banking.register"));
+        self.windows.open_new(mk("banking.register"), register);
         self.windows.open_new(
             mk("banking.feed"),
             Box::new(Placeholder::for_command(mk("banking.feed"))),
         );
         if let Some(first) = self.windows.all().first().map(|w| w.id) {
             self.windows.activate(first);
-        }
-        if let Some(link) = &self.company_link
-            && let Some(demo) = link.demo_state()
-            && let Some(c) = demo.companies.first()
-        {
-            self.open_tenant = Some((c.tenant_id, c.name.clone()));
         }
     }
 
@@ -686,6 +710,14 @@ impl Shell {
                 if let Some(ctx) = ctx {
                     self.toast(ctx, "toast.open_company_first");
                 }
+                return;
+            }
+            // Ctrl+G asks the window in front first: the Chart of Accounts
+            // opens the selected account's register, a register stays.
+            if kind.as_str() == crate::screens::register::KIND
+                && let Some(w) = target.and_then(|id| self.windows.get_mut(id))
+                && w.screen.command(kind)
+            {
                 return;
             }
             self.open_screen(kind);
@@ -1180,6 +1212,9 @@ fn make_any(
             return s;
         }
         if let Some(s) = crate::screens::lists::make(kind, link, open.clone(), today) {
+            return s;
+        }
+        if let Some(s) = crate::screens::register::make(kind, link, open.clone(), today) {
             return s;
         }
         if let Some(s) = crate::screens::preferences::make(kind, link, open, prefs) {

@@ -1,0 +1,55 @@
+# Account register (P12 WP5) against `clientledger --demo`: Ctrl+G brings
+# the Operating Checking register up on the last 90 days, newest at the
+# bottom; the one-line toggle; a range change; the footer. The demo engine
+# supplies every row and balance (synthetic); the register adds nothing up.
+name: register
+description: Register view, one-line toggle, range change and footer.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+G
+  - assert_exists: {role: tab, label: Register · Operating Checking}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.account_class, equals: bank}
+  - assert_state: {key: screen.range, equals: last_90_days}
+  - assert_state: {key: screen.range_end, equals: "2026-11-04"}
+  - assert_state: {key: screen.balance_mode, equals: engine}
+  - assert_state: {key: screen.display_only, equals: false}
+  - assert_exists: {role: label, label: 1010 · Operating Checking}
+  - assert_exists: {label_contains: Bank account}
+  # Newest at the bottom, with the cursor on it.
+  - assert_state: {key: screen.focused, equals: true}
+  - assert_exists: {role: row, label_contains: "11/04/2026"}
+  - assert_no_clipping: {}
+  - screenshot: register
+
+  # --- One line (toolbar checkbox), then back to two lines -----------------
+  - click: {role: check_box, label: One line}
+  - assert_state: {key: screen.one_line, equals: true}
+  - assert_no_clipping: {}
+  - screenshot: one-line
+  - command: register.one_line
+  - assert_state: {key: screen.one_line, equals: false}
+
+  # --- Range: This month, then All dates -----------------------------------
+  - click: {role: combo_box, label: Show}
+  - click: {role: button, label_contains: This month}
+  - assert_state: {key: screen.range, equals: this_month}
+  - assert_state: {key: screen.range_start, equals: "2026-11-01"}
+  - assert_state: {key: screen.loaded, equals: true}
+  - screenshot: this-month
+  - click: {role: combo_box, label: Show}
+  - click: {role: button, label: All dates}
+  - assert_state: {key: screen.range, equals: all_dates}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.focused, equals: true}
+  # The oldest lines are in the closed period: locked and reconciled.
+  - key: Ctrl+Home
+  - assert_state: {key: screen.cursor_row, equals: 0}
+  - assert_exists: {role: row, label_contains: "Locked (closed period), Reconciled", index: 0}
+  - screenshot: all-dates
+  # Back to the default range so the next theme's run starts the same.
+  - click: {role: combo_box, label: Show}
+  - click: {role: button, label_contains: Last 90 days}
+  - assert_state: {key: screen.range, equals: last_90_days}
