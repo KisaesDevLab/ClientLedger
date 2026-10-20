@@ -78,7 +78,11 @@ impl WriteCheckScreen {
             .show(ui, |ui| {
                 if wide {
                     ui.horizontal_top(|ui| {
-                        let form_width = ui.available_width() - PANEL_WIDTH - 20.0;
+                        // The gap, and the spacing egui puts between the
+                        // three items, so the panel's right edge stays on
+                        // screen.
+                        let spacing = 2.0 * ui.spacing().item_spacing.x;
+                        let form_width = ui.available_width() - PANEL_WIDTH - 20.0 - spacing;
                         ui.vertical(|ui| {
                             ui.set_width(form_width);
                             self.form_ui(ui, &tokens);
@@ -122,8 +126,13 @@ impl WriteCheckScreen {
             }
             ui.add_enabled(false, egui::Button::new(t("check.print")))
                 .on_disabled_hover_text(t("check.print.later"));
-            ui.add_enabled(false, egui::Button::new(t("check.attach")))
-                .on_disabled_hover_text(t("check.attach.later"));
+            if ui
+                .add_enabled(!working, egui::Button::new(t("check.attach")))
+                .on_hover_text(t("check.attach.tip"))
+                .clicked()
+            {
+                self.attach.focus = true;
+            }
             if ui
                 .add_enabled(saved, egui::Button::new(t("check.history")))
                 .on_disabled_hover_text(t("check.history.saved_only"))
@@ -175,6 +184,79 @@ impl WriteCheckScreen {
         }
         if self.history.open {
             self.history_ui(ui, tokens);
+        }
+        if let Some(key) = self.suggest.hint {
+            form::hint(ui, tokens, &t(key));
+        }
+        if self.prefill.dropped {
+            form::hint(ui, tokens, &t("check.prefill.dropped"));
+        }
+        self.nav_prompt_ui(ui);
+        self.printed_prompt_ui(ui);
+    }
+
+    /// Prev/Next on unsaved changes: the standard question.
+    fn nav_prompt_ui(&mut self, ui: &mut Ui) {
+        if self.nav_prompt.is_none() {
+            return;
+        }
+        let mut answer = None;
+        let title = self.title_text();
+        egui::Window::new(t("window.prompt.title"))
+            .id(egui::Id::unique("write_check/nav_prompt"))
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .collapsible(false)
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.label(crate::windows::prompt_message(&title));
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if crate::widgets::primary_button(ui, &t("window.prompt.save")).clicked() {
+                        answer = Some(crate::windows::PromptAnswer::Save);
+                    }
+                    if ui.button(t("window.prompt.discard")).clicked() {
+                        answer = Some(crate::windows::PromptAnswer::Discard);
+                    }
+                    if ui.button(t("window.prompt.keep")).clicked() {
+                        answer = Some(crate::windows::PromptAnswer::Keep);
+                    }
+                });
+            });
+        if let Some(a) = answer {
+            self.answer_nav(a);
+        }
+    }
+
+    /// A printed check changed: Reprint / Keep number / Cancel.
+    fn printed_prompt_ui(&mut self, ui: &mut Ui) {
+        let Some(p) = self.printed else { return };
+        let mut answer: Option<Option<cl_api::PrintedCheckChange>> = None;
+        let text = match p.number {
+            Some(n) => t_with("check.printed.question", &[("number", &n.to_string())]),
+            None => t("check.printed.question_no_number"),
+        };
+        egui::Window::new(t("check.printed.title"))
+            .id(egui::Id::unique("write_check/printed_prompt"))
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .collapsible(false)
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.add(egui::Label::new(text).wrap());
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if crate::widgets::primary_button(ui, &t("check.printed.reprint")).clicked() {
+                        answer = Some(Some(cl_api::PrintedCheckChange::Reprint));
+                    }
+                    if ui.button(t("check.printed.keep")).clicked() {
+                        answer = Some(Some(cl_api::PrintedCheckChange::KeepNumber));
+                    }
+                    if ui.button(t("check.printed.cancel")).clicked() {
+                        answer = Some(None);
+                    }
+                });
+            });
+        if let Some(a) = answer {
+            self.answer_printed(a);
         }
     }
 
@@ -572,17 +654,21 @@ impl WriteCheckScreen {
         }
     }
 
-    /// A name was picked for Pay to the order of. WP7 hangs prefill and
-    /// the payee panel on this.
+    /// A name was picked for Pay to the order of: the address, prefill
+    /// (Q-191/Q-192) and the payee panel follow.
     pub(crate) fn pick_payee(&mut self, id: cl_core::ids::ContactId) {
         self.payee_list = false;
         self.inputs.payee_problem = false;
         let name = self.lists.name_text(id).unwrap_or_default().to_string();
         self.inputs.payee.clone_from(&name);
+        let same = self.header.current().payee == Some(id);
         self.header.edit(field::PAYEE, |h| {
             h.payee = Some(id);
             h.payee_name = name;
         });
+        if !same {
+            self.payee_picked(id);
+        }
         self.inputs.rev = self.header.revision();
     }
 
@@ -796,6 +882,8 @@ impl WriteCheckScreen {
         ui.add_enabled_ui(enabled, |ui| {
             let _ = self.lines.ui(ui);
         });
+        ui.add_space(4.0);
+        self.suggestions_ui(ui, tokens);
         if !self.line_billable() {
             form::hint(ui, tokens, &t("check.lines.billable_later"));
         }
@@ -971,6 +1059,10 @@ impl WriteCheckScreen {
                 self.toggle_history();
                 true
             }
+            "form.attach" => {
+                self.attach.focus = true;
+                true
+            }
             "check.print_later" => {
                 let on = !self.header.current().print_later;
                 if self.editing.is_none() || self.check_edit() {
@@ -1006,6 +1098,14 @@ impl WriteCheckScreen {
     /// its saved value; with nothing to revert the shell closes the window
     /// (asking first when the form is dirty).
     fn revert_field(&mut self) -> bool {
+        if self.nav_prompt.is_some() {
+            self.answer_nav(crate::windows::PromptAnswer::Keep);
+            return true;
+        }
+        if self.printed.is_some() {
+            self.answer_printed(None);
+            return true;
+        }
         if self.void.open {
             self.void = super::VoidPrompt::default();
             return true;

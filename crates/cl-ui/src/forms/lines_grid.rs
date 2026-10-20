@@ -255,6 +255,12 @@ pub struct LinesState<L> {
     tag_chips: bool,
     need_account: TextKey,
     snapshot: Option<FormLine>,
+    /// A suggested account per line (rule or AI): shown as a ghost value in
+    /// an empty Account cell, on a `warn.tint` row; Tab or Accept sets it.
+    /// Never an amount (non-negotiable 4).
+    suggested: std::collections::BTreeMap<RowKey, AccountId>,
+    /// Suggestions the owner accepted with Tab since the screen last asked.
+    accepted: Vec<(RowKey, AccountId)>,
 }
 
 struct View<'a, L> {
@@ -316,6 +322,9 @@ impl<L: LineLists> RowModel for View<'_, L> {
     }
     fn row_state(&self, index: usize) -> RowState {
         match self.lines().get(index) {
+            Some(l) if l.account.is_none() && self.a.suggested.contains_key(&l.key) => {
+                RowState::SUGGESTED
+            }
             Some(l) if index + 1 == self.lines().len() && l.is_blank() => RowState::ENTRY,
             _ => RowState::empty(),
         }
@@ -326,6 +335,15 @@ impl<L: LineLists> RowModel for View<'_, L> {
         };
         let lists = &*self.a.lists;
         match col {
+            L_ACCOUNT if l.account.is_none() => self
+                .a
+                .suggested
+                .get(&l.key)
+                .and_then(|a| lists.account_key(*a))
+                .map_or(CellValue::Empty, |id| CellValue::Suggested {
+                    id,
+                    display: lists.display(L::ACCOUNTS, id).unwrap_or(Cow::Borrowed("")),
+                }),
             L_ACCOUNT => picked(
                 lists,
                 L::ACCOUNTS,
@@ -406,12 +424,19 @@ impl<L: LineLists> EditableModel for View<'_, L> {
         &mut self,
         pos: CellPos,
         value: CellInput,
-        _source: Source,
+        source: Source,
     ) -> Result<(), CellProblem> {
         if self.a.locked.contains(&pos.col) {
             return Err(CellProblem::new(BAD_VALUE).at(pos.col));
         }
         let lists = Arc::clone(&self.a.lists);
+        if source == Source::SuggestionAccepted
+            && pos.col == L_ACCOUNT
+            && let CellInput::Ref(id) = &value
+            && let Some(account) = lists.account(*id)
+        {
+            self.a.accepted.push((pos.row, account));
+        }
         let keys = &mut self.a.keys;
         let mut problem = None;
         let applied = self.form.edit_step(|v| {
@@ -513,6 +538,8 @@ impl<L: LineLists + 'static> LinesGrid<L> {
                     tag_chips: spec.tags && spec.tag_chips,
                     need_account: spec.need_account,
                     snapshot: None,
+                    suggested: std::collections::BTreeMap::new(),
+                    accepted: Vec::new(),
                 },
                 grid,
                 t(spec.label),
@@ -564,6 +591,72 @@ impl<L: LineLists + 'static> LinesGrid<L> {
     /// Makes `cols` read-only (all others editable).
     pub fn set_locked(&mut self, cols: Vec<ColumnId>) {
         self.form.adapter_mut().locked = cols;
+    }
+
+    /// Shows `account` as the suggestion for line `key` (`None` removes it).
+    /// Only an empty Account cell shows it; the line keeps no account until
+    /// the owner accepts.
+    pub fn set_suggestion(&mut self, key: RowKey, account: Option<AccountId>) {
+        let s = &mut self.form.adapter_mut().suggested;
+        match account {
+            Some(a) => {
+                s.insert(key, a);
+            }
+            None => {
+                s.remove(&key);
+            }
+        }
+    }
+
+    /// Removes every suggestion.
+    pub fn clear_suggestions(&mut self) {
+        self.form.adapter_mut().suggested.clear();
+        self.form.adapter_mut().accepted.clear();
+    }
+
+    /// The suggestions still waiting for the owner: lines without an
+    /// account that have one.
+    #[must_use]
+    pub fn open_suggestions(&self) -> Vec<(RowKey, AccountId)> {
+        let a = self.form.adapter();
+        self.value()
+            .lines
+            .iter()
+            .filter(|l| l.account.is_none())
+            .filter_map(|l| a.suggested.get(&l.key).map(|s| (l.key, *s)))
+            .collect()
+    }
+
+    /// The owner clicked Accept: the suggestion becomes the line's account
+    /// (one undo step). False when there is none or the line has an account.
+    pub fn accept_suggestion(&mut self, key: RowKey) -> bool {
+        let Some(account) = self.form.adapter().suggested.get(&key).copied() else {
+            return false;
+        };
+        let applied = self.form.edit_step(|v| {
+            if let Some(l) = v
+                .lines
+                .iter_mut()
+                .find(|l| l.key == key && l.account.is_none())
+            {
+                l.account = Some(account);
+            }
+        });
+        if applied {
+            self.form.adapter_mut().accepted.push((key, account));
+        }
+        applied
+    }
+
+    /// The suggestions accepted (Tab or Accept) since the last call.
+    pub fn take_accepted(&mut self) -> Vec<(RowKey, AccountId)> {
+        std::mem::take(&mut self.form.adapter_mut().accepted)
+    }
+
+    /// The cursor's line and column, when the grid has one.
+    #[must_use]
+    pub fn cursor(&self) -> Option<CellPos> {
+        self.form.grid().core().cursor()
     }
 
     /// Puts the cursor on the first line's Account cell.

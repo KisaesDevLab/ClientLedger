@@ -366,6 +366,144 @@ impl UiStore {
     }
 }
 
+/// How often the owner accepted the same suggestion (Q-141): per company,
+/// payee, account and source (`rule`, `ai`). Enough repeats offer a local
+/// rule. Ids and counts only (no names or amounts); capped, in its own
+/// file next to the company list, so a bad entry drops only itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SuggestionAccepts {
+    /// Least recently counted first.
+    entries: Vec<(String, u32)>,
+}
+
+impl SuggestionAccepts {
+    /// The file in the settings folder.
+    pub const FILE: &'static str = "suggestion-accepts.json";
+    /// File format version.
+    pub const VERSION: u64 = 1;
+    /// Most entries kept; one more forgets the oldest.
+    pub const MAX_ENTRIES: usize = 500;
+    /// Longest key.
+    pub const MAX_KEY: usize = 160;
+
+    /// The key for one (company, payee, account, source).
+    #[must_use]
+    pub fn key(company: &str, payee: &str, account: &str, source: &str) -> String {
+        format!(
+            "{}/{}/{}/{}",
+            key_hash(company),
+            safe_name(payee),
+            safe_name(account),
+            safe_name(source)
+        )
+    }
+
+    fn key_ok(key: &str) -> bool {
+        !key.is_empty()
+            && key.len() <= Self::MAX_KEY
+            && key
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '/'))
+    }
+
+    /// Read the file's text; a malformed entry drops only itself.
+    #[must_use]
+    pub fn parse(text: &str) -> SuggestionAccepts {
+        let mut out = SuggestionAccepts::default();
+        let Ok(serde_json::Value::Object(root)) = serde_json::from_str::<serde_json::Value>(text)
+        else {
+            return out;
+        };
+        if root.get("version").and_then(serde_json::Value::as_u64) != Some(Self::VERSION) {
+            return out;
+        }
+        // A list of `[key, count]`, least recently counted first.
+        let Some(serde_json::Value::Array(list)) = root.get("accepts") else {
+            return out;
+        };
+        for pair in list {
+            if out.entries.len() >= Self::MAX_ENTRIES {
+                break;
+            }
+            let Some([key, value]) = pair.as_array().map(Vec::as_slice) else {
+                continue;
+            };
+            if let Some(key) = key.as_str().filter(|k| Self::key_ok(k))
+                && let Some(n) = value.as_u64().and_then(|n| u32::try_from(n).ok())
+                && !out.entries.iter().any(|(k, _)| k == key)
+            {
+                out.entries.push((key.to_string(), n));
+            }
+        }
+        out
+    }
+
+    /// The file's text.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let list: Vec<serde_json::Value> = self
+            .entries
+            .iter()
+            .map(|(k, n)| serde_json::json!([k, n]))
+            .collect();
+        serde_json::to_string_pretty(&serde_json::json!({
+            "version": Self::VERSION,
+            "accepts": list,
+        }))
+        .unwrap_or_default()
+    }
+
+    /// How often `key` was accepted.
+    #[must_use]
+    pub fn count(&self, key: &str) -> u32 {
+        self.entries
+            .iter()
+            .find(|(k, _)| k == key)
+            .map_or(0, |(_, n)| *n)
+    }
+
+    /// Counts one more accept; returns the new count (0 for a bad key).
+    pub fn bump(&mut self, key: &str) -> u32 {
+        if !Self::key_ok(key) {
+            return 0;
+        }
+        let n = self.count(key).saturating_add(1);
+        self.entries.retain(|(k, _)| k != key);
+        self.entries.push((key.to_string(), n));
+        while self.entries.len() > Self::MAX_ENTRIES {
+            self.entries.remove(0);
+        }
+        n
+    }
+
+    /// How many entries are kept.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// True when none is kept.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Load from `dir` (empty when missing, oversized or unreadable).
+    #[must_use]
+    pub fn load(dir: &Path) -> SuggestionAccepts {
+        read_capped(&dir.join(Self::FILE))
+            .map_or_else(SuggestionAccepts::default, |t| SuggestionAccepts::parse(&t))
+    }
+
+    /// Save into `dir`.
+    ///
+    /// # Errors
+    /// Any file error.
+    pub fn save(&self, dir: &Path) -> io::Result<()> {
+        write_atomic(&dir.join(Self::FILE), &self.to_text())
+    }
+}
+
 /// A 16-digit hex name for a company key (FNV-1a, 64 bit). Layout files are
 /// named by this hash, so no company id can influence a path, and two ids
 /// that `safe_name` would have merged get separate files.
@@ -681,5 +819,36 @@ mod tests {
         assert_eq!(safe_name("a1-b_2"), "a1-b_2");
         let store = UiStore::new("/x");
         assert!(store.layout_path("../a").starts_with("/x"));
+    }
+
+    #[test]
+    fn suggestion_accepts_count_round_trip_and_stay_capped() {
+        let mut book = SuggestionAccepts::default();
+        let key = SuggestionAccepts::key(
+            "d0000000-0000-4000-8000-000000000001",
+            "d0000000-0000-4000-8000-c00000000040",
+            "d0000000-0000-4000-8000-a00000005110",
+            "ai",
+        );
+        assert_eq!(book.bump(&key), 1);
+        assert_eq!(book.bump(&key), 2);
+        assert_eq!(book.bump("../bad key"), 0, "a bad key is not kept");
+        let back = SuggestionAccepts::parse(&book.to_text());
+        assert_eq!(back.count(&key), 2);
+        assert!(
+            !book
+                .to_text()
+                .contains("d0000000-0000-4000-8000-000000000001")
+        );
+        for n in 0..(SuggestionAccepts::MAX_ENTRIES + 10) {
+            book.bump(&format!("k/{n}"));
+        }
+        assert_eq!(book.len(), SuggestionAccepts::MAX_ENTRIES);
+        assert_eq!(book.count(&key), 0, "the oldest is forgotten");
+        assert!(SuggestionAccepts::parse("{\"version\":9}").is_empty());
+        let dir = temp_dir("accepts");
+        book.save(&dir).expect("save");
+        assert_eq!(SuggestionAccepts::load(&dir), book);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

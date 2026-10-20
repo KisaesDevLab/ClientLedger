@@ -8,7 +8,9 @@ use cl_model::forms::SaveIntent;
 use cl_model::forms::check::{CheckedCheck, check};
 use cl_model::forms::lines::{FormLine, PostingLine};
 
+use crate::company::Task;
 use crate::screens::company::form::SecretText;
+use cl_grid::RowKey;
 
 fn link() -> (tempfile::TempDir, Arc<CompanyLink>) {
     let dir = tempfile::tempdir().expect("tmp");
@@ -313,16 +315,369 @@ fn prev_opens_the_newest_check_and_void_frees_its_number() {
 }
 
 #[test]
-fn moving_away_from_unsaved_work_is_refused() {
+fn prev_on_unsaved_work_asks_save_discard_or_keep_editing() {
+    use crate::windows::PromptAnswer;
     let (_d, link) = link();
     let mut s = screen(&link);
     fill(&mut s, "10.00", &[("5110", "10.00")]);
+    // Keep editing: nothing moves, nothing is lost.
     s.navigate(true);
-    assert_eq!(s.save.notice, Some("check.nav.unsaved"));
+    assert_eq!(s.state()["nav_prompt"], true);
     assert_eq!(s.state()["mode"], "new");
+    s.answer_nav(PromptAnswer::Keep);
+    assert_eq!(s.state()["nav_prompt"], false);
+    assert!(s.is_dirty());
+    // Esc is Keep editing too.
+    s.navigate(true);
+    assert!(s.form_command(CommandId::new("form.revert")));
+    assert!(s.nav_prompt.is_none() && s.is_dirty());
+    // Save: the check is saved, then Prev opens the newest check (it).
+    let before = writes(&link);
+    s.navigate(true);
+    s.answer_nav(PromptAnswer::Save);
+    s.poll();
+    assert_eq!(writes(&link), before + 1);
+    assert_eq!(s.state()["saved_count"], 1);
+    assert_eq!(s.state()["mode"], "edit");
+    assert_eq!(s.state()["number"], 4418);
+    // Discard: the change is thrown away and Prev moves on.
+    s.header.edit_step(|h| h.memo = "changed".into());
+    s.navigate(true);
+    let before = writes(&link);
+    s.answer_nav(PromptAnswer::Discard);
+    s.poll();
+    assert_eq!(writes(&link), before, "nothing saved");
+    assert!(!s.is_dirty());
+    assert_eq!(s.state()["mode"], "edit");
+    assert_ne!(s.state()["number"], 4418, "moved to the next older check");
     s.clear();
     assert!(!s.is_dirty());
     assert_eq!(s.state()["last_action"], "clear");
+}
+
+#[test]
+fn picking_the_payee_copies_the_last_check_but_never_an_amount() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.amount_typed(Some(money("1286.40")));
+    let payee = contact(&s, "Ozark Feed & Seed");
+    s.pick_payee(payee);
+    s.poll();
+    let st = s.state();
+    assert_eq!(st["prefill"]["applied"], true);
+    assert_eq!(st["prefill"]["source"], "last");
+    let f = s.compose();
+    let used: Vec<_> = f.lines.used().collect();
+    assert_eq!(
+        used.iter().map(|l| l.account).collect::<Vec<_>>(),
+        [Some(account(&s, "5100")), Some(account(&s, "5110"))]
+    );
+    assert!(
+        used.iter().all(|l| l.amount.is_none()),
+        "amounts stay blank"
+    );
+    assert_eq!(
+        f.amount,
+        Some(money("1286.40")),
+        "the check amount is not touched"
+    );
+    assert!(used[0].customer.is_some(), "the job's customer is copied");
+    assert!(used.iter().all(|l| l.tag.is_some()), "line tags are copied");
+    assert!(f.address.contains("1200 Commerce Dr"), "{:?}", f.address);
+    assert_eq!(s.focus, Some(Field::Amount));
+    assert!(!f.memo.is_empty(), "the memo is copied");
+}
+
+#[test]
+fn prefill_waits_for_an_untouched_check_and_a_new_one() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    // A typed line: the payee pick copies nothing.
+    let key = s.lines.form_mut().adapter_mut().keys.next_key();
+    s.lines.form_mut().edit_step(|v| {
+        v.lines = vec![FormLine {
+            memo: "mine".into(),
+            ..FormLine::blank(key)
+        }];
+    });
+    s.pick_payee(contact(&s, "Ozark Feed & Seed"));
+    s.poll();
+    assert_eq!(s.state()["prefill"]["applied"], false);
+    assert_eq!(s.compose().lines.used().count(), 1);
+    // A saved check never prefills.
+    let (_d2, link2) = self::link();
+    let mut s = screen(&link2);
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.navigate(true);
+    s.poll();
+    assert_eq!(s.state()["mode"], "edit");
+    s.pick_payee(contact(&s, "Galena Gravel"));
+    s.poll();
+    assert_eq!(s.state()["prefill"]["applied"], false);
+}
+
+#[test]
+fn without_history_the_vendor_default_account_fills_the_first_line() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let galena = contact(&s, "Galena Gravel");
+    s.header.edit_step(|h| h.payee = Some(galena));
+    s.prefill.task = Some((
+        galena,
+        Task::ready(prefill::PrefillData {
+            last: None,
+            suggest: None,
+        }),
+    ));
+    s.poll();
+    assert_eq!(s.state()["prefill"]["source"], "default");
+    let f = s.compose();
+    let first = f.lines.used().next().expect("a line");
+    assert_eq!(first.account, Some(account(&s, "5200")));
+    assert_eq!(first.amount, None);
+}
+
+#[test]
+fn the_panel_shows_the_open_bill_and_recent_checks_and_never_blocks_the_save() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "1286.40", &[("5100", "842.15"), ("5110", "444.25")]);
+    s.poll();
+    let st = s.state();
+    assert_eq!(st["panel"]["open_bills"], 1);
+    assert_eq!(st["panel"]["bill_warning"], true);
+    assert_eq!(st["panel"]["recent_checks"], json!([4401, 4392, 4380]));
+    let summary = s.panel.summary.as_ref().and_then(panel::Card::ready);
+    assert_eq!(summary.map(|v| v.total_owed), Some(money("1286.40")));
+    let note = panel::bill_note(
+        summary,
+        s.panel
+            .bills
+            .as_ref()
+            .and_then(panel::Card::ready)
+            .map(Vec::as_slice),
+        s.money_style,
+    );
+    assert_eq!(
+        note.as_deref(),
+        Some(
+            "You have an open bill from this vendor for 1,286.40, due 11/05. Pay it in Pay Bills so the bill closes."
+        )
+    );
+    // Q-248: the note never stops the save.
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    assert_eq!(s.state()["saved_count"], 1);
+}
+
+#[test]
+fn several_open_bills_give_the_count_and_the_engines_total() {
+    let bill = |id: &str, owed: &str| -> cl_api::OpenBill {
+        serde_json::from_value(json!({
+            "id": id, "txnDate": "2026-10-01", "dueDate": "2026-11-05", "balanceDue": owed,
+        }))
+        .expect("bill")
+    };
+    let bills = [
+        bill("7c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a18", "100.00"),
+        bill("7c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a19", "50.10"),
+    ];
+    let summary: cl_api::VendorSummary = serde_json::from_value(json!({
+        "unpaidCount": 2, "totalOwed": "150.10", "overdueCount": 0, "totalOverdue": "0",
+    }))
+    .expect("summary");
+    assert_eq!(
+        panel::bill_note(Some(&summary), Some(&bills), cl_core::MoneyStyle::default()).as_deref(),
+        Some(
+            "You have 2 open bills from this vendor for 150.10. Pay them in Pay Bills so the bills close."
+        )
+    );
+    assert_eq!(
+        panel::bill_note(Some(&summary), Some(&[]), cl_core::MoneyStyle::default()).map(|_| ()),
+        Some(()),
+        "the summary alone still warns"
+    );
+    let none: cl_api::VendorSummary = serde_json::from_value(json!({
+        "unpaidCount": 0, "totalOwed": "0", "overdueCount": 0, "totalOverdue": "0",
+    }))
+    .expect("summary");
+    assert_eq!(
+        panel::bill_note(Some(&none), Some(&[]), cl_core::MoneyStyle::default()),
+        None
+    );
+}
+
+/// Ozark Feed & Seed and one line with `memo`, `amount` and no account.
+fn unassigned_line(s: &mut WriteCheckScreen, memo: &str, amount: &str) -> RowKey {
+    s.pick_payee(contact(s, "Ozark Feed & Seed"));
+    s.poll();
+    s.amount_typed(Some(money(amount)));
+    let key = s.lines.form_mut().adapter_mut().keys.next_key();
+    let entry = s.lines.form_mut().adapter_mut().keys.next_key();
+    let line = FormLine {
+        memo: memo.into(),
+        amount: Some(money(amount)),
+        ..FormLine::blank(key)
+    };
+    s.lines
+        .form_mut()
+        .edit_step(|v| v.lines = vec![line, FormLine::blank(entry)]);
+    key
+}
+
+#[test]
+fn an_ai_suggestion_is_a_ghost_until_the_owner_accepts_it() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let key = unassigned_line(&mut s, "Hardwood mulch", "100.00");
+    s.maybe_suggest();
+    s.poll();
+    assert_eq!(s.state()["ai"]["chip"], true);
+    assert_eq!(s.lines.open_suggestions(), [(key, account(&s, "5110"))]);
+    // The ghost is not the line's account: the save is refused, nothing sent.
+    assert_eq!(s.lines.value().lines[0].account, None);
+    let before = writes(&link);
+    assert!(!s.start_save(SaveIntent::SaveAndNew, None));
+    assert_eq!(s.state()["save"]["refused"], "line_account_missing");
+    assert_eq!(writes(&link), before);
+    // The amount was never touched.
+    assert_eq!(s.lines.value().lines[0].amount, Some(money("100.00")));
+    // Accept sets it.
+    s.accept_suggestion(key);
+    assert_eq!(s.lines.value().lines[0].account, Some(account(&s, "5110")));
+    assert_eq!(s.state()["ai"]["accepted"], 1);
+    assert_eq!(s.state()["ai"]["chip"], false);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+}
+
+#[test]
+fn with_ai_off_nothing_is_asked_and_no_chip_shows() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    link.demo_state().expect("demo").ai.categorization = false;
+    unassigned_line(&mut s, "Hardwood mulch", "100.00");
+    s.maybe_suggest();
+    s.poll();
+    assert_eq!(s.state()["ai"]["chip"], false);
+    assert_eq!(link.demo_state().expect("demo").checks.ai_requests, 0);
+    // A rule still answers offline, before any AI.
+    link.demo_state().expect("demo").ai.categorization = true;
+    let plants = account(&s, "5100");
+    link.demo_state()
+        .expect("demo")
+        .checks
+        .rules
+        .push(crate::company::demo::checks::DemoRule {
+            name: "Mulch to plants".into(),
+            contains: "mulch".into(),
+            account: plants,
+        });
+    let key = unassigned_line(&mut s, "More mulch", "20.00");
+    s.maybe_suggest();
+    s.poll();
+    assert_eq!(s.state()["ai"]["rule"], true);
+    assert_eq!(s.state()["ai"]["chip"], false);
+    assert_eq!(s.lines.open_suggestions(), [(key, plants)]);
+    assert_eq!(link.demo_state().expect("demo").checks.ai_requests, 0);
+}
+
+#[test]
+fn accepts_are_counted_locally_per_payee_and_account() {
+    let (dir, link) = link();
+    let tenant = TenantId::parse("d0000000-0000-4000-8000-000000000001").expect("id");
+    let mut s = WriteCheckScreen::new(Arc::clone(&link), Some((tenant, "Ozark".into())), today());
+    s.poll();
+    let key = unassigned_line(&mut s, "Hardwood mulch", "100.00");
+    s.maybe_suggest();
+    s.poll();
+    s.accept_suggestion(key);
+    let settings = dir.path().join("settings");
+    let book = crate::prefs::SuggestionAccepts::load(&settings);
+    let payee = contact(&s, "Ozark Feed & Seed");
+    assert_eq!(
+        book.count(&crate::prefs::SuggestionAccepts::key(
+            &tenant.to_string(),
+            &payee.to_string(),
+            &account(&s, "5110").to_string(),
+            "ai",
+        )),
+        1
+    );
+}
+
+#[test]
+fn a_receipt_rides_on_the_first_save_and_bad_files_are_never_sent() {
+    let (dir, link) = link();
+    let mut s = screen(&link);
+    // Not a PDF or image: refused here.
+    let text = dir.path().join("notes.txt");
+    std::fs::write(&text, b"hello").expect("write");
+    s.attach_path(&text);
+    assert_eq!(s.attach.problem, Some("check.attach.wrong_type"));
+    assert!(s.header.current().draft_attachment.is_none());
+    let missing = dir.path().join("missing.pdf");
+    s.attach_path(&missing);
+    assert_eq!(s.attach.problem, Some("check.attach.not_found"));
+    // A PDF: uploaded as a draft, listed, carried on the create.
+    let pdf = dir.path().join("receipt.pdf");
+    std::fs::write(&pdf, b"%PDF-1.4\n%synthetic\n").expect("write");
+    s.attach_path(&pdf);
+    assert_eq!(s.attach.problem, None);
+    assert!(s.header.current().draft_attachment.is_some());
+    assert_eq!(s.state()["attachments"]["count"], 1);
+    // One file before the first save.
+    s.attach_path(&pdf);
+    assert_eq!(s.attach.problem, Some("check.attach.one_before_save"));
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    assert_eq!(s.state()["attachments"]["count"], 0, "a new check");
+    // The saved check has it; more files attach directly.
+    s.navigate(true);
+    s.poll();
+    assert_eq!(s.state()["mode"], "edit");
+    assert_eq!(s.state()["attachments"]["count"], 1);
+    s.attach_path(&pdf);
+    assert_eq!(s.state()["attachments"]["count"], 2);
+}
+
+#[test]
+fn a_printed_check_edit_asks_reprint_or_keep_the_number() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.navigate(true);
+    s.poll();
+    let id = s.editing.as_ref().map(|e| e.id).expect("editing");
+    assert!(crate::company::demo::checks::mark_printed(
+        &mut link.demo_state().expect("demo"),
+        id
+    ));
+    // Change the printed amount (and its line).
+    s.amount_typed(Some(money("12.00")));
+    let before = writes(&link);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(s.state()["printed_prompt"], true);
+    assert_eq!(s.printed.and_then(|p| p.number), Some(4418));
+    assert!(s.is_dirty(), "nothing changed; the owner's edit stays");
+    // Cancel: nothing saved.
+    s.answer_printed(None);
+    assert_eq!(s.state()["printed_prompt"], false);
+    assert_eq!(writes(&link), before + 1, "only the refused request");
+    // Keep number: saved as a handwritten check with its number.
+    assert!(!s.start_save(SaveIntent::Save, None));
+    s.answer_printed(Some(cl_api::PrintedCheckChange::KeepNumber));
+    assert_eq!(s.state()["last_saved"]["print_status"], "hand_written");
+    assert_eq!(s.state()["last_saved"]["number"], 4418);
+    // Reprint: back to the print queue without a number.
+    assert!(crate::company::demo::checks::mark_printed(
+        &mut link.demo_state().expect("demo"),
+        id
+    ));
+    s.amount_typed(Some(money("13.00")));
+    assert!(!s.start_save(SaveIntent::Save, None));
+    s.answer_printed(Some(cl_api::PrintedCheckChange::Reprint));
+    assert_eq!(s.state()["last_saved"]["print_status"], "queue");
 }
 
 #[test]
