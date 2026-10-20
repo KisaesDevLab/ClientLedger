@@ -90,8 +90,8 @@ pub(crate) fn entity_of(e: cl_api::EntityType) -> Entity {
     }
 }
 
-/// The demo company's equity roles: the sample's own owner accounts (3200
-/// Owner Draws, 3100 Owner Contributions) stand in for the engine's role
+/// The demo company's equity roles: the sample's own owner accounts (30170
+/// Owner's Draw, 30160 Owner's Contribution) stand in for the engine's role
 /// accounts of a single-member LLC until the demo engine twin
 /// (`company::demo::money`) answers `equity-roles-v1` itself.
 pub(crate) fn demo_roles(chart: &[Account]) -> BTreeMap<Role, AccountId> {
@@ -102,8 +102,8 @@ pub(crate) fn demo_roles(chart: &[Account]) -> BTreeMap<Role, AccountId> {
             .map(|a| a.id)
     };
     [
-        (Role::OwnerDraw, by_number("3200")),
-        (Role::OwnerContribution, by_number("3100")),
+        (Role::OwnerDraw, by_number("30170")),
+        (Role::OwnerContribution, by_number("30160")),
     ]
     .into_iter()
     .filter_map(|(r, a)| a.map(|a| (r, a)))

@@ -847,7 +847,7 @@ mod tests {
         // and its owner equity accounts: starter charts have none (the
         // engine seeds them by entity type, U-56), but the sample's history
         // posts to them.
-        let story = ["5090", "5100", "5110", "3100", "3200"];
+        let story = ["5090", "5100", "5110", "30160", "30170"];
         let template = StarterChart::GeneralService.template();
         for a in &s.company.accounts {
             let in_chart = template.accounts.iter().find(|t| t.number == a.number);

@@ -26,11 +26,11 @@ fn a_single_member_llc_pays_itself_from_owner_draws() {
     assert_eq!(st["entity_type"], "single_member_llc");
     assert_eq!(st["note"], "owner_money.note.owner");
     assert_eq!(st["equity_source"], "engine");
-    let draws = s.books.by_number("3200").expect("3200");
+    let draws = s.books.by_number("30170").expect("30170");
     assert_eq!(
         s.header.current().equity,
         Some(draws),
-        "Recorded in: Owner Draws"
+        "Recorded in: Owner's Draw"
     );
     type_amount(&mut s, "500.00");
     let mut register = link.bus().subscribe();
@@ -38,7 +38,7 @@ fn a_single_member_llc_pays_itself_from_owner_draws() {
     assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
     assert_eq!(posted(&link), before + 1);
     let (_, lines) = lines_of(&link, s.flow.last.expect("saved").id);
-    assert!(lines.contains(&("3200".into(), money("500.00"), Money::ZERO)));
+    assert!(lines.contains(&("30170".into(), money("500.00"), Money::ZERO)));
     assert!(lines.contains(&("1010".into(), Money::ZERO, money("500.00"))));
     let heard = link.bus().take(&mut register);
     assert!(heard.ledger_touches(draws));
@@ -50,14 +50,14 @@ fn putting_money_in_deposits_from_owner_contributions() {
     let (_d, link) = link();
     let mut s = screen(&link);
     s.set_direction(Direction::PutMoneyIn);
-    let contributions = s.books.by_number("3100").expect("3100");
+    let contributions = s.books.by_number("30160").expect("30160");
     assert_eq!(s.header.current().equity, Some(contributions));
     type_amount(&mut s, "1000.00");
     assert!(s.start_save(SaveIntent::Save, None));
     let (kind, lines) = lines_of(&link, s.flow.last.expect("saved").id);
     assert_eq!(kind, cl_api::TxnType::Deposit);
     assert!(lines.contains(&("1010".into(), money("1000.00"), Money::ZERO)));
-    assert!(lines.contains(&("3100".into(), Money::ZERO, money("1000.00"))));
+    assert!(lines.contains(&("30160".into(), Money::ZERO, money("1000.00"))));
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn defaults_for_every_entity_type_and_the_remembered_choice() {
     let (_d, link) = link();
     let mut s = screen(&link);
     let a = |n: &str| s.books.by_number(n).expect("account");
-    let (c3100, c3200) = (a("3100"), a("3200"));
+    let (c30160, c30170) = (a("30160"), a("30170"));
     // The engine's roles for each type (as `equity-roles-v1` gives them).
     for (entity, out, inn) in [
         (Entity::SoleProp, Role::OwnerDraw, Role::OwnerContribution),
@@ -91,15 +91,15 @@ fn defaults_for_every_entity_type_and_the_remembered_choice() {
         ),
     ] {
         s.books.entity = Some(entity);
-        s.books.roles = [(out, c3200), (inn, c3100)].into();
+        s.books.roles = [(out, c30170), (inn, c30160)].into();
         assert_eq!(
             s.default_equity(Direction::PayYourself),
-            Some((c3200, EquitySource::Engine)),
+            Some((c30170, EquitySource::Engine)),
             "{entity:?}"
         );
         assert_eq!(
             s.default_equity(Direction::PutMoneyIn),
-            Some((c3100, EquitySource::Engine)),
+            Some((c30160, EquitySource::Engine)),
             "{entity:?}"
         );
         assert_ne!(s.note_key(), "owner_money.note.unknown");
@@ -108,16 +108,16 @@ fn defaults_for_every_entity_type_and_the_remembered_choice() {
     s.books.roles.clear();
     s.books.roles_supported = false;
     assert_eq!(s.default_equity(Direction::PayYourself), None);
-    s.set_equity(c3100);
+    s.set_equity(c30160);
     assert_eq!(
         s.default_equity(Direction::PayYourself),
-        Some((c3100, EquitySource::Remembered))
+        Some((c30160, EquitySource::Remembered))
     );
     let mut again = screen(&link);
     again.books.roles.clear();
     assert_eq!(
         again.default_equity(Direction::PayYourself),
-        Some((c3100, EquitySource::Remembered)),
+        Some((c30160, EquitySource::Remembered)),
         "a new window starts on the remembered account"
     );
 }

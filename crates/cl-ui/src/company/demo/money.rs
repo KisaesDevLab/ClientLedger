@@ -3,8 +3,8 @@
 //! `equity-roles-v1`) and vendor refunds (`vendor-refund-v1`). Synthetic.
 //!
 //! It plays the engine's part for `--demo` only: the roles are the chart's
-//! equity accounts tagged by role (the sample's Owner Contributions 3100
-//! and Owner Draws 3200 carry `owner_contribution` and `owner_draw`), and
+//! equity accounts tagged by role (the sample's Owner's Contribution 30160
+//! and Owner's Draw 30170 carry `owner_contribution` and `owner_draw`), and
 //! changing the entity type seeds the new type's roles the way the engine
 //! does (adopt an untagged account with a known name or number, else
 //! create one). A vendor refund is a deposit with a vendor-credit source
@@ -75,13 +75,13 @@ impl EquityRole {
     }
 }
 
-/// The role of a sample chart account (its own Owner Contributions and
-/// Owner Draws, which its history posts to).
+/// The role of a sample chart account (its own Owner's Contribution and
+/// Owner's Draw, which its history posts to).
 #[must_use]
 pub fn sample_equity_role(number: &str) -> Option<EquityRole> {
     match number {
-        "3100" => Some(EquityRole::OwnerContribution),
-        "3200" => Some(EquityRole::OwnerDraw),
+        "30160" => Some(EquityRole::OwnerContribution),
+        "30170" => Some(EquityRole::OwnerDraw),
         _ => None,
     }
 }
@@ -458,11 +458,11 @@ mod tests {
         assert_eq!(roles.roles.len(), 7);
         assert_eq!(
             roles.account(EquityRole::OwnerDraw),
-            Some(super::super::account_id(3200))
+            Some(super::super::account_id(30170))
         );
         assert_eq!(
             roles.account(EquityRole::OwnerContribution),
-            Some(super::super::account_id(3100))
+            Some(super::super::account_id(30160))
         );
         assert_eq!(
             roles.account(EquityRole::RetainedEarnings),

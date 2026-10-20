@@ -288,7 +288,7 @@ pub const DEMO_ACCOUNTS: [(&str, &str, &str); 8] = [
     ("2200", "Vehicle and Equipment Loans", "liability"),
     ("1500", "Equipment", "asset"),
     ("1510", "Vehicles", "asset"),
-    ("3100", "Owner Contributions", "equity"),
+    ("30160", "Owner's Contribution", "equity"),
     ("2300", "Line of Credit", "liability"),
 ];
 

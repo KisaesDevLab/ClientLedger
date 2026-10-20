@@ -366,6 +366,10 @@ fn main() -> std::process::ExitCode {
             contract_lifecycle::year_boundary_retained_earnings,
         ),
         (
+            "lifecycle::sample_chart_has_one_account_per_equity_role",
+            contract_lifecycle::sample_chart_has_one_account_per_equity_role,
+        ),
+        (
             "lifecycle::closing_password_u15",
             contract_lifecycle::closing_password_u15,
         ),

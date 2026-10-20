@@ -46,18 +46,18 @@ fn a_single_member_llc_defaults_to_money_put_in_and_posts_from_3100() {
         t("personal_funds.default.smllc"),
         "Default for a single-member LLC"
     );
-    let c3100 = s.books.by_number("3100").expect("3100");
-    assert_eq!(s.header.current().offset, Some(c3100));
+    let c30160 = s.books.by_number("30160").expect("30160");
+    assert_eq!(s.header.current().offset, Some(c30160));
     fill(&mut s, "42.18", &[("6250", "42.18")]);
     let mut register = link.bus().subscribe();
     let before = posted(&link);
     assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
     assert_eq!(posted(&link), before + 1);
     let (_, lines) = lines_of(&link, s.flow.last.expect("saved").id);
-    assert!(lines.contains(&("3100".into(), Money::ZERO, money("42.18"))));
+    assert!(lines.contains(&("30160".into(), Money::ZERO, money("42.18"))));
     assert!(lines.contains(&("6250".into(), money("42.18"), Money::ZERO)));
     assert!(
-        link.bus().take(&mut register).ledger_touches(c3100),
+        link.bus().take(&mut register).ledger_touches(c30160),
         "the open 3100 register reloads"
     );
 }
@@ -66,7 +66,7 @@ fn a_single_member_llc_defaults_to_money_put_in_and_posts_from_3100() {
 fn defaults_for_all_five_entity_types() {
     let (_d, link) = link();
     let mut s = screen(&link);
-    let c3100 = s.books.by_number("3100").expect("3100");
+    let c30160 = s.books.by_number("30160").expect("30160");
     for (entity, want) in [
         (Entity::SoleProp, Treatment::PutIn),
         (Entity::SingleMemberLlc, Treatment::PutIn),
@@ -75,7 +75,7 @@ fn defaults_for_all_five_entity_types() {
         (Entity::CCorp, Treatment::PayBack),
     ] {
         s.books.entity = Some(entity);
-        s.books.roles = [(Role::OwnerContribution, c3100)].into();
+        s.books.roles = [(Role::OwnerContribution, c30160)].into();
         assert_eq!(default_treatment(Some(entity)), want, "{entity:?}");
         assert_ne!(default_label(Some(entity)), default_label(None));
         let st = s.state_json();

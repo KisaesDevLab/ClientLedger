@@ -688,7 +688,7 @@ mod tests {
         assert_eq!(create(&mut state, &d, None), Err(invalid()));
         let mut d = grouped(&mut state, &waiting[..1]);
         d.cash_back = Some(CashBack {
-            account: super::super::account_id(3200),
+            account: super::super::account_id(30170),
             amount: m("1250.00"),
             memo: None,
         });
@@ -729,7 +729,7 @@ mod tests {
         );
         d.deductions = vec![plain_line(6250, "12.50")];
         d.cash_back = Some(CashBack {
-            account: super::super::account_id(3200),
+            account: super::super::account_id(30170),
             amount: m("50.00"),
             memo: None,
         });
@@ -738,7 +738,7 @@ mod tests {
         assert_eq!(rec.total, m("237.50"));
         assert_eq!(
             rec.cash_back,
-            Some((super::super::account_id(3200), m("50.00")))
+            Some((super::super::account_id(30170), m("50.00")))
         );
         let t = state
             .ledger
@@ -757,7 +757,7 @@ mod tests {
             vec![
                 ("1010", m("237.50")),
                 ("6250", m("12.50")),
-                ("3200", m("50.00"))
+                ("30170", m("50.00"))
             ]
         );
     }

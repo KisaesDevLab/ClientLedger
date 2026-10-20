@@ -175,8 +175,8 @@ const ACCOUNTS: &[(&str, &str, &str, &str)] = &[
         "liability",
         "long_term_liability",
     ),
-    ("3100", "Owner Contributions", "equity", ""),
-    ("3200", "Owner Draws", "equity", ""),
+    ("30160", "Owner's Contribution", "equity", ""),
+    ("30170", "Owner's Draw", "equity", ""),
     ("4000", "Service Income", "revenue", ""),
     ("5000", "Subcontractors", "cogs", ""),
     ("5090", "Materials", "cogs", ""),
@@ -796,7 +796,7 @@ fn generate() -> Fixture {
                 number: format!("{check_no}"),
                 contact: Some("Kurt (owner)".into()),
                 memo: "Owner draw".into(),
-                lines: vec![line("3200", 350_000, 0), line("1010", 0, 350_000)],
+                lines: vec![line("30170", 350_000, 0), line("1010", 0, 350_000)],
                 due: None,
                 cleared: d <= cleared_cut,
                 attachment: false,
@@ -932,7 +932,7 @@ fn generate() -> Fixture {
             number: format!("DEP-{pad}"),
             contact: Some("Kurt (owner)".into()),
             memo: "Owner contribution to savings".into(),
-            lines: vec![line("1020", 5000, 0), line("3100", 0, 5000)],
+            lines: vec![line("1020", 5000, 0), line("30160", 0, 5000)],
             due: None,
             cleared: false,
             attachment: false,
@@ -1169,7 +1169,7 @@ fn push_equity_plug(txns: &mut Vec<Txn>, date: Day, diff: i64, cleared: bool, ch
             "deposit",
             format!("DEP-OWN-{}", date.text()),
             "Owner contribution",
-            vec![line("1010", diff, 0), line("3100", 0, diff)],
+            vec![line("1010", diff, 0), line("30160", 0, diff)],
         )
     } else {
         *check_no += 1;
@@ -1177,7 +1177,7 @@ fn push_equity_plug(txns: &mut Vec<Txn>, date: Day, diff: i64, cleared: bool, ch
             "check",
             format!("{check_no}"),
             "Owner draw",
-            vec![line("3200", -diff, 0), line("1010", 0, -diff)],
+            vec![line("30170", -diff, 0), line("1010", 0, -diff)],
         )
     };
     txns.push(Txn {

@@ -38,14 +38,14 @@
     },
     {
       "detail": null,
-      "name": "Owner Contributions",
-      "number": "3100",
+      "name": "Owner's Contribution",
+      "number": "30160",
       "type": "equity"
     },
     {
       "detail": null,
-      "name": "Owner Draws",
-      "number": "3200",
+      "name": "Owner's Draw",
+      "number": "30170",
       "type": "equity"
     },
     {
