@@ -117,6 +117,7 @@ pub fn spec(one_line: bool, class: AccountClass, balance: BalanceMode) -> GridSp
         money(COL_PAYMENT, labels.payment, 110),
         Column {
             align: Align::Center,
+            kind: CellKind::Mark,
             help: Some(TextKey("register.col.mark_help")),
             ..column(COL_MARK, "register.col.mark", Line::First, 40)
         },
