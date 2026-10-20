@@ -146,4 +146,10 @@ pub use resources::payments::Payments;
 pub use resources::feed::Feed;
 
 // P14 lane B: daily sales.
-pub use resources::daily_sales::DailySales;
+pub use resources::daily_sales::{
+    DAILY_LABEL_MAX_CHARS, DAILY_NAME_MAX_CHARS, DAILY_NOTES_MAX_CHARS, DailyEntry,
+    DailyEntryDraft, DailyEntryQuery, DailyEntrySummary, DailyLine, DailyLineInput,
+    DailyPostOptions, DailyPreview, DailySales, DailyTemplate, DailyTotals, DailyValue,
+    EntryStatus, MAX_DAILY_LINES, MAX_DAILY_VALUES, NormalSide, Preset, Section, entry_from_json,
+    preview_from_json, template_from_json,
+};
