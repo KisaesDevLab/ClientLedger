@@ -5,7 +5,8 @@
 //! Every figure is one the engine reported: the cleared and ending balances
 //! from `GET /accounts/{id}/register/summary` (R4), else the unfiltered
 //! `endingBalance` of a register page, else (an engine without either) the
-//! account's stored balance when the range reaches today. When a filter is
+//! account's stored balance when the range is "All dates" (the stored
+//! balance counts every posted line, future-dated ones too). When a filter is
 //! on before R1 a companion one-line page without filters supplies the
 //! ending balance. Nothing here is ever added up (non-negotiable 7); a
 //! figure that is missing shows "—". The register figures are shown as
@@ -221,16 +222,20 @@ impl RegisterScreen {
     pub(super) fn footer_shown(&self) -> Shown {
         let f = &self.footer;
         let s = f.summary.as_ref();
-        let reaches_today = self.query.as_ref().is_some_and(|q| q.end >= self.today);
+        // The stored balance counts every posted line, future-dated ones
+        // too: it is the ending balance only of an "All dates" range.
+        let all_dates = self
+            .query
+            .as_ref()
+            .is_some_and(|q| q.end >= CalendarDate::max());
         let ending = s
             .and_then(|s| s.ending_balance.as_ref())
             .or(f.page_ending.as_ref())
             .and_then(|a| self.amount_text(a, BalanceSource::Register))
-            // An engine without R1/R4: the account's stored balance, which
-            // counts every posted line, stands in only when the range
-            // reaches today.
+            // An engine without R1/R4: the account's stored balance stands
+            // in only for "All dates".
             .or_else(|| {
-                s.filter(|_| reaches_today).and_then(|s| {
+                s.filter(|_| all_dates).and_then(|s| {
                     self.amount_text(&s.current_balance, BalanceSource::AccountBalance)
                 })
             })

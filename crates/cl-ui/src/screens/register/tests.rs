@@ -510,16 +510,27 @@ fn the_footer_falls_back_only_to_engine_figures() {
     s.footer.page_ending = None;
     let shown = s.footer_shown();
     assert!(shown.cleared.is_none());
-    let current = crate::screens::lists::center::model::layout_plain(
-        &sum.current_balance.display(false).expect("display"),
-        s.model.style,
-    );
-    assert_eq!(shown.ending, current, "range reaches today: stored balance");
-    // A range that ends before today has no engine figure: a dash.
+    // The default range reaches today, but the stored balance also counts
+    // future-dated lines: no engine figure for this range, a dash.
+    assert_eq!(shown.ending, "\u{2014}", "last 90 days: no fallback");
+    // A range that ends before today: a dash too.
     if let Some(q) = s.query.as_mut() {
         q.end = CalendarDate::from_ymd(2026, 10, 1).expect("date");
     }
     assert_eq!(s.footer_shown().ending, "\u{2014}");
+    // "All dates": the stored balance is the ending balance.
+    if let Some(q) = s.query.as_mut() {
+        q.end = CalendarDate::max();
+    }
+    let current = crate::screens::lists::center::model::layout_plain(
+        &sum.current_balance.display(false).expect("display"),
+        s.model.style,
+    );
+    assert_eq!(
+        s.footer_shown().ending,
+        current,
+        "all dates: stored balance"
+    );
     // A failed summary shows a dash and never blocks the register.
     s.footer.summary = None;
     s.footer.summary_failed = true;
