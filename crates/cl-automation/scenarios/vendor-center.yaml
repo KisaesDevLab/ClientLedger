@@ -1,5 +1,5 @@
 # Vendor center (P11 steps 2-3) against `clientledger --demo`: the list
-# with a contact that is also a client, a vendor's details (what you owe
+# with a contact that is also a customer, a vendor's details (what you owe
 # from the vendor aging report, default expense account, 1099 tracking, the
 # tax ID shown masked, W-9 on file), the edit form's 1099 section, and a
 # keyboard-only create of a duplicate vendor that is then merged into the
@@ -16,7 +16,7 @@ steps:
   - assert_state: {key: screen.loaded, equals: true}
   - assert_state: {key: screen.balances_loaded, equals: true}
   - assert_state: {key: screen.focused, equals: true}
-  - assert_exists: {role: row, label_contains: "Blue Eye Feed Co, Client and vendor"}
+  - assert_exists: {role: row, label_contains: "Blue Eye Feed Co, Customer and vendor"}
   - assert_exists: {role: row, label_contains: "Galena Gravel"}
   - assert_not_exists: {role: row, label_contains: "Riverbend HOA"}
   - assert_no_clipping:

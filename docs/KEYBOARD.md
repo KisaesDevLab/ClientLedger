@@ -109,7 +109,7 @@ Find these from the menus or with `Ctrl+K`.
 - **File:** New Company, Close Company, Back Up Company, Restore a Backup, Make Portable Copy, Export All Data, Full Database Backup (Utilities), Delete Company
 - **Edit:** Void Transaction
 - **Lists:** Item List, Tags, Terms, Payment Methods, Import or Export a List
-- **Clients:** Clients & Jobs, Credit Memo or Refund, Statements
+- **Customers:** Customers & Jobs, Credit Memo or Refund, Statements
 - **Vendors:** Vendors
 - **Banking:** Import Bank File, Bank Feed
 - **Payroll:** Import Payroll

@@ -94,7 +94,7 @@ impl Menu {
             Menu::File => "File",
             Menu::Edit => "Edit",
             Menu::Lists => "Lists",
-            Menu::Clients => "Clients",
+            Menu::Clients => "Customers",
             Menu::Vendors => "Vendors",
             Menu::Banking => "Banking",
             Menu::Payroll => "Payroll",
@@ -270,7 +270,7 @@ pub const COMMANDS: &[Command] = &[
     // Register windows (P12; Ctrl+F, Ctrl+E, Ctrl+D and Ctrl+Shift+Q above apply too)
     cmd("register.one_line", "One-Line Display", None, 4, None, Scope::Window),
     // Clients
-    built("clients.center", "Clients & Jobs", Some(Menu::Clients), 0, None),
+    built("clients.center", "Customers & Jobs", Some(Menu::Clients), 0, None),
     screen("clients.create_invoice", "Create Invoice", Some(Menu::Clients), 1, ctrl('I'), "P20"),
     screen("clients.receive_payment", "Receive Payment", Some(Menu::Clients), 1, ctrl('R'), "P21"),
     screen("clients.sales_receipt", "Sales Receipt", Some(Menu::Clients), 1, ctrl_shift('R'), "P14"),

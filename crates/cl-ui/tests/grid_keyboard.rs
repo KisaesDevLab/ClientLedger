@@ -417,7 +417,7 @@ fn batched_frame_preserves_order_in_the_shell() {
     assert_eq!(rig.money("Amount", 1), Some(money("842.15")));
     assert_eq!(rig.cell("Memo", 1), "Perennials");
     assert!(!rig.cell("Service date", 1).is_empty(), "`t` is today");
-    assert!(rig.cell("Client:Job", 1).contains("Fall"));
+    assert!(rig.cell("Customer:Job", 1).contains("Fall"));
 }
 
 /// T3, first half: text and Alt+N in the same frame save the typed amount.

@@ -5,7 +5,7 @@
 #[rustfmt::skip]
 pub const ENGLISH: &[(&str, &str)] = &[
     ("csv.list.accounts", "Chart of Accounts"),
-    ("csv.list.contacts", "Clients and vendors"),
+    ("csv.list.contacts", "Customers and vendors"),
     ("csv.list.items", "Items"),
     ("csv.list.tags", "Tags"),
     ("csv.field.account_number", "Account number"),
@@ -61,7 +61,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("csv.col.sample", "First row"),
     ("csv.column_n", "Column {n}"),
     ("csv.role_label", "Add them as"),
-    ("csv.role.client", "Clients"),
+    ("csv.role.client", "Customers"),
     ("csv.role.vendor", "Vendors"),
     ("csv.role.both", "Both"),
     ("csv.contacts_fields_note", "Addresses, notes and tax IDs can't be imported yet; add them on each contact."),

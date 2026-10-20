@@ -35,7 +35,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("items.include_inactive", "Include inactive"),
     ("items.grid_label", "Items"),
     ("items.count", "{shown} of {total} items shown"),
-    ("items.price_levels_later", "Price levels (a different price for some clients) aren't available yet."),
+    ("items.price_levels_later", "Price levels (a different price for some customers) aren't available yet."),
     ("items.finish_first", "Save or cancel the item you are changing first."),
     ("items.select_first", "Select an item first."),
     ("items.saved", "Item saved."),

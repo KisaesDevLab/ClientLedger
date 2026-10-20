@@ -22,7 +22,7 @@
 
 - `Ctrl+A` Chart of Accounts
 
-**Clients**
+**Customers**
 
 - `Ctrl+I` Create Invoice
 - `Ctrl+R` Receive Payment

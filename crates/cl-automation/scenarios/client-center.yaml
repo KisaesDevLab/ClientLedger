@@ -1,10 +1,10 @@
-# Client center (P11 steps 2-3) against `clientledger --demo`: the list
-# with a client that is also a vendor, the detail pane (open balance from
-# the client balance report, recent transactions, Jobs and Notes tabs that
+# Customer center (P11 steps 2-3) against `clientledger --demo`: the list
+# with a customer that is also a vendor, the detail pane (open balance from
+# the customer balance report, recent transactions, Jobs and Notes tabs that
 # say what isn't available yet), Include inactive, QuickReport, and a
 # keyboard-only create (a used name refused), edit with Esc revert, and
 # make inactive. The demo data is synthetic; balances are the demo
-# engine's report figures, never added up by the app. The new client is
+# engine's report figures, never added up by the app. The new customer is
 # left inactive at the end so the dark run can create it again.
 name: client-center
 description: List, both roles, detail tabs, QuickReport, keyboard create/edit/inactivate.
@@ -12,23 +12,23 @@ steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
   - command: clients.center
-  - assert_exists: {role: tab, label: Clients & Jobs}
+  - assert_exists: {role: tab, label: Customers & Jobs}
   - assert_state: {key: screen.screen, equals: client_center}
   - assert_state: {key: screen.loaded, equals: true}
   - assert_state: {key: screen.balances_loaded, equals: true}
   - assert_state: {key: screen.jobs_available, equals: false}
   - assert_state: {key: screen.focused, equals: true}
-  - assert_exists: {role: row, label_contains: "Blue Eye Feed Co, Client and vendor"}
+  - assert_exists: {role: row, label_contains: "Blue Eye Feed Co, Customer and vendor"}
   - assert_not_exists: {role: row, label_contains: "Galena Gravel"}
   - assert_no_clipping: {}
   - screenshot: center
 
-  # Typing in the list jumps to the client; the pane follows.
+  # Typing in the list jumps to the customer; the pane follows.
   - type: {text: Riverbend}
   - assert_state: {key: screen.detail_loaded, equals: true}
   - assert_state: {key: screen.history_rows, equals: 10}
   - assert_exists: {role: label, label: Riverbend HOA}
-  - assert_exists: {label_contains: "From the client balance report"}
+  - assert_exists: {label_contains: "From the customer balance report"}
   - assert_exists: {label_contains: "One ship-to address for now"}
   - screenshot: details
 
@@ -58,14 +58,14 @@ steps:
   - click: {role: tab, label: Notes}
   - assert_exists: {label_contains: "Gate code at the clubhouse"}
   - assert_exists: {label_contains: "to-dos aren't available yet"}
-  - assert_exists: {label_contains: "Attaching files to a client or vendor"}
+  - assert_exists: {label_contains: "Attaching files to a customer or vendor"}
   - click: {role: tab, label: Details}
   - assert_state: {key: screen.tab, equals: details}
 
   # --- Keyboard-only create (Ctrl+N); a used name is refused ------------------
   - key: Ctrl+N
   - assert_state: {key: screen.panel, equals: new}
-  - assert_exists: {role: label, label: New client}
+  - assert_exists: {role: label, label: New customer}
   - type: {text: Riverbend HOA}
   - assert_state: {key: screen.dirty, equals: true}
   - key: Alt+S
@@ -90,7 +90,7 @@ steps:
   # --- Keyboard-only edit (Ctrl+E): Esc reverts, then closes ------------------
   - key: Ctrl+E
   - assert_state: {key: screen.panel, equals: edit}
-  - assert_exists: {role: label, label: Edit client}
+  - assert_exists: {role: label, label: Edit customer}
   - key: End
   - type: {text: " East"}
   - assert_state: {key: screen.dirty, equals: true}
@@ -116,4 +116,4 @@ steps:
   - key: Ctrl+Shift+H
   - assert_state: {key: screen.show_inactive, equals: false}
   - key: Escape
-  - assert_not_exists: {role: tab, label: Clients & Jobs}
+  - assert_not_exists: {role: tab, label: Customers & Jobs}
