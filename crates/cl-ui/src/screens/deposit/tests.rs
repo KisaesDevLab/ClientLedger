@@ -1,0 +1,417 @@
+//! Make Deposit without an engine: the demo engine and a test double that
+//! plays the P14 engine (pending payments, groupings, the 409).
+
+use std::sync::{Arc, Mutex};
+
+use cl_api::{
+    ApiError, BankPosting, DepositCaps, DepositDraft, ErrorCode, FeedDeposit, FeedGrouping,
+    FeedGroupings, FeedItemId, PendingDeposits, PendingPayment, RecordVersion, RegisterAmount,
+    Transaction, UserText, Versioned,
+};
+use cl_core::ids::{AccountId, TransactionId};
+use cl_core::{CalendarDate, Money, Secret};
+use cl_model::forms::SaveIntent;
+use cl_model::forms::deposit::{CashBackForm, check};
+use cl_model::forms::lines::FormLine;
+
+use super::*;
+use crate::company::CompanyLink;
+
+fn money(s: &str) -> Money {
+    Money::parse_wire(s).expect("money")
+}
+
+fn account(n: u32) -> AccountId {
+    crate::company::demo::account_id(n)
+}
+
+fn today() -> CalendarDate {
+    CalendarDate::from_ymd(2026, 11, 4).expect("date")
+}
+
+fn txn(n: u8) -> TransactionId {
+    TransactionId::parse(&format!("5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a{n:02}")).expect("id")
+}
+
+fn payment(n: u8, name: &str, amount: &str) -> PendingPayment {
+    PendingPayment {
+        source: txn(n),
+        txn_type: "customer_payment".into(),
+        date: today(),
+        received_from: Some(name.into()),
+        contact: None,
+        ref_no: None,
+        method: Some("check".into()),
+        memo: None,
+        amount: RegisterAmount::Exact(money(amount)),
+    }
+}
+
+#[derive(Default)]
+struct Log {
+    saved: Vec<DepositDraft>,
+    /// The next save answers 409 ALREADY_DEPOSITED.
+    conflict_next: bool,
+    /// What pending answers.
+    pending: Vec<PendingPayment>,
+    record: Option<Transaction>,
+}
+
+/// The P14 engine as a test double: everything the shapes file promises.
+struct Fake(Arc<Mutex<Log>>, DepositCaps);
+
+impl Fake {
+    fn new(caps: DepositCaps) -> (Fake, Arc<Mutex<Log>>) {
+        let log = Arc::new(Mutex::new(Log {
+            pending: vec![
+                payment(1, "Hollister Family Trust", "1250.00"),
+                payment(2, "Maple Street HOA", "842.50"),
+            ],
+            ..Log::default()
+        }));
+        (Fake(Arc::clone(&log), caps), log)
+    }
+}
+
+fn all_caps() -> DepositCaps {
+    DepositCaps {
+        grouping: true,
+        cashback: true,
+        vendor_refund: true,
+    }
+}
+
+impl LocalDeposits for Fake {
+    fn caps(&self) -> DepositCaps {
+        self.1
+    }
+    fn feed_groupings(&self) -> bool {
+        true
+    }
+    fn pending(&mut self, _link: &CompanyLink) -> Result<PendingDeposits, ApiError> {
+        let log = self.0.lock().expect("log");
+        Ok(PendingDeposits {
+            exact: true,
+            clearing_balance: RegisterAmount::Exact(money("2092.50")),
+            items: log.pending.clone(),
+        })
+    }
+    fn waiting(&mut self, _link: &CompanyLink) -> Vec<FeedDeposit> {
+        vec![FeedDeposit {
+            id: FeedItemId::parse("7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
+            date: today(),
+            amount: money("2092.50"),
+            description: None,
+            account_name: None,
+        }]
+    }
+    fn groupings(
+        &mut self,
+        _link: &CompanyLink,
+        _id: FeedItemId,
+    ) -> Result<FeedGroupings, ApiError> {
+        let log = self.0.lock().expect("log");
+        Ok(FeedGroupings {
+            target: money("2092.50"),
+            candidates: vec![FeedGrouping {
+                items: log.pending.clone(),
+            }],
+            truncated: false,
+        })
+    }
+    fn save(
+        &mut self,
+        _link: &CompanyLink,
+        draft: &DepositDraft,
+        _edit: Option<(TransactionId, RecordVersion)>,
+        _password: Option<&Secret>,
+    ) -> Result<Saved, ApiError> {
+        let mut log = self.0.lock().expect("log");
+        if std::mem::take(&mut log.conflict_next) {
+            // Another window deposited Maple Street HOA meanwhile.
+            log.pending.retain(|p| p.source != txn(2));
+            return Err(ApiError::Conflict {
+                reason: cl_api::ConflictReason::Unspecified,
+                current_version: None,
+                code: ErrorCode::parse(cl_api::ALREADY_DEPOSITED),
+                message: UserText::default(),
+            });
+        }
+        log.saved.push(draft.clone());
+        let picked: Vec<_> = draft.payments.iter().map(|p| p.source).collect();
+        log.pending.retain(|p| !picked.contains(&p.source));
+        Ok(Saved {
+            id: txn(99),
+            version: RecordVersion::Fingerprint([0; 32]),
+            date: draft.date,
+            clearing_negative: false,
+        })
+    }
+    fn get(
+        &mut self,
+        _link: &CompanyLink,
+        _id: TransactionId,
+    ) -> Result<Versioned<Transaction>, ApiError> {
+        let log = self.0.lock().expect("log");
+        let record = log
+            .record
+            .clone()
+            .ok_or(ApiError::NotFound { code: None })?;
+        Ok(Versioned {
+            record,
+            version: RecordVersion::Fingerprint([1; 32]),
+        })
+    }
+    fn list(&mut self, _link: &CompanyLink, _account: AccountId) -> Vec<DepositRow> {
+        Vec::new()
+    }
+    fn void(
+        &mut self,
+        _link: &CompanyLink,
+        _id: TransactionId,
+        _password: Option<&Secret>,
+    ) -> Result<(), ApiError> {
+        Ok(())
+    }
+    fn balance(&mut self, _link: &CompanyLink, _account: AccountId) -> Option<Money> {
+        Some(money("10000.00"))
+    }
+}
+
+fn screen(caps: DepositCaps) -> (DepositScreen, Arc<Mutex<Log>>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let (fake, log) = Fake::new(caps);
+    let s = DepositScreen::with_local(link, None, today(), Some(Box::new(fake)));
+    (s, log, dir)
+}
+
+fn set_lines(s: &mut DepositScreen, lines: &[(u32, &str)]) {
+    let keys = &mut s.lines.form_mut().adapter_mut().keys;
+    let mut seeded: Vec<FormLine> = lines
+        .iter()
+        .map(|(n, amount)| FormLine {
+            account: Some(account(*n)),
+            amount: Some(money(amount)),
+            ..FormLine::blank(keys.next_key())
+        })
+        .collect();
+    seeded.push(FormLine::blank(keys.next_key()));
+    s.lines.form_mut().edit_step(|v| v.lines = seeded);
+}
+
+fn set_cash_back(s: &mut DepositScreen, n: u32, amount: &str) {
+    s.header.edit_step(|h| {
+        h.cash_back = CashBackForm {
+            account: Some(account(n)),
+            amount: Some(money(amount)),
+            memo: String::new(),
+        };
+    });
+    s.sync_inputs();
+}
+
+#[test]
+fn the_form_opens_on_the_operating_account_with_the_payments_waiting() {
+    let (s, _log, _dir) = screen(all_caps());
+    assert!(s.loaded);
+    assert_eq!(s.account(), Some(account(1010)));
+    assert_eq!(
+        s.panel.balance,
+        Some(money("10000.00")),
+        "the engine's balance"
+    );
+    let v = s.state_json();
+    assert_eq!(v["screen"], "deposit");
+    assert_eq!(v["pending"]["count"], 2);
+    assert_eq!(v["pending"]["clearing_balance"], "2092.50");
+    assert_eq!(v["waiting"], 1);
+    let text = v.to_string();
+    assert!(
+        !text.contains("Hollister") && !text.contains("Maple"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_bank_deposit_click_ticks_the_engines_grouping_and_the_save_publishes() {
+    let (mut s, log, _dir) = screen(all_caps());
+    let fd = s.panel.waiting[0].clone();
+    s.choose_feed(fd);
+    assert_eq!(s.header.current().picked.len(), 2, "both payments ticked");
+    assert!(!s.is_dirty() || s.save.count == 0);
+    let v = s.state_json();
+    assert_eq!(v["totals"]["total"], "2,092.50");
+    assert_eq!(v["bank_match"], "matches");
+    let mut bus = s.link.bus().subscribe();
+    assert!(s.start_save(SaveIntent::Save, None));
+    let saved = log.lock().expect("log").saved.clone();
+    assert_eq!(saved.len(), 1);
+    let d = &saved[0];
+    assert_eq!(d.total(), Some(money("2092.50")));
+    assert_eq!(d.payments.len(), 2);
+    let clearing = s.clearing().expect("payments clearing");
+    assert!(d.payments.iter().all(|p| p.account == clearing));
+    assert_eq!(
+        d.payments.iter().map(|p| p.amount).collect::<Vec<_>>(),
+        [money("1250.00"), money("842.50")],
+        "the engine's exact amounts"
+    );
+    // Q-262: the bank and Payments Clearing reload elsewhere.
+    let heard = s.link.bus().take(&mut bus);
+    assert!(heard.ledger_touches(account(1010)));
+    assert!(heard.ledger_touches(clearing));
+    assert_eq!(s.save.count, 1);
+    // Nothing left waiting after the save.
+    assert_eq!(s.state_json()["pending"]["count"], 0);
+}
+
+#[test]
+fn a_payment_deposited_elsewhere_is_dropped_and_nothing_posts() {
+    let (mut s, log, _dir) = screen(all_caps());
+    s.select_all();
+    log.lock().expect("log").conflict_next = true;
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(log.lock().expect("log").saved.len(), 0, "nothing posted");
+    assert_eq!(s.save.notice, Some("deposit.already_deposited"));
+    assert_eq!(
+        s.header.current().picked.len(),
+        1,
+        "the stale pick is dropped"
+    );
+    assert_eq!(s.header.current().picked[0].source, txn(1));
+    // The owner saves again: only Hollister goes.
+    assert!(s.start_save(SaveIntent::Save, None));
+    assert_eq!(
+        log.lock().expect("log").saved[0].total(),
+        Some(money("1250.00"))
+    );
+}
+
+#[test]
+fn fees_and_cash_back_post_exactly_and_too_much_cash_back_sends_nothing() {
+    let (mut s, log, _dir) = screen(all_caps());
+    set_lines(&mut s, &[(4000, "300.00"), (6250, "-12.50")]);
+    set_cash_back(&mut s, 1020, "50.00");
+    assert_eq!(s.state_json()["totals"]["total"], "237.50");
+    set_cash_back(&mut s, 1020, "400.00");
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(s.state_json()["save"]["refused"], "cash_back_too_large");
+    assert_eq!(log.lock().expect("log").saved.len(), 0);
+    set_cash_back(&mut s, 1020, "50.00");
+    assert!(s.start_save(SaveIntent::Save, None));
+    let d = log.lock().expect("log").saved[0].clone();
+    assert_eq!(d.total(), Some(money("237.50")));
+    assert_eq!(d.deductions.len(), 1);
+    assert_eq!(d.deductions[0].amount, money("12.50"));
+    assert!(BankPosting::deposit_with(d, all_caps()).is_ok());
+    let published = s.save.published.clone();
+    for n in [1010, 4000, 6250, 1020] {
+        assert!(published.contains(&account(n)), "{n}");
+    }
+}
+
+#[test]
+fn a_fee_without_the_capability_is_refused_locally() {
+    let (mut s, log, _dir) = screen(DepositCaps::default());
+    set_lines(&mut s, &[(4000, "100.00"), (6250, "-5.00")]);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(s.state_json()["save"]["refused"], "negative_needs_update");
+    assert_eq!(log.lock().expect("log").saved.len(), 0);
+    // Plain lines still save.
+    set_lines(&mut s, &[(4000, "100.00")]);
+    assert!(s.start_save(SaveIntent::Save, None));
+    assert_eq!(log.lock().expect("log").saved.len(), 1);
+}
+
+fn grouped_record() -> Transaction {
+    #[derive(serde::Deserialize)]
+    struct W {
+        transaction: Transaction,
+    }
+    let body = include_str!("../../../../../fixtures/engine/deposit-grouped-fees.json");
+    let mut t = serde_json::from_str::<W>(body).expect("txn").transaction;
+    // The fixture's bank account is the demo's 1010 here.
+    let bank = t.lines[0].account_id;
+    for l in &mut t.lines {
+        if l.account_id == bank {
+            l.account_id = account(1010);
+        }
+    }
+    t
+}
+
+#[test]
+fn a_grouped_deposit_is_read_only_and_its_summary_is_the_engines_total() {
+    let (mut s, log, _dir) = screen(all_caps());
+    let record = grouped_record();
+    let id = record.id;
+    log.lock().expect("log").record = Some(record);
+    assert!(s.open_record(id));
+    let v = s.state_json();
+    assert_eq!(v["read_only"], true);
+    assert_eq!(v["grouped"], true);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(s.save.notice, Some("deposit.read_only.grouped"));
+    let summary = s.summary().expect("summary");
+    assert_eq!(summary.total, money("1487.50"));
+    assert_eq!(Some(summary.total), s.record.as_ref().map(|r| r.total));
+    assert!(summary.parts_agree());
+    // Void stays open to it.
+    assert!(s.start_void());
+    assert!(s.void.open);
+    s.send_void("returned to waiting", None);
+    assert_eq!(s.save.last_action, Some("void"));
+}
+
+#[test]
+fn the_draft_total_is_the_checked_total() {
+    let (mut s, _log, _dir) = screen(all_caps());
+    s.select_all();
+    set_lines(&mut s, &[(4000, "10.01"), (6250, "-0.01")]);
+    let control = s.control_accounts();
+    let c = check(&s.compose(), &s.context(&control)).expect("ok");
+    let d = to_draft(&c, s.clearing()).expect("draft");
+    assert_eq!(d.total(), Some(c.total));
+    assert_eq!(c.total, money("2102.50"));
+    // Cash back to Payments Clearing is refused before sending.
+    let clearing = s.clearing().expect("clearing");
+    s.header.edit_step(|h| {
+        h.cash_back = CashBackForm {
+            account: Some(clearing),
+            amount: Some(money("1")),
+            memo: String::new(),
+        };
+    });
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(
+        s.state_json()["save"]["refused"],
+        "cash_back_to_control_account"
+    );
+}
+
+#[test]
+fn the_demo_saves_a_plain_deposit_and_reads_it_back() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let mut s = DepositScreen::new(Arc::clone(&link), None, today());
+    assert_eq!(s.state_json()["pending"]["count"], 0, "the empty state");
+    set_lines(&mut s, &[(4000, "300.00"), (6250, "-12.50")]);
+    set_cash_back(&mut s, 1020, "50.00");
+    assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.save.error);
+    assert_eq!(s.save.count, 1);
+    let rows = DemoDeposits.list(&link, account(1010));
+    let row = rows.first().expect("the deposit");
+    assert_eq!(row.total, Some(money("237.50")));
+    let got = DemoDeposits.get(&link, row.id).expect("get");
+    let r = cl_api::DepositRecord::from_transaction(got.record, account(1010)).expect("record");
+    assert_eq!(r.total, money("237.50"));
+    // The demo ledger keeps no line roles (WP-D.3): its cash back reads
+    // back as a second debit line; the total is exact either way.
+    assert_eq!(r.lines.len(), 3);
+    assert!(r.lines.iter().any(|l| l.amount == money("-12.50")));
+    // Prev opens it, plain and editable.
+    s.navigate(true);
+    assert_eq!(s.state_json()["mode"], "edit");
+    assert_eq!(s.state_json()["read_only"], false);
+}
