@@ -259,6 +259,7 @@ Answers from the owner after P11. They replace the defaults named below; later p
 | Q-242 | Suggest the next check number in the register entry row? | **Yes**: for a Check, propose the next number after the highest check in the account; the owner can overwrite it (confirms Q-P12q). | P12 entry row, P13 Write Check |
 | Q-243 | Who merges engine (Vibe-MyBooks) pull requests? | **The orchestrator merges** each engine PR itself once its security review is clean (Blocking/High findings fixed) and the engine repo's CI passes, in migration order, then bumps ClientLedger's engine pin in a normal PR. Replaces the owner-review step of Q-29 for engine PRs; the owner can still review any PR before it merges. | Engine PRs #151, #152, #153 and later; pin bumps |
 | Q-244 | Should the owner (super admin) see every company on this computer in Open Company, even without an access row? | **Yes, show all** companies to the owner/super admin on a desktop install. | Engine `GET /api/v1/tenants` (E5a), P08 Open Company |
+| Q-245 | Which transaction types can be deleted (engine R7)? | Default (engine agent's call, owner may change): only journal entries, checks/expenses, transfers, deposits and sales receipts. Invoices, bills and payments are refused (`TXN_DELETE_UNSUPPORTED`) and deposits that group payments are refused (`TXN_DELETE_LINKED`), because deleting them would leave linked records inconsistent; those are voided instead. | P12 Delete, P17–P21 forms |
 
 ## Open
 
