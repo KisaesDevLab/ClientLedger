@@ -14,6 +14,21 @@ import into MyBooks Online.
 
 **Status:** under construction (pre-beta). See `STATE.md` and `PHASES.md`.
 
+## Trying a preview build
+
+Unsigned preview builds for testing are made automatically each time a phase
+merges to `main`, and on demand. In the repository's **Actions** tab open the
+**preview** workflow, pick a run, and download the archive for your system from
+**Artifacts** (Windows `.zip`, macOS Apple silicon and Intel `.zip`, Linux
+`.tar.gz`, each with a `.sha256` file). Artifacts are kept for 30 days. Unpack
+the folder and follow `README-PREVIEW.txt` inside it.
+
+Preview builds are **not signed**: Windows SmartScreen and macOS Gatekeeper warn
+about an unknown developer, and `README-PREVIEW.txt` explains how to open them.
+They are for trying the app only; do not keep real books in them. Developers can
+build the same archive locally with `cargo xtask preview`. Signed installers
+come later (phase P35).
+
 ## Licensing
 
 - ClientLedger code: MIT, see [LICENSE](LICENSE).

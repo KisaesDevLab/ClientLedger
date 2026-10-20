@@ -5760,6 +5760,7 @@ dependencies = [
  "anyhow",
  "cargo_metadata",
  "cl-model",
+ "flate2",
  "liblzma",
  "proc-macro2",
  "serde_json",
