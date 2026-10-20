@@ -49,7 +49,7 @@ When two scopes use the same keys, the innermost one wins: a form beats a window
 | `Ctrl+N` | New List Entry | `list.new` |
 | `Ctrl+Shift+I` | Make Inactive or Active Again | `list.toggle_active` |
 | `Ctrl+Shift+H` | Include Inactive Entries | `list.show_inactive` |
-| `Ctrl+Shift+Q` | QuickReport | `list.quick_report` |
+| `Ctrl+Shift+Q` | Account or Transaction Report | `list.quick_report` |
 | `Ctrl+Shift+O` | Move Window to Its Own Window | `window.pop_out` |
 
 ## In a form or grid

@@ -74,7 +74,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lists.accounts.edit", "Edit account"),
     ("lists.accounts.make_inactive", "Make inactive"),
     ("lists.accounts.make_active", "Make active again"),
-    ("lists.accounts.quick_report", "QuickReport"),
+    ("lists.accounts.quick_report", "Account Report"),
     ("lists.accounts.find", "Find an account"),
     ("lists.accounts.include_inactive", "Include inactive"),
     ("lists.accounts.count", "{shown} of {total} accounts shown"),
@@ -108,7 +108,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lists.accounts.form.cancel", "Cancel"),
     ("orphan.account_save", "saving an account"),
     // Quick report
-    ("lists.qr.title", "QuickReport: {account}"),
+    ("lists.qr.title", "Account Report: {account}"),
     ("lists.qr.this_year", "This year to date"),
     ("lists.qr.all_dates", "All dates"),
     ("lists.qr.close", "Close report"),

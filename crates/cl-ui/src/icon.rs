@@ -1,9 +1,9 @@
-//! The application icon (Q-122: option 1 until the owner picks).
+//! The application icon: option 1, chosen by the owner (Q-122, Q-257).
 //!
 //! Option 1 is a teal rounded square (the accent colour) holding three white
 //! ledger rows of different lengths and one amber mark, drawn here from a few
 //! rounded rectangles so there is no image file to bundle and the window icon
-//! always matches `assets/icon/option-1.svg`. Options 2 and 3 are drafts in
+//! always matches `assets/icon/option-1.svg`. Options 2 and 3 are unused drafts in
 //! `assets/icon/` only. All three are original; none uses any other product's
 //! artwork.
 

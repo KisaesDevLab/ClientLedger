@@ -1,4 +1,4 @@
-//! English text for contacts and the Client and Vendor centers (P11 steps
+//! English text for contacts and the Customers & Jobs and Vendors lists (P11 steps
 //! 2-3).
 
 /// The contacts' part of the English catalog.
@@ -27,14 +27,14 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("contacts.problem.expense_account_invalid", "That expense account is gone or isn't an expense account. Pick another one."),
     ("contacts.problem.vendor_account_too_long", "That account number is too long. Keep it under 50 characters."),
     ("contacts.problem.tax_id_invalid", "A tax ID has nine digits, like 12-3456789 or 123-45-6789. Check it, or leave it blank."),
-    // Client and Vendor centers (screens/lists/center.rs)
+    // Customers & Jobs and Vendors lists (screens/lists/center.rs)
     ("center.loading", "Loading the list\u{2026}"),
     ("center.new_client", "New customer"),
     ("center.new_vendor", "New vendor"),
     ("center.edit", "Edit"),
     ("center.make_inactive", "Make inactive"),
     ("center.make_active", "Make active again"),
-    ("center.quick_report", "QuickReport"),
+    ("center.quick_report", "Transaction Report"),
     ("center.merge", "Merge\u{2026}"),
     ("center.find_client", "Find a customer"),
     ("center.find_vendor", "Find a vendor"),
@@ -143,7 +143,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("center.form.roles", "Roles"),
     ("center.form.is_client", "Customer"),
     ("center.form.is_vendor", "Vendor"),
-    ("center.form.both_hint", "Listed in both the Customer center and the Vendor center."),
+    ("center.form.both_hint", "Listed in both Customers & Jobs and Vendors."),
     ("center.form.needs_role", "Keep at least one role: customer, vendor or both."),
     ("center.form.terms", "Terms"),
     ("center.form.no_terms", "No default terms"),

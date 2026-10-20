@@ -1,10 +1,10 @@
 # Chart of Accounts (P11 step 1) against `clientledger --demo`: Ctrl+A
 # opens it; hierarchy and inactive filter; keyboard-only create, edit and
-# make inactive / active again; a used number refused; QuickReport; Esc
+# make inactive / active again; a used number refused; Account Report; Esc
 # closes the panel, then the window. The demo chart is synthetic; balances
 # are the demo engine's own figures, never added up by the app.
 name: chart-of-accounts
-description: Hierarchy, filter, keyboard create/edit/inactivate, used number, QuickReport.
+description: Hierarchy, filter, keyboard create/edit/inactivate, used number, Account Report.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -100,11 +100,12 @@ steps:
   - key: Ctrl+Shift+I
   - assert_state: {key: screen.warning, equals: cant_deactivate_balance}
 
-  # --- QuickReport (Ctrl+Shift+Q) --------------------------------------------
+  # --- Account Report (Ctrl+Shift+Q) --------------------------------------------
+  - assert_exists: {role: button, label_contains: "Account Report"}
   - key: Ctrl+Shift+Q
   - assert_state: {key: screen.panel, equals: report}
   - assert_state: {key: screen.report_loaded, equals: true}
-  - assert_exists: {label_contains: "QuickReport: 1010"}
+  - assert_exists: {label_contains: "Account Report: 1010"}
   - assert_exists: {label_contains: "Balance in your books"}
   - click: {role: radio_button, label: All dates}
   - assert_state: {key: screen.report_loaded, equals: true}

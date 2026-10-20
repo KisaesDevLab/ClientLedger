@@ -25,8 +25,8 @@
 | P12 | Bank and account register | H | Done 2026-10-19 (AC1 register part, password path and delete live since pin 5c8e9665; R5 PENDING by `register-cleared-v1`; reviews pending) |
 | P13 | Write Check | M | Done 2026-10-20 |
 | P14 | Deposits, transfers, sales receipts, card charges, owner and loan helpers | M | Next |
-| P15 | Journal entries, memorized and recurring | H | |
-| P15A | Batch Enter Transactions | M | |
+| P15 | Journal entries, templates and recurring | H | |
+| P15A | Bulk Entry | M | |
 | P16 | Home workspace | L | |
 | P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | |
 | P18 | Pay Bills (checks) | M | |

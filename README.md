@@ -59,3 +59,10 @@ These cannot be set from the repository and are applied by the owner:
 - Enable "Allow auto-merge" so approved-by-CI pull requests merge themselves.
 - Enable secret scanning and push protection.
 - Turn on Issues and Discussions.
+
+## Trademarks
+
+QuickBooks and Intuit are trademarks of Intuit Inc. ClientLedger is an
+independent project and is not affiliated with, endorsed by, or sponsored by
+Intuit Inc. QuickBooks is mentioned only to describe import and migration
+features. Other product names are trademarks of their owners.

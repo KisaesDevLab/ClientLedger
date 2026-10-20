@@ -1,4 +1,4 @@
-# Vendor center (P11 steps 2-3) against `clientledger --demo`: the list
+# Vendors list (P11 steps 2-3) against `clientledger --demo`: the list
 # with a contact that is also a customer, a vendor's details (what you owe
 # from the vendor aging report, default expense account, 1099 tracking, the
 # tax ID shown masked, W-9 on file), the edit form's 1099 section, and a

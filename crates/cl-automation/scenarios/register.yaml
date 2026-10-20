@@ -212,16 +212,17 @@ steps:
   - assert_state: {key: screen.screen, equals: register}
   - assert_exists: {role: tab, label: Register · Operating Checking}
 
-  # --- QuickReport (Ctrl+Shift+Q) for this account and dates ---------------
+  # --- Account Report (Ctrl+Shift+Q) for this account and dates ---------------
+  - assert_exists: {role: button, label_contains: "Account Report"}
   - key: Ctrl+Shift+Q
   - assert_state: {key: screen.quick_report.loaded, equals: true}
   - assert_state: {key: screen.quick_report.error, equals: false}
-  - assert_exists: {role: label, label_contains: "QuickReport: Operating Checking"}
+  - assert_exists: {role: label, label_contains: "Account Report: Operating Checking"}
   - assert_no_clipping: {}
   - screenshot: quick-report
   - click: {role: button, label: Close report}
   - assert_state: {key: screen.quick_report, equals: null}
-  # Esc closes just the QuickReport, never the register tab.
+  # Esc closes just the Account Report, never the register tab.
   - key: Ctrl+Shift+Q
   - assert_state: {key: screen.quick_report.loaded, equals: true}
   - key: Escape

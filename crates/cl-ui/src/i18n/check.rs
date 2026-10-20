@@ -103,7 +103,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("check.tags.remove.tip", "Remove this tag"),
     ("check.lines.label", "Expenses"),
     ("check.expenses", "Expenses {total}"),
-    ("check.lines.billable_later", "Customer:Job and Billable are available after the next engine update."),
+    ("check.lines.billable_later", "Customer / Job and Billable are available after the next engine update."),
     ("check.totals.balanced", "Lines total {total} = check amount \u{2713}"),
     ("check.totals.remaining", "{amount} left to assign"),
     ("check.totals.over", "{amount} more than the check amount"),

@@ -1,13 +1,13 @@
-# Customer center (P11 steps 2-3) against `clientledger --demo`: the list
+# Customers & Jobs (P11 steps 2-3) against `clientledger --demo`: the list
 # with a customer that is also a vendor, the detail pane (open balance from
 # the customer balance report, recent transactions, Jobs and Notes tabs that
-# say what isn't available yet), Include inactive, QuickReport, and a
+# say what isn't available yet), Include inactive, Transaction Report, and a
 # keyboard-only create (a used name refused), edit with Esc revert, and
 # make inactive. The demo data is synthetic; balances are the demo
 # engine's report figures, never added up by the app. The new customer is
 # left inactive at the end so the dark run can create it again.
 name: client-center
-description: List, both roles, detail tabs, QuickReport, keyboard create/edit/inactivate.
+description: List, both roles, detail tabs, Transaction Report, keyboard create/edit/inactivate.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -40,7 +40,8 @@ steps:
   - key: Ctrl+Shift+H
   - assert_state: {key: screen.show_inactive, equals: false}
 
-  # --- QuickReport (Ctrl+Shift+Q): every transaction; Esc back to Details ----
+  # --- Transaction Report (Ctrl+Shift+Q): every transaction; Esc back to Details ----
+  - assert_exists: {role: button, label: Transaction Report}
   - key: Ctrl+Shift+Q
   - assert_state: {key: screen.tab, equals: transactions}
   - assert_state: {key: screen.history_all, equals: true}
