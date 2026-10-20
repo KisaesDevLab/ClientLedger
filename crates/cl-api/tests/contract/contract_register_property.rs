@@ -51,7 +51,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cl_api::{
     AccountType, BankPosting, Capabilities, CardChargeDraft, CheckDraft, ClearedFilter,
     DeleteOptions, DepositDraft, PostingOptions, RecordVersion, RegisterAmount, RegisterLine,
-    RegisterQuery, RegisterSort, SortDir, SplitLine, TransferDraft, TxnType,
+    RegisterQuery, RegisterSort, SortDir, SplitLine, TransferDraft, TxnStatus, TxnType,
 };
 use cl_core::ids::{AccountId, TransactionId};
 use cl_core::{CalendarDate, Money};
@@ -268,12 +268,16 @@ impl Oracle {
         .expect("oracle sum")
     }
 
-    /// Postings that touch `acct`, voids included (the register lists them).
+    /// Register rows of `acct`, voids included (the register lists them).
+    /// The engine voids by keeping the line and adding a reversing line
+    /// (`is_void_reversal`) in the same transaction, and the register lists
+    /// both, so a void posting is two rows.
     fn rows(&self, b: &Books, acct: AccountId) -> usize {
         self.entries
             .values()
             .filter(|e| e.spec.effects(b).iter().any(|(a, _)| *a == acct))
-            .count()
+            .map(|e| if e.void { 2 } else { 1 })
+            .sum()
     }
 
     /// Ids of postings that can still be edited.
@@ -455,14 +459,15 @@ fn check_balances(h: &Harness, b: &Books, o: &Oracle, ctx: &str) {
 
 /// The full register check of one account (R1/R2).
 fn check_register(h: &Harness, b: &Books, o: &Oracle, acct: AccountId, rng: &mut Rng, ctx: &str) {
-    let all = RegisterQuery::new(date(1900, 1, 1), date(2999, 12, 31));
+    let all = RegisterQuery::new(date(1900, 1, 1), date(2199, 12, 31));
     let (rows, ending) = all_rows(h, acct, &all);
     assert_eq!(rows.len(), o.rows(b, acct), "{ctx}: rows vs oracle");
     let ids: BTreeSet<_> = rows.iter().map(|l| l.line_id.to_string()).collect();
     assert_eq!(ids.len(), rows.len(), "{ctx}: a line id twice");
 
     // Each balance = previous + deposit − payment, in date order: the
-    // engine's deposit is the increase on the account's normal side.
+    // engine's deposit is the increase on the account's normal side. A
+    // void row (the line or its reversal) moves nothing.
     let mut running = Money::ZERO;
     let mut base = BTreeMap::new();
     for l in &rows {
@@ -478,6 +483,11 @@ fn check_register(h: &Harness, b: &Books, o: &Oracle, acct: AccountId, rng: &mut
             .payment
             .as_ref()
             .map_or(Money::ZERO, |m| exact(m, "payment"));
+        let (dep, pay) = if l.status == TxnStatus::Void {
+            (Money::ZERO, Money::ZERO)
+        } else {
+            (dep, pay)
+        };
         running = running
             .checked_add(dep)
             .and_then(|r| r.checked_sub(pay))
