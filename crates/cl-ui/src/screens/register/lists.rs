@@ -9,11 +9,12 @@ use std::borrow::Cow;
 use cl_api::{Account, Contact, Tag};
 use cl_core::ids::{AccountId, ContactId, TagId};
 use cl_grid::{ListId, LookupResult, Lookups, Suggestion};
+use cl_model::lists::accounts::Chart;
 use cl_model::lookup::{LookupEntry, LookupIndex};
 use cl_model::register::AccountClass;
 
 use super::account_text;
-use crate::screens::lists::accounts::model::kind_of;
+use crate::screens::lists::accounts::model::{chart_entry, kind_of};
 
 /// Accounts.
 pub const ACCOUNTS: ListId = ListId(1);
@@ -89,7 +90,9 @@ pub struct RegisterLists {
 }
 
 impl RegisterLists {
-    /// Sets the chart of accounts.
+    /// Sets the chart of accounts. Each account shows its full path with
+    /// its number (DESIGN.md: `5100 · Materials:Plants`) and is found by
+    /// any segment of it (`Plants`, `Mulch`).
     pub fn set_accounts(&mut self, accounts: &[Account]) {
         self.classes = accounts
             .iter()
@@ -100,7 +103,19 @@ impl RegisterLists {
                 )
             })
             .collect();
-        let labels: Vec<String> = accounts.iter().map(account_text).collect();
+        let chart = Chart::new(
+            accounts.iter().map(|a| chart_entry(a, false)).collect(),
+            true,
+        );
+        let full = |a: &Account| {
+            chart
+                .full_name(a.id)
+                .map_or_else(|| a.fields.name.clone(), str::to_string)
+        };
+        let labels: Vec<String> = accounts
+            .iter()
+            .map(|a| chart.display_name(a.id).unwrap_or_else(|| account_text(a)))
+            .collect();
         let mut list = List::new(
             accounts
                 .iter()
@@ -108,7 +123,7 @@ impl RegisterLists {
                     (
                         a.id,
                         a.fields.account_number.clone().filter(|n| !n.is_empty()),
-                        a.fields.name.clone(),
+                        full(a),
                         a.is_active,
                     )
                 })
@@ -150,6 +165,12 @@ impl RegisterLists {
     #[must_use]
     pub fn account_key(&self, id: AccountId) -> Option<u64> {
         self.accounts.key(id)
+    }
+
+    /// An account's display text (`5100 · Materials:Plants`).
+    #[must_use]
+    pub fn account_text(&self, id: AccountId) -> Option<&str> {
+        self.accounts.label(self.accounts.key(id)?)
     }
 
     /// The register class of an account in the chart (`None` when it is
@@ -271,5 +292,40 @@ mod tests {
             panic!("ready");
         };
         assert_eq!(none.len(), 0);
+    }
+
+    #[test]
+    fn accounts_show_their_full_path_and_list_by_number() {
+        let chart = crate::company::demo::chart();
+        let mut l = RegisterLists::default();
+        l.set_accounts(&chart);
+        let plants = chart
+            .iter()
+            .find(|a| a.fields.account_number.as_deref() == Some("5100"))
+            .expect("5100");
+        let key = l.account_key(plants.id).expect("key");
+        assert_eq!(
+            l.display(ACCOUNTS, key).as_deref(),
+            Some("5100 \u{b7} Materials:Plants")
+        );
+        assert_eq!(
+            l.account_text(plants.id),
+            Some("5100 \u{b7} Materials:Plants")
+        );
+        // A later segment of the path still finds it.
+        let LookupResult::Ready(s) = l.suggest(ACCOUNTS, "Plants", 5) else {
+            panic!("ready");
+        };
+        assert_eq!(s.first().map(|s| s.id), Some(key));
+        // Ctrl+L: the whole list by account number.
+        let LookupResult::Ready(all) = l.all(ACCOUNTS) else {
+            panic!("ready");
+        };
+        let numbers: Vec<u32> = all
+            .iter()
+            .filter_map(|s| s.label.split(' ').next()?.parse().ok())
+            .collect();
+        assert!(numbers.len() > 10);
+        assert!(numbers.windows(2).all(|w| w[0] < w[1]), "{numbers:?}");
     }
 }

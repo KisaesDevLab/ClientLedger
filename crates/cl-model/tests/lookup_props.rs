@@ -102,6 +102,13 @@ fn naive_rank(entries: &[LookupEntry], query: &str, limit: usize) -> Vec<u64> {
         let within = match ta {
             MatchTier::Number => anum.cmp(&bnum),
             MatchTier::NamePrefix => an.len().cmp(&bn.len()),
+            // The full list: numbered entries by number value, then the rest.
+            MatchTier::All => match (&a.number, &b.number) {
+                (Some(x), Some(y)) => x.parse::<u64>().unwrap().cmp(&y.parse::<u64>().unwrap()),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            },
             _ => std::cmp::Ordering::Equal,
         };
         ta.cmp(tb)

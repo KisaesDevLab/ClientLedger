@@ -433,11 +433,10 @@ impl WriteCheckScreen {
                 continue;
             };
             let name = self
-                .accounts
-                .iter()
-                .find(|a| a.id == *account)
-                .map(crate::screens::register::account_text)
-                .unwrap_or_default();
+                .lists
+                .account_text(*account)
+                .unwrap_or_default()
+                .to_string();
             let caption = match &s.basis {
                 Basis::Rule(rule) => t_with("check.suggest.rule", &[("rule", rule)]),
                 Basis::Ai(Some(basis)) => t_with("check.suggest.ai_basis", &[("basis", basis)]),
@@ -468,11 +467,10 @@ impl WriteCheckScreen {
         if let Some((payee, account)) = self.suggest.offer {
             let payee = self.lists.name_text(payee).unwrap_or_default().to_string();
             let account = self
-                .accounts
-                .iter()
-                .find(|a| a.id == account)
-                .map(crate::screens::register::account_text)
-                .unwrap_or_default();
+                .lists
+                .account_text(account)
+                .unwrap_or_default()
+                .to_string();
             let mut close = false;
             ui.horizontal_wrapped(|ui| {
                 ui.label(
