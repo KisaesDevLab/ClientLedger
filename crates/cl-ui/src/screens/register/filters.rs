@@ -358,25 +358,39 @@ impl RegisterScreen {
             }
 
             ui.separator();
-            let b = |ui: &mut Ui, key: &str, cmd: &str| {
+            // `chip`: the shortcut shows inside the button (mockup: Go To
+            // and Edit Transaction); the others have it in the tooltip.
+            let b = |ui: &mut Ui, key: &str, cmd: &str, chip: bool| {
                 let hint = shortcut_hint(cmd);
                 let tip = if hint.is_empty() {
                     t(key)
                 } else {
                     format!("{} ({hint})", t(key))
                 };
-                ui.button(t(key)).on_hover_text(tip)
+                let chip_text = if chip {
+                    hint.replace('+', " ")
+                } else {
+                    String::new()
+                };
+                crate::widgets::button_with_chip(ui, &t(key), &chip_text).on_hover_text(tip)
             };
-            if b(ui, "register.goto.open", "edit.find").clicked() {
+            if b(ui, "register.goto.open", "edit.find", true).clicked() {
                 self.command_from_toolbar("edit.find");
             }
-            if b(ui, "register.quick_report", "list.quick_report").clicked() {
+            if b(ui, "register.quick_report", "list.quick_report", false).clicked() {
                 self.command_from_toolbar("list.quick_report");
             }
-            if b(ui, "register.edit_transaction", "edit.edit_transaction").clicked() {
+            if b(
+                ui,
+                "register.edit_transaction",
+                "edit.edit_transaction",
+                true,
+            )
+            .clicked()
+            {
                 self.command_from_toolbar("edit.edit_transaction");
             }
-            if b(ui, "register.void.open", "edit.void_transaction").clicked() {
+            if b(ui, "register.void.open", "edit.void_transaction", false).clicked() {
                 self.command_from_toolbar("edit.void_transaction");
             }
             // Delete needs the engine's soft delete (R7, `txn-delete-v1`).

@@ -795,8 +795,19 @@ impl RegisterScreen {
             form::heading(ui, tokens, &t("cmd.banking.register"));
             return;
         };
+        // Mockup Register.html: the account in the 22/600 page heading, its
+        // kind beside it in secondary text. The masked bank number the mockup
+        // shows after the kind waits on the engine (U-34).
         ui.horizontal_wrapped(|ui| {
-            form::heading(ui, tokens, &account_text(a));
+            ui.spacing_mut().item_spacing.x = 14.0;
+            ui.add(
+                egui::Label::new(
+                    RichText::new(account_text(a))
+                        .text_style(egui::TextStyle::Heading)
+                        .color(tokens.text_primary),
+                )
+                .selectable(false),
+            );
             ui.add(
                 egui::Label::new(
                     RichText::new(t(filters::class_key(self.class))).color(tokens.text_secondary),

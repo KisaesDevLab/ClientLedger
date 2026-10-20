@@ -138,6 +138,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("status.hint.next_window", "next window"),
     ("status.hint.shortcuts", "shortcuts"),
     ("status.hint.help", "help"),
+    ("status.hint.record", "record"),
+    ("status.hint.dates", "dates"),
+    ("status.hint.delete", "delete"),
+    ("status.hint.open_form", "open form"),
     ("toast.not_here", "That does not apply to this screen."),
     ("toast.help_later", "Help for this screen is not available yet."),
     // Palette and overlay
