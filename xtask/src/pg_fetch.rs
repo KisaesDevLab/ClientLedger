@@ -99,7 +99,7 @@ impl Lock {
     }
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     bytes.iter().fold(String::new(), |mut acc, b| {
         let _ = write!(acc, "{b:02x}");
