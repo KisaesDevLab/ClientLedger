@@ -17,8 +17,10 @@
 //!
 //! # Knobs
 //!
-//! - `CL_PROP_OPS` — number of operations (default 150, so the normal
-//!   contract job stays short; AC1 is `CL_PROP_OPS=1000`).
+//! - `CL_PROP_OPS` — number of operations. Default: 1,000 (AC1) when the
+//!   engine advertises `register-exact-v1`, so the full register checks
+//!   always run at AC1 size; 150 otherwise, so the normal contract job on
+//!   an engine without it stays short.
 //! - `CL_PROP_SEED` — the RNG seed (default fixed). The seed is printed at
 //!   the start and on every failure, so a failing run can be replayed.
 //!
@@ -58,6 +60,9 @@ use crate::common::{account, date, key};
 use crate::contract_bank_postings::detail_account;
 use crate::support::{Harness, unique};
 
+/// Operations when the register checks run (AC1).
+const DEFAULT_OPS_EXACT: usize = 1_000;
+/// Operations when only the account balances can be checked.
 const DEFAULT_OPS: usize = 150;
 const DEFAULT_SEED: u64 = 0x00C1_1ED6_E512_0012;
 const PAYEES: [&str; 5] = [
@@ -281,7 +286,8 @@ impl Oracle {
     }
 }
 
-/// Cents uniform in 0.01–99,999.99, with edge values mixed in.
+/// Cents uniform in 0.01–99,999.99, with the edge values 0.01, 0.10 and
+/// 1,000,000.00 mixed in (3 draws in 20).
 fn amount(rng: &mut Rng) -> Money {
     let cents = match rng.below(20) {
         0 => 1,
@@ -577,13 +583,18 @@ fn check_register(h: &Harness, b: &Books, o: &Oracle, acct: AccountId, rng: &mut
 }
 
 pub fn balance_holds_after_random_edits(h: &Harness) {
-    let ops: usize = env_or("CL_PROP_OPS", DEFAULT_OPS);
+    let exact_register = h.require_cap(Capabilities::REGISTER_EXACT, "R1/R2");
+    let default_ops = if exact_register {
+        DEFAULT_OPS_EXACT
+    } else {
+        DEFAULT_OPS
+    };
+    let ops: usize = env_or("CL_PROP_OPS", default_ops);
     let seed: u64 = env_or("CL_PROP_SEED", DEFAULT_SEED);
     eprintln!("    register property: CL_PROP_SEED={seed} CL_PROP_OPS={ops}");
     // The seed in every failure message, for a replay.
     let ctx = |i: usize| format!("seed {seed}, op {i}");
 
-    let exact_register = h.require_cap(Capabilities::REGISTER_EXACT, "R1/R2");
     let can_delete = h.require_cap(Capabilities::TXN_DELETE, "R7");
     let s = &h.s1;
     let b = Books {
