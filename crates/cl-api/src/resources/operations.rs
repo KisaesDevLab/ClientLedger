@@ -408,6 +408,27 @@ pub(crate) const CLOSING_PASSWORD_RESET: Operation = op(
     true,
 );
 
+// ---- P13 WP2: payee panel, attachments, suggestions ---------------------------
+
+/// A vendor's open bills in brief (count and total owed, overdue part).
+pub(crate) const BILLS_VENDOR_SUMMARY: Operation = read("/api/v1/bills/vendor-summary");
+/// Unpaid bills with their balance due.
+pub(crate) const BILLS_PAYABLE: Operation = read("/api/v1/bills/payable");
+/// The account to prefill for a contact (its default, else the most recent).
+pub(crate) const CONTACT_SUGGEST_ACCOUNT: Operation = read("/api/v1/contacts/{id}/suggest-account");
+/// Uploads a file (multipart) to a record or to a draft.
+pub(crate) const ATTACHMENTS_UPLOAD: Operation = write(Method::Post, "/api/v1/attachments");
+/// The files on a record.
+pub(crate) const ATTACHMENTS_LIST: Operation = read("/api/v1/attachments");
+/// One file's bytes.
+pub(crate) const ATTACHMENT_DOWNLOAD: Operation = read("/api/v1/attachments/{id}/download");
+/// AI account suggestions for typed rows (nothing is stored).
+pub(crate) const AI_CATEGORIZE_PREVIEW: Operation =
+    write(Method::Post, "/api/v1/ai/categorize/preview");
+/// The owner's rule that matches a form (`rules-evaluate-v1`).
+pub(crate) const RULES_EVALUATE: Operation =
+    write(Method::Post, "/api/v1/conditional-rules/evaluate");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -420,7 +441,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 107] = [
+pub const OPERATIONS: [Operation; 115] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -528,6 +549,15 @@ pub const OPERATIONS: [Operation; 107] = [
     CLOSING_PASSWORD_PUT,
     TXN_DELETE,
     CLOSING_PASSWORD_RESET,
+    // P13 WP2
+    BILLS_VENDOR_SUMMARY,
+    BILLS_PAYABLE,
+    CONTACT_SUGGEST_ACCOUNT,
+    ATTACHMENTS_UPLOAD,
+    ATTACHMENTS_LIST,
+    ATTACHMENT_DOWNLOAD,
+    AI_CATEGORIZE_PREVIEW,
+    RULES_EVALUATE,
 ];
 
 /// Looks up a covered operation.

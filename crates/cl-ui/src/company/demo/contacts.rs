@@ -204,6 +204,7 @@ pub fn history(state: &DemoState, id: ContactId, limit: usize) -> (Vec<Transacti
             total: Some(amount),
             display_total: Some(amount),
             created_at: None,
+            check_number: None,
         });
     }
     (rows, total)

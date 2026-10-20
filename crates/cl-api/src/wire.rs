@@ -95,6 +95,11 @@ impl Capabilities {
     /// engine PR #153).
     pub const TXN_DELETE: &'static str = "txn-delete-v1";
 
+    // ---- P13 WP2: payee panel, attachments, suggestions -------------------
+    /// P13: rule suggestions on a form (`POST /conditional-rules/evaluate`,
+    /// engine PR in progress).
+    pub const RULES_EVALUATE: &'static str = "rules-evaluate-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {

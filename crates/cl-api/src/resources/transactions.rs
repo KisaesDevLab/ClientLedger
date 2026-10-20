@@ -536,6 +536,10 @@ pub struct TransactionSummary {
     /// Created.
     #[serde(default)]
     pub created_at: Option<Timestamp>,
+    /// Check number of a check (P13 recent checks). `None` when the engine
+    /// list does not carry it yet (plan E5) or the row is not a check.
+    #[serde(default)]
+    pub check_number: Option<u64>,
 }
 
 /// Basis lens of the transaction list.

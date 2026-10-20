@@ -515,6 +515,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("fix.api.offline", "Turn off Work offline in Preferences if you want to use it."),
     ("error.api.feature_off", "That feature is not turned on."),
     ("fix.api.feature_off", "Turn it on in Preferences."),
+    ("error.api.ai_unavailable", "AI suggestions are turned off."),
+    ("fix.api.ai_unavailable", "Turn on AI suggestions in Preferences if you want them."),
     ("error.api.bad_credentials", "The email or password is not right."),
     ("error.api.session_expired", "Your sign-in has timed out."),
     ("fix.api.sign_in", "Sign in again."),

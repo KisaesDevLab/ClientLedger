@@ -120,3 +120,14 @@ pub use session::{
     TfaChallenge, TfaMethod,
 };
 pub use wire::{Capabilities, DesktopInfo, Health, Page, PageRequest, ReportAmount};
+// P13 WP2: payee panel, attachments, suggestions.
+pub use resources::ai::{
+    AI_PREVIEW_DESCRIPTION_MAX_CHARS, AI_PREVIEW_MAX_ROWS, AiGate, AiPreviewRow, AiSuggestion,
+};
+pub use resources::attachments::{
+    ATTACHMENT_MAX_BYTES, AttachTo, Attachment, AttachmentId, Attachments, DraftKey, FileKind,
+    check_file,
+};
+pub use resources::bills::{Bills, OpenBill, VendorSummary};
+pub use resources::contacts::{SuggestSource, SuggestedAccount};
+pub use resources::rules::{RULE_DESCRIPTION_MAX_CHARS, RuleMatch, RuleQuery, Rules};

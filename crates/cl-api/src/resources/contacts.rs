@@ -16,12 +16,12 @@ use crate::resources::common::{
     self, Query, SortDir, Spec, editable_with_active, null_false, null_true, yes,
 };
 use crate::resources::operations::{
-    CONTACT_DELETE, CONTACT_GET, CONTACT_PUT, CONTACT_TRANSACTIONS, CONTACTS_CREATE, CONTACTS_LIST,
-    CONTACTS_MERGE,
+    CONTACT_DELETE, CONTACT_GET, CONTACT_PUT, CONTACT_SUGGEST_ACCOUNT, CONTACT_TRANSACTIONS,
+    CONTACTS_CREATE, CONTACTS_LIST, CONTACTS_MERGE,
 };
 use crate::resources::transactions::TransactionSummary;
 use crate::resources::versioning::{EditableFields, RecordVersion, Versioned, saved_from};
-use crate::session::{Session, json_body};
+use crate::session::{Session, decode, json_body};
 use crate::wire::{Page, PageRequest};
 
 pub(crate) const SPEC: Spec = Spec {
@@ -341,6 +341,25 @@ impl ContactFilter {
     }
 }
 
+/// Where a suggested account comes from (Q-192).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SuggestSource {
+    /// The contact's own default expense account.
+    Default,
+    /// The account on the contact's most recent transaction.
+    Recent,
+}
+
+/// The account to prefill when a payee is picked
+/// (`GET /contacts/{id}/suggest-account`). Never an amount.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SuggestedAccount {
+    /// The account.
+    pub account: AccountId,
+    /// Why this one.
+    pub source: SuggestSource,
+}
+
 /// Contact operations of a session (`session.contacts()`).
 #[derive(Clone, Copy, Debug)]
 pub struct Contacts<'a>(pub(crate) &'a Session);
@@ -474,6 +493,42 @@ impl Contacts<'_> {
         call.idempotency_key = Some(key);
         let reply = self.0.send(&CONTACTS_MERGE, call, None).await?;
         saved_from(&reply.body, SPEC.item_key)
+    }
+
+    /// The account to prefill for this contact: its default expense
+    /// account, else the one on its most recent transaction; `None` when
+    /// there is neither.
+    ///
+    /// # Errors
+    /// Any [`ApiError`].
+    pub async fn suggest_account(
+        &self,
+        id: ContactId,
+    ) -> Result<Option<SuggestedAccount>, ApiError> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct W {
+            #[serde(default)]
+            account_id: Option<AccountId>,
+            #[serde(default)]
+            source: Option<String>,
+        }
+        let call = Call::new(
+            Method::Get,
+            CONTACT_SUGGEST_ACCOUNT.route(),
+            format!("{}/{id}/suggest-account", SPEC.base),
+        );
+        let reply = self.0.send(&CONTACT_SUGGEST_ACCOUNT, call, None).await?;
+        let w: W = decode(&reply, "suggested account")?;
+        let source = match w.source.as_deref() {
+            Some("default") => SuggestSource::Default,
+            Some("recent") => SuggestSource::Recent,
+            // No suggestion, or a source this version does not know: an
+            // unexplained guess is not offered.
+            _ => return Ok(None),
+        };
+        Ok(w.account_id
+            .map(|account| SuggestedAccount { account, source }))
     }
 
     /// One page of the contact's transactions, newest first (the engine's
@@ -627,6 +682,39 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn suggest_account_default_recent_and_none() {
+        let server = MockServer::start().await;
+        let acct = "2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/contacts/{}/suggest-account", id())))
+            .respond_with(json(
+                200,
+                &format!(r#"{{"accountId":"{acct}","source":"recent"}}"#),
+            ))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/contacts/{}/suggest-account", id())))
+            .respond_with(json(200, r#"{"accountId":null,"source":null}"#))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let got = s.contacts().suggest_account(id()).await.expect("suggest");
+        assert_eq!(
+            got,
+            Some(SuggestedAccount {
+                account: AccountId::parse(acct).expect("id"),
+                source: SuggestSource::Recent
+            })
+        );
+        assert_eq!(
+            s.contacts().suggest_account(id()).await.expect("none"),
+            None
+        );
+    }
+
+    #[tokio::test]
     async fn merge_sends_both_ids_and_history_pages() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -640,7 +728,7 @@ pub(crate) mod tests {
                 200,
                 r#"{"data":[{"id":"4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","txnType":"bill",
                 "txnNumber":"B-11","txnDate":"2026-01-01","status":"posted",
-                "total":"202.1600","displayTotal":"202.1600"}],"total":41}"#,
+                "total":"202.1600","displayTotal":"202.1600","checkNumber":4392}],"total":41}"#,
             ))
             .mount(&server)
             .await;
@@ -670,6 +758,7 @@ pub(crate) mod tests {
             .await
             .expect("history");
         assert_eq!(page.total, 41);
+        assert_eq!(page.data[0].check_number, Some(4392));
         assert_eq!(
             page.data[0].display_total.map(Money::to_wire).as_deref(),
             Some("202.1600")

@@ -2,8 +2,10 @@
 
 pub mod accounts;
 pub mod ai;
+pub mod attachments;
 pub mod audit;
 pub mod bank_postings;
+pub mod bills;
 pub(crate) mod common;
 pub mod company;
 pub mod contacts;
@@ -18,6 +20,7 @@ pub(crate) mod reconcile;
 pub mod recovery;
 pub mod register;
 pub mod reports;
+pub mod rules;
 pub mod sales;
 pub mod session_secrets;
 pub mod setup;

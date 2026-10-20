@@ -204,6 +204,9 @@ pub(crate) struct Call {
     /// The body carries a password or similar secret (set by `json_body`):
     /// the endpoint must be verified afresh for this call.
     pub sensitive: bool,
+    /// `Content-Type` of a non-JSON body (a multipart upload); `None`
+    /// means `application/json`.
+    pub content_type: Option<String>,
 }
 
 impl std::fmt::Debug for Call {
@@ -235,6 +238,7 @@ impl Call {
             idempotency_key: None,
             if_match: None,
             sensitive: false,
+            content_type: None,
         }
     }
 
@@ -245,6 +249,15 @@ impl Call {
 
     pub(crate) fn json_body(mut self, bytes: Vec<u8>) -> Call {
         self.sensitive = body_has_secret_key(&bytes);
+        self.body = Some(Zeroizing::new(bytes));
+        self
+    }
+
+    /// A `multipart/form-data` body (an attachment upload). The parts were
+    /// built by the caller with `boundary`; a file carries no secret.
+    pub(crate) fn multipart_body(mut self, boundary: &str, bytes: Vec<u8>) -> Call {
+        self.sensitive = false;
+        self.content_type = Some(format!("multipart/form-data; boundary={boundary}"));
         self.body = Some(Zeroizing::new(bytes));
         self
     }
@@ -589,10 +602,11 @@ fn build_headers(
         plain(&call.request_id.to_string())?,
     );
     if call.body.is_some() {
-        h.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
+        let ct = match &call.content_type {
+            Some(ct) => plain(ct)?,
+            None => HeaderValue::from_static("application/json"),
+        };
+        h.insert(header::CONTENT_TYPE, ct);
     }
     if let Some(bearer) = &auth.bearer {
         h.insert(
