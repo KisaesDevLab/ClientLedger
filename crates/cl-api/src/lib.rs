@@ -137,3 +137,12 @@ pub use resources::attachments::{
 pub use resources::bills::{Bills, OpenBill, VendorSummary};
 pub use resources::contacts::{SuggestSource, SuggestedAccount};
 pub use resources::rules::{RULE_DESCRIPTION_MAX_CHARS, RuleMatch, RuleQuery, Rules};
+
+// P14 lane A: pending deposits and bank-file groupings.
+pub use resources::payments::Payments;
+
+// P14 lane A: the bank feed.
+pub use resources::feed::Feed;
+
+// P14 lane B: daily sales.
+pub use resources::daily_sales::DailySales;

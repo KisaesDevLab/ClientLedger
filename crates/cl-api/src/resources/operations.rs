@@ -440,6 +440,61 @@ pub(crate) const CHECK_SETTINGS: Operation = read("/api/v1/checks/settings");
 /// included (`check-edit-v1`).
 pub(crate) const CHECK_PUT: Operation = write(Method::Put, "/api/v1/checks/{id}");
 
+// ---- P14: deposits, daily sales, owner helpers ---------------------------------
+
+/// Payments waiting in Payments Clearing (`?exact=1` for string amounts
+/// with `deposit-grouping-v1`).
+pub(crate) const PENDING_DEPOSITS: Operation = read("/api/v1/payments/pending-deposits");
+/// The bank feed (bank-file deposits waiting for an account).
+pub(crate) const FEED_LIST: Operation = read("/api/v1/banking/feed");
+/// Groups of pending payments that add up to a bank-file deposit
+/// (`feed-deposit-groupings-v1`).
+pub(crate) const FEED_DEPOSIT_GROUPINGS: Operation =
+    read("/api/v1/banking/feed/{id}/deposit-groupings");
+/// The deposit detail report (what each deposit grouped).
+pub(crate) const REPORT_DEPOSIT_DETAIL: Operation = read("/api/v1/reports/deposit-detail");
+/// The company's entity type and equity role accounts (`equity-roles-v1`).
+pub(crate) const EQUITY_ROLES: Operation = read("/api/v1/company/equity-roles");
+/// Daily-sales layouts.
+pub(crate) const DAILY_TEMPLATES: Operation = read("/api/v1/daily-sales/templates");
+/// Creates a daily-sales layout (blank or from a preset).
+pub(crate) const DAILY_TEMPLATES_CREATE: Operation =
+    write(Method::Post, "/api/v1/daily-sales/templates");
+/// One daily-sales layout with its lines.
+pub(crate) const DAILY_TEMPLATE_GET: Operation = read("/api/v1/daily-sales/templates/{id}");
+/// Renames a layout or changes its default tag.
+pub(crate) const DAILY_TEMPLATE_PUT: Operation =
+    write(Method::Put, "/api/v1/daily-sales/templates/{id}");
+/// Deletes a layout.
+pub(crate) const DAILY_TEMPLATE_DELETE: Operation =
+    write(Method::Delete, "/api/v1/daily-sales/templates/{id}");
+/// Replaces a layout's lines.
+pub(crate) const DAILY_TEMPLATE_LINES: Operation =
+    write(Method::Put, "/api/v1/daily-sales/templates/{id}/lines");
+/// Daily-sales days (by status and date).
+pub(crate) const DAILY_ENTRIES: Operation = read("/api/v1/daily-sales/entries");
+/// Saves a day as a draft.
+pub(crate) const DAILY_ENTRIES_CREATE: Operation =
+    write(Method::Post, "/api/v1/daily-sales/entries");
+/// The posting a day would make, with its over/short (nothing is stored;
+/// a POST, so classed as a write).
+pub(crate) const DAILY_ENTRY_PREVIEW: Operation =
+    write(Method::Post, "/api/v1/daily-sales/entries/preview");
+/// One day.
+pub(crate) const DAILY_ENTRY_GET: Operation = read("/api/v1/daily-sales/entries/{id}");
+/// Changes a draft day.
+pub(crate) const DAILY_ENTRY_PUT: Operation =
+    write(Method::Put, "/api/v1/daily-sales/entries/{id}");
+/// Deletes a draft day.
+pub(crate) const DAILY_ENTRY_DELETE: Operation =
+    write(Method::Delete, "/api/v1/daily-sales/entries/{id}");
+/// Posts a day (`closingPassword` with `daily-sales-lock-v1`).
+pub(crate) const DAILY_ENTRY_POST: Operation =
+    write(Method::Post, "/api/v1/daily-sales/entries/{id}/post");
+/// Voids a posted day (`closingPassword` with `daily-sales-lock-v1`).
+pub(crate) const DAILY_ENTRY_VOID: Operation =
+    write(Method::Post, "/api/v1/daily-sales/entries/{id}/void");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -452,7 +507,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 118] = [
+pub const OPERATIONS: [Operation; 137] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -573,6 +628,26 @@ pub const OPERATIONS: [Operation; 118] = [
     CHECKS_LIST,
     CHECK_SETTINGS,
     CHECK_PUT,
+    // P14
+    PENDING_DEPOSITS,
+    FEED_LIST,
+    FEED_DEPOSIT_GROUPINGS,
+    REPORT_DEPOSIT_DETAIL,
+    EQUITY_ROLES,
+    DAILY_TEMPLATES,
+    DAILY_TEMPLATES_CREATE,
+    DAILY_TEMPLATE_GET,
+    DAILY_TEMPLATE_PUT,
+    DAILY_TEMPLATE_DELETE,
+    DAILY_TEMPLATE_LINES,
+    DAILY_ENTRIES,
+    DAILY_ENTRIES_CREATE,
+    DAILY_ENTRY_PREVIEW,
+    DAILY_ENTRY_GET,
+    DAILY_ENTRY_PUT,
+    DAILY_ENTRY_DELETE,
+    DAILY_ENTRY_POST,
+    DAILY_ENTRY_VOID,
 ];
 
 /// Looks up a covered operation.

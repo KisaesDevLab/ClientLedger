@@ -15,3 +15,6 @@ b2627570809c910ce912121106b9e1a4c4911b67fcd7913577465b47358988f4  engine/package
 be9c4e3bb2a71b8b75e9b0b8a197add0bf0f0822cf69296299324da4f24749f2  engine/packages/api/src/routes/checks.routes.ts
 3f88b48cc0681abee00732d201a934cd40397f9437c45b0be8f9482b4e6fd521  engine/packages/api/src/routes/accounts.routes.ts
 f79a832cb6802b7deac37cd02f443bf2dabc72c99bb052509f59eb8bce5169c4  engine/packages/api/src/routes/audit.routes.ts
+23a4ba598350537b24650d6223bc56b4eb5aba227798b650936cb31e9e22cb80  engine/packages/shared/src/schemas/daily-sales.ts
+5bdccc39c10f4b3ded36e8403b437f866895a2b4a5850f346b5216b5ec2dd713  engine/packages/api/src/routes/daily-sales.routes.ts
+e138a03f47369de6a0dde2d1180c11699062825dc92d1490f18862749f1f270a  engine/packages/api/src/routes/payments.routes.ts

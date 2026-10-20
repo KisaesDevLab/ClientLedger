@@ -109,6 +109,24 @@ impl Capabilities {
     /// on check and expense lines; `isBillable`/`billedStatus` on read.
     pub const LINE_BILLABLE: &'static str = "line-billable-v1";
 
+    // ---- P14: deposits, daily sales, owner helpers (engine PR #159) -------
+    /// P14 U-52: deposit lines with `sourceTransactionId` group pending
+    /// payments out of Payments Clearing (409 `ALREADY_DEPOSITED`), and
+    /// `GET /payments/pending-deposits?exact=1` reports string amounts.
+    pub const DEPOSIT_GROUPING: &'static str = "deposit-grouping-v1";
+    /// P14 U-53: deposit `cashBack` and negative (fee) line amounts.
+    pub const DEPOSIT_CASHBACK: &'static str = "deposit-cashback-v1";
+    /// P14 U-54: a deposit line on A/P with `sourceTransactionId` pointing
+    /// at a vendor credit (a vendor refund).
+    pub const VENDOR_REFUND: &'static str = "vendor-refund-v1";
+    /// P14 U-55: `GET /banking/feed/{id}/deposit-groupings`.
+    pub const FEED_DEPOSIT_GROUPINGS: &'static str = "feed-deposit-groupings-v1";
+    /// P14 U-56: `GET /company/equity-roles` and engine-seeded owner,
+    /// partner and shareholder equity accounts.
+    pub const EQUITY_ROLES: &'static str = "equity-roles-v1";
+    /// P14 U-57: `closingPassword` on daily-sales post and void.
+    pub const DAILY_SALES_LOCK: &'static str = "daily-sales-lock-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {
