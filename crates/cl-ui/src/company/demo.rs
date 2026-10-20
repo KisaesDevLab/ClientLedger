@@ -5,6 +5,7 @@ use cl_core::ids::TenantId;
 use cl_core::{CalendarDate, Timestamp};
 use cl_settings::{ACCENT_PALETTE, Accent};
 
+pub mod checks;
 pub mod contacts;
 pub mod lists;
 pub mod register;
@@ -63,6 +64,8 @@ pub struct DemoState {
     pub tags_gone: std::collections::BTreeSet<cl_core::ids::TagId>,
     /// Transactions recorded or changed in the demo registers (P12).
     pub ledger: register::DemoLedger,
+    /// Checks written in the demo (P13): their own fields and history.
+    pub checks: checks::DemoChecks,
 }
 
 fn id(n: u8) -> TenantId {
@@ -123,6 +126,7 @@ impl DemoState {
             required_tag_groups: std::collections::BTreeMap::new(),
             tags_gone: std::collections::BTreeSet::new(),
             ledger: register::DemoLedger::default(),
+            checks: checks::DemoChecks::default(),
         }
     }
 

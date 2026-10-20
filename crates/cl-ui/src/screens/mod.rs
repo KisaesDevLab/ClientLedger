@@ -6,3 +6,4 @@ pub mod dev;
 pub mod lists;
 pub mod preferences;
 pub mod register;
+pub mod write_check;
