@@ -78,7 +78,7 @@ Every report ties to the trial balance; accrual vs. cash consistency; drill-down
 **Crates and files:** `crates/cl-ui/src/screens/payroll_import.rs`, `fixtures/payroll/*`.
 
 **Steps**
-1. Wizard: provider (Gusto, ADP Run, QB Payroll, Paychex, Square, OnPay, Rippling, or generic CSV Q-153), file, pay period, mapping saved per provider, departments → tags (Q-152), preview, post. — `feat(payroll): import wizard`
+1. Wizard: provider (Gusto, ADP Run, QuickBooks Payroll (export file), Paychex, Square, OnPay, Rippling, or generic CSV Q-153), file, pay period, mapping saved per provider, departments → tags (Q-152), preview, post. — `feat(payroll): import wizard`
 2. Summary journal entry per pay date, no employee names (Q-150); duplicate pay-period detection. — `feat(payroll): summary posting`
 3. Expected withdrawals for bank-feed matching (Q-151). — `feat(payroll): expected withdrawals`
 

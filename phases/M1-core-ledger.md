@@ -1,6 +1,6 @@
 # M1 — Core ledger (P10–P16)
 
-**Outcome:** a QBD switcher can set up lists and tags, work a two-line register, write checks, make deposits and transfers, record card charges and owner transactions, post journal entries and memorized transactions, and start from Home.
+**Outcome:** a QBD switcher can set up lists and tags, work a two-line register, write checks, make deposits and transfers, record card charges and owner transactions, post journal entries and templates (recurring transactions), and start from Home.
 
 **Milestone exit:** all phases merged; **PR-1** process review (fable) of the core ledger with no unresolved Blocking items; milestone summary in STATE.md. **PR-P10** reviews the grid plan inside P10.
 
@@ -50,9 +50,9 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 **Crates and files:** `crates/cl-ui/src/screens/lists/{accounts.rs,clients.rs,vendors.rs,items.rs,tags.rs,terms.rs,payment_methods.rs,price_levels.rs,detail_pane.rs,csv_import.rs}`, `crates/cl-model/src/lists/*.rs`, scenarios per list.
 
 **Steps**
-1. Chart of Accounts: hierarchy (depth per engine, Q-208), unique numbers (Q-209) shown by preference (Q-79), types, active/inactive, balances, QuickReport, add/edit, merge if supported; masked bank/card numbers with logged Admin reveal (Q-154); sensitive flag (used in P29). — `feat(lists): chart of accounts`
+1. Chart of Accounts: hierarchy (depth per engine, Q-208), unique numbers (Q-209) shown by preference (Q-79), types, active/inactive, balances, Account Report (Q-254), add/edit, merge if supported; masked bank/card numbers with logged Admin reveal (Q-154); sensitive flag (used in P29). — `feat(lists): chart of accounts`
 2. Contacts: one record with client and/or vendor roles (Q-77); multiple ship-to addresses with default (Q-128); contact people with roles and invoice/statement recipients (Q-129); dated notes and to-dos (Q-130); no credit limits (Q-131); vendor default expense account (Q-192); vendor 1099 fields (Q-53). — `feat(lists): contacts`
-3. Client center with jobs (status, type, dates, Q-90) and Vendor center: list + detail panes (open balance, recent transactions, notes, to-dos, attachments). — `feat(lists): centers`
+3. Customers & Jobs with jobs (status, type, dates, Q-90) and Vendors (Q-258): list + detail panes (open balance, recent transactions, notes, to-dos, attachments). — `feat(lists): centers`
 4. Items: service, non-inventory, other charge, discount (percent/amount), subtotal; two-sided purchase/sales fields (Q-99); UOM label (Q-96); price levels (Q-58). Inventory parts arrive in P24. — `feat(lists): items and price levels`
 5. Tags: groups, one-per-group rule, required groups by account type, transaction- and line-level application rules exposed to forms (Q-178–Q-181); rename/merge; usage counts. — `feat(lists): tags`
 6. Terms (incl. discount terms), payment methods; CSV import/export per list with mapping. — `feat(lists): terms, methods, csv`
@@ -83,7 +83,7 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 1. Register view on `cl-grid`: two-line rows (date · number/type · payee/account·memo · payment · ✓ · deposit · balance); one-line toggle; opens date ascending, last 90 days, range remembered per account (Q-186). — `feat(register): view`
 2. Balance column always shows the engine's true per-transaction balance in date order, even when filtered or sorted (Q-187). — `feat(register): true balance`
 3. Entry row for simple checks/deposits/transfers; Splits opens the full form; Record with Enter. — `feat(register): entry row`
-4. Quick filters: uncleared, payee, tag, amount range (Q-189); Go To; QuickReport; Edit Transaction. — `feat(register): filters and navigation`
+4. Quick filters: uncleared, payee, tag, amount range (Q-189); Go To; Account Report (Q-254); Edit Transaction. — `feat(register): filters and navigation`
 5. Closed-period lock and password flow (shared `cl-model::closing`); Delete and Void everywhere with confirmation, before-image in audit trail (Q-40). — `feat(register): lock, delete, void`
 6. Footer: cleared and ending balances.
 
@@ -103,17 +103,17 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 | --- | --- | --- | --- | --- |
 | M | M | P12 | rust-implementer (sonnet) | reviewer (opus), ui-verifier |
 
-**Decisions:** Q-10, Q-73, Q-85, Q-190–Q-193, Q-212. **Engine:** checks with expense/item lines, billable, tags, attachments, memorize; rules-based and AI suggestions.
+**Decisions:** Q-10, Q-73, Q-85, Q-190–Q-193, Q-212. **Engine:** checks with expense/item lines, billable, tags, attachments, templates (Q-256); rules-based and AI suggestions.
 
 **Mockup:** `docs/design/mockups/WriteCheck.html` and `docs/design/screenshots/WriteCheck.png`.
 
 **Crates and files:** `crates/cl-ui/src/screens/write_check/{form.rs,payee_panel.rs}`, `crates/cl-model/src/forms/check.rs`, `crates/cl-automation/scenarios/write_check.yaml`.
 
 **Steps**
-1. Form per DESIGN.md: account + ending balance, number, date, payee (autofill + address), amount + words line, memo, Expenses/Items split grid (account, amount, memo, client:job, billable, tags). — `feat(check): form`
+1. Form per DESIGN.md: account + ending balance, number, date, payee (autofill + address), amount + words line, memo, Expenses/Items split grid (account, amount, memo, customer / job, billable, tags). — `feat(check): form`
 2. Payee prefill from last transaction except amounts (Q-191); vendor default account (Q-192); header tags default to lines (Q-178). — `feat(check): prefill`
 3. Payee panel: open-bill warning ("use Pay Bills instead"), recent checks. — `feat(check): payee panel`
-4. Print later, attach, memorize, history, Prev/Next; no Pay online in beta (Q-10). — `feat(check): toolbar`
+4. Print later, attach, Save as Template (P15, Q-249), history, Prev/Next; no Pay online in beta (Q-10). — `feat(check): toolbar`
 5. Suggestions: rule match offline; AI chip only when enabled and online; explicit accept; accepts counted toward rule offers (Q-141). — `feat(check): suggestions`
 
 **Tests:** mockup example scenario (check 4418 to Ozark Feed & Seed, 1,286.40 split 842.15 + 444.25, open-bill warning shown); GL effect test; lines-vs-amount validation; AI-off scenario shows no AI chip.
@@ -137,7 +137,7 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 
 **Steps (work packages A–C may run in parallel worktrees)**
 - **A:** Make Deposit (from Undeposited Funds; other lines including negative fee lines; cash back to a chosen account, Q-205; suggested groupings for pending imported deposits; deposit summary printout, Q-203; "Refund from a vendor", Q-87); Transfer Funds. — `feat(banking): deposit and transfer`
-- **B:** Sales Receipt (defaults to Undeposited Funds, Q-202); Daily sales summary with tenders and over/short (Q-86, Q-204), memorizable. — `feat(sales): sales receipt and daily summary`
+- **B:** Sales Receipt (defaults to Undeposited Funds, Q-202); Daily sales summary with tenders and over/short (Q-86, Q-204), can be saved as a template (Q-256). — `feat(sales): sales receipt and daily summary`
 - **C:** Record Card Charge/Credit (Q-60); "Pay yourself / Put money in" by entity type (Q-61); "Paid with personal funds" (Q-85); Loan payment helper (Q-62). — `feat(money): card and owner helpers`
 
 **Tests:** deposit grouping clears Undeposited Funds exactly; transfer appears in both registers; loan split matches lender fixture; over/short posts correctly; personal-funds default by entity type; scenarios per form.
@@ -149,20 +149,20 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 
 ---
 
-## P15 — Journal entries, memorized and recurring transactions
+## P15 — Journal entries, templates and recurring transactions
 
 | Tier | Size | Depends on | Implementer | Reviews |
 | --- | --- | --- | --- | --- |
 | H | M | P12 | rust-implementer (opus) | reviewer (opus), ui-verifier |
 
-**Decisions:** Q-52, Q-181, Q-206, Q-207. **Engine:** journal entries (A/R or A/P line with name, one per entry; adjusting flag; reversing), memorized transactions with schedules on pg-boss, missed-run catch-up idempotency.
+**Decisions:** Q-52, Q-181, Q-206, Q-207. **Engine:** journal entries (A/R or A/P line with name, one per entry; adjusting flag; reversing), memorized transactions (owner-facing name: Templates, Q-256) with schedules on pg-boss, missed-run catch-up idempotency.
 
-**Crates and files:** `crates/cl-ui/src/screens/{journal_entry.rs,memorized.rs}`, `crates/cl-model/src/forms/journal.rs`, `crates/cl-model/src/memorized.rs`.
+**Crates and files:** `crates/cl-ui/src/screens/{journal_entry.rs,templates.rs}`, `crates/cl-model/src/forms/journal.rs`, `crates/cl-model/src/templates.rs`.
 
 **Steps**
 1. Make Journal Entry: debit/credit grid, names, tags, autobalance helper, numbering, reversing option, adjusting flag (Q-207), A/R or A/P rule (Q-206). — `feat(je): form`
-2. Memorize from checks, bills, deposits, journal entries; remind / enter automatically / never; groups; next date; tags carried (Q-181); no recurring invoices (Q-52). — `feat(memorized): list and schedules`
-3. Catch-up: on launch, post missed occurrences once each and show a summary. — `feat(memorized): catch-up`
+2. "Save as Template" from checks, bills, deposits, journal entries (Q-256, Q-249); a Templates list; remind / enter automatically / never; groups; next date; tags carried (Q-181); no recurring invoices (Q-52). — `feat(templates): list and schedules`
+3. Catch-up: on launch, post missed occurrences once each and show a summary. — `feat(templates): catch-up`
 
 **Tests:** unbalanced entry refused; A/R line without a name refused; two A/R accounts refused; catch-up idempotency across restarts (simulated clock); reversing entry dates.
 
@@ -172,13 +172,13 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 
 ---
 
-## P15A — Batch Enter Transactions
+## P15A — Bulk Entry
 
 | Tier | Size | Depends on | Implementer | Reviews |
 | --- | --- | --- | --- | --- |
 | M | M | P13–P15 (and P10 grid) | rust-implementer (opus) | reviewer (opus), ui-verifier |
 
-**Decisions:** Q-252, Q-232, Q-233, Q-238, Q-250. **Engine:** `/api/v1/batch` (validate, save, suggest-account, parse-csv). Run the capability check first. Invoice, bill, credit memo and customer payment rows may need items (P20) or A/R-A/P rules from P17/P21: rows of types whose forms are not built yet are offered only once their phase is done (record this as a default in QUESTIONS.md when the phase starts).
+**Decisions:** Q-252, Q-256, Q-232, Q-233, Q-238, Q-250. Screen title "Bulk Entry" (Q-256). **Engine:** `/api/v1/batch` (validate, save, suggest-account, parse-csv). Run the capability check first. Invoice, bill, credit memo and customer payment rows may need items (P20) or A/R-A/P rules from P17/P21: rows of types whose forms are not built yet are offered only once their phase is done (record this as a default in QUESTIONS.md when the phase starts).
 
 **Mockup:** none. Follow the grid rules in `docs/DESIGN.md`; note "no mockup" in the PR.
 
@@ -228,4 +228,4 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 
 ## Checkpoint PR-1 — Core ledger process review (fable)
 
-Run `process-reviewer` on: register, checks, deposits/transfers, card charges, owner helpers, journal entries, memorized catch-up, closed-period enforcement, delete/void audit trail. Fix Blocking findings on `fix/PR-1` before M2 starts.
+Run `process-reviewer` on: register, checks, deposits/transfers, card charges, owner helpers, journal entries, template catch-up, closed-period enforcement, delete/void audit trail. Fix Blocking findings on `fix/PR-1` before M2 starts.

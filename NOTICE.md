@@ -36,5 +36,6 @@ licensing@kisaes.com.
 ## Non-affiliation
 
 ClientLedger is an independent project. It is not affiliated with, endorsed by,
-or sponsored by Intuit Inc. QuickBooks is a trademark of Intuit Inc., mentioned
-here only to describe import and migration features.
+or sponsored by Intuit Inc. Intuit and QuickBooks are trademarks of Intuit Inc.,
+mentioned here only to describe import and migration features. Other product
+names are trademarks of their owners.
