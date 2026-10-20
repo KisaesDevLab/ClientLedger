@@ -1099,6 +1099,9 @@ impl WriteCheckScreen {
                 true
             }
             "edit.void_transaction" => self.start_void(),
+            // `--demo` only (the command exists only there): the saved
+            // check in front was printed.
+            "dev.check_mark_printed" => self.demo_mark_printed(),
             "edit.open_list" if self.focused == Some(Field::Payee) => {
                 self.payee_list = true;
                 true
@@ -1120,6 +1123,22 @@ impl WriteCheckScreen {
             "form.revert" => self.revert_field(),
             _ => false,
         }
+    }
+
+    /// The demo check being edited becomes a printed one (no printing
+    /// before P19; the scenario reaches the printed-check question so).
+    fn demo_mark_printed(&mut self) -> bool {
+        let Some(e) = self.editing.as_mut() else {
+            return false;
+        };
+        let Some(mut demo) = self.link.demo_state() else {
+            return false;
+        };
+        let done = crate::company::demo::checks::mark_printed(&mut demo, e.id);
+        if done {
+            e.print_status = cl_api::PrintStatus::Printed;
+        }
+        done
     }
 
     /// Esc: the payee list closes, then the focused field goes back to

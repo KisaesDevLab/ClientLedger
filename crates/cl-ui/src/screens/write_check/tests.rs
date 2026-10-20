@@ -680,6 +680,26 @@ fn a_printed_check_edit_asks_reprint_or_keep_the_number() {
     assert_eq!(s.state()["last_saved"]["print_status"], "queue");
 }
 
+/// The demo-only `dev.check_mark_printed` (the scenario's way to the
+/// printed-check question before P19): only a saved check, then the edit
+/// asks.
+#[test]
+fn the_dev_command_marks_the_demo_check_printed() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let mark = cl_model::CommandId::new("dev.check_mark_printed");
+    assert!(!s.command(mark), "a new check is not saved yet");
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.navigate(true);
+    s.poll();
+    assert!(s.command(mark));
+    assert_eq!(s.state()["edit_print_status"], "printed");
+    s.amount_typed(Some(money("11.00")));
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(s.state()["printed_prompt"], true);
+}
+
 #[test]
 fn the_draft_is_the_checked_check_field_by_field() {
     let account = AccountId::parse("00000000-0000-0000-0000-000000005100").expect("id");
