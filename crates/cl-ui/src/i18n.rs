@@ -89,7 +89,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("menu.file", "File"),
     ("menu.edit", "Edit"),
     ("menu.lists", "Lists"),
-    ("menu.clients", "Customers"),
+    ("menu.customers", "Customers"),
     ("menu.vendors", "Vendors"),
     ("menu.banking", "Banking"),
     ("menu.payroll", "Payroll"),
