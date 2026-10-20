@@ -525,6 +525,65 @@ impl DemoLedger {
             .map(|n| n.saturating_add(1))
     }
 
+    /// The id a demo transaction is known by (as the engine would send it).
+    #[must_use]
+    pub fn id_of(t: &SampleTransaction) -> TransactionId {
+        txn_id(t)
+    }
+
+    /// True when the transaction was voided in the demo.
+    #[must_use]
+    pub fn is_void(&self, id: TransactionId) -> bool {
+        sample_id(id).is_some_and(|n| self.voided.contains(&n))
+    }
+
+    /// Every numbered check drawn on `account`: (id, number, void).
+    #[must_use]
+    pub fn check_numbers(
+        &self,
+        chart: &[Account],
+        account: AccountId,
+    ) -> Vec<(TransactionId, u32, bool)> {
+        let Some(number) = chart.iter().find(|a| a.id == account).and_then(number_of) else {
+            return Vec::new();
+        };
+        self.transactions()
+            .iter()
+            .filter(|t| t.kind == "check" && t.lines.iter().any(|l| l.account == number))
+            .filter_map(|t| {
+                let n = t.number.parse::<u32>().ok()?;
+                Some((txn_id(t), n, self.voided.contains(&t.id)))
+            })
+            .collect()
+    }
+
+    /// Puts the line memos and tag names (by line order, the account's own
+    /// line excluded) on a transaction recorded in the demo.
+    pub fn set_line_details(
+        &mut self,
+        chart: &[Account],
+        id: TransactionId,
+        own: AccountId,
+        details: &[(Option<String>, Option<String>)],
+    ) {
+        let own_number = chart
+            .iter()
+            .find(|a| a.id == own)
+            .and_then(number_of)
+            .map(str::to_string);
+        let Some(t) = sample_id(id).and_then(|n| self.changed.get_mut(&n)) else {
+            return;
+        };
+        let others = t
+            .lines
+            .iter_mut()
+            .filter(|l| Some(&l.account) != own_number.as_ref());
+        for (l, (memo, tag)) in others.zip(details) {
+            l.memo.clone_from(memo);
+            l.tag.clone_from(tag);
+        }
+    }
+
     /// Records (or, with `existing`, replaces) a posting; `None` when an
     /// account is not in the chart or the transaction is unknown.
     pub fn save(
