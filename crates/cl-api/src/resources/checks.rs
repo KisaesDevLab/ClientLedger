@@ -231,6 +231,7 @@ impl EditableFields for CheckRecord {
         "lines.contactId",
         "lines.isBillable",
         "lines.lineOrder",
+        "lines.sourceTransactionId",
         "checkNumber",
         "printStatus",
         "payeeNameOnCheck",

@@ -397,6 +397,8 @@ mod tests {
             contact_id: None,
             is_billable: false,
             billed_status: None,
+            source_transaction_id: None,
+            line_role: None,
         }
     }
 

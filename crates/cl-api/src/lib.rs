@@ -59,8 +59,9 @@ pub use resources::ai::{
 };
 pub use resources::audit::{Audit, AuditAction, AuditEntity, AuditEntry, AuditImage, AuditLine};
 pub use resources::bank_postings::{
-    BankPosting, BankPostingKind, CardChargeDraft, CheckDraft, DepositDraft, PAYEE_ADDRESS_MAX,
-    PAYEE_NAME_MAX, PRINTED_MEMO_MAX, SplitLine, TransferDraft,
+    BankPosting, BankPostingKind, CASH_BACK_MEMO_MAX, CardChargeDraft, CashBack, CheckDraft,
+    DepositCaps, DepositDraft, DepositSource, GroupedPayment, PAYEE_ADDRESS_MAX, PAYEE_NAME_MAX,
+    PRINTED_MEMO_MAX, SplitLine, TransferDraft,
 };
 // P13 WP1: write check.
 pub use resources::checks::{
@@ -116,8 +117,8 @@ pub use resources::tenants::{
     ImportVerification, JobError, JobId, JobState, NewTenant, TenantSummary, Tenants,
 };
 pub use resources::transactions::{
-    Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions, JeLine, MAX_LINES,
-    NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter, TransactionLine,
+    Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions, JeLine, LINE_ROLE_CASH_BACK,
+    MAX_LINES, NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter, TransactionLine,
     TransactionSummary, Transactions, TxnSort, TxnStatus, TxnType,
 };
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};

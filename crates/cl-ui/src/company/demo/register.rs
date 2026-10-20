@@ -696,6 +696,8 @@ impl DemoLedger {
                 contact_id: if deposit && !own_side { contact } else { None },
                 is_billable: false,
                 billed_status: None,
+                source_transaction_id: None,
+                line_role: None,
             });
         }
         let record = cl_api::Transaction {

@@ -364,6 +364,16 @@ pub(crate) fn line_editable(
     v
 }
 
+/// A line's source document (P14: a grouped payment or a refunded vendor
+/// credit), hashed only when set so every other fingerprint stays what it
+/// was before P14.
+pub(crate) fn with_source(mut line: Value, source: Option<TransactionId>) -> Value {
+    if let Some(s) = source {
+        line["sourceTransactionId"] = json!(s);
+    }
+    line
+}
+
 pub(crate) fn txn_editable(
     txn_type: TxnType,
     date: CalendarDate,
@@ -426,7 +436,20 @@ pub struct TransactionLine {
     /// engine-maintained, never part of a fingerprint).
     #[serde(default)]
     pub billed_status: Option<BilledStatus>,
+    /// The document a deposit line takes in: a payment out of Payments
+    /// Clearing (`deposit-grouping-v1`) or a vendor credit refunded
+    /// (`vendor-refund-v1`). Hashed only when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_transaction_id: Option<TransactionId>,
+    /// What the line is for inside its document (`cash_back` on a
+    /// deposit's cash-back line, `deposit-cashback-v1`). Engine-made,
+    /// never part of a fingerprint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_role: Option<String>,
 }
+
+/// `line_role` of a deposit's cash-back line.
+pub const LINE_ROLE_CASH_BACK: &str = "cash_back";
 
 /// Whether a billable line was invoiced yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -505,6 +528,7 @@ impl EditableFields for Transaction {
         "lines.contactId",
         "lines.isBillable",
         "lines.lineOrder",
+        "lines.sourceTransactionId",
     ];
 
     fn editable(&self) -> Value {
@@ -513,15 +537,18 @@ impl EditableFields for Transaction {
         let lines = lines
             .into_iter()
             .map(|l| {
-                line_editable(
-                    l.account_id,
-                    &l.debit.to_wire(),
-                    &l.credit.to_wire(),
-                    l.description.as_deref(),
-                    l.tag_id,
-                    l.contact_id,
-                    l.is_billable,
-                    l.line_order.unwrap_or(0),
+                with_source(
+                    line_editable(
+                        l.account_id,
+                        &l.debit.to_wire(),
+                        &l.credit.to_wire(),
+                        l.description.as_deref(),
+                        l.tag_id,
+                        l.contact_id,
+                        l.is_billable,
+                        l.line_order.unwrap_or(0),
+                    ),
+                    l.source_transaction_id,
                 )
             })
             .collect::<Vec<_>>();

@@ -81,18 +81,18 @@ fn card_draft() -> CardChargeDraft {
 }
 
 fn deposit_draft() -> DepositDraft {
-    DepositDraft {
-        account: a(BANK),
-        date: day(),
-        memo: None,
-        lines: vec![
+    DepositDraft::plain(
+        a(BANK),
+        day(),
+        None,
+        vec![
             SplitLine {
                 contact: Some(ContactId::parse(PAYEE).expect("id")),
                 ..split(EXP, "1100", Some("Invoice 7"))
             },
             split(EXP2, "0.0001", Some("")),
         ],
-    }
+    )
 }
 
 fn transfer_draft() -> TransferDraft {
@@ -169,12 +169,18 @@ fn bad_drafts_are_refused_locally() {
     let mut d = deposit_draft();
     d.lines[0].amount = m("-5");
     assert_eq!(BankPosting::deposit(d), Err(L::NonPositiveAmount));
+    // A card line's customer or billable mark needs `line-billable-v1`
+    // (P14), and billable still needs the customer.
     let mut d = card_draft();
     d.lines[0].contact = Some(ContactId::parse(PAYEE).expect("id"));
-    assert_eq!(BankPosting::card_charge(d), Err(L::InvalidValue));
+    assert_eq!(BankPosting::card_charge(d), Err(L::LineBillableUnavailable));
     let mut d = card_draft();
     d.lines[0].billable = true;
-    assert_eq!(BankPosting::card_charge(d), Err(L::InvalidValue));
+    assert_eq!(
+        BankPosting::card_charge(d.clone()),
+        Err(L::LineBillableUnavailable)
+    );
+    assert_eq!(BankPosting::card_charge_with(d, true), Err(L::InvalidValue));
     let mut d = deposit_draft();
     d.lines[0].billable = true;
     assert_eq!(BankPosting::deposit(d), Err(L::InvalidValue));

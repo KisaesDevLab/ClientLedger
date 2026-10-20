@@ -527,12 +527,12 @@ impl Prepared {
                 memo: self.memo.clone(),
                 lines,
             })?,
-            EntryKind::Deposit => BankPosting::deposit(DepositDraft {
-                account: self.own,
-                date: self.date,
-                memo: self.memo.clone(),
+            EntryKind::Deposit => BankPosting::deposit(DepositDraft::plain(
+                self.own,
+                self.date,
+                self.memo.clone(),
                 lines,
-            })?,
+            ))?,
             EntryKind::Transfer => {
                 let [other] = lines.as_slice() else {
                     return Err(LocalValidation::InvalidValue);

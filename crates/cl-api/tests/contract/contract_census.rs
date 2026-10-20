@@ -510,7 +510,13 @@ pub fn field_census(h: &Harness) {
             keys: fields_of::<TransactionLine>(),
             strings: &["debit", "credit"],
             // P13: `line-billable-v1` adds these; older engines leave them out.
-            optional: &["isBillable", "billedStatus"],
+            // P14 (engine PR #159) adds the deposit source and line role.
+            optional: &[
+                "isBillable",
+                "billedStatus",
+                "sourceTransactionId",
+                "lineRole",
+            ],
         },
         line,
     );
