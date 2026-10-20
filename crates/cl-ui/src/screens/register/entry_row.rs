@@ -439,7 +439,7 @@ impl std::fmt::Debug for Prepared {
 type SideOf = fn(Money) -> cl_api::Side;
 
 /// An engine posting.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Built {
     /// A check, deposit, transfer or card charge.
     Bank(BankPosting),

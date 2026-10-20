@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use cl_api::{
     ApiError, ClosedPeriodAuthorization, Contact, ContactFilter, IdempotencyKey, OrphanLabel,
-    PostingOptions, RegisterQuery, RegisterSort, SortDir, Tag, TagFilter, TxnType,
+    PostingOptions, RecordVersion, RegisterQuery, RegisterSort, SortDir, Tag, TagFilter, TxnType,
 };
 use cl_core::ids::{AccountId, TransactionId};
 use cl_grid::{CellPos, ColumnId, GridEvent, NoLookups, TextKey};
@@ -45,8 +45,8 @@ pub(super) struct EntryState {
     pub error: Option<ApiError>,
     /// The save in flight.
     pub task: Option<Task<TransactionId>>,
-    /// The idempotency key of the draft being retried.
-    pub key: Option<(EntryDraft, IdempotencyKey)>,
+    /// The idempotency key of the request being retried.
+    pub key: Option<(SaveIdentity, IdempotencyKey)>,
     /// The next check number (Q-P12q).
     pub next_check: Option<u32>,
     next_check_task: Option<Task<Option<u32>>>,
@@ -95,17 +95,63 @@ impl EntryState {
         self.form.form().current()
     }
 
-    /// The idempotency key for `draft`: the same key while the same draft
-    /// is retried, a new one once it changed.
-    fn key_for(&mut self, draft: &EntryDraft) -> IdempotencyKey {
+    /// The idempotency key for the request `id`: the same key while the
+    /// very same request is retried, a new one once anything it sends
+    /// changed (the posting and its lines, the record version, the
+    /// password).
+    pub(super) fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
         match &self.key {
-            Some((d, k)) if d == draft => k.clone(),
+            Some((d, k)) if d == id => k.clone(),
             _ => {
                 let k = IdempotencyKey::new();
-                self.key = Some((draft.clone(), k.clone()));
+                self.key = Some((id.clone(), k.clone()));
                 k
             }
         }
+    }
+}
+
+/// Everything a save sends, for its idempotency key: the built posting
+/// (with every split line), the record and version it edits, and whether
+/// a closing-date password goes with it (never the password itself).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SaveIdentity {
+    pub built: Built,
+    pub edit: Option<(TransactionId, RecordVersion)>,
+    pub password: bool,
+}
+
+/// True when a failed save may be retried under the same key: the engine
+/// may or may not have recorded it (transport trouble, an unknown outcome,
+/// a server error) or did record it (`SavedUnreadable`), so a retry must be
+/// recognised as the same save. A definitive refusal (validation, conflict,
+/// closed period, password, rate limit, ...) gets a fresh key, so the next
+/// try is never answered with the stored refusal.
+pub(super) fn keeps_key(e: &ApiError) -> bool {
+    match e {
+        ApiError::Validation(_)
+        | ApiError::Local(_)
+        | ApiError::Conflict { .. }
+        | ApiError::ClosedPeriod(_)
+        | ApiError::ClosingPasswordRejected
+        | ApiError::ClosingPasswordRequired
+        | ApiError::ClosingPasswordOwnerRequired
+        | ApiError::ClosingPasswordRateLimited { .. }
+        | ApiError::AccountPasswordRejected
+        | ApiError::InexactMoney { .. }
+        | ApiError::OfflineUnavailable { .. }
+        | ApiError::FeatureNotEnabled { .. }
+        | ApiError::Unauthorized(_)
+        | ApiError::Forbidden { .. }
+        | ApiError::NotFound { .. }
+        | ApiError::Unsupported { .. }
+        | ApiError::NoCompanyOpen
+        | ApiError::RateLimited { .. }
+        | ApiError::PayloadTooLarge
+        | ApiError::Protocol { .. } => false,
+        // Unknown outcome (and anything newer): keep the key, so a retry
+        // can never record the save twice.
+        _ => true,
     }
 }
 
@@ -386,12 +432,16 @@ impl RegisterScreen {
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return false;
         };
-        let key = self.entry.key_for(&draft);
+        let edit = update.map(|e| (e.id, e.version));
+        let key = self.entry.key_for(&SaveIdentity {
+            built: built.clone(),
+            edit,
+            password: password.is_some(),
+        });
         let label = OrphanLabel {
             what: "orphan.register_save",
             key: Some(key.clone()),
         };
-        let edit = update.map(|e| (e.id, e.version));
         let pending = group.write(&session, label, move |s| async move {
             let opts = PostingOptions {
                 closed_period: password.map(ClosedPeriodAuthorization::with_password),
@@ -588,7 +638,10 @@ impl RegisterScreen {
         self.fetch_next_check();
     }
 
-    fn record_failed(&mut self, e: ApiError) {
+    pub(super) fn record_failed(&mut self, e: ApiError) {
+        if !keeps_key(&e) {
+            self.entry.key = None;
+        }
         self.entry.form.save_failed(cl_model::forms::SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),

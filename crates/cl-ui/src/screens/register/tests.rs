@@ -1344,3 +1344,77 @@ fn a_charge_typed_under_charge_lands_under_charge() {
     assert_eq!(rows.len(), 1, "the charge sits in the Charge column");
     assert!(rows[0].deposit.is_none());
 }
+
+fn transfer_identity(amount: &str, edit: Option<u64>, password: bool) -> record::SaveIdentity {
+    let a = AccountId::parse("d0000000-0000-4000-8000-a00000001010").expect("id");
+    let b = AccountId::parse("d0000000-0000-4000-8000-a00000001020").expect("id");
+    let built = entry_row::Built::Bank(
+        cl_api::BankPosting::transfer(cl_api::TransferDraft {
+            from: a,
+            to: b,
+            date: today(),
+            amount: money(amount),
+            memo: None,
+        })
+        .expect("transfer"),
+    );
+    let id =
+        cl_core::ids::TransactionId::parse("d0000000-0000-4000-8000-b00000000001").expect("id");
+    record::SaveIdentity {
+        built,
+        edit: edit.map(|v| (id, cl_api::RecordVersion::Server(v))),
+        password,
+    }
+}
+
+#[test]
+fn the_idempotency_key_follows_the_request_sent() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let first = transfer_identity("10.00", Some(1), false);
+    let k = s.entry.key_for(&first);
+    assert_eq!(s.entry.key_for(&first), k, "the same request: the same key");
+    // Anything the request sends changes the key.
+    for other in [
+        transfer_identity("10.01", Some(1), false),
+        transfer_identity("10.00", Some(2), false),
+        transfer_identity("10.00", None, false),
+        transfer_identity("10.00", Some(1), true),
+    ] {
+        let mut s2 = screen(&link);
+        let k1 = s2.entry.key_for(&first);
+        assert_ne!(s2.entry.key_for(&other), k1);
+    }
+}
+
+#[test]
+fn a_definitive_refusal_rotates_the_key_and_an_unknown_outcome_keeps_it() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let id = transfer_identity("10.00", None, false);
+    let k = s.entry.key_for(&id);
+    // Transport trouble: the save may be recorded; a retry must replay.
+    for e in [
+        cl_api::ApiError::Timeout,
+        cl_api::ApiError::EngineUnavailable { permanent: false },
+        cl_api::ApiError::Server {
+            status: 500,
+            code: None,
+        },
+        cl_api::ApiError::SavedUnreadable { what: "test" },
+    ] {
+        s.record_failed(e);
+        assert_eq!(s.entry.key_for(&id), k, "kept");
+    }
+    // A definitive answer: the next try is a new request.
+    for e in [
+        cl_api::ApiError::ClosingPasswordRejected,
+        cl_api::ApiError::RateLimited { retry_after: None },
+        cl_api::ApiError::NotFound { code: None },
+    ] {
+        let before = s.entry.key_for(&id);
+        s.record_failed(e);
+        assert!(s.entry.key.is_none(), "rotated");
+        assert_ne!(s.entry.key_for(&id), before);
+    }
+}
