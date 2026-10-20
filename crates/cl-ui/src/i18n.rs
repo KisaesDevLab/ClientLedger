@@ -733,7 +733,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("grid.a11y.reconciled", "Reconciled"),
     ("grid.a11y.loading", "Loading\u{2026}"),
     ("grid.a11y.locked", "Locked: this date is in a closed period"),
-    ("grid.a11y.suggested", "Suggested. Press Tab to accept it, or type to replace it."),
+    ("grid.a11y.suggested", "Suggested: {value}, not accepted. Press Tab to accept it, or type to replace it."),
     ("grid.a11y.row_problem", "This line has a problem"),
     ("grid.a11y.scrollbar", "Scroll rows"),
     ("grid.a11y.header_row", "Column headers"),
@@ -925,6 +925,7 @@ mod tests {
             ("grid.popup.full_list", &["{column}"]),
             ("grid.a11y.cell", &["{column}", "{row}"]),
             ("grid.a11y.row_of", &["{n}", "{total}"]),
+            ("grid.a11y.suggested", &["{value}"]),
         ] {
             for n in names {
                 assert!(t(key).contains(n), "{key} lacks {n}");

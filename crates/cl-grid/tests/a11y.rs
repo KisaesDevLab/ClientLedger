@@ -302,6 +302,8 @@ fn a_suggestion_is_described_as_one() {
     )
     .clone();
     assert_eq!(cell.description(), Some("grid.a11y.suggested"));
+    // Not accepted yet: the suggestion is never the cell's value.
+    assert_eq!(cell.value(), Some(""));
 }
 
 #[test]

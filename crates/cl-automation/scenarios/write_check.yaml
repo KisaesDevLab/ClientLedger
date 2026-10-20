@@ -163,6 +163,8 @@ steps:
   - assert_state: {key: screen.ai.chip, equals: true}
   - assert_state: {key: screen.ai.open, equals: 1}
   - assert_state: {key: screen.ai.accepted, equals: 0}
+  # A ghost is described, never the cell's value, until accepted.
+  - assert_value: {target: {label: "Account, line 2"}, equals: ""}
   - assert_exists: {role: button, label: Accept}
   - screenshot: ai-chip
   - click: {role: button, label: Accept}
