@@ -77,6 +77,7 @@ fn column(id: ColumnId, header: TextKey, kind: CellKind, line: Line, w: u16) -> 
         id,
         header,
         placeholder: None,
+        empty: None,
         help: None,
         kind,
         line,

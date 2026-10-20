@@ -1922,6 +1922,11 @@ impl Grid {
                 placeholder: true,
                 mono: false,
             },
+            CellValue::Empty if col.empty.is_some() => Shown {
+                text: col.empty.map(|k| env.t(k)).unwrap_or_default(),
+                placeholder: true,
+                mono: false,
+            },
             CellValue::Choice(id) => {
                 let label = match kind {
                     CellKind::Dropdown { options } => options

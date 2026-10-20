@@ -177,6 +177,7 @@ fn column(id: ColumnId, kind: CellKind) -> Column {
         id,
         header: TextKey("grid.a11y.line"),
         placeholder: None,
+        empty: None,
         help: None,
         kind,
         line: Line::First,

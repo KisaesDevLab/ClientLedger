@@ -33,6 +33,7 @@ fn column(id: ColumnId, header: &'static str, w: u16, flex: u8) -> Column {
         id,
         header: TextKey(header),
         placeholder: None,
+        empty: None,
         help: None,
         kind: CellKind::Display,
         line: Line::First,

@@ -381,8 +381,8 @@ impl WriteCheckScreen {
                     }
                 });
             }
-            egui::Frame::new()
-                .stroke(egui::Stroke::new(1.0, tokens.border_default))
+            // The drop zone: a dashed border (mockup), painted after.
+            let zone = egui::Frame::new()
                 .corner_radius(egui::CornerRadius::same(6))
                 .inner_margin(egui::Margin::same(10))
                 .show(ui, |ui| {
@@ -415,6 +415,12 @@ impl WriteCheckScreen {
                         .clicked()
                         || (enter && typed && !busy);
                 });
+            crate::widgets::paint_dashed_border(
+                ui.painter(),
+                zone.response.rect,
+                6.0,
+                egui::Stroke::new(1.0, tokens.border_strong),
+            );
             if self.attach.upload.is_some() {
                 form::progress_line(ui, tokens, &t("check.attach.uploading"));
             }

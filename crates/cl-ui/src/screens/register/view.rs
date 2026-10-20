@@ -67,6 +67,7 @@ fn column(id: ColumnId, header: &'static str, line: Line, w: u16) -> Column {
         id,
         header: TextKey(header),
         placeholder: None,
+        empty: None,
         help: None,
         kind: CellKind::Display,
         line,

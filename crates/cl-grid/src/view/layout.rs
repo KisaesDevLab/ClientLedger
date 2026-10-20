@@ -132,6 +132,7 @@ mod tests {
             id: ColumnId(id),
             header: TextKey("h"),
             placeholder: None,
+            empty: None,
             help: None,
             kind: CellKind::Display,
             line,

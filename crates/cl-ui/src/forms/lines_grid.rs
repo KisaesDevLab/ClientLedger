@@ -198,12 +198,11 @@ impl LinesSpec {
             ),
         ];
         if self.customer {
-            columns.push(column(
-                L_CUSTOMER,
-                h.customer,
-                picker(L::CUSTOMERS),
-                (110, 170, 1),
-            ));
+            // No customer reads as a muted dash (mockup WriteCheck.html).
+            columns.push(Column {
+                empty: Some(TextKey("lines.empty")),
+                ..column(L_CUSTOMER, h.customer, picker(L::CUSTOMERS), (110, 170, 1))
+            });
         }
         if self.billable {
             columns.push(Column {
@@ -228,6 +227,7 @@ fn column(id: ColumnId, header: TextKey, kind: CellKind, width: (u16, u16, u8)) 
         id,
         header,
         placeholder: None,
+        empty: None,
         help: None,
         kind,
         line: Line::First,
@@ -719,6 +719,12 @@ mod tests {
         );
         assert_eq!(all.columns[4].kind, CellKind::Checkbox);
         assert!(matches!(all.columns[5].kind, CellKind::Tags { .. }));
+        // No customer reads as a muted dash; nothing else gets one.
+        assert_eq!(
+            all.columns[3].empty.map(|k| crate::i18n::t(k.0)).as_deref(),
+            Some("\u{2014}")
+        );
+        assert_eq!(all.columns.iter().filter(|c| c.empty.is_some()).count(), 1);
         for c in &all.columns {
             assert!(crate::i18n::has(c.header.0), "{}", c.header.0);
         }

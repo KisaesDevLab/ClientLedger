@@ -27,6 +27,13 @@ const REGISTER_HINTS: [(&str, &str); 2] = [
     ("edit.edit_transaction", "status.hint.open_form"),
 ];
 
+/// Write Check's hints after Tab (mockup WriteCheck.html).
+const CHECK_HINTS: [(&str, &str); 3] = [
+    ("form.insert_line", "status.hint.insert_line"),
+    ("edit.open_list", "status.hint.list"),
+    ("form.revert", "status.hint.revert"),
+];
+
 /// One hint on the right of the bar: its key chips and short label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hint {
@@ -50,11 +57,21 @@ fn keymap_hints(list: &[(&str, &str)]) -> Vec<Hint> {
 }
 
 /// The hints for the window in front (`None` when no window is open): the
-/// register shows its own, every other screen the general ones.
+/// register and Write Check show their own, every other screen the general
+/// ones.
 #[must_use]
 pub fn hints_for(active: Option<CommandId>) -> Vec<Hint> {
-    if active.map(CommandId::as_str) != Some("banking.register") {
-        return keymap_hints(&HINTS);
+    match active.map(CommandId::as_str) {
+        Some("banking.register") => {}
+        Some("vendors.write_check") => {
+            let mut out = vec![Hint {
+                chips: vec!["Tab".to_string()],
+                label: t("status.hint.next_field"),
+            }];
+            out.extend(keymap_hints(&CHECK_HINTS));
+            return out;
+        }
+        _ => return keymap_hints(&HINTS),
     }
     let mut out = vec![
         Hint {

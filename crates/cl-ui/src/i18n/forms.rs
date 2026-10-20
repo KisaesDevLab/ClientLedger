@@ -9,6 +9,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lines.col.amount", "Amount"),
     ("lines.col.memo", "Memo"),
     ("lines.col.customer_job", "Customer:Job"),
+    ("lines.empty", "\u{2014}"),
     ("lines.col.billable", "Billable"),
     ("lines.col.tags", "Tags"),
     ("lines.need_account", "Choose an account for each line."),

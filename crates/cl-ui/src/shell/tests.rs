@@ -350,6 +350,16 @@ fn status_bar_hints_follow_the_window_in_front() {
     assert_eq!(reg[1].chips, ["+", "\u{2212}", "T"]);
     assert_eq!(reg[2].chips, vec![chip("form.delete_item")]);
     assert_eq!(reg[3].chips, vec![chip("edit.edit_transaction")]);
+
+    // Mockup WriteCheck.html: Tab next field · Ctrl Ins insert line ·
+    // Ctrl L list · Esc revert.
+    let check = hints_for(Some(CommandId::new("vendors.write_check")));
+    let labels: Vec<&str> = check.iter().map(|h| h.label.as_str()).collect();
+    assert_eq!(labels, ["next field", "insert line", "list", "revert"]);
+    assert_eq!(check[0].chips, ["Tab"]);
+    assert_eq!(check[1].chips, vec![chip("form.insert_line")]);
+    assert_eq!(check[2].chips, vec![chip("edit.open_list")]);
+    assert_eq!(check[3].chips, vec![chip("form.revert")]);
 }
 
 #[test]

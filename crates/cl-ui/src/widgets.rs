@@ -137,6 +137,46 @@ pub fn paint_dot(painter: &egui::Painter, center: Pos2, radius: f32, color: Colo
     painter.circle_filled(center, radius, color);
 }
 
+/// The outline of `rect` with rounded corners of `radius`, as points (the
+/// first repeated at the end, so the path closes).
+#[must_use]
+pub fn rounded_outline(rect: egui::Rect, radius: f32) -> Vec<Pos2> {
+    use std::f32::consts::FRAC_PI_2;
+    const STEPS: u8 = 6;
+    let r = radius
+        .min(rect.width() / 2.0)
+        .min(rect.height() / 2.0)
+        .max(0.0);
+    // Corner centres, clockwise from the top left, and each arc's start.
+    let corners = [
+        (Pos2::new(rect.left() + r, rect.top() + r), 2.0),
+        (Pos2::new(rect.right() - r, rect.top() + r), 3.0),
+        (Pos2::new(rect.right() - r, rect.bottom() - r), 0.0),
+        (Pos2::new(rect.left() + r, rect.bottom() - r), 1.0),
+    ];
+    let mut points = Vec::with_capacity(4 * usize::from(STEPS + 1) + 1);
+    for (c, quarter) in corners {
+        for i in 0..=STEPS {
+            let a = (quarter + f32::from(i) / f32::from(STEPS)) * FRAC_PI_2;
+            points.push(Pos2::new(c.x + r * a.cos(), c.y + r * a.sin()));
+        }
+    }
+    if let Some(first) = points.first().copied() {
+        points.push(first);
+    }
+    points
+}
+
+/// A dashed rounded border around `rect` (a drop zone, DESIGN.md).
+pub fn paint_dashed_border(painter: &egui::Painter, rect: egui::Rect, radius: f32, stroke: Stroke) {
+    painter.extend(egui::Shape::dashed_line(
+        &rounded_outline(rect, radius),
+        stroke,
+        4.0,
+        3.0,
+    ));
+}
+
 /// Small uppercase section label (WORKSPACE, TOOLS, OPEN WINDOWS, MONEY IN).
 pub fn eyebrow(ui: &mut Ui, text: &str) {
     let t = Tokens::of(ui.ctx());
@@ -212,6 +252,21 @@ pub fn row_button(
 #[cfg(test)]
 mod tests {
     use eframe::egui::{self, accesskit::Role};
+
+    #[test]
+    fn the_rounded_outline_closes_and_stays_on_the_rect() {
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 40.0));
+        let pts = super::rounded_outline(rect, 6.0);
+        assert_eq!(pts.first(), pts.last());
+        for p in &pts {
+            assert!(rect.expand(0.01).contains(*p), "{p:?}");
+        }
+        // Each side is reached: the path goes all the way round.
+        assert!(pts.iter().any(|p| (p.x - 10.0).abs() < 0.01));
+        assert!(pts.iter().any(|p| (p.x - 110.0).abs() < 0.01));
+        assert!(pts.iter().any(|p| (p.y - 20.0).abs() < 0.01));
+        assert!(pts.iter().any(|p| (p.y - 60.0).abs() < 0.01));
+    }
 
     /// The chip is painted inside the button, wider than the label alone,
     /// and the accessible name stays the label ("Go To", not "Go To Ctrl F").
