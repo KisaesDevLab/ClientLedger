@@ -52,6 +52,13 @@ pub const COL_ACCOUNT: ColumnId = ColumnId(8);
 /// Balance (read-only, engine value).
 pub const COL_BALANCE: ColumnId = ColumnId(9);
 
+/// Row keys kept before the ones of lines no longer loaded are dropped:
+/// four full page windows, so the cursor's key survives ordinary reloads
+/// and query changes while a long session cannot grow the maps forever.
+// 200 rows a page (`PAGE`) times `MAX_PAGES`, four times over.
+const KEY_CAP: usize = 4 * cl_model::register::MAX_PAGES * 200;
+const _: () = assert!(PAGE == 200, "KEY_CAP assumes 200 rows a page");
+
 /// The dash shown for a balance that is hidden or unreadable.
 const DASH: &str = "\u{2014}";
 
@@ -413,7 +420,23 @@ impl RegisterModel {
         }
         self.failed.remove(&req.page.0);
         self.revision += 1;
+        self.prune_keys(KEY_CAP);
         self.window.accept(req, page.total_rows, rows)
+    }
+
+    #[cfg(test)]
+    pub(super) fn prune_keys_for_test(&mut self, cap: usize) {
+        self.prune_keys(cap);
+    }
+
+    /// Past `cap` keys, keeps only the keys of lines loaded now.
+    fn prune_keys(&mut self, cap: usize) {
+        if self.keys.len() <= cap {
+            return;
+        }
+        let row_of = &self.row_of;
+        self.keys.retain(|line, _| row_of.contains_key(line));
+        self.lines.retain(|_, line| row_of.contains_key(line));
     }
 
     /// A page failed to load.

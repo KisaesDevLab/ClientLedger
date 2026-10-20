@@ -1200,9 +1200,26 @@ fn rate_limits_and_conflicts_are_plain_messages() {
         .handle(cl_model::closing::ClosingEvent::Submit(
             cl_core::Secret::new("x"),
         ));
-    let limited = cl_api::ApiError::ClosingPasswordRateLimited { retry_after: None };
-    assert!(!s.closing_failed(&limited, dialogs::Pending::Save));
-    assert_eq!(s.state()["row_action"]["closing"], "failed");
+    let limited = cl_api::ApiError::ClosingPasswordRateLimited {
+        retry_after: Some(std::time::Duration::from_secs(150)),
+    };
+    // The dialog keeps the change and turns Change off for the wait.
+    assert!(s.closing_failed(&limited, dialogs::Pending::Save));
+    assert_eq!(s.state()["row_action"]["closing"], "rejected");
+    assert_eq!(s.state()["row_action"]["pending"], "save");
+    assert_eq!(s.state()["row_action"]["closing_wait_minutes"], 3);
+    s.actions.password = "y".into();
+    s.submit_closing();
+    assert_eq!(
+        s.state()["row_action"]["closing"],
+        "rejected",
+        "nothing sent while limited"
+    );
+    // Once the wait is over, another try may go.
+    s.actions.limited_until = Some(std::time::Instant::now());
+    assert!(s.closing_wait_minutes().is_none());
+    s.cancel_closing();
+    assert!(s.actions.limited_until.is_none());
     assert_eq!(
         cl_core::OwnerFacing::owner_message(&limited).key,
         "error.api.closing_password_attempts"
@@ -1428,4 +1445,41 @@ fn a_definitive_refusal_rotates_the_key_and_an_unknown_outcome_keeps_it() {
         assert!(s.entry.key.is_none(), "rotated");
         assert_ne!(s.entry.key_for(&id), before);
     }
+}
+
+#[test]
+fn a_stamp_read_started_before_an_own_write_is_ignored() {
+    let (mut last, mut quiet) = (Some(1_u64), false);
+    // Someone else's change: reload.
+    assert!(stamp_arrived(&mut last, &mut quiet, true, 2));
+    assert_eq!(last, Some(2));
+    // An own write: the next fresh read only resets the baseline.
+    quiet = true;
+    // A read that started before the write answers first: ignored, the
+    // quiet re-read is kept for the read that follows the write.
+    assert!(!stamp_arrived(&mut last, &mut quiet, false, 2));
+    assert!(quiet && last == Some(2));
+    assert!(!stamp_arrived(&mut last, &mut quiet, true, 3), "own write");
+    assert!(!quiet && last == Some(3));
+    // Unchanged: nothing.
+    assert!(!stamp_arrived(&mut last, &mut quiet, true, 3));
+}
+
+#[test]
+fn row_keys_of_lines_no_longer_loaded_are_dropped_past_the_cap() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, Some(&(0..5)));
+    let key = s.model.row_key(3).expect("key");
+    let journal = s.model.line_of(key).expect("line");
+    // Another query: nothing loaded yet, so a prune drops every key.
+    s.set_sort(SortChoice::DateNewest);
+    s.model.prune_keys_for_test(0);
+    assert!(s.model.key_of(journal).is_none());
+    assert!(s.model.line_of(key).is_none());
+    // Loaded lines get keys again and keep them through a prune.
+    settle(&mut s, Some(&(0..5)));
+    let k = s.model.row_key(0).expect("key");
+    s.model.prune_keys_for_test(0);
+    assert_eq!(s.model.row_key(0), Some(k));
 }

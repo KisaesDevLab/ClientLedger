@@ -204,6 +204,28 @@ struct StampWatch {
     /// baseline because the register already reloaded.
     now: bool,
     quiet: bool,
+    /// Own writes so far, and the count when the read in flight started:
+    /// a read started before an own write is ignored (it would make the
+    /// write look like someone else's, or eat the quiet re-read).
+    writes: u64,
+    task_writes: u64,
+}
+
+/// Takes one stamp reading. `fresh` is false for a read started before the
+/// latest own write: it is ignored. Returns true when the ledger moved
+/// under someone else's change (the register must reload).
+fn stamp_arrived<S: PartialEq + Copy>(
+    last: &mut Option<S>,
+    quiet: &mut bool,
+    fresh: bool,
+    s: S,
+) -> bool {
+    if !fresh {
+        return false;
+    }
+    let moved = last.is_some_and(|old| old != s);
+    *last = Some(s);
+    moved && !std::mem::take(quiet)
 }
 
 /// Seconds between ledger-stamp reads while the register is visible.
@@ -713,6 +735,7 @@ impl RegisterScreen {
         self.footer.invalidate();
         self.stamp.now = true;
         self.stamp.quiet = true;
+        self.stamp.writes += 1;
     }
 
     /// The ledger moved: the shown pages reload (rows stay on screen until
@@ -728,13 +751,15 @@ impl RegisterScreen {
             && let Some(result) = task.try_take()
         {
             self.stamp.task = None;
+            let fresh = self.stamp.task_writes == self.stamp.writes;
             if let Ok(s) = result {
-                let moved = self.stamp.last.is_some_and(|old| old != s);
-                self.stamp.last = Some(s);
-                if moved && !std::mem::take(&mut self.stamp.quiet) {
+                let w = &mut self.stamp;
+                if stamp_arrived(&mut w.last, &mut w.quiet, fresh, s) {
                     self.ledger_changed();
                 }
-                self.stamp.quiet = false;
+                if fresh {
+                    self.stamp.quiet = false;
+                }
             }
         }
         let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
@@ -746,6 +771,7 @@ impl RegisterScreen {
         if due && self.stamp.task.is_none() && self.account.is_some() {
             self.stamp.now = false;
             self.stamp.read_at = Some(now);
+            self.stamp.task_writes = self.stamp.writes;
             self.stamp.task = self.read_stamp();
         }
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(STAMP_EVERY));

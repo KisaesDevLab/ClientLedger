@@ -51,6 +51,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // Closing-date password dialog (cl-model closing::ClosingFlow; shared with the forms)
     ("closing.ask", "This transaction is dated on or before your closing date ({date}). Enter the closing-date password to change it."),
     ("closing.wrong_password", "That password isn't right."),
+    ("closing.rate_limited", "Too many wrong passwords. You can try again in about {minutes} min."),
     ("closing.unavailable", "Changing transactions in a closed period isn't available yet."),
     // Register window (P12 WP5)
     ("register.title", "Register \u{b7} {account}"),

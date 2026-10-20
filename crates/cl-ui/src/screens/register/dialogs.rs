@@ -110,6 +110,8 @@ pub(super) struct RowActions {
     /// The password as typed (masked, zeroized).
     pub(super) password: SecretText,
     focus_password: bool,
+    /// Too many wrong passwords: Change stays off until then.
+    pub(super) limited_until: Option<std::time::Instant>,
     /// A void or delete on its way.
     task: Option<(Pending, Task<()>)>,
     /// The last row action's failure.
@@ -136,6 +138,7 @@ impl Default for RowActions {
             pending: None,
             password: SecretText::default(),
             focus_password: false,
+            limited_until: None,
             task: None,
             error: None,
             reload: None,
@@ -156,6 +159,10 @@ impl std::fmt::Debug for RowActions {
             .finish_non_exhaustive()
     }
 }
+
+/// The wait after too many wrong closing-date passwords when the engine
+/// does not say (its window: 10 tries in 15 minutes).
+const RATE_LIMIT_FALLBACK: std::time::Duration = std::time::Duration::from_mins(15);
 
 fn with_password(p: Option<Secret>) -> PostingOptions {
     PostingOptions {
@@ -225,6 +232,16 @@ impl RegisterScreen {
     pub(super) fn closing_failed(&mut self, e: &ApiError, pending: Pending) -> bool {
         let sending = self.actions.closing.stage() == ClosingStage::Sending;
         match e {
+            // Too many wrong passwords: the dialog stays open with the
+            // change kept, and Change stays off until the engine's wait is
+            // over (its window is 15 minutes when it does not say).
+            ApiError::ClosingPasswordRateLimited { retry_after } if sending => {
+                let wait = retry_after.unwrap_or(RATE_LIMIT_FALLBACK);
+                self.actions.limited_until = Some(std::time::Instant::now() + wait);
+                self.actions.closing.handle(ClosingEvent::PasswordRejected);
+                self.actions.pending = Some(pending);
+                true
+            }
             ApiError::ClosingPasswordRejected if sending => {
                 self.actions.closing.handle(ClosingEvent::PasswordRejected);
                 self.actions.pending = Some(pending);
@@ -268,8 +285,21 @@ impl RegisterScreen {
         self.actions.pending = None;
     }
 
+    /// The minutes left before another password may be tried, while the
+    /// engine's attempt limit is in force.
+    pub(super) fn closing_wait_minutes(&self) -> Option<u64> {
+        let left = self
+            .actions
+            .limited_until?
+            .checked_duration_since(std::time::Instant::now())?;
+        (!left.is_zero()).then(|| left.as_secs().div_ceil(60).max(1))
+    }
+
     /// Change: send the pending change with the typed password.
     pub(super) fn submit_closing(&mut self) {
+        if self.closing_wait_minutes().is_some() {
+            return;
+        }
         if self.actions.password.is_empty() {
             self.actions.focus_password = true;
             return;
@@ -311,6 +341,7 @@ impl RegisterScreen {
 
     /// Cancel (or OK on the "not available yet" message): nothing changes.
     pub(super) fn cancel_closing(&mut self) {
+        self.actions.limited_until = None;
         self.actions.closing.handle(ClosingEvent::Cancel);
         self.actions.pending = None;
         self.actions.password.clear();
@@ -697,7 +728,21 @@ impl RegisterScreen {
                 return;
             }
             ui.add(egui::Label::new(t_with("closing.ask", &[("date", &date)])).wrap());
-            if stage == ClosingStage::Rejected {
+            let wait = self.closing_wait_minutes();
+            if let Some(minutes) = wait {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(t_with(
+                            "closing.rate_limited",
+                            &[("minutes", &minutes.to_string())],
+                        ))
+                        .color(tokens.warn_text),
+                    )
+                    .wrap(),
+                );
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_secs(1));
+            } else if stage == ClosingStage::Rejected {
                 ui.add(
                     egui::Label::new(
                         RichText::new(t("closing.wrong_password")).color(tokens.warn_text),
@@ -707,16 +752,23 @@ impl RegisterScreen {
             }
             let sending = stage == ClosingStage::Sending;
             ui.add_enabled_ui(!sending, |ui| {
-                let r =
-                    form::password_secret(ui, &t("closing.password"), &mut self.actions.password);
-                if std::mem::take(&mut self.actions.focus_password) {
-                    r.request_focus();
-                }
-                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    submit = true;
-                }
+                ui.add_enabled_ui(wait.is_none(), |ui| {
+                    let r = form::password_secret(
+                        ui,
+                        &t("closing.password"),
+                        &mut self.actions.password,
+                    );
+                    if std::mem::take(&mut self.actions.focus_password) {
+                        r.request_focus();
+                    }
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        submit = true;
+                    }
+                });
                 ui.horizontal(|ui| {
-                    submit |= ui.button(t("closing.change")).clicked();
+                    submit |= ui
+                        .add_enabled(wait.is_none(), egui::Button::new(t("closing.change")))
+                        .clicked();
                     cancel = ui.button(t("closing.cancel")).clicked();
                 });
             });
@@ -829,6 +881,7 @@ impl RegisterScreen {
             "notice": notice,
             "closing": format!("{:?}", a.closing.stage()).to_lowercase(),
             "closing_attempt": a.closing.attempt(),
+            "closing_wait_minutes": self.closing_wait_minutes(),
             "closing_supported": self.closing_supported(),
             "delete_supported": self.delete_supported(),
             "pending": a.pending.as_ref().map(|p| match p {
