@@ -280,3 +280,46 @@ fn dragging_a_header_border_resizes_the_column() {
         "resize handles are not in the Tab order (T25)"
     );
 }
+
+#[test]
+fn a_row_scrolled_under_the_header_draws_no_half_text() {
+    use egui::accesskit::{Action, ActionRequest, TreeId};
+    // A height that is not a whole number of rows: bringing the cut last
+    // row into view leaves the top row partly under the header.
+    let mut b = Browse::new(Register::new(500), spec());
+    b.size = Vec2::new(1440.0, 333.0);
+    b.frame(vec![]);
+    b.frame(vec![]);
+    let last = (1..=500u64)
+        .filter(|k| b.node_bounds(b.grid.row_id(RowKey(*k))).is_some())
+        .last()
+        .expect("rows");
+    b.frame(vec![egui::Event::AccessKitActionRequest(ActionRequest {
+        action: Action::ScrollIntoView,
+        target_tree: TreeId::ROOT,
+        target_node: b.grid.row_id(RowKey(last)).accesskit_id(),
+        data: None,
+    })]);
+    b.frame(vec![]);
+    let mut seen = 0;
+    for (clip, s) in shapes(&b) {
+        let mut out = Vec::new();
+        fn walk(s: &Shape, out: &mut Vec<TextShape>) {
+            match s {
+                Shape::Text(t) => out.push(t.clone()),
+                Shape::Vec(v) => v.iter().for_each(|x| walk(x, out)),
+                _ => {}
+            }
+        }
+        walk(&s, &mut out);
+        for t in out {
+            seen += 1;
+            assert!(
+                t.pos.y >= clip.top() - 0.5,
+                "text at {:?} starts above its clip {clip:?} (half drawn)",
+                t.pos
+            );
+        }
+    }
+    assert!(seen > 0);
+}
