@@ -17,6 +17,14 @@
 //! check is 4418. The loader creates the vendor details and line memos;
 //! sub-account parents, tags and jobs are demo-only until the engine
 //! import takes them (jobs need U-35).
+//!
+//! And the P14 money story: two customer payments posted Dr Payments
+//! Clearing (10150) / Cr A/R so the engine lists them as waiting to be
+//! deposited (`GET /payments/pending-deposits` takes any posted debit to
+//! Payments Clearing), the 11/04 bank-file deposit of both, the "Plant sale
+//! counter" daily-sales layout and the lender's 11/04 statement. The engine's
+//! journal entries carry no contact, so the loader names the customer in
+//! the memo, as for every other fixture transaction.
 
 use std::collections::HashMap;
 
@@ -883,5 +891,173 @@ mod tests {
                 .any(|t| t.number == "4418" && t.lines.iter().any(|l| l.account == "1010"))
         );
         assert_eq!(s.next_check_number("1010"), Some(4418));
+    }
+
+    /// The P14 money story: payments waiting in Payments Clearing, the
+    /// 11/04 bank deposit of both, the daily-sales layout and the lender's
+    /// statement, all exact and none moving a design figure (the README
+    /// figures stay pinned by `golden_figures_match_the_design_readme`).
+    #[test]
+    fn golden_p14_story() {
+        let s = Sample::load();
+        let story = d(2026, 11, 4);
+        let sys = &s.company.system_accounts;
+        assert_eq!(sys.payments_clearing, "10150");
+        assert_eq!(sys.sales_tax_payable, "20900");
+
+        // Two payments wait in Payments Clearing, 2,092.50 at 11/04.
+        let waiting: Vec<&SampleTransaction> = s
+            .transactions
+            .iter()
+            .filter(|t| t.lines.iter().any(|l| l.account == sys.payments_clearing))
+            .collect();
+        let facts: Vec<(&str, CalendarDate, &str, Money)> = waiting
+            .iter()
+            .map(|t| {
+                let debit = Money::sum(
+                    t.lines
+                        .iter()
+                        .filter(|l| l.account == sys.payments_clearing)
+                        .map(|l| l.debit),
+                )
+                .expect("sum");
+                (
+                    t.contact.as_deref().unwrap_or_default(),
+                    t.date,
+                    t.number.as_str(),
+                    debit,
+                )
+            })
+            .collect();
+        assert_eq!(
+            facts,
+            [
+                (
+                    "Hollister Family Trust",
+                    d(2026, 11, 2),
+                    "5521",
+                    m("1250.00")
+                ),
+                ("Maple Street Bakery", d(2026, 11, 3), "1094", m("842.50")),
+            ]
+        );
+        for t in &waiting {
+            assert_eq!(t.kind, "payment");
+            // Dr Payments Clearing / Cr A/R, nothing else.
+            let accounts: Vec<&str> = t.lines.iter().map(|l| l.account.as_str()).collect();
+            assert_eq!(accounts, ["10150", "10200"]);
+            assert!(
+                s.company
+                    .clients
+                    .iter()
+                    .any(|c| Some(c) == t.contact.as_ref())
+            );
+        }
+        let clearing = s.balance(&sys.payments_clearing, story);
+        assert_eq!(clearing, m("2092.50"), "Payments Clearing at 11/04");
+        // Each pays its own invoice: no customer's open balance moves.
+        for t in &waiting {
+            let customer = t.contact.as_deref();
+            let net = Money::sum(
+                s.transactions
+                    .iter()
+                    .filter(|x| x.contact.as_deref() == customer && x.date >= d(2026, 11, 1))
+                    .flat_map(|x| x.lines.iter())
+                    .filter(|l| l.account == sys.accounts_receivable)
+                    .map(|l| l.debit.checked_sub(l.credit).expect("net")),
+            )
+            .expect("sum");
+            assert_eq!(net, Money::ZERO, "{customer:?} November A/R");
+        }
+
+        // The 11/04 bank file: one deposit of exactly the waiting payments.
+        let later: Vec<&FeedItem> = s.feed_after_last_file().collect();
+        assert_eq!(later.len(), 1);
+        assert_eq!(
+            (later[0].date, later[0].amount, later[0].status.as_str()),
+            (story, clearing, "ready")
+        );
+        assert_eq!(s.feed_through_last_file().count(), 37);
+    }
+
+    /// The P14 daily-sales layout and its account fallback.
+    #[test]
+    fn golden_p14_daily_sales_layout() {
+        let s = Sample::load();
+        let layout = &s.company.daily_sales_layouts[0];
+        assert_eq!(s.company.daily_sales_layouts.len(), 1);
+        assert_eq!(
+            (layout.name.as_str(), layout.preset.as_str()),
+            ("Plant sale counter", "retail")
+        );
+        let lines: Vec<(&str, &str, LayoutSide)> = layout
+            .lines
+            .iter()
+            .map(|l| (l.section.as_str(), l.label.as_str(), l.side))
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                ("sales", "Plant sales", LayoutSide::Credit),
+                ("tax", "Sales Tax Collected", LayoutSide::Credit),
+                ("payment", "Cash", LayoutSide::Debit),
+                ("payment", "Cards", LayoutSide::Debit),
+                ("payout", "Paid-outs", LayoutSide::Debit),
+            ]
+        );
+        // The sample chart has no 4100 (inventory only): Plant sales falls
+        // back to 4000; the engine seeds 10150 and 20900.
+        let has = |n: &str| {
+            crate::templates::ENGINE_SYSTEM_NUMBERS.contains(&n)
+                || s.company.accounts.iter().any(|a| a.number == n)
+        };
+        let resolved = layout.resolved_accounts(has);
+        assert_eq!(
+            resolved,
+            ["4000", "20900", "10150", "10150", "6250"].map(|n| Some(n.to_string()))
+        );
+        let with_4100 = layout.resolved_accounts(|n| n == "4100");
+        assert_eq!(with_4100[0].as_deref(), Some("4100"));
+        assert_eq!(with_4100[1], None);
+    }
+
+    /// The P14 lender statement balances exactly against the books; the
+    /// entity type and the owner stay.
+    #[test]
+    fn golden_p14_lender_statement() {
+        let s = Sample::load();
+        let story = d(2026, 11, 4);
+        let st = &s.lender_statement;
+        assert_eq!(st.statement_date, story);
+        assert_eq!(
+            (st.lender.as_str(), st.account.as_str()),
+            ("Lakeview Credit Union", "2200")
+        );
+        assert!(s.company.clients.iter().any(|c| c == &st.lender));
+        assert_eq!(st.payment, m("892.00"));
+        assert_eq!(st.interest, m("207.43"));
+        assert_eq!(st.principal, m("684.57"));
+        assert_eq!(
+            st.payment.checked_sub(st.interest).expect("split"),
+            st.principal
+        );
+        let owed = Money::ZERO
+            .checked_sub(s.balance("2200", story))
+            .expect("owed");
+        assert_eq!(st.balance_before, owed, "the books' 2200 balance at 11/04");
+        assert_eq!(st.balance_before, m("31200.00"));
+        assert_eq!(
+            st.balance_before.checked_sub(st.principal).expect("after"),
+            st.balance_after
+        );
+        assert_eq!(st.balance_after, m("30515.43"));
+
+        // Entity type and the owner stay.
+        assert_eq!(s.company.entity_type, "single_member_llc");
+        assert!(
+            s.transactions
+                .iter()
+                .any(|t| t.contact.as_deref() == Some("Kurt (owner)"))
+        );
     }
 }
