@@ -140,10 +140,16 @@ pub use resources::contacts::{SuggestSource, SuggestedAccount};
 pub use resources::rules::{RULE_DESCRIPTION_MAX_CHARS, RuleMatch, RuleQuery, Rules};
 
 // P14 lane A: pending deposits and bank-file groupings.
-pub use resources::payments::Payments;
+pub use resources::payments::{
+    ALREADY_DEPOSITED, DepositRecord, DepositedCashBack, DepositedLine, DepositedPayment, Payments,
+    PendingAmount, PendingDeposits, PendingPayment, SavedDeposit, VENDOR_CREDIT_EXCEEDED,
+    VendorRefundDraft, is_already_deposited, is_vendor_credit_exceeded,
+};
 
 // P14 lane A: the bank feed.
-pub use resources::feed::Feed;
+pub use resources::feed::{
+    Feed, FeedDeposit, FeedGrouping, FeedGroupings, FeedItemId, GROUPINGS_LIMIT,
+};
 
 // P14 lane B: daily sales.
 pub use resources::daily_sales::{

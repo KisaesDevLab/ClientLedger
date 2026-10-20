@@ -648,7 +648,7 @@ impl BankPosting {
     }
 
     /// The bank-side account (the register's account).
-    fn own_account(&self) -> AccountId {
+    pub(crate) fn own_account(&self) -> AccountId {
         match &self.0 {
             Kind::Check(d) => d.bank,
             Kind::Deposit(d) => d.account,
@@ -762,6 +762,10 @@ impl BankPosting {
             "txnDate": d.date,
             "depositToAccountId": d.account,
             "lines": lines,
+            // Every amount is a decimal string of at most 4 places; the
+            // engine (PR #159) then refuses anything else instead of
+            // reading it leniently. An older engine ignores the key.
+            "strictAmounts": true,
         });
         if let Some(m) = &d.memo {
             v["memo"] = Value::String(m.clone());

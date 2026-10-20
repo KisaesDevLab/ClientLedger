@@ -6,7 +6,9 @@
 //! a [`LinesSpec`] says which of the optional ones a screen shows and what
 //! they are called. The register keeps its P12 columns (Account · Amount ·
 //! Memo · Customer · Tag, one tag per line through a picker, Q-233) through
-//! [`LinesSpec::REGISTER_SPLITS`].
+//! [`LinesSpec::REGISTER_SPLITS`]. Make Deposit's Other deposits (P14)
+//! use [`LinesSpec::DEPOSIT`]: Received from · Account · Memo · Tags ·
+//! Amount, where a negative amount is a fee taken out of the deposit.
 //!
 //! The grid only stores what the owner typed: it never adds anything up
 //! (the remaining/total lines come from `cl_model::forms::lines`).
@@ -119,7 +121,31 @@ pub struct LinesSpec {
     pub need_account: TextKey,
     /// How tall the grid is.
     pub height: GridHeight,
+    /// The Amount column's rules. Every grid takes any sign as typed; the
+    /// form decides what a negative means (a check line refuses it, a
+    /// deposit line is a fee, Q-84).
+    pub amount: AmountRules,
+    /// The column order.
+    pub layout: LinesLayout,
 }
+
+/// The order of a lines grid's columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinesLayout {
+    /// Account · Amount · Memo · Customer · Billable · Tags (checks, the
+    /// register's splits).
+    Standard,
+    /// Received from (the customer column) · Account · Memo · Tags ·
+    /// Amount (Make Deposit, P14).
+    Deposit,
+}
+
+/// Amounts with either sign, at cents (Q-232): a deposit's Other lines,
+/// where a negative amount is a fee (P14 plan §4).
+pub const SIGNED_MONEY: AmountRules = AmountRules {
+    sign: cl_model::amount_entry::Sign::Any,
+    ..AmountRules::MONEY
+};
 
 impl LinesSpec {
     /// The register's Splits panel (P12): Account · Amount · Memo ·
@@ -141,6 +167,32 @@ impl LinesSpec {
         },
         need_account: TextKey("register.splits.need_account"),
         height: GridHeight::Rows { min: 3, max: 6 },
+        amount: AmountRules::MONEY,
+        layout: LinesLayout::Standard,
+    };
+
+    /// Make Deposit's Other deposits (P14): Received from · Account · Memo
+    /// · Tags (one chip per line) · Amount, signed ([`SIGNED_MONEY`]: a
+    /// negative amount is a fee taken out of the deposit).
+    pub const DEPOSIT: LinesSpec = LinesSpec {
+        grid_id: "deposit/lines",
+        label: "deposit.lines.label",
+        customer: true,
+        billable: false,
+        tags: true,
+        tag_chips: true,
+        headers: LineHeaders {
+            account: TextKey("lines.col.account"),
+            amount: TextKey("lines.col.amount"),
+            memo: TextKey("lines.col.memo"),
+            customer: TextKey("deposit.lines.col.received_from"),
+            billable: TextKey("lines.col.billable"),
+            tags: TextKey("lines.col.tags"),
+        },
+        need_account: TextKey("lines.need_account"),
+        height: GridHeight::Rows { min: 3, max: 8 },
+        amount: SIGNED_MONEY,
+        layout: LinesLayout::Deposit,
     };
 
     /// Every column (Write Check's Expenses tab): Account · Amount · Memo ·
@@ -164,6 +216,8 @@ impl LinesSpec {
             },
             need_account: TextKey("lines.need_account"),
             height: GridHeight::Rows { min: 4, max: 10 },
+            amount: AmountRules::MONEY,
+            layout: LinesLayout::Standard,
         }
     }
 
@@ -186,7 +240,7 @@ impl LinesSpec {
                 ..column(
                     L_AMOUNT,
                     h.amount,
-                    CellKind::Amount(AmountRules::MONEY),
+                    CellKind::Amount(self.amount),
                     (90, 110, 0),
                 )
             },
@@ -217,6 +271,18 @@ impl LinesSpec {
                 picker(L::TAGS)
             };
             columns.push(column(L_TAG, h.tags, kind, (90, 130, 1)));
+        }
+        if self.layout == LinesLayout::Deposit {
+            // Received from first, Amount last.
+            let rank = |c: &Column| match c.id {
+                L_CUSTOMER => 0,
+                L_AMOUNT => 2,
+                _ => 1,
+            };
+            columns.sort_by_key(rank);
+            if let Some(first) = columns.first_mut().filter(|c| c.id == L_CUSTOMER) {
+                first.placeholder = Some(h.customer);
+            }
         }
         GridSpec::line_entry(columns)
     }
@@ -739,6 +805,37 @@ mod tests {
         }
         .grid_spec::<RegisterLists>();
         assert_eq!(bare.columns.len(), 3);
+    }
+
+    #[test]
+    fn the_deposit_spec_puts_received_from_first_and_a_signed_amount_last() {
+        let spec = LinesSpec::DEPOSIT.grid_spec::<RegisterLists>();
+        assert_eq!(spec.validate(), Ok(()));
+        let ids: Vec<ColumnId> = spec.columns.iter().map(|c| c.id).collect();
+        assert_eq!(ids, [L_CUSTOMER, L_ACCOUNT, L_MEMO, L_TAG, L_AMOUNT]);
+        assert_eq!(
+            spec.columns[4].kind,
+            CellKind::Amount(SIGNED_MONEY),
+            "a fee is typed as a negative amount"
+        );
+        assert_eq!(SIGNED_MONEY.sign, cl_model::amount_entry::Sign::Any);
+        for c in &spec.columns {
+            assert!(crate::i18n::has(c.header.0), "{}", c.header.0);
+        }
+        assert!(crate::i18n::has(LinesSpec::DEPOSIT.label));
+        // The other grids keep their P12/P13 order and rules.
+        let check = LinesSpec::all("t", "lines.label");
+        assert_eq!(check.layout, LinesLayout::Standard);
+        assert_eq!(check.amount, AmountRules::MONEY);
+        assert_eq!(LinesSpec::REGISTER_SPLITS.amount, AmountRules::MONEY);
+        // A negative amount goes into the line as typed.
+        let lists = RegisterLists::default();
+        let mut l = FormLine::blank(RowKeyGen::new().next_key());
+        assert_eq!(
+            apply(&mut l, L_AMOUNT, CellInput::Money(money("-12.50")), &lists),
+            None
+        );
+        assert_eq!(l.amount, Some(money("-12.50")));
     }
 
     #[test]
