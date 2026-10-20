@@ -124,10 +124,11 @@ pub fn tag_groups() -> Vec<TagGroup> {
 }
 
 /// The demo tags: three routes, two crews, two ungrouped tags and an
-/// inactive promotion.
+/// inactive promotion, then the sample company's own tags (the Write
+/// Check story's Install and Crew A).
 #[must_use]
 pub fn tags() -> Vec<Tag> {
-    [
+    let mut rows: Vec<(u32, String, Option<TagGroupId>, bool)> = [
         (1, "North Route", Some(1), true),
         (2, "South Route", Some(1), true),
         (3, "Lake Area", Some(1), true),
@@ -138,21 +139,33 @@ pub fn tags() -> Vec<Tag> {
         (8, "Spring Promo 2025", None, false),
     ]
     .into_iter()
-    .map(|(n, name, group, active)| Tag {
-        id: tag_id(n),
-        fields: TagFields {
-            name: name.to_string(),
-            color: None,
-            group_id: group.map(group_id),
-            description: None,
-        },
-        is_active: active,
-        usage_count: Some(0),
-        sort_order: Some(0),
-        created_at: Some(DemoState::now()),
-        updated_at: Some(DemoState::now()),
-    })
-    .collect()
+    .map(|(n, name, group, active)| (n, name.to_string(), group.map(group_id), active))
+    .collect();
+    let groups = tag_groups();
+    for (n, t) in (9..).zip(cl_company::Sample::load().company.tags) {
+        let group = t
+            .group
+            .as_deref()
+            .and_then(|g| groups.iter().find(|x| x.fields.name == g))
+            .map(|x| x.id);
+        rows.push((n, t.name, group, true));
+    }
+    rows.into_iter()
+        .map(|(n, name, group, active)| Tag {
+            id: tag_id(n),
+            fields: TagFields {
+                name,
+                color: None,
+                group_id: group,
+                description: None,
+            },
+            is_active: active,
+            usage_count: Some(0),
+            sort_order: Some(0),
+            created_at: Some(DemoState::now()),
+            updated_at: Some(DemoState::now()),
+        })
+        .collect()
 }
 
 /// Where a demo tag is used: Lake Area on transaction lines (so it can't be

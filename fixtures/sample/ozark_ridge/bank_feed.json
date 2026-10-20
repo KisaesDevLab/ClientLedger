@@ -2,39 +2,39 @@
   "account": "1010",
   "items": [
     {
-      "amount": "-184.56",
-      "date": "2026-11-01",
-      "description": "SHEPHERD HILLS OFFICE SUPPLY 4346",
-      "status": "ready"
-    },
-    {
       "amount": "-348.51",
-      "date": "2026-11-02",
-      "description": "FORSYTH PRINT SHOP 4394",
+      "date": "2026-11-01",
+      "description": "FORSYTH PRINT SHOP EFT",
       "status": "ready"
     },
     {
       "amount": "-224.76",
+      "date": "2026-11-02",
+      "description": "HIGHWAY 65 TIRE & LUBE EFT",
+      "status": "ready"
+    },
+    {
+      "amount": "-184.56",
       "date": "2026-11-03",
-      "description": "HIGHWAY 65 TIRE & LUBE 4396",
+      "description": "SHEPHERD HILLS OFFICE SUPPLY 4406",
       "status": "ready"
     },
     {
       "amount": "-415.27",
       "date": "2026-11-01",
-      "description": "PINE RIDGE STORAGE UNITS 4401",
+      "description": "PINE RIDGE STORAGE UNITS 4407",
       "status": "ready"
     },
     {
       "amount": "-1813.37",
       "date": "2026-11-02",
-      "description": "THUNDER RIDGE SUBCONTRACTING 4361",
+      "description": "THUNDER RIDGE SUBCONTRACTING EFT",
       "status": "ready"
     },
     {
       "amount": "-206.25",
       "date": "2026-11-03",
-      "description": "SHEPHERD HILLS OFFICE SUPPLY 4363",
+      "description": "SHEPHERD HILLS OFFICE SUPPLY 4408",
       "status": "ready"
     },
     {
@@ -52,7 +52,7 @@
     {
       "amount": "-411.16",
       "date": "2026-11-03",
-      "description": "HIGHWAY 65 TIRE & LUBE 4355",
+      "description": "HIGHWAY 65 TIRE & LUBE EFT",
       "status": "ready"
     },
     {
@@ -64,25 +64,25 @@
     {
       "amount": "-431.11",
       "date": "2026-11-02",
-      "description": "BRANSON EQUIPMENT RENTAL 4347",
-      "status": "ready"
-    },
-    {
-      "amount": "-463.83",
-      "date": "2026-11-03",
-      "description": "WALNUT SHADE DIESEL 4400",
+      "description": "BRANSON EQUIPMENT RENTAL EFT",
       "status": "ready"
     },
     {
       "amount": "-280.56",
-      "date": "2026-11-01",
-      "description": "CEDAR HOLLOW SIGNS 4413",
+      "date": "2026-11-03",
+      "description": "CEDAR HOLLOW SIGNS EFT",
       "status": "ready"
     },
     {
       "amount": "-892.00",
+      "date": "2026-11-01",
+      "description": "LAKEVIEW CREDIT UNION EFT",
+      "status": "ready"
+    },
+    {
+      "amount": "-463.83",
       "date": "2026-11-02",
-      "description": "LAKEVIEW CREDIT UNION 4416",
+      "description": "WALNUT SHADE DIESEL 4409",
       "status": "ready"
     },
     {
@@ -100,13 +100,13 @@
     {
       "amount": "-233.44",
       "date": "2026-11-02",
-      "description": "LAKESIDE INSURANCE AGENCY 4393",
+      "description": "LAKESIDE INSURANCE AGENCY EFT",
       "status": "ready"
     },
     {
       "amount": "-320.43",
       "date": "2026-11-03",
-      "description": "BLUE EYE LUMBER 4409",
+      "description": "BLUE EYE LUMBER 4410",
       "status": "ready"
     },
     {
@@ -118,7 +118,7 @@
     {
       "amount": "-3099.38",
       "date": "2026-11-02",
-      "description": "OAK GROVE UNIFORMS 4419",
+      "description": "OAK GROVE UNIFORMS EFT",
       "status": "ready"
     },
     {
@@ -134,27 +134,27 @@
       "status": "ready"
     },
     {
-      "amount": "-222.97",
-      "date": "2026-11-02",
-      "description": "OAK GROVE UNIFORMS 4399",
-      "status": "ready"
-    },
-    {
       "amount": "-334.10",
-      "date": "2026-11-03",
-      "description": "MOUNTAIN SOFTWARE CO 4408",
+      "date": "2026-11-02",
+      "description": "MOUNTAIN SOFTWARE CO EFT",
       "status": "ready"
     },
     {
       "amount": "-2016.92",
-      "date": "2026-11-01",
-      "description": "BUSINESS CREDIT CARD 4415",
+      "date": "2026-11-03",
+      "description": "BUSINESS CREDIT CARD EFT",
       "status": "ready"
     },
     {
       "amount": "-183.26",
+      "date": "2026-11-01",
+      "description": "PERSIMMON HILL PLANTS EFT",
+      "status": "ready"
+    },
+    {
+      "amount": "-222.97",
       "date": "2026-11-02",
-      "description": "PERSIMMON HILL PLANTS 4420",
+      "description": "OAK GROVE UNIFORMS 4411",
       "status": "ready"
     },
     {
@@ -176,15 +176,15 @@
       "status": "match"
     },
     {
-      "amount": "-495.97",
-      "date": "2026-11-02",
-      "description": "POS DEBIT COPPER KETTLE CATERING",
-      "status": "match"
-    },
-    {
       "amount": "-136.56",
       "date": "2026-11-02",
       "description": "POS DEBIT SYCAMORE FENCE CO",
+      "status": "match"
+    },
+    {
+      "amount": "-495.97",
+      "date": "2026-11-02",
+      "description": "POS DEBIT COPPER KETTLE CATERING",
       "status": "match"
     },
     {

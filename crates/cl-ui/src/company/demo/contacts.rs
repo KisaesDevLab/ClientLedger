@@ -118,6 +118,23 @@ pub fn contacts() -> Vec<Contact> {
             }
             _ => {}
         }
+        // The Write Check story vendor's address and default account.
+        if let Some(d) = sample
+            .company
+            .vendor_details
+            .iter()
+            .find(|d| &d.name == name)
+        {
+            f.billing_line1 = Some(d.address_line1.clone());
+            f.billing_city = Some(d.city.clone());
+            f.billing_state = Some(d.state.clone());
+            f.billing_zip = Some(d.zip.clone());
+            f.default_expense_account_id = d
+                .default_expense_account
+                .as_deref()
+                .and_then(|n| n.parse().ok())
+                .map(account_id);
+        }
         push(f, true);
     }
     out

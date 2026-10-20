@@ -288,7 +288,7 @@ pub fn chart() -> Vec<cl_api::Account> {
                 name: a.name.clone(),
                 kind: a.account_type,
                 detail,
-                parent: None,
+                parent: a.parent.as_deref().and_then(|p| p.parse().ok()),
                 active: true,
                 system: false,
             }
