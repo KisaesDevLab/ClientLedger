@@ -1376,7 +1376,10 @@ mod tests {
         session.client().desktop_info().await.expect("desktop info");
         let store = MemorySecrets::new();
         store
-            .set(cl_settings::smtp::SMTP_PASSWORD, &Secret::new("smtp-canary-9"))
+            .set(
+                cl_settings::smtp::SMTP_PASSWORD,
+                &Secret::new("smtp-canary-9"),
+            )
             .expect("set");
         push_at_open(&session, &store, &CompanyPrefs::default()).await;
 
