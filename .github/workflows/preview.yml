@@ -1,0 +1,85 @@
+name: preview
+
+# Unsigned portable PREVIEW builds for testers (Q-253). They run automatically
+# when a phase branch merges to main, and on demand (Actions > preview > Run
+# workflow). The archives are workflow artifacts only, never a public
+# GitHub Release; P35 builds the signed installers.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: preview-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    name: preview (${{ matrix.os }})
+    # On a push to main, only for the merge commit of a phase branch.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'from KisaesDevLab/phase/')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14, macos-15-intel, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: Swatinem/rust-cache@v2
+      - name: Engine commit
+        id: engine
+        shell: bash
+        run: echo "commit=$(git rev-parse HEAD:engine)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: target/engine/.cache
+          key: engine-${{ matrix.os }}-${{ steps.engine.outputs.commit }}-node24
+      - uses: actions/cache@v4
+        with:
+          path: target/pg/.cache
+          key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
+      - name: Build label (phase id when known, else short commit)
+        id: label
+        shell: bash
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          label=$(printf '%s\n%s\n' "$MESSAGE" "$REF_NAME" \
+            | grep -oE 'phase/P[0-9]+[A-Za-z]?' | head -n 1 | sed 's#phase/##' || true)
+          if [ -z "$label" ]; then label=$(git rev-parse --short=8 HEAD); fi
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+          echo "build label: $label"
+      - name: Preview build (release apps, engine, pinned PostgreSQL, archive)
+        run: cargo xtask preview
+      - name: Platform
+        id: platform
+        shell: bash
+        run: |
+          name=$(ls target/preview/*.sha256 | head -n 1 | xargs basename)
+          plat=$(echo "$name" | sed -E 's/.*-(windows|macos|linux)-(x64|arm64)\..*/\1-\2/')
+          echo "platform=$plat" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clientledger-preview-${{ steps.label.outputs.label }}-${{ steps.platform.outputs.platform }}
+          path: |
+            target/preview/*.zip
+            target/preview/*.tar.gz
+            target/preview/*.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

@@ -13,6 +13,7 @@ mod licenses;
 mod meta;
 mod nofloat;
 mod pg_fetch;
+mod preview;
 mod run;
 mod ui_check;
 
@@ -46,6 +47,8 @@ usage: cargo xtask <command>
                      launch the app with a temporary control file, run the screen's scenario
                      (crates/cl-automation/scenarios/<screen>.yaml) in light and dark, save PNGs to
                      target/ui-check/<screen>/; --compare adds compare.html beside the mockup
+  preview            unsigned portable PREVIEW build for testers (Q-253): release apps, engine,
+                     PostgreSQL in target/preview/<name>/ plus a .zip/.tar.gz and .sha256
   package            (not implemented yet)";
 
 /// Commands that exist in the CLAUDE.md command list but land in later phases.
@@ -126,6 +129,7 @@ fn main() -> Result<()> {
         Some("engine-test") => engine_test::engine_test(&args[1..]),
         Some("api-spec") => api_spec::api_spec(&args[1..]),
         Some("pg-fetch") => pg_fetch::pg_fetch(&args[1..]),
+        Some("preview") => preview::preview(&args[1..]),
         Some("run") => run::run(&args[1..]),
         Some("ui-check") => ui_check::ui_check(&args[1..]),
         Some("keymap-doc") => keymap_doc::keymap_doc(&args[1..]),
