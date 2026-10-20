@@ -631,6 +631,8 @@ impl DemoLedger {
                     .and_then(|name| tags.iter().find(|t| t.fields.name == name).map(|t| t.id)),
                 tag_name: l.tag.clone(),
                 contact_id: if deposit && !own_side { contact } else { None },
+                is_billable: false,
+                billed_status: None,
             });
         }
         let record = cl_api::Transaction {

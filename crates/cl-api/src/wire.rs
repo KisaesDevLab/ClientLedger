@@ -96,9 +96,18 @@ impl Capabilities {
     pub const TXN_DELETE: &'static str = "txn-delete-v1";
 
     // ---- P13 WP2: payee panel, attachments, suggestions -------------------
-    /// P13: rule suggestions on a form (`POST /conditional-rules/evaluate`,
-    /// engine PR in progress).
+    /// P13 U-51: rule suggestions on a form (`POST
+    /// /practice/conditional-rules/evaluate`, engine PR in progress).
     pub const RULES_EVALUATE: &'static str = "rules-evaluate-v1";
+
+    // ---- P13 WP1: write check ---------------------------------------------
+    /// P13 U-48: edit a saved check (`PUT /checks/{id}`: number, name on
+    /// the check, address, Print later) and the exact line sum on
+    /// `POST`/`PUT /checks`.
+    pub const CHECK_EDIT: &'static str = "check-edit-v1";
+    /// P13 U-49: a customer (`contactId`) and a billable mark (`isBillable`)
+    /// on check and expense lines; `isBillable`/`billedStatus` on read.
+    pub const LINE_BILLABLE: &'static str = "line-billable-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

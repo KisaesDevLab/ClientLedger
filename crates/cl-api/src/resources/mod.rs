@@ -6,6 +6,7 @@ pub mod attachments;
 pub mod audit;
 pub mod bank_postings;
 pub mod bills;
+pub mod checks;
 pub(crate) mod common;
 pub mod company;
 pub mod contacts;

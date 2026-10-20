@@ -319,6 +319,7 @@ impl NewJournalEntry {
                 l.description.as_deref(),
                 l.tag,
                 None,
+                false,
                 i64::try_from(i).unwrap_or(i64::MAX),
             )
         });
@@ -334,6 +335,10 @@ impl NewJournalEntry {
     }
 }
 
+/// The editable fields of one line. `isBillable` (`line-billable-v1`) is
+/// hashed only when set, so the fingerprints of every non-billable line,
+/// from any engine, stay what they were before P13.
+#[allow(clippy::too_many_arguments, reason = "one argument per hashed field")]
 pub(crate) fn line_editable(
     account: AccountId,
     debit: &str,
@@ -341,9 +346,10 @@ pub(crate) fn line_editable(
     description: Option<&str>,
     tag: Option<TagId>,
     contact: Option<ContactId>,
+    billable: bool,
     order: i64,
 ) -> Value {
-    json!({
+    let mut v = json!({
         "accountId": account,
         "debit": debit,
         "credit": credit,
@@ -351,7 +357,11 @@ pub(crate) fn line_editable(
         "tagId": tag,
         "contactId": contact,
         "lineOrder": order,
-    })
+    });
+    if billable {
+        v["isBillable"] = Value::Bool(true);
+    }
+    v
 }
 
 pub(crate) fn txn_editable(
@@ -404,9 +414,31 @@ pub struct TransactionLine {
     /// Tag name (joined; display only).
     #[serde(default)]
     pub tag_name: Option<String>,
-    /// Line contact.
+    /// Line contact (a deposit's customer; with `line-billable-v1` also
+    /// the customer on a check or expense line).
     #[serde(default)]
     pub contact_id: Option<ContactId>,
+    /// The line is billable to its customer (`line-billable-v1`; `false`
+    /// from engines without it).
+    #[serde(default)]
+    pub is_billable: bool,
+    /// Whether a billable line was invoiced yet (`line-billable-v1`;
+    /// engine-maintained, never part of a fingerprint).
+    #[serde(default)]
+    pub billed_status: Option<BilledStatus>,
+}
+
+/// Whether a billable line was invoiced yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BilledStatus {
+    /// Billable and not invoiced yet.
+    Unbilled,
+    /// Invoiced (reserved by the engine for later invoicing).
+    Billed,
+    /// A status this version does not know.
+    #[serde(other)]
+    Other,
 }
 
 /// A transaction with its lines (`GET /transactions/{id}`, create/update
@@ -471,6 +503,7 @@ impl EditableFields for Transaction {
         "lines.description",
         "lines.tagId",
         "lines.contactId",
+        "lines.isBillable",
         "lines.lineOrder",
     ];
 
@@ -487,6 +520,7 @@ impl EditableFields for Transaction {
                     l.description.as_deref(),
                     l.tag_id,
                     l.contact_id,
+                    l.is_billable,
                     l.line_order.unwrap_or(0),
                 )
             })
