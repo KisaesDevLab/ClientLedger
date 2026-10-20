@@ -402,16 +402,31 @@ impl RegisterScreen {
     }
 
     /// Replaces the filters (after the amount range is checked) and asks
-    /// the engine again.
+    /// the engine again. A refused range keeps the last good filters, and
+    /// its message stays up while the typed amounts are still wrong (a
+    /// later Uncleared or Tag change never drops it silently).
     pub(crate) fn set_filters(&mut self, f: Filters) {
         if let Err(p) = f.check() {
             self.quick.problem = Some(p.key().as_str());
             return;
         }
-        self.quick.problem = None;
+        self.quick.problem = self.typed_problem();
         if f != self.filters {
             self.filters = f;
             self.apply_query();
+        }
+    }
+
+    /// What is wrong with the typed amounts, if anything.
+    fn typed_problem(&self) -> Option<&'static str> {
+        match (parse_bound(&self.quick.min), parse_bound(&self.quick.max)) {
+            (Err(p), _) | (_, Err(p)) => Some(p),
+            (Ok(Some(lo)), Ok(Some(hi))) if lo > hi => Some(
+                cl_model::register::FilterProblem::MinAboveMax
+                    .key()
+                    .as_str(),
+            ),
+            _ => None,
         }
     }
 

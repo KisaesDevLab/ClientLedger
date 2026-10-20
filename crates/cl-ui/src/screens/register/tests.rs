@@ -834,6 +834,15 @@ fn quick_filters_go_to_the_engine_and_clear() {
         Some("register.filter.problem.min_above_max")
     );
     assert!(s.filters.min.is_none());
+    // A later filter change keeps the last good amounts and the message.
+    s.set_uncleared(true);
+    assert_eq!(
+        s.quick.problem,
+        Some("register.filter.problem.min_above_max")
+    );
+    assert!(s.filters.min.is_none() && s.filters.max.is_none());
+    assert_eq!(s.state()["filters"]["problem"], true);
+    s.set_uncleared(false);
     s.quick.max = "abc".into();
     s.apply_typed_filters();
     assert_eq!(s.quick.problem, Some("grid.amount.invalid"));

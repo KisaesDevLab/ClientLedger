@@ -175,6 +175,12 @@ steps:
   - assert_exists: {role: label, label_contains: The lowest amount is more than the highest amount}
   - assert_no_clipping: {}
   - screenshot: filters
+  # Another filter change keeps the message (the bad range is never dropped
+  # silently).
+  - click: {role: check_box, label: Uncleared}
+  - assert_state: {key: screen.filters.uncleared, equals: true}
+  - assert_state: {key: screen.filters.problem, equals: true}
+  - assert_exists: {role: label, label_contains: The lowest amount is more than the highest amount}
   - click: {label: Clear filters}
   - assert_state: {key: screen.filters_active, equals: false}
   - assert_state: {key: screen.filters.problem, equals: false}
