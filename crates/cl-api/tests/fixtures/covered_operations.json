@@ -100,7 +100,7 @@
   {"method":"GET","path":"/api/v1/items/export","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/accounts/{id}/register","inSpec":true,"fragmentHash":"9897f4f4ac0e93f7dc927e0245597dce86786de534dc8e6f837f430da7a1210e"},
   {"method":"GET","path":"/api/v1/accounts/{id}/register/summary","inSpec":true,"fragmentHash":"f318f0724a4301fdd773354e58e56c901da17e187235d580404e3061d2174ff4"},
-  {"method":"POST","path":"/api/v1/checks","inSpec":true,"fragmentHash":"7845bca21c36757ba976518ed83485ff9ac2ee9b6a54ffbf9d60bddfe3a5e3aa"},
+  {"method":"POST","path":"/api/v1/checks","inSpec":true,"fragmentHash":"5f1e66732d3481ef5878cf300e3b858a7559379b976665cc08ed59529d964528"},
   {"method":"GET","path":"/api/v1/audit-log","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/company/closing-password","inSpec":true,"fragmentHash":null},
   {"method":"PUT","path":"/api/v1/company/closing-password","inSpec":true,"fragmentHash":"9e982f14396e41f1c6b3414a57fc6320cb7f25b75c4366b057a2181dbed0f9d6"},
@@ -113,8 +113,8 @@
   {"method":"GET","path":"/api/v1/attachments","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/attachments/{id}/download","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"POST","path":"/api/v1/ai/categorize/preview","inSpec":true,"fragmentHash":"8014ee765ad97f47fff54df3cf8a20fb6c986a29cf04c49fec1e4ee11678a6c9"},
-  {"method":"POST","path":"/api/v1/practice/conditional-rules/evaluate","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/practice/conditional-rules/evaluate","inSpec":true,"fragmentHash":"fcb68aeecf1368118b18579809058abae0d65b12fbd3d0d242e66860fe814a2c"},
   {"method":"GET","path":"/api/v1/checks","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/checks/settings","inSpec":true,"fragmentHash":null},
-  {"method":"PUT","path":"/api/v1/checks/{id}","inSpec":false,"fragmentHash":null}
+  {"method":"PUT","path":"/api/v1/checks/{id}","inSpec":true,"fragmentHash":"8b0bae492848eed637e866f234c3fce1567e15d107c99ea4571d8af9c7e54a39"}
 ]

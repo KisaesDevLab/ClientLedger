@@ -20,9 +20,9 @@ use sha2::{Digest, Sha256};
 /// (E5b safe delete, U-23 recovery key) that the desktop-mode export
 /// (U-24) will add. Since pin 5c8e9665 (engine PRs #151-#153) the tenant
 /// and archive routes, the usage summary, the closing password and
-/// `DELETE /transactions/{id}` are in the spec. The P13 rules evaluate
-/// call and the check edit are listed until their engine PR lands.
-pub const OUTSIDE_SPEC: [(&str, &str); 10] = [
+/// `DELETE /transactions/{id}` are in the spec; since pin 454fd23 (engine
+/// PR #156) the P13 check edit and rules evaluate call are too.
+pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -32,12 +32,6 @@ pub const OUTSIDE_SPEC: [(&str, &str); 10] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
-    // P13 WP2: rule suggestions, coded against the engine PR's contract
-    // (target/plans/P13-engine-shapes.md) until it lands (`rules-evaluate-v1`);
-    // then it joins the spec.
-    ("POST", "/api/v1/practice/conditional-rules/evaluate"),
-    // P13 WP1: check edit, same (`check-edit-v1`).
-    ("PUT", "/api/v1/checks/{id}"),
 ];
 
 /// Lowercase hex of a SHA-256.
