@@ -560,3 +560,102 @@ async fn a_check_edit_goes_to_checks_with_the_password_and_reads_back() {
     );
     assert!(!format!("{e} {e:?} {opts:?}").contains("canary"));
 }
+
+#[tokio::test]
+async fn a_printed_check_edit_is_sent_again_with_the_owners_choice() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/transactions/{ID}").as_str()))
+        .respond_with(json(200, RECORD))
+        .mount(&server)
+        .await;
+    // Without a choice: 409 CHECK_PRINTED, nothing changes.
+    Mock::given(method("PUT"))
+        .and(path(format!("/api/v1/checks/{ID}").as_str()))
+        .respond_with(json(
+            409,
+            r#"{"error":{"message":"Check was printed","code":"CHECK_PRINTED","details":{"checkNumber":4418,"printedAt":"2026-11-04T10:00:00.000Z","changedFields":["amount"]}}}"#,
+        ))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    let mut answer = inner(RECORD);
+    answer["printLater"] = json!(false);
+    Mock::given(method("PUT"))
+        .and(path(format!("/api/v1/checks/{ID}").as_str()))
+        .respond_with(json(200, &json!({ "check": answer }).to_string()))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(&server, &[Capabilities::CHECK_EDIT]).await;
+    let version = RecordVersion::Fingerprint(record(RECORD).fingerprint());
+    let e = s
+        .checks()
+        .update_check(
+            id(),
+            &version,
+            &posting(story()),
+            &PostingOptions::default(),
+            IdempotencyKey::new(),
+        )
+        .await
+        .expect_err("printed");
+    assert!(is_check_printed(&e), "{e:?}");
+    // A used number is a different 409.
+    let dup = ApiError::Conflict {
+        reason: ConflictReason::Unspecified,
+        current_version: None,
+        code: None,
+        message: crate::errors::UserText::default(),
+    };
+    assert!(!is_check_printed(&dup));
+    for (choice, wire) in [
+        (PrintedCheckChange::KeepNumber, "keep_number"),
+        (PrintedCheckChange::Reprint, "reprint"),
+    ] {
+        let opts = CheckEditOptions {
+            posting: PostingOptions::default(),
+            printed_check_change: Some(choice),
+        };
+        s.checks()
+            .update_check(
+                id(),
+                &version,
+                &posting(story()),
+                opts,
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect("saved");
+        let puts = requests(&server, "PUT").await;
+        let body: Value = serde_json::from_slice(&puts[puts.len() - 1].body).expect("json");
+        assert_eq!(body["printedCheckChange"], wire);
+        assert_eq!(body["amount"], "1286.4000", "money stays a string");
+    }
+    let puts = requests(&server, "PUT").await;
+    let first: Value = serde_json::from_slice(&puts[0].body).expect("json");
+    assert!(
+        first.get("printedCheckChange").is_none(),
+        "only when chosen"
+    );
+
+    // Without `check-edit-v1` the choice is never sent.
+    let server2 = MockServer::start().await;
+    let s = session_with_caps(&server2, &[]).await;
+    let opts = CheckEditOptions {
+        posting: PostingOptions::default(),
+        printed_check_change: Some(PrintedCheckChange::Reprint),
+    };
+    let e = s
+        .checks()
+        .update_check(
+            id(),
+            &version,
+            &posting(story()),
+            opts,
+            IdempotencyKey::new(),
+        )
+        .await
+        .expect_err("gated");
+    assert_eq!(e, ApiError::Local(LocalValidation::CheckEditUnavailable));
+    assert!(requests(&server2, "PUT").await.is_empty());
+}
