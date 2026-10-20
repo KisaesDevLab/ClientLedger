@@ -20,6 +20,7 @@ use cl_grid::{
 use cl_model::CommandId;
 use cl_model::amount_entry::AmountRules;
 use cl_model::forms::FormState;
+use cl_model::forms::lines::{FormLine, FormLines, LinesProblem, ensure_entry, to_posting_lines};
 use eframe::egui::{self, RichText, Ui};
 
 use super::RegisterScreen;
@@ -53,76 +54,14 @@ pub type LineSeed = (
     Option<TagId>,
 );
 
-/// One split line.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SplitRow {
-    /// Stable row key (never an engine id).
-    pub key: RowKey,
-    /// Account.
-    pub account: Option<AccountId>,
-    /// Amount (the owner's typed value).
-    pub amount: Option<Money>,
-    /// Memo.
-    pub memo: String,
-    /// Customer.
-    pub customer: Option<ContactId>,
-    /// Tag.
-    pub tag: Option<TagId>,
-}
-
-impl SplitRow {
-    /// A blank line.
-    #[must_use]
-    pub fn blank(key: RowKey) -> SplitRow {
-        SplitRow {
-            key,
-            account: None,
-            amount: None,
-            memo: String::new(),
-            customer: None,
-            tag: None,
-        }
-    }
-
-    /// Nothing entered.
-    #[must_use]
-    pub fn is_blank(&self) -> bool {
-        *self == SplitRow::blank(self.key)
-    }
-}
+/// One split line: the shared form line (P13 WP3.1). The register never sets
+/// `billable`.
+pub type SplitRow = FormLine;
 
 /// The panel's value: its lines, a blank entry line last.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SplitsValue {
-    /// Lines.
-    pub lines: Vec<SplitRow>,
-}
+pub type SplitsValue = FormLines;
 
-impl SplitsValue {
-    /// The lines with something on them.
-    pub fn used(&self) -> impl Iterator<Item = &SplitRow> {
-        self.lines.iter().filter(|l| !l.is_blank())
-    }
-}
-
-/// Exactly one blank entry line at the end.
-fn ensure_entry(lines: &mut Vec<SplitRow>, keys: &mut RowKeyGen) {
-    while lines.len() >= 2 && lines[lines.len() - 2..].iter().all(SplitRow::is_blank) {
-        lines.pop();
-    }
-    if lines.last().is_none_or(|l| !l.is_blank()) {
-        lines.push(SplitRow::blank(keys.next_key()));
-    }
-}
-
-/// Remaining to assign: the header amount minus the typed line amounts
-/// (`None` without a header amount or when the sum does not fit). Form
-/// arithmetic on the owner's input only.
-#[must_use]
-pub fn remaining(header: Option<Money>, v: &SplitsValue) -> Option<Money> {
-    let total = Money::sum(v.lines.iter().filter_map(|l| l.amount)).ok()?;
-    header?.checked_sub(total).ok()
-}
+pub use cl_model::forms::lines::remaining;
 
 /// The lines as posting lines, or the first problem.
 ///
@@ -130,28 +69,17 @@ pub fn remaining(header: Option<Money>, v: &SplitsValue) -> Option<Money> {
 /// A used line without an account or a positive amount, or lines that
 /// don't add up to the header amount.
 pub fn to_lines(header: Money, v: &SplitsValue) -> Result<Vec<PLine>, TextKey> {
-    let mut out = Vec::new();
-    for l in v.used() {
-        let account = l.account.ok_or(NEED_ACCOUNT)?;
-        let amount = l
-            .amount
-            .filter(|m| m.is_positive())
-            .ok_or(TextKey("register.entry.problem.amount_not_positive"))?;
-        out.push(PLine {
-            account,
-            amount,
-            memo: Some(l.memo.trim().to_string()).filter(|m| !m.is_empty()),
-            contact: l.customer,
+    let lines = to_posting_lines(header, v).map_err(LinesProblem::key)?;
+    Ok(lines
+        .into_iter()
+        .map(|l| PLine {
+            account: l.account,
+            amount: l.amount,
+            memo: l.memo,
+            contact: l.contact,
             tag: l.tag,
-        });
-    }
-    if out.is_empty() {
-        return Err(NEED_ACCOUNT);
-    }
-    if remaining(Some(header), v) != Some(Money::ZERO) {
-        return Err(TextKey("register.splits.not_assigned"));
-    }
-    Ok(out)
+        })
+        .collect())
 }
 
 fn column(id: ColumnId, header: TextKey, kind: CellKind, width: (u16, u16, u8)) -> Column {
@@ -429,6 +357,7 @@ impl SplitsPanel {
                 amount,
                 memo,
                 customer,
+                billable: false,
                 tag,
             })
             .collect();
