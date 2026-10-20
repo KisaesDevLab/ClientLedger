@@ -69,6 +69,11 @@ impl egui::Plugin for Hooks {
     }
 
     fn input_hook(&mut self, _ctx: &Context, input: &mut RawInput) {
+        // Driven input is typed into this window, so the window counts as
+        // focused whatever the OS says: `Response::has_focus` is false in a
+        // background window, which made scripted typing into pickers (and
+        // focus rings in screenshots) depend on what else was on screen.
+        input.focused = true;
         let Ok(mut s) = self.0.lock() else { return };
         s.frame += 1;
         if let Some(next) = s.scheduled.pop_front() {
@@ -923,6 +928,23 @@ mod bridge_tests {
 
     fn tab_target(label: &str) -> Value {
         json!({"target": {"role": "tab", "label": label}})
+    }
+
+    /// Driven input lands even when the OS has another window in front:
+    /// the window counts as focused, so `Response::has_focus` (pickers'
+    /// type-ahead, focus rings) does not depend on the desktop.
+    #[test]
+    fn a_background_window_still_counts_as_focused() {
+        let rig = Rig::new();
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, rig.size)),
+            focused: false,
+            ..RawInput::default()
+        };
+        let mut seen = false;
+        let mut out = rig.ctx.run_ui(input, |ui| seen = ui.input(|i| i.focused));
+        out.textures_delta.clear();
+        assert!(seen);
     }
 
     #[test]
