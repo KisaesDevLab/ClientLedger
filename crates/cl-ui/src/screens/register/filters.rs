@@ -29,6 +29,9 @@ use crate::theme::Tokens;
 pub struct QuickInput {
     /// Payee text as typed.
     pub payee: String,
+    /// The payee's names list is open (a click or typing opened it,
+    /// Q-250).
+    pub payee_list: bool,
     /// Amount from, as typed.
     pub min: String,
     /// Amount to, as typed.
@@ -37,10 +40,11 @@ pub struct QuickInput {
     pub problem: Option<&'static str>,
 }
 
-/// Rules for a filter amount: cents, zero or more.
+/// Rules for a filter amount: cents (more decimals round, Q-232), zero or
+/// more.
 const FILTER_AMOUNT: AmountRules = AmountRules {
     kind: AmountKind::Money,
-    input: cl_core::UserInput::CENTS,
+    input: cl_core::UserInput::MONEY,
     sign: Sign::NonNegative,
 };
 
@@ -474,6 +478,21 @@ impl RegisterScreen {
         typed.to_string()
     }
 
+    /// The payee filter's names list under the field (every name when a
+    /// click opened it, else those matching the typing); a click picks one.
+    fn payee_popup(&self, ui: &Ui, field: &egui::Response) -> Option<String> {
+        let query = crate::list_field::query(ui.ctx(), field.id, &self.quick.payee);
+        let limit = if query.is_empty() { 200 } else { 8 };
+        let LookupResult::Ready(found) = self.lists.suggest(NAMES, &query, limit) else {
+            return None;
+        };
+        let typed = self.quick.payee.trim();
+        let current = found.iter().position(|s| s.label == typed);
+        let i =
+            crate::list_field::popup(ui, field, found.iter().map(|s| s.label.as_str()), current)?;
+        found.get(i).map(|s| s.label.clone())
+    }
+
     /// Applies the typed payee and amounts.
     pub(crate) fn apply_typed_filters(&mut self) {
         let payee = self.complete_payee(&self.quick.payee);
@@ -535,11 +554,31 @@ impl RegisterScreen {
                 let l = ui.add(egui::Label::new(t("register.filter.payee")).selectable(false));
                 let r = ui
                     .add_sized(
-                        [130.0, 22.0],
+                        [148.0, 22.0],
                         egui::TextEdit::singleline(&mut self.quick.payee)
-                            .hint_text(t("register.filter.payee_hint")),
+                            .hint_text(t("register.filter.payee_hint"))
+                            .margin(crate::list_field::margin()),
                     )
                     .labelled_by(l.id);
+                if r.changed() {
+                    self.quick.payee_list = !self.quick.payee.trim().is_empty();
+                }
+                // Q-250: a click opens the names list; the chevron toggles it.
+                if let Some(open) = crate::list_field::mouse(ui, &r, self.quick.payee_list) {
+                    self.quick.payee_list = open;
+                }
+                let mut picked = false;
+                if self.quick.payee_list
+                    && (r.has_focus() || r.lost_focus())
+                    && let Some(name) = self.payee_popup(ui, &r)
+                {
+                    self.quick.payee = name;
+                    self.quick.payee_list = false;
+                    picked = true;
+                }
+                if r.lost_focus() {
+                    self.quick.payee_list = false;
+                }
                 if r.has_focus() {
                     let typed = self.quick.payee.trim();
                     let done = self.complete_payee(typed);
@@ -554,7 +593,7 @@ impl RegisterScreen {
                         );
                     }
                 }
-                r.lost_focus()
+                picked || r.lost_focus()
             });
 
             let (choices, ids) = self.tag_choices();

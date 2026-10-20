@@ -112,7 +112,7 @@ fn a_contact_with_both_roles_is_in_both_centers() {
         egui::CentralPanel::default().show(ui, |ui| vendors.ui(ui));
     });
     out.textures_delta.clear();
-    let both = format!("{BOTH}, Client and vendor");
+    let both = format!("{BOTH}, Customer and vendor");
     assert!(names(&r.s).contains(&both), "client center");
     assert!(names(&vendors).contains(&both), "vendor center");
     assert!(!names(&r.s).iter().any(|n| n.starts_with("Galena Gravel")));

@@ -573,7 +573,7 @@ fn the_entry_row_records_a_check_then_a_deposit() {
     let mut s = screen(&link);
     settle(&mut s, None);
     let before = s.model.total().expect("total");
-    assert_eq!(s.entry.next_check, Some(4427), "highest check number + 1");
+    assert_eq!(s.entry.next_check, Some(4418), "highest check number + 1");
     let fuel = demo_account(&link, "6100");
     let vendor = demo_contact(&link, "Hollister Fuel Stop");
     s.entry.form.edit_step(|d| {
@@ -583,7 +583,7 @@ fn the_entry_row_records_a_check_then_a_deposit() {
     });
     assert_eq!(s.draft_kind(), Some(cl_model::register::EntryKind::Check));
     s.sync_proposal();
-    assert_eq!(s.entry.draft().number, "4427");
+    assert_eq!(s.entry.draft().number, "4418");
     assert_eq!(s.state()["entry"]["number_proposed"], true);
     assert!(s.entry_dirty());
     assert!(s.start_record(), "the demo saves at once");
@@ -593,7 +593,7 @@ fn the_entry_row_records_a_check_then_a_deposit() {
     assert!(!s.entry_dirty());
     settle(&mut s, None);
     assert_eq!(s.model.total(), Some(before + 1));
-    assert_eq!(s.entry.next_check, Some(4428));
+    assert_eq!(s.entry.next_check, Some(4419));
 
     // A deposit: the second column, a customer and an income account.
     let income = demo_account(&link, "4000");
@@ -876,10 +876,9 @@ fn filter_bounds_parse_exactly() {
     assert_eq!(filters::parse_bound("  "), Ok(None));
     assert_eq!(filters::parse_bound("1,084.66"), Ok(Some(money("1084.66"))));
     assert_eq!(filters::parse_bound("0.10"), Ok(Some(money("0.1"))));
-    assert_eq!(
-        filters::parse_bound("1.005"),
-        Err("grid.amount.too_many_decimals")
-    );
+    // Typed money rounds to the cent, half away from zero (Q-232).
+    assert_eq!(filters::parse_bound("1.005"), Ok(Some(money("1.01"))));
+    assert_eq!(filters::parse_bound("1.0049"), Ok(Some(money("1.00"))));
 }
 
 #[test]
@@ -1107,7 +1106,7 @@ fn locked_check(s: &mut RegisterScreen) -> cl_grid::RowKey {
     });
     assert!(!s.start_record(), "a closed-period date asks first");
     assert_eq!(s.state()["row_action"]["closing"], "asking");
-    s.actions.password = crate::screens::company::form::SecretText::from(
+    s.actions.closing.password = crate::screens::company::form::SecretText::from(
         crate::company::demo::register::DEMO_CLOSING_PASSWORD,
     );
     s.submit_closing();
@@ -1157,23 +1156,26 @@ fn a_locked_void_needs_the_closing_password_which_is_never_kept() {
     // A wrong password keeps the dialog for another try.
     assert!(s.command(CommandId::new("edit.void_transaction")));
     s.confirm();
-    s.actions.password = crate::screens::company::form::SecretText::from("wrong-canary");
+    s.actions.closing.password = crate::screens::company::form::SecretText::from("wrong-canary");
     s.submit_closing();
     let st = s.state();
     assert_eq!(st["row_action"]["closing"], "rejected");
-    assert!(s.actions.password.is_empty(), "the typed password is wiped");
+    assert!(
+        s.actions.closing.password.is_empty(),
+        "the typed password is wiped"
+    );
     assert!(!st.to_string().contains("canary"));
     assert!(!format!("{:?}", s.actions).contains("canary"));
     // The right one voids it, and is dropped.
-    s.actions.password = crate::screens::company::form::SecretText::from(
+    s.actions.closing.password = crate::screens::company::form::SecretText::from(
         crate::company::demo::register::DEMO_CLOSING_PASSWORD,
     );
     s.submit_closing();
     let st = s.state()["row_action"].clone();
     assert_eq!(st["closing"], "done");
     assert_eq!(st["last"], "void");
-    assert!(s.actions.closing.password().is_none());
-    assert!(s.actions.pending.is_none());
+    assert!(s.actions.closing.flow.password().is_none());
+    assert!(s.actions.closing.pending.is_none());
     settle(&mut s, None);
     let total = s.model.total().expect("total");
     settle(&mut s, Some(&(0..total)));
@@ -1193,7 +1195,7 @@ fn a_locked_edit_asks_for_the_password_when_recorded() {
     assert_eq!(st["closing"], "asking");
     assert_eq!(st["pending"], "save");
     assert!(s.entry.error.is_none(), "the dialog shows it, not the row");
-    s.actions.password = crate::screens::company::form::SecretText::from(
+    s.actions.closing.password = crate::screens::company::form::SecretText::from(
         crate::company::demo::register::DEMO_CLOSING_PASSWORD,
     );
     s.submit_closing();
@@ -1232,6 +1234,7 @@ fn rate_limits_and_conflicts_are_plain_messages() {
     s.ask_closing(dialogs::Pending::Save);
     s.actions
         .closing
+        .flow
         .handle(cl_model::closing::ClosingEvent::Submit(
             cl_core::Secret::new("x"),
         ));
@@ -1243,7 +1246,7 @@ fn rate_limits_and_conflicts_are_plain_messages() {
     assert_eq!(s.state()["row_action"]["closing"], "rejected");
     assert_eq!(s.state()["row_action"]["pending"], "save");
     assert_eq!(s.state()["row_action"]["closing_wait_minutes"], 3);
-    s.actions.password = "y".into();
+    s.actions.closing.password = "y".into();
     s.submit_closing();
     assert_eq!(
         s.state()["row_action"]["closing"],
@@ -1251,10 +1254,10 @@ fn rate_limits_and_conflicts_are_plain_messages() {
         "nothing sent while limited"
     );
     // Once the wait is over, another try may go.
-    s.actions.limited_until = Some(std::time::Instant::now());
+    s.actions.closing.limited_until = Some(std::time::Instant::now());
     assert!(s.closing_wait_minutes().is_none());
     s.cancel_closing();
-    assert!(s.actions.limited_until.is_none());
+    assert!(s.actions.closing.limited_until.is_none());
     assert_eq!(
         cl_core::OwnerFacing::owner_message(&limited).key,
         "error.api.closing_password_attempts"

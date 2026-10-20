@@ -59,8 +59,14 @@ pub use resources::ai::{
 };
 pub use resources::audit::{Audit, AuditAction, AuditEntity, AuditEntry, AuditImage, AuditLine};
 pub use resources::bank_postings::{
-    BankPosting, BankPostingKind, CardChargeDraft, CheckDraft, DepositDraft, PAYEE_NAME_MAX,
-    SplitLine, TransferDraft,
+    BankPosting, BankPostingKind, CardChargeDraft, CheckDraft, DepositDraft, PAYEE_ADDRESS_MAX,
+    PAYEE_NAME_MAX, PRINTED_MEMO_MAX, SplitLine, TransferDraft,
+};
+// P13 WP1: write check.
+pub use resources::checks::{
+    CHECK_PRINTED, CheckEditOptions, CheckRecord, CheckSettings, CheckSummary, Checks, LINE_BILLED,
+    PrintStatus, PrintedCheckChange, check_settings_from_json, checks_from_json, is_check_printed,
+    is_line_billed, is_number_used,
 };
 pub use resources::common::SortDir;
 pub use resources::company::{
@@ -110,9 +116,9 @@ pub use resources::tenants::{
     ImportVerification, JobError, JobId, JobState, NewTenant, TenantSummary, Tenants,
 };
 pub use resources::transactions::{
-    Basis, DELETE_REASON_MAX_CHARS, DeleteOptions, JeLine, MAX_LINES, NewJournalEntry, ReportBasis,
-    Side, Transaction, TransactionFilter, TransactionLine, TransactionSummary, Transactions,
-    TxnSort, TxnStatus, TxnType,
+    Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions, JeLine, MAX_LINES,
+    NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter, TransactionLine,
+    TransactionSummary, Transactions, TxnSort, TxnStatus, TxnType,
 };
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{
@@ -120,3 +126,14 @@ pub use session::{
     TfaChallenge, TfaMethod,
 };
 pub use wire::{Capabilities, DesktopInfo, Health, Page, PageRequest, ReportAmount};
+// P13 WP2: payee panel, attachments, suggestions.
+pub use resources::ai::{
+    AI_PREVIEW_DESCRIPTION_MAX_CHARS, AI_PREVIEW_MAX_ROWS, AiGate, AiPreviewRow, AiSuggestion,
+};
+pub use resources::attachments::{
+    ATTACHMENT_MAX_BYTES, AttachTo, Attachment, AttachmentId, Attachments, DraftKey, FileKind,
+    check_file,
+};
+pub use resources::bills::{Bills, OpenBill, VendorSummary};
+pub use resources::contacts::{SuggestSource, SuggestedAccount};
+pub use resources::rules::{RULE_DESCRIPTION_MAX_CHARS, RuleMatch, RuleQuery, Rules};

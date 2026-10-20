@@ -205,3 +205,29 @@ fn every_request_type_omits_both_keys() {
         },
     );
 }
+
+/// P13 WP2 request bodies: neither key, and money only as strings.
+#[test]
+fn suggestion_requests_omit_both_keys_and_send_money_as_strings() {
+    let bank = AccountId::parse("2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
+    let amount = Money::parse_wire("1286.4000").expect("m");
+    let rule = cl_api::RuleQuery {
+        description: "d".into(),
+        amount,
+        contact: None,
+        bank_account: bank,
+        date: cl_core::CalendarDate::from_ymd(2026, 11, 4).ok(),
+    };
+    assert_clean("RuleQuery", &rule);
+    let row = cl_api::AiPreviewRow {
+        description: "d".into(),
+        amount,
+    };
+    assert_clean("AiPreviewRow", &row);
+    for v in [
+        serde_json::to_value(&rule).expect("json"),
+        serde_json::to_value(&row).expect("json"),
+    ] {
+        assert_eq!(v["amount"], "1286.4000", "money is a string");
+    }
+}

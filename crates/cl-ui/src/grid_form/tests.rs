@@ -177,6 +177,7 @@ fn column(id: ColumnId, kind: CellKind) -> Column {
         id,
         header: TextKey("grid.a11y.line"),
         placeholder: None,
+        empty: None,
         help: None,
         kind,
         line: Line::First,
@@ -619,7 +620,7 @@ fn model_refuses_edits_while_saving() {
 #[test]
 fn mouse_save_with_an_invalid_cell_is_blocked() {
     let mut rig = Rig::new();
-    rig.type_text("5.555");
+    rig.type_text("5.5.5");
     let r = rig.probe.borrow().save_rect;
     rig.click(r);
     assert_eq!(rig.probe.borrow().saved.len(), 0);
@@ -643,9 +644,20 @@ fn close_prompt_save_commits_first() {
 }
 
 #[test]
-fn close_prompt_save_with_an_invalid_cell_keeps_the_window() {
+fn typed_amount_with_extra_decimals_rounds_to_the_cent() {
+    // Q-232: no refusal and no hint; half away from zero.
     let mut rig = Rig::new();
     rig.type_text("5.555");
+    let id = rig.window;
+    rig.shell.close_window(id);
+    rig.shell.windows.answer_prompt(PromptAnswer::Save);
+    assert_eq!(rig.last_saved_amount(), Some(money("5.56")));
+}
+
+#[test]
+fn close_prompt_save_with_an_invalid_cell_keeps_the_window() {
+    let mut rig = Rig::new();
+    rig.type_text("5.5.5");
     let id = rig.window;
     rig.shell.close_window(id);
     rig.shell.windows.answer_prompt(PromptAnswer::Save);
@@ -678,7 +690,7 @@ fn next_record_button_commits_first() {
 #[test]
 fn next_record_command_off_the_grid_commits_or_blocks() {
     let mut rig = Rig::new();
-    rig.type_text("5.555");
+    rig.type_text("5.5.5");
     // Leave the grid: the invalid text is parked, still uncommitted.
     let r = rig.probe.borrow().next_rect;
     rig.click(r);

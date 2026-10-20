@@ -16,7 +16,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::client::{Call, Method};
+use crate::client::{Call, EngineReply, Method};
 use crate::errors::{ApiError, ConflictReason, UserText};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::operations::Operation;
@@ -228,9 +228,29 @@ pub(crate) async fn update_guarded<T>(
 where
     T: DeserializeOwned + EditableFields,
 {
+    let key = u.key;
+    let reply = update_guarded_reply::<T>(session, expected, u, None).await?;
+    saved_from(&reply.body, key)
+}
+
+/// [`update_guarded`] that returns the raw answer, for a write whose route
+/// differs from the read's (`put_path`, for example `PUT /checks/{id}`
+/// guarded and reconciled by `GET /transactions/{id}`) and whose answer
+/// sits under another key. `T` is the model the pre-read and the version
+/// are computed from.
+pub(crate) async fn update_guarded_reply<T>(
+    session: &Session,
+    expected: &RecordVersion,
+    u: GuardedUpdate,
+    put_path: Option<String>,
+) -> Result<EngineReply, ApiError>
+where
+    T: DeserializeOwned + EditableFields,
+{
     // The read, the probe and the write all belong to one company.
     let session = &session.pinned();
-    let mut call = Call::new(u.put.method(), u.put.route(), u.path.clone()).json_body(u.body);
+    let put_path = put_path.unwrap_or_else(|| u.path.clone());
+    let mut call = Call::new(u.put.method(), u.put.route(), put_path).json_body(u.body);
     call.idempotency_key = Some(u.idempotency_key);
     let pre_image = match expected {
         RecordVersion::Server(v) => {
@@ -261,8 +281,7 @@ where
         pre_image,
     };
     let probe = Probe::new(session, matcher, u.stamp_covered).await;
-    let reply = session.send(u.put, call, Some(&probe)).await?;
-    saved_from(&reply.body, u.key)
+    session.send(u.put, call, Some(&probe)).await
 }
 
 #[cfg(test)]

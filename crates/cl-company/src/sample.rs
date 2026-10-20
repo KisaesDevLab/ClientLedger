@@ -8,6 +8,15 @@
 //! general-service chart, every client and vendor, and each transaction
 //! as a journal entry (the invoice, bill and payment forms arrive in
 //! P17-P21 and will replace this with real documents, Q-P08h).
+//!
+//! The fixture also carries the Write Check mockup story (P13 WP0): the
+//! vendor Ozark Feed & Seed with its address, default account 5110 and an
+//! open bill, the accounts Materials:Plants (5100) and Materials:Mulch &
+//! stone (5110), the tags Install and Crew A, the job Hollister Family
+//! Trust:Fall bed install, and 1010 checks numbered up to 4417 so the next
+//! check is 4418. The loader creates the vendor details and line memos;
+//! sub-account parents, tags and jobs are demo-only until the engine
+//! import takes them (jobs need U-35).
 
 use std::collections::HashMap;
 
@@ -31,6 +40,8 @@ const COMPANY_JSON: &str = include_str!("../../../fixtures/sample/ozark_ridge/co
 const TRANSACTIONS_JSON: &str =
     include_str!("../../../fixtures/sample/ozark_ridge/transactions.json");
 const BANK_FEED_JSON: &str = include_str!("../../../fixtures/sample/ozark_ridge/bank_feed.json");
+/// The engine's Accounts Payable account the fixture posts bills to.
+const AP: &str = "20100";
 
 /// One fixture account.
 #[derive(Clone, Debug, Deserialize)]
@@ -45,6 +56,46 @@ pub struct SampleAccount {
     /// Detail type.
     #[serde(default)]
     pub detail: Option<String>,
+    /// Parent account number, for a sub-account.
+    #[serde(default)]
+    pub parent: Option<String>,
+}
+
+/// Contact details of one fixture vendor (the Write Check story vendor).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleVendorDetails {
+    /// Vendor name (one of [`SampleCompany::vendors`]).
+    pub name: String,
+    /// Street address.
+    pub address_line1: String,
+    /// City.
+    pub city: String,
+    /// State.
+    pub state: String,
+    /// ZIP code.
+    pub zip: String,
+    /// Default expense account number.
+    pub default_expense_account: Option<String>,
+}
+
+/// One fixture tag.
+#[derive(Clone, Debug, Deserialize)]
+pub struct SampleTag {
+    /// Name.
+    pub name: String,
+    /// Tag group name, if any.
+    #[serde(default)]
+    pub group: Option<String>,
+}
+
+/// One fixture job (Q-235: a job belongs to a customer).
+#[derive(Clone, Debug, Deserialize)]
+pub struct SampleJob {
+    /// Customer name.
+    pub customer: String,
+    /// Job name.
+    pub name: String,
 }
 
 /// `company.json`.
@@ -65,6 +116,15 @@ pub struct SampleCompany {
     pub clients: Vec<String>,
     /// Vendor names.
     pub vendors: Vec<String>,
+    /// Address and default account of the vendors that have them.
+    #[serde(default)]
+    pub vendor_details: Vec<SampleVendorDetails>,
+    /// Tags.
+    #[serde(default)]
+    pub tags: Vec<SampleTag>,
+    /// Jobs.
+    #[serde(default)]
+    pub jobs: Vec<SampleJob>,
 }
 
 /// One fixture line.
@@ -76,6 +136,15 @@ pub struct SampleLine {
     pub debit: Money,
     /// Credit.
     pub credit: Money,
+    /// Line memo.
+    #[serde(default)]
+    pub memo: Option<String>,
+    /// Tag name.
+    #[serde(default)]
+    pub tag: Option<String>,
+    /// `Customer:Job` the line is for.
+    #[serde(default)]
+    pub job: Option<String>,
 }
 
 /// One fixture transaction.
@@ -86,8 +155,9 @@ pub struct SampleTransaction {
     pub id: u32,
     /// Date.
     pub date: CalendarDate,
-    /// `invoice`, `payment`, `bill`, `bill_payment`, `check`, `deposit`,
-    /// `card_charge`, `journal_entry`.
+    /// `invoice`, `payment`, `bill`, `bill_payment`, `check`, `expense`
+    /// (an unnumbered electronic payment), `deposit`, `card_charge`,
+    /// `journal_entry`.
     #[serde(rename = "type")]
     pub kind: String,
     /// Number.
@@ -233,7 +303,10 @@ impl Sample {
             if due > through {
                 continue;
             }
-            let amount = b.lines[0].debit;
+            // The bill's amount is its credit to A/P (a bill may split its
+            // expense over several lines).
+            let amount = Money::sum(b.lines.iter().filter(|l| l.account == AP).map(|l| l.credit))
+                .expect("sum");
             let settled = self.transactions.iter().any(|p| {
                 p.kind == "bill_payment"
                     && p.contact == b.contact
@@ -245,6 +318,18 @@ impl Sample {
             }
         }
         total
+    }
+
+    /// The next check number of a bank account: the highest numbered
+    /// check on it plus one (`None` when it has no numbered check).
+    #[must_use]
+    pub fn next_check_number(&self, account: &str) -> Option<u32> {
+        self.transactions
+            .iter()
+            .filter(|t| t.kind == "check" && t.lines.iter().any(|l| l.account == account))
+            .filter_map(|t| t.number.parse::<u32>().ok())
+            .max()
+            .map(|n| n.saturating_add(1))
     }
 
     /// The bank's balance after the feed items (October statement plus the
@@ -345,11 +430,28 @@ pub async fn load_into(
             .await?;
     }
     for name in &sample.company.vendors {
+        let mut fields = ContactFields::named(ContactType::Vendor, name.clone());
+        if let Some(d) = sample
+            .company
+            .vendor_details
+            .iter()
+            .find(|d| &d.name == name)
+        {
+            fields.billing_line1 = Some(d.address_line1.clone());
+            fields.billing_city = Some(d.city.clone());
+            fields.billing_state = Some(d.state.clone());
+            fields.billing_zip = Some(d.zip.clone());
+            fields.billing_country = Some("US".into());
+            fields.default_expense_account_id = d
+                .default_expense_account
+                .as_ref()
+                .and_then(|n| ids.get(n).copied());
+        }
         session
             .contacts()
             .create(
                 &NewContact {
-                    fields: ContactFields::named(ContactType::Vendor, name.clone()),
+                    fields,
                     opening_balance: Money::ZERO,
                     opening_balance_date: None,
                 },
@@ -379,7 +481,7 @@ pub async fn load_into(
             lines.push(JeLine {
                 account,
                 side,
-                description: None,
+                description: l.memo.clone(),
                 tag: None,
             });
         }
@@ -500,12 +602,146 @@ mod tests {
         }
         assert_eq!(s.company.clients.len(), 64);
         assert_eq!(s.company.vendors.len(), 38);
-        assert!(s.company.accounts.iter().all(|a| {
-            StarterChart::GeneralService
-                .template()
+        // Every account is the starter chart's, except the Write Check
+        // story's Materials accounts (5100 is the chart's inventory-only
+        // Cost of Goods Sold, which the sample company does not turn on).
+        let story = ["5090", "5100", "5110"];
+        let template = StarterChart::GeneralService.template();
+        for a in &s.company.accounts {
+            let in_chart = template.accounts.iter().find(|t| t.number == a.number);
+            assert!(
+                story.contains(&a.number.as_str()) || in_chart.is_some(),
+                "{}",
+                a.number
+            );
+            if let Some(parent) = &a.parent {
+                assert!(s.company.accounts.iter().any(|p| &p.number == parent));
+            }
+        }
+    }
+
+    /// The Write Check mockup story (P13 WP0, docs/design/mockups/
+    /// WriteCheck.html): every fact the screen shows that comes from the
+    /// books.
+    #[test]
+    fn golden_write_check_story() {
+        let s = Sample::load();
+        let vendor = "Ozark Feed & Seed";
+        assert!(s.company.vendors.iter().any(|v| v == vendor));
+        let details = s
+            .company
+            .vendor_details
+            .iter()
+            .find(|v| v.name == vendor)
+            .expect("story vendor details");
+        assert_eq!(
+            (
+                details.address_line1.as_str(),
+                details.city.as_str(),
+                details.state.as_str(),
+                details.zip.as_str()
+            ),
+            ("1200 Commerce Dr", "Aurora", "MO", "65605")
+        );
+        assert_eq!(details.default_expense_account.as_deref(), Some("5110"));
+
+        let account = |n: &str| {
+            s.company
                 .accounts
                 .iter()
-                .any(|t| t.number == a.number)
-        }));
+                .find(|a| a.number == n)
+                .unwrap_or_else(|| panic!("{n}"))
+        };
+        assert_eq!(account("5090").name, "Materials");
+        assert_eq!(account("5100").name, "Plants");
+        assert_eq!(account("5100").parent.as_deref(), Some("5090"));
+        assert_eq!(account("5110").name, "Mulch & stone");
+        assert_eq!(account("5110").parent.as_deref(), Some("5090"));
+
+        let tags: Vec<&str> = s.company.tags.iter().map(|t| t.name.as_str()).collect();
+        assert!(tags.contains(&"Install") && tags.contains(&"Crew A"));
+        assert!(
+            s.company
+                .jobs
+                .iter()
+                .any(|j| j.customer == "Hollister Family Trust" && j.name == "Fall bed install")
+        );
+        assert!(
+            s.company
+                .clients
+                .iter()
+                .any(|c| c == "Hollister Family Trust")
+        );
+    }
+
+    /// The story's transactions: the open bill, the prior checks and the
+    /// free check number 4418.
+    #[test]
+    fn golden_write_check_story_transactions() {
+        let s = Sample::load();
+        let vendor = "Ozark Feed & Seed";
+        // Only the story's own transactions: three checks and one open bill.
+        let story: Vec<&SampleTransaction> = s
+            .transactions
+            .iter()
+            .filter(|t| t.contact.as_deref() == Some(vendor))
+            .collect();
+        assert_eq!(story.len(), 4);
+        let bill = story.iter().find(|t| t.kind == "bill").expect("open bill");
+        assert_eq!(bill.due, Some(d(2026, 11, 5)));
+        let ap: Money = Money::sum(
+            bill.lines
+                .iter()
+                .filter(|l| l.account == AP)
+                .map(|l| l.credit),
+        )
+        .expect("sum");
+        assert_eq!(ap, m("1286.40"), "open bill");
+        assert!(
+            !s.transactions
+                .iter()
+                .any(|p| p.kind == "bill_payment" && p.contact.as_deref() == Some(vendor)),
+            "the bill is open"
+        );
+        for (number, date, amount) in [
+            ("4380", d(2026, 8, 27), "756.30"),
+            ("4392", d(2026, 9, 18), "1904.11"),
+            ("4401", d(2026, 10, 2), "2318.60"),
+        ] {
+            let c = story
+                .iter()
+                .find(|t| t.number == number)
+                .unwrap_or_else(|| panic!("check {number}"));
+            assert_eq!((c.kind.as_str(), c.date), ("check", date));
+            let paid = Money::sum(
+                c.lines
+                    .iter()
+                    .filter(|l| l.account == "1010")
+                    .map(|l| l.credit),
+            )
+            .expect("sum");
+            assert_eq!(paid, m(amount), "check {number}");
+            let accounts: Vec<&str> = c
+                .lines
+                .iter()
+                .filter(|l| l.account != "1010")
+                .map(|l| l.account.as_str())
+                .collect();
+            assert_eq!(accounts, ["5100", "5110"]);
+            assert!(
+                c.lines
+                    .iter()
+                    .filter(|l| l.account != "1010")
+                    .all(|l| { l.memo.is_some() && l.tag.as_deref() == Some("Install") })
+            );
+        }
+
+        // 4418 is free on 1010 and is the next check number.
+        assert!(
+            !s.transactions
+                .iter()
+                .any(|t| t.number == "4418" && t.lines.iter().any(|l| l.account == "1010"))
+        );
+        assert_eq!(s.next_check_number("1010"), Some(4418));
     }
 }

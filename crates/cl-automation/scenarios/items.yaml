@@ -18,7 +18,7 @@ steps:
   - assert_state: {key: screen.price_levels_available, equals: false}
   - assert_state: {key: screen.focused, equals: true}
   - assert_exists: {role: row, label_contains: "Weekly Mowing, 45.00"}
-  - assert_exists: {label_contains: "Price levels (a different price for some clients) aren't available yet"}
+  - assert_exists: {label_contains: "Price levels (a different price for some customers) aren't available yet"}
   - assert_not_exists: {role: row, label_contains: "Snow Plowing"}
   - assert_no_clipping: {}
   - screenshot: list

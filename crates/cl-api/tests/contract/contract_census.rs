@@ -470,9 +470,25 @@ pub fn field_census(h: &Harness) {
             name: "GET /transactions data[]",
             keys: fields_of::<TransactionSummary>(),
             strings: &["total", "displayTotal"],
-            optional: &[],
+            // P13 plan E5: the engine list does not carry the check number
+            // yet; recent checks show a dash until it does.
+            optional: &["checkNumber"],
         },
         first(&list, "data", "/transactions"),
+    );
+    // P13 WP2: the payee panel's open-bill summary.
+    r.check(
+        &Shape {
+            name: "GET /bills/vendor-summary summary",
+            keys: fields_of::<cl_api::VendorSummary>(),
+            strings: &["totalOwed", "totalOverdue", "totalAvailableCredits"],
+            optional: &[],
+        },
+        &raw(
+            h,
+            "/api/v1/bills/vendor-summary",
+            &[("contactId", &contact.id.to_string())],
+        )["summary"],
     );
     let one = raw(h, &format!("/api/v1/transactions/{}", txn.id), &[]);
     r.check(
@@ -493,7 +509,8 @@ pub fn field_census(h: &Harness) {
             name: "GET /transactions/{id} transaction.lines[]",
             keys: fields_of::<TransactionLine>(),
             strings: &["debit", "credit"],
-            optional: &[],
+            // P13: `line-billable-v1` adds these; older engines leave them out.
+            optional: &["isBillable", "billedStatus"],
         },
         line,
     );

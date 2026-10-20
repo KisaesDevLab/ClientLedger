@@ -395,6 +395,8 @@ mod tests {
             tag_id: None,
             tag_name: None,
             contact_id: None,
+            is_billable: false,
+            billed_status: None,
         }
     }
 

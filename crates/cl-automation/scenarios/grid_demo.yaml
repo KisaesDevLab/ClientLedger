@@ -1,7 +1,7 @@
 # Ledger grid scenario (P10, plan §6). Runs against `clientledger --demo`
 # in light and dark: `dev.grid_demo` exists only with `--demo`.
 # Keyboard-only entry of a split check with autofill, the calculator, a
-# billable Client:Job and tags; errors, undo, delete and save; the 200,000
+# billable Customer:Job and tags; errors, undo, delete and save; the 200,000
 # row register; Pay bills; the small window at 200% zoom. Amounts are
 # checked by their displayed values, which `Money::format` never rounds.
 name: grid_demo
@@ -19,6 +19,11 @@ steps:
   # Amount fields settle to the display style once left (DESIGN.md).
   - assert_value: {target: {role: text_input, label: Check amount}, equals: "1,286.40"}
   - assert_exists: {role: row, label: Column headers}
+  # Q-250: the click opened the whole list at once; Esc closes it.
+  - assert_state: {key: screen.popup_open, equals: true}
+  - assert_exists: {role: list_box, label_contains: "All Account"}
+  - key: Escape
+  - assert_state: {key: screen.popup_open, equals: false}
   - type: {text: "51"}
   - assert_exists: {role: list_box_option, label_contains: "5100"}
   - screenshot: account-list

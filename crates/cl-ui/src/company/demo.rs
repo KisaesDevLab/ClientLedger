@@ -5,6 +5,7 @@ use cl_core::ids::TenantId;
 use cl_core::{CalendarDate, Timestamp};
 use cl_settings::{ACCENT_PALETTE, Accent};
 
+pub mod checks;
 pub mod contacts;
 pub mod lists;
 pub mod register;
@@ -63,6 +64,30 @@ pub struct DemoState {
     pub tags_gone: std::collections::BTreeSet<cl_core::ids::TagId>,
     /// Transactions recorded or changed in the demo registers (P12).
     pub ledger: register::DemoLedger,
+    /// Checks written in the demo (P13): their own fields and history.
+    pub checks: checks::DemoChecks,
+    /// The demo company's AI switches (Preferences > AI).
+    pub ai: DemoAi,
+}
+
+/// The demo's AI switches: Preferences > AI writes them, Write Check's
+/// account suggestions read them (the AI runs on a local model in the
+/// demo, and the company agreed to the notice).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DemoAi {
+    /// AI is turned on.
+    pub enabled: bool,
+    /// The account-suggestion task (`categorization`) is on.
+    pub categorization: bool,
+}
+
+impl Default for DemoAi {
+    fn default() -> Self {
+        DemoAi {
+            enabled: true,
+            categorization: true,
+        }
+    }
 }
 
 fn id(n: u8) -> TenantId {
@@ -123,6 +148,8 @@ impl DemoState {
             required_tag_groups: std::collections::BTreeMap::new(),
             tags_gone: std::collections::BTreeSet::new(),
             ledger: register::DemoLedger::default(),
+            checks: checks::DemoChecks::default(),
+            ai: DemoAi::default(),
         }
     }
 
@@ -183,6 +210,12 @@ impl Default for DemoState {
 /// (on, Ollama, `llama3.1:8b`, nothing spent) over Ozark Ridge's settings.
 #[must_use]
 pub fn preferences_loaded() -> crate::screens::preferences::Loaded {
+    preferences_loaded_with(DemoAi::default())
+}
+
+/// [`preferences_loaded`] with the demo's current AI switches.
+#[must_use]
+pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences::Loaded {
     let settings: Option<cl_api::CompanySettings> = serde_json::from_value(serde_json::json!({
         "fiscalYearStartMonth": 1,
         "accountingMethod": "accrual",
@@ -191,7 +224,7 @@ pub fn preferences_loaded() -> crate::screens::preferences::Loaded {
     }))
     .ok();
     let ai: cl_api::AiConfig = serde_json::from_value(serde_json::json!({
-        "isEnabled": true,
+        "isEnabled": switches.enabled,
         "fallbackChain": ["ollama"],
         "categorizationProvider": "ollama",
         "categorizationModel": "llama3.1:8b",
@@ -214,8 +247,10 @@ pub fn preferences_loaded() -> crate::screens::preferences::Loaded {
         "systemVersion": 1,
         "acceptedVersion": 1,
         "acceptedAt": "2026-10-01T08:05:00.000Z",
-        "aiEnabled": true,
-        "enabledTasks": {"categorization": true, "receipt_ocr": true, "report_summary": true},
+        "aiEnabled": switches.enabled,
+        "enabledTasks": {
+            "categorization": switches.categorization, "receipt_ocr": true, "report_summary": true,
+        },
         "isStale": false,
     }))
     .ok();
@@ -288,7 +323,7 @@ pub fn chart() -> Vec<cl_api::Account> {
                 name: a.name.clone(),
                 kind: a.account_type,
                 detail,
-                parent: None,
+                parent: a.parent.as_deref().and_then(|p| p.parse().ok()),
                 active: true,
                 system: false,
             }

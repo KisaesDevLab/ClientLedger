@@ -93,8 +93,8 @@ impl Rig {
 fn loads_tags_by_group_with_usage_of_the_selected_tag() {
     let mut r = Rig::new();
     assert_eq!(r.state("screen"), "tags");
-    assert_eq!(r.state("rows"), 7);
-    assert_eq!(r.state("total"), 8);
+    assert_eq!(r.state("rows"), 9);
+    assert_eq!(r.state("total"), 10);
     assert_eq!(r.state("groups"), 2);
     assert_eq!(r.s.title(), "Tags");
     // Route first (its tags by name), then Crew, then ungrouped.
@@ -112,6 +112,8 @@ fn loads_tags_by_group_with_usage_of_the_selected_tag() {
             "South Route",
             "Crew 1",
             "Crew 2",
+            "Crew A",
+            "Install",
             "Storm Cleanup",
             "Warranty Work"
         ]
@@ -142,7 +144,7 @@ fn create_rename_and_delete_an_unused_tag() {
     r.frames(3);
     assert_eq!(r.state("panel"), "none");
     assert_eq!(r.state("note"), "saved");
-    assert_eq!(r.state("rows"), 8);
+    assert_eq!(r.state("rows"), 10);
     assert_eq!(r.state("selected_group"), "Crew");
     assert_eq!(r.state("usage_total"), 0);
 
@@ -163,7 +165,7 @@ fn create_rename_and_delete_an_unused_tag() {
 
     assert!(r.cmd("form.delete_item"));
     assert_eq!(r.state("note"), "deleted");
-    assert_eq!(r.state("rows"), 7);
+    assert_eq!(r.state("rows"), 9);
 }
 
 #[test]
@@ -209,7 +211,7 @@ fn merge_only_for_header_only_tags() {
     r.frames(3);
     assert_eq!(r.state("note"), "merged");
     assert_eq!(r.state("panel"), "none");
-    assert_eq!(r.state("total"), 7);
+    assert_eq!(r.state("total"), 9);
     assert!(
         r.link
             .demo_state()
@@ -279,14 +281,14 @@ fn make_inactive_and_active_again() {
     r.select(6);
     r.cmd("list.toggle_active");
     assert_eq!(r.state("note"), "made_inactive");
-    assert_eq!(r.state("rows"), 6);
+    assert_eq!(r.state("rows"), 8);
     r.cmd("list.show_inactive");
     assert_eq!(r.s.selected(), Some(tag_id(6)));
     assert_eq!(r.state("selected_active"), false);
     r.cmd("list.toggle_active");
     assert_eq!(r.state("note"), "made_active");
     r.cmd("list.show_inactive");
-    assert_eq!(r.state("rows"), 7);
+    assert_eq!(r.state("rows"), 9);
 }
 
 #[test]

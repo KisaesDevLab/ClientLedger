@@ -15,6 +15,7 @@ mod contract_audit;
 mod contract_bank_postings;
 mod contract_capabilities;
 mod contract_census;
+mod contract_check_panel;
 mod contract_closed_period;
 mod contract_companies;
 mod contract_conflict;
@@ -33,6 +34,7 @@ mod contract_register_property;
 mod contract_resources;
 mod contract_session;
 mod contract_tags;
+mod contract_write_check;
 
 use support::{EngineMode, TestFn, run_suite};
 
@@ -177,6 +179,40 @@ fn main() -> std::process::ExitCode {
         (
             "bank_postings::lost_replies_are_reconciled_to_one_posting",
             contract_bank_postings::lost_replies_are_reconciled_to_one_posting,
+        ),
+        (
+            "check_panel::panel_readers_after_a_bill",
+            contract_check_panel::panel_readers_after_a_bill,
+        ),
+        (
+            "check_panel::recent_checks_carry_the_number",
+            contract_check_panel::recent_checks_carry_the_number,
+        ),
+        (
+            "check_panel::draft_attachment_moves_onto_the_check",
+            contract_check_panel::draft_attachment_moves_onto_the_check,
+        ),
+        (
+            "check_panel::rules_evaluate",
+            contract_check_panel::rules_evaluate,
+        ),
+        (
+            "check_panel::ai_preview_is_refused_while_ai_is_off",
+            contract_check_panel::ai_preview_is_refused_while_ai_is_off,
+        ),
+        ("write_check::gl_effect", contract_write_check::gl_effect),
+        ("write_check::edges", contract_write_check::edges),
+        (
+            "write_check::edit_without_check_edit",
+            contract_write_check::edit_without_check_edit,
+        ),
+        (
+            "write_check::printed_check_edits",
+            contract_write_check::printed_check_edits,
+        ),
+        (
+            "write_check::closed_period",
+            contract_write_check::closed_period,
         ),
         (
             "register_property::balance_holds_after_random_edits",

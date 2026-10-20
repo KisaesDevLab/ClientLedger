@@ -731,6 +731,11 @@ impl Grid {
             GridInput::Click { pos, .. } if !open && self.core.cursor() == Some(pos) => {
                 vec![gi, choices()]
             }
+            // A click on the open dropdown closes it (Q-250).
+            GridInput::Click { pos, .. } if open && self.core.cursor() == Some(pos) => {
+                vec![gi, GridInput::ToggleList]
+            }
+            GridInput::ToggleList if !open => vec![choices()],
             other => vec![other],
         }
     }
@@ -1010,6 +1015,12 @@ impl Grid {
         if painted.resized {
             events.push(GridEvent::ColumnsResized);
         }
+        if painted.toggles {
+            for gi in self.translate(GridInput::ToggleList, env) {
+                let (ev, _) = self.handle(gi, &mut model, env, &ctx);
+                events.extend(ev);
+            }
+        }
         if painted.buffer_changed
             && let Some(text) = self.core.edit().map(|e| e.buffer.clone())
         {
@@ -1022,9 +1033,23 @@ impl Grid {
                 double: p.double,
                 mods: p.mods,
             };
+            let was_cursor = self.core.cursor() == Some(p.pos);
             for gi in self.translate(click, env) {
                 let (ev, _) = self.handle(gi, &mut model, env, &ctx);
                 events.extend(ev);
+            }
+            // A click that moved onto a dropdown cell opens its choices at
+            // once (Q-250); picker and tag cells open in the core.
+            if !was_cursor
+                && self.core.cursor() == Some(p.pos)
+                && self.core.edit().is_some_and(|e| e.popup.is_none())
+            {
+                for gi in self.translate(GridInput::ToggleList, env) {
+                    if matches!(gi, GridInput::OpenChoices(_)) {
+                        let (ev, _) = self.handle(gi, &mut model, env, &ctx);
+                        events.extend(ev);
+                    }
+                }
             }
             if !focused {
                 ctx.memory_mut(|m| m.request_focus(focus_id));
@@ -1066,6 +1091,8 @@ struct Painted {
     presses: Vec<Press>,
     popup_hit: Option<PopupHit>,
     buffer_changed: bool,
+    /// The list chevron on the open cell was clicked (Q-250).
+    toggles: bool,
     resized: bool,
 }
 
@@ -1236,6 +1263,7 @@ impl Grid {
         let fmt = env.formats();
         let mut presses = Vec::new();
         let mut buffer_changed = false;
+        let mut toggles = false;
         let total = model.rows().row_count();
         let h = self.heights(model);
         let row_h = self.row_points(style);
@@ -1482,6 +1510,10 @@ impl Grid {
                     let focus_id = self.focus_id();
                     let mut cell_rect = cell_rect;
                     let mut chips_text = None;
+                    // Picker and tag cells show the list chevron (Q-250).
+                    let list_cell =
+                        matches!(col.kind, CellKind::Picker { .. } | CellKind::Tags { .. });
+                    let list_open = self.core.edit().is_some_and(|e| e.popup.is_some());
                     if let Some(edit) = self.core.edit_mut() {
                         // Tag chips sit before the text being typed.
                         let mut edit_rect = cell_rect;
@@ -1524,13 +1556,18 @@ impl Grid {
                                     usize::try_from(max_chars).unwrap_or(usize::MAX),
                                 )
                             }
-                            _ => crate::editors::text::editor(
+                            _ => crate::editors::text::editor_with_room(
                                 &mut edit.buffer,
                                 focus_id,
                                 font,
                                 egui_align(col.align),
                                 edit_rect.width(),
                                 style.pad,
+                                if list_cell {
+                                    crate::view::chevron::WIDTH
+                                } else {
+                                    0.0
+                                },
                                 max,
                             ),
                         };
@@ -1541,6 +1578,27 @@ impl Grid {
                         };
                         let resp: Response = row_ui.put(at, te);
                         buffer_changed |= resp.changed();
+                        if list_cell {
+                            crate::view::chevron::paint(
+                                row_ui.painter(),
+                                cell_rect,
+                                style.text_secondary,
+                                list_open,
+                            );
+                            // A click on the open cell opens its list; a
+                            // click on the chevron opens or closes it.
+                            match crate::view::chevron::click(&resp, cell_rect) {
+                                Some(crate::view::chevron::Click::Chevron) => toggles = true,
+                                Some(crate::view::chevron::Click::Field) => {
+                                    presses.push(Press {
+                                        pos,
+                                        double: false,
+                                        mods: ctx.input(|i| input::mods(i.modifiers)),
+                                    });
+                                }
+                                None => {}
+                            }
+                        }
                     }
                     ctx.accesskit_node_builder(focus_id, |node| {
                         node.set_label(cell_label.clone());
@@ -1600,6 +1658,7 @@ impl Grid {
                 ctx.accesskit_node_builder(cell_id, |node| {
                     a11y::cell_node(node, cell_rect.intersect(body).intersect(vis), &info);
                 });
+                let suggested_desc = info.suggested.map(|s| s.replace("{value}", &shown.text));
                 // The cursor cell without a text editor: the focus target's
                 // node speaks for it (a checkbox, a combo box, a cell).
                 if is_cursor && !no_editor {
@@ -1616,12 +1675,17 @@ impl Grid {
                             }
                             _ => {
                                 node.set_role(if editable { Role::GridCell } else { Role::Cell });
-                                match hint {
-                                    Some(h) => {
+                                match (hint, suggested_desc) {
+                                    (Some(h), _) => {
                                         node.set_value("");
                                         node.set_description(h);
                                     }
-                                    None => node.set_value(shown.text.clone()),
+                                    // An unaccepted suggestion is never the value.
+                                    (None, Some(s)) => {
+                                        node.set_value("");
+                                        node.set_description(s);
+                                    }
+                                    (None, None) => node.set_value(shown.text.clone()),
                                 }
                             }
                         }
@@ -1655,6 +1719,25 @@ impl Grid {
                         LOCK_GUTTER
                     }
                 };
+                // An editable list cell shows its chevron under the pointer
+                // and on the cursor (Q-250): a click opens the list.
+                if !cut
+                    && editable
+                    && !state.contains(RowState::LOCKED)
+                    && matches!(
+                        col.kind,
+                        CellKind::Picker { .. } | CellKind::Tags { .. } | CellKind::Dropdown { .. }
+                    )
+                    && (is_cursor || resp.hovered())
+                {
+                    let open = is_cursor && self.core.edit().is_some_and(|e| e.popup.is_some());
+                    crate::view::chevron::paint(
+                        row_ui.painter(),
+                        paint_rect,
+                        style.text_secondary,
+                        open,
+                    );
+                }
                 // Numbers are never cut short: the column grows to fit and
                 // never shrinks this session (Q-P10o, S14).
                 if shown.mono && needed > place.width + 0.5 {
@@ -1769,6 +1852,7 @@ impl Grid {
             presses,
             popup_hit,
             buffer_changed,
+            toggles,
             resized,
         }
     }
@@ -1835,6 +1919,11 @@ impl Grid {
             }
             CellValue::Empty if state.contains(RowState::ENTRY) => Shown {
                 text: col.placeholder.map(|k| env.t(k)).unwrap_or_default(),
+                placeholder: true,
+                mono: false,
+            },
+            CellValue::Empty if col.empty.is_some() => Shown {
+                text: col.empty.map(|k| env.t(k)).unwrap_or_default(),
                 placeholder: true,
                 mono: false,
             },

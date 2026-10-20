@@ -191,6 +191,22 @@ pub enum LocalValidation {
     /// Deleting a transaction needs `txn-delete-v1` (R7); nothing was
     /// sent. Void it instead.
     TxnDeleteUnavailable,
+    // ---- P13 WP2: attachments and suggestions ----
+    /// An attachment is empty or larger than 10 MB; nothing was sent.
+    AttachmentTooLarge,
+    /// An attachment is not a PDF, PNG or JPEG (by its first bytes);
+    /// nothing was sent.
+    AttachmentType,
+    /// Rule suggestions need `rules-evaluate-v1`; nothing was sent.
+    RulesEvaluateUnavailable,
+    // ---- P13 WP1: write check ----
+    /// A customer or a billable mark on a check or expense line needs
+    /// `line-billable-v1`; nothing was sent.
+    LineBillableUnavailable,
+    /// Editing a check's own fields (`PUT /checks/{id}`) needs
+    /// `check-edit-v1`; nothing was sent. The P12 expense path still
+    /// changes its date, payee, memo and lines.
+    CheckEditUnavailable,
 }
 
 /// A save was refused because its date is on or before the closing date.
@@ -324,6 +340,11 @@ pub enum ApiError {
         /// Engine feature name.
         feature: Option<String>,
     },
+    /// AI suggestions are off: AI is not turned on, the company has not
+    /// agreed to the AI notice, or the task is switched off (refused
+    /// locally with nothing sent, or by the engine's AI gate).
+    #[error("AI suggestions are off")]
+    AiUnavailable,
     /// Sign-in or session problem.
     #[error("unauthorized ({0:?})")]
     Unauthorized(AuthFailure),
@@ -462,6 +483,7 @@ impl OwnerFacing for ApiError {
             ApiError::FeatureNotEnabled { .. } => {
                 ("error.api.feature_off", Some("fix.api.feature_off"))
             }
+            ApiError::AiUnavailable => ("error.api.ai_unavailable", Some("fix.api.ai_unavailable")),
             ApiError::Unauthorized(f) => match f {
                 AuthFailure::InvalidCredentials => ("error.api.bad_credentials", None),
                 AuthFailure::SessionExpired | AuthFailure::ReauthRequired => {

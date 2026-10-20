@@ -26,6 +26,10 @@ use cl_core::OwnerMessage;
 
 use crate::undo::UndoStack;
 
+pub mod amount_words;
+pub mod check;
+pub mod lines;
+
 /// How many unsaved steps a form remembers.
 pub const UNDO_LIMIT: usize = 200;
 

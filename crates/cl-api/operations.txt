@@ -24,6 +24,7 @@
 #! schema-source engine/packages/api/src/routes/desktop.routes.ts
 #! schema-source engine/packages/api/src/routes/portal-1099.routes.ts
 #! schema-source engine/packages/shared/src/schemas/checks.ts
+#! schema-source engine/packages/api/src/routes/checks.routes.ts
 #! schema-source engine/packages/api/src/routes/accounts.routes.ts
 #! schema-source engine/packages/api/src/routes/audit.routes.ts
 GET     /health                                 idempotent
@@ -133,3 +134,16 @@ GET     /api/v1/company/closing-password        idempotent
 PUT     /api/v1/company/closing-password        never
 DELETE  /api/v1/transactions/{id}               pre-handler-only
 POST    /api/v1/company/closing-password/reset  never
+# P13 WP2: payee panel, attachments, suggestions
+GET     /api/v1/bills/vendor-summary            idempotent
+GET     /api/v1/bills/payable                   idempotent
+GET     /api/v1/contacts/{id}/suggest-account   idempotent
+POST    /api/v1/attachments                     pre-handler-only
+GET     /api/v1/attachments                     idempotent
+GET     /api/v1/attachments/{id}/download       idempotent
+POST    /api/v1/ai/categorize/preview           pre-handler-only
+POST    /api/v1/practice/conditional-rules/evaluate pre-handler-only
+# P13 WP1: write check
+GET     /api/v1/checks                          idempotent
+GET     /api/v1/checks/settings                 idempotent
+PUT     /api/v1/checks/{id}                     pre-handler-only

@@ -172,6 +172,32 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 
 ---
 
+## P15A — Batch Enter Transactions
+
+| Tier | Size | Depends on | Implementer | Reviews |
+| --- | --- | --- | --- | --- |
+| M | M | P13–P15 (and P10 grid) | rust-implementer (opus) | reviewer (opus), ui-verifier |
+
+**Decisions:** Q-252, Q-232, Q-233, Q-238, Q-250. **Engine:** `/api/v1/batch` (validate, save, suggest-account, parse-csv). Run the capability check first. Invoice, bill, credit memo and customer payment rows may need items (P20) or A/R-A/P rules from P17/P21: rows of types whose forms are not built yet are offered only once their phase is done (record this as a default in QUESTIONS.md when the phase starts).
+
+**Mockup:** none. Follow the grid rules in `docs/DESIGN.md`; note "no mockup" in the PR.
+
+**Crates and files:** `crates/cl-ui/src/screens/batch_entry/`, `crates/cl-model/src/forms/batch.rs`, `crates/cl-automation/scenarios/batch_entry.yaml`.
+
+**Steps**
+1. One grid per transaction type with a context account; row validation through `/batch/validate` showing problems per row; nothing is saved until all rows pass. — `feat(batch): grid and validation`
+2. Paste from a spreadsheet or CSV via `parse-csv` with column mapping; account suggestions need an accept (AI rules Q-73/Q-141 gating as in P13). — `feat(batch): paste and suggestions`
+3. Save all in one call; closing-date password flow; summary; rows appear in the registers. — `feat(batch): save`
+
+**Tests:** a 50-row batch saves exactly (sum of rows equals the register change); one bad row blocks the save and is highlighted; pasted CSV amounts round to the cent (Q-232); a closed-period row asks for the password.
+
+**Acceptance**
+- [ ] A mixed batch of checks and deposits saves and every row shows in the register with the right balance.
+- [ ] Invalid rows cannot save.
+- [ ] Screen verified with a control-channel scenario.
+
+---
+
 ## P16 — Home workspace
 
 | Tier | Size | Depends on | Implementer | Reviews |

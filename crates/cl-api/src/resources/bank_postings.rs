@@ -15,11 +15,17 @@
 //!   in the body, U-15; refused locally without `closing-password-v1`). A
 //!   body that carries it asks the endpoint source for a credentials-grade
 //!   endpoint (`Call::json_body` marks it sensitive).
-//! - The engine stores a check as an `expense` with a check number. A check
-//!   is changed through `PUT /transactions/{id}` as an expense: its number
-//!   and the name printed on it stay as they were.
+//! - The engine stores a check as an `expense` with a check number. Without
+//!   `check-edit-v1` a check is changed through `PUT /transactions/{id}` as
+//!   an expense: its number, the name printed on it, its address and Print
+//!   later stay as they were. With it, `checks().update_check` (P13,
+//!   `resources/checks.rs`) changes those too.
 //! - Line tags are always sent (`null` for none) so the engine never fills a
 //!   default tag the owner did not choose.
+//! - A check line's customer and billable mark (P13) are sent only when set
+//!   and only once the engine advertises `line-billable-v1`; the caller
+//!   passes that flag in ([`BankPosting::check_with`]) so the builder stays
+//!   pure.
 
 use cl_core::ids::{AccountId, ContactId, TagId, TransactionId};
 use cl_core::{CalendarDate, Money};
@@ -28,6 +34,7 @@ use serde_json::{Value, json};
 use crate::client::{Call, Method};
 use crate::errors::{ApiError, LocalValidation};
 use crate::idempotency::IdempotencyKey;
+use crate::resources::attachments::DraftKey;
 use crate::resources::common::remember_created;
 use crate::resources::operations::{CHECKS_CREATE, TXN_GET, TXN_PUT, TXNS_CREATE};
 use crate::resources::posting::{PostingOptions, posting_body};
@@ -42,6 +49,11 @@ use crate::resources::versioning::{
 
 /// The longest name the engine prints on a check.
 pub const PAYEE_NAME_MAX: usize = 255;
+/// The longest payee address the engine takes (UTF-16 code units, as the
+/// engine's schema counts them).
+pub const PAYEE_ADDRESS_MAX: usize = 500;
+/// The longest memo printed on a check (UTF-16 code units).
+pub const PRINTED_MEMO_MAX: usize = 255;
 
 /// One split line of a posting: the other side of the bank line.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,14 +64,19 @@ pub struct SplitLine {
     pub amount: Money,
     /// Line memo (owner data: never logged).
     pub memo: Option<String>,
-    /// Line customer (deposits only).
+    /// Line customer: a deposit's customer, or the customer (job) a check
+    /// line is for (`line-billable-v1`).
     pub contact: Option<ContactId>,
+    /// The check line is billable to `contact` (`line-billable-v1`; needs
+    /// a customer).
+    pub billable: bool,
     /// Line tag.
     pub tag: Option<TagId>,
 }
 
-/// A check to write (`POST /checks`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A check to write (`POST /checks`, or `PUT /checks/{id}` with
+/// `check-edit-v1`).
+#[derive(Clone, PartialEq, Eq)]
 pub struct CheckDraft {
     /// The bank account it is drawn on.
     pub bank: AccountId,
@@ -70,14 +87,45 @@ pub struct CheckDraft {
     /// The name printed on the check (required).
     pub payee_name: String,
     /// A hand-written check's number (the engine assigns the next one
-    /// otherwise).
+    /// otherwise). Never set together with `print_later`.
     pub check_number: Option<u32>,
-    /// Memo.
+    /// Queue the check for printing: no number until it prints (`printStatus`
+    /// `queue`).
+    pub print_later: bool,
+    /// The address printed under the payee's name (lines separated by a
+    /// line feed, at most 500 characters).
+    pub payee_address: Option<String>,
+    /// Memo kept in the books.
     pub memo: Option<String>,
+    /// The memo printed on the check (at most 255 characters).
+    pub printed_memo: Option<String>,
+    /// Header tags. On a create they are the check's tags; an edit
+    /// (`PUT /checks/{id}`) always sends them and the engine replaces the
+    /// check's header tags with exactly these (empty clears them).
+    pub tag_ids: Vec<TagId>,
+    /// The draft the form's files were uploaded under before the first
+    /// save; the create moves them onto the check (not sent on an edit).
+    pub draft_attachment: Option<DraftKey>,
     /// The check amount; the lines must add up to it exactly.
     pub amount: Money,
     /// Where the money went.
     pub lines: Vec<SplitLine>,
+}
+
+/// Ids, the date, the flags and counts only: names, addresses, memos and
+/// amounts are owner data.
+impl std::fmt::Debug for CheckDraft {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CheckDraft")
+            .field("bank", &self.bank)
+            .field("date", &self.date)
+            .field("payee", &self.payee)
+            .field("print_later", &self.print_later)
+            .field("tag_ids", &self.tag_ids)
+            .field("draft_attachment", &self.draft_attachment)
+            .field("lines", &self.lines.len())
+            .finish_non_exhaustive()
+    }
 }
 
 /// A deposit (`POST /transactions`, `deposit`).
@@ -158,10 +206,19 @@ fn clean(mut lines: Vec<SplitLine>) -> Vec<SplitLine> {
     lines
 }
 
+/// Which line extras a kind of posting takes.
+#[derive(Clone, Copy)]
+struct LineRules {
+    /// A line may name a contact.
+    contacts: bool,
+    /// A line may be billable (always with a contact).
+    billable: bool,
+}
+
 fn check_lines(
     lines: &[SplitLine],
     own: AccountId,
-    contacts: bool,
+    rules: LineRules,
 ) -> Result<Money, LocalValidation> {
     if lines.is_empty() {
         return Err(LocalValidation::TooFewLines);
@@ -175,22 +232,65 @@ fn check_lines(
     if lines.iter().any(|l| l.account == own) {
         return Err(LocalValidation::SameAccount);
     }
-    if !contacts && lines.iter().any(|l| l.contact.is_some()) {
+    if !rules.contacts && lines.iter().any(|l| l.contact.is_some()) {
+        return Err(LocalValidation::InvalidValue);
+    }
+    if lines
+        .iter()
+        .any(|l| l.billable && (!rules.billable || l.contact.is_none()))
+    {
         return Err(LocalValidation::InvalidValue);
     }
     Money::sum(lines.iter().map(|l| l.amount)).map_err(|_| LocalValidation::InvalidValue)
 }
 
+/// A text the engine stores as `null` when empty; `None` when it is blank.
+fn blank_is_none(s: Option<String>) -> Option<String> {
+    s.filter(|v| !v.trim().is_empty())
+}
+
+/// Longer than `max` as the engine's schema counts (UTF-16 code units).
+fn too_long(s: Option<&String>, max: usize) -> bool {
+    s.is_some_and(|v| v.encode_utf16().count() > max)
+}
+
 impl BankPosting {
-    /// A check.
+    /// A check for an engine without `line-billable-v1`: no line customers
+    /// and no billable lines ([`BankPosting::check_with`]).
     ///
     /// # Errors
-    /// `TooFewLines`, `TooManyLines`, `NonPositiveAmount`, `TotalMismatch`
-    /// (lines ≠ amount, exactly), `SameAccount` (a line to the bank itself),
-    /// `InvalidValue` (blank or too long payee name, check number 0, a line
-    /// customer, an overflowing total).
-    pub fn check(mut d: CheckDraft) -> Result<BankPosting, LocalValidation> {
-        let total = check_lines(&d.lines, d.bank, false)?;
+    /// As [`BankPosting::check_with`].
+    pub fn check(d: CheckDraft) -> Result<BankPosting, LocalValidation> {
+        Self::check_with(d, false)
+    }
+
+    /// A check. `line_billable` is whether the engine advertises
+    /// `line-billable-v1` (customers and billable marks on lines).
+    ///
+    /// # Errors
+    /// `LineBillableUnavailable` (a line customer or billable mark without
+    /// the capability), `TooFewLines`, `TooManyLines`, `NonPositiveAmount`,
+    /// `TotalMismatch` (lines ≠ amount, exactly: the engine's own check is
+    /// never relied on), `SameAccount` (a line to the bank itself),
+    /// `InvalidValue` (blank or too long payee name, check number 0, a
+    /// number together with Print later, a billable line without a
+    /// customer, an address over 500 or a printed memo over 255
+    /// characters, an overflowing total).
+    pub fn check_with(
+        mut d: CheckDraft,
+        line_billable: bool,
+    ) -> Result<BankPosting, LocalValidation> {
+        if !line_billable && d.lines.iter().any(|l| l.contact.is_some() || l.billable) {
+            return Err(LocalValidation::LineBillableUnavailable);
+        }
+        let total = check_lines(
+            &d.lines,
+            d.bank,
+            LineRules {
+                contacts: true,
+                billable: true,
+            },
+        )?;
         if !d.amount.is_positive() {
             return Err(LocalValidation::NonPositiveAmount);
         }
@@ -198,10 +298,23 @@ impl BankPosting {
             return Err(LocalValidation::TotalMismatch);
         }
         let name = d.payee_name.trim();
-        if name.is_empty() || name.chars().count() > PAYEE_NAME_MAX || d.check_number == Some(0) {
+        if name.is_empty()
+            || name.chars().count() > PAYEE_NAME_MAX
+            || d.check_number == Some(0)
+            || (d.print_later && d.check_number.is_some())
+        {
             return Err(LocalValidation::InvalidValue);
         }
         d.payee_name = name.to_string();
+        d.payee_address = blank_is_none(d.payee_address);
+        d.printed_memo = blank_is_none(d.printed_memo);
+        if too_long(d.payee_address.as_ref(), PAYEE_ADDRESS_MAX)
+            || too_long(d.printed_memo.as_ref(), PRINTED_MEMO_MAX)
+        {
+            return Err(LocalValidation::InvalidValue);
+        }
+        let mut seen = std::collections::HashSet::new();
+        d.tag_ids.retain(|t| seen.insert(*t));
         d.memo = non_empty(d.memo);
         d.lines = clean(d.lines);
         Ok(BankPosting(Kind::Check(d)))
@@ -211,9 +324,16 @@ impl BankPosting {
     ///
     /// # Errors
     /// `TooFewLines`, `TooManyLines`, `NonPositiveAmount`, `SameAccount`,
-    /// `InvalidValue` (an overflowing total).
+    /// `InvalidValue` (a billable line, an overflowing total).
     pub fn deposit(mut d: DepositDraft) -> Result<BankPosting, LocalValidation> {
-        check_lines(&d.lines, d.account, true)?;
+        check_lines(
+            &d.lines,
+            d.account,
+            LineRules {
+                contacts: true,
+                billable: false,
+            },
+        )?;
         d.memo = non_empty(d.memo);
         d.lines = clean(d.lines);
         Ok(BankPosting(Kind::Deposit(d)))
@@ -238,10 +358,17 @@ impl BankPosting {
     ///
     /// # Errors
     /// `TooFewLines`, `TooManyLines`, `NonPositiveAmount`, `SameAccount`,
-    /// `InvalidValue` (a line customer, a number over 50 characters, an
-    /// overflowing total).
+    /// `InvalidValue` (a line customer or billable mark, a number over 50
+    /// characters, an overflowing total).
     pub fn card_charge(mut d: CardChargeDraft) -> Result<BankPosting, LocalValidation> {
-        check_lines(&d.lines, d.pay_from, false)?;
+        check_lines(
+            &d.lines,
+            d.pay_from,
+            LineRules {
+                contacts: false,
+                billable: false,
+            },
+        )?;
         d.number = non_empty(d.number.map(|n| n.trim().to_string()));
         if d.number.as_ref().is_some_and(|n| n.chars().count() > 50) {
             return Err(LocalValidation::InvalidValue);
@@ -273,8 +400,16 @@ impl BankPosting {
         }
     }
 
+    /// The check, for a check posting.
+    pub(crate) fn check_draft(&self) -> Option<&CheckDraft> {
+        match &self.0 {
+            Kind::Check(d) => Some(d),
+            _ => None,
+        }
+    }
+
     /// The engine's transaction type.
-    fn txn_type(&self) -> TxnType {
+    pub(crate) fn txn_type(&self) -> TxnType {
         match &self.0 {
             Kind::Check(_) | Kind::CardCharge(_) => TxnType::Expense,
             Kind::Deposit(_) => TxnType::Deposit,
@@ -313,6 +448,7 @@ impl BankPosting {
                 if let Some(m) = &l.memo {
                     v["description"] = Value::String(m.clone());
                 }
+                line_extras(&mut v, l);
                 v
             })
             .collect();
@@ -377,8 +513,12 @@ impl BankPosting {
         v
     }
 
-    /// The `POST /checks` body.
-    fn check_body(d: &CheckDraft) -> Value {
+    /// The `POST /checks` body (`create`), or the `PUT /checks/{id}` body
+    /// (the engine ignores a draft attachment on an edit, so none is sent).
+    /// An edit always carries `tagIds` (possibly `[]`): the engine replaces
+    /// the header tags with what is sent, so a removed tag goes away and
+    /// an absent list would leave them as the ledger edit leaves them.
+    fn check_body(d: &CheckDraft, create: bool) -> Value {
         let lines: Vec<Value> = d
             .lines
             .iter()
@@ -391,6 +531,7 @@ impl BankPosting {
                 if let Some(m) = &l.memo {
                     v["description"] = Value::String(m.clone());
                 }
+                line_extras(&mut v, l);
                 v
             })
             .collect();
@@ -399,7 +540,7 @@ impl BankPosting {
             "payeeNameOnCheck": d.payee_name,
             "txnDate": d.date,
             "amount": d.amount.to_wire(),
-            "printLater": false,
+            "printLater": d.print_later,
             "lines": lines,
         });
         if let Some(c) = d.payee {
@@ -408,17 +549,35 @@ impl BankPosting {
         if let Some(n) = d.check_number {
             v["checkNumber"] = json!(n);
         }
+        if let Some(a) = &d.payee_address {
+            v["payeeAddress"] = Value::String(a.clone());
+        }
         if let Some(m) = &d.memo {
             v["memo"] = Value::String(m.clone());
         }
+        if let Some(m) = &d.printed_memo {
+            v["printedMemo"] = Value::String(m.clone());
+        }
+        if !create || !d.tag_ids.is_empty() {
+            v["tagIds"] = json!(d.tag_ids);
+        }
+        if create && let Some(k) = d.draft_attachment {
+            v["draftAttachmentId"] = Value::String(k.to_string());
+        }
         v
+    }
+
+    /// The `PUT /checks/{id}` body (`check-edit-v1`); `None` for other
+    /// kinds.
+    pub(crate) fn check_put_value(&self) -> Option<Value> {
+        self.check_draft().map(|d| Self::check_body(d, false))
     }
 
     /// The create body (`POST /checks` for a check, else `POST
     /// /transactions`).
     pub(crate) fn create_value(&self) -> Value {
         match &self.0 {
-            Kind::Check(d) => Self::check_body(d),
+            Kind::Check(d) => Self::check_body(d, true),
             Kind::Deposit(d) => Self::deposit_body(d),
             Kind::Transfer(d) => Self::transfer_body(d),
             Kind::CardCharge(d) => Self::expense_body(
@@ -446,6 +605,12 @@ impl BankPosting {
     /// (the [`Transaction`] editable fields). `update` follows the expense
     /// path for a check, where an empty line memo takes the header memo.
     fn fingerprint(&self, update: bool) -> [u8; 32] {
+        fingerprint_of(&self.editable_value(update))
+    }
+
+    /// The [`Transaction`] editable fields of the record the engine stores
+    /// for this posting (see [`BankPosting::fingerprint`]).
+    pub(crate) fn editable_value(&self, update: bool) -> Value {
         struct L {
             account: AccountId,
             debit: Money,
@@ -453,14 +618,18 @@ impl BankPosting {
             description: Option<String>,
             tag: Option<TagId>,
             contact: Option<ContactId>,
+            billable: bool,
         }
+        // A debit split: a check's or a card charge's line (a customer and a
+        // billable mark only ever on a check, `line-billable-v1`).
         let split = |l: &SplitLine, description: Option<String>| L {
             account: l.account,
             debit: l.amount,
             credit: Money::ZERO,
             description,
             tag: l.tag,
-            contact: None,
+            contact: l.contact,
+            billable: l.billable,
         };
         let total =
             |lines: &[SplitLine]| Money::sum(lines.iter().map(|l| l.amount)).unwrap_or_default();
@@ -471,6 +640,7 @@ impl BankPosting {
             description: None,
             tag: None,
             contact: None,
+            billable: false,
         };
         // Expense path: an empty line description takes the header memo.
         let expense_lines = |lines: &[SplitLine], memo: Option<&String>, pay_from: AccountId| {
@@ -506,6 +676,7 @@ impl BankPosting {
                     description: l.memo.clone(),
                     tag: l.tag,
                     contact: l.contact,
+                    billable: false,
                 }));
                 (d.memo.as_ref(), None, out)
             }
@@ -529,11 +700,12 @@ impl BankPosting {
                     l.description.as_deref(),
                     l.tag,
                     l.contact,
+                    l.billable,
                     i64::try_from(i).unwrap_or(i64::MAX),
                 )
             })
             .collect();
-        fingerprint_of(&txn_editable(
+        txn_editable(
             self.txn_type(),
             self.date(),
             memo.map(String::as_str),
@@ -541,10 +713,12 @@ impl BankPosting {
             TxnStatus::Posted,
             contact,
             &lines,
-        ))
+        )
     }
 
-    /// The fingerprint the record has once this posting is created.
+    /// The fingerprint the record has once this posting is created (for a
+    /// check also once `PUT /checks/{id}` stored it: that route writes the
+    /// lines as the create does).
     #[must_use]
     pub fn created_fingerprint(&self) -> [u8; 32] {
         self.fingerprint(false)
@@ -558,9 +732,23 @@ impl BankPosting {
     }
 }
 
+/// A check or expense line's customer and billable mark: sent only when
+/// set (the builder refuses them without `line-billable-v1`).
+fn line_extras(v: &mut Value, l: &SplitLine) {
+    if let Some(c) = l.contact {
+        v["contactId"] = json!(c);
+    }
+    if l.billable {
+        v["isBillable"] = Value::Bool(true);
+    }
+}
+
 /// Reads a save answer whose record sits under one of `keys` (a check's
 /// create answers `{check}`; a reconciled one is the `{transaction}` read).
-fn saved_any(body: &[u8], keys: &[&'static str]) -> Result<Versioned<Transaction>, ApiError> {
+pub(crate) fn saved_any<T>(body: &[u8], keys: &[&'static str]) -> Result<Versioned<T>, ApiError>
+where
+    T: serde::de::DeserializeOwned + crate::resources::versioning::EditableFields,
+{
     let v: Value = serde_json::from_slice(body).map_err(|_| ApiError::SavedUnreadable {
         what: "transaction",
     })?;

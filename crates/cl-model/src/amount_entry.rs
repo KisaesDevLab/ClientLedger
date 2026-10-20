@@ -10,7 +10,9 @@
 //! once, to the field's smallest unit (a cent for ordinary money fields),
 //! half away from zero: `100/3` is 33.33, `33.335*1` is 33.34 and
 //! `-33.335*1` is -33.34 (owner decision 2026-10-18, Q-P10x). A plain typed
-//! amount is never rounded: `12.345` in a cents field is still refused.
+//! money amount follows the same rule (Q-232, [`UserInput::MONEY`]): `12.345`
+//! in a cents field is 12.35, with no hint (Q-237). Quantity and rate fields
+//! still refuse extra decimals.
 //!
 //! Grammar (standard precedence, left-associative):
 //!
@@ -75,10 +77,10 @@ pub struct AmountRules {
 }
 
 impl AmountRules {
-    /// An ordinary money field: cents, any sign.
+    /// An ordinary money field: cents (more decimals round, Q-232), any sign.
     pub const MONEY: AmountRules = AmountRules {
         kind: AmountKind::Money,
-        input: UserInput::CENTS,
+        input: UserInput::MONEY,
         sign: Sign::Any,
     };
 }
@@ -740,12 +742,8 @@ mod tests {
             money("1.234,56"),
             Err(AmountEntryError::Input(MoneyInputError::AmbiguousSeparator))
         );
-        assert_eq!(
-            money("1.234"),
-            Err(AmountEntryError::Input(MoneyInputError::TooManyDecimals {
-                max: 2
-            }))
-        );
+        assert_eq!(wire("1.234"), "1.2300", "typed money rounds (Q-232)");
+        assert!(!money("1.234").unwrap().calculated);
         assert_eq!(
             money(""),
             Err(AmountEntryError::Input(MoneyInputError::Empty))
@@ -788,12 +786,34 @@ mod tests {
         assert_eq!(wire("-0.004*1"), "0.0000", "zero has no sign");
         assert_eq!(wire("1234567/3"), "411522.3300");
         assert!(money("100/3").unwrap().calculated);
-        // A plain typed amount is never rounded.
+        // A plain typed amount rounds the same way (Q-232).
+        assert_eq!(wire("12.345"), "12.3500");
+        assert_eq!(wire("-1.005"), "-1.0100");
+        assert_eq!(wire("(1.005)"), "-1.0100");
+        assert_eq!(wire("1.0049999"), "1.0000");
+        assert_eq!(wire("$1,234.565"), "1234.5700");
+        assert_eq!(preview("12.345", AmountRules::MONEY), Preview::None);
+        // Quantity and rate fields still refuse extra decimals.
+        let qty = AmountRules {
+            kind: AmountKind::Quantity,
+            input: UserInput::FULL,
+            sign: Sign::Any,
+        };
         assert_eq!(
-            money("12.345"),
+            parse("1.23456", qty),
             Err(AmountEntryError::Input(MoneyInputError::TooManyDecimals {
-                max: 2
+                max: 4
             }))
+        );
+        // A debit column still refuses a negative after rounding.
+        let debit = AmountRules {
+            sign: Sign::NonNegative,
+            ..AmountRules::MONEY
+        };
+        assert_eq!(parse("-1.005", debit), Err(AmountEntryError::Negative));
+        assert_eq!(
+            parse("-0.004", debit).unwrap().value.to_ten_thousandths(),
+            0
         );
         // A four-decimal field rounds to its own unit.
         let full = AmountRules {

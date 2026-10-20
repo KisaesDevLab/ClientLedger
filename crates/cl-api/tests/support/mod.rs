@@ -537,6 +537,22 @@ impl Harness {
         false
     }
 
+    /// Records `PENDING(<item>)` for an engine gap that has no capability
+    /// flag (a field the engine does not send yet), with the reason.
+    pub fn pending(&self, item: &str, why: &str) {
+        let test = self
+            .current_test
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let line = format!("PENDING({item}): {test} ({why})");
+        eprintln!("    {line}");
+        self.pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(line);
+    }
+
     /// Kill the engine process hard (our own child) and wait for the
     /// supervisor to bring up the next generation.
     pub fn kill_engine_and_wait(&self) -> u64 {

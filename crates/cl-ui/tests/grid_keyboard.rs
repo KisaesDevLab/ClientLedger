@@ -417,7 +417,7 @@ fn batched_frame_preserves_order_in_the_shell() {
     assert_eq!(rig.money("Amount", 1), Some(money("842.15")));
     assert_eq!(rig.cell("Memo", 1), "Perennials");
     assert!(!rig.cell("Service date", 1).is_empty(), "`t` is today");
-    assert!(rig.cell("Client:Job", 1).contains("Fall"));
+    assert!(rig.cell("Customer:Job", 1).contains("Fall"));
 }
 
 /// T3, first half: text and Alt+N in the same frame save the typed amount.
@@ -549,12 +549,13 @@ fn an_invalid_buffer_blocks_save_and_keeps_the_cell() {
     rig.text("6200");
     rig.tab();
     let amount_cell = rig.cursor();
-    rig.text("5.555");
+    // Extra decimals round (Q-232), so the invalid text is an ambiguous one.
+    rig.text("5.5.5");
     rig.click("Save", Some(accesskit::Role::Button));
     assert_eq!(rig.saved(), 0);
     assert_eq!(rig.cursor(), amount_cell);
     assert_eq!(rig.state()["focused"], true, "the grid keeps focus");
-    assert_eq!(rig.cell("Amount", 1), "5.555", "the text is kept");
+    assert_eq!(rig.cell("Amount", 1), "5.5.5", "the text is kept");
 }
 
 /// T7: an open picker on "Mul" resolves on Save exactly as Tab would.

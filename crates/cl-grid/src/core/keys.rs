@@ -112,6 +112,9 @@ pub enum GridInput {
     /// Space or Alt+Down on a dropdown cell: open its choices (labels
     /// already resolved by the view).
     OpenChoices(Vec<super::model::Suggestion>),
+    /// The list chevron on the cursor cell was clicked: open its list, or
+    /// close it when open (Q-250).
+    ToggleList,
 }
 
 impl std::fmt::Debug for GridInput {
@@ -135,6 +138,7 @@ impl std::fmt::Debug for GridInput {
             GridInput::AddNewPicked => f.write_str("AddNewPicked"),
             GridInput::PopupPicked(i) => f.debug_tuple("PopupPicked").field(i).finish(),
             GridInput::OpenChoices(items) => write!(f, "OpenChoices({} items)", items.len()),
+            GridInput::ToggleList => f.write_str("ToggleList"),
         }
     }
 }

@@ -108,9 +108,12 @@ impl Screen for Placeholder {
             ui.heading(&self.title);
         });
         ui.add_space(6.0);
-        let message = match self.arrives {
-            Some(_) => t("window.placeholder.coming"),
-            None => t("window.placeholder.home"),
+        // A built command can still show a placeholder until its screen is
+        // wired in (Write Check during P13), so only Home gets its own text.
+        let message = if self.arrives.is_none() && self.kind.as_str() == "nav.home" {
+            t("window.placeholder.home")
+        } else {
+            t("window.placeholder.coming")
         };
         ui.label(eframe::egui::RichText::new(message).color(tokens.text_secondary));
     }

@@ -332,7 +332,9 @@ fn suggestion_accept_only_by_tab() {
             col: ACCOUNT,
         }))
         .expect("cell");
-    assert_eq!(cell.value(), Some("5100 · Materials:Plants"));
+    // Not the value until accepted; spoken as a description instead.
+    assert_eq!(cell.value(), Some(""));
+    assert!(cell.description().is_some_and(|d| !d.is_empty()));
 
     let mut r = suggested_rig();
     let out = r.frame(key(Key::Enter, Modifiers::NONE));
@@ -462,6 +464,74 @@ fn full_list_starts_on_the_entry_and_picks_only_when_moved() {
     r.frame(key(Key::Escape, Modifiers::NONE));
     r.focus_cell(0, AMOUNT);
     assert_eq!(r.command(GridCommand::OpenList), Handled::NotHandled);
+}
+
+fn popup_open(r: &Rig) -> bool {
+    r.grid.core().edit().is_some_and(|e| e.popup.is_some())
+}
+
+/// Q-250 through real frames: a mouse click on a picker cell opens its
+/// list at once, Tab never does, Esc closes it without a change, the
+/// chevron toggles it, and a click on a dropdown cell opens its choices.
+#[test]
+fn a_click_on_a_list_cell_opens_its_list() {
+    let mut r = Rig::new(extras_spec(), Lines::new(true, 2));
+    r.focus_cell(0, AMOUNT);
+    r.frame(shift_tab());
+    r.frame(vec![]);
+    assert_eq!(r.at(), (0, ACCOUNT));
+    assert!(!popup_open(&r), "Tab onto a list cell opens nothing");
+
+    // A click on another row's Account cell: the list is open at once.
+    let cell = r
+        .bounds(r.grid.cell_id(CellPos {
+            row: r.model.key(1),
+            col: ACCOUNT,
+        }))
+        .expect("cell bounds");
+    r.click_at(cell.left_center() + egui::vec2(12.0, 0.0));
+    r.frame(vec![]);
+    assert_eq!(r.at(), (1, ACCOUNT));
+    assert!(popup_open(&r), "a click opens the list");
+    assert_eq!(popup_items(&r).len(), 4, "the whole list");
+    let snap = r.grid.snapshot(&cl_grid::ModelRef::Edit(&mut r.model));
+    assert!(snap.popup_open, "the control channel sees it");
+
+    // Esc closes it; nothing was picked.
+    r.frame(key(Key::Escape, Modifiers::NONE));
+    assert!(!popup_open(&r));
+    assert_eq!(r.model.lines()[1].account, Account::None);
+
+    // A click on the open cell's text opens it again; the chevron at the
+    // right end closes it and opens it.
+    let open_cell = r.bounds(r.grid.focus_id()).expect("editor bounds");
+    r.click_at(open_cell.left_center() + egui::vec2(12.0, 0.0));
+    r.frame(vec![]);
+    assert!(popup_open(&r), "a click on the open cell opens the list");
+    let chevron = cl_grid::view::chevron::area(open_cell).center();
+    r.click_at(chevron);
+    r.frame(vec![]);
+    assert!(!popup_open(&r), "the chevron closes the list");
+    r.click_at(chevron);
+    r.frame(vec![]);
+    assert!(popup_open(&r), "the chevron opens the list");
+    assert_eq!(r.focused(), Some(r.grid.focus_id()), "focus stayed");
+    r.frame(key(Key::Escape, Modifiers::NONE));
+    assert_eq!(r.model.lines()[1].account, Account::None, "nothing chosen");
+
+    // A dropdown cell opens its choices on the first click too.
+    let status = r
+        .bounds(r.grid.cell_id(CellPos {
+            row: r.model.key(0),
+            col: STATUS,
+        }))
+        .expect("status bounds");
+    r.click_at(status.center());
+    r.frame(vec![]);
+    assert_eq!(r.at(), (0, STATUS));
+    assert!(popup_open(&r), "a click opens the choices");
+    r.frame(key(Key::Escape, Modifiers::NONE));
+    assert_eq!(r.model.lines()[0].status, None, "Esc picks nothing");
 }
 
 #[test]

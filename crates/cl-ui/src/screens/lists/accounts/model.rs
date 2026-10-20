@@ -40,6 +40,7 @@ fn column(id: ColumnId, header: &'static str, w: u16, flex: u8) -> Column {
         id,
         header: TextKey(header),
         placeholder: None,
+        empty: None,
         help: None,
         kind: CellKind::Display,
         line: Line::First,
@@ -148,6 +149,29 @@ pub struct ChartModel {
     revision: u64,
 }
 
+/// One engine account as a chart entry.
+pub(crate) fn chart_entry(a: &Account, sensitive: bool) -> ChartEntry {
+    ChartEntry {
+        id: a.id,
+        parent: a.fields.parent_id,
+        number: a.fields.account_number.clone().filter(|n| !n.is_empty()),
+        name: a.fields.name.clone(),
+        kind: kind_of(a.fields.account_type),
+        detail: a.fields.detail_type.clone(),
+        description: a.fields.description.clone(),
+        active: a.is_active,
+        system: a.is_system,
+        sensitive,
+        // The engine stores debits minus credits for every type; the chart
+        // shows each account's normal balance positive.
+        balance: a.balance.and_then(|b| {
+            DisplaySign::for_stored_balance(kind_of(a.fields.account_type))
+                .apply(b)
+                .ok()
+        }),
+    }
+}
+
 impl ChartModel {
     /// The chart of `accounts` (`sensitive` marks, numbers shown or not).
     pub fn set_accounts(
@@ -159,25 +183,7 @@ impl ChartModel {
     ) {
         let entries = accounts
             .iter()
-            .map(|a| ChartEntry {
-                id: a.id,
-                parent: a.fields.parent_id,
-                number: a.fields.account_number.clone().filter(|n| !n.is_empty()),
-                name: a.fields.name.clone(),
-                kind: kind_of(a.fields.account_type),
-                detail: a.fields.detail_type.clone(),
-                description: a.fields.description.clone(),
-                active: a.is_active,
-                system: a.is_system,
-                sensitive: sensitive.contains(&a.id),
-                // The engine stores debits minus credits for every type;
-                // the chart shows each account's normal balance positive.
-                balance: a.balance.and_then(|b| {
-                    DisplaySign::for_stored_balance(kind_of(a.fields.account_type))
-                        .apply(b)
-                        .ok()
-                }),
-            })
+            .map(|a| chart_entry(a, sensitive.contains(&a.id)))
             .collect();
         self.chart = Chart::new(entries, numbers);
         let (inactive, sens, detached) = (

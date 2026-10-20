@@ -525,6 +525,69 @@ impl DemoLedger {
             .map(|n| n.saturating_add(1))
     }
 
+    /// The id a demo transaction is known by (as the engine would send it).
+    #[must_use]
+    pub fn id_of(t: &SampleTransaction) -> TransactionId {
+        txn_id(t)
+    }
+
+    /// True when the transaction was voided in the demo.
+    #[must_use]
+    pub fn is_void(&self, id: TransactionId) -> bool {
+        sample_id(id).is_some_and(|n| self.voided.contains(&n))
+    }
+
+    /// Every numbered check drawn on `account`, written or paying bills:
+    /// (id, number, void).
+    #[must_use]
+    pub fn check_numbers(
+        &self,
+        chart: &[Account],
+        account: AccountId,
+    ) -> Vec<(TransactionId, u32, bool)> {
+        let Some(number) = chart.iter().find(|a| a.id == account).and_then(number_of) else {
+            return Vec::new();
+        };
+        self.transactions()
+            .iter()
+            .filter(|t| {
+                matches!(t.kind.as_str(), "check" | "bill_payment")
+                    && t.lines.iter().any(|l| l.account == number)
+            })
+            .filter_map(|t| {
+                let n = t.number.parse::<u32>().ok()?;
+                Some((txn_id(t), n, self.voided.contains(&t.id)))
+            })
+            .collect()
+    }
+
+    /// Puts the line memos and tag names (by line order, the account's own
+    /// line excluded) on a transaction recorded in the demo.
+    pub fn set_line_details(
+        &mut self,
+        chart: &[Account],
+        id: TransactionId,
+        own: AccountId,
+        details: &[(Option<String>, Option<String>)],
+    ) {
+        let own_number = chart
+            .iter()
+            .find(|a| a.id == own)
+            .and_then(number_of)
+            .map(str::to_string);
+        let Some(t) = sample_id(id).and_then(|n| self.changed.get_mut(&n)) else {
+            return;
+        };
+        let others = t
+            .lines
+            .iter_mut()
+            .filter(|l| Some(&l.account) != own_number.as_ref());
+        for (l, (memo, tag)) in others.zip(details) {
+            l.memo.clone_from(memo);
+            l.tag.clone_from(tag);
+        }
+    }
+
     /// Records (or, with `existing`, replaces) a posting; `None` when an
     /// account is not in the chart or the transaction is unknown.
     pub fn save(
@@ -544,6 +607,9 @@ impl DemoLedger {
             account,
             debit: if debit { amount } else { Money::ZERO },
             credit: if debit { Money::ZERO } else { amount },
+            memo: None,
+            tag: None,
+            job: None,
         };
         let mut lines = Vec::new();
         for (a, m) in &p.lines {
@@ -592,6 +658,12 @@ impl DemoLedger {
                 .map(|c| c.id)
         });
         let deposit = t.kind == "deposit";
+        // Story lines carry a tag by name (the demo tag list has it).
+        let tags = if t.lines.iter().any(|l| l.tag.is_some()) {
+            super::lists::tags()
+        } else {
+            Vec::new()
+        };
         let mut lines = Vec::new();
         for (i, l) in t.lines.iter().enumerate() {
             // A fixture account outside the demo chart keeps its number.
@@ -614,11 +686,16 @@ impl DemoLedger {
                 account_number: Some(l.account.clone()),
                 debit: l.debit,
                 credit: l.credit,
-                description: None,
+                description: l.memo.clone(),
                 line_order: i64::try_from(i).ok(),
-                tag_id: None,
-                tag_name: None,
+                tag_id: l
+                    .tag
+                    .as_deref()
+                    .and_then(|name| tags.iter().find(|t| t.fields.name == name).map(|t| t.id)),
+                tag_name: l.tag.clone(),
                 contact_id: if deposit && !own_side { contact } else { None },
+                is_billable: false,
+                billed_status: None,
             });
         }
         let record = cl_api::Transaction {
@@ -683,6 +760,61 @@ mod tests {
         assert_eq!(s.ending_balance.and_then(|a| a.exact()), acct.balance);
         assert_eq!(s.last_reconciled, Some(last_reconciled()));
         assert!(s.uncleared_count > 0);
+    }
+
+    /// The Write Check mockup story in the demo (P13 WP0): the vendor's
+    /// address and default account, the Materials sub-accounts, the tags,
+    /// the next check number 4418 and a prior check's line memos and tags.
+    #[test]
+    fn the_demo_holds_the_write_check_story() {
+        let chart = super::super::chart();
+        let by_number = |n: &str| {
+            chart
+                .iter()
+                .find(|a| a.fields.account_number.as_deref() == Some(n))
+                .unwrap_or_else(|| panic!("{n}"))
+        };
+        let materials = by_number("5090").id;
+        assert_eq!(by_number("5100").fields.parent_id, Some(materials));
+        assert_eq!(by_number("5110").fields.parent_id, Some(materials));
+        let contacts = super::super::contacts::contacts();
+        let vendor = contacts
+            .iter()
+            .find(|c| c.fields.display_name == "Ozark Feed & Seed")
+            .expect("story vendor");
+        assert_eq!(
+            vendor.fields.billing_line1.as_deref(),
+            Some("1200 Commerce Dr")
+        );
+        assert_eq!(vendor.fields.billing_zip.as_deref(), Some("65605"));
+        assert_eq!(
+            vendor.fields.default_expense_account_id,
+            Some(by_number("5110").id)
+        );
+        let tags = super::super::lists::tags();
+        for name in ["Install", "Crew A"] {
+            assert!(tags.iter().any(|t| t.fields.name == name), "{name}");
+        }
+        let ledger = DemoLedger::default();
+        assert_eq!(
+            ledger.next_check_number(&chart, operating(&chart)),
+            Some(4418)
+        );
+        let check = ledger
+            .transactions()
+            .into_iter()
+            .find(|t| t.number == "4401")
+            .expect("4401");
+        let got = ledger
+            .get(&chart, &contacts, txn_id(&check))
+            .expect("get")
+            .record;
+        assert_eq!(got.check_number, Some(4401));
+        assert_eq!(got.contact_id, Some(vendor.id));
+        let first = &got.lines[0];
+        assert_eq!(first.description.as_deref(), Some("Perennials"));
+        assert_eq!(first.tag_name.as_deref(), Some("Install"));
+        assert!(first.tag_id.is_some());
     }
 
     #[test]

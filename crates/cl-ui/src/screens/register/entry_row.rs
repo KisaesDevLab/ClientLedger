@@ -64,6 +64,7 @@ fn column(id: ColumnId, header: TextKey, kind: CellKind, width: (u16, u16, u8)) 
         id,
         header,
         placeholder: None,
+        empty: None,
         help: None,
         kind,
         line: Line::First,
@@ -476,6 +477,8 @@ impl Prepared {
                 amount: l.amount,
                 memo: l.memo.clone(),
                 contact: l.contact,
+                // The register has no billable column (Write Check does).
+                billable: false,
                 tag: l.tag,
             })
             .collect()
@@ -507,7 +510,12 @@ impl Prepared {
                     Some(n) => Some(n.parse().map_err(|_| LocalValidation::InvalidValue)?),
                     None => None,
                 },
+                print_later: false,
+                payee_address: None,
                 memo: self.memo.clone(),
+                printed_memo: None,
+                tag_ids: Vec::new(),
+                draft_attachment: None,
                 amount: self.amount,
                 lines,
             })?,

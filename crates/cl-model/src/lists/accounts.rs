@@ -257,7 +257,7 @@ pub struct Chart {
 
 /// Account numbers compare as numbers when both are all digits (`900`
 /// before `1000`), otherwise as text.
-fn number_cmp(a: &str, b: &str) -> Ordering {
+pub(crate) fn number_cmp(a: &str, b: &str) -> Ordering {
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
     if digits(a) && digits(b) {
         let (ta, tb) = (a.trim_start_matches('0'), b.trim_start_matches('0'));

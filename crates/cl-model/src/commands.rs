@@ -94,7 +94,7 @@ impl Menu {
             Menu::File => "File",
             Menu::Edit => "Edit",
             Menu::Lists => "Lists",
-            Menu::Clients => "Clients",
+            Menu::Clients => "Customers",
             Menu::Vendors => "Vendors",
             Menu::Banking => "Banking",
             Menu::Payroll => "Payroll",
@@ -254,6 +254,10 @@ pub const COMMANDS: &[Command] = &[
     cmd("form.insert_line", "Insert Line", None, 2, key(Mods::CMD, Key::Insert), Scope::Form),
     cmd("form.delete_line", "Delete Line", None, 2, key(Mods::CMD, Key::Delete), Scope::Form),
     cmd("form.delete_item", "Delete Transaction", None, 2, ctrl('D'), Scope::Form),
+    cmd("form.attach", "Attach\u{2026}", None, 3, None, Scope::Form),
+    cmd("form.history", "History", None, 3, None, Scope::Form),
+    // Write Check (P13; Page Up/Down, Ctrl+F, Ctrl+P, Alt+N and Alt+S above apply too)
+    cmd("check.print_later", "Print Later", None, 4, None, Scope::Form),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
@@ -270,7 +274,7 @@ pub const COMMANDS: &[Command] = &[
     // Register windows (P12; Ctrl+F, Ctrl+E, Ctrl+D and Ctrl+Shift+Q above apply too)
     cmd("register.one_line", "One-Line Display", None, 4, None, Scope::Window),
     // Clients
-    built("clients.center", "Clients & Jobs", Some(Menu::Clients), 0, None),
+    built("clients.center", "Customers & Jobs", Some(Menu::Clients), 0, None),
     screen("clients.create_invoice", "Create Invoice", Some(Menu::Clients), 1, ctrl('I'), "P20"),
     screen("clients.receive_payment", "Receive Payment", Some(Menu::Clients), 1, ctrl('R'), "P21"),
     screen("clients.sales_receipt", "Sales Receipt", Some(Menu::Clients), 1, ctrl_shift('R'), "P14"),
@@ -280,7 +284,7 @@ pub const COMMANDS: &[Command] = &[
     built("vendors.center", "Vendors", Some(Menu::Vendors), 0, None),
     screen("vendors.enter_bill", "Enter Bill", Some(Menu::Vendors), 1, ctrl('B'), "P17"),
     screen("vendors.pay_bills", "Pay Bills", Some(Menu::Vendors), 1, ctrl_shift('B'), "P18"),
-    screen("vendors.write_check", "Write Check", Some(Menu::Vendors), 1, ctrl('W'), "P13"),
+    built("vendors.write_check", "Write Check", Some(Menu::Vendors), 1, ctrl('W')),
     screen("vendors.card_charge", "Record Card Charge", Some(Menu::Vendors), 1, ctrl_shift('C'), "P14"),
     // Banking
     built("banking.register", "Open Register", Some(Menu::Banking), 0, ctrl('G')),
@@ -328,13 +332,20 @@ pub fn find(id: &str) -> Option<&'static Command> {
 /// Developer-only commands (P10 plan §2.12, S8). They are not in
 /// [`COMMANDS`], so no menu, keymap, palette or `KEYBOARD.md` sees them;
 /// the shell looks here only when it runs with `--demo`.
-pub const DEV_COMMANDS: &[Command] = &[built(
-    "dev.grid_demo",
-    "Grid Demo (developer)",
-    None,
-    0,
-    None,
-)];
+pub const DEV_COMMANDS: &[Command] = &[
+    built("dev.grid_demo", "Grid Demo (developer)", None, 0, None),
+    // Write Check (P13): there is no check printing before P19, so the
+    // control-channel scenario marks the demo check in front as printed to
+    // reach the printed-check question.
+    dev_action("dev.check_mark_printed", "Mark Check Printed (developer)"),
+];
+
+/// A developer-only command the window in front handles (opens nothing).
+const fn dev_action(id: &'static str, label: &'static str) -> Command {
+    let mut c = cmd(id, label, None, 0, None, Scope::Form);
+    c.palette = false;
+    c
+}
 
 /// Look a developer-only command up by id.
 #[must_use]
@@ -357,10 +368,15 @@ mod tests {
             assert!(c.id.as_str().starts_with("dev."), "{}", c.id);
             assert!(find(c.id.as_str()).is_none(), "{} is shipped", c.id);
             assert!(c.shortcut.is_none() && c.menu.is_none(), "{}", c.id);
-            assert!(c.opens && c.arrives.is_none());
+            assert!(c.arrives.is_none(), "{}", c.id);
+            assert!(c.opens || !c.palette, "{} is in the palette", c.id);
         }
         assert!(COMMANDS.iter().all(|c| !c.id.as_str().starts_with("dev.")));
         assert_eq!(find_dev("dev.grid_demo").map(|c| c.opens), Some(true));
+        assert_eq!(
+            find_dev("dev.check_mark_printed").map(|c| (c.opens, c.scope)),
+            Some((false, Scope::Form))
+        );
         assert!(find_dev("nav.home").is_none());
     }
 
@@ -404,6 +420,7 @@ mod tests {
             "clients.center",
             "vendors.center",
             "banking.register",
+            "vendors.write_check",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -451,6 +468,38 @@ mod tests {
         );
         let reg = find("banking.register").unwrap();
         assert!(reg.opens && reg.arrives.is_none(), "the register is built");
+    }
+
+    #[test]
+    fn write_check_commands() {
+        use crate::keymap::Keymap;
+        let wc = find("vendors.write_check").unwrap();
+        assert!(
+            wc.opens && wc.arrives.is_none(),
+            "Write Check is built (P13)"
+        );
+        for (id, label) in [
+            ("form.attach", "Attach\u{2026}"),
+            ("form.history", "History"),
+            ("check.print_later", "Print Later"),
+        ] {
+            let c = find(id).unwrap();
+            assert_eq!(c.label, label);
+            assert_eq!((c.menu, c.shortcut, c.scope), (None, None, Scope::Form));
+            assert!(!c.opens);
+        }
+        // The keys the form reuses still resolve in a form.
+        let km = Keymap::new(COMMANDS).unwrap();
+        let at = |mods: Mods, k: Key| {
+            km.resolve(Scope::Form, Shortcut::new(mods, k))
+                .map(CommandId::as_str)
+        };
+        assert_eq!(at(Mods::NONE, Key::PageUp), Some("form.prev_record"));
+        assert_eq!(at(Mods::NONE, Key::PageDown), Some("form.next_record"));
+        assert_eq!(at(Mods::CMD, Key::Letter('F')), Some("edit.find"));
+        assert_eq!(at(Mods::CMD, Key::Letter('P')), Some("file.print"));
+        assert_eq!(at(Mods::ALT, Key::Letter('N')), Some("form.save_new"));
+        assert_eq!(at(Mods::ALT, Key::Letter('S')), Some("form.save_close"));
     }
 
     #[test]

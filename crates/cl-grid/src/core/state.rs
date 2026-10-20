@@ -41,6 +41,10 @@ pub enum PopupKind {
     List,
     /// Ctrl+L: every entry.
     Full,
+    /// A click on the cell (Q-250): every entry, starting on the cell's
+    /// own. Nothing counts as chosen until the owner moves in the list or
+    /// clicks an entry (it then becomes [`PopupKind::Full`]).
+    Browse,
     /// A dropdown column's choices.
     Choices,
 }
@@ -709,6 +713,9 @@ impl Core {
             None => 0,
         };
         popup.highlight = Some(next);
+        if popup.kind == PopupKind::Browse {
+            popup.kind = PopupKind::Full;
+        }
         true
     }
 
@@ -768,6 +775,9 @@ impl Core {
                     && i < p.items.len()
                 {
                     p.highlight = Some(i);
+                    if p.kind == PopupKind::Browse {
+                        p.kind = PopupKind::Full;
+                    }
                 }
                 let mut fx = Effects::handled();
                 let _ = self.commit(model, lookups, fmt, Accept::Other, &mut fx);
@@ -775,6 +785,14 @@ impl Core {
             }
             GridInput::AddNewPicked => self.add_new(model, fmt),
             GridInput::OpenChoices(items) => self.open_choices(items, model),
+            GridInput::ToggleList => {
+                if self.popup_open() {
+                    self.close_popup();
+                    Effects::handled()
+                } else {
+                    self.open_list(model, lookups, PopupKind::Browse)
+                }
+            }
         }
     }
 
@@ -938,7 +956,7 @@ impl Core {
             GridCommand::Revert => self.revert(model, fmt),
             GridCommand::InsertLine => self.insert_line(model, lookups, fmt),
             GridCommand::DeleteLine => self.delete_line(model, fmt),
-            GridCommand::OpenList => self.open_list(model, lookups),
+            GridCommand::OpenList => self.open_list(model, lookups, PopupKind::Full),
             GridCommand::PageUp => self.page(false, model, lookups, fmt),
             GridCommand::PageDown => self.page(true, model, lookups, fmt),
             GridCommand::Undo => match self.edit.as_mut() {
@@ -1102,7 +1120,14 @@ impl Core {
         fx
     }
 
-    fn open_list(&mut self, model: &ModelRef<'_>, lookups: &dyn Lookups) -> Effects {
+    /// Every entry of the cursor cell's list: Ctrl+L ([`PopupKind::Full`])
+    /// or a click ([`PopupKind::Browse`]).
+    fn open_list(
+        &mut self,
+        model: &ModelRef<'_>,
+        lookups: &dyn Lookups,
+        kind: PopupKind,
+    ) -> Effects {
         let Some(pos) = self.cursor else {
             return Effects::default();
         };
@@ -1127,14 +1152,14 @@ impl Core {
         };
         edit.popup = Some(match lookups.all(list) {
             LookupResult::Ready(items) => Popup {
-                kind: PopupKind::Full,
+                kind,
                 highlight: current.and_then(|id| items.iter().position(|s| s.id == id)),
                 loading: false,
                 add_new: None,
                 items,
             },
             LookupResult::Loading => Popup {
-                kind: PopupKind::Full,
+                kind,
                 items: Vec::new(),
                 highlight: None,
                 loading: true,
@@ -1142,6 +1167,20 @@ impl Core {
             },
         });
         Effects::handled()
+    }
+
+    /// A click opens a list cell's list at once (Q-250); Tab and the arrows
+    /// never do. Locked cells have no editor, so nothing opens there.
+    fn open_on_click(&mut self, model: &ModelRef<'_>, lookups: &dyn Lookups, fx: &mut Effects) {
+        let Some(pos) = self.cursor else { return };
+        let list_cell = matches!(
+            self.column_kind(pos.col),
+            Some(CellKind::Picker { .. } | CellKind::Tags { .. })
+        );
+        if list_cell && self.edit.is_some() && !self.popup_open() && !self.parked {
+            let opened = self.open_list(model, lookups, PopupKind::Browse);
+            fx.handled |= opened.handled;
+        }
     }
 
     fn page(
@@ -1635,6 +1674,8 @@ impl Core {
             {
                 fx.events
                     .push(GridEvent::LockedRowEditAttempt { key: pos.row });
+            } else {
+                self.open_on_click(model, lookups, &mut fx);
             }
             return fx;
         }
@@ -1651,6 +1692,8 @@ impl Core {
                     .push(GridEvent::LockedRowEditAttempt { key: pos.row });
             } else if self.column_kind(pos.col) == Some(CellKind::Checkbox) {
                 self.toggle_checkbox(model, &mut fx);
+            } else {
+                self.open_on_click(model, lookups, &mut fx);
             }
         }
         fx

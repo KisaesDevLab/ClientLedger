@@ -20,7 +20,8 @@ use sha2::{Digest, Sha256};
 /// (E5b safe delete, U-23 recovery key) that the desktop-mode export
 /// (U-24) will add. Since pin 5c8e9665 (engine PRs #151-#153) the tenant
 /// and archive routes, the usage summary, the closing password and
-/// `DELETE /transactions/{id}` are in the spec.
+/// `DELETE /transactions/{id}` are in the spec; since pin 454fd23 (engine
+/// PR #156) the P13 check edit and rules evaluate call are too.
 pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),

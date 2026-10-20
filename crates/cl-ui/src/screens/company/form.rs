@@ -226,6 +226,59 @@ impl DateInput {
         self.text = crate::shell::us_date(d);
         self.value = Some(d);
     }
+
+    /// The text changed from `before`: a date key (+, −, T, M, H, Y, R, W,
+    /// K) is a command, not text. Typed at the end it always is (the date
+    /// so far, else the field's date, else today, is the base); typed
+    /// anywhere else, wherever the caret was, it is when `before` is a
+    /// date. Other typing re-parses the text.
+    pub fn typed(&mut self, before: &str, today: CalendarDate) {
+        let last = self.text.chars().last();
+        let command = if let Some(key) = last.and_then(DateKey::from_char) {
+            let mut base = self.text.clone();
+            base.pop();
+            Some((key, base))
+        } else if date_entry::parse(before, DateOrder::Mdy, today).is_ok() {
+            single_insert(before, &self.text)
+                .and_then(|(_, c)| DateKey::from_char(c))
+                .map(|key| (key, before.to_string()))
+        } else {
+            None
+        };
+        match command {
+            Some((key, base)) => {
+                // The week starts on Sunday for US businesses (Q-41, Q-P10f).
+                match date_entry::apply_key(
+                    key,
+                    &base,
+                    self.value,
+                    DateOrder::Mdy,
+                    today,
+                    US_FIRST_WEEKDAY,
+                ) {
+                    Some(d) => self.set(d),
+                    // Out of range: the field keeps its text.
+                    None => self.text = base,
+                }
+            }
+            None => self.reparse(today),
+        }
+    }
+}
+
+/// The one character `after` adds to `before` (and where), when that is the
+/// whole change.
+fn single_insert(before: &str, after: &str) -> Option<(usize, char)> {
+    let (b, a): (Vec<char>, Vec<char>) = (before.chars().collect(), after.chars().collect());
+    if a.len() != b.len() + 1 {
+        return None;
+    }
+    let i = b
+        .iter()
+        .zip(&a)
+        .position(|(x, y)| x != y)
+        .unwrap_or(b.len());
+    (a[i + 1..] == b[i..]).then_some((i, a[i]))
 }
 
 /// Draws a date field and applies date keys.
@@ -235,6 +288,7 @@ pub fn date_field(
     input: &mut DateInput,
     today: CalendarDate,
 ) -> Response {
+    let before = input.text.clone();
     let response = ui
         .horizontal(|ui| {
             let l = ui.add(egui::Label::new(label).selectable(false));
@@ -243,23 +297,7 @@ pub fn date_field(
         })
         .inner;
     if response.changed() {
-        let last = input.text.chars().last();
-        if let Some(key) = last.and_then(DateKey::from_char) {
-            input.text.pop();
-            // The week starts on Sunday for US businesses (Q-41, Q-P10f).
-            if let Some(d) = date_entry::apply_key(
-                key,
-                &input.text,
-                input.value,
-                DateOrder::Mdy,
-                today,
-                US_FIRST_WEEKDAY,
-            ) {
-                input.set(d);
-            }
-        } else {
-            input.reparse(today);
-        }
+        input.typed(&before, today);
     }
     if response.lost_focus() {
         input.settle();
@@ -276,7 +314,7 @@ pub fn settled_money_text(text: &str, style: MoneyStyle) -> Option<String> {
     if text.trim().is_empty() {
         return None;
     }
-    Money::parse_user(text, UserInput::CENTS)
+    Money::parse_user(text, UserInput::MONEY)
         .ok()
         .map(|m| m.format(style))
 }
@@ -313,7 +351,7 @@ pub fn money_field(
     if text.trim().is_empty() {
         return Ok(None);
     }
-    Money::parse_user(text, UserInput::CENTS).map(Some)
+    Money::parse_user(text, UserInput::MONEY).map(Some)
 }
 
 /// One selectable card with a title and a description (a radio choice).
@@ -502,18 +540,65 @@ mod tests {
             Some("1,234,567.50")
         );
         assert_eq!(settled_money_text("", minus), None);
-        assert_eq!(settled_money_text("12.345", minus), None, "kept as typed");
+        // Typed money rounds to the cent, half away from zero (Q-232).
+        assert_eq!(
+            settled_money_text("12.345", minus).as_deref(),
+            Some("12.35")
+        );
+        assert_eq!(
+            settled_money_text("-1.005", minus).as_deref(),
+            Some("-1.01")
+        );
         assert_eq!(settled_money_text("abc", minus), None);
         for typed in ["1286.40", "-42.07", "0.01", "999999.99"] {
             for style in [minus, parens] {
                 let shown = settled_money_text(typed, style).expect("settles");
                 assert_eq!(
-                    Money::parse_user(&shown, UserInput::CENTS),
-                    Money::parse_user(typed, UserInput::CENTS),
+                    Money::parse_user(&shown, UserInput::MONEY),
+                    Money::parse_user(typed, UserInput::MONEY),
                     "{typed} -> {shown}"
                 );
             }
         }
+    }
+
+    #[test]
+    fn date_keys_work_wherever_the_caret_is() {
+        let today = CalendarDate::from_ymd(2026, 11, 4).expect("date");
+        let typed = |before: &str, after: &str| {
+            let mut input = DateInput::new(today);
+            input.text = before.into();
+            input.reparse(today);
+            input.text = after.into();
+            input.typed(before, today);
+            (input.text, input.value.map(CalendarDate::to_wire))
+        };
+        let day = |s: &str| {
+            (
+                s.to_string(),
+                Some(format!("{}-{}-{}", &s[6..], &s[..2], &s[3..5])),
+            )
+        };
+        // At the end, as before.
+        assert_eq!(typed("11/04/2026", "11/04/2026+"), day("11/05/2026"));
+        // Mid-text: the caret after the month, at the start, in the year.
+        assert_eq!(typed("11/04/2026", "11+/04/2026"), day("11/05/2026"));
+        assert_eq!(typed("11/04/2026", "-11/04/2026"), day("11/03/2026"));
+        assert_eq!(typed("11/04/2026", "11/04/20t26"), day("11/04/2026"));
+        assert_eq!(typed("11/10/2026", "11/1T0/2026"), day("11/04/2026"));
+        assert_eq!(typed("11/04/2026", "11/0m4/2026"), day("11/01/2026"));
+        assert_eq!(typed("11/04/2026", "11/04/2y026"), day("01/01/2026"));
+        assert_eq!(typed("11/04/2026", "1k1/04/2026"), day("11/07/2026"));
+        // Not a date before: the key is text (the owner is still typing).
+        assert_eq!(typed("11/0", "1-1/0"), ("1-1/0".to_string(), None));
+        // A replaced selection is not a key.
+        assert_eq!(
+            typed("11/04/2026", "3/7"),
+            ("3/7".to_string(), Some("2026-03-07".into()))
+        );
+        assert_eq!(single_insert("ab", "aXb"), Some((1, 'X')));
+        assert_eq!(single_insert("ab", "abX"), Some((2, 'X')));
+        assert_eq!(single_insert("ab", "XYb"), None);
     }
 
     #[test]

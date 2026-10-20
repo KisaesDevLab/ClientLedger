@@ -46,7 +46,7 @@ steps:
   # One open invoice and one unpaid bill.
   - click: {role: button, label: Add a line, index: 1}
   - assert_state: {key: screen.invoice_rows, equals: 1}
-  - click: {role: text_input, label: Client}
+  - click: {role: text_input, label: Customer}
   - type: {text: Riverbend HOA}
   - click: {role: text_input, label: Amount}
   - type: {text: "1,250.00"}

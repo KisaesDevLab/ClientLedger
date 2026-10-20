@@ -49,8 +49,10 @@ pub fn has(key: &str) -> bool {
     }) || catalog().contains_key(key)
 }
 
+mod check;
 mod contacts;
 mod csv;
+mod forms;
 mod items;
 mod lists;
 mod register;
@@ -67,6 +69,8 @@ fn catalog() -> &'static HashMap<&'static str, &'static str> {
             .chain(tags::ENGLISH)
             .chain(csv::ENGLISH)
             .chain(register::ENGLISH)
+            .chain(check::ENGLISH)
+            .chain(forms::ENGLISH)
             .copied()
             .collect()
     })
@@ -87,7 +91,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("menu.file", "File"),
     ("menu.edit", "Edit"),
     ("menu.lists", "Lists"),
-    ("menu.clients", "Clients"),
+    ("menu.customers", "Customers"),
     ("menu.vendors", "Vendors"),
     ("menu.banking", "Banking"),
     ("menu.payroll", "Payroll"),
@@ -141,6 +145,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("status.hint.record", "record"),
     ("status.hint.dates", "dates"),
     ("status.hint.delete", "delete"),
+    ("status.hint.next_field", "next field"),
+    ("status.hint.insert_line", "insert line"),
+    ("status.hint.list", "list"),
+    ("status.hint.revert", "revert"),
     ("status.hint.open_form", "open form"),
     ("toast.not_here", "That does not apply to this screen."),
     ("toast.help_later", "Help for this screen is not available yet."),
@@ -326,7 +334,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("opening.sign_hint", "Enter what the statement says. A credit card or loan balance is what you owe."),
     ("opening.add_row", "Add a line"),
     ("opening.remove_row", "Remove"),
-    ("opening.invoices", "Open invoices (clients who owe you)"),
+    ("opening.invoices", "Open invoices (customers who owe you)"),
     ("opening.invoices_hint", "One line per unpaid invoice as of the start date."),
     ("opening.bills", "Unpaid bills (what you owe vendors)"),
     ("opening.bills_hint", "One line per bill you had not paid yet."),
@@ -337,7 +345,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("opening.many_invoices", "invoices"),
     ("opening.one_bill", "bill"),
     ("opening.many_bills", "bills"),
-    ("opening.client", "Client"),
+    ("opening.client", "Customer"),
     ("opening.vendor", "Vendor"),
     ("opening.date", "Date"),
     ("opening.number", "Number"),
@@ -513,6 +521,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("fix.api.offline", "Turn off Work offline in Preferences if you want to use it."),
     ("error.api.feature_off", "That feature is not turned on."),
     ("fix.api.feature_off", "Turn it on in Preferences."),
+    ("error.api.ai_unavailable", "AI suggestions are turned off."),
+    ("fix.api.ai_unavailable", "Turn on AI suggestions in Preferences if you want them."),
     ("error.api.bad_credentials", "The email or password is not right."),
     ("error.api.session_expired", "Your sign-in has timed out."),
     ("fix.api.sign_in", "Sign in again."),
@@ -727,7 +737,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("grid.a11y.reconciled", "Reconciled"),
     ("grid.a11y.loading", "Loading\u{2026}"),
     ("grid.a11y.locked", "Locked: this date is in a closed period"),
-    ("grid.a11y.suggested", "Suggested. Press Tab to accept it, or type to replace it."),
+    ("grid.a11y.suggested", "Suggested: {value}, not accepted. Press Tab to accept it, or type to replace it."),
     ("grid.a11y.row_problem", "This line has a problem"),
     ("grid.a11y.scrollbar", "Scroll rows"),
     ("grid.a11y.header_row", "Column headers"),
@@ -789,7 +799,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("dev.grid_demo.bills_selected", "{n} selected"),
     ("dev.grid_demo.bad_value", "That value does not fit this column."),
     ("dev.grid_demo.need_account", "Pick an account for this line."),
-    ("dev.grid_demo.billable_needs_job", "A billable line needs a Client:Job."),
+    ("dev.grid_demo.billable_needs_job", "A billable line needs a Customer:Job."),
     ("dev.grid_demo.not_balanced", "The lines total does not match the check amount."),
     ("dev.grid_demo.not_balanced.fix", "Change a line or the check amount so they match."),
     ("dev.grid_demo.col.account", "Account"),
@@ -797,7 +807,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("dev.grid_demo.col.amount", "Amount"),
     ("dev.grid_demo.col.memo", "Memo"),
     ("dev.grid_demo.col.service_date", "Service date"),
-    ("dev.grid_demo.col.job", "Client:Job"),
+    ("dev.grid_demo.col.job", "Customer:Job"),
     ("dev.grid_demo.col.billable", "Billable"),
     ("dev.grid_demo.col.tags", "Tags"),
     ("dev.grid_demo.col.date", "Date"),
@@ -919,6 +929,7 @@ mod tests {
             ("grid.popup.full_list", &["{column}"]),
             ("grid.a11y.cell", &["{column}", "{row}"]),
             ("grid.a11y.row_of", &["{n}", "{total}"]),
+            ("grid.a11y.suggested", &["{value}"]),
         ] {
             for n in names {
                 assert!(t(key).contains(n), "{key} lacks {n}");
@@ -937,6 +948,8 @@ mod tests {
             .chain(tags::ENGLISH)
             .chain(csv::ENGLISH)
             .chain(register::ENGLISH)
+            .chain(check::ENGLISH)
+            .chain(forms::ENGLISH)
         {
             assert!(seen.insert(*k), "duplicate key {k}");
             assert_ne!(*v, "", "{k}");

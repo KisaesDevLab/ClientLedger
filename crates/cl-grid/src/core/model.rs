@@ -138,6 +138,9 @@ pub struct Column {
     pub header: TextKey,
     /// Placeholder shown in the empty entry line ("Account").
     pub placeholder: Option<TextKey>,
+    /// Shown muted in an empty cell of any other row ("—"): a hint, never
+    /// the cell's value.
+    pub empty: Option<TextKey>,
     /// A short explanation shown as the header's (and cells') tooltip and
     /// spoken as their description ("R = reconciled, ✓ = cleared").
     pub help: Option<TextKey>,

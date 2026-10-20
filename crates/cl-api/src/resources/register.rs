@@ -504,7 +504,7 @@ impl fmt::Debug for RegisterSummary {
 
 /// A money field as sent: a decimal string becomes exact `Money`; a JSON
 /// number is kept as its text for display only (never parsed into money).
-fn amount(raw: &RawValue, what: &'static str) -> Result<RegisterAmount, ApiError> {
+pub(crate) fn amount(raw: &RawValue, what: &'static str) -> Result<RegisterAmount, ApiError> {
     let text = raw.get();
     match text.strip_prefix('"').and_then(|t| t.strip_suffix('"')) {
         Some(s) => Money::parse_wire(s)

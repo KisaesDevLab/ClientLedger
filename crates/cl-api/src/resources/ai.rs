@@ -21,8 +21,8 @@
 //! - [`AiUsageStamp`]: the `usage` object E6 adds to AI replies, which
 //!   feeds the client-side token cap (`cl_settings::ai`).
 
-use cl_core::Timestamp;
-use cl_core::ids::CompanyId;
+use cl_core::ids::{AccountId, CompanyId, TagId};
+use cl_core::{Money, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -30,9 +30,9 @@ use crate::client::{Call, Method};
 use crate::errors::{ApiError, LocalValidation};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::operations::{
-    AI_CONFIG, AI_CONFIG_PUT, AI_CONSENT, AI_CONSENT_ACCEPT, AI_CONSENT_DISCLOSURE,
-    AI_CONSENT_REVOKE, AI_CONSENT_TASKS, AI_DISCLOSURE, AI_DISCLOSURE_ACCEPT, AI_MODELS, AI_STATUS,
-    AI_TEST_PROVIDER, AI_USAGE, AI_USAGE_SUMMARY,
+    AI_CATEGORIZE_PREVIEW, AI_CONFIG, AI_CONFIG_PUT, AI_CONSENT, AI_CONSENT_ACCEPT,
+    AI_CONSENT_DISCLOSURE, AI_CONSENT_REVOKE, AI_CONSENT_TASKS, AI_DISCLOSURE,
+    AI_DISCLOSURE_ACCEPT, AI_MODELS, AI_STATUS, AI_TEST_PROVIDER, AI_USAGE, AI_USAGE_SUMMARY,
 };
 use crate::resources::versioning::saved_unreadable;
 use crate::session::{Scope, Session, decode, json_body};
@@ -427,6 +427,113 @@ impl AiUsageStamp {
 /// Engine provider names the desktop may use (Q-33).
 pub const DESKTOP_PROVIDERS: [&str; 3] = ["anthropic", "openai", "ollama"];
 
+/// The owner's AI switches as the app knows them (Preferences): every one
+/// must be on before an AI suggestion request is sent. With any of them
+/// off, nothing leaves the app (non-negotiable 3).
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AiGate {
+    /// AI is turned on.
+    pub ai_enabled: bool,
+    /// The company agreed to the current AI notice.
+    pub consented: bool,
+    /// The account-suggestion task is switched on.
+    pub categorization_on: bool,
+    /// Work offline is off, or the provider is a local model (Ollama).
+    pub provider_reachable: bool,
+}
+
+impl AiGate {
+    /// Every switch is on.
+    #[must_use]
+    pub const fn is_open(&self) -> bool {
+        self.ai_enabled && self.consented && self.categorization_on && self.provider_reachable
+    }
+}
+
+/// The most rows one preview asks about (the engine's limit).
+pub const AI_PREVIEW_MAX_ROWS: usize = 300;
+/// The longest description sent per row (the engine's limit).
+pub const AI_PREVIEW_DESCRIPTION_MAX_CHARS: usize = 500;
+
+/// One row to ask the AI about: what the owner typed.
+#[derive(Clone, PartialEq, Eq, Serialize)]
+pub struct AiPreviewRow {
+    /// Payee and memo text.
+    pub description: String,
+    /// The owner's typed amount (exact string on the wire; it lets the
+    /// engine offer expense or income accounts by sign).
+    pub amount: Money,
+}
+
+/// Hides the description and the amount (owner data).
+impl std::fmt::Debug for AiPreviewRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AiPreviewRow").finish_non_exhaustive()
+    }
+}
+
+/// What the AI suggests for one row: an account (and maybe a tag), never
+/// an amount. Every suggestion needs the owner's accept (non-negotiable 4).
+#[derive(Clone, PartialEq, Eq)]
+pub struct AiSuggestion {
+    /// Which row (0-based, as sent).
+    pub index: usize,
+    /// Suggested account, if any.
+    pub account_id: Option<AccountId>,
+    /// The account's name as the engine gave it (display only; the app
+    /// shows its own account name for `account_id`).
+    pub account_name: Option<String>,
+    /// Suggested tag, if any.
+    pub tag_id: Option<TagId>,
+    /// The payee name the AI read from the description (the suggestion's
+    /// basis, shown as "Based on …").
+    pub basis: Option<String>,
+}
+
+/// Ids only: names come from the owner's books.
+impl std::fmt::Debug for AiSuggestion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AiSuggestion")
+            .field("index", &self.index)
+            .field("account_id", &self.account_id)
+            .field("tag_id", &self.tag_id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The reply fields read from one preview row. There is deliberately no
+/// amount field and no confidence (a float): nothing else is parsed.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreviewRowWire {
+    index: usize,
+    #[serde(default)]
+    suggested_account_id: Option<String>,
+    #[serde(default)]
+    suggested_account_name: Option<String>,
+    #[serde(default)]
+    tag_id: Option<String>,
+    #[serde(default)]
+    cleaned_name: Option<String>,
+}
+
+impl From<PreviewRowWire> for AiSuggestion {
+    fn from(w: PreviewRowWire) -> AiSuggestion {
+        // A malformed id from the model is no suggestion, not an error.
+        AiSuggestion {
+            index: w.index,
+            account_id: w
+                .suggested_account_id
+                .as_deref()
+                .and_then(|s| AccountId::parse(s).ok()),
+            account_name: w.suggested_account_name,
+            tag_id: w.tag_id.as_deref().and_then(|s| TagId::parse(s).ok()),
+            basis: w.cleaned_name.filter(|n| !n.trim().is_empty()),
+        }
+    }
+}
+
 impl Session {
     fn company_id(&self) -> Result<CompanyId, ApiError> {
         match self.scope() {
@@ -685,6 +792,63 @@ impl Session {
         let reply = self.send(&AI_USAGE_SUMMARY, call, None).await?;
         decode(&reply, "ai usage summary")
     }
+
+    /// AI account suggestions for the owner's typed rows
+    /// (`POST /ai/categorize/preview`; nothing is stored). Only accounts,
+    /// tags and a payee name are read back, never an amount. Rows without a
+    /// suggestion are left out.
+    ///
+    /// # Errors
+    /// `AiUnavailable` when `gate` is not open (nothing sent) or the
+    /// engine's AI gate refuses (AI off, no provider, task off, no
+    /// consent); `Local(InvalidValue)` for 0 or more than 300 rows or a
+    /// description over 500 characters (nothing sent); `OfflineUnavailable`
+    /// when the cloud provider can't be reached; any [`ApiError`].
+    pub async fn ai_categorize_preview(
+        &self,
+        gate: AiGate,
+        rows: &[AiPreviewRow],
+    ) -> Result<Vec<AiSuggestion>, ApiError> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            transactions: &'a [AiPreviewRow],
+        }
+        #[derive(Deserialize)]
+        struct W {
+            rows: Vec<PreviewRowWire>,
+        }
+        if !gate.is_open() {
+            return Err(ApiError::AiUnavailable);
+        }
+        if rows.is_empty()
+            || rows.len() > AI_PREVIEW_MAX_ROWS
+            || rows
+                .iter()
+                .any(|r| r.description.chars().count() > AI_PREVIEW_DESCRIPTION_MAX_CHARS)
+        {
+            return Err(ApiError::Local(LocalValidation::InvalidValue));
+        }
+        let call = Call::at(Method::Post, AI_CATEGORIZE_PREVIEW.route())
+            .json_body(json_body(&Body { transactions: rows })?);
+        let reply = match self.send(&AI_CATEGORIZE_PREVIEW, call, None).await {
+            Ok(r) => r,
+            // The engine's AI gate answers 400 with a lowercase code
+            // (`ai_disabled_globally`, `ai_consent_blocked`, …); a body
+            // shape problem is `VALIDATION_ERROR`, which stays as is.
+            Err(ApiError::Validation(v))
+                if v.code().is_none_or(|c| c.as_str() != "VALIDATION_ERROR") =>
+            {
+                return Err(ApiError::AiUnavailable);
+            }
+            Err(e) => return Err(e),
+        };
+        let w: W = decode(&reply, "ai suggestions")?;
+        Ok(w.rows
+            .into_iter()
+            .map(AiSuggestion::from)
+            .filter(|s| s.index < rows.len() && s.account_id.is_some())
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -930,6 +1094,134 @@ mod tests {
         assert_eq!(
             AiUsageStamp::from_reply(&serde_json::json!({"result": {}})),
             None
+        );
+    }
+
+    fn open_gate() -> AiGate {
+        AiGate {
+            ai_enabled: true,
+            consented: true,
+            categorization_on: true,
+            provider_reachable: true,
+        }
+    }
+
+    fn rows() -> Vec<AiPreviewRow> {
+        vec![
+            AiPreviewRow {
+                description: "Ozark Feed canary".into(),
+                amount: cl_core::Money::parse_wire("1286.4000").expect("m"),
+            },
+            AiPreviewRow {
+                description: "Unknown".into(),
+                amount: cl_core::Money::parse_wire("-5").expect("m"),
+            },
+        ]
+    }
+
+    #[tokio::test]
+    async fn preview_sends_nothing_unless_every_switch_is_on() {
+        let server = MockServer::start().await;
+        let s = company_session(&server);
+        let shut = [
+            AiGate::default(),
+            AiGate {
+                consented: false,
+                ..open_gate()
+            },
+            AiGate {
+                categorization_on: false,
+                ..open_gate()
+            },
+            AiGate {
+                provider_reachable: false,
+                ..open_gate()
+            },
+            AiGate {
+                ai_enabled: false,
+                ..open_gate()
+            },
+        ];
+        for gate in shut {
+            assert_eq!(
+                s.ai_categorize_preview(gate, &rows())
+                    .await
+                    .expect_err("off"),
+                ApiError::AiUnavailable
+            );
+        }
+        for bad in [Vec::new(), vec![rows()[0].clone(); 301]] {
+            assert_eq!(
+                s.ai_categorize_preview(open_gate(), &bad)
+                    .await
+                    .expect_err("rows"),
+                ApiError::Local(LocalValidation::InvalidValue)
+            );
+        }
+        let mut long = rows();
+        long[0].description = "x".repeat(501);
+        assert!(s.ai_categorize_preview(open_gate(), &long).await.is_err());
+        assert!(server.received_requests().await.expect("r").is_empty());
+        assert!(!format!("{:?}", rows()).contains("canary"));
+    }
+
+    #[tokio::test]
+    async fn preview_reads_accounts_only_and_maps_the_engine_gate() {
+        let server = MockServer::start().await;
+        let acct = "2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+        Mock::given(method("POST"))
+            .and(path("/api/v1/ai/categorize/preview"))
+            .respond_with(json(
+                200,
+                &format!(
+                    r#"{{"rows":[{{"index":0,"cleanedName":"Ozark Feed","suggestedAccountId":"{acct}",
+                    "suggestedAccountName":"Mulch","tagId":"not-a-uuid","tagName":null,"confidence":0.93,
+                    "amount":"999999.99","total":123.45}},
+                    {{"index":1,"cleanedName":null,"suggestedAccountId":null,"suggestedAccountName":null,
+                    "tagId":null,"tagName":null,"confidence":null}},
+                    {{"index":7,"suggestedAccountId":"{acct}"}}]}}"#
+                ),
+            ))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/ai/categorize/preview"))
+            .respond_with(json(
+                400,
+                r#"{"error":{"message":"AI processing is not enabled.","code":"ai_disabled_globally"}}"#,
+            ))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let got = s
+            .ai_categorize_preview(open_gate(), &rows())
+            .await
+            .expect("preview");
+        assert_eq!(
+            got.len(),
+            1,
+            "rows without an account, or out of range, are dropped"
+        );
+        assert_eq!(got[0].index, 0);
+        assert_eq!(got[0].account_id, AccountId::parse(acct).ok());
+        assert_eq!(got[0].tag_id, None, "a malformed tag id is no suggestion");
+        assert_eq!(got[0].basis.as_deref(), Some("Ozark Feed"));
+        assert!(!format!("{got:?}").contains("Ozark"));
+        let body: Value =
+            serde_json::from_slice(&requests(&server, "POST").await[0].body).expect("json");
+        assert_eq!(
+            body,
+            serde_json::json!({"transactions":[
+                {"description":"Ozark Feed canary","amount":"1286.4000"},
+                {"description":"Unknown","amount":"-5.0000"}
+            ]})
+        );
+        assert_eq!(
+            s.ai_categorize_preview(open_gate(), &rows())
+                .await
+                .expect_err("ai off in the engine"),
+            ApiError::AiUnavailable
         );
     }
 

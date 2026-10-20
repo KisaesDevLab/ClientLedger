@@ -1,0 +1,396 @@
+# Write Check (P13 plan §6.4) against `clientledger --demo`: the mockup's
+# story (check 4418 to Ozark Feed & Seed for 1,286.40 = 842.15 + 444.25),
+# payee prefill and the payee panel (open bill, recent checks), no save while
+# the lines and the amount disagree, the register showing the saved check,
+# Print later ("To print"), the AI account suggestion that needs an explicit
+# accept and is gone with the switch off, the closing-date password, the
+# unsaved-changes question on Prev, and the printed-check question.
+#
+# Light and dark run in the same app, so the scenario is repeatable: it voids
+# 4418 at the end to free the number (Q-P13w), deletes the closed-period
+# check in the register, and every pass starts on the story's ending balance
+# (84,210.55) and next number (4418). The demo has no check printing before
+# P19; `dev.check_mark_printed` (a `--demo`-only developer command) marks the
+# check in front as printed. All data is synthetic.
+name: write_check
+description: Mockup example, refused mismatch, register, Print later, AI suggestion on/off, closing password, Prev prompt, printed check.
+steps:
+  # --- 1-2. The window, cleared; the toolbar ----------------------------------
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+W
+  - assert_exists: {role: tab, label_contains: "Write Check"}
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_state: {key: screen.number_proposed, equals: true}
+  - assert_state: {key: screen.date, equals: "2026-11-04"}
+  - assert_exists: {role: label, label: Ending balance}
+  - assert_state: {key: screen.ending_balance_shown, equals: true}
+  - assert_exists: {role: label, label: "84,210.55"}
+  - assert_state: {key: screen.number, equals: 4418}
+  # Not before P15 / P20 (Q-P13a, Q-P13b); Print waits for P19 (Q-P13c).
+  - assert_not_exists: {role: button, label: Memorize}
+  - assert_not_exists: {role: button, label: Pay online}
+  - assert_not_exists: {label_contains: Items}
+  - assert_disabled: {role: button, label: Print}
+  - assert_exists: {role: check_box, label: Print later}
+  - assert_state: {key: screen.print_later, equals: false}
+
+  # --- 3. Payee: prefill from the last check, the panel ----------------------
+  - type: {text: Ozark Feed, target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - assert_value: {target: {role: text_input, label: Pay to the order of}, equals: "Ozark Feed & Seed"}
+  - assert_state: {key: screen.prefill.applied, equals: true}
+  - assert_state: {key: screen.prefill.source, equals: last}
+  - assert_state: {key: screen.focused, equals: amount}
+  - assert_value: {target: {role: multiline_text_input, label: Address}, equals: "Ozark Feed & Seed\n1200 Commerce Dr\nAurora, MO 65605"}
+  # Accounts come over; amounts never do.
+  - assert_value: {target: {label: "Account, line 1"}, equals: "5100 · Materials:Plants"}
+  - assert_value: {target: {label: "Account, line 2"}, equals: "5110 · Materials:Mulch & stone"}
+  - assert_value: {target: {label: "Amount, line 1"}, equals: ""}
+  - assert_value: {target: {label: "Amount, line 2"}, equals: ""}
+  - assert_exists: {role: label, label: Open balance}
+  - assert_exists: {role: label, label: "1,286.40"}
+  - assert_exists: {label_contains: "open bill from this vendor for 1,286.40, due 11/05"}
+  - assert_state: {key: screen.panel.open_bills, equals: 1}
+  - assert_state: {key: screen.panel.bill_warning, equals: true}
+  - assert_state: {key: screen.panel.recent_checks, equals: [4401, 4392, 4380]}
+  - assert_exists: {role: label, label: "#4401"}
+  - assert_exists: {role: label, label: "#4392"}
+  - assert_exists: {role: label, label: "#4380"}
+  - assert_no_clipping: {}
+  - screenshot: prefill
+
+  # --- 4. Number, amount (in words), memo -------------------------------------
+  - click: {role: text_input, label: "No."}
+  - key: Ctrl+A
+  - type: {text: "4418"}
+  - assert_state: {key: screen.number, equals: 4418}
+  - type: {text: "1286.40", target: {role: text_input, label: "Amount ($)"}}
+  - key: Tab
+  - assert_value: {target: {role: text_input, label: "Amount ($)"}, equals: "1,286.40"}
+  - assert_exists: {role: label, label: "One thousand two hundred eighty-six and 40/100"}
+  - assert_state: {key: screen.words, equals: true}
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - type: {text: "Acct 7712 · perennials and mulch"}
+
+  # --- 5. Lines that disagree: nothing is saved -------------------------------
+  # Line 1 keeps the prefilled customer (the demo lists have no jobs yet,
+  # U-35) and is marked billable.
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - type: {text: "842.15"}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Space
+  - assert_value: {target: {role: grid_cell, label: "Billable, line 1"}, equals: "Checked"}
+  - assert_value: {target: {label: "Tags, line 1"}, equals: "Install"}
+  - click: {role: grid_cell, label: "Amount, line 2"}
+  - type: {text: "444.00"}
+  - key: Tab
+  - assert_state: {key: screen.totals, equals: remaining}
+  - assert_exists: {role: label, label_contains: "0.25 left to assign"}
+  - key: Alt+S
+  - assert_state: {key: screen.save.refused, equals: lines_disagree}
+  - assert_state: {key: screen.saving, equals: false}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - assert_state: {key: screen.last_saved, equals: null}
+  - assert_exists: {role: tab, label_contains: "Write Check · #4418"}
+  - assert_exists: {role: label, label_contains: "lines don't add up to the check amount"}
+  - screenshot: lines-disagree
+
+  # --- 6. Fixed: saved, while the open-bill note stays (Q-248) ---------------
+  - click: {role: grid_cell, label: "Amount, line 2"}
+  - type: {text: "444.25"}
+  - key: Tab
+  - assert_state: {key: screen.totals, equals: balanced}
+  - assert_exists: {role: label, label_contains: "Lines total 1,286.40 = check amount"}
+  - assert_state: {key: screen.panel.bill_warning, equals: true}
+  - assert_exists: {label_contains: "open bill from this vendor"}
+  - screenshot: balanced
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.last_saved.number, equals: 4418}
+  - assert_state: {key: screen.last_saved.print_status, equals: hand_written}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.has_payee, equals: false}
+  - assert_state: {key: screen.number_proposed, equals: true}
+
+  # --- 7. The register shows it -----------------------------------------------
+  - key: Ctrl+G
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  # A later pass also lists the earlier pass's voided 4418.
+  - assert_exists: {role: row, label_contains: "11/04/2026, Ozark Feed & Seed, 4418,", index: 0}
+  - screenshot: register-4418
+  # Closed, so step 10's cleanup reads the register afresh.
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Write Check"}
+  - assert_state: {key: screen.screen, equals: write_check}
+
+  # --- 8. Print later: "To print", saved to the print queue -------------------
+  - type: {text: Ozark Feed, target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - assert_state: {key: screen.prefill.applied, equals: true}
+  # The panel's recent checks now start with 4418.
+  - assert_state: {key: screen.panel.recent_checks, equals: [4418, 4401, 4392]}
+  - click: {role: grid_cell, label: "Account, line 1"}
+  - key: Ctrl+Delete
+  - assert_value: {target: {label: "Account, line 1"}, equals: "5110 · Materials:Mulch & stone"}
+  # One line without an amount follows the check amount (Q-P13r).
+  - type: {text: "100", target: {role: text_input, label: "Amount ($)"}}
+  - key: Tab
+  - assert_value: {target: {label: "Amount, line 1"}, equals: "100.00"}
+  - click: {role: check_box, label: Print later}
+  - assert_state: {key: screen.print_later, equals: true}
+  - assert_state: {key: screen.number_text, equals: "To print"}
+  - assert_value: {target: {role: text_input, label: "No."}, equals: "To print"}
+  - assert_exists: {role: tab, label_contains: "To print"}
+  - screenshot: print-later
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 2}
+  - assert_state: {key: screen.last_saved.print_status, equals: queue}
+  - assert_state: {key: screen.last_saved.number, equals: null}
+  - assert_state: {key: screen.print_later, equals: false}
+
+  # --- 9. AI suggestion: a ghost until accepted; nothing with the switch off --
+  # Prefill copies the print-later check (one line), so line 2 is new.
+  - type: {text: Ozark Feed, target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - click: {role: grid_cell, label: "Memo, line 2"}
+  - type: {text: Hardwood mulch}
+  - key: Tab
+  - assert_exists: {label_contains: "AI suggested this account"}
+  - assert_state: {key: screen.ai.chip, equals: true}
+  - assert_state: {key: screen.ai.open, equals: 1}
+  - assert_state: {key: screen.ai.accepted, equals: 0}
+  # A ghost is described, never the cell's value, until accepted.
+  - assert_value: {target: {label: "Account, line 2"}, equals: ""}
+  - assert_exists: {role: button, label: Accept}
+  - screenshot: ai-chip
+  - click: {role: button, label: Accept}
+  - assert_state: {key: screen.ai.accepted, equals: 1}
+  - assert_state: {key: screen.ai.chip, equals: false}
+  - assert_value: {target: {label: "Account, line 2"}, equals: "5110 · Materials:Mulch & stone"}
+  - click: {role: button, label: Clear}
+  # Preferences > AI: untick account suggestions (Bank Feed suggestions,
+  # the engine's categorization task) and save.
+  - command: edit.preferences
+  - assert_state: {key: screen.screen, equals: preferences}
+  - assert_state: {key: screen.category, equals: ai}
+  - click: {role: check_box, label: Bank Feed suggestions}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dirty, equals: false}
+  - click: {role: tab, label_contains: "Write Check"}
+  - type: {text: Ozark Feed, target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - click: {role: grid_cell, label: "Memo, line 2"}
+  - type: {text: Hardwood mulch}
+  - key: Tab
+  - wait: {ms: 400}
+  - assert_not_exists: {label_contains: "AI suggested"}
+  - assert_state: {key: screen.ai.chip, equals: false}
+  - assert_state: {key: screen.ai.open, equals: 0}
+  - screenshot: ai-off
+  - click: {role: button, label: Clear}
+  # The switch back on, so the next theme's run starts the same.
+  - click: {role: tab, label: Preferences}
+  - click: {role: check_box, label: Bank Feed suggestions}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dirty, equals: false}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Write Check"}
+  - assert_state: {key: screen.screen, equals: write_check}
+
+  # --- 10. Closed period (demo closing date 09/30/2026; the synthetic demo
+  # closing-date password is "demo-close") -------------------------------------
+  - click: {role: text_input, label: Date}
+  - key: Ctrl+A
+  - type: {text: "09/15/2026"}
+  - key: Tab
+  - assert_state: {key: screen.date, equals: "2026-09-15"}
+  - type: {text: Stone County, target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - type: {text: "18.25", target: {role: text_input, label: "Amount ($)"}}
+  - key: Tab
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - type: {text: "Closed-period scenario check"}
+  - assert_state: {key: screen.totals, equals: balanced}
+  - key: Alt+N
+  - assert_state: {key: screen.closing, equals: asking}
+  - assert_exists: {role: password_input, label: Closing-date password}
+  - assert_exists: {role: label, label_contains: "closing date (09/30/2026)"}
+  - screenshot: closing-password
+  - click: {role: button, label: Cancel}
+  - assert_state: {key: screen.closing, equals: cancelled}
+  - assert_state: {key: screen.saved_count, equals: 2}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: Alt+N
+  - assert_state: {key: screen.closing, equals: asking}
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: not-the-password}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.closing, equals: rejected}
+  - assert_exists: {role: label, label: "That password isn't right."}
+  - assert_not_exists: {label_contains: not-the-password}
+  - assert_state: {key: screen.saved_count, equals: 2}
+  - screenshot: closing-wrong
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: demo-close}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.closing, equals: done}
+  - assert_state: {key: screen.saved_count, equals: 3}
+  - assert_state: {key: screen.dirty, equals: false}
+  # Cleanup: delete it in the register (the password again), so the bank
+  # balance is the story's on the next pass.
+  - key: Ctrl+G
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - key: Ctrl+F
+  - assert_state: {key: screen.goto.open, equals: true}
+  - type: {text: Closed-period scenario check}
+  - click: {role: button, label: Find Previous}
+  - assert_state: {key: screen.goto.last, equals: found}
+  - assert_state: {key: screen.goto.jump_pending, equals: false}
+  - assert_state: {key: screen.focused, equals: true}
+  - assert_exists: {role: row, label_contains: "09/15/2026, Stone County"}
+  - click: {role: button, label: Close}
+  - key: Ctrl+D
+  - assert_state: {key: screen.row_action.panel, equals: confirm_delete}
+  - click: {role: button, label: Delete}
+  - assert_state: {key: screen.row_action.closing, equals: asking}
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: demo-close}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.row_action.closing, equals: done}
+  - assert_state: {key: screen.row_action.last, equals: delete}
+  - assert_state: {key: screen.row_action.error, equals: false}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Write Check"}
+  - assert_state: {key: screen.screen, equals: write_check}
+
+  # --- 11. Back to 4418 (Page Up, newest first: the print-later check, then
+  # 4418): Prev on unsaved changes asks; a printed check asks; then void it -----
+  - key: PageUp
+  - key: PageUp
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.number, equals: 4418}
+  - click: {role: text_input, label: Memo}
+  - key: End
+  - type: {text: " (fall)"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: PageUp
+  - assert_state: {key: screen.nav_prompt, equals: true}
+  - assert_exists: {role: button, label: Discard changes}
+  - assert_exists: {role: button, label: Keep editing}
+  - screenshot: nav-prompt
+  - click: {role: button, label: Keep editing}
+  - assert_state: {key: screen.nav_prompt, equals: false}
+  - assert_state: {key: screen.number, equals: 4418}
+  - assert_state: {key: screen.dirty, equals: true}
+  # Printed check: the memo is on its face, so the save asks first.
+  - command: dev.check_mark_printed
+  - assert_state: {key: screen.edit_print_status, equals: printed}
+  - key: Alt+N
+  - assert_state: {key: screen.printed_prompt, equals: true}
+  - assert_exists: {label_contains: "keep number 4418 as a handwritten check"}
+  - assert_exists: {role: button, label: Reprint}
+  - assert_state: {key: screen.saved_count, equals: 3}
+  - screenshot: printed-check
+  - click: {role: button, label: Keep number}
+  - assert_state: {key: screen.printed_prompt, equals: false}
+  - assert_state: {key: screen.saved_count, equals: 4}
+  - assert_state: {key: screen.last_saved.number, equals: 4418}
+  - assert_state: {key: screen.last_saved.print_status, equals: hand_written}
+  # Cleanup (Q-P13w): void 4418 so the next theme's run can use it again.
+  - key: PageUp
+  - key: PageUp
+  - assert_state: {key: screen.number, equals: 4418}
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.save.error, equals: false}
+  # Void leaves a new check; Page Up shows the newest, the print-later
+  # check. Voiding it too makes Ozark Feed & Seed's newest check the story's
+  # again, so the next run's prefill and panel match step 3.
+  - key: PageUp
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.edit_print_status, equals: queue}
+  - assert_state: {key: screen.number_text, equals: "To print"}
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.save.error, equals: false}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_exists: {role: label, label: "84,210.55"}
+  - assert_state: {key: screen.number, equals: 4418}
+  - assert_no_clipping: {}
+  # Minimum window (960 x 640): the payee panel goes under the form and the
+  # check card fits its column.
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: text_input, label: "Amount ($)"}
+  - assert_no_clipping: {}
+  - screenshot: write-check-960x640
+  - resize: {width: 1440, height: 940}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Write Check"}
+
+# `ui-check write_check --compare`: the mockup example typed into a new
+# window and left unsaved. The lines go in before the payee, so no prefill
+# runs; line 2 has no account, so the AI suggests one (the mockup's ghost).
+compare:
+  - key: Ctrl+W
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: grid_cell, label: "Account, line 1"}
+  - type: {text: "5100"}
+  - key: Tab
+  - type: {text: "842.15"}
+  - key: Tab
+  - type: {text: Perennials}
+  - key: Tab
+  - type: {text: Hollister Family}
+  - key: Tab
+  - key: Space
+  - key: Tab
+  - type: {text: Install}
+  - key: Enter
+  - key: Enter
+  - key: Tab
+  - type: {text: "444.25"}
+  - key: Tab
+  - type: {text: Hardwood mulch}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: Install}
+  - key: Enter
+  - type: {text: Ozark Feed, target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - click: {role: text_input, label: "No."}
+  - key: Ctrl+A
+  - type: {text: "4418"}
+  # Leaving the lines gave the blank check amount their total; typed over.
+  - click: {role: text_input, label: "Amount ($)"}
+  - key: Ctrl+A
+  - type: {text: "1286.40"}
+  - key: Tab
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - type: {text: "Acct 7712 · perennials and mulch"}
+  - key: Tab
+  - assert_value: {target: {role: text_input, label: "Amount ($)"}, equals: "1,286.40"}
+  - assert_value: {target: {role: grid_cell, label: "Customer:Job, line 1"}, equals: "Hollister Family Trust"}
+  - assert_state: {key: screen.totals, equals: balanced}
+  - assert_state: {key: screen.ai.chip, equals: true}

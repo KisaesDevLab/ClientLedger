@@ -52,7 +52,8 @@ pub enum MatchTier {
     WordPrefix,
     /// Anywhere in the name.
     Substring,
-    /// No query: every active entry, by name (the full list).
+    /// No query: every active entry (the full list): numbered entries by
+    /// number (`900` before `1000`), then the rest by name.
     All,
 }
 
@@ -194,6 +195,12 @@ impl LookupIndex {
         let by_tier = match a.tier {
             MatchTier::Number => x.number_lc.cmp(&y.number_lc),
             MatchTier::NamePrefix => x.name_lc.len().cmp(&y.name_lc.len()),
+            MatchTier::All => match (&x.number_lc, &y.number_lc) {
+                (Some(a), Some(b)) => crate::lists::accounts::number_cmp(a, b),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => Ordering::Equal,
+            },
             _ => Ordering::Equal,
         };
         a.tier
@@ -207,7 +214,7 @@ impl LookupIndex {
     }
 
     /// The best `limit` matches for `query`, best first. An empty query
-    /// lists active entries by name (as [`MatchTier::All`]).
+    /// lists active entries by number, then name (as [`MatchTier::All`]).
     #[must_use]
     pub fn rank(&self, query: &str, limit: usize) -> Vec<Ranked> {
         self.rank_counted(query, limit).0
@@ -368,12 +375,21 @@ mod tests {
     }
 
     #[test]
-    fn empty_query_lists_active_by_name_and_limit_applies() {
+    fn empty_query_lists_active_by_number_then_name_and_limit_applies() {
         let ix = accounts();
         let all: Vec<u64> = ix.rank("", 100).iter().map(|r| r.id).collect();
-        assert_eq!(all, [4, 3, 5, 2, 1, 6]);
+        assert_eq!(all, [6, 1, 2, 3, 4, 5], "by number; the unnumbered last");
         let two: Vec<u64> = ix.rank("", 2).iter().map(|r| r.id).collect();
-        assert_eq!(two, [4, 3]);
+        assert_eq!(two, [6, 1]);
+        // Numbers compare as numbers: 900 before 1000.
+        let mixed = LookupIndex::new(vec![
+            e(1, Some("1000"), "Checking"),
+            e(2, Some("900"), "Petty cash"),
+            e(3, None, "Brokerage"),
+            e(4, None, "Annex"),
+        ]);
+        let all: Vec<u64> = mixed.rank("", 10).iter().map(|r| r.id).collect();
+        assert_eq!(all, [2, 1, 4, 3]);
         assert_eq!(ix.rank("m", 0), Vec::<Ranked>::new());
         assert_eq!(ix.len(), 7);
         assert!(!ix.is_empty());

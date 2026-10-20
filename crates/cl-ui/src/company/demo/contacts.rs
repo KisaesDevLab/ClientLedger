@@ -118,6 +118,23 @@ pub fn contacts() -> Vec<Contact> {
             }
             _ => {}
         }
+        // The Write Check story vendor's address and default account.
+        if let Some(d) = sample
+            .company
+            .vendor_details
+            .iter()
+            .find(|d| &d.name == name)
+        {
+            f.billing_line1 = Some(d.address_line1.clone());
+            f.billing_city = Some(d.city.clone());
+            f.billing_state = Some(d.state.clone());
+            f.billing_zip = Some(d.zip.clone());
+            f.default_expense_account_id = d
+                .default_expense_account
+                .as_deref()
+                .and_then(|n| n.parse().ok())
+                .map(account_id);
+        }
         push(f, true);
     }
     out
@@ -204,6 +221,7 @@ pub fn history(state: &DemoState, id: ContactId, limit: usize) -> (Vec<Transacti
             total: Some(amount),
             display_total: Some(amount),
             created_at: None,
+            check_number: None,
         });
     }
     (rows, total)
@@ -232,6 +250,41 @@ fn open(state: &DemoState, contacts: &[Contact], id: ContactId, account: &str) -
         }
     }
     net
+}
+
+/// A vendor's unpaid bills at the story date, newest first: (bill, number,
+/// due date, still owed). The sample's bill payments are not tied to
+/// bills, so the demo pays the oldest bills first and the newest ones stay
+/// open for what the vendor is still owed (the engine tracks this itself).
+#[must_use]
+pub fn open_bills(
+    state: &DemoState,
+    id: ContactId,
+) -> Vec<(TransactionId, String, Option<cl_core::CalendarDate>, Money)> {
+    let contacts = state.contacts.clone().unwrap_or_default();
+    let names = fixture_names(state, &contacts, id);
+    let mut owed = open(state, &contacts, id, AP);
+    let sample = cl_company::Sample::load();
+    let mut out = Vec::new();
+    for t in sample.transactions.iter().rev() {
+        if !owed.is_positive() {
+            break;
+        }
+        if t.kind != "bill"
+            || t.date > DemoState::today()
+            || !t.contact.as_ref().is_some_and(|c| names.contains(c))
+        {
+            continue;
+        }
+        let mut total = Money::ZERO;
+        for l in t.lines.iter().filter(|l| l.account == AP) {
+            total = l.credit.checked_add(total).unwrap_or(total);
+        }
+        let due = if total < owed { total } else { owed };
+        owed = owed.checked_sub(due).unwrap_or(Money::ZERO);
+        out.push((txn_id(t.id), t.number.clone(), t.due, due));
+    }
+    out
 }
 
 /// The client balance summary the engine would send: active clients with
