@@ -36,6 +36,10 @@ const SYSTEM_NUMBERS: [&str; 7] = [
     "10100", "10150", "10200", "20100", "20900", "30000", "30120",
 ];
 
+/// The owner's equity accounts the engine seeds for a single-member LLC
+/// (`equity-roles-v1`, U-56): Owner's Contribution, Owner's Draw.
+const EQUITY_ROLE_NUMBERS: [&str; 2] = ["30160", "30170"];
+
 /// Tenant C: a company created with system accounts only, shared by the
 /// lifecycle tests in this file (created on first use).
 fn tenant_c(h: &Harness) -> TenantId {
@@ -82,10 +86,17 @@ pub fn coa_import_settings_and_setup(h: &Harness) {
         "systemAccountsOnly seeded {} accounts",
         before.len()
     );
+    // equity-roles-v1 (U-56) also seeds the owner's equity accounts of a
+    // single-member LLC: Owner's Contribution 30160, Owner's Draw 30170.
+    let roles: &[&str] = if h.caps.has(Capabilities::EQUITY_ROLES) {
+        &EQUITY_ROLE_NUMBERS
+    } else {
+        &[]
+    };
     for a in &before {
         if let Some(n) = &a.fields.account_number {
             assert!(
-                SYSTEM_NUMBERS.contains(&n.as_str()),
+                SYSTEM_NUMBERS.contains(&n.as_str()) || roles.contains(&n.as_str()),
                 "non-system account seeded: {n}"
             );
         }

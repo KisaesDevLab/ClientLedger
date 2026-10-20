@@ -417,7 +417,10 @@ pub fn field_census(h: &Harness) {
             name: "GET /api/v1/company/settings settings",
             keys: fields_of::<CompanySettings>(),
             strings: &["defaultSalesTaxRate"],
-            optional: &[],
+            // Read when the settings carry it; the engine's settings reply
+            // does not (pin f78583e): the legal form comes from
+            // `GET /company` and `GET /company/equity-roles`.
+            optional: &["entityType"],
         },
         &raw(h, "/api/v1/company/settings", &[])["settings"],
     );

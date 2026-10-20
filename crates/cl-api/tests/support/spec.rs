@@ -21,10 +21,10 @@ use sha2::{Digest, Sha256};
 /// (U-24) will add. Since pin 5c8e9665 (engine PRs #151-#153) the tenant
 /// and archive routes, the usage summary, the closing password and
 /// `DELETE /transactions/{id}` are in the spec; since pin 454fd23 (engine
-/// PR #156) the P13 check edit and rules evaluate call are too. The P14
-/// feed deposit groupings and equity roles are listed until their engine
-/// PR (#159) lands.
-pub const OUTSIDE_SPEC: [(&str, &str); 10] = [
+/// PR #156) the P13 check edit and rules evaluate call are too; since pin
+/// f78583e (engine PR #159) the P14 feed deposit groupings and equity
+/// roles are.
+pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -34,10 +34,6 @@ pub const OUTSIDE_SPEC: [(&str, &str); 10] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
-    // P14: coded against target/plans/P14-engine-shapes.md until engine PR
-    // #159 lands (`feed-deposit-groupings-v1`, `equity-roles-v1`).
-    ("GET", "/api/v1/banking/feed/{id}/deposit-groupings"),
-    ("GET", "/api/v1/company/equity-roles"),
 ];
 
 /// Lowercase hex of a SHA-256.

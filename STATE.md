@@ -2,7 +2,7 @@
 
 **Current phase:** P14 — Deposits, transfers, sales receipts, card charges, owner and loan helpers (Next; Intuit compliance check runs first — see Owner-requested checkpoints)
 **Status:** P13 built on `phase/P13-write-check`; PR to open
-**Engine commit:** `454fd23ae06799e5d4c68c50f04970edaf93d93d` (`main`, pinned 2026-10-20 after engine PR #156: check-edit-v1, line-billable-v1, rules-evaluate-v1, migration 0221; bump per Q-02)
+**Engine commit:** `f78583edabe88929f92c10521fefdd1f287c3d81` (`main`, pinned 2026-10-20 after engine PR #159: deposit-grouping-v1, deposit-cashback-v1, vendor-refund-v1, equity-roles-v1, feed-deposit-groupings-v1, daily-sales-lock-v1, migration 0223; bump per Q-02)
 **Last updated:** 2026-10-20
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
