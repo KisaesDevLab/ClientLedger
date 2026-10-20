@@ -53,6 +53,7 @@ mod contacts;
 mod csv;
 mod items;
 mod lists;
+mod register;
 mod tags;
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -65,6 +66,7 @@ fn catalog() -> &'static HashMap<&'static str, &'static str> {
             .chain(items::ENGLISH)
             .chain(tags::ENGLISH)
             .chain(csv::ENGLISH)
+            .chain(register::ENGLISH)
             .copied()
             .collect()
     })
@@ -136,6 +138,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("status.hint.next_window", "next window"),
     ("status.hint.shortcuts", "shortcuts"),
     ("status.hint.help", "help"),
+    ("status.hint.record", "record"),
+    ("status.hint.dates", "dates"),
+    ("status.hint.delete", "delete"),
+    ("status.hint.open_form", "open form"),
     ("toast.not_here", "That does not apply to this screen."),
     ("toast.help_later", "Help for this screen is not available yet."),
     // Palette and overlay
@@ -490,6 +496,19 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.api.conflict", "This change conflicts with something already in your books."),
     ("error.api.closed_period", "That date falls in a period you have closed."),
     ("fix.api.closed_period", "Pick a date after the closing date, or ask an administrator to reopen the period."),
+    ("error.api.closing_password_wrong", "That closing-date password isn't right."),
+    ("error.api.closing_password_required", "This change needs the closing-date password."),
+    ("fix.api.closing_password_required", "Enter the closing-date password and try again."),
+    ("error.api.closing_password_owner", "Only the company owner can set the first closing-date password."),
+    ("fix.api.ask_owner", "Ask the owner to set it."),
+    ("error.api.closing_password_attempts", "Too many wrong closing-date passwords."),
+    ("error.api.account_password_wrong", "That sign-in password isn't right."),
+    ("error.api.conflict_reconciled", "This transaction is part of a finished reconciliation, so it can't be changed that way."),
+    ("error.api.conflict_deleted", "This transaction was already deleted."),
+    ("error.api.delete_unsupported", "This kind of transaction can't be deleted."),
+    ("error.api.delete_linked", "Other transactions depend on this one, so it can't be deleted."),
+    ("fix.api.void_instead", "Void it instead. It stays in your records and in the audit trail."),
+    ("error.api.inexact_money", "The books engine sent amounts ClientLedger can't show exactly, so they aren't shown."),
     ("error.api.offline", "That needs the internet, and ClientLedger is working offline."),
     ("fix.api.offline", "Turn off Work offline in Preferences if you want to use it."),
     ("error.api.feature_off", "That feature is not turned on."),
@@ -786,8 +805,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("dev.grid_demo.col.type", "Type"),
     ("dev.grid_demo.col.payee", "Payee"),
     ("dev.grid_demo.col.payment", "Payment"),
-    ("dev.grid_demo.col.mark", "\u{2713}"),
-    ("dev.grid_demo.col.mark_help", "R = reconciled, \u{2713} = cleared"),
+    ("dev.grid_demo.col.mark", "Cleared"),
+    ("dev.grid_demo.col.mark_help", "A check mark means cleared; R means reconciled"),
     ("dev.grid_demo.col.deposit", "Deposit"),
     ("dev.grid_demo.col.balance", "Balance"),
     ("dev.grid_demo.col.select", "Pay"),
@@ -917,6 +936,7 @@ mod tests {
             .chain(items::ENGLISH)
             .chain(tags::ENGLISH)
             .chain(csv::ENGLISH)
+            .chain(register::ENGLISH)
         {
             assert!(seen.insert(*k), "duplicate key {k}");
             assert_ne!(*v, "", "{k}");

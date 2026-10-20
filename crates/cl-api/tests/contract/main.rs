@@ -11,6 +11,8 @@ mod support;
 
 mod common;
 mod contract_accounts;
+mod contract_audit;
+mod contract_bank_postings;
 mod contract_capabilities;
 mod contract_census;
 mod contract_closed_period;
@@ -26,6 +28,8 @@ mod contract_list_csv;
 mod contract_logging;
 mod contract_money;
 mod contract_preferences;
+mod contract_register;
+mod contract_register_property;
 mod contract_resources;
 mod contract_session;
 mod contract_tags;
@@ -159,6 +163,34 @@ fn main() -> std::process::ExitCode {
             contract_journal::lost_reply_is_reconciled_to_exactly_one_posting,
         ),
         (
+            "register::dates_paging_and_exact_money",
+            contract_register::dates_paging_and_exact_money,
+        ),
+        (
+            "register::card_register_columns_and_sign",
+            contract_register::card_register_columns_and_sign,
+        ),
+        (
+            "bank_postings::each_kind_round_trip_update_and_void",
+            contract_bank_postings::each_kind_round_trip_update_and_void,
+        ),
+        (
+            "bank_postings::lost_replies_are_reconciled_to_one_posting",
+            contract_bank_postings::lost_replies_are_reconciled_to_one_posting,
+        ),
+        (
+            "register_property::balance_holds_after_random_edits",
+            contract_register_property::balance_holds_after_random_edits,
+        ),
+        (
+            "audit::update_and_void_keep_the_before_image",
+            contract_audit::update_and_void_keep_the_before_image,
+        ),
+        (
+            "audit::delete_keeps_every_line_in_the_audit_trail",
+            contract_audit::delete_keeps_every_line_in_the_audit_trail,
+        ),
+        (
             "money::seeded_amounts_round_trip_string_equal",
             contract_money::seeded_amounts_round_trip_string_equal,
         ),
@@ -209,6 +241,10 @@ fn main() -> std::process::ExitCode {
         (
             "closed_period::locked_dates_are_refused_both_ways",
             contract_closed_period::locked_dates_are_refused_both_ways,
+        ),
+        (
+            "closed_period::bank_postings_in_a_closed_period",
+            contract_closed_period::bank_postings_in_a_closed_period,
         ),
         (
             "capabilities::error_codes_u21",

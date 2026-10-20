@@ -27,7 +27,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use cl_core::ids::TransactionId;
+use cl_core::ids::{AccountId, TransactionId};
 use cl_core::{CalendarDate, Timestamp};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -40,6 +40,7 @@ use crate::errors::ApiError;
 use crate::idempotency::{Ambiguity, BoxFuture, Reconciled, Reconciler};
 use crate::resources::common::{Query, Spec};
 use crate::resources::operations::{LEDGER_VERSION, Operation, TXN_GET, TXNS_LIST};
+use crate::resources::transactions::TxnType;
 use crate::resources::versioning::EditableFields;
 use crate::session::Session;
 use crate::wire::{Capabilities, Page, PageRequest};
@@ -61,8 +62,13 @@ pub(crate) fn row_fp<T: DeserializeOwned + EditableFields>(v: Value) -> Option<[
 
 /// Where a create's candidates are searched.
 pub(crate) enum Search {
-    /// Journal entries dated `date` (listed, then each candidate read).
-    JournalEntry { date: CalendarDate },
+    /// Transactions of `kind` dated `date`, touching `account` when given
+    /// (listed, then each candidate read by id).
+    Txn {
+        kind: TxnType,
+        date: CalendarDate,
+        account: Option<AccountId>,
+    },
     /// Master data whose `name_field` equals `name` exactly.
     Named {
         spec: &'static Spec,
@@ -341,11 +347,18 @@ impl Probe {
     ) -> Check {
         // (candidate count, matching replies)
         let (candidates, mut matches) = match search {
-            Search::JournalEntry { date } => {
+            Search::Txn {
+                kind,
+                date,
+                account,
+            } => {
                 let mut q = Query::default();
-                q.put("txnType", "journal_entry");
+                q.put("txnType", kind.as_str());
                 q.put("startDate", date.to_wire());
                 q.put("endDate", date.to_wire());
+                if let Some(a) = account {
+                    q.put("accountId", a.to_string());
+                }
                 let Some(rows) = self.search_rows(&TXNS_LIST, "data", &q).await else {
                     return Check::Wait;
                 };

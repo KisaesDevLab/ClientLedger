@@ -7,6 +7,7 @@ use cl_settings::{ACCENT_PALETTE, Accent};
 
 pub mod contacts;
 pub mod lists;
+pub mod register;
 
 /// One demo company card.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,6 +61,8 @@ pub struct DemoState {
         std::collections::BTreeMap<cl_core::ids::TagGroupId, std::collections::BTreeSet<String>>,
     /// Tags merged or deleted in the demo (their usage moved or gone).
     pub tags_gone: std::collections::BTreeSet<cl_core::ids::TagId>,
+    /// Transactions recorded or changed in the demo registers (P12).
+    pub ledger: register::DemoLedger,
 }
 
 fn id(n: u8) -> TenantId {
@@ -119,6 +122,7 @@ impl DemoState {
             tag_groups: None,
             required_tag_groups: std::collections::BTreeMap::new(),
             tags_gone: std::collections::BTreeSet::new(),
+            ledger: register::DemoLedger::default(),
         }
     }
 
@@ -263,7 +267,8 @@ struct DemoRow {
 /// accounts the sample posts to, and a few sub-accounts and an inactive
 /// account so the hierarchy and the filter have something to show. The
 /// balances are the fixture's own figures at the story date, standing in
-/// for the engine (credit-normal accounts shown positive). Synthetic.
+/// for the engine's stored balance (debits minus credits for every type, so
+/// credit-normal accounts carry a negative figure). Synthetic.
 #[must_use]
 pub fn chart() -> Vec<cl_api::Account> {
     use cl_api::{Account, AccountFields, AccountType};
@@ -350,19 +355,9 @@ pub fn chart() -> Vec<cl_api::Account> {
                 system,
             } = r;
             let n: u32 = number.parse().unwrap_or(0);
-            let net = sample.balance(&number, story);
-            let credit_normal = matches!(
-                t,
-                AccountType::Liability
-                    | AccountType::Equity
-                    | AccountType::Revenue
-                    | AccountType::OtherRevenue
-            );
-            let balance = if credit_normal {
-                net.checked_neg().ok()
-            } else {
-                Some(net)
-            };
+            // Debits minus credits for every type, like the engine's
+            // stored `accounts.balance`; screens flip it for display.
+            let balance = Some(sample.balance(&number, story));
             Account {
                 id: account_id(n),
                 fields: AccountFields {

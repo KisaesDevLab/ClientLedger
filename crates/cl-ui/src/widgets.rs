@@ -30,6 +30,39 @@ pub fn kbd(ui: &mut Ui, text: &str) -> Response {
         .response
 }
 
+/// A button with its shortcut chip inside, after the label ("Go To
+/// `Ctrl F`"). The chip is painted, so the accessible name stays the label
+/// alone. No chip when `chip` is empty.
+pub fn button_with_chip(ui: &mut Ui, label: &str, chip: &str) -> Response {
+    if chip.is_empty() {
+        return ui.button(label);
+    }
+    let t = Tokens::of(ui.ctx());
+    let font = styles::kbd().resolve(ui.style());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(chip.to_string(), font, t.text_secondary);
+    let size = galley.size() + Vec2::new(10.0, 2.0);
+    let id = egui::IdSalt::new(("button-chip", label));
+    let r = egui::Button::new((label, egui::Atom::custom(id, size))).atom_ui(ui);
+    if let Some(rect) = r.rect(id) {
+        let p = ui.painter();
+        p.rect(
+            rect,
+            CornerRadius::same(3),
+            t.surface_window,
+            Stroke::new(1.0, t.border_strong),
+            StrokeKind::Inside,
+        );
+        p.galley(
+            rect.center() - galley.size() / 2.0,
+            galley,
+            t.text_secondary,
+        );
+    }
+    r.response
+}
+
 /// A pill with a count, in the warning colour ("37" on Bank Feed).
 pub fn badge(ui: &mut Ui, count: u32) -> Response {
     let t = Tokens::of(ui.ctx());
@@ -129,4 +162,45 @@ pub fn row_button(
         }
     }
     (response, rect)
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui::{self, accesskit::Role};
+
+    /// The chip is painted inside the button, wider than the label alone,
+    /// and the accessible name stays the label ("Go To", not "Go To Ctrl F").
+    #[test]
+    fn button_with_chip_keeps_the_label_as_its_name() {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        ctx.enable_accesskit();
+        let mut widths = (0.0, 0.0);
+        let mut out = None;
+        for _ in 0..2 {
+            let mut o = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    widths.0 = super::button_with_chip(ui, "Go To", "Ctrl F").rect.width();
+                    widths.1 = super::button_with_chip(ui, "Go To", "").rect.width();
+                });
+            });
+            o.textures_delta.clear();
+            out = Some(o);
+        }
+        assert!(
+            widths.0 > widths.1 + 20.0,
+            "chip widens the button: {widths:?}"
+        );
+        let update = out
+            .and_then(|o| o.platform_output.accesskit_update)
+            .expect("accesskit is on");
+        let names: Vec<String> = update
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.role() == Role::Button)
+            .filter_map(|(_, n)| n.label().map(str::to_string))
+            .collect();
+        assert_eq!(names, ["Go To", "Go To"]);
+    }
 }

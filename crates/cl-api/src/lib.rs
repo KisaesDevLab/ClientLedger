@@ -57,9 +57,15 @@ pub use resources::ai::{
     AiUsageSummary, CompanyConsent, ConsentRow, ConsentStatus, DESKTOP_PROVIDERS, ProviderModels,
     ProviderTest, UsageSummaryRow, UsageTotals,
 };
+pub use resources::audit::{Audit, AuditAction, AuditEntity, AuditEntry, AuditImage, AuditLine};
+pub use resources::bank_postings::{
+    BankPosting, BankPostingKind, CardChargeDraft, CheckDraft, DepositDraft, PAYEE_NAME_MAX,
+    SplitLine, TransferDraft,
+};
 pub use resources::common::SortDir;
 pub use resources::company::{
-    AccountingMethod, ClosingDateChange, CompanyProfile, CompanyProfileUpdate, CompanySettings,
+    AccountingMethod, CLOSING_PASSWORD_MAX_BYTES, CLOSING_PASSWORD_MIN_CHARS, ClosingDateChange,
+    ClosingPasswordStatus, CompanyProfile, CompanyProfileUpdate, CompanySettings,
     CompanySettingsUpdate, EntityType,
 };
 pub use resources::contacts::{
@@ -74,6 +80,11 @@ pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, Cont
 pub use resources::operations::{OPERATIONS, Operation, RetryClass};
 pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
 pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};
+pub use resources::register::{
+    Category, ClearState, ClearedFilter, EntryType, REGISTER_MAX_PER_PAGE, Register,
+    RegisterAccount, RegisterAmount, RegisterLine, RegisterPage, RegisterQuery, RegisterSort,
+    RegisterSummary,
+};
 pub use resources::reports::{
     AccountReport, AccountReportLine, ApAgingSummary, ApAgingVendor, BalanceSheet,
     BalanceSheetEntry, CustomerBalanceRow, CustomerBalanceSummary, ProfitLoss, ReportDate, Reports,
@@ -99,8 +110,9 @@ pub use resources::tenants::{
     ImportVerification, JobError, JobId, JobState, NewTenant, TenantSummary, Tenants,
 };
 pub use resources::transactions::{
-    Basis, JeLine, MAX_LINES, NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter,
-    TransactionLine, TransactionSummary, Transactions, TxnSort, TxnStatus, TxnType,
+    Basis, DELETE_REASON_MAX_CHARS, DeleteOptions, JeLine, MAX_LINES, NewJournalEntry, ReportBasis,
+    Side, Transaction, TransactionFilter, TransactionLine, TransactionSummary, Transactions,
+    TxnSort, TxnStatus, TxnType,
 };
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{

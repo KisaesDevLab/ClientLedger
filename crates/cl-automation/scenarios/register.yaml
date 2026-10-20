@@ -1,0 +1,365 @@
+# Account register (P12 WP5-WP8) against `clientledger --demo`: Ctrl+G
+# brings the Operating Checking register up on the last 90 days, newest at
+# the bottom, with the keyboard in the entry row; a check and a deposit
+# recorded from the entry row with the keyboard only; an edit; Splits; the
+# one-line toggle; a range change; the footer. The demo engine supplies
+# every row and balance (synthetic); the register adds nothing up. Each
+# theme's pass records its own transactions, so nothing below counts rows.
+name: register
+description: Register view, entry row, edit, Splits, one-line toggle, range change and footer.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+G
+  - assert_exists: {role: tab, label: Register · Operating Checking}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.account_class, equals: bank}
+  - assert_state: {key: screen.range, equals: last_90_days}
+  - assert_state: {key: screen.range_end, equals: "2026-11-04"}
+  - assert_state: {key: screen.balance_mode, equals: engine}
+  - assert_state: {key: screen.display_only, equals: false}
+  - assert_exists: {role: label, label: 1010 · Operating Checking}
+  - assert_exists: {label_contains: Bank account}
+  # Newest at the bottom; the keyboard is in the entry row.
+  - assert_state: {key: screen.entry.focused, equals: true}
+  - assert_state: {key: screen.entry.mode, equals: new}
+  - assert_state: {key: screen.entry.view_only, equals: false}
+  - assert_exists: {role: row, label_contains: "11/04/2026", index: 0}
+  # Footer: the engine's summary, never added up on screen.
+  - assert_state: {key: screen.footer.failed, equals: false}
+  - assert_state: {key: screen.footer.last_reconciled, equals: "Last reconciled 09/30/2026"}
+  - assert_exists: {role: label, label: Ending balance}
+  - assert_exists: {role: label, label: Cleared balance}
+  - assert_exists: {role: label, label_contains: uncleared}
+  - assert_no_clipping: {}
+  - screenshot: register
+  # Minimum window (960 x 640): the toolbar wraps, every column fits, and
+  # the entry row and footer stay on screen.
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: combo_box, label: Sort by}
+  - assert_exists: {role: column_header, label: Balance}
+  - assert_exists: {role: button, label: Record}
+  - assert_exists: {role: label, label: Ending balance}
+  - assert_no_clipping: {}
+  - screenshot: register-960x640
+  - resize: {width: 1440, height: 940}
+
+  # --- Entry row: a check, keyboard only (date keeps today) -----------------
+  - key: Tab
+  - key: Tab
+  - type: {text: Hollister Fuel}
+  - key: Tab
+  - type: {text: "6100"}
+  - key: Tab
+  - type: {text: Mower fuel}
+  - key: Tab
+  - type: {text: "125.50"}
+  - key: Tab
+  - assert_state: {key: screen.entry.kind, equals: check}
+  - assert_state: {key: screen.entry.number_proposed, equals: true}
+  - assert_exists: {role: label, label: Check}
+  - screenshot: entry-check
+  - key: Enter
+  - assert_state: {key: screen.entry.last_saved, equals: check}
+  - assert_state: {key: screen.entry.empty, equals: true}
+  - assert_state: {key: screen.entry.error, equals: false}
+  - assert_state: {key: screen.loaded, equals: true}
+
+  # --- Entry row: a deposit (second amount column) ---------------------------
+  - key: Tab
+  - key: Tab
+  - type: {text: Riverbend}
+  - key: Tab
+  - type: {text: "4000"}
+  - key: Tab
+  - type: {text: Spring cleanup}
+  - key: Tab
+  - key: Tab
+  - type: {text: "300"}
+  - key: Tab
+  - assert_state: {key: screen.entry.kind, equals: deposit}
+  - assert_state: {key: screen.entry.has_number, equals: false}
+  - key: Enter
+  - assert_state: {key: screen.entry.last_saved, equals: deposit}
+  - assert_state: {key: screen.entry.empty, equals: true}
+  - assert_no_clipping: {}
+  - screenshot: entry-recorded
+
+  # --- Edit the deposit just recorded: Shift+Tab to the register, Enter ---
+  - key: Shift+Tab
+  - assert_state: {key: screen.focused, equals: true}
+  - key: Enter
+  - assert_state: {key: screen.entry.mode, equals: edit}
+  - assert_state: {key: screen.entry.kind, equals: deposit}
+  - assert_state: {key: screen.entry.focused, equals: true}
+  # The keyboard is in the deposit cell, after the amount.
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - type: {text: "350"}
+  - screenshot: entry-edit
+  - key: Enter
+  - assert_state: {key: screen.entry.last_saved, equals: update}
+  - assert_state: {key: screen.entry.mode, equals: new}
+  - assert_state: {key: screen.entry.error, equals: false}
+
+  # --- Splits on a new check (Ctrl+E opens them from the entry row) --------
+  - key: Tab
+  - key: Tab
+  - type: {text: Hollister Fuel}
+  - key: Tab
+  - type: {text: "6100"}
+  - key: Tab
+  - key: Tab
+  - type: {text: "200"}
+  - key: Tab
+  - key: Ctrl+E
+  - assert_state: {key: screen.entry.splits.open, equals: true}
+  - assert_state: {key: screen.entry.splits.focused, equals: true}
+  - key: Tab
+  - type: {text: "150"}
+  - key: Enter
+  - type: {text: "6350"}
+  - key: Tab
+  - type: {text: "40"}
+  - key: Enter
+  - assert_state: {key: screen.entry.splits.lines, equals: 2}
+  - assert_state: {key: screen.entry.splits.remaining_zero, equals: false}
+  - assert_exists: {role: label, label_contains: "Remaining to assign 10.00"}
+  - key: Up
+  - key: Tab
+  - type: {text: "50"}
+  - key: Enter
+  - assert_state: {key: screen.entry.splits.remaining_zero, equals: true}
+  - assert_exists: {role: label, label_contains: "Remaining to assign 0.00"}
+  - assert_no_clipping: {}
+  - screenshot: splits
+  # Enter on the empty split line records the check.
+  - key: Enter
+  - assert_state: {key: screen.entry.last_saved, equals: check}
+  - assert_state: {key: screen.entry.splits.open, equals: false}
+  - assert_state: {key: screen.entry.empty, equals: true}
+
+  # --- One line (toolbar checkbox), then back to two lines -----------------
+  - click: {role: check_box, label: One line}
+  - assert_state: {key: screen.one_line, equals: true}
+  - assert_no_clipping: {}
+  - screenshot: one-line
+  - command: register.one_line
+  - assert_state: {key: screen.one_line, equals: false}
+
+  # --- Quick filters (Q-189): Payee autofills, amounts are exact -----------
+  - assert_exists: {role: check_box, label: Uncleared}
+  - assert_exists: {role: combo_box, label: Tag}
+  - assert_exists: {label: Closed period (locked)}
+  - assert_exists: {label: R reconciled}
+  - type: {text: hollister fu, target: {role: text_input, label: Payee}}
+  - key: Enter
+  - assert_state: {key: screen.filters_active, equals: true}
+  - assert_state: {key: screen.filters.payee, equals: true}
+  - assert_value: {target: {role: text_input, label: Payee}, equals: Hollister Fuel Stop}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: row, label_contains: Hollister Fuel Stop, index: 0}
+  # The demo engine's balances ignore filters (R1): no dashes.
+  - assert_state: {key: screen.balance_mode, equals: engine}
+  - type: {text: "300", target: {role: text_input, label: Amount from}}
+  - type: {text: "100", target: {role: text_input, label: Amount to}}
+  - key: Enter
+  # Leaving Amount from applied it; To below From is refused.
+  - assert_state: {key: screen.filters.problem, equals: true}
+  - assert_exists: {role: label, label_contains: The lowest amount is more than the highest amount}
+  - assert_no_clipping: {}
+  - screenshot: filters
+  # Another filter change keeps the message (the bad range is never dropped
+  # silently).
+  - click: {role: check_box, label: Uncleared}
+  - assert_state: {key: screen.filters.uncleared, equals: true}
+  - assert_state: {key: screen.filters.problem, equals: true}
+  - assert_exists: {role: label, label_contains: The lowest amount is more than the highest amount}
+  - click: {label: Clear filters}
+  - assert_state: {key: screen.filters_active, equals: false}
+  - assert_state: {key: screen.filters.problem, equals: false}
+  - assert_value: {target: {role: text_input, label: Payee}, equals: ""}
+  - assert_state: {key: screen.loaded, equals: true}
+
+  # --- Go To (Ctrl+F): the check's memo, up from the newest line, then
+  # nothing below it ---------------------------------------------------------
+  - key: Ctrl+F
+  - assert_state: {key: screen.goto.open, equals: true}
+  - type: {text: Mower fuel}
+  - click: {role: button, label: Find Previous}
+  - assert_state: {key: screen.goto.last, equals: found}
+  - assert_state: {key: screen.goto.jump_pending, equals: false}
+  - assert_state: {key: screen.focused, equals: true}
+  - assert_exists: {role: row, label_contains: Hollister Fuel Stop, index: 0}
+  - screenshot: goto
+  - type: {text: zz no such memo, target: {role: text_input, label: Find}}
+  - key: Enter
+  - assert_state: {key: screen.goto.last, equals: not_found}
+  - assert_exists: {role: label, label: Not found in the shown dates.}
+  - click: {role: button, label: Close}
+  - assert_state: {key: screen.goto.open, equals: false}
+  # Esc in the Go To bar closes just the bar, never the register tab.
+  - key: Ctrl+F
+  - assert_state: {key: screen.goto.open, equals: true}
+  - key: Escape
+  - assert_state: {key: screen.goto.open, equals: false}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_exists: {role: tab, label: Register · Operating Checking}
+
+  # --- QuickReport (Ctrl+Shift+Q) for this account and dates ---------------
+  - key: Ctrl+Shift+Q
+  - assert_state: {key: screen.quick_report.loaded, equals: true}
+  - assert_state: {key: screen.quick_report.error, equals: false}
+  - assert_exists: {role: label, label_contains: "QuickReport: Operating Checking"}
+  - assert_no_clipping: {}
+  - screenshot: quick-report
+  - click: {role: button, label: Close report}
+  - assert_state: {key: screen.quick_report, equals: null}
+  # Esc closes just the QuickReport, never the register tab.
+  - key: Ctrl+Shift+Q
+  - assert_state: {key: screen.quick_report.loaded, equals: true}
+  - key: Escape
+  - assert_state: {key: screen.quick_report, equals: null}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_exists: {role: tab, label: Register · Operating Checking}
+
+  # --- Range: This month, then All dates -----------------------------------
+  - click: {role: combo_box, label: Show}
+  - click: {role: button, label_contains: This month}
+  - assert_state: {key: screen.range, equals: this_month}
+  - assert_state: {key: screen.range_start, equals: "2026-11-01"}
+  - assert_state: {key: screen.loaded, equals: true}
+  - screenshot: this-month
+  - click: {role: combo_box, label: Show}
+  - click: {role: button, label: All dates}
+  - assert_state: {key: screen.range, equals: all_dates}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.entry.focused, equals: true}
+  # Shift+Tab from the entry row goes back to the register.
+  - key: Shift+Tab
+  - assert_state: {key: screen.focused, equals: true}
+  # The oldest lines are in the closed period: locked and reconciled.
+  - key: Ctrl+Home
+  - assert_state: {key: screen.cursor_row, equals: 0}
+  - assert_exists: {role: row, label_contains: "Locked (closed period), Reconciled", index: 0}
+  - screenshot: all-dates
+  # Back to the default range so the next theme's run starts the same.
+  - click: {role: combo_box, label: Show}
+  - click: {role: button, label_contains: Last 90 days}
+  - assert_state: {key: screen.range, equals: last_90_days}
+
+  # --- Void, then Delete (P12 WP8): the newest line, the split check --------
+  - assert_state: {key: screen.loaded, equals: true}
+  - key: Shift+Tab
+  - key: Ctrl+End
+  - click: {role: button, label: "Void…"}
+  - assert_state: {key: screen.row_action.panel, equals: confirm_void}
+  - assert_exists: {role: label, label: Void this transaction?}
+  - type: {text: Entered twice, target: {role: text_input, label: Reason (optional)}}
+  - assert_no_clipping: {}
+  - screenshot: void-confirm
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.row_action.last, equals: void}
+  - assert_state: {key: screen.row_action.error, equals: false}
+  - assert_exists: {role: label, label: Transaction voided.}
+  - assert_state: {key: screen.loaded, equals: true}
+  # The demo engine deletes (txn-delete-v1): Ctrl+D asks, saying what happens.
+  - assert_state: {key: screen.row_action.delete_supported, equals: true}
+  - key: Ctrl+D
+  - assert_state: {key: screen.row_action.panel, equals: confirm_delete}
+  - assert_exists: {role: label, label_contains: It stays in the audit trail}
+  - screenshot: delete-confirm
+  - click: {role: button, label: Delete}
+  - assert_state: {key: screen.row_action.last, equals: delete}
+  - assert_state: {key: screen.row_action.error, equals: false}
+  - assert_state: {key: screen.loaded, equals: true}
+
+  # --- Closed period (demo closing date 09/30/2026; the synthetic demo
+  # closing-date password is "demo-close"): a check dated in it asks for the
+  # password; Cancel saves nothing; a wrong one is refused plainly; the
+  # right one records it. -----------------------------------------------------
+  - click: {role: combo_box, label: Show}
+  - click: {role: button, label_contains: This month}
+  - assert_state: {key: screen.entry.focused, equals: true}
+  # The keyboard is in the entry row's Date: out and back selects it.
+  - key: Tab
+  - key: Shift+Tab
+  - type: {text: 09/15/2026}
+  - key: Tab
+  - key: Tab
+  - type: {text: Hollister Fuel}
+  - key: Tab
+  - type: {text: "6100"}
+  - key: Tab
+  - key: Tab
+  - type: {text: "18.25"}
+  - key: Tab
+  - key: Enter
+  - assert_state: {key: screen.row_action.closing, equals: asking}
+  - assert_state: {key: screen.row_action.pending, equals: save}
+  - assert_exists: {role: label, label_contains: "closing date (09/30/2026)"}
+  - assert_exists: {role: password_input, label: Closing-date password}
+  - assert_no_clipping: {}
+  - screenshot: closing-password
+  - click: {role: button, label: Cancel}
+  - assert_state: {key: screen.row_action.closing, equals: cancelled}
+  - assert_state: {key: screen.entry.empty, equals: false}
+  - click: {role: button, label: Record}
+  - assert_state: {key: screen.row_action.closing, equals: asking}
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: not-the-password}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.row_action.closing, equals: rejected}
+  - assert_exists: {role: label, label: That password isn't right.}
+  - assert_not_exists: {role: label, label_contains: not-the-password}
+  - screenshot: closing-wrong
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: demo-close}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.row_action.closing, equals: done}
+  - assert_state: {key: screen.entry.last_saved, equals: check}
+  - assert_state: {key: screen.entry.empty, equals: true}
+  # Back to the default range, then close the register: the entry row keeps
+  # 09/15/2026, so the next theme's run opens a fresh one dated today.
+  - click: {role: combo_box, label: Show}
+  - click: {role: button, label_contains: Last 90 days}
+  - assert_state: {key: screen.range, equals: last_90_days}
+  - assert_state: {key: screen.entry.dirty, equals: false}
+
+  # --- A credit card (Q-P12h, Q-241): the engine sends a charge (a credit)
+  # as `deposit`; it sits under Charge, and the balance owed reads positive
+  # exactly as sent. ----------------------------------------------------------
+  - click: {role: combo_box, label: Account}
+  - click: {role: button, label_contains: Business Credit Card}
+  - assert_state: {key: screen.account_class, equals: credit_card}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: column_header, label: Charge, index: 0}
+  - assert_exists: {role: column_header, label: Payment, index: 0}
+  - assert_state: {key: screen.footer.ending, equals: "289.63"}
+  # Cleared balance in the natural sign too (credits minus debits): the
+  # sample clears only the card payments, so it reads as a credit (minus).
+  # The bank's sign would show +22,202.21.
+  - assert_state: {key: screen.footer.cleared, equals: "-22,202.21"}
+  - assert_no_clipping: {}
+  - screenshot: card
+  # The card opened in its own tab; close it, then select and close the
+  # bank register's tab (closing a tab may leave another tab active).
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Register"}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: Register}
+
+# `ui-check register --compare`: the steps above close the register, so the
+# compare screenshot opens it again (the mockup's main view).
+compare:
+  - key: Ctrl+G
+  - assert_exists: {role: tab, label: Register · Operating Checking}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.footer.loading, equals: false}

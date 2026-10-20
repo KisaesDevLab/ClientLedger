@@ -373,17 +373,54 @@ pub(crate) const CONTACTS_IMPORT: Operation = write(Method::Post, "/api/v1/conta
 /// Items as CSV.
 pub(crate) const ITEMS_EXPORT: Operation = read("/api/v1/items/export");
 
+// ---- P12 register, bank postings, audit, closing-date password ---------------
+
+/// One page of an account register.
+pub(crate) const REGISTER: Operation = read("/api/v1/accounts/{id}/register");
+/// The register footer.
+pub(crate) const REGISTER_SUMMARY: Operation = read("/api/v1/accounts/{id}/register/summary");
+/// Write a check (posts an `expense` with a check number).
+pub(crate) const CHECKS_CREATE: Operation = write(Method::Post, "/api/v1/checks");
+/// The audit trail (filtered by entity type and text).
+pub(crate) const AUDIT_LOG: Operation = read("/api/v1/audit-log");
+/// The closing date and whether a closing-date password is set (U-15).
+pub(crate) const CLOSING_PASSWORD_GET: Operation = read("/api/v1/company/closing-password");
+/// Sets, changes or clears the closing-date password (U-15): a credential
+/// change, never retried.
+pub(crate) const CLOSING_PASSWORD_PUT: Operation = op(
+    Method::Put,
+    "/api/v1/company/closing-password",
+    RetryClass::Never,
+    RouteKind::Session,
+    TimeoutClass::Auth,
+    true,
+);
+/// Soft-deletes a transaction (R7, `txn-delete-v1`).
+pub(crate) const TXN_DELETE: Operation = write(Method::Delete, "/api/v1/transactions/{id}");
+/// The owner resets a forgotten closing-date password after re-entering
+/// their sign-in password (U-15, Q-239): a credential change, never retried.
+pub(crate) const CLOSING_PASSWORD_RESET: Operation = op(
+    Method::Post,
+    "/api/v1/company/closing-password/reset",
+    RetryClass::Never,
+    RouteKind::Session,
+    TimeoutClass::Auth,
+    true,
+);
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
-const NEVER_RETRIED: [(&str, &str); 3] = [
+const NEVER_RETRIED: [(&str, &str); 5] = [
     ("POST", "/api/v1/tenants"),
     ("POST", "/api/v1/tenants/{id}/delete"),
     ("POST", "/api/v1/desktop/recover-password"),
+    ("PUT", "/api/v1/company/closing-password"),
+    ("POST", "/api/v1/company/closing-password/reset"),
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 99] = [
+pub const OPERATIONS: [Operation; 107] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -483,6 +520,14 @@ pub const OPERATIONS: [Operation; 99] = [
     CONTACTS_EXPORT,
     CONTACTS_IMPORT,
     ITEMS_EXPORT,
+    REGISTER,
+    REGISTER_SUMMARY,
+    CHECKS_CREATE,
+    AUDIT_LOG,
+    CLOSING_PASSWORD_GET,
+    CLOSING_PASSWORD_PUT,
+    TXN_DELETE,
+    CLOSING_PASSWORD_RESET,
 ];
 
 /// Looks up a covered operation.

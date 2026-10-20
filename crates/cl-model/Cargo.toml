@@ -8,10 +8,12 @@ description = "UI-side state without egui: command registry, keymap, form state 
 
 [dependencies]
 cl-core = { path = "../cl-core" }
+serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 
 [dev-dependencies]
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+serde_json = "1.0.154"
 
 [lints]
 workspace = true

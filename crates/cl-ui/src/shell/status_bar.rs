@@ -1,7 +1,7 @@
 //! Status bar: who is signed in, the mode, the engine state, the AI line, and
 //! context keyboard hints read from the keymap.
 
-use cl_model::commands;
+use cl_model::commands::{self, CommandId};
 use eframe::egui::{self, Align, Frame, Layout, Margin, RichText, Ui};
 
 use super::{HostView, Shell, chip_text};
@@ -19,6 +19,56 @@ pub const HINTS: [(&str, &str); 4] = [
     ("help.shortcuts", "status.hint.shortcuts"),
     ("help.current", "status.hint.help"),
 ];
+
+/// The register's hints after Enter and the date keys (mockup
+/// Register.html). Shortcuts come from the keymap.
+const REGISTER_HINTS: [(&str, &str); 2] = [
+    ("form.delete_item", "status.hint.delete"),
+    ("edit.edit_transaction", "status.hint.open_form"),
+];
+
+/// One hint on the right of the bar: its key chips and short label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hint {
+    /// Key chips, left to right ("Ctrl F").
+    pub chips: Vec<String>,
+    /// The short label after the chips.
+    pub label: String,
+}
+
+fn keymap_hints(list: &[(&str, &str)]) -> Vec<Hint> {
+    list.iter()
+        .map(|(id, label)| Hint {
+            chips: commands::find(id)
+                .and_then(|c| c.shortcut)
+                .map(chip_text)
+                .into_iter()
+                .collect(),
+            label: t(label),
+        })
+        .collect()
+}
+
+/// The hints for the window in front (`None` when no window is open): the
+/// register shows its own, every other screen the general ones.
+#[must_use]
+pub fn hints_for(active: Option<CommandId>) -> Vec<Hint> {
+    if active.map(CommandId::as_str) != Some("banking.register") {
+        return keymap_hints(&HINTS);
+    }
+    let mut out = vec![
+        Hint {
+            chips: vec!["Enter".to_string()],
+            label: t("status.hint.record"),
+        },
+        Hint {
+            chips: ["+", "\u{2212}", "T"].map(str::to_string).to_vec(),
+            label: t("status.hint.dates"),
+        },
+    ];
+    out.extend(keymap_hints(&REGISTER_HINTS));
+    out
+}
 
 /// The engine text.
 #[must_use]
@@ -88,10 +138,11 @@ pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) {
                 if !narrow {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
-                        for (id, label) in HINTS.iter().rev() {
-                            ui.label(small(t(label)));
-                            if let Some(s) = commands::find(id).and_then(|c| c.shortcut) {
-                                kbd(ui, &chip_text(s));
+                        let active = shell.windows.active().map(|w| w.kind);
+                        for hint in hints_for(active).into_iter().rev() {
+                            ui.label(small(hint.label));
+                            for chip in hint.chips.iter().rev() {
+                                kbd(ui, chip);
                             }
                             ui.add_space(8.0);
                         }

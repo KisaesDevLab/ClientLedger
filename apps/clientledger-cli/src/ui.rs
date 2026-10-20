@@ -38,7 +38,9 @@ methods:
   zoom <80..200>                 set the app zoom in percent
   quit                           ask the app to quit (unsaved work prompts)
   call <method> [json]           call any method from `clientledger-cli tools`
-  scenario <file.yaml> [--out <folder>]   run a scenario in light and dark
+  scenario <file.yaml> [--out <folder>] [--compare]
+                                 run a scenario in light and dark (--compare:
+                                 only its compare steps, light)
   wait [--timeout <seconds>]     wait until the app answers
 
 Do not put secrets (passwords, keys) in command-line arguments: other programs
@@ -275,9 +277,12 @@ pub fn run_ui(args: &[String]) -> ExitCode {
 fn scenario(control: &std::path::Path, args: &[String]) -> ExitCode {
     let mut file: Option<&String> = None;
     let mut out: Option<PathBuf> = None;
+    let mut compare = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == "--out" {
+        if a == "--compare" {
+            compare = true;
+        } else if a == "--out" {
             match it.next() {
                 Some(p) => out = Some(PathBuf::from(p)),
                 None => return usage_error("--out needs a folder"),
@@ -285,11 +290,11 @@ fn scenario(control: &std::path::Path, args: &[String]) -> ExitCode {
         } else if file.is_none() {
             file = Some(a);
         } else {
-            return usage_error("usage: scenario <file.yaml> [--out <folder>]");
+            return usage_error("usage: scenario <file.yaml> [--out <folder>] [--compare]");
         }
     }
     let Some(file) = file else {
-        return usage_error("usage: scenario <file.yaml> [--out <folder>]");
+        return usage_error("usage: scenario <file.yaml> [--out <folder>] [--compare]");
     };
     let scenario = match Scenario::load(std::path::Path::new(file)) {
         Ok(s) => s,
@@ -297,6 +302,16 @@ fn scenario(control: &std::path::Path, args: &[String]) -> ExitCode {
             eprintln!("error: {e}");
             return ExitCode::from(EXIT_FAILED);
         }
+    };
+    // `--compare`: only the scenario's `compare` steps (the screen's main
+    // view for `ui-check --compare`); nothing to do when it has none.
+    let scenario = if compare {
+        match scenario.compare_run() {
+            Some(s) => s,
+            None => return ExitCode::SUCCESS,
+        }
+    } else {
+        scenario
     };
     let out = out.unwrap_or_else(|| PathBuf::from("target/ui-check").join(&scenario.name));
     let mut client =

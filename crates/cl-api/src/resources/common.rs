@@ -149,7 +149,7 @@ pub(crate) async fn create<T: DeserializeOwned + EditableFields>(
 
 /// Records the id of a record this session just created, so a later
 /// identical save's reconciliation never claims it.
-fn remember_created(s: &Session, body: &[u8], key: &str) {
+pub(crate) fn remember_created(s: &Session, body: &[u8], key: &str) {
     let id = serde_json::from_slice::<Value>(body).ok().and_then(|v| {
         v.get(key)
             .and_then(|r| r.get("id"))

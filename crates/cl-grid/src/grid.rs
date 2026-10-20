@@ -573,6 +573,8 @@ impl Grid {
 
 /// Width of the grid's own scrollbar track.
 const BAR: f32 = 12.0;
+/// Room kept for the lock glyph at the right end of a locked row.
+const LOCK_GUTTER: f32 = 22.0;
 
 /// Measured heights keyed by (revision, rows, row unit, open memo).
 type MeasuredCache = (u64, usize, u64, Option<(usize, u64)>, Heights);
@@ -1177,6 +1179,17 @@ impl Grid {
                     node.set_description(h);
                 }
             });
+            // The mark column's heading is the drawn check the cells use
+            // (Plex's U+2713 reads as a radical); its name stays the
+            // AccessKit label.
+            if matches!(col.kind, CellKind::Mark) {
+                check(
+                    header_ui.painter(),
+                    Rect::from_center_size(r.center(), vec2(9.0, 9.0)),
+                    style.header_text,
+                );
+                continue;
+            }
             let (anchor, x) = match col.align {
                 crate::core::model::Align::Right => (Align2::RIGHT_CENTER, r.right() - style.pad),
                 crate::core::model::Align::Center => (Align2::CENTER_CENTER, r.center().x),
@@ -1282,6 +1295,8 @@ impl Grid {
         let mut grew = false;
         let line_h = if self.two_lines() { row_h / 2.0 } else { row_h };
         let places = self.layout.places.clone();
+        // Rows never draw over the sticky header.
+        let rows_painter = painter.with_clip_rect(body);
         for i in range.clone() {
             let top = body.top() + points(self.viewport.local_top(i, &h));
             // Measured rows may be taller than the base (a note line).
@@ -1289,7 +1304,7 @@ impl Grid {
             let row_rect = Rect::from_min_size(pos2(body.left(), top), vec2(body.width(), this_h));
             let Some(key) = model.rows().row_key(i) else {
                 // Not loaded yet: a skeleton bar.
-                painter.rect_filled(
+                rows_painter.rect_filled(
                     Rect::from_min_size(
                         row_rect.min + vec2(style.pad, row_h * 0.35),
                         vec2(row_rect.width() * 0.5, row_h * 0.3),
@@ -1315,22 +1330,22 @@ impl Grid {
             let selected = self.core.selection().contains(key);
             let is_cursor_row = cursor.is_some_and(|c| c.row == key);
             if let Some(f) = Self::row_fill(style, state, is_cursor_row) {
-                painter.rect_filled(row_rect.intersect(body), CornerRadius::ZERO, f);
+                rows_painter.rect_filled(row_rect.intersect(body), CornerRadius::ZERO, f);
             }
             let bar_rect = Rect::from_min_size(row_rect.min, vec2(3.0, this_h)).intersect(body);
             if state.contains(RowState::ERROR) {
-                painter.rect_filled(bar_rect, CornerRadius::ZERO, style.warn);
+                rows_painter.rect_filled(bar_rect, CornerRadius::ZERO, style.warn);
             }
             if selected {
-                painter.rect_filled(bar_rect, CornerRadius::ZERO, style.accent);
-                painter.rect_stroke(
+                rows_painter.rect_filled(bar_rect, CornerRadius::ZERO, style.accent);
+                rows_painter.rect_stroke(
                     row_rect.shrink(0.5).intersect(body),
                     CornerRadius::ZERO,
                     Stroke::new(1.0, style.accent_border),
                     StrokeKind::Inside,
                 );
             }
-            painter.hline(
+            rows_painter.hline(
                 row_rect.x_range(),
                 row_rect.bottom() - 0.5,
                 Stroke::new(1.0, style.row_border),
@@ -1339,13 +1354,13 @@ impl Grid {
             // right end of the row, a 6 pt dirty dot in the left gutter.
             if state.contains(RowState::LOCKED) {
                 lock(
-                    &painter,
+                    &rows_painter,
                     pos2(row_rect.right() - 14.0, top + row_h / 2.0),
                     style.locked_text,
                 );
             }
             if state.contains(RowState::DIRTY) {
-                painter.circle_filled(
+                rows_painter.circle_filled(
                     pos2(row_rect.left() + 6.0, top + row_h / 2.0),
                     3.0,
                     style.accent,
@@ -1361,7 +1376,7 @@ impl Grid {
                     crate::core::model::RowNote::Suggestion(t) => (t.to_string(), style.warn_text),
                     crate::core::model::RowNote::Error(k) => (env.t(k), style.warn_text),
                 };
-                painter.text(
+                rows_painter.text(
                     pos2(
                         body.left() + style.pad + 4.0 - self.hscroll,
                         top + row_h + memo_pts + style.note_line / 2.0,
@@ -1413,6 +1428,18 @@ impl Grid {
                 .contains(RowState::LOCKED)
                 .then(|| env.t(TextKey("grid.a11y.locked")));
             let suggested_text = env.t(TextKey("grid.a11y.suggested"));
+            // The lock glyph sits at the right end of a locked row: the
+            // rightmost first-line cell keeps its text clear of it.
+            let lock_col = state
+                .contains(RowState::LOCKED)
+                .then(|| {
+                    places
+                        .iter()
+                        .filter(|p| p.line == Line::First)
+                        .max_by(|a, b| (a.x + a.width).total_cmp(&(b.x + b.width)))
+                        .map(|p| p.id)
+                })
+                .flatten();
             for (ci, place) in places.iter().enumerate() {
                 let Some(col) = columns.iter().find(|c| c.id == place.id).copied() else {
                     continue;
@@ -1523,7 +1550,7 @@ impl Grid {
                         }
                     });
                     if focused {
-                        painter.rect_stroke(
+                        rows_painter.rect_stroke(
                             cell_rect.intersect(body),
                             CornerRadius::ZERO,
                             Stroke::new(2.0, style.accent),
@@ -1600,16 +1627,34 @@ impl Grid {
                         }
                     });
                 }
-                let needed = Self::paint_cell(
-                    row_ui.painter(),
-                    cell_rect,
-                    &col,
-                    &value,
-                    &shown,
-                    state,
-                    style,
-                    if is_memo { memo_lines + 1 } else { 1 },
-                );
+                let paint_rect = if lock_col == Some(col.id) {
+                    let mut r = cell_rect;
+                    r.max.x = (r.max.x - LOCK_GUTTER).max(r.min.x);
+                    r
+                } else {
+                    cell_rect
+                };
+                // A line scrolled partly under the header is left blank
+                // rather than drawn as half a line of text.
+                let cut = cell_rect.top() < body.top() - 0.5;
+                let needed = if cut {
+                    0.0
+                } else {
+                    Self::paint_cell(
+                        row_ui.painter(),
+                        paint_rect,
+                        &col,
+                        &value,
+                        &shown,
+                        state,
+                        style,
+                        if is_memo { memo_lines + 1 } else { 1 },
+                    ) + if paint_rect == cell_rect {
+                        0.0
+                    } else {
+                        LOCK_GUTTER
+                    }
+                };
                 // Numbers are never cut short: the column grows to fit and
                 // never shrinks this session (Q-P10o, S14).
                 if shown.mono && needed > place.width + 0.5 {
@@ -1621,7 +1666,7 @@ impl Grid {
                     grew = true;
                 }
                 if is_cursor && focused {
-                    painter.rect_stroke(
+                    rows_painter.rect_stroke(
                         cell_rect.intersect(body),
                         CornerRadius::ZERO,
                         Stroke::new(2.0, style.accent),
@@ -1840,7 +1885,7 @@ impl Grid {
             style.placeholder
         } else if state.contains(RowState::LOCKED) {
             style.locked_text
-        } else if col.line == Line::Second {
+        } else if col.line == Line::Second || state.contains(RowState::MUTED) {
             style.text_secondary
         } else {
             style.text
@@ -1922,8 +1967,9 @@ fn lock(painter: &egui::Painter, center: Pos2, color: Color32) {
     );
 }
 
-/// A drawn check mark (Plex has no check glyph, Q-P06h).
-fn check(painter: &egui::Painter, r: Rect, color: Color32) {
+/// A drawn check mark (Plex's U+2713 reads as a radical, Q-P06h). Public so
+/// screens draw the same mark outside the grid (the register legend).
+pub fn check(painter: &egui::Painter, r: Rect, color: Color32) {
     let a = pos2(r.left(), r.center().y);
     let b = pos2(r.left() + r.width() * 0.4, r.bottom());
     let c = pos2(r.right(), r.top());

@@ -50,6 +50,9 @@ pub enum CompanyEvent {
     PromptDirty,
     /// Close the window of this kind (a screen that finished its job).
     CloseWindow(cl_model::CommandId),
+    /// Bring the register of this account to the front, or open it in its
+    /// own tab (one register tab per account, P12).
+    OpenRegister(cl_core::ids::AccountId),
     /// The owner saved new user preferences (theme, zoom, dates): the
     /// shell applies and persists them.
     UserPrefs(cl_settings::UserPrefs),

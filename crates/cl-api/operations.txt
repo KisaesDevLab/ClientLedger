@@ -23,6 +23,9 @@
 #! schema-source engine/packages/shared/src/schemas/ap.ts
 #! schema-source engine/packages/api/src/routes/desktop.routes.ts
 #! schema-source engine/packages/api/src/routes/portal-1099.routes.ts
+#! schema-source engine/packages/shared/src/schemas/checks.ts
+#! schema-source engine/packages/api/src/routes/accounts.routes.ts
+#! schema-source engine/packages/api/src/routes/audit.routes.ts
 GET     /health                                 idempotent
 GET     /api/v1/desktop/info                    idempotent
 GET     /openapi.json                           idempotent
@@ -122,3 +125,11 @@ GET     /api/v1/accounts/export                 idempotent
 GET     /api/v1/contacts/export                 idempotent
 POST    /api/v1/contacts/import                 pre-handler-only
 GET     /api/v1/items/export                    idempotent
+GET     /api/v1/accounts/{id}/register          idempotent
+GET     /api/v1/accounts/{id}/register/summary  idempotent
+POST    /api/v1/checks                          pre-handler-only
+GET     /api/v1/audit-log                       idempotent
+GET     /api/v1/company/closing-password        idempotent
+PUT     /api/v1/company/closing-password        never
+DELETE  /api/v1/transactions/{id}               pre-handler-only
+POST    /api/v1/company/closing-password/reset  never

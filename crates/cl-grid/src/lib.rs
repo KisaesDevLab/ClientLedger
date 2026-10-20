@@ -13,7 +13,9 @@ mod grid;
 pub mod sequencer;
 pub mod view;
 
-pub use grid::{FULL_FILTER, Grid, GridEnv, GridHeight, GridOutput, GridSnapshot};
+pub use grid::{
+    FULL_FILTER, Grid, GridEnv, GridHeight, GridOutput, GridSnapshot, check as draw_check,
+};
 pub use view::style::GridStyle;
 
 pub use crate::core::model::{

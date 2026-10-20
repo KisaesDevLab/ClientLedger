@@ -2,7 +2,8 @@
 //! state machine, undo for unsaved edits, date entry with the date keys and
 //! date warnings, exact amount entry with the calculator, type-ahead ranking
 //! for pickers, the one-tag-per-group chip rule, and the master-list rules
-//! (chart of accounts hierarchy, filters and form checks).
+//! (chart of accounts hierarchy, filters and form checks), and the register's
+//! page window, ranges and entry-row rules.
 //!
 //! Nothing here draws or does I/O, so all of it is unit tested.
 //!
@@ -17,6 +18,7 @@
 )]
 
 pub mod amount_entry;
+pub mod closing;
 pub mod commands;
 pub mod date_entry;
 pub mod date_rules;
@@ -24,6 +26,7 @@ pub mod forms;
 pub mod keymap;
 pub mod lists;
 pub mod lookup;
+pub mod register;
 pub mod tags;
 pub mod text;
 pub mod undo;

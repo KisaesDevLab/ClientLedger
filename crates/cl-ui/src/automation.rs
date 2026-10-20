@@ -941,13 +941,13 @@ mod bridge_tests {
     fn click_selects_a_tab_and_state_reports_it() {
         let mut rig = Rig::new();
         let v = rig.run(|c| {
-            call(c, "click", tab_target("Register \u{b7} Operating")).unwrap();
+            call(c, "click", tab_target("Register \u{b7} Operating Checking")).unwrap();
             call(c, "state", json!({})).unwrap()
         });
         let tabs = v["tabs"].as_array().unwrap();
         let active: Vec<_> = tabs.iter().filter(|t| t["active"] == true).collect();
         assert_eq!(active.len(), 1);
-        assert_eq!(active[0]["title"], "Register \u{b7} Operating");
+        assert_eq!(active[0]["title"], "Register \u{b7} Operating Checking");
     }
 
     #[test]

@@ -31,8 +31,9 @@ pub fn editor(
         .id(id)
         .event_filter(FULL_FILTER)
         .return_key(KeyboardShortcut::new(Modifiers::SHIFT, Key::Enter))
-        .frame(Frame::NONE)
-        .margin(Margin::symmetric(6, 2))
+        // Padding on the frame (egui ignores `margin` once a frame is set);
+        // no vertical margin, so the measured row heights stay as they are.
+        .frame(Frame::NONE.inner_margin(Margin::symmetric(6, 0)))
         .font(font)
         .desired_width(width)
         .desired_rows(rows.max(1))

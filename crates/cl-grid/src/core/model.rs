@@ -197,6 +197,8 @@ impl RowState {
     pub const SUGGESTED: RowState = RowState(1 << 7);
     /// A save of this row is in flight.
     pub const PENDING: RowState = RowState(1 << 8);
+    /// Shown muted (a void transaction): secondary text colour.
+    pub const MUTED: RowState = RowState(1 << 9);
 
     /// No flags.
     #[must_use]

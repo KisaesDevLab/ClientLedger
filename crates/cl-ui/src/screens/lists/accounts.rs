@@ -381,6 +381,26 @@ impl ChartScreen {
             .map(|e| e.id)
     }
 
+    /// True when the selected account has a register (balance sheet).
+    fn selected_has_register(&self) -> bool {
+        self.selected()
+            .and_then(|id| self.account(id))
+            .and_then(crate::screens::register::class_of)
+            .is_some()
+    }
+
+    /// Ctrl+G or "Open Register": the selected account's register in its
+    /// own tab. False (the shell opens the default register) when the
+    /// selected account has none.
+    pub fn open_register(&mut self) -> bool {
+        let Some(id) = self.selected().filter(|_| self.selected_has_register()) else {
+            return false;
+        };
+        self.link
+            .push(crate::company::CompanyEvent::OpenRegister(id));
+        true
+    }
+
     fn account(&self, id: AccountId) -> Option<&Account> {
         self.accounts.iter().find(|a| a.id == id)
     }
@@ -815,6 +835,11 @@ impl ChartScreen {
             }
             if b(ui, "lists.accounts.quick_report", "list.quick_report").clicked() {
                 self.open_report();
+            }
+            if self.selected_has_register()
+                && b(ui, "lists.accounts.open_register", "banking.register").clicked()
+            {
+                self.open_register();
             }
             ui.separator();
             let l = ui.add(egui::Label::new(t("lists.accounts.find")).selectable(false));
@@ -1399,6 +1424,7 @@ impl Screen for ChartScreen {
             "list.toggle_active" => self.toggle_active(),
             "list.show_inactive" => self.set_show_inactive(!self.filter.show_inactive),
             "list.quick_report" => self.open_report(),
+            crate::screens::register::KIND => return self.open_register(),
             "edit.find" => self.focus_search = true,
             "form.save_new" | "form.save_close" => {
                 if !matches!(self.panel, Panel::Form(_)) {

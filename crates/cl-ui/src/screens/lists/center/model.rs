@@ -129,10 +129,16 @@ pub fn entry_of(c: &Contact) -> ContactEntry {
 /// into `Money`, compared or summed (the JSON may be a float until U-14).
 #[must_use]
 pub fn report_text(a: &ReportAmount, style: MoneyStyle) -> Option<String> {
-    let shown = a.display(2)?;
+    Some(layout_plain(&a.display(2)?, style))
+}
+
+/// Plain amount text (`-1084.66`) laid out like money: thousands
+/// separators, `$`, the negative style. Text only; no arithmetic.
+#[must_use]
+pub fn layout_plain(shown: &str, style: MoneyStyle) -> String {
     let (negative, digits) = match shown.strip_prefix('-') {
         Some(rest) => (true, rest),
-        None => (false, shown.as_str()),
+        None => (false, shown),
     };
     let (whole, frac) = digits.split_once('.').unwrap_or((digits, ""));
     let mut body = String::new();
@@ -150,11 +156,11 @@ pub fn report_text(a: &ReportAmount, style: MoneyStyle) -> Option<String> {
         body.push('.');
         body.push_str(frac);
     }
-    Some(match (negative, style.negative) {
+    match (negative, style.negative) {
         (false, _) => body,
         (true, NegativeStyle::Minus) => format!("-{body}"),
         (true, NegativeStyle::Parens) => format!("({body})"),
-    })
+    }
 }
 
 /// True when a report figure shows as zero at cents (display text only).

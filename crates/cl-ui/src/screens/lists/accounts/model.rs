@@ -15,6 +15,7 @@ use cl_grid::{
 };
 use cl_model::amount_entry::AmountRules;
 use cl_model::lists::accounts::{AccountKind, Chart, ChartEntry, ChartFilter, detail_label};
+use cl_model::register::DisplaySign;
 
 use crate::i18n::t;
 
@@ -169,7 +170,13 @@ impl ChartModel {
                 active: a.is_active,
                 system: a.is_system,
                 sensitive: sensitive.contains(&a.id),
-                balance: a.balance,
+                // The engine stores debits minus credits for every type;
+                // the chart shows each account's normal balance positive.
+                balance: a.balance.and_then(|b| {
+                    DisplaySign::for_stored_balance(kind_of(a.fields.account_type))
+                        .apply(b)
+                        .ok()
+                }),
             })
             .collect();
         self.chart = Chart::new(entries, numbers);

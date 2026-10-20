@@ -329,6 +329,30 @@ impl HostProbe for Probe {
 }
 
 #[test]
+fn status_bar_hints_follow_the_window_in_front() {
+    use super::status_bar::hints_for;
+    let chip = |id: &str| super::chip_text(commands::find(id).unwrap().shortcut.unwrap());
+    let general = hints_for(None);
+    assert_eq!(general.len(), 4);
+    assert_eq!(general[0].label, t("status.hint.go_to"));
+    assert_eq!(general[0].chips, vec![chip("help.palette")]);
+    assert_eq!(
+        hints_for(Some(CommandId::new("customers.invoice"))),
+        general
+    );
+
+    // Mockup Register.html: Enter record · + − T dates · Ctrl D delete ·
+    // Ctrl E open form.
+    let reg = hints_for(Some(CommandId::new("banking.register")));
+    let labels: Vec<&str> = reg.iter().map(|h| h.label.as_str()).collect();
+    assert_eq!(labels, ["record", "dates", "delete", "open form"]);
+    assert_eq!(reg[0].chips, ["Enter"]);
+    assert_eq!(reg[1].chips, ["+", "\u{2212}", "T"]);
+    assert_eq!(reg[2].chips, vec![chip("form.delete_item")]);
+    assert_eq!(reg[3].chips, vec![chip("edit.edit_transaction")]);
+}
+
+#[test]
 fn status_bar_reports_the_engine() {
     use super::status_bar::engine_text;
     assert_eq!(engine_text(&HostView::Unavailable), None);

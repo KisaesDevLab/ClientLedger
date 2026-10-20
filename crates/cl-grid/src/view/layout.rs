@@ -1,8 +1,9 @@
 //! Column layout (P10 plan §2.8). Widths are logical points. Line-1
 //! columns run left to right; each line-2 column sits under the line-1
 //! column before it in the spec (Type under Number, Account · Memo under
-//! Payee, as in the register mockup). When the minimum widths do not fit,
-//! the grid scrolls horizontally instead of squeezing numbers.
+//! Payee, as in the register mockup). Short of room, the flexible (text)
+//! columns shrink toward their minimum first; when that still does not
+//! fit, the grid scrolls horizontally instead of squeezing numbers.
 
 use crate::core::model::{Column, ColumnId, Line};
 
@@ -54,10 +55,18 @@ impl ColumnLayout {
         let preferred_sum: f32 = specs.iter().map(|s| s.1).sum();
         let flex_sum: f32 = specs.iter().map(|s| s.2).sum();
         let extra = (available - preferred_sum).max(0.0);
+        // Short of room: the flexible (text) columns give up width first,
+        // down to their minimum, in proportion to what each can give; fixed
+        // columns (dates, amounts, resized ones) keep theirs.
+        let short = (preferred_sum - available).max(0.0);
+        let give_sum: f32 = specs.iter().filter(|s| s.2 > 0.0).map(|s| s.1 - s.0).sum();
+        let take = short.min(give_sum);
         let mut x = 0.0;
         let mut line1 = Vec::with_capacity(first.len());
-        for (c, (_, preferred, flex)) in first.iter().zip(&specs) {
-            let w = if flex_sum > 0.0 {
+        for (c, (min, preferred, flex)) in first.iter().zip(&specs) {
+            let w = if *flex > 0.0 && take > 0.0 && give_sum > 0.0 {
+                preferred - take * (preferred - min) / give_sum
+            } else if flex_sum > 0.0 {
                 preferred + extra * flex / flex_sum
             } else {
                 *preferred
@@ -83,9 +92,9 @@ impl ColumnLayout {
                     }
                 }
                 Line::Second => {
-                    let (_, preferred, flex) = width_of(c);
+                    let (min, preferred, flex) = width_of(c);
                     let w = if flex > 0.0 {
-                        (content_width - last_line1_x).max(preferred)
+                        (content_width - last_line1_x).max(min)
                     } else {
                         preferred
                     };
@@ -168,8 +177,8 @@ mod tests {
         ];
         let l = ColumnLayout::compute(&cols, &[], 120.0);
         assert_eq!(
-            l.content_width, 200.0,
-            "wider than the 120 available: scrolls"
+            l.content_width, 160.0,
+            "flexible columns shrink to their minimum, then the grid scrolls"
         );
         let l = ColumnLayout::compute(&cols, &[(ColumnId(1), 150)], 400.0);
         assert_eq!(l.place(ColumnId(1)).unwrap().width, 150.0);
@@ -177,5 +186,30 @@ mod tests {
         let l = ColumnLayout::compute(&cols, &[(ColumnId(1), 10)], 400.0);
         assert_eq!(l.place(ColumnId(1)).unwrap().width, 80.0, "never below min");
         assert!(l.place(ColumnId(9)).is_none());
+    }
+
+    #[test]
+    fn short_of_room_only_flexible_columns_give_width() {
+        let cols = [
+            col(1, Line::First, 80, 100, 0),
+            col(2, Line::First, 80, 240, 1),
+            col(3, Line::Second, 80, 240, 1),
+            col(4, Line::First, 60, 110, 0),
+        ];
+        // Preferred 450; 370 available: the flexible column gives 80.
+        let l = ColumnLayout::compute(&cols, &[], 370.0);
+        assert_eq!(l.content_width, 370.0);
+        assert_eq!(l.place(ColumnId(1)).unwrap().width, 100.0);
+        assert_eq!(l.place(ColumnId(2)).unwrap().width, 160.0);
+        assert_eq!(
+            l.place(ColumnId(4)).unwrap().width,
+            110.0,
+            "amounts keep theirs"
+        );
+        assert_eq!(
+            l.place(ColumnId(3)).unwrap().width,
+            270.0,
+            "line two runs to the end"
+        );
     }
 }

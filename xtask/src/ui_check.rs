@@ -6,7 +6,9 @@
 //! `target/ui-check/<screen>/`), and stops only the app it started.
 //!
 //! With `--compare` it also sizes the window to the mockup (1440 x 940),
-//! saves the app's light screenshot, and writes `compare.html` next to the
+//! runs the scenario's optional `compare:` steps (which bring the screen's
+//! main view back when the scenario closed it), saves the app's light
+//! screenshot, and writes `compare.html` next to the
 //! reference PNG from `docs/design/screenshots/` for the ui-verifier review
 //! (Q-226). The app runs `--demo`, which shows the synthetic Ozark Ridge
 //! sample at the mockups' story date (11/04/2026) until the real sample
@@ -255,6 +257,13 @@ pub fn ui_check(args: &[String]) -> Result<()> {
                 &MOCKUP_SIZE.1.to_string(),
             ],
         )?;
+        // The scenario may have closed its screen: its `compare` steps
+        // bring the main view back before the screenshot.
+        if has_scenario {
+            let out_s = out.to_string_lossy().to_string();
+            let sc = scenario.to_string_lossy().to_string();
+            cli(&control, &["scenario", &sc, "--compare", "--out", &out_s])?;
+        }
         let app_png = out.join("app-light.png");
         cli(&control, &["screenshot", &app_png.to_string_lossy()])?;
         let mockups = root().join("docs/design/screenshots");

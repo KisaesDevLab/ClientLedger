@@ -85,6 +85,15 @@ impl Capabilities {
     pub const LINE_TAGS: &'static str = "line-tags-v1";
     /// U-46 the item CSV import resolves the income account by name.
     pub const ITEMS_IMPORT: &'static str = "items-import-v1";
+    /// P12 R1–R4, R6: exact register money (`?exact=1`), filter-independent
+    /// running balances, the cleared and tag filters, the summary's cleared
+    /// and ending balances, and audit before-images with lines.
+    pub const REGISTER_EXACT: &'static str = "register-exact-v1";
+    /// P12 R5: toggle a register line's cleared mark (assumed name).
+    pub const REGISTER_CLEARED: &'static str = "register-cleared-v1";
+    /// P12 R7: soft delete of a transaction (`DELETE /transactions/{id}`,
+    /// engine PR #153).
+    pub const TXN_DELETE: &'static str = "txn-delete-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

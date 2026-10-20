@@ -43,6 +43,11 @@ pub struct Scenario {
     /// The steps.
     #[serde(with = "serde_yaml_ng::with::singleton_map_recursive")]
     pub steps: Vec<Step>,
+    /// Steps that bring the screen's main view back for `ui-check
+    /// --compare` (run once, light theme, after `steps`, before the compare
+    /// screenshot). Optional.
+    #[serde(default, with = "serde_yaml_ng::with::singleton_map_recursive")]
+    pub compare: Vec<Step>,
 }
 
 fn default_themes() -> Vec<String> {
@@ -213,6 +218,19 @@ impl Scenario {
             )));
         }
         Ok(s)
+    }
+
+    /// The `compare` steps as a scenario of their own (light theme only);
+    /// `None` when the scenario has none.
+    #[must_use]
+    pub fn compare_run(&self) -> Option<Scenario> {
+        (!self.compare.is_empty()).then(|| Scenario {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            themes: vec!["light".into()],
+            steps: self.compare.clone(),
+            compare: Vec::new(),
+        })
     }
 
     /// Read a file.
@@ -646,6 +664,26 @@ mod tests {
         assert!(Scenario::parse("name: x\nsteps:\n  - explode: {}\n").is_err());
         assert!(Scenario::parse("name: x\nthemes: [blue]\nsteps:\n  - key: A\n").is_err());
         assert!(Scenario::parse("name: x\nextra: 1\nsteps:\n  - key: A\n").is_err());
+    }
+
+    #[test]
+    fn compare_steps_run_once_in_light() {
+        let s = Scenario::parse("name: x\nsteps:\n  - key: A\n").unwrap();
+        assert!(s.compare.is_empty() && s.compare_run().is_none());
+        let s = Scenario::parse(
+            "name: x\nsteps:\n  - key: A\ncompare:\n  - key: Ctrl+G\n  - assert_state: {key: screen.screen, equals: register}\n",
+        )
+        .unwrap();
+        let c = s.compare_run().expect("compare steps");
+        assert_eq!(c.themes, vec!["light"]);
+        assert_eq!(c.steps.len(), 2);
+        assert_eq!(c.compare.len(), 0);
+        let mut fake = Fake::new();
+        fake.state = json!({"screen": {"screen": "register"}});
+        let out = dir();
+        let report = run(&mut fake, &c, out.path());
+        assert!(report.passed(), "{}", report.summary());
+        assert_eq!(report.outcomes.len(), 1);
     }
 
     #[test]
