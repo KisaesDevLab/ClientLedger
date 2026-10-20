@@ -816,3 +816,51 @@ fn every_input_is_named_and_the_form_draws_at_both_sizes() {
         assert!(nodes.iter().any(|(_, n)| n == name), "{name}");
     }
 }
+
+/// `--demo`: the screen answers through the demo twin. It opens on the
+/// sample's layout and posts a 2.35-short day with the over/short line on
+/// Cash Over/Short (60900).
+#[test]
+fn the_demo_books_load_the_layout_and_post_a_short_day() {
+    use crate::company::demo::daily_sales::{DayStatus, days};
+    use crate::company::demo::register::DemoLedger;
+
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let s = DailySalesScreen::new(Arc::clone(&link), None, today());
+    let mut r = Rig {
+        _dir: dir,
+        link,
+        fake: Arc::new(Mutex::new(Fake::default())),
+        s,
+    };
+    let st = r.s.state();
+    assert_eq!(st["books"], true);
+    assert_eq!(st["loaded"], true);
+    assert_eq!(st["layouts"], 1);
+    assert_eq!(st["lines"], 5);
+    assert_eq!(st["empty_state"], false);
+    assert_eq!(r.s.inputs.layout, "Plant sale counter");
+
+    r.plan_day("500.00");
+    let tot = r.s.totals().expect("totals");
+    assert_eq!(tot.over_short, OverShort::Short(m("2.35")));
+    r.s.command(CommandId::new("form.save_new"));
+    assert_eq!(r.s.save.last_action, Some("post"));
+    assert_eq!(r.s.save.count, 1);
+
+    let demo = r.link.demo_state().expect("demo");
+    let posted = days(&demo, Some(DayStatus::Posted), Some(today()));
+    assert_eq!(posted.len(), 1);
+    assert_eq!(posted[0].over_short, Some(m("-2.35")));
+    let txn = posted[0].transaction.expect("txn");
+    let t = demo
+        .ledger
+        .transactions()
+        .into_iter()
+        .find(|t| DemoLedger::id_of(t) == txn)
+        .expect("posted");
+    let os: Vec<_> = t.lines.iter().filter(|x| x.account == "60900").collect();
+    assert_eq!(os.len(), 1);
+    assert_eq!((os[0].debit, os[0].credit), (m("2.35"), Money::ZERO));
+}

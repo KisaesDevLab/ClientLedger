@@ -161,11 +161,14 @@ pub trait DailyBooks: Send {
 /// Shared [`DailyBooks`].
 pub type SharedBooks = Arc<Mutex<dyn DailyBooks>>;
 
-/// The demo engine's daily sales. The demo twin (`company::demo::
-/// daily_sales`, WP-D.3) plugs in here; until it does, the demo shows the
-/// screen without layouts and says so.
-fn demo_books(_link: &Arc<CompanyLink>) -> Option<SharedBooks> {
-    None
+/// The demo engine's daily sales (`company::demo::daily_sales`, WP-D.3);
+/// `None` with an engine.
+fn demo_books(link: &Arc<CompanyLink>) -> Option<SharedBooks> {
+    link.is_demo().then(|| {
+        Arc::new(Mutex::new(
+            crate::company::demo::daily_sales::DemoDailyBooks::new(Arc::clone(link)),
+        )) as SharedBooks
+    })
 }
 
 /// The calls the screen makes, over the engine (async) or [`DailyBooks`]

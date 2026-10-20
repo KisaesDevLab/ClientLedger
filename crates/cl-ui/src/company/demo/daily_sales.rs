@@ -775,6 +775,341 @@ pub fn void_day(state: &mut DemoState, id: u32, password: Option<&Secret>) -> Re
     Ok(())
 }
 
+// ------------------------------------------------- the screen's DailyBooks
+
+/// Ids of the demo's layouts, lines and days as engine UUIDs (the low 12
+/// hex digits carry the demo's number).
+const LAYOUT_ID: &str = "da170000-0000-4000-8000-";
+const LINE_ID: &str = "da171000-0000-4000-8000-";
+const DAY_ID: &str = "da172000-0000-4000-8000-";
+
+fn to_uuid<T: std::str::FromStr>(prefix: &str, n: u32) -> Result<T, ApiError> {
+    format!("{prefix}{n:012x}")
+        .parse()
+        .map_err(|_| ApiError::Internal)
+}
+
+fn from_uuid(prefix: &str, id: &impl fmt::Display) -> Result<u32, ApiError> {
+    let s = id.to_string();
+    s.strip_prefix(prefix)
+        .and_then(|n| u32::from_str_radix(n, 16).ok())
+        .ok_or_else(not_found)
+}
+
+fn layout_id(id: cl_core::ids::DailyTemplateId) -> Result<u32, ApiError> {
+    from_uuid(LAYOUT_ID, &id)
+}
+
+fn day_id(id: cl_core::ids::DailyEntryId) -> Result<u32, ApiError> {
+    from_uuid(DAY_ID, &id)
+}
+
+fn template_of(l: &DemoLayout) -> Result<cl_api::DailyTemplate, ApiError> {
+    let mut lines = Vec::with_capacity(l.lines.len());
+    for (i, x) in l.lines.iter().enumerate() {
+        lines.push(cl_api::DailyLine {
+            id: to_uuid(LINE_ID, x.id)?,
+            section: cl_api::Section::from_wire(x.section.as_str()),
+            label: x.label.clone(),
+            account: x.account,
+            tag: None,
+            side: if x.debit {
+                cl_api::NormalSide::Debit
+            } else {
+                cl_api::NormalSide::Credit
+            },
+            required: false,
+            allow_tag: false,
+            active: x.active,
+            sort: u32::try_from(i).map_err(|_| invalid())?,
+        });
+    }
+    Ok(cl_api::DailyTemplate {
+        id: to_uuid(LAYOUT_ID, l.id)?,
+        name: l.name.clone(),
+        preset: match l.preset.as_str() {
+            "retail" => cl_api::Preset::Retail,
+            "restaurant" => cl_api::Preset::Restaurant,
+            _ => cl_api::Preset::Custom,
+        },
+        is_active: l.active,
+        default_tag: None,
+        lines,
+    })
+}
+
+fn status_of(s: DayStatus) -> cl_api::EntryStatus {
+    match s {
+        DayStatus::Draft => cl_api::EntryStatus::Draft,
+        DayStatus::Posted => cl_api::EntryStatus::Posted,
+        DayStatus::Void => cl_api::EntryStatus::Void,
+    }
+}
+
+fn values_in(values: &[cl_api::DailyValue]) -> Result<Vec<(u32, Money)>, ApiError> {
+    values
+        .iter()
+        .map(|v| from_uuid(LINE_ID, &v.line).map(|id| (id, v.amount)))
+        .collect()
+}
+
+/// The demo's daily sales as the screen's [`DailyBooks`]: every call locks
+/// the demo state of `link` and answers at once.
+///
+/// [`DailyBooks`]: crate::screens::daily_sales::DailyBooks
+pub struct DemoDailyBooks {
+    link: std::sync::Arc<crate::company::CompanyLink>,
+}
+
+impl DemoDailyBooks {
+    /// The books of `link`'s demo state.
+    #[must_use]
+    pub fn new(link: std::sync::Arc<crate::company::CompanyLink>) -> DemoDailyBooks {
+        DemoDailyBooks { link }
+    }
+
+    fn with<T>(
+        &self,
+        f: impl FnOnce(&mut DemoState) -> Result<T, ApiError>,
+    ) -> Result<T, ApiError> {
+        let mut state = self.link.demo_state().ok_or(ApiError::Internal)?;
+        f(&mut state)
+    }
+}
+
+impl fmt::Debug for DemoDailyBooks {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DemoDailyBooks").finish_non_exhaustive()
+    }
+}
+
+fn entry_of(state: &mut DemoState, id: u32) -> Result<cl_api::DailyEntry, ApiError> {
+    let d = day(state, id).ok_or_else(not_found)?;
+    let l = layout(state, d.layout).ok_or_else(not_found)?;
+    let c = compute(&l, &d.values).map_err(|_| invalid())?;
+    let mut values = Vec::with_capacity(d.values.len());
+    for (line, amount) in &d.values {
+        values.push(cl_api::DailyValue {
+            line: to_uuid(LINE_ID, *line)?,
+            amount: *amount,
+            tag: None,
+        });
+    }
+    Ok(cl_api::DailyEntry {
+        id: to_uuid(DAY_ID, d.id)?,
+        template: to_uuid(LAYOUT_ID, d.layout)?,
+        date: d.date,
+        status: status_of(d.status),
+        transaction: d.transaction,
+        tag: None,
+        notes: d.notes,
+        values,
+        over_short: d.over_short.unwrap_or(Money::ZERO),
+        totals: cl_api::DailyTotals {
+            sales: c.sales,
+            tax: c.tax,
+            payments: c.payments,
+        },
+        layout: Some(template_of(&l)?),
+    })
+}
+
+impl crate::screens::daily_sales::DailyBooks for DemoDailyBooks {
+    fn templates(&mut self) -> Result<Vec<cl_api::DailyTemplate>, ApiError> {
+        self.with(|s| {
+            layouts(s)
+                .iter()
+                .map(|l| {
+                    template_of(l).map(|t| cl_api::DailyTemplate {
+                        lines: Vec::new(),
+                        ..t
+                    })
+                })
+                .collect()
+        })
+    }
+
+    fn template(
+        &mut self,
+        id: cl_core::ids::DailyTemplateId,
+    ) -> Result<cl_api::DailyTemplate, ApiError> {
+        let id = layout_id(id)?;
+        self.with(|s| template_of(&layout(s, id).ok_or_else(not_found)?))
+    }
+
+    fn create_template(
+        &mut self,
+        name: &str,
+        preset: Option<cl_api::Preset>,
+    ) -> Result<cl_api::DailyTemplate, ApiError> {
+        self.with(|s| {
+            let id = create_layout(s, name, preset.map(cl_api::Preset::as_wire))?;
+            template_of(&layout(s, id).ok_or_else(not_found)?)
+        })
+    }
+
+    fn rename(
+        &mut self,
+        id: cl_core::ids::DailyTemplateId,
+        name: &str,
+    ) -> Result<cl_api::DailyTemplate, ApiError> {
+        let id = layout_id(id)?;
+        self.with(|s| {
+            rename_layout(s, id, name)?;
+            template_of(&layout(s, id).ok_or_else(not_found)?)
+        })
+    }
+
+    fn replace_lines(
+        &mut self,
+        id: cl_core::ids::DailyTemplateId,
+        lines: &[cl_api::DailyLineInput],
+    ) -> Result<cl_api::DailyTemplate, ApiError> {
+        let id = layout_id(id)?;
+        let mut demo = Vec::with_capacity(lines.len());
+        for l in lines {
+            let section = l
+                .section
+                .as_wire()
+                .and_then(Section::parse)
+                .ok_or_else(invalid)?;
+            demo.push(DemoLayoutLine {
+                id: match l.id {
+                    Some(x) => from_uuid(LINE_ID, &x).map_err(|_| invalid())?,
+                    None => 0,
+                },
+                section,
+                label: l.label.trim().to_string(),
+                account: l.account,
+                debit: l.side == cl_api::NormalSide::Debit,
+                active: l.active,
+            });
+        }
+        self.with(|s| {
+            replace_lines(s, id, &demo)?;
+            template_of(&layout(s, id).ok_or_else(not_found)?)
+        })
+    }
+
+    fn delete_template(&mut self, id: cl_core::ids::DailyTemplateId) -> Result<(), ApiError> {
+        let id = layout_id(id)?;
+        self.with(|s| delete_layout(s, id))
+    }
+
+    fn list(
+        &mut self,
+        q: &cl_api::DailyEntryQuery,
+    ) -> Result<Vec<cl_api::DailyEntrySummary>, ApiError> {
+        let status = match &q.status {
+            None => None,
+            Some(cl_api::EntryStatus::Draft) => Some(DayStatus::Draft),
+            Some(cl_api::EntryStatus::Posted) => Some(DayStatus::Posted),
+            Some(cl_api::EntryStatus::Void) => Some(DayStatus::Void),
+            Some(cl_api::EntryStatus::Unknown(_)) => return Ok(Vec::new()),
+        };
+        let template = q.template.map(layout_id).transpose()?;
+        let limit = usize::from(q.limit.unwrap_or(500));
+        self.with(|s| {
+            let mut out = Vec::new();
+            for d in days(s, status, q.date)
+                .into_iter()
+                .filter(|d| template.is_none_or(|t| t == d.layout))
+                .take(limit)
+            {
+                let l = layout(s, d.layout).ok_or_else(not_found)?;
+                let sales = compute(&l, &d.values).map_err(|_| invalid())?.sales;
+                out.push(cl_api::DailyEntrySummary {
+                    id: to_uuid(DAY_ID, d.id)?,
+                    template: to_uuid(LAYOUT_ID, d.layout)?,
+                    template_name: Some(l.name.clone()),
+                    date: d.date,
+                    status: status_of(d.status),
+                    transaction: d.transaction,
+                    over_short: d.over_short.unwrap_or(Money::ZERO),
+                    sales,
+                });
+            }
+            Ok(out)
+        })
+    }
+
+    fn entry(&mut self, id: cl_core::ids::DailyEntryId) -> Result<cl_api::DailyEntry, ApiError> {
+        let id = day_id(id)?;
+        self.with(|s| entry_of(s, id))
+    }
+
+    fn create_draft(
+        &mut self,
+        d: &cl_api::DailyEntryDraft,
+    ) -> Result<cl_api::DailyEntry, ApiError> {
+        let layout = layout_id(d.template)?;
+        let values = values_in(&d.values).map_err(|_| invalid())?;
+        self.with(|s| {
+            let id = create_day(s, layout, d.date, d.notes.clone(), &values)?;
+            entry_of(s, id)
+        })
+    }
+
+    fn update_draft(
+        &mut self,
+        id: cl_core::ids::DailyEntryId,
+        d: &cl_api::DailyEntryDraft,
+    ) -> Result<cl_api::DailyEntry, ApiError> {
+        let id = day_id(id)?;
+        let values = values_in(&d.values).map_err(|_| invalid())?;
+        self.with(|s| {
+            update_day(s, id, d.date, d.notes.clone(), &values)?;
+            entry_of(s, id)
+        })
+    }
+
+    fn preview(
+        &mut self,
+        template: cl_core::ids::DailyTemplateId,
+        values: &[cl_api::DailyValue],
+    ) -> Result<cl_api::DailyPreview, ApiError> {
+        let layout = layout_id(template)?;
+        let values = values_in(values).map_err(|_| invalid())?;
+        self.with(|s| {
+            let p = preview(s, layout, &values)?;
+            Ok(cl_api::DailyPreview {
+                debits: p.debits,
+                credits: p.credits,
+                over_short: p.over_short,
+                balanced: p.balanced,
+                sales: p.sales,
+                tax: p.tax,
+                payments: p.payments,
+                unmapped: p.unmapped,
+            })
+        })
+    }
+
+    fn post(
+        &mut self,
+        id: cl_core::ids::DailyEntryId,
+        password: Option<&Secret>,
+    ) -> Result<cl_api::DailyEntry, ApiError> {
+        let id = day_id(id)?;
+        self.with(|s| {
+            post(s, id, password)?;
+            entry_of(s, id)
+        })
+    }
+
+    fn void(
+        &mut self,
+        id: cl_core::ids::DailyEntryId,
+        password: Option<&Secret>,
+    ) -> Result<cl_api::DailyEntry, ApiError> {
+        let id = day_id(id)?;
+        self.with(|s| {
+            void_day(s, id, password)?;
+            entry_of(s, id)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
