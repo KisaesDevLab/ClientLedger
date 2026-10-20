@@ -152,7 +152,8 @@ impl DepositScreen {
     fn pending_arrived(&mut self, p: cl_api::PendingDeposits) {
         let waiting: Vec<_> = p.items.iter().map(|i| i.source).collect();
         self.panel.pending = Some(p);
-        if self.editing.is_some() {
+        // Only unsaved picks can go stale; a saved deposit keeps its own.
+        if self.editing.is_some() || !self.header.is_dirty() {
             return;
         }
         let stale = self

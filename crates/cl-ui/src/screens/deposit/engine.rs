@@ -10,14 +10,16 @@
 //! none waiting and the screen shows its empty state.
 
 use cl_api::{
-    ApiError, DepositCaps, DepositDraft, FeedDeposit, FeedGroupings, FeedItemId, LocalValidation,
-    PendingDeposits, RecordVersion, RegisterAmount, Transaction, Versioned,
+    ApiError, DepositCaps, DepositDraft, FeedDeposit, FeedGrouping, FeedGroupings, FeedItemId,
+    LocalValidation, PendingDeposits, PendingPayment, RecordVersion, RegisterAmount, Transaction,
+    TxnType, Versioned,
 };
 use cl_core::ids::{AccountId, ContactId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
 
 use crate::company::CompanyLink;
 use crate::company::demo::DemoState;
+use crate::company::demo::deposits as twins;
 use crate::company::demo::register::{DemoJournal, DemoLedger, DemoLine, check_closing};
 
 /// A save the engine took.
@@ -184,21 +186,77 @@ impl LocalDeposits for DemoDeposits {
         }
     }
 
+    fn feed_groupings(&self) -> bool {
+        true
+    }
+
     fn pending(&mut self, link: &CompanyLink) -> Result<PendingDeposits, ApiError> {
         let mut state = demo(link)?;
-        let chart = chart(&mut state);
-        let clearing = chart
-            .iter()
-            .find(|a| a.system_tag.as_deref() == Some("payments_clearing"))
-            .map(|a| a.id);
-        let balance = clearing
-            .and_then(|c| crate::company::demo::checks::balance(&mut state, c))
-            .unwrap_or(Money::ZERO);
+        let balance = twins::clearing_balance(&mut state);
+        let items = twins::pending(&mut state).iter().map(pending_of).collect();
         Ok(PendingDeposits {
             exact: true,
             clearing_balance: RegisterAmount::Exact(balance),
-            items: Vec::new(),
+            items,
         })
+    }
+
+    fn waiting(&mut self, link: &CompanyLink) -> Vec<FeedDeposit> {
+        let Ok(mut state) = demo(link) else {
+            return Vec::new();
+        };
+        let all = twins::feed_deposits();
+        twins::bank_deposits_waiting(&mut state)
+            .into_iter()
+            .filter_map(|(f, _)| {
+                let i = all
+                    .iter()
+                    .position(|x| x.date == f.date && x.amount == f.amount)?;
+                Some(FeedDeposit {
+                    id: feed_id(i)?,
+                    date: f.date,
+                    amount: f.amount.abs(),
+                    description: Some(f.description.clone()),
+                    account_name: None,
+                })
+            })
+            .collect()
+    }
+
+    fn groupings(&mut self, link: &CompanyLink, id: FeedItemId) -> Result<FeedGroupings, ApiError> {
+        let mut state = demo(link)?;
+        let all = twins::feed_deposits();
+        let f = (0..all.len())
+            .find(|i| feed_id(*i) == Some(id))
+            .and_then(|i| all.get(i))
+            .ok_or(ApiError::NotFound { code: None })?;
+        let g = twins::deposit_groupings(&mut state, f, usize::from(cl_api::GROUPINGS_LIMIT));
+        Ok(FeedGroupings {
+            target: g.target,
+            candidates: g
+                .candidates
+                .iter()
+                .map(|c| FeedGrouping {
+                    items: c.iter().map(pending_of).collect(),
+                })
+                .collect(),
+            truncated: g.truncated,
+        })
+    }
+
+    fn vendor_credits(&mut self, link: &CompanyLink, vendor: ContactId) -> Vec<VendorCredit> {
+        let Ok(mut state) = demo(link) else {
+            return Vec::new();
+        };
+        crate::company::demo::money::vendor_credits(&mut state, vendor)
+            .into_iter()
+            .filter(|c| c.open.is_positive())
+            .map(|c| VendorCredit {
+                id: c.id,
+                date: c.date,
+                number: None,
+            })
+            .collect()
     }
 
     fn save(
@@ -214,12 +272,17 @@ impl LocalDeposits for DemoDeposits {
         if let Some((id, _)) = edit {
             dates.extend(state.ledger.date_of(id));
         }
-        check_closing(closing(&state), &dates, password)?;
-        let j = journal(draft).ok_or(ApiError::Local(LocalValidation::InvalidValue))?;
-        let id = state
-            .ledger
-            .save_lines(&chart, &j, edit.map(|(id, _)| id))
-            .ok_or(ApiError::Local(LocalValidation::InvalidValue))?;
+        let id = if edit.is_none() {
+            // A new deposit goes through the twin (links, 409, cash back).
+            twins::create(&mut state, draft, password)?
+        } else {
+            check_closing(closing(&state), &dates, password)?;
+            let j = journal(draft).ok_or(ApiError::Local(LocalValidation::InvalidValue))?;
+            state
+                .ledger
+                .save_lines(&chart, &j, edit.map(|(id, _)| id))
+                .ok_or(ApiError::Local(LocalValidation::InvalidValue))?
+        };
         let contacts = state.contacts_mut().clone();
         let got = state
             .ledger
@@ -241,10 +304,29 @@ impl LocalDeposits for DemoDeposits {
         let mut state = demo(link)?;
         let chart = chart(&mut state);
         let contacts = state.contacts_mut().clone();
-        state
+        let mut got = state
             .ledger
             .get(&chart, &contacts, id)
-            .ok_or(ApiError::NotFound { code: None })
+            .ok_or(ApiError::NotFound { code: None })?;
+        // The twin keeps the links and the cash back the ledger doesn't.
+        if let Some(r) = twins::record(&mut state, id) {
+            let mut sources = r.sources.clone();
+            for l in &mut got.record.lines {
+                if let Some(i) = sources
+                    .iter()
+                    .position(|(_, m)| l.credit == *m && l.debit.is_zero())
+                    && Some(l.account_id) == twins::clearing_account(&mut state)
+                {
+                    l.source_transaction_id = Some(sources.remove(i).0);
+                } else if r
+                    .cash_back
+                    .is_some_and(|(a, m)| a == l.account_id && l.debit == m)
+                {
+                    l.line_role = Some(cl_api::LINE_ROLE_CASH_BACK.to_string());
+                }
+            }
+        }
+        Ok(got)
     }
 
     fn list(&mut self, link: &CompanyLink, account: AccountId) -> Vec<DepositRow> {
@@ -289,16 +371,40 @@ impl LocalDeposits for DemoDeposits {
         password: Option<&Secret>,
     ) -> Result<(), ApiError> {
         let mut state = demo(link)?;
-        let old = state
-            .ledger
-            .date_of(id)
-            .ok_or(ApiError::NotFound { code: None })?;
-        check_closing(closing(&state), &[old], password)?;
-        state.ledger.void(id)
+        twins::void(&mut state, id, password)
     }
 
     fn balance(&mut self, link: &CompanyLink, account: AccountId) -> Option<Money> {
         let mut state = demo(link).ok()?;
         crate::company::demo::checks::balance(&mut state, account)
+    }
+}
+
+/// A demo bank-file deposit's id (the sample feed has none: its place).
+fn feed_id(i: usize) -> Option<FeedItemId> {
+    FeedItemId::parse(&format!("f0000000-0000-4000-8000-{i:012}")).ok()
+}
+
+fn type_name(t: TxnType) -> &'static str {
+    match t {
+        TxnType::CustomerPayment => "customer_payment",
+        TxnType::CashSale => "cash_sale",
+        TxnType::DailySales => "daily_sales",
+        TxnType::JournalEntry => "journal_entry",
+        _ => "other",
+    }
+}
+
+fn pending_of(p: &twins::DemoPending) -> PendingPayment {
+    PendingPayment {
+        source: p.source,
+        txn_type: type_name(p.txn_type).to_string(),
+        date: p.date,
+        received_from: p.received_from.clone(),
+        contact: p.contact,
+        ref_no: p.ref_no.clone(),
+        method: None,
+        memo: p.memo.clone(),
+        amount: RegisterAmount::Exact(p.amount),
     }
 }

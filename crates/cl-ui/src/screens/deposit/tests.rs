@@ -395,7 +395,11 @@ fn the_demo_saves_a_plain_deposit_and_reads_it_back() {
     let dir = tempfile::tempdir().expect("tmp");
     let link = Arc::new(CompanyLink::demo(dir.path()));
     let mut s = DepositScreen::new(Arc::clone(&link), None, today());
-    assert_eq!(s.state_json()["pending"]["count"], 0, "the empty state");
+    assert_eq!(
+        s.state_json()["pending"]["count"],
+        2,
+        "the sample's two payments"
+    );
     set_lines(&mut s, &[(4000, "300.00"), (6250, "-12.50")]);
     set_cash_back(&mut s, 1020, "50.00");
     assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.save.error);
@@ -406,12 +410,40 @@ fn the_demo_saves_a_plain_deposit_and_reads_it_back() {
     let got = DemoDeposits.get(&link, row.id).expect("get");
     let r = cl_api::DepositRecord::from_transaction(got.record, account(1010)).expect("record");
     assert_eq!(r.total, money("237.50"));
-    // The demo ledger keeps no line roles (WP-D.3): its cash back reads
-    // back as a second debit line; the total is exact either way.
-    assert_eq!(r.lines.len(), 3);
+    assert_eq!(r.lines.len(), 2);
+    assert!(r.cash_back.is_some(), "the twin keeps the cash back");
     assert!(r.lines.iter().any(|l| l.amount == money("-12.50")));
     // Prev opens it, plain and editable.
     s.navigate(true);
     assert_eq!(s.state_json()["mode"], "edit");
     assert_eq!(s.state_json()["read_only"], false);
+}
+
+#[test]
+fn the_demo_story_groups_the_bank_deposit_and_void_returns_the_payments() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let mut s = DepositScreen::new(Arc::clone(&link), None, today());
+    let w = s
+        .panel
+        .waiting
+        .iter()
+        .find(|w| w.amount == money("2092.50"))
+        .cloned()
+        .expect("the 11/04 bank deposit");
+    s.choose_feed(w);
+    let v = s.state_json();
+    assert_eq!(v["picked"], 2);
+    assert_eq!(v["totals"]["total"], "2,092.50");
+    assert_eq!(v["bank_match"], "matches");
+    assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.save.error);
+    assert_eq!(s.state_json()["pending"]["count"], 0);
+    assert_eq!(s.state_json()["pending"]["clearing_balance"], "0.00");
+    // Prev opens the grouped deposit read-only; Void returns the payments.
+    s.navigate(true);
+    assert_eq!(s.state_json()["grouped"], true, "{}", s.state_json());
+    s.start_void();
+    s.send_void("scenario cleanup", None);
+    assert_eq!(s.save.last_action, Some("void"));
+    assert_eq!(s.state_json()["pending"]["count"], 2);
 }
