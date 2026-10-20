@@ -2,4 +2,5 @@
 //! lines grid (register Splits, Write Check Expenses) and the closing-date
 //! password prompt.
 
+pub mod closing_prompt;
 pub mod lines_grid;
