@@ -575,7 +575,9 @@ impl RegisterScreen {
     }
 }
 
-/// The legend: locked rows, R and ✓ (mockup `Register.html`).
+/// The legend: locked rows, R and the cleared check (mockup `Register.html`;
+/// the check is drawn like the grid's, since Plex's U+2713 reads as a
+/// radical).
 fn legend(ui: &mut Ui, tokens: &Tokens) {
     let small = |s: String| RichText::new(s).size(12.0).color(tokens.text_secondary);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
@@ -588,6 +590,12 @@ fn legend(ui: &mut Ui, tokens: &Tokens) {
     );
     ui.add(egui::Label::new(small(t("register.legend.locked"))).selectable(false));
     ui.add(egui::Label::new(small(t("register.legend.reconciled"))).selectable(false));
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 12.0), egui::Sense::hover());
+    cl_grid::draw_check(
+        ui.painter(),
+        egui::Rect::from_center_size(rect.center(), egui::vec2(9.0, 9.0)),
+        tokens.text_secondary,
+    );
     ui.add(egui::Label::new(small(t("register.legend.cleared"))).selectable(false));
 }
 

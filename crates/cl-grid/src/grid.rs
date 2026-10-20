@@ -1179,6 +1179,17 @@ impl Grid {
                     node.set_description(h);
                 }
             });
+            // The mark column's heading is the drawn check the cells use
+            // (Plex's U+2713 reads as a radical); its name stays the
+            // AccessKit label.
+            if matches!(col.kind, CellKind::Mark) {
+                check(
+                    header_ui.painter(),
+                    Rect::from_center_size(r.center(), vec2(9.0, 9.0)),
+                    style.header_text,
+                );
+                continue;
+            }
             let (anchor, x) = match col.align {
                 crate::core::model::Align::Right => (Align2::RIGHT_CENTER, r.right() - style.pad),
                 crate::core::model::Align::Center => (Align2::CENTER_CENTER, r.center().x),
@@ -1947,8 +1958,9 @@ fn lock(painter: &egui::Painter, center: Pos2, color: Color32) {
     );
 }
 
-/// A drawn check mark (Plex has no check glyph, Q-P06h).
-fn check(painter: &egui::Painter, r: Rect, color: Color32) {
+/// A drawn check mark (Plex's U+2713 reads as a radical, Q-P06h). Public so
+/// screens draw the same mark outside the grid (the register legend).
+pub fn check(painter: &egui::Painter, r: Rect, color: Color32) {
     let a = pos2(r.left(), r.center().y);
     let b = pos2(r.left() + r.width() * 0.4, r.bottom());
     let c = pos2(r.right(), r.top());
