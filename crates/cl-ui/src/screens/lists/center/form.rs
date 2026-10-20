@@ -401,6 +401,8 @@ impl CenterScreen {
                 if matches!(saved.profile, Some(Err(_))) {
                     self.warn = Some("center.profile_not_saved");
                 }
+                // A new contact's opening balance is a transaction.
+                self.publish(true);
                 self.after_save(after, Some(id));
                 true
             }

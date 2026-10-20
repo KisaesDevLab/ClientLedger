@@ -606,6 +606,11 @@ impl Screen for OpeningBalancesScreen {
             && let Some(r) = t.poll_result()
         {
             self.task = None;
+            // Open registers, centers and lists read again (Q-262); after
+            // a failure too, since part of it may have posted.
+            self.link
+                .bus()
+                .publish(crate::data_bus::Change::Ledger(None));
             match r {
                 Ok(p) => {
                     self.posted = Some(p);

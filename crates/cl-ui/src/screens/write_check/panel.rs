@@ -83,6 +83,9 @@ pub(crate) struct PanelState {
     pub summary: Option<Card<VendorSummary>>,
     pub bills: Option<Card<Vec<OpenBill>>>,
     pub recent: Option<Card<Vec<RecentCheck>>>,
+    /// The same payee's cards being read again after a save elsewhere
+    /// (Q-262): the shown cards stay until these arrive.
+    pub next: Option<Box<PanelState>>,
 }
 
 impl PanelState {
@@ -90,6 +93,7 @@ impl PanelState {
         self.summary.as_ref().is_some_and(Card::loading)
             || self.bills.as_ref().is_some_and(Card::loading)
             || self.recent.as_ref().is_some_and(Card::loading)
+            || self.next.as_ref().is_some_and(|n| n.busy())
     }
 
     fn poll(&mut self) {
@@ -174,43 +178,66 @@ impl WriteCheckScreen {
             self.load_panel(payee);
         }
         self.panel.poll();
+        if let Some(next) = self.panel.next.as_mut() {
+            next.poll();
+            if !next.busy() {
+                let next = self.panel.next.take().map(|b| *b);
+                if let Some(next) = next.filter(|n| n.payee == self.panel.payee) {
+                    self.panel = next;
+                }
+            }
+        }
     }
 
     /// Reads the cards for `payee` again.
     pub(crate) fn load_panel(&mut self, payee: Option<ContactId>) {
-        self.panel = PanelState {
+        self.panel = self.read_panel(payee);
+    }
+
+    /// Reads the shown payee's cards again without blanking them (a save
+    /// in another window, Q-262).
+    pub(crate) fn refresh_panel(&mut self) {
+        let Some(payee) = self.panel.payee else {
+            return;
+        };
+        let next = self.read_panel(Some(payee));
+        self.panel.next = Some(Box::new(next));
+    }
+
+    fn read_panel(&self, payee: Option<ContactId>) -> PanelState {
+        let mut panel = PanelState {
             payee,
             ..PanelState::default()
         };
-        let Some(id) = payee else { return };
+        let Some(id) = payee else { return panel };
         if let Some(mut demo) = self.link.demo_state() {
             use crate::company::demo::checks;
             let summary = checks::vendor_summary(&mut demo, id);
             let bills = checks::payable(&mut demo, id);
             let rows = checks::contact_transactions(&mut demo, id, usize::from(RECENT_READ));
             drop(demo);
-            self.panel.summary = Some(Card::Ready(summary));
-            self.panel.bills = Some(Card::Ready(bills));
-            self.panel.recent = Some(Card::Ready(recent_checks(&rows)));
-            return;
+            panel.summary = Some(Card::Ready(summary));
+            panel.bills = Some(Card::Ready(bills));
+            panel.recent = Some(Card::Ready(recent_checks(&rows)));
+            return panel;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
-            return;
+            return panel;
         };
-        self.panel.summary = group
+        panel.summary = group
             .read(&session, move |s| async move {
                 s.bills().vendor_summary(id).await
             })
             .ok()
             .map(|p| Card::Loading(Task::Pending(p)));
-        self.panel.bills = group
+        panel.bills = group
             .read(
                 &session,
                 move |s| async move { s.bills().payable(id).await },
             )
             .ok()
             .map(|p| Card::Loading(Task::Pending(p)));
-        self.panel.recent = group
+        panel.recent = group
             .read(&session, move |s| async move {
                 let page = cl_api::PageRequest::new(RECENT_READ, 0)?;
                 let rows = s.contacts().transactions(id, page).await?;
@@ -218,6 +245,7 @@ impl WriteCheckScreen {
             })
             .ok()
             .map(|p| Card::Loading(Task::Pending(p)));
+        panel
     }
 
     /// Draws the side panel.

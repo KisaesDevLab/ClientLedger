@@ -184,6 +184,11 @@ pub struct ItemsScreen {
     just_hidden: Option<ItemId>,
     item_types: bool,
     price_levels: bool,
+    /// Saves in other windows (Q-262).
+    bus: crate::data_bus::Subscription,
+    /// The list being read again after a save elsewhere: the cursor stays
+    /// where it was and the keyboard is not moved.
+    refreshing: bool,
 }
 
 impl ItemsScreen {
@@ -221,9 +226,32 @@ impl ItemsScreen {
             typed_at: f64::NEG_INFINITY,
             compact: false,
             just_hidden: None,
+            bus: crate::data_bus::Subscription::detached(),
+            refreshing: false,
         };
+        s.bus = s.link.bus().subscribe();
         s.start_load();
         s
+    }
+
+    /// Saves in other windows of this app (Q-262): the items and the
+    /// account names come again from the engine; the cursor stays on its
+    /// item and an open form keeps its edits.
+    fn hear_changes(&mut self) {
+        let changes = self.link.bus().take(&mut self.bus);
+        if (changes.items || changes.accounts) && self.load.is_none() {
+            self.refreshing = true;
+            self.start_load();
+            if self.load.is_none() {
+                self.refreshing = false;
+            }
+        }
+    }
+
+    fn publish(&self) {
+        self.link
+            .bus()
+            .publish_from(&self.bus, crate::data_bus::Change::Items);
     }
 
     fn start_load(&mut self) {
@@ -313,7 +341,13 @@ impl ItemsScreen {
         self.list = ItemList::new(entries);
         self.refilter();
         self.loaded = true;
-        self.place_cursor(keep);
+        if std::mem::take(&mut self.refreshing) {
+            if let Some(key) = keep.and_then(|i| self.model.key_of(i)) {
+                self.focus_row(key, false);
+            }
+        } else {
+            self.place_cursor(keep);
+        }
     }
 
     fn refilter(&mut self) {
@@ -637,6 +671,7 @@ impl ItemsScreen {
                 self.want_cursor = Some(item.id);
                 self.apply();
                 self.note = Some("items.saved");
+                self.publish();
                 self.after_save(after, Some(item.id));
                 true
             }
@@ -702,6 +737,7 @@ impl ItemsScreen {
                     }
                     self.want_cursor = Some(id);
                     self.apply();
+                    self.publish();
                     self.note = Some(if active {
                         "items.made_active"
                     } else {
@@ -1036,6 +1072,7 @@ impl Screen for ItemsScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.parts = EnvParts::capture(ui.ctx());
         self.poll();
+        self.hear_changes();
         self.sync_compact();
         let tokens = Tokens::of(ui.ctx());
         form::heading(ui, &tokens, &t("cmd.lists.items"));

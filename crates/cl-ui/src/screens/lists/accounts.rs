@@ -196,6 +196,11 @@ pub struct ChartScreen {
     /// The account just made inactive (hidden by the filter): turning on
     /// Include inactive puts the cursor back on it.
     just_hidden: Option<AccountId>,
+    /// Saves in other windows (Q-262).
+    bus: crate::data_bus::Subscription,
+    /// The chart being read again after a save elsewhere: the cursor
+    /// stays where it was and the keyboard is not moved.
+    refreshing: bool,
 }
 
 fn new_grid(salt: &str, spec: cl_grid::GridSpec) -> Grid {
@@ -240,7 +245,10 @@ impl ChartScreen {
             typed_at: f64::NEG_INFINITY,
             compact: false,
             just_hidden: None,
+            bus: crate::data_bus::Subscription::detached(),
+            refreshing: false,
         };
+        s.bus = s.link.bus().subscribe();
         s.read_prefs();
         s.grid = new_grid("coa/chart", chart_spec(s.numbers, false));
         s.start_load();
@@ -296,7 +304,54 @@ impl ChartScreen {
         self.model
             .set_accounts(&self.accounts, &self.sensitive, self.numbers, &self.filter);
         self.loaded = true;
-        self.place_cursor(keep);
+        if std::mem::take(&mut self.refreshing) {
+            self.keep_cursor(keep);
+        } else {
+            self.place_cursor(keep);
+        }
+    }
+
+    /// Saves in other windows of this app (Q-262): the chart and its
+    /// balances come again from the engine; the cursor stays on its
+    /// account and an open form keeps its edits.
+    fn hear_changes(&mut self) {
+        let changes = self.link.bus().take(&mut self.bus);
+        if (changes.accounts || changes.ledger_any()) && self.load.is_none() {
+            self.refreshing = true;
+            self.start_load();
+            if self.load.is_none() {
+                self.refreshing = false;
+            }
+        }
+    }
+
+    /// Tells the other windows this one changed the chart (an opening
+    /// balance is a transaction).
+    fn publish(&self, ledger: bool) {
+        let bus = self.link.bus();
+        bus.publish_from(&self.bus, crate::data_bus::Change::Accounts);
+        if ledger {
+            bus.publish_from(&self.bus, crate::data_bus::Change::Ledger(None));
+        }
+    }
+
+    /// Puts the cursor back on `id` without taking the keyboard.
+    fn keep_cursor(&mut self, id: Option<AccountId>) {
+        let Some(key) = id.and_then(|i| self.model.key_of(i)) else {
+            return;
+        };
+        let label = String::new();
+        let env = self
+            .parts
+            .env(&NoLookups, &label, GridHeight::Rows { min: 1, max: 1 });
+        self.grid.set_cursor(
+            CellPos {
+                row: key,
+                col: COL_NAME,
+            },
+            ModelRef::Browse(&mut self.model),
+            &env,
+        );
     }
 
     /// Puts the cursor on `id` (or the first row) and focuses the grid.
@@ -683,6 +738,7 @@ impl ChartScreen {
                 let accounts = std::mem::take(&mut self.accounts);
                 self.apply_accounts(accounts);
                 self.note = Some("lists.accounts.saved");
+                self.publish(true);
                 self.after_save(after, Some(account.id));
                 true
             }
@@ -778,6 +834,7 @@ impl ChartScreen {
                     self.want_cursor = Some(id);
                     let accounts = std::mem::take(&mut self.accounts);
                     self.apply_accounts(accounts);
+                    self.publish(false);
                     self.note = Some(if active {
                         "lists.accounts.made_active"
                     } else {
@@ -1366,6 +1423,7 @@ impl Screen for ChartScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.parts = EnvParts::capture(ui.ctx());
         self.poll();
+        self.hear_changes();
         self.sync_compact();
         let tokens = Tokens::of(ui.ctx());
         form::heading(ui, &tokens, &t("cmd.lists.chart_of_accounts"));

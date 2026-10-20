@@ -1025,6 +1025,41 @@ fn void_asks_first_then_voids_and_reloads() {
 }
 
 #[test]
+fn a_save_in_another_window_reloads_the_rows_of_its_account_only() {
+    let (_d, link) = link();
+    let mut shown = screen(&link);
+    settle(&mut shown, None);
+    let total = shown.model.total().expect("total");
+    // Another account's transactions: nothing to read again.
+    let elsewhere = link.bus().subscribe();
+    link.bus().publish_from(
+        &elsewhere,
+        crate::data_bus::Change::ledger([demo_account(&link, "6100")]),
+    );
+    let rev = cl_grid::RowModel::revision(&shown.model);
+    shown.hear_changes();
+    assert_eq!(cl_grid::RowModel::revision(&shown.model), rev);
+    // A second window on the same account records a check: the first
+    // reads its rows again from the engine and lists it.
+    let mut other = screen(&link);
+    let _ = recorded_check(&link, &mut other);
+    assert_eq!(other.model.total(), Some(total + 1));
+    assert_eq!(shown.model.total(), Some(total), "not yet heard");
+    shown.hear_changes();
+    assert!(cl_grid::RowModel::revision(&shown.model) > rev);
+    settle(&mut shown, None);
+    assert_eq!(shown.model.total(), Some(total + 1));
+    // Heard once; a window does not hear its own write back.
+    let rev = cl_grid::RowModel::revision(&shown.model);
+    shown.hear_changes();
+    other.hear_changes();
+    assert_eq!(cl_grid::RowModel::revision(&shown.model), rev);
+    let rev_other = cl_grid::RowModel::revision(&other.model);
+    other.hear_changes();
+    assert_eq!(cl_grid::RowModel::revision(&other.model), rev_other);
+}
+
+#[test]
 fn delete_asks_says_what_happens_and_removes_the_row() {
     let (_d, link) = link();
     let mut s = screen(&link);

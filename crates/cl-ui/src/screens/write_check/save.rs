@@ -568,6 +568,7 @@ impl WriteCheckScreen {
 
     /// The engine took the save.
     fn saved(&mut self, s: Saved) {
+        self.publish_ledger();
         self.closing_prompt.saved();
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
         self.save.count += 1;
@@ -1048,6 +1049,7 @@ impl WriteCheckScreen {
     }
 
     fn voided(&mut self) {
+        self.publish_ledger();
         self.closing_prompt.saved();
         self.void = super::VoidPrompt::default();
         self.save.last_action = Some("void");
