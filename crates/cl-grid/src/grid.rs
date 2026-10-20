@@ -1658,6 +1658,7 @@ impl Grid {
                 ctx.accesskit_node_builder(cell_id, |node| {
                     a11y::cell_node(node, cell_rect.intersect(body).intersect(vis), &info);
                 });
+                let suggested_desc = info.suggested.map(|s| s.replace("{value}", &shown.text));
                 // The cursor cell without a text editor: the focus target's
                 // node speaks for it (a checkbox, a combo box, a cell).
                 if is_cursor && !no_editor {
@@ -1674,12 +1675,17 @@ impl Grid {
                             }
                             _ => {
                                 node.set_role(if editable { Role::GridCell } else { Role::Cell });
-                                match hint {
-                                    Some(h) => {
+                                match (hint, suggested_desc) {
+                                    (Some(h), _) => {
                                         node.set_value("");
                                         node.set_description(h);
                                     }
-                                    None => node.set_value(shown.text.clone()),
+                                    // An unaccepted suggestion is never the value.
+                                    (None, Some(s)) => {
+                                        node.set_value("");
+                                        node.set_description(s);
+                                    }
+                                    (None, None) => node.set_value(shown.text.clone()),
                                 }
                             }
                         }

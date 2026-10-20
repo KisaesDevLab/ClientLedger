@@ -161,7 +161,10 @@ pub struct CellInfo<'a> {
     pub locked: Option<&'a str>,
     /// The row's problem in plain words.
     pub problem: Option<&'a str>,
-    /// The value is an AI suggestion, not yet accepted: this text.
+    /// The value is an AI or rule suggestion, not yet accepted: this
+    /// text, with `{value}` standing for the suggested entry. A suggestion
+    /// is never the cell's value (the value stays empty until accepted);
+    /// it is spoken as a description.
     pub suggested: Option<&'a str>,
 }
 
@@ -174,7 +177,12 @@ pub fn cell_node(node: &mut Node, bounds: Rect, cell: &CellInfo<'_>) {
         Role::Cell
     });
     node.set_label(cell.label);
-    node.set_value(cell.value);
+    // An unaccepted suggestion is not the cell's value.
+    node.set_value(if cell.suggested.is_some() {
+        ""
+    } else {
+        cell.value
+    });
     node.set_column_index(cell.column);
     node.add_action(Action::Focus);
     node.add_action(Action::Click);
@@ -185,23 +193,23 @@ pub fn cell_node(node: &mut Node, bounds: Rect, cell: &CellInfo<'_>) {
     if let Some(b) = cell.toggled {
         node.set_toggled(if b { Toggled::True } else { Toggled::False });
     }
-    let mut description = Vec::new();
+    let mut description: Vec<std::borrow::Cow<'_, str>> = Vec::new();
     if let Some(h) = cell.hint {
-        description.push(h);
+        description.push(h.into());
     }
     if let Some(l) = cell.locked {
         node.set_read_only();
-        description.push(l);
+        description.push(l.into());
     }
     if let Some(p) = cell.problem {
         node.set_invalid(Invalid::True);
-        description.push(p);
+        description.push(p.into());
     }
     if let Some(s) = cell.suggested {
-        description.push(s);
+        description.push(s.replace("{value}", cell.value).into());
     }
     if let Some(h) = cell.help {
-        description.push(h);
+        description.push(h.into());
     }
     if !description.is_empty() {
         node.set_description(description.join(". "));
@@ -306,5 +314,41 @@ mod tests {
         assert_eq!(node.description(), Some("Locked. Pick an account"));
         assert_eq!(node.numeric_value(), None, "money is never a number");
         assert!(!node.supports_action(Action::SetValue), "locked");
+    }
+
+    fn account_cell(suggested: Option<&str>) -> Node {
+        let mut node = Node::new(Role::Unknown);
+        let r = Rect::from_min_max(pos2(0.0, 0.0), pos2(10.0, 10.0));
+        cell_node(
+            &mut node,
+            r,
+            &CellInfo {
+                label: "Account, line 2",
+                value: "5110 Mulch & stone",
+                hint: None,
+                help: None,
+                column: 0,
+                editable: true,
+                toggled: None,
+                locked: None,
+                problem: None,
+                suggested,
+            },
+        );
+        node
+    }
+
+    #[test]
+    fn a_suggestion_is_a_description_never_the_value() {
+        let node = account_cell(Some("Suggested: {value}, not accepted"));
+        assert_eq!(node.value(), Some(""));
+        assert_eq!(
+            node.description(),
+            Some("Suggested: 5110 Mulch & stone, not accepted")
+        );
+        // Accepted: the entry is the value and nothing is described.
+        let node = account_cell(None);
+        assert_eq!(node.value(), Some("5110 Mulch & stone"));
+        assert_eq!(node.description(), None);
     }
 }

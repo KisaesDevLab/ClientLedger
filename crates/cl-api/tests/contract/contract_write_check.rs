@@ -3,25 +3,28 @@
 //! - `gl_effect`: the mockup check 4418 = 842.15 + 444.25 posts exactly a
 //!   bank credit of 1,286.40 and two debits, moves the three balances by
 //!   exactly those amounts, shows as one register row and one checks-list
-//!   row, and advances the engine's next number past it. The line customer
-//!   and billable mark are PENDING `line-billable-v1` (the same check runs
-//!   without a line customer meanwhile).
+//!   row, and advances the engine's next number past it, the first line
+//!   billable to its customer (`line-billable-v1`; an older engine runs
+//!   the same check without a line customer).
 //! - `edges`: a 0.01 mismatch refused locally with nothing sent (the
 //!   engine's float tolerance is never relied on), a duplicate number 409,
 //!   Print later unnumbered and leaving the counter alone, a lost create
-//!   reply reconciled to one check, and the check edit (`check-edit-v1`:
-//!   PENDING; meanwhile refused locally with nothing sent).
+//!   reply reconciled to one check, and the check edit (`check-edit-v1`;
+//!   refused locally with nothing sent on an older engine).
+//! - `printed_check_edits`: printed checks edited as the screen does
+//!   (`CHECK_PRINTED`, Keep number, Reprint, header tags replaced).
 //! - `closed_period`: a check dated on or before the closing date asks for
 //!   the closing-date password; a wrong one is refused, the right one saves
 //!   and is audited (on the second company, cleaned up afterwards).
 
 use cl_api::{
     AccountType, ApiError, AuditAction, AuditEntity, BankPosting, Capabilities, CheckDraft,
-    ClosedPeriodAuthorization, ConflictReason, ContactFields, ContactType, EditableFields,
-    LocalValidation, Method, NewContact, PageRequest, PostingOptions, PrintStatus, RecordVersion,
-    RegisterQuery, Session, SplitLine, TxnType,
+    CheckEditOptions, CheckRecord, ClosedPeriodAuthorization, ConflictReason, ContactFields,
+    ContactType, EditableFields, LocalValidation, Method, NewContact, PageRequest, PostingOptions,
+    PrintStatus, PrintedCheckChange, RecordVersion, RegisterQuery, Session, SplitLine, TagFields,
+    TxnType, is_check_printed,
 };
-use cl_core::ids::{AccountId, ContactId};
+use cl_core::ids::{AccountId, ContactId, TagId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
 use serde_json::json;
 
@@ -492,6 +495,210 @@ pub fn edit_without_check_edit(h: &Harness) {
         key(),
     ))
     .unwrap_or_else(|e| panic!("second edit: {e}"));
+}
+
+fn tag(h: &Harness, s: &Session, name: &str) -> TagId {
+    h.run(s.tags().create(
+        &TagFields {
+            name: unique(name),
+            color: None,
+            group_id: None,
+            description: None,
+        },
+        key(),
+    ))
+    .expect("tag")
+    .record
+    .id
+}
+
+/// Prints a queued check through the engine (`POST /checks/print`).
+fn print(h: &Harness, s: &Session, bank: AccountId, id: TransactionId, number: u32) {
+    h.run(s.raw_mapped(
+        Method::Post,
+        "/api/v1/checks/print",
+        Some(&json!({
+            "bankAccountId": bank.to_string(),
+            "checkIds": [id.to_string()],
+            "startingCheckNumber": number,
+            "format": "voucher",
+        })),
+    ))
+    .unwrap_or_else(|e| panic!("print: {e}"));
+}
+
+/// The check as the screen sends it back: the read's memo, printed memo,
+/// name and address, so only what the owner changed differs.
+fn as_read(b: &Books, read: &CheckRecord, lines: Vec<SplitLine>, tags: Vec<TagId>) -> CheckDraft {
+    let amount = lines
+        .iter()
+        .try_fold(Money::ZERO, |sum, l| sum.checked_add(l.amount))
+        .expect("sum");
+    CheckDraft {
+        bank: b.bank,
+        date: read.txn.txn_date,
+        payee: Some(b.vendor),
+        payee_name: read.payee_name.clone(),
+        check_number: read.check_number,
+        print_later: false,
+        payee_address: read.payee_address.clone(),
+        memo: read.txn.memo.clone(),
+        printed_memo: read.printed_memo.clone(),
+        tag_ids: tags,
+        draft_attachment: None,
+        amount,
+        lines,
+    }
+}
+
+/// Editing printed checks through `update_check` (`check-edit-v1`) as the
+/// screen does: a recategorized split keeps it printed and the sent header
+/// tags replace the old ones; a new amount is refused with `CHECK_PRINTED`
+/// (nothing changes) until the owner chooses Keep number (handwritten) or
+/// Reprint (back to the queue, unnumbered). `LINE_BILLED` needs a line
+/// invoiced to a customer, which no route makes yet; the client mapping is
+/// covered by the stub tests.
+pub fn printed_check_edits(h: &Harness) {
+    if !h.require_cap(Capabilities::CHECK_EDIT, "check-edit-v1") {
+        return;
+    }
+    let s = &h.s1;
+    let b = books(h, s);
+    let on = date(2026, 11, 7);
+    let opts = PostingOptions::default();
+    let install = tag(h, s, "Install");
+    let spring = tag(h, s, "Spring");
+    let next = h
+        .run(s.checks().settings())
+        .expect("settings")
+        .next_for(b.bank)
+        .unwrap_or(1);
+    let number = next.max(6000);
+
+    let queued = |tags: Vec<TagId>| {
+        let mut d = story(&b, on, None, false);
+        d.print_later = true;
+        d.tag_ids = tags;
+        h.run(s.transactions().create_bank_posting(
+            &BankPosting::check(d).expect("queued"),
+            &opts,
+            key(),
+        ))
+        .expect("queued check")
+        .record
+        .id
+    };
+    let id = queued(vec![install]);
+    print(h, s, b.bank, id, number);
+    let read = h.run(s.checks().get(id)).expect("printed");
+    assert_eq!(read.record.print_status, PrintStatus::Printed);
+    assert_eq!(read.record.check_number, Some(number));
+    assert_eq!(read.record.tag_ids, vec![install]);
+
+    // Same face, lines recategorized, tags replaced: no question asked.
+    let resplit = as_read(
+        &b,
+        &read.record,
+        vec![split(b.plants, "1000.00"), split(b.mulch, "286.40")],
+        vec![spring],
+    );
+    let saved = h
+        .run(s.checks().update_check(
+            id,
+            &read.version,
+            &BankPosting::check(resplit).expect("resplit"),
+            &opts,
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("face unchanged: {e}"));
+    let after = h.run(s.checks().get(id)).expect("check");
+    assert_eq!(after.record.print_status, PrintStatus::Printed);
+    assert_eq!(after.record.check_number, Some(number));
+    assert_eq!(after.record.tag_ids, vec![spring], "the sent tags replace");
+    assert_eq!(after.version, saved.version);
+
+    // A new amount on a printed check: refused, nothing changes.
+    let more = || {
+        BankPosting::check(as_read(
+            &b,
+            &after.record,
+            vec![split(b.plants, "855.75"), split(b.mulch, "444.25")],
+            Vec::new(),
+        ))
+        .expect("more")
+    };
+    let e = h
+        .run(
+            s.checks()
+                .update_check(id, &after.version, &more(), &opts, key()),
+        )
+        .expect_err("printed face changed");
+    assert!(is_check_printed(&e), "{e:?}");
+    let same = h.run(s.checks().get(id)).expect("check");
+    assert_eq!(same.version, after.version, "nothing changed");
+    assert_eq!(
+        same.record.txn.total.map(Money::to_wire).as_deref(),
+        Some("1286.4000")
+    );
+
+    // Keep number: handwritten with the same number, new amount, tags
+    // cleared (an empty set is sent).
+    let keep = CheckEditOptions {
+        posting: opts.clone(),
+        printed_check_change: Some(PrintedCheckChange::KeepNumber),
+    };
+    let kept = h
+        .run(
+            s.checks()
+                .update_check(id, &after.version, &more(), keep, key()),
+        )
+        .unwrap_or_else(|e| panic!("keep number: {e}"));
+    assert_eq!(kept.record.print_status, PrintStatus::HandWritten);
+    assert_eq!(kept.record.check_number, Some(number));
+    let reread = h.run(s.checks().get(id)).expect("check");
+    assert_eq!(
+        reread.record.txn.total.map(Money::to_wire).as_deref(),
+        Some("1300.0000")
+    );
+    assert!(reread.record.tag_ids.is_empty(), "[] clears the tags");
+    assert_eq!(reread.version, kept.version);
+
+    // Reprint: a second printed check, a new address, back to the queue.
+    let other = queued(Vec::new());
+    print(h, s, b.bank, other, number + 1);
+    let read = h.run(s.checks().get(other)).expect("printed");
+    let mut moved = as_read(
+        &b,
+        &read.record,
+        vec![split(b.plants, "842.15"), split(b.mulch, "444.25")],
+        Vec::new(),
+    );
+    moved.payee_address = Some("PO Box 12\nAurora, MO 65605".into());
+    let reprint = CheckEditOptions {
+        posting: opts.clone(),
+        printed_check_change: Some(PrintedCheckChange::Reprint),
+    };
+    // The screen sends the same form again (its number still on it) with
+    // the owner's choice; the reply is lost and reconciled by reading the
+    // check again, so the client's prediction must match the engine.
+    assert_eq!(moved.check_number, Some(number + 1));
+    h.observer
+        .drop_next_reply(Method::Put, "/api/v1/checks/{id}");
+    let queued_again = h
+        .run(s.checks().update_check(
+            other,
+            &read.version,
+            &BankPosting::check(moved).expect("moved"),
+            reprint,
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("reprint: {e}"));
+    assert_eq!(queued_again.record.print_status, PrintStatus::Queue);
+    assert_eq!(queued_again.record.check_number, None);
+    assert_eq!(
+        h.run(s.checks().get(other)).expect("check").version,
+        queued_again.version
+    );
 }
 
 /// A closed period asks for the closing-date password (second company).

@@ -207,6 +207,10 @@ fn main() -> std::process::ExitCode {
             contract_write_check::edit_without_check_edit,
         ),
         (
+            "write_check::printed_check_edits",
+            contract_write_check::printed_check_edits,
+        ),
+        (
             "write_check::closed_period",
             contract_write_check::closed_period,
         ),

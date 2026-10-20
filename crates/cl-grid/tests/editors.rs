@@ -332,7 +332,9 @@ fn suggestion_accept_only_by_tab() {
             col: ACCOUNT,
         }))
         .expect("cell");
-    assert_eq!(cell.value(), Some("5100 · Materials:Plants"));
+    // Not the value until accepted; spoken as a description instead.
+    assert_eq!(cell.value(), Some(""));
+    assert!(cell.description().is_some_and(|d| !d.is_empty()));
 
     let mut r = suggested_rig();
     let out = r.frame(key(Key::Enter, Modifiers::NONE));
