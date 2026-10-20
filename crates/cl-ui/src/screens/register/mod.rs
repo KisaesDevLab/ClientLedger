@@ -183,8 +183,9 @@ pub struct RegisterScreen {
     goto: goto::GotoBar,
     /// QuickReport (Ctrl+Shift+Q), when shown.
     report: Option<quick_report::QuickReport>,
-    /// The space kept under the grid last frame (entry row and footer).
-    reserve: f32,
+    /// The grid's height last frame (it changes when the entry row grows
+    /// for Splits, or a bar or QuickReport opens above).
+    grid_room: f32,
 }
 
 /// Watches the ledger stamp (Q-P12n): read on window focus, every
@@ -259,7 +260,7 @@ impl RegisterScreen {
             quick: filters::QuickInput::default(),
             goto: goto::GotoBar::default(),
             report: None,
-            reserve: 0.0,
+            grid_room: 0.0,
         };
         s.start_load();
         s.load_lists();
@@ -607,6 +608,7 @@ impl RegisterScreen {
     }
 
     fn grid_ui(&mut self, ui: &mut Ui, reserve: f32) {
+        let room = ui.available_height() - reserve;
         let label = t("register.grid_label");
         let env = self.parts.env(
             &NoLookups,
@@ -617,10 +619,10 @@ impl RegisterScreen {
             },
         );
         let out = self.grid.show(ui, ModelRef::Browse(&mut self.model), &env);
-        // The entry row grew or shrank (Splits opened or closed): keep the
-        // cursor row in view in the new height.
-        if (reserve - self.reserve).abs() > 0.5 {
-            self.reserve = reserve;
+        // The grid got shorter or taller (Splits opened or closed under it,
+        // Go To or QuickReport above it): keep the cursor row in view.
+        if (room - self.grid_room).abs() > 0.5 {
+            self.grid_room = room;
             if let Some(key) = self.grid.core().cursor().map(|c| c.row) {
                 self.grid
                     .scroll_to(key, RowAlign::Nearest, &ModelRef::Browse(&mut self.model));

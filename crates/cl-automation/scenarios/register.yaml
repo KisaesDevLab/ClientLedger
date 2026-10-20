@@ -143,6 +143,62 @@ steps:
   - command: register.one_line
   - assert_state: {key: screen.one_line, equals: false}
 
+  # --- Quick filters (Q-189): Payee autofills, amounts are exact -----------
+  - assert_exists: {role: check_box, label: Uncleared}
+  - assert_exists: {role: combo_box, label: Tag}
+  - assert_exists: {label: Closed period (locked)}
+  - assert_exists: {label: R reconciled}
+  - type: {text: hollister fu, target: {role: text_input, label: Payee}}
+  - key: Enter
+  - assert_state: {key: screen.filters_active, equals: true}
+  - assert_state: {key: screen.filters.payee, equals: true}
+  - assert_value: {target: {role: text_input, label: Payee}, equals: Hollister Fuel Stop}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: row, label_contains: Hollister Fuel Stop, index: 0}
+  # The demo engine's balances ignore filters (R1): no dashes.
+  - assert_state: {key: screen.balance_mode, equals: engine}
+  - type: {text: "300", target: {role: text_input, label: Amount from}}
+  - type: {text: "100", target: {role: text_input, label: Amount to}}
+  - key: Enter
+  # Leaving Amount from applied it; To below From is refused.
+  - assert_state: {key: screen.filters.problem, equals: true}
+  - assert_exists: {role: label, label_contains: The lowest amount is more than the highest amount}
+  - assert_no_clipping: {}
+  - screenshot: filters
+  - click: {label: Clear filters}
+  - assert_state: {key: screen.filters_active, equals: false}
+  - assert_state: {key: screen.filters.problem, equals: false}
+  - assert_value: {target: {role: text_input, label: Payee}, equals: ""}
+  - assert_state: {key: screen.loaded, equals: true}
+
+  # --- Go To (Ctrl+F): the check's memo, up from the newest line, then
+  # nothing below it ---------------------------------------------------------
+  - key: Ctrl+F
+  - assert_state: {key: screen.goto.open, equals: true}
+  - type: {text: Mower fuel}
+  - click: {role: button, label: Find Previous}
+  - assert_state: {key: screen.goto.last, equals: found}
+  - assert_state: {key: screen.goto.jump_pending, equals: false}
+  - assert_state: {key: screen.focused, equals: true}
+  - assert_exists: {role: row, label_contains: Hollister Fuel Stop, index: 0}
+  - screenshot: goto
+  - type: {text: zz no such memo, target: {role: text_input, label: Find}}
+  - key: Enter
+  - assert_state: {key: screen.goto.last, equals: not_found}
+  - assert_exists: {role: label, label: Not found in the shown dates.}
+  - click: {role: button, label: Close}
+  - assert_state: {key: screen.goto.open, equals: false}
+
+  # --- QuickReport (Ctrl+Shift+Q) for this account and dates ---------------
+  - key: Ctrl+Shift+Q
+  - assert_state: {key: screen.quick_report.loaded, equals: true}
+  - assert_state: {key: screen.quick_report.error, equals: false}
+  - assert_exists: {role: label, label_contains: "QuickReport: Operating Checking"}
+  - assert_no_clipping: {}
+  - screenshot: quick-report
+  - click: {role: button, label: Close report}
+  - assert_state: {key: screen.quick_report, equals: null}
+
   # --- Range: This month, then All dates -----------------------------------
   - click: {role: combo_box, label: Show}
   - click: {role: button, label_contains: This month}

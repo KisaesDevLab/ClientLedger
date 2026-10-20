@@ -511,6 +511,8 @@ pub struct GotoBar {
     pub status: Option<&'static str>,
     /// Matches found so far in this window.
     pub found: u32,
+    /// How the last search ended: `found` or `not_found`.
+    pub last: Option<&'static str>,
     search: Option<Search>,
     task: Option<Task<RegisterPage>>,
     /// The match to scroll to once its row is loaded.
@@ -542,6 +544,8 @@ impl GotoBar {
             "searching": self.searching(),
             "status": self.status.map(|k| k.rsplit('.').next().unwrap_or(k)),
             "found": self.found,
+            "last": self.last,
+            "jump_pending": self.jump.is_some(),
         })
     }
 }
@@ -553,9 +557,20 @@ impl RegisterScreen {
         self.goto.focus = true;
     }
 
+    /// Close: the bar goes away and forgets what was typed.
+    pub(crate) fn close_goto(&mut self) {
+        self.goto.cancel();
+        self.goto = GotoBar {
+            found: self.goto.found,
+            field: self.goto.field,
+            ..GotoBar::default()
+        };
+    }
+
     /// Find Next / Find Previous from the cursor row.
     pub(crate) fn find(&mut self, dir: Dir) {
         self.goto.cancel();
+        self.goto.last = None;
         let needle = match Needle::new(self.goto.field, &self.goto.text) {
             Ok(n) => n,
             Err(p) => {
@@ -599,10 +614,12 @@ impl RegisterScreen {
                 self.goto.search = None;
                 self.goto.status = None;
                 self.goto.found += 1;
+                self.goto.last = Some("found");
                 self.goto.jump = Some((index, line));
             }
             Action::NotFound => {
                 self.goto.search = None;
+                self.goto.last = Some("not_found");
                 self.goto.status = Some("register.goto.not_found");
             }
         }
@@ -741,11 +758,7 @@ impl RegisterScreen {
         });
         match action {
             Some(Some(dir)) => self.find(dir),
-            Some(None) => {
-                self.goto.cancel();
-                self.goto.open = false;
-                self.goto.status = None;
-            }
+            Some(None) => self.close_goto(),
             None => {}
         }
         if self.goto.searching() {

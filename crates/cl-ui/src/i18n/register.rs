@@ -182,7 +182,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.filter.tag", "Tag"),
     ("register.filter.any_tag", "Any tag"),
     ("register.filter.amount_from", "Amount from"),
-    ("register.filter.amount_to", "to"),
+    ("register.filter.amount_to", "Amount to"),
     ("register.filter.clear", "Clear filters"),
     ("register.legend.locked", "Closed period (locked)"),
     ("register.legend.reconciled", "R reconciled"),

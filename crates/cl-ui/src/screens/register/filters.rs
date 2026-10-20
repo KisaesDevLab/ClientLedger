@@ -463,7 +463,7 @@ impl RegisterScreen {
             let l = ui.add(egui::Label::new(t("register.filter.payee")).selectable(false));
             let r = ui
                 .add_sized(
-                    [150.0, 22.0],
+                    [130.0, 22.0],
                     egui::TextEdit::singleline(&mut self.quick.payee)
                         .hint_text(t("register.filter.payee_hint")),
                 )
@@ -507,7 +507,7 @@ impl RegisterScreen {
             let l = ui.add(egui::Label::new(t("register.filter.amount_from")).selectable(false));
             let r = ui
                 .add_sized(
-                    [90.0, 22.0],
+                    [72.0, 22.0],
                     egui::TextEdit::singleline(&mut self.quick.min),
                 )
                 .labelled_by(l.id);
@@ -515,7 +515,7 @@ impl RegisterScreen {
             let l = ui.add(egui::Label::new(t("register.filter.amount_to")).selectable(false));
             let r = ui
                 .add_sized(
-                    [90.0, 22.0],
+                    [72.0, 22.0],
                     egui::TextEdit::singleline(&mut self.quick.max),
                 )
                 .labelled_by(l.id);
