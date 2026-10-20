@@ -60,11 +60,35 @@ fn go_to_box(ui: &mut Ui, queued: &mut Vec<CommandId>, narrow: bool, tokens: &To
     if let Some(s) = palette.and_then(|c| c.shortcut) {
         kbd(ui, &chip_text(s));
     }
-    let width = if narrow { 120.0 } else { 280.0 };
-    let label = if narrow {
-        t("shell.go_to")
+    // The box takes what the menu titles leave: full size when there is
+    // room, then narrower, then without its "Go to" caption, so nothing is
+    // drawn over the last menu title (960 x 640, the minimum window).
+    let gap = ui.spacing().item_spacing.x;
+    let caption = t("shell.go_to");
+    let caption_width = ui
+        .painter()
+        .layout_no_wrap(
+            caption.clone(),
+            egui::TextStyle::Body.resolve(ui.style()),
+            tokens.text_secondary,
+        )
+        .size()
+        .x
+        + gap;
+    let room = ui.available_width() - gap;
+    let full: f32 = if narrow { 120.0 } else { 280.0 };
+    let with_caption = !narrow && room - caption_width >= MIN_GO_TO_WIDTH;
+    let width = if with_caption {
+        full.min(room - caption_width)
     } else {
+        full.min(room).max(MIN_GO_TO_WIDTH.min(room.max(0.0)))
+    };
+    let label = if !narrow && width >= HINT_WIDTH {
         t("shell.go_to_hint")
+    } else if with_caption {
+        String::new()
+    } else {
+        caption.clone()
     };
     let response = ui.add_sized(
         [width, 22.0],
@@ -78,10 +102,15 @@ fn go_to_box(ui: &mut Ui, queued: &mut Vec<CommandId>, narrow: bool, tokens: &To
     if response.clicked() {
         queued.push(CommandId::new("help.palette"));
     }
-    if !narrow {
-        ui.label(RichText::new(t("shell.go_to")).color(tokens.text_secondary));
+    if with_caption {
+        ui.label(RichText::new(caption).color(tokens.text_secondary));
     }
 }
+
+/// The narrowest the "Go to" box gets before its caption is dropped.
+const MIN_GO_TO_WIDTH: f32 = 160.0;
+/// The width the box needs to show its hint text.
+const HINT_WIDTH: f32 = 220.0;
 
 /// One menu row as drawn: label, shortcut text, and whether a separator
 /// comes before it (a new group).

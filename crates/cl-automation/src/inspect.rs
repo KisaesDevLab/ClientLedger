@@ -315,6 +315,91 @@ impl Snapshot {
         out.reverse();
         out
     }
+
+    /// Pairs of controls and labels drawn over each other (by more than
+    /// `tolerance` points both ways) inside the window, such as a menu
+    /// title running into the next label. Only near relatives count: the
+    /// two share a container that one of them sits in directly (content
+    /// scrolled under a panel belongs to another part of the tree). One
+    /// wholly inside the other is a layer or a composite widget and is not
+    /// counted; neither are elements whose centre lies inside one of
+    /// `ignore`.
+    #[must_use]
+    pub fn overlapping(&self, tolerance: f32, ignore: &[Bounds]) -> Vec<(&Node, &Node)> {
+        const ROLES: [&str; 8] = [
+            "button",
+            "label",
+            "link",
+            "check_box",
+            "text_input",
+            "combo_box",
+            "tab",
+            "menu_item",
+        ];
+        let (w, h) = (self.window.width, self.window.height);
+        // Every node with its parent's position in `all`.
+        let mut all: Vec<(&Node, Option<usize>)> = Vec::new();
+        let mut stack: Vec<(&Node, Option<usize>)> = vec![(&self.tree, None)];
+        while let Some((n, parent)) = stack.pop() {
+            let at = all.len();
+            all.push((n, parent));
+            stack.extend(n.children.iter().map(|c| (c, Some(at))));
+        }
+        let items: Vec<(usize, &Bounds)> = all
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (n, _))| {
+                let b = n.bounds.as_ref()?;
+                let shown = ROLES.contains(&n.role.as_str())
+                    && b.width > 0.0
+                    && b.height > 0.0
+                    && b.x >= 0.0
+                    && b.y >= 0.0
+                    && b.x + b.width <= w
+                    && b.y + b.height <= h;
+                let (cx, cy) = b.center();
+                let skipped = ignore
+                    .iter()
+                    .any(|r| cx >= r.x && cx <= r.x + r.width && cy >= r.y && cy <= r.y + r.height);
+                (shown && !skipped).then_some((i, b))
+            })
+            .collect();
+        let ancestors = |mut i: usize| {
+            let mut out = Vec::new();
+            while let Some(p) = all[i].1 {
+                out.push(p);
+                i = p;
+            }
+            out
+        };
+        let near = |a: usize, b: usize| {
+            let up_a = ancestors(a);
+            let common = ancestors(b).into_iter().find(|p| up_a.contains(p));
+            common.is_some() && (common == all[a].1 || common == all[b].1)
+        };
+        let inside = |a: &Bounds, b: &Bounds| {
+            a.x >= b.x - tolerance
+                && a.y >= b.y - tolerance
+                && a.x + a.width <= b.x + b.width + tolerance
+                && a.y + a.height <= b.y + b.height + tolerance
+        };
+        let mut out = Vec::new();
+        for (k, (ia, a)) in items.iter().enumerate() {
+            for (ib, b) in &items[k + 1..] {
+                let dx = (a.x + a.width).min(b.x + b.width) - a.x.max(b.x);
+                let dy = (a.y + a.height).min(b.y + b.height) - a.y.max(b.y);
+                if dx > tolerance
+                    && dy > tolerance
+                    && !inside(a, b)
+                    && !inside(b, a)
+                    && near(*ia, *ib)
+                {
+                    out.push((all[*ia].0, all[*ib].0));
+                }
+            }
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -476,6 +561,99 @@ mod tests {
             height: 100.0,
         };
         assert_eq!(s.clipped_excluding(1.0, &[region]).len(), 0);
+    }
+
+    #[test]
+    fn overlapping_finds_controls_drawn_over_each_other() {
+        let mut s = snapshot();
+        assert_eq!(s.overlapping(1.0, &[]).len(), 0);
+        // "Help" running into the "Go to" label.
+        s.tree.children.push(node(
+            "9",
+            "label",
+            Some("Go to"),
+            Some((170.0, 12.0, 40.0, 18.0)),
+        ));
+        // A label inside a button is a composite, not an overlap; touching
+        // edges are not either.
+        s.tree.children.push(node(
+            "10",
+            "label",
+            Some("Save"),
+            Some((20.0, 14.0, 30.0, 16.0)),
+        ));
+        s.tree.children.push(node(
+            "11",
+            "button",
+            Some("Next"),
+            Some((210.0, 10.0, 40.0, 24.0)),
+        ));
+        let pairs = s.overlapping(1.0, &[]);
+        let ids: Vec<(&str, &str)> = pairs
+            .iter()
+            .map(|(a, b)| (a.id.as_str(), b.id.as_str()))
+            .collect();
+        assert_eq!(ids.len(), 1, "{ids:?}");
+        let (a, b) = ids[0];
+        assert!([a, b].contains(&"3") && [a, b].contains(&"9"), "{ids:?}");
+        let region = Bounds {
+            x: 160.0,
+            y: 0.0,
+            width: 60.0,
+            height: 40.0,
+        };
+        assert_eq!(s.overlapping(1.0, &[region]).len(), 0);
+        // Content in another part of the tree (scrolled under a panel) is
+        // not a near relative of the panel's labels.
+        let mut s = snapshot();
+        let mut panel = node("20", "pane", None, Some((0.0, 560.0, 800.0, 40.0)));
+        let mut bar = node(
+            "21",
+            "generic_container",
+            None,
+            Some((0.0, 560.0, 800.0, 40.0)),
+        );
+        bar.children.push(node(
+            "22",
+            "label",
+            Some("Single-user"),
+            Some((10.0, 570.0, 80.0, 16.0)),
+        ));
+        panel.children.push(bar);
+        let mut scroll = node("30", "scroll_view", None, Some((0.0, 0.0, 800.0, 560.0)));
+        let mut content = node(
+            "31",
+            "generic_container",
+            None,
+            Some((0.0, 0.0, 800.0, 600.0)),
+        );
+        content.children.push(node(
+            "32",
+            "text_input",
+            Some("Account"),
+            Some((5.0, 550.0, 200.0, 30.0)),
+        ));
+        scroll.children.push(content);
+        s.tree.children.push(panel);
+        s.tree.children.push(scroll);
+        assert_eq!(s.overlapping(1.0, &[]).len(), 0);
+        // A sibling one level down still counts ("Go to" in the bar's
+        // right-to-left part, "Help" in the bar itself).
+        let mut s = snapshot();
+        let mut part = node(
+            "40",
+            "generic_container",
+            None,
+            Some((150.0, 0.0, 650.0, 40.0)),
+        );
+        part.children.push(node(
+            "41",
+            "label",
+            Some("Go to"),
+            Some((170.0, 12.0, 40.0, 18.0)),
+        ));
+        s.tree.children.push(part);
+        assert_eq!(s.overlapping(1.0, &[]).len(), 1);
     }
 
     #[test]

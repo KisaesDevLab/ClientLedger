@@ -531,8 +531,28 @@ fn run_step(
             let tol = tolerance.unwrap_or(1.0);
             eventually(t, |s| {
                 let clipped = s.clipped_excluding(tol, ignore);
-                if clipped.is_empty() {
+                let overlaps = s.overlapping(tol, ignore);
+                if clipped.is_empty() && overlaps.is_empty() {
                     Ok(())
+                } else if clipped.is_empty() {
+                    let names: Vec<String> = overlaps
+                        .iter()
+                        .take(5)
+                        .map(|(a, b)| {
+                            format!(
+                                "{} \"{}\" / {} \"{}\"",
+                                a.role,
+                                a.label.as_deref().unwrap_or(""),
+                                b.role,
+                                b.label.as_deref().unwrap_or("")
+                            )
+                        })
+                        .collect();
+                    Err(format!(
+                        "{} pair(s) of elements are drawn over each other: {}",
+                        overlaps.len(),
+                        names.join(", ")
+                    ))
                 } else {
                     let names: Vec<String> = clipped
                         .iter()
