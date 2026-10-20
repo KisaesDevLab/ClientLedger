@@ -276,7 +276,7 @@ pub fn settled_money_text(text: &str, style: MoneyStyle) -> Option<String> {
     if text.trim().is_empty() {
         return None;
     }
-    Money::parse_user(text, UserInput::CENTS)
+    Money::parse_user(text, UserInput::MONEY)
         .ok()
         .map(|m| m.format(style))
 }
@@ -313,7 +313,7 @@ pub fn money_field(
     if text.trim().is_empty() {
         return Ok(None);
     }
-    Money::parse_user(text, UserInput::CENTS).map(Some)
+    Money::parse_user(text, UserInput::MONEY).map(Some)
 }
 
 /// One selectable card with a title and a description (a radio choice).
@@ -502,14 +502,22 @@ mod tests {
             Some("1,234,567.50")
         );
         assert_eq!(settled_money_text("", minus), None);
-        assert_eq!(settled_money_text("12.345", minus), None, "kept as typed");
+        // Typed money rounds to the cent, half away from zero (Q-232).
+        assert_eq!(
+            settled_money_text("12.345", minus).as_deref(),
+            Some("12.35")
+        );
+        assert_eq!(
+            settled_money_text("-1.005", minus).as_deref(),
+            Some("-1.01")
+        );
         assert_eq!(settled_money_text("abc", minus), None);
         for typed in ["1286.40", "-42.07", "0.01", "999999.99"] {
             for style in [minus, parens] {
                 let shown = settled_money_text(typed, style).expect("settles");
                 assert_eq!(
-                    Money::parse_user(&shown, UserInput::CENTS),
-                    Money::parse_user(typed, UserInput::CENTS),
+                    Money::parse_user(&shown, UserInput::MONEY),
+                    Money::parse_user(typed, UserInput::MONEY),
                     "{typed} -> {shown}"
                 );
             }

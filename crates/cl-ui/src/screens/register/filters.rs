@@ -37,10 +37,11 @@ pub struct QuickInput {
     pub problem: Option<&'static str>,
 }
 
-/// Rules for a filter amount: cents, zero or more.
+/// Rules for a filter amount: cents (more decimals round, Q-232), zero or
+/// more.
 const FILTER_AMOUNT: AmountRules = AmountRules {
     kind: AmountKind::Money,
-    input: cl_core::UserInput::CENTS,
+    input: cl_core::UserInput::MONEY,
     sign: Sign::NonNegative,
 };
 

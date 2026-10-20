@@ -876,10 +876,9 @@ fn filter_bounds_parse_exactly() {
     assert_eq!(filters::parse_bound("  "), Ok(None));
     assert_eq!(filters::parse_bound("1,084.66"), Ok(Some(money("1084.66"))));
     assert_eq!(filters::parse_bound("0.10"), Ok(Some(money("0.1"))));
-    assert_eq!(
-        filters::parse_bound("1.005"),
-        Err("grid.amount.too_many_decimals")
-    );
+    // Typed money rounds to the cent, half away from zero (Q-232).
+    assert_eq!(filters::parse_bound("1.005"), Ok(Some(money("1.01"))));
+    assert_eq!(filters::parse_bound("1.0049"), Ok(Some(money("1.00"))));
 }
 
 #[test]

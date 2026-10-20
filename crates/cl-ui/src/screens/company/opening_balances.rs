@@ -163,7 +163,7 @@ impl OpeningBalancesScreen {
                     ));
                     continue;
                 };
-                match Money::parse_user(&r.amount, cl_core::UserInput::CENTS) {
+                match Money::parse_user(&r.amount, cl_core::UserInput::MONEY) {
                     Ok(m) if !m.is_zero() => balances.push((section, acct.clone(), m)),
                     Ok(_) => {}
                     Err(_) => issues.push(t_with(
@@ -179,7 +179,7 @@ impl OpeningBalancesScreen {
                 if r.who.trim().is_empty() && r.amount.trim().is_empty() {
                     continue;
                 }
-                let amount = match Money::parse_user(&r.amount, cl_core::UserInput::CENTS) {
+                let amount = match Money::parse_user(&r.amount, cl_core::UserInput::MONEY) {
                     Ok(m) if m.is_positive() => m,
                     _ => {
                         issues.push(t_with(

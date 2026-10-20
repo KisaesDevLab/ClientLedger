@@ -93,18 +93,41 @@ pub enum MoneyInputError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UserInput {
     max_scale: u32,
+    round: bool,
 }
 
 impl UserInput {
-    /// Up to two decimals (ordinary money fields).
-    pub const CENTS: UserInput = UserInput { max_scale: 2 };
-    /// Up to four decimals (unit prices, quantities, rates).
-    pub const FULL: UserInput = UserInput { max_scale: SCALE };
+    /// Typed money amounts (owner decision Q-232): more than two decimals
+    /// round to the cent, half away from zero (the calculator's rule,
+    /// Q-P10x), with no hint (Q-237). `1.005` is 1.01, `-1.005` is -1.01.
+    pub const MONEY: UserInput = UserInput {
+        max_scale: 2,
+        round: true,
+    };
+    /// Up to two decimals, more are refused (percentages and other
+    /// non-money values shown with two decimals).
+    pub const CENTS: UserInput = UserInput {
+        max_scale: 2,
+        round: false,
+    };
+    /// Up to four decimals, more are refused (unit prices, quantities,
+    /// rates).
+    pub const FULL: UserInput = UserInput {
+        max_scale: SCALE,
+        round: false,
+    };
 
-    /// The most decimal places accepted.
+    /// The most decimal places kept.
     #[must_use]
     pub const fn max_scale(self) -> u32 {
         self.max_scale
+    }
+
+    /// Whether extra decimals round (half away from zero) instead of being
+    /// refused.
+    #[must_use]
+    pub const fn rounds(self) -> bool {
+        self.round
     }
 }
 
@@ -291,14 +314,27 @@ fn parse_user_units(s: &str, rules: UserInput, int_digits: u32) -> Result<i128, 
         return Err(MoneyInputError::Invalid);
     }
     let max = rules.max_scale.min(SCALE);
-    if frac.len() > max as usize {
-        return Err(MoneyInputError::TooManyDecimals { max });
-    }
+    // Rounding (Q-232) is exact on the digits: the kept digits are truncated
+    // and one step of the field's unit is added when the first dropped digit
+    // is 5 or more, which is half away from zero on the magnitude.
+    let (frac, round_up) = if frac.len() > max as usize {
+        if !rules.round {
+            return Err(MoneyInputError::TooManyDecimals { max });
+        }
+        // `frac` is ASCII digits only (checked above), so byte slicing is safe.
+        (&frac[..max as usize], frac.as_bytes()[max as usize] >= b'5')
+    } else {
+        (frac, false)
+    };
     let significant = int_plain.trim_start_matches('0');
     if significant.len() > int_digits as usize {
         return Err(MoneyInputError::TooLarge);
     }
-    let units = digits_to_units(significant, frac);
+    let mut units = digits_to_units(significant, frac);
+    if round_up {
+        // At most 15 integer digits: far from the i128 limit.
+        units += pow10(SCALE - max);
+    }
     Ok(if neg || paren { -units } else { units })
 }
 
@@ -447,8 +483,9 @@ macro_rules! fixed_decimal {
             ///
             /// # Errors
             /// See [`MoneyInputError`]: ambiguous separators, more decimals
-            /// than `rules` allow, too many integer digits, empty input or a
-            /// bare sign. Nothing is ever rounded.
+            /// than `rules` allow (unless `rules` round, [`UserInput::MONEY`]),
+            /// too many integer digits (also after rounding), empty input or
+            /// a bare sign.
             pub fn parse_user(s: &str, rules: UserInput) -> Result<Self, MoneyInputError> {
                 let units = parse_user_units(s, rules, Self::INTEGER_DIGITS)?;
                 Self::from_ten_thousandths(units).map_err(|_| MoneyInputError::TooLarge)
@@ -956,6 +993,49 @@ mod tests {
             Ok("0.0001".into())
         );
         assert_eq!(UserInput::FULL.max_scale(), 4);
+    }
+
+    #[test]
+    fn typed_money_rounds_to_the_cent_half_away_from_zero() {
+        // Q-232: the calculator's rule (Q-P10x), applied to typed amounts.
+        let p = |s| Money::parse_user(s, UserInput::MONEY).map(Money::to_wire);
+        for (typed, want) in [
+            ("0.005", "0.0100"),
+            ("0.004", "0.0000"),
+            ("-0.004", "0.0000"),
+            ("1.004", "1.0000"),
+            ("1.005", "1.0100"),
+            ("-1.005", "-1.0100"),
+            ("(1.005)", "-1.0100"),
+            ("$-1.005", "-1.0100"),
+            ("2.675", "2.6800"),
+            ("12.3456", "12.3500"),
+            ("1.0049999", "1.0000"),
+            ("1.0050000000000000000000000000001", "1.0100"),
+            ("0.995", "1.0000"),
+            ("-9.999", "-10.0000"),
+            ("1,234,567.895", "1234567.9000"),
+            ("999,999,999,999,999.994", "999999999999999.9900"),
+            ("-999,999,999,999,999.994", "-999999999999999.9900"),
+            ("123,456,789,012,345.675", "123456789012345.6800"),
+            ("1.25", "1.2500"),
+        ] {
+            assert_eq!(p(typed), Ok(want.into()), "{typed:?}");
+        }
+        // Rounding past the top of the range is too large, never wrapped.
+        assert_eq!(p("999,999,999,999,999.995"), Err(MoneyInputError::TooLarge));
+        // Separator and sign rules are unchanged.
+        assert_eq!(p("1,23.456"), Err(MoneyInputError::AmbiguousSeparator));
+        assert_eq!(p("1.234,5"), Err(MoneyInputError::AmbiguousSeparator));
+        assert_eq!(p("(-1.005)"), Err(MoneyInputError::SignConflict));
+        assert_eq!(p("1.00a"), Err(MoneyInputError::Invalid));
+        assert!(UserInput::MONEY.rounds());
+        assert!(!UserInput::CENTS.rounds() && !UserInput::FULL.rounds());
+        // Quantities and rates never round.
+        assert_eq!(
+            Rate::parse_user("0.12345", UserInput::FULL),
+            Err(MoneyInputError::TooManyDecimals { max: 4 })
+        );
     }
 
     #[test]
