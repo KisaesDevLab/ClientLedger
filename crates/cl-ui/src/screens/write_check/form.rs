@@ -33,6 +33,20 @@ const SIDE_BY_SIDE: f32 = 1100.0;
 const PANEL_WIDTH: f32 = 270.0;
 /// How many names the payee list shows while typing.
 const PAYEE_SUGGESTIONS: usize = 8;
+/// The height of Clear / Save & New / Save & Close (DESIGN.md: 44 px for
+/// Save buttons).
+const ACTION_HEIGHT: f32 = 44.0;
+/// The printed-check question's width.
+const PRINTED_PROMPT_WIDTH: f32 = 440.0;
+
+/// The shortcut chip text of a command ("Alt N"), from the keymap.
+fn chip(id: &str) -> String {
+    cl_model::commands::find(id)
+        .and_then(|c| c.shortcut)
+        .map(crate::input::shortcut_text)
+        .unwrap_or_default()
+        .replace('+', " ")
+}
 
 /// A label above its input; the label is the input's accessible name.
 fn above(ui: &mut Ui, tokens: &Tokens, label: &str) -> egui::Response {
@@ -240,6 +254,9 @@ impl WriteCheckScreen {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .collapsible(false)
             .resizable(false)
+            // Wide enough for the whole title (egui cuts a title that is
+            // wider than the window's content).
+            .min_width(PRINTED_PROMPT_WIDTH)
             .show(ui.ctx(), |ui| {
                 ui.add(egui::Label::new(text).wrap());
                 ui.add_space(10.0);
@@ -318,7 +335,7 @@ impl WriteCheckScreen {
         self.totals_ui(ui, tokens);
         self.problems_ui(ui, tokens);
         ui.add_space(12.0);
-        self.actions_ui(ui, tokens);
+        self.actions_ui(ui);
     }
 
     fn bank_row(&mut self, ui: &mut Ui, tokens: &Tokens, enabled: bool) {
@@ -402,9 +419,13 @@ impl WriteCheckScreen {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 let width = ui.available_width();
-                let right = (width * 0.34).clamp(220.0, 300.0);
+                // egui puts `item_spacing.x` between the columns of each
+                // row as well as the gap: both come off the widths, so the
+                // card fits its column down to the 960 x 640 window.
+                let sp = ui.spacing().item_spacing.x;
+                let right = (width * 0.34).clamp(200.0, 300.0);
                 let gap = 16.0;
-                let left = (width - right - gap).max(200.0);
+                let left = (width - right - gap - sp).max(160.0);
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(left);
@@ -421,7 +442,7 @@ impl WriteCheckScreen {
                     });
                     ui.add_space(gap);
                     ui.horizontal_top(|ui| {
-                        let half = (right - 10.0) / 2.0;
+                        let half = (right - sp) / 2.0;
                         ui.vertical(|ui| {
                             ui.set_width(half);
                             self.number_ui(ui, tokens, half);
@@ -447,7 +468,7 @@ impl WriteCheckScreen {
                 ui.add_space(8.0);
                 self.words_ui(ui, tokens);
                 ui.add_space(8.0);
-                let half = (width - gap) / 2.0;
+                let half = (width - gap - sp) / 2.0;
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(half);
@@ -969,40 +990,47 @@ impl WriteCheckScreen {
         }
     }
 
-    fn actions_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+    fn actions_ui(&mut self, ui: &mut Ui) {
         let idle = self.save.task.is_none() && !self.closing_prompt.dialog_open();
         let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
         let mut clicked = None;
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let close = ui.add_enabled(
-                idle && !read_only,
-                egui::Button::new(
-                    RichText::new(t("check.save_close"))
-                        .color(tokens.on_accent)
-                        .strong(),
-                )
-                .fill(tokens.accent)
-                .min_size(Vec2::new(120.0, 40.0)),
-            );
+        // One row of fixed height: the shortcut chips sit inside the
+        // buttons (mockup), so nothing in the row stretches.
+        let row = Vec2::new(ui.available_width(), ACTION_HEIGHT);
+        ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
+            let can_save = idle && !read_only;
+            let close = ui
+                .add_enabled_ui(can_save, |ui| {
+                    crate::widgets::action_button_with_chip(
+                        ui,
+                        &t("check.save_close"),
+                        &chip("form.save_close"),
+                        true,
+                        ACTION_HEIGHT,
+                    )
+                })
+                .inner;
             if close.clicked() {
                 clicked = Some("form.save_close");
             }
-            crate::widgets::kbd(ui, "Alt S");
-            ui.add_space(6.0);
-            crate::widgets::kbd(ui, "Alt N");
-            if ui
-                .add_enabled(
-                    idle && !read_only,
-                    egui::Button::new(t("check.save_new")).min_size(Vec2::new(0.0, 40.0)),
-                )
-                .clicked()
-            {
+            let new = ui
+                .add_enabled_ui(can_save, |ui| {
+                    crate::widgets::action_button_with_chip(
+                        ui,
+                        &t("check.save_new"),
+                        &chip("form.save_new"),
+                        false,
+                        ACTION_HEIGHT,
+                    )
+                })
+                .inner;
+            if new.clicked() {
                 clicked = Some("form.save_new");
             }
             if ui
                 .add_enabled(
                     idle,
-                    egui::Button::new(t("check.clear")).min_size(Vec2::new(0.0, 40.0)),
+                    egui::Button::new(t("check.clear")).min_size(Vec2::new(0.0, ACTION_HEIGHT)),
                 )
                 .clicked()
             {
