@@ -407,6 +407,47 @@ fn an_own_write_reloads_and_rereads_the_stamp() {
     assert!(s.stamp.read_at.is_some());
 }
 
+/// Runs `finish_jump` in a frame where `field` (a text field) has the
+/// keyboard, or nobody does.
+fn jump_with_focus_on(s: &mut RegisterScreen, field: Option<egui::Id>) {
+    let ctx = egui::Context::default();
+    if let Some(id) = field {
+        egui::text_edit::TextEditState::default().store(&ctx, id);
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.ctx().memory_mut(|m| m.request_focus(id));
+        })
+        .textures_delta
+        .clear();
+    }
+    ctx.run_ui(egui::RawInput::default(), |ui| {
+        s.finish_jump(ui.ctx());
+    })
+    .textures_delta
+    .clear();
+}
+
+#[test]
+fn the_newest_line_takes_the_keyboard_when_nobody_is_typing() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    assert!(s.jump_to_end);
+    jump_with_focus_on(&mut s, None);
+    assert!(!s.jump_to_end);
+    assert_eq!(s.entry.focus, Some(entry_row::E_DATE));
+}
+
+#[test]
+fn a_reload_leaves_the_keyboard_in_a_quick_filter_field() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    assert!(s.jump_to_end);
+    jump_with_focus_on(&mut s, Some(egui::Id::unique("amount-to-filter")));
+    assert!(!s.jump_to_end, "the jump is done");
+    assert_eq!(s.entry.focus, None, "the keyboard stays in the filter");
+}
+
 #[test]
 fn the_footer_shows_the_engines_summary_as_sent() {
     let (_d, link) = link();

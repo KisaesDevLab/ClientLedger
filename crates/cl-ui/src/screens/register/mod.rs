@@ -573,8 +573,10 @@ impl RegisterScreen {
     }
 
     /// Once the newest line has arrived, scroll to it and put the cursor
-    /// there.
-    fn finish_jump(&mut self) {
+    /// there. The keyboard moves to the register only when nobody is typing
+    /// in a field outside it (a quick filter reloads the rows while the
+    /// owner may already be in the next filter field).
+    fn finish_jump(&mut self, ctx: &egui::Context) {
         // Wait for the pages being read (after an own write the old rows
         // stay on screen until the new ones arrive).
         if !self.jump_to_end || !self.pages.is_empty() || self.model.window().in_flight() > 0 {
@@ -597,6 +599,10 @@ impl RegisterScreen {
             .env(&NoLookups, &label, GridHeight::Rows { min: 1, max: 1 });
         self.grid
             .scroll_to(key, RowAlign::Bottom, &ModelRef::Browse(&mut self.model));
+        self.jump_to_end = false;
+        if self.typing_elsewhere(ctx) {
+            return;
+        }
         self.grid.focus(
             CellPos {
                 row: key,
@@ -609,7 +615,21 @@ impl RegisterScreen {
         if !self.view_only() && self.entry.editing.is_none() {
             self.entry.focus = Some(entry_row::E_DATE);
         }
-        self.jump_to_end = false;
+    }
+
+    /// A text field outside the register, its entry row and Splits has
+    /// the keyboard (a quick filter, Go To's Find, a reason field).
+    fn typing_elsewhere(&self, ctx: &egui::Context) -> bool {
+        let Some(id) = ctx.memory(egui::Memory::focused) else {
+            return false;
+        };
+        let ours = id == self.grid.focus_id()
+            || id == self.entry.form.grid().focus_id()
+            || self
+                .splits
+                .as_ref()
+                .is_some_and(splits::SplitsPanel::has_focus);
+        !ours && ctx.text_edit_focused()
     }
 
     fn grid_ui(&mut self, ui: &mut Ui, reserve: f32) {
@@ -963,7 +983,7 @@ impl Screen for RegisterScreen {
         }
         self.request_pages();
         self.footer_load();
-        self.finish_jump();
+        self.finish_jump(ui.ctx());
         self.finish_goto();
         if !self.pages.is_empty() || self.footer.loading() {
             ui.ctx()
