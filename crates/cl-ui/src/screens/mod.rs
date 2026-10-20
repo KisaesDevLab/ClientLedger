@@ -18,16 +18,6 @@ pub mod owner_money;
 pub mod personal_funds;
 pub mod transfer;
 
-use cl_model::CommandId;
-
-use crate::windows::{Placeholder, Screen};
-
-/// A scaffolded screen (P14 WP-S): its command opens a window of its own
-/// kind until the lane that builds it replaces the stub.
-fn stub(kind: CommandId, own: &str) -> Option<Box<dyn Screen>> {
-    (kind.as_str() == own).then(|| Box::new(Placeholder::for_command(kind)) as Box<dyn Screen>)
-}
-
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
     deposit::make,

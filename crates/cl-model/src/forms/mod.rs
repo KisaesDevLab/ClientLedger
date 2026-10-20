@@ -32,10 +32,10 @@ pub mod check;
 pub mod daily_sales;
 pub mod deposit;
 pub mod lines;
-pub mod transfer;
 pub mod loan_payment;
 pub mod owner_money;
 pub mod personal_funds;
+pub mod transfer;
 
 /// How many unsaved steps a form remembers.
 pub const UNDO_LIMIT: usize = 200;
