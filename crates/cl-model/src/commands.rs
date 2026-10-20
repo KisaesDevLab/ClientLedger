@@ -269,7 +269,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("list.new", "New List Entry", None, 3, ctrl('N'), Scope::Window),
     cmd("list.toggle_active", "Make Inactive or Active Again", None, 3, ctrl_shift('I'), Scope::Window),
     cmd("list.show_inactive", "Include Inactive Entries", None, 3, ctrl_shift('H'), Scope::Window),
-    cmd("list.quick_report", "QuickReport", None, 3, ctrl_shift('Q'), Scope::Window),
+    cmd("list.quick_report", "Account or Transaction Report", None, 3, ctrl_shift('Q'), Scope::Window),
     cmd("list.merge", "Merge Into Another Entry", None, 3, None, Scope::Window),
     // Register windows (P12; Ctrl+F, Ctrl+E, Ctrl+D and Ctrl+Shift+Q above apply too)
     cmd("register.one_line", "One-Line Display", None, 4, None, Scope::Window),

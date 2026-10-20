@@ -1,7 +1,7 @@
 # Ledger grid scenario (P10, plan §6). Runs against `clientledger --demo`
 # in light and dark: `dev.grid_demo` exists only with `--demo`.
 # Keyboard-only entry of a split check with autofill, the calculator, a
-# billable Customer:Job and tags; errors, undo, delete and save; the 200,000
+# billable Customer / Job and tags; errors, undo, delete and save; the 200,000
 # row register; Pay bills; the small window at 200% zoom. Amounts are
 # checked by their displayed values, which `Money::format` never rounds.
 name: grid_demo

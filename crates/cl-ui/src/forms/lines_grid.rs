@@ -2,7 +2,7 @@
 //! Splits panel and Write Check's Expenses tab edit the same
 //! [`FormLines`] value on the `line_entry` grid preset.
 //!
-//! The columns are Account · Amount · Memo · Customer:Job · Billable · Tags;
+//! The columns are Account · Amount · Memo · Customer / Job · Billable · Tags;
 //! a [`LinesSpec`] says which of the optional ones a screen shows and what
 //! they are called. The register keeps its P12 columns (Account · Amount ·
 //! Memo · Customer · Tag, one tag per line through a picker, Q-233) through
@@ -89,7 +89,7 @@ pub struct LineHeaders {
     pub amount: TextKey,
     /// Memo.
     pub memo: TextKey,
-    /// Customer:Job.
+    /// Customer / Job.
     pub customer: TextKey,
     /// Billable.
     pub billable: TextKey,
@@ -104,7 +104,7 @@ pub struct LinesSpec {
     pub grid_id: &'static str,
     /// The grid's accessible label (i18n key).
     pub label: &'static str,
-    /// The Customer:Job column.
+    /// The Customer / Job column.
     pub customer: bool,
     /// The Billable column (a checkbox).
     pub billable: bool,
@@ -144,7 +144,7 @@ impl LinesSpec {
     };
 
     /// Every column (Write Check's Expenses tab): Account · Amount · Memo ·
-    /// Customer:Job · Billable · Tags (one chip per line).
+    /// Customer / Job · Billable · Tags (one chip per line).
     #[must_use]
     pub const fn all(grid_id: &'static str, label: &'static str) -> LinesSpec {
         LinesSpec {
@@ -249,7 +249,7 @@ pub struct LinesState<L> {
     pub keys: RowKeyGen,
     /// Picker lists.
     pub lists: Arc<L>,
-    /// Columns the owner can't change right now (e.g. Customer:Job and
+    /// Columns the owner can't change right now (e.g. Customer / Job and
     /// Billable without `line-billable-v1`).
     pub locked: Vec<ColumnId>,
     tag_chips: bool,

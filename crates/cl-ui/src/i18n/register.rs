@@ -208,7 +208,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.goto.not_found", "Not found in the shown dates."),
     ("register.goto.failed", "Couldn't search your books just now. Try again."),
     ("register.goto.problem.empty", "Type what to look for."),
-    ("register.quick_report", "QuickReport"),
+    ("register.quick_report", "Account Report"),
     ("register.edit_transaction", "Edit Transaction"),
     // Closed period, Void, Delete (P12 WP8)
     ("closing.password", "Closing-date password"),
