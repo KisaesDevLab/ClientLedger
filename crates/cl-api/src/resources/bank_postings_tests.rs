@@ -5,6 +5,7 @@ use super::*;
 use crate::errors::ConflictReason;
 use crate::resources::posting::ClosedPeriodAuthorization;
 use crate::resources::testkit::{company_session, json, requests, session_with_caps};
+use crate::resources::transactions::{DeleteOptions, TxnStatus};
 use crate::resources::versioning::EditableFields;
 use crate::wire::Capabilities;
 use cl_core::Secret;
@@ -451,4 +452,135 @@ async fn a_stale_update_sends_nothing() {
         "{e:?}"
     );
     assert!(requests(&server, "PUT").await.is_empty());
+}
+
+fn deleted_answer() -> String {
+    check_answer("transaction").replace("\"posted\"", "\"deleted\"")
+}
+
+#[tokio::test]
+async fn delete_is_gated_by_its_capability_and_the_password_by_its_own() {
+    let id = TransactionId::parse(TXN).expect("id");
+    let server = MockServer::start().await;
+    let s = session_with_caps(&server, &[]).await;
+    let e = s
+        .transactions()
+        .delete(id, &DeleteOptions::default(), IdempotencyKey::new())
+        .await
+        .expect_err("gated");
+    assert_eq!(e, ApiError::Local(LocalValidation::TxnDeleteUnavailable));
+    assert!(requests(&server, "DELETE").await.is_empty(), "nothing sent");
+    let server = MockServer::start().await;
+    let s = session_with_caps(&server, &[Capabilities::TXN_DELETE]).await;
+    let with_pw = DeleteOptions {
+        reason: None,
+        closing_password: Some(Secret::new("pw-canary-123")),
+    };
+    let e = s
+        .transactions()
+        .delete(id, &with_pw, IdempotencyKey::new())
+        .await
+        .expect_err("password gated");
+    assert_eq!(
+        e,
+        ApiError::Local(LocalValidation::ClosedPeriodOverrideUnavailable)
+    );
+    let long = DeleteOptions {
+        reason: Some("x".repeat(501)),
+        closing_password: None,
+    };
+    let e = s
+        .transactions()
+        .delete(id, &long, IdempotencyKey::new())
+        .await
+        .expect_err("long reason");
+    assert_eq!(e, ApiError::Local(LocalValidation::InvalidValue));
+    assert!(requests(&server, "DELETE").await.is_empty(), "nothing sent");
+    assert!(!format!("{with_pw:?}").contains("canary"));
+}
+
+#[tokio::test]
+async fn delete_sends_the_reason_and_password_and_reads_the_deleted_record() {
+    let id = TransactionId::parse(TXN).expect("id");
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("/api/v1/transactions/{TXN}").as_str()))
+        .respond_with(json(200, &deleted_answer()))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("/api/v1/transactions/{TXN}").as_str()))
+        .respond_with(json(
+            409,
+            r#"{"error":{"message":"cannot delete invoices","code":"TXN_DELETE_UNSUPPORTED"}}"#,
+        ))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(
+        &server,
+        &[Capabilities::TXN_DELETE, Capabilities::CLOSING_PASSWORD],
+    )
+    .await;
+    let opts = DeleteOptions {
+        reason: Some("  Entered twice ".into()),
+        closing_password: Some(Secret::new("pw-canary-123")),
+    };
+    let gone = s
+        .transactions()
+        .delete(id, &opts, IdempotencyKey::new())
+        .await
+        .expect("deleted");
+    assert_eq!(gone.record.status, TxnStatus::Deleted);
+    assert_eq!(gone.record.lines.len(), 3, "the lines come back");
+    let dels = requests(&server, "DELETE").await;
+    assert_eq!(dels.len(), 1);
+    let body: Value = serde_json::from_slice(&dels[0].body).expect("json");
+    assert_eq!(body["reason"], "Entered twice");
+    assert_eq!(body["closingPassword"], "pw-canary-123");
+    assert!(body.get("overrideConfirmed").is_none());
+    assert!(dels[0].headers.get("idempotency-key").is_some());
+
+    let e = s
+        .transactions()
+        .delete(id, &DeleteOptions::default(), IdempotencyKey::new())
+        .await
+        .expect_err("unsupported");
+    assert!(matches!(
+        e,
+        ApiError::Conflict {
+            reason: ConflictReason::DeleteUnsupported,
+            ..
+        }
+    ));
+    let dels = requests(&server, "DELETE").await;
+    let body: Value = serde_json::from_slice(&dels[1].body).expect("json");
+    assert_eq!(body, serde_json::json!({}), "no reason, no password");
+}
+
+#[test]
+fn deletable_kinds_follow_q245() {
+    use crate::resources::transactions::TxnType as T;
+    for t in [
+        T::JournalEntry,
+        T::Expense,
+        T::Transfer,
+        T::Deposit,
+        T::CashSale,
+    ] {
+        assert!(t.is_deletable(), "{t:?}");
+    }
+    for t in [
+        T::Invoice,
+        T::CustomerPayment,
+        T::Bill,
+        T::BillPayment,
+        T::CreditMemo,
+        T::VendorCredit,
+        T::CustomerRefund,
+        T::DailySales,
+        T::Aje,
+    ] {
+        assert!(!t.is_deletable(), "{t:?}");
+    }
 }

@@ -395,19 +395,32 @@ pub(crate) const CLOSING_PASSWORD_PUT: Operation = op(
     TimeoutClass::Auth,
     true,
 );
+/// Soft-deletes a transaction (R7, `txn-delete-v1`).
+pub(crate) const TXN_DELETE: Operation = write(Method::Delete, "/api/v1/transactions/{id}");
+/// The owner resets a forgotten closing-date password after re-entering
+/// their sign-in password (U-15, Q-239): a credential change, never retried.
+pub(crate) const CLOSING_PASSWORD_RESET: Operation = op(
+    Method::Post,
+    "/api/v1/company/closing-password/reset",
+    RetryClass::Never,
+    RouteKind::Session,
+    TimeoutClass::Auth,
+    true,
+);
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
-const NEVER_RETRIED: [(&str, &str); 4] = [
+const NEVER_RETRIED: [(&str, &str); 5] = [
     ("POST", "/api/v1/tenants"),
     ("POST", "/api/v1/tenants/{id}/delete"),
     ("POST", "/api/v1/desktop/recover-password"),
     ("PUT", "/api/v1/company/closing-password"),
+    ("POST", "/api/v1/company/closing-password/reset"),
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 105] = [
+pub const OPERATIONS: [Operation; 107] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -513,6 +526,8 @@ pub const OPERATIONS: [Operation; 105] = [
     AUDIT_LOG,
     CLOSING_PASSWORD_GET,
     CLOSING_PASSWORD_PUT,
+    TXN_DELETE,
+    CLOSING_PASSWORD_RESET,
 ];
 
 /// Looks up a covered operation.

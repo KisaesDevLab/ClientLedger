@@ -188,6 +188,9 @@ pub enum LocalValidation {
     /// Setting or changing the closing-date password needs
     /// `closing-password-v1` (U-15); nothing was sent.
     ClosingPasswordUnavailable,
+    /// Deleting a transaction needs `txn-delete-v1` (R7); nothing was
+    /// sent. Void it instead.
+    TxnDeleteUnavailable,
 }
 
 /// A save was refused because its date is on or before the closing date.
@@ -236,6 +239,17 @@ pub enum ConflictReason {
     AlreadyExists,
     /// The engine is busy with this resource; try again shortly.
     Busy,
+    /// The transaction is in a finished reconciliation (409
+    /// `RECONCILED_TRANSACTION`); it can't be deleted or changed that way.
+    Reconciled,
+    /// The transaction was already deleted (409 `TXN_ALREADY_DELETED`).
+    AlreadyDeleted,
+    /// This kind of transaction can't be deleted; void it instead (409
+    /// `TXN_DELETE_UNSUPPORTED`, Q-245).
+    DeleteUnsupported,
+    /// Other records depend on this transaction (a deposit that groups
+    /// payments, or a payment inside one; 409 `TXN_DELETE_LINKED`).
+    DeleteLinked,
     /// Any other conflict.
     Unspecified,
 }
@@ -284,6 +298,11 @@ pub enum ApiError {
         /// How long to wait, if the engine said.
         retry_after: Option<Duration>,
     },
+    /// The owner's own sign-in password was wrong when resetting the
+    /// closing-date password (403 `ACCOUNT_PASSWORD_INVALID`, Q-239).
+    /// Never echoed.
+    #[error("sign-in password rejected (ACCOUNT_PASSWORD_INVALID)")]
+    AccountPasswordRejected,
     /// The engine sent money as a JSON number where cl-api needs the exact
     /// decimal string (for example a register from an engine without
     /// `register-exact-v1`). Amounts that may have been rounded are never
@@ -412,6 +431,16 @@ impl OwnerFacing for ApiError {
                 ConflictReason::InUse => ("error.api.conflict_in_use", None),
                 ConflictReason::AlreadyExists => ("error.api.conflict_exists", None),
                 ConflictReason::Busy => ("error.api.busy", Some("fix.api.try_again_soon")),
+                ConflictReason::Reconciled => ("error.api.conflict_reconciled", None),
+                ConflictReason::AlreadyDeleted => {
+                    ("error.api.conflict_deleted", Some("fix.api.reload"))
+                }
+                ConflictReason::DeleteUnsupported => {
+                    ("error.api.delete_unsupported", Some("fix.api.void_instead"))
+                }
+                ConflictReason::DeleteLinked => {
+                    ("error.api.delete_linked", Some("fix.api.void_instead"))
+                }
                 ConflictReason::Unspecified => ("error.api.conflict", None),
             },
             ApiError::ClosedPeriod(_) => ("error.api.closed_period", Some("fix.api.closed_period")),
@@ -427,6 +456,7 @@ impl OwnerFacing for ApiError {
             ApiError::ClosingPasswordRateLimited { .. } => {
                 ("error.api.closing_password_attempts", Some("fix.api.wait"))
             }
+            ApiError::AccountPasswordRejected => ("error.api.account_password_wrong", None),
             ApiError::InexactMoney { .. } => ("error.api.inexact_money", Some("fix.api.report")),
             ApiError::OfflineUnavailable { .. } => ("error.api.offline", Some("fix.api.offline")),
             ApiError::FeatureNotEnabled { .. } => {
@@ -583,6 +613,10 @@ fn conflict(body: &EngineErrorBody) -> ApiError {
         Some("TAG_IN_USE") => ConflictReason::InUse,
         Some("EMAIL_EXISTS" | "ACCOUNT_NUMBER_EXISTS") => ConflictReason::AlreadyExists,
         Some("TENANT_BUSY" | "IDEMPOTENCY_IN_PROGRESS") => ConflictReason::Busy,
+        Some("RECONCILED_TRANSACTION") => ConflictReason::Reconciled,
+        Some("TXN_ALREADY_DELETED") => ConflictReason::AlreadyDeleted,
+        Some("TXN_DELETE_UNSUPPORTED") => ConflictReason::DeleteUnsupported,
+        Some("TXN_DELETE_LINKED") => ConflictReason::DeleteLinked,
         _ => ConflictReason::Unspecified,
     };
     let current_version = if reason == ConflictReason::Stale {
@@ -697,6 +731,7 @@ pub(crate) fn map_failure(
         403 if has("CLOSING_PASSWORD_OWNER_REQUIRED") => {
             fin(ApiError::ClosingPasswordOwnerRequired)
         }
+        403 if has("ACCOUNT_PASSWORD_INVALID") => fin(ApiError::AccountPasswordRejected),
         403 => fin(ApiError::Forbidden { code }),
         404 => match code {
             Some(c) if c.as_str() == "NOT_AVAILABLE_IN_DESKTOP" => {
@@ -1199,6 +1234,48 @@ mod tests {
                     | "error.api.closing_password_owner"
             ));
         }
+    }
+
+    #[test]
+    fn delete_refusals_and_the_reset_password_are_typed() {
+        let body = |code: &str| {
+            format!(r#"{{"error":{{"message":"Acme Ltd check 1001 hunter2","code":"{code}"}}}}"#)
+        };
+        for (code, reason, key) in [
+            (
+                "RECONCILED_TRANSACTION",
+                ConflictReason::Reconciled,
+                "error.api.conflict_reconciled",
+            ),
+            (
+                "TXN_ALREADY_DELETED",
+                ConflictReason::AlreadyDeleted,
+                "error.api.conflict_deleted",
+            ),
+            (
+                "TXN_DELETE_UNSUPPORTED",
+                ConflictReason::DeleteUnsupported,
+                "error.api.delete_unsupported",
+            ),
+            (
+                "TXN_DELETE_LINKED",
+                ConflictReason::DeleteLinked,
+                "error.api.delete_linked",
+            ),
+        ] {
+            let e = err(409, &body(code), S);
+            assert!(
+                matches!(&e, ApiError::Conflict { reason: r, .. } if *r == reason),
+                "{code}: {e:?}"
+            );
+            assert_eq!(e.owner_message().key, key);
+            let shown = format!("{e} | {}", e.scrubbed_detail());
+            assert!(!shown.contains("Acme"), "{shown}");
+        }
+        let e = err(403, &body("ACCOUNT_PASSWORD_INVALID"), S);
+        assert_eq!(e, ApiError::AccountPasswordRejected);
+        assert!(!format!("{e} | {e:?}").contains("hunter2"));
+        assert_eq!(e.owner_message().key, "error.api.account_password_wrong");
     }
 
     #[test]

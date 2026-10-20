@@ -91,8 +91,9 @@ impl Capabilities {
     pub const REGISTER_EXACT: &'static str = "register-exact-v1";
     /// P12 R5: toggle a register line's cleared mark (assumed name).
     pub const REGISTER_CLEARED: &'static str = "register-cleared-v1";
-    /// P12 R7: soft delete of a transaction (assumed name).
-    pub const TXN_DELETE: &'static str = "transaction-delete-v1";
+    /// P12 R7: soft delete of a transaction (`DELETE /transactions/{id}`,
+    /// engine PR #153).
+    pub const TXN_DELETE: &'static str = "txn-delete-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

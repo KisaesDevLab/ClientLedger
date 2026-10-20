@@ -7,7 +7,8 @@
 //! and the original date (`ledger.service.ts` `checkLockDate`).
 
 use cl_api::{
-    ApiError, Capabilities, ClosedPeriodAuthorization, LocalValidation, Method, PostingOptions,
+    ApiError, Capabilities, ClosedPeriodAuthorization, DeleteOptions, LocalValidation, Method,
+    PostingOptions,
 };
 use cl_core::Secret;
 use serde_json::json;
@@ -120,6 +121,7 @@ pub fn bank_postings_in_a_closed_period(h: &Harness) {
         .expect("open check")
     };
     let inside = posted(date(2026, 1, 10));
+    let inside_del = posted(date(2026, 1, 11));
     let open = posted(date(2026, 2, 15));
     h.run(s.raw_mapped(
         Method::Put,
@@ -161,6 +163,16 @@ pub fn bank_postings_in_a_closed_period(h: &Harness) {
         ))
         .expect_err("closed void");
     is_closed(&e);
+    // R7: a delete in the closed period is refused the same way.
+    if h.require_cap(Capabilities::TXN_DELETE, "R7") {
+        let e = h
+            .run(
+                s.transactions()
+                    .delete(inside_del.record.id, &DeleteOptions::default(), key()),
+            )
+            .expect_err("closed delete");
+        is_closed(&e);
+    }
 
     if h.require_cap(Capabilities::CLOSING_PASSWORD, "U-15") {
         let pw = Secret::new("closing-pass-1");
@@ -214,8 +226,51 @@ pub fn bank_postings_in_a_closed_period(h: &Harness) {
             )
             .expect("void with password");
         assert_eq!(voided.record.status, cl_api::TxnStatus::Void);
+        if h.require_cap(Capabilities::TXN_DELETE, "R7") {
+            let del = |p: Option<&str>| DeleteOptions {
+                reason: Some("closed-period delete".into()),
+                closing_password: p.map(Secret::new),
+            };
+            let e = h
+                .run(
+                    s.transactions()
+                        .delete(inside_del.record.id, &del(None), key()),
+                )
+                .expect_err("delete needs the password");
+            assert!(
+                matches!(&e, ApiError::ClosedPeriod(c) if c.password_required == Some(true)),
+                "{e:?}"
+            );
+            let e = h
+                .run(s.transactions().delete(
+                    inside_del.record.id,
+                    &del(Some("not-the-password")),
+                    key(),
+                ))
+                .expect_err("wrong password");
+            assert_eq!(e, ApiError::ClosingPasswordRejected);
+            let gone = h
+                .run(s.transactions().delete(
+                    inside_del.record.id,
+                    &del(Some("closing-pass-1")),
+                    key(),
+                ))
+                .expect("delete with password");
+            assert_eq!(gone.record.status, cl_api::TxnStatus::Deleted);
+        }
+        // Q-239: the owner resets a forgotten password with their own
+        // sign-in password; a wrong one is refused and changes nothing.
+        let e = h
+            .run(s.reset_closing_password(&Secret::new("not-my-sign-in"), None, key()))
+            .expect_err("wrong sign-in password");
+        assert_eq!(e, ApiError::AccountPasswordRejected);
+        let pw2 = Secret::new("closing-pass-2");
         assert!(
-            !h.run(s.set_closing_password(Some(&pw), None, key()))
+            h.run(s.reset_closing_password(&h.password, Some(&pw2), key()))
+                .expect("owner reset")
+        );
+        assert!(
+            !h.run(s.set_closing_password(Some(&pw2), None, key()))
                 .expect("clear password")
         );
     }

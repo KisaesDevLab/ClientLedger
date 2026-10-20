@@ -103,5 +103,7 @@
   {"method":"POST","path":"/api/v1/checks","inSpec":true,"fragmentHash":"7845bca21c36757ba976518ed83485ff9ac2ee9b6a54ffbf9d60bddfe3a5e3aa"},
   {"method":"GET","path":"/api/v1/audit-log","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/company/closing-password","inSpec":false,"fragmentHash":null},
-  {"method":"PUT","path":"/api/v1/company/closing-password","inSpec":false,"fragmentHash":null}
+  {"method":"PUT","path":"/api/v1/company/closing-password","inSpec":false,"fragmentHash":null},
+  {"method":"DELETE","path":"/api/v1/transactions/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/company/closing-password/reset","inSpec":false,"fragmentHash":null}
 ]

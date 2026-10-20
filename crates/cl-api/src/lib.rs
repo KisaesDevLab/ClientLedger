@@ -110,8 +110,9 @@ pub use resources::tenants::{
     ImportVerification, JobError, JobId, JobState, NewTenant, TenantSummary, Tenants,
 };
 pub use resources::transactions::{
-    Basis, JeLine, MAX_LINES, NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter,
-    TransactionLine, TransactionSummary, Transactions, TxnSort, TxnStatus, TxnType,
+    Basis, DELETE_REASON_MAX_CHARS, DeleteOptions, JeLine, MAX_LINES, NewJournalEntry, ReportBasis,
+    Side, Transaction, TransactionFilter, TransactionLine, TransactionSummary, Transactions,
+    TxnSort, TxnStatus, TxnType,
 };
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{

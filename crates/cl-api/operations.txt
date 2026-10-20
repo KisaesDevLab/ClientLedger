@@ -131,3 +131,5 @@ POST    /api/v1/checks                          pre-handler-only
 GET     /api/v1/audit-log                       idempotent
 GET     /api/v1/company/closing-password        idempotent
 PUT     /api/v1/company/closing-password        never
+DELETE  /api/v1/transactions/{id}               pre-handler-only
+POST    /api/v1/company/closing-password/reset  never

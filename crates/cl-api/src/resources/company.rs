@@ -21,8 +21,8 @@ use crate::errors::LocalValidation;
 use crate::idempotency::IdempotencyKey;
 use crate::resources::common::requested_fp;
 use crate::resources::operations::{
-    CLOSING_PASSWORD_GET, CLOSING_PASSWORD_PUT, COMPANY_GET, COMPANY_PUT, COMPANY_SETTINGS,
-    COMPANY_SETTINGS_PUT,
+    CLOSING_PASSWORD_GET, CLOSING_PASSWORD_PUT, CLOSING_PASSWORD_RESET, COMPANY_GET, COMPANY_PUT,
+    COMPANY_SETTINGS, COMPANY_SETTINGS_PUT,
 };
 use crate::resources::reconcile::row_fp;
 use crate::resources::versioning::{
@@ -469,6 +469,60 @@ impl Session {
             .map(|a| a.closing_password_set)
             .map_err(crate::resources::versioning::saved_unreadable)
     }
+
+    /// The owner's reset of a forgotten closing-date password (Q-239): with
+    /// their own sign-in password they clear it (`new` = `None`) or replace
+    /// it. The engine records the reset in the audit trail. Returns whether
+    /// a closing-date password is set now. Never retried; neither password
+    /// is ever logged.
+    ///
+    /// # Errors
+    /// `Local(ClosingPasswordUnavailable)` without `closing-password-v1`,
+    /// `Local(InvalidValue)` for an empty sign-in password or a new
+    /// password under 4 characters or over 72 bytes (nothing sent);
+    /// `AccountPasswordRejected` (wrong sign-in password),
+    /// `ClosingPasswordOwnerRequired` (not the owner),
+    /// `ClosingPasswordRateLimited`; any [`ApiError`].
+    pub async fn reset_closing_password(
+        &self,
+        account_password: &Secret,
+        new: Option<&Secret>,
+        key: IdempotencyKey,
+    ) -> Result<bool, ApiError> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Body<'a> {
+            account_password: &'a str,
+            new_password: Option<&'a str>,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Answer {
+            closing_password_set: bool,
+        }
+        self.require_closing_password()?;
+        if account_password.expose().is_empty() {
+            return Err(ApiError::Local(LocalValidation::InvalidValue));
+        }
+        if let Some(n) = new {
+            let n = n.expose();
+            if n.chars().count() < CLOSING_PASSWORD_MIN_CHARS
+                || n.len() > CLOSING_PASSWORD_MAX_BYTES
+            {
+                return Err(ApiError::Local(LocalValidation::InvalidValue));
+            }
+        }
+        let body = json_body(&Body {
+            account_password: account_password.expose(),
+            new_password: new.map(Secret::expose),
+        })?;
+        let mut call = Call::at(Method::Post, CLOSING_PASSWORD_RESET.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self.send(&CLOSING_PASSWORD_RESET, call, None).await?;
+        decode::<Answer>(&reply, "closing password reset")
+            .map(|a| a.closing_password_set)
+            .map_err(crate::resources::versioning::saved_unreadable)
+    }
 }
 
 /// Reads `{settings}` from a settings write; a 2xx that cannot be read is
@@ -764,5 +818,74 @@ mod tests {
         let body: Value = serde_json::from_slice(&puts[0].body).expect("json");
         assert_eq!(body["currentPassword"], "old-canary");
         assert_eq!(body["newPassword"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn owner_reset_is_gated_checked_and_typed() {
+        let server = MockServer::start().await;
+        let s = company_session(&server);
+        assert_eq!(
+            s.reset_closing_password(&Secret::new("signin-canary"), None, IdempotencyKey::new())
+                .await
+                .expect_err("gated"),
+            ApiError::Local(LocalValidation::ClosingPasswordUnavailable)
+        );
+        assert!(server.received_requests().await.expect("r").is_empty());
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/company/closing-password/reset"))
+            .respond_with(json(200, r#"{"closingPasswordSet":true}"#))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/company/closing-password/reset"))
+            .respond_with(json(
+                403,
+                r#"{"error":{"message":"bad signin-canary","code":"ACCOUNT_PASSWORD_INVALID"}}"#,
+            ))
+            .mount(&server)
+            .await;
+        let s = crate::resources::testkit::session_with_caps(
+            &server,
+            &[Capabilities::CLOSING_PASSWORD],
+        )
+        .await;
+        for (account, new) in [("", None), ("signin", Some("abc"))] {
+            let new = new.map(Secret::new);
+            assert_eq!(
+                s.reset_closing_password(
+                    &Secret::new(account),
+                    new.as_ref(),
+                    IdempotencyKey::new()
+                )
+                .await
+                .expect_err("local"),
+                ApiError::Local(LocalValidation::InvalidValue)
+            );
+        }
+        let set = s
+            .reset_closing_password(
+                &Secret::new("signin-canary"),
+                Some(&Secret::new("new-canary")),
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect("reset");
+        assert!(set);
+        let posts = requests(&server, "POST").await;
+        assert_eq!(posts.len(), 1);
+        let body: Value = serde_json::from_slice(&posts[0].body).expect("json");
+        assert_eq!(body["accountPassword"], "signin-canary");
+        assert_eq!(body["newPassword"], "new-canary");
+        let e = s
+            .reset_closing_password(&Secret::new("signin-canary"), None, IdempotencyKey::new())
+            .await
+            .expect_err("wrong");
+        assert_eq!(e, ApiError::AccountPasswordRejected);
+        assert!(!format!("{e} {e:?}").contains("canary"));
+        // A credential change is never retried.
+        assert_eq!(requests(&server, "POST").await.len(), 2);
     }
 }

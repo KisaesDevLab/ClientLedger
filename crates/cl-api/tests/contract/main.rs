@@ -178,6 +178,10 @@ fn main() -> std::process::ExitCode {
             contract_audit::update_and_void_keep_the_before_image,
         ),
         (
+            "audit::delete_keeps_every_line_in_the_audit_trail",
+            contract_audit::delete_keeps_every_line_in_the_audit_trail,
+        ),
+        (
             "money::seeded_amounts_round_trip_string_equal",
             contract_money::seeded_amounts_round_trip_string_equal,
         ),

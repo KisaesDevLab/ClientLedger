@@ -23,7 +23,9 @@ use crate::client::{Call, Method};
 use crate::errors::{ApiError, LocalValidation};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::common::{self, Query, SortDir, Spec};
-use crate::resources::operations::{TXN_GET, TXN_PUT, TXN_VOID, TXNS_CREATE, TXNS_LIST};
+use crate::resources::operations::{
+    TXN_DELETE, TXN_GET, TXN_PUT, TXN_VOID, TXNS_CREATE, TXNS_LIST,
+};
 use crate::resources::posting::{PostingOptions, posting_body};
 use crate::resources::reconcile::{OutcomeMatcher, Probe, Search, row_fp};
 use crate::resources::versioning::{
@@ -70,6 +72,23 @@ pub enum TxnType {
 }
 
 impl TxnType {
+    /// True for the kinds the engine's soft delete takes (Q-245): journal
+    /// entries, checks/expenses, transfers, deposits and sales receipts.
+    /// Everything else (invoices, bills, payments, ...) is voided instead.
+    /// The engine still refuses a deposit that groups payments
+    /// (`TXN_DELETE_LINKED`).
+    #[must_use]
+    pub const fn is_deletable(self) -> bool {
+        matches!(
+            self,
+            TxnType::JournalEntry
+                | TxnType::Expense
+                | TxnType::Transfer
+                | TxnType::Deposit
+                | TxnType::CashSale
+        )
+    }
+
     pub(crate) fn as_str(self) -> String {
         serde_json::to_value(self)
             .ok()
@@ -88,6 +107,9 @@ pub enum TxnStatus {
     Posted,
     /// Voided (reversal lines posted).
     Void,
+    /// Deleted (R7 soft delete: reversing lines, hidden from registers and
+    /// reports, kept in the audit trail).
+    Deleted,
 }
 
 /// Which report bases a journal entry affects.
@@ -147,6 +169,32 @@ pub struct NewJournalEntry {
     memo: Option<String>,
     basis: Basis,
     lines: Vec<JeLine>,
+}
+
+/// The longest delete reason the engine takes (characters).
+pub const DELETE_REASON_MAX_CHARS: usize = 500;
+
+/// Options of a soft delete (R7).
+#[derive(Clone, Default)]
+pub struct DeleteOptions {
+    /// Why it is deleted (optional, at most 500 characters; recorded in
+    /// the audit trail).
+    pub reason: Option<String>,
+    /// The closing-date password, for a transaction in a closed period
+    /// (U-15). Never logged.
+    pub closing_password: Option<cl_core::Secret>,
+}
+
+impl std::fmt::Debug for DeleteOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeleteOptions")
+            .field("reason", &self.reason.as_ref().map(|_| ".."))
+            .field(
+                "closing_password",
+                &self.closing_password.as_ref().map(|_| "***"),
+            )
+            .finish()
+    }
 }
 
 pub(crate) fn non_empty(s: Option<String>) -> Option<String> {
@@ -564,6 +612,7 @@ impl TransactionFilter {
                     TxnStatus::Draft => "draft",
                     TxnStatus::Posted => "posted",
                     TxnStatus::Void => "void",
+                    TxnStatus::Deleted => "deleted",
                 },
             );
         }
@@ -717,6 +766,66 @@ impl Transactions<'_> {
         let mut call = Call::new(Method::Post, TXN_VOID.route(), path).json_body(body);
         call.idempotency_key = Some(key);
         let reply = s.send(&TXN_VOID, call, Some(&probe)).await?;
+        saved_from(&reply.body, SPEC.item_key)
+    }
+
+    /// Soft-deletes a transaction (R7, `DELETE /transactions/{id}`): the
+    /// engine posts reversing lines, hides it from registers and reports,
+    /// and keeps it, with all its lines, in the audit trail. Returns the
+    /// deleted transaction (`status` = deleted).
+    ///
+    /// # Errors
+    /// Nothing is sent for: `Local(TxnDeleteUnavailable)` without
+    /// `txn-delete-v1`; `Local(ClosedPeriodOverrideUnavailable)` for a
+    /// closing password without `closing-password-v1`; `Local(InvalidValue)`
+    /// for a reason over 500 characters. From the engine: `Conflict` with
+    /// `Reconciled`, `AlreadyDeleted`, `DeleteUnsupported` (Q-245: void it
+    /// instead) or `DeleteLinked`; `ClosedPeriod`; `ClosingPasswordRejected`;
+    /// `ClosingPasswordRateLimited`; `NotFound`; `OutcomeUnknown`; any
+    /// [`ApiError`].
+    pub async fn delete(
+        &self,
+        id: TransactionId,
+        opts: &DeleteOptions,
+        key: IdempotencyKey,
+    ) -> Result<Versioned<Transaction>, ApiError> {
+        // One company for the stamp read, the probe and the write.
+        let s = &self.0.pinned();
+        let caps = s.client().capabilities();
+        if !caps.has(crate::wire::Capabilities::TXN_DELETE) {
+            return Err(ApiError::Local(LocalValidation::TxnDeleteUnavailable));
+        }
+        let reason = opts
+            .reason
+            .as_deref()
+            .map(str::trim)
+            .filter(|r| !r.is_empty());
+        if reason.is_some_and(|r| r.chars().count() > DELETE_REASON_MAX_CHARS) {
+            return Err(ApiError::Local(LocalValidation::InvalidValue));
+        }
+        let mut body = serde_json::Map::new();
+        if let Some(r) = reason {
+            body.insert("reason".into(), Value::String(r.to_string()));
+        }
+        let opts = PostingOptions {
+            closed_period: opts
+                .closing_password
+                .clone()
+                .map(crate::resources::posting::ClosedPeriodAuthorization::with_password),
+        };
+        let body = posting_body(s, Value::Object(body), &opts)?;
+        let path = SPEC.path(&id.to_string());
+        let matcher = OutcomeMatcher::Field {
+            get: &TXN_GET,
+            path: path.clone(),
+            key: SPEC.item_key,
+            field: "status",
+            value: Value::String("deleted".into()),
+        };
+        let probe = Probe::new(s, matcher, true).await;
+        let mut call = Call::new(Method::Delete, TXN_DELETE.route(), path).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = s.send(&TXN_DELETE, call, Some(&probe)).await?;
         saved_from(&reply.body, SPEC.item_key)
     }
 }
