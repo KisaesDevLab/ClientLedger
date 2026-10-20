@@ -141,8 +141,9 @@ pub use resources::rules::{RULE_DESCRIPTION_MAX_CHARS, RuleMatch, RuleQuery, Rul
 
 // P14 lane A: pending deposits and bank-file groupings.
 pub use resources::payments::{
-    DepositRecord, DepositedCashBack, DepositedLine, DepositedPayment, Payments, PendingAmount,
-    PendingDeposits, PendingPayment, VendorRefundDraft,
+    ALREADY_DEPOSITED, DepositRecord, DepositedCashBack, DepositedLine, DepositedPayment, Payments,
+    PendingAmount, PendingDeposits, PendingPayment, SavedDeposit, VENDOR_CREDIT_EXCEEDED,
+    VendorRefundDraft, is_already_deposited, is_vendor_credit_exceeded,
 };
 
 // P14 lane A: the bank feed.

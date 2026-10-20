@@ -194,6 +194,25 @@ impl Payments<'_> {
     }
 }
 
+/// The engine's 409 code for a payment already in another posted deposit.
+pub const ALREADY_DEPOSITED: &str = "ALREADY_DEPOSITED";
+/// The engine's 409 code for a vendor refund above the credit's open
+/// balance.
+pub const VENDOR_CREDIT_EXCEEDED: &str = "VENDOR_CREDIT_EXCEEDED";
+
+/// True for the 409 of a payment that was already deposited (maybe in
+/// another window): nothing was posted.
+#[must_use]
+pub fn is_already_deposited(e: &ApiError) -> bool {
+    matches!(e, ApiError::Conflict { code: Some(c), .. } if c.as_str() == ALREADY_DEPOSITED)
+}
+
+/// True for the 409 of a vendor refund above what the credit has left.
+#[must_use]
+pub fn is_vendor_credit_exceeded(e: &ApiError) -> bool {
+    matches!(e, ApiError::Conflict { code: Some(c), .. } if c.as_str() == VENDOR_CREDIT_EXCEEDED)
+}
+
 // ---------------------------------------------------------------- record
 
 /// A payment (or refunded vendor credit) a deposit took in whole.
@@ -464,7 +483,74 @@ impl VendorRefundDraft {
     }
 }
 
+/// A deposit the engine took.
+#[derive(Clone, Debug)]
+pub struct SavedDeposit {
+    /// The record and its version.
+    pub saved: Versioned<Transaction>,
+    /// The engine says Payments Clearing now holds a net credit (an item
+    /// was probably deposited twice, once without its link): the screen
+    /// warns and offers to edit or void. False when the answer was a
+    /// reconciled read (a lost reply) or from an older engine.
+    pub clearing_would_go_negative: bool,
+}
+
+/// Reads `clearingWouldGoNegative` from a deposit's create answer.
+pub(crate) fn clearing_warning(body: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| {
+            v.get("clearingWouldGoNegative")
+                .and_then(serde_json::Value::as_bool)
+        })
+        .unwrap_or(false)
+}
+
 impl Payments<'_> {
+    /// Records a deposit (`POST /transactions`, with the outcome probe, as
+    /// `create_bank_posting`) and keeps the engine's Payments Clearing
+    /// warning.
+    ///
+    /// # Errors
+    /// `Local(InvalidValue)` for a posting that is not a deposit (nothing
+    /// sent); `Conflict` (`ALREADY_DEPOSITED`), `ClosedPeriod`, or any
+    /// error of `create_bank_posting`.
+    pub async fn create_deposit(
+        &self,
+        posting: &BankPosting,
+        opts: &crate::resources::posting::PostingOptions,
+        key: crate::idempotency::IdempotencyKey,
+    ) -> Result<SavedDeposit, ApiError> {
+        use crate::resources::bank_postings::{BankPostingKind, saved_any};
+        use crate::resources::common::remember_created;
+        use crate::resources::operations::TXNS_CREATE;
+        use crate::resources::posting::posting_body;
+        use crate::resources::reconcile::{OutcomeMatcher, Probe, Search, row_fp};
+        if posting.kind() != BankPostingKind::Deposit {
+            return Err(ApiError::Local(LocalValidation::InvalidValue));
+        }
+        let s = &self.0.pinned();
+        let body = posting_body(s, posting.create_value(), opts)?;
+        let matcher = OutcomeMatcher::Created {
+            search: Search::Txn {
+                kind: TxnType::Deposit,
+                date: posting.date(),
+                account: Some(posting.own_account()),
+            },
+            fp: row_fp::<Transaction>,
+            fingerprint: posting.created_fingerprint(),
+        };
+        let probe = Probe::new(s, matcher, true).await;
+        let mut call = Call::at(Method::Post, TXNS_CREATE.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = s.send(&TXNS_CREATE, call, Some(&probe)).await?;
+        remember_created(s, &reply.body, "transaction");
+        Ok(SavedDeposit {
+            saved: saved_any(&reply.body, &["transaction"])?,
+            clearing_would_go_negative: clearing_warning(&reply.body),
+        })
+    }
+
     /// A saved deposit into `account`, split for Make Deposit, with its
     /// version (exact amounts from `GET /transactions/{id}`).
     ///
@@ -557,6 +643,84 @@ mod tests {
         let empty = br#"{"paymentsClearingBalance":0,"items":[]}"#;
         let p = pending_from(empty).expect("empty");
         assert!(p.items.is_empty());
+    }
+
+    #[test]
+    fn the_deposit_conflicts_are_told_apart_by_code() {
+        let conflict = |code: &str| ApiError::Conflict {
+            reason: crate::errors::ConflictReason::Unspecified,
+            current_version: None,
+            code: crate::errors::ErrorCode::parse(code),
+            message: crate::errors::UserText::default(),
+        };
+        assert!(is_already_deposited(&conflict(ALREADY_DEPOSITED)));
+        assert!(!is_already_deposited(&conflict("TXN_DEPOSITED")));
+        assert!(is_vendor_credit_exceeded(&conflict(VENDOR_CREDIT_EXCEEDED)));
+        assert!(!is_vendor_credit_exceeded(&conflict(ALREADY_DEPOSITED)));
+    }
+
+    #[tokio::test]
+    async fn a_deposit_save_is_strict_and_keeps_the_clearing_warning() {
+        let server = MockServer::start().await;
+        let mut answer: serde_json::Value = serde_json::from_str(FEES).expect("json");
+        answer["clearingWouldGoNegative"] = serde_json::Value::Bool(true);
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(json(201, &answer.to_string()))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let bank: AccountId = id("2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01");
+        let income: AccountId = id("2e0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01");
+        let d = DepositDraft::plain(
+            bank,
+            CalendarDate::from_ymd(2026, 11, 4).expect("date"),
+            None,
+            vec![crate::resources::bank_postings::SplitLine {
+                account: income,
+                amount: Money::parse_wire("300.00").expect("m"),
+                memo: None,
+                contact: None,
+                billable: false,
+                tag: None,
+            }],
+        );
+        let p = BankPosting::deposit(d).expect("deposit");
+        let saved = s
+            .payments()
+            .create_deposit(
+                &p,
+                &crate::resources::posting::PostingOptions::default(),
+                crate::idempotency::IdempotencyKey::new(),
+            )
+            .await
+            .expect("saved");
+        assert!(saved.clearing_would_go_negative);
+        let posts = requests(&server, "POST").await;
+        let body: serde_json::Value = serde_json::from_slice(&posts[0].body).expect("json");
+        assert_eq!(body["strictAmounts"], true, "always strict (PR #159)");
+        assert_eq!(body["lines"][0]["amount"], "300.0000");
+        assert!(!clearing_warning(br#"{"transaction":{}}"#));
+        // Anything but a deposit is refused before sending.
+        let t = BankPosting::transfer(crate::resources::bank_postings::TransferDraft {
+            from: bank,
+            to: income,
+            date: CalendarDate::from_ymd(2026, 11, 4).expect("date"),
+            amount: Money::parse_wire("1").expect("m"),
+            memo: None,
+        })
+        .expect("transfer");
+        assert!(
+            s.payments()
+                .create_deposit(
+                    &t,
+                    &crate::resources::posting::PostingOptions::default(),
+                    crate::idempotency::IdempotencyKey::new(),
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(requests(&server, "POST").await.len(), 1);
     }
 
     const FEES: &str = include_str!("../../../../fixtures/engine/deposit-grouped-fees.json");
