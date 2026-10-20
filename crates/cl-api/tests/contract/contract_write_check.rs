@@ -462,6 +462,24 @@ pub fn edit_without_check_edit(h: &Harness) {
     assert_eq!(saved.record.fingerprint(), edit.updated_fingerprint());
     let after = h.run(s.checks().get(made.record.id)).expect("check");
     assert_eq!(after.record.check_number, Some(5101), "the number stays");
+    // No line customer unless one was sent (the screen shows a check with
+    // one read-only on an engine without `line-billable-v1`).
+    assert!(
+        after
+            .record
+            .txn
+            .lines
+            .iter()
+            .all(|l| l.contact_id.is_none() && !l.is_billable),
+        "{:?}",
+        after
+            .record
+            .txn
+            .lines
+            .iter()
+            .map(|l| (l.contact_id.is_some(), l.is_billable))
+            .collect::<Vec<_>>()
+    );
     assert_eq!(after.record.print_status, PrintStatus::HandWritten);
     assert_eq!(after.transaction_version(), saved.version);
     // The version it left guards the next edit.
