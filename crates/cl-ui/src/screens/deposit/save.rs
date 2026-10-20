@@ -327,15 +327,15 @@ impl DepositScreen {
                     })
                 }
                 Some((id, version)) => {
-                    let v = s
-                        .transactions()
-                        .update_bank_posting(id, &version, &posting, &opts, key)
+                    let d = s
+                        .payments()
+                        .update_deposit(id, &version, &posting, &opts, key)
                         .await?;
                     Ok(Saved {
                         id,
-                        version: v.version,
+                        version: d.saved.version,
                         date,
-                        clearing_negative: false,
+                        clearing_negative: d.clearing_would_go_negative,
                     })
                 }
             }

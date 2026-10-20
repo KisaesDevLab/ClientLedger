@@ -551,6 +551,49 @@ impl Payments<'_> {
         })
     }
 
+    /// Edits a deposit (`PUT /transactions/{id}`, guarded and reconciled as
+    /// `update_bank_posting`) and keeps the engine's Payments Clearing
+    /// warning, which the engine returns on an edit too.
+    ///
+    /// # Errors
+    /// `Local(InvalidValue)` for a posting that is not a deposit (nothing
+    /// sent); `Conflict` (stale, `ALREADY_DEPOSITED`), `ClosedPeriod`, or
+    /// any error of `update_bank_posting`.
+    pub async fn update_deposit(
+        &self,
+        id: TransactionId,
+        expected: &RecordVersion,
+        posting: &BankPosting,
+        opts: &crate::resources::posting::PostingOptions,
+        key: crate::idempotency::IdempotencyKey,
+    ) -> Result<SavedDeposit, ApiError> {
+        use crate::resources::bank_postings::BankPostingKind;
+        use crate::resources::operations::{TXN_GET, TXN_PUT};
+        use crate::resources::posting::posting_body;
+        use crate::resources::reconcile::row_fp;
+        use crate::resources::versioning::{GuardedUpdate, saved_from, update_guarded_reply};
+        if posting.kind() != BankPostingKind::Deposit {
+            return Err(ApiError::Local(LocalValidation::InvalidValue));
+        }
+        let body = posting_body(self.0, posting.update_value(), opts)?;
+        let u = GuardedUpdate {
+            get: &TXN_GET,
+            put: &TXN_PUT,
+            path: format!("/api/v1/transactions/{id}"),
+            key: "transaction",
+            body,
+            idempotency_key: key,
+            requested: posting.updated_fingerprint(),
+            fp: row_fp::<Transaction>,
+            stamp_covered: true,
+        };
+        let reply = update_guarded_reply::<Transaction>(self.0, expected, u, None).await?;
+        Ok(SavedDeposit {
+            saved: saved_from(&reply.body, "transaction")?,
+            clearing_would_go_negative: clearing_warning(&reply.body),
+        })
+    }
+
     /// A saved deposit into `account`, split for Make Deposit, with its
     /// version (exact amounts from `GET /transactions/{id}`).
     ///
@@ -721,6 +764,52 @@ mod tests {
                 .is_err()
         );
         assert_eq!(requests(&server, "POST").await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_deposit_edit_keeps_the_clearing_warning() {
+        let server = MockServer::start().await;
+        let mut answer: serde_json::Value = serde_json::from_str(FEES).expect("json");
+        answer["clearingWouldGoNegative"] = serde_json::Value::Bool(true);
+        let txn_id: TransactionId = id("5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01");
+        Mock::given(method("PUT"))
+            .and(path(format!("/api/v1/transactions/{txn_id}")))
+            .respond_with(json(200, &answer.to_string()))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let bank: AccountId = id("2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01");
+        let income: AccountId = id("2e0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01");
+        let d = DepositDraft::plain(
+            bank,
+            CalendarDate::from_ymd(2026, 11, 4).expect("date"),
+            None,
+            vec![crate::resources::bank_postings::SplitLine {
+                account: income,
+                amount: Money::parse_wire("300.00").expect("m"),
+                memo: None,
+                contact: None,
+                billable: false,
+                tag: None,
+            }],
+        );
+        let p = BankPosting::deposit(d).expect("deposit");
+        let saved = s
+            .payments()
+            .update_deposit(
+                txn_id,
+                &RecordVersion::Server(3),
+                &p,
+                &crate::resources::posting::PostingOptions::default(),
+                crate::idempotency::IdempotencyKey::new(),
+            )
+            .await
+            .expect("saved");
+        assert!(saved.clearing_would_go_negative, "an edit warns too");
+        let puts = requests(&server, "PUT").await;
+        assert_eq!(puts.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&puts[0].body).expect("json");
+        assert_eq!(body["txnType"], "deposit");
     }
 
     const FEES: &str = include_str!("../../../../fixtures/engine/deposit-grouped-fees.json");

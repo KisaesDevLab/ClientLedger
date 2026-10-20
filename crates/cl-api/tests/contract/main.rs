@@ -236,6 +236,15 @@ fn main() -> std::process::ExitCode {
             contract_deposits::fees_and_cash_back,
         ),
         ("deposits::closed_period", contract_deposits::closed_period),
+        ("deposits::vendor_refund", contract_deposits::vendor_refund),
+        (
+            "deposits::feed_deposit_groupings",
+            contract_deposits::feed_deposit_groupings,
+        ),
+        (
+            "deposits::clearing_warning_on_create_and_edit",
+            contract_deposits::clearing_warning_on_create_and_edit,
+        ),
         (
             "register_property::balance_holds_after_random_edits",
             contract_register_property::balance_holds_after_random_edits,
