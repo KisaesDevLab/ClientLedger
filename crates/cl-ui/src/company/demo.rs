@@ -7,7 +7,10 @@ use cl_settings::{ACCENT_PALETTE, Accent};
 
 pub mod checks;
 pub mod contacts;
+pub mod daily_sales;
+pub mod deposits;
 pub mod lists;
+pub mod money;
 pub mod register;
 
 /// One demo company card.
@@ -296,6 +299,8 @@ struct DemoRow {
     parent: Option<u32>,
     active: bool,
     system: bool,
+    /// The engine's `system_tag` (the role the engine finds it by).
+    tag: Option<&'static str>,
 }
 
 /// The demo chart: the sample company's accounts, the engine's system
@@ -326,30 +331,54 @@ pub fn chart() -> Vec<cl_api::Account> {
                 parent: a.parent.as_deref().and_then(|p| p.parse().ok()),
                 active: true,
                 system: false,
+                tag: None,
             }
         })
         .collect();
-    for (number, name, t, detail, system) in [
+    for (number, name, t, detail, tag) in [
         (
             "1200",
             "Accounts Receivable",
             AccountType::Asset,
             "accounts_receivable",
-            true,
+            None,
         ),
         (
             "2000",
             "Accounts Payable",
             AccountType::Liability,
             "accounts_payable",
-            true,
+            None,
         ),
         (
             "3900",
             "Retained Earnings",
             AccountType::Equity,
             "retained_earnings",
-            true,
+            None,
+        ),
+        // P14: where payments wait for a deposit, the daily-sales tax line
+        // and the over/short line (the engine's system accounts).
+        (
+            "10150",
+            "Payments Clearing",
+            AccountType::Asset,
+            "other_current_asset",
+            Some("payments_clearing"),
+        ),
+        (
+            "20900",
+            "Sales Tax Payable",
+            AccountType::Liability,
+            "other_current_liability",
+            Some("sales_tax_payable"),
+        ),
+        (
+            "60900",
+            "Cash Over/Short",
+            AccountType::Expense,
+            "other_expense",
+            Some("cash_over_short"),
         ),
     ] {
         rows.push(DemoRow {
@@ -359,7 +388,8 @@ pub fn chart() -> Vec<cl_api::Account> {
             detail: Some(detail.into()),
             parent: None,
             active: true,
-            system,
+            system: true,
+            tag,
         });
     }
     for (number, name, parent, active) in [
@@ -376,6 +406,7 @@ pub fn chart() -> Vec<cl_api::Account> {
             parent: (parent > 0).then_some(parent),
             active,
             system: false,
+            tag: None,
         });
     }
     rows.into_iter()
@@ -388,6 +419,7 @@ pub fn chart() -> Vec<cl_api::Account> {
                 parent,
                 active,
                 system,
+                tag,
             } = r;
             let n: u32 = number.parse().unwrap_or(0);
             // Debits minus credits for every type, like the engine's
@@ -405,7 +437,7 @@ pub fn chart() -> Vec<cl_api::Account> {
                 },
                 is_active: active,
                 is_system: system,
-                system_tag: None,
+                system_tag: tag.map(str::to_string),
                 balance,
                 created_at: Some(DemoState::now()),
                 updated_at: Some(DemoState::now()),

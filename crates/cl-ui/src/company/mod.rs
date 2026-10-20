@@ -53,6 +53,9 @@ pub enum CompanyEvent {
     /// Bring the register of this account to the front, or open it in its
     /// own tab (one register tab per account, P12).
     OpenRegister(cl_core::ids::AccountId),
+    /// Open this saved transaction in the form of this kind (P14: a grouped
+    /// deposit or a daily-sales day opened from a register row, Q-P14g).
+    OpenRecord(cl_model::CommandId, cl_core::ids::TransactionId),
     /// The owner saved new user preferences (theme, zoom, dates): the
     /// shell applies and persists them.
     UserPrefs(cl_settings::UserPrefs),

@@ -307,6 +307,19 @@ impl Shell {
         }
     }
 
+    /// Open a saved transaction in its own form (Q-P14g: a register row of
+    /// a grouped deposit or a daily-sales day). A new window of `kind` loads
+    /// it; a screen that shows no saved records just opens (or comes to the
+    /// front) as usual.
+    fn open_record(&mut self, kind: CommandId, txn: cl_core::ids::TransactionId) {
+        let mut screen = self.make_screen(kind);
+        if screen.open_record(txn) {
+            self.windows.open_new(kind, screen);
+        } else {
+            self.open_screen(kind);
+        }
+    }
+
     /// Bring the register tab of `account` to the front, or open one (one
     /// tab per account, P12).
     fn open_register(&mut self, account: cl_core::ids::AccountId) {
@@ -420,6 +433,7 @@ impl Shell {
                     }
                 }
                 CompanyEvent::OpenRegister(account) => self.open_register(account),
+                CompanyEvent::OpenRecord(kind, txn) => self.open_record(kind, txn),
             }
         }
     }
@@ -1209,6 +1223,15 @@ impl Shell {
     }
 }
 
+/// A company screen's constructor: the window for a command kind, or `None`
+/// when the kind is another screen's.
+pub(crate) type MakeScreen = fn(
+    CommandId,
+    &Arc<CompanyLink>,
+    Option<(cl_core::ids::TenantId, String)>,
+    CalendarDate,
+) -> Option<Box<dyn Screen>>;
+
 /// A screen for `kind` without borrowing the shell (layout restore). The
 /// developer-only screens are built only with `--demo` (`demo`); every
 /// path that opens a window (commands, company events, layout restore)
@@ -1239,6 +1262,11 @@ fn make_any(
         }
         if let Some(s) = crate::screens::write_check::make(kind, link, open.clone(), today) {
             return s;
+        }
+        for make in crate::screens::P14_SCREENS {
+            if let Some(s) = make(kind, link, open.clone(), today) {
+                return s;
+            }
         }
         if let Some(s) = crate::screens::preferences::make(kind, link, open, prefs) {
             return s;

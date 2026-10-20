@@ -57,23 +57,38 @@ mod items;
 mod lists;
 mod register;
 mod tags;
+// P14 (one module per screen).
+mod card_charge;
+mod daily_sales;
+mod deposit;
+mod loan_payment;
+mod owner_money;
+mod personal_funds;
+mod transfer;
+
+/// Every part of the English catalog.
+const TABLES: [&[(&str, &str)]; 16] = [
+    ENGLISH,
+    lists::ENGLISH,
+    contacts::ENGLISH,
+    items::ENGLISH,
+    tags::ENGLISH,
+    csv::ENGLISH,
+    register::ENGLISH,
+    check::ENGLISH,
+    forms::ENGLISH,
+    deposit::ENGLISH,
+    transfer::ENGLISH,
+    daily_sales::ENGLISH,
+    card_charge::ENGLISH,
+    owner_money::ENGLISH,
+    personal_funds::ENGLISH,
+    loan_payment::ENGLISH,
+];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
     static CATALOG: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
-    CATALOG.get_or_init(|| {
-        ENGLISH
-            .iter()
-            .chain(lists::ENGLISH)
-            .chain(contacts::ENGLISH)
-            .chain(items::ENGLISH)
-            .chain(tags::ENGLISH)
-            .chain(csv::ENGLISH)
-            .chain(register::ENGLISH)
-            .chain(check::ENGLISH)
-            .chain(forms::ENGLISH)
-            .copied()
-            .collect()
-    })
+    CATALOG.get_or_init(|| TABLES.iter().flat_map(|t| t.iter()).copied().collect())
 }
 
 /// The English catalog.
@@ -940,17 +955,7 @@ mod tests {
     #[test]
     fn catalog_has_no_duplicate_keys_and_no_empty_text() {
         let mut seen = std::collections::HashSet::new();
-        for (k, v) in ENGLISH
-            .iter()
-            .chain(lists::ENGLISH)
-            .chain(contacts::ENGLISH)
-            .chain(items::ENGLISH)
-            .chain(tags::ENGLISH)
-            .chain(csv::ENGLISH)
-            .chain(register::ENGLISH)
-            .chain(check::ENGLISH)
-            .chain(forms::ENGLISH)
-        {
+        for (k, v) in TABLES.iter().flat_map(|t| t.iter()) {
             assert!(seen.insert(*k), "duplicate key {k}");
             assert_ne!(*v, "", "{k}");
         }

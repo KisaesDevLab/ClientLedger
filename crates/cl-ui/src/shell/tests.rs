@@ -566,6 +566,31 @@ fn open_window(ctx: &egui::Context, shell: &mut Shell, kind: &'static str) {
     settle(ctx, shell, vec2(1280.0, 820.0));
 }
 
+/// `OpenRecord` (P14): a screen that shows no saved records yet simply
+/// opens, or comes to the front, once.
+#[test]
+fn open_record_falls_back_to_opening_the_window() {
+    let ctx = context();
+    let mut shell = demo();
+    settle(&ctx, &mut shell, vec2(1280.0, 820.0));
+    let kind = CommandId::new(crate::screens::deposit::KIND);
+    let txn =
+        cl_core::ids::TransactionId::parse("d0000000-0000-4000-8000-b00000000001").expect("id");
+    let n = shell.windows.len();
+    for _ in 0..2 {
+        shell
+            .company_link()
+            .expect("demo link")
+            .push(crate::company::CompanyEvent::OpenRecord(kind, txn));
+        settle(&ctx, &mut shell, vec2(1280.0, 820.0));
+        assert_eq!(shell.windows.len(), n + 1);
+        assert_eq!(
+            shell.windows.active().map(|w| w.kind.as_str()),
+            Some(crate::screens::deposit::KIND)
+        );
+    }
+}
+
 /// Every company screen draws in the demo shell, reports its state, and
 /// the Open Company window fills the body once the company is closed.
 #[test]

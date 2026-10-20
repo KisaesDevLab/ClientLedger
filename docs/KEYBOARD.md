@@ -109,9 +109,9 @@ Find these from the menus or with `Ctrl+K`.
 - **File:** New Company, Close Company, Back Up Company, Restore a Backup, Make Portable Copy, Export All Data, Full Database Backup (Utilities), Delete Company
 - **Edit:** Void Transaction
 - **Lists:** Item List, Tags, Terms, Payment Methods, Import or Export a List
-- **Customers:** Customers & Jobs, Credit Memo or Refund, Statements
-- **Vendors:** Vendors
-- **Banking:** Import Bank File, Bank Feed
+- **Customers:** Customers & Jobs, Daily Sales Summary, Credit Memo or Refund, Statements
+- **Vendors:** Vendors, Paid with Personal Funds
+- **Banking:** Pay Yourself or Put Money In, Loan Payment, Import Bank File, Bank Feed
 - **Payroll:** Import Payroll
 - **Reports:** Reports, Profit & Loss, Balance Sheet
 - **Company:** Set Closing Date, Users and Permissions, Send to My Accountant, Audit Trail

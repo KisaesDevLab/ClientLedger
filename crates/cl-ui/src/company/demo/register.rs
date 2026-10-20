@@ -443,6 +443,36 @@ pub struct DemoPosting {
     pub lines: Vec<(AccountId, Money)>,
 }
 
+/// One explicit line of a demo posting ([`DemoLedger::save_lines`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DemoLine {
+    /// The account.
+    pub account: AccountId,
+    /// Debit (zero on a credit line).
+    pub debit: Money,
+    /// Credit (zero on a debit line).
+    pub credit: Money,
+    /// Line memo.
+    pub memo: Option<String>,
+}
+
+/// A posting as the demo engine stores it, given as explicit lines (P14).
+#[derive(Clone, Debug)]
+pub struct DemoJournal {
+    /// `deposit`, `daily_sales`, `check`, `card_charge`, ... .
+    pub kind: &'static str,
+    /// Date.
+    pub date: CalendarDate,
+    /// Number (empty for none).
+    pub number: String,
+    /// Payee name.
+    pub contact: Option<String>,
+    /// Memo.
+    pub memo: String,
+    /// The lines, in order; debits must equal credits exactly.
+    pub lines: Vec<DemoLine>,
+}
+
 fn sample_id(id: TransactionId) -> Option<u32> {
     let s = id.to_string();
     let tail = s.rsplit('-').next()?;
@@ -596,6 +626,42 @@ impl DemoLedger {
         p: &DemoPosting,
         existing: Option<TransactionId>,
     ) -> Option<TransactionId> {
+        let side = |account: AccountId, amount: Money, debit: bool| DemoLine {
+            account,
+            debit: if debit { amount } else { Money::ZERO },
+            credit: if debit { Money::ZERO } else { amount },
+            memo: None,
+        };
+        let mut lines: Vec<DemoLine> = p
+            .lines
+            .iter()
+            .map(|(a, m)| side(*a, *m, !p.own_debit))
+            .collect();
+        let total = Money::sum(p.lines.iter().map(|(_, m)| *m)).ok()?;
+        lines.push(side(p.own, total, p.own_debit));
+        let journal = DemoJournal {
+            kind: p.kind,
+            date: p.date,
+            number: p.number.clone(),
+            contact: p.contact.clone(),
+            memo: p.memo.clone(),
+            lines,
+        };
+        self.save_lines(chart, &journal, existing)
+    }
+
+    /// Records (or, with `existing`, replaces) a posting given as explicit
+    /// debit and credit lines (P14: deposits with fees and cash back, daily
+    /// sales with their over/short). `None` when an account is not in the
+    /// chart, the transaction is unknown, there are no lines, a line is not
+    /// exactly one positive side, or the debits and credits differ by any
+    /// amount (the demo engine posts only balanced entries, exactly).
+    pub fn save_lines(
+        &mut self,
+        chart: &[Account],
+        j: &DemoJournal,
+        existing: Option<TransactionId>,
+    ) -> Option<TransactionId> {
         let num = |id: AccountId| {
             chart
                 .iter()
@@ -603,20 +669,30 @@ impl DemoLedger {
                 .and_then(number_of)
                 .map(str::to_string)
         };
-        let side = |account: String, amount: Money, debit: bool| cl_company::sample::SampleLine {
-            account,
-            debit: if debit { amount } else { Money::ZERO },
-            credit: if debit { Money::ZERO } else { amount },
-            memo: None,
-            tag: None,
-            job: None,
+        // Exactly one side, and it is above zero.
+        let one_side = |l: &DemoLine| {
+            (l.debit.is_positive() && l.credit.is_zero())
+                || (l.credit.is_positive() && l.debit.is_zero())
         };
-        let mut lines = Vec::new();
-        for (a, m) in &p.lines {
-            lines.push(side(num(*a)?, *m, !p.own_debit));
+        if j.lines.is_empty() || !j.lines.iter().all(one_side) {
+            return None;
         }
-        let total = Money::sum(p.lines.iter().map(|(_, m)| *m)).ok()?;
-        lines.push(side(num(p.own)?, total, p.own_debit));
+        let debits = Money::sum(j.lines.iter().map(|l| l.debit)).ok()?;
+        let credits = Money::sum(j.lines.iter().map(|l| l.credit)).ok()?;
+        if debits != credits {
+            return None;
+        }
+        let mut lines = Vec::with_capacity(j.lines.len());
+        for l in &j.lines {
+            lines.push(cl_company::sample::SampleLine {
+                account: num(l.account)?,
+                debit: l.debit,
+                credit: l.credit,
+                memo: l.memo.clone(),
+                tag: None,
+                job: None,
+            });
+        }
         let (id, cleared) = if let Some(t) = existing {
             let id = sample_id(t)?;
             (id, self.find(id)?.cleared)
@@ -626,11 +702,11 @@ impl DemoLedger {
         };
         let t = SampleTransaction {
             id,
-            date: p.date,
-            kind: p.kind.to_string(),
-            number: p.number.clone(),
-            contact: p.contact.clone(),
-            memo: p.memo.clone(),
+            date: j.date,
+            kind: j.kind.to_string(),
+            number: j.number.clone(),
+            contact: j.contact.clone(),
+            memo: j.memo.clone(),
             due: None,
             cleared,
             attachment: false,
@@ -736,6 +812,53 @@ mod tests {
             .find(|a| a.fields.account_number.as_deref() == Some("1010"))
             .map(|a| a.id)
             .expect("1010")
+    }
+
+    #[test]
+    #[allow(clippy::many_single_char_names, reason = "short test helpers")]
+    fn save_lines_posts_only_balanced_one_sided_lines() {
+        let chart = super::super::chart();
+        let n = |s: &str| {
+            chart
+                .iter()
+                .find(|a| a.fields.account_number.as_deref() == Some(s))
+                .map(|a| a.id)
+                .expect(s)
+        };
+        let m = |s: &str| Money::parse_wire(s).expect("m");
+        let l = |a: &str, d: &str, c: &str| DemoLine {
+            account: n(a),
+            debit: m(d),
+            credit: m(c),
+            memo: None,
+        };
+        // 1,250.00 + 300.00 − 12.50 fee − 50.00 cash back = 1,487.50.
+        let mut j = DemoJournal {
+            kind: "deposit",
+            date: CalendarDate::from_ymd(2026, 11, 4).expect("d"),
+            number: String::new(),
+            contact: None,
+            memo: String::new(),
+            lines: vec![
+                l("1010", "1487.50", "0"),
+                l("10150", "0", "1250.00"),
+                l("4000", "0", "300.00"),
+                l("6250", "12.50", "0"),
+                l("3200", "50.00", "0"),
+            ],
+        };
+        let mut ledger = DemoLedger::default();
+        let id = ledger.save_lines(&chart, &j, None).expect("saved");
+        let t = ledger.find(sample_id(id).expect("id")).expect("stored");
+        assert_eq!(t.lines.len(), 5);
+        assert_eq!(t.lines[3].debit, m("12.50"));
+        // A cent off, a two-sided line or no lines: nothing is stored.
+        j.lines[0].debit = m("1487.49");
+        assert!(ledger.save_lines(&chart, &j, None).is_none());
+        j.lines[0] = l("1010", "1487.50", "1487.50");
+        assert!(ledger.save_lines(&chart, &j, None).is_none());
+        j.lines.clear();
+        assert!(ledger.save_lines(&chart, &j, None).is_none());
     }
 
     #[test]

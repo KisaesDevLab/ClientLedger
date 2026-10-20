@@ -277,7 +277,8 @@ pub const COMMANDS: &[Command] = &[
     built("clients.center", "Customers & Jobs", Some(Menu::Clients), 0, None),
     screen("clients.create_invoice", "Create Invoice", Some(Menu::Clients), 1, ctrl('I'), "P20"),
     screen("clients.receive_payment", "Receive Payment", Some(Menu::Clients), 1, ctrl('R'), "P21"),
-    screen("clients.sales_receipt", "Sales Receipt", Some(Menu::Clients), 1, ctrl_shift('R'), "P14"),
+    screen("clients.sales_receipt", "Sales Receipt", Some(Menu::Clients), 1, ctrl_shift('R'), "P20"),
+    built("clients.daily_sales", "Daily Sales Summary", Some(Menu::Clients), 1, None),
     screen("clients.credit_memo", "Credit Memo or Refund", Some(Menu::Clients), 2, None, "P22"),
     screen("clients.statements", "Statements", Some(Menu::Clients), 2, None, "P22"),
     // Vendors
@@ -285,11 +286,14 @@ pub const COMMANDS: &[Command] = &[
     screen("vendors.enter_bill", "Enter Bill", Some(Menu::Vendors), 1, ctrl('B'), "P17"),
     screen("vendors.pay_bills", "Pay Bills", Some(Menu::Vendors), 1, ctrl_shift('B'), "P18"),
     built("vendors.write_check", "Write Check", Some(Menu::Vendors), 1, ctrl('W')),
-    screen("vendors.card_charge", "Record Card Charge", Some(Menu::Vendors), 1, ctrl_shift('C'), "P14"),
+    built("vendors.card_charge", "Record Card Charge", Some(Menu::Vendors), 1, ctrl_shift('C')),
+    built("vendors.personal_funds", "Paid with Personal Funds", Some(Menu::Vendors), 1, None),
     // Banking
     built("banking.register", "Open Register", Some(Menu::Banking), 0, ctrl('G')),
-    screen("banking.deposit", "Make Deposit", Some(Menu::Banking), 0, ctrl('D'), "P14"),
-    screen("banking.transfer", "Transfer Funds", Some(Menu::Banking), 0, ctrl('T'), "P14"),
+    built("banking.deposit", "Make Deposit", Some(Menu::Banking), 0, ctrl('D')),
+    built("banking.transfer", "Transfer Funds", Some(Menu::Banking), 0, ctrl('T')),
+    built("banking.owner_money", "Pay Yourself or Put Money In", Some(Menu::Banking), 0, None),
+    built("banking.loan_payment", "Loan Payment", Some(Menu::Banking), 0, None),
     screen("banking.reconcile", "Reconcile", Some(Menu::Banking), 1, ctrl_shift('E'), "P27"),
     screen("banking.import_file", "Import Bank File", Some(Menu::Banking), 2, None, "P25"),
     screen("banking.feed", "Bank Feed", Some(Menu::Banking), 2, None, "P26"),
@@ -421,6 +425,14 @@ mod tests {
             "vendors.center",
             "banking.register",
             "vendors.write_check",
+            // P14
+            "banking.deposit",
+            "banking.transfer",
+            "clients.daily_sales",
+            "vendors.card_charge",
+            "banking.owner_money",
+            "vendors.personal_funds",
+            "banking.loan_payment",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -500,6 +512,58 @@ mod tests {
         assert_eq!(at(Mods::CMD, Key::Letter('P')), Some("file.print"));
         assert_eq!(at(Mods::ALT, Key::Letter('N')), Some("form.save_new"));
         assert_eq!(at(Mods::ALT, Key::Letter('S')), Some("form.save_close"));
+    }
+
+    #[test]
+    fn p14_commands() {
+        use crate::keymap::Keymap;
+        for (id, label, menu, shortcut) in [
+            ("banking.deposit", "Make Deposit", Menu::Banking, ctrl('D')),
+            (
+                "banking.transfer",
+                "Transfer Funds",
+                Menu::Banking,
+                ctrl('T'),
+            ),
+            (
+                "vendors.card_charge",
+                "Record Card Charge",
+                Menu::Vendors,
+                ctrl_shift('C'),
+            ),
+            // The new helpers have no shortcut (Q-P14x).
+            (
+                "clients.daily_sales",
+                "Daily Sales Summary",
+                Menu::Clients,
+                None,
+            ),
+            (
+                "banking.owner_money",
+                "Pay Yourself or Put Money In",
+                Menu::Banking,
+                None,
+            ),
+            (
+                "vendors.personal_funds",
+                "Paid with Personal Funds",
+                Menu::Vendors,
+                None,
+            ),
+            ("banking.loan_payment", "Loan Payment", Menu::Banking, None),
+        ] {
+            let c = find(id).unwrap();
+            assert_eq!(c.label, label, "{id}");
+            assert_eq!(
+                (c.menu, c.shortcut, c.scope),
+                (Some(menu), shortcut, Scope::Global),
+                "{id}"
+            );
+            assert!(c.opens && c.arrives.is_none(), "{id} is built (P14)");
+        }
+        // Sales Receipt comes with invoices (Q-259).
+        assert_eq!(find("clients.sales_receipt").unwrap().arrives, Some("P20"));
+        assert!(Keymap::new(COMMANDS).is_ok(), "no new key clashes");
     }
 
     #[test]
