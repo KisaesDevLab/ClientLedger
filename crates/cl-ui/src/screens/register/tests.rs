@@ -310,11 +310,7 @@ fn picking_another_account_opens_its_own_tab() {
 fn later_lane_commands_are_routed_but_not_handled_yet() {
     let (_d, link) = link();
     let mut s = screen(&link);
-    for c in [
-        "form.delete_item",
-        "edit.void_transaction",
-        "list.quick_report",
-    ] {
+    for c in ["form.delete_item", "edit.void_transaction"] {
         assert!(!s.command(CommandId::new(c)), "{c}");
     }
     assert!(s.command(CommandId::new(KIND)), "Ctrl+G stays");
@@ -863,4 +859,22 @@ fn go_to_finds_the_next_match_and_puts_the_cursor_on_it() {
     s.goto.jump = Some((0, rows[0].line_id));
     s.set_sort(SortChoice::DateNewest);
     assert!(s.goto.jump.is_none());
+}
+
+#[test]
+fn quick_report_shows_the_account_report_for_the_shown_dates() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    assert!(s.command(CommandId::new("list.quick_report")));
+    let st = s.state();
+    let q = &st["quick_report"];
+    assert_eq!(q["loaded"], true);
+    assert_eq!(q["error"], false);
+    assert_eq!(q["start"], s.query.as_ref().expect("q").start.to_wire());
+    assert_eq!(q["end"], "2026-11-04");
+    assert!(q["lines"].as_u64().expect("n") > 0);
+    // Ctrl+Shift+Q again closes it.
+    assert!(s.command(CommandId::new("list.quick_report")));
+    assert!(s.state()["quick_report"].is_null());
 }

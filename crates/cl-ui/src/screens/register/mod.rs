@@ -23,6 +23,7 @@ pub mod filters;
 pub mod footer;
 pub mod goto;
 pub mod lists;
+mod quick_report;
 mod record;
 mod splits;
 pub mod view;
@@ -180,6 +181,10 @@ pub struct RegisterScreen {
     quick: filters::QuickInput,
     /// Go To (Ctrl+F).
     goto: goto::GotoBar,
+    /// QuickReport (Ctrl+Shift+Q), when shown.
+    report: Option<quick_report::QuickReport>,
+    /// The space kept under the grid last frame (entry row and footer).
+    reserve: f32,
 }
 
 /// Watches the ledger stamp (Q-P12n): read on window focus, every
@@ -253,6 +258,8 @@ impl RegisterScreen {
             read_only: None,
             quick: filters::QuickInput::default(),
             goto: goto::GotoBar::default(),
+            report: None,
+            reserve: 0.0,
         };
         s.start_load();
         s.load_lists();
@@ -506,6 +513,7 @@ impl RegisterScreen {
         self.poll_entry();
         self.poll_edit();
         self.drive_goto();
+        self.poll_report();
         if let Some(task) = self.accounts_task.as_mut()
             && let Some(result) = task.try_take()
         {
@@ -609,6 +617,16 @@ impl RegisterScreen {
             },
         );
         let out = self.grid.show(ui, ModelRef::Browse(&mut self.model), &env);
+        // The entry row grew or shrank (Splits opened or closed): keep the
+        // cursor row in view in the new height.
+        if (reserve - self.reserve).abs() > 0.5 {
+            self.reserve = reserve;
+            if let Some(key) = self.grid.core().cursor().map(|c| c.row) {
+                self.grid
+                    .scroll_to(key, RowAlign::Nearest, &ModelRef::Browse(&mut self.model));
+                ui.ctx().request_repaint();
+            }
+        }
         self.snap = self.grid.snapshot(&ModelRef::Browse(&mut self.model));
         for e in out.events {
             match e {
@@ -868,9 +886,10 @@ impl RegisterScreen {
         false
     }
 
-    /// Ctrl+Shift+Q (WP7: QuickReport).
+    /// Ctrl+Shift+Q: QuickReport for this account and the shown dates.
     fn on_quick_report(&mut self) -> bool {
-        false
+        self.toggle_quick_report();
+        true
     }
 
     /// Alt+N / Alt+S on the entry row (WP6): record the row. The register
@@ -911,6 +930,7 @@ impl Screen for RegisterScreen {
         }
         self.toolbar(ui, &tokens);
         self.goto_ui(ui, &tokens);
+        self.quick_report_ui(ui, &tokens);
         self.messages(ui, &tokens);
         ui.add_space(4.0);
         if self.empty_ui(ui, &tokens) {
@@ -1022,6 +1042,7 @@ impl Screen for RegisterScreen {
             "footer": self.footer_state(),
             "entry": self.entry_state(),
             "goto": self.goto.state(),
+            "quick_report": self.report.as_ref().map(quick_report::QuickReport::state),
         })
     }
 }
