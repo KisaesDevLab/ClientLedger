@@ -43,6 +43,11 @@ pub struct DemoChecks {
     pub ai_requests: u32,
     /// Rule evaluations that reached the demo engine.
     pub rule_requests: u32,
+    /// Behave like an engine without `check-edit-v1` (tests): a check is
+    /// changed through [`update_expense`].
+    pub check_edit_off: bool,
+    /// Behave like an engine without `line-billable-v1` (tests).
+    pub line_billable_off: bool,
 }
 
 /// A demo rule: a memo containing `contains` suggests `account`.
@@ -247,11 +252,9 @@ fn save(
     } else {
         PrintStatus::HandWritten
     };
-    let mut tag_ids = except
-        .and_then(|id| state.checks.info.get(&id))
-        .map(|i| i.tag_ids.clone())
-        .unwrap_or_default();
-    // Header tags are added, never removed (the engine's rule).
+    // The header tags become exactly the ones sent (the engine replaces
+    // the set on `PUT /checks/{id}`).
+    let mut tag_ids: Vec<TagId> = Vec::new();
     for t in &d.tag_ids {
         if !tag_ids.contains(t) {
             tag_ids.push(*t);
@@ -381,6 +384,54 @@ pub fn update(
         return Ok(saved);
     }
     save(state, d, Some((id, old)), password)
+}
+
+/// `PUT /transactions/{id}` for a check (an engine without
+/// `check-edit-v1`): guarded by the plain transaction's version (nothing
+/// is sent when it changed), and the check's own fields (number, print
+/// status, printed name, address, printed memo, header tags) stay as they
+/// were.
+///
+/// # Errors
+/// `Conflict { Stale }` (nothing sent); as [`update`].
+pub fn update_expense(
+    state: &mut DemoState,
+    id: TransactionId,
+    expected: &RecordVersion,
+    d: &CheckDraft,
+    password: Option<&Secret>,
+) -> Result<TransactionId, ApiError> {
+    let current = get(state, id).ok_or(ApiError::NotFound { code: None })?;
+    let now = current.transaction_version();
+    if &now != expected {
+        return Err(ApiError::Conflict {
+            reason: ConflictReason::Stale,
+            current_version: Some(now),
+            code: None,
+            message: UserText::default(),
+        });
+    }
+    let old = current.record.txn.txn_date;
+    if state.ledger.is_void(id) {
+        state.checks.writes += 1;
+        return Err(invalid());
+    }
+    let r = current.record;
+    let kept = CheckDraft {
+        check_number: r.check_number,
+        print_later: r.print_status == PrintStatus::Queue,
+        payee_name: r.payee_name.clone(),
+        payee_address: r.payee_address.clone(),
+        printed_memo: r.printed_memo.clone(),
+        tag_ids: r.tag_ids.clone(),
+        draft_attachment: None,
+        ..d.clone()
+    };
+    let saved = save(state, &kept, Some((id, old)), password)?;
+    if let Some(i) = state.checks.info.get_mut(&saved) {
+        i.print_status = r.print_status;
+    }
+    Ok(saved)
 }
 
 /// Marks a check printed (the demo has no printing yet; tests and the

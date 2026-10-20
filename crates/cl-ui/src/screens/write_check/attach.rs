@@ -7,11 +7,12 @@
 //! bytes; at most 10 MB) and a refused one is never sent. A failed upload
 //! never blocks saving the check.
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use cl_api::{
-    ATTACHMENT_MAX_BYTES, ApiError, AttachTo, Attachment, AttachmentId, DraftKey, IdempotencyKey,
-    LocalValidation, OrphanLabel,
+    ATTACHMENT_MAX_BYTES, ApiError, AttachTo, Attachment, AttachmentId, DraftKey, FileKind,
+    IdempotencyKey, LocalValidation, OrphanLabel,
 };
 use cl_model::forms::check::AttachmentRef;
 use eframe::egui::{self, RichText, Ui};
@@ -85,31 +86,98 @@ pub(crate) fn check_bytes(bytes: &[u8]) -> Result<(), &'static str> {
 }
 
 /// Where "Save a copy" puts a file: the Downloads folder, else the
-/// temporary folder. The name keeps only safe characters.
-fn copy_path(name: &str) -> PathBuf {
+/// temporary folder.
+fn copy_dir() -> PathBuf {
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
-    let downloads = home
-        .map(|h| PathBuf::from(h).join("Downloads"))
+    home.map(|h| PathBuf::from(h).join("Downloads"))
         .filter(|p| p.is_dir())
-        .unwrap_or_else(std::env::temp_dir);
-    let safe: String = name
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// Names Windows keeps for devices (with any extension).
+const RESERVED: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// The extension a file of `kind` is saved with.
+fn extension(kind: FileKind) -> &'static str {
+    match kind {
+        FileKind::Pdf => "pdf",
+        FileKind::Png => "png",
+        FileKind::Jpeg => "jpg",
+    }
+}
+
+/// A safe file stem from the engine's file name: the last path part only,
+/// safe characters only, no extension (the bytes decide it), no leading
+/// dots, no trailing dots or spaces, never a Windows device name.
+pub(crate) fn safe_stem(name: &str) -> String {
+    let last = name.rsplit(['/', '\\']).next().unwrap_or_default();
+    let stem = match last.rfind('.') {
+        Some(i) if i > 0 => &last[..i],
+        _ => last,
+    };
+    let safe: String = stem
         .chars()
         .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' '))
         .take(120)
         .collect();
-    let safe = safe.trim().trim_start_matches('.').to_string();
-    let safe = if safe.is_empty() {
-        "attachment".to_string()
-    } else {
-        safe
-    };
-    let mut path = downloads.join(&safe);
-    let mut n = 1;
-    while path.exists() && n < 1000 {
-        path = downloads.join(format!("{n} {safe}"));
-        n += 1;
+    let safe = safe
+        .trim_start_matches(['.', ' '])
+        .trim_end_matches(['.', ' '])
+        .to_string();
+    if safe.is_empty() {
+        return "attachment".to_string();
     }
-    path
+    let device = safe
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end()
+        .to_uppercase();
+    if RESERVED.contains(&device.as_str()) {
+        return format!("file-{safe}");
+    }
+    safe
+}
+
+/// Saves downloaded bytes into `dir` as a new file: the bytes must be a
+/// PDF, PNG or JPEG (checked here, as on upload), the extension is the
+/// detected type's, the name is made safe, and an existing file is never
+/// overwritten (` (2)`, ` (3)`, … is added instead).
+///
+/// # Errors
+/// An i18n key for the owner.
+pub(crate) fn save_copy(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, &'static str> {
+    let kind = cl_api::check_file(bytes).map_err(|_| "check.attach.download_wrong_type")?;
+    let stem = safe_stem(name);
+    let ext = extension(kind);
+    for n in 1..1000 {
+        let file = if n == 1 {
+            format!("{stem}.{ext}")
+        } else {
+            format!("{stem} ({n}).{ext}")
+        };
+        let path = dir.join(file);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut f) => {
+                if f.write_all(bytes).and_then(|()| f.sync_all()).is_err() {
+                    drop(f);
+                    let _ = std::fs::remove_file(&path);
+                    return Err("check.attach.download_failed");
+                }
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return Err("check.attach.download_failed"),
+        }
+    }
+    Err("check.attach.download_failed")
 }
 
 impl WriteCheckScreen {
@@ -271,13 +339,10 @@ impl WriteCheckScreen {
         if let Some(r) = self.attach.download.as_mut().and_then(Task::try_take) {
             self.attach.download = None;
             match r {
-                Ok((name, bytes)) => {
-                    let path = copy_path(&name);
-                    match std::fs::write(&path, bytes) {
-                        Ok(()) => self.attach.saved_to = Some(path),
-                        Err(_) => self.attach.problem = Some("check.attach.download_failed"),
-                    }
-                }
+                Ok((name, bytes)) => match save_copy(&copy_dir(), &name, &bytes) {
+                    Ok(path) => self.attach.saved_to = Some(path),
+                    Err(key) => self.attach.problem = Some(key),
+                },
                 Err(_) => self.attach.problem = Some("check.attach.download_failed"),
             }
         }

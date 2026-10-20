@@ -125,11 +125,22 @@ pub(crate) struct Inputs {
 #[derive(Clone, Debug)]
 pub(crate) struct Editing {
     pub id: TransactionId,
+    /// The check's version (`PUT /checks/{id}`, `check-edit-v1`).
     pub version: RecordVersion,
+    /// The ledger record's version (`PUT /transactions/{id}`, the path
+    /// without `check-edit-v1`): its fingerprint leaves out the check
+    /// fields.
+    pub txn_version: RecordVersion,
+    /// The bank account the check is drawn on (its bank line).
+    pub bank: AccountId,
     pub old_date: CalendarDate,
     pub print_status: PrintStatus,
-    /// Void, or a check that pays bills: shown, never changed here.
+    /// Shown, never changed here: void, a check that pays bills, lines
+    /// this form can't show exactly, or line customers the engine can't
+    /// take yet.
     pub read_only: bool,
+    /// Why it is read-only (i18n key).
+    pub read_only_note: &'static str,
 }
 
 /// What the closing-date password is for.
@@ -244,6 +255,8 @@ pub struct WriteCheckScreen {
     pub(crate) balance: Option<Money>,
     pub(crate) editing: Option<Editing>,
     pub(crate) load_task: Option<Task<cl_api::Versioned<cl_api::CheckRecord>>>,
+    /// The bank account the check being read is drawn on.
+    pub(crate) load_bank: Option<AccountId>,
     pub(crate) save: SaveState,
     pub(crate) closing_prompt: ClosingPrompt<Pending>,
     pub(crate) nav: Nav,
@@ -350,6 +363,7 @@ impl WriteCheckScreen {
             balance: None,
             editing: None,
             load_task: None,
+            load_bank: None,
             save: SaveState::default(),
             closing_prompt: ClosingPrompt::default(),
             nav: Nav::default(),
@@ -455,13 +469,20 @@ impl WriteCheckScreen {
 
     /// The engine takes customers and billable marks on check lines.
     pub(crate) fn line_billable(&self) -> bool {
-        // The demo engine behaves like `line-billable-v1`.
-        self.link.is_demo() || self.link.capabilities().has(Capabilities::LINE_BILLABLE)
+        // The demo engine behaves like `line-billable-v1` unless a test
+        // turned it off.
+        match self.link.demo_state() {
+            Some(d) => !d.checks.line_billable_off,
+            None => self.link.capabilities().has(Capabilities::LINE_BILLABLE),
+        }
     }
 
     /// The engine edits a check's own fields (`check-edit-v1`).
     pub(crate) fn check_edit(&self) -> bool {
-        self.link.is_demo() || self.link.capabilities().has(Capabilities::CHECK_EDIT)
+        match self.link.demo_state() {
+            Some(d) => !d.checks.check_edit_off,
+            None => self.link.capabilities().has(Capabilities::CHECK_EDIT),
+        }
     }
 
     /// The engine takes the closing-date password.
@@ -575,7 +596,6 @@ impl WriteCheckScreen {
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
-        let today = self.today;
         if let Ok(p) = group.read(&session, move |s| async move {
             let next = s
                 .checks()
@@ -583,18 +603,23 @@ impl WriteCheckScreen {
                 .await
                 .ok()
                 .and_then(|c| c.next_for(bank));
-            let _ = today;
-            let mut q = cl_api::RegisterQuery::new(CalendarDate::min(), CalendarDate::max());
-            q.txn_type = Some(cl_api::TxnType::Expense);
-            q.sort = cl_api::RegisterSort::Number;
-            q.dir = cl_api::SortDir::Desc;
-            let highest = s
-                .register()
-                .page(bank, &q, 1, 1)
-                .await
-                .ok()
-                .and_then(|page| page.lines.first().and_then(|l| l.check_number))
-                .and_then(|n| u32::try_from(n).ok());
+            // The highest number on a check: written here (an expense) or
+            // paying bills (a bill payment).
+            let mut highest: Option<u32> = None;
+            for kind in [cl_api::TxnType::Expense, cl_api::TxnType::BillPayment] {
+                let mut q = cl_api::RegisterQuery::new(CalendarDate::min(), CalendarDate::max());
+                q.txn_type = Some(kind);
+                q.sort = cl_api::RegisterSort::Number;
+                q.dir = cl_api::SortDir::Desc;
+                let top = s
+                    .register()
+                    .page(bank, &q, 1, 1)
+                    .await
+                    .ok()
+                    .and_then(|page| page.lines.first().and_then(|l| l.check_number))
+                    .and_then(|n| u32::try_from(n).ok());
+                highest = highest.max(top);
+            }
             Ok((next, highest))
         }) {
             self.numbers_task = Some(Task::Pending(p));
@@ -778,6 +803,10 @@ impl WriteCheckScreen {
         if &lines != self.lines.value() {
             self.lines.form_mut().edit_step(|v| *v = lines);
         }
+        // The field shows the amount taken (a save commits what it shows).
+        self.inputs.amount = amount
+            .map(|m| m.format(self.money_style))
+            .unwrap_or_default();
         self.inputs.rev = self.header.revision();
     }
 
@@ -944,6 +973,7 @@ impl WriteCheckScreen {
             "loaded": self.accounts_loaded,
             "mode": if self.editing.is_some() { "edit" } else { "new" },
             "read_only": self.editing.as_ref().is_some_and(|e| e.read_only),
+            "read_only_note": self.editing.as_ref().filter(|e| e.read_only).map(|e| e.read_only_note),
             "edit_print_status": self.editing.as_ref().map(|e| e.print_status.as_wire().to_string()),
             "locked": self.editing_locked(),
             "bank_id": f.bank.map(|b| b.to_string()),

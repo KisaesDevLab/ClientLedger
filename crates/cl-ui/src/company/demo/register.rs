@@ -537,7 +537,8 @@ impl DemoLedger {
         sample_id(id).is_some_and(|n| self.voided.contains(&n))
     }
 
-    /// Every numbered check drawn on `account`: (id, number, void).
+    /// Every numbered check drawn on `account`, written or paying bills:
+    /// (id, number, void).
     #[must_use]
     pub fn check_numbers(
         &self,
@@ -549,7 +550,10 @@ impl DemoLedger {
         };
         self.transactions()
             .iter()
-            .filter(|t| t.kind == "check" && t.lines.iter().any(|l| l.account == number))
+            .filter(|t| {
+                matches!(t.kind.as_str(), "check" | "bill_payment")
+                    && t.lines.iter().any(|l| l.account == number)
+            })
             .filter_map(|t| {
                 let n = t.number.parse::<u32>().ok()?;
                 Some((txn_id(t), n, self.voided.contains(&t.id)))

@@ -120,25 +120,40 @@ fn consent_current(c: &CompanyConsent) -> bool {
 }
 
 /// The AI switches as the engine reports them, with the local monthly cap
-/// for a cloud provider.
+/// for a cloud provider. Every provider the engine may use is checked: the
+/// whole fallback chain and the categorization provider. A cloud provider
+/// anywhere needs the cap to allow the call; a provider this version does
+/// not know closes the gate.
 #[must_use]
 pub(crate) fn gate_of(
     config: Option<&AiConfig>,
     consent: Option<&CompanyConsent>,
     under_cap: bool,
 ) -> AiGate {
-    let provider = config
-        .and_then(|c| c.fallback_chain.first())
-        .and_then(|p| AiProvider::from_wire(p));
+    let named: Vec<&str> = config
+        .map(|c| {
+            c.fallback_chain
+                .iter()
+                .map(String::as_str)
+                .chain(
+                    c.categorization_provider
+                        .as_deref()
+                        .filter(|p| !p.is_empty()),
+                )
+                .collect()
+        })
+        .unwrap_or_default();
+    let providers: Option<Vec<AiProvider>> =
+        named.iter().map(|p| AiProvider::from_wire(p)).collect();
+    let reachable = match providers {
+        Some(p) if !p.is_empty() => p.iter().all(|p| !p.is_cloud()) || under_cap,
+        _ => false,
+    };
     AiGate {
         ai_enabled: config.is_some_and(|c| c.is_enabled),
         consented: consent.is_some_and(consent_current),
         categorization_on: consent.is_some_and(|c| c.enabled_tasks.categorization == Some(true)),
-        provider_reachable: match provider {
-            Some(AiProvider::Ollama) => true,
-            Some(_) => under_cap,
-            None => false,
-        },
+        provider_reachable: reachable,
     }
 }
 
@@ -156,17 +171,18 @@ fn clip(s: &str) -> String {
 
 impl WriteCheckScreen {
     /// The AI may be asked (demo: its switches; an engine: the monthly cap
-    /// first, the rest is read with the request).
-    fn under_cap(&self) -> bool {
+    /// first, the rest is read with the request). When the local store
+    /// can't be read the cap is unknown, so a cloud call is not made.
+    pub(crate) fn under_cap(&self) -> bool {
         let Some((tenant, _)) = &self.tenant else {
             return true;
         };
         let month = crate::screens::preferences::ai::this_month();
-        self.link
-            .store()
-            .load()
-            .ok()
-            .and_then(|l| l.get(*tenant).map(|r| r.prefs.ai.check(&month)))
+        let Ok(list) = self.link.store().load() else {
+            return false;
+        };
+        list.get(*tenant)
+            .map(|r| r.prefs.ai.check(&month))
             .is_none_or(|c| matches!(c, CapCheck::Allowed))
     }
 

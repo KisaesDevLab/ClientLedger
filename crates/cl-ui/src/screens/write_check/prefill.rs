@@ -238,6 +238,9 @@ impl WriteCheckScreen {
     /// billable and tags; never an amount. Inactive details are left out.
     fn apply_last(&mut self, last: &LastTxn) {
         let mut dropped = false;
+        // Without `line-billable-v1` a line customer could never be saved:
+        // it is not copied.
+        let customers = self.line_billable();
         let keys = &mut self.lines.form_mut().adapter_mut().keys;
         let mut seeds = Vec::new();
         for l in &last.lines {
@@ -245,8 +248,8 @@ impl WriteCheckScreen {
             seeds.push(FormLine {
                 account: Some(l.account),
                 memo: l.memo.clone(),
-                customer: l.customer,
-                billable: l.billable,
+                customer: l.customer.filter(|_| customers),
+                billable: l.billable && customers,
                 tag: l.tag,
                 ..FormLine::blank(key)
             });
