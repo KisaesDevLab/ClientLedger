@@ -301,5 +301,22 @@ steps:
   - click: {role: button, label_contains: Last 90 days}
   - assert_state: {key: screen.range, equals: last_90_days}
   - assert_state: {key: screen.entry.dirty, equals: false}
+
+  # --- A credit card (Q-P12h, Q-241): the engine sends a charge (a credit)
+  # as `deposit`; it sits under Charge, and the balance owed reads positive
+  # exactly as sent. ----------------------------------------------------------
+  - click: {role: combo_box, label: Account}
+  - click: {role: button, label_contains: Business Credit Card}
+  - assert_state: {key: screen.account_class, equals: credit_card}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: column_header, label: Charge, index: 0}
+  - assert_exists: {role: column_header, label: Payment, index: 0}
+  - assert_state: {key: screen.footer.ending, equals: "289.63"}
+  - assert_no_clipping: {}
+  - screenshot: card
+  # The card opened in its own tab; close it, then select and close the
+  # bank register's tab (closing a tab may leave another tab active).
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Register"}
   - command: file.close_window
   - assert_not_exists: {role: tab, label_contains: Register}
