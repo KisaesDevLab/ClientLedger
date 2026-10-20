@@ -7,8 +7,9 @@
 # unsaved-changes question on Prev, and the printed-check question.
 #
 # Light and dark run in the same app, so the scenario is repeatable: it voids
-# 4418 at the end to free the number (Q-P13w) and asserts no balance or next
-# number that the first pass changes. The demo has no check printing before
+# 4418 at the end to free the number (Q-P13w), deletes the closed-period
+# check in the register, and every pass starts on the story's ending balance
+# (84,210.55) and next number (4418). The demo has no check printing before
 # P19; `dev.check_mark_printed` (a `--demo`-only developer command) marks the
 # check in front as printed. All data is synthetic.
 name: write_check
@@ -28,6 +29,8 @@ steps:
   - assert_state: {key: screen.date, equals: "2026-11-04"}
   - assert_exists: {role: label, label: Ending balance}
   - assert_state: {key: screen.ending_balance_shown, equals: true}
+  - assert_exists: {role: label, label: "84,210.55"}
+  - assert_state: {key: screen.number, equals: 4418}
   # Not before P15 / P20 (Q-P13a, Q-P13b); Print waits for P19 (Q-P13c).
   - assert_not_exists: {role: button, label: Memorize}
   - assert_not_exists: {role: button, label: Pay online}
@@ -45,8 +48,8 @@ steps:
   - assert_state: {key: screen.focused, equals: amount}
   - assert_value: {target: {role: multiline_text_input, label: Address}, equals: "Ozark Feed & Seed\n1200 Commerce Dr\nAurora, MO 65605"}
   # Accounts come over; amounts never do.
-  - assert_value: {target: {label: "Account, line 1"}, equals: "5100 · Plants"}
-  - assert_value: {target: {label: "Account, line 2"}, equals: "5110 · Mulch & stone"}
+  - assert_value: {target: {label: "Account, line 1"}, equals: "5100 · Materials:Plants"}
+  - assert_value: {target: {label: "Account, line 2"}, equals: "5110 · Materials:Mulch & stone"}
   - assert_value: {target: {label: "Amount, line 1"}, equals: ""}
   - assert_value: {target: {label: "Amount, line 2"}, equals: ""}
   - assert_exists: {role: label, label: Open balance}
@@ -122,8 +125,11 @@ steps:
   - key: Ctrl+G
   - assert_state: {key: screen.screen, equals: register}
   - assert_state: {key: screen.loaded, equals: true}
-  - assert_exists: {role: row, label_contains: "11/04/2026, Ozark Feed & Seed, 4418,"}
+  # A later pass also lists the earlier pass's voided 4418.
+  - assert_exists: {role: row, label_contains: "11/04/2026, Ozark Feed & Seed, 4418,", index: 0}
   - screenshot: register-4418
+  # Closed, so step 10's cleanup reads the register afresh.
+  - command: file.close_window
   - click: {role: tab, label_contains: "Write Check"}
   - assert_state: {key: screen.screen, equals: write_check}
 
@@ -135,7 +141,7 @@ steps:
   - assert_state: {key: screen.panel.recent_checks, equals: [4418, 4401, 4392]}
   - click: {role: grid_cell, label: "Account, line 1"}
   - key: Ctrl+Delete
-  - assert_value: {target: {label: "Account, line 1"}, equals: "5110 · Mulch & stone"}
+  - assert_value: {target: {label: "Account, line 1"}, equals: "5110 · Materials:Mulch & stone"}
   # One line without an amount follows the check amount (Q-P13r).
   - type: {text: "100", target: {role: text_input, label: "Amount ($)"}}
   - key: Tab
@@ -170,7 +176,7 @@ steps:
   - click: {role: button, label: Accept}
   - assert_state: {key: screen.ai.accepted, equals: 1}
   - assert_state: {key: screen.ai.chip, equals: false}
-  - assert_value: {target: {label: "Account, line 2"}, equals: "5110 · Mulch & stone"}
+  - assert_value: {target: {label: "Account, line 2"}, equals: "5110 · Materials:Mulch & stone"}
   - click: {role: button, label: Clear}
   # Preferences > AI: untick account suggestions (Bank Feed suggestions,
   # the engine's categorization task) and save.
@@ -212,6 +218,9 @@ steps:
   - key: Tab
   - type: {text: "18.25", target: {role: text_input, label: "Amount ($)"}}
   - key: Tab
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - type: {text: "Closed-period scenario check"}
   - assert_state: {key: screen.totals, equals: balanced}
   - key: Alt+N
   - assert_state: {key: screen.closing, equals: asking}
@@ -238,6 +247,33 @@ steps:
   - assert_state: {key: screen.closing, equals: done}
   - assert_state: {key: screen.saved_count, equals: 3}
   - assert_state: {key: screen.dirty, equals: false}
+  # Cleanup: delete it in the register (the password again), so the bank
+  # balance is the story's on the next pass.
+  - key: Ctrl+G
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - key: Ctrl+F
+  - assert_state: {key: screen.goto.open, equals: true}
+  - type: {text: Closed-period scenario check}
+  - click: {role: button, label: Find Previous}
+  - assert_state: {key: screen.goto.last, equals: found}
+  - assert_state: {key: screen.goto.jump_pending, equals: false}
+  - assert_state: {key: screen.focused, equals: true}
+  - assert_exists: {role: row, label_contains: "09/15/2026, Stone County"}
+  - click: {role: button, label: Close}
+  - key: Ctrl+D
+  - assert_state: {key: screen.row_action.panel, equals: confirm_delete}
+  - click: {role: button, label: Delete}
+  - assert_state: {key: screen.row_action.closing, equals: asking}
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: demo-close}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.row_action.closing, equals: done}
+  - assert_state: {key: screen.row_action.last, equals: delete}
+  - assert_state: {key: screen.row_action.error, equals: false}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Write Check"}
+  - assert_state: {key: screen.screen, equals: write_check}
 
   # --- 11. Back to 4418 (Page Up, newest first: the print-later check, then
   # 4418): Prev on unsaved changes asks; a printed check asks; then void it -----
@@ -297,6 +333,8 @@ steps:
   - assert_state: {key: screen.save.error, equals: false}
   - click: {role: button, label: Clear}
   - assert_state: {key: screen.mode, equals: new}
+  - assert_exists: {role: label, label: "84,210.55"}
+  - assert_state: {key: screen.number, equals: 4418}
   - assert_no_clipping: {}
   # Minimum window (960 x 640): the payee panel goes under the form and the
   # check card fits its column.
