@@ -176,22 +176,22 @@ impl LoanProblem {
         match self {
             LoanProblem::LoanMissing => TextKey("loan.problem.loan_missing"),
             LoanProblem::PayFromMissing => TextKey("loan.problem.pay_from_missing"),
-            LoanProblem::NumberInvalid => TextKey("check.problem.number_invalid"),
+            LoanProblem::NumberInvalid => TextKey("helper.problem.number_invalid"),
             LoanProblem::LenderMissing => TextKey("loan.problem.lender_missing"),
-            LoanProblem::DateMissing => TextKey("check.problem.date_missing"),
+            LoanProblem::DateMissing => TextKey("helper.problem.date_missing"),
             LoanProblem::Payment(AmountIssue::Missing) => TextKey("loan.problem.payment_missing"),
             LoanProblem::Payment(AmountIssue::NotPositive) => {
-                TextKey("check.problem.amount_not_positive")
+                TextKey("helper.problem.amount_not_positive")
             }
             LoanProblem::Payment(AmountIssue::TooLarge) => {
-                TextKey("check.problem.amount_too_large")
+                TextKey("helper.problem.amount_too_large")
             }
             LoanProblem::InterestMissing => TextKey("loan.problem.interest_missing"),
             LoanProblem::InterestNegative => TextKey("loan.problem.interest_negative"),
             LoanProblem::InterestAccountMissing => TextKey("loan.problem.interest_account_missing"),
             LoanProblem::SameAccount => TextKey("loan.problem.same_account"),
             LoanProblem::PrincipalNegative { .. } => TextKey("loan.problem.principal_negative"),
-            LoanProblem::TooManyLines => TextKey("check.problem.too_many_lines"),
+            LoanProblem::TooManyLines => TextKey("helper.problem.too_many_lines"),
             LoanProblem::Line(_, i) => i.key(),
         }
     }

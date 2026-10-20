@@ -238,18 +238,18 @@ impl OwnerMoneyProblem {
     #[must_use]
     pub const fn key(self) -> TextKey {
         match self {
-            OwnerMoneyProblem::BankMissing => TextKey("check.problem.bank_missing"),
-            OwnerMoneyProblem::DateMissing => TextKey("check.problem.date_missing"),
+            OwnerMoneyProblem::BankMissing => TextKey("helper.problem.bank_missing"),
+            OwnerMoneyProblem::DateMissing => TextKey("helper.problem.date_missing"),
             OwnerMoneyProblem::WhoMissing => TextKey("owner_money.problem.who_missing"),
-            OwnerMoneyProblem::NumberInvalid => TextKey("check.problem.number_invalid"),
+            OwnerMoneyProblem::NumberInvalid => TextKey("helper.problem.number_invalid"),
             OwnerMoneyProblem::Amount(AmountIssue::Missing) => {
-                TextKey("check.problem.amount_missing")
+                TextKey("helper.problem.amount_missing")
             }
             OwnerMoneyProblem::Amount(AmountIssue::NotPositive) => {
-                TextKey("check.problem.amount_not_positive")
+                TextKey("helper.problem.amount_not_positive")
             }
             OwnerMoneyProblem::Amount(AmountIssue::TooLarge) => {
-                TextKey("check.problem.amount_too_large")
+                TextKey("helper.problem.amount_too_large")
             }
             OwnerMoneyProblem::EquityMissing => TextKey("owner_money.problem.equity_missing"),
             OwnerMoneyProblem::SameAccount => TextKey("owner_money.problem.same_account"),

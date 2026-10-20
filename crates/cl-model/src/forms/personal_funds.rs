@@ -184,20 +184,20 @@ impl PersonalFundsProblem {
     #[must_use]
     pub const fn key(self) -> TextKey {
         match self {
-            PersonalFundsProblem::DateMissing => TextKey("check.problem.date_missing"),
+            PersonalFundsProblem::DateMissing => TextKey("helper.problem.date_missing"),
             PersonalFundsProblem::Amount(AmountIssue::Missing) => {
-                TextKey("check.problem.amount_missing")
+                TextKey("helper.problem.amount_missing")
             }
             PersonalFundsProblem::Amount(AmountIssue::NotPositive) => {
-                TextKey("check.problem.amount_not_positive")
+                TextKey("helper.problem.amount_not_positive")
             }
             PersonalFundsProblem::Amount(AmountIssue::TooLarge) => {
-                TextKey("check.problem.amount_too_large")
+                TextKey("helper.problem.amount_too_large")
             }
             PersonalFundsProblem::OffsetMissing => TextKey("personal_funds.problem.offset_missing"),
-            PersonalFundsProblem::LinesDisagree { .. } => TextKey("check.problem.lines_disagree"),
+            PersonalFundsProblem::LinesDisagree { .. } => TextKey("helper.problem.lines_disagree"),
             PersonalFundsProblem::NoLines => TextKey("card.problem.no_lines"),
-            PersonalFundsProblem::TooManyLines => TextKey("check.problem.too_many_lines"),
+            PersonalFundsProblem::TooManyLines => TextKey("helper.problem.too_many_lines"),
             PersonalFundsProblem::Line(_, i) => i.key(),
         }
     }

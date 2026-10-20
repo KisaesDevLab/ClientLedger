@@ -294,16 +294,18 @@ impl CardProblem {
     pub const fn key(self) -> TextKey {
         match self {
             CardProblem::CardMissing => TextKey("card.problem.card_missing"),
-            CardProblem::DateMissing => TextKey("check.problem.date_missing"),
+            CardProblem::DateMissing => TextKey("helper.problem.date_missing"),
             CardProblem::RefTooLong => TextKey("card.problem.ref_too_long"),
-            CardProblem::Amount(AmountIssue::Missing) => TextKey("check.problem.amount_missing"),
+            CardProblem::Amount(AmountIssue::Missing) => TextKey("helper.problem.amount_missing"),
             CardProblem::Amount(AmountIssue::NotPositive) => {
-                TextKey("check.problem.amount_not_positive")
+                TextKey("helper.problem.amount_not_positive")
             }
-            CardProblem::Amount(AmountIssue::TooLarge) => TextKey("check.problem.amount_too_large"),
-            CardProblem::LinesDisagree { .. } => TextKey("check.problem.lines_disagree"),
+            CardProblem::Amount(AmountIssue::TooLarge) => {
+                TextKey("helper.problem.amount_too_large")
+            }
+            CardProblem::LinesDisagree { .. } => TextKey("helper.problem.lines_disagree"),
             CardProblem::NoLines => TextKey("card.problem.no_lines"),
-            CardProblem::TooManyLines => TextKey("check.problem.too_many_lines"),
+            CardProblem::TooManyLines => TextKey("helper.problem.too_many_lines"),
             CardProblem::Line(_, i) => i.key(),
         }
     }
