@@ -1062,6 +1062,11 @@ impl Screen for RegisterScreen {
     }
 
     fn command(&mut self, id: CommandId) -> bool {
+        // Esc closes the payee filter's list first and keeps its text.
+        if id.as_str() == "form.revert" && self.quick.payee_list {
+            self.quick.payee_list = false;
+            return true;
+        }
         if let Some(handled) = self.actions_command(id) {
             return handled;
         }
@@ -1128,6 +1133,7 @@ impl Screen for RegisterScreen {
             "filters": {
                 "uncleared": self.filters.uncleared,
                 "payee": self.filters.payee_text().is_some(),
+                "payee_list": self.quick.payee_list,
                 "tag": self.filters.tag.is_some(),
                 "amount": self.filters.min.is_some() || self.filters.max.is_some(),
                 "problem": self.quick.problem.is_some(),

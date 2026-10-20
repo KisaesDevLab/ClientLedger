@@ -40,7 +40,9 @@ pub fn view<'p>(
         .as_ref()
         .map(|t| text(TextKey("grid.popup.add_new")).replace("{text}", t));
     let label = match popup.kind {
-        PopupKind::Full => text(TextKey("grid.popup.full_list")).replace("{column}", &header),
+        PopupKind::Full | PopupKind::Browse => {
+            text(TextKey("grid.popup.full_list")).replace("{column}", &header)
+        }
         PopupKind::List | PopupKind::Choices => header,
     };
     PopupView {

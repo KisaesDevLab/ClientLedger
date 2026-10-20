@@ -18,7 +18,26 @@ pub fn editor(
     pad: f32,
     max_chars: Option<usize>,
 ) -> TextEdit<'_> {
+    editor_with_room(buffer, id, font, align, width, pad, 0.0, max_chars)
+}
+
+/// [`editor`] keeping `right_room` points free at the right end (the list
+/// chevron of picker and tag cells, Q-250).
+// The editor's settings, one per argument, as in `editor`.
+#[allow(clippy::too_many_arguments)]
+pub fn editor_with_room(
+    buffer: &mut String,
+    id: Id,
+    font: FontId,
+    align: Align2,
+    width: f32,
+    pad: f32,
+    right_room: f32,
+    max_chars: Option<usize>,
+) -> TextEdit<'_> {
     // Geometry: the cell padding in whole points.
+    #[allow(clippy::cast_possible_truncation)]
+    let right = (pad + right_room).clamp(0.0, 80.0).round() as i8;
     #[allow(clippy::cast_possible_truncation)]
     let pad = pad.clamp(0.0, 40.0).round() as i8;
     let mut te = TextEdit::singleline(buffer)
@@ -27,7 +46,12 @@ pub fn editor(
         .return_key(None)
         // The padding goes on the frame: egui ignores `margin` once a
         // frame is set, which put the text against the cell's left edge.
-        .frame(Frame::NONE.inner_margin(Margin::symmetric(pad, 0)))
+        .frame(Frame::NONE.inner_margin(Margin {
+            left: pad,
+            right,
+            top: 0,
+            bottom: 0,
+        }))
         .font(font)
         .align(align)
         .desired_width(width);

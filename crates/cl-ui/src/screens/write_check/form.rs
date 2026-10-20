@@ -578,6 +578,7 @@ impl WriteCheckScreen {
             .add(
                 egui::TextEdit::singleline(&mut self.inputs.payee)
                     .desired_width(width - 8.0)
+                    .margin(crate::list_field::margin())
                     .font(egui::FontId::proportional(15.0)),
             )
             .labelled_by(l.id);
@@ -585,6 +586,10 @@ impl WriteCheckScreen {
         if r.changed() {
             self.payee_list = !self.inputs.payee.trim().is_empty();
             self.inputs.payee_problem = false;
+        }
+        // Q-250: a click opens the names list; the chevron toggles it.
+        if let Some(open) = crate::list_field::mouse(ui, &r, self.payee_list) {
+            self.payee_list = open;
         }
         let mut picked = None;
         if self.payee_list && (r.has_focus() || r.lost_focus()) {
@@ -608,9 +613,9 @@ impl WriteCheckScreen {
     }
 
     /// The names that start with (or contain) the typed text, under the
-    /// field; a click picks one.
+    /// field (every name when a click opened it, Q-250); a click picks one.
     fn payee_popup(&mut self, ui: &mut Ui, r: &egui::Response) -> Option<cl_core::ids::ContactId> {
-        let query = self.inputs.payee.trim().to_string();
+        let query = crate::list_field::query(ui.ctx(), r.id, &self.inputs.payee);
         let limit = if query.is_empty() {
             200
         } else {
@@ -619,25 +624,13 @@ impl WriteCheckScreen {
         let LookupResult::Ready(found) = self.lists.suggest(NAMES, &query, limit) else {
             return None;
         };
-        let mut picked = None;
-        egui::Area::new(egui::Id::unique("write_check/payee_list"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(r.rect.left_bottom() + Vec2::new(0.0, 2.0))
-            .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_min_width(r.rect.width());
-                    egui::ScrollArea::vertical()
-                        .max_height(240.0)
-                        .show(ui, |ui| {
-                            for s in &found {
-                                if ui.selectable_label(false, &s.label).clicked() {
-                                    picked = self.lists.name(s.id);
-                                }
-                            }
-                        });
-                });
-            });
-        picked
+        let current = self
+            .header
+            .current()
+            .payee
+            .and_then(|p| found.iter().position(|s| self.lists.name(s.id) == Some(p)));
+        let i = crate::list_field::popup(ui, r, found.iter().map(|s| s.label.as_str()), current)?;
+        found.get(i).and_then(|s| self.lists.name(s.id))
     }
 
     /// Autofill when the owner leaves the payee: the exact name, else the

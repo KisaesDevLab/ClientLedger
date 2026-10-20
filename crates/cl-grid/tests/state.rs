@@ -378,6 +378,64 @@ fn open_list_only_for_pickers_and_tags() {
     assert!(!r.cmd(GridCommand::OpenList).handled);
 }
 
+/// Q-250: a click on a list cell opens its whole list at once, starting on
+/// the cell's entry; Tab in never opens it; Esc closes it and changes
+/// nothing; typing filters; the chevron toggles it.
+#[test]
+fn a_click_opens_the_list_and_tab_does_not() {
+    let popup = |r: &Rig| r.core.edit().and_then(|e| e.popup.clone());
+    let mut r = Rig::line(1);
+    assert_eq!(r.at(), (0, ACCOUNT));
+    assert!(popup(&r).is_none(), "focus in: no list");
+    r.typ("5100");
+    r.key(GridKey::Tab);
+    assert_eq!(r.m.line(r.m.key(0)).account, Account::Id(5100));
+    assert!(popup(&r).is_none(), "Tab onto Amount: no list");
+    r.shift(GridKey::Tab);
+    assert_eq!(r.at(), (0, ACCOUNT));
+    assert!(popup(&r).is_none(), "Shift+Tab onto Account: no list");
+
+    // A click elsewhere then on Account opens every entry on 5100.
+    r.click(0, AMOUNT);
+    assert!(popup(&r).is_none(), "amount cells have no list");
+    r.click(0, ACCOUNT);
+    let p = popup(&r).expect("a click opens the list");
+    assert_eq!((p.kind, p.items.len()), (PopupKind::Browse, 4));
+    assert_eq!(p.highlight.map(|i| p.items[i].id), Some(5100));
+
+    // Esc closes it; the value and the model are untouched.
+    let calls = r.m.set_calls.len();
+    assert!(r.key(GridKey::Escape).handled);
+    assert!(popup(&r).is_none());
+    assert_eq!(r.m.line(r.m.key(0)).account, Account::Id(5100));
+    assert_eq!(r.m.set_calls.len(), calls, "Esc changed nothing");
+
+    // Opened by a click and left with Tab: nothing was chosen.
+    r.click(0, AMOUNT);
+    r.click(0, ACCOUNT);
+    r.key(GridKey::Tab);
+    assert_eq!(r.m.set_calls.len(), calls, "an unmoved list picks nothing");
+    assert_eq!(r.at(), (0, AMOUNT));
+
+    // Typing filters the open list.
+    r.click(0, ACCOUNT);
+    r.typ("Mul");
+    assert_eq!(popup(&r).expect("list").kind, PopupKind::List);
+    r.key(GridKey::Escape);
+    r.key(GridKey::Escape);
+    assert!(popup(&r).is_none());
+    assert_eq!(r.m.set_calls.len(), calls, "Esc reverted the typing");
+
+    // The chevron toggles; moving in the list makes it a choice.
+    r.input(GridInput::ToggleList);
+    assert_eq!(popup(&r).expect("list").kind, PopupKind::Browse);
+    r.input(GridInput::ToggleList);
+    assert!(popup(&r).is_none(), "the chevron closes an open list");
+    r.input(GridInput::ToggleList);
+    r.key(GridKey::Down);
+    assert_eq!(popup(&r).expect("list").kind, PopupKind::Full);
+}
+
 #[test]
 fn undo_restores_the_buffer_first_then_defers_to_the_form() {
     let mut r = Rig::line(0);
