@@ -891,6 +891,8 @@ impl Screen for WriteCheckScreen {
             self.left_lines();
         }
         self.in_grid = in_grid;
+        // A refused save's problems follow the owner's fixes.
+        self.recheck_problems();
         // Lines left with a memo or amount and no account (WP7.3).
         self.maybe_suggest();
         self.poll_suggest();

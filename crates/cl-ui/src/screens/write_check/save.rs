@@ -207,6 +207,32 @@ impl WriteCheckScreen {
         self.save.problems = problems;
     }
 
+    /// The problems a refused save showed, checked again against the form
+    /// as it is now (each frame while any show): one the owner fixed since
+    /// goes away, one still there shows its current figures. Nothing new is
+    /// added here; the next save reports those.
+    pub(crate) fn recheck_problems(&mut self) {
+        if self.save.problems.is_empty() {
+            return;
+        }
+        let form = self.compose();
+        let ctx = CheckContext {
+            tags: &self.tag_list,
+            editing: self.editing.is_some(),
+        };
+        let now = check(&form, &ctx).err().unwrap_or_default();
+        let shown: Vec<_> = self
+            .save
+            .problems
+            .iter()
+            .map(std::mem::discriminant)
+            .collect();
+        self.save.problems = now
+            .into_iter()
+            .filter(|p| shown.contains(&std::mem::discriminant(p)))
+            .collect();
+    }
+
     /// Commits the amount and payee text still being typed (they commit
     /// when their field is left, and Alt+S or Enter can come first). False,
     /// with the keyboard put there, when the typed text is not accepted:

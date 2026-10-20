@@ -138,6 +138,33 @@ fn lines_that_disagree_by_a_cent_save_nothing() {
 }
 
 #[test]
+fn a_fixed_problem_goes_away_before_the_next_save() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "1286.40", &[("5100", "842.15"), ("5110", "444.24")]);
+    assert!(!s.start_save(SaveIntent::SaveAndClose, None));
+    assert_eq!(s.state()["save"]["refused"], "lines_disagree");
+    // Still off by a different amount: the problem stays.
+    s.lines
+        .form_mut()
+        .edit_step(|v| v.lines[1].amount = Some(money("444.20")));
+    s.recheck_problems();
+    assert_eq!(s.state()["save"]["refused"], "lines_disagree");
+    assert!(matches!(
+        s.save.problems.first(),
+        Some(CheckProblem::LinesDisagree { difference }) if *difference == money("0.05")
+    ));
+    // The lines now equal the check amount: the stale message clears.
+    s.lines
+        .form_mut()
+        .edit_step(|v| v.lines[1].amount = Some(money("444.25")));
+    s.recheck_problems();
+    assert_eq!(s.state()["save"]["refused"], Value::Null);
+    assert_eq!(s.state()["save"]["problems"], 0);
+    assert_eq!(s.state()["totals"], "balanced");
+}
+
+#[test]
 fn save_and_new_posts_the_check_and_proposes_the_next_number() {
     let (_d, link) = link();
     let mut s = screen(&link);
