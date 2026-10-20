@@ -39,6 +39,7 @@ Tier and agent routing: docs/AGENTS.md. Size: S ≈ under a day of agent work, M
 | P13 | Write Check | M | M | P12 |
 | P14 | Deposits, transfers, sales receipts, card charges, owner and loan helpers | M | L | P13 |
 | P15 | Journal entries, memorized and recurring | H | M | P12 |
+| P15A | Batch Enter Transactions | M | M | P13–P15 |
 | P16 | Home workspace | L | M | P13–P15 |
 | P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | L | P13 |
 | P18 | Pay Bills (checks) | M | M | P17 |

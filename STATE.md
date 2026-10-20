@@ -26,6 +26,7 @@
 | P13 | Write Check | M | Next |
 | P14 | Deposits, transfers, sales receipts, card charges, owner and loan helpers | M | |
 | P15 | Journal entries, memorized and recurring | H | |
+| P15A | Batch Enter Transactions | M | |
 | P16 | Home workspace | L | |
 | P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | |
 | P18 | Pay Bills (checks) | M | |

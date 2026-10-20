@@ -264,6 +264,8 @@ Answers from the owner after P11. They replace the defaults named below; later p
 | Q-247 | Items tab on Write Check before item types exist (P20). | **Hidden until P20**; P13 has the Expenses tab only. | P13, P20 |
 | Q-248 | Strength of the open-bill warning on Write Check. | **Side panel only**: lists the open bills with "use Pay Bills instead"; saving is not interrupted. | P13 |
 | Q-250 | How do list fields (payee, account, customer, tag, class…) open their list? | **Clicking the field opens the dropdown list** right away (owner, 2026-10-20, from exploring the beta); typing still filters, and Ctrl+L still opens the full list. Applies to every autofill field in forms, grids, the register entry row and filters. | All forms and grids |
+| Q-251 | Fill-in-the-amounts templates for journal entries and daily sales (engine has /api/v1/je-templates)? | **Keep the plan**: memorized transactions only (P15; P14's daily sales summary is memorizable). No JE or daily sales templates in beta. | P14, P15 |
+| Q-252 | Batch Enter Transactions (engine /api/v1/batch: validate, save, suggest-account, parse-csv; types expense, credit_card_charge, deposit, credit_card_credit, invoice, bill, credit_memo, journal_entry, customer_payment) in beta? | **Yes**: a new beta phase **P15A — Batch Enter Transactions** right after P15, Tier M, on the P10 grid; moved out of post-beta P45. | P15A, P45 |
 | Q-249 | Memorize on Write Check. | **Skipped in P13**; the Memorize button arrives with the memorized-transactions work in P15. | P13, P15 |
 
 ## Open
