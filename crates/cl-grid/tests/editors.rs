@@ -229,6 +229,13 @@ fn single_line_memo_ignores_shift_enter_newlines() {
 
 #[test]
 fn the_editor_keeps_the_cell_padding() {
+    fn walk(s: &egui::Shape, out: &mut Vec<egui::epaint::TextShape>) {
+        match s {
+            egui::Shape::Text(t) => out.push(t.clone()),
+            egui::Shape::Vec(v) => v.iter().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
     let mut r = Rig::new(line_spec(), Lines::new(true, 2));
     r.focus_cell(0, DATE);
     r.frame(typed("7"));
@@ -237,17 +244,10 @@ fn the_editor_keeps_the_cell_padding() {
     let left = r
         .nodes()
         .into_iter()
-        .find(|(_, n)| n.role() == Role::ColumnHeader && n.label().as_deref() == Some(&header))
+        .find(|(_, n)| n.role() == Role::ColumnHeader && n.label() == Some(&header))
         .and_then(|(_, n)| n.bounds())
         .expect("date header")
         .x0;
-    fn walk(s: &egui::Shape, out: &mut Vec<egui::epaint::TextShape>) {
-        match s {
-            egui::Shape::Text(t) => out.push(t.clone()),
-            egui::Shape::Vec(v) => v.iter().for_each(|x| walk(x, out)),
-            _ => {}
-        }
-    }
     let mut texts = Vec::new();
     for c in &r.last.as_ref().expect("frame").shapes {
         walk(&c.shape, &mut texts);

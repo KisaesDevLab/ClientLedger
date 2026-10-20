@@ -677,7 +677,7 @@ mod tests {
         let c = s.compare_run().expect("compare steps");
         assert_eq!(c.themes, vec!["light"]);
         assert_eq!(c.steps.len(), 2);
-        assert!(c.compare.is_empty());
+        assert_eq!(c.compare.len(), 0);
         let mut fake = Fake::new();
         fake.state = json!({"screen": {"screen": "register"}});
         let out = dir();
