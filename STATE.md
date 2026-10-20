@@ -2,7 +2,7 @@
 
 **Current phase:** P13 — Write Check (Next); P02 engine PRs E5/E6 and engine PR #153 (register) pending
 **Status:** P12 built on `phase/P12-register`; not pushed, no PR yet; reviews to follow
-**Engine commit:** `850e43d2652cbd71d689350a17a3b3d0dc716f44` (`main`, pinned 2026-10-17; bump per Q-02)
+**Engine commit:** `5c8e9665e0f747693dbf93bb70596b225aeaf68b` (`main`, pinned 2026-10-20 after engine PRs #151–#153; bump per Q-02)
 **Last updated:** 2026-10-19
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
