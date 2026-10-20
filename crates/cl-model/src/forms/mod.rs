@@ -30,6 +30,7 @@ pub mod amount_words;
 pub mod check;
 pub mod deposit;
 pub mod lines;
+pub mod transfer;
 
 /// How many unsaved steps a form remembers.
 pub const UNDO_LIMIT: usize = 200;
