@@ -29,6 +29,7 @@ mod contract_logging;
 mod contract_money;
 mod contract_preferences;
 mod contract_register;
+mod contract_register_property;
 mod contract_resources;
 mod contract_session;
 mod contract_tags;
@@ -172,6 +173,10 @@ fn main() -> std::process::ExitCode {
         (
             "bank_postings::lost_replies_are_reconciled_to_one_posting",
             contract_bank_postings::lost_replies_are_reconciled_to_one_posting,
+        ),
+        (
+            "register_property::balance_holds_after_random_edits",
+            contract_register_property::balance_holds_after_random_edits,
         ),
         (
             "audit::update_and_void_keep_the_before_image",
