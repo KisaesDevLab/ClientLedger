@@ -307,11 +307,18 @@ fn picking_another_account_opens_its_own_tab() {
 }
 
 #[test]
-fn later_lane_commands_are_routed_but_not_handled_yet() {
+fn void_and_delete_need_a_row_and_esc_closes_the_panel() {
     let (_d, link) = link();
     let mut s = screen(&link);
     for c in ["form.delete_item", "edit.void_transaction"] {
-        assert!(!s.command(CommandId::new(c)), "{c}");
+        assert!(s.command(CommandId::new(c)), "{c}");
+        assert_eq!(s.state()["row_action"]["panel"], "notice");
+        assert_eq!(
+            s.state()["row_action"]["notice"],
+            "register.row_action.pick_row"
+        );
+        assert!(s.command(CommandId::new("form.revert")), "Esc closes it");
+        assert_eq!(s.state()["row_action"]["panel"], "none");
     }
     assert!(s.command(CommandId::new(KIND)), "Ctrl+G stays");
 }
@@ -877,4 +884,298 @@ fn quick_report_shows_the_account_report_for_the_shown_dates() {
     // Ctrl+Shift+Q again closes it.
     assert!(s.command(CommandId::new("list.quick_report")));
     assert!(s.state()["quick_report"].is_null());
+}
+
+// ---------------------------------------------------------------- WP8
+
+/// Records a check dated today (open period) and returns its row key.
+fn recorded_check(link: &Arc<CompanyLink>, s: &mut RegisterScreen) -> cl_grid::RowKey {
+    settle(s, None);
+    let fuel = demo_account(link, "6100");
+    let vendor = demo_contact(link, "Hollister Fuel Stop");
+    s.entry.form.edit_step(|d| {
+        d.payee = Some(vendor);
+        d.account = Some(fuel);
+        d.payment = Some(money("42.10"));
+    });
+    assert!(s.start_record());
+    settle(s, None);
+    last_key(s)
+}
+
+fn row_of(s: &RegisterScreen, key: cl_grid::RowKey) -> view::RegRow {
+    s.model.row_for_key(key).cloned().expect("row")
+}
+
+#[test]
+fn void_asks_first_then_voids_and_reloads() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let key = recorded_check(&link, &mut s);
+    let total = s.model.total();
+    s.actions.cursor = Some(key);
+    assert!(s.command(CommandId::new("edit.void_transaction")));
+    assert_eq!(s.state()["row_action"]["panel"], "confirm_void");
+    // Cancel leaves it alone.
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(!row_of(&s, key).void);
+    assert!(s.command(CommandId::new("edit.void_transaction")));
+    s.confirm();
+    let st = s.state()["row_action"].clone();
+    assert_eq!(st["panel"], "none");
+    assert_eq!(st["last"], "void");
+    assert_eq!(st["count"], 1);
+    assert_eq!(st["error"], false);
+    settle(&mut s, None);
+    assert_eq!(s.model.total(), total, "a void stays listed");
+    let key = last_key(&mut s);
+    let row = row_of(&s, key);
+    assert!(row.void);
+    assert!(row.payment.is_none(), "its amounts are zero");
+    // Voiding it again explains.
+    s.actions.cursor = Some(key);
+    assert!(s.command(CommandId::new("edit.void_transaction")));
+    assert_eq!(s.state()["row_action"]["notice"], "register.void.already");
+}
+
+#[test]
+fn delete_asks_says_what_happens_and_removes_the_row() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let key = recorded_check(&link, &mut s);
+    let total = s.model.total().expect("total");
+    s.actions.cursor = Some(key);
+    assert_eq!(s.state()["row_action"]["delete_supported"], true);
+    assert!(s.command(CommandId::new("form.delete_item")));
+    assert_eq!(s.state()["row_action"]["panel"], "confirm_delete");
+    s.confirm();
+    assert_eq!(s.state()["row_action"]["last"], "delete");
+    settle(&mut s, None);
+    assert_eq!(s.model.total(), Some(total - 1));
+}
+
+#[test]
+fn delete_offers_void_without_the_capability_or_for_other_kinds() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let key = recorded_check(&link, &mut s);
+    s.actions.caps = Some((true, false));
+    s.actions.cursor = Some(key);
+    assert_eq!(s.state()["row_action"]["delete_supported"], false);
+    assert!(s.command(CommandId::new("form.delete_item")));
+    assert_eq!(s.state()["row_action"]["panel"], "offer_void");
+    assert_eq!(
+        s.state()["row_action"]["notice"],
+        "register.delete.unavailable"
+    );
+    // With the capability: kinds the engine does not delete (Q-245) and
+    // reconciled rows.
+    s.actions.caps = None;
+    s.set_range(cl_model::register::RangePreset::AllDates);
+    settle(&mut s, Some(&(0..200)));
+    let mut seen = (false, false);
+    for i in 0..200 {
+        let Some(r) = s.model.row_at(i).cloned() else {
+            continue;
+        };
+        let k = s.model.row_key(i).expect("key");
+        s.actions.cursor = Some(k);
+        s.actions.panel = dialogs::Panel::None;
+        if !r.txn_type.is_deletable() && !seen.0 {
+            assert!(s.start_delete());
+            assert_eq!(
+                s.state()["row_action"]["notice"],
+                "register.delete.unsupported"
+            );
+            seen.0 = true;
+        } else if r.txn_type.is_deletable()
+            && r.cleared == cl_api::ClearState::Reconciled
+            && !seen.1
+        {
+            assert!(s.start_delete());
+            assert_eq!(
+                s.state()["row_action"]["notice"],
+                "register.delete.reconciled"
+            );
+            seen.1 = true;
+        }
+    }
+    assert!(seen.0 && seen.1, "{seen:?}");
+}
+
+/// A locked (closed-period), not reconciled, single-line check: the demo's
+/// closed period is all reconciled, so one is recorded there first (with
+/// the closing-date password).
+fn locked_check(s: &mut RegisterScreen) -> cl_grid::RowKey {
+    let link = Arc::clone(&s.link);
+    settle(s, None);
+    let closing = s.model.closing.expect("demo closing date");
+    let fuel = demo_account(&link, "6100");
+    let vendor = demo_contact(&link, "Hollister Fuel Stop");
+    s.entry.form.edit_step(|d| {
+        d.date = Some(closing);
+        d.payee = Some(vendor);
+        d.account = Some(fuel);
+        d.payment = Some(money("12.00"));
+    });
+    assert!(!s.start_record(), "a closed-period date asks first");
+    assert_eq!(s.state()["row_action"]["closing"], "asking");
+    s.actions.password = crate::screens::company::form::SecretText::from(
+        crate::company::demo::register::DEMO_CLOSING_PASSWORD,
+    );
+    s.submit_closing();
+    assert_eq!(s.state()["row_action"]["closing"], "done");
+    assert_eq!(s.entry.last_saved, Some("check"));
+    s.set_range(cl_model::register::RangePreset::AllDates);
+    settle(s, None);
+    let total = s.model.total().expect("total");
+    let all = 0..total;
+    settle(s, Some(&all));
+    for i in 0..usize::try_from(total).expect("rows") {
+        let Some(r) = s.model.row_at(i).cloned() else {
+            continue;
+        };
+        if s.model.locked(&r)
+            && r.editable
+            && r.txn_type == cl_api::TxnType::Expense
+            && r.cleared == cl_api::ClearState::None
+        {
+            let key = s.model.row_key(i).expect("key");
+            s.begin_edit(key, false);
+            let ok = s.entry.editing.is_some();
+            s.finish_edit();
+            if ok {
+                return key;
+            }
+        }
+    }
+    panic!("no locked open check in the demo");
+}
+
+#[test]
+fn a_locked_void_needs_the_closing_password_which_is_never_kept() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let key = locked_check(&mut s);
+    s.actions.cursor = Some(key);
+    assert!(s.command(CommandId::new("edit.void_transaction")));
+    s.confirm();
+    let st = s.state()["row_action"].clone();
+    assert_eq!(st["closing"], "asking");
+    assert_eq!(st["pending"], "void");
+    // Cancel: nothing changed.
+    assert!(s.command(CommandId::new("form.revert")));
+    assert_eq!(s.state()["row_action"]["closing"], "cancelled");
+    assert!(!row_of(&s, key).void);
+    // A wrong password keeps the dialog for another try.
+    assert!(s.command(CommandId::new("edit.void_transaction")));
+    s.confirm();
+    s.actions.password = crate::screens::company::form::SecretText::from("wrong-canary");
+    s.submit_closing();
+    let st = s.state();
+    assert_eq!(st["row_action"]["closing"], "rejected");
+    assert!(s.actions.password.is_empty(), "the typed password is wiped");
+    assert!(!st.to_string().contains("canary"));
+    assert!(!format!("{:?}", s.actions).contains("canary"));
+    // The right one voids it, and is dropped.
+    s.actions.password = crate::screens::company::form::SecretText::from(
+        crate::company::demo::register::DEMO_CLOSING_PASSWORD,
+    );
+    s.submit_closing();
+    let st = s.state()["row_action"].clone();
+    assert_eq!(st["closing"], "done");
+    assert_eq!(st["last"], "void");
+    assert!(s.actions.closing.password().is_none());
+    assert!(s.actions.pending.is_none());
+    settle(&mut s, None);
+    let total = s.model.total().expect("total");
+    settle(&mut s, Some(&(0..total)));
+    assert!(row_of(&s, key).void);
+}
+
+#[test]
+fn a_locked_edit_asks_for_the_password_when_recorded() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let key = locked_check(&mut s);
+    s.begin_edit(key, false);
+    assert!(s.entry.editing.is_some(), "the edit opens");
+    s.entry.form.edit_step(|d| d.memo = "changed".into());
+    assert!(!s.start_record());
+    let st = s.state()["row_action"].clone();
+    assert_eq!(st["closing"], "asking");
+    assert_eq!(st["pending"], "save");
+    assert!(s.entry.error.is_none(), "the dialog shows it, not the row");
+    s.actions.password = crate::screens::company::form::SecretText::from(
+        crate::company::demo::register::DEMO_CLOSING_PASSWORD,
+    );
+    s.submit_closing();
+    assert_eq!(s.state()["row_action"]["closing"], "done");
+    assert_eq!(s.entry.last_saved, Some("update"));
+    assert!(s.entry.editing.is_none());
+}
+
+#[test]
+fn without_the_engine_password_closed_rows_are_explained() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let key = locked_check(&mut s);
+    s.actions.caps = Some((false, true));
+    s.begin_edit(key, false);
+    assert!(s.entry.editing.is_none(), "no edit opens");
+    assert_eq!(s.state()["row_action"]["closing"], "unavailable");
+    assert!(s.command(CommandId::new("form.revert")), "OK / Esc");
+    assert_eq!(s.state()["row_action"]["closing"], "cancelled");
+    // An engine refusal without a password path is explained the same way.
+    let closed = cl_api::ApiError::ClosedPeriod(cl_api::ClosedPeriod {
+        lock_date: s.model.closing,
+        can_override: false,
+        password_required: None,
+        message: cl_api::UserText::default(),
+    });
+    assert!(s.closing_failed(&closed, dialogs::Pending::Save));
+    assert_eq!(s.state()["row_action"]["closing"], "unavailable");
+}
+
+#[test]
+fn rate_limits_and_conflicts_are_plain_messages() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let key = recorded_check(&link, &mut s);
+    s.ask_closing(dialogs::Pending::Save);
+    s.actions
+        .closing
+        .handle(cl_model::closing::ClosingEvent::Submit(
+            cl_core::Secret::new("x"),
+        ));
+    let limited = cl_api::ApiError::ClosingPasswordRateLimited { retry_after: None };
+    assert!(!s.closing_failed(&limited, dialogs::Pending::Save));
+    assert_eq!(s.state()["row_action"]["closing"], "failed");
+    assert_eq!(
+        cl_core::OwnerFacing::owner_message(&limited).key,
+        "error.api.closing_password_attempts"
+    );
+    // A void refused because the row changed elsewhere offers Reload,
+    // which reads it again and asks again.
+    let row = row_of(&s, key);
+    s.row_action_failed(
+        &dialogs::Pending::Row {
+            kind: dialogs::ActionKind::Void,
+            id: row.txn_id,
+            date: row.date,
+            version: None,
+            reason: None,
+        },
+        cl_api::ApiError::Conflict {
+            reason: cl_api::ConflictReason::Stale,
+            current_version: None,
+            code: None,
+            message: cl_api::UserText::default(),
+        },
+    );
+    assert_eq!(s.state()["row_action"]["stale"], true);
+    assert_eq!(s.state()["row_action"]["error"], true);
+    s.reload_row_action();
+    assert_eq!(s.state()["row_action"]["panel"], "confirm_void");
+    assert_eq!(s.state()["row_action"]["stale"], false);
 }

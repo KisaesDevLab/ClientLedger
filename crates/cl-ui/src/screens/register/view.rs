@@ -167,6 +167,9 @@ pub struct RegRow {
     pub line_id: JournalLineId,
     /// Its transaction (edits start from `GET /transactions/{id}`, WP6).
     pub txn_id: TransactionId,
+    /// Its kind (Delete is offered only for the kinds the engine deletes,
+    /// Q-245).
+    pub txn_type: TxnType,
     /// Date.
     pub date: CalendarDate,
     /// Number text.
@@ -257,6 +260,7 @@ impl Mapping {
         RegRow {
             line_id: l.line_id,
             txn_id: l.txn_id,
+            txn_type: l.txn_type,
             date: l.date,
             number: l
                 .number

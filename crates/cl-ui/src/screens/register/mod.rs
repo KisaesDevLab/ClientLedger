@@ -17,6 +17,7 @@
 //!
 //! Every engine call runs on the request queue and is polled each frame.
 
+mod dialogs;
 mod edit;
 pub mod entry_row;
 pub mod filters;
@@ -186,6 +187,8 @@ pub struct RegisterScreen {
     /// The grid's height last frame (it changes when the entry row grows
     /// for Splits, or a bar or QuickReport opens above).
     grid_room: f32,
+    /// The closing-date password flow, Void and Delete (WP8).
+    actions: dialogs::RowActions,
 }
 
 /// Watches the ledger stamp (Q-P12n): read on window focus, every
@@ -261,6 +264,7 @@ impl RegisterScreen {
             goto: goto::GotoBar::default(),
             report: None,
             grid_room: 0.0,
+            actions: dialogs::RowActions::default(),
         };
         s.start_load();
         s.load_lists();
@@ -513,6 +517,7 @@ impl RegisterScreen {
     fn poll(&mut self) {
         self.poll_entry();
         self.poll_edit();
+        self.poll_actions();
         self.drive_goto();
         self.poll_report();
         if let Some(task) = self.accounts_task.as_mut()
@@ -846,8 +851,16 @@ impl RegisterScreen {
         self.begin_edit(key, false);
     }
 
-    /// Typing on a locked row (WP8: the closing-date password flow).
-    fn on_locked_edit(&mut self, _key: cl_grid::RowKey) {}
+    /// Typing on a locked row: with an engine that takes the closing-date
+    /// password the edit opens (the password is asked when it is recorded);
+    /// otherwise a message explains that closed rows can't be changed yet.
+    fn on_locked_edit(&mut self, key: cl_grid::RowKey) {
+        if self.closing_supported() {
+            self.begin_edit(key, false);
+        } else {
+            self.closing_unavailable();
+        }
+    }
 
     /// Typing on a row while browsing starts an edit of it.
     fn on_typed(&mut self, _text: &str) {
@@ -878,14 +891,15 @@ impl RegisterScreen {
         true
     }
 
-    /// Ctrl+D (WP8: delete, or the void offer before R7).
+    /// Ctrl+D: delete the row's transaction, or offer Void where delete
+    /// can't be used.
     fn on_delete(&mut self) -> bool {
-        false
+        self.start_delete()
     }
 
-    /// Void Transaction (WP8).
+    /// Void Transaction on the row under the cursor.
     fn on_void(&mut self) -> bool {
-        false
+        self.start_void()
     }
 
     /// Ctrl+Shift+Q: QuickReport for this account and the shown dates.
@@ -934,6 +948,7 @@ impl Screen for RegisterScreen {
         self.goto_ui(ui, &tokens);
         self.quick_report_ui(ui, &tokens);
         self.messages(ui, &tokens);
+        self.actions_ui(ui, &tokens);
         ui.add_space(4.0);
         if self.empty_ui(ui, &tokens) {
             self.request_pages();
@@ -970,6 +985,9 @@ impl Screen for RegisterScreen {
     }
 
     fn command(&mut self, id: CommandId) -> bool {
+        if let Some(handled) = self.actions_command(id) {
+            return handled;
+        }
         if let Some(handled) = self.entry_command(id) {
             return handled;
         }
@@ -1045,6 +1063,7 @@ impl Screen for RegisterScreen {
             "entry": self.entry_state(),
             "goto": self.goto.state(),
             "quick_report": self.report.as_ref().map(quick_report::QuickReport::state),
+            "row_action": self.actions_state(),
         })
     }
 }

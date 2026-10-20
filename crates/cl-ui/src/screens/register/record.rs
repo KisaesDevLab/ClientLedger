@@ -6,12 +6,13 @@
 use std::sync::Arc;
 
 use cl_api::{
-    ApiError, Contact, ContactFilter, IdempotencyKey, OrphanLabel, PostingOptions, RegisterQuery,
-    RegisterSort, SortDir, Tag, TagFilter, TxnType,
+    ApiError, ClosedPeriodAuthorization, Contact, ContactFilter, IdempotencyKey, OrphanLabel,
+    PostingOptions, RegisterQuery, RegisterSort, SortDir, Tag, TagFilter, TxnType,
 };
 use cl_core::ids::{AccountId, TransactionId};
 use cl_grid::{CellPos, ColumnId, GridEvent, NoLookups, TextKey};
 use cl_model::CommandId;
+use cl_model::closing::needs_password;
 use cl_model::forms::{SaveIntent, SaveStart};
 use cl_model::register::{
     AccountClass, EntryContext, EntryDraft, EntryField, EntryKind, EntryProblem, RangePreset,
@@ -302,6 +303,12 @@ impl RegisterScreen {
     /// Checks the draft and starts the save (Enter, Record, Alt+N, Alt+S).
     /// Returns true when there was nothing to save or it saved at once.
     pub(super) fn start_record(&mut self) -> bool {
+        self.record_with(None)
+    }
+
+    /// [`Self::start_record`] with the closing-date password for a change
+    /// in the closed period (it goes with this one save only).
+    pub(super) fn record_with(&mut self, password: Option<cl_core::Secret>) -> bool {
         if self.entry.task.is_some() || self.view_only() {
             return false;
         }
@@ -334,6 +341,18 @@ impl RegisterScreen {
                 return false;
             }
         };
+        // A change touching the closed period needs the closing-date
+        // password (NN8): ask before anything is sent.
+        let new_date = draft.date.unwrap_or(self.today);
+        let old_date = update.as_ref().map(|e| e.old_date);
+        if password.is_none() && needs_password(old_date, new_date, self.model.closing) {
+            if self.closing_supported() {
+                self.ask_closing(super::dialogs::Pending::Save);
+            } else {
+                self.closing_unavailable();
+            }
+            return false;
+        }
         match self.entry.form.begin_save(SaveIntent::SaveAndNew, &*lists) {
             Ok(SaveStart::Send(_)) => {}
             Ok(SaveStart::Skip(_)) => {
@@ -346,7 +365,13 @@ impl RegisterScreen {
             Ok(SaveStart::Busy) | Err(_) => return false,
         }
         if self.link.is_demo() {
-            let saved = self.demo_save(&prepared, update.as_ref().map(|e| e.id));
+            let dates: Vec<_> = old_date.into_iter().chain([new_date]).collect();
+            let saved = crate::company::demo::register::check_closing(
+                self.model.closing,
+                &dates,
+                password.as_ref(),
+            )
+            .and_then(|()| self.demo_save(&prepared, update.as_ref().map(|e| e.id)));
             return match saved {
                 Ok(id) => {
                     self.record_done(id);
@@ -368,7 +393,9 @@ impl RegisterScreen {
         };
         let edit = update.map(|e| (e.id, e.version));
         let pending = group.write(&session, label, move |s| async move {
-            let opts = PostingOptions::default();
+            let opts = PostingOptions {
+                closed_period: password.map(ClosedPeriodAuthorization::with_password),
+            };
             let t = s.transactions();
             let saved = match (built, edit) {
                 (Built::Bank(p), None) => t.create_bank_posting(&p, &opts, key).await?,
@@ -539,6 +566,7 @@ impl RegisterScreen {
     }
 
     fn record_done(&mut self, _id: TransactionId) {
+        self.closing_saved();
         let lists = Arc::clone(&self.lists);
         let stored = self.entry.draft().clone();
         self.entry.form.save_ok(stored, &*lists);
@@ -565,6 +593,11 @@ impl RegisterScreen {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
         });
+        // A closed-period refusal or a wrong password shows in the
+        // closing-date dialog, which can send the save again.
+        if self.closing_failed(&e, super::dialogs::Pending::Save) {
+            return;
+        }
         self.entry.error = Some(e);
     }
 
@@ -655,6 +688,18 @@ impl RegisterScreen {
             if self.view_only() {
                 ui.label(RichText::new(t("register.entry.view_only")).color(tokens.text_secondary));
                 return;
+            }
+            if let Some(e) = &self.entry.editing
+                && cl_model::closing::is_locked(e.old_date, self.model.closing)
+            {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(t("closing.edit_note"))
+                            .size(12.0)
+                            .color(tokens.text_secondary),
+                    )
+                    .wrap(),
+                );
             }
             if self.entry.editing.is_some() {
                 ui.horizontal(|ui| {

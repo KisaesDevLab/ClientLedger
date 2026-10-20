@@ -348,6 +348,20 @@ impl RegisterScreen {
             if b(ui, "register.edit_transaction", "edit.edit_transaction").clicked() {
                 self.command_from_toolbar("edit.edit_transaction");
             }
+            if b(ui, "register.void.open", "edit.void_transaction").clicked() {
+                self.command_from_toolbar("edit.void_transaction");
+            }
+            // Delete needs the engine's soft delete (R7, `txn-delete-v1`).
+            let can_delete = self.delete_supported();
+            let hint = shortcut_hint("form.delete_item");
+            let tip = format!("{} ({hint})", t("register.delete.open"));
+            let del = ui
+                .add_enabled(can_delete, egui::Button::new(t("register.delete.open")))
+                .on_hover_text(tip)
+                .on_disabled_hover_text(t("register.delete.unavailable_tip"));
+            if del.clicked() {
+                self.command_from_toolbar("form.delete_item");
+            }
         });
         if self.custom.open {
             self.custom_ui(ui, tokens);

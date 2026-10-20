@@ -73,6 +73,7 @@ fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Vec<Built
         .iter()
         .filter(|t| t.lines.iter().any(|l| l.account == number))
         .collect();
+    let voided = |t: &SampleTransaction| ledger.voided.contains(&t.id);
     txns.sort_by(|a, b| a.date.cmp(&b.date).then(a.id.cmp(&b.id)));
     let mut running = Money::ZERO;
     let mut out = Vec::new();
@@ -107,7 +108,13 @@ fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Vec<Built
             .enumerate()
             .filter(|(_, l)| l.account == number)
         {
-            let net = l.debit.checked_sub(l.credit).unwrap_or(Money::ZERO);
+            let void = voided(t);
+            // A void line moves nothing: its row carries the balance before.
+            let net = if void {
+                Money::ZERO
+            } else {
+                l.debit.checked_sub(l.credit).unwrap_or(Money::ZERO)
+            };
             running = running.checked_add(net).unwrap_or(running);
             let cleared = match (t.cleared, t.date <= reconciled_through) {
                 (true, true) => ClearState::Reconciled,
@@ -129,19 +136,19 @@ fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Vec<Built
                     contact: None,
                     category: category.clone(),
                     memo: (!t.memo.is_empty()).then(|| t.memo.clone()),
-                    payment: l
-                        .credit
-                        .is_positive()
+                    payment: (!void && l.credit.is_positive())
                         .then_some(RegisterAmount::Exact(l.credit)),
-                    deposit: l
-                        .debit
-                        .is_positive()
+                    deposit: (!void && l.debit.is_positive())
                         .then_some(RegisterAmount::Exact(l.debit)),
                     balance: RegisterAmount::Exact(running),
                     cleared,
                     has_splits: matches!(category, Category::Split),
-                    engine_editable: cleared != ClearState::Reconciled,
-                    status: TxnStatus::Posted,
+                    engine_editable: cleared != ClearState::Reconciled && !void,
+                    status: if void {
+                        TxnStatus::Void
+                    } else {
+                        TxnStatus::Posted
+                    },
                 },
             });
         }
@@ -340,6 +347,49 @@ const NEW_BASE: u32 = 900_000;
 #[derive(Clone, Debug, Default)]
 pub struct DemoLedger {
     changed: std::collections::BTreeMap<u32, SampleTransaction>,
+    /// Voided in the demo (kept, amounts zero).
+    voided: std::collections::BTreeSet<u32>,
+    /// Deleted in the demo (gone from the register; R7).
+    deleted: std::collections::BTreeSet<u32>,
+}
+
+/// The demo company's closing-date password (synthetic; the demo plays an
+/// engine with `closing-password-v1`). Documented in the register scenario.
+pub const DEMO_CLOSING_PASSWORD: &str = "demo-close";
+
+/// The demo engine's closed-period rule (U-15): a change touching a date on
+/// or before `closing` needs the closing-date password.
+///
+/// # Errors
+/// `ClosedPeriod` (password required) without a password,
+/// `ClosingPasswordRejected` for a wrong one.
+pub fn check_closing(
+    closing: Option<CalendarDate>,
+    dates: &[CalendarDate],
+    password: Option<&cl_core::Secret>,
+) -> Result<(), cl_api::ApiError> {
+    if !dates.iter().any(|d| closing.is_some_and(|c| *d <= c)) {
+        return Ok(());
+    }
+    match password {
+        None => Err(cl_api::ApiError::ClosedPeriod(cl_api::ClosedPeriod {
+            lock_date: closing,
+            can_override: false,
+            password_required: Some(true),
+            message: cl_api::UserText::default(),
+        })),
+        Some(p) if p.expose() == DEMO_CLOSING_PASSWORD => Ok(()),
+        Some(_) => Err(cl_api::ApiError::ClosingPasswordRejected),
+    }
+}
+
+fn refused(reason: cl_api::ConflictReason) -> cl_api::ApiError {
+    cl_api::ApiError::Conflict {
+        reason,
+        current_version: None,
+        code: None,
+        message: cl_api::UserText::default(),
+    }
 }
 
 /// A posting as the demo engine stores it (built by the register screen
@@ -381,14 +431,57 @@ impl DemoLedger {
             .map(|t| self.changed.get(&t.id).cloned().unwrap_or(t))
             .collect();
         v.extend(self.changed.range(NEW_BASE..).map(|(_, t)| t.clone()));
+        v.retain(|t| !self.deleted.contains(&t.id));
         v
     }
 
     fn find(&self, id: u32) -> Option<SampleTransaction> {
+        if self.deleted.contains(&id) {
+            return None;
+        }
         self.changed
             .get(&id)
             .cloned()
             .or_else(|| Sample::load().transactions.into_iter().find(|t| t.id == id))
+    }
+
+    /// The date of a transaction (for the closed-period rule).
+    #[must_use]
+    pub fn date_of(&self, id: TransactionId) -> Option<CalendarDate> {
+        self.find(sample_id(id)?).map(|t| t.date)
+    }
+
+    /// Voids a transaction (amounts become zero; it stays listed).
+    ///
+    /// # Errors
+    /// `NotFound`; `Validation`-like refusal when it is already void.
+    pub fn void(&mut self, id: TransactionId) -> Result<(), cl_api::ApiError> {
+        let n = sample_id(id)
+            .filter(|n| self.find(*n).is_some())
+            .ok_or(cl_api::ApiError::NotFound { code: None })?;
+        if !self.voided.insert(n) {
+            return Err(refused(cl_api::ConflictReason::Unspecified));
+        }
+        Ok(())
+    }
+
+    /// Soft-deletes a transaction (R7): gone from the register; only the
+    /// kinds of Q-245, never a reconciled one.
+    ///
+    /// # Errors
+    /// `NotFound`; `Conflict` with `DeleteUnsupported` or `Reconciled`.
+    pub fn delete(&mut self, id: TransactionId) -> Result<(), cl_api::ApiError> {
+        let t = sample_id(id)
+            .and_then(|n| self.find(n))
+            .ok_or(cl_api::ApiError::NotFound { code: None })?;
+        if !txn_type(&t.kind).is_deletable() {
+            return Err(refused(cl_api::ConflictReason::DeleteUnsupported));
+        }
+        if t.cleared && t.date <= last_reconciled() {
+            return Err(refused(cl_api::ConflictReason::Reconciled));
+        }
+        self.deleted.insert(t.id);
+        Ok(())
     }
 
     /// The next check number in `account` (the highest numeric one + 1).
@@ -505,7 +598,11 @@ impl DemoLedger {
             txn_number: (!t.number.is_empty() && t.kind != "check").then(|| t.number.clone()),
             check_number: (t.kind == "check").then(|| t.number.parse().ok()).flatten(),
             txn_date: t.date,
-            status: TxnStatus::Posted,
+            status: if self.voided.contains(&t.id) {
+                TxnStatus::Void
+            } else {
+                TxnStatus::Posted
+            },
             basis: cl_api::Basis::Both,
             contact_id: if deposit { None } else { contact },
             contact_name: if deposit { None } else { t.contact.clone() },
@@ -557,6 +654,75 @@ mod tests {
         assert_eq!(s.ending_balance.and_then(|a| a.exact()), acct.balance);
         assert_eq!(s.last_reconciled, Some(last_reconciled()));
         assert!(s.uncleared_count > 0);
+    }
+
+    #[test]
+    fn void_and_delete_follow_the_engine_rules() {
+        let chart = super::super::chart();
+        let id = operating(&chart);
+        let all = RegisterQuery::new(CalendarDate::min(), CalendarDate::max());
+        let mut ledger = DemoLedger::default();
+        let first = page(&ledger, &chart, id, &all, 1, 1).expect("page");
+        let total = first.total_rows;
+        let day = CalendarDate::from_ymd(2026, 11, 2).expect("d");
+        let fuel = chart
+            .iter()
+            .find(|a| a.fields.account_number.as_deref() == Some("6100"))
+            .expect("6100")
+            .id;
+        let posting = DemoPosting {
+            kind: "check",
+            date: day,
+            number: "9001".into(),
+            contact: None,
+            memo: String::new(),
+            own: id,
+            own_debit: false,
+            lines: vec![(fuel, Money::parse_wire("10.00").expect("m"))],
+        };
+        let a = ledger.save(&chart, &posting, None).expect("a");
+        let b = ledger.save(&chart, &posting, None).expect("b");
+        let before = summary(&ledger, &chart, id, None).expect("s");
+        ledger.void(a).expect("void");
+        assert!(ledger.void(a).is_err(), "already void");
+        let after = summary(&ledger, &chart, id, None).expect("s");
+        assert_eq!(
+            after.current_balance.exact(),
+            before
+                .current_balance
+                .exact()
+                .and_then(|m| m.checked_add(Money::parse_wire("10.00").ok()?).ok())
+        );
+        let listed = page(&ledger, &chart, id, &all, 1, 1).expect("page");
+        assert_eq!(listed.total_rows, total + 2, "a void stays listed");
+        ledger.delete(b).expect("delete");
+        assert_eq!(
+            page(&ledger, &chart, id, &all, 1, 1)
+                .expect("page")
+                .total_rows,
+            total + 1
+        );
+        assert!(ledger.get(&chart, &[], b).is_none(), "gone");
+        // Closed period: password required, wrong, right.
+        let closing = CalendarDate::from_ymd(2026, 9, 30).ok();
+        let locked = CalendarDate::from_ymd(2026, 9, 1).expect("d");
+        assert!(matches!(
+            check_closing(closing, &[locked], None),
+            Err(cl_api::ApiError::ClosedPeriod(c)) if c.password_required == Some(true)
+        ));
+        assert_eq!(
+            check_closing(closing, &[locked], Some(&cl_core::Secret::new("no"))),
+            Err(cl_api::ApiError::ClosingPasswordRejected)
+        );
+        assert!(
+            check_closing(
+                closing,
+                &[locked],
+                Some(&cl_core::Secret::new(DEMO_CLOSING_PASSWORD))
+            )
+            .is_ok()
+        );
+        assert!(check_closing(closing, &[day], None).is_ok());
     }
 
     #[test]

@@ -631,6 +631,9 @@ pub fn new_form(
 pub struct Editing {
     /// The transaction.
     pub id: TransactionId,
+    /// Its date as read (a change of a closed-period transaction needs the
+    /// closing-date password, `needs_password(old, new)`).
+    pub old_date: cl_core::CalendarDate,
     /// Its version (the fingerprint guard).
     pub version: cl_api::RecordVersion,
     /// What it is.

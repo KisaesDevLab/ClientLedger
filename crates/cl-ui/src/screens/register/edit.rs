@@ -160,6 +160,7 @@ pub fn seed(v: &Versioned<Transaction>, own: AccountId, class: AccountClass) -> 
     Seed::Edit {
         editing: Editing {
             id: t.id,
+            old_date: t.txn_date,
             version: v.version,
             kind,
             side,
@@ -184,7 +185,7 @@ impl RegisterScreen {
         let Some(row) = self.model.row_for_key(key) else {
             return;
         };
-        if self.model.locked(row) {
+        if self.model.locked(row) && !self.closing_supported() {
             self.on_locked_edit(key);
             return;
         }
