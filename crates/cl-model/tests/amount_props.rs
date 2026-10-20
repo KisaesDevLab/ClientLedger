@@ -215,7 +215,7 @@ proptest! {
             match parse(&s, rules) {
                 Ok(p) => {
                     // Accepted values honour the field's decimals.
-                    let step = if rules.input == UserInput::CENTS { 100 } else { 1 };
+                    let step = if rules.input.max_scale() == 2 { 100 } else { 1 };
                     prop_assert_eq!(p.value.to_ten_thousandths() % step, 0);
                 }
                 Err(e) => {
@@ -258,7 +258,6 @@ fn rejection_keys() {
             "grid.calc.too_long",
         ),
         ("1 234", "grid.amount.ambiguous"),
-        ("1.234", "grid.amount.too_many_decimals"),
         ("abc", "grid.amount.invalid"),
     ];
     for (text, key) in table {
@@ -268,6 +267,13 @@ fn rejection_keys() {
             "{text}"
         );
     }
+    // Typed money rounds to the cent (Q-232); a four-decimal field without
+    // rounding still refuses a fifth decimal.
+    assert!(parse("1.234", AmountRules::MONEY).is_ok());
+    assert_eq!(
+        parse("1.23456", full()).unwrap_err().key().as_str(),
+        "grid.amount.too_many_decimals"
+    );
 }
 
 #[test]

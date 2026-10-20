@@ -303,3 +303,34 @@ proptest! {
         prop_assert_eq!(a == b, a.to_wire() == b.to_wire());
     }
 }
+
+proptest! {
+    /// Q-232: a typed money amount with any number of decimals rounds to the
+    /// cent, half away from zero, exactly as `rust_decimal`'s
+    /// `MidpointAwayFromZero` would (the calculator's rule, Q-P10x).
+    #[test]
+    fn typed_money_rounds_to_the_cent(
+        int in 0u64..1_000_000_000_000,
+        frac in "[0-9]{0,14}",
+        negative in any::<bool>(),
+        parens in any::<bool>(),
+    ) {
+        use rust_decimal::RoundingStrategy;
+        let body = if frac.is_empty() { int.to_string() } else { format!("{int}.{frac}") };
+        let text = match (negative, parens) {
+            (false, _) => body.clone(),
+            (true, false) => format!("-{body}"),
+            (true, true) => format!("({body})"),
+        };
+        let got = Money::parse_user(&text, UserInput::MONEY).unwrap().as_decimal();
+        let mut exact = Decimal::from_str(&body).unwrap();
+        if negative {
+            exact = -exact;
+        }
+        // Scale at most two, and never more than half a cent away.
+        prop_assert!(got.scale() <= 2, "{} -> {}", text, got);
+        prop_assert!((got - exact).abs() <= Decimal::new(5, 3), "{} -> {}", text, got);
+        let want = exact.round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero);
+        prop_assert_eq!(got, want, "{}", text);
+    }
+}
