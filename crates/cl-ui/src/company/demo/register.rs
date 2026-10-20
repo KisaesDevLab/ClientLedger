@@ -686,6 +686,36 @@ mod tests {
     }
 
     #[test]
+    fn card_cleared_balance_is_in_the_natural_sign() {
+        // A credit card is credit-normal: its cleared balance is credits
+        // minus debits of the cleared lines (Q-P12h), never the bank's
+        // debits minus credits.
+        let chart = super::super::chart();
+        let card = chart
+            .iter()
+            .find(|a| a.fields.account_number.as_deref() == Some("2050"))
+            .expect("2050");
+        let ledger = DemoLedger::default();
+        let mut natural = Money::ZERO;
+        for t in ledger.transactions().iter().filter(|t| t.cleared) {
+            for l in t.lines.iter().filter(|l| l.account == "2050") {
+                natural = natural
+                    .checked_add(l.credit.checked_sub(l.debit).expect("m"))
+                    .expect("m");
+            }
+        }
+        assert!(!natural.is_zero(), "the sample clears card payments");
+        let s = summary(&ledger, &chart, card.id, None).expect("summary");
+        assert_eq!(s.cleared_balance.and_then(|a| a.exact()), Some(natural));
+        // The ending balance is what is owed: positive, as sent.
+        assert!(
+            s.ending_balance
+                .and_then(|a| a.exact())
+                .is_some_and(Money::is_positive)
+        );
+    }
+
+    #[test]
     fn void_and_delete_follow_the_engine_rules() {
         let chart = super::super::chart();
         let id = operating(&chart);

@@ -336,6 +336,10 @@ steps:
   - assert_exists: {role: column_header, label: Charge, index: 0}
   - assert_exists: {role: column_header, label: Payment, index: 0}
   - assert_state: {key: screen.footer.ending, equals: "289.63"}
+  # Cleared balance in the natural sign too (credits minus debits): the
+  # sample clears only the card payments, so it reads as a credit (minus).
+  # The bank's sign would show +22,202.21.
+  - assert_state: {key: screen.footer.cleared, equals: "-22,202.21"}
   - assert_no_clipping: {}
   - screenshot: card
   # The card opened in its own tab; close it, then select and close the
