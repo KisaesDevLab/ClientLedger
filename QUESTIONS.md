@@ -349,3 +349,21 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P12u | Customer on Splits lines | P12 | The Customer column is offered on deposit splits only; check and card-charge splits have no customer until the P13 forms. | Deviation from plan WP6 |
 | Q-P12v | Go To "Look in" | P12 | Go To has a "Look in" picker (Any field, Number, Payee, Memo, Amount) so an amount or a number can be searched on its own. | Addition to plan WP7 |
 | Q-P12w | QuickReport range | P12 | QuickReport (Ctrl+Shift+Q) uses the register's shown dates, not the P11 year-to-date default. | Deviation from plan WP7 / Q-P11i |
+| Q-P13a | Items tab (mockup shows "Items $0.00") | P13 | Hidden until P20; deviation from the mockup. | Answered by owner: Q-247 |
+| Q-P13b | Memorize button | P13 | Not shown until P15; deviation from the mockup. | Answered by owner: Q-249 |
+| Q-P13c | Print button and Ctrl+P before P19 | P13 | The Print button is disabled (with a tooltip) until P19; Print later is the way to queue a check. | Default in force |
+| Q-P13d | Mockup shows Print later ticked and No. 4418 | P13 | They are exclusive: ticked shows "To print" instead of a number. | Answered by owner: Q-246 |
+| Q-P13e | "Go to Pay Bills" link | P13 | No link until P18; the open-bill warning text only, saving is never interrupted. | Answered by owner: Q-248 |
+| Q-P13f | Mockup line 1 has two tags (Install, Crew A) | P13 | One tag per line; "Crew A" can go in the header Tags field. | Answered by owner: Q-233 |
+| Q-P13g | Header Tags field, not in the mockup | P13 | An extra Tags field in the check header; it defaults the lines that have no tag of their own. | Answered by owner: Q-178 |
+| Q-P13h | "Customer:Job" wording; the demo company has no jobs | P13 | Column says "Customer:Job" (Q-238); the sample data has no jobs until U-35 lands. | Default in force |
+| Q-P13i | Editing a printed check where a printed field changes | P13 | Asks "Reprint / Keep number N as handwritten / Cancel" (engine answers 409 `CHECK_PRINTED`, client `printedCheckChange`). | Default in force |
+| Q-P13j | Void or delete of a check with an already-billed billable line | P13 | Refused with the engine's 409 `LINE_BILLED` (engine PR #156 default); no effect until invoicing bills lines. | Default in force |
+| Q-P13k | Attachments: no native file picker yet | P13 | Type a path or drag and drop; "Save a copy" writes to Downloads without overwriting. Follow-up: a native file dialog with a permissive crate. | Default in force |
+| Q-P13l | AI suggestion display | P13 | A caption strip below the grid instead of under the line; the suggested account shows as grey text; account suggestions on checks follow the "Bank Feed suggestions" preference (the help page says so). | Default in force |
+| Q-P13m | Next check number | P13 | Sent explicitly as max(engine counter, highest check number including bill payments + 1), unless Print later is ticked; editable (Q-242). | Default in force |
+| Q-P13n | Status bar shortcut text | P13 | Shows "Ctrl Insert" (keymap text), not the mockup's "Ctrl Ins". | Default in force |
+| Q-P13o | Prefill source | P13 | Copies from the payee's newest check, expense or bill (e.g., the bill for Ozark Feed & Seed); amounts are never copied. | Default in force |
+| Q-P13p | Find and History | P13 | Find opens the account register (Ctrl+F there for Go To); History shows date and action, not the user. | Default in force |
+| Q-P13w | Scenario repeatability | P13 | The `write_check` scenario voids or deletes what it posts so it can run again. | Default in force |
+| Q-P13x | Checks with line customers | P13 | Read-only when the engine lacks `line-billable-v1` (live since pin 454fd23, so editable now). | Default in force |

@@ -1,7 +1,7 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P13 — Write Check (Next); engine PRs #151–#153 merged and pinned (5c8e9665); E5b, U-23 and later U-rows pending
-**Status:** P12 built on `phase/P12-register`; not pushed, no PR yet; reviews to follow
+**Current phase:** P14 — Deposits, transfers, sales receipts, card charges, owner and loan helpers (Next; Intuit compliance check runs first — see Owner-requested checkpoints)
+**Status:** P13 built on `phase/P13-write-check`; PR to open
 **Engine commit:** `454fd23ae06799e5d4c68c50f04970edaf93d93d` (`main`, pinned 2026-10-20 after engine PR #156: check-edit-v1, line-billable-v1, rules-evaluate-v1, migration 0221; bump per Q-02)
 **Last updated:** 2026-10-20
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
@@ -23,8 +23,8 @@
 | P10 | Ledger grid widget | H | Done 2026-10-18 (reviews pending; CI to confirm grid-bench and both ui-check jobs) |
 | P11 | Lists, centers, and tags | M | Done 2026-10-18 (engine gaps PENDING by U-31 to U-46; reviews pending) |
 | P12 | Bank and account register | H | Done 2026-10-19 (AC1 register part, password path and delete live since pin 5c8e9665; R5 PENDING by `register-cleared-v1`; reviews pending) |
-| P13 | Write Check | M | Next |
-| P14 | Deposits, transfers, sales receipts, card charges, owner and loan helpers | M | |
+| P13 | Write Check | M | Done 2026-10-20 |
+| P14 | Deposits, transfers, sales receipts, card charges, owner and loan helpers | M | Next |
 | P15 | Journal entries, memorized and recurring | H | |
 | P15A | Batch Enter Transactions | M | |
 | P16 | Home workspace | L | |
@@ -153,6 +153,13 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 
 - S14 tag gap (Q-P10t): engine lines hold one `tagId`; the grid allows several tag chips per line. P11 opened U-45 (several tags per line, Q-P11w); until it lands, P13 refuses to save a line with more than one tag through `cl_model::lists::tags::engine_line_tag`.
 
+## Follow-ups from P13
+
+1. A register tab left open shows stale rows after another window saves; needs a cross-window "transactions changed" refresh (the scenario closes the tab as a workaround). Fix before or in P14.
+2. Native file picker for attachments (Q-P13k).
+3. The `cl-host` cold-start budget test exceeds the 15 s local limit under load (CI uses `CL_HOST_BUDGET_SECS=30`).
+4. Engine issues #157 (duplicate check numbers under concurrency) and #158 (float compare in the rules engine).
+
 ## Owner-requested checkpoints
 
 - **After P13 merges, before P14 starts (owner, 2026-10-20):** Intuit compliance check — trademarks/names, copied text, icons and assets, layouts and colors vs QuickBooks, feature names, help text, fixtures, non-affiliation notice (non-negotiable 5). Report to the owner; fix findings on a `fix/` branch.
@@ -163,6 +170,9 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-20 — P13 complete on `phase/P13-write-check`; PR to open. Shipped: the Write Check form (check card, amount in words, "To print", Expenses lines with Customer:Job, Billable and Tags, Save & New / Save & Close, Prev/Next with a Save/Discard prompt, History, Attach, payee panel with the open-bill warning and recent checks, prefill from the last transaction except amounts, vendor default account, offline rule suggestions and a gated AI chip with explicit accept); check edit with the printed-check choice; the closing-password flow reused; the shared lines grid and closing prompt; Q-232 typed amounts round to the cent; Q-238 "Customers" wording; Q-250 a click opens list fields; sample data for the mockup story; vendor-center focus fix. Engine PR #156 merged (U-48 check edit, U-49 line customer, U-50 billable + migration 0221, U-51 rules evaluate); pin 454fd23. Contract suite 101/101; `write_check` scenario 254 steps light+dark, `--compare` 43 steps. P15A Batch Enter Transactions added to beta (Q-252).
+  Acceptance (phases/M1-core-ledger.md P13): [x] the mockup example saves, the register shows it, the GL is correct (contract `write_check::gl_effect`); [x] no save when lines and amount disagree (unit test + scenario, nothing sent); [x] mockup match via `--compare` reviewed by ui-verifier, deviations Q-P13a–p.
+  Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, opus fallback for money packages), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.
 - 2026-10-20 — Engine pin 850e43d2 → 5c8e9665 (engine main with PRs #151 tenant archives, #152 AI desktop/session secrets, #153 register exact money, closing password, soft delete) on `chore/engine-pin-5c8e9665`. Live capabilities: `tenants-list-v1`, `tenant-archive-v1`, `session-secrets-v1`, `ai-desktop-v1`, `smtp-session-v1`, `ai-token-cap-v1`, `register-exact-v1`, `closing-password-v1`, `txn-delete-v1` (names match cl-api). Engine SEA rebuilt and smoke-tested; api-spec fixtures refreshed.
   Results: cl-api contract 91 passed, 0 failed (the formerly PENDING E5a archive round trip, closing password U-15, E6 session secrets/usage summary/SMTP session/token cap, register exact money, audit before-images and delete now run); `register_property::balance_holds_after_random_edits` at 1,000 operations with the register checks and deletes on: green (25 s, seed 54358578820153362); contract_offline 6/6; spec_fixtures 4/4; rest of the workspace green.
   Client fixes (the client follows the engine): closed-period test expects `CLOSING_PASSWORD_INVALID` for a password on a company without one; contract tests hand the Ollama address over session secrets (desktop mode ignores the stored URL) and name the session SMTP relay by LAN address (the engine resolves the host fail-closed); `OUTSIDE_SPEC` trimmed to desktop-only routes; `push_at_open` sends the AI and SMTP session secrets in separate requests so an unresolvable mail server offline no longer drops the Ollama address. No engine bugs found. Still PENDING: E5b, U-14, U-17–U-19, U-21–U-23, U-31–U-47, R5.
@@ -175,8 +185,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   Acceptance: (1) keyboard-only create/edit/inactivate for every list — met for accounts, contacts (both centers), items, tags (scenarios `chart-of-accounts`, `client-center`, `vendor-center`, `items`, `tags`, `import-export`, light+dark); terms and payment methods PENDING by U-43 (read-only); (2) classes in fixtures become tags — met (`class_map` tests on `fixtures/lists/classes.csv` plus a property test); (3) 20k-record filter under 100 ms — met (accounts, contacts, items, tags tests).
   PENDING engine items: U-31 to U-46 (merge with lines, subtree balance, sensitive flag, masked numbers, jobs, addresses/people, notes/to-dos, contact balance, item kinds, price levels, tag merge/single-select, required groups, terms/methods, W-9, several tags per line, list imports); see Blocked items. Q-P11p is now an index of the per-item rows.
   Agents: engine-scout and all implementers on opus (Fable unavailable); code review and ui-verifier to follow.
-- 2026-10-18 — P10 complete on `phase/P10-ledger-grid` (steps 1-20 of plan Rev 2; not pushed). Shipped: cl-grid (row model and RowKeys, integer row-anchored viewport, editing state machine, input sequencer, text/amount/calculator/memo/date/checkbox/dropdown/picker/tag editors, AccessKit nodes), cl-model amount/date entry, lookup and tags, cl-ui `GridForm`, `grid_env`, `grid-widths.json`, the `--demo`-only grid demo (split lines, 200k register, Pay bills), `cargo xtask grid-bench`, `ui-check grid_demo` in both ui-check CI jobs.
-  Acceptance: (1) 200k rows at 60 fps — met: `virtualization.rs` work counts, grid-bench p95 0.58 ms off / 0.60 ms on (Windows, budget 8/12 ms; ubuntu CI step to confirm); (2) keyboard-only split line with autofill and a tag, exact — met: `ui-check grid_demo` light+dark (99 steps, Windows) and `cl-ui/tests/grid_keyboard.rs` (T2-T7, T20, T23); (3) amount parser/calculator properties — met (`amount_props.rs`, T15); (4) no unresolved Blocking items — met: B1-B6 re-check with tests in `target/reviews/PR-P10.md`; (5) DoD — `cargo xtask ci` green except the engine-checkout fixture tests (engine/ on an engine branch), coverage 87.43% lines, KEYBOARD.md current.
-  Step 18 found and fixed: an AccessKit `controls` relation to a popup with no node (the platform adapter panicked and closed the app), focus loss dropping the highlighted picker entry, register/Pay bills switches leaving no keyboard focus, one-word-per-line captions, a second blank entry line after Esc. Also fixed the flaky `oversized_line_is_refused` (server drains before closing).
-  Deviation: the bench lives in `cl-ui/benches/grid_scroll.rs` (cl-grid may not depend on cl-ui). Decisions Q-P10a-w (b, c, g, l, m, o rewritten from the shipped design). Follow-up: S14 tag gap (above), manual IME check on Windows (R6).
-  Agents: architect, process review (xhigh) and implementers all on opus (Fable out of credits); code, security and ui-verifier reviews to follow.
