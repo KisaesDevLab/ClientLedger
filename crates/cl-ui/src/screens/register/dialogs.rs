@@ -504,6 +504,11 @@ impl RegisterScreen {
         let written = group.write(&session, label, move |s| async move {
             let t = s.transactions();
             // Refuse a change made elsewhere since the owner was asked.
+            // Best-effort until U-17 (`record-version-v1`): the engine's void
+            // and delete take no version, so this read-then-send leaves a
+            // short window in which another window's edit is not caught.
+            // With U-17 the version goes in `If-Match` and the engine checks
+            // it atomically.
             if let Some(expected) = version {
                 let now = t.get(id).await?;
                 if now.version != expected {
