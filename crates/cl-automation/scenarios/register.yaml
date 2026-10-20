@@ -188,6 +188,13 @@ steps:
   - assert_exists: {role: label, label: Not found in the shown dates.}
   - click: {role: button, label: Close}
   - assert_state: {key: screen.goto.open, equals: false}
+  # Esc in the Go To bar closes just the bar, never the register tab.
+  - key: Ctrl+F
+  - assert_state: {key: screen.goto.open, equals: true}
+  - key: Escape
+  - assert_state: {key: screen.goto.open, equals: false}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_exists: {role: tab, label: Register · Operating Checking}
 
   # --- QuickReport (Ctrl+Shift+Q) for this account and dates ---------------
   - key: Ctrl+Shift+Q
@@ -198,6 +205,13 @@ steps:
   - screenshot: quick-report
   - click: {role: button, label: Close report}
   - assert_state: {key: screen.quick_report, equals: null}
+  # Esc closes just the QuickReport, never the register tab.
+  - key: Ctrl+Shift+Q
+  - assert_state: {key: screen.quick_report.loaded, equals: true}
+  - key: Escape
+  - assert_state: {key: screen.quick_report, equals: null}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_exists: {role: tab, label: Register · Operating Checking}
 
   # --- Range: This month, then All dates -----------------------------------
   - click: {role: combo_box, label: Show}

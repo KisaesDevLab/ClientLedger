@@ -962,6 +962,25 @@ impl RegisterScreen {
     }
 }
 
+impl RegisterScreen {
+    /// Esc closes the Go To bar, then the QuickReport, before the tab:
+    /// `None` when neither is open (or for any other command).
+    fn panel_command(&mut self, id: CommandId) -> Option<bool> {
+        if id.as_str() != "form.revert" {
+            return None;
+        }
+        if self.goto.open {
+            self.close_goto();
+            return Some(true);
+        }
+        if self.report.is_some() {
+            self.report = None;
+            return Some(true);
+        }
+        None
+    }
+}
+
 impl Screen for RegisterScreen {
     fn title(&self) -> String {
         self.account_record().map_or_else(
@@ -1035,6 +1054,9 @@ impl Screen for RegisterScreen {
             return handled;
         }
         if let Some(handled) = self.entry_command(id) {
+            return handled;
+        }
+        if let Some(handled) = self.panel_command(id) {
             return handled;
         }
         match id.as_str() {

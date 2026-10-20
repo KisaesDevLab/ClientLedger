@@ -938,6 +938,31 @@ fn quick_report_shows_the_account_report_for_the_shown_dates() {
     assert!(s.state()["quick_report"].is_null());
 }
 
+#[test]
+fn esc_closes_the_goto_bar_then_the_quick_report_not_the_tab() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    assert!(s.command(CommandId::new("list.quick_report")));
+    assert!(s.command(CommandId::new("edit.find")));
+    assert_eq!(s.state()["goto"]["open"], true);
+    // First Esc: only the Go To bar goes.
+    assert!(
+        s.command(CommandId::new("form.revert")),
+        "Esc stays in the tab"
+    );
+    assert_eq!(s.state()["goto"]["open"], false);
+    assert!(!s.state()["quick_report"].is_null());
+    // Second Esc: the QuickReport goes.
+    assert!(
+        s.command(CommandId::new("form.revert")),
+        "Esc stays in the tab"
+    );
+    assert!(s.state()["quick_report"].is_null());
+    // Nothing left open: Esc falls through so the shell closes the tab.
+    assert!(!s.command(CommandId::new("form.revert")));
+}
+
 // ---------------------------------------------------------------- WP8
 
 /// Records a check dated today (open period) and returns its row key.
