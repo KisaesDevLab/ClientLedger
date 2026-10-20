@@ -117,6 +117,34 @@ pub(super) struct Choice {
 
 /// A labelled choice that works from the keyboard: Up/Down change it while
 /// it has focus, a click opens the list. Returns the picked index.
+/// Draws `add` as one unit inside a wrapping row (`horizontal_wrapped`):
+/// when the unit's width from the last frame does not fit what is left of
+/// the row, it starts on a new row instead of running past the window
+/// (a caption and its field never part, minimum window 960 x 640).
+pub(super) fn keep_together<R>(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let id = ui.scope_id().with(("keep-together", salt));
+    let known: Option<f32> = ui.data(|d| d.get_temp(id));
+    let x = ui.cursor().min.x;
+    let at_row_start = x <= ui.max_rect().min.x + 0.5;
+    // What is left of this row (a wrapping layout's `available_width` is
+    // the whole row), never past the visible area.
+    let right = ui.max_rect().right().min(ui.clip_rect().right());
+    if let Some(w) = known
+        && w > right - x
+        && !at_row_start
+    {
+        ui.end_row();
+    }
+    let r = ui.horizontal(add);
+    let w = r.response.rect.width();
+    if known.is_none_or(|k| (k - w).abs() > 0.5) {
+        ui.data_mut(|d| d.insert_temp(id, w));
+        // Lay out again with the measured width.
+        ui.ctx().request_discard("register toolbar width measured");
+    }
+    r.inner
+}
+
 pub(super) fn combo(
     ui: &mut Ui,
     salt: &str,
@@ -125,7 +153,7 @@ pub(super) fn combo(
     current: usize,
 ) -> Option<usize> {
     let mut picked = None;
-    ui.horizontal(|ui| {
+    keep_together(ui, salt, |ui| {
         let caption = ui.add(egui::Label::new(label).selectable(false));
         let shown = choices
             .get(current)
@@ -474,29 +502,31 @@ impl RegisterScreen {
                 self.set_uncleared(uncleared);
             }
 
-            let l = ui.add(egui::Label::new(t("register.filter.payee")).selectable(false));
-            let r = ui
-                .add_sized(
-                    [130.0, 22.0],
-                    egui::TextEdit::singleline(&mut self.quick.payee)
-                        .hint_text(t("register.filter.payee_hint")),
-                )
-                .labelled_by(l.id);
-            if r.has_focus() {
-                let typed = self.quick.payee.trim();
-                let done = self.complete_payee(typed);
-                if !typed.is_empty() && done != typed {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(format!("\u{2192} {done}"))
-                                .size(12.0)
-                                .color(tokens.text_secondary),
-                        )
-                        .selectable(false),
-                    );
+            typed_done |= keep_together(ui, "register/filter-payee", |ui| {
+                let l = ui.add(egui::Label::new(t("register.filter.payee")).selectable(false));
+                let r = ui
+                    .add_sized(
+                        [130.0, 22.0],
+                        egui::TextEdit::singleline(&mut self.quick.payee)
+                            .hint_text(t("register.filter.payee_hint")),
+                    )
+                    .labelled_by(l.id);
+                if r.has_focus() {
+                    let typed = self.quick.payee.trim();
+                    let done = self.complete_payee(typed);
+                    if !typed.is_empty() && done != typed {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("\u{2192} {done}"))
+                                    .size(12.0)
+                                    .color(tokens.text_secondary),
+                            )
+                            .selectable(false),
+                        );
+                    }
                 }
-            }
-            typed_done |= r.lost_focus();
+                r.lost_focus()
+            });
 
             let (choices, ids) = self.tag_choices();
             let current = ids
@@ -518,22 +548,25 @@ impl RegisterScreen {
             .response
             .on_disabled_hover_text(t("register.filter.needs_engine"));
 
-            let l = ui.add(egui::Label::new(t("register.filter.amount_from")).selectable(false));
-            let r = ui
-                .add_sized(
-                    [72.0, 22.0],
-                    egui::TextEdit::singleline(&mut self.quick.min),
-                )
-                .labelled_by(l.id);
-            typed_done |= r.lost_focus();
-            let l = ui.add(egui::Label::new(t("register.filter.amount_to")).selectable(false));
-            let r = ui
-                .add_sized(
-                    [72.0, 22.0],
-                    egui::TextEdit::singleline(&mut self.quick.max),
-                )
-                .labelled_by(l.id);
-            typed_done |= r.lost_focus();
+            for (salt, key, text) in [
+                (
+                    "register/filter-min",
+                    "register.filter.amount_from",
+                    &mut self.quick.min,
+                ),
+                (
+                    "register/filter-max",
+                    "register.filter.amount_to",
+                    &mut self.quick.max,
+                ),
+            ] {
+                typed_done |= keep_together(ui, salt, |ui| {
+                    let l = ui.add(egui::Label::new(t(key)).selectable(false));
+                    ui.add_sized([72.0, 22.0], egui::TextEdit::singleline(text))
+                        .labelled_by(l.id)
+                        .lost_focus()
+                });
+            }
 
             if self.filters.is_active() && ui.link(t("register.filter.clear")).clicked() {
                 self.clear_filters();

@@ -662,7 +662,7 @@ impl RegisterScreen {
             &label,
             GridHeight::Fill {
                 reserve_below: reserve,
-                min_rows: 4,
+                min_rows: 2,
             },
         );
         let out = self.grid.show(ui, ModelRef::Browse(&mut self.model), &env);

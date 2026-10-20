@@ -122,7 +122,7 @@ pub fn spec(class: AccountClass) -> GridSpec {
                         list: NAMES,
                         add_new: false,
                     },
-                    (120, 180, 2),
+                    (90, 180, 2),
                 )
             },
             Column {
@@ -134,14 +134,14 @@ pub fn spec(class: AccountClass) -> GridSpec {
                         list: ACCOUNTS,
                         add_new: false,
                     },
-                    (120, 190, 2),
+                    (90, 190, 2),
                 )
             },
             column(
                 E_MEMO,
                 TextKey("register.entry.col.memo"),
                 CellKind::Text { max_chars: 500 },
-                (100, 170, 2),
+                (70, 170, 2),
             ),
             money(E_PAYMENT, labels.payment),
             money(E_DEPOSIT, labels.deposit),

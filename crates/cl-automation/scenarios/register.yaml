@@ -34,6 +34,16 @@ steps:
   - assert_exists: {role: label, label_contains: uncleared}
   - assert_no_clipping: {}
   - screenshot: register
+  # Minimum window (960 x 640): the toolbar wraps, every column fits, and
+  # the entry row and footer stay on screen.
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: combo_box, label: Sort by}
+  - assert_exists: {role: column_header, label: Balance}
+  - assert_exists: {role: button, label: Record}
+  - assert_exists: {role: label, label: Ending balance}
+  - assert_no_clipping: {}
+  - screenshot: register-960x640
+  - resize: {width: 1440, height: 940}
 
   # --- Entry row: a check, keyboard only (date keeps today) -----------------
   - key: Tab
