@@ -127,7 +127,7 @@ pub(super) struct SaveIdentity {
 /// recognised as the same save. A definitive refusal (validation, conflict,
 /// closed period, password, rate limit, ...) gets a fresh key, so the next
 /// try is never answered with the stored refusal.
-pub(super) fn keeps_key(e: &ApiError) -> bool {
+pub(crate) fn keeps_key(e: &ApiError) -> bool {
     match e {
         ApiError::Validation(_)
         | ApiError::Local(_)

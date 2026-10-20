@@ -26,6 +26,7 @@ pub mod goto;
 pub mod lists;
 mod quick_report;
 mod record;
+pub(crate) use record::keeps_key;
 mod splits;
 pub mod view;
 
