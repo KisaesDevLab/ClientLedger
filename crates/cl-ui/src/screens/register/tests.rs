@@ -252,7 +252,8 @@ fn display_only_lines_are_text_and_flag_the_page() {
     };
     let row = card.row(&page.lines[0]);
     assert_eq!(row.balance.as_deref(), Some("0.00"));
-    assert_eq!(row.kind, "CHARGE");
+    // An expense that debits the card (sent as `payment`) pays it down.
+    assert_eq!(row.kind, "PMT");
 }
 
 #[test]
@@ -1319,10 +1320,12 @@ fn a_card_register_shows_charges_under_charge_and_the_amount_owed_positive() {
         // A charge credits the card: its amount sits under Charge only.
         if row.payment.is_some() {
             assert!(row.deposit.is_none(), "row {i}: one column");
+            assert_eq!(row.kind, "CHARGE", "row {i}");
             charges += 1;
         }
-        // A payment (here a check from the bank) debits it.
+        // A payment (here a check from the bank) debits it, labelled as one.
         if row.deposit.is_some() {
+            assert_eq!(row.kind, "PMT", "row {i}");
             payments += 1;
         }
     }

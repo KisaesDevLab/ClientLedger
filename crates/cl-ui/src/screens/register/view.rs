@@ -148,10 +148,16 @@ pub fn spec(one_line: bool, class: AccountClass, balance: BalanceMode) -> GridSp
     s
 }
 
-/// The short type code shown under the number (i18n key).
+/// The short type code shown under the number (i18n key). `debit` is true
+/// when the line is a debit to this account: on a credit card an expense
+/// that debits the card pays it down (a payment), one that credits it is a
+/// charge.
 #[must_use]
-pub fn type_key(t: TxnType, class: AccountClass) -> &'static str {
+pub fn type_key(t: TxnType, class: AccountClass, debit: bool) -> &'static str {
     match t {
+        TxnType::Expense if class == AccountClass::CreditCard && debit => {
+            "register.type.card_payment"
+        }
         TxnType::Expense if class == AccountClass::CreditCard => "register.type.card_charge",
         TxnType::Expense => "register.type.check",
         TxnType::Deposit => "register.type.deposit",
@@ -280,7 +286,7 @@ impl Mapping {
                 .clone()
                 .or_else(|| l.check_number.map(|n| n.to_string()))
                 .unwrap_or_default(),
-            kind: t(type_key(l.txn_type, class)),
+            kind: t(type_key(l.txn_type, class, debit.is_some())),
             payee: l.payee.clone().unwrap_or_default(),
             account_memo: parts.join(" \u{b7} "),
             payment: text(credit),

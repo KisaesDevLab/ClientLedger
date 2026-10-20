@@ -93,6 +93,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.col.balance_help", "The account's balance after each line, as your books have it."),
     ("register.type.check", "CHK"),
     ("register.type.card_charge", "CHARGE"),
+    ("register.type.card_payment", "PMT"),
     ("register.type.deposit", "DEP"),
     ("register.type.transfer", "TRANSFR"),
     ("register.type.journal", "GENJRNL"),
