@@ -348,3 +348,12 @@ steps:
   - click: {role: tab, label_contains: "Register"}
   - command: file.close_window
   - assert_not_exists: {role: tab, label_contains: Register}
+
+# `ui-check register --compare`: the steps above close the register, so the
+# compare screenshot opens it again (the mockup's main view).
+compare:
+  - key: Ctrl+G
+  - assert_exists: {role: tab, label: Register · Operating Checking}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.footer.loading, equals: false}
