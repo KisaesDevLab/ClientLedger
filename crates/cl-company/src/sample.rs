@@ -654,6 +654,7 @@ pub async fn load_into(
             .create_journal_entry(&entry, &PostingOptions::default(), IdempotencyKey::new())
             .await?;
     }
+    seed_layouts(session, &sample.company.daily_sales_layouts, &ids).await;
     store.update(|l| {
         if let Some(r) = l.get_mut(created.tenant_id) {
             r.is_sample = true;
@@ -665,9 +666,83 @@ pub async fn load_into(
     Ok(created)
 }
 
+/// The lines the engine gets for a sample layout: each line's own account,
+/// else its fallback (unmapped when the chart has neither).
+#[must_use]
+pub fn layout_seed_lines(
+    layout: &SampleLayout,
+    id_of: impl Fn(&str) -> Option<cl_core::ids::AccountId>,
+) -> Vec<cl_api::LayoutSeedLine> {
+    let accounts = layout.resolved_accounts(|n| id_of(n).is_some());
+    layout
+        .lines
+        .iter()
+        .zip(accounts)
+        .enumerate()
+        .map(|(i, (l, a))| cl_api::LayoutSeedLine {
+            section: l.section.clone(),
+            label: l.label.clone(),
+            account_id: a.and_then(|n| id_of(&n)),
+            normal_side: match l.side {
+                LayoutSide::Debit => "debit",
+                LayoutSide::Credit => "credit",
+            },
+            sort_order: u32::try_from(i).unwrap_or(u32::MAX),
+        })
+        .collect()
+}
+
+/// Creates the sample's daily-sales layouts through the engine (P14): from
+/// the engine's preset, then the sample's own lines. A failure is logged and
+/// skipped: the practice company works without a layout (the Daily Sales
+/// screen offers a starter).
+async fn seed_layouts(
+    session: &Session,
+    layouts: &[SampleLayout],
+    ids: &HashMap<String, cl_core::ids::AccountId>,
+) {
+    for layout in layouts {
+        let lines = layout_seed_lines(layout, |n| ids.get(n).copied());
+        if let Err(e) = session
+            .daily_sales()
+            .seed_layout(&layout.name, &layout.preset, &lines, IdempotencyKey::new())
+            .await
+        {
+            tracing::warn!(error = %e, "sample daily-sales layout skipped");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The loader maps the layout to engine ids, with 4100's fallback.
+    #[test]
+    fn layout_seed_lines_resolve_accounts() {
+        let s = Sample::load();
+        let ids: HashMap<String, cl_core::ids::AccountId> = ["4000", "20900", "10150"]
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let id = cl_core::ids::AccountId::parse(&format!(
+                    "00000000-0000-4000-8000-{:012}",
+                    i + 1
+                ))
+                .expect("id");
+                ((*n).to_string(), id)
+            })
+            .collect();
+        let lines = layout_seed_lines(&s.company.daily_sales_layouts[0], |n| ids.get(n).copied());
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[0].account_id, ids.get("4000").copied());
+        assert_eq!(lines[0].normal_side, "credit");
+        assert_eq!(lines[2].account_id, ids.get("10150").copied());
+        assert_eq!(lines[2].normal_side, "debit");
+        // 6250 is not in this chart: unmapped, not dropped.
+        assert_eq!(lines[4].account_id, None);
+        assert_eq!(lines[4].sort_order, 4);
+    }
 
     fn d(y: i32, m: u32, day: u32) -> CalendarDate {
         CalendarDate::from_ymd(y, m, day).expect("date")

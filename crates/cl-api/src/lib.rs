@@ -146,4 +146,4 @@ pub use resources::payments::Payments;
 pub use resources::feed::Feed;
 
 // P14 lane B: daily sales.
-pub use resources::daily_sales::DailySales;
+pub use resources::daily_sales::{DailySales, LayoutSeedLine};
