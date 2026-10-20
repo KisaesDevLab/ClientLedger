@@ -1,0 +1,11 @@
+{
+  "comment": "Synthetic three-month lender statement (P14 AC3). Not a real loan.",
+  "lender": "Sample Lender",
+  "opening": "24000.00",
+  "payments": [
+    { "date": "2026-08-15", "payment": "892.00", "interest": "200.00", "principal": "692.00", "balanceAfter": "23308.00" },
+    { "date": "2026-09-15", "payment": "892.00", "interest": "194.23", "principal": "697.77", "balanceAfter": "22610.23" },
+    { "date": "2026-10-15", "payment": "892.00", "interest": "188.41", "principal": "703.59", "balanceAfter": "21906.64" }
+  ],
+  "closing": "21906.64"
+}
