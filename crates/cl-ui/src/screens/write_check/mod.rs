@@ -26,7 +26,7 @@
 mod attach;
 mod form;
 mod panel;
-mod prefill;
+pub(crate) mod prefill;
 mod save;
 mod suggest;
 

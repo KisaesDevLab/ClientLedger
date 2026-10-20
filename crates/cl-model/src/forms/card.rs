@@ -557,7 +557,11 @@ mod tests {
         f.lines.ensure_entry(&mut keys);
         assert!(f.can_prefill());
         f.prefill_from_last(&last);
-        assert_eq!(f.amount, Some(money("99.00")), "the amount is never touched");
+        assert_eq!(
+            f.amount,
+            Some(money("99.00")),
+            "the amount is never touched"
+        );
         assert_eq!(f.memo, "monthly");
         let used: Vec<_> = f.lines.used().collect();
         assert_eq!(used.len(), 2);
@@ -579,7 +583,11 @@ mod tests {
         assert!(f.apply_vendor_default(account(6250), None, &mut keys));
         let first = f.lines.used().next().expect("line");
         assert_eq!(first.account, Some(account(6250)));
-        assert_eq!(first.amount, Some(money("12.00")), "the typed amount follows");
+        assert_eq!(
+            first.amount,
+            Some(money("12.00")),
+            "the typed amount follows"
+        );
         assert!(!f.apply_vendor_default(account(6400), None, &mut keys));
     }
 

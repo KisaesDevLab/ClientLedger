@@ -43,7 +43,7 @@ fn line_id(t: &SampleTransaction, index: usize) -> JournalLineId {
         .unwrap_or_else(|_| unreachable!("a well-formed demo id"))
 }
 
-pub(super) fn txn_type(kind: &str) -> TxnType {
+pub(crate) fn txn_type(kind: &str) -> TxnType {
     match kind {
         "daily_sales" => TxnType::DailySales,
         "vendor_credit" => TxnType::VendorCredit,

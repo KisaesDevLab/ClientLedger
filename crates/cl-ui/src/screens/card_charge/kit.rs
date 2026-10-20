@@ -15,10 +15,10 @@ use std::sync::Arc;
 
 use cl_api::{
     Account, AccountFilter, ApiError, BankPosting, Capabilities, ClosedPeriodAuthorization,
-    Contact, ContactFilter, IdempotencyKey, OrphanLabel, PostingOptions, RequestGroup, Tag,
-    TagFilter,
+    ConflictReason, Contact, ContactFilter, IdempotencyKey, OrphanLabel, PostingOptions,
+    RecordVersion, RequestGroup, Tag, TagFilter, Transaction, TxnStatus, Versioned,
 };
-use cl_core::ids::{AccountId, ContactId, TransactionId};
+use cl_core::ids::{AccountId, ContactId, TagId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
 use cl_grid::{LookupResult, Lookups};
 use cl_model::amount_entry::{self, AmountRules};
@@ -90,24 +90,25 @@ pub(crate) fn entity_of(e: cl_api::EntityType) -> Entity {
     }
 }
 
-/// The demo company's equity roles: the sample's own owner accounts (3200
-/// Owner Draws, 3100 Owner Contributions) stand in for the engine's role
-/// accounts of a single-member LLC until the demo engine twin
-/// (`company::demo::money`) answers `equity-roles-v1` itself.
-pub(crate) fn demo_roles(chart: &[Account]) -> BTreeMap<Role, AccountId> {
-    let by_number = |n: &str| {
-        chart
-            .iter()
-            .find(|a| a.fields.account_number.as_deref() == Some(n))
-            .map(|a| a.id)
-    };
-    [
-        (Role::OwnerDraw, by_number("3200")),
-        (Role::OwnerContribution, by_number("3100")),
-    ]
-    .into_iter()
-    .filter_map(|(r, a)| a.map(|a| (r, a)))
-    .collect()
+/// The demo engine's equity roles (`company::demo::money`, its
+/// `equity-roles-v1` twin) as the form model knows them: they follow the
+/// demo company's entity type.
+pub(crate) fn demo_roles(
+    r: &crate::company::demo::money::DemoEquityRoles,
+) -> BTreeMap<Role, AccountId> {
+    use crate::company::demo::money::EquityRole as E;
+    let pairs = [
+        (E::OwnerDraw, Role::OwnerDraw),
+        (E::OwnerContribution, Role::OwnerContribution),
+        (E::PartnerDraws, Role::PartnerDraws),
+        (E::PartnerContributions, Role::PartnerContributions),
+        (E::ShareholderDistributions, Role::ShareholderDistributions),
+        (E::PaidInCapital, Role::PaidInCapital),
+    ];
+    pairs
+        .into_iter()
+        .filter_map(|(e, role)| r.account(e).map(|a| (role, a)))
+        .collect()
 }
 
 /// The tag list `check` needs for the header-tag defaults.
@@ -132,6 +133,8 @@ impl Books {
     /// Starts reading everything (the demo answers at once).
     pub(crate) fn start(&mut self, link: &CompanyLink, group: Option<&RequestGroup>) {
         if let Some(mut demo) = link.demo_state() {
+            // The roles first: the demo engine may seed role accounts.
+            let demo_equity = crate::company::demo::money::equity_roles(&mut demo);
             let chart = demo
                 .chart
                 .get_or_insert_with(crate::company::demo::chart)
@@ -145,13 +148,13 @@ impl Books {
                     .and_then(|c| c.closed_through)
             });
             drop(demo);
-            let roles = demo_roles(&chart);
+            let roles = demo_roles(&demo_equity);
+            let entity = entity_of(demo_equity.entity_type);
             self.accounts_task = Some(Task::ready(chart));
             self.contacts_task = Some(Task::ready(contacts));
             self.tags_task = Some(Task::ready(tags));
             self.closing_task = Some(Task::ready(closing));
-            // The sample company is a single-member LLC.
-            self.entity_task = Some(Task::ready((Some(Entity::SingleMemberLlc), roles, true)));
+            self.entity_task = Some(Task::ready((Some(entity), roles, true)));
             return;
         }
         let (Some(session), Some(group)) = (link.session(), group) else {
@@ -429,6 +432,45 @@ pub(crate) struct Outbound {
 pub(crate) struct SavedRecord {
     pub id: TransactionId,
     pub date: CalendarDate,
+    /// The record's version after the save (a later edit is guarded by it).
+    pub version: RecordVersion,
+}
+
+/// A saved record open in the form (Prev/Next, the register, or the save
+/// just made with Save): a save changes it, guarded by its version (a
+/// fingerprint of the engine's record, the stale check), and Void voids it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Editing {
+    pub id: TransactionId,
+    pub version: RecordVersion,
+    /// The date it has in the books (the closed-period rule looks at both
+    /// dates, NN8).
+    pub old_date: CalendarDate,
+    /// Shown, never changed here: why (i18n key).
+    pub read_only: Option<&'static str>,
+    /// It is void.
+    pub void: bool,
+}
+
+impl Editing {
+    /// The record as read from the engine; `fits` is false when the form
+    /// can't show it exactly (then it is read-only).
+    pub(crate) fn of(v: &Versioned<Transaction>, fits: bool) -> Editing {
+        let void = v.record.status == TxnStatus::Void;
+        Editing {
+            id: v.record.id,
+            version: v.version,
+            old_date: v.record.txn_date,
+            read_only: if void {
+                Some("helper.read_only.void")
+            } else if fits {
+                None
+            } else {
+                Some("helper.read_only.shape")
+            },
+            void,
+        }
+    }
 }
 
 /// What `SaveFlow::send` did.
@@ -456,7 +498,12 @@ pub(crate) struct SaveFlow {
     pub task: Option<Task<SavedRecord>>,
     pub void_task: Option<Task<()>>,
     pub intent: Option<SaveIntent>,
-    key: Option<(BankPosting, bool, IdempotencyKey)>,
+    key: Option<(SaveIdentity, IdempotencyKey)>,
+    /// The saved record open in the form (`None`: a new one).
+    pub editing: Option<Editing>,
+    /// The open record changed somewhere else since it was read (409
+    /// stale): nothing was saved; Reload reads it again.
+    pub stale: bool,
     pub error: Option<ApiError>,
     /// A plain note under the toolbar (i18n key).
     pub notice: Option<&'static str>,
@@ -499,19 +546,31 @@ impl SaveFlow {
         self.notice = None;
     }
 
-    fn key_for(&mut self, posting: &BankPosting, password: bool) -> IdempotencyKey {
+    fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
         match &self.key {
-            Some((p, pw, k)) if p == posting && *pw == password => k.clone(),
+            Some((d, k)) if d == id => k.clone(),
             _ => {
                 let k = IdempotencyKey::new();
-                self.key = Some((posting.clone(), password, k.clone()));
+                self.key = Some((id.clone(), k.clone()));
                 k
             }
         }
     }
 
-    /// Sends a checked posting: asks for the closing-date password first
-    /// when its date is on or before the closing date (NN8), then saves
+    /// The open record is shown, not changed here: the save is refused
+    /// with its note.
+    pub(crate) fn read_only(&self) -> Option<&'static str> {
+        self.editing.and_then(|e| e.read_only)
+    }
+
+    /// The open record is dated on or before the closing date.
+    pub(crate) fn editing_locked(&self, closing: Option<CalendarDate>) -> bool {
+        self.editing.is_some_and(|e| is_locked(e.old_date, closing))
+    }
+
+    /// Sends a checked posting: a new record, or a change to the open one
+    /// guarded by its version. Asks for the closing-date password first
+    /// when either date is on or before the closing date (NN8), then saves
     /// (the demo at once, the engine on the queue).
     pub(crate) fn send(
         &mut self,
@@ -525,8 +584,15 @@ impl SaveFlow {
         if self.busy() {
             return Sent::Failed;
         }
+        if let Some(note) = self.read_only() {
+            self.notice = Some(note);
+            return Sent::Failed;
+        }
+        self.stale = false;
         let date = out.posting.date();
-        if password.is_none() && needs_password(None, date, closing) {
+        let old = self.editing.map(|e| e.old_date);
+        let edit = self.editing.map(|e| (e.id, e.version));
+        if password.is_none() && needs_password(old, date, closing) {
             let supported = closing_supported(link);
             if supported {
                 self.closing_prompt
@@ -538,7 +604,7 @@ impl SaveFlow {
         }
         self.intent = Some(intent);
         if let Some(mut demo) = link.demo_state() {
-            let r = demo_save(&mut demo, &out.demo, closing, password.as_ref());
+            let r = demo_save(&mut demo, &out.demo, edit, closing, password.as_ref());
             drop(demo);
             return match r {
                 Ok(saved) => Sent::Saved(saved),
@@ -552,20 +618,34 @@ impl SaveFlow {
             self.failed(link, ApiError::NoCompanyOpen, closing);
             return Sent::Failed;
         };
-        let key = self.key_for(&out.posting, password.is_some());
+        let key = self.key_for(&SaveIdentity {
+            posting: out.posting.clone(),
+            edit,
+            password: password.is_some(),
+        });
         let label = OrphanLabel {
             what: "orphan.helper_save",
             key: Some(key.clone()),
         };
         let posting = out.posting;
         let written = group.write(&session, label, move |s| async move {
-            let v = s
-                .transactions()
-                .create_bank_posting(&posting, &options(password), key)
-                .await?;
+            let opts = options(password);
+            let v = match edit {
+                None => {
+                    s.transactions()
+                        .create_bank_posting(&posting, &opts, key)
+                        .await?
+                }
+                Some((id, version)) => {
+                    s.transactions()
+                        .update_bank_posting(id, &version, &posting, &opts, key)
+                        .await?
+                }
+            };
             Ok(SavedRecord {
                 id: v.record.id,
                 date: v.record.txn_date,
+                version: v.version,
             })
         });
         if let Ok(p) = written {
@@ -582,6 +662,8 @@ impl SaveFlow {
     }
 
     /// The save took: the record, the count, the key and the prompt reset.
+    /// The saved record is the open one now (a second save changes it,
+    /// guarded by its new version; a new form clears it).
     pub(crate) fn saved(&mut self, r: SavedRecord) -> SaveIntent {
         self.closing_prompt.saved();
         self.key = None;
@@ -589,7 +671,35 @@ impl SaveFlow {
         self.last = Some(r);
         self.last_action = Some("save");
         self.error = None;
+        self.stale = false;
+        self.editing = Some(Editing {
+            id: r.id,
+            version: r.version,
+            old_date: r.date,
+            read_only: None,
+            void: false,
+        });
         self.intent.take().unwrap_or(SaveIntent::Save)
+    }
+
+    /// A new, blank form: no record open.
+    pub(crate) fn new_record(&mut self) {
+        self.editing = None;
+        self.stale = false;
+        self.void_open = false;
+        self.void_reason.clear();
+    }
+
+    /// A saved record was read into the form.
+    pub(crate) fn opened(&mut self, e: Editing) {
+        self.editing = Some(e);
+        self.stale = false;
+        self.key = None;
+        self.error = None;
+        self.notice = None;
+        self.void_open = false;
+        self.void_reason.clear();
+        self.last_action = Some("load");
     }
 
     /// A save or void failed: a closed-period refusal or a wrong password
@@ -611,8 +721,15 @@ impl SaveFlow {
             None => Pending::Save(SaveIntent::Save),
         };
         let supported = closing_supported(link);
-        if !self.closing_prompt.failed(&e, pending, supported, closing) {
-            self.error = Some(e);
+        if self.closing_prompt.failed(&e, pending, supported, closing) {
+            return;
+        }
+        match e {
+            ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                ..
+            } => self.stale = true,
+            e => self.error = Some(e),
         }
     }
 
@@ -629,9 +746,19 @@ impl SaveFlow {
         (saved, voided)
     }
 
-    /// Edit > Void Transaction: the record this window saved last.
+    /// What Void voids: the open record, else the one this window saved
+    /// last; (id, date in the books).
+    pub(crate) fn void_target(&self) -> Option<(TransactionId, CalendarDate)> {
+        self.editing
+            .map(|e| (e.id, e.old_date))
+            .or_else(|| self.last.map(|r| (r.id, r.date)))
+    }
+
+    /// Edit > Void Transaction: the open record (or the one saved last).
     pub(crate) fn start_void(&mut self) -> bool {
-        if self.last.is_some() {
+        if self.editing.is_some_and(|e| e.void) {
+            self.notice = Some("helper.void.already");
+        } else if self.void_target().is_some() {
             self.void_open = true;
             self.void_reason.clear();
         } else {
@@ -640,9 +767,9 @@ impl SaveFlow {
         true
     }
 
-    /// Voids the last saved record with `reason` (and the closing-date
-    /// password when it is in the closed period). True when it voided at
-    /// once (demo).
+    /// Voids the open (or last saved) record with `reason` (and the
+    /// closing-date password when it is in the closed period). True when
+    /// it voided at once (demo).
     pub(crate) fn send_void(
         &mut self,
         link: &CompanyLink,
@@ -650,13 +777,15 @@ impl SaveFlow {
         closing: Option<CalendarDate>,
         password: Option<Secret>,
     ) -> bool {
-        let Some(rec) = self.last else { return false };
+        let Some((id, date)) = self.void_target() else {
+            return false;
+        };
         let reason = self.void_reason.trim().to_string();
         if reason.is_empty() {
             self.notice = Some("helper.void.reason_needed");
             return false;
         }
-        if password.is_none() && is_locked(rec.date, closing) {
+        if password.is_none() && is_locked(date, closing) {
             let supported = closing_supported(link);
             if supported {
                 self.closing_prompt
@@ -667,12 +796,9 @@ impl SaveFlow {
             return false;
         }
         if let Some(mut demo) = link.demo_state() {
-            let r = crate::company::demo::register::check_closing(
-                closing,
-                &[rec.date],
-                password.as_ref(),
-            )
-            .and_then(|()| demo.ledger.void(rec.id));
+            let r =
+                crate::company::demo::register::check_closing(closing, &[date], password.as_ref())
+                    .and_then(|()| demo.ledger.void(id));
             drop(demo);
             return match r {
                 Ok(()) => true,
@@ -692,7 +818,7 @@ impl SaveFlow {
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
             s.transactions()
-                .void(rec.id, &reason, &options(password), key)
+                .void(id, &reason, &options(password), key)
                 .await?;
             Ok(())
         }) {
@@ -701,12 +827,14 @@ impl SaveFlow {
         false
     }
 
-    /// The void took.
+    /// The void took: nothing is open any more.
     pub(crate) fn voided(&mut self) {
         self.closing_prompt.saved();
         self.void_open = false;
         self.void_reason.clear();
         self.last = None;
+        self.editing = None;
+        self.stale = false;
         self.last_action = Some("void");
     }
 
@@ -718,8 +846,12 @@ impl SaveFlow {
             "last_action": self.last_action,
             "notice": self.notice,
             "error": self.error.is_some(),
+            "stale": self.stale,
             "void_open": self.void_open,
             "last_saved_id": self.last.map(|r| r.id.to_string()),
+            "record": if self.editing.is_some() { "edit" } else { "new" },
+            "editing_id": self.editing.map(|e| e.id.to_string()),
+            "read_only": self.read_only(),
         });
         if let (serde_json::Value::Object(m), serde_json::Value::Object(c)) = (
             &mut v,
@@ -731,23 +863,62 @@ impl SaveFlow {
     }
 }
 
-/// The demo engine's save: the closed-period rule, then the posting.
+/// What a save sends, for its idempotency key: the posting, the record and
+/// version it changes, and whether a closing-date password goes with it
+/// (never the password itself).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SaveIdentity {
+    pub posting: BankPosting,
+    pub edit: Option<(TransactionId, RecordVersion)>,
+    pub password: bool,
+}
+
+/// The demo engine's save: the stale check (the open record's version
+/// against the record as it is now), the closed-period rule over both
+/// dates, then the posting.
 fn demo_save(
     demo: &mut crate::company::demo::DemoState,
     p: &DemoPosting,
+    edit: Option<(TransactionId, RecordVersion)>,
     closing: Option<CalendarDate>,
     password: Option<&Secret>,
 ) -> Result<SavedRecord, ApiError> {
-    crate::company::demo::register::check_closing(closing, &[p.date], password)?;
     let chart = demo
         .chart
         .get_or_insert_with(crate::company::demo::chart)
         .clone();
+    let contacts = demo.contacts_mut().clone();
+    let mut dates = vec![p.date];
+    if let Some((id, version)) = edit {
+        let now = demo
+            .ledger
+            .get(&chart, &contacts, id)
+            .ok_or(ApiError::NotFound { code: None })?;
+        if now.version != version {
+            return Err(ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                current_version: None,
+                code: None,
+                message: cl_api::UserText::default(),
+            });
+        }
+        dates.push(now.record.txn_date);
+    }
+    crate::company::demo::register::check_closing(closing, &dates, password)?;
     let id = demo
         .ledger
-        .save(&chart, p, None)
+        .save(&chart, p, edit.map(|(id, _)| id))
         .ok_or(ApiError::Local(cl_api::LocalValidation::InvalidValue))?;
-    Ok(SavedRecord { id, date: p.date })
+    let version = demo
+        .ledger
+        .get(&chart, &contacts, id)
+        .ok_or(ApiError::NotFound { code: None })?
+        .version;
+    Ok(SavedRecord {
+        id,
+        date: p.date,
+        version,
+    })
 }
 
 // ----------------------------------------------------------------- widgets
@@ -1128,10 +1299,18 @@ pub(crate) enum MessageClick {
     SubmitClosing,
     /// Void with the typed reason.
     Void,
+    /// Read the open record again (it changed elsewhere).
+    Reload,
 }
 
-/// The closing-date dialog, the notice, the error and the Void card.
-pub(crate) fn messages(ui: &mut Ui, tokens: &Tokens, flow: &mut SaveFlow) -> MessageClick {
+/// The closing-date dialog, the notice, the open record's notes (read-only,
+/// closed period, changed elsewhere), the error and the Void card.
+pub(crate) fn messages(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    flow: &mut SaveFlow,
+    closing: Option<CalendarDate>,
+) -> MessageClick {
     let mut click = MessageClick::None;
     match flow.closing_prompt.ui(ui, tokens) {
         ClosingClick::Submit => click = MessageClick::SubmitClosing,
@@ -1140,6 +1319,19 @@ pub(crate) fn messages(ui: &mut Ui, tokens: &Tokens, flow: &mut SaveFlow) -> Mes
     }
     if let Some(key) = flow.notice {
         form::hint(ui, tokens, &t(key));
+    }
+    if let Some(key) = flow.read_only() {
+        form::hint(ui, tokens, &t(key));
+    } else if flow.editing_locked(closing) {
+        form::hint(ui, tokens, &t("closing.edit_note"));
+    }
+    if flow.stale {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(t("helper.stale")).color(tokens.warn_text));
+            if ui.button(t("helper.reload")).clicked() {
+                click = MessageClick::Reload;
+            }
+        });
     }
     if flow.void_open {
         let mut send = false;
@@ -1291,4 +1483,113 @@ pub(crate) fn heading_right(ui: &mut Ui, tokens: &Tokens, text: &str) {
             .selectable(false),
         );
     });
+}
+
+/// Prev · Next over the saved records (their shortcuts in the tooltips).
+/// Returns the command clicked.
+pub(crate) fn nav_buttons(ui: &mut Ui, enabled: bool) -> Option<&'static str> {
+    let mut clicked = None;
+    for (cmd, key) in [
+        ("form.prev_record", "helper.prev"),
+        ("form.next_record", "helper.next"),
+    ] {
+        let tip = chip(cmd).replace(' ', "+");
+        if ui
+            .add_enabled(enabled, egui::Button::new(t(key)))
+            .on_hover_text(tip)
+            .clicked()
+        {
+            clicked = Some(cmd);
+        }
+    }
+    clicked
+}
+
+/// Keeps `focused` on `field` while its input has the keyboard (Esc
+/// reverts the field that had it).
+pub(crate) fn track(focused: &mut Option<u64>, r: &egui::Response, field: u64) {
+    if r.has_focus() {
+        *focused = Some(field);
+    } else if *focused == Some(field) {
+        *focused = None;
+    }
+}
+
+/// What the owner did in the header tags row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TagEdit {
+    /// Took a tag off.
+    Remove(TagId),
+    /// Put a tag on (the same group's other tag comes off).
+    Add(TagId),
+}
+
+/// Header tags (Q-178): chips with a remove click, and an Add list of the
+/// active tags. The tags default onto lines without their own tag.
+pub(crate) fn tags_row(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    id_salt: &str,
+    tags: &[Tag],
+    header: &[TagId],
+) -> Option<TagEdit> {
+    let mut edit = None;
+    ui.horizontal_wrapped(|ui| {
+        let l = above(ui, tokens, &t("helper.tags"));
+        for id in header {
+            let name = tags
+                .iter()
+                .find(|g| g.id == *id)
+                .map(|g| g.fields.name.clone())
+                .unwrap_or_default();
+            let r = ui
+                .add(
+                    egui::Button::new(
+                        RichText::new(t_with("check.tags.remove", &[("tag", &name)])).size(12.0),
+                    )
+                    .fill(tokens.neutral_chip),
+                )
+                .on_hover_text(t("check.tags.remove.tip"));
+            if r.clicked() {
+                edit = Some(TagEdit::Remove(*id));
+            }
+        }
+        egui::ComboBox::from_id_salt(id_salt)
+            .selected_text(t("check.tags.add"))
+            .show_ui(ui, |ui| {
+                for g in tags
+                    .iter()
+                    .filter(|g| g.is_active && !header.contains(&g.id))
+                {
+                    if ui.selectable_label(false, &g.fields.name).clicked() {
+                        edit = Some(TagEdit::Add(g.id));
+                    }
+                }
+            })
+            .response
+            .labelled_by(l.id);
+    });
+    edit
+}
+
+/// `header` after `edit`: one tag per group.
+pub(crate) fn apply_tag_edit(tags: &[Tag], header: &mut Vec<TagId>, edit: TagEdit) {
+    match edit {
+        TagEdit::Remove(id) => header.retain(|g| *g != id),
+        TagEdit::Add(id) => {
+            let group = tags
+                .iter()
+                .find(|g| g.id == id)
+                .and_then(|g| g.fields.group_id);
+            let same_group: Vec<TagId> = tags
+                .iter()
+                .filter(|g| group.is_some() && g.fields.group_id == group)
+                .map(|g| g.id)
+                .collect();
+            header.retain(|g| !same_group.contains(g));
+            if !header.contains(&id) {
+                header.push(id);
+            }
+        }
+    }
 }

@@ -16,13 +16,13 @@ use std::sync::Arc;
 
 use cl_api::{
     ApiError, BankPosting, CardChargeDraft, CheckDraft, LocalValidation, RequestGroup, SplitLine,
-    Transaction,
+    Transaction, TxnType, Versioned,
 };
-use cl_core::ids::{AccountId, ContactId, TenantId};
+use cl_core::ids::{AccountId, ContactId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
 use cl_grid::GridHeight;
 use cl_model::amount_entry::AmountRules;
-use cl_model::forms::lines::FormLines;
+use cl_model::forms::lines::{FormLine, FormLines};
 use cl_model::forms::loan_payment::{
     CheckedLoanPayment, LenderMatch, LoanMethod, LoanPaymentForm, LoanPosting, LoanProblem, check,
     lender_match,
@@ -38,13 +38,18 @@ use crate::company::{CompanyEvent, CompanyLink, Task};
 use crate::forms::lines_grid::{LinesGrid, LinesSpec};
 use crate::i18n::{t, t_with};
 use crate::screens::card_charge::kit::{
-    self, AmountInput, Balances, Books, MessageClick, NameInput, NameOutcome, Outbound, Pending,
-    SaveFlow, Sent, Settled,
+    self, AmountInput, Balances, Books, Editing, MessageClick, NameInput, NameOutcome, Outbound,
+    Pending, SaveFlow, Sent, Settled,
 };
+use crate::screens::card_charge::records::{self, RecordForm, RecordScope, Records};
 use crate::screens::company::form::{self, DateInput};
 use crate::screens::register::lists::RegisterLists;
 use crate::theme::Tokens;
-use crate::windows::Screen;
+use crate::windows::{PromptAnswer, Screen};
+
+/// The kind of record this form writes: an expense (a check or an online
+/// payment) paid from the bank or card.
+const LOAN_TYPES: &[TxnType] = &[TxnType::Expense];
 
 /// The command and window kind.
 pub const KIND: &str = "banking.loan_payment";
@@ -134,6 +139,10 @@ pub struct LoanPaymentScreen {
     lists_stale: bool,
     after_frame: Option<CommandId>,
     pub(crate) money_style: MoneyStyle,
+    /// Prev/Next and the saved record being read.
+    pub(crate) records: Records,
+    /// The field that had the keyboard (Esc reverts it).
+    pub(crate) focused: Option<u64>,
 }
 
 /// The accounts a saved payment used: the line it was paid from (a bank or
@@ -203,6 +212,8 @@ impl LoanPaymentScreen {
             lists_stale: false,
             after_frame: None,
             money_style: MoneyStyle::default(),
+            records: Records::default(),
+            focused: None,
         };
         s.bus = s.link.bus().subscribe();
         s.books.start(&s.link, s.group.as_ref());
@@ -285,6 +296,7 @@ impl LoanPaymentScreen {
         }
         // The engine's balance after the save, against the lender's.
         self.poll_lender();
+        self.poll_records();
     }
 
     fn hear_changes(&mut self) {
@@ -329,7 +341,11 @@ impl LoanPaymentScreen {
     }
 
     fn busy(&self) -> bool {
-        self.books.busy() || self.balances.busy() || self.flow.busy() || self.prefill_task.is_some()
+        self.books.busy()
+            || self.balances.busy()
+            || self.flow.busy()
+            || self.prefill_task.is_some()
+            || self.records.busy()
     }
 
     pub(crate) fn set_loan(&mut self, loan: AccountId) {
@@ -349,7 +365,8 @@ impl LoanPaymentScreen {
                     .name_text(id)
                     .unwrap_or_default()
                     .to_string();
-                if !same {
+                // Prefill never runs while a saved payment is open.
+                if !same && self.flow.editing.is_none() {
                     self.start_prefill(id);
                 }
             }
@@ -629,8 +646,10 @@ impl LoanPaymentScreen {
         if let Some(loan) = self.header.current().loan {
             self.balances.fetch(&self.link, self.group.as_ref(), loan);
         }
+        self.records.forget();
         self.follow_up(intent);
         self.poll_lender();
+        self.after_saved();
     }
 
     fn poll_lender(&mut self) {
@@ -697,6 +716,8 @@ impl LoanPaymentScreen {
         self.problems.clear();
         self.prefill_applied = false;
         self.inputs.lender = NameInput::default();
+        self.flow.new_record();
+        self.records.new_record();
         self.sync_inputs();
     }
 
@@ -741,13 +762,219 @@ impl LoanPaymentScreen {
     }
 
     fn voided(&mut self) {
-        let accounts = self.flow.published.clone();
+        let mut accounts = self.flow.published.clone();
+        let f = self.compose();
+        accounts.extend(
+            [f.loan, f.pay_from, f.interest_account]
+                .into_iter()
+                .flatten()
+                .chain(f.extras.used().filter_map(|l| l.account)),
+        );
+        let was_open = self.flow.editing.is_some();
         self.flow.voided();
         self.lender_result = None;
         crate::forms::publish_saved(&self.link, &self.bus, &accounts);
+        self.records.forget();
+        if was_open {
+            self.new_form(true);
+        }
         if let Some(loan) = self.header.current().loan {
             self.balances.fetch(&self.link, self.group.as_ref(), loan);
         }
+    }
+
+    /// The saved payment `v` as this form: one credit on a bank or card
+    /// (the payment), a debit on the loan (the principal; none when it was
+    /// interest only, then `loan` is the form's loan), the first expense
+    /// debit as the interest, and any other debits as extra lines. Anything
+    /// else is read-only (`false`). Amounts are the engine's, copied as
+    /// they are; the principal shown is again `payment − interest − extras`.
+    pub(crate) fn form_of(
+        &mut self,
+        v: &Versioned<Transaction>,
+        loan: Option<AccountId>,
+    ) -> (LoanPaymentForm, FormLines, bool) {
+        let txn = &v.record;
+        let class = |id| self.books.class(id);
+        let expense = |id| {
+            self.books.accounts.iter().any(|a| {
+                a.id == id
+                    && matches!(
+                        a.fields.account_type,
+                        cl_api::AccountType::Expense | cl_api::AccountType::OtherExpense
+                    )
+            })
+        };
+        let credits: Vec<usize> = txn
+            .lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.credit.is_positive())
+            .map(|(i, _)| i)
+            .collect();
+        let from = match credits.as_slice() {
+            [i] => Some(*i),
+            _ => None,
+        };
+        let debits: Vec<usize> = (0..txn.lines.len()).filter(|i| Some(*i) != from).collect();
+        let loans: Vec<usize> = debits
+            .iter()
+            .copied()
+            .filter(|i| class(txn.lines[*i].account_id) == Some(AccountClass::OtherLiability))
+            .collect();
+        let principal_line = match loans.as_slice() {
+            [i] => Some(*i),
+            _ => None,
+        };
+        let interest_line = debits
+            .iter()
+            .copied()
+            .find(|i| Some(*i) != principal_line && expense(txn.lines[*i].account_id));
+        let loan = principal_line.map(|i| txn.lines[i].account_id).or(loan);
+        let fits = txn.txn_type == TxnType::Expense
+            && from.is_some_and(|i| {
+                let l = &txn.lines[i];
+                l.debit.is_zero()
+                    && matches!(
+                        class(l.account_id),
+                        Some(AccountClass::Bank | AccountClass::CreditCard)
+                    )
+            })
+            && loans.len() <= 1
+            && loan.is_some()
+            && debits.iter().all(|i| {
+                let l = &txn.lines[*i];
+                l.debit.is_positive() && l.credit.is_zero()
+            });
+        let mut f = LoanPaymentForm::new(Some(txn.txn_date));
+        f.loan = loan;
+        f.lender = txn.contact_id;
+        f.pay_from = from.map(|i| txn.lines[i].account_id);
+        f.method = match txn.check_number {
+            Some(n) => LoanMethod::Check(n.to_string()),
+            None => LoanMethod::Online,
+        };
+        f.payment = from.map(|i| txn.lines[i].credit);
+        f.interest = Some(interest_line.map_or(Money::ZERO, |i| txn.lines[i].debit));
+        f.interest_account = interest_line.map(|i| txn.lines[i].account_id);
+        f.memo = txn.memo.clone().unwrap_or_default();
+        let keys = &mut self.extras.form_mut().adapter_mut().keys;
+        let seeds = debits
+            .iter()
+            .filter(|i| Some(**i) != principal_line && Some(**i) != interest_line)
+            .map(|i| {
+                let l = &txn.lines[*i];
+                FormLine {
+                    account: Some(l.account_id),
+                    amount: Some(l.debit),
+                    memo: l.description.clone().unwrap_or_default(),
+                    ..FormLine::blank(keys.next_key())
+                }
+            })
+            .collect();
+        (f, FormLines::from_lines(seeds, keys), fits)
+    }
+
+    /// Shows a saved payment (Prev/Next, the register, Reload).
+    pub(crate) fn show(&mut self, v: &Versioned<Transaction>) {
+        let loan = self.header.current().loan;
+        let (form, extras, fits) = self.form_of(v, loan);
+        let lists = Arc::clone(&self.books.lists);
+        self.header.load(form);
+        self.extras.form_mut().load(extras, &*lists);
+        self.flow.opened(Editing::of(v, fits));
+        self.problems.clear();
+        self.prefill_task = None;
+        self.prefill_applied = false;
+        self.lender_check = None;
+        self.lender_result = None;
+        self.focused = None;
+        self.sync_inputs();
+        if let Some(loan) = self.header.current().loan {
+            self.balances.fetch(&self.link, self.group.as_ref(), loan);
+        }
+    }
+
+    fn reload(&mut self) {
+        if let Some(id) = self.flow.editing.map(|e| e.id) {
+            self.open_saved(id);
+        }
+    }
+
+    /// Esc: the question, the void card or the lender list closes first;
+    /// then the focused field goes back to its saved value (or drops the
+    /// text typed in it); with nothing to revert the shell closes the
+    /// window (asking first when the form is dirty).
+    pub(crate) fn revert_field(&mut self) -> bool {
+        if self.records.prompt.is_some() {
+            self.answer_nav(PromptAnswer::Keep);
+            return true;
+        }
+        if self.flow.void_open {
+            self.flow.void_open = false;
+            return true;
+        }
+        if self.inputs.lender.open {
+            self.inputs.lender.open = false;
+            return true;
+        }
+        let Some(fid) = self.focused else {
+            return false;
+        };
+        let saved = self.header.original().clone();
+        let now = self.header.current().clone();
+        let style = self.money_style;
+        let shown = |m: Option<Money>| m.map(|m| m.format(style)).unwrap_or_default();
+        let typed = match fid {
+            field::PAYMENT => self.inputs.payment.text.trim() != shown(now.payment),
+            field::INTEREST => self.inputs.interest.text.trim() != shown(now.interest),
+            field::LENDER_BALANCE => {
+                self.inputs.lender_balance.text.trim() != shown(now.lender_balance)
+            }
+            field::LENDER => {
+                self.inputs.lender.text.trim()
+                    != now
+                        .lender
+                        .and_then(|p| self.books.lists.name_text(p))
+                        .unwrap_or_default()
+            }
+            field::DATE => now
+                .date
+                .is_some_and(|d| DateInput::new(d).text != self.inputs.date.text),
+            _ => false,
+        };
+        let differs = match fid {
+            field::LOAN => now.loan != saved.loan,
+            field::LENDER => now.lender != saved.lender,
+            field::PAY_FROM => now.pay_from != saved.pay_from,
+            field::NUMBER => now.method != saved.method,
+            field::DATE => now.date != saved.date,
+            field::PAYMENT => now.payment != saved.payment,
+            field::INTEREST => now.interest != saved.interest,
+            field::INTEREST_ACCOUNT => now.interest_account != saved.interest_account,
+            field::LENDER_BALANCE => now.lender_balance != saved.lender_balance,
+            field::MEMO => now.memo != saved.memo,
+            _ => false,
+        };
+        if differs {
+            self.header.edit_step(|h| match fid {
+                field::LOAN => h.loan = saved.loan,
+                field::LENDER => h.lender = saved.lender,
+                field::PAY_FROM => h.pay_from = saved.pay_from,
+                field::NUMBER => h.method = saved.method.clone(),
+                field::DATE => h.date = saved.date,
+                field::PAYMENT => h.payment = saved.payment,
+                field::INTEREST => h.interest = saved.interest,
+                field::INTEREST_ACCOUNT => h.interest_account = saved.interest_account,
+                field::LENDER_BALANCE => h.lender_balance = saved.lender_balance,
+                _ => h.memo.clone_from(&saved.memo),
+            });
+        }
+        if differs || typed {
+            self.sync_inputs();
+            return true;
+        }
+        false
     }
 
     // ------------------------------------------------------------ drawing
@@ -758,7 +985,12 @@ impl LoanPaymentScreen {
             form::progress_line(ui, &tokens, &t("helper.loading"));
             return;
         }
+        let idle = self.flow.idle();
         ui.horizontal(|ui| {
+            if let Some(cmd) = kit::nav_buttons(ui, idle) {
+                self.after_frame = Some(CommandId::new(cmd));
+            }
+            ui.separator();
             ui.label(
                 RichText::new(t("loan.no_schedules"))
                     .size(12.0)
@@ -767,10 +999,16 @@ impl LoanPaymentScreen {
             kit::heading_right(ui, &tokens, &t("cmd.banking.loan_payment"));
         });
         ui.separator();
-        match kit::messages(ui, &tokens, &mut self.flow) {
+        match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
             MessageClick::SubmitClosing => self.submit_closing(),
             MessageClick::Void => self.void_now(None),
+            MessageClick::Reload => self.reload(),
             MessageClick::None => {}
+        }
+        if self.records.prompt.is_some()
+            && let Some(a) = records::prompt_ui(ui, KIND, &t("cmd.banking.loan_payment"))
+        {
+            self.answer_nav(a);
         }
         if self.loans().is_empty() {
             ui.add_space(8.0);
@@ -810,7 +1048,7 @@ impl LoanPaymentScreen {
                     ui.horizontal_top(|ui| {
                         ui.vertical(|ui| {
                             ui.set_width(half);
-                            let (p, _) = kit::account_combo(
+                            let (p, r) = kit::account_combo(
                                 ui,
                                 tokens,
                                 "loan_payment/loan",
@@ -819,6 +1057,7 @@ impl LoanPaymentScreen {
                                 f.loan,
                                 half - 8.0,
                             );
+                            kit::track(&mut self.focused, &r, field::LOAN);
                             if let Some(id) = p {
                                 self.set_loan(id);
                             }
@@ -837,6 +1076,7 @@ impl LoanPaymentScreen {
                                 half,
                             );
                             self.pick_lender(out);
+                            kit::track(&mut self.focused, &r, field::LENDER);
                             if kit::entered(&r) {
                                 self.after_frame = Some(CommandId::new("form.save_new"));
                             }
@@ -846,7 +1086,7 @@ impl LoanPaymentScreen {
                     ui.horizontal_top(|ui| {
                         ui.vertical(|ui| {
                             ui.set_width(half);
-                            let (p, _) = kit::account_combo(
+                            let (p, r) = kit::account_combo(
                                 ui,
                                 tokens,
                                 "loan_payment/pay_from",
@@ -855,6 +1095,7 @@ impl LoanPaymentScreen {
                                 f.pay_from,
                                 half - 8.0,
                             );
+                            kit::track(&mut self.focused, &r, field::PAY_FROM);
                             if let Some(id) = p {
                                 self.header.edit(field::PAY_FROM, |h| {
                                     h.pay_from = Some(id);
@@ -884,6 +1125,7 @@ impl LoanPaymentScreen {
                                 self.header.edit(field::DATE, |h| h.date = d);
                                 self.inputs.rev = self.header.revision();
                             }
+                            kit::track(&mut self.focused, &r, field::DATE);
                             if kit::entered(&r) {
                                 self.after_frame = Some(CommandId::new("form.save_new"));
                             }
@@ -899,6 +1141,7 @@ impl LoanPaymentScreen {
                                 third,
                                 true,
                             );
+                            kit::track(&mut self.focused, &r, field::PAYMENT);
                             if r.lost_focus() {
                                 self.amount_left(field::PAYMENT);
                             }
@@ -915,6 +1158,7 @@ impl LoanPaymentScreen {
                                 true,
                             )
                             .on_hover_text(t("loan.interest.tip"));
+                            kit::track(&mut self.focused, &r, field::INTEREST);
                             if r.lost_focus() {
                                 self.amount_left(field::INTEREST);
                             }
@@ -934,7 +1178,7 @@ impl LoanPaymentScreen {
                         ui.add_space(16.0);
                         ui.vertical(|ui| {
                             ui.set_width(third * 2.0 + 16.0);
-                            let (p, _) = kit::account_combo(
+                            let (p, r) = kit::account_combo(
                                 ui,
                                 tokens,
                                 "loan_payment/interest_account",
@@ -943,6 +1187,7 @@ impl LoanPaymentScreen {
                                 f.interest_account,
                                 third * 2.0,
                             );
+                            kit::track(&mut self.focused, &r, field::INTEREST_ACCOUNT);
                             if let Some(id) = p {
                                 self.header.edit(field::INTEREST_ACCOUNT, |h| {
                                     h.interest_account = Some(id);
@@ -967,6 +1212,7 @@ impl LoanPaymentScreen {
                                 self.header.edit(field::MEMO, |h| h.memo = memo);
                                 self.inputs.rev = self.header.revision();
                             }
+                            kit::track(&mut self.focused, &r, field::MEMO);
                         });
                         ui.add_space(16.0);
                         ui.vertical(|ui| {
@@ -980,6 +1226,7 @@ impl LoanPaymentScreen {
                                 true,
                             )
                             .on_hover_text(t("loan.lender_balance.tip"));
+                            kit::track(&mut self.focused, &r, field::LENDER_BALANCE);
                             if r.lost_focus() {
                                 self.amount_left(field::LENDER_BALANCE);
                             }
@@ -1030,6 +1277,7 @@ impl LoanPaymentScreen {
                 self.header
                     .edit(field::NUMBER, |h| h.method = LoanMethod::Check(text));
             }
+            kit::track(&mut self.focused, &r, field::NUMBER);
         }
         if card && matches!(f.method, LoanMethod::Check(_)) {
             set = Some(LoanMethod::Online);
@@ -1088,6 +1336,14 @@ impl LoanPaymentScreen {
                 self.clear();
                 true
             }
+            "form.prev_record" => {
+                self.navigate(true);
+                true
+            }
+            "form.next_record" => {
+                self.navigate(false);
+                true
+            }
             "edit.void_transaction" => self.flow.start_void(),
             "edit.open_list" => {
                 self.inputs.lender.open = true;
@@ -1107,17 +1363,7 @@ impl LoanPaymentScreen {
                 }
                 done
             }
-            "form.revert" => {
-                if self.flow.void_open {
-                    self.flow.void_open = false;
-                    return true;
-                }
-                if self.inputs.lender.open {
-                    self.inputs.lender.open = false;
-                    return true;
-                }
-                false
-            }
+            "form.revert" => self.revert_field(),
             _ => false,
         }
     }
@@ -1151,6 +1397,9 @@ impl LoanPaymentScreen {
                 "refused": self.problems.first().map(|p| p.name()),
                 "problems": self.problems.len(),
             },
+            "nav_prompt": self.records.prompt.is_some(),
+            "nav_at": self.records.at,
+            "focused": self.focused,
         });
         if let (Value::Object(m), Value::Object(c)) = (&mut v, self.flow.state_json(&self.link)) {
             m.extend(c);
@@ -1207,8 +1456,67 @@ impl Screen for LoanPaymentScreen {
         self.form_command(id)
     }
 
+    fn open_record(&mut self, txn: TransactionId) -> bool {
+        self.open_saved(txn)
+    }
+
     fn state(&self) -> Value {
         self.state_json()
+    }
+}
+
+impl RecordForm for LoanPaymentScreen {
+    fn parts(&mut self) -> (&mut Records, &Arc<CompanyLink>, Option<&RequestGroup>) {
+        (&mut self.records, &self.link, self.group.as_ref())
+    }
+
+    /// The payments on the loan shown.
+    fn record_scope(&self) -> Option<RecordScope> {
+        self.header.current().loan.map(|account| RecordScope {
+            account,
+            types: LOAN_TYPES,
+        })
+    }
+
+    fn form_dirty(&self) -> bool {
+        self.is_dirty()
+    }
+
+    fn form_busy(&self) -> bool {
+        !self.flow.idle()
+    }
+
+    fn show_record(&mut self, v: &Versioned<Transaction>) {
+        self.show(v);
+    }
+
+    fn blank_after_nav(&mut self) {
+        self.flow.reset_messages();
+        self.new_form(true);
+    }
+
+    fn discard_edits(&mut self) {
+        let lists = Arc::clone(&self.books.lists);
+        self.header.revert_form();
+        self.extras.form_mut().revert_form(&*lists);
+        self.problems.clear();
+        self.sync_inputs();
+    }
+
+    fn save_for_nav(&mut self) -> bool {
+        self.start_save(SaveIntent::Save, None)
+    }
+
+    fn save_queued(&self) -> bool {
+        self.flow.task.is_some()
+    }
+
+    fn record_notice(&mut self, key: &'static str) {
+        self.flow.notice = Some(key);
+    }
+
+    fn record_failed(&mut self, e: ApiError) {
+        self.flow.error = Some(e);
     }
 }
 

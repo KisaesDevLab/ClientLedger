@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use cl_api::{
     ApiError, BankPosting, CardChargeDraft, CheckDraft, DepositDraft, LocalValidation,
-    RequestGroup, SplitLine,
+    RequestGroup, SplitLine, Transaction, TxnType, Versioned,
 };
-use cl_core::ids::{AccountId, TenantId};
+use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, MoneyStyle, Secret};
 use cl_model::amount_entry::AmountRules;
 use cl_model::forms::owner_money::{
@@ -35,12 +35,13 @@ use crate::company::demo::register::DemoPosting;
 use crate::company::{CompanyEvent, CompanyLink};
 use crate::i18n::{t, t_with};
 use crate::screens::card_charge::kit::{
-    self, AmountInput, Balances, Books, MessageClick, NameInput, NameOutcome, Outbound, Pending,
-    SaveFlow, Sent, Settled,
+    self, AmountInput, Balances, Books, Editing, MessageClick, NameInput, NameOutcome, Outbound,
+    Pending, SaveFlow, Sent, Settled,
 };
+use crate::screens::card_charge::records::{self, RecordForm, RecordScope, Records};
 use crate::screens::company::form::{self, DateInput};
 use crate::theme::Tokens;
-use crate::windows::Screen;
+use crate::windows::{PromptAnswer, Screen};
 use remember::Slot;
 
 /// The command and window kind.
@@ -109,7 +110,15 @@ pub struct OwnerMoneyScreen {
     lists_stale: bool,
     after_frame: Option<CommandId>,
     pub(crate) money_style: MoneyStyle,
+    /// Prev/Next and the saved record being read.
+    pub(crate) records: Records,
+    /// The field that had the keyboard (Esc reverts it).
+    pub(crate) focused: Option<u64>,
 }
+
+/// The kinds of record this form shows: draws (a check or payment from the
+/// bank) and contributions (deposits).
+const OWNER_TYPES: &[TxnType] = &[TxnType::Expense, TxnType::Deposit];
 
 impl OwnerMoneyScreen {
     /// A new form in the open company (Pay yourself).
@@ -145,6 +154,8 @@ impl OwnerMoneyScreen {
             lists_stale: false,
             after_frame: None,
             money_style: MoneyStyle::default(),
+            records: Records::default(),
+            focused: None,
         };
         s.bus = s.link.bus().subscribe();
         s.books.start(&s.link, s.group.as_ref());
@@ -217,6 +228,7 @@ impl OwnerMoneyScreen {
             }
             None => {}
         }
+        self.poll_records();
     }
 
     fn hear_changes(&mut self) {
@@ -490,7 +502,9 @@ impl OwnerMoneyScreen {
         if let Some(b) = self.header.current().bank {
             self.balances.fetch(&self.link, self.group.as_ref(), b);
         }
+        self.records.forget();
         self.follow_up(intent);
+        self.after_saved();
     }
 
     fn save_failed(&mut self, e: ApiError) {
@@ -534,6 +548,8 @@ impl OwnerMoneyScreen {
         };
         self.header.load(f);
         self.problems.clear();
+        self.flow.new_record();
+        self.records.new_record();
         self.sync_inputs();
     }
 
@@ -577,12 +593,161 @@ impl OwnerMoneyScreen {
     }
 
     fn voided(&mut self) {
-        let accounts = self.flow.published.clone();
+        let mut accounts = self.flow.published.clone();
+        let f = self.header.current();
+        accounts.extend(f.bank.into_iter().chain(f.equity));
+        let was_open = self.flow.editing.is_some();
         self.flow.voided();
         crate::forms::publish_saved(&self.link, &self.bus, &accounts);
+        self.records.forget();
+        if was_open {
+            self.new_form(true);
+        }
         if let Some(b) = self.header.current().bank {
             self.balances.fetch(&self.link, self.group.as_ref(), b);
         }
+    }
+
+    /// The saved record `v` as this form: a draw is one credit on a bank
+    /// and one debit on an equity account (a check when it has a number); a
+    /// contribution is one debit on a bank and one credit on an equity
+    /// account, both of the same amount. Anything else is read-only
+    /// (`false`). The amount is the engine's, copied as it is.
+    pub(crate) fn form_of(&self, v: &Versioned<Transaction>) -> (OwnerMoneyForm, bool) {
+        let txn = &v.record;
+        let class = |id| self.books.class(id);
+        let direction = if txn.txn_type == TxnType::Deposit {
+            Direction::PutMoneyIn
+        } else {
+            Direction::PayYourself
+        };
+        let debit: Vec<&cl_api::TransactionLine> =
+            txn.lines.iter().filter(|l| l.debit.is_positive()).collect();
+        let credit: Vec<&cl_api::TransactionLine> = txn
+            .lines
+            .iter()
+            .filter(|l| l.credit.is_positive())
+            .collect();
+        let (bank, equity) = match direction {
+            Direction::PayYourself => (credit.first(), debit.first()),
+            Direction::PutMoneyIn => (debit.first(), credit.first()),
+        };
+        let amount = equity.map(|l| match direction {
+            Direction::PayYourself => l.debit,
+            Direction::PutMoneyIn => l.credit,
+        });
+        let fits = debit.len() == 1
+            && credit.len() == 1
+            && txn.lines.len() == 2
+            && matches!(txn.txn_type, TxnType::Expense | TxnType::Deposit)
+            && debit[0].debit == credit[0].credit
+            && bank.is_some_and(|l| class(l.account_id) == Some(AccountClass::Bank))
+            && equity.is_some_and(|l| class(l.account_id) == Some(AccountClass::Equity));
+        let mut f = OwnerMoneyForm::new(direction, bank.map(|l| l.account_id), Some(txn.txn_date));
+        f.equity = equity.map(|l| l.account_id);
+        f.amount = amount;
+        f.memo = txn.memo.clone().unwrap_or_default();
+        f.who = txn.contact_id.or_else(|| equity.and_then(|l| l.contact_id));
+        f.who_name = txn.contact_name.clone().unwrap_or_default();
+        f.method = match txn.check_number {
+            Some(n) => OwnerMethod::Check(n.to_string()),
+            None => OwnerMethod::Electronic,
+        };
+        (f, fits)
+    }
+
+    /// Shows a saved draw or contribution (Prev/Next, the register,
+    /// Reload).
+    pub(crate) fn show(&mut self, v: &Versioned<Transaction>) {
+        let (form, fits) = self.form_of(v);
+        self.header.load(form);
+        self.flow.opened(Editing::of(v, fits));
+        self.equity_source = None;
+        self.problems.clear();
+        self.focused = None;
+        self.sync_inputs();
+        if let Some(b) = self.header.current().bank {
+            self.balances.fetch(&self.link, self.group.as_ref(), b);
+        }
+    }
+
+    fn reload(&mut self) {
+        if let Some(id) = self.flow.editing.map(|e| e.id) {
+            self.open_saved(id);
+        }
+    }
+
+    /// Esc: the question, the void card or the names list closes first;
+    /// then the focused field goes back to its saved value (or drops the
+    /// text typed in it); with nothing to revert the shell closes the
+    /// window (asking first when the form is dirty).
+    pub(crate) fn revert_field(&mut self) -> bool {
+        if self.records.prompt.is_some() {
+            self.answer_nav(PromptAnswer::Keep);
+            return true;
+        }
+        if self.flow.void_open {
+            self.flow.void_open = false;
+            return true;
+        }
+        if self.inputs.who.open {
+            self.inputs.who.open = false;
+            return true;
+        }
+        let Some(fid) = self.focused else {
+            return false;
+        };
+        let saved = self.header.original().clone();
+        let now = self.header.current().clone();
+        let typed = match fid {
+            field::AMOUNT => {
+                self.inputs.amount.text.trim()
+                    != now
+                        .amount
+                        .map(|m| m.format(self.money_style))
+                        .unwrap_or_default()
+            }
+            field::WHO => {
+                let shown = now
+                    .who
+                    .and_then(|p| self.books.lists.name_text(p))
+                    .map_or_else(|| now.who_name.clone(), str::to_string);
+                self.inputs.who.text.trim() != shown.trim()
+            }
+            field::DATE => now
+                .date
+                .is_some_and(|d| DateInput::new(d).text != self.inputs.date.text),
+            _ => false,
+        };
+        let differs = match fid {
+            field::WHO => now.who != saved.who || now.who_name != saved.who_name,
+            field::BANK => now.bank != saved.bank,
+            field::NUMBER => now.method != saved.method,
+            field::DATE => now.date != saved.date,
+            field::AMOUNT => now.amount != saved.amount,
+            field::MEMO => now.memo != saved.memo,
+            field::EQUITY => now.equity != saved.equity,
+            _ => false,
+        };
+        if differs {
+            self.header.edit_step(|h| match fid {
+                field::WHO => {
+                    h.who = saved.who;
+                    h.who_name.clone_from(&saved.who_name);
+                }
+                field::BANK => h.bank = saved.bank,
+                field::NUMBER => h.method = saved.method.clone(),
+                field::DATE => h.date = saved.date,
+                field::AMOUNT => h.amount = saved.amount,
+                field::MEMO => h.memo.clone_from(&saved.memo),
+                _ => h.equity = saved.equity,
+            });
+        }
+        if differs || typed {
+            self.sync_inputs();
+            return true;
+        }
+        false
     }
 
     /// The neutral sentence for the entity type (Q-61).
@@ -604,6 +769,10 @@ impl OwnerMoneyScreen {
         let d = self.header.current().direction;
         let mut picked = None;
         ui.horizontal(|ui| {
+            if let Some(cmd) = kit::nav_buttons(ui, idle) {
+                self.after_frame = Some(CommandId::new(cmd));
+            }
+            ui.separator();
             ui.add_enabled_ui(idle, |ui| {
                 if ui
                     .selectable_label(d == Direction::PayYourself, t("owner_money.pay_yourself"))
@@ -624,10 +793,16 @@ impl OwnerMoneyScreen {
             self.set_direction(p);
         }
         ui.separator();
-        match kit::messages(ui, &tokens, &mut self.flow) {
+        match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
             MessageClick::SubmitClosing => self.submit_closing(),
             MessageClick::Void => self.void_now(None),
+            MessageClick::Reload => self.reload(),
             MessageClick::None => {}
+        }
+        if self.records.prompt.is_some()
+            && let Some(a) = records::prompt_ui(ui, KIND, &t("cmd.banking.owner_money"))
+        {
+            self.answer_nav(a);
         }
         kit::two_columns(ui, "owner_money/scroll", |ui, col| match col {
             kit::Column::Form => self.form_ui(ui, &tokens),
@@ -665,6 +840,7 @@ impl OwnerMoneyScreen {
                                 half,
                             );
                             self.apply_who(out);
+                            kit::track(&mut self.focused, &r, field::WHO);
                             if kit::entered(&r) {
                                 self.after_frame = Some(CommandId::new("form.save_new"));
                             }
@@ -672,7 +848,7 @@ impl OwnerMoneyScreen {
                         ui.add_space(16.0);
                         ui.vertical(|ui| {
                             ui.set_width(half);
-                            let (p, _) = kit::account_combo(
+                            let (p, r) = kit::account_combo(
                                 ui,
                                 tokens,
                                 "owner_money/bank",
@@ -681,6 +857,7 @@ impl OwnerMoneyScreen {
                                 f.bank,
                                 half - 8.0,
                             );
+                            kit::track(&mut self.focused, &r, field::BANK);
                             if let Some(id) = p {
                                 self.header.edit(field::BANK, |h| h.bank = Some(id));
                                 self.balances.fetch(&self.link, self.group.as_ref(), id);
@@ -711,6 +888,7 @@ impl OwnerMoneyScreen {
                                 self.header.edit(field::DATE, |h| h.date = d);
                                 self.inputs.rev = self.header.revision();
                             }
+                            kit::track(&mut self.focused, &r, field::DATE);
                             if kit::entered(&r) {
                                 self.after_frame = Some(CommandId::new("form.save_new"));
                             }
@@ -728,6 +906,7 @@ impl OwnerMoneyScreen {
                                 half,
                                 true,
                             );
+                            kit::track(&mut self.focused, &r, field::AMOUNT);
                             if r.lost_focus() {
                                 self.amount_left();
                                 if kit::entered(&r) && self.inputs.amount.problem.is_none() {
@@ -750,10 +929,11 @@ impl OwnerMoneyScreen {
                             if r.changed() {
                                 self.header.edit(field::MEMO, |h| h.memo = memo);
                             }
+                            kit::track(&mut self.focused, &r, field::MEMO);
                         });
                     });
                     ui.add_space(8.0);
-                    let (p, _) = kit::account_combo(
+                    let (p, r) = kit::account_combo(
                         ui,
                         tokens,
                         "owner_money/equity",
@@ -762,6 +942,7 @@ impl OwnerMoneyScreen {
                         f.equity,
                         half - 8.0,
                     );
+                    kit::track(&mut self.focused, &r, field::EQUITY);
                     if let Some(id) = p {
                         self.set_equity(id);
                     }
@@ -826,6 +1007,7 @@ impl OwnerMoneyScreen {
                 self.header
                     .edit(field::NUMBER, |h| h.method = OwnerMethod::Check(text));
             }
+            kit::track(&mut self.focused, &r, field::NUMBER);
         }
     }
 
@@ -864,6 +1046,14 @@ impl OwnerMoneyScreen {
                 self.clear();
                 true
             }
+            "form.prev_record" => {
+                self.navigate(true);
+                true
+            }
+            "form.next_record" => {
+                self.navigate(false);
+                true
+            }
             "edit.void_transaction" => self.flow.start_void(),
             "edit.open_list" => {
                 self.inputs.who.open = true;
@@ -883,17 +1073,7 @@ impl OwnerMoneyScreen {
                 }
                 done
             }
-            "form.revert" => {
-                if self.flow.void_open {
-                    self.flow.void_open = false;
-                    return true;
-                }
-                if self.inputs.who.open {
-                    self.inputs.who.open = false;
-                    return true;
-                }
-                false
-            }
+            "form.revert" => self.revert_field(),
             _ => false,
         }
     }
@@ -927,6 +1107,9 @@ impl OwnerMoneyScreen {
                 "refused": self.problems.first().map(|p| p.name()),
                 "problems": self.problems.len(),
             },
+            "nav_prompt": self.records.prompt.is_some(),
+            "nav_at": self.records.at,
+            "focused": self.focused,
         });
         if let (Value::Object(m), Value::Object(c)) = (&mut v, self.flow.state_json(&self.link)) {
             m.extend(c);
@@ -955,10 +1138,14 @@ impl Screen for OwnerMoneyScreen {
         if let Some(cmd) = self.after_frame.take() {
             self.command(cmd);
         }
-        if self.books.busy() || self.balances.busy() || self.flow.busy() {
+        if self.books.busy() || self.balances.busy() || self.flow.busy() || self.records.busy() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
         }
+    }
+
+    fn open_record(&mut self, txn: TransactionId) -> bool {
+        self.open_saved(txn)
     }
 
     fn scope(&self) -> Scope {
@@ -982,6 +1169,59 @@ impl Screen for OwnerMoneyScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+}
+
+impl RecordForm for OwnerMoneyScreen {
+    fn parts(&mut self) -> (&mut Records, &Arc<CompanyLink>, Option<&RequestGroup>) {
+        (&mut self.records, &self.link, self.group.as_ref())
+    }
+
+    /// The records of the "Recorded in" account.
+    fn record_scope(&self) -> Option<RecordScope> {
+        self.header.current().equity.map(|account| RecordScope {
+            account,
+            types: OWNER_TYPES,
+        })
+    }
+
+    fn form_dirty(&self) -> bool {
+        self.is_dirty()
+    }
+
+    fn form_busy(&self) -> bool {
+        !self.flow.idle()
+    }
+
+    fn show_record(&mut self, v: &Versioned<Transaction>) {
+        self.show(v);
+    }
+
+    fn blank_after_nav(&mut self) {
+        self.flow.reset_messages();
+        self.new_form(true);
+    }
+
+    fn discard_edits(&mut self) {
+        self.header.revert_form();
+        self.problems.clear();
+        self.sync_inputs();
+    }
+
+    fn save_for_nav(&mut self) -> bool {
+        self.start_save(SaveIntent::Save, None)
+    }
+
+    fn save_queued(&self) -> bool {
+        self.flow.task.is_some()
+    }
+
+    fn record_notice(&mut self, key: &'static str) {
+        self.flow.notice = Some(key);
+    }
+
+    fn record_failed(&mut self, e: ApiError) {
+        self.flow.error = Some(e);
     }
 }
 
