@@ -79,13 +79,13 @@ steps:
   - assert_exists: {label_contains: "already has this name"}
   - key: Escape
   - assert_state: {key: screen.dirty, equals: false}
-  - type: {text: "Install {theme}"}
+  - type: {text: "Hardscape {theme}"}
   - key: Tab
   - type: {text: J}
   - key: Alt+S
   - assert_state: {key: screen.panel, equals: none}
   - assert_state: {key: screen.note, equals: saved}
-  - assert_exists: {role: row, label_contains: "Install"}
+  - assert_exists: {role: row, label_contains: "Hardscape"}
   - assert_state: {key: screen.usage_total, equals: 0}
 
   # --- Keyboard-only edit (Ctrl+E), Esc reverts, then closes -----------------
@@ -109,7 +109,7 @@ steps:
   - key: Ctrl+Shift+H
   - key: Ctrl+D
   - assert_state: {key: screen.note, equals: deleted}
-  - assert_not_exists: {role: row, label_contains: "Install"}
+  - assert_not_exists: {role: row, label_contains: "Hardscape"}
 
   # --- Delete the group again (its tags would stay, ungrouped) ---------------
   - focus: {role: button, label_contains: "Edit group Job Type"}

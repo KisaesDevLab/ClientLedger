@@ -573,7 +573,7 @@ fn the_entry_row_records_a_check_then_a_deposit() {
     let mut s = screen(&link);
     settle(&mut s, None);
     let before = s.model.total().expect("total");
-    assert_eq!(s.entry.next_check, Some(4427), "highest check number + 1");
+    assert_eq!(s.entry.next_check, Some(4418), "highest check number + 1");
     let fuel = demo_account(&link, "6100");
     let vendor = demo_contact(&link, "Hollister Fuel Stop");
     s.entry.form.edit_step(|d| {
@@ -583,7 +583,7 @@ fn the_entry_row_records_a_check_then_a_deposit() {
     });
     assert_eq!(s.draft_kind(), Some(cl_model::register::EntryKind::Check));
     s.sync_proposal();
-    assert_eq!(s.entry.draft().number, "4427");
+    assert_eq!(s.entry.draft().number, "4418");
     assert_eq!(s.state()["entry"]["number_proposed"], true);
     assert!(s.entry_dirty());
     assert!(s.start_record(), "the demo saves at once");
@@ -593,7 +593,7 @@ fn the_entry_row_records_a_check_then_a_deposit() {
     assert!(!s.entry_dirty());
     settle(&mut s, None);
     assert_eq!(s.model.total(), Some(before + 1));
-    assert_eq!(s.entry.next_check, Some(4428));
+    assert_eq!(s.entry.next_check, Some(4419));
 
     // A deposit: the second column, a customer and an income account.
     let income = demo_account(&link, "4000");

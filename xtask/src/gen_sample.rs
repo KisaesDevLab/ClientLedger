@@ -100,6 +100,12 @@ struct Line {
     account: &'static str,
     debit: i64,
     credit: i64,
+    /// Line memo (the Write Check story lines only).
+    memo: Option<&'static str>,
+    /// Line tag name (story lines only).
+    tag: Option<&'static str>,
+    /// `Customer:Job` the line is for (story lines only).
+    job: Option<&'static str>,
 }
 
 #[derive(Clone, Debug)]
@@ -124,6 +130,25 @@ fn line(account: &'static str, debit: i64, credit: i64) -> Line {
         account,
         debit,
         credit,
+        memo: None,
+        tag: None,
+        job: None,
+    }
+}
+
+/// A Write Check story expense line: a debit with a memo, the Install tag
+/// and, optionally, the job it is for.
+fn story_line(
+    account: &'static str,
+    debit: i64,
+    memo: &'static str,
+    job: Option<&'static str>,
+) -> Line {
+    Line {
+        memo: Some(memo),
+        tag: Some(STORY_TAG),
+        job,
+        ..line(account, debit, 0)
     }
 }
 
@@ -149,6 +174,9 @@ const ACCOUNTS: &[(&str, &str, &str, &str)] = &[
     ("3200", "Owner Draws", "equity", ""),
     ("4000", "Service Income", "revenue", ""),
     ("5000", "Subcontractors", "cogs", ""),
+    ("5090", "Materials", "cogs", ""),
+    ("5100", "Plants", "cogs", ""),
+    ("5110", "Mulch & stone", "cogs", ""),
     ("5200", "Job Supplies and Materials", "cogs", ""),
     ("6000", "Advertising and Marketing", "expense", ""),
     ("6050", "Bank and Merchant Fees", "expense", ""),
@@ -164,6 +192,35 @@ const ACCOUNTS: &[(&str, &str, &str, &str)] = &[
     ("6700", "Vehicle Expenses", "expense", ""),
     ("8000", "Interest Expense", "other_expense", ""),
 ];
+/// Sub-accounts: (number, parent number). 5100 and 5110 show as
+/// "Materials:Plants" and "Materials:Mulch & stone" (the Write Check story).
+const ACCOUNT_PARENTS: &[(&str, &str)] = &[("5100", "5090"), ("5110", "5090")];
+
+// ---- The Write Check story (P13 WP0, docs/design/mockups/WriteCheck.html) --
+/// The story's vendor. It takes the list slot of a vendor no scenario uses,
+/// so the vendor count stays 38, and has no random history: only the three
+/// prior checks and the open bill below.
+const STORY_VENDOR: &str = "Ozark Feed & Seed";
+/// Random picks that land on the story vendor's slot go here instead.
+const STORY_VENDOR_STAND_IN: &str = "Persimmon Hill Plants";
+/// The tag on every story line; "Crew A" is the second story tag.
+const STORY_TAG: &str = "Install";
+const STORY_TAGS: &[(&str, Option<&str>)] = &[(STORY_TAG, None), ("Crew A", Some("Crew"))];
+/// The job the story lines are for.
+const STORY_CUSTOMER: &str = "Hollister Family Trust";
+const STORY_JOB_NAME: &str = "Fall bed install";
+const STORY_JOB: &str = "Hollister Family Trust:Fall bed install";
+/// Prior checks to the story vendor on 1010: number, date, plants, mulch.
+const STORY_CHECKS: &[(u32, Day, i64, i64)] = &[
+    (4380, Day(2026, 8, 27), 49_180, 26_450),
+    (4392, Day(2026, 9, 18), 123_666, 66_745),
+    (4401, Day(2026, 10, 2), 148_735, 83_125),
+];
+/// The open bill from the story vendor: plants, mulch, dated, due.
+const STORY_BILL: (i64, i64, Day, Day) = (84_215, 44_425, Day(2026, 10, 6), Day(2026, 11, 5));
+/// The highest check number on 1010; the next check is 4418.
+const LAST_CHECK_1010: u32 = 4417;
+
 /// Engine system accounts the fixture also posts to.
 const AR: &str = "10200";
 const AP: &str = "20100";
@@ -271,10 +328,158 @@ const VENDOR_NAMES: &[&str] = &[
     "Blue Eye Lumber",
     "Rockaway Auto Glass",
     "Sycamore Fence Co",
-    "Dogwood Canyon Supply",
+    STORY_VENDOR,
     "Elm Street Accountants",
     "Persimmon Hill Plants",
 ];
+
+/// A random vendor. The story vendor's slot stands in for another vendor so
+/// the random stream (and every amount and date) is the same as before the
+/// story vendor existed.
+fn pick_vendor(rng: &mut Rng) -> &'static str {
+    let v: &'static str = rng.pick(VENDOR_NAMES);
+    if v == STORY_VENDOR {
+        STORY_VENDOR_STAND_IN
+    } else {
+        v
+    }
+}
+
+/// The Write Check story: three prior checks to the story vendor and one
+/// open bill from it, all on 5100/5110 with line memos and the Install tag.
+/// Pushed before the plugs, which absorb them, so every design figure stays.
+fn push_story(txns: &mut Vec<Txn>, bill_seq: &mut u32) {
+    for &(number, date, plants, mulch) in STORY_CHECKS {
+        let job = (number == 4401).then_some(STORY_JOB);
+        txns.push(Txn {
+            date,
+            kind: "check",
+            number: number.to_string(),
+            contact: Some(STORY_VENDOR.into()),
+            memo: "Plants and mulch".into(),
+            lines: vec![
+                story_line("5100", plants, "Perennials", job),
+                story_line("5110", mulch, "Hardwood mulch", None),
+                line("1010", 0, plants + mulch),
+            ],
+            due: None,
+            cleared: true,
+            attachment: false,
+            paid: false,
+        });
+    }
+    let (plants, mulch, date, due) = STORY_BILL;
+    *bill_seq += 1;
+    txns.push(Txn {
+        date,
+        kind: "bill",
+        number: format!("B-{bill_seq}"),
+        contact: Some(STORY_VENDOR.into()),
+        memo: "Fall bed plants and mulch".into(),
+        lines: vec![
+            story_line("5100", plants, "Perennials", Some(STORY_JOB)),
+            story_line("5110", mulch, "Hardwood mulch", None),
+            line(AP, 0, plants + mulch),
+        ],
+        due: Some(due),
+        cleared: false,
+        attachment: false,
+        paid: false,
+    });
+}
+
+/// A bill's amount: its credit to A/P.
+fn bill_amount(t: &Txn) -> i64 {
+    t.lines
+        .iter()
+        .filter(|l| l.account == AP)
+        .map(|l| l.credit)
+        .sum()
+}
+
+/// Card payments, the truck loan and owner draws go out as bank transfers.
+fn is_transfer_payment(t: &Txn) -> bool {
+    matches!(
+        t.memo.as_str(),
+        "Card payment" | "Truck loan payment" | "Owner draw"
+    )
+}
+
+/// Numbers the 1010 checks in date order so the story holds: the story
+/// checks keep 4380, 4392 and 4401, the highest 1010 number is 4417 (a
+/// check), and 4418 is free. Payments that do not get a number become
+/// unnumbered electronic payments (a check becomes an `expense`). Amounts,
+/// dates and lines are untouched, so no figure moves.
+fn renumber_checks(txns: &mut [Txn]) {
+    let pays_1010 = |t: &Txn| t.lines.iter().any(|l| l.account == "1010" && l.credit > 0);
+    let mut cands: Vec<usize> = (0..txns.len())
+        .filter(|&i| matches!(txns[i].kind, "check" | "bill_payment") && pays_1010(&txns[i]))
+        .collect();
+    let unnumber = |t: &mut Txn| {
+        t.number.clear();
+        if t.kind == "check" {
+            t.kind = "expense";
+        }
+    };
+    for &i in &cands {
+        if is_transfer_payment(&txns[i]) {
+            unnumber(&mut txns[i]);
+        }
+    }
+    cands.retain(|&i| !txns[i].number.is_empty());
+    cands.sort_by_key(|&i| (txns[i].date, i));
+    let is_anchor = |t: &Txn| t.contact.as_deref() == Some(STORY_VENDOR);
+    let anchors: Vec<usize> = (0..cands.len())
+        .filter(|&k| is_anchor(&txns[cands[k]]))
+        .collect();
+    assert_eq!(anchors.len(), STORY_CHECKS.len(), "story checks");
+    let numbers: BTreeMap<usize, u32> = anchors
+        .iter()
+        .map(|&k| (k, txns[cands[k]].number.parse().unwrap_or(0)))
+        .collect();
+    let anchor_no = |k: usize| -> u32 { numbers[&k] };
+
+    // Before the first anchor: every payment numbered, ending just below it.
+    let first = anchors[0];
+    let start = anchor_no(first) - u32::try_from(first).unwrap_or(0);
+    for (n, &i) in cands[..first].iter().enumerate() {
+        txns[i].number = (start + u32::try_from(n).unwrap_or(0)).to_string();
+    }
+    // Between anchors, and after the last one up to LAST_CHECK_1010: spread
+    // the free numbers evenly over the payments; the rest go electronic.
+    let mut segments: Vec<(usize, usize, u32, u32)> = anchors
+        .windows(2)
+        .map(|w| (w[0] + 1, w[1], anchor_no(w[0]) + 1, anchor_no(w[1])))
+        .collect();
+    let last = anchors[anchors.len() - 1];
+    // The last numbered payment is a check, so the next check is 4418.
+    let tail_end = (last + 1..cands.len())
+        .rev()
+        .find(|&k| txns[cands[k]].kind == "check")
+        .map_or(last + 1, |k| k + 1);
+    segments.push((last + 1, tail_end, anchor_no(last) + 1, LAST_CHECK_1010 + 1));
+    for k in tail_end..cands.len() {
+        unnumber(&mut txns[cands[k]]);
+    }
+    for (from, to, lo, hi) in segments {
+        let slots = usize::try_from(hi - lo).unwrap_or(0);
+        let m = to - from;
+        assert!(m >= slots, "{m} payments for {slots} numbers from {lo}");
+        let mut next = lo;
+        for j in 0..m {
+            let i = cands[from + j];
+            // Keep j when the even spread crosses a slot boundary there (the
+            // last payment of the segment always gets a number).
+            if (j + 1) * slots / m > j * slots / m {
+                txns[i].number = next.to_string();
+                next += 1;
+            } else {
+                unnumber(&mut txns[i]);
+            }
+        }
+        assert_eq!(next, hi);
+    }
+}
 
 /// The generated fixture.
 struct Fixture {
@@ -402,13 +607,13 @@ fn generate() -> Fixture {
             let d = day(&mut rng);
             let (acct, lo, hi) = *rng.pick(bill_accounts);
             let amount = rng.range(lo, hi);
-            let vendor = rng.pick(VENDOR_NAMES);
+            let vendor = pick_vendor(&mut rng);
             bill_seq += 1;
             txns.push(Txn {
                 date: d,
                 kind: "bill",
                 number: format!("B-{bill_seq}"),
-                contact: Some((*vendor).into()),
+                contact: Some(vendor.into()),
                 memo: "Vendor bill".into(),
                 lines: vec![line(acct, amount, 0), line(AP, 0, amount)],
                 due: Some(d.add_days(30)),
@@ -450,12 +655,12 @@ fn generate() -> Fixture {
             let d = day(&mut rng);
             let (acct, lo, hi) = *rng.pick(expense_accounts);
             let amount = rng.range(lo, hi);
-            let vendor = rng.pick(VENDOR_NAMES);
+            let vendor = pick_vendor(&mut rng);
             txns.push(Txn {
                 date: d,
                 kind: "check",
                 number: format!("{check_no}"),
-                contact: Some((*vendor).into()),
+                contact: Some(vendor.into()),
                 memo: "Check".into(),
                 lines: vec![line(acct, amount, 0), line("1010", 0, amount)],
                 due: None,
@@ -469,12 +674,12 @@ fn generate() -> Fixture {
             let d = day(&mut rng);
             let (acct, lo, hi) = *rng.pick(expense_accounts);
             let amount = rng.range(lo, hi.min(40_000));
-            let vendor = rng.pick(VENDOR_NAMES);
+            let vendor = pick_vendor(&mut rng);
             txns.push(Txn {
                 date: d,
                 kind: "card_charge",
                 number: String::new(),
-                contact: Some((*vendor).into()),
+                contact: Some(vendor.into()),
                 memo: "Card charge".into(),
                 lines: vec![line(acct, amount, 0), line("2050", 0, amount)],
                 due: None,
@@ -561,7 +766,7 @@ fn generate() -> Fixture {
             check_no += 1;
         }
     }
-    let _ = bill_seq;
+    push_story(&mut txns, &mut bill_seq);
 
     // ---- Plugs that make the design figures exact --------------------------
     let ni = |txns: &[Txn], from: Day, to: Day| -> i64 {
@@ -635,7 +840,7 @@ fn generate() -> Fixture {
             .filter(|t| {
                 t.kind == "bill" && !t.paid && t.due.is_some_and(|d| d <= Day(2026, 11, 11))
             })
-            .map(|t| t.lines[0].debit)
+            .map(bill_amount)
             .sum()
     };
     let bills_diff = BILLS_DUE_7 - due_soon(&txns);
@@ -718,6 +923,7 @@ fn generate() -> Fixture {
         txns.iter().filter(|t| t.attachment).count(),
         ATTACHMENT_COUNT
     );
+    renumber_checks(&mut txns);
     txns.sort_by(|a, b| a.date.cmp(&b.date).then_with(|| a.number.cmp(&b.number)));
 
     // ---- Bank feed: 37 items from 11/01..11/03 ---------------------------------
@@ -742,7 +948,11 @@ fn generate() -> Fixture {
         sum += amt;
         feed.push(json!({
             "date": Day(2026, 11, 1 + u32::try_from(i % 3).unwrap_or(0)).text(),
-            "description": format!("{} {}", t.contact.clone().unwrap_or_else(|| "DEPOSIT".into()).to_uppercase(), t.number),
+            "description": format!(
+                "{} {}",
+                t.contact.clone().unwrap_or_else(|| "DEPOSIT".into()).to_uppercase(),
+                if t.number.is_empty() { "EFT" } else { t.number.as_str() }
+            ),
             "amount": cents(amt),
             "status": "ready",
         }));
@@ -863,10 +1073,26 @@ fn render(fx: &Fixture) -> BTreeMap<&'static str, String> {
         "basis": "accrual",
         "storyDate": format!("{:04}-{:02}-{:02}", STORY_DATE.0, STORY_DATE.1, STORY_DATE.2),
         "closingDate": CLOSING_DATE,
-        "accounts": ACCOUNTS.iter().map(|(n, name, t, d)| json!({"number": n, "name": name, "type": t, "detail": if d.is_empty() { Value::Null } else { json!(d) }})).collect::<Vec<_>>(),
+        "accounts": ACCOUNTS.iter().map(|(n, name, t, d)| {
+            let mut a = json!({"number": n, "name": name, "type": t, "detail": if d.is_empty() { Value::Null } else { json!(d) }});
+            if let Some((_, parent)) = ACCOUNT_PARENTS.iter().find(|(c, _)| c == n) {
+                a["parent"] = json!(parent);
+            }
+            a
+        }).collect::<Vec<_>>(),
         "systemAccounts": {"accountsReceivable": AR, "accountsPayable": AP, "openingBalances": OPENING},
         "clients": CLIENT_NAMES,
         "vendors": VENDOR_NAMES,
+        "vendorDetails": [{
+            "name": STORY_VENDOR,
+            "addressLine1": "1200 Commerce Dr",
+            "city": "Aurora",
+            "state": "MO",
+            "zip": "65605",
+            "defaultExpenseAccount": "5110"
+        }],
+        "tags": STORY_TAGS.iter().map(|(name, group)| json!({"name": name, "group": group})).collect::<Vec<_>>(),
+        "jobs": [{"customer": STORY_CUSTOMER, "name": STORY_JOB_NAME}],
         "bank": {
             "lastFileDate": "2026-11-03",
             "lastFileBalance": cents(BANK_FILE_1010),
@@ -882,6 +1108,7 @@ fn render(fx: &Fixture) -> BTreeMap<&'static str, String> {
             "netIncomeJanToOct": cents(NI_JAN_OCT),
             "transactions": TXN_COUNT,
             "attachments": ATTACHMENT_COUNT,
+            "nextCheckNumber1010": LAST_CHECK_1010 + 1,
             "bankFeedWaiting": {"ready": FEED_READY, "review": FEED_REVIEW, "match": FEED_MATCH}
         }
     });
@@ -901,7 +1128,15 @@ fn render(fx: &Fixture) -> BTreeMap<&'static str, String> {
                 "due": t.due.map(Day::text),
                 "cleared": t.cleared,
                 "attachment": t.attachment,
-                "lines": t.lines.iter().map(|l| json!({"account": l.account, "debit": cents(l.debit), "credit": cents(l.credit)})).collect::<Vec<_>>(),
+                "lines": t.lines.iter().map(|l| {
+                    let mut v = json!({"account": l.account, "debit": cents(l.debit), "credit": cents(l.credit)});
+                    for (key, value) in [("memo", l.memo), ("tag", l.tag), ("job", l.job)] {
+                        if let Some(value) = value {
+                            v[key] = json!(value);
+                        }
+                    }
+                    v
+                }).collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -976,6 +1211,45 @@ mod tests {
             assert_eq!(d, c, "{} unbalanced", t.number);
             assert!(t.lines.iter().all(|l| l.debit >= 0 && l.credit >= 0));
         }
+    }
+
+    #[test]
+    fn write_check_story_holds() {
+        let fx = generate();
+        let on_1010 = |t: &&Txn| t.lines.iter().any(|l| l.account == "1010");
+        let numbers: Vec<u32> = fx
+            .txns
+            .iter()
+            .filter(on_1010)
+            .filter_map(|t| t.number.parse().ok())
+            .collect();
+        assert_eq!(numbers.iter().max(), Some(&LAST_CHECK_1010));
+        assert!(!numbers.contains(&(LAST_CHECK_1010 + 1)));
+        let unique: std::collections::BTreeSet<_> = numbers.iter().collect();
+        assert_eq!(unique.len(), numbers.len(), "check numbers are unique");
+        let top = fx
+            .txns
+            .iter()
+            .find(|t| t.number == LAST_CHECK_1010.to_string())
+            .expect("4417");
+        assert_eq!(top.kind, "check");
+        let story: Vec<&Txn> = fx
+            .txns
+            .iter()
+            .filter(|t| t.contact.as_deref() == Some(STORY_VENDOR))
+            .collect();
+        assert_eq!(story.len(), 4, "three checks and the open bill only");
+        for (n, date, plants, mulch) in STORY_CHECKS {
+            let c = story
+                .iter()
+                .find(|t| t.number == n.to_string())
+                .expect("story check");
+            assert_eq!((c.kind, c.date), ("check", *date));
+            assert_eq!(c.lines[0].debit + c.lines[1].debit, plants + mulch);
+        }
+        let bill = story.iter().find(|t| t.kind == "bill").expect("bill");
+        assert_eq!(bill_amount(bill), 128_640);
+        assert_eq!(bill.due, Some(Day(2026, 11, 5)));
     }
 
     #[test]

@@ -62,6 +62,26 @@
     },
     {
       "detail": null,
+      "name": "Materials",
+      "number": "5090",
+      "type": "cogs"
+    },
+    {
+      "detail": null,
+      "name": "Plants",
+      "number": "5100",
+      "parent": "5090",
+      "type": "cogs"
+    },
+    {
+      "detail": null,
+      "name": "Mulch & stone",
+      "number": "5110",
+      "parent": "5090",
+      "type": "cogs"
+    },
+    {
+      "detail": null,
       "name": "Job Supplies and Materials",
       "number": "5200",
       "type": "cogs"
@@ -238,11 +258,18 @@
     "billsDueWithin7Days": "7471.90",
     "netIncomeJanToOct": "125985.00",
     "netIncomeOctober": "13865.14",
+    "nextCheckNumber1010": 4418,
     "openAr": "48912.40",
     "operatingCheckingEnding": "84210.55",
     "transactions": 1512
   },
   "fiscalYearStartMonth": 1,
+  "jobs": [
+    {
+      "customer": "Hollister Family Trust",
+      "name": "Fall bed install"
+    }
+  ],
   "legalName": "Ozark Ridge Landscaping LLC",
   "name": "Ozark Ridge Landscaping LLC",
   "storyDate": "2026-11-04",
@@ -251,6 +278,26 @@
     "accountsReceivable": "10200",
     "openingBalances": "30000"
   },
+  "tags": [
+    {
+      "group": null,
+      "name": "Install"
+    },
+    {
+      "group": "Crew",
+      "name": "Crew A"
+    }
+  ],
+  "vendorDetails": [
+    {
+      "addressLine1": "1200 Commerce Dr",
+      "city": "Aurora",
+      "defaultExpenseAccount": "5110",
+      "name": "Ozark Feed & Seed",
+      "state": "MO",
+      "zip": "65605"
+    }
+  ],
   "vendors": [
     "Ozark Mulch Supply",
     "Tri-Lakes Nursery Wholesale",
@@ -287,7 +334,7 @@
     "Blue Eye Lumber",
     "Rockaway Auto Glass",
     "Sycamore Fence Co",
-    "Dogwood Canyon Supply",
+    "Ozark Feed & Seed",
     "Elm Street Accountants",
     "Persimmon Hill Plants"
   ]
