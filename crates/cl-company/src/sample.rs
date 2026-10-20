@@ -752,8 +752,11 @@ mod tests {
         assert_eq!(s.company.vendors.len(), 38);
         // Every account is the starter chart's, except the Write Check
         // story's Materials accounts (5100 is the chart's inventory-only
-        // Cost of Goods Sold, which the sample company does not turn on).
-        let story = ["5090", "5100", "5110"];
+        // Cost of Goods Sold, which the sample company does not turn on),
+        // and its owner equity accounts: starter charts have none (the
+        // engine seeds them by entity type, U-56), but the sample's history
+        // posts to them.
+        let story = ["5090", "5100", "5110", "3100", "3200"];
         let template = StarterChart::GeneralService.template();
         for a in &s.company.accounts {
             let in_chart = template.accounts.iter().find(|t| t.number == a.number);

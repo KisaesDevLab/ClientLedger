@@ -7,6 +7,12 @@
 //! chart is imported with `POST /accounts/import`; the engine's seven
 //! system numbers are never in a template, and an account marked
 //! `requires` is imported only when that feature is on at setup.
+//!
+//! A starter chart has no equity accounts: the engine seeds the owner's
+//! equity accounts for the company's entity type (`equity-roles-v1`, U-56:
+//! Owner's Draw and Owner's Contribution, partner draws and contributions,
+//! or shareholder distributions and paid-in capital) when the company is
+//! created, so a chart row would be a second, untagged twin.
 
 use cl_api::{AccountImportRow, AccountType};
 use serde::Deserialize;
@@ -142,12 +148,20 @@ impl Template {
             .collect()
     }
 
-    /// Account numbers must be unique (Q-209) and never a system number.
+    /// Account numbers must be unique (Q-209) and never a system number,
+    /// and there are no equity accounts (the engine seeds the owner's,
+    /// U-56).
     #[must_use]
     pub fn problems(&self) -> Vec<String> {
         let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for a in &self.accounts {
+            if a.account_type == AccountType::Equity {
+                out.push(format!(
+                    "equity account {} (the engine seeds them)",
+                    a.number
+                ));
+            }
             if !seen.insert(a.number.as_str()) {
                 out.push(format!("duplicate number {}", a.number));
             }
@@ -208,5 +222,22 @@ mod tests {
                 .all(|r| r.account_number.as_deref().is_some_and(|n| n.len() <= 20))
         );
         assert!(StarterChart::from_id("nope").is_none());
+    }
+
+    #[test]
+    fn an_equity_row_is_a_problem() {
+        let mut t = StarterChart::Retail.template();
+        t.accounts.push(TemplateAccount {
+            number: "3200".into(),
+            name: "Owner Draws".into(),
+            account_type: AccountType::Equity,
+            detail: None,
+            requires: None,
+            description: None,
+        });
+        assert_eq!(
+            t.problems(),
+            vec!["equity account 3200 (the engine seeds them)".to_string()]
+        );
     }
 }
