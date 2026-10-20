@@ -99,8 +99,9 @@ pub struct CheckDraft {
     pub memo: Option<String>,
     /// The memo printed on the check (at most 255 characters).
     pub printed_memo: Option<String>,
-    /// Header tags. The engine adds them to the check (an edit never
-    /// removes one).
+    /// Header tags. On a create they are the check's tags; an edit
+    /// (`PUT /checks/{id}`) always sends them and the engine replaces the
+    /// check's header tags with exactly these (empty clears them).
     pub tag_ids: Vec<TagId>,
     /// The draft the form's files were uploaded under before the first
     /// save; the create moves them onto the check (not sent on an edit).
@@ -514,6 +515,9 @@ impl BankPosting {
 
     /// The `POST /checks` body (`create`), or the `PUT /checks/{id}` body
     /// (the engine ignores a draft attachment on an edit, so none is sent).
+    /// An edit always carries `tagIds` (possibly `[]`): the engine replaces
+    /// the header tags with what is sent, so a removed tag goes away and
+    /// an absent list would leave them as the ledger edit leaves them.
     fn check_body(d: &CheckDraft, create: bool) -> Value {
         let lines: Vec<Value> = d
             .lines
@@ -554,7 +558,7 @@ impl BankPosting {
         if let Some(m) = &d.printed_memo {
             v["printedMemo"] = Value::String(m.clone());
         }
-        if !d.tag_ids.is_empty() {
+        if !create || !d.tag_ids.is_empty() {
             v["tagIds"] = json!(d.tag_ids);
         }
         if create && let Some(k) = d.draft_attachment {

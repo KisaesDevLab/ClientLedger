@@ -168,7 +168,21 @@ fn the_requested_fingerprint_is_the_stored_checks() {
     let d = story();
     let p = posting(d.clone());
     let stored = record(RECORD);
-    assert_eq!(stored.fingerprint(), requested_fingerprint(&p, &d));
+    assert_eq!(stored.fingerprint(), requested_fingerprint(&p, &d, None));
+    // Keep number: still numbered. Reprint: back in the queue, no number.
+    assert_eq!(
+        stored.fingerprint(),
+        requested_fingerprint(&p, &d, Some(PrintedCheckChange::KeepNumber))
+    );
+    let mut reprinted = inner(RECORD);
+    reprinted["checkNumber"] = Value::Null;
+    reprinted["printStatus"] = Value::String("queue".into());
+    let reprinted = CheckRecord::deserialize(&reprinted).expect("reprinted");
+    assert_eq!(
+        reprinted.fingerprint(),
+        requested_fingerprint(&p, &d, Some(PrintedCheckChange::Reprint))
+    );
+    assert_ne!(reprinted.fingerprint(), stored.fingerprint());
     // A printed check that keeps its number stays printed: same kind.
     let mut printed = inner(RECORD);
     printed["printStatus"] = Value::String("printed".into());
@@ -221,14 +235,61 @@ fn the_requested_fingerprint_is_the_stored_checks() {
     let mut queued = record(QUEUED);
     assert_eq!(
         queued.fingerprint(),
-        requested_fingerprint(&posting(q.clone()), &q)
+        requested_fingerprint(&posting(q.clone()), &q, None)
     );
     queued.txn.lines[0].debit = m("100.0001");
     assert_ne!(
         queued.fingerprint(),
-        requested_fingerprint(&posting(q.clone()), &q)
+        requested_fingerprint(&posting(q.clone()), &q, None)
     );
     assert_eq!(CheckRecord::EDITABLE[..14], *Transaction::EDITABLE);
+}
+
+/// The expense path (no `check-edit-v1`) re-reads the plain transaction:
+/// its version leaves the check fields out; the engine's own version is
+/// the same for both reads.
+#[test]
+fn the_transaction_version_of_a_check_is_the_ledger_records() {
+    let r = record(RECORD);
+    let read = Versioned {
+        version: RecordVersion::Fingerprint(r.fingerprint()),
+        record: r.clone(),
+    };
+    let txn = read.transaction_version();
+    assert_eq!(
+        txn,
+        RecordVersion::Fingerprint(EditableFields::fingerprint(&r.txn))
+    );
+    assert_ne!(txn, read.version, "the check fields are not in it");
+    let server = Versioned {
+        version: RecordVersion::Server(7),
+        record: r,
+    };
+    assert_eq!(server.transaction_version(), RecordVersion::Server(7));
+}
+
+#[test]
+fn only_a_code_less_409_is_a_used_number() {
+    let conflict = |code: Option<&str>| ApiError::Conflict {
+        reason: ConflictReason::Unspecified,
+        current_version: None,
+        code: code.and_then(crate::ErrorCode::parse),
+        message: crate::UserText::default(),
+    };
+    assert!(is_number_used(&conflict(None)));
+    for code in [LINE_BILLED, CHECK_PRINTED, "SOMETHING_NEW"] {
+        assert!(!is_number_used(&conflict(Some(code))), "{code}");
+    }
+    assert!(is_line_billed(&conflict(Some(LINE_BILLED))));
+    assert!(!is_line_billed(&conflict(Some(CHECK_PRINTED))));
+    assert!(!is_line_billed(&conflict(None)));
+    let stale = ApiError::Conflict {
+        reason: ConflictReason::Stale,
+        current_version: None,
+        code: None,
+        message: crate::UserText::default(),
+    };
+    assert!(!is_number_used(&stale));
 }
 
 #[test]
