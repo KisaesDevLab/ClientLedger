@@ -216,6 +216,7 @@ fn suggestion_requests_omit_both_keys_and_send_money_as_strings() {
         amount,
         contact: None,
         bank_account: bank,
+        date: cl_core::CalendarDate::from_ymd(2026, 11, 4).ok(),
     };
     assert_clean("RuleQuery", &rule);
     let row = cl_api::AiPreviewRow {

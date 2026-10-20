@@ -509,7 +509,8 @@ pub fn field_census(h: &Harness) {
             name: "GET /transactions/{id} transaction.lines[]",
             keys: fields_of::<TransactionLine>(),
             strings: &["debit", "credit"],
-            optional: &[],
+            // P13: `line-billable-v1` adds these; older engines leave them out.
+            optional: &["isBillable", "billedStatus"],
         },
         line,
     );

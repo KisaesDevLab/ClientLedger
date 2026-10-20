@@ -59,8 +59,13 @@ pub use resources::ai::{
 };
 pub use resources::audit::{Audit, AuditAction, AuditEntity, AuditEntry, AuditImage, AuditLine};
 pub use resources::bank_postings::{
-    BankPosting, BankPostingKind, CardChargeDraft, CheckDraft, DepositDraft, PAYEE_NAME_MAX,
-    SplitLine, TransferDraft,
+    BankPosting, BankPostingKind, CardChargeDraft, CheckDraft, DepositDraft, PAYEE_ADDRESS_MAX,
+    PAYEE_NAME_MAX, PRINTED_MEMO_MAX, SplitLine, TransferDraft,
+};
+// P13 WP1: write check.
+pub use resources::checks::{
+    CheckRecord, CheckSettings, CheckSummary, Checks, PrintStatus, check_settings_from_json,
+    checks_from_json,
 };
 pub use resources::common::SortDir;
 pub use resources::company::{
@@ -110,9 +115,9 @@ pub use resources::tenants::{
     ImportVerification, JobError, JobId, JobState, NewTenant, TenantSummary, Tenants,
 };
 pub use resources::transactions::{
-    Basis, DELETE_REASON_MAX_CHARS, DeleteOptions, JeLine, MAX_LINES, NewJournalEntry, ReportBasis,
-    Side, Transaction, TransactionFilter, TransactionLine, TransactionSummary, Transactions,
-    TxnSort, TxnStatus, TxnType,
+    Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions, JeLine, MAX_LINES,
+    NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter, TransactionLine,
+    TransactionSummary, Transactions, TxnSort, TxnStatus, TxnType,
 };
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{

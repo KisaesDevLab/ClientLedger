@@ -1,14 +1,16 @@
-//! The owner's rule that matches a form (P13 WP2, capability
-//! `rules-evaluate-v1`): `POST /conditional-rules/evaluate`.
+//! The owner's rule that matches a form (P13 WP2, U-51, capability
+//! `rules-evaluate-v1`): `POST /practice/conditional-rules/evaluate`.
 //!
 //! The rule only names an account, a tag and a contact. The amount sent is
 //! the owner's typed amount as an exact decimal string, and nothing is read
 //! back as money. Works offline (the rules live in the books). The
 //! engine change is in progress, so the call is refused locally until the
-//! engine advertises the capability.
+//! engine advertises the capability. The route sits under the engine's
+//! practice router and carries its gate (a 404 while the tenant's
+//! conditional rules are off).
 
-use cl_core::Money;
 use cl_core::ids::{AccountId, ContactId, TagId};
+use cl_core::{CalendarDate, Money};
 use serde::{Deserialize, Serialize};
 
 use crate::client::{Call, Method};
@@ -17,8 +19,9 @@ use crate::resources::operations::RULES_EVALUATE;
 use crate::session::{Session, decode, json_body};
 use crate::wire::Capabilities;
 
-/// The longest description the engine reads for a rule match.
-pub const RULE_DESCRIPTION_MAX_CHARS: usize = 500;
+/// The longest description the engine reads for a rule match (UTF-16
+/// code units, as the engine's schema counts them).
+pub const RULE_DESCRIPTION_MAX_CHARS: usize = 1000;
 
 /// What the form holds when it asks for a rule.
 #[derive(Clone, PartialEq, Eq, Serialize)]
@@ -34,6 +37,10 @@ pub struct RuleQuery {
     /// The bank account the check is written from.
     #[serde(rename = "bankAccountId")]
     pub bank_account: AccountId,
+    /// The form's date (rules may test the date or the weekday); the
+    /// engine takes today (UTC) without it.
+    #[serde(rename = "txnDate", skip_serializing_if = "Option::is_none")]
+    pub date: Option<CalendarDate>,
 }
 
 /// Hides the description and the amount (owner data).
@@ -94,7 +101,8 @@ impl Rules<'_> {
     /// # Errors
     /// `Local(RulesEvaluateUnavailable)` until the engine advertises
     /// `rules-evaluate-v1`, `Local(InvalidValue)` for a description over
-    /// 500 characters (nothing sent in either case); any [`ApiError`].
+    /// 1000 characters (nothing sent in either case); `NotFound` while the
+    /// company's conditional rules are off; any [`ApiError`].
     pub async fn evaluate(&self, query: &RuleQuery) -> Result<Option<RuleMatch>, ApiError> {
         #[derive(Deserialize)]
         struct W {
@@ -109,7 +117,7 @@ impl Rules<'_> {
         {
             return Err(ApiError::Local(LocalValidation::RulesEvaluateUnavailable));
         }
-        if query.description.chars().count() > RULE_DESCRIPTION_MAX_CHARS {
+        if query.description.encode_utf16().count() > RULE_DESCRIPTION_MAX_CHARS {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
         }
         let call = Call::at(Method::Post, RULES_EVALUATE.route()).json_body(json_body(query)?);
@@ -135,8 +143,11 @@ mod tests {
             amount: Money::parse_wire("1286.4000").expect("m"),
             contact: None,
             bank_account: AccountId::parse(BANK).expect("id"),
+            date: None,
         }
     }
+
+    const ROUTE: &str = "/api/v1/practice/conditional-rules/evaluate";
 
     #[tokio::test]
     async fn refused_without_the_capability() {
@@ -155,7 +166,7 @@ mod tests {
         let server = MockServer::start().await;
         let s = session_with_caps(&server, &[Capabilities::RULES_EVALUATE]).await;
         Mock::given(method("POST"))
-            .and(path("/api/v1/conditional-rules/evaluate"))
+            .and(path(ROUTE))
             .respond_with(json(
                 200,
                 &format!(
@@ -167,7 +178,7 @@ mod tests {
             .mount(&server)
             .await;
         Mock::given(method("POST"))
-            .and(path("/api/v1/conditional-rules/evaluate"))
+            .and(path(ROUTE))
             .respond_with(json(200, r#"{"match":null}"#))
             .mount(&server)
             .await;
@@ -187,14 +198,22 @@ mod tests {
             body,
             serde_json::json!({"description":"Ozark Feed canary","amount":"1286.4000","bankAccountId":BANK})
         );
-        assert_eq!(s.rules().evaluate(&q()).await.expect("none"), None);
+        let mut dated = q();
+        dated.date = CalendarDate::from_ymd(2026, 11, 4).ok();
+        assert_eq!(s.rules().evaluate(&dated).await.expect("none"), None);
+        let body: Value =
+            serde_json::from_slice(&requests(&server, "POST").await[1].body).expect("json");
+        assert_eq!(body["txnDate"], "2026-11-04");
 
+        // 1000 UTF-16 units pass; one more (an emoji counts two) is refused.
         let mut long = q();
-        long.description = "x".repeat(501);
+        long.description = "x".repeat(1000);
+        assert_eq!(s.rules().evaluate(&long).await.expect("at the limit"), None);
+        long.description = format!("{}\u{1F33F}", "x".repeat(999));
         assert_eq!(
             s.rules().evaluate(&long).await.expect_err("long"),
             ApiError::Local(LocalValidation::InvalidValue)
         );
-        assert_eq!(requests(&server, "POST").await.len(), 2);
+        assert_eq!(requests(&server, "POST").await.len(), 3);
     }
 }

@@ -199,6 +199,14 @@ pub enum LocalValidation {
     AttachmentType,
     /// Rule suggestions need `rules-evaluate-v1`; nothing was sent.
     RulesEvaluateUnavailable,
+    // ---- P13 WP1: write check ----
+    /// A customer or a billable mark on a check or expense line needs
+    /// `line-billable-v1`; nothing was sent.
+    LineBillableUnavailable,
+    /// Editing a check's own fields (`PUT /checks/{id}`) needs
+    /// `check-edit-v1`; nothing was sent. The P12 expense path still
+    /// changes its date, payee, memo and lines.
+    CheckEditUnavailable,
 }
 
 /// A save was refused because its date is on or before the closing date.

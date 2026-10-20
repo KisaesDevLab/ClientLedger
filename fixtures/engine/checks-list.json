@@ -1,0 +1,40 @@
+{
+  "data": [
+    {
+      "id": "7c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a18",
+      "txnDate": "2026-11-04T05:00:00.000Z",
+      "amount": "1286.4000",
+      "memo": "Acct 7712 · perennials and mulch",
+      "status": "posted",
+      "checkNumber": 4418,
+      "printStatus": "hand_written",
+      "payeeNameOnCheck": "Sample Feed & Seed",
+      "printedMemo": "Acct 7712 · perennials and mulch",
+      "contactName": "Sample Feed & Seed"
+    },
+    {
+      "id": "7c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a19",
+      "txnDate": "2026-11-03T23:00:00.000Z",
+      "amount": "100.0000",
+      "memo": null,
+      "status": "posted",
+      "checkNumber": null,
+      "printStatus": "queue",
+      "payeeNameOnCheck": "",
+      "printedMemo": null,
+      "contactName": "Sample Feed & Seed"
+    },
+    {
+      "id": "7c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+      "txnDate": "2026-10-02",
+      "amount": 2318.6,
+      "memo": null,
+      "status": "void",
+      "checkNumber": 4401,
+      "printStatus": "printed",
+      "payeeNameOnCheck": "Sample Feed & Seed",
+      "printedMemo": null,
+      "contactName": null
+    }
+  ]
+}

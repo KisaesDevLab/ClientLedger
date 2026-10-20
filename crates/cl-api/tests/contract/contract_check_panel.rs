@@ -256,6 +256,7 @@ pub fn rules_evaluate(h: &Harness) {
         amount: m("1286.4000"),
         contact: None,
         bank_account: bank,
+        date: None,
     };
     if h.require_cap(Capabilities::RULES_EVALUATE, "rules-evaluate-v1") {
         // A fresh company has no rules: nothing matches.

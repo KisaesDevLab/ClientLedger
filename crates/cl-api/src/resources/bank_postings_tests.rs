@@ -37,6 +37,7 @@ fn split(account: &str, amount: &str, memo: Option<&str>) -> SplitLine {
         amount: m(amount),
         memo: memo.map(str::to_string),
         contact: None,
+        billable: false,
         tag: None,
     }
 }
@@ -48,7 +49,12 @@ fn check_draft() -> CheckDraft {
         payee: Some(ContactId::parse(PAYEE).expect("id")),
         payee_name: "  Sample Supply Co ".into(),
         check_number: Some(1042),
+        print_later: false,
+        payee_address: None,
         memo: Some("September".into()),
+        printed_memo: None,
+        tag_ids: Vec::new(),
+        draft_attachment: None,
         amount: m("1084.6612"),
         lines: vec![
             SplitLine {
@@ -120,8 +126,34 @@ fn bad_drafts_are_refused_locally() {
     let mut d = check_draft();
     d.check_number = Some(0);
     assert_eq!(BankPosting::check(d), Err(L::InvalidValue));
+    // A line customer or billable mark needs `line-billable-v1`.
     let mut d = check_draft();
     d.lines[0].contact = Some(ContactId::parse(PAYEE).expect("id"));
+    assert_eq!(BankPosting::check(d), Err(L::LineBillableUnavailable));
+    let mut d = check_draft();
+    d.lines[0].billable = true;
+    assert_eq!(
+        BankPosting::check_with(d.clone(), false),
+        Err(L::LineBillableUnavailable)
+    );
+    // Billable needs the customer, even with the capability.
+    assert_eq!(BankPosting::check_with(d, true), Err(L::InvalidValue));
+    let mut d = check_draft();
+    d.print_later = true;
+    assert_eq!(
+        BankPosting::check(d),
+        Err(L::InvalidValue),
+        "a number and Print later"
+    );
+    // 500 UTF-16 units of address pass; one more (an emoji counts two)
+    // does not. The printed memo stops at 255.
+    let mut d = check_draft();
+    d.payee_address = Some("a".repeat(PAYEE_ADDRESS_MAX));
+    assert!(BankPosting::check(d.clone()).is_ok());
+    d.payee_address = Some(format!("{}\u{1F33F}", "a".repeat(PAYEE_ADDRESS_MAX - 1)));
+    assert_eq!(BankPosting::check(d), Err(L::InvalidValue));
+    let mut d = check_draft();
+    d.printed_memo = Some("m".repeat(PRINTED_MEMO_MAX + 1));
     assert_eq!(BankPosting::check(d), Err(L::InvalidValue));
     let mut d = check_draft();
     d.lines = vec![split(EXP, "1", None); MAX_LINES + 1];
@@ -140,6 +172,12 @@ fn bad_drafts_are_refused_locally() {
     let mut d = card_draft();
     d.lines[0].contact = Some(ContactId::parse(PAYEE).expect("id"));
     assert_eq!(BankPosting::card_charge(d), Err(L::InvalidValue));
+    let mut d = card_draft();
+    d.lines[0].billable = true;
+    assert_eq!(BankPosting::card_charge(d), Err(L::InvalidValue));
+    let mut d = deposit_draft();
+    d.lines[0].billable = true;
+    assert_eq!(BankPosting::deposit(d), Err(L::InvalidValue));
     let mut d = card_draft();
     d.number = Some("x".repeat(51));
     assert_eq!(BankPosting::card_charge(d), Err(L::InvalidValue));
@@ -202,6 +240,144 @@ fn bodies_carry_exact_strings_and_explicit_tags() {
             }
         }
     }
+}
+
+const JOB: &str = "4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+const TAG2: &str = "3b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+const DRAFT: &str = "5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+
+/// The mockup check (P13): 4418, 842.15 (billable to a job) + 444.25.
+fn story_draft() -> CheckDraft {
+    CheckDraft {
+        check_number: Some(4418),
+        payee_address: Some("1200 Commerce Dr\nAurora, MO 65605".into()),
+        memo: Some("Acct 7712 canary".into()),
+        printed_memo: Some("Acct 7712 canary".into()),
+        tag_ids: vec![
+            TagId::parse(TAG).expect("tag"),
+            TagId::parse(TAG2).expect("tag"),
+            TagId::parse(TAG).expect("tag"),
+        ],
+        draft_attachment: Some(DraftKey::parse(DRAFT).expect("draft")),
+        amount: m("1286.40"),
+        lines: vec![
+            SplitLine {
+                contact: Some(ContactId::parse(JOB).expect("job")),
+                billable: true,
+                tag: Some(TagId::parse(TAG).expect("tag")),
+                ..split(EXP, "842.15", None)
+            },
+            split(EXP2, "444.25", None),
+        ],
+        ..check_draft()
+    }
+}
+
+#[test]
+fn a_full_check_body_carries_every_check_field_as_strings() {
+    let p = BankPosting::check_with(story_draft(), true).expect("check");
+    let v = p.create_value();
+    assert_eq!(v["amount"], "1286.4000");
+    assert_eq!(v["checkNumber"], 4418);
+    assert_eq!(v["printLater"], false);
+    assert_eq!(v["payeeAddress"], "1200 Commerce Dr\nAurora, MO 65605");
+    assert_eq!(v["printedMemo"], "Acct 7712 canary");
+    assert_eq!(v["memo"], "Acct 7712 canary");
+    assert_eq!(v["tagIds"], serde_json::json!([TAG, TAG2]), "deduplicated");
+    assert_eq!(v["draftAttachmentId"], DRAFT);
+    assert_eq!(v["lines"][0]["amount"], "842.1500");
+    assert_eq!(v["lines"][0]["contactId"], JOB);
+    assert_eq!(v["lines"][0]["isBillable"], true);
+    assert_eq!(v["lines"][1]["amount"], "444.2500");
+    assert!(v["lines"][1].get("contactId").is_none(), "only when set");
+    assert!(v["lines"][1].get("isBillable").is_none(), "only when set");
+    // The edit body is the same without the draft (the engine ignores it).
+    let put = p.check_put_value().expect("put body");
+    assert!(put.get("draftAttachmentId").is_none());
+    let mut without = v.clone();
+    without
+        .as_object_mut()
+        .expect("object")
+        .remove("draftAttachmentId");
+    assert_eq!(put, without);
+    // No money is ever a JSON number; nothing names the override.
+    for body in [&v, &put, &p.update_value()] {
+        let text = body.to_string();
+        for n in ["842.15,", "444.25,", "1286.4,", ":1286", ":842", ":444"] {
+            assert!(!text.contains(n), "{n} in {text}");
+        }
+        for bad in ["overrideConfirmed", "lockDate", "closingPassword"] {
+            assert!(!text.contains(bad), "{bad} in {text}");
+        }
+    }
+    // The expense path (no `check-edit-v1`) keeps the line customer too.
+    let u = p.update_value();
+    assert_eq!(u["lines"][0]["contactId"], JOB);
+    assert_eq!(u["lines"][0]["isBillable"], true);
+    // Not a check: no PUT /checks body.
+    let tr = BankPosting::transfer(transfer_draft()).expect("transfer");
+    assert!(tr.check_put_value().is_none());
+    // Debug shows ids, flags and counts, never owner text or amounts.
+    let shown = format!("{:?} {p:?}", story_draft());
+    for secret in ["canary", "Commerce", "1286", "842"] {
+        assert!(!shown.contains(secret), "{secret} in {shown}");
+    }
+}
+
+#[test]
+fn print_later_sends_no_number_and_blank_texts_are_dropped() {
+    let mut d = story_draft();
+    d.check_number = None;
+    d.print_later = true;
+    d.payee_address = Some("  \n ".into());
+    d.printed_memo = Some(String::new());
+    d.tag_ids.clear();
+    d.draft_attachment = None;
+    let v = BankPosting::check_with(d, true)
+        .expect("check")
+        .create_value();
+    assert_eq!(v["printLater"], true);
+    for absent in [
+        "checkNumber",
+        "payeeAddress",
+        "printedMemo",
+        "tagIds",
+        "draftAttachmentId",
+    ] {
+        assert!(v.get(absent).is_none(), "{absent} in {v}");
+    }
+}
+
+#[test]
+fn a_billable_line_is_part_of_the_fingerprint() {
+    let p = BankPosting::check_with(story_draft(), true).expect("check");
+    let mut plain = story_draft();
+    plain.lines[0].billable = false;
+    let q = BankPosting::check_with(plain, true).expect("check");
+    assert_ne!(p.created_fingerprint(), q.created_fingerprint());
+    // As the engine stores it (`GET /transactions/{id}`, line-billable-v1).
+    let mut line0 = sl(0, EXP, "842.1500", "0.0000", None, Some(TAG), Some(JOB));
+    line0["isBillable"] = Value::Bool(true);
+    line0["billedStatus"] = Value::String("unbilled".into());
+    let mut bank = sl(2, BANK, "0.0000", "1286.4000", None, None, None);
+    bank["isBillable"] = Value::Bool(false);
+    bank["billedStatus"] = Value::Null;
+    let rec = stored(
+        "expense",
+        Some(PAYEE),
+        Some("Acct 7712 canary"),
+        &[
+            line0,
+            sl(1, EXP2, "444.2500", "0.0000", None, None, None),
+            bank,
+        ],
+    );
+    assert!(rec.lines[0].is_billable);
+    assert_eq!(
+        rec.lines[0].billed_status,
+        Some(crate::resources::transactions::BilledStatus::Unbilled)
+    );
+    assert_eq!(rec.fingerprint(), p.created_fingerprint());
 }
 
 /// The record the engine stores, as `GET /transactions/{id}` shows it.

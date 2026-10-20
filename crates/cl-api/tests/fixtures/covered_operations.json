@@ -113,5 +113,8 @@
   {"method":"GET","path":"/api/v1/attachments","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/attachments/{id}/download","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"POST","path":"/api/v1/ai/categorize/preview","inSpec":true,"fragmentHash":"8014ee765ad97f47fff54df3cf8a20fb6c986a29cf04c49fec1e4ee11678a6c9"},
-  {"method":"POST","path":"/api/v1/conditional-rules/evaluate","inSpec":false,"fragmentHash":null}
+  {"method":"POST","path":"/api/v1/practice/conditional-rules/evaluate","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/checks","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/checks/settings","inSpec":true,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/checks/{id}","inSpec":false,"fragmentHash":null}
 ]

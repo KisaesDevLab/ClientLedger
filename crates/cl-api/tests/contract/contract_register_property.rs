@@ -169,6 +169,7 @@ fn split(account: AccountId, amount: Money) -> SplitLine {
         amount,
         memo: None,
         contact: None,
+        billable: false,
         tag: None,
     }
 }
@@ -186,7 +187,12 @@ impl Spec {
                 payee: None,
                 payee_name: PAYEES[*payee].into(),
                 check_number: None,
+                print_later: false,
+                payee_address: None,
                 memo,
+                printed_memo: None,
+                tag_ids: Vec::new(),
+                draft_attachment: None,
                 amount: total(lines),
                 lines: splits(lines),
             })

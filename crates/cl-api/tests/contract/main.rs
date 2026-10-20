@@ -34,6 +34,7 @@ mod contract_register_property;
 mod contract_resources;
 mod contract_session;
 mod contract_tags;
+mod contract_write_check;
 
 use support::{EngineMode, TestFn, run_suite};
 
@@ -198,6 +199,12 @@ fn main() -> std::process::ExitCode {
         (
             "check_panel::ai_preview_is_refused_while_ai_is_off",
             contract_check_panel::ai_preview_is_refused_while_ai_is_off,
+        ),
+        ("write_check::gl_effect", contract_write_check::gl_effect),
+        ("write_check::edges", contract_write_check::edges),
+        (
+            "write_check::closed_period",
+            contract_write_check::closed_period,
         ),
         (
             "register_property::balance_holds_after_random_edits",

@@ -36,6 +36,7 @@ fn split(account: AccountId, amount: &str, memo: Option<&str>) -> SplitLine {
         amount: m(amount),
         memo: memo.map(str::to_string),
         contact: None,
+        billable: false,
         tag: None,
     }
 }
@@ -68,7 +69,12 @@ pub fn check(a: &Accounts, on: CalendarDate, memo: &str, amounts: (&str, &str)) 
         payee: None,
         payee_name: "Sample Payee".into(),
         check_number: None,
+        print_later: false,
+        payee_address: None,
         memo: Some(memo.to_string()),
+        printed_memo: None,
+        tag_ids: Vec::new(),
+        draft_attachment: None,
         amount: total,
         lines: vec![
             split(a.supplies, amounts.0, Some("Paper")),

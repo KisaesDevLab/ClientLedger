@@ -1,0 +1,42 @@
+{
+  "transaction": {
+    "id": "7c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a19",
+    "txnType": "expense",
+    "txnNumber": null,
+    "txnDate": "2026-11-04",
+    "status": "posted",
+    "basis": "both",
+    "contactId": "4a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+    "contactName": "Sample Feed & Seed",
+    "memo": null,
+    "total": "100.0000",
+    "checkNumber": null,
+    "printStatus": "queue",
+    "payeeNameOnCheck": "Sample Feed & Seed",
+    "payeeAddress": null,
+    "printedMemo": null,
+    "lines": [
+      {
+        "id": "8c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a10",
+        "accountId": "2c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+        "debit": "100.0000",
+        "credit": "0.0000",
+        "description": null,
+        "lineOrder": 0,
+        "tagId": null,
+        "contactId": null
+      },
+      {
+        "id": "8c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a11",
+        "accountId": "2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+        "debit": "0.0000",
+        "credit": "100.0000",
+        "description": null,
+        "lineOrder": 1,
+        "tagId": null,
+        "contactId": null
+      }
+    ],
+    "tags": []
+  }
+}

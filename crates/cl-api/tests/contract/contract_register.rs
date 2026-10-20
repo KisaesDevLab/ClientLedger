@@ -245,6 +245,7 @@ pub fn card_register_columns_and_sign(h: &Harness) {
             amount: m("40.0000"),
             memo: None,
             contact: None,
+            billable: false,
             tag: None,
         }],
     })
