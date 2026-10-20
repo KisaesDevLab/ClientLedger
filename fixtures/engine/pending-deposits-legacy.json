@@ -1,0 +1,23 @@
+{
+  "paymentsClearingBalance": 2092.5,
+  "items": [
+    {
+      "transactionId": "5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+      "txnType": "customer_payment",
+      "date": "2026-11-02",
+      "customerName": "Hollister Family Trust",
+      "refNo": "5521",
+      "paymentMethod": "check",
+      "amount": 1250
+    },
+    {
+      "transactionId": "5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02",
+      "txnType": "customer_payment",
+      "date": "2026-11-03",
+      "customerName": "Maple Street HOA",
+      "refNo": null,
+      "paymentMethod": null,
+      "amount": 842.5
+    }
+  ]
+}

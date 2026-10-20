@@ -1,0 +1,38 @@
+{
+  "feedItemId": "7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+  "targetAmount": "2092.5000",
+  "windowStart": "2026-10-25",
+  "windowEnd": "2026-11-14",
+  "candidates": [
+    {
+      "total": "2092.5000",
+      "itemCount": 2,
+      "items": [
+        {
+          "transactionId": "5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+          "txnType": "customer_payment",
+          "date": "2026-11-02",
+          "customerName": "Hollister Family Trust",
+          "contactId": "6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+          "refNo": "5521",
+          "paymentMethod": "check",
+          "memo": null,
+          "amount": "1250.0000"
+        },
+        {
+          "transactionId": "5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02",
+          "txnType": "customer_payment",
+          "date": "2026-11-03",
+          "customerName": "Maple Street HOA",
+          "contactId": "6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02",
+          "refNo": null,
+          "paymentMethod": "ach",
+          "memo": null,
+          "amount": "842.5000"
+        }
+      ]
+    }
+  ],
+  "truncated": false,
+  "itemsConsidered": 2
+}
