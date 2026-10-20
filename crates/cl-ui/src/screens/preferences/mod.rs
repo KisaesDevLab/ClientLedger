@@ -382,8 +382,9 @@ impl PreferencesScreen {
             self.loaded.done = true;
             return;
         }
-        if self.link.is_demo() {
-            self.apply_loaded(crate::company::demo::preferences_loaded());
+        let demo_ai = self.link.demo_state().map(|d| d.ai);
+        if let Some(switches) = demo_ai {
+            self.apply_loaded(crate::company::demo::preferences_loaded_with(switches));
             return;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
@@ -589,6 +590,13 @@ impl PreferencesScreen {
         after.ai.clear_typed();
         after.email.clear_typed();
         after.company = company_prefs;
+        if let Some(mut demo) = self.link.demo_state() {
+            // The demo engine keeps the AI switches Write Check reads.
+            demo.ai = crate::company::demo::DemoAi {
+                enabled: edits.ai.enabled,
+                categorization: edits.ai.bank_feed,
+            };
+        }
         if self.link.is_demo() || self.tenant.is_none() {
             // No engine: the consent is "recorded" with the version shown.
             let consent = plan.accept_company_consent.then(|| ai::ConsentRecorded {

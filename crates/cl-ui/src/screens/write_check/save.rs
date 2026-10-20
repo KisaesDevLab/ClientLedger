@@ -10,10 +10,10 @@
 use std::sync::Arc;
 
 use cl_api::{
-    ApiError, AuditAction, AuditEntity, BankPosting, CheckDraft, CheckRecord,
+    ApiError, AuditAction, AuditEntity, BankPosting, CheckDraft, CheckEditOptions, CheckRecord,
     ClosedPeriodAuthorization, ConflictReason, DraftKey, IdempotencyKey, LocalValidation,
-    OrphanLabel, PageRequest, PostingOptions, PrintStatus, RecordVersion, SplitLine, TxnStatus,
-    TxnType, Versioned,
+    OrphanLabel, PageRequest, PostingOptions, PrintStatus, PrintedCheckChange, RecordVersion,
+    SplitLine, TxnStatus, TxnType, Versioned, is_check_printed,
 };
 use cl_core::ids::TransactionId;
 use cl_core::{CalendarDate, Secret};
@@ -39,6 +39,8 @@ pub(crate) struct SaveIdentity {
     pub posting: BankPosting,
     pub edit: Option<(TransactionId, RecordVersion)>,
     pub password: bool,
+    /// The owner's choice for a printed check.
+    pub printed: Option<PrintedCheckChange>,
 }
 
 /// A save the engine took.
@@ -264,8 +266,14 @@ impl WriteCheckScreen {
         }
         self.save.intent = Some(intent);
         let edit = self.editing.as_ref().map(|e| (e.id, e.version));
+        let printed = self.save.printed_choice.filter(|_| edit.is_some());
         if self.link.is_demo() {
-            let saved = self.demo_save(&draft, edit.as_ref().map(|(id, _)| *id), password.as_ref());
+            let saved = self.demo_save(
+                &draft,
+                edit.as_ref().map(|(id, _)| *id),
+                password.as_ref(),
+                printed,
+            );
             return match saved {
                 Ok(s) => {
                     self.saved(s);
@@ -281,6 +289,7 @@ impl WriteCheckScreen {
             posting: posting.clone(),
             edit,
             password: password.is_some(),
+            printed,
         });
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             self.save_failed(ApiError::NoCompanyOpen);
@@ -308,9 +317,13 @@ impl WriteCheckScreen {
                     })
                 }
                 Some((id, version)) if check_edit => {
+                    let opts = CheckEditOptions {
+                        posting: opts,
+                        printed_check_change: printed,
+                    };
                     let v = s
                         .checks()
-                        .update_check(id, &version, &posting, &opts, key)
+                        .update_check(id, &version, &posting, opts, key)
                         .await?;
                     Ok(Saved {
                         id,
@@ -354,6 +367,7 @@ impl WriteCheckScreen {
         draft: &CheckDraft,
         existing: Option<TransactionId>,
         password: Option<&Secret>,
+        printed: Option<PrintedCheckChange>,
     ) -> Result<Saved, ApiError> {
         let mut demo = self
             .link
@@ -361,7 +375,9 @@ impl WriteCheckScreen {
             .ok_or(ApiError::Local(LocalValidation::InvalidValue))?;
         let id = match existing {
             None => crate::company::demo::checks::create(&mut demo, draft, password)?,
-            Some(id) => crate::company::demo::checks::update(&mut demo, id, draft, password)?,
+            Some(id) => {
+                crate::company::demo::checks::update(&mut demo, id, draft, password, printed)?
+            }
         };
         let got = crate::company::demo::checks::get(&mut demo, id)
             .ok_or(ApiError::NotFound { code: None })?
@@ -452,9 +468,23 @@ impl WriteCheckScreen {
         let lines = self.lines.value().clone();
         self.lines.form_mut().save_ok(lines, &*lists);
         self.nav = super::Nav::default();
+        self.save.printed_choice = None;
+        self.printed = None;
+        // A draft's file is on the check now; the panel's recent checks
+        // changed.
+        self.attach.draft = None;
+        self.panel.payee = None;
+        let status = self.save.last.as_ref().map(|l| l.print_status.clone());
+        if let (Some(e), Some(status)) = (self.editing.as_mut().filter(|e| e.id == s.id), status) {
+            e.print_status = PrintStatus::from_wire(&status);
+        }
         self.follow_up(intent);
         // The engine's balance and next number after the save.
         self.fetch_bank_facts();
+        // Prev/Next asked before the save (the unsaved-changes prompt).
+        if let Some(older) = self.after_save_nav.take() {
+            self.navigate(older);
+        }
     }
 
     /// After a save (or with nothing to save): a new check, close, or stay.
@@ -496,6 +526,12 @@ impl WriteCheckScreen {
         self.save.problems.clear();
         self.save.duplicate = None;
         self.save.stale = false;
+        self.save.printed_choice = None;
+        self.printed = None;
+        self.nav_prompt = None;
+        self.prefill = super::prefill::PrefillState::default();
+        self.attach = super::attach::AttachState::default();
+        self.reset_suggestions();
         self.focus = Some(Field::Payee);
         self.sync_inputs();
     }
@@ -525,6 +561,22 @@ impl WriteCheckScreen {
         // A closed-period refusal or a wrong password shows in the
         // closing-date dialog, which can send the save again.
         if self.closing_failed(&e, Pending::Save(intent)) {
+            return;
+        }
+        // A printed check whose printed face changed: ask the owner
+        // (nothing changed in the books).
+        if is_check_printed(&e) {
+            self.save.printed_choice = None;
+            self.printed = Some(super::PrintedPrompt {
+                number: self.number_sent().or_else(|| {
+                    self.header
+                        .original()
+                        .number
+                        .text()
+                        .and_then(|t| t.trim().parse().ok())
+                }),
+                intent,
+            });
             return;
         }
         match &e {
@@ -557,6 +609,46 @@ impl WriteCheckScreen {
             NumberField::Proposed(n) => Some(*n),
             NumberField::Typed(s) => s.trim().parse().ok(),
             NumberField::ToPrint { .. } => None,
+        }
+    }
+
+    /// The printed-check question's answer: send the save again with the
+    /// choice, or (`None`, Cancel) leave the check as it is in the books.
+    pub(crate) fn answer_printed(&mut self, choice: Option<PrintedCheckChange>) {
+        let Some(p) = self.printed.take() else { return };
+        let Some(choice) = choice else {
+            self.save.printed_choice = None;
+            return;
+        };
+        self.save.printed_choice = Some(choice);
+        self.start_save(p.intent, None);
+    }
+
+    /// Prev/Next on unsaved changes: the answer to Save / Discard changes /
+    /// Keep editing.
+    pub(crate) fn answer_nav(&mut self, answer: crate::windows::PromptAnswer) {
+        let Some(older) = self.nav_prompt.take() else {
+            return;
+        };
+        match answer {
+            crate::windows::PromptAnswer::Keep => {}
+            crate::windows::PromptAnswer::Discard => {
+                let lists = Arc::clone(&self.lists);
+                self.header.revert_form();
+                self.lines.form_mut().revert_form(&*lists);
+                self.reset_suggestions();
+                self.sync_inputs();
+                self.navigate(older);
+            }
+            crate::windows::PromptAnswer::Save => {
+                self.after_save_nav = Some(older);
+                let done = self.start_save(SaveIntent::Save, None);
+                // Refused or waiting on a question: the move waits for the
+                // save (an engine save moves on when it finishes).
+                if !done && self.save.task.is_none() {
+                    self.after_save_nav = None;
+                }
+            }
         }
     }
 
@@ -600,7 +692,8 @@ impl WriteCheckScreen {
             return;
         }
         if self.is_dirty() {
-            self.save.notice = Some("check.nav.unsaved");
+            // The standard question: Save / Discard changes / Keep editing.
+            self.nav_prompt = Some(older);
             return;
         }
         if self.nav.bank != self.bank() {
@@ -704,8 +797,14 @@ impl WriteCheckScreen {
         self.save.error = None;
         self.save.stale = false;
         self.save.last_action = Some("load");
+        self.save.printed_choice = None;
+        self.printed = None;
         self.history = super::HistoryView::default();
         self.void = super::VoidPrompt::default();
+        self.prefill = super::prefill::PrefillState::default();
+        self.attach = super::attach::AttachState::default();
+        self.reset_suggestions();
+        self.load_attachments();
         self.sync_inputs();
     }
 

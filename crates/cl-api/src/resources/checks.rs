@@ -423,6 +423,68 @@ pub fn check_settings_from_json(body: &[u8]) -> Result<CheckSettings, ApiError> 
     })
 }
 
+/// What happens to a check that was already printed when an edit changes
+/// what is printed on it (`printedCheckChange`, `check-edit-v1`). Without
+/// one, the engine refuses such an edit with 409 `CHECK_PRINTED`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PrintedCheckChange {
+    /// Print it again: it goes back to the print queue without a number.
+    Reprint,
+    /// Keep its number as a handwritten check.
+    KeepNumber,
+}
+
+impl PrintedCheckChange {
+    /// The wire value (`reprint`, `keep_number`).
+    #[must_use]
+    pub const fn as_wire(self) -> &'static str {
+        match self {
+            PrintedCheckChange::Reprint => "reprint",
+            PrintedCheckChange::KeepNumber => "keep_number",
+        }
+    }
+}
+
+/// The engine code of the 409 for an edit that changes a printed check
+/// without saying what to do with it.
+pub const CHECK_PRINTED: &str = "CHECK_PRINTED";
+
+/// True for the engine's refusal to change a printed check without a
+/// [`PrintedCheckChange`] (409 `CHECK_PRINTED`).
+#[must_use]
+pub fn is_check_printed(e: &ApiError) -> bool {
+    matches!(e, ApiError::Conflict { code: Some(c), .. } if c.as_str() == CHECK_PRINTED)
+}
+
+/// Options of a check edit: the posting options (closing-date password)
+/// and, for a printed check, what to do with the printed one.
+#[derive(Clone, Debug, Default)]
+pub struct CheckEditOptions {
+    /// Closing-date password and the like.
+    pub posting: PostingOptions,
+    /// Reprint, or keep the number as handwritten (printed checks only;
+    /// the engine ignores it otherwise).
+    pub printed_check_change: Option<PrintedCheckChange>,
+}
+
+impl From<&PostingOptions> for CheckEditOptions {
+    fn from(posting: &PostingOptions) -> CheckEditOptions {
+        CheckEditOptions {
+            posting: posting.clone(),
+            printed_check_change: None,
+        }
+    }
+}
+
+impl From<PostingOptions> for CheckEditOptions {
+    fn from(posting: PostingOptions) -> CheckEditOptions {
+        CheckEditOptions {
+            posting,
+            printed_check_change: None,
+        }
+    }
+}
+
 /// Check operations of a session (`session.checks()`).
 #[derive(Clone, Copy, Debug)]
 pub struct Checks<'a>(pub(crate) &'a Session);
@@ -504,26 +566,33 @@ impl Checks<'_> {
     /// check; a reconciled bank line), `Conflict` (the number is used on
     /// the bank account), `NotFound`, `ClosedPeriod`,
     /// `ClosingPasswordRejected`, `ClosingPasswordRateLimited`,
-    /// `OutcomeUnknown`, or any [`ApiError`].
+    /// `OutcomeUnknown`, or any [`ApiError`]. A printed check whose
+    /// printed face changes without `opts.printed_check_change` is refused
+    /// with `Conflict` code `CHECK_PRINTED` ([`is_check_printed`]); send it
+    /// again with the owner's choice.
     pub async fn update_check(
         &self,
         id: TransactionId,
         expected: &RecordVersion,
         posting: &BankPosting,
-        opts: &PostingOptions,
+        opts: impl Into<CheckEditOptions>,
         key: IdempotencyKey,
     ) -> Result<Versioned<CheckRecord>, ApiError> {
         let s = self.0;
+        let opts: CheckEditOptions = opts.into();
         if !s.client().capabilities().has(Capabilities::CHECK_EDIT) {
             return Err(ApiError::Local(LocalValidation::CheckEditUnavailable));
         }
-        let (Some(d), Some(value)) = (posting.check_draft(), posting.check_put_value()) else {
+        let (Some(d), Some(mut value)) = (posting.check_draft(), posting.check_put_value()) else {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
         };
         if !d.print_later && d.check_number.is_none() {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
         }
-        let body = posting_body(s, value, opts)?;
+        if let (Some(change), Value::Object(map)) = (opts.printed_check_change, &mut value) {
+            map.insert("printedCheckChange".into(), json!(change.as_wire()));
+        }
+        let body = posting_body(s, value, &opts.posting)?;
         let u = GuardedUpdate {
             get: &TXN_GET,
             put: &CHECK_PUT,

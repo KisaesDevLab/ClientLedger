@@ -15,15 +15,20 @@
 //! every save; the screen never derives one (non-negotiable 7). The amount
 //! in words comes from `cl_model::forms::amount_words`.
 //!
-//! WP7 adds payee prefill, the payee panel (open bills, recent checks,
-//! attachments) and suggestions; [`panel`] holds the side panel's place.
+//! WP7 adds payee prefill ([`prefill`], Q-191/Q-192), the payee panel
+//! ([`panel`]: open balance and the open-bill note, recent checks), the
+//! attachments ([`attach`]) and account suggestions ([`suggest`]: the
+//! owner's rules offline, the AI only behind every AI switch).
 //!
 //! Every engine call runs on the request queue and is polled each frame;
 //! `--demo` answers from `company::demo::checks`.
 
+mod attach;
 mod form;
 mod panel;
+mod prefill;
 mod save;
+mod suggest;
 
 use std::sync::Arc;
 
@@ -162,6 +167,18 @@ pub(crate) struct SaveState {
     pub last_action: Option<&'static str>,
     /// A plain note under the toolbar (i18n key).
     pub notice: Option<&'static str>,
+    /// The owner's answer for a printed check whose printed face changes
+    /// (sent with the next save of this check).
+    pub printed_choice: Option<cl_api::PrintedCheckChange>,
+}
+
+/// "This check was already printed": Reprint / Keep number / Cancel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PrintedPrompt {
+    /// The printed check's number.
+    pub number: Option<u32>,
+    /// What the save was for.
+    pub intent: cl_model::forms::SaveIntent,
 }
 
 /// Prev/Next over the bank account's checks (newest first).
@@ -245,6 +262,21 @@ pub struct WriteCheckScreen {
     pub(crate) after_frame: Option<CommandId>,
     /// The owner's money display style (from the shell each frame).
     pub(crate) money_style: cl_core::MoneyStyle,
+    /// Payee prefill (WP7).
+    pub(crate) prefill: prefill::PrefillState,
+    /// The payee panel's cards.
+    pub(crate) panel: panel::PanelState,
+    /// Attachments.
+    pub(crate) attach: attach::AttachState,
+    /// Account suggestions.
+    pub(crate) suggest: suggest::SuggestState,
+    /// Prev (true) or Next asked on unsaved changes: Save / Discard /
+    /// Keep editing.
+    pub(crate) nav_prompt: Option<bool>,
+    /// Prev/Next to take once the prompt's save is done.
+    pub(crate) after_save_nav: Option<bool>,
+    /// The printed-check question after a 409 `CHECK_PRINTED`.
+    pub(crate) printed: Option<PrintedPrompt>,
 }
 
 /// The tag list `check` needs for the header-tag defaults.
@@ -329,6 +361,13 @@ impl WriteCheckScreen {
             in_grid: false,
             after_frame: None,
             money_style: cl_core::MoneyStyle::default(),
+            prefill: prefill::PrefillState::default(),
+            panel: panel::PanelState::default(),
+            attach: attach::AttachState::default(),
+            suggest: suggest::SuggestState::default(),
+            nav_prompt: None,
+            after_save_nav: None,
+            printed: None,
         };
         s.start_load();
         // The demo answers at once: the form is complete before the first
@@ -650,6 +689,10 @@ impl WriteCheckScreen {
             }
         }
         self.poll_save();
+        self.poll_prefill();
+        self.poll_panel();
+        self.poll_attach();
+        self.poll_suggest();
     }
 
     /// The proposed next number arrived (Q-242, Q-P13m). A clean new form
@@ -819,6 +862,9 @@ impl Screen for WriteCheckScreen {
             self.left_lines();
         }
         self.in_grid = in_grid;
+        // Lines left with a memo or amount and no account (WP7.3).
+        self.maybe_suggest();
+        self.poll_suggest();
         if let Some(cmd) = self.after_frame.take() {
             self.command(cmd);
         }
@@ -866,6 +912,10 @@ impl WriteCheckScreen {
             || self.nav.task.is_some()
             || self.void.task.is_some()
             || self.history.task.is_some()
+            || self.prefill.task.is_some()
+            || self.panel.busy()
+            || self.attach.busy()
+            || self.suggest.busy()
     }
 
     /// The control-channel state: flags, counts and check numbers only
@@ -936,6 +986,29 @@ impl WriteCheckScreen {
                 "focused": self.lines.has_focus(),
             },
         });
+        let wp7 = json!({
+            "prefill": {
+                "applied": self.prefill.applied,
+                "source": self.prefill.source,
+                "dropped": self.prefill.dropped,
+                "pending": self.prefill.task.is_some(),
+            },
+            "panel": self.panel_json(),
+            "attachments": {
+                "count": self.attach.list.len(),
+                "draft": f.draft_attachment.is_some(),
+                "uploading": self.attach.upload.is_some(),
+                "problem": self.attach.problem,
+                "saved_copy": self.attach.saved_to.is_some(),
+            },
+            "ai": self.suggest_json(),
+            "nav_prompt": self.nav_prompt.is_some(),
+            "printed_prompt": self.printed.is_some(),
+            "printed_choice": self.save.printed_choice.map(cl_api::PrintedCheckChange::as_wire),
+        });
+        if let (Value::Object(m), Value::Object(w)) = (&mut v, wp7) {
+            m.extend(w);
+        }
         if let (Value::Object(m), Value::Object(c)) = (
             &mut v,
             self.closing_prompt.state_json(self.closing_supported()),
