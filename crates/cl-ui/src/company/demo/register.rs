@@ -167,6 +167,17 @@ fn matches(b: &Built, q: &RegisterQuery) -> bool {
             return false;
         }
     }
+    if let Some(s) = q.search.as_deref().filter(|s| !s.is_empty()) {
+        let want = s.to_lowercase();
+        let has = |v: Option<&str>| v.is_some_and(|v| v.to_lowercase().contains(&want));
+        if !(has(l.number.as_deref()) || has(l.payee.as_deref()) || has(l.memo.as_deref())) {
+            return false;
+        }
+    }
+    // The sample lines carry no tags.
+    if q.tag.is_some() {
+        return false;
+    }
     if q.min.is_some_and(|m| b.amount < m) || q.max.is_some_and(|m| b.amount > m) {
         return false;
     }

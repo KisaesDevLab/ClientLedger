@@ -175,6 +175,8 @@ pub struct RegisterScreen {
     edit_load: Option<edit::EditLoad>,
     /// A transaction the register can't change, shown read-only.
     read_only: Option<Vec<edit::ReadLine>>,
+    /// The quick filters as typed.
+    quick: filters::QuickInput,
 }
 
 /// Watches the ledger stamp (Q-P12n): read on window focus, every
@@ -246,6 +248,7 @@ impl RegisterScreen {
             edit_lines: Vec::new(),
             edit_load: None,
             read_only: None,
+            quick: filters::QuickInput::default(),
         };
         s.start_load();
         s.load_lists();
@@ -980,6 +983,13 @@ impl Screen for RegisterScreen {
             },
             "display_only": self.model.display_only(),
             "filters_active": self.filters.is_active(),
+            "filters": {
+                "uncleared": self.filters.uncleared,
+                "payee": self.filters.payee_text().is_some(),
+                "tag": self.filters.tag.is_some(),
+                "amount": self.filters.min.is_some() || self.filters.max.is_some(),
+                "problem": self.quick.problem.is_some(),
+            },
             "cursor_row": self.snap.cursor_row,
             "top_row": self.snap.top_row,
             "focused": self.snap.focused,

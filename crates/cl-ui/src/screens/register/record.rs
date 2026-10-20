@@ -62,7 +62,7 @@ pub(super) struct EntryState {
     contacts_task: Option<Task<Vec<Contact>>>,
     tags_task: Option<Task<Vec<Tag>>>,
     contacts: Vec<Contact>,
-    tags: Vec<Tag>,
+    pub(super) tags: Vec<Tag>,
 }
 
 impl EntryState {

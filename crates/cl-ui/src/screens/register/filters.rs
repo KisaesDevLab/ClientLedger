@@ -1,15 +1,69 @@
-//! The register toolbar (P12 WP5, part 1 of `filters.rs`): Account, Show
-//! (date range), Sort by and One line. WP7 adds the quick-filter row.
+//! The register toolbar (P12 WP5): Account, Show (date range), Sort by and
+//! One line, with Go To, QuickReport and Edit Transaction; and the
+//! quick-filter row (WP7, Q-189): Uncleared · Payee · Tag · Amount from/to,
+//! "Clear filters" and the legend.
+//!
+//! Filters go to the engine as query fields; the screen never filters or
+//! adds up rows itself. Typed amounts are exact `Money` from
+//! `cl_model::amount_entry`. Uncleared and Tag need `register-exact-v1`
+//! (R3); before it they are switched off with a plain tooltip (Q-P12d).
 
-use cl_core::ids::AccountId;
+use cl_core::Money;
+use cl_core::ids::{AccountId, TagId};
+use cl_grid::{LookupResult, Lookups};
+use cl_model::amount_entry::{self, AmountKind, AmountRules, Sign};
 use cl_model::date_entry::{self, DateOrder};
-use cl_model::register::{AccountClass, RangePreset, SortChoice};
+use cl_model::register::{AccountClass, Filters, RangePreset, SortChoice};
+use cl_model::{CommandId, commands};
 use eframe::egui::{self, RichText, Ui};
 
+use super::lists::NAMES;
 use super::{RegisterScreen, account_text, class_of};
 use crate::company::CompanyEvent;
 use crate::i18n::t;
 use crate::theme::Tokens;
+
+/// The typed text of the quick filters (applied on Enter or when the
+/// field is left).
+#[derive(Debug, Default)]
+pub struct QuickInput {
+    /// Payee text as typed.
+    pub payee: String,
+    /// Amount from, as typed.
+    pub min: String,
+    /// Amount to, as typed.
+    pub max: String,
+    /// Why the typed filters were not applied (i18n key).
+    pub problem: Option<&'static str>,
+}
+
+/// Rules for a filter amount: cents, zero or more.
+const FILTER_AMOUNT: AmountRules = AmountRules {
+    kind: AmountKind::Money,
+    input: cl_core::UserInput::CENTS,
+    sign: Sign::NonNegative,
+};
+
+/// A typed filter amount: empty is "no bound".
+///
+/// # Errors
+/// The i18n key of the owner message.
+pub fn parse_bound(text: &str) -> Result<Option<Money>, &'static str> {
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    amount_entry::parse(text, FILTER_AMOUNT)
+        .map(|p| p.value.as_money())
+        .map_err(|e| e.key().as_str())
+}
+
+/// The shortcut text of a command ("Ctrl+F"), empty when it has none.
+fn shortcut_hint(id: &str) -> String {
+    commands::find(id)
+        .and_then(|c| c.shortcut)
+        .map(crate::input::shortcut_text)
+        .unwrap_or_default()
+}
 
 /// Register classes in the Account picker's order, with their group label.
 const GROUPS: [(AccountClass, &str); 7] = [
@@ -274,12 +328,256 @@ impl RegisterScreen {
             if ui.checkbox(&mut one, t("register.one_line")).changed() {
                 self.set_one_line(one);
             }
+
+            ui.separator();
+            let b = |ui: &mut Ui, key: &str, cmd: &str| {
+                let hint = shortcut_hint(cmd);
+                let tip = if hint.is_empty() {
+                    t(key)
+                } else {
+                    format!("{} ({hint})", t(key))
+                };
+                ui.button(t(key)).on_hover_text(tip)
+            };
+            if b(ui, "register.goto.open", "edit.find").clicked() {
+                self.command_from_toolbar("edit.find");
+            }
+            if b(ui, "register.quick_report", "list.quick_report").clicked() {
+                self.command_from_toolbar("list.quick_report");
+            }
+            if b(ui, "register.edit_transaction", "edit.edit_transaction").clicked() {
+                self.command_from_toolbar("edit.edit_transaction");
+            }
         });
         if self.custom.open {
             self.custom_ui(ui, tokens);
         }
+        self.quick_filters_ui(ui, tokens);
     }
 
+    fn command_from_toolbar(&mut self, id: &'static str) {
+        crate::windows::Screen::command(self, CommandId::new(id));
+    }
+
+    /// Replaces the filters (after the amount range is checked) and asks
+    /// the engine again.
+    pub(crate) fn set_filters(&mut self, f: Filters) {
+        if let Err(p) = f.check() {
+            self.quick.problem = Some(p.key().as_str());
+            return;
+        }
+        self.quick.problem = None;
+        if f != self.filters {
+            self.filters = f;
+            self.apply_query();
+        }
+    }
+
+    /// "Clear filters".
+    pub(crate) fn clear_filters(&mut self) {
+        self.quick = QuickInput::default();
+        let mut f = self.filters.clone();
+        f.clear();
+        self.set_filters(f);
+    }
+
+    /// The typed payee, completed to a known name when the typing starts
+    /// one (autofill, as in the entry row).
+    fn complete_payee(&self, typed: &str) -> String {
+        let typed = typed.trim();
+        if typed.is_empty() {
+            return String::new();
+        }
+        if let Some(s) = self.lists.exact(NAMES, typed) {
+            return s.label;
+        }
+        if let LookupResult::Ready(s) = self.lists.suggest(NAMES, typed, 1)
+            && let Some(first) = s.first()
+            && first
+                .label
+                .to_lowercase()
+                .starts_with(&typed.to_lowercase())
+        {
+            return first.label.clone();
+        }
+        typed.to_string()
+    }
+
+    /// Applies the typed payee and amounts.
+    pub(crate) fn apply_typed_filters(&mut self) {
+        let payee = self.complete_payee(&self.quick.payee);
+        self.quick.payee.clone_from(&payee);
+        let (min, max) = match (parse_bound(&self.quick.min), parse_bound(&self.quick.max)) {
+            (Ok(lo), Ok(hi)) => (lo, hi),
+            (Err(p), _) | (_, Err(p)) => {
+                self.quick.problem = Some(p);
+                return;
+            }
+        };
+        let mut f = self.filters.clone();
+        f.payee = (!payee.is_empty()).then_some(payee);
+        f.min = min;
+        f.max = max;
+        self.set_filters(f);
+    }
+
+    /// Sets the tag filter (`None` is any tag).
+    pub(crate) fn set_tag_filter(&mut self, tag: Option<TagId>) {
+        let mut f = self.filters.clone();
+        f.tag = tag;
+        self.set_filters(f);
+    }
+
+    /// Uncleared on or off.
+    pub(crate) fn set_uncleared(&mut self, on: bool) {
+        let mut f = self.filters.clone();
+        f.uncleared = on;
+        self.set_filters(f);
+    }
+
+    /// The quick-filter row and the legend.
+    fn quick_filters_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let exact = self.register_exact();
+        let mut typed_done = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(t("register.filter.title")).color(tokens.text_secondary),
+                )
+                .selectable(false),
+            );
+            let mut uncleared = self.filters.uncleared;
+            let r = ui.add_enabled(
+                exact,
+                egui::Checkbox::new(&mut uncleared, t("register.filter.uncleared")),
+            );
+            let r = if exact {
+                r.on_hover_text(t("register.filter.uncleared_help"))
+            } else {
+                r.on_disabled_hover_text(t("register.filter.needs_engine"))
+            };
+            if r.changed() {
+                self.set_uncleared(uncleared);
+            }
+
+            let l = ui.add(egui::Label::new(t("register.filter.payee")).selectable(false));
+            let r = ui
+                .add_sized(
+                    [150.0, 22.0],
+                    egui::TextEdit::singleline(&mut self.quick.payee)
+                        .hint_text(t("register.filter.payee_hint")),
+                )
+                .labelled_by(l.id);
+            if r.has_focus() {
+                let typed = self.quick.payee.trim();
+                let done = self.complete_payee(typed);
+                if !typed.is_empty() && done != typed {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("\u{2192} {done}"))
+                                .size(12.0)
+                                .color(tokens.text_secondary),
+                        )
+                        .selectable(false),
+                    );
+                }
+            }
+            typed_done |= r.lost_focus();
+
+            let (choices, ids) = self.tag_choices();
+            let current = ids
+                .iter()
+                .position(|id| *id == self.filters.tag)
+                .unwrap_or(0);
+            ui.add_enabled_ui(exact, |ui| {
+                if let Some(i) = combo(
+                    ui,
+                    "register/filter-tag",
+                    &t("register.filter.tag"),
+                    &choices,
+                    current,
+                ) && let Some(id) = ids.get(i)
+                {
+                    self.set_tag_filter(*id);
+                }
+            })
+            .response
+            .on_disabled_hover_text(t("register.filter.needs_engine"));
+
+            let l = ui.add(egui::Label::new(t("register.filter.amount_from")).selectable(false));
+            let r = ui
+                .add_sized(
+                    [90.0, 22.0],
+                    egui::TextEdit::singleline(&mut self.quick.min),
+                )
+                .labelled_by(l.id);
+            typed_done |= r.lost_focus();
+            let l = ui.add(egui::Label::new(t("register.filter.amount_to")).selectable(false));
+            let r = ui
+                .add_sized(
+                    [90.0, 22.0],
+                    egui::TextEdit::singleline(&mut self.quick.max),
+                )
+                .labelled_by(l.id);
+            typed_done |= r.lost_focus();
+
+            if self.filters.is_active() && ui.link(t("register.filter.clear")).clicked() {
+                self.clear_filters();
+            }
+
+            ui.separator();
+            legend(ui, tokens);
+        });
+        if typed_done {
+            self.apply_typed_filters();
+        }
+        if let Some(p) = self.quick.problem {
+            ui.label(RichText::new(t(p)).color(tokens.warn_text));
+        }
+    }
+
+    /// "Any tag" then the active tags (and the chosen one), by name.
+    fn tag_choices(&self) -> (Vec<Choice>, Vec<Option<TagId>>) {
+        let mut tags: Vec<_> = self
+            .entry
+            .tags
+            .iter()
+            .filter(|g| g.is_active || Some(g.id) == self.filters.tag)
+            .collect();
+        tags.sort_by(|a, b| a.fields.name.cmp(&b.fields.name));
+        let mut choices = vec![Choice {
+            text: t("register.filter.any_tag"),
+            caption: false,
+        }];
+        let mut ids = vec![None];
+        for g in tags {
+            choices.push(Choice {
+                text: g.fields.name.clone(),
+                caption: false,
+            });
+            ids.push(Some(g.id));
+        }
+        (choices, ids)
+    }
+}
+
+/// The legend: locked rows, R and ✓ (mockup `Register.html`).
+fn legend(ui: &mut Ui, tokens: &Tokens) {
+    let small = |s: String| RichText::new(s).size(12.0).color(tokens.text_secondary);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+    ui.painter().rect(
+        rect,
+        0.0,
+        tokens.locked_row,
+        egui::Stroke::new(1.0, tokens.border_default),
+        egui::StrokeKind::Inside,
+    );
+    ui.add(egui::Label::new(small(t("register.legend.locked"))).selectable(false));
+    ui.add(egui::Label::new(small(t("register.legend.reconciled"))).selectable(false));
+    ui.add(egui::Label::new(small(t("register.legend.cleared"))).selectable(false));
+}
+
+impl RegisterScreen {
     /// "Last 90 days (08/06/2026 – 11/04/2026)".
     fn range_text(&self, r: RangePreset) -> String {
         let d = r.resolve(self.today, &self.fiscal);

@@ -735,3 +735,85 @@ fn rows_the_register_cant_change_show_read_only() {
     assert!(s.entry.editing.is_none());
     assert_eq!(s.state()["entry"]["read_only"], true);
 }
+
+#[test]
+fn quick_filters_go_to_the_engine_and_clear() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.prefs.range = cl_model::register::RangePreset::AllDates;
+    s.apply_query();
+    settle(&mut s, None);
+    let all = s.model.total().expect("total");
+    // The payee autofills to a known name as typed.
+    s.quick.payee = "hollis".into();
+    s.apply_typed_filters();
+    assert!(s.quick.payee.starts_with("Hollister "), "autofilled");
+    assert_eq!(s.filters.payee_text(), Some(s.quick.payee.as_str()));
+    // A payee from the register goes to the engine as typed.
+    settle(&mut s, Some(&(0..all)));
+    let payee = (0..usize::try_from(all).expect("n"))
+        .filter_map(|i| s.model.row_at(i))
+        .map(|r| r.payee.clone())
+        .find(|p| !p.is_empty())
+        .expect("a payee");
+    s.quick.payee.clone_from(&payee);
+    s.apply_typed_filters();
+    let q = s.query.clone().expect("q");
+    assert_eq!(q.payee.as_deref(), Some(payee.as_str()));
+    assert_eq!(s.state()["filters"]["payee"], true);
+    // The demo engine keeps balances whatever the filters (R1).
+    assert_eq!(s.state()["balance_mode"], "engine");
+    settle(&mut s, None);
+    let some = s.model.total().expect("total");
+    assert!(some > 0 && some < all, "{some} of {all}");
+    settle(&mut s, Some(&(0..some)));
+    for i in 0..usize::try_from(some).expect("n") {
+        assert!(s.model.row_at(i).expect("row").payee.contains(&payee));
+    }
+    // Exact amounts: from above to is refused and changes nothing.
+    s.quick.min = "1,000".into();
+    s.quick.max = "500".into();
+    s.apply_typed_filters();
+    assert_eq!(
+        s.quick.problem,
+        Some("register.filter.problem.min_above_max")
+    );
+    assert!(s.filters.min.is_none());
+    s.quick.max = "abc".into();
+    s.apply_typed_filters();
+    assert_eq!(s.quick.problem, Some("grid.amount.invalid"));
+    s.quick.max = "-5".into();
+    s.apply_typed_filters();
+    assert_eq!(s.quick.problem, Some("grid.amount.no_negative"));
+    s.quick.max = "2000.10".into();
+    s.apply_typed_filters();
+    assert_eq!(s.quick.problem, None);
+    assert_eq!(s.filters.min, Some(money("1000")));
+    assert_eq!(s.filters.max, Some(money("2000.10")));
+    assert_eq!(s.query.as_ref().and_then(|q| q.max), Some(money("2000.10")));
+    // Uncleared and Tag go to the engine as their own fields.
+    s.set_uncleared(true);
+    assert_eq!(
+        s.query.as_ref().and_then(|q| q.cleared),
+        Some(cl_api::ClearedFilter::Uncleared)
+    );
+    // "Clear filters" brings every line back.
+    s.clear_filters();
+    assert!(!s.filters.is_active());
+    assert!(s.quick.payee.is_empty() && s.quick.min.is_empty());
+    let q = s.query.clone().expect("q");
+    assert!(!q.filters_active());
+    settle(&mut s, None);
+    assert_eq!(s.model.total(), Some(all));
+}
+
+#[test]
+fn filter_bounds_parse_exactly() {
+    assert_eq!(filters::parse_bound("  "), Ok(None));
+    assert_eq!(filters::parse_bound("1,084.66"), Ok(Some(money("1084.66"))));
+    assert_eq!(filters::parse_bound("0.10"), Ok(Some(money("0.1"))));
+    assert_eq!(
+        filters::parse_bound("1.005"),
+        Err("grid.amount.too_many_decimals")
+    );
+}
