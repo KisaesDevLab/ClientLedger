@@ -143,6 +143,72 @@ fn a_check_needs_who_and_the_equity_cannot_be_the_bank() {
 }
 
 #[test]
+fn the_demo_follows_the_entity_type() {
+    let (_d, link) = link();
+    {
+        let mut demo = link.demo_state().expect("demo");
+        crate::company::demo::money::set_entity_type(&mut demo, cl_api::EntityType::Partnership);
+    }
+    let s = screen(&link);
+    assert_eq!(s.state()["entity_type"], "partnership");
+    assert_eq!(s.state()["equity_source"], "engine");
+    let draws = s
+        .books
+        .roles
+        .get(&Role::PartnerDraws)
+        .copied()
+        .expect("partner draws");
+    assert_eq!(s.header.current().equity, Some(draws));
+    assert_ne!(Some(draws), s.books.by_number("3200"));
+}
+
+#[test]
+fn a_saved_draw_opens_with_prev_and_is_changed_in_place() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    type_amount(&mut s, "500.00");
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    let id = s.flow.last.expect("saved").id;
+    assert_eq!(s.state()["record"], "new");
+    s.command(CommandId::new("form.prev_record"));
+    assert_eq!(s.flow.editing.map(|e| e.id), Some(id));
+    assert_eq!(s.state()["read_only"], Value::Null);
+    let f = s.header.current().clone();
+    assert_eq!(f.amount, Some(money("500.00")));
+    assert_eq!(f.direction, Direction::PayYourself);
+    assert_eq!(f.equity, s.books.by_number("3200"));
+    assert!(!s.is_dirty());
+    let before = posted(&link);
+    type_amount(&mut s, "450.00");
+    assert!(s.start_save(SaveIntent::Save, None));
+    assert_eq!(posted(&link), before, "changed in place");
+    let (_, lines) = lines_of(&link, id);
+    assert!(lines.contains(&("3200".into(), money("450.00"), Money::ZERO)));
+    // Void the opened one.
+    s.command(CommandId::new("edit.void_transaction"));
+    s.flow.void_reason = "wrong".into();
+    s.void_now(None);
+    assert!(link.demo_state().expect("demo").ledger.is_void(id));
+}
+
+#[test]
+fn esc_reverts_the_focused_field_first() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.focused = Some(field::MEMO);
+    s.header.edit(field::MEMO, |h| h.memo = "x".into());
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(!s.is_dirty());
+    assert!(!s.command(CommandId::new("form.revert")));
+    // Dirty elsewhere: Prev asks first.
+    type_amount(&mut s, "5.00");
+    s.command(CommandId::new("form.prev_record"));
+    assert_eq!(s.state()["nav_prompt"], true);
+    s.answer_nav(PromptAnswer::Keep);
+    assert_eq!(s.state()["nav_prompt"], false);
+}
+
+#[test]
 fn state_never_carries_amounts_or_names() {
     let (_d, link) = link();
     let mut s = screen(&link);

@@ -113,3 +113,41 @@ fn lines_off_by_a_cent_save_nothing() {
     assert_eq!(posted(&link), before);
     assert_eq!(s.state()["save"]["refused"], "lines_disagree");
 }
+
+#[test]
+fn a_saved_one_opens_with_prev_changes_in_place_and_voids() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "42.18", &[("6250", "42.18")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    let id = s.flow.last.expect("saved").id;
+    s.command(CommandId::new("form.prev_record"));
+    assert_eq!(s.flow.editing.map(|e| e.id), Some(id));
+    let f = s.compose();
+    assert_eq!(f.amount, Some(money("42.18")));
+    assert_eq!(f.treatment, Treatment::PutIn);
+    assert_eq!(f.offset, s.books.by_number("3100"));
+    assert_eq!(s.state()["totals"], "balanced");
+    let before = posted(&link);
+    fill(&mut s, "40.00", &[("6250", "40.00")]);
+    assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
+    assert_eq!(posted(&link), before);
+    let (_, lines) = lines_of(&link, id);
+    assert!(lines.contains(&("3100".into(), Money::ZERO, money("40.00"))));
+    s.command(CommandId::new("edit.void_transaction"));
+    s.flow.void_reason = "paid twice".into();
+    s.void_now(None);
+    assert!(link.demo_state().expect("demo").ledger.is_void(id));
+    assert_eq!(s.state()["record"], "new");
+}
+
+#[test]
+fn esc_reverts_the_focused_field_first() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.focused = Some(field::MEMO);
+    s.header.edit(field::MEMO, |h| h.memo = "x".into());
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(!s.is_dirty());
+    assert!(!s.command(CommandId::new("form.revert")));
+}

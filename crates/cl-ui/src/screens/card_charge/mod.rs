@@ -728,7 +728,11 @@ impl CardChargeScreen {
         f.mode = mode;
         f.payee = txn.contact_id;
         f.ref_no = txn.txn_number.clone().unwrap_or_default();
-        f.amount = card_line.map(|i| line_amount(&txn.lines[i]));
+        // The card's own line is on the other side from the lines.
+        f.amount = card_line.map(|i| match mode {
+            CardMode::Charge => txn.lines[i].credit,
+            CardMode::Credit => txn.lines[i].debit,
+        });
         f.memo = txn.memo.clone().unwrap_or_default();
         let keys = &mut self.lines.form_mut().adapter_mut().keys;
         let seeds = txn
