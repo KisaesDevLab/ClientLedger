@@ -21,6 +21,7 @@ mod edit;
 pub mod entry_row;
 pub mod filters;
 pub mod footer;
+pub mod goto;
 pub mod lists;
 mod record;
 mod splits;
@@ -177,6 +178,8 @@ pub struct RegisterScreen {
     read_only: Option<Vec<edit::ReadLine>>,
     /// The quick filters as typed.
     quick: filters::QuickInput,
+    /// Go To (Ctrl+F).
+    goto: goto::GotoBar,
 }
 
 /// Watches the ledger stamp (Q-P12n): read on window focus, every
@@ -249,6 +252,7 @@ impl RegisterScreen {
             edit_load: None,
             read_only: None,
             quick: filters::QuickInput::default(),
+            goto: goto::GotoBar::default(),
         };
         s.start_load();
         s.load_lists();
@@ -390,6 +394,9 @@ impl RegisterScreen {
         format!("{q:?}").hash(&mut h);
         (q.payee.as_deref(), q.min, q.max, q.tag).hash(&mut h);
         let fp = h.finish();
+        if self.query.as_ref() != Some(&q) {
+            self.goto.cancel();
+        }
         self.query = Some(q);
         if self.model.set_query(fp) {
             self.jump_to_end = self.prefs.sort == SortChoice::DateOldest;
@@ -439,7 +446,7 @@ impl RegisterScreen {
         let rows = if self.jump_to_end {
             self.model.total().filter(|t| *t > 0).map(|t| (t - 1)..t)
         } else {
-            None
+            self.goto.jump.map(|(i, _)| i..i + 1)
         };
         for req in self.model.wanted(rows) {
             match self.fetch_page(account, &query, req) {
@@ -458,6 +465,17 @@ impl RegisterScreen {
         req: PageRequest,
     ) -> Option<Task<RegisterPage>> {
         let page = u32::try_from(req.page.engine_page()).ok()?;
+        self.fetch_raw(account, query, page, per_page())
+    }
+
+    /// Reads page `page` (from 1) of `query` with `per` rows a page.
+    fn fetch_raw(
+        &self,
+        account: AccountId,
+        query: &RegisterQuery,
+        page: u32,
+        per: u16,
+    ) -> Option<Task<RegisterPage>> {
         if let Some(mut demo) = self.link.demo_state() {
             let chart = demo
                 .chart
@@ -469,7 +487,7 @@ impl RegisterScreen {
                 account,
                 query,
                 page,
-                per_page(),
+                per,
             )
             .map(Task::ready);
         }
@@ -478,7 +496,7 @@ impl RegisterScreen {
         let q = query.clone();
         group
             .read(&session, move |s| async move {
-                s.register().page(account, &q, page, per_page()).await
+                s.register().page(account, &q, page, per).await
             })
             .ok()
             .map(Task::Pending)
@@ -487,6 +505,7 @@ impl RegisterScreen {
     fn poll(&mut self) {
         self.poll_entry();
         self.poll_edit();
+        self.drive_goto();
         if let Some(task) = self.accounts_task.as_mut()
             && let Some(result) = task.try_take()
         {
@@ -817,9 +836,10 @@ impl RegisterScreen {
         }
     }
 
-    /// Ctrl+F (WP7: Go To).
+    /// Ctrl+F: Go To.
     fn on_find(&mut self) -> bool {
-        false
+        self.open_goto();
+        true
     }
 
     /// Ctrl+E: Splits for the row being entered, else Edit Transaction on
@@ -890,6 +910,7 @@ impl Screen for RegisterScreen {
             return;
         }
         self.toolbar(ui, &tokens);
+        self.goto_ui(ui, &tokens);
         self.messages(ui, &tokens);
         ui.add_space(4.0);
         if self.empty_ui(ui, &tokens) {
@@ -906,6 +927,7 @@ impl Screen for RegisterScreen {
         self.request_pages();
         self.footer_load();
         self.finish_jump();
+        self.finish_goto();
         if !self.pages.is_empty() || self.footer.loading() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
@@ -999,6 +1021,7 @@ impl Screen for RegisterScreen {
             "entry_types": self.allowed.len(),
             "footer": self.footer_state(),
             "entry": self.entry_state(),
+            "goto": self.goto.state(),
         })
     }
 }

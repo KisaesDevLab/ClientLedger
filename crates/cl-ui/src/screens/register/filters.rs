@@ -110,14 +110,14 @@ pub fn class_name(c: AccountClass) -> &'static str {
 }
 
 /// One choice in a picker; `None` entries are group captions.
-struct Choice {
-    text: String,
-    caption: bool,
+pub(super) struct Choice {
+    pub(super) text: String,
+    pub(super) caption: bool,
 }
 
 /// A labelled choice that works from the keyboard: Up/Down change it while
 /// it has focus, a click opens the list. Returns the picked index.
-fn combo(
+pub(super) fn combo(
     ui: &mut Ui,
     salt: &str,
     label: &str,

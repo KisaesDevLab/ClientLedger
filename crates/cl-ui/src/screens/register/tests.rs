@@ -311,7 +311,6 @@ fn later_lane_commands_are_routed_but_not_handled_yet() {
     let (_d, link) = link();
     let mut s = screen(&link);
     for c in [
-        "edit.find",
         "form.delete_item",
         "edit.void_transaction",
         "list.quick_report",
@@ -816,4 +815,52 @@ fn filter_bounds_parse_exactly() {
         filters::parse_bound("1.005"),
         Err("grid.amount.too_many_decimals")
     );
+}
+
+#[test]
+fn go_to_finds_the_next_match_and_puts_the_cursor_on_it() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.prefs.range = cl_model::register::RangePreset::AllDates;
+    s.apply_query();
+    settle(&mut s, None);
+    let total = s.model.total().expect("total");
+    settle(&mut s, Some(&(0..total)));
+    assert!(s.command(CommandId::new("edit.find")));
+    assert_eq!(s.state()["goto"]["open"], true);
+    // Nothing typed: a plain problem, no search.
+    s.find(goto::Dir::Next);
+    assert_eq!(s.state()["goto"]["status"], "empty");
+    // The last row's payee, searched from the top: the first row with it.
+    let rows: Vec<view::RegRow> = (0..usize::try_from(total).expect("n"))
+        .map(|i| s.model.row_at(i).expect("row").clone())
+        .collect();
+    let payee = rows
+        .iter()
+        .rev()
+        .map(|r| r.payee.clone())
+        .find(|p| !p.is_empty())
+        .expect("payee");
+    let first = rows
+        .iter()
+        .position(|r| r.payee.contains(&payee))
+        .expect("i");
+    s.goto.field = goto::GotoField::Payee;
+    s.goto.text = payee.to_lowercase();
+    s.find(goto::Dir::Next);
+    let (index, found) = s.goto.jump.expect("found");
+    assert_eq!(index, first as u64);
+    assert_eq!(found, rows[first].line_id);
+    s.finish_goto();
+    assert!(s.goto.jump.is_none());
+    let key = s.grid.core().cursor().map(|c| c.row).expect("cursor");
+    assert_eq!(s.model.line_of(key), Some(rows[first].line_id));
+    assert_eq!(s.state()["goto"]["found"], 1);
+    // Find Previous from there: nothing above it.
+    s.find(goto::Dir::Previous);
+    assert_eq!(s.state()["goto"]["status"], "not_found");
+    // A new query stops a search and forgets its target.
+    s.goto.jump = Some((0, rows[0].line_id));
+    s.set_sort(SortChoice::DateNewest);
+    assert!(s.goto.jump.is_none());
 }
