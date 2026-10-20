@@ -1,0 +1,12 @@
+{
+  "entityType": "s_corp",
+  "roles": {
+    "owner_draw": null,
+    "owner_contribution": null,
+    "partner_draws": null,
+    "partner_contributions": null,
+    "shareholder_distributions": "e9000000-0000-4000-8000-000000000005",
+    "paid_in_capital": "e9000000-0000-4000-8000-000000000006",
+    "retained_earnings": "e9000000-0000-4000-8000-000000000007"
+  }
+}

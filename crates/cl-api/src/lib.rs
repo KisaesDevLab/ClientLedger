@@ -73,7 +73,7 @@ pub use resources::common::SortDir;
 pub use resources::company::{
     AccountingMethod, CLOSING_PASSWORD_MAX_BYTES, CLOSING_PASSWORD_MIN_CHARS, ClosingDateChange,
     ClosingPasswordStatus, CompanyProfile, CompanyProfileUpdate, CompanySettings,
-    CompanySettingsUpdate, EntityType,
+    CompanySettingsUpdate, EntityType, EquityRole, EquityRoles,
 };
 pub use resources::contacts::{
     Contact, ContactFields, ContactFilter, ContactSort, ContactType, ContactUpdate, Contacts,

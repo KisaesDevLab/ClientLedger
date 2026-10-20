@@ -10,7 +10,7 @@
 //! - Company list, create, open and close live on [`Session`] because they
 //!   change the session's scope.
 
-use cl_core::ids::{CompanyId, UserId};
+use cl_core::ids::{AccountId, CompanyId, UserId};
 use cl_core::{CalendarDate, Rate, Secret, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,7 +22,7 @@ use crate::idempotency::IdempotencyKey;
 use crate::resources::common::requested_fp;
 use crate::resources::operations::{
     CLOSING_PASSWORD_GET, CLOSING_PASSWORD_PUT, CLOSING_PASSWORD_RESET, COMPANY_GET, COMPANY_PUT,
-    COMPANY_SETTINGS, COMPANY_SETTINGS_PUT,
+    COMPANY_SETTINGS, COMPANY_SETTINGS_PUT, EQUITY_ROLES,
 };
 use crate::resources::reconcile::row_fp;
 use crate::resources::versioning::{
@@ -45,6 +45,142 @@ pub enum EntityType {
     CCorp,
     /// Partnership.
     Partnership,
+}
+
+impl EntityType {
+    /// The engine's wire name.
+    #[must_use]
+    pub const fn as_wire(self) -> &'static str {
+        match self {
+            EntityType::SoleProp => "sole_prop",
+            EntityType::SingleMemberLlc => "single_member_llc",
+            EntityType::SCorp => "s_corp",
+            EntityType::CCorp => "c_corp",
+            EntityType::Partnership => "partnership",
+        }
+    }
+
+    /// From the engine's wire name; `None` for a type this build does not
+    /// know (the owner then picks the equity account, Q-P14m).
+    #[must_use]
+    pub fn from_wire(s: &str) -> Option<EntityType> {
+        [
+            EntityType::SoleProp,
+            EntityType::SingleMemberLlc,
+            EntityType::SCorp,
+            EntityType::CCorp,
+            EntityType::Partnership,
+        ]
+        .into_iter()
+        .find(|e| e.as_wire() == s)
+    }
+}
+
+/// Reads an entity type leniently: an unknown or missing one is `None`
+/// rather than a decode failure (P14 C1.1; a newer engine may add types).
+fn lenient_entity<'de, D>(d: D) -> Result<Option<EntityType>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw: Option<Value> = Option::deserialize(d)?;
+    Ok(raw
+        .as_ref()
+        .and_then(Value::as_str)
+        .and_then(EntityType::from_wire))
+}
+
+/// An equity role the engine tags an account with (`accounts.system_tag`,
+/// U-56).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum EquityRole {
+    /// Owner's draw (sole proprietor, single-member LLC).
+    OwnerDraw,
+    /// Owner's contribution (sole proprietor, single-member LLC).
+    OwnerContribution,
+    /// Partner draws.
+    PartnerDraws,
+    /// Partner contributions.
+    PartnerContributions,
+    /// Shareholder distributions (S corporation; "Dividends Paid" for a C
+    /// corporation).
+    ShareholderDistributions,
+    /// Paid-in capital (corporations).
+    PaidInCapital,
+    /// Retained earnings.
+    RetainedEarnings,
+}
+
+impl EquityRole {
+    /// Every role, in the engine's order.
+    pub const ALL: [EquityRole; 7] = [
+        EquityRole::OwnerDraw,
+        EquityRole::OwnerContribution,
+        EquityRole::PartnerDraws,
+        EquityRole::PartnerContributions,
+        EquityRole::ShareholderDistributions,
+        EquityRole::PaidInCapital,
+        EquityRole::RetainedEarnings,
+    ];
+
+    /// The engine's key.
+    #[must_use]
+    pub const fn as_wire(self) -> &'static str {
+        match self {
+            EquityRole::OwnerDraw => "owner_draw",
+            EquityRole::OwnerContribution => "owner_contribution",
+            EquityRole::PartnerDraws => "partner_draws",
+            EquityRole::PartnerContributions => "partner_contributions",
+            EquityRole::ShareholderDistributions => "shareholder_distributions",
+            EquityRole::PaidInCapital => "paid_in_capital",
+            EquityRole::RetainedEarnings => "retained_earnings",
+        }
+    }
+}
+
+/// `GET /api/v1/company/equity-roles` (`equity-roles-v1`): the company's
+/// entity type and the account the engine keeps for each equity role.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct EquityRoles {
+    /// The legal form (`None`: not set, or a type this build doesn't know).
+    pub entity_type: Option<EntityType>,
+    /// The account for each role the engine has one for.
+    pub roles: std::collections::BTreeMap<EquityRole, AccountId>,
+}
+
+impl EquityRoles {
+    /// The account the engine keeps for `role`.
+    #[must_use]
+    pub fn account(&self, role: EquityRole) -> Option<AccountId> {
+        self.roles.get(&role).copied()
+    }
+
+    /// Reads the engine's answer. Unknown role keys are ignored; a role
+    /// whose value is not an account id or `null` is a decode failure.
+    ///
+    /// # Errors
+    /// `Decode` for a malformed body.
+    pub fn from_wire(v: &Value) -> Result<EquityRoles, ApiError> {
+        let bad = || ApiError::Decode {
+            what: "equity roles",
+        };
+        let entity_type = match v.get("entityType") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => EntityType::from_wire(s),
+            Some(_) => return Err(bad()),
+        };
+        let map = v.get("roles").and_then(Value::as_object).ok_or_else(bad)?;
+        let mut roles = std::collections::BTreeMap::new();
+        for role in EquityRole::ALL {
+            match map.get(role.as_wire()) {
+                None | Some(Value::Null) => {}
+                Some(Value::String(s)) => {
+                    roles.insert(role, AccountId::parse(s).map_err(|_| bad())?);
+                }
+                Some(_) => return Err(bad()),
+            }
+        }
+        Ok(EquityRoles { entity_type, roles })
+    }
 }
 
 /// The profile fields the company form edits. Sent whole on save: `None`
@@ -178,6 +314,10 @@ pub struct CompanySettings {
     /// The closing date (shown only; there is no writer until U-15).
     #[serde(default)]
     pub lock_date: Option<CalendarDate>,
+    /// The legal form when the settings carry it (P14 C1.1). Read
+    /// leniently: an unknown type is `None`.
+    #[serde(default, deserialize_with = "lenient_entity")]
+    pub entity_type: Option<EntityType>,
 }
 
 /// Accounting basis of the company (`accountingMethod`, Q-44).
@@ -354,6 +494,23 @@ impl Session {
         call.idempotency_key = Some(key);
         let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
         settings_from(&reply)
+    }
+
+    /// The company's entity type and its equity role accounts (U-56).
+    /// Refused locally until the engine advertises `equity-roles-v1`.
+    ///
+    /// # Errors
+    /// `Local(EquityRolesUnavailable)` without the capability (nothing
+    /// sent); `NoCompanyOpen`; `Decode`; any [`ApiError`].
+    pub async fn equity_roles(&self) -> Result<EquityRoles, ApiError> {
+        self.require_company()?;
+        if !self.client().capabilities().has(Capabilities::EQUITY_ROLES) {
+            return Err(ApiError::Local(LocalValidation::EquityRolesUnavailable));
+        }
+        let call = Call::at(Method::Get, EQUITY_ROLES.route());
+        let reply = self.send(&EQUITY_ROLES, call, None).await?;
+        let v: Value = decode(&reply, "equity roles")?;
+        EquityRoles::from_wire(&v)
     }
 
     /// The open company's settings (read-only in P05).
@@ -597,6 +754,114 @@ mod tests {
         assert!(body.get("lockDate").is_none());
         assert!(body.get("smtpPass").is_none());
         assert!(puts[0].headers.get("idempotency-key").is_some());
+    }
+
+    const ROLES: [(&str, &str, EntityType, [EquityRole; 2]); 5] = [
+        (
+            "sole-prop",
+            include_str!("../../../../fixtures/engine/equity-roles-sole-prop.json"),
+            EntityType::SoleProp,
+            [EquityRole::OwnerDraw, EquityRole::OwnerContribution],
+        ),
+        (
+            "single-member-llc",
+            include_str!("../../../../fixtures/engine/equity-roles-single-member-llc.json"),
+            EntityType::SingleMemberLlc,
+            [EquityRole::OwnerDraw, EquityRole::OwnerContribution],
+        ),
+        (
+            "partnership",
+            include_str!("../../../../fixtures/engine/equity-roles-partnership.json"),
+            EntityType::Partnership,
+            [EquityRole::PartnerDraws, EquityRole::PartnerContributions],
+        ),
+        (
+            "s-corp",
+            include_str!("../../../../fixtures/engine/equity-roles-s-corp.json"),
+            EntityType::SCorp,
+            [
+                EquityRole::ShareholderDistributions,
+                EquityRole::PaidInCapital,
+            ],
+        ),
+        (
+            "c-corp",
+            include_str!("../../../../fixtures/engine/equity-roles-c-corp.json"),
+            EntityType::CCorp,
+            [
+                EquityRole::ShareholderDistributions,
+                EquityRole::PaidInCapital,
+            ],
+        ),
+    ];
+
+    #[test]
+    fn equity_role_goldens_read_for_all_five_types() {
+        for (name, body, entity, roles) in ROLES {
+            let v: Value = serde_json::from_str(body).expect(name);
+            let r = EquityRoles::from_wire(&v).expect(name);
+            assert_eq!(r.entity_type, Some(entity), "{name}");
+            assert_eq!(r.roles.len(), 3, "{name}: two roles + retained earnings");
+            for role in roles {
+                assert!(r.account(role).is_some(), "{name}: {role:?}");
+            }
+            assert!(r.account(EquityRole::RetainedEarnings).is_some());
+            assert_eq!(EntityType::from_wire(entity.as_wire()), Some(entity));
+        }
+    }
+
+    #[test]
+    fn equity_roles_tolerate_unknown_types_and_refuse_bad_shapes() {
+        let v = serde_json::json!({"entityType": "cooperative", "roles": {
+            "owner_draw": null, "future_role": "x"}});
+        let r = EquityRoles::from_wire(&v).expect("lenient");
+        assert_eq!(r.entity_type, None);
+        assert!(r.roles.is_empty());
+        for bad in [
+            serde_json::json!({"entityType": "sole_prop"}),
+            serde_json::json!({"entityType": 3, "roles": {}}),
+            serde_json::json!({"roles": {"owner_draw": "not-a-uuid"}}),
+            serde_json::json!({"roles": {"owner_draw": 12}}),
+        ] {
+            assert!(matches!(
+                EquityRoles::from_wire(&bad),
+                Err(ApiError::Decode { .. })
+            ));
+        }
+        let st: CompanySettings =
+            serde_json::from_value(serde_json::json!({"entityType": "trust"})).expect("lenient");
+        assert_eq!(st.entity_type, None);
+        let st: CompanySettings =
+            serde_json::from_value(serde_json::json!({"entityType": "s_corp"})).expect("known");
+        assert_eq!(st.entity_type, Some(EntityType::SCorp));
+    }
+
+    #[tokio::test]
+    async fn equity_roles_are_gated_by_capability() {
+        let server = MockServer::start().await;
+        let s = company_session(&server);
+        assert_eq!(
+            s.equity_roles().await.expect_err("gated"),
+            ApiError::Local(LocalValidation::EquityRolesUnavailable)
+        );
+        assert!(server.received_requests().await.expect("r").is_empty());
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/company/equity-roles"))
+            .respond_with(json(200, ROLES[1].1))
+            .mount(&server)
+            .await;
+        let s =
+            crate::resources::testkit::session_with_caps(&server, &[Capabilities::EQUITY_ROLES])
+                .await;
+        let r = s.equity_roles().await.expect("roles");
+        assert_eq!(r.entity_type, Some(EntityType::SingleMemberLlc));
+        assert!(r.account(EquityRole::OwnerDraw).is_some());
+        let ws = crate::session::tests::session_on(&server, Scope::Workspace);
+        assert_eq!(
+            ws.equity_roles().await.expect_err("ws"),
+            ApiError::NoCompanyOpen
+        );
     }
 
     #[tokio::test]
