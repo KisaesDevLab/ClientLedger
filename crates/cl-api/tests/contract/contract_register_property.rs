@@ -24,18 +24,17 @@
 //! - `CL_PROP_SEED` — the RNG seed (default fixed). The seed is printed at
 //!   the start and on every failure, so a failing run can be replayed.
 //!
-//! # Running it against the engine branch with the capabilities
+//! # Running it against another engine build
 //!
-//! The pinned engine does not advertise `register-exact-v1` or
-//! `txn-delete-v1` yet (engine PR #153). To run the full property against
-//! an engine built from branch `clientledger/register-exact`, point the
-//! harness at that executable with `CL_ENGINE_EXE` (the same override
-//! `cl-host` uses for the app) and require the capabilities so that a
-//! missing one fails instead of going PENDING:
+//! The pinned engine (5c8e9665, engine PR #153 merged) advertises
+//! `register-exact-v1` and `txn-delete-v1`, so the normal contract run
+//! does the full 1,000-operation property. To run it against another
+//! engine build, point the harness at that executable with `CL_ENGINE_EXE`
+//! (the same override `cl-host` uses for the app) and require the
+//! capabilities so that a missing one fails instead of going PENDING:
 //!
 //! ```text
 //! cargo xtask pg-fetch
-//! # build the engine SEA from the branch checkout, then:
 //! CL_ENGINE_EXE=/path/to/clientledger-engine.exe \
 //! CL_API_REQUIRE_CAPS=register-exact-v1,txn-delete-v1 \
 //! CL_PROP_OPS=1000 CL_API_TEST_BUDGET_SECS=60 \
