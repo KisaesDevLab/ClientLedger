@@ -878,3 +878,104 @@ fn every_input_is_named_by_its_label_and_the_toolbar_matches_the_plan() {
         assert!(named("Expenses 1,286.40"));
     }
 }
+
+/// One frame of the screen with `events`; the AccessKit nodes it gave.
+fn frame_with(
+    s: &mut WriteCheckScreen,
+    ctx: &egui::Context,
+    events: Vec<egui::Event>,
+) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+    use eframe::egui::{Pos2, RawInput, Rect, vec2};
+    let input = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+        events,
+        ..RawInput::default()
+    };
+    let mut out = ctx.run_ui(input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+    });
+    out.textures_delta.clear();
+    out.platform_output
+        .accesskit_update
+        .map(|u| u.nodes)
+        .unwrap_or_default()
+}
+
+/// Q-250: a click on "Pay to the order of" opens the names list at once;
+/// Tab into the field does not; Esc closes it and keeps the payee.
+#[test]
+fn a_click_on_the_payee_opens_the_names_list_and_tab_does_not() {
+    use eframe::egui::{Event, Key, Modifiers, PointerButton, Pos2};
+    let (_d, link) = link();
+    let mut s = WriteCheckScreen::demo_draft(Arc::clone(&link), None, today());
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        nodes.extend(frame_with(&mut s, &ctx, vec![]));
+    }
+    let label = nodes
+        .iter()
+        .find(|(_, n)| {
+            n.role() == egui::accesskit::Role::Label && n.value() == Some("Pay to the order of")
+        })
+        .map(|(id, _)| *id)
+        .expect("payee label");
+    let field = nodes
+        .iter()
+        .rev()
+        .find(|(_, n)| n.labelled_by().contains(&label))
+        .and_then(|(_, n)| n.bounds())
+        .expect("payee field");
+    // AccessKit bounds are f64 copies of egui's f32 points.
+    #[allow(clippy::cast_possible_truncation)]
+    let at = Pos2::new(
+        field.x0 as f32 + 24.0,
+        f64::midpoint(field.y0, field.y1) as f32,
+    );
+    let payee = s.header.current().payee;
+    assert!(payee.is_some(), "the draft has a payee");
+    assert_eq!(s.state_json()["payee_list"], false);
+
+    // A click opens the list.
+    let button = |pressed| Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    frame_with(&mut s, &ctx, vec![Event::PointerMoved(at), button(true)]);
+    frame_with(&mut s, &ctx, vec![button(false)]);
+    frame_with(&mut s, &ctx, vec![]);
+    assert_eq!(s.state_json()["payee_list"], true, "a click opens it");
+
+    // Esc closes it; the payee stays.
+    assert!(s.command(CommandId::new("form.revert")));
+    frame_with(&mut s, &ctx, vec![]);
+    assert_eq!(s.state_json()["payee_list"], false);
+    assert_eq!(s.header.current().payee, payee, "Esc changed nothing");
+
+    // Shift+Tab out and Tab back in: focused, no list.
+    let tab = |m: Modifiers| {
+        [true, false]
+            .into_iter()
+            .map(|pressed| Event::Key {
+                key: Key::Tab,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: m,
+            })
+            .collect::<Vec<_>>()
+    };
+    frame_with(&mut s, &ctx, tab(Modifiers::SHIFT));
+    frame_with(&mut s, &ctx, vec![]);
+    assert_ne!(s.focused, Some(Field::Payee), "Shift+Tab left the payee");
+    frame_with(&mut s, &ctx, tab(Modifiers::NONE));
+    frame_with(&mut s, &ctx, vec![]);
+    assert_eq!(s.focused, Some(Field::Payee), "Tab came back");
+    assert_eq!(s.state_json()["payee_list"], false, "Tab never opens it");
+    assert_eq!(s.header.current().payee, payee);
+}
