@@ -374,6 +374,10 @@ impl PayeePrefill for CheckForm {
 pub struct CheckContext<'a> {
     /// The tags (for the header-tag defaults).
     pub tags: &'a TagList,
+    /// A saved check is being changed: it keeps a number unless it is
+    /// printed later, so a cleared number is refused
+    /// ([`CheckProblem::NumberInvalid`]) instead of being sent without one.
+    pub editing: bool,
 }
 
 /// The field a problem belongs to (the screen focuses it).
@@ -563,6 +567,10 @@ pub fn check(form: &CheckForm, ctx: &CheckContext<'_>) -> Result<CheckedCheck, V
         problems.push(CheckProblem::BankMissing);
     }
     let number = match check_number(form) {
+        Ok(None) if ctx.editing && !form.print_later => {
+            problems.push(CheckProblem::NumberInvalid);
+            None
+        }
         Ok(n) => n,
         Err(p) => {
             problems.push(p);

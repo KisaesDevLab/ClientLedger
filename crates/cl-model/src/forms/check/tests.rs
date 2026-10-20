@@ -98,7 +98,37 @@ fn valid(keys: &mut RowKeyGen) -> CheckForm {
 
 fn run(f: &CheckForm) -> Result<CheckedCheck, Vec<CheckProblem>> {
     let list = tags();
-    check(f, &CheckContext { tags: &list })
+    check(
+        f,
+        &CheckContext {
+            tags: &list,
+            editing: false,
+        },
+    )
+}
+
+#[test]
+fn a_saved_check_keeps_a_number_unless_printed_later() {
+    let list = tags();
+    let editing = CheckContext {
+        tags: &list,
+        editing: true,
+    };
+    let mut f = valid(&mut RowKeyGen::new());
+    f.number = NumberField::Typed("  ".into());
+    assert!(run(&f).is_ok(), "a new check: the engine numbers it");
+    assert_eq!(
+        check(&f, &editing).expect_err("refused"),
+        vec![CheckProblem::NumberInvalid]
+    );
+    f.number = NumberField::Typed("4418".into());
+    assert!(check(&f, &editing).is_ok());
+    f.number = NumberField::ToPrint {
+        kept: String::new(),
+        proposed: false,
+    };
+    f.print_later = true;
+    assert!(check(&f, &editing).is_ok(), "printed later: no number");
 }
 
 fn problems(f: &CheckForm) -> Vec<CheckProblem> {
