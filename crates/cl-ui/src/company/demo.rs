@@ -69,6 +69,12 @@ pub struct DemoState {
     pub ledger: register::DemoLedger,
     /// Checks written in the demo (P13): their own fields and history.
     pub checks: checks::DemoChecks,
+    /// Deposits made in the demo (P14): cash back and the write count.
+    pub deposits: deposits::DemoDeposits,
+    /// Daily-sales layouts and days (P14).
+    pub daily_sales: daily_sales::DemoDailySales,
+    /// The open company's entity type (the sample's single-member LLC).
+    pub entity_type: cl_api::EntityType,
     /// The demo company's AI switches (Preferences > AI).
     pub ai: DemoAi,
 }
@@ -152,6 +158,9 @@ impl DemoState {
             tags_gone: std::collections::BTreeSet::new(),
             ledger: register::DemoLedger::default(),
             checks: checks::DemoChecks::default(),
+            deposits: deposits::DemoDeposits::default(),
+            daily_sales: daily_sales::DemoDailySales::default(),
+            entity_type: cl_api::EntityType::SingleMemberLlc,
             ai: DemoAi::default(),
         }
     }
@@ -331,7 +340,11 @@ pub fn chart() -> Vec<cl_api::Account> {
                 parent: a.parent.as_deref().and_then(|p| p.parse().ok()),
                 active: true,
                 system: false,
-                tag: None,
+                // The sample's own owner equity accounts carry the engine's
+                // equity roles (U-56): an engine with `equity-roles-v1`
+                // adopts or seeds them for a single-member LLC, so the owner
+                // helpers find them by role.
+                tag: money::sample_equity_role(&a.number).map(money::EquityRole::tag),
             }
         })
         .collect();
@@ -341,21 +354,21 @@ pub fn chart() -> Vec<cl_api::Account> {
             "Accounts Receivable",
             AccountType::Asset,
             "accounts_receivable",
-            None,
+            Some("accounts_receivable"),
         ),
         (
             "2000",
             "Accounts Payable",
             AccountType::Liability,
             "accounts_payable",
-            None,
+            Some("accounts_payable"),
         ),
         (
             "3900",
             "Retained Earnings",
             AccountType::Equity,
             "retained_earnings",
-            None,
+            Some("retained_earnings"),
         ),
         // P14: where payments wait for a deposit, the daily-sales tax line
         // and the over/short line (the engine's system accounts).

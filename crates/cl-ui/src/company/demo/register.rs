@@ -43,8 +43,10 @@ fn line_id(t: &SampleTransaction, index: usize) -> JournalLineId {
         .unwrap_or_else(|_| unreachable!("a well-formed demo id"))
 }
 
-fn txn_type(kind: &str) -> TxnType {
+pub(super) fn txn_type(kind: &str) -> TxnType {
     match kind {
+        "daily_sales" => TxnType::DailySales,
+        "vendor_credit" => TxnType::VendorCredit,
         "invoice" => TxnType::Invoice,
         "payment" => TxnType::CustomerPayment,
         "bill" => TxnType::Bill,
@@ -380,6 +382,10 @@ pub struct DemoLedger {
     voided: std::collections::BTreeSet<u32>,
     /// Deleted in the demo (gone from the register; R7).
     deleted: std::collections::BTreeSet<u32>,
+    /// What each deposit took in (U-52, U-54): deposit → its sources (a
+    /// payment, a daily-sales day or a vendor credit) with their amounts.
+    /// A void or deleted deposit releases them.
+    links: std::collections::BTreeMap<u32, Vec<(u32, Money)>>,
 }
 
 /// The demo company's closing-date password (synthetic; the demo plays an
@@ -417,6 +423,17 @@ fn refused(reason: cl_api::ConflictReason) -> cl_api::ApiError {
         reason,
         current_version: None,
         code: None,
+        message: cl_api::UserText::default(),
+    }
+}
+
+/// The engine's 409 with its code (`ALREADY_DEPOSITED`, `TXN_DEPOSITED`,
+/// ...).
+pub(super) fn conflict_code(reason: cl_api::ConflictReason, code: &str) -> cl_api::ApiError {
+    cl_api::ApiError::Conflict {
+        reason,
+        current_version: None,
+        code: cl_api::ErrorCode::parse(code),
         message: cl_api::UserText::default(),
     }
 }
@@ -518,6 +535,14 @@ impl DemoLedger {
         let n = sample_id(id)
             .filter(|n| self.find(*n).is_some())
             .ok_or(cl_api::ApiError::NotFound { code: None })?;
+        // A deposited payment (or a refunded vendor credit) stays until its
+        // deposit is voided (409 `TXN_DEPOSITED`).
+        if self.deposited_in(id).is_some() {
+            return Err(conflict_code(
+                cl_api::ConflictReason::InUse,
+                "TXN_DEPOSITED",
+            ));
+        }
         if !self.voided.insert(n) {
             return Err(refused(cl_api::ConflictReason::Unspecified));
         }
@@ -539,6 +564,12 @@ impl DemoLedger {
         if t.cleared && t.date <= last_reconciled() {
             return Err(refused(cl_api::ConflictReason::Reconciled));
         }
+        if self.deposited_in(id).is_some() {
+            return Err(conflict_code(
+                cl_api::ConflictReason::DeleteLinked,
+                "TXN_DELETE_LINKED",
+            ));
+        }
         self.deleted.insert(t.id);
         Ok(())
     }
@@ -553,6 +584,55 @@ impl DemoLedger {
             .filter_map(|t| t.number.parse::<u32>().ok())
             .max()
             .map(|n| n.saturating_add(1))
+    }
+
+    /// Records what a deposit took in (replacing any earlier set).
+    pub fn link_deposit(&mut self, deposit: TransactionId, sources: &[(TransactionId, Money)]) {
+        let Some(d) = sample_id(deposit) else { return };
+        let v: Vec<(u32, Money)> = sources
+            .iter()
+            .filter_map(|(s, m)| sample_id(*s).map(|n| (n, *m)))
+            .collect();
+        self.links.insert(d, v);
+    }
+
+    /// What a deposit took in: (source, amount), in the order sent.
+    #[must_use]
+    pub fn deposit_links(&self, deposit: TransactionId) -> Vec<(TransactionId, Money)> {
+        sample_id(deposit)
+            .and_then(|d| self.links.get(&d))
+            .map(|v| {
+                v.iter()
+                    .filter_map(|(n, m)| self.find(*n).map(|t| (txn_id(&t), *m)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Every live (not void, not deleted) deposit that took `source` in,
+    /// with the amount, oldest first.
+    #[must_use]
+    pub fn live_links_of(&self, source: TransactionId) -> Vec<(TransactionId, Money)> {
+        let Some(n) = sample_id(source) else {
+            return Vec::new();
+        };
+        self.links
+            .iter()
+            .filter(|(d, _)| !self.voided.contains(d) && !self.deleted.contains(d))
+            .flat_map(|(d, v)| {
+                v.iter()
+                    .filter(move |(s, _)| *s == n)
+                    .map(move |(_, m)| (*d, *m))
+            })
+            .filter_map(|(d, m)| self.find(d).map(|t| (txn_id(&t), m)))
+            .collect()
+    }
+
+    /// The live deposit that took `source` in, if any (a void or deleted
+    /// deposit released it).
+    #[must_use]
+    pub fn deposited_in(&self, source: TransactionId) -> Option<TransactionId> {
+        self.live_links_of(source).first().map(|(d, _)| *d)
     }
 
     /// The id a demo transaction is known by (as the engine would send it).
