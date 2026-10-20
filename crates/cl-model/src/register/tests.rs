@@ -372,24 +372,45 @@ fn column_labels_by_class() {
 }
 
 #[test]
-fn display_sign_only_negates_credit_normal_balances() {
+fn display_sign_flips_only_credit_normal_stored_balances() {
+    use super::BalanceSource::{AccountBalance, Register};
+    const ALL: [AccountClass; 7] = [
+        AccountClass::Bank,
+        AccountClass::Receivable,
+        AccountClass::OtherAsset,
+        AccountClass::CreditCard,
+        AccountClass::Payable,
+        AccountClass::OtherLiability,
+        AccountClass::Equity,
+    ];
     let v = money("-1084.6600");
+    // Register figures come in the account's natural sign: never flipped.
+    for c in ALL {
+        let s = DisplaySign::for_source(c, Register);
+        assert_eq!(s, DisplaySign::AsSent, "{c:?}");
+        assert_eq!(s.apply(v).unwrap(), v);
+    }
     for c in [
         AccountClass::Bank,
         AccountClass::Receivable,
         AccountClass::OtherAsset,
     ] {
-        assert_eq!(DisplaySign::for_class(c), DisplaySign::AsSent);
-        assert_eq!(DisplaySign::for_class(c).apply(v).unwrap(), v);
+        assert_eq!(
+            DisplaySign::for_source(c, AccountBalance),
+            DisplaySign::AsSent
+        );
     }
+    // The stored balance is debit-positive: a card owing 1,084.66 stores
+    // -1084.66 and shows 1,084.66 (Q-241).
     for c in [
         AccountClass::CreditCard,
         AccountClass::Payable,
         AccountClass::OtherLiability,
         AccountClass::Equity,
     ] {
-        let s = DisplaySign::for_class(c);
+        let s = DisplaySign::for_source(c, AccountBalance);
         assert_eq!(s, DisplaySign::Negated);
+        assert!(s.negates());
         assert_eq!(s.apply(v).unwrap(), money("1084.66"));
         assert_eq!(s.apply(v).unwrap().to_wire(), money("1084.6600").to_wire());
         assert_eq!(s.apply(s.apply(v).unwrap()).unwrap(), v, "a pure sign flip");
@@ -398,6 +419,67 @@ fn display_sign_only_negates_credit_normal_balances() {
         DisplaySign::Negated.apply(Money::ZERO).unwrap(),
         Money::ZERO
     );
+}
+
+#[test]
+fn stored_balances_flip_for_every_credit_normal_kind() {
+    use AccountKind as K;
+    for k in [K::Liability, K::Equity, K::Income, K::OtherIncome] {
+        assert_eq!(
+            DisplaySign::for_stored_balance(k),
+            DisplaySign::Negated,
+            "{k:?}"
+        );
+    }
+    for k in [K::Asset, K::Cogs, K::Expense, K::OtherExpense] {
+        assert_eq!(
+            DisplaySign::for_stored_balance(k),
+            DisplaySign::AsSent,
+            "{k:?}"
+        );
+    }
+    // The register classes agree with the kind rule.
+    for (kind, detail) in [
+        (K::Asset, Some("bank")),
+        (K::Asset, None),
+        (K::Liability, Some("credit_card")),
+        (K::Liability, Some("accounts_payable")),
+        (K::Liability, None),
+        (K::Equity, None),
+    ] {
+        assert_eq!(
+            DisplaySign::for_source(
+                AccountClass::of(kind, detail),
+                BalanceSource::AccountBalance
+            ),
+            DisplaySign::for_stored_balance(kind),
+            "{kind:?} {detail:?}"
+        );
+    }
+}
+
+#[test]
+fn engine_fields_land_in_the_column_of_their_side() {
+    // Debit-normal: the engine's `payment` is the credit (first column).
+    for c in [
+        AccountClass::Bank,
+        AccountClass::Receivable,
+        AccountClass::OtherAsset,
+    ] {
+        assert_eq!(c.engine_payment_side(), Side::Payment, "{c:?}");
+    }
+    // Credit-normal: the engine's `payment` is the debit (second column),
+    // so a card charge (a credit, sent as `deposit`) lands under Charge.
+    for c in [
+        AccountClass::CreditCard,
+        AccountClass::Payable,
+        AccountClass::OtherLiability,
+        AccountClass::Equity,
+    ] {
+        assert_eq!(c.engine_payment_side(), Side::Deposit, "{c:?}");
+    }
+    let card = ColumnLabels::for_class(AccountClass::CreditCard);
+    assert_eq!(card.payment.as_str(), "register.col.charge", "first column");
 }
 
 // ----- entry kinds ----------------------------------------------------------

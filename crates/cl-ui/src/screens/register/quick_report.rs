@@ -7,6 +7,7 @@ use cl_api::{AccountReport, ApiError};
 use cl_core::CalendarDate;
 use cl_core::ids::AccountId;
 use cl_grid::{Grid, GridHeight, ModelRef, NoLookups};
+use cl_model::register::{BalanceSource, DisplaySign};
 use eframe::egui::{RichText, Ui};
 use serde_json::{Value, json};
 
@@ -120,7 +121,13 @@ impl RegisterScreen {
 
     /// The panel, above the register.
     pub(super) fn quick_report_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        let balance = self.account_record().and_then(|a| a.balance);
+        // The stored balance is debit-positive for every type: a
+        // credit-normal account shows it flipped (Q-P12h, Q-241).
+        let sign = DisplaySign::for_source(self.class, BalanceSource::AccountBalance);
+        let balance = self
+            .account_record()
+            .and_then(|a| a.balance)
+            .and_then(|b| sign.apply(b).ok());
         let title = self
             .account_record()
             .map(|a| a.fields.name.clone())

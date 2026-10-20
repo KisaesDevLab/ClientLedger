@@ -6,8 +6,11 @@
 //! Every amount here is text made from what the engine sent
 //! ([`RegisterAmount::display`]): exact amounts and display-only ones look
 //! the same and neither is ever added up (non-negotiable 7). The Balance
-//! column is the engine's running balance with the account's display sign
-//! (Q-P12h), or a dash while a filter makes it unreliable (Q-P12c).
+//! column is the engine's running balance as sent (it is already in the
+//! account's natural sign, Q-P12h), or a dash while a filter makes it
+//! unreliable (Q-P12c). The first amount column always holds the credit and
+//! the second the debit; the engine's `payment` / `deposit` fields are
+//! placed by [`AccountClass::engine_payment_side`].
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -23,8 +26,8 @@ use cl_grid::{
     RowKeyGen, RowModel, RowState, TextKey, WidthSpec,
 };
 use cl_model::register::{
-    AccountClass, BalanceMode, ColumnLabels, DisplaySign, PAGE, PageNo, PageRequest, Reply,
-    RowView, WindowCache,
+    AccountClass, BalanceMode, BalanceSource, ColumnLabels, DisplaySign, PAGE, PageNo, PageRequest,
+    Reply, RowView, Side, WindowCache,
 };
 
 use crate::i18n::t;
@@ -181,12 +184,13 @@ pub struct RegRow {
     pub payee: String,
     /// "Account · Memo" (owner data).
     pub account_memo: String,
-    /// Plain payment text (`1084.66`), as the engine sent it.
+    /// Plain text (`1084.66`) of the first amount column (the credit:
+    /// Payment, Charge, Decrease or Increase), as the engine sent it.
     pub payment: Option<String>,
-    /// Plain deposit text.
+    /// Plain text of the second amount column (the debit).
     pub deposit: Option<String>,
-    /// Plain balance text with the display sign; `None` when the engine's
-    /// value could not be read (shown as a dash).
+    /// Plain running balance text, as the engine sent it; `None` when the
+    /// engine's value could not be read (shown as a dash).
     pub balance: Option<String>,
     /// Cleared state.
     pub cleared: ClearState,
@@ -222,16 +226,17 @@ pub struct Mapping {
 }
 
 impl Mapping {
-    fn sign(&self) -> DisplaySign {
-        self.class
-            .map_or(DisplaySign::AsSent, DisplaySign::for_class)
-    }
-
     /// The row for one engine line.
     #[must_use]
     pub fn row(&self, l: &RegisterLine) -> RegRow {
         let class = self.class.unwrap_or(AccountClass::Bank);
-        let negate = self.sign() == DisplaySign::Negated;
+        // Running balances are register figures: in the natural sign.
+        let negate = DisplaySign::for_source(class, BalanceSource::Register).negates();
+        let text = |a: Option<&RegisterAmount>| a.and_then(|a| a.display(false));
+        let (credit, debit) = match class.engine_payment_side() {
+            Side::Payment => (l.payment.as_ref(), l.deposit.as_ref()),
+            Side::Deposit => (l.deposit.as_ref(), l.payment.as_ref()),
+        };
         let account = match &l.category {
             Category::Account { id, name } => self
                 .names
@@ -271,8 +276,8 @@ impl Mapping {
             kind: t(type_key(l.txn_type, class)),
             payee: l.payee.clone().unwrap_or_default(),
             account_memo: parts.join(" \u{b7} "),
-            payment: l.payment.as_ref().and_then(|a| a.display(false)),
-            deposit: l.deposit.as_ref().and_then(|a| a.display(false)),
+            payment: text(credit),
+            deposit: text(debit),
             balance: l.balance.display(negate),
             cleared: l.cleared,
             void,

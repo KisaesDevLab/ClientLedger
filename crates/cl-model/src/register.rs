@@ -6,8 +6,8 @@
 //! The engine is the ledger. Nothing here adds amounts up: every balance a
 //! register shows is a value the engine sent, carried as it came
 //! (non-negotiable 7, Q-187). The only arithmetic on an engine balance is the
-//! display sign flip for credit-normal accounts (Q-P12h), which is
-//! [`Money::checked_neg`] and nothing else.
+//! display sign flip of a credit-normal account's stored balance (Q-P12h),
+//! which is [`Money::checked_neg`] and nothing else.
 //!
 //! No cl-api types appear here (layering): cl-ui maps the API's register
 //! lines into its own row type and hands them to [`WindowCache`].
@@ -563,9 +563,11 @@ impl AccountClass {
     }
 }
 
-/// Which amount column a line's amount sits in. The first column holds
-/// credits to the register's account, the second debits, whatever their
-/// labels say (WP1: payment = credit, deposit = debit).
+/// Which amount column a line's amount sits in. The first column always
+/// holds credits to the register's account and the second debits, whatever
+/// their labels say. The engine's own `payment` / `deposit` field names
+/// follow the account's normal side instead (see
+/// [`AccountClass::engine_payment_side`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Side {
     /// The first amount column (credit): Payment, Charge, Decrease or
@@ -574,6 +576,25 @@ pub enum Side {
     /// The second amount column (debit): Deposit, Payment, Increase or
     /// Decrease by account.
     Deposit,
+}
+
+impl AccountClass {
+    /// The column the engine's `payment` field belongs in; its `deposit`
+    /// field goes in the other one.
+    ///
+    /// The engine names the two fields after the account's normal side: on
+    /// a debit-normal account `payment` is the credit and `deposit` the
+    /// debit; on a credit-normal one (card, A/P, other liability, equity)
+    /// `payment` is the debit and `deposit` the credit. A card charge is a
+    /// credit, so it arrives as `deposit` and is shown under "Charge".
+    #[must_use]
+    pub const fn engine_payment_side(self) -> Side {
+        if self.is_credit_normal() {
+            Side::Deposit
+        } else {
+            Side::Payment
+        }
+    }
 }
 
 /// The two amount column headings for a register (Q-P12g).
@@ -612,9 +633,23 @@ impl ColumnLabels {
     }
 }
 
-/// How an engine balance is shown (Q-P12h). The engine reports register
-/// balances as debits minus credits; a credit-normal account shows them
-/// with its normal sign, so a card's balance owed reads positive.
+/// Where a balance figure comes from. The engine uses two sign conventions
+/// (Q-P12h, Q-241), so the display sign depends on the source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BalanceSource {
+    /// The register endpoints: running balances, balance forward, and the
+    /// summary's ending and cleared balances. They are in the account's
+    /// natural sign (credit − debit on a credit-normal account), so a
+    /// card's balance owed already reads positive.
+    Register,
+    /// The stored account balance (`accounts.balance`, the summary's
+    /// `currentBalance`, the chart's balance): debits minus credits for
+    /// every account type.
+    AccountBalance,
+}
+
+/// How an engine balance is shown (Q-P12h, Q-241): every register shows its
+/// account's normal sign, so a card's balance owed reads positive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DisplaySign {
     /// Shown as sent.
@@ -624,14 +659,39 @@ pub enum DisplaySign {
 }
 
 impl DisplaySign {
-    /// The sign rule for a register of `class`.
+    /// The sign rule for a figure from `source` on a register of `class`.
+    /// Only the stored account balance of a credit-normal account is
+    /// flipped; register figures already come in the natural sign.
     #[must_use]
-    pub const fn for_class(class: AccountClass) -> DisplaySign {
-        if class.is_credit_normal() {
-            DisplaySign::Negated
-        } else {
-            DisplaySign::AsSent
+    pub const fn for_source(class: AccountClass, source: BalanceSource) -> DisplaySign {
+        match source {
+            BalanceSource::AccountBalance if class.is_credit_normal() => DisplaySign::Negated,
+            BalanceSource::Register | BalanceSource::AccountBalance => DisplaySign::AsSent,
         }
+    }
+
+    /// The sign rule for the stored balance of an account of `kind` (the
+    /// chart of accounts): flipped for the credit-normal kinds the engine
+    /// names (liability, equity, income, other income), so every account
+    /// shows its normal balance positive.
+    #[must_use]
+    pub const fn for_stored_balance(kind: AccountKind) -> DisplaySign {
+        match kind {
+            AccountKind::Liability
+            | AccountKind::Equity
+            | AccountKind::Income
+            | AccountKind::OtherIncome => DisplaySign::Negated,
+            AccountKind::Asset
+            | AccountKind::Cogs
+            | AccountKind::Expense
+            | AccountKind::OtherExpense => DisplaySign::AsSent,
+        }
+    }
+
+    /// True when the value is shown negated.
+    #[must_use]
+    pub const fn negates(self) -> bool {
+        matches!(self, DisplaySign::Negated)
     }
 
     /// The value to show for the engine's `value`. This is the only

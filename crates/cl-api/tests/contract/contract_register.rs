@@ -6,21 +6,22 @@
 //! convertible to `Money`); the shape checks below read the raw JSON for
 //! the non-money fields only. With
 //! `register-exact-v1` (engine PR #153, R1–R4) the typed pages are checked
-//! too: exact strings, payment = credit and deposit = debit against
+//! too: exact strings, payment = credit and deposit = debit on a bank against
 //! `GET /transactions/{id}`, the same balance per line whatever the sort or
 //! filter, and the summary's ending balance. PENDING(R1–R4) until then.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use cl_api::{
-    AccountFields, AccountType, Capabilities, Method, RegisterAmount, RegisterQuery, RegisterSort,
-    SortDir,
+    AccountFields, AccountType, BankPosting, Capabilities, CardChargeDraft, Method, PostingOptions,
+    RegisterAmount, RegisterQuery, RegisterSort, SortDir, SplitLine, TransferDraft,
 };
 use cl_core::Money;
 use cl_core::ids::AccountId;
 use serde_json::Value;
 
-use crate::common::{account, date, je2, key, post};
+use crate::common::{account, date, je2, key, m, post};
+use crate::contract_bank_postings::detail_account;
 use crate::support::{Harness, unique};
 
 fn bank(h: &Harness, s: &cl_api::Session) -> AccountId {
@@ -217,5 +218,104 @@ pub fn dates_paging_and_exact_money(h: &Harness) {
         exact(p.ending_balance.as_ref()),
         Some(ending),
         "unfiltered ending"
+    );
+}
+
+/// A credit-card register (B1, Q-P12h, Q-241): one charge and one payment.
+/// The engine names `payment` / `deposit` after the account's normal side,
+/// so on a card the charge (a credit) is `deposit` and the payment (a
+/// debit) is `payment`; running balances are credit − debit (the amount
+/// owed, positive). Only the stored `accounts.balance` (`currentBalance`)
+/// is debit-positive. The row checks compare display text, so they run on
+/// the pinned engine too; the summary's ending balance needs R4.
+pub fn card_register_columns_and_sign(h: &Harness) {
+    let s = &h.s1;
+    let card = detail_account(h, s, AccountType::Liability, "credit_card");
+    let bank = bank(h, s);
+    let fuel = account(h, s, AccountType::Expense, "Card register fuel").id;
+    let memo = unique("card register");
+    let charge = BankPosting::card_charge(CardChargeDraft {
+        pay_from: card,
+        date: date(2019, 6, 1),
+        number: None,
+        payee: None,
+        memo: Some(memo.clone()),
+        lines: vec![SplitLine {
+            account: fuel,
+            amount: m("40.0000"),
+            memo: None,
+            contact: None,
+            tag: None,
+        }],
+    })
+    .expect("charge");
+    let payment = BankPosting::transfer(TransferDraft {
+        from: bank,
+        to: card,
+        date: date(2019, 6, 2),
+        amount: m("15.2500"),
+        memo: Some(memo),
+    })
+    .expect("payment");
+    let opts = PostingOptions::default();
+    for p in [&charge, &payment] {
+        h.run(s.transactions().create_bank_posting(p, &opts, key()))
+            .unwrap_or_else(|e| panic!("create: {e}"));
+    }
+
+    let q = RegisterQuery::new(date(1900, 1, 1), date(2199, 12, 31));
+    let page = h.run(s.register().page(card, &q, 1, 200)).expect("page");
+    let text = |a: Option<&RegisterAmount>| a.and_then(|a| a.display(false));
+    assert_eq!(page.lines.len(), 2);
+    let (c, p) = (&page.lines[0], &page.lines[1]);
+    assert_eq!(c.date, date(2019, 6, 1));
+    // The charge is a credit: sent as `deposit` (the screen's Charge column).
+    assert_eq!(text(c.deposit.as_ref()).as_deref(), Some("40.00"), "charge");
+    assert_eq!(text(c.payment.as_ref()), None, "charge");
+    // The payment is a debit: sent as `payment`.
+    assert_eq!(
+        text(p.payment.as_ref()).as_deref(),
+        Some("15.25"),
+        "payment"
+    );
+    assert_eq!(text(p.deposit.as_ref()), None, "payment");
+    // Running balance: the amount owed, positive.
+    assert_eq!(c.balance.display(false).as_deref(), Some("40.00"));
+    assert_eq!(p.balance.display(false).as_deref(), Some("24.75"));
+    assert_eq!(page.balance_forward.display(false).as_deref(), Some("0.00"));
+
+    // The stored balance is debits minus credits for every type.
+    let summary = h.run(s.register().summary(card, None)).expect("summary");
+    assert_eq!(
+        summary.current_balance.display(false).as_deref(),
+        Some("-24.75"),
+        "accounts.balance is debit-positive"
+    );
+    let stored = h
+        .run(s.accounts().get(card))
+        .expect("account")
+        .record
+        .balance
+        .expect("balance");
+    assert_eq!(stored.to_wire(), "-24.7500");
+
+    if !h.require_cap(Capabilities::REGISTER_EXACT, "R1-R4") {
+        return;
+    }
+    // R4: the summary's ending balance is the last row's, same sign.
+    let last = p.balance.exact().expect("exact balance");
+    assert_eq!(last.to_wire(), "24.7500");
+    assert_eq!(
+        summary
+            .ending_balance
+            .as_ref()
+            .and_then(RegisterAmount::exact),
+        Some(last),
+        "summary ending = last row"
+    );
+    assert_eq!(
+        page.ending_balance.as_ref().and_then(RegisterAmount::exact),
+        Some(last),
+        "page ending = last row"
     );
 }

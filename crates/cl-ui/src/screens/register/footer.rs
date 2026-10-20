@@ -8,12 +8,14 @@
 //! account's stored balance when the range reaches today. When a filter is
 //! on before R1 a companion one-line page without filters supplies the
 //! ending balance. Nothing here is ever added up (non-negotiable 7); a
-//! figure that is missing shows "—".
+//! figure that is missing shows "—". The register figures are shown as
+//! sent (they are in the account's natural sign); only the stored balance
+//! of a credit-normal account is flipped for display (Q-P12h, Q-241).
 
 use cl_api::{RegisterAmount, RegisterPage, RegisterQuery, RegisterSummary};
 use cl_core::CalendarDate;
 use cl_core::ids::AccountId;
-use cl_model::register::DisplaySign;
+use cl_model::register::{BalanceSource, DisplaySign};
 use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
@@ -113,12 +115,8 @@ pub struct Shown {
 }
 
 impl RegisterScreen {
-    fn negate(&self) -> bool {
-        DisplaySign::for_class(self.class) == DisplaySign::Negated
-    }
-
-    fn amount_text(&self, a: &RegisterAmount) -> Option<String> {
-        a.display(self.negate())
+    fn amount_text(&self, a: &RegisterAmount, source: BalanceSource) -> Option<String> {
+        a.display(DisplaySign::for_source(self.class, source).negates())
             .map(|p| layout_plain(&p, self.model.style))
     }
 
@@ -227,11 +225,15 @@ impl RegisterScreen {
         let ending = s
             .and_then(|s| s.ending_balance.as_ref())
             .or(f.page_ending.as_ref())
+            .and_then(|a| self.amount_text(a, BalanceSource::Register))
             // An engine without R1/R4: the account's stored balance, which
             // counts every posted line, stands in only when the range
             // reaches today.
-            .or_else(|| s.filter(|_| reaches_today).map(|s| &s.current_balance))
-            .and_then(|a| self.amount_text(a))
+            .or_else(|| {
+                s.filter(|_| reaches_today).and_then(|s| {
+                    self.amount_text(&s.current_balance, BalanceSource::AccountBalance)
+                })
+            })
             .unwrap_or_else(|| DASH.to_string());
         Shown {
             last_reconciled: s.and_then(|s| s.last_reconciled).map(|d| {
@@ -248,7 +250,7 @@ impl RegisterScreen {
             }),
             cleared: s
                 .and_then(|s| s.cleared_balance.as_ref())
-                .and_then(|a| self.amount_text(a)),
+                .and_then(|a| self.amount_text(a, BalanceSource::Register)),
             ending,
             failed: f.summary_failed,
         }

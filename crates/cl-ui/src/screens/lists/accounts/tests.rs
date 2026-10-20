@@ -408,3 +408,27 @@ fn esc_revert_puts_the_focus_back_in_the_form() {
         Some(cl_model::lists::accounts::DraftField::Name)
     );
 }
+
+#[test]
+fn credit_normal_accounts_show_their_stored_balance_flipped() {
+    let r = Rig::new(true);
+    let chart = r.s.model.chart();
+    // The engine stores debits minus credits for every type (the demo
+    // does too); the chart shows each account's normal balance positive.
+    for (number, flipped) in [(1010, false), (2050, true), (4000, true), (6100, false)] {
+        let stored =
+            r.s.accounts
+                .iter()
+                .find(|a| a.id == account_id(number))
+                .and_then(|a| a.balance)
+                .expect("stored");
+        let shown = chart.entry(account_id(number)).and_then(|e| e.balance);
+        let want = if flipped {
+            stored.checked_neg().expect("neg")
+        } else {
+            stored
+        };
+        assert_eq!(shown, Some(want), "{number}");
+        assert!(!want.is_negative(), "{number} reads positive");
+    }
+}

@@ -103,13 +103,28 @@ fn env_or<T: std::str::FromStr>(name: &str, default: T) -> T {
 }
 
 /// The accounts of the run. A is the register under test; B and C are the
-/// other sides of transfers, and C is the card.
+/// other sides of transfers, and C is the card (credit-normal).
 struct Books {
     a: AccountId,
     b: AccountId,
     c: AccountId,
     expenses: [AccountId; 2],
     income: AccountId,
+}
+
+impl Books {
+    /// `debit_minus_credit` in the register's sign for `acct`: the engine's
+    /// register reports a credit-normal account (the card C) as
+    /// credit − debit, the amount owed positive (Q-P12h, Q-241), and a
+    /// debit-normal one as debit − credit. `accounts.balance` is
+    /// debit − credit for both.
+    fn register_sign(&self, acct: AccountId, debit_minus_credit: Money) -> Money {
+        if acct == self.c {
+            debit_minus_credit.checked_neg().expect("neg")
+        } else {
+            debit_minus_credit
+        }
+    }
 }
 
 /// What a posting is, enough to rebuild it and to know its effect.
@@ -411,9 +426,9 @@ fn account_balance(h: &Harness, acct: AccountId) -> Money {
 }
 
 /// The engine's stored account balances. `accounts.balance` is
-/// debit-positive for every account type (the engine's own convention), the
-/// same sign as the register, so the card's is negative while money is
-/// owed; the register screen flips it for display only (Q-P12h).
+/// debit-positive for every account type (the engine's own convention), so
+/// the card's is negative while money is owed, the opposite of its register
+/// (Q-P12h); the screen flips the stored figure for display only.
 fn engine_balances(h: &Harness, b: &Books) -> [(&'static str, AccountId, Money); 3] {
     [
         ("A", b.a, account_balance(h, b.a)),
@@ -440,7 +455,8 @@ fn check_register(h: &Harness, b: &Books, o: &Oracle, acct: AccountId, rng: &mut
     let ids: BTreeSet<_> = rows.iter().map(|l| l.line_id.to_string()).collect();
     assert_eq!(ids.len(), rows.len(), "{ctx}: a line id twice");
 
-    // Each balance = previous + deposit − payment, in date order.
+    // Each balance = previous + deposit − payment, in date order: the
+    // engine's deposit is the increase on the account's normal side.
     let mut running = Money::ZERO;
     let mut base = BTreeMap::new();
     for l in &rows {
@@ -464,7 +480,7 @@ fn check_register(h: &Harness, b: &Books, o: &Oracle, acct: AccountId, rng: &mut
         assert_eq!(bal.to_wire(), running.to_wire(), "{ctx}: row balance");
         base.insert(l.line_id.to_string(), bal.to_wire());
     }
-    let expected = o.balance(b, acct);
+    let expected = b.register_sign(acct, o.balance(b, acct));
     let ending = ending.unwrap_or_else(|| panic!("{ctx}: no endingBalance"));
     assert_eq!(
         running.to_wire(),
@@ -477,7 +493,8 @@ fn check_register(h: &Harness, b: &Books, o: &Oracle, acct: AccountId, rng: &mut
         "{ctx}: ending vs oracle"
     );
 
-    // The footer: the stored balance and no cleared amount.
+    // The footer: the stored balance (debit − credit, so the card's is the
+    // register's negated) and no cleared amount.
     let summary = h.run(h.s1.register().summary(acct, None)).expect("summary");
     assert!(summary.exact, "{ctx}: summary not exact");
     let stored = account_balance(h, acct);
@@ -485,6 +502,11 @@ fn check_register(h: &Harness, b: &Books, o: &Oracle, acct: AccountId, rng: &mut
         exact(&summary.current_balance, "currentBalance").to_wire(),
         stored.to_wire(),
         "{ctx}: summary current balance"
+    );
+    assert_eq!(
+        b.register_sign(acct, stored).to_wire(),
+        ending.to_wire(),
+        "{ctx}: stored balance vs register ending (per-account sign)"
     );
     let summary_ending = summary
         .ending_balance

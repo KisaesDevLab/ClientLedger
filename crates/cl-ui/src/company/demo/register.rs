@@ -6,12 +6,19 @@
 //! as with the engine's `register-exact-v1`). The register screen never
 //! adds anything up: it shows what this module (or the real engine) sends.
 //! All figures are synthetic.
+//!
+//! Signs follow the engine (Q-P12h): the running, forward, ending and
+//! cleared balances are in the account's natural sign (credit − debit on a
+//! credit-normal account), `payment` is the decrease and `deposit` the
+//! increase, while the summary's `currentBalance` (the stored account
+//! balance) is debits minus credits for every type.
 
 use std::cmp::Ordering;
 
 use cl_api::{
-    Account, Category, ClearState, EntryType, RegisterAccount, RegisterAmount, RegisterLine,
-    RegisterPage, RegisterQuery, RegisterSort, RegisterSummary, SortDir, TxnStatus, TxnType,
+    Account, AccountType, Category, ClearState, EntryType, RegisterAccount, RegisterAmount,
+    RegisterLine, RegisterPage, RegisterQuery, RegisterSort, RegisterSummary, SortDir, TxnStatus,
+    TxnType,
 };
 use cl_company::Sample;
 use cl_company::sample::SampleTransaction;
@@ -61,12 +68,22 @@ fn number_of(a: &Account) -> Option<&str> {
     a.fields.account_number.as_deref()
 }
 
-/// Every line of `account` in date order with its running balance, and the
-/// account's balance before each date (for the balance forward).
-fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Vec<Built> {
+/// The engine's `isDebitNormal`: asset, COGS, expense, other expense.
+fn debit_normal(t: AccountType) -> bool {
+    matches!(
+        t,
+        AccountType::Asset | AccountType::Cogs | AccountType::Expense | AccountType::OtherExpense
+    )
+}
+
+/// Every line of `account` in date order with its running balance (in the
+/// account's natural sign, like the engine's register). `None` when a
+/// figure leaves the supported money range.
+fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Option<Vec<Built>> {
     let Some(number) = number_of(account) else {
-        return Vec::new();
+        return Some(Vec::new());
     };
+    let debit_normal = debit_normal(account.fields.account_type);
     let all = ledger.transactions();
     let reconciled_through = last_reconciled();
     let mut txns: Vec<&SampleTransaction> = all
@@ -110,12 +127,19 @@ fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Vec<Built
         {
             let void = voided(t);
             // A void line moves nothing: its row carries the balance before.
-            let net = if void {
-                Money::ZERO
-            } else {
-                l.debit.checked_sub(l.credit).unwrap_or(Money::ZERO)
+            let net = match (void, debit_normal) {
+                (true, _) => Money::ZERO,
+                (false, true) => l.debit.checked_sub(l.credit).ok()?,
+                (false, false) => l.credit.checked_sub(l.debit).ok()?,
             };
-            running = running.checked_add(net).unwrap_or(running);
+            running = running.checked_add(net).ok()?;
+            // Payment is the decrease and deposit the increase, relative to
+            // the account's normal side (the engine's convention).
+            let (decrease, increase) = if debit_normal {
+                (l.credit, l.debit)
+            } else {
+                (l.debit, l.credit)
+            };
             let cleared = match (t.cleared, t.date <= reconciled_through) {
                 (true, true) => ClearState::Reconciled,
                 (true, false) => ClearState::Cleared,
@@ -136,10 +160,10 @@ fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Vec<Built
                     contact: None,
                     category: category.clone(),
                     memo: (!t.memo.is_empty()).then(|| t.memo.clone()),
-                    payment: (!void && l.credit.is_positive())
-                        .then_some(RegisterAmount::Exact(l.credit)),
-                    deposit: (!void && l.debit.is_positive())
-                        .then_some(RegisterAmount::Exact(l.debit)),
+                    payment: (!void && decrease.is_positive())
+                        .then_some(RegisterAmount::Exact(decrease)),
+                    deposit: (!void && increase.is_positive())
+                        .then_some(RegisterAmount::Exact(increase)),
                     balance: RegisterAmount::Exact(running),
                     cleared,
                     has_splits: matches!(category, Category::Split),
@@ -153,7 +177,7 @@ fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Vec<Built
             });
         }
     }
-    out
+    Some(out)
 }
 
 fn matches(b: &Built, q: &RegisterQuery) -> bool {
@@ -216,7 +240,7 @@ pub fn page(
     per_page: u16,
 ) -> Option<RegisterPage> {
     let acct = chart.iter().find(|a| a.id == account)?;
-    let all = build(ledger, chart, acct);
+    let all = build(ledger, chart, acct)?;
     let balance_forward = all
         .iter()
         .take_while(|b| b.line.date < q.start)
@@ -295,14 +319,20 @@ pub fn summary(
     end: Option<CalendarDate>,
 ) -> Option<RegisterSummary> {
     let acct = chart.iter().find(|a| a.id == account)?;
-    let all = build(ledger, chart, acct);
+    let all = build(ledger, chart, acct)?;
     let through = |b: &&Built| end.is_none_or(|e| b.line.date <= e);
     let last_balance = |it: &mut dyn Iterator<Item = &Built>| {
         it.last()
             .and_then(|b| b.line.balance.exact())
             .unwrap_or(Money::ZERO)
     };
-    let current = last_balance(&mut all.iter());
+    // The stored account balance is debits minus credits for every type.
+    let natural = last_balance(&mut all.iter());
+    let current = if debit_normal(acct.fields.account_type) {
+        natural
+    } else {
+        natural.checked_neg().ok()?
+    };
     let ending = last_balance(&mut all.iter().filter(through));
     // The demo engine's own cleared total (not the screen's arithmetic).
     let cleared = all
@@ -316,8 +346,7 @@ pub fn summary(
                 _ => Some(Money::ZERO),
             }?;
             acc.checked_add(net).ok()
-        })
-        .unwrap_or(Money::ZERO);
+        })?;
     let uncleared = all
         .iter()
         .filter(through)

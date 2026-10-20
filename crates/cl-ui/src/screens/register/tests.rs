@@ -1220,3 +1220,127 @@ fn rate_limits_and_conflicts_are_plain_messages() {
     assert_eq!(s.state()["row_action"]["panel"], "confirm_void");
     assert_eq!(s.state()["row_action"]["stale"], false);
 }
+
+/// B1 (Q-P12h, Q-241): a card register in the engine's convention. The
+/// engine sends a charge (a credit) as `deposit` and a payment (a debit) as
+/// `payment`, with running balances in the natural sign (credit − debit);
+/// only the stored account balance is debit-positive.
+#[test]
+fn a_card_register_shows_charges_under_charge_and_the_amount_owed_positive() {
+    let (_d, link) = link();
+    let card = demo_account(&link, "2050");
+    let mut s = RegisterScreen::new(Arc::clone(&link), None, today(), Some(card));
+    s.set_range(cl_model::register::RangePreset::AllDates);
+    settle(&mut s, None);
+    assert_eq!(s.account(), Some(card));
+    assert_eq!(s.class, AccountClass::CreditCard);
+    let total = s.model.total().expect("total");
+    assert!(total > 2, "the sample card has activity");
+    settle(&mut s, Some(&(0..total)));
+
+    let chart = link
+        .demo_state()
+        .and_then(|d| d.chart.clone())
+        .expect("chart");
+    let q = s.query.clone().expect("q");
+    let per = u16::try_from(total).expect("rows");
+    let page = crate::company::demo::register::page(
+        &crate::company::demo::register::DemoLedger::default(),
+        &chart,
+        card,
+        &q,
+        1,
+        per,
+    )
+    .expect("page");
+    let text = |a: Option<&cl_api::RegisterAmount>| a.and_then(|a| a.display(false));
+    let (mut charges, mut payments) = (0, 0);
+    for (i, l) in page.lines.iter().enumerate() {
+        let row = s.model.row_at(i).expect("row");
+        assert_eq!(row.line_id, l.line_id);
+        // The first column (Charge) holds the credit, sent as `deposit`.
+        assert_eq!(row.payment, text(l.deposit.as_ref()), "row {i}: Charge");
+        assert_eq!(row.deposit, text(l.payment.as_ref()), "row {i}: Payment");
+        // The running balance is shown exactly as sent.
+        assert_eq!(row.balance, l.balance.display(false), "row {i}: balance");
+        // A charge credits the card: its amount sits under Charge only.
+        if row.payment.is_some() {
+            assert!(row.deposit.is_none(), "row {i}: one column");
+            charges += 1;
+        }
+        // A payment (here a check from the bank) debits it.
+        if row.deposit.is_some() {
+            payments += 1;
+        }
+    }
+    assert!(
+        charges > 0 && payments > 0,
+        "{charges} charges, {payments} payments"
+    );
+    let owed = page
+        .lines
+        .last()
+        .and_then(|l| l.balance.exact())
+        .expect("last balance");
+    assert!(owed.is_positive(), "a card owing money reads positive");
+    let first_header = s
+        .grid
+        .spec()
+        .columns
+        .iter()
+        .find(|c| c.id == view::COL_PAYMENT)
+        .map(|c| c.header.as_str());
+    assert_eq!(first_header, Some("register.col.charge"));
+
+    // The footer: the engine's ending balance as sent, positive.
+    s.footer_load();
+    let layout = |m: cl_core::Money| {
+        crate::screens::lists::center::model::layout_plain(
+            &cl_api::RegisterAmount::Exact(m)
+                .display(false)
+                .expect("display"),
+            s.model.style,
+        )
+    };
+    let shown = s.footer_shown();
+    assert_eq!(shown.ending, layout(owed));
+    // The stored balance is debit-positive (negative while money is owed);
+    // as a fallback it is flipped, so it reads the same.
+    let mut sum = s.footer.summary.clone().expect("summary");
+    let stored = sum.current_balance.exact().expect("exact");
+    assert_eq!(stored, owed.checked_neg().expect("neg"));
+    sum.ending_balance = None;
+    s.footer.summary = Some(sum);
+    s.footer.page_ending = None;
+    assert_eq!(s.footer_shown().ending, layout(owed));
+}
+
+#[test]
+fn a_charge_typed_under_charge_lands_under_charge() {
+    let (_d, link) = link();
+    let card = demo_account(&link, "2050");
+    let mut s = RegisterScreen::new(Arc::clone(&link), None, today(), Some(card));
+    s.set_range(cl_model::register::RangePreset::AllDates);
+    settle(&mut s, None);
+    let before = s.model.total().expect("total");
+    let fuel = demo_account(&link, "6100");
+    s.entry.form.edit_step(|d| {
+        d.account = Some(fuel);
+        d.payment = Some(money("42.17"));
+    });
+    assert_eq!(
+        s.draft_kind(),
+        Some(cl_model::register::EntryKind::CardCharge)
+    );
+    assert!(s.start_record(), "the demo saves at once");
+    settle(&mut s, None);
+    let total = s.model.total().expect("total");
+    assert_eq!(total, before + 1);
+    settle(&mut s, Some(&(0..total)));
+    let rows: Vec<_> = (0..usize::try_from(total).expect("n"))
+        .filter_map(|i| s.model.row_at(i))
+        .filter(|r| r.date == today() && r.payment.as_deref() == Some("42.17"))
+        .collect();
+    assert_eq!(rows.len(), 1, "the charge sits in the Charge column");
+    assert!(rows[0].deposit.is_none());
+}

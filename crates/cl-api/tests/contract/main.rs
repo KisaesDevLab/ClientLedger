@@ -167,6 +167,10 @@ fn main() -> std::process::ExitCode {
             contract_register::dates_paging_and_exact_money,
         ),
         (
+            "register::card_register_columns_and_sign",
+            contract_register::card_register_columns_and_sign,
+        ),
+        (
             "bank_postings::each_kind_round_trip_update_and_void",
             contract_bank_postings::each_kind_round_trip_update_and_void,
         ),

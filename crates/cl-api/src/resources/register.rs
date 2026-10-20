@@ -320,9 +320,9 @@ impl RegisterAmount {
     }
 
     /// Plain display text at cents (`-1084.66`), half away from zero,
-    /// never `-0.00`. `negated` flips the shown sign (the display sign of a
-    /// credit-normal register, Q-P12h); for either kind that is a change of
-    /// the text's sign, not arithmetic on the value. `None` when the
+    /// never `-0.00`. `negated` flips the shown sign (the display flip of
+    /// a credit-normal account's stored balance, Q-P12h); for either kind
+    /// that is a change of the text's sign, not arithmetic on the value. `None` when the
     /// engine's number text is not readable as a decimal.
     #[must_use]
     pub fn display(&self, negated: bool) -> Option<String> {
