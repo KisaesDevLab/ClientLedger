@@ -332,13 +332,20 @@ pub fn find(id: &str) -> Option<&'static Command> {
 /// Developer-only commands (P10 plan §2.12, S8). They are not in
 /// [`COMMANDS`], so no menu, keymap, palette or `KEYBOARD.md` sees them;
 /// the shell looks here only when it runs with `--demo`.
-pub const DEV_COMMANDS: &[Command] = &[built(
-    "dev.grid_demo",
-    "Grid Demo (developer)",
-    None,
-    0,
-    None,
-)];
+pub const DEV_COMMANDS: &[Command] = &[
+    built("dev.grid_demo", "Grid Demo (developer)", None, 0, None),
+    // Write Check (P13): there is no check printing before P19, so the
+    // control-channel scenario marks the demo check in front as printed to
+    // reach the printed-check question.
+    dev_action("dev.check_mark_printed", "Mark Check Printed (developer)"),
+];
+
+/// A developer-only command the window in front handles (opens nothing).
+const fn dev_action(id: &'static str, label: &'static str) -> Command {
+    let mut c = cmd(id, label, None, 0, None, Scope::Form);
+    c.palette = false;
+    c
+}
 
 /// Look a developer-only command up by id.
 #[must_use]
@@ -361,10 +368,15 @@ mod tests {
             assert!(c.id.as_str().starts_with("dev."), "{}", c.id);
             assert!(find(c.id.as_str()).is_none(), "{} is shipped", c.id);
             assert!(c.shortcut.is_none() && c.menu.is_none(), "{}", c.id);
-            assert!(c.opens && c.arrives.is_none());
+            assert!(c.arrives.is_none(), "{}", c.id);
+            assert!(c.opens || !c.palette, "{} is in the palette", c.id);
         }
         assert!(COMMANDS.iter().all(|c| !c.id.as_str().starts_with("dev.")));
         assert_eq!(find_dev("dev.grid_demo").map(|c| c.opens), Some(true));
+        assert_eq!(
+            find_dev("dev.check_mark_printed").map(|c| (c.opens, c.scope)),
+            Some((false, Scope::Form))
+        );
         assert!(find_dev("nav.home").is_none());
     }
 

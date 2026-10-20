@@ -37,28 +37,73 @@ pub fn button_with_chip(ui: &mut Ui, label: &str, chip: &str) -> Response {
     if chip.is_empty() {
         return ui.button(label);
     }
+    chip_button(ui, RichText::new(label), chip, false, |b| b)
+}
+
+/// A form action button with its shortcut chip inside ("Save & New
+/// `Alt N`"), `min_height` tall; `primary` fills it with the accent and
+/// draws the chip to read on it. The accessible name stays the label.
+pub fn action_button_with_chip(
+    ui: &mut Ui,
+    label: &str,
+    chip: &str,
+    primary: bool,
+    min_height: f32,
+) -> Response {
     let t = Tokens::of(ui.ctx());
+    let text = if primary {
+        RichText::new(label).color(t.on_accent).strong()
+    } else {
+        RichText::new(label)
+    };
+    chip_button(ui, text, chip, primary, |b| {
+        let b = b.min_size(Vec2::new(0.0, min_height));
+        if primary {
+            b.fill(t.accent).stroke(Stroke::NONE)
+        } else {
+            b
+        }
+    })
+}
+
+/// A button holding `label` then a painted chip `chip`; `style` finishes
+/// the button (fill, size).
+fn chip_button(
+    ui: &mut Ui,
+    label: RichText,
+    chip: &str,
+    on_accent: bool,
+    style: impl FnOnce(egui::Button<'_>) -> egui::Button<'_>,
+) -> Response {
+    let t = Tokens::of(ui.ctx());
+    let (fill, stroke, text) = if on_accent {
+        (
+            t.on_accent.gamma_multiply(0.18),
+            Stroke::new(1.0, t.on_accent.gamma_multiply(0.45)),
+            t.on_accent,
+        )
+    } else {
+        (
+            t.surface_window,
+            Stroke::new(1.0, t.border_strong),
+            t.text_secondary,
+        )
+    };
     let font = styles::kbd().resolve(ui.style());
-    let galley = ui
-        .painter()
-        .layout_no_wrap(chip.to_string(), font, t.text_secondary);
+    let galley = ui.painter().layout_no_wrap(chip.to_string(), font, text);
     let size = galley.size() + Vec2::new(10.0, 2.0);
-    let id = egui::IdSalt::new(("button-chip", label));
-    let r = egui::Button::new((label, egui::Atom::custom(id, size))).atom_ui(ui);
+    let id = egui::IdSalt::new(("button-chip", label.text().to_string()));
+    let r = style(egui::Button::new((label, egui::Atom::custom(id, size)))).atom_ui(ui);
     if let Some(rect) = r.rect(id) {
         let p = ui.painter();
         p.rect(
             rect,
             CornerRadius::same(3),
-            t.surface_window,
-            Stroke::new(1.0, t.border_strong),
+            fill,
+            stroke,
             StrokeKind::Inside,
         );
-        p.galley(
-            rect.center() - galley.size() / 2.0,
-            galley,
-            t.text_secondary,
-        );
+        p.galley(rect.center() - galley.size() / 2.0, galley, text);
     }
     r.response
 }
