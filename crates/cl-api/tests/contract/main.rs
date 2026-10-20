@@ -20,6 +20,7 @@ mod contract_closed_period;
 mod contract_companies;
 mod contract_conflict;
 mod contract_contacts;
+mod contract_daily_sales;
 mod contract_errors;
 mod contract_harness;
 mod contract_items;
@@ -213,6 +214,15 @@ fn main() -> std::process::ExitCode {
         (
             "write_check::closed_period",
             contract_write_check::closed_period,
+        ),
+        ("daily_sales::over_short", contract_daily_sales::over_short),
+        (
+            "daily_sales::preview_property",
+            contract_daily_sales::preview_property,
+        ),
+        (
+            "daily_sales::closed_period",
+            contract_daily_sales::closed_period,
         ),
         (
             "register_property::balance_holds_after_random_edits",

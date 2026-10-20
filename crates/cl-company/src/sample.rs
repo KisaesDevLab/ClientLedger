@@ -667,29 +667,41 @@ pub async fn load_into(
 }
 
 /// The lines the engine gets for a sample layout: each line's own account,
-/// else its fallback (unmapped when the chart has neither).
+/// else its fallback (unmapped when the chart has neither). Their order is
+/// the sort order.
 #[must_use]
 pub fn layout_seed_lines(
     layout: &SampleLayout,
     id_of: impl Fn(&str) -> Option<cl_core::ids::AccountId>,
-) -> Vec<cl_api::LayoutSeedLine> {
+) -> Vec<cl_api::DailyLineInput> {
     let accounts = layout.resolved_accounts(|n| id_of(n).is_some());
     layout
         .lines
         .iter()
         .zip(accounts)
-        .enumerate()
-        .map(|(i, (l, a))| cl_api::LayoutSeedLine {
-            section: l.section.clone(),
+        .map(|(l, a)| cl_api::DailyLineInput {
+            id: None,
+            section: cl_api::Section::from_wire(&l.section),
             label: l.label.clone(),
-            account_id: a.and_then(|n| id_of(&n)),
-            normal_side: match l.side {
-                LayoutSide::Debit => "debit",
-                LayoutSide::Credit => "credit",
+            account: a.and_then(|n| id_of(&n)),
+            tag: None,
+            side: match l.side {
+                LayoutSide::Debit => cl_api::NormalSide::Debit,
+                LayoutSide::Credit => cl_api::NormalSide::Credit,
             },
-            sort_order: u32::try_from(i).unwrap_or(u32::MAX),
+            required: false,
+            active: true,
         })
         .collect()
+}
+
+/// The engine preset named by a sample layout (`custom` for anything else).
+fn sample_preset(word: &str) -> cl_api::Preset {
+    match word {
+        "retail" => cl_api::Preset::Retail,
+        "restaurant" => cl_api::Preset::Restaurant,
+        _ => cl_api::Preset::Custom,
+    }
 }
 
 /// Creates the sample's daily-sales layouts through the engine (P14): from
@@ -703,11 +715,15 @@ async fn seed_layouts(
 ) {
     for layout in layouts {
         let lines = layout_seed_lines(layout, |n| ids.get(n).copied());
-        if let Err(e) = session
-            .daily_sales()
-            .seed_layout(&layout.name, &layout.preset, &lines, IdempotencyKey::new())
+        let daily = session.daily_sales();
+        let seeded = match daily
+            .create_template(&layout.name, Some(sample_preset(&layout.preset)))
             .await
         {
+            Ok(t) => daily.replace_lines(t.id, &lines).await.map(|_| ()),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = seeded {
             tracing::warn!(error = %e, "sample daily-sales layout skipped");
         }
     }
@@ -735,13 +751,13 @@ mod tests {
             .collect();
         let lines = layout_seed_lines(&s.company.daily_sales_layouts[0], |n| ids.get(n).copied());
         assert_eq!(lines.len(), 5);
-        assert_eq!(lines[0].account_id, ids.get("4000").copied());
-        assert_eq!(lines[0].normal_side, "credit");
-        assert_eq!(lines[2].account_id, ids.get("10150").copied());
-        assert_eq!(lines[2].normal_side, "debit");
-        // 6250 is not in this chart: unmapped, not dropped.
-        assert_eq!(lines[4].account_id, None);
-        assert_eq!(lines[4].sort_order, 4);
+        assert_eq!(lines[0].account, ids.get("4000").copied());
+        assert_eq!(lines[0].side, cl_api::NormalSide::Credit);
+        assert_eq!(lines[2].account, ids.get("10150").copied());
+        assert_eq!(lines[2].side, cl_api::NormalSide::Debit);
+        // 6250 is not in this chart: unmapped, not dropped (last in order).
+        assert_eq!(lines[4].account, None);
+        assert_eq!(lines[4].section, cl_api::Section::from_wire("payout"));
     }
 
     fn d(y: i32, m: u32, day: u32) -> CalendarDate {

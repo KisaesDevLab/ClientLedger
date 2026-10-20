@@ -143,6 +143,12 @@ typed_id!(
     JournalLineId,
     /// The `X-Request-Id` of one logical request.
     RequestId,
+    /// A daily-sales layout (the engine's daily-sales template, P14).
+    DailyTemplateId,
+    /// One line of a daily-sales layout.
+    DailyLineId,
+    /// One business day of daily sales (the engine's daily-sales entry).
+    DailyEntryId,
 );
 
 #[cfg(test)]
