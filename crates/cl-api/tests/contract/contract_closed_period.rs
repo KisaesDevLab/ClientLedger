@@ -68,7 +68,6 @@ pub fn locked_dates_are_refused_both_ways(h: &Harness) {
         .expect_err("closed");
     assert_closed(&e);
 
-    // No override exists until U-15: a password is refused before sending.
     let before = h.observer.total();
     let opts = PostingOptions {
         closed_period: Some(ClosedPeriodAuthorization::with_password(Secret::new(
@@ -82,14 +81,21 @@ pub fn locked_dates_are_refused_both_ways(h: &Harness) {
             key(),
         ))
         .expect_err("no override");
-    assert!(
-        matches!(
-            e,
-            ApiError::Local(LocalValidation::ClosedPeriodOverrideUnavailable)
-        ),
-        "{e:?}"
-    );
-    assert_eq!(h.observer.total(), before, "nothing may be sent");
+    if h.require_cap(Capabilities::CLOSING_PASSWORD, "U-15") {
+        // A password cannot open the period of a company that has none
+        // (`ledger.service.ts` `checkLockDate`): refused, nothing saved.
+        assert_eq!(e, ApiError::ClosingPasswordRejected);
+    } else {
+        // No override exists until U-15: a password is refused before sending.
+        assert!(
+            matches!(
+                e,
+                ApiError::Local(LocalValidation::ClosedPeriodOverrideUnavailable)
+            ),
+            "{e:?}"
+        );
+        assert_eq!(h.observer.total(), before, "nothing may be sent");
+    }
 
     // Clear the closing date again.
     h.run(s.raw_mapped(
@@ -112,6 +118,13 @@ pub fn bank_postings_in_a_closed_period(h: &Harness) {
     let s = h.s3();
     let a = accounts(h, &s);
     let memo = unique("closed bank");
+    // Start from no closing date (a failed earlier test may have left one).
+    h.run(s.raw_mapped(
+        Method::Put,
+        "/api/v1/company/settings",
+        Some(&json!({"lockDate": null})),
+    ))
+    .expect("clear the closing date");
     let posted = |on| {
         h.run(s.transactions().create_bank_posting(
             &check(&a, on, &memo, ("10.0000", "2.5000")),

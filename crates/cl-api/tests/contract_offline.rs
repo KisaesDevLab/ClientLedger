@@ -14,8 +14,8 @@ mod common;
 use std::time::{Duration, Instant};
 
 use cl_api::{
-    AccountFilter, AccountType, AiConfigUpdate, ApiError, Method, PageRequest, PostingOptions,
-    SmtpTest, TransactionFilter, TxnStatus, TxnType,
+    AccountFilter, AccountType, AiConfigUpdate, ApiError, Capabilities, Method, OllamaTarget,
+    PageRequest, PostingOptions, SessionSecrets, SmtpTest, TransactionFilter, TxnStatus, TxnType,
 };
 use cl_core::Secret;
 
@@ -183,6 +183,18 @@ fn ollama_works_offline_and_cloud_is_unavailable(h: &Harness) {
         key(),
     ))
     .expect("update");
+    if h.require_cap(Capabilities::AI_DESKTOP, "U-09") {
+        // Desktop mode takes the Ollama address from this session only
+        // (`ai-providers/index.ts` `resolveCredential`), as the app does.
+        h.run(s.put_session_secrets(&SessionSecrets {
+            ollama: Some(OllamaTarget {
+                base_url: stub.base_url.clone(),
+                model: None,
+            }),
+            ..SessionSecrets::default()
+        }))
+        .expect("session ollama");
+    }
     let r = h.run(s.test_ai_provider("ollama")).expect("ollama test");
     assert!(r.success, "{:?}", r.error);
     assert_eq!(stub.hits(h), 1, "exactly the loopback stub was contacted");

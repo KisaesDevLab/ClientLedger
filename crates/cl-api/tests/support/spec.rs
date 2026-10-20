@@ -15,33 +15,22 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 /// Operations that the engine serves but does not list in its `OpenAPI`
-/// document: the desktop gate and the spec route itself, plus the
-/// documented-but-unmerged P08 contracts (E5 tenant archives and safe
-/// delete, U-23 recovery key) that the desktop-mode export (U-24) will add.
-pub const OUTSIDE_SPEC: [(&str, &str); 20] = [
+/// document: the desktop gate and the spec route itself, the desktop
+/// session-secrets routes, and the documented-but-unmerged P08 contracts
+/// (E5b safe delete, U-23 recovery key) that the desktop-mode export
+/// (U-24) will add. Since pin 5c8e9665 (engine PRs #151-#153) the tenant
+/// and archive routes, the usage summary, the closing password and
+/// `DELETE /transactions/{id}` are in the spec.
+pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
-    ("GET", "/api/v1/tenants"),
-    ("POST", "/api/v1/tenants"),
-    ("PATCH", "/api/v1/tenants/{id}"),
-    ("POST", "/api/v1/tenants/{id}/archives"),
-    ("GET", "/api/v1/tenant-archives/jobs/{jobId}"),
-    ("GET", "/api/v1/tenant-archives/{fileName}/download"),
-    ("POST", "/api/v1/tenant-archives/import"),
     ("POST", "/api/v1/tenants/{id}/delete"),
     ("POST", "/api/v1/desktop/recover-password"),
     ("POST", "/api/v1/auth/recovery-key/rotate"),
-    // E6 (P09): session secrets and the integer usage summary.
+    // E6 (P09): session secrets.
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
-    ("GET", "/api/v1/ai/usage/summary"),
-    // U-15 (P12): the closing-date password, on engine PR #153.
-    ("GET", "/api/v1/company/closing-password"),
-    ("PUT", "/api/v1/company/closing-password"),
-    // R7 soft delete and the owner reset (Q-239), on engine PR #153.
-    ("DELETE", "/api/v1/transactions/{id}"),
-    ("POST", "/api/v1/company/closing-password/reset"),
 ];
 
 /// Lowercase hex of a SHA-256.

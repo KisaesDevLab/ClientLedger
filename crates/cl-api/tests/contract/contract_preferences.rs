@@ -17,6 +17,12 @@ use crate::support::{Harness, OllamaStub};
 
 const MODEL: &str = "llama3.1:8b";
 
+/// The mail server named with a session SMTP password. The engine resolves
+/// a host name fail-closed before allowing it (`session-secrets.ts`
+/// `allowSmtpEgress`), which needs DNS; the tests run offline, so they name
+/// a LAN relay by address (private addresses are allowed, nothing dials it).
+const SESSION_SMTP_HOST: &str = "10.0.0.25";
+
 /// The AI config reads without key values; the system disclosure can be
 /// accepted (audit row) and AI turned on for Ollama with
 /// `fallbackChain: ["ollama"]`; the company accepts its disclosure; task
@@ -125,6 +131,20 @@ pub fn provider_test_ollama_stub_and_keyless_cloud(h: &Harness) {
         key(),
     ))
     .expect("update");
+    if h.require_cap(Capabilities::AI_DESKTOP, "U-09") {
+        // Desktop mode takes the Ollama address from this session only,
+        // never the stored config (`ai-providers/index.ts`
+        // `resolveCredential`); no session model, so the config's model
+        // is the one tested.
+        h.run(s.put_session_secrets(&SessionSecrets {
+            ollama: Some(OllamaTarget {
+                base_url: stub.base_url.clone(),
+                model: None,
+            }),
+            ..SessionSecrets::default()
+        }))
+        .expect("session ollama");
+    }
     let r = h.run(s.test_ai_provider("ollama")).expect("test");
     assert!(r.success, "{:?}", r.error);
     assert_eq!(stub.hits(h), hits + 1);
@@ -268,7 +288,7 @@ pub fn session_secrets_e6(h: &Harness) {
         }),
         smtp: Some(SmtpSessionSecret {
             password: Some(Secret::new("smtp-session-canary-2")),
-            host: "smtp.example.com".into(),
+            host: SESSION_SMTP_HOST.into(),
             port: 587,
             security: SmtpSecurityWire::Starttls,
         }),
@@ -380,7 +400,7 @@ pub fn smtp_session_u13(h: &Harness) {
         h.run(s.put_session_secrets(&SessionSecrets {
             smtp: Some(SmtpSessionSecret {
                 password: Some(Secret::new("smtp-session-canary-3")),
-                host: "smtp.example.com".into(),
+                host: SESSION_SMTP_HOST.into(),
                 port: 587,
                 security: SmtpSecurityWire::Starttls,
             }),
