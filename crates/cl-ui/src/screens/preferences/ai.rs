@@ -578,6 +578,12 @@ impl AiSavePlan {
 /// address), so sends and suggestions work without a visit to
 /// Preferences. Best effort: nothing is reported beyond a debug line, and
 /// nothing is sent without the capability or past the monthly cap.
+///
+/// The AI part and the SMTP part go in separate requests: the engine
+/// checks a whole request before storing any of it, and resolves the mail
+/// server's name fail-closed (`allowSmtpEgress`), so offline a named SMTP
+/// host is refused, and in one request it would take the local Ollama
+/// address down with it.
 pub async fn push_at_open(session: &Session, store: &dyn SecretStore, prefs: &CompanyPrefs) {
     if !session
         .client()
@@ -614,6 +620,11 @@ pub async fn push_at_open(session: &Session, store: &dyn SecretStore, prefs: &Co
             _ => {}
         }
     }
+    if !secrets.is_empty()
+        && let Err(e) = session.put_session_secrets(&secrets).await
+    {
+        tracing::debug!(kind = %e, "AI session secrets were not handed to the engine at open");
+    }
     if let Ok(smtp) = session.smtp_settings().await
         && smtp.configured
         && let Some(password) = store
@@ -622,18 +633,18 @@ pub async fn push_at_open(session: &Session, store: &dyn SecretStore, prefs: &Co
             .flatten()
             .filter(|p| !p.is_empty())
     {
-        secrets.smtp = Some(cl_api::SmtpSessionSecret {
-            password: Some(password),
-            host: smtp.smtp_host.clone(),
-            port: smtp.smtp_port,
-            security: super::email::security_wire(prefs.smtp_security),
-        });
-    }
-    if secrets.is_empty() {
-        return;
-    }
-    if let Err(e) = session.put_session_secrets(&secrets).await {
-        tracing::debug!(kind = %e, "session secrets were not handed to the engine at open");
+        let mail = SessionSecrets {
+            smtp: Some(cl_api::SmtpSessionSecret {
+                password: Some(password),
+                host: smtp.smtp_host.clone(),
+                port: smtp.smtp_port,
+                security: super::email::security_wire(prefs.smtp_security),
+            }),
+            ..SessionSecrets::default()
+        };
+        if let Err(e) = session.put_session_secrets(&mail).await {
+            tracing::debug!(kind = %e, "the SMTP password was not handed to the engine at open");
+        }
     }
 }
 
@@ -1305,5 +1316,82 @@ mod tests {
         );
         e.cap_text.clear();
         assert_eq!(e.cap(), None);
+    }
+
+    /// At open the AI part and the SMTP part travel in separate requests:
+    /// offline the engine refuses a named mail server (fail-closed DNS),
+    /// and that must not take the local Ollama address down with it.
+    #[tokio::test]
+    async fn push_at_open_keeps_ollama_when_the_mail_server_is_refused() {
+        use wiremock::matchers::{body_string_contains, method, path};
+        use wiremock::{Mock, ResponseTemplate};
+        let server = wiremock::MockServer::start().await;
+        let ok = |body: Value| ResponseTemplate::new(200).set_body_json(body);
+        Mock::given(method("GET"))
+            .and(path("/api/v1/desktop/info"))
+            .respond_with(ok(json!({
+                "mode": "desktop",
+                "initialized": true,
+                "capabilities": [Capabilities::SESSION_SECRETS],
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/ai/admin/config"))
+            .respond_with(ok(json!({
+                "isEnabled": true,
+                "fallbackChain": ["ollama"],
+                "categorizationModel": "llama3.1:8b",
+                "ollamaBaseUrl": "http://localhost:11434",
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/company/smtp"))
+            .respond_with(ok(json!({
+                "smtpHost": "smtp.example.com",
+                "smtpPort": 587,
+                "smtpUser": "books",
+                "smtpFrom": "books@example.com",
+                "configured": true,
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v1/desktop/session-secrets"))
+            .and(body_string_contains("smtp"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "error": {"message": "SMTP host is not allowed", "code": "SMTP_HOST_BLOCKED"},
+            })))
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v1/desktop/session-secrets"))
+            .respond_with(ok(json!({"ai.ollama.baseUrl": {"present": true}})))
+            .with_priority(2)
+            .mount(&server)
+            .await;
+        let session = cl_api::testing::stub_session(server.address().port());
+        session.client().desktop_info().await.expect("desktop info");
+        let store = MemorySecrets::new();
+        store
+            .set(cl_settings::smtp::SMTP_PASSWORD, &Secret::new("smtp-canary-9"))
+            .expect("set");
+        push_at_open(&session, &store, &CompanyPrefs::default()).await;
+
+        let puts: Vec<Value> = server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|r| r.method.as_str() == "PUT")
+            .map(|r| serde_json::from_slice(&r.body).expect("json"))
+            .collect();
+        assert_eq!(puts.len(), 2, "{puts:?}");
+        assert_eq!(puts[0]["ai"]["ollama"]["baseUrl"], "http://localhost:11434");
+        assert!(puts[0].get("smtp").is_none(), "AI alone: {}", puts[0]);
+        assert_eq!(puts[1]["smtp"]["host"], "smtp.example.com");
+        assert!(puts[1].get("ai").is_none(), "SMTP alone: {}", puts[1]);
     }
 }
