@@ -10,8 +10,10 @@
 //!   for hand-written and printed, `queue`): a hand-written check never
 //!   becomes printed without a new number, and the engine keeps a printed
 //!   check printed when an edit keeps its number, so the kind is exactly
-//!   what an edit decides. Header tags are not hashed: the engine only ever
-//!   adds them on an edit and its `PUT /checks` answer does not carry them.
+//!   what an edit decides. Header tags are not hashed: its `PUT /checks`
+//!   answer does not carry them. An edit always sends them (`tagIds`,
+//!   possibly empty) and the engine replaces the check's header tags with
+//!   exactly that set.
 //! - [`Checks::update_check`] (`PUT /checks/{id}`, `check-edit-v1`) is
 //!   refused locally without the capability, guarded by the fingerprint
 //!   (`Conflict { Stale }`, nothing sent) and reconciled after a lost reply
@@ -34,7 +36,7 @@ use serde_json::value::RawValue;
 use serde_json::{Value, json};
 
 use crate::client::{Call, Method};
-use crate::errors::{ApiError, LocalValidation};
+use crate::errors::{ApiError, ConflictReason, LocalValidation};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::bank_postings::{BankPosting, CheckDraft, saved_any};
 use crate::resources::operations::{CHECK_PUT, CHECK_SETTINGS, CHECKS_LIST, TXN_GET};
@@ -249,9 +251,16 @@ impl EditableFields for CheckRecord {
 }
 
 /// The fingerprint the check has once `PUT /checks/{id}` stored `d`
-/// (`posting` is `d`'s posting).
-fn requested_fingerprint(posting: &BankPosting, d: &CheckDraft) -> [u8; 32] {
-    let (number, kind) = if d.print_later {
+/// (`posting` is `d`'s posting) with the owner's `printed` choice.
+/// `Reprint` puts a printed check back in the print queue without a number
+/// (the choice is only sent after the engine said the check was printed
+/// and its printed face changes); `KeepNumber` keeps it numbered.
+fn requested_fingerprint(
+    posting: &BankPosting,
+    d: &CheckDraft,
+    printed: Option<PrintedCheckChange>,
+) -> [u8; 32] {
+    let (number, kind) = if d.print_later || printed == Some(PrintedCheckChange::Reprint) {
         (None, KIND_QUEUE)
     } else {
         (d.check_number, KIND_NUMBERED)
@@ -456,6 +465,48 @@ pub fn is_check_printed(e: &ApiError) -> bool {
     matches!(e, ApiError::Conflict { code: Some(c), .. } if c.as_str() == CHECK_PRINTED)
 }
 
+/// The engine code of the 409 for an edit (or a void) that changes or
+/// removes a line already billed to a customer.
+pub const LINE_BILLED: &str = "LINE_BILLED";
+
+/// True for the engine's refusal to change a billed line (409
+/// `LINE_BILLED`).
+#[must_use]
+pub fn is_line_billed(e: &ApiError) -> bool {
+    matches!(e, ApiError::Conflict { code: Some(c), .. } if c.as_str() == LINE_BILLED)
+}
+
+/// True for the engine's 409 for a check number already used on the bank
+/// account: the only 409 it sends without a code.
+#[must_use]
+pub fn is_number_used(e: &ApiError) -> bool {
+    matches!(
+        e,
+        ApiError::Conflict {
+            reason: ConflictReason::Unspecified,
+            code: None,
+            ..
+        }
+    )
+}
+
+impl Versioned<CheckRecord> {
+    /// The version the ledger record has, for an edit through
+    /// `PUT /transactions/{id}` ([`crate::Transactions::update_bank_posting`],
+    /// the path without `check-edit-v1`): that edit re-reads the plain
+    /// [`Transaction`], whose fingerprint leaves out the check fields. The
+    /// engine's own version (`Server`) is the same for both reads.
+    #[must_use]
+    pub fn transaction_version(&self) -> RecordVersion {
+        match self.version {
+            RecordVersion::Server(v) => RecordVersion::Server(v),
+            RecordVersion::Fingerprint(_) => {
+                RecordVersion::Fingerprint(EditableFields::fingerprint(&self.record.txn))
+            }
+        }
+    }
+}
+
 /// Options of a check edit: the posting options (closing-date password)
 /// and, for a printed check, what to do with the printed one.
 #[derive(Clone, Debug, Default)]
@@ -552,8 +603,9 @@ impl Checks<'_> {
 
     /// Replaces a saved check if it is still at `expected`: lines, amount,
     /// date, payee and memo, and the check's own number, printed name,
-    /// address, printed memo and Print later. Header tags are added, never
-    /// removed. The engine checks the closing date for the old and the new
+    /// address, printed memo and Print later. The header tags become
+    /// exactly the posting's (`tagIds` is always sent; empty clears them).
+    /// The engine checks the closing date for the old and the new
     /// date (`closingPassword` rides in `opts`).
     ///
     /// # Errors
@@ -569,7 +621,10 @@ impl Checks<'_> {
     /// `OutcomeUnknown`, or any [`ApiError`]. A printed check whose
     /// printed face changes without `opts.printed_check_change` is refused
     /// with `Conflict` code `CHECK_PRINTED` ([`is_check_printed`]); send it
-    /// again with the owner's choice.
+    /// again with the owner's choice. A change to a line already billed to
+    /// a customer is refused with `Conflict` code `LINE_BILLED`
+    /// ([`is_line_billed`]); a used number is the code-less `Conflict`
+    /// ([`is_number_used`]).
     pub async fn update_check(
         &self,
         id: TransactionId,
@@ -600,7 +655,7 @@ impl Checks<'_> {
             key: "transaction",
             body,
             idempotency_key: key,
-            requested: requested_fingerprint(posting, d),
+            requested: requested_fingerprint(posting, d, opts.printed_check_change),
             fp: row_fp::<CheckRecord>,
             stamp_covered: true,
         };

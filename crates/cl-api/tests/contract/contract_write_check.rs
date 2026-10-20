@@ -18,8 +18,8 @@
 use cl_api::{
     AccountType, ApiError, AuditAction, AuditEntity, BankPosting, Capabilities, CheckDraft,
     ClosedPeriodAuthorization, ConflictReason, ContactFields, ContactType, EditableFields,
-    LocalValidation, Method, NewContact, PageRequest, PostingOptions, PrintStatus, RegisterQuery,
-    Session, SplitLine, TxnType,
+    LocalValidation, Method, NewContact, PageRequest, PostingOptions, PrintStatus, RecordVersion,
+    RegisterQuery, Session, SplitLine, TxnType,
 };
 use cl_core::ids::{AccountId, ContactId};
 use cl_core::{CalendarDate, Money, Secret};
@@ -397,6 +397,101 @@ pub fn edges(h: &Harness) {
         );
         assert_eq!(h.observer.total(), before, "nothing may be sent");
     }
+}
+
+/// The edit path without `check-edit-v1` (`PUT /transactions/{id}`), as
+/// the screen takes it: the check is read with `checks().get`, and the
+/// update is guarded by the ledger record's version (the check's own
+/// version also covers the check fields, which the plain transaction
+/// re-read never has). It succeeds whatever the engine advertises, and
+/// leaves the check's number and print status alone.
+pub fn edit_without_check_edit(h: &Harness) {
+    let s = &h.s1;
+    let b = books(h, s);
+    let on = date(2026, 11, 6);
+    let opts = PostingOptions::default();
+    let made = h
+        .run(s.transactions().create_bank_posting(
+            &BankPosting::check(story(&b, on, Some(5101), false)).expect("check"),
+            &opts,
+            key(),
+        ))
+        .expect("5101");
+    let read = h.run(s.checks().get(made.record.id)).expect("check");
+    let mut changed = story(&b, on, Some(5101), false);
+    changed.memo = Some(unique("changed through the ledger"));
+    changed.lines = vec![split(b.plants, "1000.00"), split(b.mulch, "286.40")];
+    let edit = BankPosting::check(changed).expect("edit");
+    if matches!(read.version, RecordVersion::Fingerprint(_)) {
+        // The check's own fingerprint never matches the transaction
+        // re-read: refused as stale with nothing sent (the P13 bug).
+        let puts = h.observer.sent(Method::Put, "/api/v1/transactions/{id}");
+        let e = h
+            .run(s.transactions().update_bank_posting(
+                made.record.id,
+                &read.version,
+                &edit,
+                &opts,
+                key(),
+            ))
+            .expect_err("the check's version is not the transaction's");
+        assert!(
+            matches!(
+                e,
+                ApiError::Conflict {
+                    reason: ConflictReason::Stale,
+                    ..
+                }
+            ),
+            "{e:?}"
+        );
+        assert_eq!(
+            h.observer.sent(Method::Put, "/api/v1/transactions/{id}"),
+            puts
+        );
+    }
+    let saved = h
+        .run(s.transactions().update_bank_posting(
+            made.record.id,
+            &read.transaction_version(),
+            &edit,
+            &opts,
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("edit without check-edit-v1: {e}"));
+    assert_eq!(saved.record.fingerprint(), edit.updated_fingerprint());
+    let after = h.run(s.checks().get(made.record.id)).expect("check");
+    assert_eq!(after.record.check_number, Some(5101), "the number stays");
+    // No line customer unless one was sent (the screen shows a check with
+    // one read-only on an engine without `line-billable-v1`).
+    assert!(
+        after
+            .record
+            .txn
+            .lines
+            .iter()
+            .all(|l| l.contact_id.is_none() && !l.is_billable),
+        "{:?}",
+        after
+            .record
+            .txn
+            .lines
+            .iter()
+            .map(|l| (l.contact_id.is_some(), l.is_billable))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(after.record.print_status, PrintStatus::HandWritten);
+    assert_eq!(after.transaction_version(), saved.version);
+    // The version it left guards the next edit.
+    let again = BankPosting::check(story(&b, on, Some(5101), false)).expect("again");
+    h.run(s.transactions().update_bank_posting(
+        made.record.id,
+        &saved.version,
+        &again,
+        &opts,
+        key(),
+    ))
+    .unwrap_or_else(|e| panic!("second edit: {e}"));
 }
 
 /// A closed period asks for the closing-date password (second company).

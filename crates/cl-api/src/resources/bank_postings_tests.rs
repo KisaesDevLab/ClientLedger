@@ -294,6 +294,7 @@ fn a_full_check_body_carries_every_check_field_as_strings() {
     // The edit body is the same without the draft (the engine ignores it).
     let put = p.check_put_value().expect("put body");
     assert!(put.get("draftAttachmentId").is_none());
+    assert_eq!(put["tagIds"], serde_json::json!([TAG, TAG2]));
     let mut without = v.clone();
     without
         .as_object_mut()
@@ -333,9 +334,12 @@ fn print_later_sends_no_number_and_blank_texts_are_dropped() {
     d.printed_memo = Some(String::new());
     d.tag_ids.clear();
     d.draft_attachment = None;
-    let v = BankPosting::check_with(d, true)
-        .expect("check")
-        .create_value();
+    let p = BankPosting::check_with(d, true).expect("check");
+    let v = p.create_value();
+    // An edit always names the header tags: `[]` clears them (the engine
+    // replaces the set with what is sent).
+    let put = p.check_put_value().expect("put body");
+    assert_eq!(put["tagIds"], serde_json::json!([]));
     assert_eq!(v["printLater"], true);
     for absent in [
         "checkNumber",

@@ -767,7 +767,10 @@ fn the_draft_is_the_checked_check_field_by_field() {
 fn every_problem_has_a_name_and_a_message() {
     let (_d, link) = link();
     let s = screen(&link);
-    let ctx = cl_model::forms::check::CheckContext { tags: &s.tag_list };
+    let ctx = cl_model::forms::check::CheckContext {
+        tags: &s.tag_list,
+        editing: false,
+    };
     let Err(problems) = check(&s.compose(), &ctx) else {
         panic!("a blank check is refused");
     };
@@ -877,4 +880,399 @@ fn every_input_is_named_by_its_label_and_the_toolbar_matches_the_plan() {
         assert!(named("84,210.55"), "the ending balance");
         assert!(named("Expenses 1,286.40"));
     }
+}
+
+// ------------------------------------------------------------------------
+// Review fixes (P13): the expense edit path, header commit, line
+// customers without the capability, the bank line, 409 codes, files and
+// the AI cap.
+
+/// The saved check numbered `n` on 1010, read as the demo engine has it.
+fn saved_check(link: &Arc<CompanyLink>, s: &WriteCheckScreen, n: u32) -> cl_api::CheckRecord {
+    let mut demo = link.demo_state().expect("demo");
+    let bank = account(s, "1010");
+    let id = crate::company::demo::checks::list(&mut demo, bank)
+        .into_iter()
+        .find(|c| c.number == Some(n))
+        .map_or_else(|| panic!("check {n}"), |c| c.id);
+    crate::company::demo::checks::get(&mut demo, id)
+        .expect("get")
+        .record
+}
+
+fn bank_credit(r: &cl_api::CheckRecord) -> Vec<Money> {
+    r.txn
+        .lines
+        .iter()
+        .filter(|l| l.credit.is_positive())
+        .map(|l| l.credit)
+        .collect()
+}
+
+#[test]
+fn without_check_edit_an_edit_goes_through_the_ledger_record_and_saves_again() {
+    let (_d, link) = link();
+    link.demo_state().expect("demo").checks.check_edit_off = true;
+    let mut s = screen(&link);
+    assert_eq!(s.state()["check_edit"], false);
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.navigate(true);
+    s.poll();
+    assert_eq!(s.state()["mode"], "edit");
+    // The first edit: guarded by the plain transaction's version, never
+    // the check's (which would always look changed elsewhere).
+    s.header.edit_step(|h| h.memo = "changed".into());
+    let before = writes(&link);
+    assert!(s.start_save(SaveIntent::Save, None));
+    assert_eq!(s.state()["save"]["stale"], false);
+    assert_eq!(writes(&link), before + 1);
+    assert_eq!(s.state()["saved_count"], 2);
+    assert_eq!(
+        saved_check(&link, &s, 4418).txn.memo.as_deref(),
+        Some("changed")
+    );
+    // A second edit of the same check, with a new date: guarded by the
+    // version the first save left (not stale), and the old date follows.
+    let moved = CalendarDate::from_ymd(2026, 11, 5).expect("date");
+    s.header.edit_step(|h| {
+        h.memo = "again".into();
+        h.date = Some(moved);
+    });
+    assert!(s.start_save(SaveIntent::Save, None));
+    assert_eq!(s.state()["save"]["stale"], false);
+    assert_eq!(s.state()["saved_count"], 3);
+    assert_eq!(s.editing.as_ref().map(|e| e.old_date), Some(moved));
+    let r = saved_check(&link, &s, 4418);
+    assert_eq!(r.txn.memo.as_deref(), Some("again"));
+    assert_eq!(r.check_number, Some(4418), "the number stays");
+    // Changed somewhere else: refused as stale, nothing sent.
+    let id = r.txn.id;
+    {
+        let mut demo = link.demo_state().expect("demo");
+        let other = crate::company::demo::checks::get(&mut demo, id).expect("get");
+        let version = other.transaction_version();
+        let draft = cl_api::CheckDraft {
+            bank: account(&s, "1010"),
+            date: moved,
+            payee: other.record.txn.contact_id,
+            payee_name: other.record.payee_name.clone(),
+            check_number: Some(4418),
+            print_later: false,
+            payee_address: None,
+            memo: Some("elsewhere".into()),
+            printed_memo: None,
+            tag_ids: Vec::new(),
+            draft_attachment: None,
+            amount: money("10.00"),
+            lines: vec![SplitLine {
+                account: account(&s, "5110"),
+                amount: money("10.00"),
+                memo: None,
+                contact: None,
+                billable: false,
+                tag: None,
+            }],
+        };
+        crate::company::demo::checks::update_expense(&mut demo, id, &version, &draft, None)
+            .expect("changed elsewhere");
+    }
+    s.header.edit_step(|h| h.memo = "mine".into());
+    let before = writes(&link);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(s.state()["save"]["stale"], true);
+    assert_eq!(writes(&link), before, "nothing sent");
+}
+
+#[test]
+fn alt_s_saves_the_amount_and_payee_still_being_typed() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "50.00", &[("5110", "50.00")]);
+    // Typed, the field not left yet: the one line follows the new amount.
+    s.inputs.amount = "75.00".into();
+    assert!(s.form_command(CommandId::new("form.save_close")));
+    assert_eq!(s.state()["saved_count"], 1);
+    assert_eq!(bank_credit(&saved_check(&link, &s, 4418)), [money("75.00")]);
+    // On a saved check too.
+    s.navigate(true);
+    s.poll();
+    assert_eq!(s.state()["mode"], "edit");
+    s.sync_inputs();
+    s.inputs.amount = "80.00".into();
+    assert!(s.start_save(SaveIntent::Save, None));
+    assert_eq!(bank_credit(&saved_check(&link, &s, 4418)), [money("80.00")]);
+    // A typed payee name is resolved before the save.
+    s.sync_inputs();
+    s.inputs.payee = "Galena".into();
+    assert!(s.start_save(SaveIntent::Save, None));
+    assert_eq!(
+        saved_check(&link, &s, 4418).txn.contact_id,
+        Some(contact(&s, "Galena Gravel"))
+    );
+}
+
+#[test]
+fn a_typed_amount_or_payee_that_is_not_accepted_saves_nothing() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "50.00", &[("5110", "50.00")]);
+    let before = writes(&link);
+    s.inputs.amount = "12..5".into();
+    assert!(!s.start_save(SaveIntent::SaveAndClose, None));
+    assert_eq!(writes(&link), before);
+    assert_eq!(s.focus, Some(Field::Amount));
+    assert_eq!(s.header.current().amount, Some(money("50.00")));
+    s.sync_inputs();
+    s.inputs.payee = "Nobody By This Name".into();
+    assert!(!s.start_save(SaveIntent::SaveAndClose, None));
+    assert_eq!(writes(&link), before);
+    assert_eq!(s.focus, Some(Field::Payee));
+    assert!(s.inputs.payee_problem);
+}
+
+#[test]
+fn without_line_billable_no_line_customer_is_copied_or_sent() {
+    let (_d, link) = link();
+    link.demo_state().expect("demo").checks.line_billable_off = true;
+    let mut s = screen(&link);
+    assert_eq!(s.state()["line_billable"], false);
+    s.pick_payee(contact(&s, "Ozark Feed & Seed"));
+    s.poll();
+    assert_eq!(s.state()["prefill"]["applied"], true);
+    let f = s.compose();
+    assert!(f.lines.used().count() >= 1);
+    assert!(
+        f.lines.used().all(|l| l.customer.is_none() && !l.billable),
+        "the last check's line customer is not copied"
+    );
+    // A line customer that got onto the form anyway: refused here with a
+    // plain message, nothing sent.
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    let job = contact(&s, "Hollister Family Trust");
+    s.lines.form_mut().edit_step(|v| {
+        v.lines[0].customer = Some(job);
+        v.lines[0].billable = true;
+    });
+    let before = writes(&link);
+    assert!(!s.start_save(SaveIntent::SaveAndNew, None));
+    assert_eq!(writes(&link), before);
+    assert_eq!(s.state()["notice"], "check.line_billable_unavailable");
+    assert!(crate::i18n::has("check.line_billable_unavailable"));
+}
+
+#[test]
+fn a_check_with_a_line_customer_is_read_only_without_line_billable() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    let job = contact(&s, "Hollister Family Trust");
+    s.lines.form_mut().edit_step(|v| {
+        v.lines[0].customer = Some(job);
+        v.lines[0].billable = true;
+    });
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    // The engine without `line-billable-v1` (Q-P13x).
+    link.demo_state().expect("demo").checks.line_billable_off = true;
+    let mut s = screen(&link);
+    s.navigate(true);
+    s.poll();
+    assert_eq!(s.state()["mode"], "edit");
+    assert_eq!(s.state()["read_only"], true);
+    assert_eq!(
+        s.state()["read_only_note"],
+        "check.read_only.line_customers"
+    );
+    assert!(crate::i18n::has("check.read_only.line_customers"));
+    s.header.edit_step(|h| h.memo = "changed".into());
+    let before = writes(&link);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(writes(&link), before);
+    assert_eq!(s.state()["notice"], "check.read_only.line_customers");
+}
+
+#[test]
+fn the_bank_line_is_the_credit_on_the_checks_bank_account() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "1286.40", &[("5100", "842.15"), ("5110", "444.25")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    let r = saved_check(&link, &s, 4418);
+    let bank = account(&s, "1010");
+    let keys = &mut cl_model::rowkey::RowKeyGen::new();
+    let (f, lines, exact) = save::form_of(&r, bank, keys);
+    assert!(exact);
+    assert_eq!(f.bank, Some(bank));
+    assert_eq!(f.amount, Some(money("1286.40")));
+    assert_eq!(lines.used().count(), 2);
+    // Read against another account: not this form's check.
+    let (_, _, exact) = save::form_of(&r, account(&s, "5100"), keys);
+    assert!(!exact);
+    // A second credit line (before the bank line): shown read-only, never
+    // taken for the bank line.
+    let mut odd = r.clone();
+    let mut refund = odd.txn.lines[0].clone();
+    refund.debit = Money::ZERO;
+    refund.credit = money("5.00");
+    odd.txn.lines.insert(0, refund);
+    let (_, _, exact) = save::form_of(&odd, bank, keys);
+    assert!(!exact);
+    // Loaded into the screen: read-only with its note.
+    s.load_bank = Some(bank);
+    s.show_record(&cl_api::Versioned {
+        version: RecordVersion::Fingerprint(cl_api::EditableFields::fingerprint(&odd)),
+        record: odd,
+    });
+    assert_eq!(s.state()["read_only"], true);
+    assert_eq!(s.state()["read_only_note"], "check.read_only.shape");
+    assert!(crate::i18n::has("check.read_only.shape"));
+}
+
+fn conflict(code: Option<&str>) -> ApiError {
+    ApiError::Conflict {
+        reason: cl_api::ConflictReason::Unspecified,
+        current_version: None,
+        code: code.and_then(cl_api::ErrorCode::parse),
+        message: cl_api::UserText::default(),
+    }
+}
+
+#[test]
+fn only_a_code_less_409_offers_another_number() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    s.save_failed(conflict(Some(cl_api::LINE_BILLED)));
+    assert_eq!(s.save.duplicate, None);
+    assert_eq!(s.state()["notice"], "check.line_billed");
+    assert!(crate::i18n::has("check.line_billed"));
+    s.save.notice = None;
+    s.save_failed(conflict(Some("SOMETHING_NEW")));
+    assert_eq!(s.save.duplicate, None);
+    assert!(s.save.error.is_some(), "a plain error, not a used number");
+    s.save.error = None;
+    s.save_failed(conflict(None));
+    assert_eq!(s.save.duplicate, Some((4418, 4419)));
+}
+
+#[test]
+fn a_saved_check_needs_a_number_unless_printed_later() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.navigate(true);
+    s.poll();
+    s.header
+        .edit_step(|h| h.number = NumberField::Typed(String::new()));
+    let before = writes(&link);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(s.state()["save"]["refused"], "number_invalid");
+    assert_eq!(writes(&link), before);
+}
+
+#[test]
+fn the_proposal_counts_checks_that_pay_bills() {
+    let (_d, link) = link();
+    let s = screen(&link);
+    let bank = account(&s, "1010");
+    let mut demo = link.demo_state().expect("demo");
+    let chart = demo
+        .chart
+        .get_or_insert_with(crate::company::demo::chart)
+        .clone();
+    let posting = crate::company::demo::register::DemoPosting {
+        kind: "bill_payment",
+        date: today(),
+        number: "4500".into(),
+        contact: None,
+        memo: String::new(),
+        own: bank,
+        own_debit: false,
+        lines: vec![(account(&s, "5110"), money("1.00"))],
+    };
+    demo.ledger
+        .save(&chart, &posting, None)
+        .expect("bill payment");
+    assert_eq!(
+        crate::company::demo::checks::numbers(&mut demo, bank),
+        (None, Some(4500))
+    );
+}
+
+#[test]
+fn a_saved_copy_never_overwrites_and_is_named_by_its_bytes() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let pdf = b"%PDF-1.4\n%synthetic\n";
+    let first = attach::save_copy(dir.path(), "receipt.pdf", pdf).expect("first");
+    std::fs::write(&first, b"owner edits").expect("edit");
+    let second = attach::save_copy(dir.path(), "receipt.pdf", pdf).expect("second");
+    assert_ne!(first, second);
+    assert_eq!(std::fs::read(&first).expect("read"), b"owner edits");
+    assert_eq!(std::fs::read(&second).expect("read"), pdf);
+    assert!(second.ends_with("receipt (2).pdf"), "{second:?}");
+    // The extension is the detected type's; the name loses any path.
+    let png = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0];
+    let p = attach::save_copy(dir.path(), "..\\..\\evil.exe", &png).expect("png");
+    assert_eq!(p.parent(), Some(dir.path()));
+    assert!(p.ends_with("evil.png"), "{p:?}");
+    // Not a PDF or image: nothing written.
+    assert_eq!(
+        attach::save_copy(dir.path(), "notes.txt", b"hello"),
+        Err("check.attach.download_wrong_type")
+    );
+    assert!(crate::i18n::has("check.attach.download_wrong_type"));
+    for (name, want) in [
+        ("CON", "file-CON"),
+        ("nul.pdf", "file-nul"),
+        ("Com1.txt.pdf", "file-Com1.txt"),
+        ("lpt9", "file-lpt9"),
+        ("report. . .pdf", "report"),
+        ("../etc/passwd", "passwd"),
+        ("a/b\\c:d.pdf", "cd"),
+        ("...", "attachment"),
+        ("COM10", "COM10"),
+    ] {
+        assert_eq!(attach::safe_stem(name), want, "{name}");
+    }
+}
+
+#[test]
+fn the_ai_cap_checks_every_provider_and_an_unreadable_store_blocks() {
+    let consent: cl_api::CompanyConsent = serde_json::from_value(json!({
+        "companyId": "d0000000-0000-4000-8000-000000000001",
+        "aiEnabled": true,
+        "acceptedAt": "2026-10-01T00:00:00.000Z",
+        "acceptedVersion": 1,
+        "systemVersion": 1,
+        "isStale": false,
+        "enabledTasks": { "categorization": true },
+    }))
+    .expect("consent");
+    let config = |chain: &[&str], task: Option<&str>| cl_api::AiConfig {
+        is_enabled: true,
+        fallback_chain: chain.iter().map(|p| (*p).to_string()).collect(),
+        categorization_provider: task.map(str::to_string),
+        ..cl_api::AiConfig::default()
+    };
+    let reachable = |c: &cl_api::AiConfig, under_cap: bool| {
+        suggest::gate_of(Some(c), Some(&consent), under_cap).provider_reachable
+    };
+    assert!(reachable(&config(&["ollama"], None), false));
+    assert!(
+        !reachable(&config(&["ollama", "anthropic"], None), false),
+        "a cloud fallback needs the cap"
+    );
+    assert!(reachable(&config(&["ollama", "anthropic"], None), true));
+    assert!(!reachable(&config(&["ollama"], Some("openai")), false));
+    assert!(!reachable(&config(&["ollama", "something"], None), true));
+    assert!(!reachable(&config(&[], None), true));
+    assert!(suggest::gate_of(Some(&config(&["ollama"], None)), Some(&consent), false).is_open());
+    // The local store can't be read: the cap is unknown, so no cloud call.
+    let (dir, link) = link();
+    let tenant = TenantId::parse("d0000000-0000-4000-8000-000000000001").expect("id");
+    let s = WriteCheckScreen::new(Arc::clone(&link), Some((tenant, "Ozark".into())), today());
+    assert!(s.under_cap(), "nothing stored yet: no cap");
+    std::fs::create_dir_all(dir.path().join("settings").join("companies.json")).expect("dir");
+    assert!(!s.under_cap());
 }

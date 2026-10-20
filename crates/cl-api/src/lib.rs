@@ -64,8 +64,9 @@ pub use resources::bank_postings::{
 };
 // P13 WP1: write check.
 pub use resources::checks::{
-    CHECK_PRINTED, CheckEditOptions, CheckRecord, CheckSettings, CheckSummary, Checks, PrintStatus,
-    PrintedCheckChange, check_settings_from_json, checks_from_json, is_check_printed,
+    CHECK_PRINTED, CheckEditOptions, CheckRecord, CheckSettings, CheckSummary, Checks, LINE_BILLED,
+    PrintStatus, PrintedCheckChange, check_settings_from_json, checks_from_json, is_check_printed,
+    is_line_billed, is_number_used,
 };
 pub use resources::common::SortDir;
 pub use resources::company::{

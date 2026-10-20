@@ -13,9 +13,9 @@ use cl_api::{
     ApiError, AuditAction, AuditEntity, BankPosting, CheckDraft, CheckEditOptions, CheckRecord,
     ClosedPeriodAuthorization, ConflictReason, DraftKey, IdempotencyKey, LocalValidation,
     OrphanLabel, PageRequest, PostingOptions, PrintStatus, PrintedCheckChange, RecordVersion,
-    SplitLine, TxnStatus, TxnType, Versioned, is_check_printed,
+    SplitLine, TxnStatus, TxnType, Versioned, is_check_printed, is_line_billed, is_number_used,
 };
-use cl_core::ids::TransactionId;
+use cl_core::ids::{AccountId, TransactionId};
 use cl_core::{CalendarDate, Secret};
 use cl_model::closing::{is_locked, needs_password};
 use cl_model::forms::check::{
@@ -49,6 +49,13 @@ pub(crate) struct Saved {
     pub id: TransactionId,
     pub number: Option<u32>,
     pub print_status: String,
+    /// The check's version after the save (`None` when the answer was the
+    /// plain transaction: the expense path).
+    pub version: Option<RecordVersion>,
+    /// The ledger record's version after the save.
+    pub txn_version: RecordVersion,
+    /// The date the check now has.
+    pub date: CalendarDate,
 }
 
 /// The checked check as the engine's draft, field by field (no
@@ -98,19 +105,37 @@ pub fn to_draft(c: &CheckedCheck, payee_display: &str) -> Result<CheckDraft, Api
     })
 }
 
-/// The form for a saved check read from the engine (exact amounts from
-/// `GET /transactions/{id}`, never from a list), and whether it is shown
-/// read-only.
+/// The form for a saved check drawn on `bank`, read from the engine (exact
+/// amounts from `GET /transactions/{id}`, never from a list), and whether
+/// the form shows it exactly: its one bank line is the credit on `bank`,
+/// and every other line is a debit. Anything else (no such credit, a
+/// second credit, a debit on the bank line) is shown read-only.
 pub(crate) fn form_of(
     r: &CheckRecord,
+    bank: AccountId,
     keys: &mut cl_model::rowkey::RowKeyGen,
-) -> (CheckForm, FormLines) {
-    let bank_line = r
+) -> (CheckForm, FormLines, bool) {
+    let credits: Vec<usize> = r
         .txn
         .lines
         .iter()
-        .position(|l| l.credit.is_positive() && l.debit.is_zero());
-    let bank = bank_line.map(|i| r.txn.lines[i].account_id);
+        .enumerate()
+        .filter(|(_, l)| !l.credit.is_zero())
+        .map(|(i, _)| i)
+        .collect();
+    let bank_line = match credits.as_slice() {
+        [i] if r.txn.lines[*i].account_id == bank => Some(*i),
+        _ => None,
+    };
+    let exact = bank_line.is_some_and(|i| {
+        let l = &r.txn.lines[i];
+        l.credit.is_positive() && l.debit.is_zero()
+    }) && r
+        .txn
+        .lines
+        .iter()
+        .enumerate()
+        .all(|(i, l)| Some(i) == bank_line || (l.credit.is_zero() && !l.debit.is_negative()));
     let amount = bank_line.map(|i| r.txn.lines[i].credit);
     let queued = r.print_status == PrintStatus::Queue;
     let number = match (queued, r.check_number) {
@@ -121,7 +146,7 @@ pub(crate) fn form_of(
         (false, Some(n)) => NumberField::Typed(n.to_string()),
         (false, None) => NumberField::Typed(String::new()),
     };
-    let mut f = blank(bank, r.txn.txn_date, number);
+    let mut f = blank(Some(bank), r.txn.txn_date, number);
     f.print_later = queued;
     f.payee = r.txn.contact_id;
     f.payee_name.clone_from(&r.payee_name);
@@ -145,7 +170,7 @@ pub(crate) fn form_of(
             ..FormLine::blank(keys.next_key())
         })
         .collect();
-    (f, FormLines::from_lines(seeds, keys))
+    (f, FormLines::from_lines(seeds, keys), exact)
 }
 
 fn options(password: Option<Secret>) -> PostingOptions {
@@ -182,6 +207,47 @@ impl WriteCheckScreen {
         self.save.problems = problems;
     }
 
+    /// Commits the amount and payee text still being typed (they commit
+    /// when their field is left, and Alt+S or Enter can come first). False,
+    /// with the keyboard put there, when the typed text is not accepted:
+    /// the check is never saved with an amount or payee other than the one
+    /// shown.
+    pub(crate) fn commit_header(&mut self) -> bool {
+        if self.inputs.rev != self.header.revision() {
+            // The header changed under the texts (a load, prefill, undo):
+            // the fields show the form's values again from the next frame,
+            // so there is nothing typed to commit.
+            return true;
+        }
+        let (amount_shown, payee_shown) = {
+            let f = self.header.current();
+            let amount = f
+                .amount
+                .map(|m| m.format(self.money_style))
+                .unwrap_or_default();
+            let payee = f
+                .payee
+                .and_then(|p| self.lists.name_text(p))
+                .map_or_else(|| f.payee_name.clone(), str::to_string);
+            (amount, payee)
+        };
+        if self.inputs.amount.trim() != amount_shown.trim() {
+            self.amount_left();
+        }
+        if self.inputs.payee.trim() != payee_shown.trim() {
+            self.resolve_payee();
+        }
+        if self.inputs.amount_problem.is_some() {
+            self.focus = Some(Field::Amount);
+            return false;
+        }
+        if self.inputs.payee_problem {
+            self.focus = Some(Field::Payee);
+            return false;
+        }
+        true
+    }
+
     /// Checks the form and starts the save (Save & New, Save & Close, the
     /// close prompt's Save). Nothing is sent when the check doesn't pass,
     /// above all when the lines and the amount disagree by any amount.
@@ -190,11 +256,16 @@ impl WriteCheckScreen {
         if self.save.task.is_some() {
             return false;
         }
-        if self.editing.as_ref().is_some_and(|e| e.read_only) {
-            self.save.notice = Some("check.read_only");
+        if let Some(e) = self.editing.as_ref().filter(|e| e.read_only) {
+            self.save.notice = Some(e.read_only_note);
             return false;
         }
-        // The open cell first (B4), then the header follows the lines.
+        // The header text being typed first (the amount and the payee
+        // commit when their field is left; Alt+S can come before that).
+        if !self.commit_header() {
+            return false;
+        }
+        // The open cell (B4), then the header follows the lines.
         if !self.lines.commit() {
             return false;
         }
@@ -211,6 +282,7 @@ impl WriteCheckScreen {
         let form = self.compose();
         let ctx = CheckContext {
             tags: &self.tag_list,
+            editing: self.editing.is_some(),
         };
         let checked = match check(&form, &ctx) {
             Ok(c) => c,
@@ -240,6 +312,11 @@ impl WriteCheckScreen {
                 }]);
                 return false;
             }
+            Err(LocalValidation::LineBillableUnavailable) => {
+                // Nothing sent: the engine can't take line customers yet.
+                self.save.notice = Some("check.line_billable_unavailable");
+                return false;
+            }
             Err(v) => {
                 self.save.error = Some(ApiError::Local(v));
                 return false;
@@ -265,15 +342,17 @@ impl WriteCheckScreen {
             return false;
         }
         self.save.intent = Some(intent);
-        let edit = self.editing.as_ref().map(|e| (e.id, e.version));
+        let check_edit = self.check_edit();
+        // The version the edit is guarded by: the check's for `PUT
+        // /checks/{id}`, the plain transaction's for `PUT
+        // /transactions/{id}` (which re-reads it as a transaction).
+        let edit = self.editing.as_ref().map(|e| {
+            let version = if check_edit { e.version } else { e.txn_version };
+            (e.id, version)
+        });
         let printed = self.save.printed_choice.filter(|_| edit.is_some());
         if self.link.is_demo() {
-            let saved = self.demo_save(
-                &draft,
-                edit.as_ref().map(|(id, _)| *id),
-                password.as_ref(),
-                printed,
-            );
+            let saved = self.demo_save(&draft, edit, password.as_ref(), printed, check_edit);
             return match saved {
                 Ok(s) => {
                     self.saved(s);
@@ -299,7 +378,6 @@ impl WriteCheckScreen {
             what: "orphan.check_save",
             key: Some(key.clone()),
         };
-        let check_edit = self.check_edit();
         let print_later = draft.print_later;
         let written = group.write(&session, label, move |s| async move {
             let opts = options(password);
@@ -314,6 +392,9 @@ impl WriteCheckScreen {
                         id: v.record.id,
                         number: v.record.check_number.and_then(|n| u32::try_from(n).ok()),
                         print_status: queued(print_later),
+                        version: None,
+                        txn_version: v.version,
+                        date: v.record.txn_date,
                     })
                 }
                 Some((id, version)) if check_edit => {
@@ -329,6 +410,9 @@ impl WriteCheckScreen {
                         id,
                         number: v.record.check_number,
                         print_status: v.record.print_status.as_wire().to_string(),
+                        txn_version: v.transaction_version(),
+                        version: Some(v.version),
+                        date: v.record.txn.txn_date,
                     })
                 }
                 Some((id, version)) => {
@@ -340,6 +424,9 @@ impl WriteCheckScreen {
                         id,
                         number: v.record.check_number.and_then(|n| u32::try_from(n).ok()),
                         print_status: queued(print_later),
+                        version: None,
+                        txn_version: v.version,
+                        date: v.record.txn_date,
                     })
                 }
             }
@@ -365,27 +452,31 @@ impl WriteCheckScreen {
     fn demo_save(
         &self,
         draft: &CheckDraft,
-        existing: Option<TransactionId>,
+        existing: Option<(TransactionId, RecordVersion)>,
         password: Option<&Secret>,
         printed: Option<PrintedCheckChange>,
+        check_edit: bool,
     ) -> Result<Saved, ApiError> {
+        use crate::company::demo::checks;
         let mut demo = self
             .link
             .demo_state()
             .ok_or(ApiError::Local(LocalValidation::InvalidValue))?;
         let id = match existing {
-            None => crate::company::demo::checks::create(&mut demo, draft, password)?,
-            Some(id) => {
-                crate::company::demo::checks::update(&mut demo, id, draft, password, printed)?
+            None => checks::create(&mut demo, draft, password)?,
+            Some((id, _)) if check_edit => checks::update(&mut demo, id, draft, password, printed)?,
+            Some((id, version)) => {
+                checks::update_expense(&mut demo, id, &version, draft, password)?
             }
         };
-        let got = crate::company::demo::checks::get(&mut demo, id)
-            .ok_or(ApiError::NotFound { code: None })?
-            .record;
+        let got = checks::get(&mut demo, id).ok_or(ApiError::NotFound { code: None })?;
         Ok(Saved {
             id,
-            number: got.check_number,
-            print_status: got.print_status.as_wire().to_string(),
+            number: got.record.check_number,
+            print_status: got.record.print_status.as_wire().to_string(),
+            txn_version: got.transaction_version(),
+            version: Some(got.version),
+            date: got.record.txn.txn_date,
         })
     }
 
@@ -474,9 +565,18 @@ impl WriteCheckScreen {
         // changed.
         self.attach.draft = None;
         self.panel.payee = None;
+        // The edited check's versions and date are the saved ones now (a
+        // second save of it is guarded by them).
         let status = self.save.last.as_ref().map(|l| l.print_status.clone());
-        if let (Some(e), Some(status)) = (self.editing.as_mut().filter(|e| e.id == s.id), status) {
-            e.print_status = PrintStatus::from_wire(&status);
+        if let Some(e) = self.editing.as_mut().filter(|e| e.id == s.id) {
+            if let Some(status) = status {
+                e.print_status = PrintStatus::from_wire(&status);
+            }
+            if let Some(v) = s.version {
+                e.version = v;
+            }
+            e.txn_version = s.txn_version;
+            e.old_date = s.date;
         }
         self.follow_up(intent);
         // The engine's balance and next number after the save.
@@ -547,7 +647,7 @@ impl WriteCheckScreen {
         self.new_check(false);
     }
 
-    fn save_failed(&mut self, e: ApiError) {
+    pub(crate) fn save_failed(&mut self, e: ApiError) {
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
         if !crate::screens::register::keeps_key(&e) {
             self.save.key = None;
@@ -584,7 +684,10 @@ impl WriteCheckScreen {
                 reason: ConflictReason::Stale,
                 ..
             } => self.save.stale = true,
-            ApiError::Conflict { .. } => {
+            // A line already billed to a customer can't change.
+            _ if is_line_billed(&e) => self.save.notice = Some("check.line_billed"),
+            // Only the engine's code-less 409 is a used check number.
+            _ if is_number_used(&e) => {
                 if let Some(n) = self.number_sent() {
                     // A re-proposal for the owner to take, never a silent
                     // change (plan WP6.2).
@@ -721,9 +824,10 @@ impl WriteCheckScreen {
         match target {
             None => self.new_check(true),
             Some(i) if i < self.nav.list.len() => {
+                let Some(bank) = self.nav.bank else { return };
                 self.nav.at = Some(i);
                 let id = self.nav.list[i].id;
-                self.load_check(id);
+                self.load_check(id, bank);
             }
             Some(_) if !self.nav.done => {
                 self.nav.want_older = Some(older);
@@ -760,8 +864,9 @@ impl WriteCheckScreen {
         }
     }
 
-    /// Reads a saved check into the form.
-    pub(crate) fn load_check(&mut self, id: TransactionId) {
+    /// Reads a saved check drawn on `bank` into the form.
+    pub(crate) fn load_check(&mut self, id: TransactionId, bank: AccountId) {
+        self.load_bank = Some(bank);
         let link = Arc::clone(&self.link);
         if let Some(mut demo) = link.demo_state() {
             let got = crate::company::demo::checks::get(&mut demo, id);
@@ -780,21 +885,45 @@ impl WriteCheckScreen {
         }
     }
 
-    fn show_record(&mut self, v: &Versioned<CheckRecord>) {
+    pub(crate) fn show_record(&mut self, v: &Versioned<CheckRecord>) {
         let r = &v.record;
+        let Some(bank) = self.load_bank.or(self.bank()) else {
+            return;
+        };
         let lists = Arc::clone(&self.lists);
-        let (form, lines) = form_of(r, &mut self.lines.form_mut().adapter_mut().keys);
+        let (form, lines, exact) = form_of(r, bank, &mut self.lines.form_mut().adapter_mut().keys);
+        // Line customers the engine can't take yet (Q-P13x): changing the
+        // check would drop them, so it is shown as it is.
+        let line_customers = !self.line_billable()
+            && r.txn
+                .lines
+                .iter()
+                .any(|l| l.contact_id.is_some() || l.is_billable);
+        let read_only_note =
+            if r.txn.status == TxnStatus::Void || r.txn.txn_type == TxnType::BillPayment {
+                Some("check.read_only")
+            } else if !exact {
+                Some("check.read_only.shape")
+            } else if line_customers {
+                Some("check.read_only.line_customers")
+            } else {
+                None
+            };
         self.header.load(form);
         self.lines.form_mut().load(lines, &*lists);
         self.editing = Some(Editing {
             id: r.txn.id,
             version: v.version,
+            txn_version: v.transaction_version(),
+            bank,
             old_date: r.txn.txn_date,
             print_status: r.print_status.clone(),
-            read_only: r.txn.status == TxnStatus::Void || r.txn.txn_type == TxnType::BillPayment,
+            read_only: read_only_note.is_some(),
+            read_only_note: read_only_note.unwrap_or("check.read_only"),
         });
         self.save.problems.clear();
         self.save.error = None;
+        self.save.notice = None;
         self.save.stale = false;
         self.save.last_action = Some("load");
         self.save.printed_choice = None;
@@ -810,9 +939,9 @@ impl WriteCheckScreen {
 
     /// The edited check was changed elsewhere: read it again.
     pub(crate) fn reload(&mut self) {
-        if let Some(id) = self.editing.as_ref().map(|e| e.id) {
+        if let Some((id, bank)) = self.editing.as_ref().map(|e| (e.id, e.bank)) {
             self.save.stale = false;
-            self.load_check(id);
+            self.load_check(id, bank);
         }
     }
 

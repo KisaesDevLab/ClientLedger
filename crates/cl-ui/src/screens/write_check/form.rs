@@ -306,8 +306,8 @@ impl WriteCheckScreen {
             && !self.editing.as_ref().is_some_and(|e| e.read_only);
         self.bank_row(ui, tokens, enabled);
         ui.add_space(10.0);
-        if self.editing.as_ref().is_some_and(|e| e.read_only) {
-            form::hint(ui, tokens, &t("check.read_only"));
+        if let Some(e) = self.editing.as_ref().filter(|e| e.read_only) {
+            form::hint(ui, tokens, &t(e.read_only_note));
         } else if self.editing_locked() {
             form::hint(ui, tokens, &t("closing.edit_note"));
         }
@@ -622,7 +622,7 @@ impl WriteCheckScreen {
     /// Autofill when the owner leaves the payee: the exact name, else the
     /// first name that starts with the typed text. No free-text payees
     /// (Q-P13o): anything else asks for a name from the list.
-    fn resolve_payee(&mut self) {
+    pub(crate) fn resolve_payee(&mut self) {
         self.payee_list = false;
         let typed = self.inputs.payee.trim().to_string();
         if typed.is_empty() {
