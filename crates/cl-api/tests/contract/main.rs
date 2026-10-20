@@ -28,6 +28,7 @@ mod contract_lifecycle;
 mod contract_list_csv;
 mod contract_logging;
 mod contract_money;
+mod contract_money_helpers;
 mod contract_preferences;
 mod contract_register;
 mod contract_register_property;
@@ -381,6 +382,26 @@ fn main() -> std::process::ExitCode {
         (
             "preferences::token_cap_u29",
             contract_preferences::token_cap_u29,
+        ),
+        (
+            "money_helpers::transfers_in_both_registers",
+            contract_money_helpers::transfers_in_both_registers,
+        ),
+        (
+            "money_helpers::card_charge_and_credit",
+            contract_money_helpers::card_charge_and_credit,
+        ),
+        (
+            "money_helpers::personal_funds_postings",
+            contract_money_helpers::personal_funds_postings,
+        ),
+        (
+            "money_helpers::owner_money_postings",
+            contract_money_helpers::owner_money_postings,
+        ),
+        (
+            "money_helpers::loan_payments_match_the_lender",
+            contract_money_helpers::loan_payments_match_the_lender,
         ),
         (
             "lifecycle::ten_switches_under_two_seconds",
