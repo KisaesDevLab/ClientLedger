@@ -4,13 +4,49 @@
 //! PENDING(R6) until then. Delete (R7) is PENDING by `txn-delete-v1`.
 
 use cl_api::{
-    ApiError, AuditAction, AuditEntity, Capabilities, ConflictReason, DeleteOptions,
-    PostingOptions, TxnStatus,
+    ApiError, AuditAction, AuditEntity, AuditLine, Capabilities, ConflictReason, DeleteOptions,
+    PostingOptions, Transaction, TxnStatus,
 };
 
-use crate::common::{date, key, wire_lines};
+use crate::common::{date, key};
 use crate::contract_bank_postings::{accounts, check};
 use crate::support::{Harness, unique};
+
+/// One line as both sides report it: account, position, exact debit and
+/// credit, and description, in line order.
+type LineImage = (String, Option<i64>, String, String, Option<String>);
+
+fn txn_lines(t: &Transaction) -> Vec<LineImage> {
+    let mut lines: Vec<_> = t.lines.iter().collect();
+    lines.sort_by_key(|l| l.line_order.unwrap_or(0));
+    lines
+        .into_iter()
+        .map(|l| {
+            (
+                l.account_id.to_string(),
+                l.line_order,
+                l.debit.to_wire(),
+                l.credit.to_wire(),
+                l.description.clone(),
+            )
+        })
+        .collect()
+}
+
+fn audit_lines(lines: &[AuditLine]) -> Vec<LineImage> {
+    lines
+        .iter()
+        .map(|l| {
+            (
+                l.account.to_string(),
+                l.line_order,
+                l.debit.to_wire(),
+                l.credit.to_wire(),
+                l.description.clone(),
+            )
+        })
+        .collect()
+}
 
 pub fn update_and_void_keep_the_before_image(h: &Harness) {
     let s = &h.s1;
@@ -24,7 +60,11 @@ pub fn update_and_void_keep_the_before_image(h: &Harness) {
         )
         .expect("check");
     let got = h.run(s.transactions().get(made.record.id)).expect("get");
-    let before_lines = wire_lines(&got.record);
+    let before_lines = txn_lines(&got.record);
+    assert!(
+        before_lines.iter().any(|l| l.4.as_deref() == Some("Paper")),
+        "a line description to compare"
+    );
     let changed = check(&a, date(2026, 6, 3), &memo, ("20.0000", "1.0000"));
     let upd = h
         .run(s.transactions().update_bank_posting(
@@ -35,6 +75,10 @@ pub fn update_and_void_keep_the_before_image(h: &Harness) {
             key(),
         ))
         .expect("update");
+    let updated = h
+        .run(s.transactions().get(made.record.id))
+        .expect("get after update");
+    let updated_lines = txn_lines(&updated.record);
     h.run(s.transactions().void(
         made.record.id,
         "audit test",
@@ -73,17 +117,22 @@ pub fn update_and_void_keep_the_before_image(h: &Harness) {
             .as_ref()
             .and_then(|b| b.lines().expect("exact lines"))
             .expect("update before-image has lines");
-        let got: Vec<(String, String)> = lines
-            .iter()
-            .map(|l| (l.debit.to_wire(), l.credit.to_wire()))
-            .collect();
-        assert_eq!(got, before_lines, "every original line, exactly");
+        assert_eq!(
+            audit_lines(&lines),
+            before_lines,
+            "every original line, exactly: account, order, amounts, description"
+        );
         let void_lines = void
             .before
             .as_ref()
             .and_then(|b| b.lines().expect("exact lines"))
             .expect("void before-image has lines");
         assert_eq!(void_lines.len(), 3, "the updated check's lines");
+        assert_eq!(
+            audit_lines(&void_lines),
+            updated_lines,
+            "the void's before-image is the updated check, exactly"
+        );
     }
 }
 
@@ -105,7 +154,7 @@ pub fn delete_keeps_every_line_in_the_audit_trail(h: &Harness) {
         ))
         .expect("check");
     let got = h.run(s.transactions().get(made.record.id)).expect("get");
-    let before_lines = wire_lines(&got.record);
+    let before_lines = txn_lines(&got.record);
     let opts = DeleteOptions {
         reason: Some("entered twice".into()),
         closing_password: None,
@@ -130,11 +179,11 @@ pub fn delete_keeps_every_line_in_the_audit_trail(h: &Harness) {
         .as_ref()
         .and_then(|b| b.lines().expect("exact lines"))
         .expect("delete before-image has lines");
-    let got: Vec<(String, String)> = lines
-        .iter()
-        .map(|l| (l.debit.to_wire(), l.credit.to_wire()))
-        .collect();
-    assert_eq!(got, before_lines, "every original line, exactly");
+    assert_eq!(
+        audit_lines(&lines),
+        before_lines,
+        "every original line, exactly: account, order, amounts, description"
+    );
 
     let e = h
         .run(
