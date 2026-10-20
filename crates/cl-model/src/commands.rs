@@ -254,6 +254,10 @@ pub const COMMANDS: &[Command] = &[
     cmd("form.insert_line", "Insert Line", None, 2, key(Mods::CMD, Key::Insert), Scope::Form),
     cmd("form.delete_line", "Delete Line", None, 2, key(Mods::CMD, Key::Delete), Scope::Form),
     cmd("form.delete_item", "Delete Transaction", None, 2, ctrl('D'), Scope::Form),
+    cmd("form.attach", "Attach\u{2026}", None, 3, None, Scope::Form),
+    cmd("form.history", "History", None, 3, None, Scope::Form),
+    // Write Check (P13; Page Up/Down, Ctrl+F, Ctrl+P, Alt+N and Alt+S above apply too)
+    cmd("check.print_later", "Print Later", None, 4, None, Scope::Form),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
@@ -280,7 +284,7 @@ pub const COMMANDS: &[Command] = &[
     built("vendors.center", "Vendors", Some(Menu::Vendors), 0, None),
     screen("vendors.enter_bill", "Enter Bill", Some(Menu::Vendors), 1, ctrl('B'), "P17"),
     screen("vendors.pay_bills", "Pay Bills", Some(Menu::Vendors), 1, ctrl_shift('B'), "P18"),
-    screen("vendors.write_check", "Write Check", Some(Menu::Vendors), 1, ctrl('W'), "P13"),
+    built("vendors.write_check", "Write Check", Some(Menu::Vendors), 1, ctrl('W')),
     screen("vendors.card_charge", "Record Card Charge", Some(Menu::Vendors), 1, ctrl_shift('C'), "P14"),
     // Banking
     built("banking.register", "Open Register", Some(Menu::Banking), 0, ctrl('G')),
@@ -404,6 +408,7 @@ mod tests {
             "clients.center",
             "vendors.center",
             "banking.register",
+            "vendors.write_check",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -451,6 +456,38 @@ mod tests {
         );
         let reg = find("banking.register").unwrap();
         assert!(reg.opens && reg.arrives.is_none(), "the register is built");
+    }
+
+    #[test]
+    fn write_check_commands() {
+        use crate::keymap::Keymap;
+        let wc = find("vendors.write_check").unwrap();
+        assert!(
+            wc.opens && wc.arrives.is_none(),
+            "Write Check is built (P13)"
+        );
+        for (id, label) in [
+            ("form.attach", "Attach\u{2026}"),
+            ("form.history", "History"),
+            ("check.print_later", "Print Later"),
+        ] {
+            let c = find(id).unwrap();
+            assert_eq!(c.label, label);
+            assert_eq!((c.menu, c.shortcut, c.scope), (None, None, Scope::Form));
+            assert!(!c.opens);
+        }
+        // The keys the form reuses still resolve in a form.
+        let km = Keymap::new(COMMANDS).unwrap();
+        let at = |mods: Mods, k: Key| {
+            km.resolve(Scope::Form, Shortcut::new(mods, k))
+                .map(CommandId::as_str)
+        };
+        assert_eq!(at(Mods::NONE, Key::PageUp), Some("form.prev_record"));
+        assert_eq!(at(Mods::NONE, Key::PageDown), Some("form.next_record"));
+        assert_eq!(at(Mods::CMD, Key::Letter('F')), Some("edit.find"));
+        assert_eq!(at(Mods::CMD, Key::Letter('P')), Some("file.print"));
+        assert_eq!(at(Mods::ALT, Key::Letter('N')), Some("form.save_new"));
+        assert_eq!(at(Mods::ALT, Key::Letter('S')), Some("form.save_close"));
     }
 
     #[test]

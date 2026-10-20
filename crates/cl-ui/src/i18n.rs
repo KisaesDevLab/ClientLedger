@@ -49,6 +49,7 @@ pub fn has(key: &str) -> bool {
     }) || catalog().contains_key(key)
 }
 
+mod check;
 mod contacts;
 mod csv;
 mod items;
@@ -67,6 +68,7 @@ fn catalog() -> &'static HashMap<&'static str, &'static str> {
             .chain(tags::ENGLISH)
             .chain(csv::ENGLISH)
             .chain(register::ENGLISH)
+            .chain(check::ENGLISH)
             .copied()
             .collect()
     })
@@ -937,6 +939,7 @@ mod tests {
             .chain(tags::ENGLISH)
             .chain(csv::ENGLISH)
             .chain(register::ENGLISH)
+            .chain(check::ENGLISH)
         {
             assert!(seen.insert(*k), "duplicate key {k}");
             assert_ne!(*v, "", "{k}");
