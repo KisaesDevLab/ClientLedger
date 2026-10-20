@@ -20,6 +20,7 @@ mod contract_closed_period;
 mod contract_companies;
 mod contract_conflict;
 mod contract_contacts;
+mod contract_deposits;
 mod contract_errors;
 mod contract_harness;
 mod contract_items;
@@ -214,6 +215,16 @@ fn main() -> std::process::ExitCode {
             "write_check::closed_period",
             contract_write_check::closed_period,
         ),
+        // P14 lane A: Make Deposit and Transfer Funds.
+        (
+            "deposits::grouping_clears_payments_clearing",
+            contract_deposits::grouping_clears_payments_clearing,
+        ),
+        (
+            "deposits::fees_and_cash_back",
+            contract_deposits::fees_and_cash_back,
+        ),
+        ("deposits::closed_period", contract_deposits::closed_period),
         (
             "register_property::balance_holds_after_random_edits",
             contract_register_property::balance_holds_after_random_edits,
