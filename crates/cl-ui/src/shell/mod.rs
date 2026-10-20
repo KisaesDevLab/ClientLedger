@@ -502,14 +502,20 @@ impl Shell {
             mk("nav.home"),
             Box::new(Placeholder::for_command(mk("nav.home"))),
         );
-        self.windows.open_new(
-            mk("vendors.write_check"),
-            Box::new(
+        // The real Write Check with the mockup's unsaved draft (P13).
+        let check: Box<dyn Screen> = match &self.company_link {
+            Some(link) => Box::new(crate::screens::write_check::WriteCheckScreen::demo_draft(
+                Arc::clone(link),
+                self.open_tenant.clone(),
+                self.today,
+            )),
+            None => Box::new(
                 Placeholder::for_command(mk("vendors.write_check"))
                     .with_title("Write Check \u{b7} #4418")
                     .with_dirty(true),
             ),
-        );
+        };
+        self.windows.open_new(mk("vendors.write_check"), check);
         // The real register of the demo's operating account (P12).
         let register = self.make_screen(mk("banking.register"));
         self.windows.open_new(mk("banking.register"), register);
@@ -1229,6 +1235,9 @@ fn make_any(
             return s;
         }
         if let Some(s) = crate::screens::register::make(kind, link, open.clone(), today) {
+            return s;
+        }
+        if let Some(s) = crate::screens::write_check::make(kind, link, open.clone(), today) {
             return s;
         }
         if let Some(s) = crate::screens::preferences::make(kind, link, open, prefs) {
