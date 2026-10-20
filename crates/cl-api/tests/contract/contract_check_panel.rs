@@ -4,7 +4,7 @@
 //! vs recent), the check number on the payee's transactions (PENDING E5
 //! while the engine list lacks it), a draft attachment moved onto a check
 //! by the check create, local file refusals that send nothing, rule
-//! suggestions (PENDING `rules-evaluate-v1`) and the AI preview refused
+//! suggestions (`rules-evaluate-v1`) and the AI preview refused
 //! while AI is off (no network: the engine refuses before any provider).
 //!
 //! Checks are written with raw `POST /checks` bodies here so this file does
@@ -246,8 +246,11 @@ pub fn draft_attachment_moves_onto_the_check(h: &Harness) {
     assert_eq!(h.observer.total(), before, "nothing may be sent");
 }
 
-/// Rule suggestions: PENDING until the engine advertises
-/// `rules-evaluate-v1`; meanwhile refused locally with nothing sent.
+/// Rule suggestions (`rules-evaluate-v1`): no rule matches nothing; the
+/// owner's rule names its account for the check as the screen asks (money
+/// out, the payee chosen); with the company's conditional rules switched
+/// off the engine's 404 reads as no match. Without the capability:
+/// refused locally with nothing sent.
 pub fn rules_evaluate(h: &Harness) {
     let s = &h.s1;
     let bank = detail_account(h, s, AccountType::Asset, "bank");
@@ -259,8 +262,72 @@ pub fn rules_evaluate(h: &Harness) {
         date: None,
     };
     if h.require_cap(Capabilities::RULES_EVALUATE, "rules-evaluate-v1") {
-        // A fresh company has no rules: nothing matches.
+        // New companies have conditional rules on.
+        let flags = h
+            .run(s.raw_mapped(Method::Get, "/api/v1/feature-flags", None))
+            .expect("flags");
+        assert_eq!(
+            flags["flags"]["CONDITIONAL_RULES_V1"]["enabled"], true,
+            "{flags}"
+        );
+        // No rule for this text: nothing matches.
         assert_eq!(h.run(s.rules().evaluate(&q)).expect("evaluate"), None);
+
+        // The owner's rule: memo contains the token -> Mulch & stone.
+        let mulch = account(h, s, AccountType::Expense, "Materials:Mulch & stone").id;
+        let payee = vendor(h, s, None);
+        let token = unique("hardwoodmulch").replace(' ', "");
+        let rule = h
+            .run(s.raw_mapped(
+                Method::Post,
+                "/api/v1/practice/conditional-rules",
+                Some(&json!({
+                    "name": "Mulch from the feed store",
+                    "conditions": {"type": "leaf", "field": "descriptor", "operator": "contains", "value": token},
+                    "actions": [{"type": "set_account", "accountId": mulch.to_string()}],
+                })),
+            ))
+            .expect("rule");
+        let rule_id = rule["id"]
+            .as_str()
+            .or_else(|| rule["rule"]["id"].as_str())
+            .unwrap_or_else(|| panic!("rule id in {rule}"))
+            .to_string();
+        let asked = RuleQuery {
+            description: format!("{} 3 yards", token.to_uppercase()),
+            amount: m("-1286.40"),
+            contact: Some(payee.id),
+            bank_account: bank,
+            date: Some(date(2026, 11, 4)),
+        };
+        let got = h
+            .run(s.rules().evaluate(&asked))
+            .expect("evaluate")
+            .expect("the rule matches");
+        assert_eq!(got.account_id, Some(mulch));
+        assert_eq!(got.rule_id, rule_id);
+        assert_eq!(got.rule_name, "Mulch from the feed store");
+
+        // Conditional rules switched off (an older company): no match,
+        // no error.
+        let flag = format!(
+            "/api/v1/admin/feature-flags/{}/CONDITIONAL_RULES_V1",
+            h.contract_co
+        );
+        let toggle = |on: bool| {
+            h.run(s.raw_mapped(Method::Post, &flag, Some(&json!({ "enabled": on }))))
+                .unwrap_or_else(|e| panic!("toggle conditional rules: {e}"));
+        };
+        toggle(false);
+        let off = h.run(s.rules().evaluate(&asked));
+        toggle(true);
+        assert_eq!(off.expect("rules off read as no match"), None);
+        h.run(s.raw_mapped(
+            Method::Delete,
+            &format!("/api/v1/practice/conditional-rules/{rule_id}"),
+            None,
+        ))
+        .expect("delete rule");
     } else {
         let before = h.observer.total();
         assert_eq!(

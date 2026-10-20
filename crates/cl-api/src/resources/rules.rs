@@ -3,11 +3,12 @@
 //!
 //! The rule only names an account, a tag and a contact. The amount sent is
 //! the owner's typed amount as an exact decimal string, and nothing is read
-//! back as money. Works offline (the rules live in the books). The
-//! engine change is in progress, so the call is refused locally until the
-//! engine advertises the capability. The route sits under the engine's
-//! practice router and carries its gate (a 404 while the tenant's
-//! conditional rules are off).
+//! back as money. Works offline (the rules live in the books). The call is
+//! refused locally on an engine that does not advertise the capability.
+//! The route sits under the engine's practice router and carries its gate:
+//! a 404 while the tenant's conditional rules (`CONDITIONAL_RULES_V1`) are
+//! off. New companies have them on; a company restored from an older
+//! archive may not, and that 404 reads as "no rule matched".
 
 use cl_core::ids::{AccountId, ContactId, TagId};
 use cl_core::{CalendarDate, Money};
@@ -101,8 +102,9 @@ impl Rules<'_> {
     /// # Errors
     /// `Local(RulesEvaluateUnavailable)` until the engine advertises
     /// `rules-evaluate-v1`, `Local(InvalidValue)` for a description over
-    /// 1000 characters (nothing sent in either case); `NotFound` while the
-    /// company's conditional rules are off; any [`ApiError`].
+    /// 1000 characters (nothing sent in either case); any [`ApiError`].
+    /// While the company's conditional rules are off (the engine's 404)
+    /// the answer is `None`: no rule suggests anything.
     pub async fn evaluate(&self, query: &RuleQuery) -> Result<Option<RuleMatch>, ApiError> {
         #[derive(Deserialize)]
         struct W {
@@ -121,7 +123,11 @@ impl Rules<'_> {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
         }
         let call = Call::at(Method::Post, RULES_EVALUATE.route()).json_body(json_body(query)?);
-        let reply = self.0.send(&RULES_EVALUATE, call, None).await?;
+        let reply = match self.0.send(&RULES_EVALUATE, call, None).await {
+            Ok(r) => r,
+            Err(ApiError::NotFound { .. }) => return Ok(None),
+            Err(e) => return Err(e),
+        };
         decode::<W>(&reply, "rule match").map(|w| w.matched)
     }
 }
@@ -215,5 +221,21 @@ mod tests {
             ApiError::Local(LocalValidation::InvalidValue)
         );
         assert_eq!(requests(&server, "POST").await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn rules_switched_off_read_as_no_match() {
+        let server = MockServer::start().await;
+        let s = session_with_caps(&server, &[Capabilities::RULES_EVALUATE]).await;
+        Mock::given(method("POST"))
+            .and(path(ROUTE))
+            .respond_with(json(
+                404,
+                r#"{"error":{"message":"Feature not available"}}"#,
+            ))
+            .mount(&server)
+            .await;
+        assert_eq!(s.rules().evaluate(&q()).await.expect("quiet"), None);
+        assert_eq!(requests(&server, "POST").await.len(), 1, "never retried");
     }
 }
