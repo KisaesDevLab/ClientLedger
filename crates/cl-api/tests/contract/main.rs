@@ -203,6 +203,10 @@ fn main() -> std::process::ExitCode {
         ("write_check::gl_effect", contract_write_check::gl_effect),
         ("write_check::edges", contract_write_check::edges),
         (
+            "write_check::edit_without_check_edit",
+            contract_write_check::edit_without_check_edit,
+        ),
+        (
             "write_check::closed_period",
             contract_write_check::closed_period,
         ),
