@@ -32618,10 +32618,56 @@
     {
       "attachment": false,
       "cleared": false,
+      "contact": "Hollister Family Trust",
+      "date": "2026-11-01",
+      "due": "2026-12-01",
+      "id": 1410,
+      "lines": [
+        {
+          "account": "10200",
+          "credit": "0.00",
+          "debit": "1250.00"
+        },
+        {
+          "account": "4000",
+          "credit": "1250.00",
+          "debit": "0.00"
+        }
+      ],
+      "memo": "Landscaping services",
+      "number": "INV-1348",
+      "type": "invoice"
+    },
+    {
+      "attachment": false,
+      "cleared": false,
+      "contact": "Maple Street Bakery",
+      "date": "2026-11-01",
+      "due": "2026-12-01",
+      "id": 1411,
+      "lines": [
+        {
+          "account": "10200",
+          "credit": "0.00",
+          "debit": "842.50"
+        },
+        {
+          "account": "4000",
+          "credit": "842.50",
+          "debit": "0.00"
+        }
+      ],
+      "memo": "Landscaping services",
+      "number": "INV-1349",
+      "type": "invoice"
+    },
+    {
+      "attachment": false,
+      "cleared": false,
       "contact": "Kimberling Marina",
       "date": "2026-11-01",
       "due": null,
-      "id": 1410,
+      "id": 1412,
       "lines": [
         {
           "account": "1010",
@@ -32644,7 +32690,7 @@
       "contact": "Shepherd Hills Office Supply",
       "date": "2026-11-02",
       "due": null,
-      "id": 1411,
+      "id": 1413,
       "lines": [
         {
           "account": "6350",
@@ -32664,10 +32710,33 @@
     {
       "attachment": false,
       "cleared": false,
+      "contact": "Hollister Family Trust",
+      "date": "2026-11-02",
+      "due": null,
+      "id": 1414,
+      "lines": [
+        {
+          "account": "10150",
+          "credit": "0.00",
+          "debit": "1250.00"
+        },
+        {
+          "account": "10200",
+          "credit": "1250.00",
+          "debit": "0.00"
+        }
+      ],
+      "memo": "Payment received for INV-1348",
+      "number": "5521",
+      "type": "payment"
+    },
+    {
+      "attachment": false,
+      "cleared": false,
       "contact": "White River Lumber",
       "date": "2026-11-02",
       "due": "2026-12-02",
-      "id": 1412,
+      "id": 1415,
       "lines": [
         {
           "account": "10200",
@@ -32690,7 +32759,7 @@
       "contact": "Copper Kettle Coffee",
       "date": "2026-11-02",
       "due": "2026-12-02",
-      "id": 1413,
+      "id": 1416,
       "lines": [
         {
           "account": "10200",
@@ -32713,7 +32782,7 @@
       "contact": "Riverbend HOA",
       "date": "2026-11-02",
       "due": "2026-12-02",
-      "id": 1414,
+      "id": 1417,
       "lines": [
         {
           "account": "10200",
@@ -32736,7 +32805,7 @@
       "contact": "Kimberling Marina",
       "date": "2026-11-02",
       "due": null,
-      "id": 1415,
+      "id": 1418,
       "lines": [
         {
           "account": "1010",
@@ -32759,7 +32828,7 @@
       "contact": "Lampe Country Store",
       "date": "2026-11-02",
       "due": null,
-      "id": 1416,
+      "id": 1419,
       "lines": [
         {
           "account": "1010",
@@ -32782,7 +32851,7 @@
       "contact": "Pine Ridge Storage",
       "date": "2026-11-02",
       "due": null,
-      "id": 1417,
+      "id": 1420,
       "lines": [
         {
           "account": "1010",
@@ -32805,7 +32874,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-03",
       "due": null,
-      "id": 1418,
+      "id": 1421,
       "lines": [
         {
           "account": "3200",
@@ -32823,12 +32892,35 @@
       "type": "expense"
     },
     {
+      "attachment": false,
+      "cleared": false,
+      "contact": "Maple Street Bakery",
+      "date": "2026-11-03",
+      "due": null,
+      "id": 1422,
+      "lines": [
+        {
+          "account": "10150",
+          "credit": "0.00",
+          "debit": "842.50"
+        },
+        {
+          "account": "10200",
+          "credit": "842.50",
+          "debit": "0.00"
+        }
+      ],
+      "memo": "Payment received for INV-1349",
+      "number": "1094",
+      "type": "payment"
+    },
+    {
       "attachment": true,
       "cleared": false,
       "contact": "Bluff View Trucking",
       "date": "2026-11-03",
       "due": "2026-12-03",
-      "id": 1419,
+      "id": 1423,
       "lines": [
         {
           "account": "5200",
@@ -32851,7 +32943,7 @@
       "contact": "Cedar Hollow Church",
       "date": "2026-11-03",
       "due": null,
-      "id": 1420,
+      "id": 1424,
       "lines": [
         {
           "account": "1010",
@@ -32874,7 +32966,7 @@
       "contact": "Walnut Shade Farmhouse",
       "date": "2026-11-03",
       "due": null,
-      "id": 1421,
+      "id": 1425,
       "lines": [
         {
           "account": "1010",
@@ -32897,7 +32989,7 @@
       "contact": "Roark Creek Dentistry",
       "date": "2026-11-03",
       "due": null,
-      "id": 1422,
+      "id": 1426,
       "lines": [
         {
           "account": "1010",
@@ -32920,7 +33012,7 @@
       "contact": "Riverbend HOA",
       "date": "2026-11-03",
       "due": null,
-      "id": 1423,
+      "id": 1427,
       "lines": [
         {
           "account": "1010",
@@ -32943,7 +33035,7 @@
       "contact": "Highway 65 Tire & Lube",
       "date": "2026-11-04",
       "due": null,
-      "id": 1424,
+      "id": 1428,
       "lines": [
         {
           "account": "6100",
@@ -32966,7 +33058,7 @@
       "contact": "Elm Street Accountants",
       "date": "2026-11-04",
       "due": null,
-      "id": 1425,
+      "id": 1429,
       "lines": [
         {
           "account": "5200",
@@ -32989,7 +33081,7 @@
       "contact": "Pine Ridge Storage Units",
       "date": "2026-11-04",
       "due": "2026-12-04",
-      "id": 1426,
+      "id": 1430,
       "lines": [
         {
           "account": "6500",
@@ -33012,7 +33104,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1427,
+      "id": 1431,
       "lines": [
         {
           "account": "1020",
@@ -33035,7 +33127,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1428,
+      "id": 1432,
       "lines": [
         {
           "account": "1020",
@@ -33058,7 +33150,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1429,
+      "id": 1433,
       "lines": [
         {
           "account": "1020",
@@ -33081,7 +33173,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1430,
+      "id": 1434,
       "lines": [
         {
           "account": "1020",
@@ -33104,7 +33196,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1431,
+      "id": 1435,
       "lines": [
         {
           "account": "1020",
@@ -33127,7 +33219,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1432,
+      "id": 1436,
       "lines": [
         {
           "account": "1020",
@@ -33150,7 +33242,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1433,
+      "id": 1437,
       "lines": [
         {
           "account": "1020",
@@ -33173,7 +33265,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1434,
+      "id": 1438,
       "lines": [
         {
           "account": "1020",
@@ -33196,7 +33288,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1435,
+      "id": 1439,
       "lines": [
         {
           "account": "1020",
@@ -33219,7 +33311,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1436,
+      "id": 1440,
       "lines": [
         {
           "account": "1020",
@@ -33242,7 +33334,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1437,
+      "id": 1441,
       "lines": [
         {
           "account": "1020",
@@ -33265,7 +33357,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1438,
+      "id": 1442,
       "lines": [
         {
           "account": "1020",
@@ -33288,7 +33380,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1439,
+      "id": 1443,
       "lines": [
         {
           "account": "1020",
@@ -33311,7 +33403,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1440,
+      "id": 1444,
       "lines": [
         {
           "account": "1020",
@@ -33334,7 +33426,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1441,
+      "id": 1445,
       "lines": [
         {
           "account": "1020",
@@ -33357,7 +33449,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1442,
+      "id": 1446,
       "lines": [
         {
           "account": "1020",
@@ -33380,7 +33472,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1443,
+      "id": 1447,
       "lines": [
         {
           "account": "1020",
@@ -33403,7 +33495,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1444,
+      "id": 1448,
       "lines": [
         {
           "account": "1020",
@@ -33426,7 +33518,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1445,
+      "id": 1449,
       "lines": [
         {
           "account": "1020",
@@ -33449,7 +33541,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1446,
+      "id": 1450,
       "lines": [
         {
           "account": "1020",
@@ -33472,7 +33564,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1447,
+      "id": 1451,
       "lines": [
         {
           "account": "1020",
@@ -33495,7 +33587,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1448,
+      "id": 1452,
       "lines": [
         {
           "account": "1020",
@@ -33518,7 +33610,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1449,
+      "id": 1453,
       "lines": [
         {
           "account": "1020",
@@ -33541,7 +33633,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1450,
+      "id": 1454,
       "lines": [
         {
           "account": "1020",
@@ -33564,7 +33656,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1451,
+      "id": 1455,
       "lines": [
         {
           "account": "1020",
@@ -33587,7 +33679,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1452,
+      "id": 1456,
       "lines": [
         {
           "account": "1020",
@@ -33610,7 +33702,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1453,
+      "id": 1457,
       "lines": [
         {
           "account": "1020",
@@ -33633,7 +33725,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1454,
+      "id": 1458,
       "lines": [
         {
           "account": "1020",
@@ -33656,7 +33748,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1455,
+      "id": 1459,
       "lines": [
         {
           "account": "1020",
@@ -33679,7 +33771,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1456,
+      "id": 1460,
       "lines": [
         {
           "account": "1020",
@@ -33702,7 +33794,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1457,
+      "id": 1461,
       "lines": [
         {
           "account": "1020",
@@ -33725,7 +33817,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1458,
+      "id": 1462,
       "lines": [
         {
           "account": "1020",
@@ -33748,7 +33840,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1459,
+      "id": 1463,
       "lines": [
         {
           "account": "1020",
@@ -33771,7 +33863,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1460,
+      "id": 1464,
       "lines": [
         {
           "account": "1020",
@@ -33794,7 +33886,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1461,
+      "id": 1465,
       "lines": [
         {
           "account": "1020",
@@ -33817,7 +33909,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1462,
+      "id": 1466,
       "lines": [
         {
           "account": "1020",
@@ -33840,7 +33932,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1463,
+      "id": 1467,
       "lines": [
         {
           "account": "1020",
@@ -33863,7 +33955,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1464,
+      "id": 1468,
       "lines": [
         {
           "account": "1020",
@@ -33886,7 +33978,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1465,
+      "id": 1469,
       "lines": [
         {
           "account": "1020",
@@ -33909,7 +34001,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1466,
+      "id": 1470,
       "lines": [
         {
           "account": "1020",
@@ -33932,7 +34024,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1467,
+      "id": 1471,
       "lines": [
         {
           "account": "1020",
@@ -33955,7 +34047,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1468,
+      "id": 1472,
       "lines": [
         {
           "account": "1020",
@@ -33978,7 +34070,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1469,
+      "id": 1473,
       "lines": [
         {
           "account": "1020",
@@ -34001,7 +34093,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1470,
+      "id": 1474,
       "lines": [
         {
           "account": "1020",
@@ -34024,7 +34116,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1471,
+      "id": 1475,
       "lines": [
         {
           "account": "1020",
@@ -34047,7 +34139,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1472,
+      "id": 1476,
       "lines": [
         {
           "account": "1020",
@@ -34070,7 +34162,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1473,
+      "id": 1477,
       "lines": [
         {
           "account": "1020",
@@ -34093,7 +34185,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1474,
+      "id": 1478,
       "lines": [
         {
           "account": "1020",
@@ -34116,7 +34208,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1475,
+      "id": 1479,
       "lines": [
         {
           "account": "1020",
@@ -34139,7 +34231,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1476,
+      "id": 1480,
       "lines": [
         {
           "account": "1020",
@@ -34162,7 +34254,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1477,
+      "id": 1481,
       "lines": [
         {
           "account": "1020",
@@ -34185,7 +34277,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1478,
+      "id": 1482,
       "lines": [
         {
           "account": "1020",
@@ -34208,7 +34300,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1479,
+      "id": 1483,
       "lines": [
         {
           "account": "1020",
@@ -34231,7 +34323,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1480,
+      "id": 1484,
       "lines": [
         {
           "account": "1020",
@@ -34254,7 +34346,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1481,
+      "id": 1485,
       "lines": [
         {
           "account": "1020",
@@ -34277,7 +34369,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1482,
+      "id": 1486,
       "lines": [
         {
           "account": "1020",
@@ -34300,7 +34392,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1483,
+      "id": 1487,
       "lines": [
         {
           "account": "1020",
@@ -34323,7 +34415,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1484,
+      "id": 1488,
       "lines": [
         {
           "account": "1020",
@@ -34346,7 +34438,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1485,
+      "id": 1489,
       "lines": [
         {
           "account": "1020",
@@ -34369,7 +34461,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1486,
+      "id": 1490,
       "lines": [
         {
           "account": "1020",
@@ -34392,7 +34484,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1487,
+      "id": 1491,
       "lines": [
         {
           "account": "1020",
@@ -34415,7 +34507,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1488,
+      "id": 1492,
       "lines": [
         {
           "account": "1020",
@@ -34438,7 +34530,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1489,
+      "id": 1493,
       "lines": [
         {
           "account": "1020",
@@ -34461,7 +34553,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1490,
+      "id": 1494,
       "lines": [
         {
           "account": "1020",
@@ -34484,7 +34576,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1491,
+      "id": 1495,
       "lines": [
         {
           "account": "1020",
@@ -34507,7 +34599,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1492,
+      "id": 1496,
       "lines": [
         {
           "account": "1020",
@@ -34530,7 +34622,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1493,
+      "id": 1497,
       "lines": [
         {
           "account": "1020",
@@ -34553,7 +34645,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1494,
+      "id": 1498,
       "lines": [
         {
           "account": "1020",
@@ -34576,7 +34668,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1495,
+      "id": 1499,
       "lines": [
         {
           "account": "1020",
@@ -34599,7 +34691,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1496,
+      "id": 1500,
       "lines": [
         {
           "account": "1020",
@@ -34622,7 +34714,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1497,
+      "id": 1501,
       "lines": [
         {
           "account": "1020",
@@ -34645,7 +34737,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1498,
+      "id": 1502,
       "lines": [
         {
           "account": "1020",
@@ -34668,7 +34760,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1499,
+      "id": 1503,
       "lines": [
         {
           "account": "1020",
@@ -34691,7 +34783,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1500,
+      "id": 1504,
       "lines": [
         {
           "account": "1020",
@@ -34714,7 +34806,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1501,
+      "id": 1505,
       "lines": [
         {
           "account": "1020",
@@ -34737,7 +34829,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1502,
+      "id": 1506,
       "lines": [
         {
           "account": "1020",
@@ -34760,7 +34852,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1503,
+      "id": 1507,
       "lines": [
         {
           "account": "1020",
@@ -34783,7 +34875,7 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1504,
+      "id": 1508,
       "lines": [
         {
           "account": "1020",
@@ -34806,98 +34898,6 @@
       "contact": "Kurt (owner)",
       "date": "2026-11-04",
       "due": null,
-      "id": 1505,
-      "lines": [
-        {
-          "account": "1020",
-          "credit": "0.00",
-          "debit": "50.00"
-        },
-        {
-          "account": "3100",
-          "credit": "50.00",
-          "debit": "0.00"
-        }
-      ],
-      "memo": "Owner contribution to savings",
-      "number": "DEP-80",
-      "type": "deposit"
-    },
-    {
-      "attachment": false,
-      "cleared": false,
-      "contact": "Kurt (owner)",
-      "date": "2026-11-04",
-      "due": null,
-      "id": 1506,
-      "lines": [
-        {
-          "account": "1020",
-          "credit": "0.00",
-          "debit": "50.00"
-        },
-        {
-          "account": "3100",
-          "credit": "50.00",
-          "debit": "0.00"
-        }
-      ],
-      "memo": "Owner contribution to savings",
-      "number": "DEP-81",
-      "type": "deposit"
-    },
-    {
-      "attachment": false,
-      "cleared": false,
-      "contact": "Kurt (owner)",
-      "date": "2026-11-04",
-      "due": null,
-      "id": 1507,
-      "lines": [
-        {
-          "account": "1020",
-          "credit": "0.00",
-          "debit": "50.00"
-        },
-        {
-          "account": "3100",
-          "credit": "50.00",
-          "debit": "0.00"
-        }
-      ],
-      "memo": "Owner contribution to savings",
-      "number": "DEP-82",
-      "type": "deposit"
-    },
-    {
-      "attachment": false,
-      "cleared": false,
-      "contact": "Kurt (owner)",
-      "date": "2026-11-04",
-      "due": null,
-      "id": 1508,
-      "lines": [
-        {
-          "account": "1020",
-          "credit": "0.00",
-          "debit": "50.00"
-        },
-        {
-          "account": "3100",
-          "credit": "50.00",
-          "debit": "0.00"
-        }
-      ],
-      "memo": "Owner contribution to savings",
-      "number": "DEP-83",
-      "type": "deposit"
-    },
-    {
-      "attachment": false,
-      "cleared": false,
-      "contact": "Kurt (owner)",
-      "date": "2026-11-04",
-      "due": null,
       "id": 1509,
       "lines": [
         {
@@ -34912,7 +34912,7 @@
         }
       ],
       "memo": "Owner contribution to savings",
-      "number": "DEP-84",
+      "number": "DEP-80",
       "type": "deposit"
     },
     {

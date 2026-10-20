@@ -40,6 +40,8 @@ const COMPANY_JSON: &str = include_str!("../../../fixtures/sample/ozark_ridge/co
 const TRANSACTIONS_JSON: &str =
     include_str!("../../../fixtures/sample/ozark_ridge/transactions.json");
 const BANK_FEED_JSON: &str = include_str!("../../../fixtures/sample/ozark_ridge/bank_feed.json");
+const LENDER_STATEMENT_JSON: &str =
+    include_str!("../../../fixtures/sample/ozark_ridge/lender_statement.json");
 /// The engine's Accounts Payable account the fixture posts bills to.
 const AP: &str = "20100";
 
@@ -98,12 +100,120 @@ pub struct SampleJob {
     pub name: String,
 }
 
+/// The bank-file facts of `company.json` (`bank`).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleBank {
+    /// Date of the bank file the design figures use; later feed items
+    /// (the P14 deposit) come from a newer file.
+    pub last_file_date: CalendarDate,
+}
+
+/// Engine system accounts the fixture posts to (`systemAccounts`).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleSystemAccounts {
+    /// Accounts Receivable.
+    pub accounts_receivable: String,
+    /// Accounts Payable.
+    pub accounts_payable: String,
+    /// Opening balances equity.
+    pub opening_balances: String,
+    /// Payments Clearing: payments received but not yet deposited.
+    pub payments_clearing: String,
+    /// Sales Tax Payable.
+    pub sales_tax_payable: String,
+}
+
+/// Side of a daily-sales layout line (fixed by section; never shown to
+/// owners, Q-P14s).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LayoutSide {
+    /// Money in (tenders, paid-outs).
+    Debit,
+    /// Sales, tax collected.
+    Credit,
+}
+
+/// One line of a daily-sales layout.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleLayoutLine {
+    /// Engine section (`sales`, `tax`, `payment`, `payout`, ...).
+    pub section: String,
+    /// Label the owner sees.
+    pub label: String,
+    /// Account number.
+    pub account: String,
+    /// Account number to use when the chart lacks `account`.
+    #[serde(default)]
+    pub fallback_account: Option<String>,
+    /// Normal side.
+    pub side: LayoutSide,
+}
+
+/// A daily-sales layout (the engine's daily-sales template, Q-P14r): no
+/// amounts, only the lines.
+#[derive(Clone, Debug, Deserialize)]
+pub struct SampleLayout {
+    /// Layout name.
+    pub name: String,
+    /// Engine preset it is created from before its lines are replaced.
+    pub preset: String,
+    /// Lines in order.
+    pub lines: Vec<SampleLayoutLine>,
+}
+
+impl SampleLayout {
+    /// Each line's account number in a chart that has `has` accounts: the
+    /// line's own, else its fallback (`None` when neither exists).
+    #[must_use]
+    pub fn resolved_accounts(&self, has: impl Fn(&str) -> bool) -> Vec<Option<String>> {
+        self.lines
+            .iter()
+            .map(|l| {
+                if has(&l.account) {
+                    Some(l.account.clone())
+                } else {
+                    l.fallback_account.clone().filter(|f| has(f))
+                }
+            })
+            .collect()
+    }
+}
+
+/// The lender's statement for the truck loan (`lender_statement.json`):
+/// what the Loan Payment helper checks the books against (Q-P14q).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LenderStatement {
+    /// Lender (a contact).
+    pub lender: String,
+    /// Loan account number.
+    pub account: String,
+    /// Statement date.
+    pub statement_date: CalendarDate,
+    /// Owed before the payment.
+    pub balance_before: Money,
+    /// Payment.
+    pub payment: Money,
+    /// Interest part.
+    pub interest: Money,
+    /// Principal part.
+    pub principal: Money,
+    /// Owed after the payment.
+    pub balance_after: Money,
+}
+
 /// `company.json`.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SampleCompany {
     /// Business name.
     pub name: String,
+    /// Engine entity type (`single_member_llc`).
+    pub entity_type: String,
     /// Starter chart id.
     pub chart: String,
     /// Story date of the mockups.
@@ -125,6 +235,13 @@ pub struct SampleCompany {
     /// Jobs.
     #[serde(default)]
     pub jobs: Vec<SampleJob>,
+    /// Bank-file facts.
+    pub bank: SampleBank,
+    /// Engine system accounts.
+    pub system_accounts: SampleSystemAccounts,
+    /// Daily-sales layouts.
+    #[serde(default)]
+    pub daily_sales_layouts: Vec<SampleLayout>,
 }
 
 /// One fixture line.
@@ -208,8 +325,10 @@ pub struct Sample {
     pub company: SampleCompany,
     /// Transactions in date order.
     pub transactions: Vec<SampleTransaction>,
-    /// Bank feed items.
+    /// Bank feed items (every file, in date order).
     pub feed: Vec<FeedItem>,
+    /// The lender's statement for the truck loan.
+    pub lender_statement: LenderStatement,
 }
 
 impl Sample {
@@ -224,11 +343,27 @@ impl Sample {
         let transactions: TransactionsFile =
             serde_json::from_str(TRANSACTIONS_JSON).expect("sample transactions.json");
         let feed: FeedFile = serde_json::from_str(BANK_FEED_JSON).expect("sample bank_feed.json");
+        let lender_statement: LenderStatement =
+            serde_json::from_str(LENDER_STATEMENT_JSON).expect("sample lender_statement.json");
         Sample {
             company,
             transactions: transactions.transactions,
             feed: feed.items,
+            lender_statement,
         }
+    }
+
+    /// Feed items in the bank file of `company.bank.last_file_date` and
+    /// earlier (the ones the design figures count).
+    pub fn feed_through_last_file(&self) -> impl Iterator<Item = &FeedItem> {
+        let last = self.company.bank.last_file_date;
+        self.feed.iter().filter(move |i| i.date <= last)
+    }
+
+    /// Feed items from bank files after `company.bank.last_file_date`.
+    pub fn feed_after_last_file(&self) -> impl Iterator<Item = &FeedItem> {
+        let last = self.company.bank.last_file_date;
+        self.feed.iter().filter(move |i| i.date > last)
     }
 
     fn sum(&self, f: impl Fn(&SampleTransaction, &SampleLine) -> Option<Money>) -> Money {
@@ -332,22 +467,27 @@ impl Sample {
             .map(|n| n.saturating_add(1))
     }
 
-    /// The bank's balance after the feed items (October statement plus the
-    /// items the file carries).
+    /// The bank's balance in the last bank file (October statement plus the
+    /// items through `company.bank.last_file_date`).
     ///
     /// # Panics
     /// Only if fixture totals overflow the money range (they do not).
     #[must_use]
     pub fn bank_file_balance(&self, statement_end: Money) -> Money {
-        self.feed.iter().fold(statement_end, |acc, i| {
+        self.feed_through_last_file().fold(statement_end, |acc, i| {
             acc.checked_add(i.amount).expect("sum")
         })
     }
 
-    /// Feed items by status: (ready, review, match).
+    /// Feed items through the last bank file by status: (ready, review,
+    /// match).
     #[must_use]
     pub fn feed_counts(&self) -> (usize, usize, usize) {
-        let n = |s: &str| self.feed.iter().filter(|i| i.status == s).count();
+        let n = |s: &str| {
+            self.feed_through_last_file()
+                .filter(|i| i.status == s)
+                .count()
+        };
         (n("ready"), n("review"), n("match"))
     }
 }
