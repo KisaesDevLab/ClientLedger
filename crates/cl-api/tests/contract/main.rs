@@ -15,6 +15,7 @@ mod contract_audit;
 mod contract_bank_postings;
 mod contract_capabilities;
 mod contract_census;
+mod contract_check_panel;
 mod contract_closed_period;
 mod contract_companies;
 mod contract_conflict;
@@ -177,6 +178,26 @@ fn main() -> std::process::ExitCode {
         (
             "bank_postings::lost_replies_are_reconciled_to_one_posting",
             contract_bank_postings::lost_replies_are_reconciled_to_one_posting,
+        ),
+        (
+            "check_panel::panel_readers_after_a_bill",
+            contract_check_panel::panel_readers_after_a_bill,
+        ),
+        (
+            "check_panel::recent_checks_carry_the_number",
+            contract_check_panel::recent_checks_carry_the_number,
+        ),
+        (
+            "check_panel::draft_attachment_moves_onto_the_check",
+            contract_check_panel::draft_attachment_moves_onto_the_check,
+        ),
+        (
+            "check_panel::rules_evaluate",
+            contract_check_panel::rules_evaluate,
+        ),
+        (
+            "check_panel::ai_preview_is_refused_while_ai_is_off",
+            contract_check_panel::ai_preview_is_refused_while_ai_is_off,
         ),
         (
             "register_property::balance_holds_after_random_edits",
