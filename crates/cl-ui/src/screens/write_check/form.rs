@@ -544,6 +544,7 @@ impl WriteCheckScreen {
 
     fn date_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
         let l = above(ui, tokens, &t("check.date"));
+        let before = self.inputs.date.text.clone();
         let r = ui
             .add(
                 egui::TextEdit::singleline(&mut self.inputs.date.text)
@@ -553,7 +554,7 @@ impl WriteCheckScreen {
             .labelled_by(l.id);
         self.take_focus(Field::Date, &r);
         if r.changed() {
-            apply_date_keys(&mut self.inputs.date, self.today);
+            self.inputs.date.typed(&before, self.today);
             let value = self.inputs.date.value;
             if value.is_some() {
                 self.header.edit(field::DATE, |h| h.date = value);
@@ -878,14 +879,15 @@ impl WriteCheckScreen {
         // (Q-247: no Items tab before P20). A label, not a tab: the window
         // tabs are the only tabs.
         ui.horizontal(|ui| {
-            let r = ui.add(
-                egui::Label::new(
-                    RichText::new(t_with("check.expenses", &[("total", &total.format(style))]))
-                        .strong()
-                        .color(tokens.text_primary),
-                )
-                .selectable(false),
+            let job = with_figure(
+                ui,
+                "check.expenses",
+                "total",
+                &total.format(style),
+                14.0,
+                tokens.text_primary,
             );
+            let r = ui.add(egui::Label::new(job).selectable(false));
             ui.painter().hline(
                 r.rect.x_range(),
                 r.rect.bottom() + 2.0,
@@ -907,23 +909,11 @@ impl WriteCheckScreen {
         let style = self.style(ui);
         let form = self.compose();
         let total = lines_total(&form.lines).unwrap_or(Money::ZERO);
-        let (text, warn) = match form.totals_status() {
-            Some(TotalsStatus::Balanced) => (
-                t_with("check.totals.balanced", &[("total", &total.format(style))]),
-                false,
-            ),
-            Some(TotalsStatus::Remaining(m)) => (
-                t_with("check.totals.remaining", &[("amount", &m.format(style))]),
-                true,
-            ),
-            Some(TotalsStatus::Over(m)) => (
-                t_with("check.totals.over", &[("amount", &m.format(style))]),
-                true,
-            ),
-            None => (
-                t_with("check.totals.lines", &[("total", &total.format(style))]),
-                false,
-            ),
+        let (key, var, figure, warn) = match form.totals_status() {
+            Some(TotalsStatus::Balanced) => ("check.totals.balanced", "total", total, false),
+            Some(TotalsStatus::Remaining(m)) => ("check.totals.remaining", "amount", m, true),
+            Some(TotalsStatus::Over(m)) => ("check.totals.over", "amount", m, true),
+            None => ("check.totals.lines", "total", total, false),
         };
         ui.horizontal_wrapped(|ui| {
             let color = if warn {
@@ -931,7 +921,8 @@ impl WriteCheckScreen {
             } else {
                 tokens.text_secondary
             };
-            ui.label(RichText::new(text).size(12.0).color(color));
+            let job = with_figure(ui, key, var, &figure.format(style), 12.0, color);
+            ui.label(job);
             ui.label(
                 RichText::new(t("check.totals.ai_note"))
                     .size(12.0)
@@ -1189,24 +1180,37 @@ impl WriteCheckScreen {
     }
 }
 
-/// The date keys (+, −, T, M, H, Y, R, W, K) typed at the end of the date.
-fn apply_date_keys(input: &mut form::DateInput, today: cl_core::CalendarDate) {
-    use cl_model::date_entry::{self, DateOrder, US_FIRST_WEEKDAY};
-    use cl_model::date_rules::DateKey;
-    let last = input.text.chars().last();
-    if let Some(key) = last.and_then(DateKey::from_char) {
-        input.text.pop();
-        if let Some(d) = date_entry::apply_key(
-            key,
-            &input.text,
-            input.value,
-            DateOrder::Mdy,
-            today,
-            US_FIRST_WEEKDAY,
-        ) {
-            input.set(d);
+/// The text of `key` with `figure` (an amount) for `{var}` in the
+/// monospace numeric font and the rest in the body font (DESIGN.md: amounts
+/// are mono); one label, so it reads as one sentence.
+fn with_figure(
+    ui: &Ui,
+    key: &str,
+    var: &str,
+    figure: &str,
+    size: f32,
+    color: egui::Color32,
+) -> egui::text::LayoutJob {
+    const MARK: &str = "\u{1}";
+    let text = t_with(key, &[(var, MARK)]);
+    let body = egui::TextFormat {
+        font_id: egui::FontId::proportional(size),
+        color,
+        ..Default::default()
+    };
+    let mono = egui::TextFormat {
+        font_id: egui::FontId::new(size, egui::TextStyle::Monospace.resolve(ui.style()).family),
+        color,
+        ..Default::default()
+    };
+    let mut job = egui::text::LayoutJob::default();
+    for (i, part) in text.split(MARK).enumerate() {
+        if i > 0 {
+            job.append(figure, 0.0, mono.clone());
         }
-    } else {
-        input.reparse(today);
+        if !part.is_empty() {
+            job.append(part, 0.0, body.clone());
+        }
     }
+    job
 }
