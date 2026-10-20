@@ -25,8 +25,9 @@ pub fn editor(
         .id(id)
         .event_filter(FULL_FILTER)
         .return_key(None)
-        .frame(Frame::NONE)
-        .margin(Margin::symmetric(pad, 0))
+        // The padding goes on the frame: egui ignores `margin` once a
+        // frame is set, which put the text against the cell's left edge.
+        .frame(Frame::NONE.inner_margin(Margin::symmetric(pad, 0)))
         .font(font)
         .align(align)
         .desired_width(width);

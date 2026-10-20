@@ -228,6 +228,44 @@ fn single_line_memo_ignores_shift_enter_newlines() {
 }
 
 #[test]
+fn the_editor_keeps_the_cell_padding() {
+    let mut r = Rig::new(line_spec(), Lines::new(true, 2));
+    r.focus_cell(0, DATE);
+    r.frame(typed("7"));
+    r.frame(vec![]);
+    let header = support::rig::text(line_spec().column(DATE).expect("date").header);
+    let left = r
+        .nodes()
+        .into_iter()
+        .find(|(_, n)| n.role() == Role::ColumnHeader && n.label().as_deref() == Some(&header))
+        .and_then(|(_, n)| n.bounds())
+        .expect("date header")
+        .x0;
+    fn walk(s: &egui::Shape, out: &mut Vec<egui::epaint::TextShape>) {
+        match s {
+            egui::Shape::Text(t) => out.push(t.clone()),
+            egui::Shape::Vec(v) => v.iter().for_each(|x| walk(x, out)),
+            _ => {}
+        }
+    }
+    let mut texts = Vec::new();
+    for c in &r.last.as_ref().expect("frame").shapes {
+        walk(&c.shape, &mut texts);
+    }
+    let typed_text = texts
+        .iter()
+        .find(|t| t.galley.text() == "7")
+        .expect("the typed date text");
+    #[allow(clippy::cast_possible_truncation)]
+    let left = left as f32;
+    assert!(
+        typed_text.pos.x >= left + r.style.pad - 0.5,
+        "the text at {} touches the cell edge at {left}",
+        typed_text.pos.x
+    );
+}
+
+#[test]
 fn date_editor_takes_date_keys() {
     let mut r = Rig::new(line_spec(), Lines::new(true, 2));
     r.focus_cell(0, DATE);
