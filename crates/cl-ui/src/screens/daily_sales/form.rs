@@ -90,6 +90,12 @@ impl DailySalesScreen {
         }
         self.toolbar(ui, &tokens);
         self.messages(ui, &tokens);
+        if self.nav_prompt.is_some()
+            && let Some(a) =
+                crate::forms::nav_prompt::ui(ui, "daily_sales", &t("cmd.clients.daily_sales"))
+        {
+            self.answer_nav(a);
+        }
         if self.books.is_none() && self.link.session().is_none() {
             form::hint(ui, &tokens, &t("daily.unavailable"));
             return;
@@ -140,6 +146,21 @@ impl DailySalesScreen {
             .is_some_and(|s| s.status == cl_api::EntryStatus::Posted);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
+            let can_nav = !working && self.setup.is_none() && self.load_task.is_none();
+            if ui
+                .add_enabled(can_nav, egui::Button::new(t("daily.prev")))
+                .on_hover_text(t("daily.prev.tip"))
+                .clicked()
+            {
+                self.navigate(true);
+            }
+            if ui
+                .add_enabled(can_nav, egui::Button::new(t("daily.next")))
+                .on_hover_text(t("daily.next.tip"))
+                .clicked()
+            {
+                self.navigate(false);
+            }
             let can_setup = !working && self.setup.is_none() && !self.templates.is_empty();
             if ui
                 .add_enabled(can_setup, egui::Button::new(t("daily.setup")))
@@ -825,6 +846,14 @@ impl DailySalesScreen {
                 true
             }
             "edit.void_transaction" => self.start_void(),
+            "form.prev_record" => {
+                self.navigate(true);
+                true
+            }
+            "form.next_record" => {
+                self.navigate(false);
+                true
+            }
             "edit.open_list" if self.focused == Some(Field::Layout) => {
                 self.layout_list = true;
                 true
@@ -852,6 +881,10 @@ impl DailySalesScreen {
     /// back to its saved value; with nothing to revert the shell closes the
     /// window (asking first when the form is dirty).
     fn revert_field(&mut self) -> bool {
+        if self.nav_prompt.is_some() {
+            self.answer_nav(crate::windows::PromptAnswer::Keep);
+            return true;
+        }
         if self.void.open {
             self.void = super::VoidState::default();
             return true;

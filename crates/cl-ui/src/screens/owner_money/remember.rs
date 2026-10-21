@@ -73,7 +73,10 @@ fn load(dir: &Path) -> Vec<(String, AccountId)> {
 /// The remembered account for `company` and `slot`.
 pub(crate) fn get(dir: Option<&Path>, company: &str, slot: Slot) -> Option<AccountId> {
     let k = key(company, slot);
-    load(dir?).into_iter().find(|(e, _)| *e == k).map(|(_, a)| a)
+    load(dir?)
+        .into_iter()
+        .find(|(e, _)| *e == k)
+        .map(|(_, a)| a)
 }
 
 /// Remembers `account` for `company` and `slot` (best effort: a failed
@@ -150,5 +153,4 @@ mod tests {
             .count();
         assert_eq!(left, 0);
     }
-
 }

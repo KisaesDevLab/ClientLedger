@@ -550,6 +550,19 @@ pub(crate) struct VoidState {
     pub task: Option<Job>,
 }
 
+/// Prev/Next over the saved days (newest first).
+#[derive(Default)]
+pub(crate) struct DayNav {
+    pub list: Vec<DailyEntrySummary>,
+    pub task: Option<Job>,
+    pub loaded: bool,
+    pub at: Option<usize>,
+    pub want_older: Option<bool>,
+}
+
+/// Prev/Next reads this many saved days.
+pub(crate) const NAV_DAYS: u16 = 100;
+
 /// The side panel's readers (each fails on its own).
 #[derive(Default)]
 pub(crate) struct PanelState {
@@ -599,6 +612,14 @@ pub struct DailySalesScreen {
     pub(crate) money_style: cl_core::MoneyStyle,
     pub(crate) bus: crate::data_bus::Subscription,
     pub(crate) open_task: Option<Job>,
+    /// Another window changed the lists while the form was dirty.
+    pub(crate) lists_stale: bool,
+    pub(crate) nav: DayNav,
+    /// Prev (true) or Next asked on unsaved changes: Save / Discard /
+    /// Keep editing.
+    pub(crate) nav_prompt: Option<bool>,
+    /// Prev/Next to take once the prompt's save is done.
+    pub(crate) after_save_nav: Option<bool>,
 }
 
 /// The cl-model section of an engine section (`None`: unknown).
@@ -725,7 +746,12 @@ impl DailySalesScreen {
             money_style: cl_core::MoneyStyle::default(),
             bus: crate::data_bus::Subscription::detached(),
             open_task: None,
+            lists_stale: false,
+            nav: DayNav::default(),
+            nav_prompt: None,
+            after_save_nav: None,
         };
+
         s.bus = s.link.bus().subscribe();
         s.start_load();
         s.poll();

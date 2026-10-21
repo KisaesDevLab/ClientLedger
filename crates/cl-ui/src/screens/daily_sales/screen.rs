@@ -100,6 +100,25 @@ impl DailySalesScreen {
                 Err(_) => self.panel.recent_failed = true,
             }
         }
+        if let Some(r) = self.nav.task.as_mut().and_then(Task::poll_result) {
+            self.nav.task = None;
+            match r {
+                Ok(Reply::Days(mut d)) => {
+                    // Newest first, whatever order the list came in.
+                    d.sort_by(|a, b| b.date.cmp(&a.date).then(b.id.cmp(&a.id)));
+                    self.nav.list = d;
+                    self.nav.loaded = true;
+                    if let Some(older) = self.nav.want_older.take() {
+                        self.step(older);
+                    }
+                }
+                Ok(_) => self.nav.want_older = None,
+                Err(e) => {
+                    self.nav.want_older = None;
+                    self.save.error = Some(e);
+                }
+            }
+        }
         if let Some(r) = self.panel.drafts_task.as_mut().and_then(Task::poll_result) {
             self.panel.drafts_task = None;
             if let Ok(Reply::Days(d)) = r {
@@ -252,13 +271,19 @@ impl DailySalesScreen {
     }
 
     /// Saves in other windows (Q-262): the panel's days are read again;
-    /// the layouts too while the form has no unsaved edits.
+    /// the layouts too, once the form has no unsaved edits (a change heard
+    /// while dirty waits for then, as on the other forms).
     pub(crate) fn hear_changes(&mut self) {
         let changes = self.link.bus().take(&mut self.bus);
         if changes.ledger_any() {
             self.load_panel();
+            self.nav = super::DayNav::default();
         }
-        if changes.lists() && !self.is_dirty() && self.templates_task.is_none() {
+        if changes.lists() {
+            self.lists_stale = true;
+        }
+        if self.lists_stale && !self.is_dirty() && self.templates_task.is_none() {
+            self.lists_stale = false;
             self.load_templates();
         }
     }
@@ -274,6 +299,7 @@ impl DailySalesScreen {
             || self.panel.recent_task.is_some()
             || self.panel.drafts_task.is_some()
             || self.open_task.is_some()
+            || self.nav.task.is_some()
     }
 
     /// The control-channel state: flags and counts only (never an amount,
@@ -326,6 +352,9 @@ impl DailySalesScreen {
             "recent_failed": self.panel.recent_failed,
             "drafts": self.panel.drafts.len(),
             "layout_list": self.layout_list,
+            "nav_at": self.nav.at,
+            "nav_prompt": self.nav_prompt.is_some(),
+
             "focused": self.focused.map(|f| match f {
                 Field::Layout => "layout",
                 Field::Date => "date",

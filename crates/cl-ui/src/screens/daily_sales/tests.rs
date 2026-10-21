@@ -864,3 +864,85 @@ fn the_demo_books_load_the_layout_and_post_a_short_day() {
     assert_eq!(os.len(), 1);
     assert_eq!((os[0].debit, os[0].credit), (m("2.35"), Money::ZERO));
 }
+
+#[test]
+fn prev_and_next_go_through_the_saved_days_with_the_standard_question() {
+    use crate::windows::PromptAnswer;
+    let mut r = rig();
+    r.plan_day("500.00");
+    r.s.command(CommandId::new("form.save_new"));
+    r.plan_day("503.00");
+    r.s.command(CommandId::new("form.save_new"));
+    assert_eq!(r.fake().posts, 2);
+    let day2 = today().add_days(1).expect("date");
+    // Prev: the newest saved day (11/05), then 11/04, then the oldest note.
+    r.s.command(CommandId::new("form.prev_record"));
+    assert_eq!(r.s.header.current().date, Some(day2));
+    assert_eq!(r.s.state()["mode"], "posted");
+    r.s.command(CommandId::new("form.prev_record"));
+    assert_eq!(r.s.header.current().date, Some(today()));
+    r.s.command(CommandId::new("form.prev_record"));
+    assert_eq!(r.s.save.notice, Some("daily.nav.oldest"));
+    // Next: back to 11/05, then past the newest a new day.
+    r.s.command(CommandId::new("form.next_record"));
+    assert_eq!(r.s.header.current().date, Some(day2));
+    r.s.command(CommandId::new("form.next_record"));
+    assert_eq!(r.s.state()["mode"], "new");
+    // Unsaved work: the question, not a silent move.
+    r.type_amount("Plant sales", "10.00");
+    assert!(r.s.is_dirty());
+    r.s.command(CommandId::new("form.prev_record"));
+    assert_eq!(r.s.state()["nav_prompt"], true);
+    assert_eq!(r.s.state()["mode"], "new");
+    // Esc is Keep editing.
+    assert!(r.s.command(CommandId::new("form.revert")));
+    assert!(r.s.nav_prompt.is_none() && r.s.is_dirty());
+    // Discard: the typing goes, then Prev opens 11/05.
+    r.s.command(CommandId::new("form.prev_record"));
+    r.s.answer_nav(PromptAnswer::Discard);
+    assert!(!r.s.is_dirty());
+    assert_eq!(r.s.header.current().date, Some(day2));
+    assert_eq!(r.fake().posts, 2, "nothing saved");
+}
+
+#[test]
+fn a_list_change_heard_while_dirty_waits_until_the_form_is_clean() {
+    let mut r = rig();
+    let mut second = counter();
+    second.name = "Farmers market".into();
+    r.fake().templates.push(second);
+    r.type_amount("Plant sales", "10.00");
+    r.link.bus().publish(crate::data_bus::Change::Accounts);
+    r.s.hear_changes();
+    r.s.poll();
+    assert_eq!(r.s.templates.len(), 1, "dirty: the layouts wait");
+    assert!(r.s.lists_stale);
+    r.s.command(CommandId::new("form.clear"));
+    r.s.hear_changes();
+    r.s.poll();
+    assert_eq!(r.s.templates.len(), 2);
+    assert!(!r.s.lists_stale);
+}
+
+#[test]
+fn a_kept_draft_dated_in_the_closed_period_does_not_ask_for_the_password() {
+    let mut r = rig();
+    // A mismatch keeps a draft dated today.
+    r.fake().skew = Some(m("0.01"));
+    r.plan_day("500.00");
+    r.s.start_save(SaveIntent::Save, None);
+    assert_eq!(r.s.state()["mode"], "draft");
+    // The books close through today; the owner moves the day after it.
+    r.s.closing = Some(today());
+    r.fake().closing = Some(today());
+    r.fake().skew = None;
+    let tomorrow = today().add_days(1).expect("date");
+    r.s.header.edit_step(|h| h.date = Some(tomorrow));
+    r.s.sync_inputs();
+    r.s.start_save(SaveIntent::Save, None);
+    assert!(
+        !r.s.closing_prompt.dialog_open(),
+        "a draft posted nothing: its old date doesn't ask"
+    );
+    assert_eq!(r.fake().posts, 1);
+}

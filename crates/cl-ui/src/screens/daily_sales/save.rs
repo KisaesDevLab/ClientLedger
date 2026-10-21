@@ -169,7 +169,13 @@ impl DailySalesScreen {
         // A day in the closed period needs the closing-date password (NN8):
         // asked before anything is sent; refused plainly without the
         // engine's lock (Q-P14v).
-        let old = self.saved.as_ref().map(|s| s.date);
+        // Only a posted day has a date in the books; a draft posts nothing
+        // until it is posted, so its old date doesn't ask (NN8).
+        let old = self
+            .saved
+            .as_ref()
+            .filter(|s| s.status == EntryStatus::Posted)
+            .map(|s| s.date);
         if password.is_none() && needs_password(old, checked.date, self.closing) {
             let supported = self.lock_supported();
             if supported {
@@ -268,6 +274,7 @@ impl DailySalesScreen {
     /// The preview disagreed: nothing posted; the layout is read again.
     fn mismatch(&mut self, draft: DailyEntryId) {
         self.keep_draft(draft);
+        self.after_save_nav = None;
         self.save.intent = None;
         self.save.last_action = Some("mismatch");
         self.save.notice = Some("daily.layout_changed");
@@ -323,7 +330,12 @@ impl DailySalesScreen {
             date: e.date,
         });
         self.load_panel();
+        self.nav = super::DayNav::default();
         self.follow_up(intent);
+        // Prev/Next asked before the save (the unsaved-changes prompt).
+        if let Some(older) = self.after_save_nav.take() {
+            self.navigate(older);
+        }
     }
 
     /// After a save (or with nothing to save): the next day, close, or stay.
@@ -358,6 +370,8 @@ impl DailySalesScreen {
         self.void = VoidState::default();
         self.save.problems.clear();
         self.save.key = None;
+        self.nav.at = None;
+        self.nav_prompt = None;
         self.focus = Some(Field::Date);
         self.sync_inputs();
     }
@@ -375,6 +389,7 @@ impl DailySalesScreen {
 
     pub(crate) fn save_failed(&mut self, e: ApiError) {
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
+        self.after_save_nav = None;
         if !crate::screens::register::keeps_key(&e) {
             self.save.key = None;
         }
@@ -437,6 +452,94 @@ impl DailySalesScreen {
             s.status = e.status.clone();
         }
         self.load_panel();
+        self.nav.list.clear();
+        self.nav.loaded = false;
+    }
+
+    // --------------------------------------------------------------------
+    // Prev/Next through the saved days.
+
+    /// Prev (older) or Next (newer) over the saved days; on unsaved changes
+    /// the standard question first.
+    pub(crate) fn navigate(&mut self, older: bool) {
+        if self.save.task.is_some() || self.load_task.is_some() || self.setup.is_some() {
+            return;
+        }
+        if self.is_dirty() {
+            self.nav_prompt = Some(older);
+            return;
+        }
+        if !self.nav.loaded {
+            self.nav.want_older = Some(older);
+            self.nav.task = self.run(
+                Call::List(DailyEntryQuery {
+                    limit: Some(super::NAV_DAYS),
+                    ..DailyEntryQuery::default()
+                }),
+                false,
+            );
+            // The books answer at once.
+            self.poll();
+            return;
+        }
+        self.step(older);
+    }
+
+    /// One step along the saved days (newest first); Next past the newest
+    /// is a new day.
+    pub(crate) fn step(&mut self, older: bool) {
+        // Where the form is now: the day shown, else the step taken last.
+        let here = self
+            .saved
+            .as_ref()
+            .and_then(|s| self.nav.list.iter().position(|d| d.id == s.id))
+            .or(self.nav.at.filter(|_| self.saved.is_some()));
+        let target = match (here, older) {
+            (None, true) => Some(0),
+            (None, false) => return,
+            (Some(i), true) => Some(i + 1),
+            (Some(0), false) => None,
+            (Some(i), false) => Some(i - 1),
+        };
+        match target {
+            None => {
+                self.save.last_action = Some("clear");
+                self.new_day(self.today);
+            }
+            Some(i) if i < self.nav.list.len() => {
+                self.nav.at = Some(i);
+                let id = self.nav.list[i].id;
+                self.open_entry(id);
+                self.poll();
+            }
+            Some(_) => self.save.notice = Some("daily.nav.oldest"),
+        }
+    }
+
+    /// Prev/Next on unsaved changes: the answer to Save / Discard changes /
+    /// Keep editing.
+    pub(crate) fn answer_nav(&mut self, answer: crate::windows::PromptAnswer) {
+        let Some(older) = self.nav_prompt.take() else {
+            return;
+        };
+        match answer {
+            crate::windows::PromptAnswer::Keep => {}
+            crate::windows::PromptAnswer::Discard => {
+                self.header.revert_form();
+                self.sync_inputs();
+                self.navigate(older);
+            }
+            crate::windows::PromptAnswer::Save => {
+                self.after_save_nav = Some(older);
+                let done = self.start_save(SaveIntent::Save, None);
+                // Refused or waiting on a question: no move (a post that
+                // finished at once has moved already; an engine post moves
+                // on when it finishes).
+                if !done && self.save.task.is_none() {
+                    self.after_save_nav = None;
+                }
+            }
+        }
     }
 
     /// The closing-date dialog's Change: the pending change with the
