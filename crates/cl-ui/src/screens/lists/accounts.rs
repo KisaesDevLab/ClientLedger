@@ -279,9 +279,20 @@ impl ChartScreen {
         self.load_error = None;
         if self.link.is_demo() {
             let accounts = self.link.demo_state().map(|mut d| {
-                d.chart
+                let mut accounts = d
+                    .chart
                     .get_or_insert_with(crate::company::demo::chart)
-                    .clone()
+                    .clone();
+                // The demo engine keeps Payments Clearing's balance in its
+                // ledger (deposits move money out of it, P14); the chart
+                // shows that stored balance, as the engine's list does.
+                let clearing = crate::company::demo::deposits::clearing_balance(&mut d);
+                for a in &mut accounts {
+                    if a.system_tag.as_deref() == Some("payments_clearing") {
+                        a.balance = Some(clearing);
+                    }
+                }
+                accounts
             });
             self.load = Some(Task::ready(accounts.unwrap_or_default()));
             return;
