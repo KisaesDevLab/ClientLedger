@@ -140,6 +140,11 @@ fn a_check_needs_who_and_the_equity_cannot_be_the_bank() {
     assert!(!s.start_save(SaveIntent::Save, None));
     assert_eq!(s.state()["save"]["refused"], "same_account");
     assert_eq!(posted(&link), before);
+    // Picking a real equity account takes the refusal away at once.
+    let equity = s.books.by_number("30160");
+    s.header.edit_step(|h| h.equity = equity);
+    s.recheck_problems();
+    assert!(s.state()["save"]["refused"].is_null());
 }
 
 #[test]

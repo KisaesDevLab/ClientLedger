@@ -140,6 +140,18 @@ pub(crate) fn to_draft(c: &CheckedDaily) -> DailyEntryDraft {
 }
 
 impl DailySalesScreen {
+    /// A refused save's problems, checked again against the day as it is
+    /// now (a fixed problem goes away at once, P13).
+    pub(crate) fn recheck_problems(&mut self) {
+        if self.save.problems.is_empty() {
+            return;
+        }
+        let now = check(self.header.current(), &self.layout)
+            .err()
+            .unwrap_or_default();
+        crate::forms::recheck(&mut self.save.problems, now);
+    }
+
     /// Save & New / Save & Close / Save: check, then post (see the module
     /// docs). True when the form is done (nothing was waiting).
     pub(crate) fn start_save(&mut self, intent: SaveIntent, password: Option<Secret>) -> bool {

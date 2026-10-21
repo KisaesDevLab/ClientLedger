@@ -124,6 +124,10 @@ fn a_negative_principal_is_refused_with_nothing_sent() {
     assert!(!s.start_save(SaveIntent::SaveAndClose, None));
     assert_eq!(posted(&link), before);
     assert_eq!(s.state()["save"]["refused"], "principal_negative");
+    // Lowering the interest takes the refusal away before the next save.
+    type_amounts(&mut s, "892.00", "207.43");
+    s.recheck_problems();
+    assert!(s.state()["save"]["refused"].is_null());
 }
 
 #[test]

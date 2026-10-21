@@ -192,16 +192,7 @@ impl DepositScreen {
         let now = check(&self.compose(), &self.context(&control))
             .err()
             .unwrap_or_default();
-        let shown: Vec<_> = self
-            .save
-            .problems
-            .iter()
-            .map(std::mem::discriminant)
-            .collect();
-        self.save.problems = now
-            .into_iter()
-            .filter(|p| shown.contains(&std::mem::discriminant(p)))
-            .collect();
+        crate::forms::recheck(&mut self.save.problems, now);
     }
 
     /// Commits the cash-back amount still being typed. False (with the

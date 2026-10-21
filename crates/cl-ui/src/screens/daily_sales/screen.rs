@@ -390,6 +390,8 @@ impl Screen for DailySalesScreen {
             self.sync_inputs();
         }
         self.draw(ui);
+        // A refused save's problems follow the owner's fixes.
+        self.recheck_problems();
         if let Some(cmd) = self.after_frame.take() {
             self.command(cmd);
         }

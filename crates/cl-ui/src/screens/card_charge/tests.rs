@@ -105,6 +105,12 @@ fn a_split_off_by_a_dime_saves_nothing_then_saves_exactly() {
     assert!(!s.start_save(SaveIntent::SaveAndClose, None));
     assert_eq!(posted(&link), before, "nothing reached the engine");
     assert_eq!(s.state()["save"]["refused"], "lines_disagree");
+    // Fixing the amount takes the refusal away at once (never shown next
+    // to the agreeing total).
+    fill(&mut s, "64.10", &[("6250", "40.00"), ("6400", "24.10")]);
+    s.recheck_problems();
+    assert!(s.state()["save"]["refused"].is_null());
+    assert_eq!(s.state()["save"]["problems"], 0);
     // Fix the amount: saved, and every window hears the card and the lines.
     fill(&mut s, "64.10", &[("6250", "40.00"), ("6400", "24.10")]);
     assert!(s.start_save(SaveIntent::Save, None));

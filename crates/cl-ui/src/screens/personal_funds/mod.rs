@@ -1303,6 +1303,8 @@ impl Screen for PersonalFundsScreen {
             self.sync_inputs();
         }
         self.draw(ui);
+        // A refused save's problems follow the owner's fixes.
+        self.recheck_problems();
         let in_grid = self.lines.has_focus();
         if self.in_grid && !in_grid {
             self.left_lines();
@@ -1405,6 +1407,20 @@ impl RecordForm for PersonalFundsScreen {
 
     fn record_failed(&mut self, e: ApiError) {
         self.flow.error = Some(e);
+    }
+}
+
+impl PersonalFundsScreen {
+    /// A refused save's problems, checked again against the form as it is
+    /// now (a fixed problem goes away at once, P13).
+    pub(crate) fn recheck_problems(&mut self) {
+        if self.problems.is_empty() {
+            return;
+        }
+        let now = check(&self.compose(), &self.books.tag_list)
+            .err()
+            .unwrap_or_default();
+        crate::forms::recheck(&mut self.problems, now);
     }
 }
 

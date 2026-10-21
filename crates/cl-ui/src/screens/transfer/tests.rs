@@ -211,6 +211,12 @@ fn the_same_account_is_refused_and_nothing_is_sent() {
     assert!(!s.start_save(SaveIntent::Save, None));
     assert_eq!(s.state_json()["save"]["refused"], "same_account");
     assert_eq!(s.saved_count, 0);
+    // Picking another To account takes the refusal away before the next
+    // save (it never lingers over a fixed form).
+    s.set_account(false, account(2050));
+    s.recheck_problems();
+    assert!(s.problems.is_empty());
+    assert!(s.state_json()["save"]["refused"].is_null());
 }
 
 #[test]

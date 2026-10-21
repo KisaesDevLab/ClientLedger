@@ -551,6 +551,9 @@ fn a_negative_or_unmapped_amount_is_refused_with_nothing_sent() {
     assert_eq!(r.s.state()["save"]["refused"], "negative_amount");
     assert_eq!(r.fake().drafts_made, 0);
     r.type_amount("Cards", "577.65");
+    // The fixed amount takes the refusal away before the next save.
+    r.s.recheck_problems();
+    assert!(r.s.state()["save"]["refused"].is_null());
     r.type_amount("Dept 2", "10");
     assert_eq!(r.s.state()["unmapped"], 1);
     r.s.command(CommandId::new("form.save_new"));

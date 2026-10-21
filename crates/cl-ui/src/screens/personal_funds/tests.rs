@@ -117,6 +117,9 @@ fn lines_off_by_a_cent_save_nothing() {
     assert!(!s.start_save(SaveIntent::SaveAndClose, None));
     assert_eq!(posted(&link), before);
     assert_eq!(s.state()["save"]["refused"], "lines_disagree");
+    fill(&mut s, "42.18", &[("6250", "42.18")]);
+    s.recheck_problems();
+    assert!(s.state()["save"]["refused"].is_null());
 }
 
 #[test]

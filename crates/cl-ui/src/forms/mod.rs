@@ -25,6 +25,21 @@ pub fn publish_saved(link: &CompanyLink, from: &Subscription, accounts: &[Accoun
     link.bus().publish_from(from, Change::ledger(unique))
 }
 
+/// A refused save's problems after the owner's edits: `now` is the form's
+/// check as it is now, and only the kinds of problem already shown stay
+/// (a fixed one goes away at once; a new one waits for the next save, as
+/// in Write Check, P13). Call every frame while `shown` is not empty.
+pub fn recheck<P>(shown: &mut Vec<P>, now: Vec<P>) {
+    if shown.is_empty() {
+        return;
+    }
+    let kinds: Vec<_> = shown.iter().map(std::mem::discriminant).collect();
+    *shown = now
+        .into_iter()
+        .filter(|p| kinds.contains(&std::mem::discriminant(p)))
+        .collect();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,6 +73,24 @@ mod tests {
         assert!(link.bus().take(&mut register).is_empty());
         publish_saved(&link, &form, &[]);
         assert_eq!(link.bus().take(&mut form_view).ledger, LedgerScope::All);
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum P {
+        A,
+        B(u8),
+        C,
+    }
+
+    #[test]
+    fn recheck_drops_fixed_problems_and_keeps_new_ones_for_the_next_save() {
+        let mut shown = vec![P::A, P::B(1)];
+        recheck(&mut shown, vec![P::B(2), P::C]);
+        assert_eq!(shown, vec![P::B(2)], "A fixed, C not shown before");
+        recheck(&mut shown, Vec::new());
+        assert!(shown.is_empty(), "all fixed");
+        recheck(&mut shown, vec![P::A]);
+        assert!(shown.is_empty(), "nothing shown, nothing comes back");
     }
 
     #[test]
