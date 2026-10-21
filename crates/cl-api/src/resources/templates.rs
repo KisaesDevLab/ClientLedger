@@ -43,7 +43,9 @@ use crate::resources::operations::{
     TEMPLATE_SKIP, TEMPLATES_CREATE, TEMPLATES_FROM_TXN, TEMPLATES_LIST,
 };
 use crate::resources::posting::{PostingOptions, posting_body};
-use crate::resources::transactions::{Basis, JeLine, NewJournalEntry, Side};
+use crate::resources::transactions::{
+    AccountRoles, Basis, JeLine, JeOptions, NewJournalEntry, Side,
+};
 use crate::resources::versioning::saved_unreadable;
 use crate::session::{Session, json_body};
 use crate::wire::Capabilities;
@@ -396,7 +398,21 @@ fn journal_from(r: &Reader<'_>, date: CalendarDate) -> Result<NewJournalEntry, A
         Some("accrual") => Basis::Accrual,
         _ => Basis::Both,
     };
-    NewJournalEntry::new(date, r.text("memo")?, basis, lines).map_err(|_| decode())
+    // Adjusting travels with the template (Q-P15g); the number and
+    // Reverse on never do.
+    let opts = JeOptions {
+        adjusting: r.flag("isAdjusting")?,
+        ..JeOptions::default()
+    };
+    NewJournalEntry::new_with(
+        date,
+        r.text("memo")?,
+        basis,
+        lines,
+        opts,
+        &AccountRoles::default(),
+    )
+    .map_err(|_| decode())
 }
 
 fn decode() -> ApiError {

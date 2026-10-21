@@ -217,6 +217,29 @@ fn each_draft_is_its_create_body_without_date_or_numbers() {
         (&v["lines"][0]["debit"], &v["lines"][1]["credit"]),
         (&json!("412.5000"), &json!("412.5000"))
     );
+    // Adjusting travels with a journal template (Q-P15g).
+    let adjusting = NewJournalEntry::new_with(
+        day(),
+        None,
+        Basis::Both,
+        journal().lines().to_vec(),
+        JeOptions {
+            adjusting: true,
+            ..JeOptions::default()
+        },
+        &AccountRoles::default(),
+    )
+    .expect("je");
+    let v = TemplateDraft::Journal(adjusting)
+        .to_value(&full_caps())
+        .expect("je");
+    assert_eq!(v["isAdjusting"], true);
+    let Ok(TemplateDraft::Journal(back)) =
+        TemplateDraft::from_value(&TemplateKind::JournalEntry, day(), &v)
+    else {
+        panic!("a journal draft");
+    };
+    assert!(back.adjusting(), "read back");
 }
 
 #[test]
