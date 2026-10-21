@@ -346,6 +346,10 @@ impl DailySalesScreen {
                                 egui::TextEdit::singleline(&mut line.label)
                                     .id_salt(("daily_sales/setup_label", i))
                                     .desired_width(200.0)
+                                    // A grid cell offers last frame's column
+                                    // width; without a floor the box stays
+                                    // as narrow as the first frame's.
+                                    .min_size(egui::vec2(200.0, 0.0))
                                     .char_limit(cl_model::forms::daily_sales::LABEL_MAX)
                                     .hint_text(t("daily.setup.col.line")),
                             )
