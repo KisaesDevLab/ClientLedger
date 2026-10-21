@@ -1,0 +1,64 @@
+# Make Journal Entry (P15 plan §6 Acceptance 1) against `clientledger --demo`:
+# Debit 1,200.00 to 6100 Fuel and credit 1,100.00 to 1010 Operating
+# Checking leaves a 100.00 difference; Save & Close is off and Alt+S is
+# refused with nothing saved; the next line takes the balancing 100.00 when
+# it gets an account; then it saves. The entry is voided at the end so the
+# scenario repeats in light and dark. All data is synthetic.
+name: journal_entry
+description: Unbalanced entry refused, balance helper, save, void.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+J
+  - assert_exists: {role: tab, label_contains: "Make Journal Entry"}
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_state: {key: screen.template.button, equals: enabled}
+  - assert_exists: {label_contains: "Journal entry lines"}
+  - assert_exists: {label_contains: "Account, line 1"}
+  # --- 1. Debit 1,200.00 to 6100, credit 1,100.00 to 1010 ------------------
+  - click: {label_contains: "Account, line 1"}
+  - type: {text: "6100"}
+  - key: Tab
+  - type: {text: "1200"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Account, line 2"}
+  - type: {text: "1010"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Credit, line 2"}
+  - type: {text: "1100"}
+  - key: Tab
+  - assert_state: {key: screen.lines, equals: 2}
+  - assert_state: {key: screen.difference, equals: "100.00"}
+  - assert_state: {key: screen.can_save, equals: false}
+  - assert_exists: {role: label, label_contains: "Difference $100.00"}
+  - assert_no_clipping: {}
+  - screenshot: unbalanced
+  - key: Alt+S
+  - assert_state: {key: screen.save.refused, equals: unbalanced}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - assert_count: {target: {role: label, label: "Debits and credits must be equal."}, count: 2}
+  # --- 2. The next line takes the balancing amount -------------------------
+  - click: {label_contains: "Account, line 3"}
+  - type: {text: "1020"}
+  - key: Tab
+  - assert_state: {key: screen.difference, equals: "0.00"}
+  - assert_state: {key: screen.can_save, equals: true}
+  - assert_exists: {role: label, label_contains: "Difference $0.00"}
+  - screenshot: balanced
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.save.error, equals: false}
+  - assert_state: {key: screen.mode, equals: new}
+  # --- 3. Clean up: open it from Prev and void it ---------------------------
+  - command: form.prev_record
+  - assert_state: {key: screen.mode, equals: edit}
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void, index: 1}
+  - assert_state: {key: screen.last_action, equals: void}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Make Journal Entry"}
