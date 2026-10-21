@@ -1004,7 +1004,9 @@ impl RegisterScreen {
         if in_entry || self.entry.editing.is_some() {
             self.toggle_splits();
         } else if let Some(key) = self.grid.core().cursor().map(|c| c.row) {
-            self.begin_edit(key, true);
+            // A row a P14 form owns (a deposit, transfer, card charge, loan
+            // payment, ...) opens in that form; others in place.
+            self.begin_edit_routed(key, true, edit::Route::Form);
         }
         true
     }

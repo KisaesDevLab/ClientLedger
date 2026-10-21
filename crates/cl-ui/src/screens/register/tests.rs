@@ -769,6 +769,96 @@ fn splits_record_a_check_once_the_lines_add_up() {
     assert_eq!(s.state()["entry"]["splits"]["remaining_zero"], true);
 }
 
+/// The register's row key of `id` (loads every row).
+fn key_of(s: &mut RegisterScreen, id: cl_core::ids::TransactionId) -> cl_grid::RowKey {
+    let total = s.model.total().expect("total");
+    settle(s, Some(&(0..total)));
+    (0..usize::try_from(total).expect("n"))
+        .find(|i| s.model.row_at(*i).is_some_and(|r| r.txn_id == id))
+        .and_then(|i| s.model.row_key(i))
+        .expect("the row")
+}
+
+/// The form an `OpenRecord` asked for, if one was pushed.
+fn opened(link: &CompanyLink) -> Option<(String, cl_core::ids::TransactionId)> {
+    link.drain().into_iter().find_map(|e| match e {
+        crate::company::CompanyEvent::OpenRecord(k, id) => Some((k.as_str().to_string(), id)),
+        _ => None,
+    })
+}
+
+#[test]
+fn edit_transaction_opens_the_form_that_owns_the_row() {
+    let (_d, link) = link();
+    let bank = demo_account(&link, "1010");
+    let loan = demo_account(&link, "2200");
+    let fuel = demo_account(&link, "6250");
+    let id = {
+        let mut demo = link.demo_state().expect("demo");
+        let chart = demo
+            .chart
+            .get_or_insert_with(crate::company::demo::chart)
+            .clone();
+        let p = crate::company::demo::register::DemoPosting {
+            kind: "check",
+            date: CalendarDate::from_ymd(2026, 11, 3).expect("date"),
+            number: String::new(),
+            contact: None,
+            memo: String::new(),
+            own: bank,
+            own_debit: false,
+            lines: vec![(loan, money("400.00")), (fuel, money("25.00"))],
+        };
+        demo.ledger.save(&chart, &p, None).expect("saved")
+    };
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let key = key_of(&mut s, id);
+    let _ = link.drain();
+    // Enter keeps the register's own edit (P12: Splits in place).
+    s.begin_edit(key, false);
+    assert!(s.entry.editing.is_some());
+    assert_eq!(opened(&link), None);
+    s.finish_edit();
+    // Edit Transaction (Ctrl+E): the loan payment opens in Loan Payment.
+    s.begin_edit_routed(key, true, edit::Route::Form);
+    assert!(s.entry.editing.is_none());
+    assert_eq!(
+        opened(&link),
+        Some((crate::screens::loan_payment::KIND.to_string(), id))
+    );
+}
+
+#[test]
+fn form_for_names_each_p14_form_by_the_shape_of_the_lines() {
+    use cl_model::register::AccountClass as C;
+    #[derive(serde::Deserialize)]
+    struct W {
+        transaction: cl_api::Transaction,
+    }
+    let body = include_str!("../../../../../fixtures/engine/deposit-grouped-fees.json");
+    let mut t = serde_json::from_str::<W>(body).expect("txn").transaction;
+    let bank = t.lines[0].account_id;
+    let is = |c: C| move |id: AccountId| Some(if id == bank { C::Bank } else { c });
+    // A grouped deposit: Make Deposit.
+    assert_eq!(
+        edit::form_for(&t, &is(C::OtherAsset)),
+        Some(crate::screens::deposit::KIND)
+    );
+    // The same lines all from equity: Put Money In.
+    assert_eq!(
+        edit::form_for(&t, &is(C::Equity)),
+        Some(crate::screens::owner_money::KIND)
+    );
+    t.txn_type = cl_api::TxnType::DailySales;
+    assert_eq!(
+        edit::form_for(&t, &is(C::OtherAsset)),
+        Some(crate::screens::daily_sales::KIND)
+    );
+    t.txn_type = cl_api::TxnType::JournalEntry;
+    assert_eq!(edit::form_for(&t, &is(C::OtherAsset)), None);
+}
+
 #[test]
 fn rows_the_register_cant_change_show_read_only() {
     let (_d, link) = link();

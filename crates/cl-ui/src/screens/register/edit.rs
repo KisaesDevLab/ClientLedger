@@ -84,6 +84,80 @@ fn read_only(t: &Transaction) -> Seed {
     )
 }
 
+/// The P14 form that shows the saved transaction `t` (its window kind), by
+/// the shape of its lines (`class` gives each account's class): a deposit
+/// (Make Deposit, or Put Money In when it comes only from equity), a
+/// transfer, a card charge or credit, Pay Yourself (a bank payment to
+/// equity), a loan payment (a bank payment with a liability line), money
+/// paid with personal funds (a payment out of equity or a liability, no
+/// bank or card), a daily sales day. `None`: a check, a journal entry or
+/// anything else (the register shows it itself).
+#[must_use]
+pub fn form_for(
+    t: &Transaction,
+    class: &dyn Fn(AccountId) -> Option<AccountClass>,
+) -> Option<&'static str> {
+    use crate::screens::{
+        card_charge, daily_sales, deposit, loan_payment, owner_money, personal_funds, transfer,
+    };
+    let debits: Vec<Option<AccountClass>> = t
+        .lines
+        .iter()
+        .filter(|l| l.debit.is_positive())
+        .map(|l| class(l.account_id))
+        .collect();
+    let credits: Vec<Option<AccountClass>> = t
+        .lines
+        .iter()
+        .filter(|l| l.credit.is_positive())
+        .map(|l| class(l.account_id))
+        .collect();
+    let has = |v: &[Option<AccountClass>], c: AccountClass| v.contains(&Some(c));
+    let all = |v: &[Option<AccountClass>], c: AccountClass| {
+        !v.is_empty() && v.iter().all(|x| *x == Some(c))
+    };
+    Some(match t.txn_type {
+        TxnType::DailySales => daily_sales::KIND,
+        TxnType::Transfer => transfer::KIND,
+        TxnType::Deposit if has(&debits, AccountClass::CreditCard) => card_charge::KIND,
+        TxnType::Deposit
+            if has(&debits, AccountClass::Bank) && all(&credits, AccountClass::Equity) =>
+        {
+            owner_money::KIND
+        }
+        TxnType::Deposit => deposit::KIND,
+        TxnType::Expense if has(&credits, AccountClass::CreditCard) => card_charge::KIND,
+        TxnType::Expense if has(&credits, AccountClass::Bank) => {
+            if all(&debits, AccountClass::Equity) {
+                owner_money::KIND
+            } else if has(&debits, AccountClass::OtherLiability) {
+                loan_payment::KIND
+            } else {
+                return None;
+            }
+        }
+        TxnType::Expense
+            if has(&credits, AccountClass::Equity)
+                || has(&credits, AccountClass::OtherLiability) =>
+        {
+            personal_funds::KIND
+        }
+        _ => return None,
+    })
+}
+
+/// When a row goes to its P14 form instead of the register's own edit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Route {
+    /// Only when the register can't change it in place (a read-only shape).
+    Shape,
+    /// The engine doesn't let the register change it: the form, else the
+    /// "can't be edited here" note.
+    NotEditable,
+    /// Edit Transaction (Ctrl+E): the form whenever one shows it.
+    Form,
+}
+
 /// What an edit of `v` in the register of `own` (class `class`) opens.
 #[must_use]
 pub fn seed(v: &Versioned<Transaction>, own: AccountId, class: AccountClass) -> Seed {
@@ -175,6 +249,7 @@ pub fn seed(v: &Versioned<Transaction>, own: AccountId, class: AccountClass) -> 
 /// An edit being read.
 pub(super) struct EditLoad {
     splits: bool,
+    route: Route,
     task: Task<Versioned<Transaction>>,
 }
 
@@ -182,27 +257,44 @@ impl RegisterScreen {
     /// Enter or typing on a row, or Ctrl+E: read the transaction and open
     /// it in the pinned row.
     pub(super) fn begin_edit(&mut self, key: RowKey, splits: bool) {
+        self.begin_edit_routed(key, splits, Route::Shape);
+    }
+
+    /// [`Self::begin_edit`], with when the row goes to its P14 form
+    /// (`CompanyEvent::OpenRecord`) instead.
+    pub(super) fn begin_edit_routed(&mut self, key: RowKey, splits: bool, route: Route) {
         let Some(row) = self.model.row_for_key(key) else {
             return;
         };
+        let id = row.txn_id;
+        if !row.editable {
+            // A void row stays as it is; any other the engine doesn't let
+            // the register change may still have its form (a daily sales
+            // day, a grouped deposit).
+            if row.void {
+                self.entry.problems = vec![TextKey("register.edit.not_editable")];
+            } else {
+                self.load_routed(id, splits, Route::NotEditable);
+            }
+            return;
+        }
         if self.model.locked(row) && !self.closing_supported() {
             self.on_locked_edit(key);
             return;
         }
-        if !row.editable {
-            self.entry.problems = vec![TextKey("register.edit.not_editable")];
-            return;
-        }
-        let id = row.txn_id;
         if self.entry.editing.is_none() && self.entry_dirty() {
             self.entry.problems = vec![TextKey("register.edit.finish_entry")];
             return;
         }
-        self.load_edit(id, splits);
+        self.load_routed(id, splits, route);
     }
 
     /// Reads `id` for an edit.
     pub(super) fn load_edit(&mut self, id: TransactionId, splits: bool) {
+        self.load_routed(id, splits, Route::Shape);
+    }
+
+    fn load_routed(&mut self, id: TransactionId, splits: bool, route: Route) {
         self.read_only = None;
         self.entry.problems.clear();
         self.entry.error = None;
@@ -230,8 +322,23 @@ impl RegisterScreen {
                 Err(_) => return,
             }
         };
-        self.edit_load = Some(EditLoad { splits, task });
+        self.edit_load = Some(EditLoad {
+            splits,
+            route,
+            task,
+        });
         self.poll_edit();
+    }
+
+    /// The P14 form for `t`, if one shows it.
+    fn form_kind(&self, t: &Transaction) -> Option<&'static str> {
+        let class = |id: AccountId| {
+            self.accounts
+                .iter()
+                .find(|a| a.id == id)
+                .and_then(super::class_of)
+        };
+        form_for(t, &class)
     }
 
     /// Takes a finished read and opens the edit.
@@ -243,12 +350,36 @@ impl RegisterScreen {
             return;
         };
         let want_splits = load.splits;
+        let route = load.route;
         self.edit_load = None;
         let Some(own) = self.account else { return };
-        match result {
-            Ok(v) => self.open_seed(seed(&v, own, self.class), want_splits),
-            Err(e) => self.entry.error = Some(e),
+        let v = match result {
+            Ok(v) => v,
+            Err(e) => {
+                self.entry.error = Some(e);
+                return;
+            }
+        };
+        let form = self.form_kind(&v.record);
+        let s = seed(&v, own, self.class);
+        let to_form = match route {
+            Route::Form | Route::NotEditable => form,
+            Route::Shape => form.filter(|_| matches!(s, Seed::ReadOnly(_))),
+        };
+        if let Some(kind) = to_form {
+            // Double-click / Edit opens the form that owns it (P14).
+            self.read_only = None;
+            self.link.push(crate::company::CompanyEvent::OpenRecord(
+                cl_model::CommandId::new(kind),
+                v.record.id,
+            ));
+            return;
         }
+        if route == Route::NotEditable {
+            self.entry.problems = vec![TextKey("register.edit.not_editable")];
+            return;
+        }
+        self.open_seed(s, want_splits);
     }
 
     fn open_seed(&mut self, s: Seed, want_splits: bool) {
