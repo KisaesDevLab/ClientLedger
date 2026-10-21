@@ -89,8 +89,13 @@ fn pay_back_uses_a_liability_and_the_quick_add_is_remembered() {
     let mut s = screen(&link);
     s.set_treatment(Treatment::PayBack);
     assert_eq!(s.state()["treatment"], "pay_back");
+    let mut other = link.bus().subscribe();
     s.quick_add_due_to_owner();
     s.poll();
+    assert!(
+        link.bus().take(&mut other).lists(),
+        "other windows hear the new account"
+    );
     let due = s.header.current().offset.expect("Due to owner picked");
     assert_eq!(s.books.class(due), Some(AccountClass::OtherLiability));
     // Remembered for this company: a new window starts on it.

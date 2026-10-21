@@ -263,6 +263,11 @@ impl PersonalFundsScreen {
             self.quick_add = None;
             match r {
                 Ok(id) => {
+                    // A new account: every other window's pickers read the
+                    // chart again (Q-262).
+                    self.link
+                        .bus()
+                        .publish_from(&self.bus, crate::data_bus::Change::Accounts);
                     self.pending_offset = Some(id);
                     self.books.start(&self.link, self.group.as_ref());
                     if self.link.is_demo() {

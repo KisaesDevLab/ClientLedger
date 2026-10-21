@@ -427,7 +427,8 @@ impl LoanPaymentScreen {
         );
         let h = self.header.current();
         let fill_loan = h.loan.is_none() && loan.is_some();
-        if fill_loan || (h.interest_account.is_none() && interest.is_some()) || from.is_some() {
+        let fill_from = h.pay_from.is_none() && from.is_some();
+        if fill_loan || (h.interest_account.is_none() && interest.is_some()) || fill_from {
             self.header.edit_step(|h| {
                 if h.loan.is_none() {
                     h.loan = loan;
@@ -435,8 +436,9 @@ impl LoanPaymentScreen {
                 if h.interest_account.is_none() {
                     h.interest_account = interest;
                 }
-                if let Some(f) = from {
-                    h.pay_from = Some(f);
+                // The owner's (or the default) Pay From stays.
+                if h.pay_from.is_none() {
+                    h.pay_from = from;
                 }
             });
             self.prefill_applied = true;

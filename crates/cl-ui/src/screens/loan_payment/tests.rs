@@ -51,6 +51,31 @@ fn the_lender_fills_the_accounts_never_the_amounts() {
 }
 
 #[test]
+fn the_prefill_never_replaces_a_pay_from_already_there() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let savings = s.books.by_number("1020").expect("1020");
+    let checking = s.books.by_number("1010").expect("1010");
+    s.header.edit_step(|h| h.pay_from = Some(savings));
+    s.apply_prefill(LoanPrefill {
+        loan: s.books.by_number("2200"),
+        interest_account: None,
+        pay_from: Some(checking),
+    });
+    let f = s.header.current();
+    assert_eq!(f.pay_from, Some(savings), "the owner's Pay From stays");
+    assert_eq!(f.loan, s.books.by_number("2200"));
+    // A blank Pay From is filled.
+    s.header.edit_step(|h| h.pay_from = None);
+    s.apply_prefill(LoanPrefill {
+        loan: None,
+        interest_account: None,
+        pay_from: Some(checking),
+    });
+    assert_eq!(s.header.current().pay_from, Some(checking));
+}
+
+#[test]
 fn principal_is_exact_and_the_engine_balance_matches_the_lender() {
     let (_d, link) = link();
     let mut s = screen(&link);
