@@ -1,0 +1,223 @@
+# Make Deposit (P14 plan §6.4) against `clientledger --demo`: the two
+# payments waiting in Payments Clearing (Hollister Family Trust 1,250.00 and
+# Maple Street Bakery 842.50) grouped by the bank-file deposit 2,092.50, the
+# register (open the whole time) showing the deposit without being reopened
+# (Q-262), Payments Clearing at 0.00 in the Chart of Accounts, the register
+# opening the grouped deposit in its form (Ctrl+E, Q-P14g), a fee line and
+# cash back (too much refused), a vendor refund line, the Summary, the
+# unsaved-changes question on Next, and Void.
+#
+# Light and dark run in the same app, so the scenario is repeatable: both
+# deposits are voided at the end and the void of the grouped deposit puts
+# its payments back in Payments to deposit (E2). All data is synthetic.
+name: deposit
+description: Grouped payments = bank deposit, register refresh, Payments Clearing 0.00, Ctrl+E from the register, fee, cash back, vendor refund, Summary, Next prompt, Void.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  # --- 1. The register stays open behind Make Deposit -------------------------
+  - key: Ctrl+G
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  # Any 11/04 deposit from an earlier pass is void.
+  - assert_not_exists: {role: row, label_contains: "11/04/2026, , row"}
+  - command: banking.deposit
+  - assert_exists: {role: tab, label_contains: "Make Deposit"}
+  - assert_state: {key: screen.screen, equals: deposit}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_value: {target: {role: combo_box, label: Deposit to}, equals: "1010 · Operating Checking"}
+  - assert_state: {key: screen.balance_shown, equals: true}
+  - assert_state: {key: screen.pending.count, equals: 2}
+  - assert_state: {key: screen.pending.clearing_balance, equals: "2092.50"}
+  - assert_exists: {role: check_box, label: Deposit the payment from Hollister Family Trust}
+  - assert_exists: {role: check_box, label: Deposit the payment from Maple Street Bakery}
+  - assert_exists: {role: label, label: "1,250.00"}
+  - assert_exists: {role: label, label: "842.50"}
+
+  # --- 2. The bank-file deposit ticks the group that adds up to it -------------
+  - assert_exists: {role: label, label: Bank deposits waiting}
+  - click: {role: button, label_contains: "2,092.50"}
+  - assert_state: {key: screen.chosen, equals: true}
+  - assert_state: {key: screen.picked, equals: 2}
+  - assert_state: {key: screen.totals.payments, equals: "2,092.50"}
+  - assert_state: {key: screen.totals.total, equals: "2,092.50"}
+  - assert_state: {key: screen.bank_match, equals: matches}
+  - assert_exists: {role: label, label: "Deposit total 2,092.50"}
+  - assert_exists: {role: label, label: "Bank deposit 2,092.50 ✓"}
+  - assert_exists: {role: label, label: "Selected: 2 payments, 2,092.50"}
+  - assert_no_clipping: {}
+  - screenshot: grouped
+
+  # --- 3. Saved: nothing waits, the register shows it, Payments Clearing 0.00 -
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.last_action, equals: save}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.pending.count, equals: 0}
+  - assert_state: {key: screen.pending.clearing_balance, equals: "0.00"}
+  - assert_exists: {role: label, label: No payments are waiting to be deposited.}
+  - assert_exists: {role: link, label: "11/04/2026 · 2,092.50"}
+  - screenshot: saved-nothing-waiting
+  - click: {role: tab, label_contains: "Register"}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: row, label_contains: "11/04/2026, , row"}
+  - assert_state: {key: screen.footer.ending, equals: "86,303.05"}
+  - screenshot: register-deposit
+  - command: lists.chart_of_accounts
+  - assert_state: {key: screen.screen, equals: chart_of_accounts}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_value: {target: {role: cell, label: "Balance, 10150 Payments Clearing"}, equals: "0.00"}
+  - screenshot: chart-clearing-zero
+  - command: file.close_window
+  # Ctrl+E on the register row opens the grouped deposit in Make Deposit,
+  # read-only except Void (Q-P14g).
+  - click: {role: tab, label_contains: "Register"}
+  - assert_state: {key: screen.screen, equals: register}
+  - click: {role: row, label_contains: "11/04/2026, , row"}
+  - key: Ctrl+E
+  - assert_state: {key: screen.screen, equals: deposit}
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.grouped, equals: true}
+  - assert_state: {key: screen.read_only, equals: true}
+  - assert_state: {key: screen.totals.total, equals: "2,092.50"}
+  - assert_exists: {role: label, label_contains: "To change it, void it and make it again."}
+  - assert_disabled: {role: button, label: Save & New}
+  - screenshot: grouped-read-only
+  # Void it: its payments go back to Payments to deposit (E2).
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - assert_exists: {role: label, label_contains: "its payments go back to Payments to deposit"}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.save.error, equals: false}
+  - assert_state: {key: screen.pending.count, equals: 2}
+  - assert_state: {key: screen.pending.clearing_balance, equals: "2092.50"}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Make Deposit"}
+  - assert_state: {key: screen.screen, equals: deposit}
+  - assert_state: {key: screen.mode, equals: new}
+
+  # --- 4. Other lines: income 300.00, a fee -12.50, cash back 50.00 -----------
+  - click: {role: grid_cell, label: "Account, line 1"}
+  - type: {text: "4000"}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: "300"}
+  - key: Enter
+  - key: Tab
+  - type: {text: "Bank and"}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: "-12.50"}
+  - key: Enter
+  - assert_value: {target: {label: "Account, line 1"}, equals: "4000 · Service Income"}
+  - assert_value: {target: {label: "Amount, line 1"}, equals: "300.00"}
+  - assert_value: {target: {label: "Account, line 2"}, equals: "6050 · Bank and Merchant Fees"}
+  - assert_value: {target: {label: "Amount, line 2"}, equals: "-12.50"}
+  - assert_state: {key: screen.totals.total, equals: "287.50"}
+  - click: {role: combo_box, label: Cash back}
+  - click: {role: button, label: "1020 · Savings"}
+  - click: {role: text_input, label: Amount}
+  - key: Ctrl+A
+  - type: {text: "400"}
+  - key: Tab
+  - key: Alt+N
+  - assert_state: {key: screen.save.refused, equals: cash_back_too_large}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_exists: {role: label, label: Cash back must be less than the rest of the deposit.}
+  - screenshot: cash-back-too-large
+  - click: {role: text_input, label: Amount}
+  - key: Ctrl+A
+  - type: {text: "50"}
+  - key: Tab
+  - assert_state: {key: screen.cash_back, equals: true}
+  - assert_state: {key: screen.totals.other, equals: "287.50"}
+  - assert_state: {key: screen.totals.total, equals: "237.50"}
+  - assert_exists: {role: label, label: "Deposit total 237.50"}
+  - assert_exists: {role: label, label: "after 50.00 cash back"}
+
+  # --- 5. A vendor refund: something already paid for -> an expense line ------
+  - click: {role: button, label: Refund from a vendor}
+  - assert_state: {key: screen.refund.open, equals: true}
+  - click: {role: combo_box, label: Vendor}
+  - click: {role: button, label: Blue Eye Feed Co}
+  - click: {role: radio_button, label: Something I already paid for}
+  - assert_state: {key: screen.refund.kind, equals: already_paid}
+  # Two "Amount" boxes now: the refund's comes first.
+  - click: {role: text_input, label: Amount, index: 0}
+  - type: {text: "40"}
+  - click: {role: button, label: Add}
+  - assert_state: {key: screen.refund.open, equals: false}
+  - assert_value: {target: {label: "Received from, line 3"}, equals: "Blue Eye Feed Co"}
+  - assert_value: {target: {label: "Amount, line 3"}, equals: "40.00"}
+  - assert_state: {key: screen.totals.total, equals: "277.50"}
+  - assert_no_clipping: {}
+  - screenshot: other-lines
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 2}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.mode, equals: new}
+
+  # --- 6. Prev: the saved deposit; unsaved changes ask on Next ----------------
+  - key: PageUp
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.totals.total, equals: "277.50"}
+  - click: {role: text_input, label: Memo, index: 0}
+  - type: {text: "Counter cash"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: PageDown
+  - assert_state: {key: screen.nav_prompt, equals: true}
+  - assert_exists: {role: button, label: Discard changes}
+  - assert_exists: {role: button, label: Keep editing}
+  - screenshot: nav-prompt
+  - click: {role: button, label: Keep editing}
+  - assert_state: {key: screen.nav_prompt, equals: false}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: PageDown
+  - assert_state: {key: screen.nav_prompt, equals: true}
+  - click: {role: button, label: Discard changes}
+  - assert_state: {key: screen.nav_prompt, equals: false}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.mode, equals: new}
+
+  # --- 7. The Summary, then Void ------------------------------------------------
+  - key: PageUp
+  - assert_state: {key: screen.mode, equals: edit}
+  - click: {role: button, label: Summary}
+  - assert_state: {key: screen.summary_open, equals: true}
+  - assert_exists: {role: label, label: Deposit summary}
+  - assert_exists: {role: label, label: Less cash back}
+  - assert_exists: {role: label, label: "277.50"}
+  - assert_disabled: {role: button, label: Print}
+  - assert_no_clipping: {}
+  - screenshot: summary
+  - click: {role: button, label: Back to the deposit}
+  - assert_state: {key: screen.summary_open, equals: false}
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.save.error, equals: false}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_state: {key: screen.pending.count, equals: 2}
+  - assert_no_clipping: {}
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: combo_box, label: Deposit to}
+  - assert_no_clipping: {}
+  - screenshot: deposit-960x640
+  - resize: {width: 1440, height: 940}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Make Deposit"}
+  - click: {role: tab, label_contains: "Register"}
+  - assert_not_exists: {role: row, label_contains: "11/04/2026, , row"}
+  - command: file.close_window
