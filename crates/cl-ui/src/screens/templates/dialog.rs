@@ -334,7 +334,9 @@ impl DialogUi {
             .max_height(screen.height() - 48.0)
             .show(ctx, |ui| {
                 ui.set_width(width);
-                click = self.body(ui, &tokens);
+                // The window's title bar and margins sit outside the body.
+                let room = screen.height() - 48.0 - 64.0;
+                click = self.body(ui, &tokens, room);
             });
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.busy {
             return DialogClick::Cancel;
@@ -342,10 +344,14 @@ impl DialogUi {
         click
     }
 
-    fn body(&mut self, ui: &mut Ui, tokens: &Tokens) -> DialogClick {
+    /// `room`: the height the body may take (the window's content).
+    fn body(&mut self, ui: &mut Ui, tokens: &Tokens, room: f32) -> DialogClick {
         // Room for the buttons under the scrolling fields.
         let reserve = 44.0 + 2.0 * ui.spacing().item_spacing.y + 8.0;
-        let fields_height = (ui.available_height() - reserve).max(80.0);
+        // From the window's room, not `available_height` (an auto-sized
+        // window reports last frame's size, which would keep a grown
+        // dialog scrolling).
+        let fields_height = (room - reserve).max(80.0);
         egui::ScrollArea::vertical()
             .id_salt("templates/dialog/scroll")
             .max_height(fields_height)
