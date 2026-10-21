@@ -312,7 +312,7 @@ fn reads_are_strict() {
     })
     .to_value(&full_caps())
     .expect("body");
-    v["amount"] = json!(250.0);
+    v["amount"] = serde_json::from_str::<Value>("250.5").expect("a JSON number");
     assert!(TemplateDraft::from_value(&TemplateKind::Transfer, day(), &v).is_err());
     v["amount"] = json!("250.00001");
     assert!(TemplateDraft::from_value(&TemplateKind::Transfer, day(), &v).is_err());

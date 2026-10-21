@@ -39,7 +39,7 @@ steps:
   - assert_exists: {role: label, label: "84,210.55"}
   - assert_state: {key: screen.number, equals: 4418}
   # Not before P15 / P20 (Q-P13a, Q-P13b); Print waits for P19 (Q-P13c).
-  - assert_not_exists: {role: button, label: Save as Template}
+  - assert_exists: {role: button, label: Save as Template}
   - assert_not_exists: {role: button, label: Pay online}
   - assert_not_exists: {label_contains: Items}
   - assert_disabled: {role: button, label: Print}
