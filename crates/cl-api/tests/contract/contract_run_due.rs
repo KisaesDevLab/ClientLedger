@@ -2,8 +2,10 @@
 //! `recurring-run-due-v1`; plan §6 acceptance 2). PENDING until the engine
 //! pin carries the capability.
 //!
-//! The run's `asOf` is the simulated clock (past dates; the engine refuses
-//! a future one). Every check compares exact engine strings.
+//! The run's `asOf` is the simulated clock: past dates built from today, so
+//! it is never in the future (`RUN_DUE_FUTURE`) and every automatic start
+//! stays within the engine's 366 days back. Every check compares exact
+//! engine strings.
 
 use cl_api::{
     AccountType, ApiError, Capabilities, CardChargeDraft, ClosedPeriodAuthorization, Frequency,
@@ -17,6 +19,45 @@ use serde_json::json;
 
 use crate::common::{account, date, m};
 use crate::support::{Harness, unique};
+
+/// Today (UTC): the engine's `CURRENT_DATE` is this day or the next, so
+/// dates on or before it are never refused as future.
+fn today() -> CalendarDate {
+    let days = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() / 86_400);
+    date(1970, 1, 1)
+        .add_days(i64::try_from(days).expect("days"))
+        .expect("today")
+}
+
+/// Day `day` of the month `months_back` months before this one.
+fn day_back(months_back: i32, day: u32) -> CalendarDate {
+    today()
+        .start_of_month()
+        .add_months(-months_back)
+        .and_then(|m| m.add_days(i64::from(day) - 1))
+        .expect("date")
+}
+
+/// The end of the month `n` months after `base`'s.
+fn month_end_after(base: CalendarDate, n: i32) -> CalendarDate {
+    base.start_of_month()
+        .add_months(n)
+        .expect("month")
+        .end_of_month()
+}
+
+/// A 31st, 7 or 8 months back: the anchor the clamped month rule counts
+/// from (each later date is its month's last day). Two months without a
+/// 31st never follow each other, so one step back at most.
+fn a_31st_back() -> CalendarDate {
+    let mut m = day_back(7, 1);
+    while m.end_of_month().day() != 31 {
+        m = m.add_months(-1).expect("month");
+    }
+    m.end_of_month()
+}
 
 fn ready(h: &Harness) -> bool {
     h.require_cap(Capabilities::TEMPLATES, "U-62 templates-v1")
@@ -127,41 +168,26 @@ pub fn monthly_catch_up_exactly_once_across_restarts(h: &Harness) {
     }
     let s = &h.s1;
     let c = card(h, s);
-    let t = auto(
-        h,
-        s,
-        &c,
-        ScheduleMode::Auto,
-        date(2026, 1, 31),
-        ScheduleEnd::Never,
-    );
+    // A 31st 7–8 months back, then each month's last day (computed from
+    // today, so the start stays within 366 days and `asOf` in the past).
+    let start = a_31st_back();
+    let ends = |from: i32, to: i32| -> Vec<CalendarDate> {
+        (from..=to).map(|n| month_end_after(start, n)).collect()
+    };
+    let t = auto(h, s, &c, ScheduleMode::Auto, start, ScheduleEnd::Never);
     let before = balance(h, s, c.software);
-    let first = run(h, s, date(2026, 4, 30));
-    assert_eq!(
-        mine(&first, &t),
-        vec![
-            date(2026, 1, 31),
-            date(2026, 2, 28),
-            date(2026, 3, 31),
-            date(2026, 4, 30)
-        ],
-        "clamped to each month's end"
-    );
-    assert!(
-        mine(&run(h, s, date(2026, 4, 30)), &t).is_empty(),
-        "again: 0"
-    );
+    let first_as_of = month_end_after(start, 3);
+    let first = run(h, s, first_as_of);
+    assert_eq!(mine(&first, &t), ends(0, 3), "clamped to each month's end");
+    assert!(mine(&run(h, s, first_as_of), &t).is_empty(), "again: 0");
     h.kill_engine_and_wait();
     let s = h.login();
     h.run(s.open_company(h.contract_co)).expect("open");
     assert!(
-        mine(&run(h, &s, date(2026, 4, 30)), &t).is_empty(),
+        mine(&run(h, &s, first_as_of), &t).is_empty(),
         "after a restart: 0"
     );
-    assert_eq!(
-        mine(&run(h, &s, date(2026, 6, 30)), &t),
-        vec![date(2026, 5, 31), date(2026, 6, 30)]
-    );
+    assert_eq!(mine(&run(h, &s, month_end_after(start, 5)), &t), ends(4, 5));
     let txns = card_txns(h, &s, c.card);
     let mut dates: Vec<_> = txns.iter().map(|(_, d)| *d).collect();
     dates.sort();
@@ -202,10 +228,10 @@ pub fn parallel_runs_post_once(h: &Harness) {
         s,
         &c,
         ScheduleMode::Auto,
-        date(2025, 1, 15),
+        day_back(4, 15),
         ScheduleEnd::Never,
     );
-    let as_of = date(2025, 4, 15);
+    let as_of = day_back(1, 15);
     let calls: Vec<_> = (0..4)
         .map(|_| {
             let s = s.clone();
@@ -245,15 +271,14 @@ pub fn lost_reply_same_run_id(h: &Harness) {
         s,
         &c,
         ScheduleMode::Auto,
-        date(2025, 6, 10),
+        day_back(3, 10),
         ScheduleEnd::Never,
     );
     let id = new_run_id();
-    let first = h
-        .run(s.recurring().run_due(date(2025, 7, 10), id, 200))
-        .expect("run");
+    let as_of = day_back(2, 10);
+    let first = h.run(s.recurring().run_due(as_of, id, 200)).expect("run");
     let again = h
-        .run(s.recurring().run_due(date(2025, 7, 10), id, 200))
+        .run(s.recurring().run_due(as_of, id, 200))
         .expect("replay");
     assert_eq!(mine(&first, &t).len(), 2);
     assert_eq!(
@@ -270,14 +295,9 @@ pub fn closed_period_skipped_then_entered_with_password(h: &Harness) {
     }
     let s = h.s3();
     let c = card(h, &s);
-    let t = auto(
-        h,
-        &s,
-        &c,
-        ScheduleMode::Auto,
-        date(2026, 1, 31),
-        ScheduleEnd::Never,
-    );
+    let first = a_31st_back();
+    let (second, third) = (month_end_after(first, 1), month_end_after(first, 2));
+    let t = auto(h, &s, &c, ScheduleMode::Auto, first, ScheduleEnd::Never);
     let lock = |v: serde_json::Value| {
         h.run(s.raw_mapped(
             Method::Put,
@@ -286,9 +306,9 @@ pub fn closed_period_skipped_then_entered_with_password(h: &Harness) {
         ))
         .expect("closing date");
     };
-    lock(json!("2026-02-28"));
-    let r = run(h, &s, date(2026, 3, 31));
-    assert_eq!(mine(&r, &t), vec![date(2026, 3, 31)]);
+    lock(json!(second.to_wire()));
+    let r = run(h, &s, third);
+    assert_eq!(mine(&r, &t), vec![third]);
     let skipped: Vec<_> = r
         .skipped
         .iter()
@@ -298,8 +318,8 @@ pub fn closed_period_skipped_then_entered_with_password(h: &Harness) {
     assert_eq!(
         skipped,
         vec![
-            (date(2026, 1, 31), SkipReason::ClosedPeriod),
-            (date(2026, 2, 28), SkipReason::ClosedPeriod)
+            (first, SkipReason::ClosedPeriod),
+            (second, SkipReason::ClosedPeriod)
         ]
     );
     if h.require_cap(Capabilities::CLOSING_PASSWORD, "U-15 closing-password-v1") {
@@ -309,7 +329,7 @@ pub fn closed_period_skipped_then_entered_with_password(h: &Harness) {
         let e = h
             .run(s.templates().enter(
                 t.id,
-                Some(date(2026, 1, 31)),
+                Some(first),
                 &PostingOptions::default(),
                 IdempotencyKey::new(),
             ))
@@ -318,18 +338,18 @@ pub fn closed_period_skipped_then_entered_with_password(h: &Harness) {
         let entered = h
             .run(s.templates().enter(
                 t.id,
-                Some(date(2026, 1, 31)),
+                Some(first),
                 &PostingOptions {
                     closed_period: Some(ClosedPeriodAuthorization::with_password(pw.clone())),
                 },
                 IdempotencyKey::new(),
             ))
             .expect("entered");
-        assert_eq!(entered.occurrence, Some(date(2026, 1, 31)));
+        assert_eq!(entered.occurrence, Some(first));
         let again = h
             .run(s.templates().enter(
                 t.id,
-                Some(date(2026, 1, 31)),
+                Some(first),
                 &PostingOptions {
                     closed_period: Some(ClosedPeriodAuthorization::with_password(pw.clone())),
                 },
@@ -337,8 +357,7 @@ pub fn closed_period_skipped_then_entered_with_password(h: &Harness) {
             ))
             .expect_err("taken");
         assert!(cl_api::is_occurrence_taken(&again), "{again:?}");
-        h.run(s.templates().skip(t.id, date(2026, 2, 28)))
-            .expect("dismiss");
+        h.run(s.templates().skip(t.id, second)).expect("dismiss");
         h.run(s.set_closing_password(Some(&pw), None, IdempotencyKey::new()))
             .expect("clear password");
     }
@@ -356,7 +375,7 @@ pub fn inactive_account_skipped_no_partial(h: &Harness) {
         s,
         &c,
         ScheduleMode::Auto,
-        date(2025, 9, 1),
+        day_back(2, 1),
         ScheduleEnd::Never,
     );
     let before = (balance(h, s, c.card), balance(h, s, c.software));
@@ -366,7 +385,7 @@ pub fn inactive_account_skipped_no_partial(h: &Harness) {
         Some(&json!({ "isActive": false })),
     ))
     .expect("deactivate");
-    let r = run(h, s, date(2025, 9, 1));
+    let r = run(h, s, day_back(2, 1));
     assert!(mine(&r, &t).is_empty(), "skipped, not posted");
     assert!(
         r.skipped
@@ -392,18 +411,18 @@ pub fn remind_mode_lists_not_posts(h: &Harness) {
         s,
         &c,
         ScheduleMode::Remind,
-        date(2025, 10, 1),
+        day_back(3, 1),
         ScheduleEnd::Never,
     );
     for _ in 0..2 {
-        let r = run(h, s, date(2025, 11, 1));
+        let r = run(h, s, day_back(2, 1));
         assert!(mine(&r, &t).is_empty(), "a reminder never posts");
         let due = r
             .reminders
             .iter()
             .find(|d| d.template == t.id)
             .expect("listed");
-        assert_eq!(due.dates, vec![date(2025, 10, 1), date(2025, 11, 1)]);
+        assert_eq!(due.dates, vec![day_back(3, 1), day_back(2, 1)]);
     }
     let att = h.run(s.recurring().attention()).expect("attention");
     assert!(att.reminders.iter().any(|d| d.template == t.id));
@@ -421,14 +440,14 @@ pub fn ends_after_count(h: &Harness) {
         s,
         &c,
         ScheduleMode::Auto,
-        date(2026, 9, 15),
+        day_back(7, 15),
         ScheduleEnd::After(3),
     );
-    let r = run(h, s, date(2027, 3, 1));
+    let r = run(h, s, today());
     assert_eq!(
         mine(&r, &t),
-        vec![date(2026, 9, 15), date(2026, 10, 15), date(2026, 11, 15)],
+        vec![day_back(7, 15), day_back(6, 15), day_back(5, 15)],
         "three times, then it stops"
     );
-    assert!(mine(&run(h, s, date(2027, 6, 1)), &t).is_empty(), "stopped");
+    assert!(mine(&run(h, s, today()), &t).is_empty(), "stopped");
 }
