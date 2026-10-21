@@ -135,6 +135,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("tabs.close_menu", "Close"),
     ("tabs.pop_out", "Move to its own window"),
     ("tabs.dock", "Bring back as a tab"),
+    ("tabs.more", "More tabs ({count} out of view)"),
     // Windows
     ("window.placeholder.coming", "This screen is not available yet. It arrives in a later release."),
     ("window.placeholder.home", "Home arrives in a later release."),

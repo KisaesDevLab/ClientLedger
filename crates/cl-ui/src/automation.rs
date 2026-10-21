@@ -780,6 +780,15 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
         "theme": format!("{:?}", shell.prefs.theme).to_ascii_lowercase(),
         "zoom_percent": shell.prefs.zoom_percent,
         "tabs": tabs,
+        "active_tab": shell
+            .windows
+            .all()
+            .iter()
+            .find(|w| shell.active_window().is_some_and(|a| a == w.id))
+            .map(|w| w.title()),
+        "tabs_hidden": ctx
+            .data(|d| d.get_temp::<usize>(crate::shell::tabs::hidden_count_id()))
+            .unwrap_or(0),
         "palette_open": shell.palette.open,
         "shortcuts_open": shell.shortcuts_open(),
         "about_open": shell.about_open(),

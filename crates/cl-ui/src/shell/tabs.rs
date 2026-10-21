@@ -1,6 +1,10 @@
 //! The tab strip: one tab per open window, a dot on tabs with unsaved
 //! changes, close buttons, a right-click menu to move a window out to its own
 //! operating-system window (Q-57), and Ctrl+Tab cycling (through the keymap).
+//!
+//! When the tabs don't fit (960 wide, 200 % zoom) the strip scrolls, the
+//! window in front is scrolled into view whenever it changes, and a »
+//! button at the right lists the tabs out of view.
 
 use eframe::egui::{
     self, Color32, CornerRadius, Frame, Margin, Pos2, Rect, Role, Sense, Stroke, Ui, Vec2,
@@ -17,6 +21,33 @@ use crate::windows::WindowId;
 pub const HEIGHT: f32 = 36.0;
 const PAD: f32 = 12.0;
 const CLOSE: f32 = 16.0;
+/// Space between tabs.
+const GAP: f32 = 2.0;
+/// Room kept at the right for the » button when the tabs overflow.
+const MORE_WIDTH: f32 = 36.0;
+
+/// The memory key of how many tabs are out of view (control-channel state).
+#[must_use]
+pub fn hidden_count_id() -> egui::Id {
+    egui::Id::unique("tabs/hidden_count")
+}
+
+/// True when tabs of these widths don't fit in `room` points.
+#[must_use]
+pub fn overflowing(widths: &[f32], room: f32) -> bool {
+    let gaps = GAP * widths.iter().skip(1).map(|_| 1.0).sum::<f32>();
+    widths.iter().sum::<f32>() + gaps > room + 0.5
+}
+
+/// The tabs not wholly inside `visible` (left to right), given each tab's
+/// left and right edge.
+#[must_use]
+pub fn out_of_view<T: Copy>(tabs: &[(T, f32, f32)], visible: (f32, f32)) -> Vec<T> {
+    tabs.iter()
+        .filter(|(_, l, r)| *l < visible.0 - 0.5 || *r > visible.1 + 0.5)
+        .map(|(id, _, _)| *id)
+        .collect()
+}
 
 enum Action {
     Activate(WindowId),
@@ -50,6 +81,9 @@ pub fn show(ui: &mut Ui, shell: &mut Shell, narrow: bool, tokens: &Tokens) {
         .collect();
     let mut actions: Vec<Action> = Vec::new();
     let mut toggle_rail = false;
+    let last_active_id = egui::Id::unique("tabs/last_active");
+    let last_active: Option<WindowId> = ui.data(|d| d.get_temp(last_active_id));
+    let reveal = active_id.is_some() && last_active != active_id;
     egui::Panel::top("tabs")
         .exact_size(HEIGHT)
         .frame(
@@ -62,19 +96,42 @@ pub fn show(ui: &mut Ui, shell: &mut Shell, narrow: bool, tokens: &Tokens) {
                 if narrow && ui.button(t("shell.rail.toggle")).clicked() {
                     toggle_rail = true;
                 }
+                let widths: Vec<f32> = tabs.iter().map(|i| tab_width(ui, i)).collect();
+                let room = ui.available_width();
+                let more = overflowing(&widths, room);
+                let strip = if more { room - MORE_WIDTH } else { room };
+                let mut placed: Vec<(WindowId, f32, f32)> = Vec::new();
+                let mut visible = (0.0, 0.0);
                 egui::ScrollArea::horizontal()
+                    .id_salt("tabs/strip")
+                    .max_width(strip.max(0.0))
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
+                        visible = (ui.clip_rect().left(), ui.clip_rect().right());
                         ui.horizontal_centered(|ui| {
-                            ui.spacing_mut().item_spacing.x = 2.0;
+                            ui.spacing_mut().item_spacing.x = GAP;
                             for info in &tabs {
-                                tab(ui, tokens, info, &mut actions);
+                                let r = tab(ui, tokens, info, &mut actions);
+                                if info.active && reveal {
+                                    r.scroll_to_me(Some(egui::Align::Center));
+                                }
+                                placed.push((info.id, r.rect.left(), r.rect.right()));
                             }
                         });
                     });
+                let hidden = if more {
+                    out_of_view(&placed, visible)
+                } else {
+                    Vec::new()
+                };
+                ui.data_mut(|d| d.insert_temp(hidden_count_id(), hidden.len()));
+                if more {
+                    more_menu(ui, tokens, &tabs, &hidden, &mut actions);
+                }
             });
         });
+    ui.data_mut(|d| d.insert_temp(last_active_id, active_id));
     if toggle_rail {
         shell.toggle_rail();
     }
@@ -100,7 +157,48 @@ pub fn tab_label(title: &str, dirty: bool) -> String {
     }
 }
 
-fn tab(ui: &mut Ui, tokens: &Tokens, info: &TabInfo, actions: &mut Vec<Action>) {
+/// The » button: a menu of the tabs out of view (a click brings one to
+/// the front, and the strip scrolls to it).
+fn more_menu(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    tabs: &[TabInfo],
+    hidden: &[WindowId],
+    actions: &mut Vec<Action>,
+) {
+    let r = ui
+        .menu_button(
+            egui::RichText::new("\u{bb}").color(tokens.text_secondary),
+            |ui| {
+                for info in tabs.iter().filter(|i| hidden.contains(&i.id)) {
+                    let text = tab_label(&info.title, info.dirty);
+                    if ui
+                        .add(egui::Button::selectable(info.active, text))
+                        .clicked()
+                    {
+                        actions.push(Action::Activate(info.id));
+                        ui.close();
+                    }
+                }
+            },
+        )
+        .response;
+    let label = t_with("tabs.more", &[("count", &hidden.len().to_string())]);
+    r.widget_info(|| WidgetInfo::labeled(Role::Button, true, label.clone()));
+    r.on_hover_text(label);
+}
+
+/// A tab's width: its title, the unsaved dot and the close button.
+fn tab_width(ui: &Ui, info: &TabInfo) -> f32 {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(info.title.clone(), font, Color32::PLACEHOLDER);
+    let dot_room = if info.dirty { 14.0 } else { 0.0 };
+    PAD + galley.size().x + dot_room + 6.0 + CLOSE + 8.0
+}
+
+fn tab(ui: &mut Ui, tokens: &Tokens, info: &TabInfo, actions: &mut Vec<Action>) -> egui::Response {
     let TabInfo {
         id,
         title,
@@ -116,7 +214,7 @@ fn tab(ui: &mut Ui, tokens: &Tokens, info: &TabInfo, actions: &mut Vec<Action>) 
     };
     let galley = ui.painter().layout_no_wrap(title.clone(), font, color);
     let dot_room = if *dirty { 14.0 } else { 0.0 };
-    let width = PAD + galley.size().x + dot_room + 6.0 + CLOSE + 8.0;
+    let width = tab_width(ui, info);
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, HEIGHT - 6.0), Sense::click());
     let label = tab_label(title, *dirty);
     resp.widget_info(|| WidgetInfo::selected(Role::Tab, true, *active, label.clone()));
@@ -217,4 +315,34 @@ fn tab(ui: &mut Ui, tokens: &Tokens, info: &TabInfo, actions: &mut Vec<Action>) 
             ui.close();
         }
     });
+    resp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id(n: u64) -> u64 {
+        n
+    }
+
+    #[test]
+    fn tabs_overflow_only_past_the_room() {
+        assert!(!overflowing(&[100.0, 100.0], 202.0));
+        assert!(overflowing(&[100.0, 100.0], 201.0));
+        assert!(!overflowing(&[], 0.0));
+    }
+
+    #[test]
+    fn the_tabs_out_of_view_are_listed_in_order() {
+        let tabs = [
+            (id(1), 0.0, 100.0),
+            (id(2), 102.0, 300.0),
+            (id(3), 302.0, 500.0),
+        ];
+        assert_eq!(out_of_view(&tabs, (0.0, 320.0)), vec![id(3)]);
+        // Scrolled right: the first is out of view on the left.
+        assert_eq!(out_of_view(&tabs, (150.0, 500.0)), vec![id(1), id(2)]);
+        assert_eq!(out_of_view(&tabs, (0.0, 500.0)), Vec::<u64>::new());
+    }
 }
