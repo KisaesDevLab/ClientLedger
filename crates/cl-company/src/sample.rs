@@ -744,12 +744,28 @@ pub async fn load_into(
         .filter_map(|a| a.fields.account_number.clone().map(|n| (n, a.id)))
         .collect();
 
+    // The engine's A/R and A/P accounts (by system tag): with `je-names-v1`
+    // their lines carry the transaction's customer or vendor (Q-206).
+    let names_on_lines = session
+        .client()
+        .capabilities()
+        .has(cl_api::Capabilities::JE_NAMES);
+    let role = |tag: &str| -> std::collections::HashSet<cl_core::ids::AccountId> {
+        accounts
+            .iter()
+            .filter(|a| a.system_tag.as_deref() == Some(tag))
+            .map(|a| a.id)
+            .collect()
+    };
+    let (receivable, payable) = (role("accounts_receivable"), role("accounts_payable"));
+
+    let mut customers: HashMap<String, cl_core::ids::ContactId> = HashMap::new();
     for (i, name) in sample.company.clients.iter().enumerate() {
         progress(Progress::Working {
             percent: Some(u8::try_from(i * 5 / sample.company.clients.len().max(1)).unwrap_or(0)),
             step: Some("contacts".into()),
         });
-        session
+        let made = session
             .contacts()
             .create(
                 &NewContact {
@@ -760,6 +776,7 @@ pub async fn load_into(
                 IdempotencyKey::new(),
             )
             .await?;
+        customers.insert(name.clone(), made.record.id);
     }
     let mut vendors: HashMap<String, cl_core::ids::ContactId> = HashMap::new();
     for name in &sample.company.vendors {
@@ -812,12 +829,24 @@ pub async fn load_into(
             } else {
                 Side::Credit(l.credit)
             };
+            // An A/R line names the customer, an A/P line the vendor.
+            let names = if receivable.contains(&account) {
+                Some(&customers)
+            } else if payable.contains(&account) {
+                Some(&vendors)
+            } else {
+                None
+            };
+            let contact = names
+                .filter(|_| names_on_lines)
+                .and_then(|n| t.contact.as_ref().and_then(|c| n.get(c)))
+                .copied();
             lines.push(JeLine {
                 account,
                 side,
                 description: l.memo.clone(),
                 tag: None,
-                contact: None,
+                contact,
             });
         }
         let memo = match &t.contact {

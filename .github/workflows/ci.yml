@@ -237,6 +237,10 @@ jobs:
           # harness has its own boot limit, CL_API_BOOT_BUDGET_SECS (default 90 s).
           CL_HOST_BUDGET_SECS: ${{ (runner.os == 'Windows' || (runner.os == 'macOS' && runner.arch == 'X64')) && '60' || '30' }}
         run: cargo test -p cl-api --test contract --test contract_offline --test spec_fixtures
+      - name: Practice company against the real engine (templates load, first catch-up)
+        env:
+          CL_API_REQUIRE: "1"
+        run: cargo test -p cl-company --test practice_live -- --nocapture
 
       # Network-blocked run (plan B3, Linux only). The tests run as a dedicated
       # non-root user (initdb, pg_ctl and postgres refuse to run as root) whose
