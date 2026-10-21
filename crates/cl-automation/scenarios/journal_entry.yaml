@@ -48,6 +48,14 @@ steps:
   - assert_state: {key: screen.can_save, equals: true}
   - assert_exists: {role: label, label_contains: "Difference $0.00"}
   - screenshot: balanced
+  # Ctrl+M opens the Template dialog every form shares; Cancel keeps the
+  # entry as it is.
+  - key: Ctrl+M
+  - assert_state: {key: screen.template.dialog.title, equals: templates.dialog.title.new}
+  - assert_exists: {role: button, label: Save as Template}
+  - click: {role: button, label: Cancel}
+  - assert_state: {key: screen.template.dialog, equals: null}
+  - assert_state: {key: screen.template.saved_count, equals: 0}
   - key: Alt+N
   - assert_state: {key: screen.saved_count, equals: 1}
   - assert_state: {key: screen.save.error, equals: false}
