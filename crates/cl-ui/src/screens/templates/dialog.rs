@@ -125,6 +125,23 @@ pub(crate) fn model_schedule(s: &TemplateSchedule) -> model::Schedule {
     }
 }
 
+/// The dialog's width when the window has room.
+const DIALOG_WIDTH: f32 = 440.0;
+
+/// The unit after "Every N" ("month(s)"); none for twice a month, which
+/// runs on the 1st and the 15th whatever N is.
+fn unit_key(f: model::Frequency) -> Option<&'static str> {
+    match f {
+        model::Frequency::Daily => Some("templates.dialog.unit.days"),
+        model::Frequency::Weekly => Some("templates.dialog.unit.weeks"),
+        model::Frequency::Biweekly => Some("templates.dialog.unit.biweeks"),
+        model::Frequency::Semimonthly => None,
+        model::Frequency::Monthly => Some("templates.dialog.unit.months"),
+        model::Frequency::Quarterly => Some("templates.dialog.unit.quarters"),
+        model::Frequency::Annually => Some("templates.dialog.unit.years"),
+    }
+}
+
 /// "Every 2 weeks", "Monthly on the 31st (or last day)".
 #[must_use]
 pub(crate) fn how_often_text(s: &model::Schedule) -> String {
@@ -302,16 +319,21 @@ impl DialogUi {
         })
     }
 
-    /// Draws the dialog window.
+    /// Draws the dialog window. It fits the window (960 x 640 at 200 %):
+    /// the fields scroll and Save / Cancel stay in view.
     pub(crate) fn show(&mut self, ctx: &egui::Context) -> DialogClick {
         let tokens = Tokens::of(ctx);
         let mut click = DialogClick::None;
+        let screen = ctx.content_rect();
+        let width = (screen.width() - 48.0).clamp(240.0, DIALOG_WIDTH);
         egui::Window::new(t(self.title))
             .id(egui::Id::unique("templates/dialog"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .max_height(screen.height() - 48.0)
             .show(ctx, |ui| {
+                ui.set_width(width);
                 click = self.body(ui, &tokens);
             });
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !self.busy {
@@ -321,14 +343,50 @@ impl DialogUi {
     }
 
     fn body(&mut self, ui: &mut Ui, tokens: &Tokens) -> DialogClick {
-        ui.set_width(440.0);
+        // Room for the buttons under the scrolling fields.
+        let reserve = 44.0 + 2.0 * ui.spacing().item_spacing.y + 8.0;
+        let fields_height = (ui.available_height() - reserve).max(80.0);
+        egui::ScrollArea::vertical()
+            .id_salt("templates/dialog/scroll")
+            .max_height(fields_height)
+            .auto_shrink([false, true])
+            .show(ui, |ui| self.fields(ui, tokens));
+        ui.add_space(8.0);
+        let mut click = DialogClick::None;
+        ui.horizontal(|ui| {
+            let save = ui
+                .add_enabled_ui(!self.busy, |ui| {
+                    crate::widgets::primary_button(ui, &t("templates.dialog.save"))
+                })
+                .inner;
+            if save.clicked()
+                && let Some(c) = self.save()
+            {
+                click = DialogClick::Save(c);
+            }
+            if ui
+                .add_enabled(
+                    !self.busy,
+                    egui::Button::new(t("templates.dialog.cancel"))
+                        .min_size(egui::Vec2::new(0.0, 44.0)),
+                )
+                .clicked()
+            {
+                click = DialogClick::Cancel;
+            }
+        });
+        click
+    }
+
+    fn fields(&mut self, ui: &mut Ui, tokens: &Tokens) {
         egui::Grid::new("templates/dialog/grid")
             .num_columns(2)
             .spacing([12.0, 8.0])
             .show(ui, |ui| {
                 let l = ui.label(t("templates.dialog.name"));
+                let name_width = (ui.available_width() - 8.0).clamp(120.0, 280.0);
                 let r = ui
-                    .add(egui::TextEdit::singleline(&mut self.form.name).desired_width(280.0))
+                    .add(egui::TextEdit::singleline(&mut self.form.name).desired_width(name_width))
                     .labelled_by(l.id);
                 if std::mem::take(&mut self.focus_name) {
                     r.request_focus();
@@ -352,45 +410,35 @@ impl DialogUi {
         self.sync();
         if let Some(s) = self.form.schedule() {
             ui.add_space(6.0);
-            ui.label(
-                RichText::new(how_often_text(&s))
-                    .size(12.0)
-                    .color(tokens.text_secondary),
+            ui.add(
+                egui::Label::new(
+                    RichText::new(how_often_text(&s))
+                        .size(12.0)
+                        .color(tokens.text_secondary),
+                )
+                .wrap(),
             );
             let dates: Vec<String> = model::next_dates(&s, model::PREVIEW_COUNT)
                 .into_iter()
                 .map(crate::shell::us_date)
                 .collect();
-            ui.label(
-                RichText::new(t_with(
-                    "templates.dialog.preview",
-                    &[("dates", dates.join(", ").as_str())],
-                ))
-                .size(12.0)
-                .color(tokens.text_secondary),
+            ui.add(
+                egui::Label::new(
+                    RichText::new(t_with(
+                        "templates.dialog.preview",
+                        &[("dates", dates.join(", ").as_str())],
+                    ))
+                    .size(12.0)
+                    .color(tokens.text_secondary),
+                )
+                .wrap(),
             );
         }
         for p in &self.problems {
-            ui.label(RichText::new(t(p.key().as_str())).color(tokens.warn_text));
+            ui.add(
+                egui::Label::new(RichText::new(t(p.key().as_str())).color(tokens.warn_text)).wrap(),
+            );
         }
-        ui.add_space(8.0);
-        let mut click = DialogClick::None;
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled(!self.busy, egui::Button::new(t("templates.dialog.save")))
-                .clicked()
-                && let Some(c) = self.save()
-            {
-                click = DialogClick::Save(c);
-            }
-            if ui
-                .add_enabled(!self.busy, egui::Button::new(t("templates.dialog.cancel")))
-                .clicked()
-            {
-                click = DialogClick::Cancel;
-            }
-        });
-        click
     }
 
     fn group_row(&mut self, ui: &mut Ui) {
@@ -469,6 +517,9 @@ impl DialogUi {
             let e = ui.label(t("templates.dialog.every"));
             ui.add(egui::TextEdit::singleline(&mut self.interval_text).desired_width(48.0))
                 .labelled_by(e.id);
+            if let Some(unit) = unit_key(self.form.frequency) {
+                ui.label(t(unit));
+            }
         });
         ui.end_row();
         let l = ui.label(t("templates.dialog.next_date"));

@@ -250,7 +250,7 @@ impl LinesSpec {
             credit: TextKey("lines.col.credit"),
         },
         need_account: TextKey("lines.need_account"),
-        height: GridHeight::Rows { min: 5, max: 12 },
+        height: GridHeight::Rows { min: 3, max: 12 },
         amount: SIDE_MONEY,
         layout: LinesLayout::Standard,
         amounts: AmountColumns::DebitCredit,

@@ -174,6 +174,9 @@ impl JournalScreen {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 header::wrap_row(ui, |ui| {
+                    // Spacing, not add_space: a space after the last item of
+                    // a row would push the card past the window's edge.
+                    ui.spacing_mut().item_spacing.x = 12.0;
                     kit::wrap_item(ui, "journal/date", |ui| {
                         let today = self.today;
                         let (r, d) = kit::date_field(
@@ -193,7 +196,6 @@ impl JournalScreen {
                             self.after_frame = Some(CommandId::new("form.save_new"));
                         }
                     });
-                    ui.add_space(12.0);
                     kit::wrap_item(ui, "journal/number", |ui| {
                         let mut text = self.header.current().number.clone();
                         let r = kit::text_field(
@@ -211,7 +213,6 @@ impl JournalScreen {
                         }
                         kit::track(&mut self.focused, &r, field::NUMBER);
                     });
-                    ui.add_space(12.0);
                     kit::wrap_item(ui, "journal/reverse", |ui| {
                         let today = self.today;
                         let (r, d) = kit::date_field(
@@ -233,7 +234,6 @@ impl JournalScreen {
                         }
                         kit::track(&mut self.focused, &r, field::REVERSE);
                     });
-                    ui.add_space(12.0);
                     kit::wrap_item(ui, "journal/adjusting", |ui| {
                         ui.add_space(20.0);
                         let mut on = self.header.current().adjusting;
