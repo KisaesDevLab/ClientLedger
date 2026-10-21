@@ -90,6 +90,9 @@ pub struct DemoState {
         std::collections::BTreeMap<(cl_core::ids::TemplateId, CalendarDate), templates::Occ>,
     /// Journal entries' P15 fields (names, tags, Adjusting, reversals).
     pub journal: journal::DemoJournals,
+    /// The practice company's templates were added (P15 WP-D; once, on
+    /// the first open through Open Company).
+    pub templates_seeded: bool,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -179,6 +182,7 @@ impl DemoState {
             template_groups: Vec::new(),
             occurrences: std::collections::BTreeMap::new(),
             journal: journal::DemoJournals::default(),
+            templates_seeded: false,
         }
     }
 

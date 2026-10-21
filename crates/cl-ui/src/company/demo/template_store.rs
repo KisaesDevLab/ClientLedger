@@ -39,7 +39,7 @@ pub fn demo_caps() -> Capabilities {
     .unwrap_or_default()
 }
 
-fn conflict(reason: ConflictReason, code: &str) -> ApiError {
+pub(crate) fn conflict(reason: ConflictReason, code: &str) -> ApiError {
     ApiError::Conflict {
         reason,
         current_version: None,
@@ -56,7 +56,7 @@ fn invalid() -> ApiError {
     ApiError::Local(LocalValidation::InvalidValue)
 }
 
-fn closing(state: &DemoState) -> Option<CalendarDate> {
+pub(crate) fn closing(state: &DemoState) -> Option<CalendarDate> {
     let open = state.open?;
     state
         .companies
@@ -118,7 +118,7 @@ pub fn next_after(t: &DemoTemplate, d: CalendarDate) -> Option<CalendarDate> {
 }
 
 /// The demo engine's header total of a draft (display only).
-fn total(d: &TemplateDraft) -> Option<Money> {
+pub(crate) fn total(d: &TemplateDraft) -> Option<Money> {
     match d {
         TemplateDraft::Check(c) => Some(c.amount),
         TemplateDraft::Transfer(t) => Some(t.amount),
@@ -202,7 +202,7 @@ pub fn get(state: &DemoState, id: TemplateId) -> Result<Template, ApiError> {
     live(state, id).map(|t| row(state, t))
 }
 
-fn live(state: &DemoState, id: TemplateId) -> Result<&DemoTemplate, ApiError> {
+pub(crate) fn live(state: &DemoState, id: TemplateId) -> Result<&DemoTemplate, ApiError> {
     state
         .templates
         .iter()
@@ -629,14 +629,21 @@ pub fn enter(
     let t = live(state, id)?.clone();
     let on = date.or(t.schedule.map(|s| s.next_date)).unwrap_or(today);
     let keyed = t.schedule.is_some();
-    if keyed
-        && let Some(o) = state.occurrences.get(&(id, on))
-        && matches!(o.status, OccStatus::Posted | OccStatus::Entered)
-    {
-        return Err(conflict(
-            ConflictReason::Unspecified,
-            cl_api::OCCURRENCE_TAKEN,
-        ));
+    let open_skip = match state.occurrences.get(&(id, on)) {
+        // Posted, entered or dismissed: that date is done.
+        Some(o) if keyed && o.status != OccStatus::Skipped => {
+            return Err(conflict(
+                ConflictReason::Unspecified,
+                cl_api::OCCURRENCE_TAKEN,
+            ));
+        }
+        Some(_) => true,
+        None => false,
+    };
+    // E2: the next date (even early) or an open skipped date; any other
+    // date is 400 OCCURRENCE_NOT_DUE.
+    if keyed && !open_skip && t.schedule.is_some_and(|s| s.next_date != on) {
+        return Err(invalid());
     }
     let (txn, touched) = post_draft(state, &t.draft, on, password)?;
     if keyed {
@@ -652,27 +659,7 @@ pub fn enter(
     }
     if let Some(s) = state.templates.iter_mut().find(|x| x.id == id) {
         s.last_entered = Some(on);
-        if let Some(mut sched) = s.schedule
-            && sched.next_date == on
-        {
-            let next = next_after(s, on);
-            let spent = match &mut sched.end {
-                ScheduleEnd::After(n) => {
-                    *n = n.saturating_sub(1);
-                    *n == 0
-                }
-                _ => false,
-            };
-            let past_end = matches!((sched.end, next), (ScheduleEnd::On(end), Some(n)) if n > end);
-            match next {
-                Some(n) if !spent && !past_end => {
-                    sched.next_date = n;
-                    s.schedule = Some(sched);
-                }
-                _ => s.schedule = None,
-            }
-            s.version += 1;
-        }
+        super::templates::advance(s, on);
     }
     Ok((
         Entered {

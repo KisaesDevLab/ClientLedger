@@ -238,18 +238,7 @@ impl SaveFlow {
             link,
             group,
             Some("orphan.template_resolve"),
-            move |s| {
-                s.occurrences.insert(
-                    (id, date),
-                    crate::company::demo::templates::Occ {
-                        status: crate::company::demo::templates::OccStatus::Entered,
-                        transaction: Some(txn),
-                        reason: None,
-                        run: None,
-                    },
-                );
-                Ok(())
-            },
+            move |s| crate::company::demo::templates::resolve(s, id, date, txn),
             move |s| async move { s.templates().resolve(id, date, txn).await },
         ));
     }
@@ -519,7 +508,29 @@ mod tests {
     fn an_occurrence_is_marked_entered_after_the_form_saves() {
         let (_dir, link) = demo();
         let mut f = SaveFlow::default();
-        let tid = TemplateId::parse("d0000000-0000-4000-8000-e00000000009").expect("id");
+        let tid = link
+            .demo_state()
+            .map(|mut s| {
+                template_store::create(
+                    &mut s,
+                    &cl_api::NewTemplate {
+                        name: "Savings".into(),
+                        group: None,
+                        client_form: None,
+                        draft: draft(),
+                        schedule: Some(cl_api::TemplateSchedule {
+                            mode: cl_api::ScheduleMode::Remind,
+                            frequency: cl_api::Frequency::Monthly,
+                            interval: 1,
+                            next_date: d(2026, 11, 1),
+                            end: cl_api::ScheduleEnd::Never,
+                        }),
+                    },
+                )
+            })
+            .expect("demo")
+            .expect("template")
+            .id;
         f.opened(&TemplateOpen {
             kind: cl_model::CommandId::new("banking.transfer"),
             template: tid,
