@@ -25,6 +25,15 @@ pub struct DemoTemplate {
     pub group: Option<TemplateGroupId>,
     /// The stored draft (a form's create body minus the date and numbers).
     pub draft: TemplateDraft,
+    /// The desktop form it opens in (`clientForm`, P15 lane T).
+    pub client_form: String,
+    /// Its schedule; `None` is "Don't remind me" (lane T).
+    pub schedule: Option<cl_api::TemplateSchedule>,
+    /// The day-of-month anchor the clamped month rule counts from (the
+    /// next date the owner last set; lane T).
+    pub anchor: Option<cl_core::CalendarDate>,
+    /// The last date it was entered (lane T).
+    pub last_entered: Option<cl_core::CalendarDate>,
     /// The engine's row version (409 `STALE` when a write names another).
     pub version: u32,
     /// Soft-deleted (gone from the list; its occurrences stay).
