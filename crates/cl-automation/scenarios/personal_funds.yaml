@@ -1,0 +1,127 @@
+# Paid with Personal Funds (P14 plan §6.4) against `clientledger --demo` (a
+# single-member LLC): the form defaults to "Money I put into the business"
+# ("Default for a single-member LLC", Q-P14n) recorded in Owner's
+# Contribution, with the neutral note (no tax advice); "The business will
+# pay me back" asks for a liability (with the quick add, not used here) and
+# going back restores the default; 42.18 of office supplies saves and shows
+# in the Owner's Contribution register; the unsaved-changes question on
+# Prev; the register opens it again (Ctrl+E) and it is voided.
+#
+# Light and dark run in the same app, so the scenario is repeatable: the
+# expense is voided. All data is synthetic.
+name: personal_funds
+description: Default by entity type, pay-back choice, save shown in the equity register, Prev prompt, Ctrl+E from the register, Void.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: vendors.personal_funds
+  - assert_exists: {role: tab, label_contains: "Personal Funds"}
+  - assert_state: {key: screen.screen, equals: personal_funds}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.record, equals: new}
+  # --- 1. The default for a single-member LLC -----------------------------------
+  - assert_state: {key: screen.entity_type, equals: single_member_llc}
+  - assert_state: {key: screen.treatment, equals: put_in}
+  - assert_state: {key: screen.treatment_default, equals: put_in}
+  - assert_exists: {role: label, label: Default for a single-member LLC}
+  - assert_value: {target: {role: combo_box, label: Recorded in}, equals: "30160 · Owner's Contribution"}
+  - assert_exists: {role: label, label: "Ask your accountant if you're not sure which to use."}
+  - assert_no_clipping: {}
+  - screenshot: default
+  # The business will pay it back: a liability, with a quick add.
+  - click: {role: radio_button, label: The business will pay me back}
+  - assert_state: {key: screen.treatment, equals: pay_back}
+  - assert_state: {key: screen.offset_id, equals: null}
+  - assert_exists: {role: button, label_contains: "Due to owner"}
+  - screenshot: pay-back
+  - click: {role: radio_button, label: Money I put into the business}
+  - assert_state: {key: screen.treatment, equals: put_in}
+  - assert_value: {target: {role: combo_box, label: Recorded in}, equals: "30160 · Owner's Contribution"}
+
+  # --- 2. 42.18 of office supplies --------------------------------------------
+  - type: {text: Shepherd Hills Office, target: {role: text_input, label: Paid to (optional)}}
+  - key: Tab
+  - assert_value: {target: {role: text_input, label: Paid to (optional)}, equals: "Shepherd Hills Office Supply"}
+  - type: {text: "42.18", target: {role: text_input, label: Amount}}
+  - key: Tab
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - type: {text: "Scenario printer paper"}
+  - click: {label: "Account, line 1"}
+  - key: Ctrl+A
+  - type: {text: "6250"}
+  - key: Tab
+  - type: {text: "42.18"}
+  - key: Tab
+  - assert_value: {target: {label: "Account, line 1"}, equals: "6250 · Office Supplies and Software"}
+  - assert_state: {key: screen.totals, equals: balanced}
+  - screenshot: filled
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.last_action, equals: save}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.error, equals: false}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.record, equals: new}
+
+  # --- 3. Prev with unsaved changes asks --------------------------------------
+  - type: {text: "5", target: {role: text_input, label: Amount}}
+  - key: Tab
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: PageUp
+  - assert_state: {key: screen.nav_prompt, equals: true}
+  - assert_exists: {role: button, label: Discard changes}
+  - assert_exists: {role: button, label: Keep editing}
+  - screenshot: nav-prompt
+  - click: {role: button, label: Keep editing}
+  - assert_state: {key: screen.nav_prompt, equals: false}
+  - assert_state: {key: screen.dirty, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
+
+  # --- 4. The Owner's Contribution register shows it; Ctrl+E; Void ----------
+  - command: lists.chart_of_accounts
+  - assert_state: {key: screen.screen, equals: chart_of_accounts}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: row, label_contains: "30160 Owner"}
+  - click: {role: button, label: Open Register}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.account_id, equals: "d0000000-0000-4000-8000-a00000030160"}
+  - assert_exists: {role: row, label_contains: "11/04/2026, Shepherd Hills Office Supply, row"}
+  - assert_value: {target: {role: cell, label: "Increase, 11/04/2026, Shepherd Hills Office Supply"}, equals: "42.18"}
+  - assert_value: {target: {role: cell, label: "Account · Memo, 11/04/2026, Shepherd Hills Office Supply"}, equals: "6250 · Office Supplies and Software · Scenario printer paper"}
+  - screenshot: equity-register
+  - click: {role: row, label_contains: "11/04/2026, Shepherd Hills Office Supply, row"}
+  - key: Ctrl+E
+  - assert_state: {key: screen.screen, equals: personal_funds}
+  - assert_state: {key: screen.record, equals: edit}
+  - assert_value: {target: {role: text_input, label: Memo}, equals: "Scenario printer paper"}
+  - assert_value: {target: {role: text_input, label: Amount}, equals: "42.18"}
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.error, equals: false}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Register · Owner"}
+  - assert_not_exists: {role: row, label_contains: "11/04/2026, Shepherd Hills Office Supply, row"}
+  - command: file.close_window
+  - click: {role: tab, label: Chart of Accounts}
+  - command: file.close_window
+  - click_if_present: {role: button, label: Close Bank Feed}
+  - click: {role: tab, label_contains: "Personal Funds"}
+  - assert_state: {key: screen.screen, equals: personal_funds}
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: text_input, label: Amount}
+  - assert_no_clipping:
+      # The side panel goes under the form and scrolls by design: only the
+      # bottom band of the scroll area may be cut by the window edge.
+      ignore:
+        - {x: 212, y: 560, width: 10000, height: 200}
+  - screenshot: personal-funds-960x640
+  - resize: {width: 1440, height: 940}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Personal Funds"}
