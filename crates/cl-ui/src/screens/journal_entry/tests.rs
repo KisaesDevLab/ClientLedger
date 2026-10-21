@@ -438,6 +438,41 @@ fn save_as_template_leaves_out_the_date_number_and_reverse_on() {
 }
 
 #[test]
+fn a_delete_retried_after_a_lost_reply_takes_not_found_as_done() {
+    let (mut s, link, _dir) = screen();
+    set_lines(
+        &mut s,
+        &[(6100, "75.00", "", None), (1010, "", "75.00", None)],
+    );
+    assert!(
+        s.start_save(SaveIntent::SaveAndNew, None),
+        "{:?}",
+        s.problems
+    );
+    let id = s.last_saved.expect("saved");
+    assert!(s.open_record(id));
+    // The delete's reply was lost: the outcome is unknown.
+    s.action_failed(&ApiError::Timeout, Pending::Delete);
+    assert_eq!(s.delete_unknown, Some(id));
+    // It had taken: the entry is gone at the engine.
+    let gone = link
+        .demo_state()
+        .map(|mut st| crate::company::demo::journal::delete(&mut st, id, None));
+    assert!(matches!(gone, Some(Ok(()))));
+    // The retry hears "not found": done, the form moves on.
+    s.send_delete(None);
+    assert_eq!(s.last_action, Some("delete"), "{:?}", s.error);
+    assert_eq!(s.delete_unknown, None);
+    // Without a lost reply "not found" stays an error.
+    let nf = || Err(ApiError::NotFound { code: None });
+    assert!(save::delete_answer(nf(), false).is_err());
+    assert!(save::delete_answer(nf(), true).is_ok());
+    // A definite refusal forgets the unknown delete.
+    s.action_failed(&ApiError::NotFound { code: None }, Pending::Delete);
+    assert_eq!(s.delete_unknown, None);
+}
+
+#[test]
 fn a_dropped_template_account_fills_in_empty() {
     let (mut s, _link, _dir) = screen();
     let e = cl_api::NewJournalEntry::new(

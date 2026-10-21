@@ -146,6 +146,9 @@ pub struct JournalScreen {
     pub(crate) load_task: Option<Task<Versioned<Transaction>>>,
     pub(crate) save_task: Option<Task<(TransactionId, RecordVersion)>>,
     pub(crate) action_task: Option<(Pending, Task<()>)>,
+    /// A delete whose reply was lost (the entry may be gone): its retry
+    /// takes "not found" as done.
+    pub(crate) delete_unknown: Option<TransactionId>,
     pub(crate) number_task: Option<Task<String>>,
     pub(crate) intent: Option<SaveIntent>,
     pub(crate) key: Option<(SaveIdentity, IdempotencyKey)>,
@@ -237,6 +240,7 @@ impl JournalScreen {
             load_task: None,
             save_task: None,
             action_task: None,
+            delete_unknown: None,
             number_task: None,
             intent: None,
             key: None,

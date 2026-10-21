@@ -34,6 +34,21 @@ fn options(password: Option<Secret>) -> PostingOptions {
     }
 }
 
+/// A delete's answer. On the `retry` of a delete whose reply was lost,
+/// "not found" (or "already deleted") means the first try took: done.
+pub(crate) fn delete_answer(r: Result<(), ApiError>, retry: bool) -> Result<(), ApiError> {
+    match r {
+        Err(
+            ApiError::NotFound { .. }
+            | ApiError::Conflict {
+                reason: cl_api::ConflictReason::AlreadyDeleted,
+                ..
+            },
+        ) if retry => Ok(()),
+        r => r,
+    }
+}
+
 impl JournalScreen {
     /// The checked form as the engine's entry, field by field.
     ///
@@ -542,8 +557,9 @@ impl JournalScreen {
         }
         self.published.clone_from(&e.accounts);
         let link = Arc::clone(&self.link);
+        let retry = self.delete_unknown == Some(e.id);
         if let Some(local) = self.local.as_mut() {
-            match local.delete(&link, e.id, password.as_ref()) {
+            match delete_answer(local.delete(&link, e.id, password.as_ref()), retry) {
                 Ok(()) => self.action_done(&Pending::Delete),
                 Err(err) => self.action_failed(&err, Pending::Delete),
             }
@@ -562,8 +578,8 @@ impl JournalScreen {
                 reason: None,
                 closing_password: password,
             };
-            s.transactions().delete(e.id, &opts, key).await?;
-            Ok(())
+            let r = s.transactions().delete(e.id, &opts, key).await.map(|_| ());
+            delete_answer(r, retry)
         }) {
             self.action_task = Some((Pending::Delete, Task::Pending(p)));
         }
@@ -571,6 +587,7 @@ impl JournalScreen {
 
     /// The void or delete took: the entry leaves the form.
     pub(crate) fn action_done(&mut self, pending: &Pending) {
+        self.delete_unknown = None;
         crate::forms::publish_saved(&self.link, &self.bus, &self.published);
         self.closing_prompt.saved();
         self.void_open = false;
@@ -585,6 +602,12 @@ impl JournalScreen {
     }
 
     pub(crate) fn action_failed(&mut self, e: &ApiError, pending: Pending) {
+        // A delete with an unknown outcome may have taken: remember it, so
+        // the retry's "not found" counts as done.
+        self.delete_unknown = match (&pending, &self.editing) {
+            (Pending::Delete, Some(ed)) if crate::screens::register::keeps_key(e) => Some(ed.id),
+            _ => None,
+        };
         if self.closing_failed(e, pending) {
             return;
         }
