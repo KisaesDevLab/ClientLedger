@@ -641,7 +641,7 @@ mod tests {
             width: 100.0,
             height: 50.0,
         };
-        assert!(s.truncated_inputs(1.0, &[region]).is_empty());
+        assert_eq!(s.truncated_inputs(1.0, &[region]).len(), 0);
     }
 
     #[test]

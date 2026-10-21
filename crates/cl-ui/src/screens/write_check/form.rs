@@ -21,6 +21,7 @@ use eframe::egui::{self, Align, CornerRadius, Layout, Margin, RichText, Stroke, 
 use super::{Field, WriteCheckScreen, field};
 use crate::company::CompanyEvent;
 use crate::forms::closing_prompt::ClosingClick;
+use crate::forms::header;
 use crate::i18n::{t, t_with};
 use crate::screens::company::form;
 use crate::screens::register::account_text;
@@ -118,21 +119,15 @@ impl WriteCheckScreen {
     fn toolbar(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let saved = self.editing.is_some();
         let working = self.save.task.is_some();
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            if ui
-                .add_enabled(!working, egui::Button::new(t("check.prev")))
-                .on_hover_text(t("check.prev.tip"))
-                .clicked()
-            {
-                self.navigate(true);
-            }
-            if ui
-                .add_enabled(!working, egui::Button::new(t("check.next")))
-                .on_hover_text(t("check.next.tip"))
-                .clicked()
-            {
-                self.navigate(false);
+        let dirty = self.is_dirty();
+        header::toolbar(ui, tokens, dirty, &t("check.unsaved"), |ui| {
+            if let Some(nav) = header::nav_buttons(
+                ui,
+                !working,
+                (&t("check.prev"), &t("check.prev.tip")),
+                (&t("check.next"), &t("check.next.tip")),
+            ) {
+                self.navigate(nav.older());
             }
             ui.separator();
             if ui.button(t("check.find")).clicked() {
@@ -166,17 +161,7 @@ impl WriteCheckScreen {
             if r.changed() {
                 self.set_print_later(later);
             }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if self.is_dirty() {
-                    ui.label(
-                        RichText::new(t("check.unsaved"))
-                            .size(12.0)
-                            .color(tokens.text_tertiary),
-                    );
-                }
-            });
         });
-        ui.separator();
     }
 
     pub(crate) fn set_print_later(&mut self, on: bool) {
@@ -352,8 +337,9 @@ impl WriteCheckScreen {
             .unwrap_or_default();
         let mut picked = None;
         let style = self.style(ui);
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
+        let title = t("cmd.vendors.write_check");
+        header::title_row(ui, tokens, "write_check", &title, |ui| {
+            header::wrap_item(ui, "write_check/bank", |ui| {
                 let l = above(ui, tokens, &t("check.bank"));
                 ui.add_enabled_ui(enabled && self.editing.is_none(), |ui| {
                     let r = egui::ComboBox::from_id_salt("write_check/bank")
@@ -375,7 +361,7 @@ impl WriteCheckScreen {
                     }
                 });
             });
-            ui.vertical(|ui| {
+            header::wrap_item(ui, "write_check/balance", |ui| {
                 ui.add_space(20.0);
                 ui.horizontal(|ui| {
                     ui.label(
@@ -391,16 +377,6 @@ impl WriteCheckScreen {
                             .color(tokens.text_primary),
                     );
                 });
-            });
-            ui.with_layout(Layout::right_to_left(Align::BOTTOM), |ui| {
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(t("cmd.vendors.write_check"))
-                            .text_style(egui::TextStyle::Heading)
-                            .color(tokens.text_primary),
-                    )
-                    .selectable(false),
-                );
             });
         });
         if let Some(id) = picked {

@@ -1,9 +1,11 @@
 //! Components that more than one transaction form shares (P13 WP5): the
 //! lines grid (register Splits, Write Check Expenses) and the closing-date
 //! password prompt. P14 adds [`publish_saved`], the one way a form tells
-//! the other windows what its save changed (Q-262).
+//! the other windows what its save changed (Q-262), and [`header`], the
+//! toolbar and title row every form draws the same way.
 
 pub mod closing_prompt;
+pub mod header;
 pub mod lines_grid;
 pub mod nav_prompt;
 

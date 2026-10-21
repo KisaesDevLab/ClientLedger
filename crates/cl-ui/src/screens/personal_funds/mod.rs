@@ -952,19 +952,20 @@ impl PersonalFundsScreen {
             return;
         }
         let idle = self.flow.idle();
-        ui.horizontal(|ui| {
-            if let Some(cmd) = kit::nav_buttons(ui, idle) {
-                self.after_frame = Some(CommandId::new(cmd));
-            }
+        let clicked = kit::toolbar(ui, &tokens, idle, self.is_dirty(), |ui| {
             ui.separator();
-            ui.label(
-                RichText::new(t("personal_funds.intro"))
-                    .size(12.0)
-                    .color(tokens.text_secondary),
+            ui.add(
+                egui::Label::new(
+                    RichText::new(t("personal_funds.intro"))
+                        .size(12.0)
+                        .color(tokens.text_secondary),
+                )
+                .wrap_mode(egui::TextWrapMode::Extend),
             );
-            kit::heading_right(ui, &tokens, &t("cmd.vendors.personal_funds"));
         });
-        ui.separator();
+        if let Some(cmd) = clicked {
+            self.after_frame = Some(CommandId::new(cmd));
+        }
         match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
             MessageClick::SubmitClosing => self.submit_closing(),
             MessageClick::Void => self.void_now(None),
@@ -984,6 +985,7 @@ impl PersonalFundsScreen {
 
     #[allow(clippy::too_many_lines)] // One card of fields, top to bottom.
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        kit::title_only(ui, tokens, &t("cmd.vendors.personal_funds"));
         let enabled = self.flow.idle();
         ui.add_enabled_ui(enabled, |ui| {
             egui::Frame::new()

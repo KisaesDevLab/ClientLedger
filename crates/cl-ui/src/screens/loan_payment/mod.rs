@@ -982,15 +982,11 @@ impl LoanPaymentScreen {
             return;
         }
         let idle = self.flow.idle();
-        ui.horizontal(|ui| {
-            if let Some(cmd) = kit::nav_buttons(ui, idle) {
-                self.after_frame = Some(CommandId::new(cmd));
-            }
-            // "No payment schedules" is said in the side panel: beside the
-            // buttons it ran into the heading at the minimum width.
-            kit::heading_right(ui, &tokens, &t("cmd.banking.loan_payment"));
-        });
-        ui.separator();
+        // "No payment schedules" is said in the side panel: beside the
+        // buttons it ran into the heading at the minimum width.
+        if let Some(cmd) = kit::toolbar(ui, &tokens, idle, self.is_dirty(), |_| {}) {
+            self.after_frame = Some(CommandId::new(cmd));
+        }
         match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
             MessageClick::SubmitClosing => self.submit_closing(),
             MessageClick::Void => self.void_now(None),
@@ -1020,6 +1016,7 @@ impl LoanPaymentScreen {
 
     #[allow(clippy::too_many_lines)] // One card of fields, top to bottom.
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        kit::title_only(ui, tokens, &t("cmd.banking.loan_payment"));
         let enabled = self.flow.idle();
         let loans = self.loans();
         let banks = self.pay_from_accounts();

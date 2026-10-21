@@ -782,10 +782,7 @@ impl OwnerMoneyScreen {
         let idle = self.flow.idle();
         let d = self.header.current().direction;
         let mut picked = None;
-        ui.horizontal(|ui| {
-            if let Some(cmd) = kit::nav_buttons(ui, idle) {
-                self.after_frame = Some(CommandId::new(cmd));
-            }
+        let clicked = kit::toolbar(ui, &tokens, idle, self.is_dirty(), |ui| {
             ui.separator();
             ui.add_enabled_ui(idle, |ui| {
                 if ui
@@ -801,12 +798,13 @@ impl OwnerMoneyScreen {
                     picked = Some(Direction::PutMoneyIn);
                 }
             });
-            kit::heading_right(ui, &tokens, &t("cmd.banking.owner_money"));
         });
+        if let Some(cmd) = clicked {
+            self.after_frame = Some(CommandId::new(cmd));
+        }
         if let Some(p) = picked {
             self.set_direction(p);
         }
-        ui.separator();
         match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
             MessageClick::SubmitClosing => self.submit_closing(),
             MessageClick::Void => self.void_now(None),
@@ -825,6 +823,7 @@ impl OwnerMoneyScreen {
     }
 
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        kit::title_only(ui, tokens, &t("cmd.banking.owner_money"));
         let enabled = self.flow.idle();
         let banks = self.books.accounts_of(&[AccountClass::Bank]);
         let equity = self.equity_accounts();

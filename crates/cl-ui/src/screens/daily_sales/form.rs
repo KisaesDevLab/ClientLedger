@@ -19,6 +19,7 @@ use eframe::egui::{self, Align, CornerRadius, Layout, Margin, RichText, Stroke, 
 use super::{DailySalesScreen, Field, field};
 use crate::company::CompanyEvent;
 use crate::forms::closing_prompt::ClosingClick;
+use crate::forms::header;
 use crate::i18n::{t, t_with};
 use crate::screens::company::form;
 use crate::screens::register::account_text;
@@ -144,23 +145,18 @@ impl DailySalesScreen {
             .saved
             .as_ref()
             .is_some_and(|s| s.status == cl_api::EntryStatus::Posted);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
+        let dirty = self.is_dirty();
+        header::toolbar(ui, tokens, dirty, &t("daily.unsaved"), |ui| {
             let can_nav = !working && self.setup.is_none() && self.load_task.is_none();
-            if ui
-                .add_enabled(can_nav, egui::Button::new(t("daily.prev")))
-                .on_hover_text(t("daily.prev.tip"))
-                .clicked()
-            {
-                self.navigate(true);
+            if let Some(nav) = header::nav_buttons(
+                ui,
+                can_nav,
+                (&t("daily.prev"), &t("daily.prev.tip")),
+                (&t("daily.next"), &t("daily.next.tip")),
+            ) {
+                self.navigate(nav.older());
             }
-            if ui
-                .add_enabled(can_nav, egui::Button::new(t("daily.next")))
-                .on_hover_text(t("daily.next.tip"))
-                .clicked()
-            {
-                self.navigate(false);
-            }
+            ui.separator();
             let can_setup = !working && self.setup.is_none() && !self.templates.is_empty();
             if ui
                 .add_enabled(can_setup, egui::Button::new(t("daily.setup")))
@@ -176,17 +172,7 @@ impl DailySalesScreen {
             {
                 self.start_void();
             }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if self.is_dirty() {
-                    ui.label(
-                        RichText::new(t("daily.unsaved"))
-                            .size(12.0)
-                            .color(tokens.text_tertiary),
-                    );
-                }
-            });
         });
-        ui.separator();
     }
 
     fn messages(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -271,6 +257,8 @@ impl DailySalesScreen {
         } else if self.saved.is_some() {
             form::hint(ui, tokens, &t("daily.draft_note"));
         }
+        header::title_only(ui, tokens, &t("cmd.clients.daily_sales"));
+        ui.add_space(6.0);
         ui.add_enabled_ui(enabled, |ui| self.header_ui(ui, tokens));
         ui.add_space(12.0);
         ui.add_enabled_ui(enabled, |ui| self.lines_ui(ui, tokens));

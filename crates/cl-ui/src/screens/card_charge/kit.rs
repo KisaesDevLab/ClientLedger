@@ -32,6 +32,7 @@ use eframe::egui::{self, Align, Layout, RichText, Ui, Vec2};
 use crate::company::demo::register::DemoPosting;
 use crate::company::{CompanyLink, Task};
 use crate::forms::closing_prompt::{ClosingClick, ClosingPrompt};
+use crate::forms::header;
 use crate::i18n::{t, t_with};
 use crate::screens::company::form::{self, DateInput};
 use crate::screens::register::lists::{NAMES, RegisterLists};
@@ -1509,38 +1510,61 @@ pub(crate) fn two_columns(ui: &mut Ui, id_salt: &str, mut draw: impl FnMut(&mut 
         });
 }
 
-/// The window's heading at the right of a row.
-pub(crate) fn heading_right(ui: &mut Ui, tokens: &Tokens, text: &str) {
-    ui.with_layout(Layout::right_to_left(Align::BOTTOM), |ui| {
-        ui.add(
-            egui::Label::new(
-                RichText::new(text)
-                    .text_style(egui::TextStyle::Heading)
-                    .color(tokens.text_primary),
-            )
-            .selectable(false),
-        );
-    });
+/// ◀ Prev · Next ▶ over the saved records (their shortcuts in the
+/// tooltips). Returns the command clicked.
+pub(crate) fn nav_buttons(ui: &mut Ui, enabled: bool) -> Option<&'static str> {
+    let tip = |cmd: &str| chip(cmd).replace(' ', "+");
+    header::nav_buttons(
+        ui,
+        enabled,
+        (&t("helper.prev"), &tip("form.prev_record")),
+        (&t("helper.next"), &tip("form.next_record")),
+    )
+    .map(header::Nav::command)
 }
 
-/// Prev · Next over the saved records (their shortcuts in the tooltips).
-/// Returns the command clicked.
-pub(crate) fn nav_buttons(ui: &mut Ui, enabled: bool) -> Option<&'static str> {
-    let mut clicked = None;
-    for (cmd, key) in [
-        ("form.prev_record", "helper.prev"),
-        ("form.next_record", "helper.next"),
-    ] {
-        let tip = chip(cmd).replace(' ', "+");
-        if ui
-            .add_enabled(enabled, egui::Button::new(t(key)))
-            .on_hover_text(tip)
-            .clicked()
-        {
-            clicked = Some(cmd);
-        }
-    }
-    clicked
+/// The toolbar (Write Check layout): Prev and Next, then what `add`
+/// draws (starting with its own separator), then "Unsaved changes" at the
+/// right; it wraps when narrow. Returns the record command clicked.
+pub(crate) fn toolbar(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    idle: bool,
+    dirty: bool,
+    add: impl FnOnce(&mut Ui),
+) -> Option<&'static str> {
+    header::toolbar(ui, tokens, dirty, &t("helper.unsaved"), |ui| {
+        let clicked = nav_buttons(ui, idle);
+        add(ui);
+        clicked
+    })
+}
+
+/// The title row (Write Check layout): `content` on the left and the
+/// window title on the right, or the title above when they don't fit.
+pub(crate) fn title_row<R>(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    salt: &str,
+    title: &str,
+    content: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    header::title_row(ui, tokens, salt, title, content)
+}
+
+/// The title alone at the right (Write Check layout).
+pub(crate) fn title_only(ui: &mut Ui, tokens: &Tokens, title: &str) {
+    header::title_only(ui, tokens, title);
+}
+
+/// One group of a wrapping row, moved whole to the next line when it
+/// doesn't fit (see [`header::wrap_item`]).
+pub(crate) fn wrap_item<R>(
+    ui: &mut Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    header::wrap_item(ui, salt, add)
 }
 
 /// Keeps `focused` on `field` while its input has the keyboard (Esc

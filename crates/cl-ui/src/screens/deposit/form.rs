@@ -18,6 +18,7 @@ use eframe::egui::{self, Align, CornerRadius, Layout, Margin, RichText, Stroke, 
 use super::{DepositScreen, Field, VoidPrompt, field};
 use crate::company::CompanyEvent;
 use crate::forms::closing_prompt::ClosingClick;
+use crate::forms::header;
 use crate::i18n::{t, t_with};
 use crate::screens::company::form;
 use crate::screens::register::account_text;
@@ -50,6 +51,9 @@ fn above(ui: &mut Ui, tokens: &Tokens, label: &str) -> egui::Response {
 fn entered(r: &egui::Response) -> bool {
     r.lost_focus() && r.ctx.input(|i| i.key_pressed(egui::Key::Enter))
 }
+
+/// The deposit Memo box's width (it moves under Date when it doesn't fit).
+const MEMO_WIDTH: f32 = 260.0;
 
 impl DepositScreen {
     /// Draws the whole window.
@@ -113,21 +117,15 @@ impl DepositScreen {
 
     fn toolbar(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let working = self.save.task.is_some();
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            if ui
-                .add_enabled(!working, egui::Button::new(t("deposit.prev")))
-                .on_hover_text(t("deposit.prev.tip"))
-                .clicked()
-            {
-                self.navigate(true);
-            }
-            if ui
-                .add_enabled(!working, egui::Button::new(t("deposit.next")))
-                .on_hover_text(t("deposit.next.tip"))
-                .clicked()
-            {
-                self.navigate(false);
+        let dirty = self.is_dirty();
+        header::toolbar(ui, tokens, dirty, &t("deposit.unsaved"), |ui| {
+            if let Some(nav) = header::nav_buttons(
+                ui,
+                !working,
+                (&t("deposit.prev"), &t("deposit.prev.tip")),
+                (&t("deposit.next"), &t("deposit.next.tip")),
+            ) {
+                self.navigate(nav.older());
             }
             ui.separator();
             ui.add_enabled(false, egui::Button::new(t("deposit.print")))
@@ -155,17 +153,7 @@ impl DepositScreen {
             {
                 self.refund.open = !self.refund.open;
             }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if self.is_dirty() {
-                    ui.label(
-                        RichText::new(t("deposit.unsaved"))
-                            .size(12.0)
-                            .color(tokens.text_tertiary),
-                    );
-                }
-            });
         });
-        ui.separator();
     }
 
     fn messages(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -227,6 +215,8 @@ impl DepositScreen {
         } else if self.editing_locked() {
             form::hint(ui, tokens, &t("closing.edit_note"));
         }
+        header::title_only(ui, tokens, &t("cmd.banking.deposit"));
+        ui.add_space(6.0);
         ui.add_enabled_ui(enabled, |ui| self.card_ui(ui, tokens));
         ui.add_space(12.0);
         ui.add_enabled_ui(enabled, |ui| self.payments_ui(ui, tokens, enabled));
@@ -275,8 +265,8 @@ impl DepositScreen {
             .inner_margin(Margin::symmetric(20, 16))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    header::wrap_item(ui, "deposit/account", |ui| {
                         let l = above(ui, tokens, &t("deposit.account"));
                         // Q-250: a click opens the list.
                         let r = ui
@@ -314,8 +304,7 @@ impl DepositScreen {
                             ui.label(RichText::new(text).text_style(egui::TextStyle::Monospace));
                         });
                     });
-                    ui.add_space(16.0);
-                    ui.vertical(|ui| {
+                    header::wrap_item(ui, "deposit/date", |ui| {
                         let l = above(ui, tokens, &t("deposit.date"));
                         let before = self.inputs.date.text.clone();
                         let r = ui
@@ -346,13 +335,16 @@ impl DepositScreen {
                         }
                     });
                     ui.add_space(16.0);
-                    ui.vertical(|ui| {
+                    // Memo keeps a usable width; it takes a row of its own
+                    // when the row has no room for it (200 % zoom).
+                    let memo_width = MEMO_WIDTH;
+                    header::wrap_item(ui, "deposit/memo", |ui| {
                         let l = above(ui, tokens, &t("deposit.memo"));
                         let mut text = self.header.current().memo.clone();
                         let r = ui
                             .add(
                                 egui::TextEdit::singleline(&mut text)
-                                    .desired_width(ui.available_width().max(120.0) - 8.0)
+                                    .desired_width(memo_width)
                                     .char_limit(1000),
                             )
                             .labelled_by(l.id);
@@ -365,16 +357,6 @@ impl DepositScreen {
                             self.after_frame = Some(CommandId::new("form.save_new"));
                         }
                     });
-                });
-                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(t("cmd.banking.deposit"))
-                                .text_style(egui::TextStyle::Heading)
-                                .color(tokens.text_primary),
-                        )
-                        .selectable(false),
-                    );
                 });
             });
         if let Some(id) = picked {

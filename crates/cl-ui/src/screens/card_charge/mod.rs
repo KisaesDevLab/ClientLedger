@@ -899,14 +899,10 @@ impl CardChargeScreen {
 
     fn toolbar(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let idle = self.flow.idle();
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            if let Some(cmd) = kit::nav_buttons(ui, idle) {
-                self.after_frame = Some(CommandId::new(cmd));
-            }
+        let mode = self.header.current().mode;
+        let mut picked = None;
+        let clicked = kit::toolbar(ui, tokens, idle, self.is_dirty(), |ui| {
             ui.separator();
-            let mode = self.header.current().mode;
-            let mut picked = None;
             ui.add_enabled_ui(idle, |ui| {
                 if ui
                     .radio(mode == CardMode::Charge, t("card.mode.charge"))
@@ -922,20 +918,13 @@ impl CardChargeScreen {
                     picked = Some(CardMode::Credit);
                 }
             });
-            if let Some(m) = picked {
-                self.set_mode(m);
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if self.is_dirty() {
-                    ui.label(
-                        RichText::new(t("helper.unsaved"))
-                            .size(12.0)
-                            .color(tokens.text_tertiary),
-                    );
-                }
-            });
         });
-        ui.separator();
+        if let Some(cmd) = clicked {
+            self.after_frame = Some(CommandId::new(cmd));
+        }
+        if let Some(m) = picked {
+            self.set_mode(m);
+        }
     }
 
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -976,8 +965,9 @@ impl CardChargeScreen {
         let cards = self.cards();
         let current = self.card();
         let mut picked = None;
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
+        let title = self.title_text();
+        kit::title_row(ui, tokens, "card_charge", &title, |ui| {
+            kit::wrap_item(ui, "card_charge/card", |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
                     let (p, r) = kit::account_combo(
                         ui,
@@ -992,14 +982,13 @@ impl CardChargeScreen {
                     kit::track(&mut self.focused, &r, field::CARD);
                 });
             });
-            ui.vertical(|ui| {
+            kit::wrap_item(ui, "card_charge/balance", |ui| {
                 ui.add_space(20.0);
                 let owed = current
                     .and_then(|c| self.balances.shown(c, Some(AccountClass::CreditCard)))
                     .map(|m| m.format(self.money_style));
                 kit::balance_line(ui, tokens, &t("card.balance_owed"), owed);
             });
-            kit::heading_right(ui, tokens, &self.title_text());
         });
         if let Some(id) = picked {
             self.set_card(id);
