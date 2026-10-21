@@ -135,6 +135,35 @@ pub struct PersonalFundsScreen {
 /// or liability account.
 const FUNDS_TYPES: &[TxnType] = &[TxnType::Expense];
 
+/// How Who paid is kept in the books: the engine's expense has no contact
+/// on the equity or liability line it is paid from, so the owner's name
+/// starts the memo ("Paid by Dana Ortiz — new hose"). Fixed English text,
+/// not translated: it is data in the books (and the accountant reads it),
+/// and Prev/Next or the register read it back from there.
+const WHO_PREFIX: &str = "Paid by ";
+/// Between the name and the owner's own memo.
+const WHO_SEPARATOR: &str = " \u{2014} ";
+
+/// The memo sent: who paid first, then the owner's memo.
+pub(crate) fn memo_with_who(who: Option<&str>, memo: Option<&str>) -> Option<String> {
+    match (who.map(str::trim).filter(|w| !w.is_empty()), memo) {
+        (Some(w), Some(m)) => Some(format!("{WHO_PREFIX}{w}{WHO_SEPARATOR}{m}")),
+        (Some(w), None) => Some(format!("{WHO_PREFIX}{w}")),
+        (None, m) => m.map(str::to_string),
+    }
+}
+
+/// A saved memo split back into who paid (the name) and the owner's memo.
+pub(crate) fn split_who(memo: &str) -> (Option<&str>, String) {
+    let Some(rest) = memo.strip_prefix(WHO_PREFIX) else {
+        return (None, memo.to_string());
+    };
+    match rest.split_once(WHO_SEPARATOR) {
+        Some((name, m)) => (Some(name), m.to_string()),
+        None => (Some(rest), String::new()),
+    }
+}
+
 impl PersonalFundsScreen {
     /// A new form in the open company.
     #[must_use]
@@ -517,6 +546,12 @@ impl PersonalFundsScreen {
 
     /// The checked form as the engine posting and the demo's copy.
     pub(crate) fn outbound(&self, c: &CheckedPersonalFunds) -> Result<Outbound, LocalValidation> {
+        // Who paid rides in the memo (see [`memo_with_who`]).
+        let memo = memo_with_who(
+            c.who.and_then(|w| self.books.contact_name(w)).as_deref(),
+            c.memo.as_deref(),
+        );
+        let c = &CheckedPersonalFunds { memo, ..c.clone() };
         let posting = BankPosting::card_charge_with(
             CardChargeDraft {
                 pay_from: c.offset,
@@ -732,9 +767,8 @@ impl PersonalFundsScreen {
 
     /// The saved record `v` as this form: one credit on an equity account
     /// ("put in") or another liability ("pay back") with debit lines.
-    /// Anything else is read-only (`false`). Who paid is not on the
-    /// posting and stays blank. Amounts are the engine's, copied as they
-    /// are.
+    /// Anything else is read-only (`false`). Who paid is read back from the
+    /// memo ([`split_who`]). Amounts are the engine's, copied as they are.
     pub(crate) fn form_of(
         &mut self,
         v: &Versioned<Transaction>,
@@ -770,7 +804,24 @@ impl PersonalFundsScreen {
         let mut f = PersonalFundsForm::new(Some(txn.txn_date), treatment);
         f.offset = own.map(|i| txn.lines[i].account_id);
         f.payee = txn.contact_id;
-        f.memo = txn.memo.clone().unwrap_or_default();
+        // Who paid comes back out of the memo, by the exact name of one
+        // contact; otherwise the memo stays as it is and Who paid blank.
+        let memo = txn.memo.clone().unwrap_or_default();
+        let (name, rest) = split_who(&memo);
+        let who = name.and_then(|n| {
+            let mut found = self
+                .books
+                .contacts
+                .iter()
+                .filter(|c| c.fields.display_name == n);
+            match (found.next(), found.next()) {
+                (Some(c), None) => Some(c.id),
+                _ => None,
+            }
+        });
+        f.who = who;
+        f.memo = if who.is_some() { rest } else { memo };
+
         f.amount = own.map(|i| txn.lines[i].credit);
         let keys = &mut self.lines.form_mut().adapter_mut().keys;
         let seeds = txn

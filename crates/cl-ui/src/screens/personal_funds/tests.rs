@@ -147,6 +147,52 @@ fn a_saved_one_opens_with_prev_changes_in_place_and_voids() {
 }
 
 #[test]
+fn who_paid_is_kept_in_the_memo_and_comes_back_on_reopen() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let (who, name) = s
+        .books
+        .contacts
+        .first()
+        .map(|c| (c.id, c.fields.display_name.clone()))
+        .expect("a contact");
+    fill(&mut s, "18.00", &[("6250", "18.00")]);
+    s.header.edit_step(|h| {
+        h.who = Some(who);
+        h.memo = "new hose".into();
+    });
+    s.sync_inputs();
+    assert!(s.start_save(SaveIntent::SaveAndNew, None), "{}", s.state());
+    let id = s.flow.last.expect("saved").id;
+    let memo = {
+        let mut demo = link.demo_state().expect("demo");
+        let chart = demo
+            .chart
+            .get_or_insert_with(crate::company::demo::chart)
+            .clone();
+        let contacts = demo.contacts_mut().clone();
+        demo.ledger
+            .get(&chart, &contacts, id)
+            .expect("txn")
+            .record
+            .memo
+    };
+    assert_eq!(memo, Some(format!("Paid by {name} \u{2014} new hose")));
+    // Reopened: Who paid is back and the memo is the owner's own.
+    s.header.edit_step(|h| h.who = None);
+    s.new_form(false);
+    s.command(CommandId::new("form.prev_record"));
+    assert_eq!(s.flow.editing.map(|e| e.id), Some(id));
+    assert_eq!(s.header.current().who, Some(who));
+    assert_eq!(s.header.current().memo, "new hose");
+    assert!(!s.is_dirty());
+    // The convention round-trips; a memo without it is left alone.
+    assert_eq!(memo_with_who(None, Some("x")), Some("x".into()));
+    assert_eq!(split_who("Paid by Ann"), (Some("Ann"), String::new()));
+    assert_eq!(split_who("plain memo"), (None, "plain memo".into()));
+}
+
+#[test]
 fn esc_reverts_the_focused_field_first() {
     let (_d, link) = link();
     let mut s = screen(&link);
