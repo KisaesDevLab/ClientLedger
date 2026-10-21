@@ -149,6 +149,7 @@ impl WriteCheckScreen {
             {
                 self.toggle_history();
             }
+            self.template_slot(ui);
             ui.separator();
             let mut later = self.header.current().print_later;
             let can_print_later = !working && (self.editing.is_none() || self.check_edit());
@@ -1045,6 +1046,10 @@ impl WriteCheckScreen {
             }
             "form.history" => {
                 self.toggle_history();
+                true
+            }
+            "form.save_as_template" => {
+                self.save_as_template();
                 true
             }
             "form.attach" => {

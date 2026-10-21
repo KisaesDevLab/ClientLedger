@@ -326,6 +326,10 @@ impl DailySalesScreen {
     fn posted(&mut self, e: &DailyEntry) {
         let form = self.header.current().clone();
         crate::forms::publish_saved(&self.link, &self.bus, &self.touched(&form));
+        if let Some(txn) = e.transaction {
+            self.save_template
+                .form_saved(&self.link, self.group.as_ref(), txn);
+        }
         self.closing_prompt.saved();
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
         self.save.count += 1;
@@ -379,6 +383,7 @@ impl DailySalesScreen {
             ..DailySalesForm::default()
         });
         self.saved = None;
+        self.save_template.forget();
         self.void = VoidState::default();
         self.save.problems.clear();
         self.save.key = None;

@@ -13,6 +13,7 @@
 //! Every save and void publishes both accounts on the data bus (Q-262).
 
 mod engine;
+mod template;
 
 use std::sync::Arc;
 
@@ -155,6 +156,8 @@ pub struct TransferScreen {
     pub(crate) nav_prompt: Option<bool>,
     /// Prev/Next to take once the prompt's save is done.
     after_save_nav: Option<bool>,
+    /// Save as Template and the template this form came from (P15).
+    pub(crate) template: crate::screens::templates::SaveFlow,
 }
 
 fn options(password: Option<Secret>) -> PostingOptions {
@@ -260,6 +263,7 @@ impl TransferScreen {
             focused: None,
             nav_prompt: None,
             after_save_nav: None,
+            template: crate::screens::templates::SaveFlow::default(),
         };
         s.start_load();
         s.poll();
@@ -641,6 +645,8 @@ impl TransferScreen {
 
     fn saved(&mut self, id: TransactionId, version: RecordVersion) {
         crate::forms::publish_saved(&self.link, &self.bus, &self.published);
+        self.template
+            .form_saved(&self.link, self.group.as_ref(), id);
         self.closing_prompt.saved();
         let intent = self.intent.take().unwrap_or(SaveIntent::Save);
         self.saved_count += 1;
@@ -717,6 +723,7 @@ impl TransferScreen {
         };
         self.form.load(blank(from, date));
         self.editing = None;
+        self.template.forget();
         self.nav_at = None;
         self.nav_prompt = None;
         self.focused = None;
@@ -949,6 +956,7 @@ impl TransferScreen {
     fn show(&mut self, v: &Versioned<Transaction>) {
         let (form, exact) = form_of(&v.record);
         self.form.load(form);
+        self.template.forget();
         let mut accounts: Vec<AccountId> = v.record.lines.iter().map(|l| l.account_id).collect();
         accounts.sort();
         accounts.dedup();
@@ -1103,7 +1111,9 @@ impl TransferScreen {
             return;
         }
         let working = self.save_task.is_some();
-        if let Some(cmd) = kit::toolbar(ui, &tokens, !working, self.is_dirty(), |_| {}) {
+        if let Some(cmd) = kit::toolbar(ui, &tokens, !working, self.is_dirty(), |ui| {
+            self.template_slot(ui);
+        }) {
             self.command(CommandId::new(cmd));
         }
         match self.closing_prompt.ui(ui, &tokens) {
@@ -1343,6 +1353,7 @@ impl TransferScreen {
             "void_open": self.void_open,
             "nav_at": self.nav_at,
             "nav_prompt": self.nav_prompt.is_some(),
+            "template": self.template.state_json(),
         });
         if let (Value::Object(m), Value::Object(c)) = (
             &mut v,
@@ -1447,9 +1458,17 @@ impl Screen for TransferScreen {
                 d
             }
             "form.revert" => self.revert_field(),
+            "form.save_as_template" => {
+                self.save_as_template();
+                true
+            }
 
             _ => false,
         }
+    }
+
+    fn open_template(&mut self, t: crate::forms::template::TemplateOpen) -> bool {
+        self.fill_template(&t)
     }
 
     fn open_record(&mut self, txn: TransactionId) -> bool {

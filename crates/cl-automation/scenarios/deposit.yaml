@@ -28,6 +28,7 @@ steps:
   - click: {role: button, label: Clear}
   - assert_state: {key: screen.mode, equals: new}
   - assert_state: {key: screen.dirty, equals: false}
+  - assert_exists: {role: button, label: Save as Template}
   - assert_value: {target: {role: combo_box, label: Deposit to}, equals: "1010 · Operating Checking"}
   - assert_state: {key: screen.balance_shown, equals: true}
   - assert_state: {key: screen.pending.count, equals: 2}

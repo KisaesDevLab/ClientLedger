@@ -13,6 +13,7 @@ pub mod journal;
 pub mod lists;
 pub mod money;
 pub mod register;
+pub mod template_store;
 pub mod templates;
 
 /// One demo company card.

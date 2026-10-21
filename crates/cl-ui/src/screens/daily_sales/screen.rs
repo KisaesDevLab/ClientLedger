@@ -226,6 +226,7 @@ impl DailySalesScreen {
             date: e.date,
         });
         self.header.load(form);
+        self.save_template.forget();
         match e.layout {
             Some(t) => self.apply_template(t),
             None => self.load_template(e.template),
@@ -354,6 +355,7 @@ impl DailySalesScreen {
             "layout_list": self.layout_list,
             "nav_at": self.nav.at,
             "nav_prompt": self.nav_prompt.is_some(),
+            "template": self.save_template.state_json(),
 
             "focused": self.focused.map(|f| match f {
                 Field::Layout => "layout",
@@ -423,6 +425,10 @@ impl Screen for DailySalesScreen {
             return handled;
         }
         self.form_command(id)
+    }
+
+    fn open_template(&mut self, t: crate::forms::template::TemplateOpen) -> bool {
+        self.fill_template(&t)
     }
 
     fn open_record(&mut self, txn: TransactionId) -> bool {

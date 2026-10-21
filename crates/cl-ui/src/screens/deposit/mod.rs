@@ -25,6 +25,7 @@ mod payments;
 mod refund;
 mod save;
 mod summary;
+mod template;
 
 use std::sync::Arc;
 
@@ -240,6 +241,8 @@ pub struct DepositScreen {
     pub(crate) nav_prompt: Option<bool>,
     /// Prev/Next to take once the prompt's save is done.
     pub(crate) after_save_nav: Option<bool>,
+    /// Save as Template and the template this deposit came from (P15).
+    pub(crate) template: crate::screens::templates::SaveFlow,
 }
 
 /// A blank deposit (no lines: the grid holds them).
@@ -316,6 +319,7 @@ impl DepositScreen {
             lists_stale: false,
             nav_prompt: None,
             after_save_nav: None,
+            template: crate::screens::templates::SaveFlow::default(),
         };
         s.bus = s.link.bus().subscribe();
         s.start_load();
@@ -654,6 +658,7 @@ impl DepositScreen {
             "refund": self.refund.state_json(),
             "nav_at": self.nav.at,
             "nav_prompt": self.nav_prompt.is_some(),
+            "template": self.template.state_json(),
 
             "focused": self.focused.map(|f| format!("{f:?}").to_lowercase()),
             "grid": { "focused": self.lines.has_focus() },
@@ -715,6 +720,10 @@ impl Screen for DepositScreen {
             return handled;
         }
         self.form_command(id)
+    }
+
+    fn open_template(&mut self, t: crate::forms::template::TemplateOpen) -> bool {
+        self.fill_template(&t)
     }
 
     fn open_record(&mut self, txn: TransactionId) -> bool {

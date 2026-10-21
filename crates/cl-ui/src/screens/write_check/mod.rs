@@ -29,6 +29,7 @@ mod panel;
 pub(crate) mod prefill;
 mod save;
 mod suggest;
+mod template;
 
 use std::sync::Arc;
 
@@ -295,6 +296,8 @@ pub struct WriteCheckScreen {
     /// The names, accounts or tags changed elsewhere while the form had
     /// unsaved edits: read them again once it is clean.
     pub(crate) lists_stale: bool,
+    /// Save as Template and the template this check came from (P15).
+    pub(crate) template: crate::screens::templates::SaveFlow,
 }
 
 /// The tag list `check` needs for the header-tag defaults.
@@ -389,6 +392,7 @@ impl WriteCheckScreen {
             printed: None,
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,
+            template: crate::screens::templates::SaveFlow::default(),
         };
         s.bus = s.link.bus().subscribe();
         s.start_load();
@@ -977,6 +981,10 @@ impl Screen for WriteCheckScreen {
     fn state(&self) -> Value {
         self.state_json()
     }
+
+    fn open_template(&mut self, t: crate::forms::template::TemplateOpen) -> bool {
+        self.fill_template(&t)
+    }
 }
 
 impl WriteCheckScreen {
@@ -1084,6 +1092,7 @@ impl WriteCheckScreen {
             "nav_prompt": self.nav_prompt.is_some(),
             "printed_prompt": self.printed.is_some(),
             "printed_choice": self.save.printed_choice.map(cl_api::PrintedCheckChange::as_wire),
+            "template": self.template.state_json(),
         });
         if let (Value::Object(m), Value::Object(w)) = (&mut v, wp7) {
             m.extend(w);
