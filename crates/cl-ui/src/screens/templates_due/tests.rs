@@ -237,6 +237,23 @@ fn nothing_due_and_failed_rows() {
 }
 
 #[test]
+fn nothing_starts_while_a_call_is_on_its_way() {
+    let (_dir, link) = demo();
+    let today = DemoState::today();
+    remind(&link, "Savings", d(2026, 10, 30));
+    let _r = caught_up(&link, today);
+    let mut s = screen(&link, today);
+    select(&mut s, "waiting");
+    // A call still running (it never answers here).
+    s.open_job = Some(crate::screens::templates::engine::Job::Done(None));
+    s.enter_now(None);
+    assert!(s.enter_job.is_none(), "Enter waits for the running call");
+    s.skip_selected();
+    assert!(s.skip_job.is_none(), "Skip waits too");
+    assert_eq!(s.state()["waiting"], 1, "nothing changed");
+}
+
+#[test]
 fn a_capped_catch_up_has_no_skip_or_dismiss() {
     let (_dir, link) = demo();
     let mut s = screen(&link, DemoState::today());

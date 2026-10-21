@@ -391,6 +391,11 @@ impl TemplatesDueScreen {
     /// Enter now (a reminder date), with the closing-date password after a
     /// refusal.
     pub(crate) fn enter_now(&mut self, password: Option<Secret>) {
+        // One call at a time: a second Enter (keyboard) while one is on its
+        // way would drop the first answer.
+        if self.busy() {
+            return;
+        }
         let Some(row) = self.selected_row().cloned() else {
             return;
         };
@@ -455,6 +460,9 @@ impl TemplatesDueScreen {
 
     /// Skip this one / Dismiss.
     pub(crate) fn skip_selected(&mut self) {
+        if self.busy() {
+            return;
+        }
         let Some(row) = self.selected_row().cloned() else {
             return;
         };
