@@ -1701,12 +1701,30 @@ impl Grid {
                 // A line scrolled partly under the header is left blank
                 // rather than drawn as half a line of text.
                 let cut = cell_rect.top() < body.top() - 0.5;
+                // An editable list cell shows its chevron under the pointer
+                // and on the cursor (Q-250): a click opens the list. Its text
+                // keeps clear of it (a long name ends in "…" before it).
+                let chevron = !cut
+                    && editable
+                    && !state.contains(RowState::LOCKED)
+                    && matches!(
+                        col.kind,
+                        CellKind::Picker { .. } | CellKind::Tags { .. } | CellKind::Dropdown { .. }
+                    )
+                    && (is_cursor || resp.hovered());
+                let text_rect = if chevron {
+                    let mut r = paint_rect;
+                    r.max.x = (r.max.x - crate::view::chevron::WIDTH).max(r.min.x);
+                    r
+                } else {
+                    paint_rect
+                };
                 let needed = if cut {
                     0.0
                 } else {
                     Self::paint_cell(
                         row_ui.painter(),
-                        paint_rect,
+                        text_rect,
                         &col,
                         &value,
                         &shown,
@@ -1719,17 +1737,7 @@ impl Grid {
                         LOCK_GUTTER
                     }
                 };
-                // An editable list cell shows its chevron under the pointer
-                // and on the cursor (Q-250): a click opens the list.
-                if !cut
-                    && editable
-                    && !state.contains(RowState::LOCKED)
-                    && matches!(
-                        col.kind,
-                        CellKind::Picker { .. } | CellKind::Tags { .. } | CellKind::Dropdown { .. }
-                    )
-                    && (is_cursor || resp.hovered())
-                {
+                if chevron {
                     let open = is_cursor && self.core.edit().is_some_and(|e| e.popup.is_some());
                     crate::view::chevron::paint(
                         row_ui.painter(),
