@@ -31,6 +31,7 @@ pub mod card;
 pub mod check;
 pub mod daily_sales;
 pub mod deposit;
+pub mod journal;
 pub mod lines;
 pub mod loan_payment;
 pub mod owner_money;
