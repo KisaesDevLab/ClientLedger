@@ -28,19 +28,29 @@ const VISIBLE_ROWS: usize = 8;
 const RECENT: usize = 5;
 /// The columns' widths (Deposit, Date, Type, Received from, Ref no.,
 /// Method, Amount): the header and every row use them, so the headings sit
-/// over their columns.
-const COLS: [f32; 7] = [56.0, 84.0, 110.0, 170.0, 70.0, 100.0, 100.0];
+/// over their columns. Received from takes what the others leave.
+const COLS: [f32; 7] = [56.0, 84.0, 100.0, 0.0, 64.0, 96.0, 96.0];
+/// The narrowest and widest Received from.
+const NAME_WIDTH: (f32, f32) = (90.0, 220.0);
+
+/// The columns' widths for `room` points with `gap` between cells.
+fn widths(room: f32, gap: f32) -> [f32; 7] {
+    let fixed: f32 = COLS.iter().sum::<f32>() + gap * 6.0;
+    let mut w = COLS;
+    w[3] = (room - fixed - 4.0).clamp(NAME_WIDTH.0, NAME_WIDTH.1);
+    w
+}
 
 /// One cell of the payments table: `add` drawn in a box of the column's
 /// width, left-aligned (right-aligned for Amount).
-fn cell(ui: &mut Ui, col: usize, add: impl FnOnce(&mut Ui)) {
-    let layout = if col == COLS.len() - 1 {
+fn cell(ui: &mut Ui, w: &[f32; 7], col: usize, add: impl FnOnce(&mut Ui)) {
+    let layout = if col == w.len() - 1 {
         egui::Layout::right_to_left(egui::Align::Center)
     } else {
         egui::Layout::left_to_right(egui::Align::Center)
     };
-    ui.allocate_ui_with_layout(egui::vec2(COLS[col], ROW_HEIGHT), layout, |ui| {
-        ui.set_width(COLS[col]);
+    ui.allocate_ui_with_layout(egui::vec2(w[col], ROW_HEIGHT), layout, |ui| {
+        ui.set_width(w[col]);
         add(ui);
     });
 }
@@ -299,7 +309,11 @@ impl DepositScreen {
                 )
                 .selectable(false),
             );
-            r.on_hover_text(t("deposit.payments.tip"));
+            r.on_hover_text(format!(
+                "{} {}",
+                t("deposit.payments.tip"),
+                t("jargon.undeposited_funds")
+            ));
             ui.label(
                 RichText::new(t_with(
                     "deposit.payments.selected",
@@ -351,6 +365,7 @@ impl DepositScreen {
             .iter()
             .map(|p| p.source)
             .collect();
+        let cols = widths(ui.available_width(), ui.spacing().item_spacing.x);
         ui.horizontal(|ui| {
             for (col, key) in [
                 "deposit.col.pick",
@@ -364,7 +379,7 @@ impl DepositScreen {
             .into_iter()
             .enumerate()
             {
-                cell(ui, col, |ui| {
+                cell(ui, &cols, col, |ui| {
                     ui.label(
                         RichText::new(t(key))
                             .size(12.0)
@@ -388,7 +403,7 @@ impl DepositScreen {
                             "deposit.payments.pick",
                             &[("name", p.received_from.as_deref().unwrap_or(""))],
                         );
-                        cell(ui, 0, |ui| {
+                        cell(ui, &cols, 0, |ui| {
                             let r = ui.add_enabled(
                                 can_tick && p.exact().is_some(),
                                 egui::Checkbox::without_text(&mut on),
@@ -406,24 +421,24 @@ impl DepositScreen {
                                 toggled = Some(i);
                             }
                         });
-                        cell(ui, 1, |ui| {
+                        cell(ui, &cols, 1, |ui| {
                             ui.add(egui::Label::new(Self::row_date(p.date)).truncate());
                         });
-                        cell(ui, 2, |ui| {
+                        cell(ui, &cols, 2, |ui| {
                             ui.add(egui::Label::new(t(type_key(&p.txn_type))).truncate());
                         });
-                        cell(ui, 3, |ui| {
+                        cell(ui, &cols, 3, |ui| {
                             ui.add(
                                 egui::Label::new(p.received_from.clone().unwrap_or_default())
                                     .truncate(),
                             );
                         });
-                        cell(ui, 4, |ui| {
+                        cell(ui, &cols, 4, |ui| {
                             ui.add(
                                 egui::Label::new(p.ref_no.clone().unwrap_or_default()).truncate(),
                             );
                         });
-                        cell(ui, 5, |ui| {
+                        cell(ui, &cols, 5, |ui| {
                             // The engine's method; a dash when it isn't known.
                             let method = p
                                 .method
@@ -435,7 +450,7 @@ impl DepositScreen {
                             Some(m) => m.format(style),
                             None => p.amount.display(false).unwrap_or_default(),
                         };
-                        cell(ui, 6, |ui| {
+                        cell(ui, &cols, 6, |ui| {
                             ui.label(RichText::new(amount).text_style(egui::TextStyle::Monospace));
                         });
                     });
@@ -490,7 +505,8 @@ impl DepositScreen {
         });
         ui.add_space(8.0);
         form::card(ui, tokens, |ui| {
-            form::heading(ui, tokens, &t("deposit.panel.clearing"));
+            form::heading(ui, tokens, &t("deposit.panel.clearing"))
+                .on_hover_text(t("jargon.undeposited_funds"));
             let text = self
                 .panel
                 .pending
@@ -533,5 +549,18 @@ impl DepositScreen {
                 self.load_deposit(id, account);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_payment_columns_fit_the_room_with_a_floor_and_a_cap() {
+        let fit = widths(700.0, 8.0);
+        assert!(fit.iter().sum::<f32>() + 48.0 <= 700.0, "{fit:?}");
+        assert_eq!(widths(2000.0, 8.0)[3], NAME_WIDTH.1);
+        assert_eq!(widths(300.0, 8.0)[3], NAME_WIDTH.0);
     }
 }

@@ -1146,7 +1146,11 @@ impl LoanPaymentScreen {
                                 third,
                                 true,
                             )
-                            .on_hover_text(t("loan.interest.tip"));
+                            .on_hover_text(format!(
+                                "{} {}",
+                                t("jargon.interest"),
+                                t("loan.interest.tip")
+                            ));
                             kit::track(&mut self.focused, &r, field::INTEREST);
                             if r.lost_focus() {
                                 self.amount_left(field::INTEREST);
@@ -1155,7 +1159,7 @@ impl LoanPaymentScreen {
                     });
                     ui.add_space(8.0);
                     ui.horizontal_top(|ui| {
-                        ui.vertical(|ui| {
+                        let r = ui.vertical(|ui| {
                             ui.set_width(third);
                             let principal = self
                                 .compose()
@@ -1164,6 +1168,7 @@ impl LoanPaymentScreen {
                                 .unwrap_or_default();
                             kit::figure_field(ui, tokens, &t("loan.principal"), &principal, third);
                         });
+                        r.response.on_hover_text(t("jargon.principal"));
                         ui.add_space(16.0);
                         ui.vertical(|ui| {
                             ui.set_width(third * 2.0 + 16.0);

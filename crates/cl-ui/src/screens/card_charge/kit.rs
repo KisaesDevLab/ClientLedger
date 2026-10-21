@@ -277,15 +277,6 @@ impl Books {
             .and_then(crate::screens::register::class_of)
     }
 
-    /// An account's "number · name".
-    pub(crate) fn account_name(&self, id: AccountId) -> String {
-        self.accounts
-            .iter()
-            .find(|a| a.id == id)
-            .map(crate::screens::register::account_text)
-            .unwrap_or_default()
-    }
-
     /// A contact's display name.
     pub(crate) fn contact_name(&self, id: ContactId) -> Option<String> {
         self.contacts
@@ -1508,6 +1499,16 @@ pub(crate) fn two_columns(ui: &mut Ui, id_salt: &str, mut draw: impl FnMut(&mut 
                 draw(ui, Column::Panel);
             }
         });
+}
+
+/// The tooltip key that explains the entity type's words for owner money
+/// (draw, contribution, distribution, paid-in capital).
+pub(crate) fn jargon_of(entity: Option<Entity>) -> &'static str {
+    match entity {
+        Some(Entity::Partnership) => "jargon.partner_money",
+        Some(Entity::SCorp | Entity::CCorp) => "jargon.shareholder_money",
+        Some(Entity::SoleProp | Entity::SingleMemberLlc) | None => "jargon.owner_money",
+    }
 }
 
 /// ◀ Prev · Next ▶ over the saved records (their shortcuts in the

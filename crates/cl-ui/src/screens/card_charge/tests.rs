@@ -563,3 +563,37 @@ fn every_helper_draws_with_labelled_inputs() {
         }
     }
 }
+
+#[test]
+fn owner_money_words_get_a_plain_tooltip_for_each_entity_type() {
+    use cl_model::forms::owner_money::Entity;
+    assert_eq!(kit::jargon_of(None), "jargon.owner_money");
+    assert_eq!(
+        kit::jargon_of(Some(Entity::SingleMemberLlc)),
+        "jargon.owner_money"
+    );
+    assert_eq!(
+        kit::jargon_of(Some(Entity::Partnership)),
+        "jargon.partner_money"
+    );
+    assert_eq!(
+        kit::jargon_of(Some(Entity::SCorp)),
+        "jargon.shareholder_money"
+    );
+    // Every glossary entry is a plain sentence in the catalog.
+    for key in [
+        "jargon.undeposited_funds",
+        "jargon.cash_over_short",
+        "jargon.equity",
+        "jargon.principal",
+        "jargon.interest",
+        "jargon.owner_money",
+        "jargon.partner_money",
+        "jargon.shareholder_money",
+    ] {
+        let text = crate::i18n::t(key);
+        assert_ne!(text, key, "{key} is in the catalog");
+        assert!(text.ends_with('.'), "{key}");
+    }
+    assert!(crate::i18n::t("jargon.undeposited_funds").contains("Payments Clearing"));
+}

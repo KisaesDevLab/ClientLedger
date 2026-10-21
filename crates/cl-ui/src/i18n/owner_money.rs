@@ -13,7 +13,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("owner_money.paid_by.transfer", "Transfer or online"),
     ("owner_money.check_no", "Check No."),
     ("owner_money.recorded_in", "Recorded in"),
-    ("owner_money.recorded_line", "Recorded in: {account}"),
     ("owner_money.source.engine", "Set up for your type of business. You can change it."),
     ("owner_money.source.remembered", "Your earlier choice for this company. You can change it."),
     ("owner_money.panel.title", "About this"),

@@ -671,7 +671,8 @@ impl DailySalesScreen {
             RichText::new(over_short_text(totals.over_short, style))
                 .strong()
                 .color(color),
-        );
+        )
+        .on_hover_text(t("jargon.cash_over_short"));
         if !totals.unmapped.is_empty() {
             ui.label(
                 RichText::new(t("daily.unmapped"))
@@ -746,7 +747,8 @@ impl DailySalesScreen {
     fn panel_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let style = self.money_style;
         form::card(ui, tokens, |ui| {
-            form::heading(ui, tokens, &t("daily.panel.clearing"));
+            form::heading(ui, tokens, &t("daily.panel.clearing"))
+                .on_hover_text(t("jargon.undeposited_funds"));
             ui.add(
                 egui::Label::new(
                     RichText::new(t("daily.panel.clearing.explain"))

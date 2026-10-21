@@ -33,7 +33,9 @@ steps:
   - click: {role: button, label: Clear}
   - assert_state: {key: screen.mode, equals: new}
   - assert_value: {target: {role: combo_box, label: Transfer from}, equals: "1010 · Operating Checking"}
-  - assert_exists: {role: label, label: "Balance 84,210.55"}
+  # The label in the body font, the figure in mono (two labels); the side
+  # panel shows the same engine balance.
+  - assert_count: {target: {role: label, label: "84,210.55"}, count: 2}
   - click: {role: combo_box, label: Transfer to}
   - click: {role: button, label: "1010 · Operating Checking"}
   - type: {text: "200", target: {role: text_input, label: Amount}}
@@ -48,7 +50,8 @@ steps:
   # --- 3. To the card: saved, in both registers at once -----------------------
   - click: {role: combo_box, label: Transfer to}
   - click: {role: button, label: "2050 · Business Credit Card"}
-  - assert_exists: {role: label, label: "Balance owed 289.63"}
+  - assert_count: {target: {role: label, label: "Balance owed"}, count: 2}
+  - assert_count: {target: {role: label, label: "289.63"}, count: 2}
   - assert_no_clipping: {}
   - screenshot: to-card
   - key: Alt+N

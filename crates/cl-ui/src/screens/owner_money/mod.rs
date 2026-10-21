@@ -33,7 +33,7 @@ use serde_json::{Value, json};
 
 use crate::company::demo::register::DemoPosting;
 use crate::company::{CompanyEvent, CompanyLink};
-use crate::i18n::{t, t_with};
+use crate::i18n::t;
 use crate::screens::card_charge::kit::{
     self, AmountInput, Balances, Books, MessageClick, NameInput, NameOutcome, Outbound, Pending,
     SaveFlow, Sent, Settled,
@@ -956,6 +956,7 @@ impl OwnerMoneyScreen {
                         half - 8.0,
                     );
                     kit::track(&mut self.focused, &r, field::EQUITY);
+                    r.on_hover_text(t("jargon.equity"));
                     if let Some(id) = p {
                         self.set_equity(id);
                     }
@@ -969,21 +970,6 @@ impl OwnerMoneyScreen {
                 });
         });
         ui.add_space(6.0);
-        let recorded = self
-            .header
-            .current()
-            .equity
-            .map(|a| self.books.account_name(a))
-            .unwrap_or_default();
-        if !recorded.is_empty() {
-            ui.label(
-                RichText::new(t_with(
-                    "owner_money.recorded_line",
-                    &[("account", &recorded)],
-                ))
-                .color(tokens.text_secondary),
-            );
-        }
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
         kit::status(ui, tokens, &self.flow);
@@ -1027,7 +1013,8 @@ impl OwnerMoneyScreen {
     fn panel_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let style = self.money_style;
         kit::panel_card(ui, tokens, &t("owner_money.panel.title"), |ui| {
-            ui.add(egui::Label::new(t(self.note_key())).wrap());
+            ui.add(egui::Label::new(t(self.note_key())).wrap())
+                .on_hover_text(t(kit::jargon_of(self.books.entity)));
             ui.add(
                 egui::Label::new(
                     RichText::new(t("owner_money.ask_accountant")).color(tokens.text_secondary),

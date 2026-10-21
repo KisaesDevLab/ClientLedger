@@ -265,7 +265,7 @@ impl DepositScreen {
             .inner_margin(Margin::symmetric(20, 16))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.horizontal_wrapped(|ui| {
+                header::wrap_row(ui, |ui| {
                     header::wrap_item(ui, "deposit/account", |ui| {
                         let l = above(ui, tokens, &t("deposit.account"));
                         // Q-250: a click opens the list.

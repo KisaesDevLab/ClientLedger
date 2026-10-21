@@ -26,7 +26,6 @@ steps:
   - assert_state: {key: screen.entity_type, equals: single_member_llc}
   - assert_state: {key: screen.record, equals: new}
   - assert_value: {target: {role: combo_box, label: Recorded in}, equals: "30170 · Owner's Draw"}
-  - assert_exists: {role: label, label: "Recorded in: 30170 · Owner's Draw"}
   - assert_exists: {role: label, label: "Set up for your type of business. You can change it."}
   - assert_exists: {role: label, label_contains: "money you take out is recorded as an owner draw"}
   - assert_exists: {role: label, label: "Ask your accountant if you're not sure which to use."}
@@ -52,7 +51,6 @@ steps:
   - click: {role: button, label: Put money in}
   - assert_state: {key: screen.direction, equals: put_money_in}
   - assert_value: {target: {role: combo_box, label: Recorded in}, equals: "30160 · Owner's Contribution"}
-  - assert_exists: {role: label, label: "Recorded in: 30160 · Owner's Contribution"}
   - type: {text: "1000", target: {role: text_input, label: Amount}}
   - key: Tab
   - click: {role: text_input, label: Memo}

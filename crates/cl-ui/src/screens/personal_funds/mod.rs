@@ -1138,7 +1138,8 @@ impl PersonalFundsScreen {
     }
 
     fn treatment_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
-        kit::above(ui, tokens, &t("personal_funds.how"));
+        kit::above(ui, tokens, &t("personal_funds.how"))
+            .on_hover_text(t(kit::jargon_of(self.books.entity)));
         let f = self.header.current().clone();
         let default = default_treatment(self.books.entity);
         let mut set = None;

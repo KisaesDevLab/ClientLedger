@@ -1164,7 +1164,7 @@ impl TransferScreen {
         }
         let enabled = !working && !self.closing_prompt.dialog_open() && !read_only;
         form::card(ui, tokens, |ui| {
-            ui.horizontal_wrapped(|ui| {
+            crate::forms::header::wrap_row(ui, |ui| {
                 self.account_ui(ui, tokens, true, enabled);
                 kit::wrap_item(ui, "transfer/arrow", |ui| {
                     ui.add_space(22.0);
@@ -1174,7 +1174,7 @@ impl TransferScreen {
             });
             ui.add_space(8.0);
             ui.add_enabled_ui(enabled, |ui| {
-                ui.horizontal_wrapped(|ui| {
+                crate::forms::header::wrap_row(ui, |ui| {
                     kit::wrap_item(ui, "transfer/date", |ui| {
                         let l = kit::above(ui, tokens, &t("transfer.date"));
                         let before = self.date.text.clone();

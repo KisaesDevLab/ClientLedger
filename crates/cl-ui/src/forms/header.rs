@@ -253,3 +253,10 @@ pub fn locked_scope<R>(
     })
     .inner
 }
+
+/// A row that wraps onto more lines when narrow, its groups top-aligned
+/// (labels above inputs line up across the row).
+pub fn wrap_row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.with_layout(Layout::left_to_right(Align::TOP).with_main_wrap(true), add)
+        .inner
+}
