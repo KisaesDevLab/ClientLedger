@@ -302,7 +302,10 @@ impl DailySalesScreen {
                 .spacing([8.0, 6.0])
                 .show(ui, |ui| {
                     ui.label(RichText::new(t("daily.setup.col.section")).size(12.0));
-                    ui.label(RichText::new(t("daily.setup.col.line")).size(12.0));
+                    // The line names are labelled by this header (AccessKit).
+                    let line_header = ui
+                        .label(RichText::new(t("daily.setup.col.line")).size(12.0))
+                        .id;
                     ui.label(RichText::new(t("daily.setup.col.account")).size(12.0));
                     ui.label("");
                     ui.label("");
@@ -338,13 +341,15 @@ impl DailySalesScreen {
                             line.section = Some(sec);
                             line.side = side_for(sec);
                         }
-                        let r = ui.add(
-                            egui::TextEdit::singleline(&mut line.label)
-                                .id_salt(("daily_sales/setup_label", i))
-                                .desired_width(200.0)
-                                .char_limit(cl_model::forms::daily_sales::LABEL_MAX)
-                                .hint_text(t("daily.setup.col.line")),
-                        );
+                        let r = ui
+                            .add(
+                                egui::TextEdit::singleline(&mut line.label)
+                                    .id_salt(("daily_sales/setup_label", i))
+                                    .desired_width(200.0)
+                                    .char_limit(cl_model::forms::daily_sales::LABEL_MAX)
+                                    .hint_text(t("daily.setup.col.line")),
+                            )
+                            .labelled_by(line_header);
                         if r.has_focus() {
                             s.row = Some(i);
                         }
