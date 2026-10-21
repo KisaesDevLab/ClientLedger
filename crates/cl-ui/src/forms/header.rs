@@ -172,33 +172,37 @@ pub fn title_row<R>(
         .size()
         .x;
     let room = ui.available_width();
-    let last: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
+    // The content's width on one line, measured while the title sits beside
+    // it (a wrapped row would report less and flip the choice back).
+    let natural: Option<f32> = ui.data(|d| d.get_temp(id));
     let beside = |content_width: f32| content_width + TITLE_GAP + title_width <= room;
-    let side = beside(last);
-    if !side {
-        ui.add(title_label(tokens, title).wrap());
-        ui.add_space(4.0);
-    }
-    let (out, width) = ui
-        .horizontal_wrapped(|ui| {
-            let r = ui.scope(content);
-            let width = r.response.rect.width();
-            if side {
-                ui.with_layout(Layout::right_to_left(Align::BOTTOM), |ui| {
+    let side = natural.is_none_or(beside);
+    if side {
+        let (out, width) = ui
+            .horizontal(|ui| {
+                let r = ui.scope(content);
+                let rect = r.response.rect;
+                // Beside the content, centred on its height.
+                let title_box = Vec2::new(ui.available_width(), rect.height());
+                ui.allocate_ui_with_layout(title_box, Layout::right_to_left(Align::Center), |ui| {
                     ui.add(title_label(tokens, title));
                 });
+                (r.inner, rect.width())
+            })
+            .inner;
+        if natural.is_none_or(|n| (n - width).abs() > 0.5) {
+            ui.data_mut(|d| d.insert_temp(id, width));
+            if !beside(width) {
+                // Lay the frame out again with the title above.
+                ui.ctx().request_discard("form title row");
             }
-            (r.inner, width)
-        })
-        .inner;
-    if (width - last).abs() > 0.5 {
-        ui.data_mut(|d| d.insert_temp(id, width));
-        if beside(width) != side {
-            // Lay the frame out again with the title where it fits.
-            ui.ctx().request_discard("form title row");
         }
+        out
+    } else {
+        ui.add(title_label(tokens, title).wrap());
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(content).inner
     }
-    out
 }
 
 /// The title alone at the right (a form with no picker above its card);
