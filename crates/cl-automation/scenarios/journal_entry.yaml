@@ -2,10 +2,16 @@
 # Debit 1,200.00 to 6100 Fuel and credit 1,100.00 to 1010 Operating
 # Checking leaves a 100.00 difference; Save & Close is off and Alt+S is
 # refused with nothing saved; the next line takes the balancing 100.00 when
-# it gets an account; then it saves. The entry is voided at the end so the
-# scenario repeats in light and dark. All data is synthetic.
+# it gets an account; then it saves and is voided. Then an entry dated in
+# the closed period: an Accounts Receivable line needs a customer, a second
+# A/R-or-A/P line is refused, Adjusting and Reverse on 11/30 save with the
+# closing-date password; Prev shows the reversal, whose link opens the
+# original ("Reversed by"); an edit and the delete each ask for the
+# password. Light and dark run in one app: the first entry is voided and the
+# second deleted (with its reversal), so the scenario repeats. All data is
+# synthetic.
 name: journal_entry
-description: Unbalanced entry refused, balance helper, save, void.
+description: Unbalanced entry refused, balance helper, save, void; A/R name rule, one A/R-or-A/P line, Adjusting, Reverse on, edit and delete with the closing password.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -68,5 +74,124 @@ steps:
   - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
   - click: {role: button, label: Void, index: 1}
   - assert_state: {key: screen.last_action, equals: void}
+
+  # --- 4. A/R needs a name; one A/R-or-A/P line; Adjusting; Reverse on --------
+  # Dated 09/15 (closed through 09/30): every save, edit and delete asks for
+  # the closing-date password ("demo-close", synthetic).
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Date}
+  - key: Ctrl+A
+  - type: {text: "09/15/2026"}
+  - key: Tab
+  - assert_state: {key: screen.date, equals: "2026-09-15"}
+  - click: {label_contains: "Account, line 1"}
+  - type: {text: "1200"}
+  - key: Tab
+  - type: {text: "100"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Account, line 2"}
+  - type: {text: "4000"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Credit, line 2"}
+  - type: {text: "100"}
+  - key: Tab
+  - assert_value: {target: {label: "Account, line 1"}, equals: "1200 · Accounts Receivable"}
+  - assert_state: {key: screen.names_column, equals: true}
+  - key: Alt+N
+  - assert_state: {key: screen.save.refused, equals: ar_ap_name_missing}
+  - assert_exists: {role: label, label: "A line on Accounts Receivable needs a customer, and a line on Accounts Payable a vendor. Choose one in the Name column."}
+  - assert_state: {key: screen.closing, equals: idle}
+  - click: {label: "Name, line 1"}
+  - type: {text: "Hollister Fam"}
+  - key: Tab
+  - assert_value: {target: {label: "Name, line 1"}, equals: "Hollister Family Trust"}
+  - assert_state: {key: screen.save.problems, equals: 0}
+  # A second A/R-or-A/P line (Accounts Payable) is refused.
+  - click: {label: "Account, line 3"}
+  - type: {text: "2000"}
+  - key: Tab
+  - type: {text: "10"}
+  - key: Tab
+  - click: {label: "Account, line 4"}
+  - type: {text: "4000"}
+  - key: Tab
+  - click: {label: "Credit, line 4"}
+  - type: {text: "10"}
+  - key: Tab
+  - assert_state: {key: screen.difference, equals: "0.00"}
+  - key: Alt+N
+  - assert_state: {key: screen.save.problems, equals: 2}
+  - assert_exists: {role: label, label: "A journal entry can have only one line on Accounts Receivable or Accounts Payable."}
+  - assert_state: {key: screen.closing, equals: idle}
+  - screenshot: ar-ap-refused
+  - click: {label: "Debit, line 3"}
+  - key: Ctrl+Delete
+  - click: {label: "Debit, line 3"}
+  - key: Ctrl+Delete
+  - assert_state: {key: screen.lines, equals: 2}
+  - assert_state: {key: screen.save.problems, equals: 0}
+  - click: {role: check_box, label: Adjusting entry}
+  - assert_state: {key: screen.adjusting, equals: true}
+  - click: {role: text_input, label: Reverse on}
+  - type: {text: "11/30/2026"}
+  - key: Tab
+  - assert_state: {key: screen.reverse_on, equals: "2026-11-30"}
+  - key: Alt+N
+  - assert_state: {key: screen.closing, equals: asking}
+  - assert_exists: {role: password_input, label: Closing-date password}
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: demo-close}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.closing, equals: done}
+  - assert_state: {key: screen.last_action, equals: save}
+  - assert_state: {key: screen.save.error, equals: false}
+  - assert_state: {key: screen.mode, equals: new}
+  # The newest entry is its reversal on 11/30, debits and credits swapped.
+  - command: form.prev_record
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.date, equals: "2026-11-30"}
+  - assert_state: {key: screen.reverses, equals: true}
+  - assert_value: {target: {label: "Credit, line 1"}, equals: "100.00"}
+  - assert_exists: {role: label, label: "This entry reverses an earlier entry."}
+  - screenshot: reversal
+  - click: {role: link, label: Open it}
+  - assert_state: {key: screen.date, equals: "2026-09-15"}
+  - assert_state: {key: screen.adjusting, equals: true}
+  - assert_state: {key: screen.reverse_on, equals: "2026-11-30"}
+  - assert_state: {key: screen.reverses, equals: false}
+  - assert_value: {target: {label: "Name, line 1"}, equals: "Hollister Family Trust"}
+  - assert_exists: {role: link, label: "Reversed by the entry of 11/30/2026"}
+  - screenshot: reversed-by
+
+  # --- 5. Edit and delete in the closed period: the password each time --------
+  - click: {role: text_input, label: Memo}
+  - type: {text: "Scenario edit"}
+  - key: Tab
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: Alt+N
+  - assert_state: {key: screen.closing, equals: asking}
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: demo-close}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.closing, equals: done}
+  - assert_state: {key: screen.last_action, equals: save}
+  - assert_state: {key: screen.mode, equals: new}
+  - command: form.prev_record
+  - assert_state: {key: screen.date, equals: "2026-11-30"}
+  - click: {role: link, label: Open it}
+  - assert_state: {key: screen.date, equals: "2026-09-15"}
+  - assert_value: {target: {role: text_input, label: Memo}, equals: "Scenario edit"}
+  - click: {role: button, label: Delete}
+  - assert_state: {key: screen.delete_open, equals: true}
+  - assert_exists: {role: label, label: "Delete this journal entry?"}
+  - click: {role: button, label: Delete, index: 1}
+  - assert_state: {key: screen.closing, equals: asking}
+  - screenshot: delete-closing-password
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: demo-close}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.closing, equals: done}
+  - assert_state: {key: screen.last_action, equals: delete}
+  - assert_state: {key: screen.save.error, equals: false}
   - command: file.close_window
   - assert_not_exists: {role: tab, label_contains: "Make Journal Entry"}

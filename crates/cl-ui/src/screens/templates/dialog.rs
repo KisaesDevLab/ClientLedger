@@ -336,11 +336,12 @@ impl DialogUi {
                 ui.end_row();
                 self.group_row(ui);
                 ui.end_row();
-                let l = ui.label(t("templates.dialog.mode"));
+                // Each radio is named by its own words ("Remind me"), not by
+                // the row label, so screen readers tell them apart.
+                ui.label(t("templates.dialog.mode"));
                 ui.vertical(|ui| {
                     for m in self.form.modes() {
-                        ui.radio_value(&mut self.form.mode, m, t(m.key().as_str()))
-                            .labelled_by(l.id);
+                        ui.radio_value(&mut self.form.mode, m, t(m.key().as_str()));
                     }
                 });
                 ui.end_row();
@@ -479,8 +480,7 @@ impl DialogUi {
                 &mut self.end_kind,
                 EndKind::Never,
                 t("templates.dialog.ends.never"),
-            )
-            .labelled_by(l.id);
+            );
             ui.horizontal(|ui| {
                 ui.radio_value(
                     &mut self.end_kind,

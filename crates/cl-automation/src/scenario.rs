@@ -132,7 +132,8 @@ pub enum Step {
     AssertEnabled(Target),
     /// An element is disabled.
     AssertDisabled(Target),
-    /// A value in `state` (dotted path such as `window.width`) equals this.
+    /// A value in `state` (dotted path such as `window.width`; a number
+    /// picks an array element, `screen.rows.0.date`) equals this.
     AssertState {
         /// Dotted path.
         key: String,
@@ -331,8 +332,13 @@ fn snapshot(t: &mut dyn Transport) -> Result<Snapshot, String> {
     serde_json::from_value(v).map_err(|_| "the element tree could not be read".to_string())
 }
 
+/// A value at a dotted path; a number picks an array element
+/// (`screen.rows.0.date`).
 fn dotted<'a>(v: &'a Value, path: &str) -> Option<&'a Value> {
-    path.split('.').try_fold(v, |cur, key| cur.get(key))
+    path.split('.').try_fold(v, |cur, key| match cur {
+        Value::Array(items) => key.parse::<usize>().ok().and_then(|i| items.get(i)),
+        _ => cur.get(key),
+    })
 }
 
 /// Retry `check` against fresh snapshots until it passes or time runs out.
@@ -796,6 +802,10 @@ mod tests {
         let v = json!({"a": {"b": 3}});
         assert_eq!(dotted(&v, "a.b"), Some(&json!(3)));
         assert_eq!(dotted(&v, "a.c"), None);
+        let v = json!({"rows": [{"d": 1}, {"d": 2}]});
+        assert_eq!(dotted(&v, "rows.1.d"), Some(&json!(2)));
+        assert_eq!(dotted(&v, "rows.2.d"), None);
+        assert_eq!(dotted(&v, "rows.x"), None);
     }
 
     #[test]
