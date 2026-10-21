@@ -1,0 +1,388 @@
+# Templates (P15 plan §6 "templates.yaml") against `clientledger --demo`:
+# the empty list; a new group; Save as Template (Ctrl+M) from Write Check,
+# Make Deposit (off while customer payments are ticked), Transfer Funds,
+# Record Card Charge, Make Journal Entry and Daily Sales Summary (no "Enter
+# automatically"); the list grouped with its types and modes; Use fills
+# Write Check (today's date, the next check number) and Replace saves the
+# form back; Edit moves a schedule between Remind me, Enter automatically
+# and Don't remind me; Enter now on a template without a schedule asks for
+# the date and posts; a Replace from a form opened before the template was
+# edited is refused as changed in another window; Delete with confirm back
+# to the empty list.
+#
+# Light and dark run in the same app, so the scenario is repeatable: every
+# template is deleted (a deleted template's name is free again) and the one
+# journal entry it posts is voided. The group is named per theme ("light
+# bills", "dark bills"): groups stay when their templates go (Q-P15a) and
+# the list only shows groups that hold templates. The demo's own sample
+# templates arrive with the first company open (the catch-up), which this
+# scenario never does. All data is synthetic.
+name: templates
+description: Empty list, new group, Save as Template from six forms, grouped list, Use + Replace, schedule edits, Enter now with a date, stale Replace, Delete to empty.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+
+  # --- 1. The empty list and a new group ---------------------------------------
+  - command: lists.templates
+  - assert_exists: {role: tab, label_contains: "Templates"}
+  - assert_state: {key: screen.screen, equals: templates}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.available, equals: true}
+  - assert_state: {key: screen.empty, equals: true}
+  - assert_exists: {role: label, label: "No templates yet. On any form, choose Save as Template (Ctrl+M) to reuse it or schedule it."}
+  - assert_no_clipping: {}
+  - screenshot: empty
+  - click: {role: button, label: New group}
+  - assert_state: {key: screen.new_group, equals: true}
+  - type: {text: "{theme} bills", target: {role: text_input, label: Group name}}
+  - click: {role: button, label: Add group}
+  - assert_state: {key: screen.new_group, equals: false}
+  - assert_state: {key: screen.error, equals: false}
+  - command: file.close_window
+
+  # --- 2. Write Check -> Save as Template: Remind me, monthly, in the group ----
+  - key: Ctrl+W
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.mode, equals: new}
+  - type: {text: Ozark Feed, target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - assert_value: {target: {role: text_input, label: Pay to the order of}, equals: "Ozark Feed & Seed"}
+  - type: {text: "100", target: {role: text_input, label: "Amount ($)"}}
+  - key: Tab
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - type: {text: "60"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Amount, line 2"}
+  - type: {text: "40"}
+  - key: Tab
+  - assert_state: {key: screen.totals, equals: balanced}
+  - assert_state: {key: screen.template.saved_count, equals: 0}
+  - key: Ctrl+M
+  - assert_state: {key: screen.template.dialog.title, equals: templates.dialog.title.new}
+  - assert_state: {key: screen.template.dialog.mode, equals: remind}
+  - assert_state: {key: screen.template.dialog.modes, equals: [remind, auto, never]}
+  - click: {role: text_input, label: Name}
+  - key: Ctrl+A
+  - type: {text: Scenario check}
+  - click: {role: combo_box, label: Group}
+  - click: {role: button, label_contains: "bills", index: 0}
+  - click: {role: text_input, label: Next date}
+  - key: Ctrl+A
+  - type: {text: "12/01/2026"}
+  - key: Tab
+  - assert_state: {key: screen.template.dialog.next_date, equals: "2026-12-01"}
+  - assert_state: {key: screen.template.dialog.preview, equals: ["2026-12-01", "2027-01-01", "2027-02-01", "2027-03-01", "2027-04-01"]}
+  - assert_exists: {role: label, label: "Monthly on the 1st"}
+  - assert_exists: {role: radio_button, label: Remind me}
+  - assert_exists: {role: radio_button, label: Enter automatically}
+  - assert_exists: {role: radio_button, label: "Don't remind me"}
+  - assert_no_clipping: {}
+  - screenshot: save-as-template
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.template.dialog, equals: null}
+  - assert_state: {key: screen.template.saved_count, equals: 1}
+  - assert_state: {key: screen.template.last, equals: created}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+
+  # --- 3. Make Deposit: payments block it; other lines -> Don't remind me -------
+  - command: banking.deposit
+  - assert_state: {key: screen.screen, equals: deposit}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_enabled: {role: button, label: Save as Template}
+  - click: {role: check_box, label: Deposit the payment from Hollister Family Trust}
+  - assert_disabled: {role: button, label: Save as Template}
+  - screenshot: deposit-grouped-off
+  - click: {role: check_box, label: Deposit the payment from Hollister Family Trust}
+  - assert_enabled: {role: button, label: Save as Template}
+  - click: {role: grid_cell, label: "Account, line 1"}
+  - type: {text: "4000"}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: "300"}
+  - key: Enter
+  - assert_value: {target: {label: "Amount, line 1"}, equals: "300.00"}
+  - key: Ctrl+M
+  - assert_state: {key: screen.template.dialog.title, equals: templates.dialog.title.new}
+  - click: {role: text_input, label: Name}
+  - key: Ctrl+A
+  - type: {text: Scenario deposit}
+  - click: {role: radio_button, label: "Don't remind me"}
+  - assert_state: {key: screen.template.dialog.mode, equals: never}
+  - assert_not_exists: {role: text_input, label: Next date}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.template.saved_count, equals: 1}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+
+  # --- 4. Transfer Funds -> Enter automatically, monthly from 12/15 -------------
+  - key: Ctrl+T
+  - assert_state: {key: screen.screen, equals: transfer}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: combo_box, label: Transfer to}
+  - click: {role: button, label: "1020 · Savings"}
+  - type: {text: "25", target: {role: text_input, label: Amount}}
+  - key: Tab
+  - key: Ctrl+M
+  - click: {role: text_input, label: Name}
+  - key: Ctrl+A
+  - type: {text: Scenario transfer}
+  - click: {role: radio_button, label: Enter automatically}
+  - assert_state: {key: screen.template.dialog.mode, equals: auto}
+  - click: {role: text_input, label: Next date}
+  - key: Ctrl+A
+  - type: {text: "12/15/2026"}
+  - key: Tab
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.template.saved_count, equals: 1}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+
+  # --- 5. Record Card Charge -> Remind me ---------------------------------------
+  - key: Ctrl+Shift+C
+  - assert_state: {key: screen.screen, equals: card_charge}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - type: {text: Hollister Fuel, target: {role: text_input, label: Purchased from}}
+  - key: Tab
+  - type: {text: "30", target: {role: text_input, label: Amount}}
+  - key: Tab
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - type: {text: "30"}
+  - key: Tab
+  - assert_state: {key: screen.totals, equals: balanced}
+  - key: Ctrl+M
+  - click: {role: text_input, label: Name}
+  - key: Ctrl+A
+  - type: {text: Scenario card}
+  - click: {role: text_input, label: Next date}
+  - key: Ctrl+A
+  - type: {text: "12/10/2026"}
+  - key: Tab
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.template.saved_count, equals: 1}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+
+  # --- 6. Make Journal Entry (Ctrl+M) -> Don't remind me ------------------------
+  - key: Ctrl+J
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {label_contains: "Account, line 1"}
+  - type: {text: "6100"}
+  - key: Tab
+  - type: {text: "50"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Account, line 2"}
+  - type: {text: "1010"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Credit, line 2"}
+  - type: {text: "50"}
+  - key: Tab
+  - assert_state: {key: screen.difference, equals: "0.00"}
+  - key: Ctrl+M
+  - click: {role: text_input, label: Name}
+  - key: Ctrl+A
+  - type: {text: Scenario entry}
+  - click: {role: radio_button, label: "Don't remind me"}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.template.saved_count, equals: 1}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+
+  # --- 7. Daily Sales Summary: Remind me or Don't remind me only ----------------
+  - command: clients.daily_sales
+  - assert_state: {key: screen.screen, equals: daily_sales}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - type: {text: "1000", target: {role: text_input, label: Plant sales}}
+  - type: {text: "80", target: {role: text_input, label: Sales Tax Collected}}
+  - type: {text: "500", target: {role: text_input, label: Cash}}
+  - type: {text: "580", target: {role: text_input, label: Cards}}
+  - key: Tab
+  - key: Ctrl+M
+  - assert_state: {key: screen.template.dialog.modes, equals: [remind, never]}
+  - assert_not_exists: {role: radio_button, label: Enter automatically}
+  - click: {role: text_input, label: Name}
+  - key: Ctrl+A
+  - type: {text: Scenario sales}
+  - click: {role: radio_button, label: "Don't remind me"}
+  - screenshot: daily-sales-dialog
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.template.saved_count, equals: 1}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+
+  # --- 8. The list: grouped, with types, how often, next dates and modes --------
+  - command: lists.templates
+  - assert_state: {key: screen.screen, equals: templates}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.count, equals: 6}
+  - assert_exists: {role: button, label_contains: "bills"}
+  - assert_exists: {role: button, label_contains: "No group"}
+  - assert_exists: {role: button, label_contains: "Scenario check"}
+  - assert_exists: {role: label, label: "Monthly on the 1st"}
+  - assert_exists: {role: label, label: "12/01/2026"}
+  - assert_exists: {role: label, label: "Monthly on the 15th"}
+  - assert_exists: {role: label, label: "Enter automatically"}
+  - assert_exists: {role: label, label: "Daily sales"}
+  - assert_exists: {role: label, label: "Journal entry"}
+  - assert_exists: {role: label, label: "Card charge"}
+  - assert_exists: {role: label, label: "Deposit"}
+  - assert_exists: {role: label, label: "Transfer"}
+  - assert_exists: {role: label, label: "100.00"}
+  - assert_no_clipping: {}
+  - screenshot: list
+
+  # --- 9. Use: Write Check filled with today's date and the next number --------
+  - click: {role: button, label_contains: "Scenario check"}
+  - click: {role: button, label: Use}
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_state: {key: screen.date, equals: "2026-11-04"}
+  - assert_state: {key: screen.number, equals: 4418}
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_value: {target: {role: text_input, label: Pay to the order of}, equals: "Ozark Feed & Seed"}
+  - assert_value: {target: {label: "Amount, line 1"}, equals: "60.00"}
+  - assert_value: {target: {label: "Amount, line 2"}, equals: "40.00"}
+  - assert_state: {key: screen.template.warnings, equals: 0}
+  - screenshot: use-write-check
+  # Replace: the form saved back over the template.
+  - click: {role: grid_cell, label: "Amount, line 2"}
+  - key: Ctrl+A
+  - type: {text: "45"}
+  - key: Tab
+  - click: {role: text_input, label: "Amount ($)"}
+  - key: Ctrl+A
+  - type: {text: "105"}
+  - key: Tab
+  - key: Ctrl+M
+  - assert_state: {key: screen.template.replace_prompt, equals: true}
+  - assert_exists: {role: button, label: Replace}
+  - assert_exists: {role: button, label: Save as new}
+  - screenshot: replace-prompt
+  - click: {role: button, label: Replace}
+  - assert_state: {key: screen.template.last, equals: replaced}
+  - assert_state: {key: screen.template.stale, equals: false}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+
+  # --- 10. Edit: Remind me -> Enter automatically -> Don't remind me ------------
+  - click: {role: tab, label_contains: "Templates"}
+  - assert_state: {key: screen.screen, equals: templates}
+  - assert_exists: {role: label, label: "105.00"}
+  - click: {role: button, label_contains: "Scenario check"}
+  - click: {role: button, label: Edit, index: 1}
+  - assert_state: {key: screen.dialog.title, equals: templates.dialog.title.edit}
+  - assert_state: {key: screen.dialog.mode, equals: remind}
+  - click: {role: radio_button, label: Enter automatically}
+  - click: {role: text_input, label: Next date}
+  - key: Ctrl+A
+  - type: {text: "01/05/2027"}
+  - key: Tab
+  - assert_state: {key: screen.dialog.next_date, equals: "2027-01-05"}
+  - screenshot: edit-schedule
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dialog, equals: null}
+  - assert_state: {key: screen.last_action, equals: edit}
+  - assert_exists: {role: label, label: "01/05/2027"}
+  - assert_exists: {role: label, label: "Monthly on the 5th"}
+  - assert_not_exists: {role: label, label: "12/01/2026"}
+  - click: {role: button, label_contains: "Scenario check"}
+  - click: {role: button, label: Edit, index: 1}
+  - assert_state: {key: screen.dialog.mode, equals: auto}
+  - click: {role: radio_button, label: "Don't remind me"}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dialog, equals: null}
+  - assert_not_exists: {role: label, label: "01/05/2027"}
+
+  # --- 11. Enter now without a schedule: the date prompt, then it posts --------
+  - click: {role: button, label_contains: "Scenario entry"}
+  - click: {role: button, label: Enter now}
+  - assert_state: {key: screen.enter_date, equals: "2026-11-04"}
+  - assert_exists: {role: label, label: "This template has no schedule. Which date should the transaction have?"}
+  - screenshot: enter-date
+  - click: {role: button, label: Enter now, index: 1}
+  - assert_state: {key: screen.enter_date, equals: null}
+  - assert_state: {key: screen.last_action, equals: enter}
+  - assert_state: {key: screen.notice, equals: templates.entered}
+  - assert_state: {key: screen.error, equals: false}
+  - click: {role: link, label: Open}
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - assert_state: {key: screen.mode, equals: edit}
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void, index: 1}
+  - assert_state: {key: screen.last_action, equals: void}
+  - command: file.close_window
+
+  # --- 12. Stale: a form opened before an Edit can't Replace ------------------
+  - click: {role: tab, label_contains: "Templates"}
+  - click: {role: button, label_contains: "Scenario transfer"}
+  - click: {role: button, label: Use}
+  - assert_state: {key: screen.screen, equals: transfer}
+  - assert_state: {key: screen.amount, equals: "25.00"}
+  - click: {role: tab, label_contains: "Templates"}
+  - click: {role: button, label_contains: "Scenario transfer"}
+  - click: {role: button, label: Edit, index: 1}
+  - click: {role: text_input, label: Next date}
+  - key: Ctrl+A
+  - type: {text: "12/20/2026"}
+  - key: Tab
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dialog, equals: null}
+  - click: {role: tab, label_contains: "Transfer Funds"}
+  - assert_state: {key: screen.screen, equals: transfer}
+  - key: Ctrl+M
+  - click: {role: button, label: Replace}
+  - assert_state: {key: screen.template.stale, equals: true}
+  - assert_exists: {role: label, label: "This template changed in another window. Reload it from Templates, or save as a new one."}
+  - screenshot: stale
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+
+  # --- 13. Delete each with confirm: back to the empty list --------------------
+  - click: {role: tab, label_contains: "Templates"}
+  - assert_state: {key: screen.count, equals: 6}
+  - click: {role: button, label_contains: "Scenario check"}
+  - click: {role: button, label: Delete}
+  - assert_state: {key: screen.confirm_delete, equals: true}
+  - assert_exists: {role: label, label_contains: "Delete the template"}
+  - screenshot: delete-confirm
+  - click: {role: button, label: Delete, index: 1}
+  - assert_state: {key: screen.count, equals: 5}
+  - click: {role: button, label_contains: "Scenario deposit"}
+  - click: {role: button, label: Delete}
+  - click: {role: button, label: Delete, index: 1}
+  - assert_state: {key: screen.count, equals: 4}
+  - click: {role: button, label_contains: "Scenario transfer"}
+  - click: {role: button, label: Delete}
+  - click: {role: button, label: Delete, index: 1}
+  - assert_state: {key: screen.count, equals: 3}
+  - click: {role: button, label_contains: "Scenario card"}
+  - click: {role: button, label: Delete}
+  - click: {role: button, label: Delete, index: 1}
+  - assert_state: {key: screen.count, equals: 2}
+  - click: {role: button, label_contains: "Scenario entry"}
+  - click: {role: button, label: Delete}
+  - click: {role: button, label: Delete, index: 1}
+  - assert_state: {key: screen.count, equals: 1}
+  - click: {role: button, label_contains: "Scenario sales"}
+  - click: {role: button, label: Delete}
+  - click: {role: button, label: Delete, index: 1}
+  - assert_state: {key: screen.count, equals: 0}
+  - assert_state: {key: screen.empty, equals: true}
+  - assert_exists: {role: label, label_contains: "No templates yet."}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Templates"}
