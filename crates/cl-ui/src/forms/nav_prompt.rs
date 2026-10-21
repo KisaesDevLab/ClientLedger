@@ -8,6 +8,7 @@ use crate::windows::PromptAnswer;
 
 /// Draws the question for the window titled `title`; the owner's answer
 /// when one was clicked this frame.
+#[must_use]
 pub fn ui(ui: &Ui, salt: &str, title: &str) -> Option<PromptAnswer> {
     let mut answer = None;
     egui::Window::new(t("window.prompt.title"))

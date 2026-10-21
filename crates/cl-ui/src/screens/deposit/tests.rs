@@ -510,15 +510,16 @@ fn a_lost_refund_reply_resends_under_the_same_key() {
     // The reply is lost: the outcome is unknown, so the key stays.
     s.refund_failed(ApiError::Timeout);
     assert!(s.refund.key.is_some());
-    assert!(
-        s.refund_key(&draft, false) == first,
+    assert_eq!(
+        s.refund_key(&draft, false),
+        first,
         "the resend reuses the key"
     );
     // With the password it is another request.
     let with_password = s.refund_key(&draft, true);
-    assert!(with_password != first);
+    assert_ne!(with_password, first);
     // A definitive refusal drops the key: the next try is fresh.
     s.refund_failed(ApiError::Local(cl_api::LocalValidation::InvalidValue));
     assert!(s.refund.key.is_none());
-    assert!(s.refund_key(&draft, true) != with_password);
+    assert_ne!(s.refund_key(&draft, true), with_password);
 }

@@ -115,19 +115,22 @@ fn a_retry_reuses_the_key_only_for_the_same_save() {
     };
     let k = s.key_for(&id(None, false));
     s.save_failed(ApiError::Timeout);
-    assert!(
-        s.key_for(&id(None, false)) == k,
+    assert_eq!(
+        s.key_for(&id(None, false)),
+        k,
         "a lost reply resends the key"
     );
-    assert!(
-        s.key_for(&id(None, true)) != k,
+    assert_ne!(
+        s.key_for(&id(None, true)),
+        k,
         "with the password: a new key"
     );
     let txn = TransactionId::parse("5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
     let e = s.key_for(&id(Some((txn, RecordVersion::Fingerprint([0; 32]))), false));
     let newer = Some((txn, RecordVersion::Fingerprint([1; 32])));
-    assert!(
-        s.key_for(&id(newer, false)) != e,
+    assert_ne!(
+        s.key_for(&id(newer, false)),
+        e,
         "another version: a new key"
     );
 }
