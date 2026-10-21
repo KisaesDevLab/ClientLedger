@@ -833,14 +833,18 @@ impl TemplateSource for JournalScreen {
                     cl_api::Side::Debit(m) => cl_model::forms::journal::JeSide::Debit(m),
                     cl_api::Side::Credit(m) => cl_model::forms::journal::JeSide::Credit(m),
                 };
-                line_from_side(
+                let mut line = line_from_side(
                     keys.next_key(),
                     l.account,
                     side,
                     l.description.as_deref(),
                     l.contact,
                     l.tag,
-                )
+                );
+                // An account the engine dropped (`MISSING_ACCOUNT`) shows
+                // empty, as on every other form.
+                line.account = crate::screens::templates::real_account(l.account);
+                line
             })
             .collect();
         let lines = FormLines::from_lines(seeds, keys);

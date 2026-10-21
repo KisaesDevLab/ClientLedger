@@ -438,6 +438,38 @@ fn save_as_template_leaves_out_the_date_number_and_reverse_on() {
 }
 
 #[test]
+fn a_dropped_template_account_fills_in_empty() {
+    let (mut s, _link, _dir) = screen();
+    let e = cl_api::NewJournalEntry::new(
+        s.today,
+        Some("Insurance".into()),
+        cl_api::Basis::Both,
+        vec![
+            cl_api::JeLine {
+                account: cl_api::MISSING_ACCOUNT,
+                side: cl_api::Side::Debit(m("412.50")),
+                description: None,
+                tag: None,
+                contact: None,
+            },
+            cl_api::JeLine {
+                account: account_id(1010),
+                side: cl_api::Side::Credit(m("412.50")),
+                description: None,
+                tag: None,
+                contact: None,
+            },
+        ],
+    )
+    .expect("entry");
+    s.fill_from_template(TemplateDraft::Journal(e), &[]);
+    let lines = &s.lines.value().lines;
+    assert_eq!(lines[0].account, None, "the placeholder shows empty");
+    assert_eq!(debit_of(&lines[0]), Some(m("412.50")), "the amount stays");
+    assert_eq!(lines[1].account, Some(account_id(1010)));
+}
+
+#[test]
 fn esc_reverts_the_focused_field_then_lets_the_window_close() {
     let (mut s, _link, _dir) = screen();
     s.header.edit(field::MEMO, |h| h.memo = "typed".into());
