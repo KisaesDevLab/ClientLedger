@@ -835,7 +835,11 @@ impl Shell {
             self.windows.request_close(id);
             return;
         }
-        let quiet = cmd.id.as_str().starts_with("form.") || cmd.id.as_str().starts_with("edit.");
+        // The plain Delete key reaches every window; only lists that delete
+        // entries take it.
+        let quiet = cmd.id.as_str().starts_with("form.")
+            || cmd.id.as_str().starts_with("edit.")
+            || cmd.id.as_str() == "list.delete";
         if !handled
             && !quiet
             && let Some(ctx) = ctx

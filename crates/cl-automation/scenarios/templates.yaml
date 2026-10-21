@@ -362,8 +362,14 @@ steps:
   - screenshot: delete-confirm
   - click: {role: button, label: Delete, index: 1}
   - assert_state: {key: screen.count, equals: 5}
+  # The Delete key asks the same question; Esc takes it back.
   - click: {role: button, label_contains: "Scenario deposit"}
-  - click: {role: button, label: Delete}
+  - key: Delete
+  - assert_state: {key: screen.confirm_delete, equals: true}
+  - key: Escape
+  - assert_state: {key: screen.confirm_delete, equals: false}
+  - assert_state: {key: screen.count, equals: 5}
+  - key: Delete
   - click: {role: button, label: Delete, index: 1}
   - assert_state: {key: screen.count, equals: 4}
   - click: {role: button, label_contains: "Scenario transfer"}

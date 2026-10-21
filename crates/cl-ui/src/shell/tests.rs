@@ -377,6 +377,25 @@ fn status_bar_hints_follow_the_window_in_front() {
     let transfer = hints_for(Some(CommandId::new("banking.transfer")));
     let labels: Vec<&str> = transfer.iter().map(|h| h.label.as_str()).collect();
     assert_eq!(labels, ["next field", "revert"]);
+    // The Templates list and Templates Due name their own keys (P15).
+    let list = hints_for(Some(CommandId::new("lists.templates")));
+    let pairs: Vec<(String, &str)> = list
+        .iter()
+        .map(|h| (h.chips.join(" "), h.label.as_str()))
+        .collect();
+    assert_eq!(
+        pairs,
+        [
+            ("Enter".to_string(), "use"),
+            (chip("list.new"), "new group"),
+            (chip("edit.edit_transaction"), "edit"),
+            (chip("list.delete"), "delete"),
+            (chip("form.revert"), "close"),
+        ]
+    );
+    let due = hints_for(Some(CommandId::new("lists.templates_due")));
+    let labels: Vec<&str> = due.iter().map(|h| h.label.as_str()).collect();
+    assert_eq!(labels, ["enter or open", "open form", "close"]);
 }
 
 #[test]

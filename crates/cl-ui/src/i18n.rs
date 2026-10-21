@@ -173,6 +173,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("status.hint.list", "list"),
     ("status.hint.revert", "revert"),
     ("status.hint.open_form", "open form"),
+    ("status.hint.use", "use"),
+    ("status.hint.enter_or_open", "enter or open"),
+    ("status.hint.new_group", "new group"),
+    ("status.hint.edit", "edit"),
+    ("status.hint.close", "close"),
     ("toast.not_here", "That does not apply to this screen."),
     ("toast.help_later", "Help for this screen is not available yet."),
     // Palette and overlay

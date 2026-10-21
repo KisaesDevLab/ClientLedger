@@ -292,6 +292,16 @@ fn new_group_and_keys() {
     s.new_group = Some(String::new());
     assert!(s.command(CommandId::new("form.revert")));
     assert!(s.new_group.is_none());
+    // Delete (the key) asks first, and the last "entered" note goes.
+    s.notice = Some("templates.entered");
+    assert!(s.command(CommandId::new("list.delete")));
+    assert_eq!(s.confirm_delete, s.selected);
+    assert!(s.notice.is_none());
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(s.confirm_delete.is_none(), "Esc cancels the question");
+    // Ctrl+E edits the selected template.
+    assert!(s.command(CommandId::new("edit.edit_transaction")));
+    assert!(s.dialog.is_some());
 }
 
 #[test]

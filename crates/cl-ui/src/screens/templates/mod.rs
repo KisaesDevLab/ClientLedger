@@ -620,6 +620,17 @@ impl TemplatesScreen {
         self.poll();
     }
 
+    /// Delete (button or key): asks first about the selected template. An
+    /// earlier "entered" note goes, so the question stands alone.
+    pub(crate) fn ask_delete(&mut self) {
+        if self.selected.and_then(|s| self.row(s)).is_none() {
+            return;
+        }
+        self.confirm_delete = self.selected;
+        self.notice = None;
+        self.entered = None;
+    }
+
     pub(crate) fn delete_confirmed(&mut self) {
         let Some(id) = self.confirm_delete.take() else {
             return;
@@ -758,7 +769,7 @@ impl TemplatesScreen {
             Some("templates.use") => self.use_selected(),
             Some("templates.enter_now") => self.enter_selected(),
             Some("templates.edit") => self.edit_selected(),
-            Some("templates.delete") => self.confirm_delete = self.selected,
+            Some("templates.delete") => self.ask_delete(),
             Some("templates.new_group") => self.new_group = Some(String::new()),
             _ => {}
         }
@@ -971,7 +982,8 @@ impl TemplatesScreen {
         }
     }
 
-    /// Arrow keys move, Enter uses (when no text field has the keyboard).
+    /// Arrow keys move, Enter uses, Esc closes the open question or else
+    /// the window (when no text field has the keyboard).
     fn keys(&mut self, ui: &Ui) {
         if self.dialog.is_some()
             || self.enter_date.is_some()
@@ -980,11 +992,12 @@ impl TemplatesScreen {
         {
             return;
         }
-        let (up, down, enter) = ui.input(|i| {
+        let (up, down, enter, esc) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::ArrowUp),
                 i.key_pressed(egui::Key::ArrowDown),
                 i.key_pressed(egui::Key::Enter),
+                i.key_pressed(egui::Key::Escape),
             )
         });
         if up || down {
@@ -992,6 +1005,10 @@ impl TemplatesScreen {
         }
         if enter {
             self.use_selected();
+        }
+        if esc && !self.command(CommandId::new("form.revert")) {
+            self.link
+                .push(CompanyEvent::CloseWindow(CommandId::new(KIND)));
         }
     }
 
@@ -1077,6 +1094,19 @@ impl Screen for TemplatesScreen {
             KIND => true,
             "list.new" => {
                 self.new_group = Some(String::new());
+                true
+            }
+            // Delete (the key): the same confirmation as the button.
+            "list.delete" => {
+                if !self.busy() && self.dialog.is_none() && self.enter_date.is_none() {
+                    self.ask_delete();
+                }
+                true
+            }
+            "edit.edit_transaction" => {
+                if !self.busy() {
+                    self.edit_selected();
+                }
                 true
             }
             "form.revert" => {

@@ -43,6 +43,20 @@ const LIST_HINTS: [(&str, &str); 2] = [
 /// Forms with neither a lines grid nor a name list (Transfer Funds).
 const REVERT_HINTS: [(&str, &str); 1] = [("form.revert", "status.hint.revert")];
 
+/// The Templates list's keys (P15): Enter uses the selected template.
+const TEMPLATES_HINTS: [(&str, &str); 4] = [
+    ("list.new", "status.hint.new_group"),
+    ("edit.edit_transaction", "status.hint.edit"),
+    ("list.delete", "status.hint.delete"),
+    ("form.revert", "status.hint.close"),
+];
+
+/// Templates Due's keys (P15): Enter does the row's main action.
+const TEMPLATES_DUE_HINTS: [(&str, &str); 2] = [
+    ("edit.edit_transaction", "status.hint.open_form"),
+    ("form.revert", "status.hint.close"),
+];
+
 /// The form hints of a window kind: Write Check's for forms with a lines
 /// grid, fewer for the others; `None` for other windows.
 fn form_hints(kind: &str) -> Option<&'static [(&'static str, &'static str)]> {
@@ -88,6 +102,19 @@ fn keymap_hints(list: &[(&str, &str)]) -> Vec<Hint> {
 pub fn hints_for(active: Option<CommandId>) -> Vec<Hint> {
     match active.map(CommandId::as_str) {
         Some("banking.register") => {}
+        Some(kind @ ("lists.templates" | "lists.templates_due")) => {
+            let (enter, rest): (&str, &[(&str, &str)]) = if kind == "lists.templates" {
+                ("status.hint.use", &TEMPLATES_HINTS)
+            } else {
+                ("status.hint.enter_or_open", &TEMPLATES_DUE_HINTS)
+            };
+            let mut out = vec![Hint {
+                chips: vec!["Enter".to_string()],
+                label: t(enter),
+            }];
+            out.extend(keymap_hints(rest));
+            return out;
+        }
         Some(kind) if form_hints(kind).is_some() => {
             let mut out = vec![Hint {
                 chips: vec!["Tab".to_string()],

@@ -91,7 +91,9 @@ pub fn pressed_shortcuts(input: &InputState) -> Vec<Shortcut> {
 /// "select all" there, not "Chart of Accounts" (Q-P06d).
 #[must_use]
 pub fn reserved_by_text_fields(s: Shortcut) -> bool {
-    s.mods == Mods::CMD && matches!(s.key, Key::Letter('A' | 'C' | 'V' | 'X'))
+    (s.mods == Mods::CMD && matches!(s.key, Key::Letter('A' | 'C' | 'V' | 'X')))
+        // Delete deletes the next character, not the list entry (P15).
+        || (s.mods == Mods::NONE && s.key == Key::Delete)
 }
 
 /// True when the platform uses Cmd and Option names.

@@ -277,6 +277,9 @@ pub const COMMANDS: &[Command] = &[
     cmd("list.show_inactive", "Include Inactive Entries", None, 3, ctrl_shift('H'), Scope::Window),
     cmd("list.quick_report", "Account or Transaction Report", None, 3, ctrl_shift('Q'), Scope::Window),
     cmd("list.merge", "Merge Into Another Entry", None, 3, None, Scope::Window),
+    // Delete the selected entry, after a confirmation (P15: Templates). A
+    // text field keeps its own Delete key.
+    cmd("list.delete", "Delete List Entry", None, 3, key(Mods::NONE, Key::Delete), Scope::Window),
     // Register windows (P12; Ctrl+F, Ctrl+E, Ctrl+D and Ctrl+Shift+Q above apply too)
     cmd("register.one_line", "One-Line Display", None, 4, None, Scope::Window),
     // Clients

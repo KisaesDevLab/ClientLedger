@@ -806,14 +806,21 @@ impl TemplatesDueScreen {
         if self.closing_prompt.dialog_open() || ui.ctx().egui_wants_keyboard_input() {
             return;
         }
-        let (up, down, enter, open) = ui.input_mut(|i| {
+        let (up, down, enter, open, esc) = ui.input_mut(|i| {
             (
                 i.key_pressed(egui::Key::ArrowUp),
                 i.key_pressed(egui::Key::ArrowDown),
                 i.key_pressed(egui::Key::Enter),
                 i.consume_key(egui::Modifiers::ALT, egui::Key::O),
+                i.key_pressed(egui::Key::Escape),
             )
         });
+        if esc {
+            // Esc closes the window (the status bar says so).
+            self.link
+                .push(CompanyEvent::CloseWindow(CommandId::new(KIND)));
+            return;
+        }
         if up || down {
             self.step(down);
         }
