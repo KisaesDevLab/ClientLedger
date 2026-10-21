@@ -87,15 +87,15 @@ pub fn check(a: &Accounts, on: CalendarDate, memo: &str, amounts: (&str, &str)) 
 fn kinds(a: &Accounts, on: CalendarDate, memo: &str) -> Vec<BankPosting> {
     vec![
         check(a, on, memo, ("1000.0012", "84.6600")),
-        BankPosting::deposit(DepositDraft {
-            account: a.bank,
-            date: on,
-            memo: Some(memo.to_string()),
-            lines: vec![
+        BankPosting::deposit(DepositDraft::plain(
+            a.bank,
+            on,
+            Some(memo.to_string()),
+            vec![
                 split(a.sales, "1100.0000", Some("Invoice 7")),
                 split(a.sales, "0.0001", None),
             ],
-        })
+        ))
         .expect("deposit"),
         BankPosting::transfer(TransferDraft {
             from: a.bank,

@@ -53,6 +53,9 @@ pub enum CompanyEvent {
     /// Bring the register of this account to the front, or open it in its
     /// own tab (one register tab per account, P12).
     OpenRegister(cl_core::ids::AccountId),
+    /// Open this saved transaction in the form of this kind (P14: a grouped
+    /// deposit or a daily-sales day opened from a register row, Q-P14g).
+    OpenRecord(cl_model::CommandId, cl_core::ids::TransactionId),
     /// The owner saved new user preferences (theme, zoom, dates): the
     /// shell applies and persists them.
     UserPrefs(cl_settings::UserPrefs),
@@ -82,6 +85,8 @@ pub struct CompanyLink {
     pub backup_dir: PathBuf,
     /// The demo list and state, in demo mode.
     demo: Option<Mutex<demo::DemoState>>,
+    /// "Data changed" notices between windows (Q-262).
+    bus: crate::data_bus::DataBus,
 }
 
 impl std::fmt::Debug for CompanyLink {
@@ -119,6 +124,7 @@ impl CompanyLink {
             recovery_key: Mutex::new(None),
             backup_dir,
             demo: None,
+            bus: crate::data_bus::DataBus::new(),
         }
     }
 
@@ -137,6 +143,7 @@ impl CompanyLink {
             recovery_key: Mutex::new(None),
             backup_dir: dir.join("Backups"),
             demo: Some(Mutex::new(demo::DemoState::new())),
+            bus: crate::data_bus::DataBus::new(),
         }
     }
 
@@ -266,6 +273,13 @@ impl CompanyLink {
     #[must_use]
     pub fn secrets(&self) -> Arc<dyn SecretStore> {
         Arc::clone(&self.secrets)
+    }
+
+    /// The "data changed" notices (Q-262): every successful save, void or
+    /// delete publishes here; windows showing the data subscribe.
+    #[must_use]
+    pub fn bus(&self) -> &crate::data_bus::DataBus {
+        &self.bus
     }
 
     /// Queue an event for the shell.

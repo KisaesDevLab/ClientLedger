@@ -16,7 +16,9 @@ use cl_core::{CalendarDate, Money};
 
 use crate::forms::PayeePrefill;
 use crate::forms::amount_words::MAX_CHECK_UNITS;
-use crate::forms::lines::{FormLine, FormLines, PostingLine, lines_total, trimmed};
+use crate::forms::lines::{
+    FormLine, FormLines, PostingLine, difference, exact_totals, lines_total, trimmed,
+};
 use crate::lists::tags::{TagList, effective_line_tags, engine_line_tag};
 use crate::rowkey::{RowKey, RowKeyGen};
 use crate::text::TextKey;
@@ -131,16 +133,7 @@ pub fn line_tag_default(
     engine_line_tag(&first).ok().flatten()
 }
 
-/// The footer line under the lines (tri-state, plan WP6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TotalsStatus {
-    /// The lines add up to the check amount.
-    Balanced,
-    /// This much of the check amount is not on a line yet.
-    Remaining(Money),
-    /// The lines are this much more than the check amount.
-    Over(Money),
-}
+pub use crate::forms::lines::TotalsStatus;
 
 /// The Write Check form's complete editable value. `Debug` shows which
 /// fields are filled, never their contents.
@@ -273,14 +266,7 @@ impl CheckForm {
     /// a check amount or when the total leaves the money range.
     #[must_use]
     pub fn totals_status(&self) -> Option<TotalsStatus> {
-        let left = self.amount?.checked_sub(lines_total(&self.lines)?).ok()?;
-        Some(if left.is_zero() {
-            TotalsStatus::Balanced
-        } else if left.is_positive() {
-            TotalsStatus::Remaining(left)
-        } else {
-            TotalsStatus::Over(left.abs())
-        })
+        exact_totals(self.amount, &self.lines)
     }
 
     /// Ticks or unticks Print later (Q-246): ticked shows "To print" and
@@ -527,20 +513,6 @@ impl fmt::Debug for CheckedCheck {
             .field("lines", &self.lines.len())
             .finish_non_exhaustive()
     }
-}
-
-/// Check amount − sum of the typed line amounts, in exact units. Saturates
-/// at the money range (only reachable with absurd line sums; the save is
-/// refused either way).
-fn difference(header: Money, lines: &FormLines) -> Money {
-    let sum: i128 = lines
-        .lines
-        .iter()
-        .filter_map(|l| l.amount)
-        .map(Money::to_ten_thousandths)
-        .fold(0_i128, i128::saturating_add);
-    let diff = header.to_ten_thousandths().saturating_sub(sum);
-    Money::from_ten_thousandths(diff).unwrap_or(if diff > 0 { Money::MAX } else { Money::MIN })
 }
 
 fn check_number(form: &CheckForm) -> Result<Option<u32>, CheckProblem> {

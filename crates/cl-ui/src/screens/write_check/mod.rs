@@ -26,7 +26,7 @@
 mod attach;
 mod form;
 mod panel;
-mod prefill;
+pub(crate) mod prefill;
 mod save;
 mod suggest;
 
@@ -290,6 +290,11 @@ pub struct WriteCheckScreen {
     pub(crate) after_save_nav: Option<bool>,
     /// The printed-check question after a 409 `CHECK_PRINTED`.
     pub(crate) printed: Option<PrintedPrompt>,
+    /// Saves in other windows (Q-262).
+    pub(crate) bus: crate::data_bus::Subscription,
+    /// The names, accounts or tags changed elsewhere while the form had
+    /// unsaved edits: read them again once it is clean.
+    pub(crate) lists_stale: bool,
 }
 
 /// The tag list `check` needs for the header-tag defaults.
@@ -382,7 +387,10 @@ impl WriteCheckScreen {
             nav_prompt: None,
             after_save_nav: None,
             printed: None,
+            bus: crate::data_bus::Subscription::detached(),
+            lists_stale: false,
         };
+        s.bus = s.link.bus().subscribe();
         s.start_load();
         // The demo answers at once: the form is complete before the first
         // frame.
@@ -720,6 +728,44 @@ impl WriteCheckScreen {
         self.poll_suggest();
     }
 
+    /// Saves in other windows of this app (Q-262). The read-only parts come
+    /// again from the engine: the ending balance and the proposed number
+    /// (a typed number is kept), and the payee panel (its cards stay until
+    /// the new ones arrive). The name, account and tag lists are read
+    /// again only while the form has no unsaved edits.
+    pub(crate) fn hear_changes(&mut self) {
+        let changes = self.link.bus().take(&mut self.bus);
+        if changes.lists() {
+            self.lists_stale = true;
+        }
+        if self.lists_stale
+            && !self.is_dirty()
+            && self.accounts_task.is_none()
+            && self.contacts_task.is_none()
+            && self.tags_task.is_none()
+        {
+            self.lists_stale = false;
+            self.start_load();
+        }
+        if let Some(bank) = self.bank()
+            && changes.ledger_touches(bank)
+        {
+            self.fetch_bank_facts();
+        }
+        if changes.ledger_any() || changes.contacts {
+            self.refresh_panel();
+        }
+    }
+
+    /// Tells the other windows this one changed the ledger (Q-262).
+    pub(crate) fn publish_ledger(&self) {
+        // A check touches its bank account, its lines' accounts and the
+        // payee; an edit may also leave an old bank account.
+        self.link
+            .bus()
+            .publish_from(&self.bus, crate::data_bus::Change::Ledger(None));
+    }
+
     /// The proposed next number arrived (Q-242, Q-P13m). A clean new form
     /// takes it as its starting value; a changed one only replaces an
     /// earlier proposal. A duplicate refusal offers the larger of it and
@@ -872,6 +918,7 @@ impl Screen for WriteCheckScreen {
             self.inputs.rev = u64::MAX;
         }
         self.poll();
+        self.hear_changes();
         if self.bank().is_none()
             && self.accounts_loaded
             && let Some(bank) = self.default_bank(Some(ui.ctx()))

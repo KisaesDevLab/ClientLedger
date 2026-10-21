@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use cl_api::{
     AccountFilter, AccountImportRow, AccountRef, AccountType, AccountingMethod, ApiError,
     ArchiveRequest, BillLine, Capabilities, ClosingDateChange, CompanySettingsUpdate,
-    ContactFields, ContactType, DeleteRequest, ImportRequest, InvoiceLine, JobState,
+    ContactFields, ContactType, DeleteRequest, EquityRole, ImportRequest, InvoiceLine, JobState,
     LocalValidation, Method, NewBill, NewCompany, NewContact, NewInvoice, NewTenant, ReportBasis,
 };
 use cl_core::ids::TenantId;
@@ -35,6 +35,10 @@ use crate::support::{Harness, unique};
 const SYSTEM_NUMBERS: [&str; 7] = [
     "10100", "10150", "10200", "20100", "20900", "30000", "30120",
 ];
+
+/// The owner's equity accounts the engine seeds for a single-member LLC
+/// (`equity-roles-v1`, U-56): Owner's Contribution, Owner's Draw.
+const EQUITY_ROLE_NUMBERS: [&str; 2] = ["30160", "30170"];
 
 /// Tenant C: a company created with system accounts only, shared by the
 /// lifecycle tests in this file (created on first use).
@@ -82,10 +86,17 @@ pub fn coa_import_settings_and_setup(h: &Harness) {
         "systemAccountsOnly seeded {} accounts",
         before.len()
     );
+    // equity-roles-v1 (U-56) also seeds the owner's equity accounts of a
+    // single-member LLC: Owner's Contribution 30160, Owner's Draw 30170.
+    let roles: &[&str] = if h.caps.has(Capabilities::EQUITY_ROLES) {
+        &EQUITY_ROLE_NUMBERS
+    } else {
+        &[]
+    };
     for a in &before {
         if let Some(n) = &a.fields.account_number {
             assert!(
-                SYSTEM_NUMBERS.contains(&n.as_str()),
+                SYSTEM_NUMBERS.contains(&n.as_str()) || roles.contains(&n.as_str()),
                 "non-system account seeded: {n}"
             );
         }
@@ -720,6 +731,125 @@ pub fn recovery_key_u23(h: &Harness) {
             .run(s.raw(Method::Post, "/api/v1/auth/recovery-key/rotate", &[], None))
             .expect("raw");
         assert_eq!(raw.status, 404, "the pinned engine has no recovery key");
+    }
+}
+
+/// The practice company's chart on a real engine (U-56): its owner's
+/// equity accounts are the engine's role accounts (Owner's Contribution
+/// 30160, Owner's Draw 30170), so loading it the way
+/// `cl_company::sample::load_into` does (create with system accounts only,
+/// import the fixture accounts whose numbers are missing) leaves exactly one
+/// account per role, and the sample's history posts to the tagged ones.
+pub fn sample_chart_has_one_account_per_equity_role(h: &Harness) {
+    if !h.require_cap(Capabilities::EQUITY_ROLES, "U-56") {
+        return;
+    }
+    let s = session_c(h);
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/sample/ozark_ridge/company.json");
+    let company: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).expect("sample company.json")).expect("json");
+    let sample: Vec<(String, String, AccountType, Option<String>)> = company["accounts"]
+        .as_array()
+        .expect("accounts")
+        .iter()
+        .map(|a| {
+            (
+                a["number"].as_str().expect("number").to_string(),
+                a["name"].as_str().expect("name").to_string(),
+                serde_json::from_value(a["type"].clone()).expect("type"),
+                a["detail"].as_str().map(str::to_string),
+            )
+        })
+        .collect();
+    let have: std::collections::HashSet<String> = h
+        .run(s.accounts().list_all(&AccountFilter::default()))
+        .expect("accounts")
+        .into_iter()
+        .filter_map(|a| a.fields.account_number)
+        .collect();
+    let missing: Vec<AccountImportRow> = sample
+        .iter()
+        .filter(|(n, ..)| !have.contains(n))
+        .map(|(n, name, t, d)| row(n, name, *t, d.as_deref()))
+        .collect();
+    assert!(
+        !missing
+            .iter()
+            .any(|r| r.account_type == AccountType::Equity),
+        "the engine already has every sample equity account: {:?}",
+        missing
+            .iter()
+            .filter(|r| r.account_type == AccountType::Equity)
+            .map(|r| r.account_number.clone())
+            .collect::<Vec<_>>()
+    );
+    if !missing.is_empty() {
+        h.run(s.accounts().import(&missing, false, key()))
+            .expect("import");
+    }
+    let accounts = h
+        .run(s.accounts().list_all(&AccountFilter::default()))
+        .expect("accounts");
+    let roles = h.run(s.equity_roles()).expect("equity roles");
+    let number_of = |id| {
+        accounts
+            .iter()
+            .find(|a| a.id == id)
+            .and_then(|a| a.fields.account_number.clone())
+    };
+    assert_eq!(
+        roles
+            .account(EquityRole::OwnerContribution)
+            .and_then(number_of)
+            .as_deref(),
+        Some("30160")
+    );
+    assert_eq!(
+        roles
+            .account(EquityRole::OwnerDraw)
+            .and_then(number_of)
+            .as_deref(),
+        Some("30170")
+    );
+    // No twin under another name or number.
+    let owner_names = [
+        "owner's draw",
+        "owner draws",
+        "owner draw",
+        "owner withdraw",
+        "owner withdrawals",
+        "owner's contribution",
+        "owner contributions",
+        "owner contribution",
+    ];
+    let owner_accounts: Vec<_> = accounts
+        .iter()
+        .filter(|a| a.fields.account_type == AccountType::Equity)
+        .filter(|a| owner_names.contains(&a.fields.name.to_lowercase().as_str()))
+        .map(|a| a.fields.account_number.clone())
+        .collect();
+    assert_eq!(owner_accounts.len(), 2, "{owner_accounts:?}");
+    let tagged: Vec<_> = accounts
+        .iter()
+        .filter(|a| {
+            matches!(
+                a.system_tag.as_deref(),
+                Some("owner_draw" | "owner_contribution")
+            )
+        })
+        .collect();
+    assert_eq!(tagged.len(), 2, "one account per role");
+    // Every sample equity account is a role account.
+    for (n, name, t, _) in &sample {
+        if *t == AccountType::Equity {
+            let a = accounts
+                .iter()
+                .find(|a| a.fields.account_number.as_deref() == Some(n.as_str()))
+                .unwrap_or_else(|| panic!("{n} present"));
+            assert!(a.system_tag.is_some(), "{n} {name} carries its role");
+            assert_eq!(&a.fields.name, name, "{n}: the engine's name");
+        }
     }
 }
 

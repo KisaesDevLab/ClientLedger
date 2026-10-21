@@ -242,7 +242,7 @@ fn the_requested_fingerprint_is_the_stored_checks() {
         queued.fingerprint(),
         requested_fingerprint(&posting(q.clone()), &q, None)
     );
-    assert_eq!(CheckRecord::EDITABLE[..14], *Transaction::EDITABLE);
+    assert_eq!(CheckRecord::EDITABLE[..15], *Transaction::EDITABLE);
 }
 
 /// The expense path (no `check-edit-v1`) re-reads the plain transaction:

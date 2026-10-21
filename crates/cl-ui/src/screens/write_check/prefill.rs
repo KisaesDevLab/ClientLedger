@@ -22,7 +22,7 @@ use crate::company::Task;
 
 /// How many of the payee's transactions are looked through for the last
 /// check, expense or bill.
-const LOOK_BACK: u16 = 10;
+pub(crate) const LOOK_BACK: u16 = 10;
 
 /// One line of the last transaction (never its amount).
 #[derive(Clone, PartialEq, Eq)]
@@ -73,7 +73,7 @@ pub(crate) struct PrefillState {
 }
 
 /// The kinds a check copies from: what the owner paid this payee for.
-fn copyable(t: TxnType) -> bool {
+pub(crate) fn copyable(t: TxnType) -> bool {
     matches!(t, TxnType::Expense | TxnType::Bill)
 }
 

@@ -316,6 +316,50 @@ impl Snapshot {
         out
     }
 
+    /// Text inputs inside the window whose text runs past their own box
+    /// by more than `tolerance` points (left or right): a field too narrow
+    /// for what it shows, such as a name cut to "Plai". egui gives each
+    /// laid-out row of a text input a `text_run` child with its bounds.
+    /// Inputs whose centre lies inside one of `ignore` are not counted.
+    #[must_use]
+    pub fn truncated_inputs(&self, tolerance: f32, ignore: &[Bounds]) -> Vec<&Node> {
+        let (w, h) = (self.window.width, self.window.height);
+        let mut out = Vec::new();
+        let mut stack = vec![&self.tree];
+        while let Some(n) = stack.pop() {
+            stack.extend(n.children.iter());
+            if !n.role.ends_with("input") {
+                continue;
+            }
+            let Some(b) = n.bounds.as_ref() else { continue };
+            let shown = b.width > 0.0
+                && b.height > 0.0
+                && b.x >= 0.0
+                && b.y >= 0.0
+                && b.x + b.width <= w
+                && b.y + b.height <= h;
+            let (cx, cy) = b.center();
+            let skipped = ignore
+                .iter()
+                .any(|r| cx >= r.x && cx <= r.x + r.width && cy >= r.y && cy <= r.y + r.height);
+            if !shown || skipped {
+                continue;
+            }
+            let cut = n.children.iter().any(|c| {
+                c.role == "text_run"
+                    && c.bounds.as_ref().is_some_and(|r| {
+                        r.width > 0.0
+                            && (r.x + r.width > b.x + b.width + tolerance || r.x < b.x - tolerance)
+                    })
+            });
+            if cut {
+                out.push(n);
+            }
+        }
+        out.reverse();
+        out
+    }
+
     /// Pairs of controls and labels drawn over each other (by more than
     /// `tolerance` points both ways) inside the window, such as a menu
     /// title running into the next label. Only near relatives count: the
@@ -561,6 +605,43 @@ mod tests {
             height: 100.0,
         };
         assert_eq!(s.clipped_excluding(1.0, &[region]).len(), 0);
+    }
+
+    #[test]
+    fn truncation_finds_text_cut_inside_its_input() {
+        let mut s = snapshot();
+        let mut fits = node(
+            "20",
+            "text_input",
+            Some("Line"),
+            Some((10.0, 10.0, 200.0, 24.0)),
+        );
+        fits.children.push(node(
+            "21",
+            "text_run",
+            None,
+            Some((14.0, 14.0, 120.0, 16.0)),
+        ));
+        let mut cut = node(
+            "22",
+            "text_input",
+            Some("Line"),
+            Some((10.0, 40.0, 36.0, 24.0)),
+        );
+        cut.children
+            .push(node("23", "text_run", None, Some((14.0, 44.0, 90.0, 16.0))));
+        s.tree.children.push(fits);
+        s.tree.children.push(cut);
+        let found = s.truncated_inputs(1.0, &[]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "22");
+        let region = Bounds {
+            x: 0.0,
+            y: 30.0,
+            width: 100.0,
+            height: 50.0,
+        };
+        assert_eq!(s.truncated_inputs(1.0, &[region]).len(), 0);
     }
 
     #[test]

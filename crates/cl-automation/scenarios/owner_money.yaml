@@ -1,0 +1,148 @@
+# Pay Yourself or Put Money In (P14 plan §6.4) against `clientledger --demo`
+# (a single-member LLC): Pay yourself is recorded in Owner's Draw with the
+# neutral sentence and "Ask your accountant…" (no tax advice, Q-P14l); 500.00
+# by transfer saves and the bank register (open the whole time) shows it;
+# Put money in switches to Owner's Contribution, 1,000.00 saves; Prev with
+# unsaved changes asks; both voided.
+#
+# Light and dark run in the same app, so the scenario is repeatable: both
+# are voided (Prev/Next walk newest first). All data is synthetic.
+name: owner_money
+description: Owner draw and contribution by entity type, neutral note, saves shown in the register, Prev prompt, Void both.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+G
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.footer.ending, equals: "84,210.55"}
+  # --- 1. Pay yourself: Owner's Draw, by transfer -----------------------------
+  - command: banking.owner_money
+  - assert_exists: {role: tab, label_contains: "Pay Yourself"}
+  - assert_state: {key: screen.screen, equals: owner_money}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: button, label: Pay yourself}
+  - assert_state: {key: screen.direction, equals: pay_yourself}
+  - assert_state: {key: screen.entity_type, equals: single_member_llc}
+  - assert_state: {key: screen.record, equals: new}
+  - assert_value: {target: {role: combo_box, label: Recorded in}, equals: "30170 · Owner's Draw"}
+  - assert_exists: {role: label, label: "Set up for your type of business. You can change it."}
+  - assert_exists: {role: label, label_contains: "money you take out is recorded as an owner draw"}
+  - assert_exists: {role: label, label: "Ask your accountant if you're not sure which to use."}
+  - click: {role: radio_button, label: Transfer or online}
+  - assert_state: {key: screen.method, equals: electronic}
+  - type: {text: "500", target: {role: text_input, label: Amount}}
+  - key: Tab
+  - assert_value: {target: {role: text_input, label: Amount}, equals: "500.00"}
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - type: {text: "Scenario draw"}
+  - assert_no_clipping: {}
+  - screenshot: pay-yourself
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.last_action, equals: save}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.error, equals: false}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_exists: {role: label, label: "83,710.55"}
+
+  # --- 2. Put money in: Owner's Contribution ----------------------------------
+  - click: {role: button, label: Put money in}
+  - assert_state: {key: screen.direction, equals: put_money_in}
+  - assert_value: {target: {role: combo_box, label: Recorded in}, equals: "30160 · Owner's Contribution"}
+  - type: {text: "1000", target: {role: text_input, label: Amount}}
+  - key: Tab
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - type: {text: "Scenario contribution"}
+  - screenshot: put-money-in
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 2}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.error, equals: false}
+  - assert_exists: {role: label, label: "84,710.55"}
+  - click: {role: tab, label: "Register · Operating Checking"}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.footer.ending, equals: "84,710.55"}
+  - assert_value: {target: {role: cell, label: "Payment, 11/04/2026, ", index: 0}, equals: "500.00"}
+  - assert_value: {target: {role: cell, label: "Deposit, 11/04/2026, ", index: 1}, equals: "1,000.00"}
+  - screenshot: register
+  - click: {role: tab, label_contains: "Pay Yourself"}
+
+  # --- 3. Prev: the contribution (newest); unsaved changes ask; void it ------
+  - key: PageUp
+  - assert_state: {key: screen.record, equals: edit}
+  - assert_state: {key: screen.nav_at, equals: 0}
+  - assert_state: {key: screen.direction, equals: put_money_in}
+  - assert_value: {target: {role: text_input, label: Memo}, equals: "Scenario contribution"}
+  - assert_value: {target: {role: text_input, label: Amount}, equals: "1,000.00"}
+  - click: {role: text_input, label: Memo}
+  - key: End
+  - type: {text: " (start-up)"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: PageUp
+  - assert_state: {key: screen.nav_prompt, equals: true}
+  - assert_exists: {role: button, label: Discard changes}
+  - screenshot: nav-prompt
+  - click: {role: button, label: Keep editing}
+  - assert_state: {key: screen.nav_prompt, equals: false}
+  - assert_state: {key: screen.nav_at, equals: 0}
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - type: {text: "Scenario contribution"}
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.error, equals: false}
+  # The draw: found by its memo in the register, opened with Ctrl+E.
+  - click: {role: tab, label: "Register · Operating Checking"}
+  - assert_state: {key: screen.loaded, equals: true}
+  - key: Ctrl+F
+  - assert_state: {key: screen.goto.open, equals: true}
+  - type: {text: Scenario draw}
+  - click: {role: button, label: Find Previous}
+  - assert_state: {key: screen.goto.last, equals: found}
+  - assert_state: {key: screen.goto.jump_pending, equals: false}
+  - click: {role: button, label: Close}
+  - key: Ctrl+E
+  - assert_state: {key: screen.screen, equals: owner_money}
+  - assert_state: {key: screen.record, equals: edit}
+  - assert_state: {key: screen.direction, equals: pay_yourself}
+  - assert_value: {target: {role: text_input, label: Memo}, equals: "Scenario draw"}
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.error, equals: false}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Pay Yourself"}
+  - click: {role: button, label: Clear}
+  - click: {role: button, label: Pay yourself}
+  # After a saved contribution was shown, a draw goes to Owner's Draw again.
+  - assert_value: {target: {role: combo_box, label: Recorded in}, equals: "30170 · Owner's Draw"}
+  # Switching direction is an edit; Clear leaves a clean Pay yourself form.
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.direction, equals: pay_yourself}
+  - assert_exists: {role: label, label: "84,210.55"}
+  - assert_no_clipping: {}
+  - click: {role: tab, label: "Register · Operating Checking"}
+  - assert_state: {key: screen.footer.ending, equals: "84,210.55"}
+  - command: file.close_window
+  - click_if_present: {role: button, label: Close Bank Feed}
+  - click: {role: tab, label_contains: "Pay Yourself"}
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: text_input, label: Amount}
+  - assert_no_clipping:
+      # The side panel goes under the form and scrolls by design: only the
+      # bottom band of the scroll area may be cut by the window edge.
+      ignore:
+        - {x: 212, y: 560, width: 10000, height: 200}
+  - screenshot: owner-money-960x640
+  - resize: {width: 1440, height: 940}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Pay Yourself"}

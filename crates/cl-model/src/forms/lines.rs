@@ -135,6 +135,48 @@ pub fn remaining(header: Option<Money>, v: &FormLines) -> Option<Money> {
     header?.checked_sub(lines_total(v)?).ok()
 }
 
+/// The footer line under a form's lines (tri-state, P13 plan WP6): the
+/// header amount against the typed lines total.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TotalsStatus {
+    /// The lines add up to the header amount.
+    Balanced,
+    /// This much of the header amount is not on a line yet.
+    Remaining(Money),
+    /// The lines are this much more than the header amount.
+    Over(Money),
+}
+
+/// Header amount − sum of the typed line amounts, in exact units (blank
+/// amounts count as nothing). Saturates at the money range (only reachable
+/// with absurd line sums; a save is refused either way).
+#[must_use]
+pub fn difference(header: Money, lines: &FormLines) -> Money {
+    let sum: i128 = lines
+        .lines
+        .iter()
+        .filter_map(|l| l.amount)
+        .map(Money::to_ten_thousandths)
+        .fold(0_i128, i128::saturating_add);
+    let diff = header.to_ten_thousandths().saturating_sub(sum);
+    Money::from_ten_thousandths(diff).unwrap_or(if diff > 0 { Money::MAX } else { Money::MIN })
+}
+
+/// The exact lines-versus-header footer every lines form shares (P14 C2.1):
+/// `None` without a header amount or when the lines total leaves the money
+/// range.
+#[must_use]
+pub fn exact_totals(header: Option<Money>, lines: &FormLines) -> Option<TotalsStatus> {
+    let left = header?.checked_sub(lines_total(lines)?).ok()?;
+    Some(if left.is_zero() {
+        TotalsStatus::Balanced
+    } else if left.is_positive() {
+        TotalsStatus::Remaining(left)
+    } else {
+        TotalsStatus::Over(left.abs())
+    })
+}
+
 /// One checked line, ready for a posting builder.
 #[derive(Clone, PartialEq, Eq)]
 pub struct PostingLine {
@@ -318,6 +360,36 @@ mod tests {
             to_posting_lines(money("1"), &FormLines::default()).err(),
             Some(LinesProblem::NeedAccount)
         );
+    }
+
+    #[test]
+    fn exact_totals_is_tri_state_to_the_cent() {
+        let mut keys = RowKeyGen::new();
+        let v = FormLines {
+            lines: vec![line(&mut keys, 1, "40.00"), line(&mut keys, 2, "24.10")],
+        };
+        assert_eq!(
+            exact_totals(Some(money("64.20")), &v),
+            Some(TotalsStatus::Remaining(money("0.10")))
+        );
+        assert_eq!(
+            exact_totals(Some(money("64.10")), &v),
+            Some(TotalsStatus::Balanced)
+        );
+        assert_eq!(
+            exact_totals(Some(money("64.00")), &v),
+            Some(TotalsStatus::Over(money("0.10")))
+        );
+        assert_eq!(exact_totals(None, &v), None);
+        assert_eq!(difference(money("64.20"), &v), money("0.10"));
+        assert_eq!(difference(money("64.00"), &v), money("-0.10"));
+        assert_eq!(difference(Money::ZERO, &FormLines::default()), Money::ZERO);
+        let mut a = line(&mut keys, 1, "1");
+        a.amount = Some(Money::MIN);
+        let huge = FormLines {
+            lines: vec![a.clone(), a],
+        };
+        assert_eq!(difference(Money::MAX, &huge), Money::MAX, "saturates");
     }
 
     #[test]

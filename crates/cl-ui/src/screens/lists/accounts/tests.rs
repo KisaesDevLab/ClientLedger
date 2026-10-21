@@ -432,3 +432,42 @@ fn credit_normal_accounts_show_their_stored_balance_flipped() {
         assert!(!want.is_negative(), "{number} reads positive");
     }
 }
+
+/// The demo chart shows Payments Clearing's balance as the demo ledger
+/// keeps it: a grouped deposit (P14) takes it to 0.00.
+#[test]
+fn demo_chart_shows_the_payments_clearing_balance_from_the_ledger() {
+    use crate::company::demo::deposits;
+    fn clearing_balance(s: &ChartScreen) -> Option<cl_core::Money> {
+        s.accounts
+            .iter()
+            .find(|a| a.system_tag.as_deref() == Some("payments_clearing"))
+            .and_then(|a| a.balance)
+    }
+    let mut r = Rig::new(true);
+    let m = |s: &str| cl_core::Money::parse_wire(s).expect("m");
+    assert_eq!(clearing_balance(&r.s), Some(m("2092.50")));
+    let date = CalendarDate::from_ymd(2026, 11, 4).expect("date");
+    {
+        let mut state = r.link.demo_state().expect("demo");
+        let waiting = deposits::pending(&mut state);
+        let clearing = deposits::clearing_account(&mut state).expect("10150");
+        let mut d = cl_api::DepositDraft::plain(account_id(1010), date, None, Vec::new());
+        d.payments = waiting
+            .iter()
+            .map(|p| cl_api::GroupedPayment {
+                source: p.source,
+                kind: cl_api::DepositSource::Payment,
+                account: clearing,
+                amount: p.amount,
+                contact: p.contact,
+                memo: None,
+            })
+            .collect();
+        deposits::create(&mut state, &d, None).expect("deposit");
+    }
+    let id = TenantId::parse(TENANT).expect("id");
+    r.s = ChartScreen::new(Arc::clone(&r.link), Some((id, "Ozark".into())), date);
+    r.frames(3);
+    assert_eq!(clearing_balance(&r.s), Some(cl_core::Money::ZERO));
+}

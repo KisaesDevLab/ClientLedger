@@ -50,6 +50,7 @@ use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
 use self::view::{COL_DATE, Mapping, RegisterModel};
+use crate::account_names::shown_name;
 use crate::company::{CompanyEvent, CompanyLink, Task};
 use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
@@ -88,8 +89,8 @@ pub fn class_of(a: &Account) -> Option<AccountClass> {
 #[must_use]
 pub fn account_text(a: &Account) -> String {
     match a.fields.account_number.as_deref().filter(|n| !n.is_empty()) {
-        Some(n) => format!("{n} \u{b7} {}", a.fields.name),
-        None => a.fields.name.clone(),
+        Some(n) => format!("{n} \u{b7} {}", shown_name(a)),
+        None => shown_name(a),
     }
 }
 
@@ -190,6 +191,8 @@ pub struct RegisterScreen {
     grid_room: f32,
     /// The closing-date password flow, Void and Delete (WP8).
     actions: dialogs::RowActions,
+    /// Saves in other windows (Q-262).
+    bus: crate::data_bus::Subscription,
 }
 
 /// Watches the ledger stamp (Q-P12n): read on window focus, every
@@ -288,7 +291,9 @@ impl RegisterScreen {
             report: None,
             grid_room: 0.0,
             actions: dialogs::RowActions::default(),
+            bus: crate::data_bus::Subscription::detached(),
         };
+        s.bus = s.link.bus().subscribe();
         s.start_load();
         s.load_lists();
         // The demo answers at once: the tab title is right before the
@@ -389,8 +394,21 @@ impl RegisterScreen {
                     .any(|a| a.id == *id && class_of(a).is_some())
             })
             .or_else(|| self.default_account());
-        if let Some(id) = wanted {
-            self.show_account(id);
+        match wanted {
+            // A refresh (the chart changed elsewhere, Q-262): same account,
+            // so the entry row and the shown dates stay; the rows come
+            // again with the new names.
+            Some(id) if self.account == Some(id) => {
+                if let Some(class) = self.accounts.iter().find(|a| a.id == id).and_then(class_of)
+                    && class != self.class
+                {
+                    self.show_account(id);
+                } else {
+                    self.ledger_changed();
+                }
+            }
+            Some(id) => self.show_account(id),
+            None => {}
         }
     }
 
@@ -732,6 +750,12 @@ impl RegisterScreen {
     /// After this window saved a change: reload now and re-read the stamp
     /// so the change is not taken for someone else's (WP6-WP8 call it).
     pub(crate) fn after_own_write(&mut self) {
+        // Other windows reload what they show (Q-262). A register entry may
+        // touch other accounts (a transfer, a split, a moved line), so any
+        // register may be affected.
+        self.link
+            .bus()
+            .publish_from(&self.bus, crate::data_bus::Change::Ledger(None));
         self.model.invalidate();
         self.footer.invalidate();
         self.stamp.now = true;
@@ -744,6 +768,42 @@ impl RegisterScreen {
     fn ledger_changed(&mut self) {
         self.model.invalidate();
         self.footer.invalidate();
+    }
+
+    /// Saves in other windows of this app (Q-262): the rows and the footer
+    /// come again from the engine (the scroll position and cursor stay;
+    /// rows stay on screen until their pages return), the entry row's
+    /// pickers and next check number are read again. A row being entered
+    /// or edited is left as typed.
+    pub(crate) fn hear_changes(&mut self) {
+        let changes = self.link.bus().take(&mut self.bus);
+        if changes.is_empty() {
+            return;
+        }
+        if changes.accounts {
+            // The account names in the rows and the pickers.
+            self.start_load();
+        }
+        if changes.contacts || changes.tags {
+            self.load_lists();
+        }
+        if let Some(account) = self.account
+            && changes.ledger_touches(account)
+        {
+            // On the newest line (date order, newest at the bottom): stay
+            // with the newest, so a line added elsewhere comes into view.
+            let at_end = self.prefs.sort == SortChoice::DateOldest
+                && self.entry.editing.is_none()
+                && self.snap.cursor_row.is_none_or(|r| r + 1 >= self.snap.rows);
+            self.ledger_changed();
+            if at_end {
+                self.jump_to_end = true;
+            }
+            self.fetch_next_check();
+        } else if changes.contacts {
+            // Payee names in the rows.
+            self.ledger_changed();
+        }
     }
 
     /// Polls and starts ledger-stamp reads (Q-P12n).
@@ -780,7 +840,8 @@ impl RegisterScreen {
 
     fn read_stamp(&self) -> Option<Task<LedgerStamp>> {
         if self.link.is_demo() {
-            // The demo ledger only changes through this window.
+            // The demo ledger only changes inside this app: saves in other
+            // windows arrive on the data bus (Q-262).
             return None;
         }
         let session = self.link.session()?;
@@ -944,7 +1005,9 @@ impl RegisterScreen {
         if in_entry || self.entry.editing.is_some() {
             self.toggle_splits();
         } else if let Some(key) = self.grid.core().cursor().map(|c| c.row) {
-            self.begin_edit(key, true);
+            // A row a P14 form owns (a deposit, transfer, card charge, loan
+            // payment, ...) opens in that form; others in place.
+            self.begin_edit_routed(key, true, edit::Route::Form);
         }
         true
     }
@@ -997,7 +1060,7 @@ impl Screen for RegisterScreen {
     fn title(&self) -> String {
         self.account_record().map_or_else(
             || t("cmd.banking.register"),
-            |a| t_with("register.title", &[("account", &a.fields.name)]),
+            |a| t_with("register.title", &[("account", &shown_name(a))]),
         )
     }
 
@@ -1008,6 +1071,7 @@ impl Screen for RegisterScreen {
             self.model.touch();
         }
         self.poll();
+        self.hear_changes();
         self.sync_prefs(ui.ctx());
         self.watch_stamp(ui.ctx());
         let tokens = Tokens::of(ui.ctx());

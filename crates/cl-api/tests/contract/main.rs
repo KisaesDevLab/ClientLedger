@@ -20,6 +20,8 @@ mod contract_closed_period;
 mod contract_companies;
 mod contract_conflict;
 mod contract_contacts;
+mod contract_daily_sales;
+mod contract_deposits;
 mod contract_errors;
 mod contract_harness;
 mod contract_items;
@@ -28,6 +30,7 @@ mod contract_lifecycle;
 mod contract_list_csv;
 mod contract_logging;
 mod contract_money;
+mod contract_money_helpers;
 mod contract_preferences;
 mod contract_register;
 mod contract_register_property;
@@ -214,6 +217,34 @@ fn main() -> std::process::ExitCode {
             "write_check::closed_period",
             contract_write_check::closed_period,
         ),
+        ("daily_sales::over_short", contract_daily_sales::over_short),
+        (
+            "daily_sales::preview_property",
+            contract_daily_sales::preview_property,
+        ),
+        (
+            "daily_sales::closed_period",
+            contract_daily_sales::closed_period,
+        ),
+        // P14 lane A: Make Deposit and Transfer Funds.
+        (
+            "deposits::grouping_clears_payments_clearing",
+            contract_deposits::grouping_clears_payments_clearing,
+        ),
+        (
+            "deposits::fees_and_cash_back",
+            contract_deposits::fees_and_cash_back,
+        ),
+        ("deposits::closed_period", contract_deposits::closed_period),
+        ("deposits::vendor_refund", contract_deposits::vendor_refund),
+        (
+            "deposits::feed_deposit_groupings",
+            contract_deposits::feed_deposit_groupings,
+        ),
+        (
+            "deposits::clearing_warning_on_create_and_edit",
+            contract_deposits::clearing_warning_on_create_and_edit,
+        ),
         (
             "register_property::balance_holds_after_random_edits",
             contract_register_property::balance_holds_after_random_edits,
@@ -335,6 +366,10 @@ fn main() -> std::process::ExitCode {
             contract_lifecycle::year_boundary_retained_earnings,
         ),
         (
+            "lifecycle::sample_chart_has_one_account_per_equity_role",
+            contract_lifecycle::sample_chart_has_one_account_per_equity_role,
+        ),
+        (
             "lifecycle::closing_password_u15",
             contract_lifecycle::closing_password_u15,
         ),
@@ -381,6 +416,26 @@ fn main() -> std::process::ExitCode {
         (
             "preferences::token_cap_u29",
             contract_preferences::token_cap_u29,
+        ),
+        (
+            "money_helpers::transfers_in_both_registers",
+            contract_money_helpers::transfers_in_both_registers,
+        ),
+        (
+            "money_helpers::card_charge_and_credit",
+            contract_money_helpers::card_charge_and_credit,
+        ),
+        (
+            "money_helpers::personal_funds_postings",
+            contract_money_helpers::personal_funds_postings,
+        ),
+        (
+            "money_helpers::owner_money_postings",
+            contract_money_helpers::owner_money_postings,
+        ),
+        (
+            "money_helpers::loan_payments_match_the_lender",
+            contract_money_helpers::loan_payments_match_the_lender,
         ),
         (
             "lifecycle::ten_switches_under_two_seconds",

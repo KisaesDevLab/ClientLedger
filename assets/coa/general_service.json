@@ -81,16 +81,6 @@
       "type": "liability"
     },
     {
-      "number": "3100",
-      "name": "Owner Contributions",
-      "type": "equity"
-    },
-    {
-      "number": "3200",
-      "name": "Owner Draws",
-      "type": "equity"
-    },
-    {
       "number": "4000",
       "name": "Service Income",
       "type": "revenue"

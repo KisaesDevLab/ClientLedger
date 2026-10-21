@@ -417,7 +417,10 @@ pub fn field_census(h: &Harness) {
             name: "GET /api/v1/company/settings settings",
             keys: fields_of::<CompanySettings>(),
             strings: &["defaultSalesTaxRate"],
-            optional: &[],
+            // Read when the settings carry it; the engine's settings reply
+            // does not (pin f78583e): the legal form comes from
+            // `GET /company` and `GET /company/equity-roles`.
+            optional: &["entityType"],
         },
         &raw(h, "/api/v1/company/settings", &[])["settings"],
     );
@@ -510,7 +513,13 @@ pub fn field_census(h: &Harness) {
             keys: fields_of::<TransactionLine>(),
             strings: &["debit", "credit"],
             // P13: `line-billable-v1` adds these; older engines leave them out.
-            optional: &["isBillable", "billedStatus"],
+            // P14 (engine PR #159) adds the deposit source and line role.
+            optional: &[
+                "isBillable",
+                "billedStatus",
+                "sourceTransactionId",
+                "lineRole",
+            ],
         },
         line,
     );

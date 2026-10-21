@@ -242,6 +242,11 @@ pub struct TagsScreen {
     compact: bool,
     just_hidden: Option<TagId>,
     caps: Caps,
+    /// Saves in other windows (Q-262).
+    bus: crate::data_bus::Subscription,
+    /// The list being read again after a save elsewhere: the cursor stays
+    /// where it was and the keyboard is not moved.
+    refreshing: bool,
 }
 
 impl TagsScreen {
@@ -286,7 +291,10 @@ impl TagsScreen {
             compact: false,
             just_hidden: None,
             caps,
+            bus: crate::data_bus::Subscription::detached(),
+            refreshing: false,
         };
+        s.bus = s.link.bus().subscribe();
         s.read_prefs();
         s.start_load();
         s
@@ -397,7 +405,38 @@ impl TagsScreen {
         self.list = TagList::new(groups, tags);
         self.refilter();
         self.loaded = true;
-        self.place_cursor(keep);
+        if std::mem::take(&mut self.refreshing) {
+            if let Some(key) = keep.and_then(|i| self.model.key_of(i)) {
+                self.focus_row(key, false);
+            }
+        } else {
+            self.place_cursor(keep);
+        }
+    }
+
+    /// Saves in other windows of this app (Q-262): the tags, groups and
+    /// usage counts come again from the engine; the cursor stays on its
+    /// tag and an open form keeps its edits.
+    fn hear_changes(&mut self) {
+        let changes = self.link.bus().take(&mut self.bus);
+        if (changes.tags || changes.ledger_any()) && self.load.is_none() {
+            self.refreshing = true;
+            self.usage = None;
+            self.start_load();
+            if self.load.is_none() {
+                self.refreshing = false;
+            }
+        }
+    }
+
+    /// Tells the other windows this one changed tags (a merge also
+    /// retags transaction lines).
+    fn publish(&self, ledger: bool) {
+        let bus = self.link.bus();
+        bus.publish_from(&self.bus, crate::data_bus::Change::Tags);
+        if ledger {
+            bus.publish_from(&self.bus, crate::data_bus::Change::Ledger(None));
+        }
     }
 
     fn refilter(&mut self) {
@@ -862,6 +901,7 @@ impl TagsScreen {
                 }
                 self.want_cursor = Some(tag.id);
                 self.apply();
+                self.publish(false);
                 self.note = Some("tags.saved");
                 self.after_tag_save(after, Some(tag.id));
                 true
@@ -1010,6 +1050,7 @@ impl TagsScreen {
                 }
                 self.store_required(saved.id, Some(required));
                 self.apply();
+                self.publish(false);
                 self.note = Some("tags.group_saved");
                 match after {
                     AfterSave::NewForm => {
@@ -1135,6 +1176,7 @@ impl TagsScreen {
                     }
                     self.want_cursor = Some(id);
                     self.apply();
+                    self.publish(false);
                     self.note = Some(if active {
                         "tags.made_active"
                     } else {
@@ -1154,6 +1196,7 @@ impl TagsScreen {
                     self.tags.retain(|x| x.id != id);
                     self.usage = None;
                     self.apply();
+                    self.publish(false);
                     self.note = Some("tags.deleted");
                 }
                 Err(ApiError::Conflict {
@@ -1193,6 +1236,7 @@ impl TagsScreen {
                     }
                     self.panel = Panel::None;
                     self.apply();
+                    self.publish(false);
                     self.note = Some("tags.group_deleted");
                 }
                 Err(e) => f.error = Some(e),
@@ -1208,6 +1252,7 @@ impl TagsScreen {
                     self.panel = Panel::None;
                     self.usage = None;
                     self.want_cursor = target;
+                    self.publish(true);
                     self.note = Some("tags.merged");
                     // The engine moved the uses and deleted the source:
                     // read both back.
@@ -1778,6 +1823,7 @@ impl Screen for TagsScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.parts = EnvParts::capture(ui.ctx());
         self.poll();
+        self.hear_changes();
         self.sync_compact();
         self.follow_selection();
         let tokens = Tokens::of(ui.ctx());

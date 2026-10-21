@@ -272,6 +272,10 @@ Answers from the owner after P11. They replace the defaults named below; later p
 | Q-256 | "Memorized transactions" and "Batch Enter Transactions" (QBD feature names, review L-3/L-4). | Memorized transactions are called **Templates**: "Save as Template" on forms, a "Templates" list (P15). Batch entry phase P15A is renamed **"P15A — Bulk Entry"**. Decision IDs (Q-249, Q-251, Q-252) keep their numbers; their wording is updated. QBD import text may still say "QuickBooks memorized transactions" (Q-143) because it describes the source file. Memorized reports (P28) are not covered by this decision. | P13, P15, P15A, P40, P48 |
 | Q-257 | App icon (Q-122; review L-10 flagged option 2's ring shape). | **Option 1** (teal square with ledger rows), already the shipped app and window icon; options 2 and 3 stay as unused drafts in `assets/icon/`. | P06 icon, packaging (P36) |
 | Q-258 | "Customer Center"/"Vendor Center" and "QB Payroll" (review L-2, L-7). | Owner-facing text says **"Customers & Jobs"** and **"Vendors"**, never "Customer center"/"Vendor center" (Q-238 amended). The payroll provider picker spells out **"QuickBooks Payroll (export file)"**, never "QB Payroll". Trademark notice (About, Open Company footer, NOTICE.md, README) reads "Intuit and QuickBooks are trademarks of Intuit Inc. … Other product names are trademarks of their owners." (review M-2, M-3). | P11 lists, P30 payroll import, About, README |
+| Q-259 | Sales Receipt lines before items exist (P20). | **Sales Receipt moves to P20** and is built with items there; P14 builds the rest (deposits, transfers, daily sales summary, card charges, owner, personal-funds and loan helpers). | P14, P20 |
+| Q-260 | Sales tax on the daily sales summary before P23. | **Manual "Sales tax collected" line**: the owner types the tax to a sales-tax liability account; P23 replaces it with calculated tax. | P14, P20, P23 |
+| Q-261 | Look of P14 screens (no mockups). | **Follow the approved Write Check pattern** (tokens, header + lines grid + side panel); screenshots in the PR for owner review. | P14 |
+| Q-262 | Open registers don't refresh after a save in another window (P13 follow-up). | **Fix first in P14**: every save tells open registers and lists to reload. | P14 |
 | Q-253 | Early test builds before P35 packaging? | **Yes**: a GitHub workflow builds unsigned portable preview archives (Windows, macOS, Linux) automatically after each phase merges to main, and on demand, as workflow artifacts (kept 30 days), not public releases; P35 still builds the installers. | Preview build, P35 |
 
 ## Open
@@ -373,3 +377,33 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P13p | Find and History | P13 | Find opens the account register (Ctrl+F there for Go To); History shows date and action, not the user. | Default in force |
 | Q-P13w | Scenario repeatability | P13 | The `write_check` scenario voids or deletes what it posts so it can run again. | Default in force |
 | Q-P13x | Checks with line customers | P13 | Read-only when the engine lacks `line-billable-v1` (live since pin 454fd23, so editable now). | Default in force |
+| Q-P14a | "Undeposited Funds" vs the engine's "Payments Clearing" | P14 | Owners see "Undeposited Funds" wherever account names show (display mapping by the payments_clearing system tag); heading "Payments to deposit"; tooltip "Payments you've received but haven't taken to the bank yet." | Default in force |
+| Q-P14b | Grouping before `deposit-grouping-v1` | P14 | Read-only pending list with a note; plain lines only (capability is live since pin f78583e). | Default in force |
+| Q-P14c | Fees and cash back before `deposit-cashback-v1` | P14 | Negative amounts refused; cash back hidden; tooltip (capability is live since pin f78583e). | Default in force |
+| Q-P14d | Deposit summary (Q-203) | P14 | `DepositSummary` model and an on-screen Summary tab; the PDF is P19, Print disabled until then. | Default in force |
+| Q-P14e | Suggested groupings | P14 | From bank-file deposits waiting for this account; a click ticks them; feed matching is P26. | Default in force |
+| Q-P14f | Guided vendor refund | P14 | (1) "Something I already paid for" gives an expense line; (2) vendor credit or overpayment uses `vendor-refund-v1`. The vendor statement shows refunds. | Default in force |
+| Q-P14g | Editing a grouped deposit | P14 | Read-only except Void. | Default in force |
+| Q-P14h | Transfer accounts | P14 | Bank, card, other current asset/liability, loans; not A/R, A/P, system accounts or equity. | Default in force |
+| Q-P14i | Card credit | P14 | Deposit into the card account. | Default in force |
+| Q-P14j | Customer / Job and Billable on card charges | P14 | Yes, as on Write Check (Q-255 wording). | Default in force |
+| Q-P14k | Rule/AI suggestions on P14 forms | P14 | None in P14. | Default in force |
+| Q-P14l | Pay yourself by entity type | P14 | Sole prop/SMLLC: owner draw/contribution; partnership: partner draws/contributions (per partner); S/C corp: shareholder distributions/paid-in capital. Neutral sentence and "Ask your accountant..."; no tax advice. Equity role accounts (30160/30170) come from the engine; starter charts no longer add owner equity rows. | Default in force |
+| Q-P14m | Without `equity-roles-v1` | P14 | The owner picks the equity account once; remembered per company. | Default in force |
+| Q-P14n | Personal-funds default (Q-85) | P14 | Sole prop/SMLLC/partnership: "Money I put into the business"; S/C corp: "The business will pay me back". | Default in force |
+| Q-P14o | Personal-funds posting | P14 | An expense paid from the equity or liability account. "Who paid" is stored as a memo prefix "Paid by <name> — <memo>" because the engine has no contact on the pay-from line. | Default in force |
+| Q-P14p | Loan method and prefill | P14 | Check or Online/automatic; accounts prefilled, never amounts (Q-191); optional extra lines. | Default in force |
+| Q-P14q | Loan balance check | P14 | Optional lender balance vs the engine balance after save; no amortization. | Default in force |
+| Q-P14r | Daily sales "saved as a template" | P14 | The engine daily-sales template is the layout, never amounts; not in the P15 Templates list. | Default in force |
+| Q-P14s | Debit/credit on daily lines | P14 | Fixed by section; never shown to owners. | Default in force |
+| Q-P14t | Negative daily-sales amounts | P14 | Refused. | Default in force |
+| Q-P14u | Daily-sales drafts | P14 | Save posts in one action; a failed post leaves a draft the form reopens; no "Save draft" button. The demo stores no tags on daily-sales days. | Default in force |
+| Q-P14v | Closed-period daily sales | P14 | Refused with a plain message without `daily-sales-lock-v1`; with it the closing-password flow applies (live since pin f78583e). | Default in force |
+| Q-P14w | Over/short before saving | P14 | Local exact figure; the engine preview confirms before posting; a mismatch posts nothing. | Default in force |
+| Q-P14x | Menus and shortcuts | P14 | Daily Sales Summary (Customers), Personal Funds (Vendors), Owner Money and Loan Payment (Banking); no new shortcuts. | Default in force |
+| Q-P14y | Look | P14 | No mockups: Write Check pattern (Q-261); PR screenshots; no `--compare`. | Default in force |
+| Q-P14z | Demo and sample additions | P14 | 10150/20900/60900 in the demo chart; 1,250.00 + 842.50 payments; feed deposit 2,092.50; "Plant sale counter"; lender statement. Dropdown scenario steps choose Blue Eye Feed Co (refund) and 1020 (cash back) because the control channel can't click options scrolled out of view. | Default in force |
+| Q-P14aa | Register routing for P14 types | P14 | Ctrl+E on a P14-type row opens its form. Enter or double-click edits simple rows in the register entry row (P12 behavior); grouped deposits, daily-sales days and non-editable rows open the form. | Default in force |
+| Q-P14ab | Sales Receipt | P14 | Built in P20, not P14 (Q-259). | Default in force |
+| Q-P14ac | Sales tax on daily sales | P14 | A manual sales tax line (Q-260); computed tax arrives with P23. | Default in force |
+| Q-P14ad | Engine main CI | P14 | The npm-audit job failing on engine main is pre-existing and unrelated to PR #159. | Default in force |

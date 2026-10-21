@@ -17,6 +17,14 @@
 //! check is 4418. The loader creates the vendor details and line memos;
 //! sub-account parents, tags and jobs are demo-only until the engine
 //! import takes them (jobs need U-35).
+//!
+//! And the P14 money story: two customer payments posted Dr Payments
+//! Clearing (10150) / Cr A/R so the engine lists them as waiting to be
+//! deposited (`GET /payments/pending-deposits` takes any posted debit to
+//! Payments Clearing), the 11/04 bank-file deposit of both, the "Plant sale
+//! counter" daily-sales layout and the lender's 11/04 statement. The engine's
+//! journal entries carry no contact, so the loader names the customer in
+//! the memo, as for every other fixture transaction.
 
 use std::collections::HashMap;
 
@@ -40,6 +48,8 @@ const COMPANY_JSON: &str = include_str!("../../../fixtures/sample/ozark_ridge/co
 const TRANSACTIONS_JSON: &str =
     include_str!("../../../fixtures/sample/ozark_ridge/transactions.json");
 const BANK_FEED_JSON: &str = include_str!("../../../fixtures/sample/ozark_ridge/bank_feed.json");
+const LENDER_STATEMENT_JSON: &str =
+    include_str!("../../../fixtures/sample/ozark_ridge/lender_statement.json");
 /// The engine's Accounts Payable account the fixture posts bills to.
 const AP: &str = "20100";
 
@@ -98,12 +108,120 @@ pub struct SampleJob {
     pub name: String,
 }
 
+/// The bank-file facts of `company.json` (`bank`).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleBank {
+    /// Date of the bank file the design figures use; later feed items
+    /// (the P14 deposit) come from a newer file.
+    pub last_file_date: CalendarDate,
+}
+
+/// Engine system accounts the fixture posts to (`systemAccounts`).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleSystemAccounts {
+    /// Accounts Receivable.
+    pub accounts_receivable: String,
+    /// Accounts Payable.
+    pub accounts_payable: String,
+    /// Opening balances equity.
+    pub opening_balances: String,
+    /// Payments Clearing: payments received but not yet deposited.
+    pub payments_clearing: String,
+    /// Sales Tax Payable.
+    pub sales_tax_payable: String,
+}
+
+/// Side of a daily-sales layout line (fixed by section; never shown to
+/// owners, Q-P14s).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LayoutSide {
+    /// Money in (tenders, paid-outs).
+    Debit,
+    /// Sales, tax collected.
+    Credit,
+}
+
+/// One line of a daily-sales layout.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleLayoutLine {
+    /// Engine section (`sales`, `tax`, `payment`, `payout`, ...).
+    pub section: String,
+    /// Label the owner sees.
+    pub label: String,
+    /// Account number.
+    pub account: String,
+    /// Account number to use when the chart lacks `account`.
+    #[serde(default)]
+    pub fallback_account: Option<String>,
+    /// Normal side.
+    pub side: LayoutSide,
+}
+
+/// A daily-sales layout (the engine's daily-sales template, Q-P14r): no
+/// amounts, only the lines.
+#[derive(Clone, Debug, Deserialize)]
+pub struct SampleLayout {
+    /// Layout name.
+    pub name: String,
+    /// Engine preset it is created from before its lines are replaced.
+    pub preset: String,
+    /// Lines in order.
+    pub lines: Vec<SampleLayoutLine>,
+}
+
+impl SampleLayout {
+    /// Each line's account number in a chart that has `has` accounts: the
+    /// line's own, else its fallback (`None` when neither exists).
+    #[must_use]
+    pub fn resolved_accounts(&self, has: impl Fn(&str) -> bool) -> Vec<Option<String>> {
+        self.lines
+            .iter()
+            .map(|l| {
+                if has(&l.account) {
+                    Some(l.account.clone())
+                } else {
+                    l.fallback_account.clone().filter(|f| has(f))
+                }
+            })
+            .collect()
+    }
+}
+
+/// The lender's statement for the truck loan (`lender_statement.json`):
+/// what the Loan Payment helper checks the books against (Q-P14q).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LenderStatement {
+    /// Lender (a contact).
+    pub lender: String,
+    /// Loan account number.
+    pub account: String,
+    /// Statement date.
+    pub statement_date: CalendarDate,
+    /// Owed before the payment.
+    pub balance_before: Money,
+    /// Payment.
+    pub payment: Money,
+    /// Interest part.
+    pub interest: Money,
+    /// Principal part.
+    pub principal: Money,
+    /// Owed after the payment.
+    pub balance_after: Money,
+}
+
 /// `company.json`.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SampleCompany {
     /// Business name.
     pub name: String,
+    /// Engine entity type (`single_member_llc`).
+    pub entity_type: String,
     /// Starter chart id.
     pub chart: String,
     /// Story date of the mockups.
@@ -125,6 +243,13 @@ pub struct SampleCompany {
     /// Jobs.
     #[serde(default)]
     pub jobs: Vec<SampleJob>,
+    /// Bank-file facts.
+    pub bank: SampleBank,
+    /// Engine system accounts.
+    pub system_accounts: SampleSystemAccounts,
+    /// Daily-sales layouts.
+    #[serde(default)]
+    pub daily_sales_layouts: Vec<SampleLayout>,
 }
 
 /// One fixture line.
@@ -208,8 +333,10 @@ pub struct Sample {
     pub company: SampleCompany,
     /// Transactions in date order.
     pub transactions: Vec<SampleTransaction>,
-    /// Bank feed items.
+    /// Bank feed items (every file, in date order).
     pub feed: Vec<FeedItem>,
+    /// The lender's statement for the truck loan.
+    pub lender_statement: LenderStatement,
 }
 
 impl Sample {
@@ -224,11 +351,27 @@ impl Sample {
         let transactions: TransactionsFile =
             serde_json::from_str(TRANSACTIONS_JSON).expect("sample transactions.json");
         let feed: FeedFile = serde_json::from_str(BANK_FEED_JSON).expect("sample bank_feed.json");
+        let lender_statement: LenderStatement =
+            serde_json::from_str(LENDER_STATEMENT_JSON).expect("sample lender_statement.json");
         Sample {
             company,
             transactions: transactions.transactions,
             feed: feed.items,
+            lender_statement,
         }
+    }
+
+    /// Feed items in the bank file of `company.bank.last_file_date` and
+    /// earlier (the ones the design figures count).
+    pub fn feed_through_last_file(&self) -> impl Iterator<Item = &FeedItem> {
+        let last = self.company.bank.last_file_date;
+        self.feed.iter().filter(move |i| i.date <= last)
+    }
+
+    /// Feed items from bank files after `company.bank.last_file_date`.
+    pub fn feed_after_last_file(&self) -> impl Iterator<Item = &FeedItem> {
+        let last = self.company.bank.last_file_date;
+        self.feed.iter().filter(move |i| i.date > last)
     }
 
     fn sum(&self, f: impl Fn(&SampleTransaction, &SampleLine) -> Option<Money>) -> Money {
@@ -332,22 +475,27 @@ impl Sample {
             .map(|n| n.saturating_add(1))
     }
 
-    /// The bank's balance after the feed items (October statement plus the
-    /// items the file carries).
+    /// The bank's balance in the last bank file (October statement plus the
+    /// items through `company.bank.last_file_date`).
     ///
     /// # Panics
     /// Only if fixture totals overflow the money range (they do not).
     #[must_use]
     pub fn bank_file_balance(&self, statement_end: Money) -> Money {
-        self.feed.iter().fold(statement_end, |acc, i| {
+        self.feed_through_last_file().fold(statement_end, |acc, i| {
             acc.checked_add(i.amount).expect("sum")
         })
     }
 
-    /// Feed items by status: (ready, review, match).
+    /// Feed items through the last bank file by status: (ready, review,
+    /// match).
     #[must_use]
     pub fn feed_counts(&self) -> (usize, usize, usize) {
-        let n = |s: &str| self.feed.iter().filter(|i| i.status == s).count();
+        let n = |s: &str| {
+            self.feed_through_last_file()
+                .filter(|i| i.status == s)
+                .count()
+        };
         (n("ready"), n("review"), n("match"))
     }
 }
@@ -506,6 +654,7 @@ pub async fn load_into(
             .create_journal_entry(&entry, &PostingOptions::default(), IdempotencyKey::new())
             .await?;
     }
+    seed_layouts(session, &sample.company.daily_sales_layouts, &ids).await;
     store.update(|l| {
         if let Some(r) = l.get_mut(created.tenant_id) {
             r.is_sample = true;
@@ -517,9 +666,99 @@ pub async fn load_into(
     Ok(created)
 }
 
+/// The lines the engine gets for a sample layout: each line's own account,
+/// else its fallback (unmapped when the chart has neither). Their order is
+/// the sort order.
+#[must_use]
+pub fn layout_seed_lines(
+    layout: &SampleLayout,
+    id_of: impl Fn(&str) -> Option<cl_core::ids::AccountId>,
+) -> Vec<cl_api::DailyLineInput> {
+    let accounts = layout.resolved_accounts(|n| id_of(n).is_some());
+    layout
+        .lines
+        .iter()
+        .zip(accounts)
+        .map(|(l, a)| cl_api::DailyLineInput {
+            id: None,
+            section: cl_api::Section::from_wire(&l.section),
+            label: l.label.clone(),
+            account: a.and_then(|n| id_of(&n)),
+            tag: None,
+            side: match l.side {
+                LayoutSide::Debit => cl_api::NormalSide::Debit,
+                LayoutSide::Credit => cl_api::NormalSide::Credit,
+            },
+            required: false,
+            active: true,
+        })
+        .collect()
+}
+
+/// The engine preset named by a sample layout (`custom` for anything else).
+fn sample_preset(word: &str) -> cl_api::Preset {
+    match word {
+        "retail" => cl_api::Preset::Retail,
+        "restaurant" => cl_api::Preset::Restaurant,
+        _ => cl_api::Preset::Custom,
+    }
+}
+
+/// Creates the sample's daily-sales layouts through the engine (P14): from
+/// the engine's preset, then the sample's own lines. A failure is logged and
+/// skipped: the practice company works without a layout (the Daily Sales
+/// screen offers a starter).
+async fn seed_layouts(
+    session: &Session,
+    layouts: &[SampleLayout],
+    ids: &HashMap<String, cl_core::ids::AccountId>,
+) {
+    for layout in layouts {
+        let lines = layout_seed_lines(layout, |n| ids.get(n).copied());
+        let daily = session.daily_sales();
+        let seeded = match daily
+            .create_template(&layout.name, Some(sample_preset(&layout.preset)))
+            .await
+        {
+            Ok(t) => daily.replace_lines(t.id, &lines).await.map(|_| ()),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = seeded {
+            tracing::warn!(error = %e, "sample daily-sales layout skipped");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The loader maps the layout to engine ids, with 4100's fallback.
+    #[test]
+    fn layout_seed_lines_resolve_accounts() {
+        let s = Sample::load();
+        let ids: HashMap<String, cl_core::ids::AccountId> = ["4000", "20900", "10150"]
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let id = cl_core::ids::AccountId::parse(&format!(
+                    "00000000-0000-4000-8000-{:012}",
+                    i + 1
+                ))
+                .expect("id");
+                ((*n).to_string(), id)
+            })
+            .collect();
+        let lines = layout_seed_lines(&s.company.daily_sales_layouts[0], |n| ids.get(n).copied());
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[0].account, ids.get("4000").copied());
+        assert_eq!(lines[0].side, cl_api::NormalSide::Credit);
+        assert_eq!(lines[2].account, ids.get("10150").copied());
+        assert_eq!(lines[2].side, cl_api::NormalSide::Debit);
+        // 6250 is not in this chart: unmapped, not dropped (last in order).
+        assert_eq!(lines[4].account, None);
+        assert_eq!(lines[4].section, cl_api::Section::from_wire("payout"));
+    }
 
     fn d(y: i32, m: u32, day: u32) -> CalendarDate {
         CalendarDate::from_ymd(y, m, day).expect("date")
@@ -604,8 +843,11 @@ mod tests {
         assert_eq!(s.company.vendors.len(), 38);
         // Every account is the starter chart's, except the Write Check
         // story's Materials accounts (5100 is the chart's inventory-only
-        // Cost of Goods Sold, which the sample company does not turn on).
-        let story = ["5090", "5100", "5110"];
+        // Cost of Goods Sold, which the sample company does not turn on),
+        // and its owner equity accounts: starter charts have none (the
+        // engine seeds them by entity type, U-56), but the sample's history
+        // posts to them.
+        let story = ["5090", "5100", "5110", "30160", "30170"];
         let template = StarterChart::GeneralService.template();
         for a in &s.company.accounts {
             let in_chart = template.accounts.iter().find(|t| t.number == a.number);
@@ -743,5 +985,173 @@ mod tests {
                 .any(|t| t.number == "4418" && t.lines.iter().any(|l| l.account == "1010"))
         );
         assert_eq!(s.next_check_number("1010"), Some(4418));
+    }
+
+    /// The P14 money story: payments waiting in Payments Clearing, the
+    /// 11/04 bank deposit of both, the daily-sales layout and the lender's
+    /// statement, all exact and none moving a design figure (the README
+    /// figures stay pinned by `golden_figures_match_the_design_readme`).
+    #[test]
+    fn golden_p14_story() {
+        let s = Sample::load();
+        let story = d(2026, 11, 4);
+        let sys = &s.company.system_accounts;
+        assert_eq!(sys.payments_clearing, "10150");
+        assert_eq!(sys.sales_tax_payable, "20900");
+
+        // Two payments wait in Payments Clearing, 2,092.50 at 11/04.
+        let waiting: Vec<&SampleTransaction> = s
+            .transactions
+            .iter()
+            .filter(|t| t.lines.iter().any(|l| l.account == sys.payments_clearing))
+            .collect();
+        let facts: Vec<(&str, CalendarDate, &str, Money)> = waiting
+            .iter()
+            .map(|t| {
+                let debit = Money::sum(
+                    t.lines
+                        .iter()
+                        .filter(|l| l.account == sys.payments_clearing)
+                        .map(|l| l.debit),
+                )
+                .expect("sum");
+                (
+                    t.contact.as_deref().unwrap_or_default(),
+                    t.date,
+                    t.number.as_str(),
+                    debit,
+                )
+            })
+            .collect();
+        assert_eq!(
+            facts,
+            [
+                (
+                    "Hollister Family Trust",
+                    d(2026, 11, 2),
+                    "5521",
+                    m("1250.00")
+                ),
+                ("Maple Street Bakery", d(2026, 11, 3), "1094", m("842.50")),
+            ]
+        );
+        for t in &waiting {
+            assert_eq!(t.kind, "payment");
+            // Dr Payments Clearing / Cr A/R, nothing else.
+            let accounts: Vec<&str> = t.lines.iter().map(|l| l.account.as_str()).collect();
+            assert_eq!(accounts, ["10150", "10200"]);
+            assert!(
+                s.company
+                    .clients
+                    .iter()
+                    .any(|c| Some(c) == t.contact.as_ref())
+            );
+        }
+        let clearing = s.balance(&sys.payments_clearing, story);
+        assert_eq!(clearing, m("2092.50"), "Payments Clearing at 11/04");
+        // Each pays its own invoice: no customer's open balance moves.
+        for t in &waiting {
+            let customer = t.contact.as_deref();
+            let net = Money::sum(
+                s.transactions
+                    .iter()
+                    .filter(|x| x.contact.as_deref() == customer && x.date >= d(2026, 11, 1))
+                    .flat_map(|x| x.lines.iter())
+                    .filter(|l| l.account == sys.accounts_receivable)
+                    .map(|l| l.debit.checked_sub(l.credit).expect("net")),
+            )
+            .expect("sum");
+            assert_eq!(net, Money::ZERO, "{customer:?} November A/R");
+        }
+
+        // The 11/04 bank file: one deposit of exactly the waiting payments.
+        let later: Vec<&FeedItem> = s.feed_after_last_file().collect();
+        assert_eq!(later.len(), 1);
+        assert_eq!(
+            (later[0].date, later[0].amount, later[0].status.as_str()),
+            (story, clearing, "ready")
+        );
+        assert_eq!(s.feed_through_last_file().count(), 37);
+    }
+
+    /// The P14 daily-sales layout and its account fallback.
+    #[test]
+    fn golden_p14_daily_sales_layout() {
+        let s = Sample::load();
+        let layout = &s.company.daily_sales_layouts[0];
+        assert_eq!(s.company.daily_sales_layouts.len(), 1);
+        assert_eq!(
+            (layout.name.as_str(), layout.preset.as_str()),
+            ("Plant sale counter", "retail")
+        );
+        let lines: Vec<(&str, &str, LayoutSide)> = layout
+            .lines
+            .iter()
+            .map(|l| (l.section.as_str(), l.label.as_str(), l.side))
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                ("sales", "Plant sales", LayoutSide::Credit),
+                ("tax", "Sales Tax Collected", LayoutSide::Credit),
+                ("payment", "Cash", LayoutSide::Debit),
+                ("payment", "Cards", LayoutSide::Debit),
+                ("payout", "Paid-outs", LayoutSide::Debit),
+            ]
+        );
+        // The sample chart has no 4100 (inventory only): Plant sales falls
+        // back to 4000; the engine seeds 10150 and 20900.
+        let has = |n: &str| {
+            crate::templates::ENGINE_SYSTEM_NUMBERS.contains(&n)
+                || s.company.accounts.iter().any(|a| a.number == n)
+        };
+        let resolved = layout.resolved_accounts(has);
+        assert_eq!(
+            resolved,
+            ["4000", "20900", "10150", "10150", "6250"].map(|n| Some(n.to_string()))
+        );
+        let with_4100 = layout.resolved_accounts(|n| n == "4100");
+        assert_eq!(with_4100[0].as_deref(), Some("4100"));
+        assert_eq!(with_4100[1], None);
+    }
+
+    /// The P14 lender statement balances exactly against the books; the
+    /// entity type and the owner stay.
+    #[test]
+    fn golden_p14_lender_statement() {
+        let s = Sample::load();
+        let story = d(2026, 11, 4);
+        let st = &s.lender_statement;
+        assert_eq!(st.statement_date, story);
+        assert_eq!(
+            (st.lender.as_str(), st.account.as_str()),
+            ("Lakeview Credit Union", "2200")
+        );
+        assert!(s.company.clients.iter().any(|c| c == &st.lender));
+        assert_eq!(st.payment, m("892.00"));
+        assert_eq!(st.interest, m("207.43"));
+        assert_eq!(st.principal, m("684.57"));
+        assert_eq!(
+            st.payment.checked_sub(st.interest).expect("split"),
+            st.principal
+        );
+        let owed = Money::ZERO
+            .checked_sub(s.balance("2200", story))
+            .expect("owed");
+        assert_eq!(st.balance_before, owed, "the books' 2200 balance at 11/04");
+        assert_eq!(st.balance_before, m("31200.00"));
+        assert_eq!(
+            st.balance_before.checked_sub(st.principal).expect("after"),
+            st.balance_after
+        );
+        assert_eq!(st.balance_after, m("30515.43"));
+
+        // Entity type and the owner stay.
+        assert_eq!(s.company.entity_type, "single_member_llc");
+        assert!(
+            s.transactions
+                .iter()
+                .any(|t| t.contact.as_deref() == Some("Kurt (owner)"))
+        );
     }
 }

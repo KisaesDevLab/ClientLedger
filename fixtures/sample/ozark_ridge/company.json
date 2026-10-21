@@ -38,14 +38,14 @@
     },
     {
       "detail": null,
-      "name": "Owner Contributions",
-      "number": "3100",
+      "name": "Owner's Contribution",
+      "number": "30160",
       "type": "equity"
     },
     {
       "detail": null,
-      "name": "Owner Draws",
-      "number": "3200",
+      "name": "Owner's Draw",
+      "number": "30170",
       "type": "equity"
     },
     {
@@ -246,6 +246,45 @@
     "Valley View Assisted Living"
   ],
   "closingDate": "2026-09-30",
+  "dailySalesLayouts": [
+    {
+      "lines": [
+        {
+          "account": "4100",
+          "fallbackAccount": "4000",
+          "label": "Plant sales",
+          "section": "sales",
+          "side": "credit"
+        },
+        {
+          "account": "20900",
+          "label": "Sales Tax Collected",
+          "section": "tax",
+          "side": "credit"
+        },
+        {
+          "account": "10150",
+          "label": "Cash",
+          "section": "payment",
+          "side": "debit"
+        },
+        {
+          "account": "10150",
+          "label": "Cards",
+          "section": "payment",
+          "side": "debit"
+        },
+        {
+          "account": "6250",
+          "label": "Paid-outs",
+          "section": "payout",
+          "side": "debit"
+        }
+      ],
+      "name": "Plant sale counter",
+      "preset": "retail"
+    }
+  ],
   "entityType": "single_member_llc",
   "figures": {
     "attachments": 214,
@@ -276,7 +315,9 @@
   "systemAccounts": {
     "accountsPayable": "20100",
     "accountsReceivable": "10200",
-    "openingBalances": "30000"
+    "openingBalances": "30000",
+    "paymentsClearing": "10150",
+    "salesTaxPayable": "20900"
   },
   "tags": [
     {

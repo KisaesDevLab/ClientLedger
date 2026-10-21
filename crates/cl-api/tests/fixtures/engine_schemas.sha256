@@ -1,4 +1,4 @@
-8f90f0214b056dbd0beabe01cc5552a26e0f6333e0c7561d2ea995fe82da8651  engine/packages/shared/src/schemas/transactions.ts
+37cae6322140349ab2ae1b97be80cab1e5352c66cf7366cdac7ed32f5b36db5b  engine/packages/shared/src/schemas/transactions.ts
 0882b40b4f07060af25e81c82d0a2b5d5d63317a972b6d36ce3dc46e7fbfdba4  engine/packages/shared/src/schemas/accounts.ts
 35f0026e5933fcf286fa182ffba407e74b1f34cfad765040cef8adf7c7fcf7c1  engine/packages/shared/src/schemas/contacts.ts
 d95ad68788e53b5fa72ccce2ab38c7bb45b381d240ab34c6ae2e08879c94c417  engine/packages/shared/src/schemas/items.ts
@@ -7,7 +7,7 @@ cce501e7a3b95cc6b27eb37680697b9c2b01b61a84587456d12d2dcc064d511b  engine/package
 caa4d4629f96c011cc83b5a7ce9f066195136df80aaaf779c47d62eaf8e0106c  engine/packages/shared/src/schemas/auth.ts
 44c890ad68a8abdcb26348f73ac9246aee4c066397717505ec07b6464a2a4787  engine/packages/api/src/routes/tags.routes.ts
 2a998c8158e4c0615d6161031e72e0d07a0b90275786a674f863f65c05711ed2  engine/packages/shared/src/schemas/ai.ts
-606d6c24c7c66faca8f166bea55d33db2acb2c7f4d46eb8a9db7fcd047b5ae9d  engine/packages/api/src/routes/transactions.routes.ts
+ed3d68fde2cd415f16d807097ea642d08cd0bbd2419ab089f4808ba3f5ed00a0  engine/packages/api/src/routes/transactions.routes.ts
 d370523607e966393037745ef11d3824367053d35c3326b1044c2260b971d649  engine/packages/shared/src/schemas/ap.ts
 b2627570809c910ce912121106b9e1a4c4911b67fcd7913577465b47358988f4  engine/packages/api/src/routes/desktop.routes.ts
 92dd301a527aad2f763e15f80cb5d09a3b78e2e9d992a5e4a2690fc3fd077f8c  engine/packages/api/src/routes/portal-1099.routes.ts
@@ -15,3 +15,6 @@ b2627570809c910ce912121106b9e1a4c4911b67fcd7913577465b47358988f4  engine/package
 be9c4e3bb2a71b8b75e9b0b8a197add0bf0f0822cf69296299324da4f24749f2  engine/packages/api/src/routes/checks.routes.ts
 3f88b48cc0681abee00732d201a934cd40397f9437c45b0be8f9482b4e6fd521  engine/packages/api/src/routes/accounts.routes.ts
 f79a832cb6802b7deac37cd02f443bf2dabc72c99bb052509f59eb8bce5169c4  engine/packages/api/src/routes/audit.routes.ts
+daeea9464659f58e633df35f8946a1690ed86573f5b9cbc839497c44d0608380  engine/packages/shared/src/schemas/daily-sales.ts
+687df1aed70ec018201b96f92399f14c7ab2dd8609fb4657a08dbb9c6dd19898  engine/packages/api/src/routes/daily-sales.routes.ts
+9f625b4b6efc9eee4ad23f4ce959716bf275a2bc46a033693c61c44b74cf9635  engine/packages/api/src/routes/payments.routes.ts

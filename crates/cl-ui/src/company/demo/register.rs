@@ -43,8 +43,10 @@ fn line_id(t: &SampleTransaction, index: usize) -> JournalLineId {
         .unwrap_or_else(|_| unreachable!("a well-formed demo id"))
 }
 
-fn txn_type(kind: &str) -> TxnType {
+pub(crate) fn txn_type(kind: &str) -> TxnType {
     match kind {
+        "daily_sales" => TxnType::DailySales,
+        "vendor_credit" => TxnType::VendorCredit,
         "invoice" => TxnType::Invoice,
         "payment" => TxnType::CustomerPayment,
         "bill" => TxnType::Bill,
@@ -380,6 +382,10 @@ pub struct DemoLedger {
     voided: std::collections::BTreeSet<u32>,
     /// Deleted in the demo (gone from the register; R7).
     deleted: std::collections::BTreeSet<u32>,
+    /// What each deposit took in (U-52, U-54): deposit → its sources (a
+    /// payment, a daily-sales day or a vendor credit) with their amounts.
+    /// A void or deleted deposit releases them.
+    links: std::collections::BTreeMap<u32, Vec<(u32, Money)>>,
 }
 
 /// The demo company's closing-date password (synthetic; the demo plays an
@@ -421,6 +427,17 @@ fn refused(reason: cl_api::ConflictReason) -> cl_api::ApiError {
     }
 }
 
+/// The engine's 409 with its code (`ALREADY_DEPOSITED`, `TXN_DEPOSITED`,
+/// ...).
+pub(super) fn conflict_code(reason: cl_api::ConflictReason, code: &str) -> cl_api::ApiError {
+    cl_api::ApiError::Conflict {
+        reason,
+        current_version: None,
+        code: cl_api::ErrorCode::parse(code),
+        message: cl_api::UserText::default(),
+    }
+}
+
 /// A posting as the demo engine stores it (built by the register screen
 /// from the owner's typed values; amounts exact).
 #[derive(Clone, Debug)]
@@ -441,6 +458,36 @@ pub struct DemoPosting {
     pub own_debit: bool,
     /// The other side's accounts and amounts.
     pub lines: Vec<(AccountId, Money)>,
+}
+
+/// One explicit line of a demo posting ([`DemoLedger::save_lines`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DemoLine {
+    /// The account.
+    pub account: AccountId,
+    /// Debit (zero on a credit line).
+    pub debit: Money,
+    /// Credit (zero on a debit line).
+    pub credit: Money,
+    /// Line memo.
+    pub memo: Option<String>,
+}
+
+/// A posting as the demo engine stores it, given as explicit lines (P14).
+#[derive(Clone, Debug)]
+pub struct DemoJournal {
+    /// `deposit`, `daily_sales`, `check`, `card_charge`, ... .
+    pub kind: &'static str,
+    /// Date.
+    pub date: CalendarDate,
+    /// Number (empty for none).
+    pub number: String,
+    /// Payee name.
+    pub contact: Option<String>,
+    /// Memo.
+    pub memo: String,
+    /// The lines, in order; debits must equal credits exactly.
+    pub lines: Vec<DemoLine>,
 }
 
 fn sample_id(id: TransactionId) -> Option<u32> {
@@ -488,6 +535,14 @@ impl DemoLedger {
         let n = sample_id(id)
             .filter(|n| self.find(*n).is_some())
             .ok_or(cl_api::ApiError::NotFound { code: None })?;
+        // A deposited payment (or a refunded vendor credit) stays until its
+        // deposit is voided (409 `TXN_DEPOSITED`).
+        if self.deposited_in(id).is_some() {
+            return Err(conflict_code(
+                cl_api::ConflictReason::InUse,
+                "TXN_DEPOSITED",
+            ));
+        }
         if !self.voided.insert(n) {
             return Err(refused(cl_api::ConflictReason::Unspecified));
         }
@@ -509,6 +564,12 @@ impl DemoLedger {
         if t.cleared && t.date <= last_reconciled() {
             return Err(refused(cl_api::ConflictReason::Reconciled));
         }
+        if self.deposited_in(id).is_some() {
+            return Err(conflict_code(
+                cl_api::ConflictReason::DeleteLinked,
+                "TXN_DELETE_LINKED",
+            ));
+        }
         self.deleted.insert(t.id);
         Ok(())
     }
@@ -523,6 +584,55 @@ impl DemoLedger {
             .filter_map(|t| t.number.parse::<u32>().ok())
             .max()
             .map(|n| n.saturating_add(1))
+    }
+
+    /// Records what a deposit took in (replacing any earlier set).
+    pub fn link_deposit(&mut self, deposit: TransactionId, sources: &[(TransactionId, Money)]) {
+        let Some(d) = sample_id(deposit) else { return };
+        let v: Vec<(u32, Money)> = sources
+            .iter()
+            .filter_map(|(s, m)| sample_id(*s).map(|n| (n, *m)))
+            .collect();
+        self.links.insert(d, v);
+    }
+
+    /// What a deposit took in: (source, amount), in the order sent.
+    #[must_use]
+    pub fn deposit_links(&self, deposit: TransactionId) -> Vec<(TransactionId, Money)> {
+        sample_id(deposit)
+            .and_then(|d| self.links.get(&d))
+            .map(|v| {
+                v.iter()
+                    .filter_map(|(n, m)| self.find(*n).map(|t| (txn_id(&t), *m)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Every live (not void, not deleted) deposit that took `source` in,
+    /// with the amount, oldest first.
+    #[must_use]
+    pub fn live_links_of(&self, source: TransactionId) -> Vec<(TransactionId, Money)> {
+        let Some(n) = sample_id(source) else {
+            return Vec::new();
+        };
+        self.links
+            .iter()
+            .filter(|(d, _)| !self.voided.contains(d) && !self.deleted.contains(d))
+            .flat_map(|(d, v)| {
+                v.iter()
+                    .filter(move |(s, _)| *s == n)
+                    .map(move |(_, m)| (*d, *m))
+            })
+            .filter_map(|(d, m)| self.find(d).map(|t| (txn_id(&t), m)))
+            .collect()
+    }
+
+    /// The live deposit that took `source` in, if any (a void or deleted
+    /// deposit released it).
+    #[must_use]
+    pub fn deposited_in(&self, source: TransactionId) -> Option<TransactionId> {
+        self.live_links_of(source).first().map(|(d, _)| *d)
     }
 
     /// The id a demo transaction is known by (as the engine would send it).
@@ -596,6 +706,42 @@ impl DemoLedger {
         p: &DemoPosting,
         existing: Option<TransactionId>,
     ) -> Option<TransactionId> {
+        let side = |account: AccountId, amount: Money, debit: bool| DemoLine {
+            account,
+            debit: if debit { amount } else { Money::ZERO },
+            credit: if debit { Money::ZERO } else { amount },
+            memo: None,
+        };
+        let mut lines: Vec<DemoLine> = p
+            .lines
+            .iter()
+            .map(|(a, m)| side(*a, *m, !p.own_debit))
+            .collect();
+        let total = Money::sum(p.lines.iter().map(|(_, m)| *m)).ok()?;
+        lines.push(side(p.own, total, p.own_debit));
+        let journal = DemoJournal {
+            kind: p.kind,
+            date: p.date,
+            number: p.number.clone(),
+            contact: p.contact.clone(),
+            memo: p.memo.clone(),
+            lines,
+        };
+        self.save_lines(chart, &journal, existing)
+    }
+
+    /// Records (or, with `existing`, replaces) a posting given as explicit
+    /// debit and credit lines (P14: deposits with fees and cash back, daily
+    /// sales with their over/short). `None` when an account is not in the
+    /// chart, the transaction is unknown, there are no lines, a line is not
+    /// exactly one positive side, or the debits and credits differ by any
+    /// amount (the demo engine posts only balanced entries, exactly).
+    pub fn save_lines(
+        &mut self,
+        chart: &[Account],
+        j: &DemoJournal,
+        existing: Option<TransactionId>,
+    ) -> Option<TransactionId> {
         let num = |id: AccountId| {
             chart
                 .iter()
@@ -603,20 +749,30 @@ impl DemoLedger {
                 .and_then(number_of)
                 .map(str::to_string)
         };
-        let side = |account: String, amount: Money, debit: bool| cl_company::sample::SampleLine {
-            account,
-            debit: if debit { amount } else { Money::ZERO },
-            credit: if debit { Money::ZERO } else { amount },
-            memo: None,
-            tag: None,
-            job: None,
+        // Exactly one side, and it is above zero.
+        let one_side = |l: &DemoLine| {
+            (l.debit.is_positive() && l.credit.is_zero())
+                || (l.credit.is_positive() && l.debit.is_zero())
         };
-        let mut lines = Vec::new();
-        for (a, m) in &p.lines {
-            lines.push(side(num(*a)?, *m, !p.own_debit));
+        if j.lines.is_empty() || !j.lines.iter().all(one_side) {
+            return None;
         }
-        let total = Money::sum(p.lines.iter().map(|(_, m)| *m)).ok()?;
-        lines.push(side(num(p.own)?, total, p.own_debit));
+        let debits = Money::sum(j.lines.iter().map(|l| l.debit)).ok()?;
+        let credits = Money::sum(j.lines.iter().map(|l| l.credit)).ok()?;
+        if debits != credits {
+            return None;
+        }
+        let mut lines = Vec::with_capacity(j.lines.len());
+        for l in &j.lines {
+            lines.push(cl_company::sample::SampleLine {
+                account: num(l.account)?,
+                debit: l.debit,
+                credit: l.credit,
+                memo: l.memo.clone(),
+                tag: None,
+                job: None,
+            });
+        }
         let (id, cleared) = if let Some(t) = existing {
             let id = sample_id(t)?;
             (id, self.find(id)?.cleared)
@@ -626,11 +782,11 @@ impl DemoLedger {
         };
         let t = SampleTransaction {
             id,
-            date: p.date,
-            kind: p.kind.to_string(),
-            number: p.number.clone(),
-            contact: p.contact.clone(),
-            memo: p.memo.clone(),
+            date: j.date,
+            kind: j.kind.to_string(),
+            number: j.number.clone(),
+            contact: j.contact.clone(),
+            memo: j.memo.clone(),
             due: None,
             cleared,
             attachment: false,
@@ -696,6 +852,8 @@ impl DemoLedger {
                 contact_id: if deposit && !own_side { contact } else { None },
                 is_billable: false,
                 billed_status: None,
+                source_transaction_id: None,
+                line_role: None,
             });
         }
         let record = cl_api::Transaction {
@@ -734,6 +892,53 @@ mod tests {
             .find(|a| a.fields.account_number.as_deref() == Some("1010"))
             .map(|a| a.id)
             .expect("1010")
+    }
+
+    #[test]
+    #[allow(clippy::many_single_char_names, reason = "short test helpers")]
+    fn save_lines_posts_only_balanced_one_sided_lines() {
+        let chart = super::super::chart();
+        let n = |s: &str| {
+            chart
+                .iter()
+                .find(|a| a.fields.account_number.as_deref() == Some(s))
+                .map(|a| a.id)
+                .expect(s)
+        };
+        let m = |s: &str| Money::parse_wire(s).expect("m");
+        let l = |a: &str, d: &str, c: &str| DemoLine {
+            account: n(a),
+            debit: m(d),
+            credit: m(c),
+            memo: None,
+        };
+        // 1,250.00 + 300.00 − 12.50 fee − 50.00 cash back = 1,487.50.
+        let mut j = DemoJournal {
+            kind: "deposit",
+            date: CalendarDate::from_ymd(2026, 11, 4).expect("d"),
+            number: String::new(),
+            contact: None,
+            memo: String::new(),
+            lines: vec![
+                l("1010", "1487.50", "0"),
+                l("10150", "0", "1250.00"),
+                l("4000", "0", "300.00"),
+                l("6250", "12.50", "0"),
+                l("30170", "50.00", "0"),
+            ],
+        };
+        let mut ledger = DemoLedger::default();
+        let id = ledger.save_lines(&chart, &j, None).expect("saved");
+        let t = ledger.find(sample_id(id).expect("id")).expect("stored");
+        assert_eq!(t.lines.len(), 5);
+        assert_eq!(t.lines[3].debit, m("12.50"));
+        // A cent off, a two-sided line or no lines: nothing is stored.
+        j.lines[0].debit = m("1487.49");
+        assert!(ledger.save_lines(&chart, &j, None).is_none());
+        j.lines[0] = l("1010", "1487.50", "1487.50");
+        assert!(ledger.save_lines(&chart, &j, None).is_none());
+        j.lines.clear();
+        assert!(ledger.save_lines(&chart, &j, None).is_none());
     }
 
     #[test]

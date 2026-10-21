@@ -27,6 +27,9 @@
 #! schema-source engine/packages/api/src/routes/checks.routes.ts
 #! schema-source engine/packages/api/src/routes/accounts.routes.ts
 #! schema-source engine/packages/api/src/routes/audit.routes.ts
+#! schema-source engine/packages/shared/src/schemas/daily-sales.ts
+#! schema-source engine/packages/api/src/routes/daily-sales.routes.ts
+#! schema-source engine/packages/api/src/routes/payments.routes.ts
 GET     /health                                 idempotent
 GET     /api/v1/desktop/info                    idempotent
 GET     /openapi.json                           idempotent
@@ -147,3 +150,23 @@ POST    /api/v1/practice/conditional-rules/evaluate pre-handler-only
 GET     /api/v1/checks                          idempotent
 GET     /api/v1/checks/settings                 idempotent
 PUT     /api/v1/checks/{id}                     pre-handler-only
+# P14: deposits, daily sales, owner helpers
+GET     /api/v1/payments/pending-deposits       idempotent
+GET     /api/v1/banking/feed                    idempotent
+GET     /api/v1/banking/feed/{id}/deposit-groupings idempotent
+GET     /api/v1/reports/deposit-detail          idempotent
+GET     /api/v1/company/equity-roles            idempotent
+GET     /api/v1/daily-sales/templates           idempotent
+POST    /api/v1/daily-sales/templates           pre-handler-only
+GET     /api/v1/daily-sales/templates/{id}      idempotent
+PUT     /api/v1/daily-sales/templates/{id}      pre-handler-only
+DELETE  /api/v1/daily-sales/templates/{id}      pre-handler-only
+PUT     /api/v1/daily-sales/templates/{id}/lines pre-handler-only
+GET     /api/v1/daily-sales/entries             idempotent
+POST    /api/v1/daily-sales/entries             pre-handler-only
+POST    /api/v1/daily-sales/entries/preview     pre-handler-only
+GET     /api/v1/daily-sales/entries/{id}        idempotent
+PUT     /api/v1/daily-sales/entries/{id}        pre-handler-only
+DELETE  /api/v1/daily-sales/entries/{id}        pre-handler-only
+POST    /api/v1/daily-sales/entries/{id}/post   pre-handler-only
+POST    /api/v1/daily-sales/entries/{id}/void   pre-handler-only

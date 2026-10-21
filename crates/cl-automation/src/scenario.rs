@@ -139,7 +139,8 @@ pub enum Step {
         /// Expected JSON value.
         equals: Value,
     },
-    /// No element is cut off by the window edge.
+    /// No element is cut off by the window edge, drawn over another, or
+    /// showing text cut inside its own text field.
     AssertNoClipping {
         /// Points of slack (default 1).
         #[serde(default)]
@@ -532,8 +533,20 @@ fn run_step(
             eventually(t, |s| {
                 let clipped = s.clipped_excluding(tol, ignore);
                 let overlaps = s.overlapping(tol, ignore);
-                if clipped.is_empty() && overlaps.is_empty() {
+                let truncated = s.truncated_inputs(tol, ignore);
+                if clipped.is_empty() && overlaps.is_empty() && truncated.is_empty() {
                     Ok(())
+                } else if clipped.is_empty() && overlaps.is_empty() {
+                    let names: Vec<String> = truncated
+                        .iter()
+                        .take(5)
+                        .map(|n| format!("{} \"{}\"", n.role, n.label.as_deref().unwrap_or("")))
+                        .collect();
+                    Err(format!(
+                        "{} text field(s) are too narrow for their text: {}",
+                        truncated.len(),
+                        names.join(", ")
+                    ))
                 } else if clipped.is_empty() {
                     let names: Vec<String> = overlaps
                         .iter()

@@ -46,6 +46,13 @@ pub trait Screen {
         true
     }
 
+    /// Load a saved transaction into a fresh form (`CompanyEvent::OpenRecord`,
+    /// P14). Returns true when this screen shows saved records; the shell
+    /// then opens it as a new window.
+    fn open_record(&mut self, _txn: cl_core::ids::TransactionId) -> bool {
+        false
+    }
+
     /// Screen state for the control channel (`state.screen`); no amounts,
     /// names or secrets.
     fn state(&self) -> serde_json::Value {

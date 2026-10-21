@@ -182,6 +182,11 @@ pub struct CenterScreen {
     typed_at: f64,
     compact: bool,
     just_hidden: Option<ContactId>,
+    /// Saves in other windows (Q-262).
+    bus: crate::data_bus::Subscription,
+    /// The contacts being read again after a save elsewhere: the cursor
+    /// stays where it was and the keyboard is not moved.
+    refreshing: bool,
 }
 
 fn new_grid(salt: &str, spec: cl_grid::GridSpec) -> Grid {
@@ -251,7 +256,10 @@ impl CenterScreen {
             typed_at: f64::NEG_INFINITY,
             compact: false,
             just_hidden: None,
+            bus: crate::data_bus::Subscription::detached(),
+            refreshing: false,
         };
+        s.bus = s.link.bus().subscribe();
         s.start_load();
         s
     }
@@ -361,7 +369,100 @@ impl CenterScreen {
         self.contacts = contacts;
         self.model.set_contacts(&self.contacts, &self.filter);
         self.loaded = true;
-        self.place_cursor(keep);
+        if std::mem::take(&mut self.refreshing) {
+            self.keep_cursor(keep);
+        } else {
+            self.place_cursor(keep);
+        }
+    }
+
+    /// Saves in other windows of this app (Q-262): the names, balances
+    /// and the shown contact's transactions come again from the engine.
+    /// The cursor stays on its contact; an open form keeps its edits.
+    fn hear_changes(&mut self) {
+        let changes = self.link.bus().take(&mut self.bus);
+        if changes.is_empty() {
+            return;
+        }
+        if changes.contacts && self.load.is_none() {
+            self.refreshing = true;
+            self.reload_contacts();
+        }
+        if changes.accounts {
+            self.reload_accounts();
+        }
+        if changes.contacts || changes.ledger_any() {
+            self.start_balances();
+            if let Some((id, all)) = self.detail.as_ref().map(|d| (d.id, d.all)) {
+                self.load_detail(id, all);
+            }
+        }
+    }
+
+    /// Tells the other windows this one changed contacts (and, for a
+    /// merge, the transactions moved to the kept contact).
+    fn publish(&self, ledger: bool) {
+        let bus = self.link.bus();
+        bus.publish_from(&self.bus, crate::data_bus::Change::Contacts);
+        if ledger {
+            bus.publish_from(&self.bus, crate::data_bus::Change::Ledger(None));
+        }
+    }
+
+    fn reload_contacts(&mut self) {
+        if let Some(mut d) = self.link.demo_state() {
+            let cs = d.contacts_mut().clone();
+            drop(d);
+            self.load = Some(Task::ready(cs));
+            return;
+        }
+        if let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref())
+            && let Ok(p) = group.read(&session, |s| async move {
+                s.contacts().list_all(&ApiContactFilter::default()).await
+            })
+        {
+            self.load = Some(Task::Pending(p));
+        } else {
+            self.refreshing = false;
+        }
+    }
+
+    fn reload_accounts(&mut self) {
+        if let Some(mut d) = self.link.demo_state() {
+            let chart = d
+                .chart
+                .get_or_insert_with(crate::company::demo::chart)
+                .clone();
+            drop(d);
+            self.accounts_load = Some(Task::ready(chart));
+            return;
+        }
+        if let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref())
+            && let Ok(p) = group.read(&session, |s| async move {
+                s.accounts().list_all(&AccountFilter::default()).await
+            })
+        {
+            self.accounts_load = Some(Task::Pending(p));
+        }
+    }
+
+    /// Puts the cursor back on `id` without taking the keyboard.
+    fn keep_cursor(&mut self, id: Option<ContactId>) {
+        let Some(key) = id.and_then(|i| self.model.key_of(i)) else {
+            return;
+        };
+        let label = String::new();
+        let env = self
+            .parts
+            .env(&NoLookups, &label, GridHeight::Rows { min: 1, max: 1 });
+        self.grid.set_cursor(
+            CellPos {
+                row: key,
+                col: COL_NAME,
+            },
+            ModelRef::Browse(&mut self.model),
+            &env,
+        );
     }
 
     /// Puts the cursor on `id` (or the first row) and focuses the grid.
@@ -779,6 +880,7 @@ impl CenterScreen {
                     let contacts = std::mem::take(&mut self.contacts);
                     self.apply_contacts(contacts);
                     self.start_balances();
+                    self.publish(false);
                     self.note = Some(if active {
                         "center.made_active"
                     } else {
@@ -802,6 +904,7 @@ impl CenterScreen {
                     self.detail = None;
                     self.want_cursor = Some(kept.record.id);
                     self.note = Some("center.merge.done");
+                    self.publish(true);
                     self.start_load();
                 }
                 Err(e) => m.error = Some(e),
@@ -1328,6 +1431,7 @@ impl Screen for CenterScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.parts = EnvParts::capture(ui.ctx());
         self.poll();
+        self.hear_changes();
         self.sync_compact();
         let tokens = Tokens::of(ui.ctx());
         cform::heading(ui, &tokens, &self.title());

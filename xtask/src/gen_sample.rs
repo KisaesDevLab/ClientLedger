@@ -8,6 +8,11 @@
 //! `docs/design/README.md` come out exactly; `cl-company`'s golden test
 //! asserts every one of them from the fixture.
 //!
+//! The P14 money story rides on top without moving a design figure: two
+//! customer payments waiting in Payments Clearing (10150), the 11/04 bank
+//! file's deposit of both, the "Plant sale counter" daily-sales layout and
+//! the lender's 11/04 statement for the truck loan (`lender_statement.json`).
+//!
 //! Amounts are integer cents here and decimal strings in the files; no
 //! floating point anywhere.
 
@@ -170,8 +175,8 @@ const ACCOUNTS: &[(&str, &str, &str, &str)] = &[
         "liability",
         "long_term_liability",
     ),
-    ("3100", "Owner Contributions", "equity", ""),
-    ("3200", "Owner Draws", "equity", ""),
+    ("30160", "Owner's Contribution", "equity", ""),
+    ("30170", "Owner's Draw", "equity", ""),
     ("4000", "Service Income", "revenue", ""),
     ("5000", "Subcontractors", "cogs", ""),
     ("5090", "Materials", "cogs", ""),
@@ -225,6 +230,40 @@ const LAST_CHECK_1010: u32 = 4417;
 const AR: &str = "10200";
 const AP: &str = "20100";
 const OPENING: &str = "30000";
+/// Engine system accounts the P14 story uses: Payments Clearing (payments
+/// received but not yet taken to the bank) and Sales Tax Payable.
+const PAYMENTS_CLEARING: &str = "10150";
+const SALES_TAX_PAYABLE: &str = "20900";
+
+// ---- The P14 money story (deposits, daily sales, loan) ----------------------
+/// Payments waiting to be deposited, each paying its own November invoice so
+/// no customer balance, open A/R or 1010 figure moves: customer, the
+/// customer's check number, invoice date, payment date, cents.
+const DEPOSIT_STORY: &[(&str, &str, Day, Day, i64)] = &[
+    (
+        "Hollister Family Trust",
+        "5521",
+        Day(2026, 11, 1),
+        Day(2026, 11, 2),
+        125_000,
+    ),
+    (
+        "Maple Street Bakery",
+        "1094",
+        Day(2026, 11, 1),
+        Day(2026, 11, 3),
+        84_250,
+    ),
+];
+/// The bank deposit on 11/04 that takes both payments to 1010 (the bank
+/// file after the 11/03 one the design figures use).
+const DEPOSIT_STORY_DATE: Day = Day(2026, 11, 4);
+const DEPOSIT_STORY_TOTAL: i64 = 209_250;
+/// The truck loan: monthly payment and the interest of the 11/04 statement.
+const LOAN_ACCOUNT: &str = "2200";
+const LOAN_LENDER: &str = "Lakeview Credit Union";
+const LOAN_PAYMENT: i64 = 89_200;
+const LOAN_STATEMENT_INTEREST: i64 = 20_743;
 
 const CLIENT_NAMES: &[&str] = &[
     "Riverbend HOA",
@@ -757,7 +796,7 @@ fn generate() -> Fixture {
                 number: format!("{check_no}"),
                 contact: Some("Kurt (owner)".into()),
                 memo: "Owner draw".into(),
-                lines: vec![line("3200", 350_000, 0), line("1010", 0, 350_000)],
+                lines: vec![line("30170", 350_000, 0), line("1010", 0, 350_000)],
                 due: None,
                 cleared: d <= cleared_cut,
                 attachment: false,
@@ -872,6 +911,12 @@ fn generate() -> Fixture {
     push_equity_plug(&mut txns, Day(2026, 11, 3), d1104, false, &mut check_no);
     assert_eq!(balance_1010(&txns), ENDING_1010);
 
+    // (8) The P14 deposit story: invoices paid into Payments Clearing. Net
+    //     zero on A/R and on every customer; 1010 and Jan-Oct untouched.
+    push_deposit_story(&mut txns, &mut invoice_no);
+    assert_eq!(open_ar(&txns), OPEN_AR);
+    assert_eq!(balance_1010(&txns), ENDING_1010);
+
     // ---- Pad to the exact count with savings deposits (1020 only) ----------
     assert!(
         txns.len() <= TXN_COUNT,
@@ -887,7 +932,7 @@ fn generate() -> Fixture {
             number: format!("DEP-{pad}"),
             contact: Some("Kurt (owner)".into()),
             memo: "Owner contribution to savings".into(),
-            lines: vec![line("1020", 5000, 0), line("3100", 0, 5000)],
+            lines: vec![line("1020", 5000, 0), line("30160", 0, 5000)],
             due: None,
             cleared: false,
             attachment: false,
@@ -988,7 +1033,94 @@ fn generate() -> Fixture {
     let last = BANK_FILE_1010 - OCT_STATEMENT_1010 - sum;
     feed.push(json!({"date": Day(2026, 11, 3).text(), "description": "MOBILE DEPOSIT", "amount": cents(last), "status": "review"}));
     assert_eq!(feed.len(), FEED_READY + FEED_REVIEW + FEED_MATCH);
+    // The 11/04 bank file: one deposit of both waiting payments. It comes
+    // after the 11/03 file, so the design figures (through 11/03) hold.
+    feed.push(json!({
+        "date": DEPOSIT_STORY_DATE.text(),
+        "description": "DEPOSIT",
+        "amount": cents(DEPOSIT_STORY_TOTAL),
+        "status": "ready",
+    }));
     Fixture { txns, feed }
+}
+
+/// The P14 deposit story: for each payment, a November invoice and the
+/// customer's payment of it into Payments Clearing.
+fn push_deposit_story(txns: &mut Vec<Txn>, invoice_no: &mut u32) {
+    let mut total = 0;
+    for &(customer, check, invoice_date, paid_on, amount) in DEPOSIT_STORY {
+        let invoice = format!("INV-{invoice_no}");
+        *invoice_no += 1;
+        txns.push(Txn {
+            date: invoice_date,
+            kind: "invoice",
+            number: invoice.clone(),
+            contact: Some(customer.into()),
+            memo: "Landscaping services".into(),
+            lines: vec![line(AR, amount, 0), line("4000", 0, amount)],
+            due: Some(invoice_date.add_days(30)),
+            cleared: false,
+            attachment: false,
+            paid: true,
+        });
+        txns.push(Txn {
+            date: paid_on,
+            kind: "payment",
+            number: check.into(),
+            contact: Some(customer.into()),
+            memo: format!("Payment received for {invoice}"),
+            lines: vec![line(PAYMENTS_CLEARING, amount, 0), line(AR, 0, amount)],
+            due: None,
+            cleared: false,
+            attachment: false,
+            paid: false,
+        });
+        total += amount;
+    }
+    assert_eq!(total, DEPOSIT_STORY_TOTAL);
+}
+
+/// The lender's 11/04 statement for the truck loan: the payment splits into
+/// interest and principal, and the balance after is the books' balance on
+/// 11/04 less the principal, in exact cents.
+fn lender_statement(txns: &[Txn]) -> Value {
+    // Credit-normal: what is owed.
+    let owed: i64 = txns
+        .iter()
+        .filter(|t| t.date <= DEPOSIT_STORY_DATE)
+        .flat_map(|t| t.lines.iter())
+        .filter(|l| l.account == LOAN_ACCOUNT)
+        .map(|l| l.credit - l.debit)
+        .sum();
+    let principal = LOAN_PAYMENT - LOAN_STATEMENT_INTEREST;
+    assert!(principal > 0 && owed > principal, "loan statement");
+    json!({
+        "lender": LOAN_LENDER,
+        "account": LOAN_ACCOUNT,
+        "statementDate": DEPOSIT_STORY_DATE.text(),
+        "balanceBefore": cents(owed),
+        "payment": cents(LOAN_PAYMENT),
+        "interest": cents(LOAN_STATEMENT_INTEREST),
+        "principal": cents(principal),
+        "balanceAfter": cents(owed - principal),
+    })
+}
+
+/// The "Plant sale counter" daily-sales layout (created from the engine's
+/// retail preset, then its lines replaced). `fallback` is used when the
+/// chart lacks `account` (4100 Product Sales is an inventory-only account).
+fn daily_sales_layouts() -> Value {
+    json!([{
+        "name": "Plant sale counter",
+        "preset": "retail",
+        "lines": [
+            {"section": "sales", "label": "Plant sales", "account": "4100", "fallbackAccount": "4000", "side": "credit"},
+            {"section": "tax", "label": "Sales Tax Collected", "account": SALES_TAX_PAYABLE, "side": "credit"},
+            {"section": "payment", "label": "Cash", "account": PAYMENTS_CLEARING, "side": "debit"},
+            {"section": "payment", "label": "Cards", "account": PAYMENTS_CLEARING, "side": "debit"},
+            {"section": "payout", "label": "Paid-outs", "account": "6250", "side": "debit"},
+        ],
+    }])
 }
 
 fn account_kind(number: &str) -> &'static str {
@@ -1037,7 +1169,7 @@ fn push_equity_plug(txns: &mut Vec<Txn>, date: Day, diff: i64, cleared: bool, ch
             "deposit",
             format!("DEP-OWN-{}", date.text()),
             "Owner contribution",
-            vec![line("1010", diff, 0), line("3100", 0, diff)],
+            vec![line("1010", diff, 0), line("30160", 0, diff)],
         )
     } else {
         *check_no += 1;
@@ -1045,7 +1177,7 @@ fn push_equity_plug(txns: &mut Vec<Txn>, date: Day, diff: i64, cleared: bool, ch
             "check",
             format!("{check_no}"),
             "Owner draw",
-            vec![line("3200", -diff, 0), line("1010", 0, -diff)],
+            vec![line("30170", -diff, 0), line("1010", 0, -diff)],
         )
     };
     txns.push(Txn {
@@ -1080,7 +1212,14 @@ fn render(fx: &Fixture) -> BTreeMap<&'static str, String> {
             }
             a
         }).collect::<Vec<_>>(),
-        "systemAccounts": {"accountsReceivable": AR, "accountsPayable": AP, "openingBalances": OPENING},
+        "systemAccounts": {
+            "accountsReceivable": AR,
+            "accountsPayable": AP,
+            "openingBalances": OPENING,
+            "paymentsClearing": PAYMENTS_CLEARING,
+            "salesTaxPayable": SALES_TAX_PAYABLE
+        },
+        "dailySalesLayouts": daily_sales_layouts(),
         "clients": CLIENT_NAMES,
         "vendors": VENDOR_NAMES,
         "vendorDetails": [{
@@ -1145,6 +1284,7 @@ fn render(fx: &Fixture) -> BTreeMap<&'static str, String> {
         "bank_feed.json",
         pretty(&json!({"account": "1010", "items": fx.feed})),
     );
+    out.insert("lender_statement.json", pretty(&lender_statement(&fx.txns)));
     out
 }
 
@@ -1204,7 +1344,8 @@ mod tests {
             fx.txns.iter().filter(|t| t.attachment).count(),
             ATTACHMENT_COUNT
         );
-        assert_eq!(fx.feed.len(), 37);
+        // 37 items through 11/03 (the design figures) plus the 11/04 deposit.
+        assert_eq!(fx.feed.len(), 38);
         for t in &fx.txns {
             let d: i64 = t.lines.iter().map(|l| l.debit).sum();
             let c: i64 = t.lines.iter().map(|l| l.credit).sum();
@@ -1250,6 +1391,28 @@ mod tests {
         let bill = story.iter().find(|t| t.kind == "bill").expect("bill");
         assert_eq!(bill_amount(bill), 128_640);
         assert_eq!(bill.due, Some(Day(2026, 11, 5)));
+    }
+
+    #[test]
+    fn deposit_and_loan_story_holds() {
+        let fx = generate();
+        let clearing: i64 = fx
+            .txns
+            .iter()
+            .flat_map(|t| t.lines.iter())
+            .filter(|l| l.account == PAYMENTS_CLEARING)
+            .map(|l| l.debit - l.credit)
+            .sum();
+        assert_eq!(clearing, DEPOSIT_STORY_TOTAL);
+        let last = fx.feed.last().expect("feed");
+        assert_eq!(last["amount"], "2092.50");
+        assert_eq!(last["date"], "2026-11-04");
+        let s = lender_statement(&fx.txns);
+        assert_eq!(s["payment"], "892.00");
+        assert_eq!(s["interest"], "207.43");
+        assert_eq!(s["principal"], "684.57");
+        assert_eq!(s["balanceBefore"], "31200.00");
+        assert_eq!(s["balanceAfter"], "30515.43");
     }
 
     #[test]

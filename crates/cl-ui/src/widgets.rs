@@ -3,8 +3,8 @@
 //! fonts carry no symbol fallback.
 
 use eframe::egui::{
-    self, Align2, Color32, CornerRadius, Margin, Pos2, Response, RichText, Role, Sense, Stroke,
-    StrokeKind, Ui, Vec2, WidgetInfo,
+    self, Color32, CornerRadius, Margin, Pos2, Response, RichText, Role, Sense, Stroke, StrokeKind,
+    Ui, Vec2, WidgetInfo,
 };
 
 use crate::theme::{Tokens, styles};
@@ -212,6 +212,20 @@ pub fn row_button(
     selected: bool,
     height: f32,
 ) -> (Response, egui::Rect) {
+    row_button_with_room(ui, label, accessible, selected, height, 0.0)
+}
+
+/// [`row_button`] keeping `room` points free at the right (for a dot or a
+/// count): a label too long for the rest ends in an ellipsis instead of
+/// running under it.
+pub fn row_button_with_room(
+    ui: &mut Ui,
+    label: &str,
+    accessible: &str,
+    selected: bool,
+    height: f32,
+    room: f32,
+) -> (Response, egui::Rect) {
     let t = Tokens::of(ui.ctx());
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
@@ -230,13 +244,15 @@ pub fn row_button(
         } else {
             t.text_primary
         };
-        ui.painter().text(
-            Pos2::new(rect.left() + 8.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            label,
-            egui::TextStyle::Body.resolve(ui.style()),
-            color,
+        let mut job = egui::text::LayoutJob::single_section(
+            label.to_owned(),
+            egui::TextFormat::simple(egui::TextStyle::Body.resolve(ui.style()), color),
         );
+        job.wrap =
+            egui::text::TextWrapping::truncate_at_width((rect.width() - 16.0 - room).max(0.0));
+        let galley = ui.painter().layout_job(job);
+        let pos = Pos2::new(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0);
+        ui.painter().galley(pos, galley, color);
         if response.has_focus() {
             ui.painter().rect_stroke(
                 rect,

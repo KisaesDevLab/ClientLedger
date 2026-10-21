@@ -1,0 +1,12 @@
+{
+  "entityType": "single_member_llc",
+  "roles": {
+    "owner_draw": "e9000000-0000-4000-8000-000000000001",
+    "owner_contribution": "e9000000-0000-4000-8000-000000000002",
+    "partner_draws": null,
+    "partner_contributions": null,
+    "shareholder_distributions": null,
+    "paid_in_capital": null,
+    "retained_earnings": "e9000000-0000-4000-8000-000000000007"
+  }
+}

@@ -1020,6 +1020,27 @@ impl Session {
         Ok(serde_json::from_slice(&reply.body).unwrap_or(serde_json::Value::Null))
     }
 
+    /// A raw `multipart/form-data` POST through the normal executor (the
+    /// contract tests' bank-file upload, `POST /banking/feed/import`): the
+    /// parts were built by the caller with `boundary`. Returns the 2xx JSON
+    /// body.
+    ///
+    /// # Errors
+    /// The mapped [`ApiError`].
+    pub async fn raw_multipart_mapped(
+        &self,
+        path: &str,
+        boundary: &str,
+        body: Vec<u8>,
+    ) -> Result<serde_json::Value, ApiError> {
+        let op = crate::resources::operations::raw(Method::Post);
+        let call = self
+            .raw_call(Method::Post, path, &[], None)?
+            .multipart_body(boundary, body);
+        let reply = self.send(&op, call, None).await?;
+        Ok(serde_json::from_slice(&reply.body).unwrap_or(serde_json::Value::Null))
+    }
+
     /// Rotate the refresh token now (single-flight like any refresh).
     ///
     /// # Errors

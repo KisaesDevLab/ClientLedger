@@ -207,6 +207,24 @@ pub enum LocalValidation {
     /// `check-edit-v1`; nothing was sent. The P12 expense path still
     /// changes its date, payee, memo and lines.
     CheckEditUnavailable,
+    // ---- P14: deposits, daily sales, owner helpers ----
+    /// Depositing pending payments as a group needs `deposit-grouping-v1`;
+    /// nothing was sent.
+    DepositGroupingUnavailable,
+    /// Cash back and fee (negative) lines on a deposit need
+    /// `deposit-cashback-v1`; nothing was sent.
+    DepositCashBackUnavailable,
+    /// A vendor refund against a vendor credit needs `vendor-refund-v1`;
+    /// nothing was sent.
+    VendorRefundUnavailable,
+    /// Bank-file deposit groupings need `feed-deposit-groupings-v1`;
+    /// nothing was sent.
+    FeedGroupingsUnavailable,
+    /// The equity role accounts need `equity-roles-v1`; nothing was sent.
+    EquityRolesUnavailable,
+    /// Posting or voiding a daily-sales day in a closed period needs
+    /// `daily-sales-lock-v1`; nothing was sent.
+    DailySalesLockUnavailable,
 }
 
 /// A save was refused because its date is on or before the closing date.

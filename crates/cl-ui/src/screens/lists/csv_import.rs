@@ -564,7 +564,31 @@ impl CsvScreen {
     /// What an import answered. Either way the names are read again before
     /// another import is allowed: after an error some rows may have gone
     /// in (S2).
+    /// Tells the open windows the list changed (Q-262). Also after a
+    /// failed import: some rows may have gone in.
+    fn publish(&self) {
+        use crate::data_bus::Change;
+        let bus = self.link.bus();
+        match self.list {
+            // An imported account may carry an opening balance.
+            ListChoice::Accounts => {
+                bus.publish(Change::Accounts);
+                bus.publish(Change::Ledger(None));
+            }
+            ListChoice::Contacts => {
+                bus.publish(Change::Contacts);
+            }
+            ListChoice::Items => {
+                bus.publish(Change::Items);
+            }
+            ListChoice::Tags => {
+                bus.publish(Change::Tags);
+            }
+        }
+    }
+
     fn import_finished(&mut self, r: Result<Outcome, ApiError>) {
+        self.publish();
         match r {
             Ok(o) => {
                 tracing::info!(

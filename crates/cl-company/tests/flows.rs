@@ -916,6 +916,127 @@ async fn switching_mid_load_sends_nothing_into_the_other_company() {
     }));
 }
 
+/// The P14 story on a real load: the two waiting payments post as journal
+/// entries Dr Payments Clearing (the engine's 10150) / Cr A/R, naming the
+/// customer in the memo, so the engine's pending-deposits list (any posted
+/// debit to Payments Clearing) shows them.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn the_sample_posts_waiting_payments_into_payments_clearing() {
+    const PC: &str = "2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8ea004";
+    const AR: &str = "2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8ea001";
+    let dir = tempfile::tempdir().expect("tmp");
+    let server = engine(&[]).await;
+    let s = session(&server).await;
+    let store = RecentStore::in_dir(&dir.path().join("settings"));
+    Mock::given(method("POST"))
+        .and(path("/api/v1/auth/create-tenant"))
+        .respond_with(json(
+            201,
+            json!({"tenantId":T2,"companyId":CO,"tenantName":"Practice"}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/company"))
+        .respond_with(json(
+            200,
+            json!({"company":{"id":CO,"businessName":"Practice","country":"US"}}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/company/settings"))
+        .respond_with(json(200, json!({"settings":{"fiscalYearStartMonth":1}})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/accounts/import"))
+        .respond_with(json(201, json!({"imported":40,"updated":0,"skipped":[]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/company/setup-complete"))
+        .respond_with(json(200, json!({"message":"ok"})))
+        .mount(&server)
+        .await;
+    let accounts: Vec<Value> = cl_company::Sample::load()
+        .company
+        .accounts
+        .iter()
+        .enumerate()
+        .map(|(i, a)| json!({"id": format!("2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e{:04x}", i), "accountNumber": a.number,
+            "name": a.name, "accountType": a.account_type, "isActive": true, "isSystem": false}))
+        .chain([
+            json!({"id":AR,"accountNumber":"10200","name":"A/R","accountType":"asset","isSystem":true}),
+            json!({"id":"2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8ea002","accountNumber":"20100","name":"A/P","accountType":"liability","isSystem":true}),
+            json!({"id":"2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8ea003","accountNumber":"30000","name":"Opening","accountType":"equity","isSystem":true}),
+            json!({"id":PC,"accountNumber":"10150","name":"Payments Clearing","accountType":"asset","isSystem":true}),
+        ])
+        .collect();
+    let total = accounts.len();
+    Mock::given(method("GET"))
+        .and(path("/api/v1/accounts"))
+        .respond_with(json(
+            200,
+            json!({"data": accounts, "total": total, "limit": 500, "offset": 0}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/contacts"))
+        .respond_with(json(201, json!({"contact":{"id":"4a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","contactType":"customer","displayName":"x","isActive":true}})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(json(201, json!({"transaction":{"id":"3b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","txnType":"journal_entry","txnDate":"2026-01-01","status":"posted","lines":[]}})))
+        .mount(&server)
+        .await;
+
+    cl_company::sample::load_into(&s, &store, &cl_company::backup::silent())
+        .await
+        .expect("loaded");
+
+    let entries = posts(&server, "/api/v1/transactions").await;
+    assert_eq!(entries.len(), 1512);
+    let into_clearing: Vec<&Value> = entries
+        .iter()
+        .filter(|e| {
+            e["lines"]
+                .as_array()
+                .is_some_and(|ls| ls.iter().any(|l| l["accountId"] == PC))
+        })
+        .collect();
+    let facts: Vec<(&str, &str, &str, &str, &str)> = into_clearing
+        .iter()
+        .map(|e| {
+            (
+                e["txnType"].as_str().unwrap_or_default(),
+                e["txnDate"].as_str().unwrap_or_default(),
+                e["lines"][0]["debit"].as_str().unwrap_or_default(),
+                e["lines"][1]["accountId"].as_str().unwrap_or_default(),
+                e["lines"][1]["credit"].as_str().unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        facts,
+        [
+            ("journal_entry", "2026-11-02", "1250.0000", AR, "1250.0000"),
+            ("journal_entry", "2026-11-03", "842.5000", AR, "842.5000"),
+        ]
+    );
+    for (e, customer) in into_clearing
+        .iter()
+        .zip(["Hollister Family Trust", "Maple Street Bakery"])
+    {
+        assert_eq!(e["lines"][0]["accountId"], PC);
+        let memo = e["memo"].as_str().unwrap_or_default();
+        assert!(memo.contains(customer), "{memo}");
+    }
+}
+
 /// A stale previous company (409 STALE on the first rename) does not fail
 /// the restore: the restored company keeps the archive's name and the
 /// local records stay as they were.

@@ -197,13 +197,10 @@ impl Spec {
                 lines: splits(lines),
             })
             .expect("check"),
-            Shape::Deposit { to, lines } => BankPosting::deposit(DepositDraft {
-                account: *to,
-                date: self.date,
-                memo,
-                lines: splits(lines),
-            })
-            .expect("deposit"),
+            Shape::Deposit { to, lines } => {
+                BankPosting::deposit(DepositDraft::plain(*to, self.date, memo, splits(lines)))
+                    .expect("deposit")
+            }
             Shape::Transfer { from, to, amount } => BankPosting::transfer(TransferDraft {
                 from: *from,
                 to: *to,

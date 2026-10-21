@@ -8,7 +8,7 @@ use eframe::egui::{self, Align, Frame, Layout, Margin, RichText, Ui, UiBuilder, 
 use super::{RailCounts, Shell, chip_text};
 use crate::i18n::t;
 use crate::theme::Tokens;
-use crate::widgets::{badge, eyebrow, kbd, paint_dot, row_button};
+use crate::widgets::{badge, eyebrow, kbd, paint_dot, row_button, row_button_with_room};
 
 /// Rail width in logical points (DESIGN.md: 200 to 220).
 pub const WIDTH: f32 = 212.0;
@@ -63,8 +63,16 @@ pub fn show(ui: &mut Ui, shell: &mut Shell, tokens: &Tokens) {
                     section(ui, "shell.rail.open_windows", 14.0);
                     for (id, title, dirty) in &open {
                         let active = active_id == Some(*id);
-                        let (resp, rect) =
-                            row_button(ui, title, &title_label(title, *dirty), active, ROW);
+                        // The dot keeps its room; a long title ends in "…".
+                        let room = if *dirty { 20.0 } else { 0.0 };
+                        let (resp, rect) = row_button_with_room(
+                            ui,
+                            title,
+                            &title_label(title, *dirty),
+                            active,
+                            ROW,
+                            room,
+                        );
                         if *dirty {
                             paint_dot(
                                 ui.painter(),

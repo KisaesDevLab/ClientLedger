@@ -59,8 +59,9 @@ pub use resources::ai::{
 };
 pub use resources::audit::{Audit, AuditAction, AuditEntity, AuditEntry, AuditImage, AuditLine};
 pub use resources::bank_postings::{
-    BankPosting, BankPostingKind, CardChargeDraft, CheckDraft, DepositDraft, PAYEE_ADDRESS_MAX,
-    PAYEE_NAME_MAX, PRINTED_MEMO_MAX, SplitLine, TransferDraft,
+    BankPosting, BankPostingKind, CASH_BACK_MEMO_MAX, CardChargeDraft, CashBack, CheckDraft,
+    DepositCaps, DepositDraft, DepositSource, GroupedPayment, PAYEE_ADDRESS_MAX, PAYEE_NAME_MAX,
+    PRINTED_MEMO_MAX, SplitLine, TransferDraft,
 };
 // P13 WP1: write check.
 pub use resources::checks::{
@@ -72,7 +73,7 @@ pub use resources::common::SortDir;
 pub use resources::company::{
     AccountingMethod, CLOSING_PASSWORD_MAX_BYTES, CLOSING_PASSWORD_MIN_CHARS, ClosingDateChange,
     ClosingPasswordStatus, CompanyProfile, CompanyProfileUpdate, CompanySettings,
-    CompanySettingsUpdate, EntityType,
+    CompanySettingsUpdate, EntityType, EquityRole, EquityRoles,
 };
 pub use resources::contacts::{
     Contact, ContactFields, ContactFilter, ContactSort, ContactType, ContactUpdate, Contacts,
@@ -116,8 +117,8 @@ pub use resources::tenants::{
     ImportVerification, JobError, JobId, JobState, NewTenant, TenantSummary, Tenants,
 };
 pub use resources::transactions::{
-    Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions, JeLine, MAX_LINES,
-    NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter, TransactionLine,
+    Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions, JeLine, LINE_ROLE_CASH_BACK,
+    MAX_LINES, NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter, TransactionLine,
     TransactionSummary, Transactions, TxnSort, TxnStatus, TxnType,
 };
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
@@ -137,3 +138,24 @@ pub use resources::attachments::{
 pub use resources::bills::{Bills, OpenBill, VendorSummary};
 pub use resources::contacts::{SuggestSource, SuggestedAccount};
 pub use resources::rules::{RULE_DESCRIPTION_MAX_CHARS, RuleMatch, RuleQuery, Rules};
+
+// P14 lane A: pending deposits and bank-file groupings.
+pub use resources::payments::{
+    ALREADY_DEPOSITED, DepositRecord, DepositedCashBack, DepositedLine, DepositedPayment, Payments,
+    PendingAmount, PendingDeposits, PendingPayment, SavedDeposit, VENDOR_CREDIT_EXCEEDED,
+    VendorRefundDraft, is_already_deposited, is_vendor_credit_exceeded,
+};
+
+// P14 lane A: the bank feed.
+pub use resources::feed::{
+    Feed, FeedDeposit, FeedGrouping, FeedGroupings, FeedItemId, GROUPINGS_LIMIT,
+};
+
+// P14 lane B: daily sales.
+pub use resources::daily_sales::{
+    DAILY_LABEL_MAX_CHARS, DAILY_NAME_MAX_CHARS, DAILY_NOTES_MAX_CHARS, DailyEntry,
+    DailyEntryDraft, DailyEntryQuery, DailyEntrySummary, DailyLine, DailyLineInput,
+    DailyPostOptions, DailyPreview, DailySales, DailyTemplate, DailyTotals, DailyValue,
+    EntryStatus, MAX_DAILY_LINES, MAX_DAILY_VALUES, NormalSide, Preset, Section, entry_from_json,
+    preview_from_json, template_from_json,
+};

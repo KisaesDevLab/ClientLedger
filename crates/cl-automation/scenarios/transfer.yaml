@@ -1,0 +1,178 @@
+# Transfer Funds (P14 plan §6.4) against `clientledger --demo`: 200.00 from
+# Operating Checking to the Business Credit Card, shown at once in both
+# registers (open the whole time, Q-262) as one transfer (Ctrl+E on the card
+# register's row opens it), the card's balance owed down by 200.00 (289.63
+# to 89.63); the same account on both sides refused; a closed-period date
+# saved with the closing-date password ("demo-close", synthetic); Void.
+#
+# Light and dark run in the same app, so the scenario is repeatable: the
+# 11/04 transfer is voided and the closed-period one deleted in the register
+# (the password again). All data is synthetic.
+name: transfer
+description: Transfer shown in both registers, same-account refusal, closed-period password, Ctrl+E from the register, Void.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  # --- 1. Both registers open: Operating Checking, then the card ---------------
+  - key: Ctrl+G
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.footer.ending, equals: "84,210.55"}
+  - click: {role: combo_box, label: Account}
+  - click: {role: button, label_contains: Business Credit Card}
+  - assert_state: {key: screen.account_class, equals: credit_card}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.footer.ending, equals: "289.63"}
+  - assert_not_exists: {role: row, label_contains: "11/04/2026, , row"}
+
+  # --- 2. Transfer Funds: the same account on both sides is refused ----------
+  - key: Ctrl+T
+  - assert_exists: {role: tab, label_contains: "Transfer Funds"}
+  - assert_state: {key: screen.screen, equals: transfer}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_value: {target: {role: combo_box, label: Transfer from}, equals: "1010 · Operating Checking"}
+  # The label in the body font, the figure in mono (two labels); the side
+  # panel shows the same engine balance.
+  - assert_count: {target: {role: label, label: "84,210.55"}, count: 2}
+  - click: {role: combo_box, label: Transfer to}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - type: {text: "200", target: {role: text_input, label: Amount}}
+  - key: Tab
+  - assert_state: {key: screen.amount, equals: "200.00"}
+  - key: Alt+N
+  - assert_state: {key: screen.save.refused, equals: same_account}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - assert_exists: {role: label, label: Choose two different accounts.}
+  - screenshot: same-account
+
+  # --- 3. To the card: saved, in both registers at once -----------------------
+  - click: {role: combo_box, label: Transfer to}
+  - click: {role: button, label: "2050 · Business Credit Card"}
+  - assert_count: {target: {role: label, label: "Balance owed"}, count: 2}
+  - assert_count: {target: {role: label, label: "289.63"}, count: 2}
+  - assert_no_clipping: {}
+  - screenshot: to-card
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.last_action, equals: save}
+  - assert_state: {key: screen.save.error, equals: false}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_state: {key: screen.dirty, equals: false}
+  - click: {role: tab, label: "Register · Operating Checking"}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: row, label_contains: "11/04/2026, , row"}
+  - assert_value: {target: {role: cell, label: "Type, 11/04/2026, "}, equals: TRANSFR}
+  - assert_value: {target: {role: cell, label: "Account · Memo, 11/04/2026, "}, equals: "2050 · Business Credit Card"}
+  - assert_value: {target: {role: cell, label: "Payment, 11/04/2026, "}, equals: "200.00"}
+  - assert_state: {key: screen.footer.ending, equals: "84,010.55"}
+  - screenshot: register-bank
+  - click: {role: tab, label: "Register · Business Credit Card"}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_value: {target: {role: cell, label: "Type, 11/04/2026, "}, equals: TRANSFR}
+  - assert_value: {target: {role: cell, label: "Account · Memo, 11/04/2026, "}, equals: "1010 · Operating Checking"}
+  - assert_value: {target: {role: cell, label: "Payment, 11/04/2026, "}, equals: "200.00"}
+  - assert_state: {key: screen.footer.ending, equals: "89.63"}
+  - screenshot: register-card
+  # The card register's row is the same transfer: Ctrl+E opens it.
+  - click: {role: row, label_contains: "11/04/2026, , row"}
+  - key: Ctrl+E
+  - assert_state: {key: screen.screen, equals: transfer}
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.amount, equals: "200.00"}
+  - assert_state: {key: screen.from_id, equals: "d0000000-0000-4000-8000-a00000001010"}
+  - assert_state: {key: screen.to_id, equals: "d0000000-0000-4000-8000-a00000002050"}
+  # Unsaved changes ask before Prev.
+  - click: {role: text_input, label: Memo}
+  - type: {text: "Card payment"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: PageUp
+  - assert_state: {key: screen.nav_prompt, equals: true}
+  - assert_exists: {role: button, label: Discard changes}
+  - screenshot: nav-prompt
+  - click: {role: button, label: Keep editing}
+  - assert_state: {key: screen.nav_prompt, equals: false}
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - key: Backspace
+  # Void it: both registers go back.
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.save.error, equals: false}
+  - command: file.close_window
+  - click: {role: tab, label: "Register · Business Credit Card"}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.footer.ending, equals: "289.63"}
+  - assert_not_exists: {role: row, label_contains: "11/04/2026, , row"}
+  - command: file.close_window
+
+  # --- 4. Closed period: the password ("demo-close"), then delete it ----------
+  - click: {role: tab, label_contains: "Transfer Funds"}
+  - assert_state: {key: screen.screen, equals: transfer}
+  - click: {role: button, label: Clear}
+  - click: {role: combo_box, label: Transfer to}
+  - click: {role: button, label: "1020 · Savings"}
+  - click: {role: text_input, label: Date}
+  - key: Ctrl+A
+  - type: {text: "09/15/2026"}
+  - key: Tab
+  - assert_state: {key: screen.date, equals: "2026-09-15"}
+  - type: {text: "25", target: {role: text_input, label: Amount}}
+  - key: Tab
+  - click: {role: text_input, label: Memo}
+  - type: {text: "Closed-period scenario transfer"}
+  - key: Alt+N
+  - assert_state: {key: screen.closing, equals: asking}
+  - assert_exists: {role: password_input, label: Closing-date password}
+  - assert_exists: {role: label, label_contains: "closing date (09/30/2026)"}
+  - screenshot: closing-password
+  - click: {role: button, label: Cancel}
+  - assert_state: {key: screen.closing, equals: cancelled}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - key: Alt+N
+  - assert_state: {key: screen.closing, equals: asking}
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: demo-close}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.closing, equals: done}
+  - assert_state: {key: screen.saved_count, equals: 2}
+  - assert_state: {key: screen.dirty, equals: false}
+  - click: {role: tab, label: "Register · Operating Checking"}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - key: Ctrl+F
+  - assert_state: {key: screen.goto.open, equals: true}
+  - type: {text: Closed-period scenario transfer}
+  - click: {role: button, label: Find Previous}
+  - assert_state: {key: screen.goto.last, equals: found}
+  - assert_state: {key: screen.goto.jump_pending, equals: false}
+  - assert_exists: {role: row, label_contains: "09/15/2026, , "}
+  - click: {role: button, label: Close}
+  - key: Ctrl+D
+  - assert_state: {key: screen.row_action.panel, equals: confirm_delete}
+  - click: {role: button, label: Delete}
+  - assert_state: {key: screen.row_action.closing, equals: asking}
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: demo-close}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.row_action.closing, equals: done}
+  - assert_state: {key: screen.row_action.last, equals: delete}
+  - assert_state: {key: screen.row_action.error, equals: false}
+  - assert_state: {key: screen.footer.ending, equals: "84,210.55"}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Transfer Funds"}
+  - assert_state: {key: screen.screen, equals: transfer}
+  - assert_no_clipping: {}
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: combo_box, label: Transfer to}
+  - assert_no_clipping: {}
+  - screenshot: transfer-960x640
+  - resize: {width: 1440, height: 940}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Transfer Funds"}

@@ -22,10 +22,17 @@
 //!   `resources/checks.rs`) changes those too.
 //! - Line tags are always sent (`null` for none) so the engine never fills a
 //!   default tag the owner did not choose.
-//! - A check line's customer and billable mark (P13) are sent only when set
-//!   and only once the engine advertises `line-billable-v1`; the caller
-//!   passes that flag in ([`BankPosting::check_with`]) so the builder stays
-//!   pure.
+//! - A check or card-charge line's customer and billable mark (P13, P14)
+//!   are sent only when set and only once the engine advertises
+//!   `line-billable-v1`; the caller passes that flag in
+//!   ([`BankPosting::check_with`], [`BankPosting::card_charge_with`]) so the
+//!   builder stays pure.
+//! - A deposit (P14) may also take whole pending payments or a refunded
+//!   vendor credit (source lines at the engine's exact amount), fees
+//!   (positive here, negative on the wire) and cash back, each behind its
+//!   capability ([`BankPosting::deposit_with`], [`DepositCaps`]). The bank
+//!   total is computed exactly and refused locally unless it is greater
+//!   than zero.
 
 use cl_core::ids::{AccountId, ContactId, TagId, TransactionId};
 use cl_core::{CalendarDate, Money};
@@ -41,11 +48,12 @@ use crate::resources::posting::{PostingOptions, posting_body};
 use crate::resources::reconcile::{OutcomeMatcher, Probe, Search, row_fp};
 use crate::resources::transactions::{
     Basis, MAX_LINES, Transaction, Transactions, TxnStatus, TxnType, line_editable, non_empty,
-    txn_editable,
+    txn_editable, with_source,
 };
 use crate::resources::versioning::{
     GuardedUpdate, RecordVersion, Versioned, fingerprint_of, saved_from, update_guarded,
 };
+use crate::wire::Capabilities;
 
 /// The longest name the engine prints on a check.
 pub const PAYEE_NAME_MAX: usize = 255;
@@ -129,7 +137,11 @@ impl std::fmt::Debug for CheckDraft {
 }
 
 /// A deposit (`POST /transactions`, `deposit`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// The bank gets `Σpayments + Σlines − Σdeductions − cash back`
+/// ([`DepositDraft::total`]), which must be greater than zero. The P12
+/// plain deposit has only `lines` ([`DepositDraft::plain`]).
+#[derive(Clone, PartialEq, Eq)]
 pub struct DepositDraft {
     /// The account the money goes into.
     pub account: AccountId,
@@ -137,8 +149,158 @@ pub struct DepositDraft {
     pub date: CalendarDate,
     /// Memo.
     pub memo: Option<String>,
-    /// Where the money came from (the total is their sum).
+    /// Pending payments (or a refunded vendor credit) taken in whole, at
+    /// the engine's exact amount (`deposit-grouping-v1`,
+    /// `vendor-refund-v1`). Sent first, in this order.
+    pub payments: Vec<GroupedPayment>,
+    /// Other money deposited (each amount greater than zero).
     pub lines: Vec<SplitLine>,
+    /// Fees taken out of the deposit: each amount is positive here and goes
+    /// out negative, posting as a debit (`deposit-cashback-v1`, Q-84).
+    pub deductions: Vec<SplitLine>,
+    /// Cash kept back from the deposit (`deposit-cashback-v1`).
+    pub cash_back: Option<CashBack>,
+}
+
+/// Ids, the date and counts only: amounts and memos are owner data.
+impl std::fmt::Debug for DepositDraft {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DepositDraft")
+            .field("account", &self.account)
+            .field("date", &self.date)
+            .field("payments", &self.payments)
+            .field("lines", &self.lines.len())
+            .field("deductions", &self.deductions.len())
+            .field("cash_back", &self.cash_back)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DepositDraft {
+    /// A deposit of plain lines only (the P12 register deposit).
+    #[must_use]
+    pub fn plain(
+        account: AccountId,
+        date: CalendarDate,
+        memo: Option<String>,
+        lines: Vec<SplitLine>,
+    ) -> DepositDraft {
+        DepositDraft {
+            account,
+            date,
+            memo,
+            payments: Vec::new(),
+            lines,
+            deductions: Vec::new(),
+            cash_back: None,
+        }
+    }
+
+    /// What the bank gets: `Σpayments + Σlines − Σdeductions − cash back`,
+    /// exactly. `None` when the sum overflows. The checked builder
+    /// ([`BankPosting::deposit_with`]) refuses a total that is not greater
+    /// than zero.
+    #[must_use]
+    pub fn total(&self) -> Option<Money> {
+        let payments = Money::sum(self.payments.iter().map(|p| p.amount)).ok()?;
+        let lines = Money::sum(self.lines.iter().map(|l| l.amount)).ok()?;
+        let deductions = Money::sum(self.deductions.iter().map(|l| l.amount)).ok()?;
+        let cash_back = self.cash_back.as_ref().map_or(Money::ZERO, |c| c.amount);
+        payments
+            .checked_add(lines)
+            .and_then(|t| t.checked_sub(deductions))
+            .and_then(|t| t.checked_sub(cash_back))
+            .ok()
+    }
+}
+
+/// What a deposit's source line takes in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DepositSource {
+    /// A payment (or a daily-sales tender) waiting in Payments Clearing
+    /// (`deposit-grouping-v1`): the line is on Payments Clearing and its
+    /// amount is exactly what the payment holds there.
+    Payment,
+    /// A vendor credit refunded in cash (`vendor-refund-v1`): the line is
+    /// on Accounts Payable and names the credit's vendor; the amount is at
+    /// most the credit's open balance.
+    VendorCredit,
+}
+
+/// One whole document deposited: its amount is the engine's figure, never
+/// typed or rounded (P14 plan §4).
+#[derive(Clone, PartialEq, Eq)]
+pub struct GroupedPayment {
+    /// The payment (or vendor credit) transaction.
+    pub source: TransactionId,
+    /// Which kind of document it is.
+    pub kind: DepositSource,
+    /// Payments Clearing for a payment, Accounts Payable for a vendor
+    /// credit (the engine checks it).
+    pub account: AccountId,
+    /// Exactly the engine's undeposited amount (greater than zero).
+    pub amount: Money,
+    /// Received from (required for a vendor credit: its vendor).
+    pub contact: Option<ContactId>,
+    /// Line memo (owner data: never logged).
+    pub memo: Option<String>,
+}
+
+/// Ids and the kind only.
+impl std::fmt::Debug for GroupedPayment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GroupedPayment")
+            .field("source", &self.source)
+            .field("kind", &self.kind)
+            .field("account", &self.account)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Cash kept back from a deposit (`deposit-cashback-v1`).
+#[derive(Clone, PartialEq, Eq)]
+pub struct CashBack {
+    /// The account the cash goes to (debited; never the deposit account).
+    pub account: AccountId,
+    /// How much (greater than zero, less than the rest of the deposit).
+    pub amount: Money,
+    /// Memo (at most 1000 characters; owner data, never logged).
+    pub memo: Option<String>,
+}
+
+/// The account only.
+impl std::fmt::Debug for CashBack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CashBack")
+            .field("account", &self.account)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The longest cash-back memo the engine takes.
+pub const CASH_BACK_MEMO_MAX: usize = 1000;
+
+/// Which deposit parts the engine takes (from its capabilities).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DepositCaps {
+    /// `deposit-grouping-v1`: pending payments as source lines.
+    pub grouping: bool,
+    /// `deposit-cashback-v1`: cash back and fee (negative) lines.
+    pub cashback: bool,
+    /// `vendor-refund-v1`: a refunded vendor credit as a source line.
+    pub vendor_refund: bool,
+}
+
+impl DepositCaps {
+    /// What `caps` advertises.
+    #[must_use]
+    pub fn from_caps(caps: &Capabilities) -> DepositCaps {
+        DepositCaps {
+            grouping: caps.has(Capabilities::DEPOSIT_GROUPING),
+            cashback: caps.has(Capabilities::DEPOSIT_CASHBACK),
+            vendor_refund: caps.has(Capabilities::VENDOR_REFUND),
+        }
+    }
 }
 
 /// A transfer between two balance-sheet accounts (`transfer`).
@@ -206,20 +368,10 @@ fn clean(mut lines: Vec<SplitLine>) -> Vec<SplitLine> {
     lines
 }
 
-/// Which line extras a kind of posting takes.
-#[derive(Clone, Copy)]
-struct LineRules {
-    /// A line may name a contact.
-    contacts: bool,
-    /// A line may be billable (always with a contact).
-    billable: bool,
-}
-
-fn check_lines(
-    lines: &[SplitLine],
-    own: AccountId,
-    rules: LineRules,
-) -> Result<Money, LocalValidation> {
+/// The split lines of a check or card charge (the caller has already
+/// refused line customers and billable marks the engine can't take): their
+/// exact total.
+fn check_lines(lines: &[SplitLine], own: AccountId) -> Result<Money, LocalValidation> {
     if lines.is_empty() {
         return Err(LocalValidation::TooFewLines);
     }
@@ -232,13 +384,8 @@ fn check_lines(
     if lines.iter().any(|l| l.account == own) {
         return Err(LocalValidation::SameAccount);
     }
-    if !rules.contacts && lines.iter().any(|l| l.contact.is_some()) {
-        return Err(LocalValidation::InvalidValue);
-    }
-    if lines
-        .iter()
-        .any(|l| l.billable && (!rules.billable || l.contact.is_none()))
-    {
+    // Billable always needs the customer it is billable to.
+    if lines.iter().any(|l| l.billable && l.contact.is_none()) {
         return Err(LocalValidation::InvalidValue);
     }
     Money::sum(lines.iter().map(|l| l.amount)).map_err(|_| LocalValidation::InvalidValue)
@@ -283,14 +430,7 @@ impl BankPosting {
         if !line_billable && d.lines.iter().any(|l| l.contact.is_some() || l.billable) {
             return Err(LocalValidation::LineBillableUnavailable);
         }
-        let total = check_lines(
-            &d.lines,
-            d.bank,
-            LineRules {
-                contacts: true,
-                billable: true,
-            },
-        )?;
+        let total = check_lines(&d.lines, d.bank)?;
         if !d.amount.is_positive() {
             return Err(LocalValidation::NonPositiveAmount);
         }
@@ -320,22 +460,101 @@ impl BankPosting {
         Ok(BankPosting(Kind::Check(d)))
     }
 
-    /// A deposit.
+    /// A deposit for an engine without the P14 deposit capabilities: plain
+    /// lines only ([`BankPosting::deposit_with`]).
     ///
     /// # Errors
-    /// `TooFewLines`, `TooManyLines`, `NonPositiveAmount`, `SameAccount`,
-    /// `InvalidValue` (a billable line, an overflowing total).
-    pub fn deposit(mut d: DepositDraft) -> Result<BankPosting, LocalValidation> {
-        check_lines(
-            &d.lines,
-            d.account,
-            LineRules {
-                contacts: true,
-                billable: false,
-            },
-        )?;
+    /// As [`BankPosting::deposit_with`].
+    pub fn deposit(d: DepositDraft) -> Result<BankPosting, LocalValidation> {
+        Self::deposit_with(d, DepositCaps::default())
+    }
+
+    /// A deposit. `caps` is what the engine advertises
+    /// ([`DepositCaps::from_caps`]).
+    ///
+    /// # Errors
+    /// Nothing is sent for:
+    /// - `DepositGroupingUnavailable`, `VendorRefundUnavailable`,
+    ///   `DepositCashBackUnavailable`: a part the engine does not take yet;
+    /// - `TooFewLines` (no payment, line or fee), `TooManyLines` (more than
+    ///   [`MAX_LINES`] parts, cash back included);
+    /// - `NonPositiveAmount`: a part that is not greater than zero, or a
+    ///   bank total (`Σpayments + Σlines − Σdeductions − cash back`) that is
+    ///   not greater than zero;
+    /// - `SameAccount`: a part or the cash back on the deposit account;
+    /// - `InvalidValue`: the same source twice, a vendor credit without its
+    ///   vendor, a billable line, a cash-back memo over 1000 characters, an
+    ///   overflowing total.
+    pub fn deposit_with(
+        mut d: DepositDraft,
+        caps: DepositCaps,
+    ) -> Result<BankPosting, LocalValidation> {
+        // What the engine takes at all comes first: nothing else matters
+        // when a part can't be sent.
+        if !caps.grouping && d.payments.iter().any(|p| p.kind == DepositSource::Payment) {
+            return Err(LocalValidation::DepositGroupingUnavailable);
+        }
+        if !caps.vendor_refund
+            && d.payments
+                .iter()
+                .any(|p| p.kind == DepositSource::VendorCredit)
+        {
+            return Err(LocalValidation::VendorRefundUnavailable);
+        }
+        if !caps.cashback && (!d.deductions.is_empty() || d.cash_back.is_some()) {
+            return Err(LocalValidation::DepositCashBackUnavailable);
+        }
+        let parts = d.payments.len() + d.lines.len() + d.deductions.len();
+        if parts == 0 {
+            return Err(LocalValidation::TooFewLines);
+        }
+        if parts + usize::from(d.cash_back.is_some()) > MAX_LINES {
+            return Err(LocalValidation::TooManyLines);
+        }
+        let split_parts = || d.lines.iter().chain(d.deductions.iter());
+        let amounts_positive = d.payments.iter().all(|p| p.amount.is_positive())
+            && split_parts().all(|l| l.amount.is_positive())
+            && d.cash_back.as_ref().is_none_or(|c| c.amount.is_positive());
+        if !amounts_positive {
+            return Err(LocalValidation::NonPositiveAmount);
+        }
+        let own = d.account;
+        if d.payments.iter().any(|p| p.account == own)
+            || split_parts().any(|l| l.account == own)
+            || d.cash_back.as_ref().is_some_and(|c| c.account == own)
+        {
+            return Err(LocalValidation::SameAccount);
+        }
+        let mut seen = std::collections::HashSet::new();
+        if !d.payments.iter().all(|p| seen.insert(p.source))
+            || d.payments
+                .iter()
+                .any(|p| p.kind == DepositSource::VendorCredit && p.contact.is_none())
+            || split_parts().any(|l| l.billable)
+        {
+            return Err(LocalValidation::InvalidValue);
+        }
+        if let Some(c) = &mut d.cash_back {
+            c.memo = blank_is_none(c.memo.take());
+            if c.memo
+                .as_ref()
+                .is_some_and(|m| m.chars().count() > CASH_BACK_MEMO_MAX)
+            {
+                return Err(LocalValidation::InvalidValue);
+            }
+        }
+        // The bank side, exactly; the engine refuses it at zero or below
+        // (`DEPOSIT_TOTAL_NOT_POSITIVE`), so it is never sent that way.
+        let total = d.total().ok_or(LocalValidation::InvalidValue)?;
+        if !total.is_positive() {
+            return Err(LocalValidation::NonPositiveAmount);
+        }
         d.memo = non_empty(d.memo);
+        for p in &mut d.payments {
+            p.memo = non_empty(p.memo.take());
+        }
         d.lines = clean(d.lines);
+        d.deductions = clean(d.deductions);
         Ok(BankPosting(Kind::Deposit(d)))
     }
 
@@ -354,21 +573,32 @@ impl BankPosting {
         Ok(BankPosting(Kind::Transfer(d)))
     }
 
-    /// A card charge (or other payment that is not a check).
+    /// A card charge for an engine without `line-billable-v1`: no line
+    /// customers and no billable lines ([`BankPosting::card_charge_with`]).
     ///
     /// # Errors
-    /// `TooFewLines`, `TooManyLines`, `NonPositiveAmount`, `SameAccount`,
-    /// `InvalidValue` (a line customer or billable mark, a number over 50
-    /// characters, an overflowing total).
-    pub fn card_charge(mut d: CardChargeDraft) -> Result<BankPosting, LocalValidation> {
-        check_lines(
-            &d.lines,
-            d.pay_from,
-            LineRules {
-                contacts: false,
-                billable: false,
-            },
-        )?;
+    /// As [`BankPosting::card_charge_with`].
+    pub fn card_charge(d: CardChargeDraft) -> Result<BankPosting, LocalValidation> {
+        Self::card_charge_with(d, false)
+    }
+
+    /// A card charge (or other payment that is not a check). `line_billable`
+    /// is whether the engine advertises `line-billable-v1`: then a line may
+    /// name its customer and be billable to it, as on a check.
+    ///
+    /// # Errors
+    /// `LineBillableUnavailable` (a line customer or billable mark without
+    /// the capability), `TooFewLines`, `TooManyLines`, `NonPositiveAmount`,
+    /// `SameAccount`, `InvalidValue` (a billable line without a customer, a
+    /// number over 50 characters, an overflowing total).
+    pub fn card_charge_with(
+        mut d: CardChargeDraft,
+        line_billable: bool,
+    ) -> Result<BankPosting, LocalValidation> {
+        if !line_billable && d.lines.iter().any(|l| l.contact.is_some() || l.billable) {
+            return Err(LocalValidation::LineBillableUnavailable);
+        }
+        check_lines(&d.lines, d.pay_from)?;
         d.number = non_empty(d.number.map(|n| n.trim().to_string()));
         if d.number.as_ref().is_some_and(|n| n.chars().count() > 50) {
             return Err(LocalValidation::InvalidValue);
@@ -418,7 +648,7 @@ impl BankPosting {
     }
 
     /// The bank-side account (the register's account).
-    fn own_account(&self) -> AccountId {
+    pub(crate) fn own_account(&self) -> AccountId {
         match &self.0 {
             Kind::Check(d) => d.bank,
             Kind::Deposit(d) => d.account,
@@ -470,31 +700,85 @@ impl BankPosting {
         v
     }
 
+    /// The deposit body (P14 shapes): source lines first (with
+    /// `sourceTransactionId`), then the other lines, then the fees as
+    /// negative amounts; the cash back in `cashBack`. Every amount is a
+    /// `Money::to_wire()` string. The engine numbers the journal lines in
+    /// this order after the bank line ([`DepositDraft`] fingerprint).
     fn deposit_body(d: &DepositDraft) -> Value {
-        let lines: Vec<Value> = d
-            .lines
+        let line = |account: AccountId,
+                    amount: String,
+                    tag: Option<TagId>,
+                    contact: Option<ContactId>,
+                    memo: Option<&String>| {
+            let mut v = json!({
+                "accountId": account,
+                "amount": amount,
+                "tagId": tag,
+                "contactId": contact,
+            });
+            if let Some(m) = memo {
+                v["description"] = Value::String(m.clone());
+            }
+            v
+        };
+        let mut lines: Vec<Value> = d
+            .payments
             .iter()
-            .map(|l| {
-                let mut v = json!({
-                    "accountId": l.account,
-                    "amount": l.amount.to_wire(),
-                    "tagId": l.tag,
-                    "contactId": l.contact,
-                });
-                if let Some(m) = &l.memo {
-                    v["description"] = Value::String(m.clone());
-                }
+            .map(|p| {
+                let mut v = line(
+                    p.account,
+                    p.amount.to_wire(),
+                    None,
+                    p.contact,
+                    p.memo.as_ref(),
+                );
+                v["sourceTransactionId"] = json!(p.source);
                 v
             })
             .collect();
+        lines.extend(d.lines.iter().map(|l| {
+            line(
+                l.account,
+                l.amount.to_wire(),
+                l.tag,
+                l.contact,
+                l.memo.as_ref(),
+            )
+        }));
+        lines.extend(d.deductions.iter().map(|l| {
+            // The builder refused anything not greater than zero, so the
+            // wire text has no sign of its own: the minus is exact.
+            line(
+                l.account,
+                format!("-{}", l.amount.to_wire()),
+                l.tag,
+                l.contact,
+                l.memo.as_ref(),
+            )
+        }));
         let mut v = json!({
             "txnType": "deposit",
             "txnDate": d.date,
             "depositToAccountId": d.account,
             "lines": lines,
+            // Every amount is a decimal string of at most 4 places; the
+            // engine (PR #159) then refuses anything else instead of
+            // reading it leniently. An older engine ignores the key.
+            "strictAmounts": true,
         });
         if let Some(m) = &d.memo {
             v["memo"] = Value::String(m.clone());
+        }
+        if let Some(c) = &d.cash_back {
+            let mut cb = json!({
+                "accountId": c.account,
+                "amount": c.amount.to_wire(),
+            });
+            if let Some(m) = &c.memo {
+                cb["memo"] = Value::String(m.clone());
+            }
+            v["cashBack"] = cb;
         }
         v
     }
@@ -611,17 +895,8 @@ impl BankPosting {
     /// The [`Transaction`] editable fields of the record the engine stores
     /// for this posting (see [`BankPosting::fingerprint`]).
     pub(crate) fn editable_value(&self, update: bool) -> Value {
-        struct L {
-            account: AccountId,
-            debit: Money,
-            credit: Money,
-            description: Option<String>,
-            tag: Option<TagId>,
-            contact: Option<ContactId>,
-            billable: bool,
-        }
         // A debit split: a check's or a card charge's line (a customer and a
-        // billable mark only ever on a check, `line-billable-v1`).
+        // billable mark with `line-billable-v1`).
         let split = |l: &SplitLine, description: Option<String>| L {
             account: l.account,
             debit: l.amount,
@@ -630,18 +905,11 @@ impl BankPosting {
             tag: l.tag,
             contact: l.contact,
             billable: l.billable,
+            source: None,
         };
         let total =
             |lines: &[SplitLine]| Money::sum(lines.iter().map(|l| l.amount)).unwrap_or_default();
-        let side = |account: AccountId, debit: Money, credit: Money| L {
-            account,
-            debit,
-            credit,
-            description: None,
-            tag: None,
-            contact: None,
-            billable: false,
-        };
+        let side = L::side;
         // Expense path: an empty line description takes the header memo.
         let expense_lines = |lines: &[SplitLine], memo: Option<&String>, pay_from: AccountId| {
             let mut out: Vec<L> = lines
@@ -667,19 +935,7 @@ impl BankPosting {
                 d.payee,
                 expense_lines(&d.lines, d.memo.as_ref(), d.pay_from),
             ),
-            Kind::Deposit(d) => {
-                let mut out = vec![side(d.account, total(&d.lines), Money::ZERO)];
-                out.extend(d.lines.iter().map(|l| L {
-                    account: l.account,
-                    debit: Money::ZERO,
-                    credit: l.amount,
-                    description: l.memo.clone(),
-                    tag: l.tag,
-                    contact: l.contact,
-                    billable: false,
-                }));
-                (d.memo.as_ref(), None, out)
-            }
+            Kind::Deposit(d) => (d.memo.as_ref(), None, deposit_journal(d)),
             Kind::Transfer(d) => (
                 d.memo.as_ref(),
                 None,
@@ -693,15 +949,18 @@ impl BankPosting {
             .iter()
             .enumerate()
             .map(|(i, l)| {
-                line_editable(
-                    l.account,
-                    &l.debit.to_wire(),
-                    &l.credit.to_wire(),
-                    l.description.as_deref(),
-                    l.tag,
-                    l.contact,
-                    l.billable,
-                    i64::try_from(i).unwrap_or(i64::MAX),
+                with_source(
+                    line_editable(
+                        l.account,
+                        &l.debit.to_wire(),
+                        &l.credit.to_wire(),
+                        l.description.as_deref(),
+                        l.tag,
+                        l.contact,
+                        l.billable,
+                        i64::try_from(i).unwrap_or(i64::MAX),
+                    ),
+                    l.source,
                 )
             })
             .collect();
@@ -730,6 +989,75 @@ impl BankPosting {
     pub fn updated_fingerprint(&self) -> [u8; 32] {
         self.fingerprint(true)
     }
+}
+
+/// One journal line of the record the engine stores for a posting (the
+/// fingerprinted fields).
+struct L {
+    account: AccountId,
+    debit: Money,
+    credit: Money,
+    description: Option<String>,
+    tag: Option<TagId>,
+    contact: Option<ContactId>,
+    billable: bool,
+    source: Option<TransactionId>,
+}
+
+impl L {
+    /// A bare line: an account and its side.
+    fn side(account: AccountId, debit: Money, credit: Money) -> L {
+        L {
+            account,
+            debit,
+            credit,
+            description: None,
+            tag: None,
+            contact: None,
+            billable: false,
+            source: None,
+        }
+    }
+}
+
+/// A deposit's journal as the engine writes it (deposit.service
+/// planDeposit, PR #159): the bank debit of the exact total first, then each
+/// body line in order (a source line credits its amount, a fee debits it),
+/// then the cash-back debit described by its memo.
+fn deposit_journal(d: &DepositDraft) -> Vec<L> {
+    let mut out = vec![L::side(
+        d.account,
+        d.total().unwrap_or_default(),
+        Money::ZERO,
+    )];
+    out.extend(d.payments.iter().map(|p| L {
+        description: p.memo.clone(),
+        contact: p.contact,
+        source: Some(p.source),
+        ..L::side(p.account, Money::ZERO, p.amount)
+    }));
+    let part = |l: &SplitLine, is_fee: bool| {
+        let (debit, credit) = if is_fee {
+            (l.amount, Money::ZERO)
+        } else {
+            (Money::ZERO, l.amount)
+        };
+        L {
+            description: l.memo.clone(),
+            tag: l.tag,
+            contact: l.contact,
+            ..L::side(l.account, debit, credit)
+        }
+    };
+    out.extend(d.lines.iter().map(|l| part(l, false)));
+    out.extend(d.deductions.iter().map(|l| part(l, true)));
+    if let Some(c) = &d.cash_back {
+        out.push(L {
+            description: c.memo.clone(),
+            ..L::side(c.account, c.amount, Money::ZERO)
+        });
+    }
+    out
 }
 
 /// A check or expense line's customer and billable mark: sent only when
@@ -839,3 +1167,7 @@ impl Transactions<'_> {
 #[cfg(test)]
 #[path = "bank_postings_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "deposit_tests.rs"]
+mod deposit_tests;

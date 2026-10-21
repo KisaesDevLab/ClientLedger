@@ -142,8 +142,9 @@ pub fn card_tight<R>(ui: &mut Ui, tokens: &Tokens, add: impl FnOnce(&mut Ui) -> 
         .inner
 }
 
-/// A plain-language heading for a group of fields.
-pub fn heading(ui: &mut Ui, tokens: &Tokens, text: &str) {
+/// A plain-language heading for a group of fields (its response takes a
+/// tooltip).
+pub fn heading(ui: &mut Ui, tokens: &Tokens, text: &str) -> Response {
     ui.add(
         egui::Label::new(
             RichText::new(text)
@@ -151,7 +152,7 @@ pub fn heading(ui: &mut Ui, tokens: &Tokens, text: &str) {
                 .color(tokens.text_primary),
         )
         .selectable(false),
-    );
+    )
 }
 
 /// Secondary explanatory text.
