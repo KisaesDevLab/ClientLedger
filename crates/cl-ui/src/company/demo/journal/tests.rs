@@ -224,13 +224,7 @@ fn an_edit_without_reverse_on_keeps_the_reversal_and_null_removes_it() {
     // Omitted, but the kept date is no longer after the new entry date.
     let late = entry(day(11, 3), lines.clone(), Some("78"), None);
     assert_eq!(
-        save_with(
-            &mut s,
-            &late,
-            Some((id, v2.clone())),
-            None,
-            ReverseOnField::Omitted
-        ),
+        save_with(&mut s, &late, Some((id, v2)), None, ReverseOnField::Omitted),
         Err(ApiError::Local(LocalValidation::ReverseNotAfter))
     );
     // Sent null: removed.
