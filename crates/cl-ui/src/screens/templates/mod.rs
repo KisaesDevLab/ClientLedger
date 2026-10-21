@@ -114,6 +114,20 @@ pub(crate) fn form_lines(
     FormLines::from_lines(seeds, keys)
 }
 
+/// The plain words for "this automatic schedule starts too far back",
+/// naming the earliest date allowed (today − 366 days); `None` for any
+/// other error.
+pub(crate) fn auto_start_text(e: &ApiError, today: CalendarDate) -> Option<String> {
+    if !cl_api::is_auto_start_too_early(e) {
+        return None;
+    }
+    let earliest = cl_model::templates::earliest_auto_start(today)?;
+    Some(t_with(
+        "templates.problem.auto_start_too_early",
+        &[("date", crate::shell::us_date(earliest).as_str())],
+    ))
+}
+
 /// An account the engine dropped from a template shows empty.
 pub(crate) fn real_account(a: AccountId) -> Option<AccountId> {
     (a != cl_api::MISSING_ACCOUNT).then_some(a)
@@ -766,7 +780,12 @@ impl TemplatesScreen {
             ui.label(RichText::new(t("templates.save.stale")).color(tokens.warn_text));
         }
         if let Some(e) = &self.error {
-            form::inline_error(ui, tokens, e);
+            match auto_start_text(e, self.today) {
+                Some(text) => {
+                    ui.label(RichText::new(text).color(tokens.warn_text));
+                }
+                None => form::inline_error(ui, tokens, e),
+            }
         }
         if let Some(id) = self.confirm_delete {
             let name = self.row(id).map(|r| r.name.clone()).unwrap_or_default();
@@ -1013,6 +1032,7 @@ impl TemplatesScreen {
             "entered": self.entered.map(|(t, _)| t.to_string()),
             "stale": self.stale,
             "error": self.error.is_some(),
+            "auto_start_too_early": self.error.as_ref().is_some_and(cl_api::is_auto_start_too_early),
             "busy": self.busy(),
         });
         if let (Value::Object(m), Value::Object(c)) = (&mut v, self.closing_prompt.state_json(true))

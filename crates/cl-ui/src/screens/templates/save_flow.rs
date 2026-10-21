@@ -328,8 +328,9 @@ impl SaveFlow {
             ui.label(RichText::new(t("templates.save.stale")).color(tokens.warn_text));
         }
         if let Some(e) = &self.error {
-            let m = cl_core::OwnerFacing::owner_message(e);
-            ui.label(RichText::new(t(m.key)).color(tokens.warn_text));
+            let text = super::auto_start_text(e, today)
+                .unwrap_or_else(|| t(cl_core::OwnerFacing::owner_message(e).key));
+            ui.label(RichText::new(text).color(tokens.warn_text));
         }
         if self.resolve_failed {
             ui.label(RichText::new(t("templates.save.resolve_failed")).color(tokens.warn_text));
@@ -445,6 +446,7 @@ impl SaveFlow {
             "last": self.last,
             "stale": self.stale,
             "error": self.error.is_some(),
+            "auto_start_too_early": self.error.as_ref().is_some_and(cl_api::is_auto_start_too_early),
             "warnings": self.warnings.len(),
             "busy": self.busy(),
         })

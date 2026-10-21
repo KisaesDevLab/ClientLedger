@@ -248,6 +248,32 @@ fn edit_changes_the_schedule_and_delete_confirms() {
 }
 
 #[test]
+fn an_automatic_start_too_far_back_says_the_earliest_date() {
+    let (_dir, link) = demo();
+    let made = add(&link, "Savings", Some(d(2026, 12, 1)), None);
+    let mut s = screen(&link);
+    s.selected = Some(made.id);
+    s.edit_selected();
+    let (id, version, mut dlg) = s.dialog.take().expect("dialog");
+    assert!(dlg.set("mode", "auto"));
+    assert!(dlg.set("next_date", "01/01/2025"));
+    let c = dlg.save().expect("ok");
+    s.dialog = Some((id, version, dlg));
+    s.save_edit(id, version, c);
+    assert_eq!(s.state_json()["auto_start_too_early"], true);
+    assert!(s.dialog.is_some(), "the dialog stays open to fix the date");
+    let e = s.error.as_ref().expect("refused");
+    let text = auto_start_text(e, today()).expect("plain words");
+    assert!(text.contains("11/03/2025"), "{text}");
+    // Any other error keeps its own message.
+    assert!(auto_start_text(&ApiError::Internal, today()).is_none());
+    // The same through Save as Template on a form.
+    let mut f = SaveFlow::default();
+    f.error = Some(e.clone());
+    assert_eq!(f.state_json()["auto_start_too_early"], true);
+}
+
+#[test]
 fn new_group_and_keys() {
     let (_dir, link) = demo();
     add(&link, "A", None, None);

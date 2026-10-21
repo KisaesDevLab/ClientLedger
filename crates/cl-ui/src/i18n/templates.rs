@@ -100,7 +100,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("templates.problem.interval", "Every must be a number from 1 to 365."),
     ("templates.problem.next_date", "Enter the next date."),
     ("templates.problem.end_date", "The end date must be on or after the next date."),
-    ("templates.problem.count", "Enter how many times, from 1 to 9999."),
+    ("templates.problem.auto_start_too_early", "An automatic schedule can't start that far back. Choose a next date on or after {date}, or choose Remind me."),
+    ("templates.problem.count","Enter how many times, from 1 to 9999."),
     // Save as Template on a form.
     ("templates.save.busy", "Saving the template\u{2026}"),
     ("templates.save.stale", "This template changed in another window. Reload it from Templates, or save as a new one."),
