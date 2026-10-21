@@ -314,9 +314,14 @@ fn build(root: &Path, target: &Target, force: bool) -> Result<PathBuf> {
         .env("PUPPETEER_SKIP_DOWNLOAD", "1")
         .current_dir(&engine);
     run(c, "npm ci (engine)")?;
+    // The API build (tsc) outgrew Node's default 2 GB heap on the hosted macOS
+    // runners; an owner-set NODE_OPTIONS still wins.
+    let node_options =
+        std::env::var("NODE_OPTIONS").unwrap_or_else(|_| "--max-old-space-size=6144".to_owned());
     for ws in ["@kis-books/shared", "@kis-books/api"] {
         let mut c = npm();
         c.args(["run", "build", "--workspace", ws])
+            .env("NODE_OPTIONS", &node_options)
             .current_dir(&engine);
         run(c, &format!("npm run build ({ws})"))?;
     }
