@@ -986,12 +986,8 @@ impl LoanPaymentScreen {
             if let Some(cmd) = kit::nav_buttons(ui, idle) {
                 self.after_frame = Some(CommandId::new(cmd));
             }
-            ui.separator();
-            ui.label(
-                RichText::new(t("loan.no_schedules"))
-                    .size(12.0)
-                    .color(tokens.text_secondary),
-            );
+            // "No payment schedules" is said in the side panel: beside the
+            // buttons it ran into the heading at the minimum width.
             kit::heading_right(ui, &tokens, &t("cmd.banking.loan_payment"));
         });
         ui.separator();
