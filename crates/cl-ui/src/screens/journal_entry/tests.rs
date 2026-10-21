@@ -287,6 +287,7 @@ fn closed_period_save_void_and_delete_ask_for_the_password() {
     ));
     s.closing_prompt.cancel();
     assert_eq!(s.saved_count, 0);
+    use crate::forms::closing_prompt::Verb;
     let pw = || Some(Secret::new(DEMO_CLOSING_PASSWORD));
     assert!(s.start_save(SaveIntent::Save, pw()), "{:?}", s.error);
     assert_eq!(s.saved_count, 1);
@@ -296,6 +297,7 @@ fn closed_period_save_void_and_delete_ask_for_the_password() {
     s.void_reason = "cleanup".into();
     s.send_void(None);
     assert!(matches!(s.closing_prompt.pending(), Some(Pending::Void(_))));
+    assert_eq!(s.closing_prompt.verb(), Verb::Void);
     s.closing_prompt.cancel();
     s.send_void(pw());
     assert_eq!(s.last_action, Some("void"));
@@ -313,6 +315,8 @@ fn closed_period_save_void_and_delete_ask_for_the_password() {
     assert!(s.delete_open);
     s.send_delete(None);
     assert!(matches!(s.closing_prompt.pending(), Some(Pending::Delete)));
+    // The prompt's button says Delete (one flow with the confirmation).
+    assert_eq!(s.closing_prompt.verb(), Verb::Delete);
     s.closing_prompt.cancel();
     s.send_delete(pw());
     assert_eq!(s.last_action, Some("delete"));

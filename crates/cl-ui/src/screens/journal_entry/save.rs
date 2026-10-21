@@ -320,7 +320,12 @@ impl JournalScreen {
     fn closing_failed(&mut self, e: &ApiError, pending: Pending) -> bool {
         let supported = self.closing_supported();
         let closing = self.books.closing;
-        self.closing_prompt.failed(e, pending, supported, closing)
+        let verb = pending.verb();
+        let took = self.closing_prompt.failed(e, pending, supported, closing);
+        if took {
+            self.closing_prompt.set_verb(verb);
+        }
+        took
     }
 
     /// The engine took the save (Q-262: every window showing these
@@ -499,6 +504,7 @@ impl JournalScreen {
         let supported = self.closing_supported();
         if supported {
             self.closing_prompt.ask(pending.clone(), supported, closing);
+            self.closing_prompt.set_verb(pending.verb());
         } else {
             self.closing_prompt.unavailable(supported, closing);
         }

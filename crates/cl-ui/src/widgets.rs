@@ -201,6 +201,19 @@ pub fn primary_button(ui: &mut Ui, label: &str) -> Response {
     )
 }
 
+/// A destructive action's button (Delete in a delete prompt): the warning
+/// fill with its paired text colour (the theme tests check the contrast),
+/// at least 44 px tall.
+pub fn destructive_button(ui: &mut Ui, label: &str) -> Response {
+    let t = Tokens::of(ui.ctx());
+    ui.add(
+        egui::Button::new(RichText::new(label).color(t.on_warn).strong())
+            .fill(t.warn_badge)
+            .stroke(Stroke::NONE)
+            .min_size(Vec2::new(96.0, 44.0)),
+    )
+}
+
 /// A full-width selectable row with painted text, an optional trailing
 /// widget area, and an accessible label (which may say more than the text,
 /// for example "unsaved changes"). Returns the row response and the

@@ -209,13 +209,19 @@ steps:
   - assert_value: {target: {role: text_input, label: Memo}, equals: "Scenario edit"}
   - click: {role: button, label: Delete}
   - assert_state: {key: screen.delete_open, equals: true}
-  - assert_exists: {role: label, label: "Delete this journal entry?"}
+  - assert_exists: {role: label, label_contains: "It leaves your registers and reports"}
   - click: {role: button, label: Delete, index: 1}
+  # One flow: the confirmation gives way to the password prompt, whose
+  # button says Delete.
   - assert_state: {key: screen.closing, equals: asking}
+  - assert_state: {key: screen.closing_verb, equals: delete}
+  - assert_not_exists: {role: label, label_contains: "It leaves your registers and reports"}
+  - assert_not_exists: {role: button, label: Change}
+  - assert_no_clipping: {}
   - screenshot: delete-closing-password
   - click: {role: password_input, label: Closing-date password}
   - type: {text: demo-close}
-  - click: {role: button, label: Change}
+  - click: {role: button, label: Delete, index: 1}
   - assert_state: {key: screen.closing, equals: done}
   - assert_state: {key: screen.last_action, equals: delete}
   - assert_state: {key: screen.save.error, equals: false}

@@ -89,6 +89,18 @@ pub(crate) enum Pending {
     Delete,
 }
 
+impl Pending {
+    /// The closing-date dialog's words and button for it.
+    pub(crate) fn verb(&self) -> crate::forms::closing_prompt::Verb {
+        use crate::forms::closing_prompt::Verb;
+        match self {
+            Pending::Save(_) => Verb::Change,
+            Pending::Void(_) => Verb::Void,
+            Pending::Delete => Verb::Delete,
+        }
+    }
+}
+
 /// A saved entry open in the form.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Editing {

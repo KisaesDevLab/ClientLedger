@@ -39,6 +39,38 @@ pub enum ClosingClick {
     Cancel,
 }
 
+/// What the password is for: the dialog's words and its button (P15: a
+/// delete asks "to delete it" and its button says Delete, drawn as a
+/// destructive action).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Verb {
+    /// A save of an edit (Change).
+    #[default]
+    Change,
+    /// Void (Void).
+    Void,
+    /// Delete (Delete, destructive).
+    Delete,
+}
+
+impl Verb {
+    fn ask_key(self) -> &'static str {
+        match self {
+            Verb::Change => "closing.ask",
+            Verb::Void => "closing.ask.void",
+            Verb::Delete => "closing.ask.delete",
+        }
+    }
+
+    fn button_key(self) -> &'static str {
+        match self {
+            Verb::Change => "closing.change",
+            Verb::Void => "closing.void",
+            Verb::Delete => "closing.delete",
+        }
+    }
+}
+
 /// The closing-date password flow for changes of type `P` (no `Debug` of
 /// the change or the password).
 pub struct ClosingPrompt<P> {
@@ -53,6 +85,8 @@ pub struct ClosingPrompt<P> {
     focus_password: bool,
     /// Too many wrong passwords: Change stays off until then.
     pub(crate) limited_until: Option<Instant>,
+    /// What the password is for.
+    verb: Verb,
 }
 
 impl<P> Default for ClosingPrompt<P> {
@@ -64,6 +98,7 @@ impl<P> Default for ClosingPrompt<P> {
             password: SecretText::default(),
             focus_password: false,
             limited_until: None,
+            verb: Verb::Change,
         }
     }
 }
@@ -107,7 +142,21 @@ impl<P: Clone> ClosingPrompt<P> {
         if !self.flow.dialog_open() {
             self.flow = ClosingFlow::new(supported);
             self.password.clear();
+            self.verb = Verb::Change;
         }
+    }
+
+    /// What the password is for (the dialog's words and button). Set it
+    /// after [`ClosingPrompt::ask`] or [`ClosingPrompt::failed`]; a fresh
+    /// flow starts at [`Verb::Change`].
+    pub fn set_verb(&mut self, verb: Verb) {
+        self.verb = verb;
+    }
+
+    /// What the password is for.
+    #[must_use]
+    pub fn verb(&self) -> Verb {
+        self.verb
     }
 
     /// Starts the password flow for `pending` (a locked change found by
@@ -269,15 +318,43 @@ impl<P: Clone> ClosingPrompt<P> {
             "closing_attempt": self.flow.attempt(),
             "closing_wait_minutes": self.wait_minutes(),
             "closing_supported": supported,
+            "closing_verb": format!("{:?}", self.verb).to_lowercase(),
         })
     }
 
-    /// Draws the dialog (when it is up) and says what was clicked. The
-    /// screen runs [`ClosingPrompt::submit`] or [`ClosingPrompt::cancel`].
+    /// Draws the dialog (when it is up) in the form and says what was
+    /// clicked. The screen runs [`ClosingPrompt::submit`] or
+    /// [`ClosingPrompt::cancel`].
     pub fn ui(&mut self, ui: &mut Ui, tokens: &Tokens) -> ClosingClick {
         if !self.flow.dialog_open() {
             return ClosingClick::None;
         }
+        form::card(ui, tokens, |ui| self.body(ui, tokens, true))
+    }
+
+    /// [`ClosingPrompt::ui`] in a window over the form (P15), so the
+    /// form's own buttons stay where they are; `salt` names the window.
+    pub fn window(&mut self, ctx: &egui::Context, tokens: &Tokens, salt: &str) -> ClosingClick {
+        if !self.flow.dialog_open() {
+            return ClosingClick::None;
+        }
+        let width = (ctx.content_rect().width() - 48.0).clamp(240.0, WINDOW_WIDTH);
+        let mut click = ClosingClick::None;
+        egui::Window::new(t("closing.title"))
+            .id(egui::Id::unique(("closing-prompt", salt)))
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.set_width(width);
+                click = self.body(ui, tokens, false);
+            });
+        click
+    }
+
+    /// The dialog's content; `heading`: draw the title (the window has its
+    /// own).
+    fn body(&mut self, ui: &mut Ui, tokens: &Tokens, heading: bool) -> ClosingClick {
         let stage = self.flow.stage();
         let date = self
             .closing_date
@@ -285,14 +362,18 @@ impl<P: Clone> ClosingPrompt<P> {
             .unwrap_or_default();
         let mut submit = false;
         let mut cancel = false;
-        form::card(ui, tokens, |ui| {
-            form::heading(ui, tokens, &t("closing.title"));
+        {
+            if heading {
+                form::heading(ui, tokens, &t("closing.title"));
+            }
             if stage == ClosingStage::Unavailable {
                 ui.add(egui::Label::new(t("closing.unavailable")).wrap());
-                cancel = ui.button(t("closing.ok")).clicked();
-                return;
+                if ui.button(t("closing.ok")).clicked() {
+                    return ClosingClick::Cancel;
+                }
+                return ClosingClick::None;
             }
-            ui.add(egui::Label::new(t_with("closing.ask", &[("date", &date)])).wrap());
+            ui.add(egui::Label::new(t_with(self.verb.ask_key(), &[("date", &date)])).wrap());
             let wait = self.wait_minutes();
             if let Some(minutes) = wait {
                 ui.add(
@@ -326,16 +407,32 @@ impl<P: Clone> ClosingPrompt<P> {
                     }
                 });
                 ui.horizontal(|ui| {
+                    let label = t(self.verb.button_key());
+                    let verb = self.verb;
                     submit |= ui
-                        .add_enabled(wait.is_none(), egui::Button::new(t("closing.change")))
+                        .add_enabled_ui(wait.is_none(), |ui| {
+                            if verb == Verb::Delete {
+                                crate::widgets::destructive_button(ui, &label)
+                            } else {
+                                ui.button(label)
+                            }
+                        })
+                        .inner
                         .clicked();
-                    cancel = ui.button(t("closing.cancel")).clicked();
+                    // Beside the tall Delete, a Cancel of the same height.
+                    let height = if verb == Verb::Delete { 44.0 } else { 0.0 };
+                    cancel = ui
+                        .add(
+                            egui::Button::new(t("closing.cancel"))
+                                .min_size(egui::Vec2::new(0.0, height)),
+                        )
+                        .clicked();
                 });
             });
             if sending {
                 form::progress_line(ui, tokens, &t("closing.sending"));
             }
-        });
+        }
         if submit {
             ClosingClick::Submit
         } else if cancel {
@@ -345,6 +442,9 @@ impl<P: Clone> ClosingPrompt<P> {
         }
     }
 }
+
+/// The window's width when the app has room.
+const WINDOW_WIDTH: f32 = 420.0;
 
 #[cfg(test)]
 mod tests {
@@ -398,6 +498,23 @@ mod tests {
         p.nothing_sent();
         assert!(!p.dialog_open());
         assert!(!p.failed(&ApiError::ClosingPasswordRejected, 3, true, None));
+    }
+
+    #[test]
+    fn the_verb_names_the_action_until_a_fresh_flow() {
+        let mut p: ClosingPrompt<u8> = ClosingPrompt::default();
+        p.ask(1, true, None);
+        p.set_verb(Verb::Delete);
+        assert_eq!(p.verb(), Verb::Delete);
+        assert_eq!(p.state_json(true)["closing_verb"], "delete");
+        assert_eq!(Verb::Delete.button_key(), "closing.delete");
+        for v in [Verb::Change, Verb::Void, Verb::Delete] {
+            assert!(crate::i18n::has(v.ask_key()));
+            assert!(crate::i18n::has(v.button_key()));
+        }
+        p.cancel();
+        p.ask(2, true, None);
+        assert_eq!(p.verb(), Verb::Change, "a fresh flow is a change again");
     }
 
     #[test]

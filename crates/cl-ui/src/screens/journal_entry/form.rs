@@ -76,11 +76,23 @@ impl JournalScreen {
     }
 
     fn messages(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        match self.closing_prompt.ui(ui, tokens) {
+        // The password prompt is a window over the form, so Save and Clear
+        // stay where they are; for a void or delete it carries on the
+        // confirmation (one flow: confirm, then the password, its button
+        // naming the action).
+        match self
+            .closing_prompt
+            .window(ui.ctx(), tokens, "journal_entry")
+        {
             ClosingClick::Submit => self.submit_closing(),
-            ClosingClick::Cancel => self.closing_prompt.cancel(),
+            ClosingClick::Cancel => {
+                self.closing_prompt.cancel();
+                self.delete_open = false;
+                self.void_open = false;
+            }
             ClosingClick::None => {}
         }
+        let asking = self.closing_prompt.dialog_open();
         if let Some(k) = self.notice {
             form::hint(ui, tokens, &t(k));
         }
@@ -101,7 +113,7 @@ impl JournalScreen {
                 }
             });
         }
-        if self.void_open {
+        if self.void_open && !asking {
             let mut send = false;
             let mut cancel = false;
             form::card(ui, tokens, |ui| {
@@ -121,17 +133,30 @@ impl JournalScreen {
                 self.send_void(None);
             }
         }
-        if self.delete_open {
+        if self.delete_open && !asking {
             let mut send = false;
             let mut cancel = false;
-            form::card(ui, tokens, |ui| {
-                form::heading(ui, tokens, &t("journal.delete.title"));
-                form::hint(ui, tokens, &t("journal.delete.explain"));
-                ui.horizontal(|ui| {
-                    send = ui.button(t("journal.delete.confirm")).clicked();
-                    cancel = ui.button(t("journal.delete.cancel")).clicked();
+            let width = (ui.ctx().content_rect().width() - 48.0).clamp(240.0, 420.0);
+            egui::Window::new(t("journal.delete.title"))
+                .id(egui::Id::unique("journal_entry/delete"))
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.set_width(width);
+                    ui.add(egui::Label::new(t("journal.delete.explain")).wrap());
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        send = crate::widgets::destructive_button(ui, &t("journal.delete.confirm"))
+                            .clicked();
+                        cancel = ui
+                            .add(
+                                egui::Button::new(t("journal.delete.cancel"))
+                                    .min_size(Vec2::new(0.0, ACTION_HEIGHT)),
+                            )
+                            .clicked();
+                    });
                 });
-            });
             if cancel {
                 self.delete_open = false;
             } else if send {
