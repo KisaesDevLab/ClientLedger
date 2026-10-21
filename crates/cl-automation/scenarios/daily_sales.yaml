@@ -1,7 +1,7 @@
 # Daily Sales Summary (P14 plan §6.4) against `clientledger --demo`: the
 # sample's "Plant sale counter" layout for 11/04 with sales 1,000.00, sales
 # tax 80.00, Cash 500.00 and Cards 577.65 is "2.35 short" before saving; the
-# post puts the tenders in Payments Clearing (one day, 1,077.65, waiting in
+# post puts the tenders in Undeposited Funds (one day, 1,077.65, waiting in
 # Make Deposit) and the 80.00 in Sales Tax Payable (its register); the engine
 # posts the 2.35 to Cash Over/Short. A "Gift cards" line saved as a new
 # layout "Counter 2", a negative amount refused, the unsaved-changes
@@ -11,7 +11,7 @@
 # day is voided (a voided day can be entered again) and the new layout
 # deleted. All data is synthetic.
 name: daily_sales
-description: Over/short before saving, post, Payments Clearing and Sales Tax Payable, Make Deposit pending, new layout, negative refused, Prev prompt, Void, delete layout.
+description: Over/short before saving, post, Undeposited Funds and Sales Tax Payable, Make Deposit pending, new layout, negative refused, Prev prompt, Void, delete layout.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -40,7 +40,7 @@ steps:
   - assert_no_clipping: {}
   - screenshot: short
 
-  # --- 2. Posted: tenders wait in Payments Clearing, tax in Sales Tax Payable ----
+  # --- 2. Posted: tenders wait in Undeposited Funds, tax in Sales Tax Payable ----
   - key: Alt+N
   - assert_state: {key: screen.last_action, equals: post}
   - assert_state: {key: screen.save.refused, equals: null}
@@ -62,7 +62,7 @@ steps:
   - command: lists.chart_of_accounts
   - assert_state: {key: screen.screen, equals: chart_of_accounts}
   - assert_state: {key: screen.loaded, equals: true}
-  - assert_value: {target: {role: cell, label: "Balance, 10150 Payments Clearing"}, equals: "3,170.15"}
+  - assert_value: {target: {role: cell, label: "Balance, 10150 Undeposited Funds"}, equals: "3,170.15"}
   - click: {role: row, label_contains: "20900 Sales Tax"}
   - click: {role: button, label: Open Register}
   - assert_state: {key: screen.screen, equals: register}

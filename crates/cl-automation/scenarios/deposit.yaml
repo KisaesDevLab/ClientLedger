@@ -1,8 +1,8 @@
 # Make Deposit (P14 plan §6.4) against `clientledger --demo`: the two
-# payments waiting in Payments Clearing (Hollister Family Trust 1,250.00 and
+# payments waiting in Undeposited Funds (Hollister Family Trust 1,250.00 and
 # Maple Street Bakery 842.50) grouped by the bank-file deposit 2,092.50, the
 # register (open the whole time) showing the deposit without being reopened
-# (Q-262), Payments Clearing at 0.00 in the Chart of Accounts, the register
+# (Q-262), Undeposited Funds at 0.00 in the Chart of Accounts, the register
 # opening the grouped deposit in its form (Ctrl+E, Q-P14g), a fee line and
 # cash back (too much refused), a vendor refund line, the Summary, the
 # unsaved-changes question on Next, and Void.
@@ -11,7 +11,7 @@
 # deposits are voided at the end and the void of the grouped deposit puts
 # its payments back in Payments to deposit (E2). All data is synthetic.
 name: deposit
-description: Grouped payments = bank deposit, register refresh, Payments Clearing 0.00, Ctrl+E from the register, fee, cash back, vendor refund, Summary, Next prompt, Void.
+description: Grouped payments = bank deposit, register refresh, Undeposited Funds 0.00, Ctrl+E from the register, fee, cash back, vendor refund, Summary, Next prompt, Void.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -51,7 +51,7 @@ steps:
   - assert_no_clipping: {}
   - screenshot: grouped
 
-  # --- 3. Saved: nothing waits, the register shows it, Payments Clearing 0.00 -
+  # --- 3. Saved: nothing waits, the register shows it, Undeposited Funds 0.00 -
   - key: Alt+N
   - assert_state: {key: screen.saved_count, equals: 1}
   - assert_state: {key: screen.last_action, equals: save}
@@ -71,7 +71,7 @@ steps:
   - command: lists.chart_of_accounts
   - assert_state: {key: screen.screen, equals: chart_of_accounts}
   - assert_state: {key: screen.loaded, equals: true}
-  - assert_value: {target: {role: cell, label: "Balance, 10150 Payments Clearing"}, equals: "0.00"}
+  - assert_value: {target: {role: cell, label: "Balance, 10150 Undeposited Funds"}, equals: "0.00"}
   - screenshot: chart-clearing-zero
   - command: file.close_window
   # Ctrl+E on the register row opens the grouped deposit in Make Deposit,

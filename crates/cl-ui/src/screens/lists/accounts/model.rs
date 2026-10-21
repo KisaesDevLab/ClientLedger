@@ -155,7 +155,7 @@ pub(crate) fn chart_entry(a: &Account, sensitive: bool) -> ChartEntry {
         id: a.id,
         parent: a.fields.parent_id,
         number: a.fields.account_number.clone().filter(|n| !n.is_empty()),
-        name: a.fields.name.clone(),
+        name: crate::account_names::shown_name(a),
         kind: kind_of(a.fields.account_type),
         detail: a.fields.detail_type.clone(),
         description: a.fields.description.clone(),

@@ -50,6 +50,7 @@ use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
 use self::view::{COL_DATE, Mapping, RegisterModel};
+use crate::account_names::shown_name;
 use crate::company::{CompanyEvent, CompanyLink, Task};
 use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
@@ -88,8 +89,8 @@ pub fn class_of(a: &Account) -> Option<AccountClass> {
 #[must_use]
 pub fn account_text(a: &Account) -> String {
     match a.fields.account_number.as_deref().filter(|n| !n.is_empty()) {
-        Some(n) => format!("{n} \u{b7} {}", a.fields.name),
-        None => a.fields.name.clone(),
+        Some(n) => format!("{n} \u{b7} {}", shown_name(a)),
+        None => shown_name(a),
     }
 }
 
@@ -1059,7 +1060,7 @@ impl Screen for RegisterScreen {
     fn title(&self) -> String {
         self.account_record().map_or_else(
             || t("cmd.banking.register"),
-            |a| t_with("register.title", &[("account", &a.fields.name)]),
+            |a| t_with("register.title", &[("account", &shown_name(a))]),
         )
     }
 

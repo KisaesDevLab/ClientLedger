@@ -110,7 +110,7 @@ impl RegisterLists {
         let full = |a: &Account| {
             chart
                 .full_name(a.id)
-                .map_or_else(|| a.fields.name.clone(), str::to_string)
+                .map_or_else(|| crate::account_names::shown_name(a), str::to_string)
         };
         let labels: Vec<String> = accounts
             .iter()

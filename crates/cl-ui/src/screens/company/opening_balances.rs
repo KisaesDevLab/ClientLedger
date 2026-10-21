@@ -134,7 +134,7 @@ impl OpeningBalancesScreen {
                 .map(|a| AccountChoice {
                     id: Some(a.id),
                     number: a.fields.account_number.clone().unwrap_or_default(),
-                    name: a.fields.name.clone(),
+                    name: crate::account_names::shown_name(&a),
                     kind: a.fields.account_type.as_str().to_string(),
                 })
                 .collect();

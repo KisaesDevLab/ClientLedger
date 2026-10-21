@@ -676,16 +676,22 @@ impl ChartScreen {
             }
             SaveStart::Busy => return false,
         }
+        let editing = panel.editing;
+        let existing = editing.and_then(|id| self.accounts.iter().find(|a| a.id == id).cloned());
+        // The chart shows the owner-facing name (Q-202); saving it unchanged
+        // keeps the name the engine stores.
+        let name = existing.as_ref().map_or_else(
+            || checked.name.clone(),
+            |a| crate::account_names::stored_name(a, &checked.name),
+        );
         let fields = AccountFields {
-            name: checked.name.clone(),
+            name,
             account_number: checked.number.clone(),
             account_type: api_type(checked.kind),
             detail_type: checked.detail.clone(),
             description: checked.description.clone(),
             parent_id: checked.parent,
         };
-        let editing = panel.editing;
-        let existing = editing.and_then(|id| self.accounts.iter().find(|a| a.id == id).cloned());
         let sensitive = checked.sensitive;
         if self.link.is_demo() {
             let saved = demo_save(&self.link, editing, existing, fields);

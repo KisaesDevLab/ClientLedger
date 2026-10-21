@@ -108,8 +108,8 @@ pub(super) fn account_label(accounts: &[Account], id: AccountId) -> String {
     accounts.iter().find(|a| a.id == id).map_or_else(
         || t("center.form.account_gone"),
         |a| match a.fields.account_number.as_deref().filter(|n| !n.is_empty()) {
-            Some(n) => format!("{n} {}", a.fields.name),
-            None => a.fields.name.clone(),
+            Some(n) => format!("{n} {}", crate::account_names::shown_name(a)),
+            None => crate::account_names::shown_name(a),
         },
     )
 }

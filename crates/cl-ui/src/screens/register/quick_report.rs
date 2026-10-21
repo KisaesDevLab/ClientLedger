@@ -130,7 +130,7 @@ impl RegisterScreen {
             .and_then(|b| sign.apply(b).ok());
         let title = self
             .account_record()
-            .map(|a| a.fields.name.clone())
+            .map(crate::account_names::shown_name)
             .unwrap_or_default();
         let style = self.parts.frame.money_style;
         let Some(r) = self.report.as_mut() else {

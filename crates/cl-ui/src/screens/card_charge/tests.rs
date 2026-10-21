@@ -595,5 +595,7 @@ fn owner_money_words_get_a_plain_tooltip_for_each_entity_type() {
         assert_ne!(text, key, "{key} is in the catalog");
         assert!(text.ends_with('.'), "{key}");
     }
-    assert!(crate::i18n::t("jargon.undeposited_funds").contains("Payments Clearing"));
+    // Owners see Undeposited Funds everywhere (Q-202), so the glossary
+    // never mentions the engine's name for it.
+    assert!(!crate::i18n::t("jargon.undeposited_funds").contains("Payments Clearing"));
 }

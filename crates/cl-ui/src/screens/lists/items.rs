@@ -284,8 +284,8 @@ impl ItemsScreen {
             .iter()
             .find(|a| a.id == id)
             .map(|a| match &a.fields.account_number {
-                Some(n) if !n.is_empty() => format!("{n} {}", a.fields.name),
-                _ => a.fields.name.clone(),
+                Some(n) if !n.is_empty() => format!("{n} {}", crate::account_names::shown_name(a)),
+                _ => crate::account_names::shown_name(a),
             })
             .unwrap_or_default()
     }

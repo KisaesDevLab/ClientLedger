@@ -14,7 +14,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lines.col.tags", "Tags"),
     ("lines.need_account", "Choose an account for each line."),
     // Plain one-sentence explanations of accounting words (CLAUDE.md rule 12).
-    ("jargon.undeposited_funds", "Undeposited Funds holds payments you've received but not yet taken to the bank (your chart of accounts calls it Payments Clearing)."),
+    // The owner-facing name of the engine's Payments Clearing account (Q-202).
+    ("account.undeposited_funds", "Undeposited Funds"),
+    ("jargon.undeposited_funds", "Undeposited Funds holds payments you've received but not yet taken to the bank."),
     ("jargon.cash_over_short", "Cash over/short is the difference between the cash counted in the drawer and what the day's sales say should be there."),
     ("jargon.equity", "Equity is the owners' share of the business: what they put in and take out, and the profit kept in the business."),
     ("jargon.principal", "Principal is the part of a loan payment that pays down what you still owe."),
