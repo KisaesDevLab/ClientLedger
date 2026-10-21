@@ -1,0 +1,167 @@
+# Record Card Charge (P14 plan §6.4) against `clientledger --demo`: the
+# card's balance owed shown; a 64.20 charge split 40.00 + 24.10 is "0.10
+# left to assign" and refused (lines_disagree); fixed to 24.20 it saves; a
+# 15.00 credit to Office Supplies saves; the Business Credit Card register
+# (open the whole time, Q-262) shows both and the balance owed moves
+# 289.63 -> 353.83 -> 338.83; Prev with unsaved changes asks; both voided.
+#
+# Light and dark run in the same app, so the scenario is repeatable: both
+# are voided, and Prev/Next walk newest first (the new voids first). All
+# data is synthetic.
+name: card_charge
+description: Balance owed, lines that disagree refused, charge saved, credit saved, card register shows both, Prev prompt, Void both.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  # --- The card register stays open ------------------------------------------
+  - key: Ctrl+G
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: combo_box, label: Account}
+  - click: {role: button, label: "2050 · Business Credit Card"}
+  - assert_state: {key: screen.account_class, equals: credit_card}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.footer.ending, equals: "289.63"}
+
+  # --- 1. A charge whose lines disagree, then fixed --------------------------
+  - key: Ctrl+Shift+C
+  - assert_exists: {role: tab, label_contains: "Record Card"}
+  - assert_state: {key: screen.screen, equals: card_charge}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.mode, equals: charge}
+  - assert_state: {key: screen.record, equals: new}
+  - assert_value: {target: {role: combo_box, label: Card}, equals: "2050 · Business Credit Card"}
+  - assert_state: {key: screen.balance_owed_shown, equals: true}
+  - assert_exists: {role: label, label: Balance owed, index: 0}
+  - assert_exists: {role: label, label: "289.63", index: 0}
+  # Prefill from the vendor's last charge: accounts, never amounts.
+  - type: {text: Hollister Fuel, target: {role: text_input, label: Purchased from}}
+  - key: Tab
+  - assert_value: {target: {role: text_input, label: Purchased from}, equals: "Hollister Fuel Stop"}
+  - assert_state: {key: screen.prefill.applied, equals: true}
+  - assert_value: {target: {label: "Account, line 1"}, equals: "5200 · Job Supplies and Materials"}
+  - assert_value: {target: {label: "Amount, line 1"}, equals: ""}
+  - type: {text: "64.20", target: {role: text_input, label: Amount}}
+  - key: Tab
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - type: {text: "40"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Account, line 2"}
+  - type: {text: "6100"}
+  - key: Tab
+  - type: {text: "24.10"}
+  - key: Tab
+  - assert_value: {target: {label: "Account, line 2"}, equals: "6100 · Fuel"}
+  - assert_state: {key: screen.totals, equals: remaining}
+  - assert_exists: {role: label, label: "0.10 left to assign"}
+  - key: Alt+N
+  - assert_state: {key: screen.save.refused, equals: lines_disagree}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - assert_exists: {role: label, label_contains: "The lines don't add up to the amount."}
+  - assert_no_clipping: {}
+  - screenshot: lines-disagree
+  - click: {role: grid_cell, label: "Amount, line 2"}
+  - type: {text: "24.20"}
+  - key: Tab
+  - assert_state: {key: screen.totals, equals: balanced}
+  - screenshot: balanced
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.last_action, equals: save}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_exists: {role: label, label: "353.83", index: 0}
+
+  # --- 2. A credit (a return) to Office Supplies ------------------------------
+  - click: {role: radio_button, label: Credit}
+  - assert_state: {key: screen.mode, equals: credit}
+  - assert_exists: {role: label, label: Record Card Credit}
+  - assert_disabled: {role: text_input, label: Ref no.}
+  - type: {text: "15", target: {role: text_input, label: Amount}}
+  - key: Tab
+  - click: {label: "Account, line 1"}
+  - type: {text: "6250"}
+  - key: Tab
+  - type: {text: "15"}
+  - key: Tab
+  - assert_value: {target: {label: "Account, line 1"}, equals: "6250 · Office Supplies and Software"}
+  - assert_state: {key: screen.totals, equals: balanced}
+  - screenshot: credit
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 2}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_exists: {role: label, label: "338.83", index: 0}
+
+  # --- 3. The card register shows both without being reopened (Q-262) --------
+  - click: {role: tab, label: "Register · Business Credit Card"}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: row, label_contains: "11/04/2026, Hollister Fuel Stop, row"}
+  - assert_exists: {role: row, label_contains: "11/04/2026, , row"}
+  - assert_value: {target: {role: cell, label: "Charge, 11/04/2026, Hollister Fuel Stop"}, equals: "64.20"}
+  - assert_value: {target: {role: cell, label: "Payment, 11/04/2026, "}, equals: "15.00"}
+  - assert_state: {key: screen.footer.ending, equals: "338.83"}
+  - screenshot: card-register
+  - click: {role: tab, label_contains: "Record Card"}
+  - assert_state: {key: screen.screen, equals: card_charge}
+
+  # --- 4. Prev (newest first): the credit; unsaved changes ask; void both ------
+  - key: PageUp
+  - assert_state: {key: screen.record, equals: edit}
+  - assert_state: {key: screen.mode, equals: credit}
+  - assert_state: {key: screen.nav_at, equals: 0}
+  - click: {role: text_input, label: Memo}
+  - type: {text: "Returned toner"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: PageUp
+  - assert_state: {key: screen.nav_prompt, equals: true}
+  - assert_exists: {role: button, label: Discard changes}
+  - screenshot: nav-prompt
+  - click: {role: button, label: Keep editing}
+  - assert_state: {key: screen.nav_prompt, equals: false}
+  - assert_state: {key: screen.nav_at, equals: 0}
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - key: Backspace
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.error, equals: false}
+  # Newest first: the voided credit, then the charge.
+  - key: PageUp
+  - assert_state: {key: screen.nav_at, equals: 0}
+  - key: PageUp
+  - assert_state: {key: screen.nav_at, equals: 1}
+  - assert_state: {key: screen.mode, equals: charge}
+  - assert_state: {key: screen.read_only, equals: null}
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.error, equals: false}
+  - click: {role: button, label: Clear}
+  - click: {role: radio_button, label: Charge}
+  - assert_state: {key: screen.mode, equals: charge}
+  - assert_exists: {role: label, label: "289.63", index: 0}
+  - assert_no_clipping: {}
+  # Close the registers (and the demo's Bank Feed tab, first run only): the
+  # tab strip doesn't scroll yet, so fewer tabs fit 960 points.
+  - click: {role: tab, label: "Register · Business Credit Card"}
+  - assert_state: {key: screen.footer.ending, equals: "289.63"}
+  - command: file.close_window
+  - click: {role: tab, label: "Register · Operating Checking"}
+  - command: file.close_window
+  - click_if_present: {role: button, label: Close Bank Feed}
+  - click: {role: tab, label_contains: "Record Card"}
+  - assert_state: {key: screen.screen, equals: card_charge}
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: text_input, label: Purchased from}
+  - assert_no_clipping: {}
+  - screenshot: card-charge-960x640
+  - resize: {width: 1440, height: 940}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Record Card"}
