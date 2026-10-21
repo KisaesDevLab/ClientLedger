@@ -142,9 +142,14 @@ impl Capabilities {
     /// P15 part A: `reverseOn` (after the date) creates a linked reversing
     /// entry; the read-back gives the link.
     pub const JE_REVERSING: &'static str = "je-reversing-v1";
-    /// P15 part A: string balances everywhere the journal entry form shows
-    /// one.
+    /// P15 part A: every posting's debits must equal its credits exactly at
+    /// 4 places (each line rounded half away from zero, no 0.0001
+    /// tolerance), else 400 "Transaction does not balance".
     pub const BALANCE_EXACT: &'static str = "balance-exact-v1";
+    /// P15 part A (U-64): recurring copies keep line names, billable marks,
+    /// a journal entry's basis and adjusting mark; `PUT /recurring/{id}`
+    /// takes `expectedUpdatedAt` (409 `STALE_SCHEDULE`).
+    pub const RECURRING_GUARD: &'static str = "recurring-guard-v1";
     /// P15 U-62: `/templates` (stored drafts, groups, `from-transaction`,
     /// `draft`, `enter`, `skip`, `resolve`).
     pub const TEMPLATES: &'static str = "templates-v1";

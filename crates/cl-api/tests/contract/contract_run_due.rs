@@ -8,9 +8,10 @@
 //! engine strings.
 
 use cl_api::{
-    AccountType, ApiError, Capabilities, CardChargeDraft, ClosedPeriodAuthorization, Frequency,
-    IdempotencyKey, Method, NewTemplate, PageRequest, PostingOptions, RunDue, ScheduleEnd,
-    ScheduleMode, Session, SkipReason, SplitLine, Template, TemplateDraft, TemplateSchedule,
+    AccountRoles, AccountType, ApiError, Basis, Capabilities, CardChargeDraft,
+    ClosedPeriodAuthorization, Frequency, IdempotencyKey, JeLine, JeOptions, Method,
+    NewJournalEntry, NewTemplate, PageRequest, PostingOptions, RunDue, ScheduleEnd, ScheduleMode,
+    Session, Side, SkipReason, SplitLine, Template, TemplateDraft, TemplateSchedule,
     TransactionFilter, new_run_id,
 };
 use cl_core::ids::{AccountId, TransactionId};
@@ -450,4 +451,288 @@ pub fn ends_after_count(h: &Harness) {
         "three times, then it stops"
     );
     assert!(mine(&run(h, s, today()), &t).is_empty(), "stopped");
+}
+
+/// More than 31 due dates of one schedule: one call posts 31 and lists the
+/// schedule once as `CATCH_UP_CAPPED` (its next due date, `new`); nothing
+/// else is recorded, and the next call posts the rest, each date once.
+pub fn catch_up_capped_continues_next_call(h: &Harness) {
+    if !ready(h) {
+        return;
+    }
+    let s = &h.s1;
+    let c = card(h, s);
+    let as_of = today().add_days(-1).expect("yesterday");
+    let start = as_of.add_days(-39).expect("start");
+    let t = h
+        .run(s.templates().create(&NewTemplate {
+            name: unique("Daily sweep"),
+            group: None,
+            client_form: None,
+            draft: TemplateDraft::CardCharge(CardChargeDraft {
+                pay_from: c.card,
+                date: start,
+                number: None,
+                payee: None,
+                memo: None,
+                lines: vec![SplitLine {
+                    account: c.software,
+                    amount: m("1.25"),
+                    memo: None,
+                    contact: None,
+                    billable: false,
+                    tag: None,
+                }],
+            }),
+            schedule: Some(TemplateSchedule {
+                mode: ScheduleMode::Auto,
+                frequency: Frequency::Daily,
+                interval: 1,
+                next_date: start,
+                end: ScheduleEnd::Never,
+            }),
+        }))
+        .unwrap_or_else(|e| panic!("template: {e}"));
+    let day = |n: i64| start.add_days(n).expect("day");
+    let first = h
+        .run(s.recurring().run_due(as_of, new_run_id(), 200))
+        .unwrap_or_else(|e| panic!("run-due: {e}"));
+    assert_eq!(
+        mine(&first, &t),
+        (0..31).map(day).collect::<Vec<_>>(),
+        "31 dates in one call"
+    );
+    let capped: Vec<_> = first
+        .skipped
+        .iter()
+        .filter(|k| k.template == t.id)
+        .map(|k| (k.date, k.reason.clone(), k.new))
+        .collect();
+    assert_eq!(
+        capped,
+        vec![(day(31), SkipReason::CatchUpCapped, true)],
+        "listed once, at its next due date"
+    );
+    assert_eq!(card_txns(h, s, c.card).len(), 31);
+    let second = run(h, s, as_of);
+    assert_eq!(
+        mine(&second, &t),
+        (31..40).map(day).collect::<Vec<_>>(),
+        "the rest on the next call"
+    );
+    assert!(
+        !second
+            .skipped
+            .iter()
+            .any(|k| k.template == t.id && k.reason == SkipReason::CatchUpCapped),
+        "no longer capped"
+    );
+    let txns = card_txns(h, s, c.card);
+    let mut dates: Vec<_> = txns.iter().map(|(_, d)| *d).collect();
+    dates.sort();
+    dates.dedup();
+    assert_eq!((txns.len(), dates.len()), (40, 40), "each date once");
+    assert_eq!(
+        balance(h, s, c.software).to_wire(),
+        "50.0000",
+        "exactly 40 × 1.25"
+    );
+    assert!(mine(&run(h, s, as_of), &t).is_empty(), "nothing left");
+}
+
+/// The id of a team member invited into the session's company.
+fn invite(h: &Harness, s: &Session, email: &str) -> (String, Secret) {
+    let made = h
+        .run(s.raw(
+            Method::Post,
+            "/api/v1/company/invite-user",
+            &[],
+            Some(&json!({"email": email, "displayName": "Synthetic Bookkeeper", "role": "bookkeeper"})),
+        ))
+        .expect("invite");
+    assert_eq!(made.status, 201, "{}", made.body);
+    let id = made.body["user"]["id"].as_str().expect("id").to_string();
+    let pw = made.body["temporaryPassword"]
+        .as_str()
+        .expect("temporary password");
+    (id, Secret::new(pw.to_string()))
+}
+
+fn permissions(h: &Harness, s: &Session, user: &str, transactions: &str) {
+    let r = h
+        .run(s.raw(
+            Method::Put,
+            &format!("/api/v1/company/users/{user}/permissions"),
+            &[],
+            Some(&json!({"overrides": {
+                "recurring": "full",
+                "transactions": transactions,
+                "accounts": "full",
+            }})),
+        ))
+        .expect("permissions");
+    assert_eq!(r.status, 200, "{}", r.body);
+}
+
+/// An automatic template posts only while its owner (the person who last
+/// saved it) may still enter it: a bookkeeper's card-charge template is
+/// skipped `PERMISSION` (recorded, advanced, nothing posted) once the
+/// bookkeeper's transactions permission drops to view, and posts again
+/// once it is back. The run itself is the owner's.
+pub fn owner_without_permission_skipped(h: &Harness) {
+    if !ready(h) {
+        return;
+    }
+    let s = &h.s1;
+    let c = card(h, s);
+    let email = format!(
+        "bk-{}@example.com",
+        unique("x").trim_start_matches("x ").to_lowercase()
+    );
+    let (user, pw) = invite(h, s, &email);
+    permissions(h, s, &user, "full");
+    let bk = match h.run(h.client.login(&email, &pw)) {
+        Ok(cl_api::LoginOutcome::Session(b)) => b,
+        other => panic!("bookkeeper login: {other:?}"),
+    };
+    h.run(bk.open_company(h.contract_co))
+        .expect("bookkeeper opens");
+    let first = day_back(3, 12);
+    let t = auto(h, &bk, &c, ScheduleMode::Auto, first, ScheduleEnd::Never);
+    permissions(h, s, &user, "view");
+    let before = (balance(h, s, c.card), balance(h, s, c.software));
+    let r = run(h, s, first);
+    assert!(mine(&r, &t).is_empty(), "not posted");
+    let skipped: Vec<_> = r
+        .skipped
+        .iter()
+        .filter(|k| k.template == t.id)
+        .map(|k| (k.date, k.reason.clone(), k.new))
+        .collect();
+    assert_eq!(skipped, vec![(first, SkipReason::Permission, true)]);
+    assert_eq!(
+        (balance(h, s, c.card), balance(h, s, c.software)),
+        before,
+        "nothing posted, exactly"
+    );
+    assert!(card_txns(h, s, c.card).is_empty(), "no transaction");
+    // Recorded and advanced: the next run does not post it again.
+    permissions(h, s, &user, "full");
+    let second = day_back(2, 12);
+    let r = run(h, s, second);
+    assert_eq!(mine(&r, &t), vec![second], "posts again, next date only");
+    assert!(
+        r.skipped
+            .iter()
+            .any(|k| k.template == t.id && k.date == first && !k.new),
+        "the skipped date stays listed for the owner"
+    );
+    assert_eq!(card_txns(h, s, c.card).len(), 1);
+    h.run(s.templates().skip(t.id, first)).expect("dismiss");
+}
+
+/// A journal entry template (adjusting, a name on its A/P line) posted by
+/// the catch-up run keeps the name, the adjusting mark and the basis, and
+/// takes the company's next entry number (`recurring-guard-v1`, U-64).
+pub fn journal_template_keeps_names_and_adjusting(h: &Harness) {
+    if !ready(h)
+        || !h.require_cap(Capabilities::RECURRING_GUARD, "U-64 recurring-guard-v1")
+        || !h.require_cap(Capabilities::JE_NAMES, "U-58 je-names-v1")
+        || !h.require_cap(Capabilities::JE_ADJUSTING, "U-60 je-adjusting-v1")
+    {
+        return;
+    }
+    let s = &h.s1;
+    let accounts = h
+        .run(s.accounts().list_all(&cl_api::AccountFilter::default()))
+        .expect("accounts");
+    let ap = accounts
+        .iter()
+        .find(|a| a.system_tag.as_deref() == Some("accounts_payable"))
+        .map(|a| a.id)
+        .expect("an A/P account");
+    let expense = account(h, s, AccountType::Expense, "Accrued rent").id;
+    let vendor = h
+        .run(s.contacts().create(
+            &cl_api::NewContact {
+                fields: cl_api::ContactFields::named(
+                    cl_api::ContactType::Vendor,
+                    unique("Landlord"),
+                ),
+                opening_balance: Money::ZERO,
+                opening_balance_date: None,
+            },
+            IdempotencyKey::new(),
+        ))
+        .expect("vendor")
+        .record
+        .id;
+    let on = day_back(2, 20);
+    let entry = NewJournalEntry::new_with(
+        on,
+        Some(unique("Accrue rent")),
+        Basis::Accrual,
+        vec![
+            JeLine {
+                account: expense,
+                side: Side::Debit(m("1200.00")),
+                description: Some("Rent".into()),
+                tag: None,
+                contact: None,
+            },
+            JeLine {
+                account: ap,
+                side: Side::Credit(m("1200.00")),
+                description: None,
+                tag: None,
+                contact: Some(vendor),
+            },
+        ],
+        JeOptions {
+            adjusting: true,
+            ..JeOptions::default()
+        },
+        &AccountRoles::default(),
+    )
+    .expect("entry");
+    let t = h
+        .run(s.templates().create(&NewTemplate {
+            name: unique("Accrue rent"),
+            group: None,
+            client_form: None,
+            draft: TemplateDraft::Journal(entry),
+            schedule: Some(TemplateSchedule {
+                mode: ScheduleMode::Auto,
+                frequency: Frequency::Monthly,
+                interval: 1,
+                next_date: on,
+                end: ScheduleEnd::After(1),
+            }),
+        }))
+        .unwrap_or_else(|e| panic!("template: {e}"));
+    let r = run(h, s, on);
+    let posted: Vec<_> = r.posted.iter().filter(|p| p.template == t.id).collect();
+    assert_eq!(posted.len(), 1);
+    let got = h
+        .run(s.raw_mapped(
+            Method::Get,
+            &format!("/api/v1/transactions/{}", posted[0].transaction),
+            None,
+        ))
+        .expect("read back");
+    let txn = &got["transaction"];
+    assert_eq!(txn["isAdjusting"], json!(true), "{txn}");
+    assert_eq!(txn["basis"], json!("accrual"), "{txn}");
+    assert!(
+        txn["txnNumber"].as_str().is_some_and(|n| !n.is_empty()),
+        "numbered: {txn}"
+    );
+    let lines = txn["lines"].as_array().expect("lines");
+    let named: Vec<_> = lines
+        .iter()
+        .filter(|l| l["contactId"] == json!(vendor.to_string()))
+        .collect();
+    assert_eq!(named.len(), 1, "the A/P line keeps its name");
+    assert_eq!(named[0]["accountId"], json!(ap.to_string()));
+    assert_eq!(named[0]["credit"], json!("1200.0000"));
 }

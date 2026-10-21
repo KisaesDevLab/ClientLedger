@@ -1,11 +1,14 @@
 //! Make Journal Entry against the real engine (P15 lane J, plan §6
 //! Acceptance 1 and the phase tests). The P15 part A capabilities
 //! (`je-names-v1`, `je-number-v1`, `je-adjusting-v1`, `je-reversing-v1`,
-//! U-58..U-61) are PENDING until the engine pin bump; only the unbalanced
+//! U-58..U-61, `balance-exact-v1`) are PENDING on an engine without them
+//! (pinned since 886c6b5); only the unbalanced
 //! refusal runs on every engine.
 //!
 //! - `engine_refuses_unbalanced_raw`: a raw body that bypasses the builder
 //!   is refused with 400, posts nothing, and both balances stay exactly.
+//! - `exact_balance_no_tolerance` (`balance-exact-v1`): off by 0.0001 is
+//!   refused too; balanced exactly it posts.
 //! - `ar_ap_names`: an A/R line without a name → 400
 //!   `JE_AR_AP_NAME_REQUIRED`; two A/R or A/P lines → 400
 //!   `JE_AR_AP_ONE_PER_ENTRY`; with a customer it posts and reads back the
@@ -132,6 +135,50 @@ pub fn engine_refuses_unbalanced_raw(h: &Harness) {
         ],
     );
     assert_eq!(local, Err(cl_api::LocalValidation::Unbalanced));
+}
+
+/// `balance-exact-v1`: no 0.0001 tolerance. An entry off by one
+/// ten-thousandth is refused ("does not balance"), posts nothing, and both
+/// balances stay exactly; the same entry balanced exactly posts.
+pub fn exact_balance_no_tolerance(h: &Harness) {
+    if !h.require_cap(Capabilities::BALANCE_EXACT, "U-65 balance-exact-v1") {
+        return;
+    }
+    let s = &h.s1;
+    let (cash, supplies) = pair(h, s);
+    let before = (balance(h, s, cash.id), balance(h, s, supplies.id));
+    let body = |debit: &str| {
+        json!({
+            "txnType": "journal_entry",
+            "txnDate": "2026-07-31",
+            "basis": "both",
+            "lines": [
+                je_line(supplies.id, debit, "0", None),
+                je_line(cash.id, "0", "10.0000", None),
+            ],
+        })
+    };
+    let off = raw_je(h, s, &body("10.0001"));
+    assert_eq!(off.status, 400, "{}", off.body);
+    assert!(
+        off.body["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("does not balance")),
+        "{}",
+        off.body
+    );
+    assert_eq!(
+        (balance(h, s, cash.id), balance(h, s, supplies.id)),
+        before,
+        "balances unchanged exactly"
+    );
+    let ok = raw_je(h, s, &body("10.0000"));
+    assert_eq!(ok.status, 201, "{}", ok.body);
+    assert_eq!(
+        balance(h, s, supplies.id).as_deref(),
+        Some("10.0000"),
+        "posted exactly"
+    );
 }
 
 pub fn ar_ap_names(h: &Harness) {

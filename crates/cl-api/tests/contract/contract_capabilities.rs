@@ -76,7 +76,7 @@ pub fn idempotency_u18(h: &Harness) {
 }
 
 /// U-22: journal-line `contactId` is stripped by the engine's schema until
-/// `je-line-contact-v1`.
+/// `je-line-contact-v1` or `je-names-v1` (which carries it).
 pub fn je_line_contact_u22(h: &Harness) {
     let s = &h.s1;
     let (cash, supplies) = pair(h, s);
@@ -109,7 +109,9 @@ pub fn je_line_contact_u22(h: &Harness) {
         .expect("id");
     let got = h.run(s.transactions().get(id)).expect("get").record;
     let with_contact = got.lines.iter().filter(|l| l.contact_id.is_some()).count();
-    if h.require_cap(JE_LINE_CONTACT, "U-22") {
+    // `je-names-v1` (P15 part A, U-58) delivers U-22: line names are kept
+    // and scope-checked.
+    if h.caps.has(Capabilities::JE_NAMES) || h.require_cap(JE_LINE_CONTACT, "U-22") {
         assert_eq!(with_contact, 1);
     } else {
         assert_eq!(with_contact, 0, "the engine is expected to drop contactId");

@@ -191,9 +191,10 @@ pub fn money_fields_are_strings_on_the_wire(h: &Harness) {
     );
 }
 
-/// Capability probe `money-strict-v1` (U-19), in tenant B. This test
-/// DELIBERATELY documents the engine's 0.0001 balance tolerance: without
-/// U-19 the engine accepts a raw entry unbalanced by 0.0001 (cl-api itself
+/// Capability probe `money-strict-v1` (U-19) or `balance-exact-v1` (P15),
+/// in tenant B. With either, an entry off by 0.0001 is refused. This test
+/// DELIBERATELY documents the older engine's 0.0001 balance tolerance:
+/// without them the engine accepts a raw entry unbalanced by 0.0001 (cl-api itself
 /// never sends one, see `local_refusals_send_nothing`); the entry is voided
 /// straight away. The cluster is throwaway and no other test reads tenant
 /// B's totals.
@@ -212,8 +213,15 @@ pub fn engine_tolerance_probe_money_strict(h: &Harness) {
     let raw = h
         .run(s.raw(Method::Post, "/api/v1/transactions", &[], Some(&body)))
         .expect("raw");
-    if h.caps.has(Capabilities::MONEY_STRICT) {
-        assert_eq!(raw.status, 400, "money-strict-v1 must refuse");
+    // `balance-exact-v1` (P15 part A) delivers U-19's exact 4-place balance
+    // check: no tolerance, 400 "does not balance", nothing posted.
+    if h.caps.has(Capabilities::MONEY_STRICT) || h.caps.has(Capabilities::BALANCE_EXACT) {
+        assert_eq!(raw.status, 400, "an exact balance check must refuse");
+        assert!(
+            raw.body.to_string().contains("does not balance"),
+            "{}",
+            raw.body
+        );
         return;
     }
     assert!(

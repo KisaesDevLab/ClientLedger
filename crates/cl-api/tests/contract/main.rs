@@ -254,6 +254,10 @@ fn main() -> std::process::ExitCode {
             contract_journal_entries::engine_refuses_unbalanced_raw,
         ),
         (
+            "journal_entries::exact_balance_no_tolerance",
+            contract_journal_entries::exact_balance_no_tolerance,
+        ),
+        (
             "journal_entries::ar_ap_names",
             contract_journal_entries::ar_ap_names,
         ),
@@ -506,6 +510,18 @@ fn main() -> std::process::ExitCode {
         (
             "run_due::ends_after_count",
             contract_run_due::ends_after_count,
+        ),
+        (
+            "run_due::catch_up_capped_continues_next_call",
+            contract_run_due::catch_up_capped_continues_next_call,
+        ),
+        (
+            "run_due::owner_without_permission_skipped",
+            contract_run_due::owner_without_permission_skipped,
+        ),
+        (
+            "run_due::journal_template_keeps_names_and_adjusting",
+            contract_run_due::journal_template_keeps_names_and_adjusting,
         ),
         (
             "lifecycle::ten_switches_under_two_seconds",
