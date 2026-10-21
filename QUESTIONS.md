@@ -407,3 +407,30 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P14ab | Sales Receipt | P14 | Built in P20, not P14 (Q-259). | Default in force |
 | Q-P14ac | Sales tax on daily sales | P14 | A manual sales tax line (Q-260); computed tax arrives with P23. | Default in force |
 | Q-P14ad | Engine main CI | P14 | The npm-audit job failing on engine main is pre-existing and unrelated to PR #159. | Default in force |
+| Q-P15a | Template groups | P15 | Folders only; no group schedule; deleting a group keeps its templates. | Default in force |
+| Q-P15b | Mode words | P15 | "Remind me", "Enter automatically", "Don't remind me" (no schedule). | Default in force |
+| Q-P15c | Auto entry into a closed period | P15 | Never posted: catch-up skips closed-period dates and lists them under "Couldn't be entered"; the owner enters them with the closing password (audited). | Default in force |
+| Q-P15d | Daily Sales templates | P15 | They store the layout, amounts, tag and notes but can't enter automatically (Remind or Don't remind only); replaces Q-P14r. | Default in force |
+| Q-P15e | Deposits in templates | P15 | Other lines, fee lines and cash back allowed; grouped payments refused. | Default in force |
+| Q-P15f | Numbers in templates | P15 | Never stored: a check takes "To print" or the next number at entry; a journal entry takes the next entry number. | Default in force |
+| Q-P15g | Journal entry templates | P15 | Carry lines, names, tags, memo and Adjusting; not Reverse on. | Default in force |
+| Q-P15h | When catch-up runs | P15 | Company open (File > Open Company), local midnight, hourly and "Check now"; the desktop engine timer is off. A `--demo` launch does not run catch-up. | Default in force |
+| Q-P15i | Many missed occurrences | P15 | The engine posts at most 31 dates per template per run; the runner re-asks up to 12 times with the same run id; a summary follows. Capped rows can't be skipped. | Default in force |
+| Q-P15j | Monthly on the 29th-31st | P15 | Clamped to the month end, back to the anchor day afterwards (engine month-end anchoring). | Default in force |
+| Q-P15k | Shortcuts | P15 | Ctrl+M Save as Template (form scope); Templates in the Lists menu, no global shortcut (Ctrl+T is Transfer). | Default in force |
+| Q-P15l | Changing a template's transaction | P15 | Use, change, Save as Template, then Replace (version-checked) or Save as new; the dialog edits the name, group and schedule. | Default in force |
+| Q-P15m | MyBooks Online schedules (invoices, bills) on desktop | P15 | Listed read-only (Pause/Delete); no recurring invoices are created on desktop (Q-52). | Default in force |
+| Q-P15n | Balance helper | P15 | The next line is filled with the balancing amount without an explicit accept (QB-like); deviation from plan section 4, which proposed a suggestion. Plus a "Balance on this line" button; no shortcut. | Default in force |
+| Q-P15o | Journal entry Name list | P15 | Customers, jobs, vendors and other names; A/R lines need a customer, A/P lines a vendor. | Default in force |
+| Q-P15p | "Open in form" for a due occurrence | P15 | The form saves normally, then the app marks the occurrence entered (a second call); if that fails, the reminder stays and can be dismissed. | Default in force |
+| Q-P15q | Helpers (owner money, personal funds, loan) | P15 | No Save as Template in P15; their postings can be saved from the base form when opened from the register. | Default in force |
+| Q-P15r | Sample templates | P15 | Three templates; the README notes the first-open catch-up of two 49.00 charges. | Default in force |
+| Q-P15s | A/R-A/P rule | P15 | One A/R or A/P account per entry; every line on it needs the right kind of name (Q-206). | Default in force |
+| Q-P15t | P15 look | P15 | Write Check pattern, no mockup; screenshots in the PR. | Default in force |
+| Q-P15u | Use date | P15 | Today, or the occurrence date when opened from Templates Due. | Default in force |
+| Q-P15v | Enter now on an unscheduled template | P15 | Asks for the date, default today. | Default in force |
+| Q-P15w | Auto template start | P15 | An auto template's start date may be at most 366 days back. | Default in force |
+| Q-P15x | Who an auto template posts as | P15 | It posts only while the last editor still has the permission for the template's kind; otherwise it is skipped with PERMISSION. | Default in force |
+| Q-P15y | Register routing for journal entries | P15 | Ctrl+E or Enter on a journal entry opens Make Journal Entry (Q-P14aa extended). | Default in force |
+| Q-P15z | Make Journal Entry panels | P15 | No side panel and no History in P15 (follow-up). | Default in force |
+| Q-P15aa | Templates Due chip | P15 | Counts dates (occurrences), matching what Templates Due lists. | Default in force |
