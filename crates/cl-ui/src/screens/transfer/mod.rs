@@ -1163,70 +1163,73 @@ impl TransferScreen {
             form::hint(ui, tokens, &t("closing.edit_note"));
         }
         let enabled = !working && !self.closing_prompt.dialog_open() && !read_only;
-        form::card(ui, tokens, |ui| {
-            crate::forms::header::wrap_row(ui, |ui| {
-                self.account_ui(ui, tokens, true, enabled);
-                kit::wrap_item(ui, "transfer/arrow", |ui| {
-                    ui.add_space(22.0);
-                    ui.label(RichText::new("\u{2192}").size(20.0));
-                });
-                self.account_ui(ui, tokens, false, enabled);
-            });
-            ui.add_space(8.0);
-            ui.add_enabled_ui(enabled, |ui| {
+        // A read-only transfer keeps readable text (contrast >= 4.5:1).
+        crate::forms::header::locked_scope(ui, true, read_only, |ui| {
+            form::card(ui, tokens, |ui| {
                 crate::forms::header::wrap_row(ui, |ui| {
-                    kit::wrap_item(ui, "transfer/date", |ui| {
-                        let l = kit::above(ui, tokens, &t("transfer.date"));
-                        let before = self.date.text.clone();
-                        let r = ui
-                            .add(
-                                egui::TextEdit::singleline(&mut self.date.text)
-                                    .desired_width(110.0)
-                                    .font(egui::TextStyle::Monospace),
-                            )
-                            .labelled_by(l.id);
-                        if r.changed() {
-                            self.date.typed(&before, self.today);
-                            let v = self.date.value;
-                            if v.is_some() {
-                                self.form.edit(field::DATE, |f| f.date = v);
+                    self.account_ui(ui, tokens, true, enabled);
+                    kit::wrap_item(ui, "transfer/arrow", |ui| {
+                        ui.add_space(22.0);
+                        ui.label(RichText::new("\u{2192}").size(20.0));
+                    });
+                    self.account_ui(ui, tokens, false, enabled);
+                });
+                ui.add_space(8.0);
+                ui.add_enabled_ui(enabled, |ui| {
+                    crate::forms::header::wrap_row(ui, |ui| {
+                        kit::wrap_item(ui, "transfer/date", |ui| {
+                            let l = kit::above(ui, tokens, &t("transfer.date"));
+                            let before = self.date.text.clone();
+                            let r = ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut self.date.text)
+                                        .desired_width(110.0)
+                                        .font(egui::TextStyle::Monospace),
+                                )
+                                .labelled_by(l.id);
+                            if r.changed() {
+                                self.date.typed(&before, self.today);
+                                let v = self.date.value;
+                                if v.is_some() {
+                                    self.form.edit(field::DATE, |f| f.date = v);
+                                    self.rev = self.form.revision();
+                                }
+                            }
+                            if r.lost_focus() {
+                                self.date.settle();
+                            }
+                            self.track(&r, field::DATE);
+                        });
+                        kit::wrap_item(ui, "transfer/amount", |ui| {
+                            let l = kit::above(ui, tokens, &t("transfer.amount"));
+                            let r = ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut self.amount_text)
+                                        .desired_width(130.0)
+                                        .font(egui::TextStyle::Monospace)
+                                        .align(egui::Align2::RIGHT_CENTER),
+                                )
+                                .labelled_by(l.id);
+                            if r.lost_focus() {
+                                self.amount_left();
+                            }
+                            self.track(&r, field::AMOUNT);
+                            if let Some(k) = self.amount_problem {
+                                ui.label(RichText::new(t(k)).size(12.0).color(tokens.warn_text));
+                            }
+                        });
+                        kit::wrap_item(ui, "transfer/memo", |ui| {
+                            let l = kit::above(ui, tokens, &t("transfer.memo"));
+                            let mut memo = self.form.current().memo.clone();
+                            let r = ui
+                                .add(egui::TextEdit::singleline(&mut memo).desired_width(260.0))
+                                .labelled_by(l.id);
+                            if r.changed() {
+                                self.form.edit(field::MEMO, |f| f.memo = memo);
                                 self.rev = self.form.revision();
                             }
-                        }
-                        if r.lost_focus() {
-                            self.date.settle();
-                        }
-                        self.track(&r, field::DATE);
-                    });
-                    kit::wrap_item(ui, "transfer/amount", |ui| {
-                        let l = kit::above(ui, tokens, &t("transfer.amount"));
-                        let r = ui
-                            .add(
-                                egui::TextEdit::singleline(&mut self.amount_text)
-                                    .desired_width(130.0)
-                                    .font(egui::TextStyle::Monospace)
-                                    .align(egui::Align2::RIGHT_CENTER),
-                            )
-                            .labelled_by(l.id);
-                        if r.lost_focus() {
-                            self.amount_left();
-                        }
-                        self.track(&r, field::AMOUNT);
-                        if let Some(k) = self.amount_problem {
-                            ui.label(RichText::new(t(k)).size(12.0).color(tokens.warn_text));
-                        }
-                    });
-                    kit::wrap_item(ui, "transfer/memo", |ui| {
-                        let l = kit::above(ui, tokens, &t("transfer.memo"));
-                        let mut memo = self.form.current().memo.clone();
-                        let r = ui
-                            .add(egui::TextEdit::singleline(&mut memo).desired_width(260.0))
-                            .labelled_by(l.id);
-                        if r.changed() {
-                            self.form.edit(field::MEMO, |f| f.memo = memo);
-                            self.rev = self.form.revision();
-                        }
-                        self.track(&r, field::MEMO);
+                            self.track(&r, field::MEMO);
+                        });
                     });
                 });
             });

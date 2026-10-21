@@ -264,3 +264,34 @@ pub fn wrap_row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     ui.with_layout(Layout::left_to_right(Align::TOP).with_main_wrap(true), add)
         .inner
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{egui, locked_scope};
+
+    /// (enabled, opacity) seen inside `locked_scope`.
+    fn inside(enabled: bool, read_only: bool) -> (bool, f32) {
+        let ctx = egui::Context::default();
+        let mut seen = (true, 0.0);
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            seen = locked_scope(ui, enabled, read_only, |ui| (ui.is_enabled(), ui.opacity()));
+        });
+        out.textures_delta.clear();
+        seen
+    }
+
+    #[test]
+    fn read_only_record_is_locked_but_not_faded() {
+        let (on, opacity) = inside(false, true);
+        assert!(!on);
+        assert!((opacity - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn busy_form_still_fades_its_inputs() {
+        let (on, opacity) = inside(false, false);
+        assert!(!on);
+        assert!(opacity < 1.0);
+        assert!(inside(true, true).0);
+    }
+}

@@ -217,13 +217,15 @@ impl DepositScreen {
         }
         header::title_only(ui, tokens, &t("cmd.banking.deposit"));
         ui.add_space(6.0);
-        ui.add_enabled_ui(enabled, |ui| self.card_ui(ui, tokens));
+        header::locked_scope(ui, enabled, read_only, |ui| self.card_ui(ui, tokens));
         ui.add_space(12.0);
-        ui.add_enabled_ui(enabled, |ui| self.payments_ui(ui, tokens, enabled));
+        header::locked_scope(ui, enabled, read_only, |ui| {
+            self.payments_ui(ui, tokens, enabled);
+        });
         ui.add_space(12.0);
-        self.lines_ui(ui, tokens, enabled);
+        self.lines_ui(ui, tokens, enabled, read_only);
         ui.add_space(6.0);
-        ui.add_enabled_ui(enabled, |ui| self.cash_back_ui(ui, tokens));
+        header::locked_scope(ui, enabled, read_only, |ui| self.cash_back_ui(ui, tokens));
         ui.add_space(6.0);
         self.totals_ui(ui, tokens);
         self.problems_ui(ui, tokens);
@@ -364,7 +366,7 @@ impl DepositScreen {
         }
     }
 
-    fn lines_ui(&mut self, ui: &mut Ui, tokens: &Tokens, enabled: bool) {
+    fn lines_ui(&mut self, ui: &mut Ui, tokens: &Tokens, enabled: bool, read_only: bool) {
         ui.horizontal(|ui| {
             let r = ui.add(
                 egui::Label::new(
@@ -381,7 +383,7 @@ impl DepositScreen {
             );
         });
         ui.add_space(4.0);
-        ui.add_enabled_ui(enabled, |ui| {
+        header::locked_scope(ui, enabled, read_only, |ui| {
             let _ = self.lines.ui(ui);
         });
         let hint = if self.caps().cashback {

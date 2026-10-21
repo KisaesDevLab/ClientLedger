@@ -303,19 +303,19 @@ impl WriteCheckScreen {
     }
 
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        let enabled = self.save.task.is_none()
-            && !self.closing_prompt.dialog_open()
-            && !self.editing.as_ref().is_some_and(|e| e.read_only);
-        self.bank_row(ui, tokens, enabled);
+        let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
+        let enabled = self.save.task.is_none() && !self.closing_prompt.dialog_open() && !read_only;
+        // A read-only check keeps readable text (contrast >= 4.5:1).
+        header::locked_scope(ui, true, read_only, |ui| self.bank_row(ui, tokens, enabled));
         ui.add_space(10.0);
         if let Some(e) = self.editing.as_ref().filter(|e| e.read_only) {
             form::hint(ui, tokens, &t(e.read_only_note));
         } else if self.editing_locked() {
             form::hint(ui, tokens, &t("closing.edit_note"));
         }
-        ui.add_enabled_ui(enabled, |ui| self.card_ui(ui, tokens));
+        header::locked_scope(ui, enabled, read_only, |ui| self.card_ui(ui, tokens));
         ui.add_space(12.0);
-        self.lines_ui(ui, tokens, enabled);
+        header::locked_scope(ui, true, read_only, |ui| self.lines_ui(ui, tokens, enabled));
         ui.add_space(6.0);
         self.totals_ui(ui, tokens);
         self.problems_ui(ui, tokens);
