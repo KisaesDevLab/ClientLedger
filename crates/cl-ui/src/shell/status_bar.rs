@@ -51,7 +51,8 @@ fn form_hints(kind: &str) -> Option<&'static [(&'static str, &'static str)]> {
         | "vendors.card_charge"
         | "vendors.personal_funds"
         | "banking.deposit"
-        | "banking.loan_payment" => Some(&CHECK_HINTS),
+        | "banking.loan_payment"
+        | "company.journal_entry" => Some(&CHECK_HINTS),
         "banking.owner_money" | "clients.daily_sales" => Some(&LIST_HINTS),
         "banking.transfer" => Some(&REVERT_HINTS),
         _ => None,

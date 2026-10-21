@@ -309,7 +309,12 @@ impl LinesSpec {
             },
         ];
         if self.amounts == AmountColumns::DebitCredit {
+            // Plain-language tooltips for the two accounting words (rule 12).
+            if let Some(debit) = columns.iter_mut().find(|c| c.id == L_AMOUNT) {
+                debit.help = Some(TextKey("jargon.debit"));
+            }
             columns.push(Column {
+                help: Some(TextKey("jargon.credit")),
                 align: Align::Right,
                 mono: true,
                 ..column(
