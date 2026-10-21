@@ -1,0 +1,135 @@
+# Loan Payment (P14 plan §6.4) against `clientledger --demo`: the 2200
+# Vehicle and Equipment Loans account and Lakeview Credit Union prefill the
+# accounts from the last payment, never the amounts (Q-191); interest more
+# than the payment is refused (principal_negative); 892.00 with interest
+# 207.43 splits to principal 684.57; the lender's balance after the payment
+# from the sample's lender statement (30,515.43,
+# fixtures/sample/ozark_ridge/lender_statement.json) matches the engine's
+# balance after saving (31,200.00 -> 30,515.43); the loan register shows the
+# 684.57; the unsaved-changes question on Prev; Void.
+#
+# Light and dark run in the same app, so the scenario is repeatable: the
+# payment is voided, so each pass starts on 31,200.00. All data is synthetic.
+name: loan_payment
+description: Prefill accounts not amounts, principal_negative refused, exact principal split, lender-statement balance matches, loan register, Prev prompt, Void.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.loan_payment
+  - assert_exists: {role: tab, label_contains: "Loan Payment"}
+  - assert_state: {key: screen.screen, equals: loan_payment}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.record, equals: new}
+  - assert_exists: {role: label, label: "This helper doesn't build payment schedules. Type the amounts from your lender's statement.", index: 0}
+  # --- 1. The loan and the lender: accounts prefilled, amounts blank ---------
+  - click: {role: combo_box, label: Loan account}
+  - click: {role: button, label: "2200 · Vehicle and Equipment Loans"}
+  - type: {text: Lakeview, target: {role: text_input, label: Lender}}
+  - key: Tab
+  - assert_value: {target: {role: text_input, label: Lender}, equals: "Lakeview Credit Union"}
+  - assert_state: {key: screen.loan_id, equals: "d0000000-0000-4000-8000-a00000002200"}
+  - assert_state: {key: screen.prefill.applied, equals: true}
+  - assert_state: {key: screen.interest_account_set, equals: true}
+  - assert_value: {target: {role: combo_box, label: Interest account}, equals: "8000 · Interest Expense"}
+  - assert_value: {target: {role: text_input, label: Payment}, equals: ""}
+  - assert_value: {target: {role: text_input, label: Interest (from the statement)}, equals: ""}
+  - assert_exists: {role: label, label: "Accounts filled in from your last payment to this lender. Amounts are never copied."}
+  - assert_state: {key: screen.balance_shown, equals: true}
+  - assert_exists: {role: label, label: "31,200.00"}
+  # Interest more than the payment: refused.
+  - type: {text: "892", target: {role: text_input, label: Payment}}
+  - type: {text: "900", target: {role: text_input, label: Interest (from the statement)}}
+  - key: Tab
+  - assert_state: {key: screen.principal_negative, equals: true}
+  - assert_value: {target: {role: text_input, label: Principal}, equals: "-8.00"}
+  - key: Alt+N
+  - assert_state: {key: screen.save.refused, equals: principal_negative}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - assert_exists: {role: label, label_contains: "more than the payment"}
+  - screenshot: principal-negative
+
+  # --- 2. Interest 207.43: principal 684.57; the lender's balance matches ------
+  - click: {role: text_input, label: Interest (from the statement)}
+  - key: Ctrl+A
+  - type: {text: "207.43"}
+  - key: Tab
+  - assert_state: {key: screen.principal_negative, equals: false}
+  - assert_value: {target: {role: text_input, label: Principal}, equals: "684.57"}
+  - type: {text: "30515.43", target: {role: text_input, label: "Lender's balance after this payment (optional)"}}
+  - key: Tab
+  - assert_state: {key: screen.lender_balance_set, equals: true}
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - type: {text: "Scenario loan payment"}
+  - assert_no_clipping: {}
+  - screenshot: split
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.last_action, equals: save}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.error, equals: false}
+  - assert_state: {key: screen.lender_match, equals: matches}
+  - assert_exists: {role: label, label: "Matches your lender's statement ✓"}
+  - assert_exists: {role: label, label: "30,515.43"}
+  - screenshot: lender-match
+
+  # --- 3. The loan register shows the principal -------------------------------
+  - command: lists.chart_of_accounts
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: row, label_contains: "2200 Vehicle"}
+  - click: {role: button, label: Open Register}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.account_id, equals: "d0000000-0000-4000-8000-a00000002200"}
+  - assert_state: {key: screen.footer.ending, equals: "30,515.43"}
+  - assert_exists: {role: row, label_contains: "11/04/2026, Lakeview Credit Union, row"}
+  - screenshot: loan-register
+  - command: file.close_window
+  - click: {role: tab, label: Chart of Accounts}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Loan Payment"}
+  - assert_state: {key: screen.screen, equals: loan_payment}
+
+  # --- 4. Prev: the payment (newest); unsaved changes ask; void it -----------
+  - key: PageUp
+  - assert_state: {key: screen.record, equals: edit}
+  - assert_state: {key: screen.nav_at, equals: 0}
+  - assert_value: {target: {role: text_input, label: Memo}, equals: "Scenario loan payment"}
+  - assert_value: {target: {role: text_input, label: Payment}, equals: "892.00"}
+  - assert_value: {target: {role: text_input, label: Principal}, equals: "684.57"}
+  - click: {role: text_input, label: Memo}
+  - key: End
+  - type: {text: " (Nov)"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: PageUp
+  - assert_state: {key: screen.nav_prompt, equals: true}
+  - assert_exists: {role: button, label: Discard changes}
+  - screenshot: nav-prompt
+  - click: {role: button, label: Keep editing}
+  - assert_state: {key: screen.nav_prompt, equals: false}
+  - assert_state: {key: screen.nav_at, equals: 0}
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - type: {text: "Scenario loan payment"}
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.error, equals: false}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
+  - click_if_present: {role: button, label: Close Bank Feed}
+  - click: {role: tab, label_contains: "Loan Payment"}
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: text_input, label: Payment}
+  - assert_no_clipping:
+      # The side panel goes under the form and scrolls by design: only the
+      # bottom band of the scroll area may be cut by the window edge.
+      ignore:
+        - {x: 212, y: 560, width: 10000, height: 200}
+  - screenshot: loan-payment-960x640
+  - resize: {width: 1440, height: 940}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Loan Payment"}
