@@ -12,6 +12,8 @@
 //! customer payments waiting in Payments Clearing (10150), the 11/04 bank
 //! file's deposit of both, the "Plant sale counter" daily-sales layout and
 //! the lender's 11/04 statement for the truck loan (`lender_statement.json`).
+//! P15 adds three templates (`templates.json`); the automatic one posts
+//! two 49.00 card charges on the first open, after the design figures.
 //!
 //! Amounts are integer cents here and decimal strings in the files; no
 //! floating point anywhere.
@@ -1106,6 +1108,54 @@ fn lender_statement(txns: &[Txn]) -> Value {
     })
 }
 
+/// The P15 templates (Q-P15r): a check to print each month (Remind me), a
+/// 49.00 software charge on the card entered automatically from 09/15 for
+/// three months (the first open catches up 09/15 and 10/15; the count
+/// stops it), and an owner's insurance journal entry with no schedule.
+fn templates() -> Value {
+    json!({
+        "groups": ["Monthly bills"],
+        "templates": [
+            {
+                "name": "Shop rent",
+                "group": "Monthly bills",
+                "kind": "check",
+                "account": "1010",
+                "payee": "Pine Ridge Storage Units",
+                "memo": "Shop rent",
+                "printLater": true,
+                "lines": [{"account": "6300", "debit": cents(145_000)}],
+                "schedule": {"mode": "remind", "frequency": "monthly", "interval": 1, "nextDate": "2026-12-01", "remainingCount": null},
+            },
+            {
+                "name": "Accounting software",
+                "group": "Monthly bills",
+                "kind": "card_charge",
+                "account": "2050",
+                "payee": "Mountain Software Co",
+                "memo": "Accounting software",
+                "printLater": false,
+                "lines": [{"account": "6250", "debit": cents(4_900)}],
+                "schedule": {"mode": "auto", "frequency": "monthly", "interval": 1, "nextDate": "2026-09-15", "remainingCount": 3},
+            },
+            {
+                "name": "Owner health insurance",
+                "group": null,
+                "kind": "journal_entry",
+                "account": null,
+                "payee": null,
+                "memo": "Owner health insurance",
+                "printLater": false,
+                "lines": [
+                    {"account": "30170", "debit": cents(41_250)},
+                    {"account": "1010", "credit": cents(41_250)},
+                ],
+                "schedule": null,
+            },
+        ],
+    })
+}
+
 /// The "Plant sale counter" daily-sales layout (created from the engine's
 /// retail preset, then its lines replaced). `fallback` is used when the
 /// chart lacks `account` (4100 Product Sales is an inventory-only account).
@@ -1285,6 +1335,7 @@ fn render(fx: &Fixture) -> BTreeMap<&'static str, String> {
         pretty(&json!({"account": "1010", "items": fx.feed})),
     );
     out.insert("lender_statement.json", pretty(&lender_statement(&fx.txns)));
+    out.insert("templates.json", pretty(&templates()));
     out
 }
 

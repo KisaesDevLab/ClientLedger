@@ -1,0 +1,71 @@
+{
+  "groups": [
+    "Monthly bills"
+  ],
+  "templates": [
+    {
+      "account": "1010",
+      "group": "Monthly bills",
+      "kind": "check",
+      "lines": [
+        {
+          "account": "6300",
+          "debit": "1450.00"
+        }
+      ],
+      "memo": "Shop rent",
+      "name": "Shop rent",
+      "payee": "Pine Ridge Storage Units",
+      "printLater": true,
+      "schedule": {
+        "frequency": "monthly",
+        "interval": 1,
+        "mode": "remind",
+        "nextDate": "2026-12-01",
+        "remainingCount": null
+      }
+    },
+    {
+      "account": "2050",
+      "group": "Monthly bills",
+      "kind": "card_charge",
+      "lines": [
+        {
+          "account": "6250",
+          "debit": "49.00"
+        }
+      ],
+      "memo": "Accounting software",
+      "name": "Accounting software",
+      "payee": "Mountain Software Co",
+      "printLater": false,
+      "schedule": {
+        "frequency": "monthly",
+        "interval": 1,
+        "mode": "auto",
+        "nextDate": "2026-09-15",
+        "remainingCount": 3
+      }
+    },
+    {
+      "account": null,
+      "group": null,
+      "kind": "journal_entry",
+      "lines": [
+        {
+          "account": "30170",
+          "debit": "412.50"
+        },
+        {
+          "account": "1010",
+          "credit": "412.50"
+        }
+      ],
+      "memo": "Owner health insurance",
+      "name": "Owner health insurance",
+      "payee": null,
+      "printLater": false,
+      "schedule": null
+    }
+  ]
+}

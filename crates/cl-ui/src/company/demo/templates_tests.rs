@@ -4,8 +4,8 @@
 use super::*;
 use crate::company::demo::register::DEMO_CLOSING_PASSWORD;
 use crate::company::demo::template_store;
-use cl_api::{NewTemplate, new_run_id};
-use cl_core::Secret;
+use cl_api::{CardChargeDraft, Frequency, NewTemplate, SplitLine, TemplateSchedule, new_run_id};
+use cl_core::{Money, Secret};
 
 fn d(y: i32, m: u32, day: u32) -> CalendarDate {
     CalendarDate::from_ymd(y, m, day).expect("date")
@@ -31,7 +31,14 @@ fn card(amount: &str) -> TemplateDraft {
         number: None,
         payee: None,
         memo: None,
-        lines: vec![line(super::super::account_id(6250), m(amount))],
+        lines: vec![SplitLine {
+            account: super::super::account_id(6250),
+            amount: m(amount),
+            memo: None,
+            contact: None,
+            billable: false,
+            tag: None,
+        }],
     })
 }
 

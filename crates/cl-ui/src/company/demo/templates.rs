@@ -27,12 +27,12 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 use cl_api::{
-    ApiError, Attention, CardChargeDraft, CheckDraft, ConflictReason, DueReminder, FailedTemplate,
-    Frequency, JeLine, LocalValidation, NewJournalEntry, PostedOccurrence, RunDue, ScheduleEnd,
-    ScheduleMode, SkipReason, SkippedOccurrence, SplitLine, TemplateDraft, TemplateSchedule,
+    ApiError, Attention, ConflictReason, DueReminder, FailedTemplate, LocalValidation,
+    PostedOccurrence, RunDue, ScheduleEnd, ScheduleMode, SkipReason, SkippedOccurrence,
+    TemplateDraft,
 };
+use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, RunId, TemplateGroupId, TemplateId, TransactionId};
-use cl_core::{CalendarDate, Money};
 
 use super::DemoState;
 use super::template_store::{closing, conflict, live, next_after, post_draft, total};
@@ -471,47 +471,15 @@ pub fn resolve(
 
 // ------------------------------------------------------------ sample (WP-D)
 
-fn sample_id<T: std::str::FromStr>(prefix: char, n: u32) -> Option<T> {
+fn sample_id<T: std::str::FromStr>(prefix: char, n: usize) -> Option<T> {
     format!("d0000000-0000-4000-8000-{prefix}{n:011}")
         .parse()
         .ok()
 }
 
-fn sample_money(s: &str) -> Money {
-    Money::parse_wire(s).unwrap_or(Money::ZERO)
-}
-
-fn vendor(state: &mut DemoState, name: &str) -> Option<cl_core::ids::ContactId> {
-    state
-        .contacts_mut()
-        .iter()
-        .find(|c| c.fields.display_name == name)
-        .map(|c| c.id)
-}
-
-fn line(account: AccountId, amount: Money) -> SplitLine {
-    SplitLine {
-        account,
-        amount,
-        memo: None,
-        contact: None,
-        billable: false,
-        tag: None,
-    }
-}
-
-fn je_line(account: AccountId, side: cl_api::Side) -> JeLine {
-    JeLine {
-        account,
-        side,
-        description: None,
-        tag: None,
-        contact: None,
-    }
-}
-
-/// The practice company's templates (P15 WP-D, Q-P15r; the same three as
-/// `fixtures/sample/ozark_ridge/templates.json`), added once:
+/// The practice company's templates (P15 WP-D, Q-P15r), from
+/// `fixtures/sample/ozark_ridge/templates.json` as the real loader takes
+/// them, added once:
 ///
 /// - "Shop rent" (Monthly bills): a check to print, Remind me monthly from
 ///   12/01/2026;
@@ -527,105 +495,50 @@ pub fn seed_sample(state: &mut DemoState) {
         return;
     }
     state.templates_seeded = true;
-    let a = super::account_id;
+    let sample = cl_company::Sample::load().templates;
     let story = DemoState::today();
-    let Some(group) = sample_id::<TemplateGroupId>('f', 900) else {
-        return;
-    };
-    if !state.template_groups.iter().any(|g| g.id == group) {
-        state.template_groups.push(DemoTemplateGroup {
-            id: group,
-            name: "Monthly bills".into(),
-        });
-    }
-    let landlord = vendor(state, "Pine Ridge Storage Units");
-    let software = vendor(state, "Mountain Software Co");
-    let rent = sample_money("1450.00");
-    let check = TemplateDraft::Check(CheckDraft {
-        bank: a(1010),
-        date: story,
-        payee: landlord,
-        payee_name: "Pine Ridge Storage Units".into(),
-        check_number: None,
-        print_later: true,
-        payee_address: None,
-        memo: Some("Shop rent".into()),
-        printed_memo: None,
-        tag_ids: Vec::new(),
-        draft_attachment: None,
-        amount: rent,
-        lines: vec![line(a(6300), rent)],
-    });
-    let card = TemplateDraft::CardCharge(CardChargeDraft {
-        pay_from: a(2050),
-        date: story,
-        number: None,
-        payee: software,
-        memo: Some("Accounting software".into()),
-        lines: vec![line(a(6250), sample_money("49.00"))],
-    });
-    let insurance = sample_money("412.50");
-    let je = NewJournalEntry::new(
-        story,
-        Some("Owner health insurance".into()),
-        cl_api::Basis::Both,
-        vec![
-            je_line(a(30170), cl_api::Side::Debit(insurance)),
-            je_line(a(1010), cl_api::Side::Credit(insurance)),
-        ],
-    );
-    let monthly = |mode, next, end| TemplateSchedule {
-        mode,
-        frequency: Frequency::Monthly,
-        interval: 1,
-        next_date: next,
-        end,
-    };
-    let mut rows = vec![
-        (
-            1,
-            "Shop rent",
-            Some(group),
-            check,
-            cl_api::client_form::WRITE_CHECK,
-            CalendarDate::from_ymd(2026, 12, 1)
-                .ok()
-                .map(|d| monthly(ScheduleMode::Remind, d, ScheduleEnd::Never)),
-        ),
-        (
-            2,
-            "Accounting software",
-            Some(group),
-            card,
-            cl_api::client_form::CARD_CHARGE,
-            CalendarDate::from_ymd(2026, 9, 15)
-                .ok()
-                .map(|d| monthly(ScheduleMode::Auto, d, ScheduleEnd::After(3))),
-        ),
-    ];
-    if let Ok(je) = je {
-        rows.push((
-            3,
-            "Owner health insurance",
-            None,
-            TemplateDraft::Journal(je),
-            cl_api::client_form::JOURNAL_ENTRY,
-            None,
-        ));
-    }
-    for (n, name, group, draft, form, schedule) in rows {
-        let Some(id) = sample_id::<TemplateId>('e', 900 + n) else {
+    let mut groups: Vec<(String, TemplateGroupId)> = Vec::new();
+    for (i, name) in sample.groups.iter().enumerate() {
+        let Some(id) = sample_id::<TemplateGroupId>('f', 900 + i) else {
             continue;
         };
-        if state.templates.iter().any(|t| t.id == id) {
+        if !state.template_groups.iter().any(|g| g.id == id) {
+            state.template_groups.push(DemoTemplateGroup {
+                id,
+                name: name.clone(),
+            });
+        }
+        groups.push((name.clone(), id));
+    }
+    let vendors: Vec<(String, cl_core::ids::ContactId)> = state
+        .contacts_mut()
+        .iter()
+        .map(|c| (c.fields.display_name.clone(), c.id))
+        .collect();
+    for (i, t) in sample.templates.iter().enumerate() {
+        let Some(id) = sample_id::<TemplateId>('e', 901 + i) else {
+            continue;
+        };
+        if state.templates.iter().any(|x| x.id == id) {
             continue;
         }
+        let Some(draft) = t.draft(
+            story,
+            |n| n.parse().ok().map(super::account_id),
+            |n| vendors.iter().find(|(v, _)| v == n).map(|(_, c)| *c),
+        ) else {
+            continue;
+        };
+        let schedule = t.api_schedule();
         state.templates.push(DemoTemplate {
             id,
-            name: name.into(),
-            group,
+            name: t.name.clone(),
+            group: t
+                .group
+                .as_deref()
+                .and_then(|g| groups.iter().find(|(n, _)| n == g).map(|(_, id)| *id)),
             draft,
-            client_form: form.into(),
+            client_form: t.client_form().into(),
             schedule,
             anchor: schedule.map(|s| s.next_date),
             last_entered: None,
