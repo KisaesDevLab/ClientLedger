@@ -134,6 +134,41 @@ pub(crate) fn real_account(a: AccountId) -> Option<AccountId> {
 }
 
 /// The Type column's words.
+/// A group's heading row: a painted chevron (the UI fonts have no
+/// triangles; P14 paints Prev / Next the same way), pointing down when the
+/// group is open, then its name.
+fn group_toggle(ui: &mut Ui, open: bool, name: &str) -> egui::Response {
+    let id = egui::IdSalt::new(("templates-group-chevron", name));
+    let size = egui::Vec2::new(10.0, 10.0);
+    let r = egui::Button::new((egui::Atom::custom(id, size), RichText::new(name).strong()))
+        .frame(false)
+        .atom_ui(ui);
+    if let Some(rect) = r.rect(id) {
+        let color = ui.style().interact(&r.response).text_color();
+        let c = rect.center();
+        let h = rect.height() / 2.0 - 1.0;
+        let points = if open {
+            vec![
+                egui::pos2(c.x - h, c.y - h / 2.0),
+                egui::pos2(c.x + h, c.y - h / 2.0),
+                egui::pos2(c.x, c.y + h / 2.0 + 1.0),
+            ]
+        } else {
+            vec![
+                egui::pos2(c.x - h / 2.0, c.y - h),
+                egui::pos2(c.x - h / 2.0, c.y + h),
+                egui::pos2(c.x + h / 2.0 + 1.0, c.y),
+            ]
+        };
+        ui.painter().add(egui::Shape::convex_polygon(
+            points,
+            color,
+            egui::Stroke::NONE,
+        ));
+    }
+    r.response
+}
+
 fn kind_key(t: &Template) -> &'static str {
     match (t.client_form.as_deref(), &t.kind) {
         (Some(client_form::CARD_CREDIT), _) => "templates.kind.card_credit",
@@ -807,10 +842,16 @@ impl TemplatesScreen {
                     &[("name", name.as_str())],
                 ));
                 ui.horizontal(|ui| {
-                    if ui.button(t("templates.delete")).clicked() {
+                    if crate::widgets::destructive_button(ui, &t("templates.delete")).clicked() {
                         answer = Some(true);
                     }
-                    if ui.button(t("templates.dialog.cancel")).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(t("templates.dialog.cancel"))
+                                .min_size(egui::Vec2::new(0.0, 44.0)),
+                        )
+                        .clicked()
+                    {
                         answer = Some(false);
                     }
                 });
@@ -902,14 +943,7 @@ impl TemplatesScreen {
                             let name = g
                                 .and_then(|g| self.groups.iter().find(|x| x.id == g))
                                 .map_or_else(|| t("templates.group.none"), |x| x.name.clone());
-                            // Arrows IBM Plex Sans has (it has no
-                            // triangles: those drew as empty boxes).
-                            let arrow = if open { "\u{2193}" } else { "\u{2192}" };
-                            if ui
-                                .selectable_label(
-                                    false,
-                                    RichText::new(format!("{arrow} {name}")).strong(),
-                                )
+                            if group_toggle(ui, open, &name)
                                 .on_hover_text(t("templates.group.toggle"))
                                 .clicked()
                             {
