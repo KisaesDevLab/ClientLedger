@@ -26,6 +26,24 @@ const ROW_HEIGHT: f32 = 24.0;
 const VISIBLE_ROWS: usize = 8;
 /// Recent deposits in the side panel.
 const RECENT: usize = 5;
+/// The columns' widths (Deposit, Date, Type, Received from, Ref no.,
+/// Method, Amount): the header and every row use them, so the headings sit
+/// over their columns.
+const COLS: [f32; 7] = [56.0, 84.0, 110.0, 170.0, 70.0, 100.0, 100.0];
+
+/// One cell of the payments table: `add` drawn in a box of the column's
+/// width, left-aligned (right-aligned for Amount).
+fn cell(ui: &mut Ui, col: usize, add: impl FnOnce(&mut Ui)) {
+    let layout = if col == COLS.len() - 1 {
+        egui::Layout::right_to_left(egui::Align::Center)
+    } else {
+        egui::Layout::left_to_right(egui::Align::Center)
+    };
+    ui.allocate_ui_with_layout(egui::vec2(COLS[col], ROW_HEIGHT), layout, |ui| {
+        ui.set_width(COLS[col]);
+        add(ui);
+    });
+}
 
 /// The plain name of a pending item's kind (i18n key).
 fn type_key(txn_type: &str) -> &'static str {
@@ -333,27 +351,28 @@ impl DepositScreen {
             .iter()
             .map(|p| p.source)
             .collect();
-        egui::Grid::new("deposit/payments/head")
-            .num_columns(7)
-            .min_col_width(60.0)
-            .show(ui, |ui| {
-                for key in [
-                    "deposit.col.pick",
-                    "deposit.col.date",
-                    "deposit.col.type",
-                    "deposit.col.received_from",
-                    "deposit.col.ref_no",
-                    "deposit.col.method",
-                    "deposit.col.amount",
-                ] {
+        ui.horizontal(|ui| {
+            for (col, key) in [
+                "deposit.col.pick",
+                "deposit.col.date",
+                "deposit.col.type",
+                "deposit.col.received_from",
+                "deposit.col.ref_no",
+                "deposit.col.method",
+                "deposit.col.amount",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                cell(ui, col, |ui| {
                     ui.label(
                         RichText::new(t(key))
                             .size(12.0)
                             .color(tokens.text_secondary),
                     );
-                }
-                ui.end_row();
-            });
+                });
+            }
+        });
         let rows = pending.items.len();
         let height = ROW_HEIGHT * f32::from(u8::try_from(rows.min(VISIBLE_ROWS)).unwrap_or(8));
         egui::ScrollArea::vertical()
@@ -369,51 +388,56 @@ impl DepositScreen {
                             "deposit.payments.pick",
                             &[("name", p.received_from.as_deref().unwrap_or(""))],
                         );
-                        let r = ui.add_enabled(
-                            can_tick && p.exact().is_some(),
-                            egui::Checkbox::without_text(&mut on),
-                        );
-                        let r = r.on_hover_text(&label);
-                        r.widget_info(|| {
-                            egui::WidgetInfo::selected(
-                                egui::Role::CheckBox,
-                                true,
-                                on,
-                                label.clone(),
-                            )
+                        cell(ui, 0, |ui| {
+                            let r = ui.add_enabled(
+                                can_tick && p.exact().is_some(),
+                                egui::Checkbox::without_text(&mut on),
+                            );
+                            let r = r.on_hover_text(&label);
+                            r.widget_info(|| {
+                                egui::WidgetInfo::selected(
+                                    egui::Role::CheckBox,
+                                    true,
+                                    on,
+                                    label.clone(),
+                                )
+                            });
+                            if r.clicked() {
+                                toggled = Some(i);
+                            }
                         });
-                        if r.clicked() {
-                            toggled = Some(i);
-                        }
-                        ui.add_sized([80.0, ROW_HEIGHT], egui::Label::new(Self::row_date(p.date)));
-                        ui.add_sized(
-                            [110.0, ROW_HEIGHT],
-                            egui::Label::new(t(type_key(&p.txn_type))),
-                        );
-                        ui.add_sized(
-                            [180.0, ROW_HEIGHT],
-                            egui::Label::new(p.received_from.clone().unwrap_or_default())
-                                .truncate(),
-                        );
-                        ui.add_sized(
-                            [70.0, ROW_HEIGHT],
-                            egui::Label::new(p.ref_no.clone().unwrap_or_default()).truncate(),
-                        );
-                        ui.add_sized(
-                            [90.0, ROW_HEIGHT],
-                            egui::Label::new(
-                                p.method
-                                    .as_deref()
-                                    .map(method_key)
-                                    .map(t)
-                                    .unwrap_or_default(),
-                            ),
-                        );
+                        cell(ui, 1, |ui| {
+                            ui.add(egui::Label::new(Self::row_date(p.date)).truncate());
+                        });
+                        cell(ui, 2, |ui| {
+                            ui.add(egui::Label::new(t(type_key(&p.txn_type))).truncate());
+                        });
+                        cell(ui, 3, |ui| {
+                            ui.add(
+                                egui::Label::new(p.received_from.clone().unwrap_or_default())
+                                    .truncate(),
+                            );
+                        });
+                        cell(ui, 4, |ui| {
+                            ui.add(
+                                egui::Label::new(p.ref_no.clone().unwrap_or_default()).truncate(),
+                            );
+                        });
+                        cell(ui, 5, |ui| {
+                            // The engine's method; a dash when it isn't known.
+                            let method = p
+                                .method
+                                .as_deref()
+                                .map_or_else(|| t("deposit.method.unknown"), |m| t(method_key(m)));
+                            ui.add(egui::Label::new(method).truncate());
+                        });
                         let amount = match p.exact() {
                             Some(m) => m.format(style),
                             None => p.amount.display(false).unwrap_or_default(),
                         };
-                        ui.label(RichText::new(amount).text_style(egui::TextStyle::Monospace));
+                        cell(ui, 6, |ui| {
+                            ui.label(RichText::new(amount).text_style(egui::TextStyle::Monospace));
+                        });
                     });
                 }
             });

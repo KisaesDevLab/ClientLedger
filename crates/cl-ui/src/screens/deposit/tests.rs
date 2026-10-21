@@ -400,6 +400,20 @@ fn the_demo_saves_a_plain_deposit_and_reads_it_back() {
         2,
         "the sample's two payments"
     );
+    // Their method comes with them (numbered payments are checks).
+    let pending = s.panel.pending.clone().expect("pending");
+    assert!(
+        pending
+            .items
+            .iter()
+            .all(|p| p.method.as_deref() == Some("check")),
+        "{:?}",
+        pending
+            .items
+            .iter()
+            .map(|p| p.method.clone())
+            .collect::<Vec<_>>()
+    );
     set_lines(&mut s, &[(4000, "300.00"), (6250, "-12.50")]);
     set_cash_back(&mut s, 1020, "50.00");
     assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.save.error);

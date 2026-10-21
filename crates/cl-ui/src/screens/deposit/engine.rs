@@ -403,7 +403,7 @@ fn pending_of(p: &twins::DemoPending) -> PendingPayment {
         received_from: p.received_from.clone(),
         contact: p.contact,
         ref_no: p.ref_no.clone(),
-        method: None,
+        method: p.method.clone(),
         memo: p.memo.clone(),
         amount: RegisterAmount::Exact(p.amount),
     }

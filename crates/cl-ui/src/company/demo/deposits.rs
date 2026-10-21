@@ -76,6 +76,9 @@ pub struct DemoPending {
     pub ref_no: Option<String>,
     /// Memo.
     pub memo: Option<String>,
+    /// Payment method as the engine names it (a numbered customer payment
+    /// is a check in the demo; otherwise not known).
+    pub method: Option<String>,
     /// Exactly what it holds in Payments Clearing.
     pub amount: Money,
 }
@@ -201,6 +204,8 @@ pub fn pending(state: &mut DemoState) -> Vec<DemoPending> {
                     contact,
                     ref_no: (!t.number.is_empty()).then(|| t.number.clone()),
                     memo: (!t.memo.is_empty()).then(|| t.memo.clone()),
+                    method: (t.kind == "payment" && !t.number.is_empty())
+                        .then(|| "check".to_string()),
                     amount,
                 },
             ))
