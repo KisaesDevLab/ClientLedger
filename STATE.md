@@ -1,7 +1,7 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P14 — Deposits, transfers, sales receipts, card charges, owner and loan helpers (Next; Intuit compliance check runs first — see Owner-requested checkpoints)
-**Status:** P13 built on `phase/P13-write-check`; PR to open
+**Current phase:** P15 — Journal entries, Templates (memorized) and recurring (Next)
+**Status:** P14 built on `phase/P14-money-forms`; PR to open
 **Engine commit:** `f78583edabe88929f92c10521fefdd1f287c3d81` (`main`, pinned 2026-10-20 after engine PR #159: deposit-grouping-v1, deposit-cashback-v1, vendor-refund-v1, equity-roles-v1, feed-deposit-groupings-v1, daily-sales-lock-v1, migration 0223; bump per Q-02)
 **Last updated:** 2026-10-20
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
@@ -24,8 +24,8 @@
 | P11 | Lists, centers, and tags | M | Done 2026-10-18 (engine gaps PENDING by U-31 to U-46; reviews pending) |
 | P12 | Bank and account register | H | Done 2026-10-19 (AC1 register part, password path and delete live since pin 5c8e9665; R5 PENDING by `register-cleared-v1`; reviews pending) |
 | P13 | Write Check | M | Done 2026-10-20 |
-| P14 | Deposits, transfers, sales receipts, card charges, owner and loan helpers | M | Next |
-| P15 | Journal entries, templates and recurring | H | |
+| P14 | Deposits, transfers, sales receipts, card charges, owner and loan helpers | M | Done 2026-10-20 |
+| P15 | Journal entries, templates and recurring | H | Next |
 | P15A | Bulk Entry | M | |
 | P16 | Home workspace | L | |
 | P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | |
@@ -155,10 +155,18 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 
 ## Follow-ups from P13
 
-1. A register tab left open shows stale rows after another window saves; needs a cross-window "transactions changed" refresh (the scenario closes the tab as a workaround). Fix before or in P14.
+1. ~~A register tab left open shows stale rows after another window saves.~~ Fixed in P14 by the cross-window refresh bus (Q-262).
 2. Native file picker for attachments (Q-P13k).
 3. The `cl-host` cold-start budget test exceeds the 15 s local limit under load (CI uses `CL_HOST_BUDGET_SECS=30`).
 4. Engine issues #157 (duplicate check numbers under concurrency) and #158 (float compare in the rules engine).
+
+## Follow-ups from P14
+
+1. The control channel can't click dropdown options scrolled out of view (automation limitation); scenarios choose options that are visible (Q-P14z).
+2. The demo stores no tags on daily-sales days.
+3. Engine issues #154, #155, #157 and #158 are still open.
+4. Engine main CI (npm-audit) is failing; pre-existing, not caused by PR #159.
+5. The vendor A/P aging summary lists bills only; vendor refunds are not reflected there (the vendor statement shows them).
 
 ## Owner-requested checkpoints
 
@@ -170,6 +178,9 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-20 — P14 complete on `phase/P14-money-forms`; PR to open. Shipped: Make Deposit (grouping clears Undeposited Funds exactly, fee lines, cash back, vendor refunds, bank-deposit suggestions, on-screen summary), Transfer Funds, Daily Sales Summary (engine templates, over/short exact against the engine, manual tax line), Card Charge/Credit (header tags, payee panel, prefill), Pay Yourself/Put Money In and Paid with Personal Funds by entity type (equity roles), Loan Payment helper (lender fixture exact), cross-window refresh bus (Q-262), shared form header with navigation prompt, tab strip overflow, Undeposited Funds naming, jargon tooltips. Engine PR #159 (U-52 to U-57, migration 0223) merged after security review and fixes; pin f78583e. Contract suite 116/116 live; scenarios deposit 190, transfer 152, daily_sales 126, card_charge 141, owner_money 126, personal_funds 101, loan_payment 108 steps, plus forms-zoom; help pages x7. The preview build workflow (Q-253) and the Intuit compliance fixes (Q-254 to Q-258) merged between P13 and P14. Decisions Q-P14a to Q-P14ad.
+  Acceptance (phases/M1-core-ledger.md P14): [x] two grouped payments equal the bank deposit and clear Undeposited Funds (contract `deposits::grouping_clears_payments_clearing` + scenario); [x] transfers match in both registers (contract + scenario); [x] loan payment splits exactly and the balance matches the lender fixture (contract + model proptest).
+  Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, Opus fallback for money lanes), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.
 - 2026-10-20 — P13 complete on `phase/P13-write-check`; PR to open. Shipped: the Write Check form (check card, amount in words, "To print", Expenses lines with Customer:Job, Billable and Tags, Save & New / Save & Close, Prev/Next with a Save/Discard prompt, History, Attach, payee panel with the open-bill warning and recent checks, prefill from the last transaction except amounts, vendor default account, offline rule suggestions and a gated AI chip with explicit accept); check edit with the printed-check choice; the closing-password flow reused; the shared lines grid and closing prompt; Q-232 typed amounts round to the cent; Q-238 "Customers" wording; Q-250 a click opens list fields; sample data for the mockup story; vendor-center focus fix. Engine PR #156 merged (U-48 check edit, U-49 line customer, U-50 billable + migration 0221, U-51 rules evaluate); pin 454fd23. Contract suite 101/101; `write_check` scenario 254 steps light+dark, `--compare` 43 steps. P15A Batch Enter Transactions added to beta (Q-252).
   Acceptance (phases/M1-core-ledger.md P13): [x] the mockup example saves, the register shows it, the GL is correct (contract `write_check::gl_effect`); [x] no save when lines and amount disagree (unit test + scenario, nothing sent); [x] mockup match via `--compare` reviewed by ui-verifier, deviations Q-P13a–p.
   Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, opus fallback for money packages), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.
@@ -181,7 +192,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   Acceptance (phases/M1-core-ledger.md): (1) balance = engine account balance after 1,000 random edits — met for the account balance (oracle == `accounts.balance`, 1,000 ops, two seeds); the register per-line/ending/filtered checks PENDING by `register-exact-v1`; (2) closed-period edit without password refused clearly — met (423 contract + scenario); password path PENDING by `closing-password-v1`; (3) deleted transactions in the audit trail with all lines — PENDING by `txn-delete-v1`; (4) mockup — `ui-check register` light+dark screenshots in `target/ui-check/register/`, `--compare` review by ui-verifier to follow, deviations Q-P12r–w. Capabilities all on engine PR #153.
   Still PENDING: R5 cleared toggle (`register-cleared-v1`), U-17, U-18. Decisions Q-P12a–w added (Q-P12h: `accounts.balance` is debit-positive for every type, found by WP3).
   Agents: all implementers and the engine-side work on opus (Fable unavailable); code review, security review and ui-verifier to follow.
-- 2026-10-18 — P11 complete on `phase/P11-lists` (steps 1-7, 21 commits; not pushed). Shipped: Chart of Accounts, client and vendor centers on one contact record, Item List, Tags and tag groups, read-only Terms and Payment Methods, list CSV import/export with column mapping (`cl-import` CSV, `cl-model` mapping, `cl-api` export/import routes), `cl_model::lists::tags` line rules for forms, and `cl_model::lists::class_map` (class → tag, `Parent:Child` → group + tag, Q-P11z) for P31.
-  Acceptance: (1) keyboard-only create/edit/inactivate for every list — met for accounts, contacts (both centers), items, tags (scenarios `chart-of-accounts`, `client-center`, `vendor-center`, `items`, `tags`, `import-export`, light+dark); terms and payment methods PENDING by U-43 (read-only); (2) classes in fixtures become tags — met (`class_map` tests on `fixtures/lists/classes.csv` plus a property test); (3) 20k-record filter under 100 ms — met (accounts, contacts, items, tags tests).
-  PENDING engine items: U-31 to U-46 (merge with lines, subtree balance, sensitive flag, masked numbers, jobs, addresses/people, notes/to-dos, contact balance, item kinds, price levels, tag merge/single-select, required groups, terms/methods, W-9, several tags per line, list imports); see Blocked items. Q-P11p is now an index of the per-item rows.
-  Agents: engine-scout and all implementers on opus (Fable unavailable); code review and ui-verifier to follow.
