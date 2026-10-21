@@ -49,6 +49,16 @@ impl JournalScreen {
         let nav = kit::toolbar(ui, tokens, idle, dirty, |ui| {
             ui.separator();
             ui.add_enabled_ui(idle, |ui| {
+                if ui
+                    .button(t("journal.find"))
+                    .on_hover_text(t_with(
+                        "journal.find.tip",
+                        &[("keys", &kit::chip("edit.find").replace(' ', "+"))],
+                    ))
+                    .clicked()
+                {
+                    clicked = Some("edit.find");
+                }
                 // The shared Save as Template: the button, the template's
                 // warnings and the Template dialog (P15).
                 if flow.slot(ui, &link, group, &template, today) {

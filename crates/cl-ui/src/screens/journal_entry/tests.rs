@@ -587,3 +587,21 @@ fn save_as_template_is_off_on_an_empty_entry_and_says_why() {
     );
     assert_eq!(s.template_state(), SaveAsTemplate::Enabled);
 }
+
+#[test]
+fn find_opens_the_first_accounts_register() {
+    let (mut s, link, _dir) = screen();
+    s.clear();
+    let _ = link.drain();
+    assert!(s.command(CommandId::new("edit.find")));
+    assert_eq!(s.notice, Some("journal.find.no_account"));
+    set_lines(
+        &mut s,
+        &[(6100, "10.00", "", None), (1010, "", "10.00", None)],
+    );
+    assert!(s.command(CommandId::new("edit.find")));
+    assert!(link.drain().iter().any(|e| matches!(
+        e,
+        crate::company::CompanyEvent::OpenRegister(a) if *a == account_id(6100)
+    )));
+}

@@ -795,6 +795,15 @@ impl JournalScreen {
         false
     }
 
+    /// Find (Ctrl+F), as in Write Check: the register of the entry's first
+    /// account, where Go To finds an entry; with no account yet, why not.
+    pub(crate) fn find(&mut self) {
+        match self.lines.value().used().find_map(|l| l.account) {
+            Some(a) => self.link.push(CompanyEvent::OpenRegister(a)),
+            None => self.notice = Some("journal.find.no_account"),
+        }
+    }
+
     /// Keymap commands the grid and the closing dialog did not take.
     pub(crate) fn form_command(&mut self, id: CommandId) -> bool {
         match id.as_str() {
@@ -820,6 +829,10 @@ impl JournalScreen {
                 true
             }
             "form.save_as_template" => self.save_as_template(),
+            "edit.find" => {
+                self.find();
+                true
+            }
             "edit.void_transaction" => self.start_void(),
             "form.delete_item" => self.start_delete(),
             "edit.undo" => {
