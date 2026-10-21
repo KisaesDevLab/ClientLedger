@@ -246,7 +246,7 @@ impl SaveFlow {
             move |s| crate::company::demo::templates::resolve(s, id, date, txn),
             move |s| async move { s.templates().resolve(id, date, txn).await },
         ));
-        self.poll();
+        self.poll(link);
         self.settle_resolved(link);
     }
 
@@ -257,7 +257,7 @@ impl SaveFlow {
         }
     }
 
-    fn poll(&mut self) {
+    fn poll(&mut self, link: &CompanyLink) {
         if let Some(r) = finished(&mut self.groups_job)
             && let Some(d) = self.dialog.as_mut()
         {
@@ -270,6 +270,8 @@ impl SaveFlow {
             match r {
                 Ok(tpl) => {
                     self.saved_count += 1;
+                    // An open Templates list shows it at once.
+                    link.bus().publish(crate::data_bus::Change::Templates);
                     self.dialog = None;
                     self.draft = None;
                     // The form now stands for the saved template.
@@ -310,7 +312,7 @@ impl SaveFlow {
         state: &SaveAsTemplate,
         today: CalendarDate,
     ) -> bool {
-        self.poll();
+        self.poll(link);
         self.settle_resolved(link);
         let clicked = crate::forms::header::save_as_template_button(ui, state);
         let tokens = Tokens::of(ui.ctx());
@@ -384,7 +386,7 @@ impl SaveFlow {
                 DialogClick::Save(c) => {
                     d.busy = true;
                     self.create(link, group, c);
-                    self.poll();
+                    self.poll(link);
                 }
             }
         }
@@ -402,12 +404,12 @@ impl SaveFlow {
         match choice {
             0 => {
                 self.replace(link, group);
-                self.poll();
+                self.poll(link);
             }
             1 => {
                 let auto = self.draft.as_ref().is_some_and(|(d, _)| d.allows_auto());
                 self.open_dialog(link, group, String::new(), auto, today);
-                self.poll();
+                self.poll(link);
             }
             _ => self.draft = None,
         }
@@ -430,7 +432,7 @@ impl SaveFlow {
             return false;
         };
         self.create(link, group, c);
-        self.poll();
+        self.poll(link);
         true
     }
 
@@ -493,12 +495,15 @@ mod tests {
         ));
         let today = d(2026, 11, 4);
         f.start(&link, None, draft(), "transfer", "Savings".into(), today);
-        f.poll();
+        f.poll(&link);
         assert!(f.dialog_mut().is_some());
         let dlg = f.dialog_mut().expect("dialog");
         assert!(dlg.set("new_group", "Monthly bills"));
+        let mut list = link.bus().subscribe();
         assert!(f.dialog_save(&link, None));
         assert_eq!(f.saved_count, 1);
+        // An open Templates list hears about it.
+        assert!(link.bus().take(&mut list).templates);
         assert_eq!(f.last, Some("created"));
         let id = f.origin.expect("origin").id;
         let saved = link
@@ -567,7 +572,7 @@ mod tests {
         assert!(warning_text(&f.warnings).is_some());
         let txn = TransactionId::parse("d0000000-0000-4000-8000-b00000000001").expect("t");
         f.form_saved(&link, None, txn);
-        f.poll();
+        f.poll(&link);
         assert!(!f.resolve_failed);
         assert!(
             link.demo_state()

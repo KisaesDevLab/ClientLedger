@@ -38,6 +38,9 @@ pub enum Change {
     Tags,
     /// Products and services.
     Items,
+    /// Templates (saved, replaced, edited or deleted): an open Templates
+    /// list reads them again.
+    Templates,
 }
 
 impl Change {
@@ -74,6 +77,8 @@ pub struct Changes {
     pub tags: bool,
     /// Items.
     pub items: bool,
+    /// Templates.
+    pub templates: bool,
 }
 
 impl Changes {
@@ -86,6 +91,7 @@ impl Changes {
             accounts: true,
             tags: true,
             items: true,
+            templates: true,
         }
     }
 
@@ -131,6 +137,7 @@ impl Changes {
             Change::Accounts => self.accounts = true,
             Change::Tags => self.tags = true,
             Change::Items => self.items = true,
+            Change::Templates => self.templates = true,
         }
     }
 }

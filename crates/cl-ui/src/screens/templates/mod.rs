@@ -891,7 +891,9 @@ impl TemplatesScreen {
                             let name = g
                                 .and_then(|g| self.groups.iter().find(|x| x.id == g))
                                 .map_or_else(|| t("templates.group.none"), |x| x.name.clone());
-                            let arrow = if open { "\u{25be}" } else { "\u{25b8}" };
+                            // Arrows IBM Plex Sans has (it has no
+                            // triangles: those drew as empty boxes).
+                            let arrow = if open { "\u{2193}" } else { "\u{2192}" };
                             if ui
                                 .selectable_label(
                                     false,
