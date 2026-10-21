@@ -53,6 +53,11 @@ pub(crate) struct RefundState {
     pub task: Option<Task<Saved>>,
     /// Why the refund can't go yet (i18n key).
     pub problem: Option<&'static str>,
+    /// The idempotency key of the refund being retried: the draft and
+    /// whether a password went with it (never the password itself). A
+    /// lost reply resent unchanged reuses it, so the engine can't post the
+    /// refund twice.
+    pub key: Option<(VendorRefundDraft, bool, IdempotencyKey)>,
 }
 
 impl RefundState {
@@ -254,10 +259,10 @@ impl DepositScreen {
             self.poll_refund();
             return;
         }
+        let key = self.refund_key(&draft, password.is_some());
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
-        let key = IdempotencyKey::new();
         let label = OrphanLabel {
             what: "orphan.deposit_save",
             key: Some(key.clone()),
@@ -278,6 +283,24 @@ impl DepositScreen {
         }
     }
 
+    /// The key for this refund: the stored one when the same refund (same
+    /// draft, same password-or-not) is being sent again, a fresh one
+    /// otherwise.
+    pub(crate) fn refund_key(
+        &mut self,
+        draft: &VendorRefundDraft,
+        password: bool,
+    ) -> IdempotencyKey {
+        match &self.refund.key {
+            Some((d, p, k)) if d == draft && *p == password => k.clone(),
+            _ => {
+                let k = IdempotencyKey::new();
+                self.refund.key = Some((draft.clone(), password, k.clone()));
+                k
+            }
+        }
+    }
+
     fn refund_saved(&mut self, _s: &Saved) {
         crate::forms::publish_saved(&self.link, &self.bus, &self.save.published);
         self.closing_prompt.saved();
@@ -288,7 +311,10 @@ impl DepositScreen {
         self.refresh_facts();
     }
 
-    fn refund_failed(&mut self, e: ApiError) {
+    pub(crate) fn refund_failed(&mut self, e: ApiError) {
+        if !crate::screens::register::keeps_key(&e) {
+            self.refund.key = None;
+        }
         if self.closing_failed(&e, Pending::Refund) {
             return;
         }

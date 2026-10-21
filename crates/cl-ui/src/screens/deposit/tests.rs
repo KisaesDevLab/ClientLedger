@@ -447,3 +447,30 @@ fn the_demo_story_groups_the_bank_deposit_and_void_returns_the_payments() {
     assert_eq!(s.save.last_action, Some("void"));
     assert_eq!(s.state_json()["pending"]["count"], 2);
 }
+
+#[test]
+fn a_lost_refund_reply_resends_under_the_same_key() {
+    let (mut s, _log, _dir) = screen(all_caps());
+    let draft = cl_api::VendorRefundDraft {
+        vendor: cl_core::ids::ContactId::parse("6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01")
+            .expect("id"),
+        deposit_to: account(1010),
+        payables: account(2000),
+        date: today(),
+        amount: money("75.00"),
+        applies_to: txn(7),
+        memo: None,
+    };
+    let first = s.refund_key(&draft, false);
+    // The reply is lost: the outcome is unknown, so the key stays.
+    s.refund_failed(ApiError::Timeout);
+    assert!(s.refund.key.is_some());
+    assert!(s.refund_key(&draft, false) == first, "the resend reuses the key");
+    // With the password it is another request.
+    let with_password = s.refund_key(&draft, true);
+    assert!(with_password != first);
+    // A definitive refusal drops the key: the next try is fresh.
+    s.refund_failed(ApiError::Local(cl_api::LocalValidation::InvalidValue));
+    assert!(s.refund.key.is_none());
+    assert!(s.refund_key(&draft, true) != with_password);
+}
