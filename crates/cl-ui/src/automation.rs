@@ -785,7 +785,7 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
             .all()
             .iter()
             .find(|w| shell.active_window().is_some_and(|a| a == w.id))
-            .map(|w| w.title()),
+            .map(crate::windows::Window::title),
         "tabs_hidden": ctx
             .data(|d| d.get_temp::<usize>(crate::shell::tabs::hidden_count_id()))
             .unwrap_or(0),
