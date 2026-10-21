@@ -10,6 +10,12 @@
 //! use [`LinesSpec::DEPOSIT`]: Received from · Account · Memo · Tags ·
 //! Amount, where a negative amount is a fee taken out of the deposit.
 //!
+//! Make Journal Entry (P15) uses [`LinesSpec::JOURNAL`]: Account · Debit ·
+//! Credit · Memo · Name · Tags ([`AmountColumns::DebitCredit`]). The line's
+//! one amount is signed there (debit positive, the `cl_model::forms::journal`
+//! convention); the two columns show its sides and typing in one clears the
+//! other.
+//!
 //! The grid only stores what the owner typed: it never adds anything up
 //! (the remaining/total lines come from `cl_model::forms::lines`).
 
@@ -25,6 +31,7 @@ use cl_grid::{
 use cl_model::CommandId;
 use cl_model::amount_entry::AmountRules;
 use cl_model::forms::FormState;
+use cl_model::forms::journal;
 use cl_model::forms::lines::{FormLine, FormLines, ensure_entry};
 use eframe::egui::Ui;
 
@@ -43,6 +50,8 @@ pub const L_CUSTOMER: ColumnId = ColumnId(4);
 pub const L_TAG: ColumnId = ColumnId(5);
 /// Billable to the line's customer.
 pub const L_BILLABLE: ColumnId = ColumnId(6);
+/// Credit (debit/credit grids; the Amount column is the Debit there).
+pub const L_CREDIT: ColumnId = ColumnId(7);
 
 const PICK_FROM_LIST: TextKey = TextKey("register.entry.pick_from_list");
 const BAD_VALUE: TextKey = TextKey("register.entry.bad_value");
@@ -97,6 +106,18 @@ pub struct LineHeaders {
     pub billable: TextKey,
     /// Tag(s).
     pub tags: TextKey,
+    /// Credit (debit/credit grids only; `amount` is the Debit header).
+    pub credit: TextKey,
+}
+
+/// How a lines grid takes amounts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AmountColumns {
+    /// One Amount column, the value as typed.
+    Single,
+    /// Debit and Credit columns over one signed amount (debit positive):
+    /// each shows its side, and typing in one clears the other.
+    DebitCredit,
 }
 
 /// Which optional columns a screen shows, and what the grid is called.
@@ -127,6 +148,8 @@ pub struct LinesSpec {
     pub amount: AmountRules,
     /// The column order.
     pub layout: LinesLayout,
+    /// One Amount column, or Debit and Credit.
+    pub amounts: AmountColumns,
 }
 
 /// The order of a lines grid's columns.
@@ -147,6 +170,13 @@ pub const SIGNED_MONEY: AmountRules = AmountRules {
     ..AmountRules::MONEY
 };
 
+/// Amounts of zero or more, at cents (Q-232): a Debit or Credit column,
+/// where a negative belongs in the other column.
+pub const SIDE_MONEY: AmountRules = AmountRules {
+    sign: cl_model::amount_entry::Sign::NonNegative,
+    ..AmountRules::MONEY
+};
+
 impl LinesSpec {
     /// The register's Splits panel (P12): Account · Amount · Memo ·
     /// Customer · Tag (a picker).
@@ -164,11 +194,13 @@ impl LinesSpec {
             customer: TextKey("register.splits.col.customer"),
             billable: TextKey("lines.col.billable"),
             tags: TextKey("register.splits.col.tag"),
+            credit: TextKey("lines.col.credit"),
         },
         need_account: TextKey("register.splits.need_account"),
         height: GridHeight::Rows { min: 3, max: 6 },
         amount: AmountRules::MONEY,
         layout: LinesLayout::Standard,
+        amounts: AmountColumns::Single,
     };
 
     /// Make Deposit's Other deposits (P14): Received from · Account · Memo
@@ -188,11 +220,40 @@ impl LinesSpec {
             customer: TextKey("deposit.lines.col.received_from"),
             billable: TextKey("lines.col.billable"),
             tags: TextKey("lines.col.tags"),
+            credit: TextKey("lines.col.credit"),
         },
         need_account: TextKey("lines.need_account"),
         height: GridHeight::Rows { min: 3, max: 8 },
         amount: SIGNED_MONEY,
         layout: LinesLayout::Deposit,
+        amounts: AmountColumns::Single,
+    };
+
+    /// Make Journal Entry (P15): Account · Debit · Credit · Memo · Name
+    /// (customers, jobs, vendors and other names, Q-P15o; the screen fills
+    /// the list) · Tags (one chip per line, Q-233). Both amount columns
+    /// take zero or more ([`SIDE_MONEY`]).
+    pub const JOURNAL: LinesSpec = LinesSpec {
+        grid_id: "journal_entry/lines",
+        label: "journal.lines.label",
+        customer: true,
+        billable: false,
+        tags: true,
+        tag_chips: true,
+        headers: LineHeaders {
+            account: TextKey("lines.col.account"),
+            amount: TextKey("lines.col.debit"),
+            memo: TextKey("lines.col.memo"),
+            customer: TextKey("lines.col.name"),
+            billable: TextKey("lines.col.billable"),
+            tags: TextKey("lines.col.tags"),
+            credit: TextKey("lines.col.credit"),
+        },
+        need_account: TextKey("lines.need_account"),
+        height: GridHeight::Rows { min: 3, max: 12 },
+        amount: SIDE_MONEY,
+        layout: LinesLayout::Standard,
+        amounts: AmountColumns::DebitCredit,
     };
 
     /// Every column (Write Check's Expenses tab): Account · Amount · Memo ·
@@ -213,11 +274,13 @@ impl LinesSpec {
                 customer: TextKey("lines.col.customer_job"),
                 billable: TextKey("lines.col.billable"),
                 tags: TextKey("lines.col.tags"),
+                credit: TextKey("lines.col.credit"),
             },
             need_account: TextKey("lines.need_account"),
             height: GridHeight::Rows { min: 4, max: 10 },
             amount: AmountRules::MONEY,
             layout: LinesLayout::Standard,
+            amounts: AmountColumns::Single,
         }
     }
 
@@ -244,13 +307,30 @@ impl LinesSpec {
                     (90, 110, 0),
                 )
             },
-            column(
-                L_MEMO,
-                h.memo,
-                CellKind::Text { max_chars: 500 },
-                (100, 200, 2),
-            ),
         ];
+        if self.amounts == AmountColumns::DebitCredit {
+            // Plain-language tooltips for the two accounting words (rule 12).
+            if let Some(debit) = columns.iter_mut().find(|c| c.id == L_AMOUNT) {
+                debit.help = Some(TextKey("jargon.debit"));
+            }
+            columns.push(Column {
+                help: Some(TextKey("jargon.credit")),
+                align: Align::Right,
+                mono: true,
+                ..column(
+                    L_CREDIT,
+                    h.credit,
+                    CellKind::Amount(self.amount),
+                    (90, 110, 0),
+                )
+            });
+        }
+        columns.extend([column(
+            L_MEMO,
+            h.memo,
+            CellKind::Text { max_chars: 500 },
+            (100, 200, 2),
+        )]);
         if self.customer {
             // No customer reads as a muted dash (mockup WriteCheck.html).
             columns.push(Column {
@@ -319,6 +399,8 @@ pub struct LinesState<L> {
     /// Billable without `line-billable-v1`).
     pub locked: Vec<ColumnId>,
     tag_chips: bool,
+    /// Debit and Credit columns over the signed amount.
+    debit_credit: bool,
     need_account: TextKey,
     snapshot: Option<FormLine>,
     /// A suggested account per line (rule or AI): shown as a ghost value in
@@ -415,6 +497,12 @@ impl<L: LineLists> RowModel for View<'_, L> {
                 L::ACCOUNTS,
                 l.account.and_then(|a| lists.account_key(a)),
             ),
+            L_AMOUNT if self.a.debit_credit => {
+                journal::debit_of(l).map_or(CellValue::Empty, CellValue::Money)
+            }
+            L_CREDIT if self.a.debit_credit => {
+                journal::credit_of(l).map_or(CellValue::Empty, CellValue::Money)
+            }
             L_AMOUNT => l.amount.map_or(CellValue::Empty, CellValue::Money),
             L_MEMO => CellValue::Text(Cow::Borrowed(&l.memo)),
             L_CUSTOMER => picked(
@@ -434,6 +522,27 @@ impl<L: LineLists> RowModel for View<'_, L> {
     fn row_label(&self, _index: usize) -> String {
         String::new()
     }
+}
+
+/// Puts one committed cell into a line of a debit/credit grid: Debit and
+/// Credit set the one signed amount (typing in one clears the other;
+/// clearing one leaves the other side alone); every other column as
+/// [`apply`].
+pub(crate) fn apply_debit_credit<L: LineLists>(
+    l: &mut FormLine,
+    col: ColumnId,
+    value: CellInput,
+    lists: &L,
+) -> Option<TextKey> {
+    match (col, value) {
+        (L_AMOUNT, CellInput::Money(m)) => journal::set_debit(l, Some(m)),
+        (L_AMOUNT, CellInput::Clear) => journal::clear_debit(l),
+        (L_CREDIT, CellInput::Money(m)) => journal::set_credit(l, Some(m)),
+        (L_CREDIT, CellInput::Clear) => journal::clear_credit(l),
+        (L_CREDIT, _) => return Some(BAD_VALUE),
+        (col, value) => return apply(l, col, value, lists),
+    }
+    None
 }
 
 /// Puts one committed cell into a line.
@@ -504,10 +613,15 @@ impl<L: LineLists> EditableModel for View<'_, L> {
             self.a.accepted.push((pos.row, account));
         }
         let keys = &mut self.a.keys;
+        let debit_credit = self.a.debit_credit;
         let mut problem = None;
         let applied = self.form.edit_step(|v| {
             if let Some(l) = v.lines.iter_mut().find(|l| l.key == pos.row) {
-                problem = apply(l, pos.col, value, &*lists);
+                problem = if debit_credit {
+                    apply_debit_credit(l, pos.col, value, &*lists)
+                } else {
+                    apply(l, pos.col, value, &*lists)
+                };
             }
             ensure_entry(&mut v.lines, keys);
         });
@@ -602,6 +716,7 @@ impl<L: LineLists + 'static> LinesGrid<L> {
                     lists,
                     locked: Vec::new(),
                     tag_chips: spec.tags && spec.tag_chips,
+                    debit_credit: spec.amounts == AmountColumns::DebitCredit,
                     need_account: spec.need_account,
                     snapshot: None,
                     suggested: std::collections::BTreeMap::new(),
@@ -836,6 +951,94 @@ mod tests {
             None
         );
         assert_eq!(l.amount, Some(money("-12.50")));
+    }
+
+    #[test]
+    fn the_journal_spec_has_debit_and_credit_over_one_signed_amount() {
+        let spec = LinesSpec::JOURNAL.grid_spec::<RegisterLists>();
+        assert_eq!(spec.validate(), Ok(()));
+        let ids: Vec<ColumnId> = spec.columns.iter().map(|c| c.id).collect();
+        assert_eq!(
+            ids,
+            [L_ACCOUNT, L_AMOUNT, L_CREDIT, L_MEMO, L_CUSTOMER, L_TAG]
+        );
+        assert_eq!(spec.columns[1].kind, CellKind::Amount(SIDE_MONEY));
+        assert_eq!(spec.columns[2].kind, CellKind::Amount(SIDE_MONEY));
+        for c in &spec.columns {
+            assert!(crate::i18n::has(c.header.0), "{}", c.header.0);
+        }
+        assert_eq!(crate::i18n::t("lines.col.name"), "Name");
+        // The other grids keep their columns (no Credit).
+        for s in [
+            LinesSpec::REGISTER_SPLITS,
+            LinesSpec::DEPOSIT,
+            LinesSpec::all("t", "lines.label"),
+        ] {
+            assert_eq!(s.amounts, AmountColumns::Single);
+            let g = s.grid_spec::<RegisterLists>();
+            assert!(g.columns.iter().all(|c| c.id != L_CREDIT));
+        }
+        // Typing a credit clears the debit, and the reverse.
+        let lists = RegisterLists::default();
+        let mut l = FormLine::blank(RowKeyGen::new().next_key());
+        let put = |l: &mut FormLine, col, v| apply_debit_credit(l, col, v, &lists);
+        assert_eq!(
+            put(&mut l, L_AMOUNT, CellInput::Money(money("1200.00"))),
+            None
+        );
+        assert_eq!(l.amount, Some(money("1200.00")));
+        assert_eq!(
+            put(&mut l, L_CREDIT, CellInput::Money(money("15.00"))),
+            None
+        );
+        assert_eq!(l.amount, Some(money("-15.00")), "credit replaced the debit");
+        assert_eq!(put(&mut l, L_AMOUNT, CellInput::Clear), None);
+        assert_eq!(
+            l.amount,
+            Some(money("-15.00")),
+            "clearing debit keeps credit"
+        );
+        assert_eq!(put(&mut l, L_CREDIT, CellInput::Clear), None);
+        assert_eq!(l.amount, None);
+        assert_eq!(
+            put(&mut l, L_CREDIT, CellInput::Text("x".into())),
+            Some(BAD_VALUE)
+        );
+        assert_eq!(put(&mut l, L_MEMO, CellInput::Text("rent".into())), None);
+        assert_eq!(l.memo, "rent");
+    }
+
+    #[test]
+    fn the_journal_grid_shows_each_side_in_its_column() {
+        let chart = crate::company::demo::chart();
+        let mut lists = RegisterLists::default();
+        lists.set_accounts(&chart);
+        let seed = FormLine {
+            amount: Some(money("-40.00")),
+            ..FormLine::blank(RowKeyGen::new().next_key())
+        };
+        let mut g = LinesGrid::new(&LinesSpec::JOURNAL, Arc::new(lists), vec![seed]);
+        let key = g.value().lines[0].key;
+        let mut form = FormState::new(g.value().clone());
+        let mut model = g.form_mut().adapter_mut().model(&mut form);
+        assert_eq!(model.cell(0, L_AMOUNT), CellValue::Empty);
+        assert_eq!(model.cell(0, L_CREDIT), CellValue::Money(money("40.00")));
+        assert!(
+            model
+                .set_cell(
+                    CellPos {
+                        row: key,
+                        col: L_AMOUNT
+                    },
+                    CellInput::Money(money("40.00")),
+                    Source::Typed,
+                )
+                .is_ok()
+        );
+        assert_eq!(model.cell(0, L_AMOUNT), CellValue::Money(money("40.00")));
+        assert_eq!(model.cell(0, L_CREDIT), CellValue::Empty);
+        drop(model);
+        assert_eq!(form.current().lines[0].amount, Some(money("40.00")));
     }
 
     #[test]

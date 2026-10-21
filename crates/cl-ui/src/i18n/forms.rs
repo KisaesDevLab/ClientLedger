@@ -12,7 +12,15 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lines.empty", "\u{2014}"),
     ("lines.col.billable", "Billable"),
     ("lines.col.tags", "Tags"),
+    // Debit/credit grids (P15 Make Journal Entry).
+    ("lines.col.debit", "Debit"),
+    ("lines.col.credit", "Credit"),
+    ("lines.col.name", "Name"),
     ("lines.need_account", "Choose an account for each line."),
+    // Save as Template (P15): the toolbar slot every template form shares.
+    ("template.save.tip", "Keep this form as a template to reuse or schedule it ({keys})."),
+    ("template.save.unavailable", "Templates need an engine update."),
+    ("template.save.grouped", "A deposit that includes customer payments can't be a template; remove the payments or enter it each time."),
     // Plain one-sentence explanations of accounting words (CLAUDE.md rule 12).
     // The owner-facing name of the engine's Payments Clearing account (Q-202).
     ("account.undeposited_funds", "Undeposited Funds"),
@@ -20,6 +28,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("jargon.cash_over_short", "Cash over/short is the difference between the cash counted in the drawer and what the day's sales say should be there."),
     ("jargon.equity", "Equity is the owners' share of the business: what they put in and take out, and the profit kept in the business."),
     ("jargon.principal", "Principal is the part of a loan payment that pays down what you still owe."),
+    ("jargon.debit", "A debit adds to what the business has or spends (assets and expenses) and takes away from what it owes, earns or owns (liabilities, income and equity)."),
+    ("jargon.credit", "A credit adds to what the business owes, earns or owns (liabilities, income and equity) and takes away from what it has or spends (assets and expenses)."),
+    ("jargon.adjusting", "An adjusting entry is one your accountant uses to correct or update the books at period end."),
+    ("jargon.reversing", "A reversing entry undoes this entry on a later date, with the debits and credits swapped (for example, an accrual that reverses on the first of next month)."),
+    ("jargon.journal_entry", "A journal entry moves amounts between accounts directly. Every entry's debits must equal its credits."),
     ("jargon.interest", "Interest is what the lender charges for the loan; it is a business expense."),
     ("jargon.owner_money", "An owner's draw is money an owner takes out of the business for personal use; an owner's contribution is money an owner puts in."),
     ("jargon.partner_money", "A partner draw is money a partner takes out of the business; a partner contribution is money a partner puts in."),

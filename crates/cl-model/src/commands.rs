@@ -256,6 +256,8 @@ pub const COMMANDS: &[Command] = &[
     cmd("form.delete_item", "Delete Transaction", None, 2, ctrl('D'), Scope::Form),
     cmd("form.attach", "Attach\u{2026}", None, 3, None, Scope::Form),
     cmd("form.history", "History", None, 3, None, Scope::Form),
+    // Save as Template (P15, Q-P15k): every form that can be a template
+    cmd("form.save_as_template", "Save as Template", None, 3, ctrl('M'), Scope::Form),
     // Write Check (P13; Page Up/Down, Ctrl+F, Ctrl+P, Alt+N and Alt+S above apply too)
     cmd("check.print_later", "Print Later", None, 4, None, Scope::Form),
     // Lists
@@ -264,6 +266,10 @@ pub const COMMANDS: &[Command] = &[
     built("lists.tags", "Tags", Some(Menu::Lists), 0, None),
     built("lists.terms", "Terms", Some(Menu::Lists), 1, None),
     built("lists.payment_methods", "Payment Methods", Some(Menu::Lists), 1, None),
+    built("lists.templates", "Templates", Some(Menu::Lists), 1, None),
+    // Templates Due (P15): the catch-up runner opens it; no menu entry (the
+    // palette still finds it, like every command)
+    built("lists.templates_due", "Templates Due", None, 1, None),
     built("lists.import_export", "Import or Export a List", Some(Menu::Lists), 2, None),
     // List windows (Chart of Accounts first; the other lists use the same keys)
     cmd("list.new", "New List Entry", None, 3, ctrl('N'), Scope::Window),
@@ -271,6 +277,9 @@ pub const COMMANDS: &[Command] = &[
     cmd("list.show_inactive", "Include Inactive Entries", None, 3, ctrl_shift('H'), Scope::Window),
     cmd("list.quick_report", "Account or Transaction Report", None, 3, ctrl_shift('Q'), Scope::Window),
     cmd("list.merge", "Merge Into Another Entry", None, 3, None, Scope::Window),
+    // Delete the selected entry, after a confirmation (P15: Templates). A
+    // text field keeps its own Delete key.
+    cmd("list.delete", "Delete List Entry", None, 3, key(Mods::NONE, Key::Delete), Scope::Window),
     // Register windows (P12; Ctrl+F, Ctrl+E, Ctrl+D and Ctrl+Shift+Q above apply too)
     cmd("register.one_line", "One-Line Display", None, 4, None, Scope::Window),
     // Clients
@@ -305,7 +314,7 @@ pub const COMMANDS: &[Command] = &[
     screen("reports.balance_sheet", "Balance Sheet", Some(Menu::Reports), 1, None, "P28"),
     screen("reports.trial_balance", "Trial Balance", Some(Menu::Reports), 1, ctrl_shift('T'), "P28"),
     // Company
-    screen("company.journal_entry", "Make Journal Entry", Some(Menu::Company), 0, ctrl('J'), "P15"),
+    built("company.journal_entry", "Make Journal Entry", Some(Menu::Company), 0, ctrl('J')),
     screen("company.closing_date", "Set Closing Date", Some(Menu::Company), 1, None, "P29"),
     screen("company.users", "Users and Permissions", Some(Menu::Company), 1, None, "P29"),
     screen("company.send_to_accountant", "Send to My Accountant", Some(Menu::Company), 2, None, "P32"),
@@ -433,6 +442,10 @@ mod tests {
             "banking.owner_money",
             "vendors.personal_funds",
             "banking.loan_payment",
+            // P15
+            "company.journal_entry",
+            "lists.templates",
+            "lists.templates_due",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -564,6 +577,42 @@ mod tests {
         // Sales Receipt comes with invoices (Q-259).
         assert_eq!(find("clients.sales_receipt").unwrap().arrives, Some("P20"));
         assert!(Keymap::new(COMMANDS).is_ok(), "no new key clashes");
+    }
+
+    #[test]
+    fn p15_commands() {
+        use crate::keymap::Keymap;
+        let je = find("company.journal_entry").unwrap();
+        assert_eq!(je.label, "Make Journal Entry");
+        assert_eq!((je.menu, je.shortcut), (Some(Menu::Company), ctrl('J')));
+        assert!(
+            je.opens && je.arrives.is_none(),
+            "Make Journal Entry is built"
+        );
+        let list = find("lists.templates").unwrap();
+        assert_eq!(list.label, "Templates");
+        assert_eq!((list.menu, list.shortcut), (Some(Menu::Lists), None));
+        assert!(list.opens && list.arrives.is_none() && list.palette);
+        // The catch-up runner opens Templates Due; it has no menu entry.
+        let due = find("lists.templates_due").unwrap();
+        assert_eq!(due.label, "Templates Due");
+        assert_eq!((due.menu, due.shortcut), (None, None));
+        assert!(due.opens && due.arrives.is_none() && due.palette);
+        assert!(in_menu(Menu::Lists).all(|c| c.id.as_str() != "lists.templates_due"));
+        // Save as Template is a form command on Ctrl+M (Q-P15k).
+        let save = find("form.save_as_template").unwrap();
+        assert_eq!(save.label, "Save as Template");
+        assert_eq!(
+            (save.menu, save.shortcut, save.scope),
+            (None, ctrl('M'), Scope::Form)
+        );
+        assert!(!save.opens);
+        let km = Keymap::new(COMMANDS).unwrap();
+        assert_eq!(
+            km.resolve(Scope::Form, Shortcut::new(Mods::CMD, Key::Letter('M')))
+                .map(CommandId::as_str),
+            Some("form.save_as_template")
+        );
     }
 
     #[test]

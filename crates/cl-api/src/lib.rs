@@ -117,9 +117,11 @@ pub use resources::tenants::{
     ImportVerification, JobError, JobId, JobState, NewTenant, TenantSummary, Tenants,
 };
 pub use resources::transactions::{
-    Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions, JeLine, LINE_ROLE_CASH_BACK,
-    MAX_LINES, NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter, TransactionLine,
-    TransactionSummary, Transactions, TxnSort, TxnStatus, TxnType,
+    AccountRoles, Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions,
+    JE_AR_AP_NAME_REQUIRED, JE_AR_AP_ONE_PER_ENTRY, JE_NUMBER_MAX_CHARS, JeLine, JeOptions,
+    JournalEntries, LINE_ROLE_CASH_BACK, MAX_LINES, NewJournalEntry, REVERSAL_EDITED, ReportBasis,
+    Side, Transaction, TransactionFilter, TransactionLine, TransactionSummary, Transactions,
+    TxnSort, TxnStatus, TxnType, has_code, next_number_from_json,
 };
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{
@@ -158,4 +160,19 @@ pub use resources::daily_sales::{
     DailyPostOptions, DailyPreview, DailySales, DailyTemplate, DailyTotals, DailyValue,
     EntryStatus, MAX_DAILY_LINES, MAX_DAILY_VALUES, NormalSide, Preset, Section, entry_from_json,
     preview_from_json, template_from_json,
+};
+
+// P15 lane T: templates and the catch-up run.
+pub use resources::recurring::{
+    Attention, DueReminder, FailedTemplate, PostedOccurrence, RUN_LIMIT_DEFAULT, RUN_LIMIT_MAX,
+    Recurring, RunDue, SkipReason, SkippedOccurrence, attention_from_json, new_run_id,
+    run_due_from_json,
+};
+pub use resources::templates::{
+    AUTO_START_FIELD, COUNT_MAX, DraftWarning, DraftWarningCode, Entered, Frequency, INTERVAL_MAX,
+    MISSING_ACCOUNT, MISSING_LAYOUT, NewTemplate, OCCURRENCE_TAKEN, ScheduleEnd, ScheduleMode,
+    TEMPLATE_GROUP_NAME_MAX, TEMPLATE_NAME_MAX, TEMPLATE_NAME_TAKEN, TEMPLATE_PAGE_MAX, Template,
+    TemplateChange, TemplateDraft, TemplateGroup, TemplateKind, TemplateSchedule, TemplateUse,
+    Templates, auto_start_too_early, client_form, is_auto_start_too_early, is_name_taken,
+    is_occurrence_taken, use_from_json,
 };

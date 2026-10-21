@@ -142,6 +142,19 @@ impl ValidationError {
     pub fn issues(&self) -> &[ValidationIssue] {
         &self.issues
     }
+
+    /// A refusal naming one field, as the engine's object-shaped
+    /// `details: {field, ...}` reads (demo twins build the same).
+    pub(crate) fn for_field(code: &str, field: &str, message: &str) -> ValidationError {
+        ValidationError {
+            code: ErrorCode::parse(code),
+            message: UserText::new(message),
+            issues: vec![ValidationIssue {
+                path: Some(FieldPath(field.to_string())),
+                message: UserText::new(message),
+            }],
+        }
+    }
 }
 
 /// Input refused by cl-api before anything was sent.
@@ -225,6 +238,32 @@ pub enum LocalValidation {
     /// Posting or voiding a daily-sales day in a closed period needs
     /// `daily-sales-lock-v1`; nothing was sent.
     DailySalesLockUnavailable,
+    // ---- P15: journal entries, templates, catch-up ----
+    /// A name on a journal entry line needs `je-names-v1`; nothing was
+    /// sent.
+    JeNamesUnavailable,
+    /// A journal entry number (or its suggestion) needs `je-number-v1`;
+    /// nothing was sent.
+    JeNumberUnavailable,
+    /// The Adjusting flag needs `je-adjusting-v1`; nothing was sent.
+    JeAdjustingUnavailable,
+    /// Reverse on needs `je-reversing-v1`; nothing was sent.
+    JeReversingUnavailable,
+    /// Reverse on must be after the entry's date; nothing was sent.
+    ReverseNotAfter,
+    /// A journal entry line on Accounts Receivable needs a customer, and
+    /// one on Accounts Payable a vendor; nothing was sent.
+    ArApNameMissing,
+    /// A journal entry may use only one Accounts Receivable or Accounts
+    /// Payable account; nothing was sent.
+    ArApTwoAccounts,
+    /// Templates need `templates-v1`; nothing was sent.
+    TemplatesUnavailable,
+    /// A deposit that groups customer payments cannot be a template;
+    /// nothing was sent.
+    TemplateGrouping,
+    /// The catch-up run needs `recurring-run-due-v1`; nothing was sent.
+    RunDueUnavailable,
 }
 
 /// A save was refused because its date is on or before the closing date.
@@ -639,6 +678,14 @@ fn validation(body: &EngineErrorBody) -> ValidationError {
                 })
                 .collect()
         })
+        .or_else(|| {
+            // Object-shaped details naming one field (`{field, earliest}`).
+            let field = body.pointer("/error/details/field")?.as_str()?;
+            Some(vec![ValidationIssue {
+                path: Some(FieldPath(field.to_string())),
+                message: body.text(),
+            }])
+        })
         .unwrap_or_default();
     ValidationError {
         code: body.code.clone(),
@@ -858,6 +905,24 @@ mod tests {
         );
         assert_eq!(v.code().map(ErrorCode::as_str), Some("VALIDATION_ERROR"));
         assert_eq!(v.message().as_str(), "lines: At least 2 lines required");
+    }
+
+    #[test]
+    fn validation_error_reads_an_object_detail_field() {
+        let body = r#"{"error":{"message":"Auto schedules can start no earlier than 2025-11-03","code":"VALIDATION_ERROR",
+            "details":{"field":"schedule.nextDate","earliest":"2025-11-03"}}}"#;
+        let e = err(400, body, S);
+        let ApiError::Validation(v) = &e else {
+            panic!("validation")
+        };
+        assert_eq!(v.field().map(FieldPath::as_str), Some("schedule.nextDate"));
+        assert!(crate::is_auto_start_too_early(&e));
+        let twin =
+            crate::auto_start_too_early(cl_core::CalendarDate::from_ymd(2025, 11, 3).expect("d"));
+        assert!(crate::is_auto_start_too_early(&twin));
+        // Other refusals are not it.
+        let other = r#"{"error":{"message":"x","code":"VALIDATION_ERROR","details":{"lockDate":"2026-01-01"}}}"#;
+        assert!(!crate::is_auto_start_too_early(&err(400, other, S)));
     }
 
     #[test]

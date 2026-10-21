@@ -13,6 +13,7 @@
 pub(crate) mod kit;
 mod payee;
 pub(crate) mod records;
+mod template;
 
 use std::sync::Arc;
 
@@ -108,6 +109,8 @@ pub struct CardChargeScreen {
     pub(crate) focused: Option<u64>,
     /// Payee prefill and the recent charges.
     pub(crate) payee: payee::PayeeState,
+    /// Save as Template and the template this form came from (P15).
+    pub(crate) template: crate::screens::templates::SaveFlow,
 }
 
 /// The kinds of record this form shows: charges (expenses paid from the
@@ -151,6 +154,7 @@ impl CardChargeScreen {
             records: Records::default(),
             focused: None,
             payee: payee::PayeeState::default(),
+            template: crate::screens::templates::SaveFlow::default(),
         };
         s.bus = s.link.bus().subscribe();
         s.books.start(&s.link, s.group.as_ref());
@@ -563,6 +567,8 @@ impl CardChargeScreen {
     /// The engine took the save (Q-262: every window showing these
     /// accounts reads them again).
     fn saved(&mut self, r: kit::SavedRecord) {
+        self.template
+            .form_saved(&self.link, self.group.as_ref(), r.id);
         let intent = self.flow.saved(r);
         crate::forms::publish_saved(&self.link, &self.bus, &self.flow.published);
         self.problems.clear();
@@ -622,6 +628,7 @@ impl CardChargeScreen {
         let fresh =
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
         self.lines.form_mut().load(fresh, &*lists);
+        self.template.forget();
         self.problems.clear();
         self.inputs.payee = NameInput::default();
         self.flow.new_record();
@@ -769,6 +776,7 @@ impl CardChargeScreen {
         let lists = Arc::clone(&self.books.lists);
         self.header.load(form);
         self.lines.form_mut().load(lines, &*lists);
+        self.template.forget();
         self.flow.opened_txn(v, fits);
 
         self.problems.clear();
@@ -918,6 +926,7 @@ impl CardChargeScreen {
                     picked = Some(CardMode::Credit);
                 }
             });
+            self.template_slot(ui);
         });
         if let Some(cmd) = clicked {
             self.after_frame = Some(CommandId::new(cmd));
@@ -1160,6 +1169,10 @@ impl CardChargeScreen {
     fn form_command(&mut self, id: CommandId) -> bool {
         match id.as_str() {
             KIND => true,
+            "form.save_as_template" => {
+                self.save_as_template();
+                true
+            }
             "form.save_new" => {
                 self.start_save(SaveIntent::SaveAndNew, None);
                 true
@@ -1243,6 +1256,7 @@ impl CardChargeScreen {
                 "pending": self.payee.prefill.is_some(),
             },
             "recent_charges": self.payee.recent.as_ref().map(Vec::len),
+            "template": self.template.state_json(),
         });
         if let (Value::Object(m), Value::Object(c)) = (&mut v, self.flow.state_json(&self.link)) {
             m.extend(c);
@@ -1308,6 +1322,10 @@ impl Screen for CardChargeScreen {
 
     fn open_record(&mut self, txn: TransactionId) -> bool {
         self.open_saved(txn)
+    }
+
+    fn open_template(&mut self, t: crate::forms::template::TemplateOpen) -> bool {
+        self.fill_template(&t)
     }
 
     fn state(&self) -> Value {

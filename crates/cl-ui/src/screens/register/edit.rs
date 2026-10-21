@@ -90,15 +90,17 @@ fn read_only(t: &Transaction) -> Seed {
 /// transfer, a card charge or credit, Pay Yourself (a bank payment to
 /// equity), a loan payment (a bank payment with a liability line), money
 /// paid with personal funds (a payment out of equity or a liability, no
-/// bank or card), a daily sales day. `None`: a check, a journal entry or
-/// anything else (the register shows it itself).
+/// bank or card), a daily sales day; a journal entry opens Make Journal
+/// Entry (P15). `None`: a check or anything else (the register shows it
+/// itself).
 #[must_use]
 pub fn form_for(
     t: &Transaction,
     class: &dyn Fn(AccountId) -> Option<AccountClass>,
 ) -> Option<&'static str> {
     use crate::screens::{
-        card_charge, daily_sales, deposit, loan_payment, owner_money, personal_funds, transfer,
+        card_charge, daily_sales, deposit, journal_entry, loan_payment, owner_money,
+        personal_funds, transfer,
     };
     let debits: Vec<Option<AccountClass>> = t
         .lines
@@ -118,6 +120,7 @@ pub fn form_for(
     };
     Some(match t.txn_type {
         TxnType::DailySales => daily_sales::KIND,
+        TxnType::JournalEntry => journal_entry::KIND,
         TxnType::Transfer => transfer::KIND,
         TxnType::Deposit if has(&debits, AccountClass::CreditCard) => card_charge::KIND,
         TxnType::Deposit
@@ -168,6 +171,17 @@ pub fn seed(v: &Versioned<Transaction>, own: AccountId, class: AccountClass) -> 
         return read_only(t);
     };
     if t.status != TxnStatus::Posted || others.is_empty() {
+        return read_only(t);
+    }
+    // A journal entry the register's row can't show whole (adjusting, a
+    // reversing pair, a name on its line) goes to Make Journal Entry.
+    if t.txn_type == TxnType::JournalEntry
+        && (t.is_adjusting
+            || t.reverse_on.is_some()
+            || t.reverses_transaction_id.is_some()
+            || t.reversal_transaction_id.is_some()
+            || mine.contact_id.is_some())
+    {
         return read_only(t);
     }
     let (side, amount) = if mine.credit.is_positive() && mine.debit.is_zero() {
@@ -526,6 +540,7 @@ mod tests {
             tag_id: None,
             tag_name: None,
             contact_id: None,
+            contact_name: None,
             is_billable: false,
             billed_status: None,
             source_transaction_id: None,
@@ -551,6 +566,10 @@ mod tests {
                 created_at: None,
                 updated_at: None,
                 lines,
+                is_adjusting: false,
+                reverses_transaction_id: None,
+                reversal_transaction_id: None,
+                reverse_on: None,
             },
             version: RecordVersion::Fingerprint([7; 32]),
         }

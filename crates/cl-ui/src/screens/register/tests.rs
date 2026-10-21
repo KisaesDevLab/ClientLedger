@@ -855,8 +855,53 @@ fn form_for_names_each_p14_form_by_the_shape_of_the_lines() {
         edit::form_for(&t, &is(C::OtherAsset)),
         Some(crate::screens::daily_sales::KIND)
     );
+    // Any journal entry: Make Journal Entry (P15, Ctrl+E).
     t.txn_type = cl_api::TxnType::JournalEntry;
-    assert_eq!(edit::form_for(&t, &is(C::OtherAsset)), None);
+    assert_eq!(
+        edit::form_for(&t, &is(C::OtherAsset)),
+        Some(crate::screens::journal_entry::KIND)
+    );
+}
+
+#[test]
+fn journal_entries_the_row_cant_show_go_to_make_journal_entry() {
+    use cl_model::register::AccountClass as C;
+    #[derive(serde::Deserialize)]
+    struct W {
+        transaction: cl_api::Transaction,
+    }
+    let body = include_str!("../../../../../fixtures/engine/je-record-reversing.json");
+    let full = serde_json::from_str::<W>(body).expect("txn").transaction;
+    let own = full.lines[0].account_id;
+    let mut plain = full.clone();
+    plain.is_adjusting = false;
+    plain.reverse_on = None;
+    plain.reversal_transaction_id = None;
+    plain.lines[1].contact_id = None;
+    let seed = |t: &cl_api::Transaction| {
+        let v = cl_api::Versioned {
+            record: t.clone(),
+            version: cl_api::RecordVersion::Server(1),
+        };
+        matches!(edit::seed(&v, own, C::OtherAsset), edit::Seed::ReadOnly(_))
+    };
+    // A plain two-line entry stays in the register's row (Enter).
+    assert!(!seed(&plain));
+    // Adjusting, a reversing pair or a name: the row can't show it, so
+    // Enter and double-click open Make Journal Entry (Q-P14aa).
+    let mut t = plain.clone();
+    t.is_adjusting = true;
+    assert!(seed(&t));
+    let mut t = plain.clone();
+    t.reverse_on = full.reverse_on;
+    assert!(seed(&t));
+    let mut t = plain.clone();
+    t.reverses_transaction_id = full.reversal_transaction_id;
+    assert!(seed(&t));
+    let mut t = plain.clone();
+    t.lines[0].contact_id = full.lines[1].contact_id;
+    assert!(seed(&t));
+    assert!(seed(&full));
 }
 
 #[test]

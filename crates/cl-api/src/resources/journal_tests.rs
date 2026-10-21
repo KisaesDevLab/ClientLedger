@@ -44,6 +44,7 @@ fn line(account: &str, side: Side) -> JeLine {
         side,
         description: None,
         tag: None,
+        contact: None,
     }
 }
 
@@ -915,4 +916,486 @@ async fn a_candidate_id_that_is_not_an_id_is_never_put_in_a_path() {
         gets.iter().all(|r| !r.url.path().contains("admin")),
         "no request built from the raw id"
     );
+}
+
+// --- P15 part A: names, numbers, adjusting, reversing -------------------------
+
+mod p15 {
+    use super::*;
+    use crate::resources::testkit::session_with_caps;
+    use crate::resources::transactions::{
+        AccountRoles, JE_AR_AP_NAME_REQUIRED, JeOptions, Transaction, has_code,
+        next_number_from_json,
+    };
+    use crate::resources::versioning::EditableFields;
+    use crate::wire::Capabilities;
+    use cl_core::ids::ContactId;
+    use std::collections::BTreeSet;
+
+    const AP: &str = "2c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+    const AR: &str = "2d0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+    const VENDOR: &str = "3c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+    const FULL_BODY: &str = include_str!("../../../../fixtures/engine/je-create-full.json");
+    const REVERSING: &str = include_str!("../../../../fixtures/engine/je-record-reversing.json");
+    const ALL: [&str; 4] = [
+        Capabilities::JE_NAMES,
+        Capabilities::JE_NUMBER,
+        Capabilities::JE_ADJUSTING,
+        Capabilities::JE_REVERSING,
+    ];
+
+    fn roles() -> AccountRoles {
+        AccountRoles {
+            receivable: BTreeSet::from([acct(AR)]),
+            payable: BTreeSet::from([acct(AP)]),
+        }
+    }
+
+    fn vendor() -> ContactId {
+        ContactId::parse(VENDOR).expect("contact")
+    }
+
+    fn named(account: &str, side: Side) -> JeLine {
+        JeLine {
+            contact: Some(vendor()),
+            ..line(account, side)
+        }
+    }
+
+    fn opts(number: Option<&str>, adjusting: bool, reverse_on: Option<CalendarDate>) -> JeOptions {
+        JeOptions {
+            number: number.map(str::to_string),
+            adjusting,
+            reverse_on,
+        }
+    }
+
+    fn full() -> NewJournalEntry {
+        NewJournalEntry::new_with(
+            day(),
+            Some("Accrue October rent".into()),
+            Basis::Both,
+            vec![
+                JeLine {
+                    description: Some("Rent".into()),
+                    tag: Some(TagId::parse(T1).expect("tag")),
+                    ..line(A, Side::Debit(m("1200")))
+                },
+                named(AP, Side::Credit(m("1200"))),
+            ],
+            opts(Some(" 41 "), true, CalendarDate::from_ymd(2026, 11, 1).ok()),
+            &roles(),
+        )
+        .expect("valid")
+    }
+
+    #[tokio::test]
+    async fn unbalanced_refused_without_request() {
+        let server = MockServer::start().await;
+        let _s = session_with_caps(&server, &ALL).await;
+        let before = server.received_requests().await.expect("r").len();
+        let e = NewJournalEntry::new_with(
+            day(),
+            None,
+            Basis::Both,
+            vec![
+                line(A, Side::Debit(m("1200.00"))),
+                line(B, Side::Credit(m("1100.00"))),
+            ],
+            JeOptions::default(),
+            &roles(),
+        );
+        assert_eq!(e, Err(LocalValidation::Unbalanced));
+        // There is no entry to send: the builder is the only way to one.
+        assert_eq!(server.received_requests().await.expect("r").len(), before);
+    }
+
+    #[test]
+    fn header_and_ar_ap_rules_are_refused_locally() {
+        let mk = |lines, o| NewJournalEntry::new_with(day(), None, Basis::Both, lines, o, &roles());
+        let pair = || vec![line(A, Side::Debit(m("5"))), line(B, Side::Credit(m("5")))];
+        for r in [day(), CalendarDate::from_ymd(2026, 10, 14).expect("d")] {
+            assert_eq!(
+                mk(pair(), opts(None, false, Some(r))),
+                Err(LocalValidation::ReverseNotAfter),
+                "reverse on {r:?}"
+            );
+        }
+        assert!(
+            mk(
+                pair(),
+                opts(None, false, CalendarDate::from_ymd(2026, 10, 16).ok())
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            mk(pair(), opts(Some(&"9".repeat(21)), false, None)),
+            Err(LocalValidation::InvalidValue)
+        );
+        let ok = mk(
+            pair(),
+            opts(Some(&format!(" {} ", "9".repeat(20))), false, None),
+        )
+        .expect("20 after trimming");
+        assert_eq!(ok.number(), Some("99999999999999999999"));
+        assert_eq!(
+            mk(pair(), opts(Some("   "), false, None))
+                .expect("blank")
+                .number(),
+            None
+        );
+        // A/R or A/P: a name on the line, and only one such line (Q-206).
+        assert_eq!(
+            mk(
+                vec![line(A, Side::Debit(m("5"))), line(AP, Side::Credit(m("5")))],
+                JeOptions::default()
+            ),
+            Err(LocalValidation::ArApNameMissing)
+        );
+        assert_eq!(
+            mk(
+                vec![line(AR, Side::Debit(m("5"))), line(B, Side::Credit(m("5")))],
+                JeOptions::default()
+            ),
+            Err(LocalValidation::ArApNameMissing)
+        );
+        assert_eq!(
+            mk(
+                vec![
+                    named(AR, Side::Debit(m("5"))),
+                    named(AP, Side::Credit(m("5")))
+                ],
+                JeOptions::default()
+            ),
+            Err(LocalValidation::ArApTwoAccounts)
+        );
+        assert_eq!(
+            mk(
+                vec![
+                    named(AP, Side::Debit(m("5"))),
+                    named(AP, Side::Credit(m("5")))
+                ],
+                JeOptions::default()
+            ),
+            Err(LocalValidation::ArApTwoAccounts),
+            "two lines on one A/P account"
+        );
+        assert!(
+            mk(
+                vec![
+                    line(A, Side::Debit(m("5"))),
+                    named(AP, Side::Credit(m("5")))
+                ],
+                JeOptions::default()
+            )
+            .is_ok()
+        );
+        // Balance is checked first: an unbalanced entry is Unbalanced
+        // whatever else is wrong.
+        assert_eq!(
+            mk(
+                vec![
+                    line(AR, Side::Debit(m("5"))),
+                    line(AR, Side::Credit(m("4")))
+                ],
+                opts(None, false, Some(day()))
+            ),
+            Err(LocalValidation::Unbalanced)
+        );
+    }
+
+    #[tokio::test]
+    async fn fields_without_their_capability_send_nothing() {
+        let server = MockServer::start().await;
+        stamp(&server, 1, None).await;
+        let s = session_with_caps(&server, &[]).await;
+        let base = || vec![line(A, Side::Debit(m("5"))), line(B, Side::Credit(m("5")))];
+        let roles = AccountRoles::default();
+        let cases = [
+            (
+                NewJournalEntry::new_with(
+                    day(),
+                    None,
+                    Basis::Both,
+                    vec![line(A, Side::Debit(m("5"))), named(B, Side::Credit(m("5")))],
+                    JeOptions::default(),
+                    &roles,
+                ),
+                LocalValidation::JeNamesUnavailable,
+            ),
+            (
+                NewJournalEntry::new_with(
+                    day(),
+                    None,
+                    Basis::Both,
+                    base(),
+                    opts(Some("7"), false, None),
+                    &roles,
+                ),
+                LocalValidation::JeNumberUnavailable,
+            ),
+            (
+                NewJournalEntry::new_with(
+                    day(),
+                    None,
+                    Basis::Both,
+                    base(),
+                    opts(None, true, None),
+                    &roles,
+                ),
+                LocalValidation::JeAdjustingUnavailable,
+            ),
+            (
+                NewJournalEntry::new_with(
+                    day(),
+                    None,
+                    Basis::Both,
+                    base(),
+                    opts(None, false, CalendarDate::from_ymd(2026, 11, 1).ok()),
+                    &roles,
+                ),
+                LocalValidation::JeReversingUnavailable,
+            ),
+        ];
+        let id = TransactionId::parse(T1).expect("id");
+        let version = crate::RecordVersion::Fingerprint([0; 32]);
+        for (e, refusal) in cases {
+            let e = e.expect("valid");
+            let got = s
+                .transactions()
+                .create_journal_entry(&e, &PostingOptions::default(), IdempotencyKey::new())
+                .await
+                .expect_err("refused");
+            assert_eq!(got, ApiError::Local(refusal));
+            let got = s
+                .transactions()
+                .update_journal_entry(
+                    id,
+                    &version,
+                    &e,
+                    &PostingOptions::default(),
+                    IdempotencyKey::new(),
+                )
+                .await
+                .expect_err("refused");
+            assert_eq!(got, ApiError::Local(refusal));
+        }
+        let e = s.journal().next_number().await.expect_err("no je-number");
+        assert_eq!(e, ApiError::Local(LocalValidation::JeNumberUnavailable));
+        let sent: Vec<String> = server
+            .received_requests()
+            .await
+            .expect("r")
+            .iter()
+            .map(|r| r.url.path().to_string())
+            .filter(|p| p != "/api/v1/desktop/info")
+            .collect();
+        assert!(sent.is_empty(), "nothing sent: {sent:?}");
+    }
+
+    #[tokio::test]
+    async fn full_entry_body_matches_the_golden_and_reads_back() {
+        let server = MockServer::start().await;
+        stamp(&server, 3, None).await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(json(201, REVERSING))
+            .mount(&server)
+            .await;
+        let s = session_with_caps(&server, &ALL).await;
+        let v = s
+            .transactions()
+            .create_journal_entry(&full(), &PostingOptions::default(), IdempotencyKey::new())
+            .await
+            .expect("posted");
+        let posts = requests(&server, "POST").await;
+        let body: Value = serde_json::from_slice(&posts[0].body).expect("json");
+        let golden: Value = serde_json::from_str(FULL_BODY).expect("golden");
+        assert_eq!(body, golden);
+        let t = &v.record;
+        assert_eq!(t.txn_number.as_deref(), Some("41"));
+        assert!(t.is_adjusting);
+        assert_eq!(t.reverse_on, CalendarDate::from_ymd(2026, 11, 1).ok());
+        assert_eq!(
+            t.reversal_transaction_id,
+            TransactionId::parse("7d0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").ok()
+        );
+        assert_eq!(t.lines[1].contact_id, Some(vendor()));
+        assert_eq!(
+            t.lines[1].contact_name.as_deref(),
+            Some("Synthetic Landlord LLC")
+        );
+        assert_eq!(t.lines[1].credit.to_wire(), "1200.0000");
+        assert_eq!(
+            t.fingerprint(),
+            full().fingerprint(),
+            "the read-back is the entry sent"
+        );
+        assert_eq!(
+            v.version,
+            crate::RecordVersion::Fingerprint(full().fingerprint())
+        );
+    }
+
+    #[test]
+    fn new_fields_are_hashed_only_when_set() {
+        // A plain entry hashes exactly as before P15.
+        let plain = entry();
+        let same = NewJournalEntry::new_with(
+            day(),
+            Some("rent".into()),
+            Basis::Both,
+            plain.lines().to_vec(),
+            opts(Some(" "), false, None),
+            &roles(),
+        )
+        .expect("ok");
+        assert_eq!(plain.fingerprint(), same.fingerprint());
+        let raw: Transaction =
+            serde_json::from_str(&txn(T1, "posted", "2199-01-01T00:00:00.000Z")).expect("record");
+        assert_eq!(raw.fingerprint(), plain.fingerprint());
+        // Each new field, once set, changes it.
+        let lines = plain.lines().to_vec();
+        let with = |o: JeOptions| {
+            NewJournalEntry::new_with(
+                day(),
+                Some("rent".into()),
+                Basis::Both,
+                lines.clone(),
+                o,
+                &roles(),
+            )
+            .expect("ok")
+            .fingerprint()
+        };
+        let fps = [
+            plain.fingerprint(),
+            with(opts(Some("1"), false, None)),
+            with(opts(None, true, None)),
+            with(opts(None, false, CalendarDate::from_ymd(2026, 12, 1).ok())),
+        ];
+        let distinct: BTreeSet<[u8; 32]> = fps.into_iter().collect();
+        assert_eq!(distinct.len(), 4);
+        // A check's number is never hashed by the journal entry rule.
+        let mut check = raw.clone();
+        check.txn_type = crate::resources::transactions::TxnType::Expense;
+        let before = check.fingerprint();
+        check.txn_number = Some("1001".into());
+        assert_eq!(check.fingerprint(), before);
+    }
+
+    #[tokio::test]
+    async fn update_clears_number_and_flag_explicitly_with_the_capability() {
+        let server = MockServer::start().await;
+        stamp(&server, 1, None).await;
+        get_txn(&server, T1, "posted").await;
+        Mock::given(method("PUT"))
+            .respond_with(json(200, &wrapped(T1, "posted")))
+            .mount(&server)
+            .await;
+        let s = session_with_caps(&server, &ALL).await;
+        let id = TransactionId::parse(T1).expect("id");
+        let v = s.transactions().get(id).await.expect("get");
+        s.transactions()
+            .update_journal_entry(
+                id,
+                &v.version,
+                &entry(),
+                &PostingOptions::default(),
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect("update");
+        let put: Value =
+            serde_json::from_slice(&requests(&server, "PUT").await[0].body).expect("json");
+        assert_eq!(put["txnNumber"], "");
+        assert_eq!(put["isAdjusting"], false);
+        assert_eq!(
+            put.get("reverseOn"),
+            Some(&Value::Null),
+            "no reversal on the edited entry: null removes a stored one"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_sends_the_reversal_date_and_omits_it_without_the_capability() {
+        let server = MockServer::start().await;
+        stamp(&server, 1, None).await;
+        get_txn(&server, T1, "posted").await;
+        Mock::given(method("PUT"))
+            .respond_with(json(200, &wrapped(T1, "posted")))
+            .mount(&server)
+            .await;
+        let s = session_with_caps(&server, &ALL).await;
+        let id = TransactionId::parse(T1).expect("id");
+        let v = s.transactions().get(id).await.expect("get");
+        let on = CalendarDate::from_ymd(2026, 12, 1).expect("date");
+        let reversing = NewJournalEntry::new_with(
+            day(),
+            Some("rent".into()),
+            Basis::Both,
+            entry().lines().to_vec(),
+            opts(None, false, Some(on)),
+            &roles(),
+        )
+        .expect("ok");
+        s.transactions()
+            .update_journal_entry(
+                id,
+                &v.version,
+                &reversing,
+                &PostingOptions::default(),
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect("update");
+        let put: Value =
+            serde_json::from_slice(&requests(&server, "PUT").await[0].body).expect("json");
+        assert_eq!(put["reverseOn"], "2026-12-01");
+        // Without je-reversing-v1 the key is never sent.
+        let body = entry().to_update_value(&Capabilities::default());
+        assert!(body.get("reverseOn").is_none());
+    }
+
+    #[tokio::test]
+    async fn next_number_reads_the_string() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/journal-entries/next-number"))
+            .respond_with(json(200, r#"{"next":"1044"}"#))
+            .mount(&server)
+            .await;
+        let s = session_with_caps(&server, &[Capabilities::JE_NUMBER]).await;
+        assert_eq!(s.journal().next_number().await.expect("next"), "1044");
+        assert!(matches!(
+            next_number_from_json(br#"{"next":1044}"#),
+            Err(ApiError::Decode { .. })
+        ));
+        assert!(matches!(
+            next_number_from_json(b"not json"),
+            Err(ApiError::Decode { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn engine_ar_ap_refusal_keeps_its_code() {
+        let server = MockServer::start().await;
+        stamp(&server, 1, None).await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(json(
+                400,
+                r#"{"error":{"message":"Line 2 needs a name","code":"JE_AR_AP_NAME_REQUIRED"}}"#,
+            ))
+            .mount(&server)
+            .await;
+        let s = session_with_caps(&server, &ALL).await;
+        let e = s
+            .transactions()
+            .create_journal_entry(&entry(), &PostingOptions::default(), IdempotencyKey::new())
+            .await
+            .expect_err("refused");
+        assert!(has_code(&e, JE_AR_AP_NAME_REQUIRED), "{e:?}");
+        assert!(!has_code(&e, "OTHER"));
+    }
 }

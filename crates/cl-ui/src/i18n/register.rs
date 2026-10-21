@@ -50,6 +50,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.entry.problem.kind_not_allowed", "This kind of transaction can't be entered in this register. Use its own form instead."),
     // Closing-date password dialog (cl-model closing::ClosingFlow; shared with the forms)
     ("closing.ask", "This transaction is dated on or before your closing date ({date}). Enter the closing-date password to change it."),
+    ("closing.ask.delete", "This transaction is dated on or before your closing date ({date}). Enter the closing-date password to delete it."),
+    ("closing.ask.void", "This transaction is dated on or before your closing date ({date}). Enter the closing-date password to void it."),
+    ("closing.delete", "Delete"),
+    ("closing.void", "Void"),
     ("closing.wrong_password", "That password isn't right."),
     ("closing.rate_limited", "Too many wrong passwords. You can try again in about {minutes} min."),
     ("closing.unavailable", "Changing transactions in a closed period isn't available yet."),

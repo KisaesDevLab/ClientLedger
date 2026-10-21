@@ -149,6 +149,8 @@ Forms and grids
 | Enter | Record row (registers, grids) |
 | Ctrl+Insert / Ctrl+Delete | Insert / delete line |
 | Page Up / Page Down | Previous / next record (forms), page (grids) |
+| Ctrl+M | Save as Template (any form that can be a template) |
+| Delete | Delete the selected entry, after a confirmation (Templates list; text fields keep Delete) |
 
 Date fields
 

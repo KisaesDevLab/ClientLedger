@@ -32,6 +32,7 @@ pub mod logging;
 pub mod prefs;
 pub mod screens;
 pub mod shell;
+pub mod templates_runner;
 pub mod theme;
 pub mod widgets;
 pub mod windows;

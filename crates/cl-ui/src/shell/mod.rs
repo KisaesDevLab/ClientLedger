@@ -122,6 +122,8 @@ pub struct ShellOptions {
 }
 
 struct Toast {
+    /// Its i18n key.
+    key: String,
     text: String,
     until: f64,
 }
@@ -173,6 +175,8 @@ pub struct Shell {
     prompt_focused: Option<crate::windows::Prompt>,
     /// Running with `--demo`: developer-only commands and screens exist.
     demo: bool,
+    /// The open company's templates catch-up (P15).
+    runner: crate::templates_runner::TemplatesRunner,
 }
 
 impl Shell {
@@ -247,6 +251,7 @@ impl Shell {
             open_tenant: None,
             return_after_prompt: None,
             close_company_after_prompt: false,
+            runner: crate::templates_runner::TemplatesRunner::default(),
         };
         shell.palette.include_dev = options.demo;
         if options.demo {
@@ -314,6 +319,19 @@ impl Shell {
     fn open_record(&mut self, kind: CommandId, txn: cl_core::ids::TransactionId) {
         let mut screen = self.make_screen(kind);
         if screen.open_record(txn) {
+            self.windows.open_new(kind, screen);
+        } else {
+            self.open_screen(kind);
+        }
+    }
+
+    /// Open a fresh form filled from a template (P15). A form that takes
+    /// templates opens as a new window; any other kind just opens (or comes
+    /// to the front) as usual.
+    fn open_template(&mut self, template: crate::forms::template::TemplateOpen) {
+        let kind = template.kind;
+        let mut screen = self.make_screen(kind);
+        if screen.open_template(template) {
             self.windows.open_new(kind, screen);
         } else {
             self.open_screen(kind);
@@ -392,8 +410,11 @@ impl Shell {
                     if self.windows.is_empty() {
                         self.dispatch_now(CommandId::new("nav.home"));
                     }
+                    // Catch-up runs after every open (P15, Q-P15h).
+                    self.runner.opened(&link, tenant_id);
                 }
                 CompanyEvent::Closed => {
+                    self.runner.closed(&link);
                     self.save_layout();
                     for id in self.windows.all().iter().map(|w| w.id).collect::<Vec<_>>() {
                         self.windows.close_now(id);
@@ -411,6 +432,11 @@ impl Shell {
                 CompanyEvent::Toast(key) => {
                     if let Some(ctx) = ctx {
                         self.toast(ctx, key);
+                    }
+                }
+                CompanyEvent::ClearToast(key) => {
+                    if self.toast.as_ref().is_some_and(|t| t.key == key) {
+                        self.toast = None;
                     }
                 }
                 CompanyEvent::UserPrefs(p) => {
@@ -434,6 +460,7 @@ impl Shell {
                 }
                 CompanyEvent::OpenRegister(account) => self.open_register(account),
                 CompanyEvent::OpenRecord(kind, txn) => self.open_record(kind, txn),
+                CompanyEvent::OpenTemplate(t) => self.open_template(*t),
             }
         }
     }
@@ -672,6 +699,7 @@ impl Shell {
     fn toast(&mut self, ctx: &Context, key: &str) {
         let now = ctx.input(|i| i.time);
         self.toast = Some(Toast {
+            key: key.to_owned(),
             text: t(key),
             until: now + 4.0,
         });
@@ -807,7 +835,11 @@ impl Shell {
             self.windows.request_close(id);
             return;
         }
-        let quiet = cmd.id.as_str().starts_with("form.") || cmd.id.as_str().starts_with("edit.");
+        // The plain Delete key reaches every window; only lists that delete
+        // entries take it.
+        let quiet = cmd.id.as_str().starts_with("form.")
+            || cmd.id.as_str().starts_with("edit.")
+            || cmd.id.as_str() == "list.delete";
         if !handled
             && !quiet
             && let Some(ctx) = ctx
@@ -931,6 +963,41 @@ impl Shell {
         }
     }
 
+    /// The templates catch-up (P15): runs when a trigger fired; after a run
+    /// the registers hear about the posts (Q-262) and Templates Due opens
+    /// when there is something new to show.
+    fn run_templates(&mut self, ctx: &Context) {
+        let Some(link) = self.company_link.clone() else {
+            return;
+        };
+        let now = ctx.input(|i| i.time);
+        if let Some(done) = self.runner.tick(&link, self.today, now) {
+            if done.posted {
+                link.bus().publish(crate::data_bus::Change::Ledger(None));
+            }
+            if done.open_window {
+                self.open_screen(CommandId::new(crate::screens::templates_due::KIND));
+            }
+        }
+        if self.runner.busy() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        } else if self.runner.armed() {
+            // The midnight and hourly triggers need a frame now and then.
+            ctx.request_repaint_after(Duration::from_secs(60));
+        }
+    }
+
+    /// How many templates wait for the owner (the status-bar chip).
+    #[must_use]
+    pub fn templates_need_you(&self) -> usize {
+        if self.open_tenant.is_none() {
+            return 0;
+        }
+        self.company_link
+            .as_ref()
+            .map_or(0, |l| l.due().needs_you())
+    }
+
     /// The text of the toast on screen, if any.
     #[must_use]
     pub fn toast_text(&self) -> Option<&str> {
@@ -961,7 +1028,9 @@ impl Shell {
         self.publish_grid_facts(&ctx, egui::ViewportId::ROOT);
         title_bar::show(ui, self, narrow, &tokens);
         menu::show(ui, self, narrow, &tokens);
-        status_bar::show(ui, self, narrow, &tokens);
+        if status_bar::show(ui, self, narrow, &tokens) {
+            self.open_screen(CommandId::new(crate::screens::templates_due::KIND));
+        }
         // With no company open the Open Company window fills the body, as
         // in its mockup: no rail and no tab strip until a company opens.
         let chrome = self.company.is_some() || self.company_link.is_none();
@@ -979,6 +1048,7 @@ impl Shell {
             self.run(Some(&ctx), id);
         }
         self.apply_company_events(Some(&ctx));
+        self.run_templates(&ctx);
         self.save_layout();
         let now = ctx.input(|i| i.time);
         self.flush_widths(Some(now));
@@ -1263,7 +1333,10 @@ fn make_any(
         if let Some(s) = crate::screens::write_check::make(kind, link, open.clone(), today) {
             return s;
         }
-        for make in crate::screens::P14_SCREENS {
+        for make in crate::screens::P14_SCREENS
+            .iter()
+            .chain(&crate::screens::P15_SCREENS)
+        {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;
             }

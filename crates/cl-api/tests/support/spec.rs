@@ -23,7 +23,8 @@ use sha2::{Digest, Sha256};
 /// `DELETE /transactions/{id}` are in the spec; since pin 454fd23 (engine
 /// PR #156) the P13 check edit and rules evaluate call are too; since pin
 /// f78583e (engine PR #159) the P14 feed deposit groupings and equity
-/// roles are.
+/// roles are. The P15 journal entry number, templates and run-due routes
+/// are listed until their engine PRs land and the pin moves.
 pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),

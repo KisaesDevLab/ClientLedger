@@ -850,6 +850,7 @@ impl DemoLedger {
                     .and_then(|name| tags.iter().find(|t| t.fields.name == name).map(|t| t.id)),
                 tag_name: l.tag.clone(),
                 contact_id: if deposit && !own_side { contact } else { None },
+                contact_name: None,
                 is_billable: false,
                 billed_status: None,
                 source_transaction_id: None,
@@ -876,6 +877,10 @@ impl DemoLedger {
             created_at: Some(super::DemoState::now()),
             updated_at: Some(super::DemoState::now()),
             lines,
+            is_adjusting: false,
+            reverses_transaction_id: None,
+            reversal_transaction_id: None,
+            reverse_on: None,
         };
         let version = cl_api::RecordVersion::Fingerprint(record.fingerprint());
         Some(cl_api::Versioned { record, version })

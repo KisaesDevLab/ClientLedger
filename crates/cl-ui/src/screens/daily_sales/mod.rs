@@ -20,6 +20,7 @@ mod form;
 mod layout;
 mod save;
 mod screen;
+mod template;
 #[cfg(test)]
 mod tests;
 
@@ -620,6 +621,8 @@ pub struct DailySalesScreen {
     pub(crate) nav_prompt: Option<bool>,
     /// Prev/Next to take once the prompt's save is done.
     pub(crate) after_save_nav: Option<bool>,
+    /// Save as Template and the template this day came from (P15).
+    pub(crate) save_template: crate::screens::templates::SaveFlow,
 }
 
 /// The cl-model section of an engine section (`None`: unknown).
@@ -750,6 +753,7 @@ impl DailySalesScreen {
             nav: DayNav::default(),
             nav_prompt: None,
             after_save_nav: None,
+            save_template: crate::screens::templates::SaveFlow::default(),
         };
 
         s.bus = s.link.bus().subscribe();

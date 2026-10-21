@@ -42,8 +42,19 @@ Linux
      session (X11 or Wayland) and the usual graphics libraries (Vulkan or
      OpenGL, libxkbcommon).
 
-To look around without starting the database, run the app with --demo
-(it shows sample data only).
+THE PRACTICE COMPANY
+--------------------
+The practice company is a made-up business built into the app. Two ways
+to use it:
+
+  - Start the app normally and click "Try the practice company" on the
+    Open Company screen. It is built in the bundled database the first
+    time (about a minute) and then works like a real company file: what
+    you save is kept between launches. If it says the practice company is
+    not set up yet, wait a few seconds for the database to start and click
+    again.
+  - Or run the app with --demo for a quick look without the database.
+    Nothing you change is kept after you close the app.
 
 WHERE YOUR TEST DATA GOES
 -------------------------

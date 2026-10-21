@@ -1,9 +1,9 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P15 — Journal entries, Templates (memorized) and recurring (Next)
-**Status:** P14 built on `phase/P14-money-forms`; PR to open
-**Engine commit:** `f78583edabe88929f92c10521fefdd1f287c3d81` (`main`, pinned 2026-10-20 after engine PR #159: deposit-grouping-v1, deposit-cashback-v1, vendor-refund-v1, equity-roles-v1, feed-deposit-groupings-v1, daily-sales-lock-v1, migration 0223; bump per Q-02)
-**Last updated:** 2026-10-20
+**Current phase:** P15A — Bulk Entry (Next)
+**Status:** P15 built on `phase/P15-journal-templates`; PR to open
+**Engine commit:** `886c6b5d30f9cc153dbfcefdfa6d372f335bc9a7` (`main`, pinned 2026-10-21 after engine PRs #160 and #161: je-names-v1, je-number-v1, je-adjusting-v1, je-reversing-v1, balance-exact-v1, recurring-guard-v1, templates-v1, recurring-run-due-v1, migrations 0224 and 0225; bump per Q-02)
+**Last updated:** 2026-10-21
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
 ## Phase board — beta track
@@ -25,8 +25,8 @@
 | P12 | Bank and account register | H | Done 2026-10-19 (AC1 register part, password path and delete live since pin 5c8e9665; R5 PENDING by `register-cleared-v1`; reviews pending) |
 | P13 | Write Check | M | Done 2026-10-20 |
 | P14 | Deposits, transfers, sales receipts, card charges, owner and loan helpers | M | Done 2026-10-20 |
-| P15 | Journal entries, templates and recurring | H | Next |
-| P15A | Bulk Entry | M | |
+| P15 | Journal entries, templates and recurring | H | Done 2026-10-21 |
+| P15A | Bulk Entry | M | Next |
 | P16 | Home workspace | L | |
 | P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | |
 | P18 | Pay Bills (checks) | M | |
@@ -101,7 +101,7 @@ Screens or actions that link to a later phase. Remove each line when its phase l
 
 - P34/P08 — restore UI must call `Cluster::restore(src, store, allow_unregistered)` with `allow_unregistered = false` by default and set it to `true` only after an explicit owner confirmation that the file came from a trusted source (Q-P03h).
 
-- P06 shell placeholders (Q-P06g): every menu, rail and palette command whose screen is built later opens a placeholder tab. The phase that builds the screen removes its entry: P11 Item List / Tags / Clients & Jobs / Vendors, P12 Open Register, P13 Write Check, P14 Make Deposit / Transfer Funds / Sales Receipt / Record Card Charge, P15 Make Journal Entry, P16 Home (replaces the Home placeholder and the demo rail counts), P17 Enter Bill, P18 Pay Bills, P20 Create Invoice, P21 Receive Payment, P22 Credit Memo or Refund / Statements, P25 Import Bank File, P26 Bank Feed, P27 Reconcile, P28 Reports / Profit & Loss / Balance Sheet / Trial Balance, P29 Set Closing Date / Users and Permissions / Audit Trail, P30 Import Payroll, P32 Send to My Accountant, P38 bundled help (F1 says "not available yet").
+- P06 shell placeholders (Q-P06g): every menu, rail and palette command whose screen is built later opens a placeholder tab. The phase that builds the screen removes its entry: P11 Item List / Tags / Clients & Jobs / Vendors, P12 Open Register, P13 Write Check, P14 Make Deposit / Transfer Funds / Sales Receipt / Record Card Charge, P16 Home (replaces the Home placeholder and the demo rail counts), P17 Enter Bill, P18 Pay Bills, P20 Create Invoice, P21 Receive Payment, P22 Credit Memo or Refund / Statements, P25 Import Bank File, P26 Bank Feed, P27 Reconcile, P28 Reports / Profit & Loss / Balance Sheet / Trial Balance, P29 Set Closing Date / Users and Permissions / Audit Trail, P30 Import Payroll, P32 Send to My Accountant, P38 bundled help (F1 says "not available yet").
 - P06 native macOS menu bar (Q-70, muda) is deferred (Q-P06b): in-window menu on every platform until macOS packaging.
 
 ## Follow-ups from P03 security review
@@ -168,6 +168,13 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 4. Engine main CI (npm-audit) is failing; pre-existing, not caused by PR #159.
 5. The vendor A/P aging summary lists bills only; vendor refunds are not reflected there (the vendor statement shows them).
 
+## Follow-ups from P15
+
+1. Engine issue #162: flaky pgboss-owner-role test (not caused by PRs #160 or #161).
+2. Make Journal Entry has no side panel and no History yet (Q-P15z).
+3. The demo ledger doesn't store basis.
+4. A `--demo` launch skips the catch-up (File > Open Company runs it).
+
 ## Owner-requested checkpoints
 
 - **After P13 merges, before P14 starts (owner, 2026-10-20):** Intuit compliance check — trademarks/names, copied text, icons and assets, layouts and colors vs QuickBooks, feature names, help text, fixtures, non-affiliation notice (non-negotiable 5). Report to the owner; fix findings on a `fix/` branch.
@@ -178,6 +185,9 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-21 — P15 complete on `phase/P15-journal-templates`; PR to open. Shipped (2026-10-20/21): Make Journal Entry (names on lines, A/R-A/P rule, entry numbering, adjusting, reversing, autobalance, closing-password flow, edit/void/delete); Templates (store without posting, groups, remind/auto/never, Save as Template on Write Check, Deposit, Transfer, Card Charge, Journal Entry and Daily Sales, Use, Enter now); the catch-up runner and the Templates Due window. Engine PRs #160 (U-58 to U-61, U-64 to U-66, migration 0224, exact balance for all postings, rounding fixes in invoices, bills, vendor credits and estimates) and #161 (U-62, U-63, migration 0225, per-kind permissions, 31-per-run cap, month-end anchoring) merged after security reviews and fixes; pin 886c6b5; U-19 and U-22 delivered by it. Contract suite 136/136 live; practice company loads with templates and the first catch-up posts once; scenarios journal_entry 169, templates 339, templates_due 235 steps plus forms-zoom coverage; help pages x3. Decisions Q-P15a to Q-P15aa.
+  Acceptance (phases/M1-core-ledger.md P15): [x] unbalanced entries cannot save (unit + contract + scenario, nothing sent); [x] missed monthly occurrences post exactly once each (contract run_due across engine restart + practice_live).
+  Agents: scout/opus, architect/opus (Fable out of credits, Opus fallback for Tier H), impl/opus, engine-impl/opus, security-review/opus x2, review/opus, ui/opus, bookkeeper/sonnet.
 - 2026-10-20 — P14 complete on `phase/P14-money-forms`; PR to open. Shipped: Make Deposit (grouping clears Undeposited Funds exactly, fee lines, cash back, vendor refunds, bank-deposit suggestions, on-screen summary), Transfer Funds, Daily Sales Summary (engine templates, over/short exact against the engine, manual tax line), Card Charge/Credit (header tags, payee panel, prefill), Pay Yourself/Put Money In and Paid with Personal Funds by entity type (equity roles), Loan Payment helper (lender fixture exact), cross-window refresh bus (Q-262), shared form header with navigation prompt, tab strip overflow, Undeposited Funds naming, jargon tooltips. Engine PR #159 (U-52 to U-57, migration 0223) merged after security review and fixes; pin f78583e. Contract suite 116/116 live; scenarios deposit 190, transfer 152, daily_sales 126, card_charge 141, owner_money 126, personal_funds 101, loan_payment 108 steps, plus forms-zoom; help pages x7. The preview build workflow (Q-253) and the Intuit compliance fixes (Q-254 to Q-258) merged between P13 and P14. Decisions Q-P14a to Q-P14ad.
   Acceptance (phases/M1-core-ledger.md P14): [x] two grouped payments equal the bank deposit and clear Undeposited Funds (contract `deposits::grouping_clears_payments_clearing` + scenario); [x] transfers match in both registers (contract + scenario); [x] loan payment splits exactly and the balance matches the lender fixture (contract + model proptest).
   Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, Opus fallback for money lanes), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.
@@ -188,7 +198,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   Results: cl-api contract 91 passed, 0 failed (the formerly PENDING E5a archive round trip, closing password U-15, E6 session secrets/usage summary/SMTP session/token cap, register exact money, audit before-images and delete now run); `register_property::balance_holds_after_random_edits` at 1,000 operations with the register checks and deletes on: green (25 s, seed 54358578820153362); contract_offline 6/6; spec_fixtures 4/4; rest of the workspace green.
   Client fixes (the client follows the engine): closed-period test expects `CLOSING_PASSWORD_INVALID` for a password on a company without one; contract tests hand the Ollama address over session secrets (desktop mode ignores the stored URL) and name the session SMTP relay by LAN address (the engine resolves the host fail-closed); `OUTSIDE_SPEC` trimmed to desktop-only routes; `push_at_open` sends the AI and SMTP session secrets in separate requests so an unresolvable mail server offline no longer drops the Ollama address. No engine bugs found. Still PENDING: E5b, U-14, U-17–U-19, U-21–U-23, U-31–U-47, R5.
   ui-check register, open-company, preferences-ai, chart-of-accounts: pass, light and dark (`--demo` data). Agents: implementer on opus.
-- 2026-10-19 — P12 complete on `phase/P12-register` (WP1–WP8, 34 commits; not pushed). Shipped: cl-api register/summary, bank postings (check, deposit, transfer, card charge), audit reader, soft delete and closing-password errors; cl-model register window cache, ranges, entry rules and `closing` flow; cl-ui register screen (two-line/one-line view, true balance, footer, entry row, edit and Splits, quick filters, Go To, QuickReport, lock/void/delete, conflicts); scenario `register.yaml`; WP3 property test `register_property::balance_holds_after_random_edits` (seeded, `CL_PROP_OPS`/`CL_PROP_SEED`, `CL_ENGINE_EXE` for the engine branch).
-  Acceptance (phases/M1-core-ledger.md): (1) balance = engine account balance after 1,000 random edits — met for the account balance (oracle == `accounts.balance`, 1,000 ops, two seeds); the register per-line/ending/filtered checks PENDING by `register-exact-v1`; (2) closed-period edit without password refused clearly — met (423 contract + scenario); password path PENDING by `closing-password-v1`; (3) deleted transactions in the audit trail with all lines — PENDING by `txn-delete-v1`; (4) mockup — `ui-check register` light+dark screenshots in `target/ui-check/register/`, `--compare` review by ui-verifier to follow, deviations Q-P12r–w. Capabilities all on engine PR #153.
-  Still PENDING: R5 cleared toggle (`register-cleared-v1`), U-17, U-18. Decisions Q-P12a–w added (Q-P12h: `accounts.balance` is debit-positive for every type, found by WP3).
-  Agents: all implementers and the engine-side work on opus (Fable unavailable); code review, security review and ui-verifier to follow.

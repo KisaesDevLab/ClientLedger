@@ -50,6 +50,7 @@ const TRANSACTIONS_JSON: &str =
 const BANK_FEED_JSON: &str = include_str!("../../../fixtures/sample/ozark_ridge/bank_feed.json");
 const LENDER_STATEMENT_JSON: &str =
     include_str!("../../../fixtures/sample/ozark_ridge/lender_statement.json");
+const TEMPLATES_JSON: &str = include_str!("../../../fixtures/sample/ozark_ridge/templates.json");
 /// The engine's Accounts Payable account the fixture posts bills to.
 const AP: &str = "20100";
 
@@ -326,6 +327,184 @@ struct FeedFile {
     items: Vec<FeedItem>,
 }
 
+/// One line of a sample template: a debit or a credit (check and card
+/// lines are debits to the expense account).
+#[derive(Clone, Debug, Deserialize)]
+pub struct SampleTemplateLine {
+    /// Account number.
+    pub account: String,
+    /// Debit.
+    #[serde(default)]
+    pub debit: Option<Money>,
+    /// Credit.
+    #[serde(default)]
+    pub credit: Option<Money>,
+}
+
+/// A sample template's schedule.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleSchedule {
+    /// `remind` or `auto`.
+    pub mode: String,
+    /// `monthly`, …
+    pub frequency: String,
+    /// Every N.
+    pub interval: u16,
+    /// The first date.
+    pub next_date: CalendarDate,
+    /// It stops after this many dates.
+    #[serde(default)]
+    pub remaining_count: Option<u32>,
+}
+
+/// One sample template (P15 WP-D, Q-P15r).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleTemplate {
+    /// Name.
+    pub name: String,
+    /// Group name.
+    #[serde(default)]
+    pub group: Option<String>,
+    /// `check`, `card_charge` or `journal_entry`.
+    pub kind: String,
+    /// The bank or card account number (none for a journal entry).
+    #[serde(default)]
+    pub account: Option<String>,
+    /// The payee's name.
+    #[serde(default)]
+    pub payee: Option<String>,
+    /// Memo.
+    #[serde(default)]
+    pub memo: Option<String>,
+    /// A check goes to the print queue.
+    #[serde(default)]
+    pub print_later: bool,
+    /// The lines.
+    pub lines: Vec<SampleTemplateLine>,
+    /// No schedule is "Don't remind me".
+    #[serde(default)]
+    pub schedule: Option<SampleSchedule>,
+}
+
+/// The sample's templates and their groups.
+#[derive(Clone, Debug, Deserialize)]
+pub struct SampleTemplates {
+    /// Group names.
+    pub groups: Vec<String>,
+    /// The templates.
+    pub templates: Vec<SampleTemplate>,
+}
+
+impl SampleTemplate {
+    /// The form the template opens in (`clientForm`).
+    #[must_use]
+    pub fn client_form(&self) -> &'static str {
+        match self.kind.as_str() {
+            "check" => cl_api::client_form::WRITE_CHECK,
+            "card_charge" => cl_api::client_form::CARD_CHARGE,
+            _ => cl_api::client_form::JOURNAL_ENTRY,
+        }
+    }
+
+    /// The template's schedule.
+    #[must_use]
+    pub fn api_schedule(&self) -> Option<cl_api::TemplateSchedule> {
+        let s = self.schedule.as_ref()?;
+        Some(cl_api::TemplateSchedule {
+            mode: if s.mode == "auto" {
+                cl_api::ScheduleMode::Auto
+            } else {
+                cl_api::ScheduleMode::Remind
+            },
+            frequency: cl_api::Frequency::from_wire(&s.frequency)?,
+            interval: s.interval,
+            next_date: s.next_date,
+            end: s
+                .remaining_count
+                .map_or(cl_api::ScheduleEnd::Never, cl_api::ScheduleEnd::After),
+        })
+    }
+
+    /// The template as the form's checked draft, dated `date`, with the
+    /// company's own account and name ids. `None` when an account is
+    /// missing or the draft would not pass its form's check. Amounts are
+    /// the fixture's exact figures.
+    pub fn draft(
+        &self,
+        date: CalendarDate,
+        account: impl Fn(&str) -> Option<cl_core::ids::AccountId>,
+        contact: impl Fn(&str) -> Option<cl_core::ids::ContactId>,
+    ) -> Option<cl_api::TemplateDraft> {
+        let payee = self.payee.as_deref().and_then(&contact);
+        let split = |l: &SampleTemplateLine| {
+            Some(cl_api::SplitLine {
+                account: account(&l.account)?,
+                amount: l.debit?,
+                memo: None,
+                contact: None,
+                billable: false,
+                tag: None,
+            })
+        };
+        let splits = || self.lines.iter().map(split).collect::<Option<Vec<_>>>();
+        let own = || self.account.as_deref().and_then(&account);
+        match self.kind.as_str() {
+            "check" => {
+                let lines = splits()?;
+                Some(cl_api::TemplateDraft::Check(cl_api::CheckDraft {
+                    bank: own()?,
+                    date,
+                    payee,
+                    payee_name: self.payee.clone().unwrap_or_default(),
+                    check_number: None,
+                    print_later: self.print_later,
+                    payee_address: None,
+                    memo: self.memo.clone(),
+                    printed_memo: None,
+                    tag_ids: Vec::new(),
+                    draft_attachment: None,
+                    amount: Money::sum(lines.iter().map(|l| l.amount)).ok()?,
+                    lines,
+                }))
+            }
+            "card_charge" => Some(cl_api::TemplateDraft::CardCharge(cl_api::CardChargeDraft {
+                pay_from: own()?,
+                date,
+                number: None,
+                payee,
+                memo: self.memo.clone(),
+                lines: splits()?,
+            })),
+            "journal_entry" => {
+                let lines = self
+                    .lines
+                    .iter()
+                    .map(|l| {
+                        let side = match (l.debit, l.credit) {
+                            (Some(d), None) => Side::Debit(d),
+                            (None, Some(c)) => Side::Credit(c),
+                            _ => return None,
+                        };
+                        Some(JeLine {
+                            account: account(&l.account)?,
+                            side,
+                            description: None,
+                            tag: None,
+                            contact: None,
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                NewJournalEntry::new(date, self.memo.clone(), Basis::Both, lines)
+                    .ok()
+                    .map(cl_api::TemplateDraft::Journal)
+            }
+            _ => None,
+        }
+    }
+}
+
 /// The whole fixture.
 #[derive(Clone, Debug)]
 pub struct Sample {
@@ -337,6 +516,8 @@ pub struct Sample {
     pub feed: Vec<FeedItem>,
     /// The lender's statement for the truck loan.
     pub lender_statement: LenderStatement,
+    /// The templates (P15).
+    pub templates: SampleTemplates,
 }
 
 impl Sample {
@@ -353,11 +534,14 @@ impl Sample {
         let feed: FeedFile = serde_json::from_str(BANK_FEED_JSON).expect("sample bank_feed.json");
         let lender_statement: LenderStatement =
             serde_json::from_str(LENDER_STATEMENT_JSON).expect("sample lender_statement.json");
+        let templates: SampleTemplates =
+            serde_json::from_str(TEMPLATES_JSON).expect("sample templates.json");
         Sample {
             company,
             transactions: transactions.transactions,
             feed: feed.items,
             lender_statement,
+            templates,
         }
     }
 
@@ -560,12 +744,28 @@ pub async fn load_into(
         .filter_map(|a| a.fields.account_number.clone().map(|n| (n, a.id)))
         .collect();
 
+    // The engine's A/R and A/P accounts (by system tag): with `je-names-v1`
+    // their lines carry the transaction's customer or vendor (Q-206).
+    let names_on_lines = session
+        .client()
+        .capabilities()
+        .has(cl_api::Capabilities::JE_NAMES);
+    let role = |tag: &str| -> std::collections::HashSet<cl_core::ids::AccountId> {
+        accounts
+            .iter()
+            .filter(|a| a.system_tag.as_deref() == Some(tag))
+            .map(|a| a.id)
+            .collect()
+    };
+    let (receivable, payable) = (role("accounts_receivable"), role("accounts_payable"));
+
+    let mut customers: HashMap<String, cl_core::ids::ContactId> = HashMap::new();
     for (i, name) in sample.company.clients.iter().enumerate() {
         progress(Progress::Working {
             percent: Some(u8::try_from(i * 5 / sample.company.clients.len().max(1)).unwrap_or(0)),
             step: Some("contacts".into()),
         });
-        session
+        let made = session
             .contacts()
             .create(
                 &NewContact {
@@ -576,7 +776,9 @@ pub async fn load_into(
                 IdempotencyKey::new(),
             )
             .await?;
+        customers.insert(name.clone(), made.record.id);
     }
+    let mut vendors: HashMap<String, cl_core::ids::ContactId> = HashMap::new();
     for name in &sample.company.vendors {
         let mut fields = ContactFields::named(ContactType::Vendor, name.clone());
         if let Some(d) = sample
@@ -595,7 +797,7 @@ pub async fn load_into(
                 .as_ref()
                 .and_then(|n| ids.get(n).copied());
         }
-        session
+        let made = session
             .contacts()
             .create(
                 &NewContact {
@@ -606,6 +808,7 @@ pub async fn load_into(
                 IdempotencyKey::new(),
             )
             .await?;
+        vendors.insert(name.clone(), made.record.id);
     }
 
     let total = sample.transactions.len().max(1);
@@ -626,11 +829,24 @@ pub async fn load_into(
             } else {
                 Side::Credit(l.credit)
             };
+            // An A/R line names the customer, an A/P line the vendor.
+            let names = if receivable.contains(&account) {
+                Some(&customers)
+            } else if payable.contains(&account) {
+                Some(&vendors)
+            } else {
+                None
+            };
+            let contact = names
+                .filter(|_| names_on_lines)
+                .and_then(|n| t.contact.as_ref().and_then(|c| n.get(c)))
+                .copied();
             lines.push(JeLine {
                 account,
                 side,
                 description: l.memo.clone(),
                 tag: None,
+                contact,
             });
         }
         let memo = match &t.contact {
@@ -655,6 +871,14 @@ pub async fn load_into(
             .await?;
     }
     seed_layouts(session, &sample.company.daily_sales_layouts, &ids).await;
+    seed_templates(
+        session,
+        &sample.templates,
+        sample.company.story_date,
+        &ids,
+        &vendors,
+    )
+    .await;
     store.update(|l| {
         if let Some(r) = l.get_mut(created.tenant_id) {
             r.is_sample = true;
@@ -729,6 +953,50 @@ async fn seed_layouts(
     }
 }
 
+/// Creates the sample's templates and groups through the engine (P15
+/// WP-D). An engine without `templates-v1`, or any refusal, is logged and
+/// skipped: the practice company works without them. The automatic one
+/// posts its missed dates at the first catch-up run (the app's, after the
+/// company opens), never here.
+async fn seed_templates(
+    session: &Session,
+    sample: &SampleTemplates,
+    date: CalendarDate,
+    ids: &HashMap<String, cl_core::ids::AccountId>,
+    vendors: &HashMap<String, cl_core::ids::ContactId>,
+) {
+    let api = session.templates();
+    let mut groups: HashMap<&str, cl_core::ids::TemplateGroupId> = HashMap::new();
+    for name in &sample.groups {
+        match api.create_group(name).await {
+            Ok(g) => {
+                groups.insert(name.as_str(), g.id);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "sample templates skipped");
+                return;
+            }
+        }
+    }
+    for t in &sample.templates {
+        let Some(draft) = t.draft(date, |n| ids.get(n).copied(), |n| vendors.get(n).copied())
+        else {
+            tracing::warn!("a sample template was skipped: an account is missing");
+            continue;
+        };
+        let new = cl_api::NewTemplate {
+            name: t.name.clone(),
+            group: t.group.as_deref().and_then(|g| groups.get(g).copied()),
+            client_form: Some(t.client_form().to_string()),
+            draft,
+            schedule: t.api_schedule(),
+        };
+        if let Err(e) = api.create(&new).await {
+            tracing::warn!(error = %e, "a sample template was skipped");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -766,6 +1034,94 @@ mod tests {
 
     fn m(s: &str) -> Money {
         Money::parse_wire(s).expect("money")
+    }
+
+    /// The P15 templates (Q-P15r) and what the first open's catch-up
+    /// adds: two 49.00 card charges (09/15 and 10/15; the count of three
+    /// stops the third after the story date), +98.00 on the card and on
+    /// software. The design figures above are the books before it.
+    #[test]
+    fn sample_templates_and_the_first_catch_up() {
+        let s = Sample::load();
+        let story = s.company.story_date;
+        assert_eq!(s.templates.groups, vec!["Monthly bills".to_string()]);
+        let names: Vec<&str> = s
+            .templates
+            .templates
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            ["Shop rent", "Accounting software", "Owner health insurance"]
+        );
+        let account = |n: &str| {
+            s.company
+                .accounts
+                .iter()
+                .position(|a| a.number == n)
+                .and_then(|i| {
+                    cl_core::ids::AccountId::parse(&format!("00000000-0000-4000-8000-{i:012}")).ok()
+                })
+        };
+        let vendor = |n: &str| {
+            s.company.vendors.iter().position(|v| v == n).and_then(|i| {
+                cl_core::ids::ContactId::parse(&format!("00000000-0000-4000-8000-{i:012}")).ok()
+            })
+        };
+        for t in &s.templates.templates {
+            let d = t
+                .draft(story, account, vendor)
+                .expect("every template maps");
+            assert_eq!(
+                d.kind().as_wire(),
+                match t.kind.as_str() {
+                    "card_charge" => "expense",
+                    k => k,
+                }
+            );
+            assert_eq!(d.client_form(), t.client_form());
+        }
+        let rent = &s.templates.templates[0];
+        let cl_api::TemplateDraft::Check(c) = rent.draft(story, account, vendor).expect("rent")
+        else {
+            panic!("a check");
+        };
+        assert_eq!(c.amount, m("1450.00"));
+        assert!(c.print_later);
+        assert!(c.payee.is_some(), "the landlord is a sample vendor");
+        let rent_s = rent.api_schedule().expect("schedule");
+        assert_eq!(rent_s.mode, cl_api::ScheduleMode::Remind);
+        assert_eq!(rent_s.next_date, d(2026, 12, 1));
+        let card = &s.templates.templates[1];
+        let sched = card.api_schedule().expect("schedule");
+        assert_eq!(sched.mode, cl_api::ScheduleMode::Auto);
+        assert_eq!(sched.end, cl_api::ScheduleEnd::After(3));
+        assert_eq!(sched.next_date, d(2026, 9, 15));
+        let due: Vec<CalendarDate> = (0..3)
+            .filter_map(|k| sched.next_date.add_months(k).ok())
+            .filter(|x| *x <= story)
+            .collect();
+        assert_eq!(due, vec![d(2026, 9, 15), d(2026, 10, 15)]);
+        let each = card.lines[0].debit.expect("49.00");
+        assert_eq!(each, m("49.00"));
+        let added = Money::sum(due.iter().map(|_| each)).expect("sum");
+        assert_eq!(added, m("98.00"));
+        // Debits minus credits: the card is owed 289.63 before, 387.63
+        // after; software 7,805.73 before, 7,903.73 after.
+        let card_before = s.balance("2050", story);
+        let soft_before = s.balance("6250", story);
+        assert_eq!(card_before, m("-289.63"));
+        assert_eq!(soft_before, m("7805.73"));
+        assert_eq!(card_before.checked_sub(added), Ok(m("-387.63")));
+        assert_eq!(soft_before.checked_add(added), Ok(m("7903.73")));
+        let je = &s.templates.templates[2];
+        assert!(je.api_schedule().is_none(), "Don't remind me");
+        let cl_api::TemplateDraft::Journal(e) = je.draft(story, account, vendor).expect("je")
+        else {
+            panic!("a journal entry");
+        };
+        assert_eq!(e.lines().len(), 2);
     }
 
     /// The figures in docs/design/README.md, every one.

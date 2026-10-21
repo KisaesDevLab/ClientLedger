@@ -419,6 +419,8 @@ impl DepositScreen {
     /// The engine took the save.
     fn saved(&mut self, s: &Saved) {
         crate::forms::publish_saved(&self.link, &self.bus, &self.save.published);
+        self.template
+            .form_saved(&self.link, self.group.as_ref(), s.id);
         self.closing_prompt.saved();
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
         self.save.count += 1;
@@ -483,6 +485,7 @@ impl DepositScreen {
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
         self.lines.form_mut().load(fresh, &*lists);
         self.editing = None;
+        self.template.forget();
         self.record = None;
         self.show_summary = false;
         self.nav.at = None;
@@ -745,6 +748,7 @@ impl DepositScreen {
         }
         self.header.load(form);
         self.lines.form_mut().load(lines, &*lists);
+        self.template.forget();
         self.editing = Some(Editing {
             id: r.txn.id,
             version: v.version,

@@ -127,6 +127,35 @@ impl Capabilities {
     /// P14 U-57: `closingPassword` on daily-sales post and void.
     pub const DAILY_SALES_LOCK: &'static str = "daily-sales-lock-v1";
 
+    // ---- P15: journal entries, templates, catch-up (client-declared) ------
+    /// P15 part A: a name (`contactId`) on journal entry lines; an A/R line
+    /// needs a customer and an A/P line a vendor
+    /// (400 `JE_AR_AP_NAME_REQUIRED`), one A/R-or-A/P account per entry
+    /// (400 `JE_AR_AP_ONE_PER_ENTRY`).
+    pub const JE_NAMES: &'static str = "je-names-v1";
+    /// P15 part A: `txnNumber` on journal entries and
+    /// `GET /journal-entries/next-number`.
+    pub const JE_NUMBER: &'static str = "je-number-v1";
+    /// P15 part A: `isAdjusting` on journal entries and the report filter
+    /// `adjusting=include|exclude|only`.
+    pub const JE_ADJUSTING: &'static str = "je-adjusting-v1";
+    /// P15 part A: `reverseOn` (after the date) creates a linked reversing
+    /// entry; the read-back gives the link.
+    pub const JE_REVERSING: &'static str = "je-reversing-v1";
+    /// P15 part A: every posting's debits must equal its credits exactly at
+    /// 4 places (each line rounded half away from zero, no 0.0001
+    /// tolerance), else 400 "Transaction does not balance".
+    pub const BALANCE_EXACT: &'static str = "balance-exact-v1";
+    /// P15 part A (U-64): recurring copies keep line names, billable marks,
+    /// a journal entry's basis and adjusting mark; `PUT /recurring/{id}`
+    /// takes `expectedUpdatedAt` (409 `STALE_SCHEDULE`).
+    pub const RECURRING_GUARD: &'static str = "recurring-guard-v1";
+    /// P15 U-62: `/templates` (stored drafts, groups, `from-transaction`,
+    /// `draft`, `enter`, `skip`, `resolve`).
+    pub const TEMPLATES: &'static str = "templates-v1";
+    /// P15 U-63: `POST /recurring/run-due` and `GET /recurring/attention`.
+    pub const RECURRING_RUN_DUE: &'static str = "recurring-run-due-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {

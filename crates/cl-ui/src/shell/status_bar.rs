@@ -43,6 +43,20 @@ const LIST_HINTS: [(&str, &str); 2] = [
 /// Forms with neither a lines grid nor a name list (Transfer Funds).
 const REVERT_HINTS: [(&str, &str); 1] = [("form.revert", "status.hint.revert")];
 
+/// The Templates list's keys (P15): Enter uses the selected template.
+const TEMPLATES_HINTS: [(&str, &str); 4] = [
+    ("list.new", "status.hint.new_group"),
+    ("edit.edit_transaction", "status.hint.edit"),
+    ("list.delete", "status.hint.delete"),
+    ("form.revert", "status.hint.close"),
+];
+
+/// Templates Due's keys (P15): Enter does the row's main action.
+const TEMPLATES_DUE_HINTS: [(&str, &str); 2] = [
+    ("edit.edit_transaction", "status.hint.open_form"),
+    ("form.revert", "status.hint.close"),
+];
+
 /// The form hints of a window kind: Write Check's for forms with a lines
 /// grid, fewer for the others; `None` for other windows.
 fn form_hints(kind: &str) -> Option<&'static [(&'static str, &'static str)]> {
@@ -51,7 +65,8 @@ fn form_hints(kind: &str) -> Option<&'static [(&'static str, &'static str)]> {
         | "vendors.card_charge"
         | "vendors.personal_funds"
         | "banking.deposit"
-        | "banking.loan_payment" => Some(&CHECK_HINTS),
+        | "banking.loan_payment"
+        | "company.journal_entry" => Some(&CHECK_HINTS),
         "banking.owner_money" | "clients.daily_sales" => Some(&LIST_HINTS),
         "banking.transfer" => Some(&REVERT_HINTS),
         _ => None,
@@ -87,6 +102,19 @@ fn keymap_hints(list: &[(&str, &str)]) -> Vec<Hint> {
 pub fn hints_for(active: Option<CommandId>) -> Vec<Hint> {
     match active.map(CommandId::as_str) {
         Some("banking.register") => {}
+        Some(kind @ ("lists.templates" | "lists.templates_due")) => {
+            let (enter, rest): (&str, &[(&str, &str)]) = if kind == "lists.templates" {
+                ("status.hint.use", &TEMPLATES_HINTS)
+            } else {
+                ("status.hint.enter_or_open", &TEMPLATES_DUE_HINTS)
+            };
+            let mut out = vec![Hint {
+                chips: vec!["Enter".to_string()],
+                label: t(enter),
+            }];
+            out.extend(keymap_hints(rest));
+            return out;
+        }
         Some(kind) if form_hints(kind).is_some() => {
             let mut out = vec![Hint {
                 chips: vec!["Tab".to_string()],
@@ -124,9 +152,26 @@ pub fn engine_text(view: &HostView) -> Option<String> {
     }
 }
 
-/// Draw the bar.
-pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) {
+/// The "template entries need you" chip text (P15), when any dates wait
+/// (it counts dates, as Templates Due lists them).
+#[must_use]
+pub fn templates_chip(n: usize) -> Option<String> {
+    match n {
+        0 => None,
+        1 => Some(t("status.templates_need_you.one")),
+        n => Some(crate::i18n::t_with(
+            "status.templates_need_you",
+            &[("n", &n.to_string())],
+        )),
+    }
+}
+
+/// Draw the bar. True when the owner clicked the "templates need you"
+/// chip (the shell opens Templates Due).
+pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) -> bool {
     let engine = engine_text(&shell.host_view());
+    let chip = templates_chip(shell.templates_need_you());
+    let mut chip_clicked = false;
     egui::Panel::bottom("status_bar")
         .exact_size(HEIGHT)
         .frame(
@@ -154,6 +199,14 @@ pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) {
                     && !narrow
                 {
                     ui.label(small(ai.clone()));
+                }
+                if let Some(chip) = &chip
+                    && ui
+                        .link(RichText::new(chip).size(12.0).color(tokens.warn_text))
+                        .on_hover_text(t("status.templates_need_you.tip"))
+                        .clicked()
+                {
+                    chip_clicked = true;
                 }
                 if let Some(toast) = shell.toast_text() {
                     // Leave room for the shortcut chips on the right so the
@@ -191,4 +244,5 @@ pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) {
                 }
             });
         });
+    chip_clicked
 }

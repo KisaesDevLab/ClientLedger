@@ -153,6 +153,7 @@ impl DepositScreen {
             {
                 self.refund.open = !self.refund.open;
             }
+            self.template_slot(ui);
         });
     }
 
@@ -683,6 +684,10 @@ impl DepositScreen {
                 done
             }
             "form.revert" => self.revert_field(),
+            "form.save_as_template" => {
+                self.save_as_template();
+                true
+            }
             _ => false,
         }
     }

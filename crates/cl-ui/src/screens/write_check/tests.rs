@@ -918,7 +918,9 @@ fn every_input_is_named_by_its_label_and_the_toolbar_matches_the_plan() {
             .find(|(r, n, _)| *r == Role::Button && n == "Print")
             .expect("Print");
         assert!(print.2, "Print is off until P19");
-        for name in ["Save as Template", "Memorize", "Pay online", "Items"] {
+        // P15 adds Save as Template (Q-256); the rest stay out.
+        assert!(has(Role::Button, "Save as Template"));
+        for name in ["Memorize", "Pay online", "Items"] {
             assert!(!nodes.iter().any(|(_, n, _)| n.starts_with(name)), "{name}");
         }
         let named = |want: &str| nodes.iter().any(|(_, n, _)| n.starts_with(want));

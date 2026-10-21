@@ -9,9 +9,12 @@ pub mod checks;
 pub mod contacts;
 pub mod daily_sales;
 pub mod deposits;
+pub mod journal;
 pub mod lists;
 pub mod money;
 pub mod register;
+pub mod template_store;
+pub mod templates;
 
 /// One demo company card.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +80,23 @@ pub struct DemoState {
     pub entity_type: cl_api::EntityType,
     /// The demo company's AI switches (Preferences > AI).
     pub ai: DemoAi,
+    /// Stored templates (P15), deleted ones included (soft delete).
+    pub templates: Vec<templates::DemoTemplate>,
+    /// Template groups (P15).
+    pub template_groups: Vec<templates::DemoTemplateGroup>,
+    /// Every handled occurrence under its unique `(template, date)` key
+    /// (P15: each due date posts exactly once).
+    pub occurrences:
+        std::collections::BTreeMap<(cl_core::ids::TemplateId, CalendarDate), templates::Occ>,
+    /// Journal entries' P15 fields (names, tags, Adjusting, reversals).
+    pub journal: journal::DemoJournals,
+    /// The practice company's templates were added (P15 WP-D; once, on
+    /// the first open through Open Company).
+    pub templates_seeded: bool,
+    /// Templates whose owner (last editor, else creator) lost the kind's
+    /// permission: the run skips their dates with `PERMISSION` (the demo
+    /// has one user; tests and scenarios set this).
+    pub templates_owner_revoked: std::collections::BTreeSet<cl_core::ids::TemplateId>,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -162,6 +182,12 @@ impl DemoState {
             daily_sales: daily_sales::DemoDailySales::default(),
             entity_type: cl_api::EntityType::SingleMemberLlc,
             ai: DemoAi::default(),
+            templates: Vec::new(),
+            template_groups: Vec::new(),
+            occurrences: std::collections::BTreeMap::new(),
+            journal: journal::DemoJournals::default(),
+            templates_seeded: false,
+            templates_owner_revoked: std::collections::BTreeSet::new(),
         }
     }
 

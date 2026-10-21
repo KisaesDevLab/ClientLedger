@@ -77,9 +77,11 @@
 - `Ctrl+Insert` Insert Line
 - `Ctrl+Delete` Delete Line
 - `Ctrl+D` Delete Transaction
+- `Ctrl+M` Save as Template
 - `Ctrl+N` New List Entry
 - `Ctrl+Shift+I` Make Inactive or Active Again
 - `Ctrl+Shift+H` Include Inactive Entries
 - `Ctrl+Shift+Q` Account or Transaction Report
+- `Delete` Delete List Entry
 
 **Dates**: `+ / -` Next / previous day; `T` Today; `M / H` First / last day of the month; `Y / R` First / last day of the year; `W / K` First / last day of the week

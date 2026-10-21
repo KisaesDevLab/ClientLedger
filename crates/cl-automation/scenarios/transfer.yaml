@@ -32,6 +32,7 @@ steps:
   - assert_state: {key: screen.loaded, equals: true}
   - click: {role: button, label: Clear}
   - assert_state: {key: screen.mode, equals: new}
+  - assert_exists: {role: button, label: Save as Template}
   - assert_value: {target: {role: combo_box, label: Transfer from}, equals: "1010 · Operating Checking"}
   # The label in the body font, the figure in mono (two labels); the side
   # panel shows the same engine balance.

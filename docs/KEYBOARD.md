@@ -50,6 +50,7 @@ When two scopes use the same keys, the innermost one wins: a form beats a window
 | `Ctrl+Shift+I` | Make Inactive or Active Again | `list.toggle_active` |
 | `Ctrl+Shift+H` | Include Inactive Entries | `list.show_inactive` |
 | `Ctrl+Shift+Q` | Account or Transaction Report | `list.quick_report` |
+| `Delete` | Delete List Entry | `list.delete` |
 | `Ctrl+Shift+O` | Move Window to Its Own Window | `window.pop_out` |
 
 ## In a form or grid
@@ -67,6 +68,7 @@ When two scopes use the same keys, the innermost one wins: a form beats a window
 | `Ctrl+Insert` | Insert Line | `form.insert_line` |
 | `Ctrl+Delete` | Delete Line | `form.delete_line` |
 | `Ctrl+D` | Delete Transaction | `form.delete_item` |
+| `Ctrl+M` | Save as Template | `form.save_as_template` |
 
 ## Always the same in forms and grids
 
@@ -108,7 +110,7 @@ Find these from the menus or with `Ctrl+K`.
 
 - **File:** New Company, Close Company, Back Up Company, Restore a Backup, Make Portable Copy, Export All Data, Full Database Backup (Utilities), Delete Company
 - **Edit:** Void Transaction
-- **Lists:** Item List, Tags, Terms, Payment Methods, Import or Export a List
+- **Lists:** Item List, Tags, Terms, Payment Methods, Templates, Import or Export a List
 - **Customers:** Customers & Jobs, Daily Sales Summary, Credit Memo or Refund, Statements
 - **Vendors:** Vendors, Paid with Personal Funds
 - **Banking:** Pay Yourself or Put Money In, Loan Payment, Import Bank File, Bank Feed

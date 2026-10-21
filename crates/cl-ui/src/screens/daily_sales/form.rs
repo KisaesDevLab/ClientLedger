@@ -172,6 +172,7 @@ impl DailySalesScreen {
             {
                 self.start_void();
             }
+            self.template_slot(ui);
         });
     }
 
@@ -824,6 +825,10 @@ impl DailySalesScreen {
     pub(crate) fn form_command(&mut self, id: CommandId) -> bool {
         match id.as_str() {
             super::KIND => true,
+            "form.save_as_template" => {
+                self.save_as_template();
+                true
+            }
             "form.save_new" => {
                 self.start_save(SaveIntent::SaveAndNew, None);
                 true

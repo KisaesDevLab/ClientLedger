@@ -45,6 +45,9 @@ pub enum CompanyEvent {
     OpenWindow(cl_model::CommandId),
     /// A short confirmation for the toast line (i18n key).
     Toast(&'static str),
+    /// Take this toast (i18n key) off the status bar now, if it is the
+    /// one showing (P15: a refusal the owner has since fixed).
+    ClearToast(&'static str),
     /// A company switch was refused because a window has unsaved edits:
     /// the shell shows the close prompt for the first one.
     PromptDirty,
@@ -56,6 +59,9 @@ pub enum CompanyEvent {
     /// Open this saved transaction in the form of this kind (P14: a grouped
     /// deposit or a daily-sales day opened from a register row, Q-P14g).
     OpenRecord(cl_model::CommandId, cl_core::ids::TransactionId),
+    /// Open a fresh form filled from a template (P15: Templates "Use",
+    /// Templates Due "Open in form").
+    OpenTemplate(Box<crate::forms::template::TemplateOpen>),
     /// The owner saved new user preferences (theme, zoom, dates): the
     /// shell applies and persists them.
     UserPrefs(cl_settings::UserPrefs),
@@ -87,6 +93,9 @@ pub struct CompanyLink {
     demo: Option<Mutex<demo::DemoState>>,
     /// "Data changed" notices between windows (Q-262).
     bus: crate::data_bus::DataBus,
+    /// The last catch-up run's answer, shared by the runner and the
+    /// Templates Due window (P15).
+    due: Mutex<crate::templates_runner::DueBoard>,
 }
 
 impl std::fmt::Debug for CompanyLink {
@@ -125,6 +134,7 @@ impl CompanyLink {
             backup_dir,
             demo: None,
             bus: crate::data_bus::DataBus::new(),
+            due: Mutex::new(crate::templates_runner::DueBoard::default()),
         }
     }
 
@@ -144,6 +154,7 @@ impl CompanyLink {
             backup_dir: dir.join("Backups"),
             demo: Some(Mutex::new(demo::DemoState::new())),
             bus: crate::data_bus::DataBus::new(),
+            due: Mutex::new(crate::templates_runner::DueBoard::default()),
         }
     }
 
@@ -280,6 +291,11 @@ impl CompanyLink {
     #[must_use]
     pub fn bus(&self) -> &crate::data_bus::DataBus {
         &self.bus
+    }
+
+    /// The catch-up board (the last run's answer, "Check now"; P15).
+    pub fn due(&self) -> std::sync::MutexGuard<'_, crate::templates_runner::DueBoard> {
+        self.due.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Queue an event for the shell.

@@ -819,6 +819,7 @@ dependencies = [
  "chrono",
  "cl-api",
  "cl-core",
+ "cl-host",
  "cl-pg",
  "cl-settings",
  "serde",

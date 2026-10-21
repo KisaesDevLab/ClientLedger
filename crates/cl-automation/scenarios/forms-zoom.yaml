@@ -1,9 +1,10 @@
-# Write Check and the seven P14 forms at the minimum window (960 x 640) at 200% zoom
+# Write Check, the seven P14 forms, Make Journal Entry, Templates, Templates
+# Due and the Template dialog (P15) at the minimum window (960 x 640) at 200% zoom
 # (480 x 320 points): the shared header wraps (toolbar note, title above the
 # picker), label+input groups move whole to the next line, and nothing is
 # drawn over anything or cut inside its own field. Ignored: the tab strip
-# (it scrolls, with the » list) and the bottom band, where the scrolled form
-# runs under the status bar. Opens and closes each form with its shortcut or
+# (it scrolls, with the » list, so a tab may sit left of the window) and the
+# bottom band, where the scrolled form runs under the status bar. Opens and closes each form with its shortcut or
 # command; nothing is saved.
 name: forms-zoom
 description: The transaction forms at the minimum window (960 x 640) and 200% zoom, nothing drawn over anything.
@@ -17,7 +18,7 @@ steps:
   - screenshot: deposit-z200
   - assert_no_clipping: &zoomed
       ignore:
-        - {x: 0, y: 70, width: 480, height: 40}
+        - {x: -4000, y: 70, width: 8480, height: 40}
         - {x: 0, y: 260, width: 480, height: 80}
   - key: Escape
   - key: Ctrl+T
@@ -50,6 +51,28 @@ steps:
   - assert_state: {key: screen.screen, equals: write_check}
   - screenshot: write-check-z200
   - assert_no_clipping: *zoomed
+  # The Template dialog (P15), from the demo's filled-in check.
+  - key: Ctrl+M
+  - assert_exists: {role: text_input, label: Name}
+  - screenshot: template-dialog-z200
+  - assert_no_clipping: *zoomed
+  - click: {role: button, label: Cancel}
+  - key: Ctrl+J
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - assert_state: {key: screen.loaded, equals: true}
+  - screenshot: journal-z200
+  - assert_no_clipping: *zoomed
+  - key: Escape
+  - command: lists.templates
+  - assert_state: {key: screen.screen, equals: templates}
+  - screenshot: templates-z200
+  - assert_no_clipping: *zoomed
+  - command: file.close_window
+  - command: lists.templates_due
+  - assert_state: {key: screen.screen, equals: templates_due}
+  - screenshot: templates-due-z200
+  - assert_no_clipping: *zoomed
+  - command: file.close_window
   - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}
   - click: {role: tab, label: Home}

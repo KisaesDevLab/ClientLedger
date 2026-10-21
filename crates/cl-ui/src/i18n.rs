@@ -65,9 +65,13 @@ mod loan_payment;
 mod owner_money;
 mod personal_funds;
 mod transfer;
+// P15 (one module per screen).
+mod journal_entry;
+mod templates;
+mod templates_due;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 16] = [
+const TABLES: [&[(&str, &str)]; 19] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -84,6 +88,9 @@ const TABLES: [&[(&str, &str)]; 16] = [
     owner_money::ENGLISH,
     personal_funds::ENGLISH,
     loan_payment::ENGLISH,
+    journal_entry::ENGLISH,
+    templates::ENGLISH,
+    templates_due::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -166,6 +173,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("status.hint.list", "list"),
     ("status.hint.revert", "revert"),
     ("status.hint.open_form", "open form"),
+    ("status.hint.use", "use"),
+    ("status.hint.enter_or_open", "enter or open"),
+    ("status.hint.new_group", "new group"),
+    ("status.hint.edit", "edit"),
+    ("status.hint.close", "close"),
     ("toast.not_here", "That does not apply to this screen."),
     ("toast.help_later", "Help for this screen is not available yet."),
     // Palette and overlay

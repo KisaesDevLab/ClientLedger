@@ -45,6 +45,7 @@ pub fn line(account: AccountId, side: Side) -> JeLine {
         side,
         description: None,
         tag: None,
+        contact: None,
     }
 }
 

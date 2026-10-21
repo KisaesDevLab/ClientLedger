@@ -24,6 +24,8 @@ zip = { version = "9.0.3", default-features = false }
 
 [dev-dependencies]
 cl-api = { path = "../cl-api", features = ["test-support"] }
+# The practice-company test against the real engine (tests/practice_live.rs).
+cl-host = { path = "../cl-host" }
 tempfile = "3.27.0"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6.5"

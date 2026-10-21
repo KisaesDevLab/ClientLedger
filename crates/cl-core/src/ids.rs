@@ -149,6 +149,12 @@ typed_id!(
     DailyLineId,
     /// One business day of daily sales (the engine's daily-sales entry).
     DailyEntryId,
+    /// A stored transaction template (P15, `templates-v1`).
+    TemplateId,
+    /// A group of templates.
+    TemplateGroupId,
+    /// One catch-up run (`runId`; a repeat call with it is harmless).
+    RunId,
 );
 
 #[cfg(test)]

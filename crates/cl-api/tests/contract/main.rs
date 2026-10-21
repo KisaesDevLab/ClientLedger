@@ -26,6 +26,7 @@ mod contract_errors;
 mod contract_harness;
 mod contract_items;
 mod contract_journal;
+mod contract_journal_entries;
 mod contract_lifecycle;
 mod contract_list_csv;
 mod contract_logging;
@@ -35,8 +36,10 @@ mod contract_preferences;
 mod contract_register;
 mod contract_register_property;
 mod contract_resources;
+mod contract_run_due;
 mod contract_session;
 mod contract_tags;
+mod contract_templates;
 mod contract_write_check;
 
 use support::{EngineMode, TestFn, run_suite};
@@ -245,6 +248,35 @@ fn main() -> std::process::ExitCode {
             "deposits::clearing_warning_on_create_and_edit",
             contract_deposits::clearing_warning_on_create_and_edit,
         ),
+        // P15 lane J: Make Journal Entry (part A capabilities PENDING).
+        (
+            "journal_entries::engine_refuses_unbalanced_raw",
+            contract_journal_entries::engine_refuses_unbalanced_raw,
+        ),
+        (
+            "journal_entries::exact_balance_no_tolerance",
+            contract_journal_entries::exact_balance_no_tolerance,
+        ),
+        (
+            "journal_entries::ar_ap_names",
+            contract_journal_entries::ar_ap_names,
+        ),
+        (
+            "journal_entries::numbering",
+            contract_journal_entries::numbering,
+        ),
+        (
+            "journal_entries::adjusting_round_trip",
+            contract_journal_entries::adjusting_round_trip,
+        ),
+        (
+            "journal_entries::reversing_creates_linked_entry_on_date",
+            contract_journal_entries::reversing_creates_linked_entry_on_date,
+        ),
+        (
+            "journal_entries::editing_without_reverse_on_removes_the_reversal",
+            contract_journal_entries::editing_without_reverse_on_removes_the_reversal,
+        ),
         (
             "register_property::balance_holds_after_random_edits",
             contract_register_property::balance_holds_after_random_edits,
@@ -436,6 +468,60 @@ fn main() -> std::process::ExitCode {
         (
             "money_helpers::loan_payments_match_the_lender",
             contract_money_helpers::loan_payments_match_the_lender,
+        ),
+        // P15 lane T: templates and the catch-up run (PENDING until the pin
+        // carries templates-v1 / recurring-run-due-v1).
+        (
+            "templates::draft_round_trip",
+            contract_templates::draft_round_trip,
+        ),
+        (
+            "templates::grouped_deposit_refused",
+            contract_templates::grouped_deposit_refused,
+        ),
+        (
+            "templates::stale_on_replace",
+            contract_templates::stale_on_replace,
+        ),
+        (
+            "run_due::monthly_catch_up_exactly_once_across_restarts",
+            contract_run_due::monthly_catch_up_exactly_once_across_restarts,
+        ),
+        (
+            "run_due::parallel_runs_post_once",
+            contract_run_due::parallel_runs_post_once,
+        ),
+        (
+            "run_due::lost_reply_same_run_id",
+            contract_run_due::lost_reply_same_run_id,
+        ),
+        (
+            "run_due::closed_period_skipped_then_entered_with_password",
+            contract_run_due::closed_period_skipped_then_entered_with_password,
+        ),
+        (
+            "run_due::inactive_account_skipped_no_partial",
+            contract_run_due::inactive_account_skipped_no_partial,
+        ),
+        (
+            "run_due::remind_mode_lists_not_posts",
+            contract_run_due::remind_mode_lists_not_posts,
+        ),
+        (
+            "run_due::ends_after_count",
+            contract_run_due::ends_after_count,
+        ),
+        (
+            "run_due::catch_up_capped_continues_next_call",
+            contract_run_due::catch_up_capped_continues_next_call,
+        ),
+        (
+            "run_due::owner_without_permission_skipped",
+            contract_run_due::owner_without_permission_skipped,
+        ),
+        (
+            "run_due::journal_template_keeps_names_and_adjusting",
+            contract_run_due::journal_template_keeps_names_and_adjusting,
         ),
         (
             "lifecycle::ten_switches_under_two_seconds",
