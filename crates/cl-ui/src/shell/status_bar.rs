@@ -34,6 +34,30 @@ const CHECK_HINTS: [(&str, &str); 3] = [
     ("form.revert", "status.hint.revert"),
 ];
 
+/// Forms with a name or account list but no lines grid (Ctrl+L, Esc).
+const LIST_HINTS: [(&str, &str); 2] = [
+    ("edit.open_list", "status.hint.list"),
+    ("form.revert", "status.hint.revert"),
+];
+
+/// Forms with neither a lines grid nor a name list (Transfer Funds).
+const REVERT_HINTS: [(&str, &str); 1] = [("form.revert", "status.hint.revert")];
+
+/// The form hints of a window kind: Write Check's for forms with a lines
+/// grid, fewer for the others; `None` for other windows.
+fn form_hints(kind: &str) -> Option<&'static [(&'static str, &'static str)]> {
+    match kind {
+        "vendors.write_check"
+        | "vendors.card_charge"
+        | "vendors.personal_funds"
+        | "banking.deposit"
+        | "banking.loan_payment" => Some(&CHECK_HINTS),
+        "banking.owner_money" | "clients.daily_sales" => Some(&LIST_HINTS),
+        "banking.transfer" => Some(&REVERT_HINTS),
+        _ => None,
+    }
+}
+
 /// One hint on the right of the bar: its key chips and short label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hint {
@@ -57,18 +81,18 @@ fn keymap_hints(list: &[(&str, &str)]) -> Vec<Hint> {
 }
 
 /// The hints for the window in front (`None` when no window is open): the
-/// register and Write Check show their own, every other screen the general
-/// ones.
+/// register and the transaction forms show their own, every other screen
+/// the general ones.
 #[must_use]
 pub fn hints_for(active: Option<CommandId>) -> Vec<Hint> {
     match active.map(CommandId::as_str) {
         Some("banking.register") => {}
-        Some("vendors.write_check") => {
+        Some(kind) if form_hints(kind).is_some() => {
             let mut out = vec![Hint {
                 chips: vec!["Tab".to_string()],
                 label: t("status.hint.next_field"),
             }];
-            out.extend(keymap_hints(&CHECK_HINTS));
+            out.extend(keymap_hints(form_hints(kind).unwrap_or_default()));
             return out;
         }
         _ => return keymap_hints(&HINTS),

@@ -360,6 +360,23 @@ fn status_bar_hints_follow_the_window_in_front() {
     assert_eq!(check[1].chips, vec![chip("form.insert_line")]);
     assert_eq!(check[2].chips, vec![chip("edit.open_list")]);
     assert_eq!(check[3].chips, vec![chip("form.revert")]);
+    // The P14 forms: the same with a lines grid, fewer without one.
+    for kind in [
+        "vendors.card_charge",
+        "vendors.personal_funds",
+        "banking.deposit",
+        "banking.loan_payment",
+    ] {
+        assert_eq!(hints_for(Some(CommandId::new(kind))), check, "{kind}");
+    }
+    for kind in ["banking.owner_money", "clients.daily_sales"] {
+        let h = hints_for(Some(CommandId::new(kind)));
+        let labels: Vec<&str> = h.iter().map(|h| h.label.as_str()).collect();
+        assert_eq!(labels, ["next field", "list", "revert"], "{kind}");
+    }
+    let transfer = hints_for(Some(CommandId::new("banking.transfer")));
+    let labels: Vec<&str> = transfer.iter().map(|h| h.label.as_str()).collect();
+    assert_eq!(labels, ["next field", "revert"]);
 }
 
 #[test]
