@@ -567,3 +567,23 @@ fn esc_reverts_the_focused_field_then_lets_the_window_close() {
     assert_eq!(s.header.current().memo, "");
     assert!(!s.command(CommandId::new("form.revert")));
 }
+
+#[test]
+fn save_as_template_is_off_on_an_empty_entry_and_says_why() {
+    use crate::forms::template::SaveAsTemplate;
+    let (mut s, _link, _dir) = screen();
+    s.clear();
+    assert_eq!(
+        s.template_state(),
+        SaveAsTemplate::Disabled(t(TEMPLATE_EMPTY))
+    );
+    // Ctrl+M on it: the plain reason, no dialog.
+    assert!(s.save_as_template());
+    assert_eq!(s.notice, Some(TEMPLATE_EMPTY));
+    assert!(s.problems.is_empty());
+    set_lines(
+        &mut s,
+        &[(6100, "10.00", "", None), (1010, "", "10.00", None)],
+    );
+    assert_eq!(s.template_state(), SaveAsTemplate::Enabled);
+}

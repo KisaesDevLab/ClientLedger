@@ -2,7 +2,7 @@
 //! the lines grid, the totals line and the action row.
 
 use cl_model::CommandId;
-use cl_model::forms::journal::{JournalProblem, save_blocker, totals};
+use cl_model::forms::journal::totals;
 use eframe::egui::{self, Align, CornerRadius, Layout, Margin, RichText, Stroke, Ui, Vec2};
 
 use super::{JournalScreen, field};
@@ -350,17 +350,17 @@ impl JournalScreen {
         });
     }
 
-    /// Clear · Save & New · Save & Close. The save buttons are off while
-    /// the entry can't save (unbalanced, fewer than two lines), with the
-    /// reason in their tooltip.
+    /// Clear · Save & New · Save & Close. As in Write Check, the save
+    /// buttons are on whenever the entry can change; a click on one that
+    /// can't save (unbalanced, fewer than two lines) is refused with the
+    /// reasons under the lines and in the status bar. A read-only entry
+    /// turns them off, the reason in their tooltip.
     fn actions_ui(&mut self, ui: &mut Ui, read_only: bool) {
         let idle = self.idle();
-        let blocker = save_blocker(&self.compose());
-        let why = match (read_only, blocker) {
-            (true, _) => self.read_only().map(t),
-            (false, Some(JournalProblem::Unbalanced { .. })) => Some(t("journal.save_blocked")),
-            (false, Some(p)) => Some(t(p.key().0)),
-            (false, None) => None,
+        let why = if read_only {
+            self.read_only().map(t)
+        } else {
+            None
         };
         let can_save = idle && why.is_none();
         let mut clicked = None;

@@ -17,6 +17,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("journal.balance_here.tip", "Puts the amount that makes debits equal credits on the line with the cursor (or the next blank line)."),
     ("journal.balance_here.none", "Debits already equal credits."),
     ("journal.save_blocked", "Debits and credits must be equal before you can save."),
+    ("journal.template.empty", "There's nothing to save as a template yet. Enter the entry's lines first."),
     ("journal.read_only.void", "This entry was voided. It stays in your books for the record but can't be changed."),
     ("journal.read_only.shape", "This entry can't be changed here (it was made in a way this form can't show)."),
     ("journal.changed_elsewhere", "This entry was changed somewhere else. Reload it to see the change."),

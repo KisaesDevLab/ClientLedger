@@ -78,6 +78,9 @@ mod field {
     pub const REVERSE: u64 = 5;
 }
 
+/// Why Save as Template is off on an empty entry.
+const TEMPLATE_EMPTY: &str = "journal.template.empty";
+
 /// What the closing-date password is for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Pending {
@@ -683,7 +686,10 @@ impl JournalScreen {
     /// The Save as Template button.
     pub(crate) fn template_state(&self) -> SaveAsTemplate {
         if self.has(Capabilities::TEMPLATES) {
-            self.template.button(&self.link, None)
+            // Off on an empty entry, saying why (nothing to save yet).
+            let empty = self.lines.value().used().next().is_none();
+            let why = empty.then(|| t(TEMPLATE_EMPTY));
+            self.template.button(&self.link, why)
         } else {
             SaveAsTemplate::Disabled(t("template.save.unavailable"))
         }
@@ -695,7 +701,12 @@ impl JournalScreen {
     /// template).
     pub(crate) fn save_as_template(&mut self) -> bool {
         if self.template_state() != SaveAsTemplate::Enabled {
-            self.notice = Some("template.save.unavailable");
+            let empty = self.lines.value().used().next().is_none();
+            self.notice = Some(if empty && self.has(Capabilities::TEMPLATES) {
+                TEMPLATE_EMPTY
+            } else {
+                "template.save.unavailable"
+            });
             return true;
         }
         if !self.lines.commit() {

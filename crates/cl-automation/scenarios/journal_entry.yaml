@@ -1,16 +1,15 @@
-# Make Journal Entry (P15 plan §6 Acceptance 1) against `clientledger --demo`:
-# Debit 1,200.00 to 6100 Fuel and credit 1,100.00 to 1010 Operating
-# Checking leaves a 100.00 difference; Save & Close is off and Alt+S is
-# refused with nothing saved; the next line takes the balancing 100.00 when
-# it gets an account; then it saves, opens from the register with Enter
-# and Ctrl+E, and is voided. Then an entry dated in
-# the closed period: an Accounts Receivable line needs a customer, a second
-# A/R-or-A/P line is refused, Adjusting and Reverse on 11/30 save with the
-# closing-date password; Prev shows the reversal, whose link opens the
-# original ("Reversed by"); an edit and the delete each ask for the
-# password. Light and dark run in one app: the first entry is voided and the
-# second deleted (with its reversal), so the scenario repeats. All data is
-# synthetic.
+# Make Journal Entry (P15 plan §6 Acceptance 1) against `clientledger
+# --demo`: Debit 1,200.00 to 6100 Fuel and credit 1,100.00 to 1010 Operating
+# Checking leaves a 100.00 difference; Save & Close stays on (Write Check)
+# and Alt+S is refused with nothing saved; the next line takes the balancing
+# 100.00 when it gets an account; then it saves, opens from the register
+# with Enter and Ctrl+E, and is voided. Then an entry dated in the closed
+# period: an Accounts Receivable line needs a customer, a second A/R-or-A/P
+# line is refused, Adjusting and Reverse on 11/30 save with the closing-date
+# password; Prev shows the reversal, whose link opens the original
+# ("Reversed by"); an edit and the delete each ask for the password. Light
+# and dark run in one app: the first entry is voided and the second deleted
+# (with its reversal), so the scenario repeats. All data is synthetic.
 name: journal_entry
 description: Unbalanced entry refused, balance helper, save, void; A/R name rule, one A/R-or-A/P line, Adjusting, Reverse on, edit and delete with the closing password.
 steps:
@@ -22,7 +21,11 @@ steps:
   - assert_state: {key: screen.loaded, equals: true}
   - click: {role: button, label: Clear}
   - assert_state: {key: screen.mode, equals: new}
-  - assert_state: {key: screen.template.button, equals: enabled}
+  # Nothing to save as a template yet: Save as Template is off.
+  - assert_state: {key: screen.template.button, equals: disabled}
+  - key: Ctrl+M
+  - assert_exists: {role: label, label: "There's nothing to save as a template yet. Enter the entry's lines first."}
+  - assert_state: {key: screen.template.dialog, equals: null}
   - assert_exists: {label_contains: "Journal entry lines"}
   - assert_exists: {label_contains: "Account, line 1"}
   # --- 1. Debit 1,200.00 to 6100, credit 1,100.00 to 1010 ------------------
