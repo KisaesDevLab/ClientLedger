@@ -2,7 +2,7 @@
 
 **Current phase:** P15 — Journal entries, Templates (memorized) and recurring (Next)
 **Status:** P14 built on `phase/P14-money-forms`; PR to open
-**Engine commit:** `f78583edabe88929f92c10521fefdd1f287c3d81` (`main`, pinned 2026-10-20 after engine PR #159: deposit-grouping-v1, deposit-cashback-v1, vendor-refund-v1, equity-roles-v1, feed-deposit-groupings-v1, daily-sales-lock-v1, migration 0223; bump per Q-02)
+**Engine commit:** `886c6b5d30f9cc153dbfcefdfa6d372f335bc9a7` (`main`, pinned 2026-10-21 after engine PRs #160 and #161: je-names-v1, je-number-v1, je-adjusting-v1, je-reversing-v1, balance-exact-v1, recurring-guard-v1, templates-v1, recurring-run-due-v1, migrations 0224 and 0225; bump per Q-02)
 **Last updated:** 2026-10-20
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 

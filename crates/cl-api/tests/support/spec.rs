@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 /// f78583e (engine PR #159) the P14 feed deposit groupings and equity
 /// roles are. The P15 journal entry number, templates and run-due routes
 /// are listed until their engine PRs land and the pin moves.
-pub const OUTSIDE_SPEC: [(&str, &str); 25] = [
+pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -35,26 +35,6 @@ pub const OUTSIDE_SPEC: [(&str, &str); 25] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
-    // P15: coded against target/plans/P15.md §2 and P15-engine-templates.md
-    // until the part A and part B engine PRs land (`je-number-v1`,
-    // `templates-v1`, `recurring-run-due-v1`).
-    ("GET", "/api/v1/journal-entries/next-number"),
-    ("GET", "/api/v1/templates"),
-    ("POST", "/api/v1/templates"),
-    ("POST", "/api/v1/templates/from-transaction"),
-    ("GET", "/api/v1/templates/groups"),
-    ("POST", "/api/v1/templates/groups"),
-    ("PUT", "/api/v1/templates/groups/{id}"),
-    ("DELETE", "/api/v1/templates/groups/{id}"),
-    ("GET", "/api/v1/templates/{id}"),
-    ("PUT", "/api/v1/templates/{id}"),
-    ("DELETE", "/api/v1/templates/{id}"),
-    ("GET", "/api/v1/templates/{id}/draft"),
-    ("POST", "/api/v1/templates/{id}/enter"),
-    ("POST", "/api/v1/templates/{id}/occurrences/{date}/skip"),
-    ("POST", "/api/v1/templates/{id}/occurrences/{date}/resolve"),
-    ("POST", "/api/v1/recurring/run-due"),
-    ("GET", "/api/v1/recurring/attention"),
 ];
 
 /// Lowercase hex of a SHA-256.
