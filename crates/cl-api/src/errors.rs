@@ -142,6 +142,19 @@ impl ValidationError {
     pub fn issues(&self) -> &[ValidationIssue] {
         &self.issues
     }
+
+    /// A refusal naming one field, as the engine's object-shaped
+    /// `details: {field, ...}` reads (demo twins build the same).
+    pub(crate) fn for_field(code: &str, field: &str, message: &str) -> ValidationError {
+        ValidationError {
+            code: ErrorCode::parse(code),
+            message: UserText::new(message),
+            issues: vec![ValidationIssue {
+                path: Some(FieldPath(field.to_string())),
+                message: UserText::new(message),
+            }],
+        }
+    }
 }
 
 /// Input refused by cl-api before anything was sent.
@@ -665,6 +678,14 @@ fn validation(body: &EngineErrorBody) -> ValidationError {
                 })
                 .collect()
         })
+        .or_else(|| {
+            // Object-shaped details naming one field (`{field, earliest}`).
+            let field = body.pointer("/error/details/field")?.as_str()?;
+            Some(vec![ValidationIssue {
+                path: Some(FieldPath(field.to_string())),
+                message: body.text(),
+            }])
+        })
         .unwrap_or_default();
     ValidationError {
         code: body.code.clone(),
@@ -884,6 +905,24 @@ mod tests {
         );
         assert_eq!(v.code().map(ErrorCode::as_str), Some("VALIDATION_ERROR"));
         assert_eq!(v.message().as_str(), "lines: At least 2 lines required");
+    }
+
+    #[test]
+    fn validation_error_reads_an_object_detail_field() {
+        let body = r#"{"error":{"message":"Auto schedules can start no earlier than 2025-11-03","code":"VALIDATION_ERROR",
+            "details":{"field":"schedule.nextDate","earliest":"2025-11-03"}}}"#;
+        let e = err(400, body, S);
+        let ApiError::Validation(v) = &e else {
+            panic!("validation")
+        };
+        assert_eq!(v.field().map(FieldPath::as_str), Some("schedule.nextDate"));
+        assert!(crate::is_auto_start_too_early(&e));
+        let twin =
+            crate::auto_start_too_early(cl_core::CalendarDate::from_ymd(2025, 11, 3).expect("d"));
+        assert!(crate::is_auto_start_too_early(&twin));
+        // Other refusals are not it.
+        let other = r#"{"error":{"message":"x","code":"VALIDATION_ERROR","details":{"lockDate":"2026-01-01"}}}"#;
+        assert!(!crate::is_auto_start_too_early(&err(400, other, S)));
     }
 
     #[test]

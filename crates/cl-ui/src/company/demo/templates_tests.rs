@@ -4,7 +4,10 @@
 use super::*;
 use crate::company::demo::register::DEMO_CLOSING_PASSWORD;
 use crate::company::demo::template_store;
-use cl_api::{CardChargeDraft, Frequency, NewTemplate, SplitLine, TemplateSchedule, new_run_id};
+use cl_api::{
+    CardChargeDraft, Frequency, NewTemplate, SplitLine, TemplateChange, TemplateSchedule,
+    new_run_id,
+};
 use cl_core::{Money, Secret};
 
 fn d(y: i32, m: u32, day: u32) -> CalendarDate {
@@ -386,4 +389,120 @@ fn the_sample_templates_catch_up_on_the_first_open() {
     let before = owed_on_card(&live);
     assert_eq!(run(&mut live, today).posted.len(), 2);
     assert_eq!(owed_on_card(&live).checked_sub(before), Ok(m("98.00")));
+}
+
+#[test]
+fn one_call_handles_at_most_31_dates_per_schedule() {
+    let mut s = open_books();
+    let daily = TemplateSchedule {
+        frequency: Frequency::Daily,
+        ..schedule(ScheduleMode::Auto, d(2026, 1, 1), ScheduleEnd::Never)
+    };
+    let id = make(&mut s, "Daily fee", daily);
+    let other = make(
+        &mut s,
+        "Software",
+        schedule(ScheduleMode::Auto, d(2026, 1, 31), ScheduleEnd::Never),
+    );
+    let before = owed_on_card(&s);
+    let as_of = d(2026, 2, 15); // 46 daily dates due
+    let run_id = new_run_id();
+    let first = run_due(&mut s, as_of, run_id, 200, as_of).expect("run").0;
+    let mine = |r: &RunDue| r.posted.iter().filter(|p| p.template == id).count();
+    assert_eq!(mine(&first), 31, "31 dates, then capped");
+    assert!(!first.more, "a capped schedule is not `more`");
+    assert!(
+        first.posted.iter().any(|p| p.template == other),
+        "other schedules carry on"
+    );
+    let capped: Vec<_> = first
+        .skipped
+        .iter()
+        .filter(|k| k.reason == SkipReason::CatchUpCapped)
+        .collect();
+    assert_eq!(capped.len(), 1, "listed once");
+    assert_eq!(capped[0].template, id);
+    assert_eq!(capped[0].date, d(2026, 2, 1), "its next due date");
+    assert!(capped[0].new);
+    assert!(
+        !s.occurrences.contains_key(&(id, d(2026, 2, 1))),
+        "nothing recorded for it"
+    );
+    // The same run id continues: the rest posts, the earlier posts repeat.
+    let second = run_due(&mut s, as_of, run_id, 200, as_of).expect("run").0;
+    assert_eq!(mine(&second), 46);
+    assert!(second.skipped.iter().all(|k| !k.reason.is_capped()));
+    let posted = owed_on_card(&s).checked_sub(before).expect("change");
+    // 46 daily + 1 monthly (01/31) × 49.00, each exactly once.
+    assert_eq!(posted, m("2303.00"));
+}
+
+#[test]
+fn an_owner_without_permission_skips_permission() {
+    let mut s = open_books();
+    let id = make(
+        &mut s,
+        "Software",
+        schedule(ScheduleMode::Auto, d(2026, 1, 31), ScheduleEnd::Never),
+    );
+    s.templates_owner_revoked.insert(id);
+    let before = owed_on_card(&s);
+    let r = run(&mut s, d(2026, 2, 28));
+    assert_eq!(r.posted.len(), 0);
+    assert_eq!(r.skipped.len(), 2);
+    assert!(
+        r.skipped
+            .iter()
+            .all(|k| k.reason == SkipReason::Permission && k.new)
+    );
+    assert_eq!(owed_on_card(&s), before, "nothing posted");
+    // Recorded and advanced like any skip.
+    assert_eq!(
+        template_store::get(&s, id)
+            .expect("t")
+            .schedule
+            .map(|x| x.next_date),
+        Some(d(2026, 3, 31))
+    );
+}
+
+#[test]
+fn an_automatic_start_more_than_366_days_back_is_refused() {
+    let mut s = open_books();
+    // Today is 11/04/2026: the earliest automatic start is 11/03/2025.
+    let new = |s: &mut DemoState, name: &str, mode, next| {
+        template_store::create(
+            s,
+            &NewTemplate {
+                name: name.into(),
+                group: None,
+                client_form: None,
+                draft: card("10.00"),
+                schedule: Some(schedule(mode, next, ScheduleEnd::Never)),
+            },
+        )
+    };
+    let e = new(&mut s, "Too old", ScheduleMode::Auto, d(2025, 11, 2)).expect_err("refused");
+    assert!(cl_api::is_auto_start_too_early(&e), "{e:?}");
+    let ok = new(&mut s, "Just in", ScheduleMode::Auto, d(2025, 11, 3)).expect("earliest");
+    // Reminders have no limit.
+    let remind = new(&mut s, "Old reminder", ScheduleMode::Remind, d(2024, 1, 1)).expect("ok");
+    // Switching it to automatic with the old date is refused.
+    let switch = TemplateChange {
+        schedule: Some(Some(schedule(
+            ScheduleMode::Auto,
+            d(2024, 1, 1),
+            ScheduleEnd::Never,
+        ))),
+        ..TemplateChange::default()
+    };
+    let e = template_store::update(&mut s, remind.id, remind.version, &switch).expect_err("no");
+    assert!(cl_api::is_auto_start_too_early(&e));
+    // An unchanged automatic date stays editable (a later "today").
+    let rename = TemplateChange {
+        name: Some("Renamed".into()),
+        schedule: Some(ok.schedule),
+        ..TemplateChange::default()
+    };
+    assert!(template_store::update(&mut s, ok.id, ok.version, &rename).is_ok());
 }

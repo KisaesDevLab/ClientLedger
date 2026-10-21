@@ -93,6 +93,10 @@ pub struct DemoState {
     /// The practice company's templates were added (P15 WP-D; once, on
     /// the first open through Open Company).
     pub templates_seeded: bool,
+    /// Templates whose owner (last editor, else creator) lost the kind's
+    /// permission: the run skips their dates with `PERMISSION` (the demo
+    /// has one user; tests and scenarios set this).
+    pub templates_owner_revoked: std::collections::BTreeSet<cl_core::ids::TemplateId>,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -183,6 +187,7 @@ impl DemoState {
             occurrences: std::collections::BTreeMap::new(),
             journal: journal::DemoJournals::default(),
             templates_seeded: false,
+            templates_owner_revoked: std::collections::BTreeSet::new(),
         }
     }
 

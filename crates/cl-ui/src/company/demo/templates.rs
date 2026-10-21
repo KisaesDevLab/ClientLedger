@@ -17,13 +17,19 @@
 //!   the schedule on, and stays open until it is entered or dismissed;
 //! - `posted` repeats every earlier post of the same `runId` (a lost reply
 //!   is recovered by asking again);
-//! - reminders are listed, never posted or advanced.
+//! - reminders are listed, never posted or advanced;
+//! - one call posts or skips at most 31 dates per schedule; a schedule
+//!   with more due is listed once as `CATCH_UP_CAPPED` (nothing recorded);
+//! - a template whose owner lost the kind's permission skips `PERMISSION`
+//!   ([`DemoState::templates_owner_revoked`]);
+//! - an automatic start more than 366 days back is refused on create, move
+//!   or switch to automatic ([`super::template_store`]).
 //!
 //! Amounts come only from the stored drafts (the app sends a date and a
 //! run id). Also the practice company's three templates
 //! ([`seed_sample`], P15 WP-D).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use cl_api::{
@@ -121,6 +127,9 @@ pub struct Occ {
 
 /// The most occurrences one run handles (the engine's cap).
 const RUN_LIMIT_MAX: u32 = 500;
+/// The most dates of one schedule one call posts or skips
+/// (`CATCH_UP_CAPPED` beyond).
+pub const CATCH_UP_CAP: u32 = 31;
 /// Due dates listed per reminder.
 const DUE_DATES_MAX: usize = 24;
 /// The highest due count reported.
@@ -295,27 +304,46 @@ pub fn run_due(
     let lock = closing(state);
     let mut handled = 0u32;
     let mut more = false;
-    let mut failed_ids: BTreeSet<TemplateId> = BTreeSet::new();
+    // Failed or capped in this call: left out of the rest of it.
+    let mut left_out: BTreeSet<TemplateId> = BTreeSet::new();
     let mut failed = Vec::new();
     let mut new_skips = BTreeSet::new();
+    let mut per_schedule: BTreeMap<TemplateId, u32> = BTreeMap::new();
+    let mut capped: Vec<SkippedOccurrence> = Vec::new();
     let mut touched: Vec<AccountId> = Vec::new();
-    while let Some((id, on)) = first_due(state, as_of, &failed_ids) {
+    while let Some((id, on)) = first_due(state, as_of, &left_out) {
+        let Some(t) = template(state, id).cloned() else {
+            break;
+        };
+        // 31 dates of one schedule per call: listed once as capped, nothing
+        // recorded, the rest stays due for the next call.
+        if per_schedule.get(&id).copied().unwrap_or(0) >= CATCH_UP_CAP {
+            left_out.insert(id);
+            capped.push(SkippedOccurrence {
+                template: id,
+                name: t.name.clone(),
+                date: on,
+                reason: SkipReason::CatchUpCapped,
+                new: true,
+            });
+            continue;
+        }
         if handled == limit {
             more = true;
             break;
         }
-        let Some(t) = template(state, id).cloned() else {
-            break;
-        };
         // Entered early, dismissed or posted already: never twice.
         let done = state
             .occurrences
             .get(&(id, on))
             .is_some_and(|o| o.status != OccStatus::Skipped);
         if !done {
-            // Auto never posts on or before the closing date.
+            // Auto never posts on or before the closing date, nor for an
+            // owner who lost the kind's permission.
             let posted = if lock.is_some_and(|c| on <= c) {
                 Err(Some("CLOSED_PERIOD"))
+            } else if state.templates_owner_revoked.contains(&id) {
+                Err(Some("PERMISSION"))
             } else {
                 post_draft(state, &t.draft, on, None).map_err(|e| skip_reason(&e))
             };
@@ -340,7 +368,7 @@ pub fn run_due(
                 }
                 Err(None) => {
                     // Nothing claimed or advanced; the next run retries.
-                    failed_ids.insert(id);
+                    left_out.insert(id);
                     failed.push(FailedTemplate {
                         template: id,
                         reason: "INTERNAL".into(),
@@ -350,6 +378,7 @@ pub fn run_due(
             };
             state.occurrences.insert((id, on), occ);
             handled += 1;
+            *per_schedule.entry(id).or_default() += 1;
         }
         if let Some(t) = state.templates.iter_mut().find(|x| x.id == id) {
             if !done {
@@ -378,13 +407,16 @@ pub fn run_due(
     posted.sort_by_key(|p| (p.date, p.name.to_lowercase()));
     touched.sort();
     touched.dedup();
+    // The open skips, then the capped schedules.
+    let mut skipped = open_skips(state, &new_skips);
+    skipped.extend(capped);
     let answer = RunDue {
         as_of,
         run_id,
         more,
         posted,
         reminders: reminders(state, as_of),
-        skipped: open_skips(state, &new_skips),
+        skipped,
         failed,
     };
     Ok((answer, touched))

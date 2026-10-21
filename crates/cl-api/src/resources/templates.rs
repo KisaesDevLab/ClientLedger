@@ -961,6 +961,31 @@ pub struct DraftWarning {
 pub const OCCURRENCE_TAKEN: &str = "OCCURRENCE_TAKEN";
 /// The engine code of a template name that is already used (409).
 pub const TEMPLATE_NAME_TAKEN: &str = "TEMPLATE_NAME_TAKEN";
+/// The field a refused automatic start date names (`details.field`): an
+/// `auto` schedule's next date more than 366 days before today, when it is
+/// created, moved or switched to auto.
+pub const AUTO_START_FIELD: &str = "schedule.nextDate";
+
+/// True for "this automatic schedule starts too far back" (400
+/// `VALIDATION_ERROR` naming [`AUTO_START_FIELD`]).
+#[must_use]
+pub fn is_auto_start_too_early(e: &ApiError) -> bool {
+    matches!(e, ApiError::Validation(v) if v.field().is_some_and(|f| f.as_str() == AUTO_START_FIELD))
+}
+
+/// That refusal as the engine answers it (for the demo twin): `earliest`
+/// is the earliest date allowed.
+#[must_use]
+pub fn auto_start_too_early(earliest: CalendarDate) -> ApiError {
+    ApiError::Validation(crate::errors::ValidationError::for_field(
+        "VALIDATION_ERROR",
+        AUTO_START_FIELD,
+        &format!(
+            "An automatic schedule can start no earlier than {}",
+            earliest.to_wire()
+        ),
+    ))
+}
 
 /// True for the engine's "that date was already entered" answer: a retry
 /// of a lost `enter` reply, treated as done (§5 Lost reply).

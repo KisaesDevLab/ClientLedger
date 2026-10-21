@@ -497,6 +497,16 @@ pub fn how_often(s: &Schedule) -> HowOften {
     }
 }
 
+/// How far back an automatic schedule may start (the engine's rule).
+pub const AUTO_START_DAYS_BACK: i64 = 366;
+
+/// The earliest next date an automatic schedule may have when it is
+/// created, moved or switched to automatic: `today` − 366 days.
+#[must_use]
+pub fn earliest_auto_start(today: CalendarDate) -> Option<CalendarDate> {
+    today.add_days(-AUTO_START_DAYS_BACK).ok()
+}
+
 /// The Templates Due wording for an engine skip reason.
 #[must_use]
 pub fn reason_key(code: &str) -> TextKey {
@@ -655,6 +665,11 @@ mod tests {
             "templates_due.reason.catch_up_capped"
         );
         assert_eq!(reason_key("NEW").as_str(), "templates_due.reason.other");
+        assert_eq!(
+            earliest_auto_start(d(2026, 11, 4)),
+            Some(d(2025, 11, 3)),
+            "366 days back"
+        );
         assert!(!should_open_due(0, 0, 0) && should_open_due(0, 0, 1));
     }
 

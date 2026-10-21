@@ -169,9 +169,10 @@ pub use resources::recurring::{
     run_due_from_json,
 };
 pub use resources::templates::{
-    COUNT_MAX, DraftWarning, DraftWarningCode, Entered, Frequency, INTERVAL_MAX, MISSING_ACCOUNT,
-    MISSING_LAYOUT, NewTemplate, OCCURRENCE_TAKEN, ScheduleEnd, ScheduleMode,
+    AUTO_START_FIELD, COUNT_MAX, DraftWarning, DraftWarningCode, Entered, Frequency, INTERVAL_MAX,
+    MISSING_ACCOUNT, MISSING_LAYOUT, NewTemplate, OCCURRENCE_TAKEN, ScheduleEnd, ScheduleMode,
     TEMPLATE_GROUP_NAME_MAX, TEMPLATE_NAME_MAX, TEMPLATE_NAME_TAKEN, TEMPLATE_PAGE_MAX, Template,
     TemplateChange, TemplateDraft, TemplateGroup, TemplateKind, TemplateSchedule, TemplateUse,
-    Templates, client_form, is_name_taken, is_occurrence_taken, use_from_json,
+    Templates, auto_start_too_early, client_form, is_auto_start_too_early, is_name_taken,
+    is_occurrence_taken, use_from_json,
 };

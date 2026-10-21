@@ -232,6 +232,26 @@ fn check_schedule(d: &TemplateDraft, s: Option<&TemplateSchedule>) -> Result<(),
     Ok(())
 }
 
+/// An automatic schedule may not start more than 366 days back when it is
+/// created, moved or switched to automatic (400 naming `schedule.nextDate`;
+/// an unchanged automatic date stays editable). The demo's clock is today.
+fn check_auto_start(
+    old: Option<&TemplateSchedule>,
+    new: Option<&TemplateSchedule>,
+) -> Result<(), ApiError> {
+    let Some(s) = new.filter(|s| s.mode == cl_api::ScheduleMode::Auto) else {
+        return Ok(());
+    };
+    let unchanged =
+        old.is_some_and(|o| o.mode == cl_api::ScheduleMode::Auto && o.next_date == s.next_date);
+    match cl_model::templates::earliest_auto_start(DemoState::today()) {
+        Some(earliest) if !unchanged && s.next_date < earliest => {
+            Err(cl_api::auto_start_too_early(earliest))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// `POST /templates`.
 ///
 /// # Errors
@@ -245,6 +265,7 @@ pub fn create(state: &mut DemoState, t: &NewTemplate) -> Result<Template, ApiErr
         return Err(invalid());
     }
     check_schedule(&t.draft, t.schedule.as_ref())?;
+    check_auto_start(None, t.schedule.as_ref())?;
     if name_taken(state, name, None) {
         return Err(conflict(
             ConflictReason::AlreadyExists,
@@ -307,6 +328,7 @@ pub fn update(
     }
     let schedule = c.schedule.unwrap_or(now.schedule);
     check_schedule(&draft, schedule.as_ref())?;
+    check_auto_start(now.schedule.as_ref(), schedule.as_ref())?;
     if let Some(n) = &c.name {
         let n = n.trim();
         if n.is_empty() || n.chars().count() > cl_api::TEMPLATE_NAME_MAX {
