@@ -100,12 +100,14 @@ pub fn draft_round_trip(h: &Harness) {
                         side: Side::Debit(m("412.50")),
                         description: None,
                         tag: None,
+                        contact: None,
                     },
                     JeLine {
                         account: bank,
                         side: Side::Credit(m("412.50")),
                         description: None,
                         tag: None,
+                        contact: None,
                     },
                 ],
             )

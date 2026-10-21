@@ -388,6 +388,7 @@ fn journal_from(r: &Reader<'_>, date: CalendarDate) -> Result<NewJournalEntry, A
             side,
             description: l.text("description")?,
             tag: l.id("tagId")?,
+            contact: l.id("contactId")?,
         });
     }
     let basis = match r.text("basis")?.as_deref() {

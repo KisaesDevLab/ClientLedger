@@ -95,12 +95,14 @@ fn journal() -> NewJournalEntry {
                 side: Side::Debit(m("412.50")),
                 description: None,
                 tag: None,
+                contact: None,
             },
             JeLine {
                 account: a(BANK),
                 side: Side::Credit(m("412.50")),
                 description: None,
                 tag: None,
+                contact: None,
             },
         ],
     )
