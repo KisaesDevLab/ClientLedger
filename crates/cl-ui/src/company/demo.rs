@@ -87,6 +87,8 @@ pub struct DemoState {
     /// (P15: each due date posts exactly once).
     pub occurrences:
         std::collections::BTreeMap<(cl_core::ids::TemplateId, CalendarDate), templates::Occ>,
+    /// Journal entries' P15 fields (names, tags, Adjusting, reversals).
+    pub journal: journal::DemoJournals,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -175,6 +177,7 @@ impl DemoState {
             templates: Vec::new(),
             template_groups: Vec::new(),
             occurrences: std::collections::BTreeMap::new(),
+            journal: journal::DemoJournals::default(),
         }
     }
 
