@@ -152,7 +152,8 @@ pub fn engine_text(view: &HostView) -> Option<String> {
     }
 }
 
-/// The "templates need you" chip text (P15), when any wait.
+/// The "template entries need you" chip text (P15), when any dates wait
+/// (it counts dates, as Templates Due lists them).
 #[must_use]
 pub fn templates_chip(n: usize) -> Option<String> {
     match n {

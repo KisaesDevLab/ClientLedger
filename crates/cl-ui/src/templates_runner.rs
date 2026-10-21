@@ -102,8 +102,9 @@ impl DueBoard {
         self.generation += 1;
     }
 
-    /// How many templates wait for the owner (due reminders and open
-    /// skipped dates): the status-bar chip.
+    /// How many dates wait for the owner (due reminder dates and open
+    /// skipped dates, each a row in Templates Due): the status-bar chip
+    /// ("4 entries need you").
     #[must_use]
     pub fn needs_you(&self) -> usize {
         let Some(run) = &self.run else {
@@ -111,13 +112,13 @@ impl DueBoard {
         };
         run.reminders
             .iter()
-            .map(|r| r.template)
+            .flat_map(|r| r.dates.iter().map(move |d| (r.template, *d)))
             // A capped catch-up continues on its own: not a chip.
             .chain(
                 run.skipped
                     .iter()
                     .filter(|k| !k.reason.is_capped())
-                    .map(|k| k.template),
+                    .map(|k| (k.template, k.date)),
             )
             .collect::<BTreeSet<_>>()
             .len()

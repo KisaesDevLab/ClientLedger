@@ -795,6 +795,7 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
         "error_dialog_open": shell.error_dialog().is_some(),
         "prompt_open": shell.windows.prompt().is_some(),
         "toast": shell.toast_text(),
+        "templates_need_you": shell.templates_need_you(),
         "engine": host,
         "quit_approved": shell.quit_approved(),
         "company_open": shell.company.is_some(),

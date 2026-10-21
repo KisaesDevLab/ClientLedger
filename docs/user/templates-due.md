@@ -1,6 +1,6 @@
 # Templates Due
 
-When you open your company, at midnight and every hour while it is open, ClientLedger checks your scheduled [templates](templates.md). Templates set to **Enter automatically** are entered for every date that has come due, each date exactly once, even if the app was closed for a while. Then the **Templates Due** window opens if there is something new to show. While some still need you, the status bar says "2 templates need you"; click it to open the window.
+When you open your company, at midnight and every hour while it is open, ClientLedger checks your scheduled [templates](templates.md). Templates set to **Enter automatically** are entered for every date that has come due, each date exactly once, even if the app was closed for a while. Then the **Templates Due** window opens if there is something new to show. While some still need you, the status bar says how many dates wait ("3 template entries need you"); click it to open the window.
 
 The window has up to four lists:
 

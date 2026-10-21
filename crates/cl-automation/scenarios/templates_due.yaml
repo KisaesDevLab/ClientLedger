@@ -130,6 +130,8 @@ steps:
   - assert_state: {key: screen.entered, equals: 1}
   - assert_state: {key: screen.waiting, equals: 3}
   - assert_state: {key: screen.skipped, equals: 1}
+  # The status-bar chip counts the dates listed (3 waiting + 1 skipped).
+  - assert_state: {key: templates_need_you, equals: 4}
   - assert_state: {key: screen.failed, equals: 0}
   - assert_state: {key: screen.rows.0.section, equals: entered}
   - assert_state: {key: screen.rows.0.date, equals: "2026-10-20"}
