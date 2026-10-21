@@ -57,10 +57,20 @@ fn a_transfer_saves_exactly_and_both_balances_hear_it() {
     let v = s.state_json();
     assert_eq!(v["amount"], "300.00");
     assert!(v["txn_id"].is_string());
-    // Void it (scenario cleanup).
+    // The side panel lists it first among the From account's transfers,
+    // with the engine's amount.
+    s.poll();
+    let id = s.last_saved.expect("saved");
+    assert_eq!(s.recent.first().map(|r| r.id), Some(id));
+    assert_eq!(s.recent[0].amount, Some(money("300.00")));
+    assert!(s.recent.len() <= RECENT_SHOWN);
+    // Void it (scenario cleanup): it leaves the recent list.
     s.command(CommandId::new("edit.void_transaction"));
     s.send_void("cleanup", None);
     assert_eq!(s.last_action, Some("void"));
+    s.poll();
+    s.poll();
+    assert!(s.recent.iter().all(|r| r.id != id), "{:?}", s.recent);
 }
 
 #[test]
@@ -215,7 +225,7 @@ fn the_same_account_is_refused_and_nothing_is_sent() {
     // save (it never lingers over a fixed form).
     s.set_account(false, account(2050));
     s.recheck_problems();
-    assert!(s.problems.is_empty());
+    assert_eq!(s.problems, Vec::new());
     assert!(s.state_json()["save"]["refused"].is_null());
 }
 

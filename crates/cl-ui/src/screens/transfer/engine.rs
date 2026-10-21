@@ -9,11 +9,24 @@ use crate::company::CompanyLink;
 use crate::company::demo::DemoState;
 use crate::company::demo::register::{DemoLedger, DemoPosting, check_closing};
 
-/// One saved transfer touching the account (Prev/Next).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// One saved transfer touching the account (Prev/Next and the side
+/// panel's recent transfers): its date and the amount the engine reports.
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct TransferRow {
     pub id: TransactionId,
     pub date: CalendarDate,
+    pub amount: Option<Money>,
+    pub void: bool,
+}
+
+/// Ids and dates only (never an amount).
+impl std::fmt::Debug for TransferRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransferRow")
+            .field("id", &self.id)
+            .field("date", &self.date)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Transfer Funds' engine when it is not the live one.
@@ -156,6 +169,13 @@ impl LocalTransfers for DemoTransfers {
             .map(|t| TransferRow {
                 id: DemoLedger::id_of(&t),
                 date: t.date,
+                // The To line's debit is the transfer's amount.
+                amount: t
+                    .lines
+                    .iter()
+                    .find(|l| l.debit.is_positive())
+                    .map(|l| l.debit),
+                void: state.ledger.is_void(DemoLedger::id_of(&t)),
             })
             .collect();
         rows.sort_by(|a, b| b.date.cmp(&a.date).then(b.id.cmp(&a.id)));

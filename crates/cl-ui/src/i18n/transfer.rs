@@ -4,8 +4,6 @@
 #[rustfmt::skip]
 pub const ENGLISH: &[(&str, &str)] = &[
     ("transfer.loading", "Loading\u{2026}"),
-    ("transfer.prev", "\u{2190} Prev"),
-    ("transfer.next", "Next \u{2192}"),
     ("transfer.unsaved", "Unsaved changes"),
     ("transfer.from", "Transfer from"),
     ("transfer.to", "Transfer to"),
@@ -14,9 +12,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("transfer.date", "Date"),
     ("transfer.amount", "Amount"),
     ("transfer.memo", "Memo"),
-    ("transfer.save_new", "Save & New"),
-    ("transfer.save_close", "Save & Close"),
-    ("transfer.clear", "Clear"),
+    ("transfer.panel.balances", "Balances"),
+    ("transfer.panel.not_chosen", "Not chosen yet"),
+    ("transfer.panel.recent", "Recent transfers from this account"),
+    ("transfer.panel.recent.none", "No transfers from this account yet."),
     ("transfer.no_accounts", "You need two bank, card or loan accounts to move money between. Add one in the Chart of Accounts."),
     ("transfer.read_only", "This transfer can't be changed here (it was voided, or made in a way this form can't show)."),
     ("transfer.changed_elsewhere", "This transfer was changed somewhere else. Open it again to see the change."),

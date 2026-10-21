@@ -1,8 +1,9 @@
 //! Transfer Funds (P14 lane A, `banking.transfer`, Ctrl+T), on the Write
-//! Check pattern (Q-261): From (with the engine's balance) → To (with its
-//! balance) · Date · Amount · Memo, Clear / Save & New / Save & Close,
-//! Prev/Next over the From account's transfers, Void and the shared
-//! closing-date prompt.
+//! Check pattern (Q-261): the shared toolbar and title row, From (with the
+//! engine's balance) → To (with its balance) · Date · Amount · Memo, Clear
+//! / Save & New / Save & Close with their shortcut chips, a side panel
+//! with both balances and the From account's recent transfers, Prev/Next
+//! over those transfers, Void and the shared closing-date prompt.
 //!
 //! Money: the amount is the owner's typed `Money` (cents, Q-232);
 //! `cl_model::forms::transfer::check` is the gate and
@@ -31,12 +32,13 @@ use cl_model::forms::transfer::{
 use cl_model::forms::{FormState, SaveIntent, SaveStart};
 use cl_model::register::AccountClass;
 use cl_model::{CommandId, Scope};
-use eframe::egui::{self, Align, Layout, RichText, Ui, Vec2};
+use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
 use crate::company::{CompanyEvent, CompanyLink, Task};
 use crate::forms::closing_prompt::{ClosingClick, ClosingPrompt};
 use crate::i18n::t;
+use crate::screens::card_charge::kit;
 use crate::screens::company::form::{self, DateInput};
 use crate::screens::register::account_text;
 use crate::theme::Tokens;
@@ -47,8 +49,8 @@ pub(crate) use engine::{DemoTransfers, LocalTransfers, TransferRow};
 /// The command and window kind.
 pub const KIND: &str = "banking.transfer";
 
-/// The height of Clear / Save & New / Save & Close.
-const ACTION_HEIGHT: f32 = 44.0;
+/// How many recent transfers the side panel lists.
+const RECENT_SHOWN: usize = 3;
 
 /// The Transfer Funds window for `kind`, if it is one.
 #[must_use]
@@ -131,6 +133,11 @@ pub struct TransferScreen {
     pub(crate) published: Vec<AccountId>,
     nav: Vec<TransferRow>,
     nav_task: Option<Task<Vec<TransferRow>>>,
+    /// The From account's newest transfers (the side panel).
+    pub(crate) recent: Vec<TransferRow>,
+    recent_task: Option<Task<Vec<TransferRow>>>,
+    /// The account `recent` was read for (`None`: read again).
+    recent_for: Option<AccountId>,
     nav_at: Option<usize>,
     want_older: Option<bool>,
     void_open: bool,
@@ -239,6 +246,9 @@ impl TransferScreen {
             published: Vec::new(),
             nav: Vec::new(),
             nav_task: None,
+            recent: Vec::new(),
+            recent_task: None,
+            recent_for: None,
             nav_at: None,
             want_older: None,
             void_open: false,
@@ -383,6 +393,16 @@ impl TransferScreen {
                 Err(e) => self.error = Some(e),
             }
         }
+        if self.loaded && self.recent_task.is_none() && self.recent_for != self.form.current().from
+        {
+            self.fetch_recent();
+        }
+        if let Some(r) = self.recent_task.as_mut().and_then(Task::try_take) {
+            self.recent_task = None;
+            self.recent = r.unwrap_or_default();
+            self.recent.retain(|r| !r.void);
+            self.recent.truncate(RECENT_SHOWN);
+        }
         if let Some(r) = self.nav_task.as_mut().and_then(Task::try_take) {
             self.nav_task = None;
             self.nav = r.unwrap_or_default();
@@ -424,6 +444,7 @@ impl TransferScreen {
             .any(|a| changes.ledger_touches(a))
         {
             self.fetch_balances();
+            self.recent_for = None;
         }
     }
 
@@ -643,6 +664,7 @@ impl TransferScreen {
             });
         }
         self.nav.clear();
+        self.recent_for = None;
         self.follow_up(intent);
         self.fetch_balances();
         // Prev/Next asked before the save (the unsaved-changes prompt).
@@ -850,40 +872,57 @@ impl TransferScreen {
         }
     }
 
+    /// The transfers touching `account`, newest first.
+    fn list_task(&mut self, account: AccountId) -> Option<Task<Vec<TransferRow>>> {
+        let link = Arc::clone(&self.link);
+        if let Some(local) = self.local.as_mut() {
+            return Some(Task::ready(local.list(&link, account)));
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return None;
+        };
+        group
+            .read(&session, move |s| async move {
+                let filter = TransactionFilter {
+                    txn_type: Some(TxnType::Transfer),
+                    account_id: Some(account),
+                    sort: Some((cl_api::TxnSort::Date, cl_api::SortDir::Desc)),
+                    ..TransactionFilter::default()
+                };
+                let page = s
+                    .transactions()
+                    .list(&filter, PageRequest::new(50, 0)?)
+                    .await?;
+                Ok(page
+                    .data
+                    .into_iter()
+                    .map(|r| TransferRow {
+                        id: r.id,
+                        date: r.txn_date,
+                        amount: r.display_total.or(r.total),
+                        void: r.status == TxnStatus::Void,
+                    })
+                    .collect())
+            })
+            .ok()
+            .map(Task::Pending)
+    }
+
     fn fetch_list(&mut self) {
         let Some(account) = self.form.current().from else {
             return;
         };
-        let link = Arc::clone(&self.link);
-        if let Some(local) = self.local.as_mut() {
-            self.nav_task = Some(Task::ready(local.list(&link, account)));
-            self.poll();
-            return;
-        }
-        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
-            return;
-        };
-        if let Ok(p) = group.read(&session, move |s| async move {
-            let filter = TransactionFilter {
-                txn_type: Some(TxnType::Transfer),
-                account_id: Some(account),
-                sort: Some((cl_api::TxnSort::Date, cl_api::SortDir::Desc)),
-                ..TransactionFilter::default()
-            };
-            let page = s
-                .transactions()
-                .list(&filter, PageRequest::new(50, 0)?)
-                .await?;
-            Ok(page
-                .data
-                .into_iter()
-                .map(|r| TransferRow {
-                    id: r.id,
-                    date: r.txn_date,
-                })
-                .collect())
-        }) {
-            self.nav_task = Some(Task::Pending(p));
+        self.nav_task = self.list_task(account);
+        self.poll();
+    }
+
+    /// The side panel's recent transfers of the From account.
+    fn fetch_recent(&mut self) {
+        let from = self.form.current().from;
+        self.recent_for = from;
+        match from {
+            Some(account) => self.recent_task = self.list_task(account),
+            None => self.recent.clear(),
         }
     }
 
@@ -990,29 +1029,25 @@ impl TransferScreen {
         self.void_reason.clear();
         self.last_action = Some("void");
         self.nav.clear();
+        self.recent_for = None;
         self.new_transfer(true);
     }
 
     // ------------------------------------------------------------ drawing
 
-    /// The balance text: "Balance 1,234.00" or, for a card or other
-    /// liability, "Balance owed" with the stored sign turned (Q-241).
-    fn balance_text(&self, i: usize, account: Option<AccountId>) -> String {
-        let Some(m) = self.balances[i] else {
-            return String::new();
-        };
+    /// The balance label and figure: "Balance" and the stored balance, or
+    /// for a card or other liability "Balance owed" with the stored sign
+    /// turned (Q-241). `None` until the engine's balance arrives.
+    fn balance_parts(&self, i: usize, account: Option<AccountId>) -> Option<(String, String)> {
+        let m = self.balances[i]?;
         let owed = account
             .and_then(|a| self.class(a))
             .is_some_and(|c| matches!(c, AccountClass::CreditCard | AccountClass::OtherLiability));
         if owed {
             let shown = m.checked_neg().unwrap_or(m);
-            format!(
-                "{} {}",
-                t("transfer.balance_owed"),
-                shown.format(self.money_style)
-            )
+            Some((t("transfer.balance_owed"), shown.format(self.money_style)))
         } else {
-            format!("{} {}", t("transfer.balance"), m.format(self.money_style))
+            Some((t("transfer.balance"), m.format(self.money_style)))
         }
     }
 
@@ -1030,14 +1065,11 @@ impl TransferScreen {
             .map(|(_, s)| s.clone())
             .unwrap_or_default();
         let mut picked = None;
-        ui.vertical(|ui| {
-            let l = ui.add(
-                egui::Label::new(
-                    RichText::new(t(if from { "transfer.from" } else { "transfer.to" }))
-                        .size(12.0)
-                        .color(tokens.text_secondary),
-                )
-                .selectable(false),
+        kit::wrap_item(ui, ("transfer/account", from), |ui| {
+            let l = kit::above(
+                ui,
+                tokens,
+                &t(if from { "transfer.from" } else { "transfer.to" }),
             );
             let r = ui.add_enabled_ui(enabled, |ui| {
                 // Q-250: a click opens the list.
@@ -1055,8 +1087,9 @@ impl TransferScreen {
                     .labelled_by(l.id)
             });
             self.track(&r.inner, if from { field::FROM } else { field::TO });
-            let text = self.balance_text(usize::from(!from), current);
-            ui.label(RichText::new(text).text_style(egui::TextStyle::Monospace));
+            if let Some((label, figure)) = self.balance_parts(usize::from(!from), current) {
+                kit::balance_line(ui, tokens, &label, Some(figure));
+            }
         });
         if let Some(id) = picked {
             self.set_account(from, id);
@@ -1070,30 +1103,9 @@ impl TransferScreen {
             return;
         }
         let working = self.save_task.is_some();
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .add_enabled(!working, egui::Button::new(t("transfer.prev")))
-                .clicked()
-            {
-                self.navigate(true);
-            }
-            if ui
-                .add_enabled(!working, egui::Button::new(t("transfer.next")))
-                .clicked()
-            {
-                self.navigate(false);
-            }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if self.is_dirty() {
-                    ui.label(
-                        RichText::new(t("transfer.unsaved"))
-                            .size(12.0)
-                            .color(tokens.text_tertiary),
-                    );
-                }
-            });
-        });
-        ui.separator();
+        if let Some(cmd) = kit::toolbar(ui, &tokens, !working, self.is_dirty(), |_| {}) {
+            self.command(CommandId::new(cmd));
+        }
         match self.closing_prompt.ui(ui, &tokens) {
             ClosingClick::Submit => self.submit_closing(),
             ClosingClick::Cancel => self.closing_prompt.cancel(),
@@ -1124,33 +1136,53 @@ impl TransferScreen {
             form::hint(ui, &tokens, &t("transfer.no_accounts"));
             return;
         }
+        kit::two_columns(ui, "transfer/scroll", |ui, col| match col {
+            kit::Column::Form => self.form_ui(ui, &tokens),
+            kit::Column::Panel => self.panel_ui(ui, &tokens),
+        });
+        if self.nav_prompt.is_some()
+            && let Some(a) =
+                crate::forms::nav_prompt::ui(ui, "transfer", &t("cmd.banking.transfer"))
+        {
+            self.answer_nav(a);
+        }
+    }
+
+    fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let working = self.save_task.is_some();
+        kit::title_only(ui, tokens, &t("cmd.banking.transfer"));
+        ui.add_space(6.0);
         let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
         if read_only {
-            form::hint(ui, &tokens, &t("transfer.read_only"));
+            form::hint(ui, tokens, &t("transfer.read_only"));
         } else if self
             .editing
             .as_ref()
             .is_some_and(|e| is_locked(e.old_date, self.closing))
         {
-            form::hint(ui, &tokens, &t("closing.edit_note"));
+            form::hint(ui, tokens, &t("closing.edit_note"));
         }
         let enabled = !working && !self.closing_prompt.dialog_open() && !read_only;
-        form::card(ui, &tokens, |ui| {
-            ui.horizontal_top(|ui| {
-                self.account_ui(ui, &tokens, true, enabled);
-                ui.label(RichText::new("\u{2192}").size(20.0));
-                self.account_ui(ui, &tokens, false, enabled);
+        form::card(ui, tokens, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                self.account_ui(ui, tokens, true, enabled);
+                kit::wrap_item(ui, "transfer/arrow", |ui| {
+                    ui.add_space(22.0);
+                    ui.label(RichText::new("\u{2192}").size(20.0));
+                });
+                self.account_ui(ui, tokens, false, enabled);
             });
             ui.add_space(8.0);
             ui.add_enabled_ui(enabled, |ui| {
-                ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
-                        let l = ui.label(RichText::new(t("transfer.date")).size(12.0));
+                ui.horizontal_wrapped(|ui| {
+                    kit::wrap_item(ui, "transfer/date", |ui| {
+                        let l = kit::above(ui, tokens, &t("transfer.date"));
                         let before = self.date.text.clone();
                         let r = ui
                             .add(
                                 egui::TextEdit::singleline(&mut self.date.text)
-                                    .desired_width(110.0),
+                                    .desired_width(110.0)
+                                    .font(egui::TextStyle::Monospace),
                             )
                             .labelled_by(l.id);
                         if r.changed() {
@@ -1166,8 +1198,8 @@ impl TransferScreen {
                         }
                         self.track(&r, field::DATE);
                     });
-                    ui.vertical(|ui| {
-                        let l = ui.label(RichText::new(t("transfer.amount")).size(12.0));
+                    kit::wrap_item(ui, "transfer/amount", |ui| {
+                        let l = kit::above(ui, tokens, &t("transfer.amount"));
                         let r = ui
                             .add(
                                 egui::TextEdit::singleline(&mut self.amount_text)
@@ -1184,8 +1216,8 @@ impl TransferScreen {
                             ui.label(RichText::new(t(k)).size(12.0).color(tokens.warn_text));
                         }
                     });
-                    ui.vertical(|ui| {
-                        let l = ui.label(RichText::new(t("transfer.memo")).size(12.0));
+                    kit::wrap_item(ui, "transfer/memo", |ui| {
+                        let l = kit::above(ui, tokens, &t("transfer.memo"));
                         let mut memo = self.form.current().memo.clone();
                         let r = ui
                             .add(egui::TextEdit::singleline(&mut memo).desired_width(260.0))
@@ -1199,64 +1231,82 @@ impl TransferScreen {
                 });
             });
         });
-        for p in &self.problems {
-            ui.label(RichText::new(t(p.key().0)).color(tokens.warn_text));
-        }
+        let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
+        kit::problems(ui, tokens, &keys);
         if self.stale {
             ui.label(RichText::new(t("transfer.changed_elsewhere")).color(tokens.warn_text));
         }
         if let Some(e) = &self.error {
-            form::inline_error(ui, &tokens, e);
+            form::inline_error(ui, tokens, e);
         }
         ui.add_space(12.0);
-        let mut clicked = None;
         let idle = !working && !self.closing_prompt.dialog_open();
-        ui.allocate_ui_with_layout(
-            Vec2::new(ui.available_width(), ACTION_HEIGHT),
-            Layout::right_to_left(Align::Center),
-            |ui| {
-                let can = idle && !read_only;
-                if ui
-                    .add_enabled(
-                        can,
-                        egui::Button::new(t("transfer.save_close"))
-                            .min_size(Vec2::new(0.0, ACTION_HEIGHT)),
-                    )
-                    .clicked()
-                {
-                    clicked = Some("form.save_close");
-                }
-                if ui
-                    .add_enabled(
-                        can,
-                        egui::Button::new(t("transfer.save_new"))
-                            .min_size(Vec2::new(0.0, ACTION_HEIGHT)),
-                    )
-                    .clicked()
-                {
-                    clicked = Some("form.save_new");
-                }
-                if ui
-                    .add_enabled(
-                        idle,
-                        egui::Button::new(t("transfer.clear"))
-                            .min_size(Vec2::new(0.0, ACTION_HEIGHT)),
-                    )
-                    .clicked()
-                {
-                    clicked = Some("form.clear");
-                }
-            },
-        );
-        if let Some(c) = clicked {
+        if let Some(c) = kit::actions_row(ui, idle && !read_only, idle) {
             self.command(CommandId::new(c));
         }
-        if self.nav_prompt.is_some()
-            && let Some(a) =
-                crate::forms::nav_prompt::ui(ui, "transfer", &t("cmd.banking.transfer"))
-        {
-            self.answer_nav(a);
-        }
+    }
+
+    /// The side panel: both accounts with the engine's balances, and the
+    /// From account's newest transfers (as the engine lists them).
+    fn panel_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let f = self.form.current().clone();
+        kit::panel_card(ui, tokens, &t("transfer.panel.balances"), |ui| {
+            for (i, account, key) in [(0, f.from, "transfer.from"), (1, f.to, "transfer.to")] {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(t(key))
+                        .size(12.0)
+                        .color(tokens.text_secondary),
+                );
+                let Some(a) = account else {
+                    form::hint(ui, tokens, &t("transfer.panel.not_chosen"));
+                    continue;
+                };
+                let name = self
+                    .accounts
+                    .iter()
+                    .find(|x| x.id == a)
+                    .map(account_text)
+                    .unwrap_or_default();
+                ui.add(egui::Label::new(RichText::new(name).color(tokens.text_primary)).wrap());
+                match self.balance_parts(i, Some(a)) {
+                    Some((label, figure)) => kit::balance_line(ui, tokens, &label, Some(figure)),
+                    None => kit::balance_line(ui, tokens, &t("transfer.balance"), None),
+                }
+            }
+        });
+        ui.add_space(12.0);
+        kit::panel_card(ui, tokens, &t("transfer.panel.recent"), |ui| {
+            if self.recent.is_empty() {
+                form::hint(ui, tokens, &t("transfer.panel.recent.none"));
+            }
+            for r in &self.recent {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{:02}/{:02}/{}",
+                            r.date.month(),
+                            r.date.day(),
+                            r.date.year()
+                        ))
+                        .size(12.0)
+                        .color(tokens.text_secondary),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // The engine's amount as listed; nothing added up.
+                        let amount = r
+                            .amount
+                            .map(|m| m.format(self.money_style))
+                            .unwrap_or_default();
+                        ui.label(
+                            RichText::new(amount)
+                                .text_style(egui::TextStyle::Monospace)
+                                .color(tokens.text_primary),
+                        );
+                    });
+                });
+            }
+        });
     }
 
     /// The control-channel state: flags, ids and the typed amount the
@@ -1274,6 +1324,7 @@ impl TransferScreen {
             "date": f.date.map(CalendarDate::to_wire),
             "amount": f.amount.map(|m| m.format(cl_core::MoneyStyle::default())),
             "balances_shown": [self.balances[0].is_some(), self.balances[1].is_some()],
+            "recent_shown": self.recent.len(),
             "dirty": self.is_dirty(),
             "saving": self.save_task.is_some(),
             "saved_count": self.saved_count,
@@ -1324,6 +1375,7 @@ impl Screen for TransferScreen {
             || self.load_task.is_some()
             || self.nav_task.is_some()
             || self.void_task.is_some()
+            || self.recent_task.is_some()
             || self.balance_tasks.iter().any(Option::is_some);
         if busy {
             ui.ctx()
