@@ -192,6 +192,22 @@ fn who_paid_is_kept_in_the_memo_and_comes_back_on_reopen() {
     assert_eq!(split_who("plain memo"), (None, "plain memo".into()));
 }
 
+/// The engine's expense memo has no length limit (`createExpenseSchema`:
+/// `memo: z.string().optional()`, a `text` column), so "Paid by <name> —"
+/// never needs a refusal: the longest name with the longest memo the form
+/// takes goes out whole and splits back exactly.
+#[test]
+fn the_longest_name_and_memo_round_trip_whole() {
+    let name = "N".repeat(cl_api::PAYEE_NAME_MAX);
+    let own = "m".repeat(cl_api::PRINTED_MEMO_MAX);
+    let sent = memo_with_who(Some(&name), Some(&own)).expect("memo");
+    assert_eq!(
+        sent.chars().count(),
+        "Paid by ".len() + name.len() + " \u{2014} ".chars().count() + own.len()
+    );
+    assert_eq!(split_who(&sent), (Some(name.as_str()), own));
+}
+
 #[test]
 fn esc_reverts_the_focused_field_first() {
     let (_d, link) = link();
