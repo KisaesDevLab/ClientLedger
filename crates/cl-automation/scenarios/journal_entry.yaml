@@ -2,7 +2,8 @@
 # Debit 1,200.00 to 6100 Fuel and credit 1,100.00 to 1010 Operating
 # Checking leaves a 100.00 difference; Save & Close is off and Alt+S is
 # refused with nothing saved; the next line takes the balancing 100.00 when
-# it gets an account; then it saves and is voided. Then an entry dated in
+# it gets an account; then it saves, opens from the register with Enter
+# and Ctrl+E, and is voided. Then an entry dated in
 # the closed period: an Accounts Receivable line needs a customer, a second
 # A/R-or-A/P line is refused, Adjusting and Reverse on 11/30 save with the
 # closing-date password; Prev shows the reversal, whose link opens the
@@ -66,16 +67,41 @@ steps:
   - assert_state: {key: screen.saved_count, equals: 1}
   - assert_state: {key: screen.save.error, equals: false}
   - assert_state: {key: screen.mode, equals: new}
-  # --- 3. Clean up: open it from Prev and void it ---------------------------
-  - command: form.prev_record
+  # --- 3. From the register: Enter and Ctrl+E open Make Journal Entry ------
+  # The bank register can't show a three-line entry in its row, so Enter
+  # opens the form that owns it; Ctrl+E (Edit Transaction) always does
+  # (Q-P14aa).
+  - key: Ctrl+G
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - key: Shift+Tab
+  - assert_state: {key: screen.focused, equals: true}
+  - key: Enter
+  - assert_state: {key: screen.screen, equals: journal_entry}
   - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.lines, equals: 3}
+  - assert_state: {key: screen.difference, equals: "0.00"}
+  # Each opens its own window, as every form opened from a register does.
+  - command: file.close_window
+  - key: Ctrl+G
+  - assert_state: {key: screen.screen, equals: register}
+  - key: Shift+Tab
+  - key: Ctrl+E
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.lines, equals: 3}
+  # --- 4. Clean up: void it, back to the first window -------------------------
   - command: edit.void_transaction
   - assert_state: {key: screen.void_open, equals: true}
   - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
   - click: {role: button, label: Void, index: 1}
   - assert_state: {key: screen.last_action, equals: void}
+  - command: file.close_window
+  - key: Ctrl+J
+  - assert_count: {target: {role: tab, label_contains: "Make Journal Entry"}, count: 1}
+  - assert_state: {key: screen.screen, equals: journal_entry}
 
-  # --- 4. A/R needs a name; one A/R-or-A/P line; Adjusting; Reverse on --------
+  # --- 5. A/R needs a name; one A/R-or-A/P line; Adjusting; Reverse on --------
   # Dated 09/15 (closed through 09/30): every save, edit and delete asks for
   # the closing-date password ("demo-close", synthetic).
   - click: {role: button, label: Clear}
@@ -163,7 +189,7 @@ steps:
   - assert_exists: {role: link, label: "Reversed by the entry of 11/30/2026"}
   - screenshot: reversed-by
 
-  # --- 5. Edit and delete in the closed period: the password each time --------
+  # --- 6. Edit and delete in the closed period: the password each time --------
   - click: {role: text_input, label: Memo}
   - type: {text: "Scenario edit"}
   - key: Tab
