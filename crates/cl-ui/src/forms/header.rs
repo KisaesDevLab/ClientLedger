@@ -94,6 +94,30 @@ pub fn nav_buttons(
     clicked
 }
 
+/// The toolbar's Save as Template slot (P15): the button, its tooltip
+/// naming the shortcut (Ctrl+M) or, when off, why. True when clicked; the
+/// form then runs the same as `form.save_as_template`.
+pub fn save_as_template_button(ui: &mut Ui, state: &super::template::SaveAsTemplate) -> bool {
+    use super::template::SaveAsTemplate;
+    let label = crate::i18n::t("cmd.form.save_as_template");
+    match state {
+        SaveAsTemplate::Hidden => false,
+        SaveAsTemplate::Disabled(why) => {
+            ui.add_enabled(false, egui::Button::new(label))
+                .on_disabled_hover_text(why.as_str());
+            false
+        }
+        SaveAsTemplate::Enabled => {
+            let keys = cl_model::commands::find("form.save_as_template")
+                .and_then(|c| c.shortcut)
+                .map(crate::input::shortcut_text)
+                .unwrap_or_default();
+            let tip = crate::i18n::t_with("template.save.tip", &[("keys", keys.as_str())]);
+            ui.button(label).on_hover_text(tip).clicked()
+        }
+    }
+}
+
 /// The "Unsaved changes" note, last in a `horizontal_wrapped` toolbar:
 /// at the right when the row has room for it, else on the next row (never
 /// over the buttons).
@@ -285,6 +309,26 @@ mod tests {
         let (on, opacity) = inside(false, true);
         assert!(!on);
         assert!((opacity - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn save_as_template_slot_draws_only_when_asked() {
+        use super::super::template::SaveAsTemplate;
+        let ctx = egui::Context::default();
+        for (state, widgets) in [
+            (SaveAsTemplate::Hidden, false),
+            (SaveAsTemplate::Disabled("why".into()), true),
+            (SaveAsTemplate::Enabled, true),
+        ] {
+            let mut drawn = false;
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let before = ui.min_rect().width();
+                assert!(!super::save_as_template_button(ui, &state));
+                drawn = ui.min_rect().width() > before;
+            });
+            out.textures_delta.clear();
+            assert_eq!(drawn, widgets, "{state:?}");
+        }
     }
 
     #[test]

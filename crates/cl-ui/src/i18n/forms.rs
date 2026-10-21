@@ -13,6 +13,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lines.col.billable", "Billable"),
     ("lines.col.tags", "Tags"),
     ("lines.need_account", "Choose an account for each line."),
+    // Save as Template (P15): the toolbar slot every template form shares.
+    ("template.save.tip", "Keep this form as a template to reuse or schedule it ({keys})."),
+    ("template.save.unavailable", "Templates need an engine update."),
+    ("template.save.grouped", "A deposit that includes customer payments can't be a template; remove the payments or enter it each time."),
     // Plain one-sentence explanations of accounting words (CLAUDE.md rule 12).
     // The owner-facing name of the engine's Payments Clearing account (Q-202).
     ("account.undeposited_funds", "Undeposited Funds"),

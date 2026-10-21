@@ -608,6 +608,47 @@ fn open_record_falls_back_to_opening_the_window() {
     }
 }
 
+/// `OpenTemplate` (P15): a screen that takes no templates yet simply
+/// opens, or comes to the front, once.
+#[test]
+fn open_template_falls_back_to_opening_the_window() {
+    let ctx = context();
+    let mut shell = demo();
+    settle(&ctx, &mut shell, vec2(1280.0, 820.0));
+    let kind = CommandId::new(crate::screens::journal_entry::KIND);
+    let date = cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("date");
+    let open = crate::forms::template::TemplateOpen {
+        kind,
+        template: cl_core::ids::TemplateId::parse("d0000000-0000-4000-8000-c00000000001")
+            .expect("id"),
+        version: 1,
+        occurrence: None,
+        draft: cl_api::TemplateDraft::Transfer(cl_api::TransferDraft {
+            from: crate::company::demo::account_id(1010),
+            to: crate::company::demo::account_id(1020),
+            date,
+            amount: cl_core::Money::parse_wire("25.00").expect("m"),
+            memo: None,
+        }),
+        warnings: Vec::new(),
+    };
+    let n = shell.windows.len();
+    for _ in 0..2 {
+        shell
+            .company_link()
+            .expect("demo link")
+            .push(crate::company::CompanyEvent::OpenTemplate(Box::new(
+                open.clone(),
+            )));
+        settle(&ctx, &mut shell, vec2(1280.0, 820.0));
+        assert_eq!(shell.windows.len(), n + 1);
+        assert_eq!(
+            shell.windows.active().map(|w| w.kind.as_str()),
+            Some(crate::screens::journal_entry::KIND)
+        );
+    }
+}
+
 /// Every company screen draws in the demo shell, reports its state, and
 /// the Open Company window fills the body once the company is closed.
 #[test]

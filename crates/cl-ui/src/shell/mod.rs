@@ -320,6 +320,19 @@ impl Shell {
         }
     }
 
+    /// Open a fresh form filled from a template (P15). A form that takes
+    /// templates opens as a new window; any other kind just opens (or comes
+    /// to the front) as usual.
+    fn open_template(&mut self, template: crate::forms::template::TemplateOpen) {
+        let kind = template.kind;
+        let mut screen = self.make_screen(kind);
+        if screen.open_template(template) {
+            self.windows.open_new(kind, screen);
+        } else {
+            self.open_screen(kind);
+        }
+    }
+
     /// Bring the register tab of `account` to the front, or open one (one
     /// tab per account, P12).
     fn open_register(&mut self, account: cl_core::ids::AccountId) {
@@ -434,6 +447,7 @@ impl Shell {
                 }
                 CompanyEvent::OpenRegister(account) => self.open_register(account),
                 CompanyEvent::OpenRecord(kind, txn) => self.open_record(kind, txn),
+                CompanyEvent::OpenTemplate(t) => self.open_template(*t),
             }
         }
     }
@@ -1263,7 +1277,10 @@ fn make_any(
         if let Some(s) = crate::screens::write_check::make(kind, link, open.clone(), today) {
             return s;
         }
-        for make in crate::screens::P14_SCREENS {
+        for make in crate::screens::P14_SCREENS
+            .iter()
+            .chain(&crate::screens::P15_SCREENS)
+        {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;
             }

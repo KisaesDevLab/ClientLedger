@@ -9,9 +9,11 @@ pub mod checks;
 pub mod contacts;
 pub mod daily_sales;
 pub mod deposits;
+pub mod journal;
 pub mod lists;
 pub mod money;
 pub mod register;
+pub mod templates;
 
 /// One demo company card.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +79,14 @@ pub struct DemoState {
     pub entity_type: cl_api::EntityType,
     /// The demo company's AI switches (Preferences > AI).
     pub ai: DemoAi,
+    /// Stored templates (P15), deleted ones included (soft delete).
+    pub templates: Vec<templates::DemoTemplate>,
+    /// Template groups (P15).
+    pub template_groups: Vec<templates::DemoTemplateGroup>,
+    /// Every handled occurrence under its unique `(template, date)` key
+    /// (P15: each due date posts exactly once).
+    pub occurrences:
+        std::collections::BTreeMap<(cl_core::ids::TemplateId, CalendarDate), templates::Occ>,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -162,6 +172,9 @@ impl DemoState {
             daily_sales: daily_sales::DemoDailySales::default(),
             entity_type: cl_api::EntityType::SingleMemberLlc,
             ai: DemoAi::default(),
+            templates: Vec::new(),
+            template_groups: Vec::new(),
+            occurrences: std::collections::BTreeMap::new(),
         }
     }
 

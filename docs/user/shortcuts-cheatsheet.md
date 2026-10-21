@@ -77,6 +77,7 @@
 - `Ctrl+Insert` Insert Line
 - `Ctrl+Delete` Delete Line
 - `Ctrl+D` Delete Transaction
+- `Ctrl+M` Save as Template
 - `Ctrl+N` New List Entry
 - `Ctrl+Shift+I` Make Inactive or Active Again
 - `Ctrl+Shift+H` Include Inactive Entries

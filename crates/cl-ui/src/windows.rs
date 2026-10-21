@@ -53,6 +53,14 @@ pub trait Screen {
         false
     }
 
+    /// Fill a fresh form from a template (`CompanyEvent::OpenTemplate`,
+    /// P15; the form's `TemplateSource::fill_from_template`). Returns true when
+    /// this screen takes templates; the shell then opens it as a new
+    /// window.
+    fn open_template(&mut self, _template: crate::forms::template::TemplateOpen) -> bool {
+        false
+    }
+
     /// Screen state for the control channel (`state.screen`); no amounts,
     /// names or secrets.
     fn state(&self) -> serde_json::Value {

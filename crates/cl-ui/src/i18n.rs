@@ -65,9 +65,13 @@ mod loan_payment;
 mod owner_money;
 mod personal_funds;
 mod transfer;
+// P15 (one module per screen).
+mod journal_entry;
+mod templates;
+mod templates_due;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 16] = [
+const TABLES: [&[(&str, &str)]; 19] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -84,6 +88,9 @@ const TABLES: [&[(&str, &str)]; 16] = [
     owner_money::ENGLISH,
     personal_funds::ENGLISH,
     loan_payment::ENGLISH,
+    journal_entry::ENGLISH,
+    templates::ENGLISH,
+    templates_due::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {

@@ -56,6 +56,9 @@ pub enum CompanyEvent {
     /// Open this saved transaction in the form of this kind (P14: a grouped
     /// deposit or a daily-sales day opened from a register row, Q-P14g).
     OpenRecord(cl_model::CommandId, cl_core::ids::TransactionId),
+    /// Open a fresh form filled from a template (P15: Templates "Use",
+    /// Templates Due "Open in form").
+    OpenTemplate(Box<crate::forms::template::TemplateOpen>),
     /// The owner saved new user preferences (theme, zoom, dates): the
     /// shell applies and persists them.
     UserPrefs(cl_settings::UserPrefs),

@@ -2,12 +2,14 @@
 //! lines grid (register Splits, Write Check Expenses) and the closing-date
 //! password prompt. P14 adds [`publish_saved`], the one way a form tells
 //! the other windows what its save changed (Q-262), and [`header`], the
-//! toolbar and title row every form draws the same way.
+//! toolbar and title row every form draws the same way. P15 adds
+//! [`template`], the Save as Template and Use hook.
 
 pub mod closing_prompt;
 pub mod header;
 pub mod lines_grid;
 pub mod nav_prompt;
+pub mod template;
 
 use std::collections::BTreeSet;
 
