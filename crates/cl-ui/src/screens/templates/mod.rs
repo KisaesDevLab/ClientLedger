@@ -21,7 +21,7 @@
 
 mod dialog;
 pub(crate) mod engine;
-// T4: mod save_flow;
+mod save_flow;
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -49,7 +49,7 @@ use crate::windows::Screen;
 use dialog::{DialogClick, DialogUi, api_schedule, how_often_text, model_schedule};
 use engine::{Job, finished, run, templates_on};
 
-// T4: pub use save_flow::SaveFlow;
+pub use save_flow::SaveFlow;
 
 /// The command and window kind.
 pub const KIND: &str = "lists.templates";
@@ -89,6 +89,34 @@ pub fn form_kind(client: Option<&str>, kind: &TemplateKind) -> Option<&'static s
         TemplateKind::DailySales => crate::screens::daily_sales::KIND,
         TemplateKind::Legacy | TemplateKind::Other(_) => return None,
     })
+}
+
+/// A template's split lines as a form's lines (Use). An account the
+/// engine dropped (`MISSING_ACCOUNT`) shows empty; amounts are copied
+/// exactly.
+pub(crate) fn form_lines(
+    lines: &[cl_api::SplitLine],
+    keys: &mut cl_model::rowkey::RowKeyGen,
+) -> cl_model::forms::lines::FormLines {
+    use cl_model::forms::lines::{FormLine, FormLines};
+    let seeds = lines
+        .iter()
+        .map(|l| FormLine {
+            account: (l.account != cl_api::MISSING_ACCOUNT).then_some(l.account),
+            amount: Some(l.amount),
+            memo: l.memo.clone().unwrap_or_default(),
+            customer: l.contact,
+            billable: l.billable,
+            tag: l.tag,
+            ..FormLine::blank(keys.next_key())
+        })
+        .collect();
+    FormLines::from_lines(seeds, keys)
+}
+
+/// An account the engine dropped from a template shows empty.
+pub(crate) fn real_account(a: AccountId) -> Option<AccountId> {
+    (a != cl_api::MISSING_ACCOUNT).then_some(a)
 }
 
 /// The Type column's words.

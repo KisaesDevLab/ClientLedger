@@ -569,6 +569,8 @@ impl WriteCheckScreen {
     /// The engine took the save.
     fn saved(&mut self, s: Saved) {
         self.publish_ledger();
+        self.template
+            .form_saved(&self.link, self.group.as_ref(), s.id);
         self.closing_prompt.saved();
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
         self.save.count += 1;
@@ -647,6 +649,7 @@ impl WriteCheckScreen {
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
         self.lines.form_mut().load(fresh, &*lists);
         self.editing = None;
+        self.template.forget();
         self.nav.at = None;
         self.void = super::VoidPrompt::default();
         self.history = super::HistoryView::default();
@@ -938,6 +941,7 @@ impl WriteCheckScreen {
             };
         self.header.load(form);
         self.lines.form_mut().load(lines, &*lists);
+        self.template.forget();
         self.editing = Some(Editing {
             id: r.txn.id,
             version: v.version,
