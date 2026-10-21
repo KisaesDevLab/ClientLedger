@@ -106,6 +106,8 @@ pub struct OwnerMoneyScreen {
     /// Where "Recorded in" came from (`None`: picked by the owner, or
     /// nothing yet).
     pub(crate) equity_source: Option<EquitySource>,
+    /// "Recorded in" came from a saved record that was shown.
+    pub(crate) equity_from_record: bool,
     pub(crate) bus: crate::data_bus::Subscription,
     lists_stale: bool,
     after_frame: Option<CommandId>,
@@ -150,6 +152,7 @@ impl OwnerMoneyScreen {
             flow: SaveFlow::default(),
             problems: Vec::new(),
             equity_source: None,
+            equity_from_record: false,
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,
             after_frame: None,
@@ -292,6 +295,7 @@ impl OwnerMoneyScreen {
         self.header
             .edit(field::EQUITY, |h| h.equity = Some(account));
         self.equity_source = None;
+        self.equity_from_record = false;
         remember::set(
             remember::dir_of(&self.link).as_deref(),
             &company_key(self.tenant.as_ref()),
@@ -542,6 +546,16 @@ impl OwnerMoneyScreen {
         f.who = c.who;
         f.who_name = c.who_name;
         f.equity = c.equity;
+        // Leaving a saved record: the direction's default again (the role,
+        // else the owner's remembered choice), so the record's account
+        // doesn't stick and follow into the other direction (a draw
+        // recorded as a contribution).
+        if std::mem::take(&mut self.equity_from_record)
+            && let Some((a, src)) = self.default_equity(c.direction)
+        {
+            f.equity = Some(a);
+            self.equity_source = Some(src);
+        }
         f.method = match c.method {
             OwnerMethod::Check(_) => OwnerMethod::Check(String::new()),
             OwnerMethod::Electronic => OwnerMethod::Electronic,
@@ -662,6 +676,7 @@ impl OwnerMoneyScreen {
         self.flow.opened_txn(v, fits);
 
         self.equity_source = None;
+        self.equity_from_record = true;
         self.problems.clear();
         self.focused = None;
         self.sync_inputs();

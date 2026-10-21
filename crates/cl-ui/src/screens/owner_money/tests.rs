@@ -191,6 +191,34 @@ fn a_saved_draw_opens_with_prev_and_is_changed_in_place() {
     assert!(link.demo_state().expect("demo").ledger.is_void(id));
 }
 
+/// A saved contribution shown, then Clear and Pay yourself: the draw goes
+/// to Owner's Draw, not the contribution account the record had.
+#[test]
+fn leaving_a_saved_record_does_not_keep_its_account_for_the_other_direction() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.set_direction(Direction::PutMoneyIn);
+    type_amount(&mut s, "1000.00");
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.command(CommandId::new("form.prev_record"));
+    assert!(s.flow.editing.is_some());
+    assert_eq!(s.header.current().equity, s.books.by_number("30160"));
+    s.clear();
+    s.set_direction(Direction::PayYourself);
+    assert_eq!(s.header.current().equity, s.books.by_number("30170"));
+    assert_eq!(s.state()["equity_source"], "engine");
+    // The same after voiding the shown contribution.
+    s.set_direction(Direction::PutMoneyIn);
+    type_amount(&mut s, "20.00");
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.command(CommandId::new("form.prev_record"));
+    s.flow.void_reason = "wrong".into();
+    s.void_now(None);
+    s.clear();
+    s.set_direction(Direction::PayYourself);
+    assert_eq!(s.header.current().equity, s.books.by_number("30170"));
+}
+
 #[test]
 fn esc_reverts_the_focused_field_first() {
     let (_d, link) = link();
