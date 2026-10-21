@@ -15,11 +15,13 @@
 //!   lists it.
 //! - `reversing_creates_linked_entry_on_date`: the reversal's date is
 //!   `reverseOn`, lines swapped exactly, linked both ways.
+//! - `editing_without_reverse_on_removes_the_reversal`: an edit with the
+//!   same Reverse on keeps the reversal; without one (`null`) removes it.
 
 use cl_api::{
     AccountFilter, AccountRoles, Basis, Capabilities, ContactFields, ContactType,
     JE_AR_AP_NAME_REQUIRED, JE_AR_AP_ONE_PER_ENTRY, JeLine, JeOptions, Method, NewContact,
-    NewJournalEntry, PostingOptions, Session, Side, has_code,
+    NewJournalEntry, PostingOptions, Session, Side, TxnStatus, has_code,
 };
 use cl_core::Money;
 use cl_core::ids::{AccountId, ContactId};
@@ -352,4 +354,66 @@ pub fn reversing_creates_linked_entry_on_date(h: &Harness) {
         }),
     );
     assert_eq!(raw.status, 400, "{}", raw.body);
+}
+
+/// An edit always names Reverse on: the same date keeps the reversal, no
+/// date (`null` on the wire) removes it (shapes-a "Reversal", three states).
+pub fn editing_without_reverse_on_removes_the_reversal(h: &Harness) {
+    if !h.require_cap(Capabilities::JE_REVERSING, "U-61 je-reversing-v1") {
+        return;
+    }
+    let s = &h.s1;
+    let (cash, supplies) = pair(h, s);
+    let on = date(2026, 7, 31);
+    let back = date(2026, 8, 1);
+    let memo = unique("Accrual edit");
+    let mk = |reverse_on| {
+        NewJournalEntry::new_with(
+            on,
+            Some(memo.clone()),
+            Basis::Both,
+            vec![
+                line(supplies.id, Side::Debit(m("55.00"))),
+                line(cash.id, Side::Credit(m("55.00"))),
+            ],
+            JeOptions {
+                reverse_on,
+                ..JeOptions::default()
+            },
+            &AccountRoles::default(),
+        )
+        .expect("entry")
+    };
+    let made = post(h, s, &mk(Some(back)));
+    let got = h.run(s.transactions().get(made.record.id)).expect("get");
+    let rev_id = got.record.reversal_transaction_id.expect("linked reversal");
+    // Same date sent explicitly: the reversal stays.
+    h.run(s.transactions().update_journal_entry(
+        made.record.id,
+        &got.version,
+        &mk(Some(back)),
+        &PostingOptions::default(),
+        key(),
+    ))
+    .expect("edit keeps");
+    let reread = h.run(s.transactions().get(made.record.id)).expect("get");
+    assert_eq!(reread.record.reverse_on, Some(back));
+    assert!(reread.record.reversal_transaction_id.is_some());
+    // No Reverse on: `reverseOn: null` removes it.
+    h.run(s.transactions().update_journal_entry(
+        made.record.id,
+        &reread.version,
+        &mk(None),
+        &PostingOptions::default(),
+        key(),
+    ))
+    .expect("edit removes");
+    let after = h.run(s.transactions().get(made.record.id)).expect("get");
+    assert_eq!(after.record.reverse_on, None);
+    assert_eq!(after.record.reversal_transaction_id, None);
+    let gone = h.run(s.transactions().get(rev_id));
+    assert!(
+        gone.is_err() || gone.is_ok_and(|v| v.record.status != TxnStatus::Posted),
+        "the reversal no longer posts"
+    );
 }

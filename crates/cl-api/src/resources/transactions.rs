@@ -446,7 +446,9 @@ impl NewJournalEntry {
 
     /// The update body: the create body plus the explicit "cleared" values
     /// an engine with the capability needs (a `PUT` without `txnNumber`
-    /// keeps the old number, and without `isAdjusting` keeps the flag).
+    /// keeps the old number, without `isAdjusting` keeps the flag, and
+    /// without `reverseOn` keeps the stored reversal — so `reverseOn` is
+    /// always sent: the date, or `null` to remove the reversal).
     pub(crate) fn to_update_value(&self, caps: &Capabilities) -> Value {
         let mut v = self.to_value();
         if caps.has(Capabilities::JE_NUMBER) && self.number.is_none() {
@@ -454,6 +456,9 @@ impl NewJournalEntry {
         }
         if caps.has(Capabilities::JE_ADJUSTING) {
             v["isAdjusting"] = Value::Bool(self.adjusting);
+        }
+        if caps.has(Capabilities::JE_REVERSING) {
+            v["reverseOn"] = self.reverse_on.map_or(Value::Null, |r| json!(r));
         }
         v
     }

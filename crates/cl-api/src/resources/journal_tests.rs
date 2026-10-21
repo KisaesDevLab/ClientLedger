@@ -1310,10 +1310,51 @@ mod p15 {
             serde_json::from_slice(&requests(&server, "PUT").await[0].body).expect("json");
         assert_eq!(put["txnNumber"], "");
         assert_eq!(put["isAdjusting"], false);
-        assert!(
-            put.get("reverseOn").is_none(),
-            "no reversal on the edited entry"
+        assert_eq!(
+            put.get("reverseOn"),
+            Some(&Value::Null),
+            "no reversal on the edited entry: null removes a stored one"
         );
+    }
+
+    #[tokio::test]
+    async fn update_sends_the_reversal_date_and_omits_it_without_the_capability() {
+        let server = MockServer::start().await;
+        stamp(&server, 1, None).await;
+        get_txn(&server, T1, "posted").await;
+        Mock::given(method("PUT"))
+            .respond_with(json(200, &wrapped(T1, "posted")))
+            .mount(&server)
+            .await;
+        let s = session_with_caps(&server, &ALL).await;
+        let id = TransactionId::parse(T1).expect("id");
+        let v = s.transactions().get(id).await.expect("get");
+        let on = CalendarDate::from_ymd(2026, 12, 1).expect("date");
+        let reversing = NewJournalEntry::new_with(
+            day(),
+            Some("rent".into()),
+            Basis::Both,
+            entry().lines().to_vec(),
+            opts(None, false, Some(on)),
+            &roles(),
+        )
+        .expect("ok");
+        s.transactions()
+            .update_journal_entry(
+                id,
+                &v.version,
+                &reversing,
+                &PostingOptions::default(),
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect("update");
+        let put: Value =
+            serde_json::from_slice(&requests(&server, "PUT").await[0].body).expect("json");
+        assert_eq!(put["reverseOn"], "2026-12-01");
+        // Without je-reversing-v1 the key is never sent.
+        let body = entry().to_update_value(&Capabilities::default());
+        assert!(body.get("reverseOn").is_none());
     }
 
     #[tokio::test]

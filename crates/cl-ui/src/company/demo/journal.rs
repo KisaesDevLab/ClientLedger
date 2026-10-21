@@ -169,25 +169,59 @@ fn live_reversal(state: &DemoState, id: TransactionId) -> Option<(TransactionId,
     (!state.ledger.is_void(r)).then_some((r, date))
 }
 
-/// Posts (or, with `edit`, replaces) an entry; with Reverse on, also its
-/// reversal: same accounts, debits and credits swapped, dated Reverse on,
-/// linked both ways. An edit replaces the old reversal.
+/// What a body says about Reverse on — the engine's three `PUT` states.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReverseOnField {
+    /// The key is absent: a create has no reversal; an edit keeps the
+    /// stored reversal on its stored date (re-posted from the edited lines).
+    Omitted,
+    /// The key is sent: a date adds or moves the reversal; `null` removes it.
+    Sent(Option<CalendarDate>),
+}
+
+/// Posts (or, with `edit`, replaces) an entry as `cl-api` sends it — with
+/// the capability every update carries `reverseOn` explicitly (the date,
+/// or `null` to remove the reversal). See [`save_with`].
 ///
 /// # Errors
-/// `Stale` when `edit`'s version is not the entry's now; the closed-period
-/// rule over every date touched (the entry's old and new dates, the old
-/// and new reversal's); the contract's refusals as `Local`; `NotFound`.
+/// As [`save_with`].
 pub fn save(
     state: &mut DemoState,
     e: &NewJournalEntry,
     edit: Option<(TransactionId, RecordVersion)>,
     password: Option<&Secret>,
 ) -> Result<(TransactionId, RecordVersion), ApiError> {
+    save_with(
+        state,
+        e,
+        edit,
+        password,
+        ReverseOnField::Sent(e.reverse_on()),
+    )
+}
+
+/// Posts (or, with `edit`, replaces) an entry; with Reverse on, also its
+/// reversal: same accounts, debits and credits swapped, dated Reverse on,
+/// linked both ways. An edit replaces the old reversal; `reverse` says
+/// whether the body named Reverse on at all (when omitted, `e`'s own value
+/// is not on the wire and the stored reversal date is kept).
+///
+/// # Errors
+/// `Stale` when `edit`'s version is not the entry's now; the closed-period
+/// rule over every date touched (the entry's old and new dates, the old
+/// and new reversal's); the contract's refusals as `Local`; `NotFound`.
+pub fn save_with(
+    state: &mut DemoState,
+    e: &NewJournalEntry,
+    edit: Option<(TransactionId, RecordVersion)>,
+    password: Option<&Secret>,
+    reverse: ReverseOnField,
+) -> Result<(TransactionId, RecordVersion), ApiError> {
     let chart = chart(state);
     contract_checks(&chart, e)?;
     let mut dates = vec![e.txn_date()];
-    dates.extend(e.reverse_on());
     let mut old_reversal = None;
+    let mut stored_on = None;
     if let Some((id, version)) = &edit {
         let now = get(state, *id)?;
         if now.version != *version {
@@ -197,8 +231,18 @@ pub fn save(
         if let Some((r, d)) = live_reversal(state, *id) {
             dates.push(d);
             old_reversal = Some(r);
+            stored_on = Some(d);
         }
     }
+    let reverse_on = match reverse {
+        ReverseOnField::Sent(on) => on,
+        ReverseOnField::Omitted => stored_on,
+    };
+    // The kept date must still be after the (possibly new) entry date.
+    if reverse_on.is_some_and(|r| r <= e.txn_date()) {
+        return Err(ApiError::Local(LocalValidation::ReverseNotAfter));
+    }
+    dates.extend(reverse_on);
     check_closing(closing(state), &dates, password)?;
     if let Some(r) = old_reversal {
         state.ledger.delete(r)?;
@@ -217,7 +261,7 @@ pub fn save(
         .save_lines(&chart, &journal, edit.as_ref().map(|(id, _)| *id))
         .ok_or_else(invalid)?;
     let mut meta = meta_of(e);
-    if let Some(on) = e.reverse_on() {
+    if let Some(on) = reverse_on {
         let memo = match e.number() {
             Some(n) => format!("Reverses JE {n}"),
             None => format!(

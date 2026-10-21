@@ -270,6 +270,10 @@ fn main() -> std::process::ExitCode {
             contract_journal_entries::reversing_creates_linked_entry_on_date,
         ),
         (
+            "journal_entries::editing_without_reverse_on_removes_the_reversal",
+            contract_journal_entries::editing_without_reverse_on_removes_the_reversal,
+        ),
+        (
             "register_property::balance_holds_after_random_edits",
             contract_register_property::balance_holds_after_random_edits,
         ),

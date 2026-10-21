@@ -186,6 +186,67 @@ fn reverse_on_posts_a_linked_reversal_with_the_lines_swapped() {
 }
 
 #[test]
+fn an_edit_without_reverse_on_keeps_the_reversal_and_null_removes_it() {
+    let mut s = DemoState::new();
+    let lines = vec![
+        line(6100, Side::Debit(m("40.00")), None),
+        line(1010, Side::Credit(m("40.00")), None),
+    ];
+    let e = entry(day(10, 31), lines.clone(), Some("78"), Some(day(11, 3)));
+    let (id, v1) = save(&mut s, &e, None, None).expect("saved");
+    // Omitted: the stored date is kept, re-posted from the edited lines
+    // (the entry's own Option is not on the wire).
+    let edited = entry(
+        day(10, 30),
+        vec![
+            line(6100, Side::Debit(m("41.00")), None),
+            line(1010, Side::Credit(m("41.00")), None),
+        ],
+        Some("78"),
+        None,
+    );
+    let (_, v2) = save_with(
+        &mut s,
+        &edited,
+        Some((id, v1)),
+        None,
+        ReverseOnField::Omitted,
+    )
+    .expect("keep");
+    let kept = get(&mut s, id).expect("read");
+    assert_eq!(kept.version, v2);
+    assert_eq!(kept.record.reverse_on, Some(day(11, 3)));
+    let r = kept.record.reversal_transaction_id.expect("still reversed");
+    assert_eq!(
+        get(&mut s, r).expect("reversal").record.lines[0].credit,
+        m("41.00")
+    );
+    // Omitted, but the kept date is no longer after the new entry date.
+    let late = entry(day(11, 3), lines.clone(), Some("78"), None);
+    assert_eq!(
+        save_with(
+            &mut s,
+            &late,
+            Some((id, v2.clone())),
+            None,
+            ReverseOnField::Omitted
+        ),
+        Err(ApiError::Local(LocalValidation::ReverseNotAfter))
+    );
+    // Sent null: removed.
+    save_with(
+        &mut s,
+        &edited,
+        Some((id, v2)),
+        None,
+        ReverseOnField::Sent(None),
+    )
+    .expect("remove");
+    assert_eq!(get(&mut s, id).expect("read").record.reverse_on, None);
+    assert!(get(&mut s, r).is_err(), "the reversal is gone");
+}
+
+#[test]
 fn void_and_delete_take_the_reversal_with_them() {
     let mut s = DemoState::new();
     let e = entry(
