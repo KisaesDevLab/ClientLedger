@@ -194,9 +194,9 @@ fn prev_and_next_step_through_saved_charges_with_exact_amounts() {
     assert_eq!(s.flow.editing.map(|e| e.id), Some(second));
     assert_eq!(s.state()["record"], "edit");
     assert_eq!(s.header.current().amount, Some(money("22.50")));
-    let line = s.lines.value().used().next().expect("line").clone();
-    assert_eq!(line.amount, Some(money("22.50")));
-    assert_eq!(line.account, s.books.by_number("6250"));
+    let row = s.lines.value().used().next().expect("line").clone();
+    assert_eq!(row.amount, Some(money("22.50")));
+    assert_eq!(row.account, s.books.by_number("6250"));
     assert_eq!(s.state()["totals"], "balanced");
     assert!(!s.is_dirty(), "an opened record is clean");
     // Prev again: the older one; Next: back; Next again: a new form.
