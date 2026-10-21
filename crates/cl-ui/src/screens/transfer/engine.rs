@@ -81,8 +81,22 @@ impl LocalTransfers for DemoTransfers {
         let mut state = demo(link)?;
         let chart = chart(&mut state);
         let mut dates = vec![draft.date];
-        if let Some((id, _)) = edit {
-            dates.extend(state.ledger.date_of(id));
+        if let Some((id, version)) = &edit {
+            // Changed elsewhere since it was read: the engine's 409.
+            let contacts = state.contacts_mut().clone();
+            let now = state
+                .ledger
+                .get(&chart, &contacts, *id)
+                .ok_or(ApiError::NotFound { code: None })?;
+            if now.version != *version {
+                return Err(ApiError::Conflict {
+                    reason: cl_api::ConflictReason::Stale,
+                    current_version: Some(now.version),
+                    code: None,
+                    message: cl_api::UserText::default(),
+                });
+            }
+            dates.extend(state.ledger.date_of(*id));
         }
         check_closing(closing(&state), &dates, password)?;
         // From is credited, To debited, by exactly the amount.

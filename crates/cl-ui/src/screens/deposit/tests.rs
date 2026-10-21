@@ -417,6 +417,17 @@ fn the_demo_saves_a_plain_deposit_and_reads_it_back() {
     s.navigate(true);
     assert_eq!(s.state_json()["mode"], "edit");
     assert_eq!(s.state_json()["read_only"], false);
+    // The edit drops the fee and the cash back: their accounts still hear
+    // about it (M2).
+    set_lines(&mut s, &[(4000, "300.00")]);
+    s.header.edit_step(|h| h.cash_back = CashBackForm::default());
+    s.sync_inputs();
+    let mut bus = link.bus().subscribe();
+    assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.save.error);
+    let heard = link.bus().take(&mut bus);
+    for n in [1010, 4000, 6250, 1020] {
+        assert!(heard.ledger_touches(account(n)), "{n}");
+    }
 }
 
 #[test]

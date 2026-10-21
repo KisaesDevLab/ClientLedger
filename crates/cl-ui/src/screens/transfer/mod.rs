@@ -85,6 +85,17 @@ pub(crate) struct Editing {
     pub old_date: CalendarDate,
     /// Void, or not the shape this form writes.
     pub read_only: bool,
+    /// The accounts the saved transfer touches: an edit or a void also
+    /// tells them (Q-262), so an account the edit moved off reloads.
+    pub accounts: Vec<AccountId>,
+}
+
+/// What a save sends, for its idempotency key (never the password).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SaveIdentity {
+    pub posting: BankPosting,
+    pub edit: Option<(TransactionId, RecordVersion)>,
+    pub password: bool,
 }
 
 /// The Transfer Funds window.
@@ -109,7 +120,7 @@ pub struct TransferScreen {
     load_task: Option<Task<Versioned<Transaction>>>,
     save_task: Option<Task<(TransactionId, RecordVersion)>>,
     intent: Option<SaveIntent>,
-    key: Option<(BankPosting, IdempotencyKey)>,
+    pub(crate) key: Option<(SaveIdentity, IdempotencyKey)>,
     pub(crate) problems: Vec<TransferProblem>,
     pub(crate) error: Option<ApiError>,
     pub(crate) notice: Option<&'static str>,
@@ -128,6 +139,15 @@ pub struct TransferScreen {
     pub(crate) closing_prompt: ClosingPrompt<Pending>,
     money_style: cl_core::MoneyStyle,
     bus: crate::data_bus::Subscription,
+    /// Another window changed the accounts list while this form was dirty.
+    pub(crate) lists_stale: bool,
+    /// The field with the keyboard (Esc reverts it).
+    pub(crate) focused: Option<u64>,
+    /// Prev (true) or Next asked on unsaved changes: Save / Discard /
+    /// Keep editing.
+    pub(crate) nav_prompt: Option<bool>,
+    /// Prev/Next to take once the prompt's save is done.
+    after_save_nav: Option<bool>,
 }
 
 fn options(password: Option<Secret>) -> PostingOptions {
@@ -226,6 +246,10 @@ impl TransferScreen {
             void_task: None,
             closing_prompt: ClosingPrompt::default(),
             money_style: cl_core::MoneyStyle::default(),
+            lists_stale: false,
+            focused: None,
+            nav_prompt: None,
+            after_save_nav: None,
         };
         s.start_load();
         s.poll();
@@ -380,9 +404,19 @@ impl TransferScreen {
         }
     }
 
-    /// Saves elsewhere (Q-262): the balances of From and To come again.
-    fn hear_changes(&mut self) {
+    /// Saves elsewhere (Q-262): the balances of From and To come again; a
+    /// changed accounts list is read again once the form is clean (new
+    /// accounts appear in the pickers).
+    pub(crate) fn hear_changes(&mut self) {
         let changes = self.link.bus().take(&mut self.bus);
+        if changes.lists() {
+            self.lists_stale = true;
+        }
+        if self.lists_stale && !self.is_dirty() && self.accounts_task.is_none() {
+            self.lists_stale = false;
+            self.start_load();
+            self.poll();
+        }
         let f = self.form.current();
         if [f.from, f.to]
             .into_iter()
@@ -512,6 +546,9 @@ impl TransferScreen {
         }
         self.intent = Some(intent);
         self.published = vec![c.from, c.to];
+        if let Some(e) = &self.editing {
+            self.published.extend(e.accounts.iter().copied());
+        }
         let edit = self.editing.as_ref().map(|e| (e.id, e.version));
         let link = Arc::clone(&self.link);
         if let Some(local) = self.local.as_mut() {
@@ -526,14 +563,11 @@ impl TransferScreen {
                 }
             };
         }
-        let key = match &self.key {
-            Some((p, k)) if *p == posting => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((posting.clone(), k.clone()));
-                k
-            }
-        };
+        let key = self.key_for(&SaveIdentity {
+            posting: posting.clone(),
+            edit,
+            password: password.is_some(),
+        });
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             self.save_failed(ApiError::NoCompanyOpen);
             return false;
@@ -564,6 +598,20 @@ impl TransferScreen {
         false
     }
 
+    /// The key for this save: the stored one when the same save (same
+    /// posting, same record version, same password-or-not) goes again
+    /// after an unknown outcome, a fresh one otherwise.
+    pub(crate) fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
+        match &self.key {
+            Some((d, k)) if d == id => k.clone(),
+            _ => {
+                let k = IdempotencyKey::new();
+                self.key = Some((id.clone(), k.clone()));
+                k
+            }
+        }
+    }
+
     fn closing_failed(&mut self, e: &ApiError, pending: Pending) -> bool {
         let supported = self.closing_supported();
         self.closing_prompt
@@ -580,20 +628,27 @@ impl TransferScreen {
         self.key = None;
         let f = self.form.current().clone();
         self.form.save_ok(f.clone());
+        let now: Vec<AccountId> = [f.from, f.to].into_iter().flatten().collect();
         if let Some(e) = self.editing.as_mut() {
             e.version = version;
             e.old_date = f.date.unwrap_or(e.old_date);
+            e.accounts = now;
         } else if intent == SaveIntent::Save {
             self.editing = Some(Editing {
                 id,
                 version,
                 old_date: f.date.unwrap_or(self.today),
                 read_only: false,
+                accounts: now,
             });
         }
         self.nav.clear();
         self.follow_up(intent);
         self.fetch_balances();
+        // Prev/Next asked before the save (the unsaved-changes prompt).
+        if let Some(older) = self.after_save_nav.take() {
+            self.navigate(older);
+        }
     }
 
     fn follow_up(&mut self, intent: SaveIntent) {
@@ -607,8 +662,9 @@ impl TransferScreen {
         }
     }
 
-    fn save_failed(&mut self, e: ApiError) {
+    pub(crate) fn save_failed(&mut self, e: ApiError) {
         let intent = self.intent.take().unwrap_or(SaveIntent::Save);
+        self.after_save_nav = None;
         if !crate::screens::register::keeps_key(&e) {
             self.key = None;
         }
@@ -640,6 +696,8 @@ impl TransferScreen {
         self.form.load(blank(from, date));
         self.editing = None;
         self.nav_at = None;
+        self.nav_prompt = None;
+        self.focused = None;
         self.void_open = false;
         self.problems.clear();
         self.stale = false;
@@ -674,12 +732,13 @@ impl TransferScreen {
 
     // ------------------------------------------------------------ records
 
-    fn navigate(&mut self, older: bool) {
+    pub(crate) fn navigate(&mut self, older: bool) {
         if self.save_task.is_some() || self.load_task.is_some() {
             return;
         }
         if self.is_dirty() {
-            self.notice = Some("transfer.nav.unsaved");
+            // The standard question: Save / Discard changes / Keep editing.
+            self.nav_prompt = Some(older);
             return;
         }
         if self.nav.is_empty() {
@@ -688,6 +747,88 @@ impl TransferScreen {
             return;
         }
         self.step(older);
+    }
+
+    /// Prev/Next on unsaved changes: the answer to Save / Discard changes /
+    /// Keep editing.
+    pub(crate) fn answer_nav(&mut self, answer: crate::windows::PromptAnswer) {
+        let Some(older) = self.nav_prompt.take() else {
+            return;
+        };
+        match answer {
+            crate::windows::PromptAnswer::Keep => {}
+            crate::windows::PromptAnswer::Discard => {
+                self.form.revert_form();
+                self.sync_inputs();
+                self.navigate(older);
+            }
+            crate::windows::PromptAnswer::Save => {
+                self.after_save_nav = Some(older);
+                let done = self.start_save(SaveIntent::Save, None);
+                // Refused or waiting on a question: the move waits for the
+                // save (an engine save moves on when it finishes).
+                if !done && self.save_task.is_none() {
+                    self.after_save_nav = None;
+                }
+            }
+        }
+    }
+
+    /// Esc: an open question or Void card closes, then the focused field
+    /// goes back to its saved value; with nothing to revert the shell
+    /// closes the window (asking first when the form is dirty).
+    pub(crate) fn revert_field(&mut self) -> bool {
+        if self.nav_prompt.is_some() {
+            self.answer_nav(crate::windows::PromptAnswer::Keep);
+            return true;
+        }
+        if self.void_open {
+            self.void_open = false;
+            return true;
+        }
+        let Some(f) = self.focused else { return false };
+        let saved = self.form.original().clone();
+        let now = self.form.current();
+        let differs = match f {
+            field::FROM => now.from != saved.from,
+            field::TO => now.to != saved.to,
+            field::DATE => now.date != saved.date,
+            field::AMOUNT => now.amount != saved.amount,
+            field::MEMO => now.memo != saved.memo,
+            _ => false,
+        };
+        // An amount typed but not yet taken also goes back.
+        let typed = f == field::AMOUNT
+            && self.amount_text.trim()
+                != saved
+                    .amount
+                    .map(|m| m.format(self.money_style))
+                    .unwrap_or_default();
+        if !differs && !typed {
+            return false;
+        }
+        if differs {
+            self.form.edit_step(|v| match f {
+                field::FROM => v.from = saved.from,
+                field::TO => v.to = saved.to,
+                field::DATE => v.date = saved.date,
+                field::AMOUNT => v.amount = saved.amount,
+                _ => v.memo.clone_from(&saved.memo),
+            });
+        }
+        self.sync_inputs();
+        if matches!(f, field::FROM | field::TO) {
+            self.fetch_balances();
+        }
+        true
+    }
+
+    fn track(&mut self, r: &egui::Response, f: u64) {
+        if r.has_focus() {
+            self.focused = Some(f);
+        } else if self.focused == Some(f) {
+            self.focused = None;
+        }
     }
 
     fn step(&mut self, older: bool) {
@@ -769,12 +910,17 @@ impl TransferScreen {
     fn show(&mut self, v: &Versioned<Transaction>) {
         let (form, exact) = form_of(&v.record);
         self.form.load(form);
+        let mut accounts: Vec<AccountId> = v.record.lines.iter().map(|l| l.account_id).collect();
+        accounts.sort();
+        accounts.dedup();
         self.editing = Some(Editing {
             id: v.record.id,
             version: v.version,
             old_date: v.record.txn_date,
             read_only: !exact || v.record.status == TxnStatus::Void,
+            accounts,
         });
+        self.focused = None;
         self.last_action = Some("load");
         self.problems.clear();
         self.error = None;
@@ -805,6 +951,7 @@ impl TransferScreen {
         }
         let f = self.form.current();
         self.published = [f.from, f.to].into_iter().flatten().collect();
+        self.published.extend(e.accounts.iter().copied());
         let link = Arc::clone(&self.link);
         if let Some(local) = self.local.as_mut() {
             match local.void(&link, e.id, password.as_ref()) {
@@ -820,6 +967,7 @@ impl TransferScreen {
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
+        // A fresh key per try is safe: void is idempotent at the engine.
         let key = IdempotencyKey::new();
         let label = OrphanLabel {
             what: "orphan.transfer_void",
@@ -891,7 +1039,7 @@ impl TransferScreen {
                 )
                 .selectable(false),
             );
-            ui.add_enabled_ui(enabled, |ui| {
+            let r = ui.add_enabled_ui(enabled, |ui| {
                 // Q-250: a click opens the list.
                 egui::ComboBox::from_id_salt(if from { "transfer/from" } else { "transfer/to" })
                     .width(260.0)
@@ -904,8 +1052,9 @@ impl TransferScreen {
                         }
                     })
                     .response
-                    .labelled_by(l.id);
+                    .labelled_by(l.id)
             });
+            self.track(&r.inner, if from { field::FROM } else { field::TO });
             let text = self.balance_text(usize::from(!from), current);
             ui.label(RichText::new(text).text_style(egui::TextStyle::Monospace));
         });
@@ -1015,6 +1164,7 @@ impl TransferScreen {
                         if r.lost_focus() {
                             self.date.settle();
                         }
+                        self.track(&r, field::DATE);
                     });
                     ui.vertical(|ui| {
                         let l = ui.label(RichText::new(t("transfer.amount")).size(12.0));
@@ -1029,6 +1179,7 @@ impl TransferScreen {
                         if r.lost_focus() {
                             self.amount_left();
                         }
+                        self.track(&r, field::AMOUNT);
                         if let Some(k) = self.amount_problem {
                             ui.label(RichText::new(t(k)).size(12.0).color(tokens.warn_text));
                         }
@@ -1043,6 +1194,7 @@ impl TransferScreen {
                             self.form.edit(field::MEMO, |f| f.memo = memo);
                             self.rev = self.form.revision();
                         }
+                        self.track(&r, field::MEMO);
                     });
                 });
             });
@@ -1099,6 +1251,12 @@ impl TransferScreen {
         if let Some(c) = clicked {
             self.command(CommandId::new(c));
         }
+        if self.nav_prompt.is_some()
+            && let Some(a) =
+                crate::forms::nav_prompt::ui(ui, "transfer", &t("cmd.banking.transfer"))
+        {
+            self.answer_nav(a);
+        }
     }
 
     /// The control-channel state: flags, ids and the typed amount the
@@ -1130,6 +1288,7 @@ impl TransferScreen {
             "notice": self.notice,
             "void_open": self.void_open,
             "nav_at": self.nav_at,
+            "nav_prompt": self.nav_prompt.is_some(),
         });
         if let (Value::Object(m), Value::Object(c)) = (
             &mut v,
@@ -1230,10 +1389,8 @@ impl Screen for TransferScreen {
                 }
                 d
             }
-            "form.revert" if self.void_open => {
-                self.void_open = false;
-                true
-            }
+            "form.revert" => self.revert_field(),
+
             _ => false,
         }
     }

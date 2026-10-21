@@ -64,6 +64,132 @@ fn a_transfer_saves_exactly_and_both_balances_hear_it() {
 }
 
 #[test]
+fn an_edit_tells_the_account_it_moved_off_and_a_stale_edit_is_refused() {
+    let (mut s, link, _dir) = screen();
+    fill(&mut s, 1010, 2050, "40.00");
+    assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.error);
+    let id = s.last_saved.expect("saved");
+    // Read it again (as the register's Edit would) and move To elsewhere.
+    s.clear();
+    assert!(s.open_record(id));
+    assert_eq!(s.state_json()["mode"], "edit");
+    let other = s
+        .transfer_accounts()
+        .iter()
+        .map(|a| a.id)
+        .find(|a| *a != account(1010) && *a != account(2050))
+        .expect("a third account");
+    s.set_account(false, other);
+    let mut bus = link.bus().subscribe();
+    assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.error);
+    let heard = link.bus().take(&mut bus);
+    assert!(heard.ledger_touches(account(2050)), "the old To hears it");
+    assert!(heard.ledger_touches(other) && heard.ledger_touches(account(1010)));
+    // Someone else changes it meanwhile: this window's version is stale.
+    let mut elsewhere = TransferScreen::new(Arc::clone(&link), None, s.today);
+    assert!(elsewhere.open_record(id));
+    elsewhere.amount_text = "41.00".into();
+    assert!(elsewhere.amount_left());
+    assert!(elsewhere.start_save(SaveIntent::Save, None));
+    s.amount_text = "42.00".into();
+    assert!(s.amount_left());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(s.state_json()["save"]["stale"], true);
+}
+
+#[test]
+fn a_retry_reuses_the_key_only_for_the_same_save() {
+    let (mut s, _link, _dir) = screen();
+    let posting = BankPosting::transfer(TransferDraft {
+        from: account(1010),
+        to: account(2050),
+        date: s.today,
+        amount: money("5.00"),
+        memo: None,
+    })
+    .expect("posting");
+    let id = |edit, password| SaveIdentity {
+        posting: posting.clone(),
+        edit,
+        password,
+    };
+    let k = s.key_for(&id(None, false));
+    s.save_failed(ApiError::Timeout);
+    assert!(s.key_for(&id(None, false)) == k, "a lost reply resends the key");
+    assert!(s.key_for(&id(None, true)) != k, "with the password: a new key");
+    let txn = TransactionId::parse("5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
+    let e = s.key_for(&id(Some((txn, RecordVersion::Fingerprint([0; 32]))), false));
+    let newer = Some((txn, RecordVersion::Fingerprint([1; 32])));
+    assert!(s.key_for(&id(newer, false)) != e, "another version: a new key");
+}
+
+#[test]
+fn prev_on_unsaved_work_asks_and_esc_reverts_the_focused_field() {
+    use crate::windows::PromptAnswer;
+    let (mut s, _link, _dir) = screen();
+    fill(&mut s, 1010, 2050, "12.00");
+    assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.error);
+    s.amount_text = "13.00".into();
+    assert!(s.amount_left());
+    assert!(s.is_dirty());
+    // Prev: the standard question, not a notice.
+    s.navigate(true);
+    assert_eq!(s.state_json()["nav_prompt"], true);
+    s.answer_nav(PromptAnswer::Keep);
+    assert!(s.is_dirty() && s.nav_prompt.is_none());
+    // Esc on the amount: back to the saved 12.00, then nothing to revert.
+    s.focused = Some(field::AMOUNT);
+    assert!(s.command(CommandId::new("form.revert")));
+    assert_eq!(s.state_json()["amount"], "12.00");
+    assert!(!s.is_dirty());
+    assert!(!s.command(CommandId::new("form.revert")), "clean: the shell closes");
+    // Discard moves on without saving.
+    s.amount_text = "14.00".into();
+    assert!(s.amount_left());
+    s.navigate(true);
+    s.answer_nav(PromptAnswer::Discard);
+    assert!(!s.is_dirty());
+    assert_eq!(s.saved_count, 1);
+    // Save saves first, then moves.
+    s.amount_text = "15.00".into();
+    assert!(s.amount_left());
+    s.navigate(true);
+    s.answer_nav(PromptAnswer::Save);
+    assert_eq!(s.saved_count, 2);
+    assert!(!s.is_dirty());
+    assert!(
+        s.last_action == Some("load") || s.notice == Some("transfer.nav.oldest"),
+        "it moved on after the save"
+    );
+}
+
+#[test]
+fn a_new_account_from_another_window_appears_once_the_form_is_clean() {
+    let (mut s, link, _dir) = screen();
+    let before = s.accounts.len();
+    {
+        let mut demo = link.demo_state().expect("demo");
+        let chart = demo.chart.get_or_insert_with(crate::company::demo::chart);
+        let mut extra = chart
+            .iter()
+            .find(|a| a.id == account(1010))
+            .cloned()
+            .expect("checking");
+        extra.id = account(1099);
+        extra.fields.account_number = Some("1099".into());
+        chart.push(extra);
+    }
+    fill(&mut s, 1010, 2050, "1.00");
+    link.bus().publish(crate::data_bus::Change::Accounts);
+    s.hear_changes();
+    assert_eq!(s.accounts.len(), before, "dirty: the list waits");
+    s.clear();
+    s.hear_changes();
+    assert_eq!(s.accounts.len(), before + 1);
+    assert!(s.transfer_accounts().iter().any(|a| a.id == account(1099)));
+}
+
+#[test]
 fn the_same_account_is_refused_and_nothing_is_sent() {
     let (mut s, _link, _dir) = screen();
     fill(&mut s, 1010, 1010, "5.00");

@@ -284,7 +284,7 @@ impl DepositScreen {
             return false;
         }
         self.save.intent = Some(intent);
-        self.save.published = touched(&draft);
+        self.save.published = self.publishes(&draft);
         let edit = self.editing.as_ref().map(|e| (e.id, e.version));
         let link = Arc::clone(&self.link);
         if let Some(local) = self.local.as_mut() {
@@ -345,6 +345,21 @@ impl DepositScreen {
             Err(_) => self.save_failed(ApiError::Local(LocalValidation::InvalidValue)),
         }
         false
+    }
+
+    /// The accounts a save publishes (Q-262): what the draft touches, and
+    /// on an edit also what the saved deposit touched before, so a line
+    /// moved off an account reloads that account too.
+    pub(crate) fn publishes(&self, draft: &DepositDraft) -> Vec<AccountId> {
+        let mut v = touched(draft);
+        if self.editing.is_some()
+            && let Some(r) = &self.record
+        {
+            v.extend(touched_by(r));
+            v.sort();
+            v.dedup();
+        }
+        v
     }
 
     fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
@@ -799,6 +814,9 @@ impl DepositScreen {
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
+        // A fresh key per try is safe here: void is idempotent at the
+        // engine (voiding a void transaction changes nothing), so a resend
+        // after a lost reply can't void twice or post anything.
         let key = IdempotencyKey::new();
         let label = OrphanLabel {
             what: "orphan.deposit_void",

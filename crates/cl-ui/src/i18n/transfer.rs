@@ -20,7 +20,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("transfer.no_accounts", "You need two bank, card or loan accounts to move money between. Add one in the Chart of Accounts."),
     ("transfer.read_only", "This transfer can't be changed here (it was voided, or made in a way this form can't show)."),
     ("transfer.changed_elsewhere", "This transfer was changed somewhere else. Open it again to see the change."),
-    ("transfer.nav.unsaved", "Save or clear this transfer first."),
     ("transfer.nav.oldest", "This is the oldest transfer from this account."),
     ("transfer.void.title", "Void this transfer"),
     ("transfer.void.reason", "Reason"),

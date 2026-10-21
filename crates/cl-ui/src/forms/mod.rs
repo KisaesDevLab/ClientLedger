@@ -5,6 +5,7 @@
 
 pub mod closing_prompt;
 pub mod lines_grid;
+pub mod nav_prompt;
 
 use std::collections::BTreeSet;
 
