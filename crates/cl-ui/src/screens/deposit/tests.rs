@@ -460,6 +460,36 @@ fn the_demo_story_groups_the_bank_deposit_and_void_returns_the_payments() {
 }
 
 #[test]
+fn prev_on_unsaved_work_asks_save_discard_or_keep_editing() {
+    use crate::windows::PromptAnswer;
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let mut s = DepositScreen::new(Arc::clone(&link), None, today());
+    set_lines(&mut s, &[(4000, "20.00")]);
+    s.navigate(true);
+    assert_eq!(s.state_json()["nav_prompt"], true);
+    assert_eq!(s.save.notice, None, "a question, not a notice");
+    // Keep editing (Esc too): nothing moves, nothing is lost.
+    s.answer_nav(PromptAnswer::Keep);
+    assert!(s.is_dirty() && s.nav_prompt.is_none());
+    s.navigate(true);
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(s.nav_prompt.is_none() && s.is_dirty());
+    // Save: saved, then Prev opens the newest deposit (it).
+    s.navigate(true);
+    s.answer_nav(PromptAnswer::Save);
+    assert_eq!(s.save.count, 1);
+    assert_eq!(s.state_json()["mode"], "edit");
+    // Discard: the change goes, then Prev moves on.
+    set_lines(&mut s, &[(4000, "21.00")]);
+    s.navigate(false);
+    s.answer_nav(PromptAnswer::Discard);
+    assert!(!s.is_dirty());
+    assert_eq!(s.save.count, 1);
+    assert_eq!(s.state_json()["mode"], "new", "Next past the newest: a new one");
+}
+
+#[test]
 fn a_lost_refund_reply_resends_under_the_same_key() {
     let (mut s, _log, _dir) = screen(all_caps());
     let draft = cl_api::VendorRefundDraft {

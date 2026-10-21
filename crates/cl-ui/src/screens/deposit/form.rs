@@ -61,6 +61,12 @@ impl DepositScreen {
         }
         self.toolbar(ui, &tokens);
         self.messages(ui, &tokens);
+        if self.nav_prompt.is_some()
+            && let Some(a) =
+                crate::forms::nav_prompt::ui(ui, "deposit", &t("cmd.banking.deposit"))
+        {
+            self.answer_nav(a);
+        }
         if self.deposit_accounts().is_empty() {
             ui.add_space(8.0);
             ui.label(RichText::new(t("deposit.no_bank")).color(tokens.text_secondary));
@@ -701,7 +707,12 @@ impl DepositScreen {
     /// Esc: an open card closes, then the focused field goes back to its
     /// saved value; with nothing to revert the shell closes the window.
     fn revert_field(&mut self) -> bool {
+        if self.nav_prompt.is_some() {
+            self.answer_nav(crate::windows::PromptAnswer::Keep);
+            return true;
+        }
         if self.void.open {
+
             self.void = VoidPrompt::default();
             return true;
         }

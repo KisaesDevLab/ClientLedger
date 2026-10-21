@@ -68,7 +68,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("deposit.reload", "Reload"),
     ("deposit.already_deposited", "One of these payments was already deposited (maybe in another window). The list has been refreshed."),
     ("deposit.clearing_warning", "Saved, but Payments Clearing now shows less than nothing. A payment may have been deposited twice. Check this deposit and change or void it if needed."),
-    ("deposit.nav.unsaved", "Save or clear this deposit first."),
     ("deposit.nav.oldest", "This is the oldest deposit in this account."),
     ("deposit.read_only.void", "This deposit was voided. It can't be changed."),
     ("deposit.read_only.grouped", "This deposit took payments from Payments to deposit. To change it, void it and make it again."),

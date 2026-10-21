@@ -456,6 +456,10 @@ impl DepositScreen {
         self.follow_up(intent);
         self.refresh_pending();
         self.refresh_facts();
+        // Prev/Next asked before the save (the unsaved-changes prompt).
+        if let Some(older) = self.after_save_nav.take() {
+            self.navigate(older);
+        }
     }
 
     /// After a save: a new deposit, close, or stay.
@@ -491,6 +495,7 @@ impl DepositScreen {
         self.record = None;
         self.show_summary = false;
         self.nav.at = None;
+        self.nav_prompt = None;
         self.void = VoidPrompt::default();
         self.save.problems.clear();
         self.save.stale = false;
@@ -514,6 +519,7 @@ impl DepositScreen {
 
     pub(crate) fn save_failed(&mut self, e: ApiError) {
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
+        self.after_save_nav = None;
         if !crate::screens::register::keeps_key(&e) {
             self.save.key = None;
         }
@@ -577,7 +583,8 @@ impl DepositScreen {
             return;
         }
         if self.is_dirty() {
-            self.save.notice = Some("deposit.nav.unsaved");
+            // The standard question: Save / Discard changes / Keep editing.
+            self.nav_prompt = Some(older);
             return;
         }
         if self.nav.account != self.account() {
@@ -594,7 +601,35 @@ impl DepositScreen {
         self.step(older);
     }
 
+    /// Prev/Next on unsaved changes: the answer to Save / Discard changes /
+    /// Keep editing.
+    pub(crate) fn answer_nav(&mut self, answer: crate::windows::PromptAnswer) {
+        let Some(older) = self.nav_prompt.take() else {
+            return;
+        };
+        match answer {
+            crate::windows::PromptAnswer::Keep => {}
+            crate::windows::PromptAnswer::Discard => {
+                let lists = Arc::clone(&self.lists);
+                self.header.revert_form();
+                self.lines.form_mut().revert_form(&*lists);
+                self.sync_inputs();
+                self.navigate(older);
+            }
+            crate::windows::PromptAnswer::Save => {
+                self.after_save_nav = Some(older);
+                let done = self.start_save(SaveIntent::Save, None);
+                // Refused or waiting on a question: the move waits for the
+                // save (an engine save moves on when it finishes).
+                if !done && self.save.task.is_none() {
+                    self.after_save_nav = None;
+                }
+            }
+        }
+    }
+
     fn step(&mut self, older: bool) {
+
         let target = match (self.nav.at, older) {
             (None, true) => Some(0),
             (None, false) => return,

@@ -235,6 +235,11 @@ pub struct DepositScreen {
     /// Saves in other windows (Q-262).
     pub(crate) bus: crate::data_bus::Subscription,
     pub(crate) lists_stale: bool,
+    /// Prev (true) or Next asked on unsaved changes: Save / Discard /
+    /// Keep editing.
+    pub(crate) nav_prompt: Option<bool>,
+    /// Prev/Next to take once the prompt's save is done.
+    pub(crate) after_save_nav: Option<bool>,
 }
 
 /// A blank deposit (no lines: the grid holds them).
@@ -309,6 +314,8 @@ impl DepositScreen {
             money_style: cl_core::MoneyStyle::default(),
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,
+            nav_prompt: None,
+            after_save_nav: None,
         };
         s.bus = s.link.bus().subscribe();
         s.start_load();
@@ -646,6 +653,8 @@ impl DepositScreen {
             "void_open": self.void.open,
             "refund": self.refund.state_json(),
             "nav_at": self.nav.at,
+            "nav_prompt": self.nav_prompt.is_some(),
+
             "focused": self.focused.map(|f| format!("{f:?}").to_lowercase()),
             "grid": { "focused": self.lines.has_focus() },
         });
