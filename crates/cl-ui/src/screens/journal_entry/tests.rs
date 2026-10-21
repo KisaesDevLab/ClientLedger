@@ -505,6 +505,38 @@ fn a_dropped_template_account_fills_in_empty() {
 }
 
 #[test]
+fn a_template_keeps_its_report_basis() {
+    let (mut s, _link, _dir) = screen();
+    let line = |n, side| cl_api::JeLine {
+        account: account_id(n),
+        side,
+        description: None,
+        tag: None,
+        contact: None,
+    };
+    let e = cl_api::NewJournalEntry::new(
+        s.today,
+        Some("Accrual".into()),
+        cl_api::Basis::Accrual,
+        vec![
+            line(6100, cl_api::Side::Debit(m("10.00"))),
+            line(1010, cl_api::Side::Credit(m("10.00"))),
+        ],
+    )
+    .expect("entry");
+    s.fill_from_template(TemplateDraft::Journal(e), &[]);
+    let Ok(TemplateDraft::Journal(again)) = s.template_draft() else {
+        panic!("a journal draft");
+    };
+    assert_eq!(again.basis(), cl_api::Basis::Accrual, "Save as Template");
+    // Save builds the entry the same way (no edit: the template's basis).
+    assert_eq!(s.new_basis, cl_api::Basis::Accrual);
+    // A blank form is Both again.
+    s.new_form(false);
+    assert_eq!(s.new_basis, cl_api::Basis::Both);
+}
+
+#[test]
 fn esc_reverts_the_focused_field_then_lets_the_window_close() {
     let (mut s, _link, _dir) = screen();
     s.header.edit(field::MEMO, |h| h.memo = "typed".into());

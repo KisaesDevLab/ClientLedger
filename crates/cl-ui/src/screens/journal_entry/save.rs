@@ -152,7 +152,7 @@ impl JournalScreen {
                 return false;
             }
         };
-        let basis = self.editing.as_ref().map_or(Basis::Both, |e| e.basis);
+        let basis = self.editing.as_ref().map_or(self.new_basis, |e| e.basis);
         let entry = match self.entry_of(&checked, basis) {
             Ok(e) => e,
             Err(v) => {
@@ -361,7 +361,7 @@ impl JournalScreen {
                     id,
                     version,
                     old_date: date,
-                    basis: Basis::Both,
+                    basis: self.new_basis,
                     read_only: None,
                     void: false,
                     accounts,

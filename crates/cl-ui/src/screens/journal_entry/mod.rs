@@ -149,6 +149,9 @@ pub struct JournalScreen {
     /// A delete whose reply was lost (the entry may be gone): its retry
     /// takes "not found" as done.
     pub(crate) delete_unknown: Option<TransactionId>,
+    /// The report basis a new entry saves with: Both, or the template's
+    /// it was filled from (an edit keeps the entry's own).
+    pub(crate) new_basis: Basis,
     pub(crate) number_task: Option<Task<String>>,
     pub(crate) intent: Option<SaveIntent>,
     pub(crate) key: Option<(SaveIdentity, IdempotencyKey)>,
@@ -241,6 +244,7 @@ impl JournalScreen {
             save_task: None,
             action_task: None,
             delete_unknown: None,
+            new_basis: Basis::Both,
             number_task: None,
             intent: None,
             key: None,
@@ -574,6 +578,7 @@ impl JournalScreen {
         self.lines.form_mut().load(fresh, &*lists);
         self.seen_lines = self.lines.value().clone();
         self.editing = None;
+        self.new_basis = Basis::Both;
         self.nav_at = None;
         self.nav_prompt = None;
         self.focused = None;
@@ -818,7 +823,8 @@ impl TemplateSource for JournalScreen {
         f.number.clear();
         f.reverse_on = None;
         let c = check(&f, &self.context())?;
-        self.entry_of(&c, Basis::Both)
+        let basis = self.editing.as_ref().map_or(self.new_basis, |e| e.basis);
+        self.entry_of(&c, basis)
             .map(TemplateDraft::Journal)
             .map_err(|_| vec![JournalProblem::TooLarge])
     }
@@ -856,6 +862,7 @@ impl TemplateSource for JournalScreen {
         self.seen_lines = self.lines.value().clone();
         let memo = e.memo().unwrap_or_default().to_string();
         let adjusting = e.adjusting();
+        self.new_basis = e.basis();
         self.header.edit_step(|h| {
             h.memo = memo;
             h.adjusting = adjusting;
