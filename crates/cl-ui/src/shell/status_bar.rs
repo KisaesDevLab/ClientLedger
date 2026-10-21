@@ -125,9 +125,25 @@ pub fn engine_text(view: &HostView) -> Option<String> {
     }
 }
 
-/// Draw the bar.
-pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) {
+/// The "templates need you" chip text (P15), when any wait.
+#[must_use]
+pub fn templates_chip(n: usize) -> Option<String> {
+    match n {
+        0 => None,
+        1 => Some(t("status.templates_need_you.one")),
+        n => Some(crate::i18n::t_with(
+            "status.templates_need_you",
+            &[("n", &n.to_string())],
+        )),
+    }
+}
+
+/// Draw the bar. True when the owner clicked the "templates need you"
+/// chip (the shell opens Templates Due).
+pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) -> bool {
     let engine = engine_text(&shell.host_view());
+    let chip = templates_chip(shell.templates_need_you());
+    let mut chip_clicked = false;
     egui::Panel::bottom("status_bar")
         .exact_size(HEIGHT)
         .frame(
@@ -155,6 +171,14 @@ pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) {
                     && !narrow
                 {
                     ui.label(small(ai.clone()));
+                }
+                if let Some(chip) = &chip
+                    && ui
+                        .link(RichText::new(chip).size(12.0).color(tokens.warn_text))
+                        .on_hover_text(t("status.templates_need_you.tip"))
+                        .clicked()
+                {
+                    chip_clicked = true;
                 }
                 if let Some(toast) = shell.toast_text() {
                     // Leave room for the shortcut chips on the right so the
@@ -192,4 +216,5 @@ pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) {
                 }
             });
         });
+    chip_clicked
 }

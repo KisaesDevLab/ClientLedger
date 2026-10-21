@@ -90,6 +90,9 @@ pub struct CompanyLink {
     demo: Option<Mutex<demo::DemoState>>,
     /// "Data changed" notices between windows (Q-262).
     bus: crate::data_bus::DataBus,
+    /// The last catch-up run's answer, shared by the runner and the
+    /// Templates Due window (P15).
+    due: Mutex<crate::templates_runner::DueBoard>,
 }
 
 impl std::fmt::Debug for CompanyLink {
@@ -128,6 +131,7 @@ impl CompanyLink {
             backup_dir,
             demo: None,
             bus: crate::data_bus::DataBus::new(),
+            due: Mutex::new(crate::templates_runner::DueBoard::default()),
         }
     }
 
@@ -147,6 +151,7 @@ impl CompanyLink {
             backup_dir: dir.join("Backups"),
             demo: Some(Mutex::new(demo::DemoState::new())),
             bus: crate::data_bus::DataBus::new(),
+            due: Mutex::new(crate::templates_runner::DueBoard::default()),
         }
     }
 
@@ -283,6 +288,11 @@ impl CompanyLink {
     #[must_use]
     pub fn bus(&self) -> &crate::data_bus::DataBus {
         &self.bus
+    }
+
+    /// The catch-up board (the last run's answer, "Check now"; P15).
+    pub fn due(&self) -> std::sync::MutexGuard<'_, crate::templates_runner::DueBoard> {
+        self.due.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Queue an event for the shell.
