@@ -12,6 +12,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lines.empty", "\u{2014}"),
     ("lines.col.billable", "Billable"),
     ("lines.col.tags", "Tags"),
+    // Debit/credit grids (P15 Make Journal Entry).
+    ("lines.col.debit", "Debit"),
+    ("lines.col.credit", "Credit"),
+    ("lines.col.name", "Name"),
     ("lines.need_account", "Choose an account for each line."),
     // Save as Template (P15): the toolbar slot every template form shares.
     ("template.save.tip", "Keep this form as a template to reuse or schedule it ({keys})."),
