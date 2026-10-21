@@ -117,9 +117,11 @@ pub use resources::tenants::{
     ImportVerification, JobError, JobId, JobState, NewTenant, TenantSummary, Tenants,
 };
 pub use resources::transactions::{
-    Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions, JeLine, LINE_ROLE_CASH_BACK,
-    MAX_LINES, NewJournalEntry, ReportBasis, Side, Transaction, TransactionFilter, TransactionLine,
-    TransactionSummary, Transactions, TxnSort, TxnStatus, TxnType,
+    AccountRoles, Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions,
+    JE_AR_AP_NAME_REQUIRED, JE_AR_AP_ONE_PER_ENTRY, JE_NUMBER_MAX_CHARS, JeLine, JeOptions,
+    JournalEntries, LINE_ROLE_CASH_BACK, MAX_LINES, NewJournalEntry, REVERSAL_EDITED, ReportBasis,
+    Side, Transaction, TransactionFilter, TransactionLine, TransactionSummary, Transactions,
+    TxnSort, TxnStatus, TxnType, has_code, next_number_from_json,
 };
 pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
 pub use session::{

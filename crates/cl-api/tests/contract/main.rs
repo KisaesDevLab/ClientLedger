@@ -26,6 +26,7 @@ mod contract_errors;
 mod contract_harness;
 mod contract_items;
 mod contract_journal;
+mod contract_journal_entries;
 mod contract_lifecycle;
 mod contract_list_csv;
 mod contract_logging;
@@ -244,6 +245,27 @@ fn main() -> std::process::ExitCode {
         (
             "deposits::clearing_warning_on_create_and_edit",
             contract_deposits::clearing_warning_on_create_and_edit,
+        ),
+        // P15 lane J: Make Journal Entry (part A capabilities PENDING).
+        (
+            "journal_entries::engine_refuses_unbalanced_raw",
+            contract_journal_entries::engine_refuses_unbalanced_raw,
+        ),
+        (
+            "journal_entries::ar_ap_names",
+            contract_journal_entries::ar_ap_names,
+        ),
+        (
+            "journal_entries::numbering",
+            contract_journal_entries::numbering,
+        ),
+        (
+            "journal_entries::adjusting_round_trip",
+            contract_journal_entries::adjusting_round_trip,
+        ),
+        (
+            "journal_entries::reversing_creates_linked_entry_on_date",
+            contract_journal_entries::reversing_creates_linked_entry_on_date,
         ),
         (
             "register_property::balance_holds_after_random_edits",

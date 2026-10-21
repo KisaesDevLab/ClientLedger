@@ -631,6 +631,7 @@ pub async fn load_into(
                 side,
                 description: l.memo.clone(),
                 tag: None,
+                contact: None,
             });
         }
         let memo = match &t.contact {

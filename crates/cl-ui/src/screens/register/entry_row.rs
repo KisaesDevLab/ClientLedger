@@ -564,12 +564,14 @@ impl Prepared {
             side: own_side(self.amount),
             description: self.own_line.0.clone(),
             tag: self.own_line.1,
+            contact: None,
         }];
         lines.extend(self.lines.iter().map(|l| JeLine {
             account: l.account,
             side: other_side(l.amount),
             description: l.memo.clone(),
             tag: l.tag,
+            contact: None,
         }));
         NewJournalEntry::new(self.date, self.memo.clone(), self.basis, lines)
     }

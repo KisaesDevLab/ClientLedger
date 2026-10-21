@@ -526,6 +526,7 @@ mod tests {
             tag_id: None,
             tag_name: None,
             contact_id: None,
+            contact_name: None,
             is_billable: false,
             billed_status: None,
             source_transaction_id: None,
@@ -551,6 +552,10 @@ mod tests {
                 created_at: None,
                 updated_at: None,
                 lines,
+                is_adjusting: false,
+                reverses_transaction_id: None,
+                reversal_transaction_id: None,
+                reverse_on: None,
             },
             version: RecordVersion::Fingerprint([7; 32]),
         }

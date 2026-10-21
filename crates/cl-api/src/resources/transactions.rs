@@ -13,6 +13,15 @@
 //!   owner is told the outcome is unknown (§2.6.1).
 //! - A 423 `TB_PERIOD_LOCKED` is `ApiError::ClosedPeriod`; there is no way
 //!   to send `overrideConfirmed` ([`PostingOptions`], §2.7).
+//! - P15 part A (`target/plans/P15-engine-shapes-a.md`): line names
+//!   (`contactId`, `je-names-v1`) with the A/R-A/P rule (Q-206), the entry
+//!   number (`txnNumber`, `je-number-v1`), the Adjusting flag
+//!   (`isAdjusting`, `je-adjusting-v1`) and Reverse on (`reverseOn`,
+//!   `je-reversing-v1`). [`NewJournalEntry::new_with`] refuses what the
+//!   engine would refuse; a field set without its capability is refused at
+//!   send time, nothing sent.
+
+use std::collections::BTreeSet;
 
 use cl_core::ids::{AccountId, ContactId, JournalLineId, TagId, TransactionId};
 use cl_core::{CalendarDate, Money, Timestamp};
@@ -24,7 +33,7 @@ use crate::errors::{ApiError, LocalValidation};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::common::{self, Query, SortDir, Spec};
 use crate::resources::operations::{
-    TXN_DELETE, TXN_GET, TXN_PUT, TXN_VOID, TXNS_CREATE, TXNS_LIST,
+    JE_NEXT_NUMBER, TXN_DELETE, TXN_GET, TXN_PUT, TXN_VOID, TXNS_CREATE, TXNS_LIST,
 };
 use crate::resources::posting::{PostingOptions, posting_body};
 use crate::resources::reconcile::{OutcomeMatcher, Probe, Search, row_fp};
@@ -33,7 +42,7 @@ use crate::resources::versioning::{
     update_guarded,
 };
 use crate::session::Session;
-use crate::wire::{Page, PageRequest};
+use crate::wire::{Capabilities, Page, PageRequest};
 
 pub(crate) const SPEC: Spec = Spec {
     list: &TXNS_LIST,
@@ -48,6 +57,10 @@ pub(crate) const SPEC: Spec = Spec {
 
 /// The most lines a journal entry may have (engine `MAX_LINES`).
 pub const MAX_LINES: usize = 500;
+
+/// The longest journal entry number the engine takes, after trimming
+/// (characters, `je-number-v1`).
+pub const JE_NUMBER_MAX_CHARS: usize = 20;
 
 /// Kind of transaction (`txnType`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -135,7 +148,9 @@ pub enum Side {
 }
 
 impl Side {
-    fn amount(self) -> Money {
+    /// The amount (always above zero on a checked entry).
+    #[must_use]
+    pub const fn amount(self) -> Money {
         match self {
             Side::Debit(m) | Side::Credit(m) => m,
         }
@@ -160,6 +175,55 @@ pub struct JeLine {
     pub description: Option<String>,
     /// Line tag.
     pub tag: Option<TagId>,
+    /// The line's name (customer, vendor or other name; `je-names-v1`).
+    /// An Accounts Receivable or Accounts Payable line needs one (Q-206).
+    pub contact: Option<ContactId>,
+}
+
+/// The header options of a journal entry (P15 part A). The default is an
+/// entry without a number, not adjusting and not reversing, which is what
+/// every engine takes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct JeOptions {
+    /// Entry number (`txnNumber`, free text, at most 20 characters after
+    /// trimming; blank is none). Needs `je-number-v1`.
+    pub number: Option<String>,
+    /// An adjusting entry (`isAdjusting`). Needs `je-adjusting-v1`.
+    pub adjusting: bool,
+    /// Posts a reversing entry on this date, which must be after the
+    /// entry's date (`reverseOn`). Needs `je-reversing-v1`.
+    pub reverse_on: Option<CalendarDate>,
+}
+
+/// The Accounts Receivable and Accounts Payable accounts of the chart (the
+/// caller reads them from each account's system tag or detail type). The
+/// A/R-A/P rule (Q-206) is checked against them before anything is sent.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AccountRoles {
+    /// Accounts Receivable accounts.
+    pub receivable: BTreeSet<AccountId>,
+    /// Accounts Payable accounts.
+    pub payable: BTreeSet<AccountId>,
+}
+
+impl AccountRoles {
+    /// True for an Accounts Receivable account.
+    #[must_use]
+    pub fn is_receivable(&self, a: AccountId) -> bool {
+        self.receivable.contains(&a)
+    }
+
+    /// True for an Accounts Payable account.
+    #[must_use]
+    pub fn is_payable(&self, a: AccountId) -> bool {
+        self.payable.contains(&a)
+    }
+
+    /// True for an Accounts Receivable or Accounts Payable account.
+    #[must_use]
+    pub fn is_ar_ap(&self, a: AccountId) -> bool {
+        self.is_receivable(a) || self.is_payable(a)
+    }
 }
 
 /// A balanced journal entry, checked before sending.
@@ -169,6 +233,27 @@ pub struct NewJournalEntry {
     memo: Option<String>,
     basis: Basis,
     lines: Vec<JeLine>,
+    number: Option<String>,
+    adjusting: bool,
+    reverse_on: Option<CalendarDate>,
+}
+
+/// Engine code: an A/R or A/P line without a name (400, `je-names-v1`).
+pub const JE_AR_AP_NAME_REQUIRED: &str = "JE_AR_AP_NAME_REQUIRED";
+/// Engine code: more than one A/R or A/P line in one entry (400).
+pub const JE_AR_AP_ONE_PER_ENTRY: &str = "JE_AR_AP_ONE_PER_ENTRY";
+/// Engine code: a void, delete or edit of an entry whose reversal was
+/// changed since it was made (409; void or delete the reversal first).
+pub const REVERSAL_EDITED: &str = "REVERSAL_EDITED";
+
+/// True when `e` carries the engine code `code` (validation or conflict).
+#[must_use]
+pub fn has_code(e: &ApiError, code: &str) -> bool {
+    match e {
+        ApiError::Validation(v) => v.code().is_some_and(|c| c.as_str() == code),
+        ApiError::Conflict { code: Some(c), .. } => c.as_str() == code,
+        _ => false,
+    }
 }
 
 /// The longest delete reason the engine takes (characters).
@@ -202,18 +287,45 @@ pub(crate) fn non_empty(s: Option<String>) -> Option<String> {
 }
 
 impl NewJournalEntry {
-    /// Checks and builds an entry. Empty memo and descriptions count as
-    /// none (the engine stores them as `null`).
+    /// Checks and builds an entry without a number, not adjusting and not
+    /// reversing, with no A/R-A/P accounts known
+    /// ([`NewJournalEntry::new_with`] with the defaults).
     ///
     /// # Errors
-    /// `TooFewLines` (< 2), `TooManyLines` (> 500), `NonPositiveAmount`,
-    /// `Unbalanced` (debits ≠ credits exactly), `InvalidValue` when a total
-    /// overflows the money range.
+    /// As [`NewJournalEntry::new_with`].
     pub fn new(
         txn_date: CalendarDate,
         memo: Option<String>,
         basis: Basis,
         lines: Vec<JeLine>,
+    ) -> Result<NewJournalEntry, LocalValidation> {
+        Self::new_with(
+            txn_date,
+            memo,
+            basis,
+            lines,
+            JeOptions::default(),
+            &AccountRoles::default(),
+        )
+    }
+
+    /// Checks and builds an entry. Empty memo, descriptions and number
+    /// count as none (the engine stores them as `null`).
+    ///
+    /// # Errors
+    /// `TooFewLines` (< 2), `TooManyLines` (> 500), `NonPositiveAmount`,
+    /// `Unbalanced` (debits ≠ credits exactly), `InvalidValue` when a total
+    /// overflows the money range or the number is over 20 characters,
+    /// `ReverseNotAfter` (Reverse on not after the date), `ArApTwoAccounts`
+    /// (more than one line on an A/R or A/P account, Q-206) and
+    /// `ArApNameMissing` (an A/R or A/P line without a name).
+    pub fn new_with(
+        txn_date: CalendarDate,
+        memo: Option<String>,
+        basis: Basis,
+        lines: Vec<JeLine>,
+        opts: JeOptions,
+        roles: &AccountRoles,
     ) -> Result<NewJournalEntry, LocalValidation> {
         if lines.len() < 2 {
             return Err(LocalValidation::TooFewLines);
@@ -234,6 +346,26 @@ impl NewJournalEntry {
         if total(true)? != total(false)? {
             return Err(LocalValidation::Unbalanced);
         }
+        let number = opts
+            .number
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty());
+        if number
+            .as_ref()
+            .is_some_and(|n| n.chars().count() > JE_NUMBER_MAX_CHARS)
+        {
+            return Err(LocalValidation::InvalidValue);
+        }
+        if opts.reverse_on.is_some_and(|r| r <= txn_date) {
+            return Err(LocalValidation::ReverseNotAfter);
+        }
+        let ar_ap: Vec<&JeLine> = lines.iter().filter(|l| roles.is_ar_ap(l.account)).collect();
+        if ar_ap.len() > 1 {
+            return Err(LocalValidation::ArApTwoAccounts);
+        }
+        if ar_ap.iter().any(|l| l.contact.is_none()) {
+            return Err(LocalValidation::ArApNameMissing);
+        }
         let lines = lines
             .into_iter()
             .map(|l| JeLine {
@@ -246,7 +378,84 @@ impl NewJournalEntry {
             memo: non_empty(memo),
             basis,
             lines,
+            number,
+            adjusting: opts.adjusting,
+            reverse_on: opts.reverse_on,
         })
+    }
+
+    /// Entry number (trimmed; `None` when blank).
+    #[must_use]
+    pub fn number(&self) -> Option<&str> {
+        self.number.as_deref()
+    }
+
+    /// True for an adjusting entry.
+    #[must_use]
+    pub fn adjusting(&self) -> bool {
+        self.adjusting
+    }
+
+    /// The date of the reversing entry, if any.
+    #[must_use]
+    pub fn reverse_on(&self) -> Option<CalendarDate> {
+        self.reverse_on
+    }
+
+    /// The header options this entry was built with.
+    #[must_use]
+    pub fn options(&self) -> JeOptions {
+        JeOptions {
+            number: self.number.clone(),
+            adjusting: self.adjusting,
+            reverse_on: self.reverse_on,
+        }
+    }
+
+    /// Refuses, before sending, what an engine without the matching
+    /// capability cannot store.
+    fn require(&self, caps: &Capabilities) -> Result<(), ApiError> {
+        let need = |set: bool, cap: &str, refusal: LocalValidation| {
+            if set && !caps.has(cap) {
+                Err(ApiError::Local(refusal))
+            } else {
+                Ok(())
+            }
+        };
+        need(
+            self.lines.iter().any(|l| l.contact.is_some()),
+            Capabilities::JE_NAMES,
+            LocalValidation::JeNamesUnavailable,
+        )?;
+        need(
+            self.number.is_some(),
+            Capabilities::JE_NUMBER,
+            LocalValidation::JeNumberUnavailable,
+        )?;
+        need(
+            self.adjusting,
+            Capabilities::JE_ADJUSTING,
+            LocalValidation::JeAdjustingUnavailable,
+        )?;
+        need(
+            self.reverse_on.is_some(),
+            Capabilities::JE_REVERSING,
+            LocalValidation::JeReversingUnavailable,
+        )
+    }
+
+    /// The update body: the create body plus the explicit "cleared" values
+    /// an engine with the capability needs (a `PUT` without `txnNumber`
+    /// keeps the old number, and without `isAdjusting` keeps the flag).
+    pub(crate) fn to_update_value(&self, caps: &Capabilities) -> Value {
+        let mut v = self.to_value();
+        if caps.has(Capabilities::JE_NUMBER) && self.number.is_none() {
+            v["txnNumber"] = Value::String(String::new());
+        }
+        if caps.has(Capabilities::JE_ADJUSTING) {
+            v["isAdjusting"] = Value::Bool(self.adjusting);
+        }
+        v
     }
 
     /// Entry date.
@@ -291,6 +500,9 @@ impl NewJournalEntry {
                 if let Some(t) = l.tag {
                     v["tagId"] = json!(t);
                 }
+                if let Some(c) = l.contact {
+                    v["contactId"] = json!(c);
+                }
                 v
             })
             .collect();
@@ -302,6 +514,15 @@ impl NewJournalEntry {
         });
         if let Some(m) = &self.memo {
             v["memo"] = Value::String(m.clone());
+        }
+        if let Some(n) = &self.number {
+            v["txnNumber"] = Value::String(n.clone());
+        }
+        if self.adjusting {
+            v["isAdjusting"] = Value::Bool(true);
+        }
+        if let Some(r) = self.reverse_on {
+            v["reverseOn"] = json!(r);
         }
         v
     }
@@ -318,12 +539,12 @@ impl NewJournalEntry {
                 &credit,
                 l.description.as_deref(),
                 l.tag,
-                None,
+                l.contact,
                 false,
                 i64::try_from(i).unwrap_or(i64::MAX),
             )
         });
-        fingerprint_of(&txn_editable(
+        let mut v = txn_editable(
             TxnType::JournalEntry,
             self.txn_date,
             self.memo.as_deref(),
@@ -331,7 +552,33 @@ impl NewJournalEntry {
             TxnStatus::Posted,
             None,
             &lines.collect::<Vec<_>>(),
-        ))
+        );
+        je_editable(
+            &mut v,
+            self.number.as_deref(),
+            self.adjusting,
+            self.reverse_on,
+        );
+        fingerprint_of(&v)
+    }
+}
+
+/// The P15 journal entry fields, hashed only when set so every fingerprint
+/// without them stays what it was before P15.
+fn je_editable(
+    v: &mut Value,
+    number: Option<&str>,
+    adjusting: bool,
+    reverse_on: Option<CalendarDate>,
+) {
+    if let Some(n) = number.map(str::trim).filter(|n| !n.is_empty()) {
+        v["txnNumber"] = Value::String(n.to_string());
+    }
+    if adjusting {
+        v["isAdjusting"] = Value::Bool(true);
+    }
+    if let Some(r) = reverse_on {
+        v["reverseOn"] = json!(r);
     }
 }
 
@@ -428,6 +675,9 @@ pub struct TransactionLine {
     /// the customer on a check or expense line).
     #[serde(default)]
     pub contact_id: Option<ContactId>,
+    /// Line contact name (joined; display only; `je-names-v1`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact_name: Option<String>,
     /// The line is billable to its customer (`line-billable-v1`; `false`
     /// from engines without it).
     #[serde(default)]
@@ -510,6 +760,18 @@ pub struct Transaction {
     /// Lines in `lineOrder` order.
     #[serde(default)]
     pub lines: Vec<TransactionLine>,
+    /// An adjusting entry (`je-adjusting-v1`; `false` from older engines).
+    #[serde(default)]
+    pub is_adjusting: bool,
+    /// On a reversing entry: the entry it reverses (`je-reversing-v1`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reverses_transaction_id: Option<TransactionId>,
+    /// On a reversed entry: its live reversal (`je-reversing-v1`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reversal_transaction_id: Option<TransactionId>,
+    /// On a reversed entry: the live reversal's date (`je-reversing-v1`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reverse_on: Option<CalendarDate>,
 }
 
 impl EditableFields for Transaction {
@@ -529,6 +791,10 @@ impl EditableFields for Transaction {
         "lines.isBillable",
         "lines.lineOrder",
         "lines.sourceTransactionId",
+        // Journal entries only, each hashed only when set (P15).
+        "txnNumber",
+        "isAdjusting",
+        "reverseOn",
     ];
 
     fn editable(&self) -> Value {
@@ -552,7 +818,7 @@ impl EditableFields for Transaction {
                 )
             })
             .collect::<Vec<_>>();
-        txn_editable(
+        let mut v = txn_editable(
             self.txn_type,
             self.txn_date,
             self.memo.as_deref(),
@@ -560,7 +826,16 @@ impl EditableFields for Transaction {
             self.status,
             self.contact_id,
             &lines,
-        )
+        );
+        if self.txn_type == TxnType::JournalEntry {
+            je_editable(
+                &mut v,
+                self.txn_number.as_deref(),
+                self.is_adjusting,
+                self.reverse_on,
+            );
+        }
+        v
     }
 }
 
@@ -757,6 +1032,7 @@ impl Transactions<'_> {
     ) -> Result<Versioned<Transaction>, ApiError> {
         // One company for the stamp read, the probe and the write.
         let s = &self.0.pinned();
+        entry.require(&s.client().capabilities())?;
         let body = posting_body(s, entry.to_value(), opts)?;
         let matcher = OutcomeMatcher::Created {
             search: Search::Txn {
@@ -785,7 +1061,9 @@ impl Transactions<'_> {
         opts: &PostingOptions,
         key: IdempotencyKey,
     ) -> Result<Versioned<Transaction>, ApiError> {
-        let body = posting_body(self.0, entry.to_value(), opts)?;
+        let caps = self.0.client().capabilities();
+        entry.require(&caps)?;
+        let body = posting_body(self.0, entry.to_update_value(&caps), opts)?;
         let u = GuardedUpdate {
             get: &TXN_GET,
             put: &TXN_PUT,
@@ -893,4 +1171,47 @@ impl Transactions<'_> {
         let reply = s.send(&TXN_DELETE, call, Some(&probe)).await?;
         saved_from(&reply.body, SPEC.item_key)
     }
+}
+
+/// Journal entry calls of a session (`session.journal()`).
+#[derive(Clone, Copy, Debug)]
+pub struct JournalEntries<'a>(pub(crate) &'a Session);
+
+impl Session {
+    /// Journal entries of the open company.
+    #[must_use]
+    pub fn journal(&self) -> JournalEntries<'_> {
+        JournalEntries(self)
+    }
+}
+
+impl JournalEntries<'_> {
+    /// The suggested next entry number (`GET /journal-entries/next-number`,
+    /// `je-number-v1`): the highest all-digit number + 1, `"1"` if none.
+    /// Not reserved; the owner may change it.
+    ///
+    /// # Errors
+    /// `Local(JeNumberUnavailable)` without `je-number-v1` (nothing sent);
+    /// `Decode` when `next` is not a string; any [`ApiError`].
+    pub async fn next_number(&self) -> Result<String, ApiError> {
+        if !self.0.client().capabilities().has(Capabilities::JE_NUMBER) {
+            return Err(ApiError::Local(LocalValidation::JeNumberUnavailable));
+        }
+        let call = Call::at(Method::Get, JE_NEXT_NUMBER.route());
+        let reply = self.0.send(&JE_NEXT_NUMBER, call, None).await?;
+        next_number_from_json(&reply.body)
+    }
+}
+
+/// Parses `{"next": "42"}` of `GET /journal-entries/next-number`.
+///
+/// # Errors
+/// `Decode` when `next` is missing or not a string.
+pub fn next_number_from_json(body: &[u8]) -> Result<String, ApiError> {
+    const WHAT: &str = "next journal entry number";
+    let v: Value = serde_json::from_slice(body).map_err(|_| ApiError::Decode { what: WHAT })?;
+    v.get("next")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or(ApiError::Decode { what: WHAT })
 }

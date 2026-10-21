@@ -1,0 +1,40 @@
+{
+  "transaction": {
+    "id": "7c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+    "txnType": "journal_entry",
+    "txnNumber": "41",
+    "txnDate": "2026-10-15",
+    "status": "posted",
+    "basis": "both",
+    "contactId": null,
+    "memo": "Accrue October rent",
+    "isAdjusting": true,
+    "reversesTransactionId": null,
+    "reversalTransactionId": "7d0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+    "reverseOn": "2026-11-01",
+    "createdAt": "2199-01-01T00:00:00.000Z",
+    "lines": [
+      {
+        "id": "8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+        "accountId": "2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+        "debit": "1200.0000",
+        "credit": "0.0000",
+        "description": "Rent",
+        "lineOrder": 0,
+        "tagId": "7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+        "contactId": null
+      },
+      {
+        "id": "8b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+        "accountId": "2c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+        "debit": "0.0000",
+        "credit": "1200.0000",
+        "description": null,
+        "lineOrder": 1,
+        "tagId": null,
+        "contactId": "3c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+        "contactName": "Synthetic Landlord LLC"
+      }
+    ]
+  }
+}

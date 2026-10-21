@@ -242,7 +242,8 @@ fn the_requested_fingerprint_is_the_stored_checks() {
         queued.fingerprint(),
         requested_fingerprint(&posting(q.clone()), &q, None)
     );
-    assert_eq!(CheckRecord::EDITABLE[..15], *Transaction::EDITABLE);
+    // The journal-entry-only fields (P15) follow the shared 15.
+    assert_eq!(CheckRecord::EDITABLE[..15], Transaction::EDITABLE[..15]);
 }
 
 /// The expense path (no `check-edit-v1`) re-reads the plain transaction:
