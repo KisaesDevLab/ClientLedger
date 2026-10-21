@@ -231,3 +231,25 @@ pub fn wrap_item<R>(
     }
     r.inner
 }
+
+/// `add` with the inputs off when `enabled` is false. A saved record that
+/// can't change (`read_only`) keeps its labels, names and figures at their
+/// normal colours (contrast ≥ 4.5:1, DESIGN.md) instead of egui's faded
+/// disabled look; only the controls stop taking input.
+pub fn locked_scope<R>(
+    ui: &mut Ui,
+    enabled: bool,
+    read_only: bool,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    ui.scope(|ui| {
+        if read_only {
+            ui.visuals_mut().disabled_alpha = 1.0;
+        }
+        if !enabled {
+            ui.disable();
+        }
+        add(ui)
+    })
+    .inner
+}

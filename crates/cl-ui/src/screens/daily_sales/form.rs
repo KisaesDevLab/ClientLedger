@@ -259,9 +259,10 @@ impl DailySalesScreen {
         }
         header::title_only(ui, tokens, &t("cmd.clients.daily_sales"));
         ui.add_space(6.0);
-        ui.add_enabled_ui(enabled, |ui| self.header_ui(ui, tokens));
+        let read_only = self.read_only();
+        header::locked_scope(ui, enabled, read_only, |ui| self.header_ui(ui, tokens));
         ui.add_space(12.0);
-        ui.add_enabled_ui(enabled, |ui| self.lines_ui(ui, tokens));
+        header::locked_scope(ui, enabled, read_only, |ui| self.lines_ui(ui, tokens));
         ui.add_space(6.0);
         self.summary_ui(ui, tokens);
         self.problems_ui(ui, tokens);
