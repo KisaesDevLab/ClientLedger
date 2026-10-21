@@ -16,13 +16,14 @@ use std::fmt;
 use cl_core::ids::{AccountId, ContactId, TagId};
 use cl_core::{CalendarDate, Money};
 
+use crate::forms::PayeePrefill;
 use crate::forms::amount_words::MAX_CHECK_UNITS;
 use crate::forms::check::line_tag_default;
 use crate::forms::lines::{
-    FormLines, PostingLine, TotalsStatus, difference, exact_totals, trimmed,
+    FormLine, FormLines, PostingLine, TotalsStatus, difference, exact_totals, trimmed,
 };
 use crate::lists::tags::TagList;
-use crate::rowkey::RowKey;
+use crate::rowkey::{RowKey, RowKeyGen};
 use crate::text::TextKey;
 
 /// Most lines one form takes (the engine's `MAX_LINES`).
@@ -244,6 +245,63 @@ impl CardForm {
     #[must_use]
     pub fn totals_status(&self) -> Option<TotalsStatus> {
         exact_totals(self.amount, &self.lines)
+    }
+
+    /// Prefill (Q-191) may fill the form: no line used and no memo typed.
+    #[must_use]
+    pub fn can_prefill(&self) -> bool {
+        self.lines.used().next().is_none() && self.memo.trim().is_empty()
+    }
+
+    /// The vendor's default expense account and tag (Q-192, Q-178) fill the
+    /// first line only when no line is used; a typed amount follows onto
+    /// that single line (as on a check). Returns true when it filled.
+    pub fn apply_vendor_default(
+        &mut self,
+        account: AccountId,
+        tag: Option<TagId>,
+        keys: &mut RowKeyGen,
+    ) -> bool {
+        if self.lines.used().next().is_some() {
+            return false;
+        }
+        if self.lines.lines.is_empty() {
+            self.lines.lines.push(FormLine::blank(keys.next_key()));
+        }
+        let Some(first) = self.lines.lines.first_mut() else {
+            return false;
+        };
+        first.account = Some(account);
+        first.tag = tag;
+        first.amount = self.amount;
+        self.lines.ensure_entry(keys);
+        true
+    }
+}
+
+/// Copies the payee's last charge (Q-191): line accounts, memos,
+/// customers, billable marks and tags, plus the memo and header tags. Every
+/// line amount is cleared and the amount is not touched (non-negotiable 4).
+/// `last` must have been built with this form's [`RowKeyGen`].
+impl PayeePrefill for CardForm {
+    fn prefill_from_last(&mut self, last: &CardForm) {
+        let entry = self.lines.lines.last().filter(|l| l.is_blank()).cloned();
+        let billable = self.mode == CardMode::Charge;
+        let mut lines: Vec<FormLine> = last
+            .lines
+            .lines
+            .iter()
+            .map(|l| FormLine {
+                amount: None,
+                billable: l.billable && billable,
+                ..l.clone()
+            })
+            .filter(|l| !l.is_blank())
+            .collect();
+        lines.extend(entry);
+        self.lines = FormLines { lines };
+        self.memo.clone_from(&last.memo);
+        self.header_tags.clone_from(&last.header_tags);
     }
 }
 
@@ -483,6 +541,54 @@ mod tests {
         f.amount = Some(money(amount));
         f.lines = lines(&mut keys, parts);
         f
+    }
+
+    #[test]
+    fn prefill_copies_the_last_charge_without_any_amount() {
+        let mut keys = RowKeyGen::new();
+        let mut last = CardForm::new(Some(account(2050)), Some(date()));
+        last.memo = "monthly".into();
+        last.header_tags = Vec::new();
+        last.lines = lines(&mut keys, &[(6250, "40.00"), (6400, "24.10")]);
+        last.lines.lines[0].billable = true;
+        last.lines.lines[0].customer = Some(contact(7));
+        let mut f = CardForm::new(Some(account(2050)), Some(date()));
+        f.amount = Some(money("99.00"));
+        f.lines.ensure_entry(&mut keys);
+        assert!(f.can_prefill());
+        f.prefill_from_last(&last);
+        assert_eq!(
+            f.amount,
+            Some(money("99.00")),
+            "the amount is never touched"
+        );
+        assert_eq!(f.memo, "monthly");
+        let used: Vec<_> = f.lines.used().collect();
+        assert_eq!(used.len(), 2);
+        assert!(used.iter().all(|l| l.amount.is_none()), "no amount copied");
+        assert!(used[0].billable && used[0].customer == Some(contact(7)));
+        assert!(!f.can_prefill(), "a filled form is not prefilled again");
+        // A credit takes no billable marks.
+        let mut credit = CardForm::new(Some(account(2050)), Some(date()));
+        credit.mode = CardMode::Credit;
+        credit.prefill_from_last(&last);
+        assert!(credit.lines.used().all(|l| !l.billable));
+    }
+
+    #[test]
+    fn the_vendor_default_fills_only_an_untouched_first_line() {
+        let mut keys = RowKeyGen::new();
+        let mut f = CardForm::new(Some(account(2050)), Some(date()));
+        f.amount = Some(money("12.00"));
+        assert!(f.apply_vendor_default(account(6250), None, &mut keys));
+        let first = f.lines.used().next().expect("line");
+        assert_eq!(first.account, Some(account(6250)));
+        assert_eq!(
+            first.amount,
+            Some(money("12.00")),
+            "the typed amount follows"
+        );
+        assert!(!f.apply_vendor_default(account(6400), None, &mut keys));
     }
 
     #[test]

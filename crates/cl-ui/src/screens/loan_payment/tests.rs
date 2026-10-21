@@ -133,3 +133,47 @@ fn interest_must_be_typed_even_when_zero() {
     assert!(!s.start_save(SaveIntent::Save, None));
     assert_eq!(s.state()["save"]["refused"], "interest_missing");
 }
+
+#[test]
+fn a_saved_payment_opens_with_prev_exactly_and_changes_in_place() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.pick_lender(NameOutcome::Picked(lakeview(&s)));
+    s.poll();
+    type_amounts(&mut s, "892.00", "194.23");
+    assert!(s.start_save(SaveIntent::SaveAndNew, None), "{}", s.state());
+    let id = s.flow.last.expect("saved").id;
+    s.command(CommandId::new("form.prev_record"));
+    assert_eq!(s.flow.editing.map(|e| e.id), Some(id));
+    assert_eq!(s.state()["read_only"], Value::Null, "{}", s.state());
+    let f = s.compose();
+    assert_eq!(f.payment, Some(money("892.00")));
+    assert_eq!(f.interest, Some(money("194.23")));
+    assert_eq!(f.principal(), Some(money("697.77")), "payment − interest");
+    assert_eq!(f.loan, s.books.by_number("2200"));
+    assert!(!s.is_dirty());
+    let before = posted(&link);
+    type_amounts(&mut s, "892.00", "188.41");
+    assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
+    assert_eq!(posted(&link), before, "changed in place");
+    let (_, lines) = lines_of(&link, id);
+    assert!(lines.contains(&("2200".into(), money("703.59"), Money::ZERO)));
+}
+
+#[test]
+fn esc_reverts_the_focused_field_first() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.focused = Some(field::PAYMENT);
+    s.inputs.payment.text = "5".into();
+    assert!(
+        s.command(CommandId::new("form.revert")),
+        "typed text dropped"
+    );
+    assert_eq!(s.inputs.payment.text, "");
+    s.focused = Some(field::MEMO);
+    s.header.edit(field::MEMO, |h| h.memo = "x".into());
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(!s.is_dirty());
+    assert!(!s.command(CommandId::new("form.revert")));
+}

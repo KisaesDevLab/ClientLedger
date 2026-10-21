@@ -11,18 +11,20 @@
 //! balance owed is the engine's, read again after every save (Q-262).
 
 pub(crate) mod kit;
+mod payee;
+pub(crate) mod records;
 
 use std::sync::Arc;
 
 use cl_api::{
     ApiError, BankPosting, Capabilities, CardChargeDraft, DepositDraft, LocalValidation,
-    RequestGroup, SplitLine,
+    RequestGroup, SplitLine, Transaction, TxnType, Versioned,
 };
-use cl_core::ids::{AccountId, TenantId};
+use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
 use cl_model::amount_entry::AmountRules;
 use cl_model::forms::card::{CardField, CardForm, CardMode, CardProblem, CheckedCard, check};
-use cl_model::forms::lines::{FormLines, TotalsStatus, lines_total};
+use cl_model::forms::lines::{FormLine, FormLines, TotalsStatus, lines_total};
 use cl_model::forms::{FormState, SaveIntent, SaveStart};
 use cl_model::register::AccountClass;
 use cl_model::{CommandId, Scope};
@@ -36,11 +38,12 @@ use crate::i18n::t;
 use crate::screens::company::form::{self, DateInput};
 use crate::screens::register::lists::RegisterLists;
 use crate::theme::Tokens;
-use crate::windows::Screen;
+use crate::windows::{PromptAnswer, Screen};
 use kit::{
-    AmountInput, Balances, Books, MessageClick, NameInput, NameOutcome, Outbound, Pending,
+    AmountInput, Balances, Books, Editing, MessageClick, NameInput, NameOutcome, Outbound, Pending,
     SaveFlow, Sent,
 };
+use records::{RecordForm, RecordScope, Records};
 
 /// The command and window kind.
 pub const KIND: &str = "vendors.card_charge";
@@ -99,7 +102,17 @@ pub struct CardChargeScreen {
     after_frame: Option<CommandId>,
     pub(crate) money_style: MoneyStyle,
     focus_amount: bool,
+    /// Prev/Next and the saved record being read.
+    pub(crate) records: Records,
+    /// The header field that had the keyboard (Esc reverts it).
+    pub(crate) focused: Option<u64>,
+    /// Payee prefill and the recent charges.
+    pub(crate) payee: payee::PayeeState,
 }
+
+/// The kinds of record this form shows: charges (expenses paid from the
+/// card) and credits (deposits into it).
+const CARD_TYPES: &[TxnType] = &[TxnType::Expense, TxnType::Deposit];
 
 impl CardChargeScreen {
     /// A new card charge in the open company.
@@ -135,6 +148,9 @@ impl CardChargeScreen {
             after_frame: None,
             money_style: MoneyStyle::default(),
             focus_amount: false,
+            records: Records::default(),
+            focused: None,
+            payee: payee::PayeeState::default(),
         };
         s.bus = s.link.bus().subscribe();
         s.books.start(&s.link, s.group.as_ref());
@@ -198,6 +214,8 @@ impl CardChargeScreen {
             }
             None => {}
         }
+        self.poll_records();
+        self.poll_payee();
     }
 
     /// Billable is a charge's column only; without `line-billable-v1` the
@@ -329,7 +347,11 @@ impl CardChargeScreen {
     }
 
     fn busy(&self) -> bool {
-        self.books.busy() || self.balances.busy() || self.flow.busy()
+        self.books.busy()
+            || self.balances.busy()
+            || self.flow.busy()
+            || self.records.busy()
+            || self.payee.busy()
     }
 
     // ------------------------------------------------------------- saving
@@ -367,6 +389,7 @@ impl CardChargeScreen {
     fn apply_payee(&mut self, out: NameOutcome) {
         match out {
             NameOutcome::Picked(id) => {
+                let changed = self.header.current().payee != Some(id);
                 self.header.edit(field::PAYEE, |h| h.payee = Some(id));
                 self.inputs.payee.text = self
                     .books
@@ -374,6 +397,9 @@ impl CardChargeScreen {
                     .name_text(id)
                     .unwrap_or_default()
                     .to_string();
+                if changed {
+                    self.payee_picked(id);
+                }
             }
             NameOutcome::Cleared => {
                 self.header.edit(field::PAYEE, |h| h.payee = None);
@@ -541,7 +567,10 @@ impl CardChargeScreen {
         if let Some(card) = self.card() {
             self.balances.fetch(&self.link, self.group.as_ref(), card);
         }
+        self.records.forget();
+        self.payee.recent_for = None;
         self.follow_up(intent);
+        self.after_saved();
     }
 
     fn save_failed(&mut self, e: ApiError) {
@@ -583,6 +612,13 @@ impl CardChargeScreen {
         self.lines.form_mut().load(fresh, &*lists);
         self.problems.clear();
         self.inputs.payee = NameInput::default();
+        self.flow.new_record();
+        self.records.new_record();
+        self.payee.prefill = None;
+        self.payee.applied = false;
+        self.payee.source = None;
+        self.payee.dropped = false;
+        self.lock_columns();
         self.sync_inputs();
     }
 
@@ -627,12 +663,191 @@ impl CardChargeScreen {
     }
 
     fn voided(&mut self) {
-        let accounts = self.flow.published.clone();
+        let mut accounts = self.flow.published.clone();
+        accounts.extend(self.card());
+        accounts.extend(self.lines.value().used().filter_map(|l| l.account));
+        let was_open = self.flow.editing.is_some();
         self.flow.voided();
         crate::forms::publish_saved(&self.link, &self.bus, &accounts);
+        self.records.forget();
+        if was_open {
+            // The voided record leaves the form: a new one (as Write Check).
+            self.new_form(true);
+        }
         if let Some(card) = self.card() {
             self.balances.fetch(&self.link, self.group.as_ref(), card);
         }
+    }
+
+    /// The saved record `v` as this form: a charge is one credit on a card
+    /// with debit lines; a credit is one debit on a card with credit lines.
+    /// Anything else is shown read-only (`false`). Amounts are the
+    /// engine's, copied as they are.
+    pub(crate) fn form_of(&mut self, v: &Versioned<Transaction>) -> (CardForm, FormLines, bool) {
+        let txn = &v.record;
+        let is_card = |id| self.books.class(id) == Some(AccountClass::CreditCard);
+        let mode = if txn.txn_type == TxnType::Deposit {
+            CardMode::Credit
+        } else {
+            CardMode::Charge
+        };
+        // The card's side: credited on a charge, debited on a credit.
+        let card_side = |l: &cl_api::TransactionLine| match mode {
+            CardMode::Charge => l.credit.is_positive() && l.debit.is_zero(),
+            CardMode::Credit => l.debit.is_positive() && l.credit.is_zero(),
+        };
+        let own: Vec<usize> = txn
+            .lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| card_side(l) && is_card(l.account_id))
+            .map(|(i, _)| i)
+            .collect();
+        let card_line = match own.as_slice() {
+            [i] => Some(*i),
+            _ => None,
+        };
+        let line_amount = |l: &cl_api::TransactionLine| match mode {
+            CardMode::Charge => l.debit,
+            CardMode::Credit => l.credit,
+        };
+        let fits = card_line.is_some()
+            && matches!(txn.txn_type, TxnType::Expense | TxnType::Deposit)
+            && txn.lines.iter().enumerate().all(|(i, l)| {
+                Some(i) == card_line
+                    || (line_amount(l).is_positive() && !card_side(l) && {
+                        let other = match mode {
+                            CardMode::Charge => l.credit,
+                            CardMode::Credit => l.debit,
+                        };
+                        other.is_zero()
+                    })
+            });
+        let card = card_line.map(|i| txn.lines[i].account_id);
+        let mut f = CardForm::new(card, Some(txn.txn_date));
+        f.mode = mode;
+        f.payee = txn.contact_id;
+        f.ref_no = txn.txn_number.clone().unwrap_or_default();
+        // The card's own line is on the other side from the lines.
+        f.amount = card_line.map(|i| match mode {
+            CardMode::Charge => txn.lines[i].credit,
+            CardMode::Credit => txn.lines[i].debit,
+        });
+        f.memo = txn.memo.clone().unwrap_or_default();
+        let keys = &mut self.lines.form_mut().adapter_mut().keys;
+        let seeds = txn
+            .lines
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| Some(*i) != card_line)
+            .map(|(_, l)| FormLine {
+                account: Some(l.account_id),
+                amount: Some(line_amount(l)),
+                memo: l.description.clone().unwrap_or_default(),
+                customer: l.contact_id,
+                billable: l.is_billable,
+                tag: l.tag_id,
+                ..FormLine::blank(keys.next_key())
+            })
+            .collect();
+        (f, FormLines::from_lines(seeds, keys), fits)
+    }
+
+    /// Shows a saved charge or credit (Prev/Next, the register, Reload).
+    pub(crate) fn show(&mut self, v: &Versioned<Transaction>) {
+        let (form, lines, fits) = self.form_of(v);
+        let lists = Arc::clone(&self.books.lists);
+        self.header.load(form);
+        self.lines.form_mut().load(lines, &*lists);
+        self.flow.opened(Editing::of(v, fits));
+        self.problems.clear();
+        self.payee.prefill = None;
+        self.payee.applied = false;
+        self.payee.dropped = false;
+        self.focused = None;
+        self.lock_columns();
+        self.sync_inputs();
+        if let Some(card) = self.card() {
+            self.balances.fetch(&self.link, self.group.as_ref(), card);
+        }
+    }
+
+    /// Reads the open record again (it changed elsewhere).
+    fn reload(&mut self) {
+        if let Some(id) = self.flow.editing.map(|e| e.id) {
+            self.open_saved(id);
+        }
+    }
+
+    /// Esc: the question, the void card or the names list closes first;
+    /// then the focused field goes back to its saved value (or drops the
+    /// text typed in it). With nothing to revert the shell closes the
+    /// window, asking first when the form is dirty.
+    pub(crate) fn revert_field(&mut self) -> bool {
+        if self.records.prompt.is_some() {
+            self.answer_nav(PromptAnswer::Keep);
+            return true;
+        }
+        if self.flow.void_open {
+            self.flow.void_open = false;
+            return true;
+        }
+        if self.inputs.payee.open {
+            self.inputs.payee.open = false;
+            return true;
+        }
+        let Some(f) = self.focused else { return false };
+        let saved = self.header.original().clone();
+        let now = self.header.current().clone();
+        let typed = match f {
+            field::AMOUNT => {
+                self.inputs.amount.text.trim()
+                    != now
+                        .amount
+                        .map(|m| m.format(self.money_style))
+                        .unwrap_or_default()
+            }
+            field::PAYEE => {
+                self.inputs.payee.text.trim()
+                    != now
+                        .payee
+                        .and_then(|p| self.books.lists.name_text(p))
+                        .unwrap_or_default()
+            }
+            field::DATE => now
+                .date
+                .is_some_and(|d| DateInput::new(d).text != self.inputs.date.text),
+            _ => false,
+        };
+        let differs = match f {
+            field::CARD => now.card != saved.card,
+            field::DATE => now.date != saved.date,
+            field::PAYEE => now.payee != saved.payee,
+            field::REF => now.ref_no != saved.ref_no,
+            field::AMOUNT => {
+                now.amount != saved.amount || now.amount_from_lines != saved.amount_from_lines
+            }
+            field::MEMO => now.memo != saved.memo,
+            _ => false,
+        };
+        if differs {
+            self.header.edit_step(|h| match f {
+                field::CARD => h.card = saved.card,
+                field::DATE => h.date = saved.date,
+                field::PAYEE => h.payee = saved.payee,
+                field::REF => h.ref_no.clone_from(&saved.ref_no),
+                field::AMOUNT => {
+                    h.amount = saved.amount;
+                    h.amount_from_lines = saved.amount_from_lines;
+                }
+                _ => h.memo.clone_from(&saved.memo),
+            });
+        }
+        if differs || typed {
+            self.sync_inputs();
+            return true;
+        }
+        false
     }
 
     // ------------------------------------------------------------ drawing
@@ -644,10 +859,16 @@ impl CardChargeScreen {
             return;
         }
         self.toolbar(ui, &tokens);
-        match kit::messages(ui, &tokens, &mut self.flow) {
+        match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
             MessageClick::SubmitClosing => self.submit_closing(),
             MessageClick::Void => self.void_now(None),
+            MessageClick::Reload => self.reload(),
             MessageClick::None => {}
+        }
+        if self.records.prompt.is_some()
+            && let Some(a) = records::prompt_ui(ui, KIND, &self.title_text())
+        {
+            self.answer_nav(a);
         }
         if self.cards().is_empty() {
             ui.add_space(8.0);
@@ -669,10 +890,9 @@ impl CardChargeScreen {
         let idle = self.flow.idle();
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            ui.add_enabled(false, egui::Button::new(t("helper.prev")))
-                .on_disabled_hover_text(t("helper.nav.register"));
-            ui.add_enabled(false, egui::Button::new(t("helper.next")))
-                .on_disabled_hover_text(t("helper.nav.register"));
+            if let Some(cmd) = kit::nav_buttons(ui, idle) {
+                self.after_frame = Some(CommandId::new(cmd));
+            }
             ui.separator();
             let mode = self.header.current().mode;
             let mut picked = None;
@@ -748,7 +968,7 @@ impl CardChargeScreen {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.add_enabled_ui(enabled, |ui| {
-                    picked = kit::account_combo(
+                    let (p, r) = kit::account_combo(
                         ui,
                         tokens,
                         "card_charge/card",
@@ -756,8 +976,9 @@ impl CardChargeScreen {
                         &cards,
                         current,
                         300.0,
-                    )
-                    .0;
+                    );
+                    picked = p;
+                    kit::track(&mut self.focused, &r, field::CARD);
                 });
             });
             ui.vertical(|ui| {
@@ -800,6 +1021,7 @@ impl CardChargeScreen {
                             third * 2.0 + 16.0,
                         );
                         self.apply_payee(out);
+                        kit::track(&mut self.focused, &r, field::PAYEE);
                         if kit::entered(&r) {
                             self.after_frame = Some(CommandId::new("form.save_new"));
                         }
@@ -820,6 +1042,7 @@ impl CardChargeScreen {
                             self.header.edit(field::DATE, |h| h.date = d);
                             self.inputs.rev = self.header.revision();
                         }
+                        kit::track(&mut self.focused, &r, field::DATE);
                         if kit::entered(&r) {
                             self.after_frame = Some(CommandId::new("form.save_new"));
                         }
@@ -842,6 +1065,7 @@ impl CardChargeScreen {
                             self.header.edit(field::REF, |h| h.ref_no = text);
                             self.inputs.rev = self.header.revision();
                         }
+                        kit::track(&mut self.focused, &r, field::REF);
                     });
                     ui.add_space(16.0);
                     ui.vertical(|ui| {
@@ -859,6 +1083,7 @@ impl CardChargeScreen {
                             self.header.edit(field::MEMO, |h| h.memo = text);
                             self.inputs.rev = self.header.revision();
                         }
+                        kit::track(&mut self.focused, &r, field::MEMO);
                     });
                     ui.add_space(16.0);
                     ui.vertical(|ui| {
@@ -874,6 +1099,7 @@ impl CardChargeScreen {
                         if std::mem::take(&mut self.focus_amount) {
                             r.request_focus();
                         }
+                        kit::track(&mut self.focused, &r, field::AMOUNT);
                         if r.lost_focus() {
                             self.amount_left();
                             if kit::entered(&r) && self.inputs.amount.problem.is_none() {
@@ -882,6 +1108,15 @@ impl CardChargeScreen {
                         }
                     });
                 });
+                ui.add_space(8.0);
+                let header = self.header.current().header_tags.clone();
+                if let Some(edit) =
+                    kit::tags_row(ui, tokens, "card_charge/tags", &self.books.tags, &header)
+                {
+                    let tags = self.books.tags.clone();
+                    self.header
+                        .edit_step(|h| kit::apply_tag_edit(&tags, &mut h.header_tags, edit));
+                }
             });
     }
 
@@ -912,6 +1147,7 @@ impl CardChargeScreen {
             kit::balance_line(ui, tokens, &t("card.balance_owed"), owed);
             form::hint(ui, tokens, &t("card.panel.explain"));
         });
+        self.payee_panel_ui(ui, tokens);
     }
 
     /// Keymap commands the grid and the closing dialog did not take.
@@ -928,6 +1164,14 @@ impl CardChargeScreen {
             }
             "form.clear" => {
                 self.clear();
+                true
+            }
+            "form.prev_record" => {
+                self.navigate(true);
+                true
+            }
+            "form.next_record" => {
+                self.navigate(false);
                 true
             }
             "edit.void_transaction" => self.flow.start_void(),
@@ -949,17 +1193,7 @@ impl CardChargeScreen {
                 }
                 done
             }
-            "form.revert" => {
-                if self.flow.void_open {
-                    self.flow.void_open = false;
-                    return true;
-                }
-                if self.inputs.payee.open {
-                    self.inputs.payee.open = false;
-                    return true;
-                }
-                false
-            }
+            "form.revert" => self.revert_field(),
             _ => false,
         }
     }
@@ -987,11 +1221,22 @@ impl CardChargeScreen {
             "dirty": self.is_dirty(),
             "line_billable": self.line_billable(),
             "published_accounts": self.flow.published.len(),
+            "header_tags": f.header_tags.len(),
             "save": {
                 "refused": self.problems.first().map(|p| p.name()),
                 "problems": self.problems.len(),
             },
             "grid": { "focused": self.lines.has_focus() },
+            "nav_prompt": self.records.prompt.is_some(),
+            "nav_at": self.records.at,
+            "focused": self.focused,
+            "prefill": {
+                "applied": self.payee.applied,
+                "source": self.payee.source,
+                "dropped": self.payee.dropped,
+                "pending": self.payee.prefill.is_some(),
+            },
+            "recent_charges": self.payee.recent.as_ref().map(Vec::len),
         });
         if let (Value::Object(m), Value::Object(c)) = (&mut v, self.flow.state_json(&self.link)) {
             m.extend(c);
@@ -1053,8 +1298,67 @@ impl Screen for CardChargeScreen {
         self.form_command(id)
     }
 
+    fn open_record(&mut self, txn: TransactionId) -> bool {
+        self.open_saved(txn)
+    }
+
     fn state(&self) -> Value {
         self.state_json()
+    }
+}
+
+impl RecordForm for CardChargeScreen {
+    fn parts(&mut self) -> (&mut Records, &Arc<CompanyLink>, Option<&RequestGroup>) {
+        (&mut self.records, &self.link, self.group.as_ref())
+    }
+
+    fn record_scope(&self) -> Option<RecordScope> {
+        self.card().map(|account| RecordScope {
+            account,
+            types: CARD_TYPES,
+        })
+    }
+
+    fn form_dirty(&self) -> bool {
+        self.is_dirty()
+    }
+
+    fn form_busy(&self) -> bool {
+        !self.flow.idle()
+    }
+
+    fn show_record(&mut self, v: &Versioned<Transaction>) {
+        self.show(v);
+    }
+
+    fn blank_after_nav(&mut self) {
+        self.flow.reset_messages();
+        self.new_form(true);
+    }
+
+    fn discard_edits(&mut self) {
+        let lists = Arc::clone(&self.books.lists);
+        self.header.revert_form();
+        self.lines.form_mut().revert_form(&*lists);
+        self.problems.clear();
+        self.lock_columns();
+        self.sync_inputs();
+    }
+
+    fn save_for_nav(&mut self) -> bool {
+        self.start_save(SaveIntent::Save, None)
+    }
+
+    fn save_queued(&self) -> bool {
+        self.flow.task.is_some()
+    }
+
+    fn record_notice(&mut self, key: &'static str) {
+        self.flow.notice = Some(key);
+    }
+
+    fn record_failed(&mut self, e: ApiError) {
+        self.flow.error = Some(e);
     }
 }
 
