@@ -59,6 +59,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("card.balance_owed", "Balance owed"),
     ("card.payee", "Purchased from"),
     ("card.ref_no", "Ref no."),
+    (
+        "card.ref_no.credit",
+        "A card credit has no reference number; put it in the memo if you need it.",
+    ),
     ("card.lines.label", "Card lines"),
     ("card.lines.heading", "Where it went {total}"),
     ("card.no_card", "There is no credit card account yet. Add one in the Chart of Accounts to record card charges."),

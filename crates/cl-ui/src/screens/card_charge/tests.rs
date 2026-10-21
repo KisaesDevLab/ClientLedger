@@ -126,8 +126,18 @@ fn a_split_off_by_a_dime_saves_nothing_then_saves_exactly() {
 fn a_credit_posts_as_a_deposit_into_the_card() {
     let (_d, link) = link();
     let mut s = screen(&link);
+    s.header.edit_step(|h| h.ref_no = "INV-7".into());
     s.set_mode(CardMode::Credit);
     assert_eq!(s.title(), "Record Card Credit");
+    assert_eq!(
+        s.header.current().ref_no,
+        "",
+        "a credit has no ref no.: emptied, not dropped at the save"
+    );
+    // Back to Charge with Undo: the number returns.
+    assert!(s.header.undo());
+    assert_eq!(s.header.current().ref_no, "INV-7");
+    assert!(s.header.redo());
     fill(&mut s, "15.00", &[("6250", "15.00")]);
     // A billable line is refused on a credit (nothing sent).
     s.lines.form_mut().edit_step(|v| v.lines[0].billable = true);

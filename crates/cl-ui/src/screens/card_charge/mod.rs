@@ -317,7 +317,15 @@ impl CardChargeScreen {
         if self.header.current().mode == mode {
             return;
         }
-        self.header.edit_step(|h| h.mode = mode);
+        self.header.edit_step(|h| {
+            h.mode = mode;
+            // A credit is a deposit into the card, which has no reference
+            // number: the field empties and is off (never dropped
+            // silently at the save). Undo brings it back with Charge.
+            if mode == CardMode::Credit {
+                h.ref_no.clear();
+            }
+        });
         if mode == CardMode::Credit {
             // A credit has no billable lines (the engine takes none on a
             // deposit); the customer stays.
@@ -452,7 +460,11 @@ impl CardChargeScreen {
                 CardMode::Credit => "deposit",
             },
             date: c.date,
-            number: c.ref_no.clone().unwrap_or_default(),
+            // As the engine: a deposit (credit) has no number.
+            number: match c.mode {
+                CardMode::Charge => c.ref_no.clone().unwrap_or_default(),
+                CardMode::Credit => String::new(),
+            },
             contact: c.payee.and_then(|p| self.books.contact_name(p)),
             memo: c.memo.clone().unwrap_or_default(),
             own: c.card,
@@ -1052,15 +1064,21 @@ impl CardChargeScreen {
                     ui.vertical(|ui| {
                         ui.set_width(third);
                         let mut text = self.header.current().ref_no.clone();
-                        let r = kit::text_field(
-                            ui,
-                            tokens,
-                            &t("card.ref_no"),
-                            &mut text,
-                            third,
-                            cl_model::forms::card::REF_MAX,
-                        );
-                        if r.changed() {
+                        let charge = self.header.current().mode == CardMode::Charge;
+                        let r = ui
+                            .add_enabled_ui(charge, |ui| {
+                                kit::text_field(
+                                    ui,
+                                    tokens,
+                                    &t("card.ref_no"),
+                                    &mut text,
+                                    third,
+                                    cl_model::forms::card::REF_MAX,
+                                )
+                            })
+                            .inner
+                            .on_disabled_hover_text(t("card.ref_no.credit"));
+                        if charge && r.changed() {
                             self.header.edit(field::REF, |h| h.ref_no = text);
                             self.inputs.rev = self.header.revision();
                         }
