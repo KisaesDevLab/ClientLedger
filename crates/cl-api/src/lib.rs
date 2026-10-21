@@ -159,3 +159,7 @@ pub use resources::daily_sales::{
     EntryStatus, MAX_DAILY_LINES, MAX_DAILY_VALUES, NormalSide, Preset, Section, entry_from_json,
     preview_from_json, template_from_json,
 };
+
+// P15 lane T: templates and the catch-up run.
+pub use resources::recurring::Recurring;
+pub use resources::templates::{DraftWarning, DraftWarningCode, TemplateDraft, Templates};

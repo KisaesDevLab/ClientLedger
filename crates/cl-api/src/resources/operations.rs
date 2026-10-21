@@ -495,6 +495,55 @@ pub(crate) const DAILY_ENTRY_POST: Operation =
 pub(crate) const DAILY_ENTRY_VOID: Operation =
     write(Method::Post, "/api/v1/daily-sales/entries/{id}/void");
 
+// ---- P15: journal entries, templates, catch-up ----------------------------------
+// Client-declared (outside the pinned spec) until the P15 engine PRs land.
+
+/// The suggested next journal entry number (`je-number-v1`).
+pub(crate) const JE_NEXT_NUMBER: Operation = read("/api/v1/journal-entries/next-number");
+/// Templates, by group and kind (`templates-v1`).
+pub(crate) const TEMPLATES_LIST: Operation = read("/api/v1/templates");
+/// Stores a template (a form's create body minus the date and numbers).
+pub(crate) const TEMPLATES_CREATE: Operation = write(Method::Post, "/api/v1/templates");
+/// Stores a template from a posted transaction.
+pub(crate) const TEMPLATES_FROM_TXN: Operation =
+    write(Method::Post, "/api/v1/templates/from-transaction");
+/// Template groups.
+pub(crate) const TEMPLATE_GROUPS: Operation = read("/api/v1/templates/groups");
+/// Creates a template group.
+pub(crate) const TEMPLATE_GROUPS_CREATE: Operation =
+    write(Method::Post, "/api/v1/templates/groups");
+/// Renames a template group.
+pub(crate) const TEMPLATE_GROUP_PUT: Operation =
+    write(Method::Put, "/api/v1/templates/groups/{id}");
+/// Deletes a template group (its templates move to no group).
+pub(crate) const TEMPLATE_GROUP_DELETE: Operation =
+    write(Method::Delete, "/api/v1/templates/groups/{id}");
+/// One template with its draft and schedule.
+pub(crate) const TEMPLATE_GET: Operation = read("/api/v1/templates/{id}");
+/// Changes a template (`version`; 409 `STALE`).
+pub(crate) const TEMPLATE_PUT: Operation = write(Method::Put, "/api/v1/templates/{id}");
+/// Deletes a template (`?version=`).
+pub(crate) const TEMPLATE_DELETE: Operation = write(Method::Delete, "/api/v1/templates/{id}");
+/// A template's draft for a date, with warnings (posts nothing).
+pub(crate) const TEMPLATE_DRAFT: Operation = read("/api/v1/templates/{id}/draft");
+/// Posts one occurrence now (`closingPassword` in a closed period).
+pub(crate) const TEMPLATE_ENTER: Operation = write(Method::Post, "/api/v1/templates/{id}/enter");
+/// Dismisses one occurrence.
+pub(crate) const TEMPLATE_SKIP: Operation = write(
+    Method::Post,
+    "/api/v1/templates/{id}/occurrences/{date}/skip",
+);
+/// Links an occurrence to a transaction the owner saved in a form.
+pub(crate) const TEMPLATE_RESOLVE: Operation = write(
+    Method::Post,
+    "/api/v1/templates/{id}/occurrences/{date}/resolve",
+);
+/// Posts the due automatic occurrences (`recurring-run-due-v1`; repeatable
+/// with the same `runId`).
+pub(crate) const RECURRING_RUN_DUE: Operation = write(Method::Post, "/api/v1/recurring/run-due");
+/// Due reminders and open skipped occurrences (no side effects).
+pub(crate) const RECURRING_ATTENTION: Operation = read("/api/v1/recurring/attention");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -507,7 +556,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 137] = [
+pub const OPERATIONS: [Operation; 154] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -648,6 +697,24 @@ pub const OPERATIONS: [Operation; 137] = [
     DAILY_ENTRY_DELETE,
     DAILY_ENTRY_POST,
     DAILY_ENTRY_VOID,
+    // P15
+    JE_NEXT_NUMBER,
+    TEMPLATES_LIST,
+    TEMPLATES_CREATE,
+    TEMPLATES_FROM_TXN,
+    TEMPLATE_GROUPS,
+    TEMPLATE_GROUPS_CREATE,
+    TEMPLATE_GROUP_PUT,
+    TEMPLATE_GROUP_DELETE,
+    TEMPLATE_GET,
+    TEMPLATE_PUT,
+    TEMPLATE_DELETE,
+    TEMPLATE_DRAFT,
+    TEMPLATE_ENTER,
+    TEMPLATE_SKIP,
+    TEMPLATE_RESOLVE,
+    RECURRING_RUN_DUE,
+    RECURRING_ATTENTION,
 ];
 
 /// Looks up a covered operation.

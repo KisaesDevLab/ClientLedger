@@ -225,6 +225,32 @@ pub enum LocalValidation {
     /// Posting or voiding a daily-sales day in a closed period needs
     /// `daily-sales-lock-v1`; nothing was sent.
     DailySalesLockUnavailable,
+    // ---- P15: journal entries, templates, catch-up ----
+    /// A name on a journal entry line needs `je-names-v1`; nothing was
+    /// sent.
+    JeNamesUnavailable,
+    /// A journal entry number (or its suggestion) needs `je-number-v1`;
+    /// nothing was sent.
+    JeNumberUnavailable,
+    /// The Adjusting flag needs `je-adjusting-v1`; nothing was sent.
+    JeAdjustingUnavailable,
+    /// Reverse on needs `je-reversing-v1`; nothing was sent.
+    JeReversingUnavailable,
+    /// Reverse on must be after the entry's date; nothing was sent.
+    ReverseNotAfter,
+    /// A journal entry line on Accounts Receivable needs a customer, and
+    /// one on Accounts Payable a vendor; nothing was sent.
+    ArApNameMissing,
+    /// A journal entry may use only one Accounts Receivable or Accounts
+    /// Payable account; nothing was sent.
+    ArApTwoAccounts,
+    /// Templates need `templates-v1`; nothing was sent.
+    TemplatesUnavailable,
+    /// A deposit that groups customer payments cannot be a template;
+    /// nothing was sent.
+    TemplateGrouping,
+    /// The catch-up run needs `recurring-run-due-v1`; nothing was sent.
+    RunDueUnavailable,
 }
 
 /// A save was refused because its date is on or before the closing date.

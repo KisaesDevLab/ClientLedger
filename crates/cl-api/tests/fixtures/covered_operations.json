@@ -135,5 +135,22 @@
   {"method":"PUT","path":"/api/v1/daily-sales/entries/{id}","inSpec":true,"fragmentHash":"da5b201d89cbd95453344d8fde0469d849692ec08b7ecef0dfcd4fe2a2d3b908"},
   {"method":"DELETE","path":"/api/v1/daily-sales/entries/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"POST","path":"/api/v1/daily-sales/entries/{id}/post","inSpec":true,"fragmentHash":"ce8cd9c27fd02ae87ebaa12318fd5d853690a2f5aaff0e6f08ae5e686717d87f"},
-  {"method":"POST","path":"/api/v1/daily-sales/entries/{id}/void","inSpec":true,"fragmentHash":"ce8cd9c27fd02ae87ebaa12318fd5d853690a2f5aaff0e6f08ae5e686717d87f"}
+  {"method":"POST","path":"/api/v1/daily-sales/entries/{id}/void","inSpec":true,"fragmentHash":"ce8cd9c27fd02ae87ebaa12318fd5d853690a2f5aaff0e6f08ae5e686717d87f"},
+  {"method":"GET","path":"/api/v1/journal-entries/next-number","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/templates","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/templates","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/templates/from-transaction","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/templates/groups","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/templates/groups","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/templates/groups/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"DELETE","path":"/api/v1/templates/groups/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/templates/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/templates/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"DELETE","path":"/api/v1/templates/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/templates/{id}/draft","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/templates/{id}/enter","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/templates/{id}/occurrences/{date}/skip","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/templates/{id}/occurrences/{date}/resolve","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/recurring/run-due","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/recurring/attention","inSpec":false,"fragmentHash":null}
 ]

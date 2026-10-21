@@ -170,3 +170,21 @@ PUT     /api/v1/daily-sales/entries/{id}        pre-handler-only
 DELETE  /api/v1/daily-sales/entries/{id}        pre-handler-only
 POST    /api/v1/daily-sales/entries/{id}/post   pre-handler-only
 POST    /api/v1/daily-sales/entries/{id}/void   pre-handler-only
+# P15: journal entries, templates, catch-up (client-declared until the engine PRs land)
+GET     /api/v1/journal-entries/next-number     idempotent
+GET     /api/v1/templates                       idempotent
+POST    /api/v1/templates                       pre-handler-only
+POST    /api/v1/templates/from-transaction      pre-handler-only
+GET     /api/v1/templates/groups                idempotent
+POST    /api/v1/templates/groups                pre-handler-only
+PUT     /api/v1/templates/groups/{id}           pre-handler-only
+DELETE  /api/v1/templates/groups/{id}           pre-handler-only
+GET     /api/v1/templates/{id}                  idempotent
+PUT     /api/v1/templates/{id}                  pre-handler-only
+DELETE  /api/v1/templates/{id}                  pre-handler-only
+GET     /api/v1/templates/{id}/draft            idempotent
+POST    /api/v1/templates/{id}/enter            pre-handler-only
+POST    /api/v1/templates/{id}/occurrences/{date}/skip pre-handler-only
+POST    /api/v1/templates/{id}/occurrences/{date}/resolve pre-handler-only
+POST    /api/v1/recurring/run-due               pre-handler-only
+GET     /api/v1/recurring/attention             idempotent
