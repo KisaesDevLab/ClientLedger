@@ -154,3 +154,129 @@ fn the_board_folds_rounds_and_keeps_new_skips() {
     assert!(transient(&ApiError::Timeout));
     assert!(!transient(&ApiError::Internal));
 }
+
+fn answer(more: bool, capped: bool, posted: usize) -> RunDue {
+    let t = TemplateId::parse("d0000000-0000-4000-8000-e00000000003").expect("id");
+    RunDue {
+        as_of: d(2026, 11, 4),
+        run_id: cl_api::new_run_id(),
+        more,
+        posted: (0..posted)
+            .map(|i| cl_api::PostedOccurrence {
+                template: t,
+                name: String::new(),
+                kind: cl_api::TemplateKind::Transfer,
+                client_form: None,
+                date: d(2026, 1, 1 + u32::try_from(i % 28).expect("small")),
+                transaction: cl_core::ids::TransactionId::parse(
+                    "e0000000-0000-4000-8000-e00000000001",
+                )
+                .expect("id"),
+                total: None,
+            })
+            .collect(),
+        reminders: Vec::new(),
+        skipped: if capped {
+            vec![cl_api::SkippedOccurrence {
+                template: t,
+                name: String::new(),
+                date: d(2026, 2, 1),
+                reason: cl_api::SkipReason::CatchUpCapped,
+                new: true,
+            }]
+        } else {
+            Vec::new()
+        },
+        failed: Vec::new(),
+    }
+}
+
+/// Runs [`gather`] over scripted answers (then "still capped" forever);
+/// how many calls it made.
+fn scripted(mut answers: Vec<Result<RunDue, ApiError>>) -> (Gathered, usize) {
+    answers.reverse();
+    let calls = std::cell::Cell::new(0);
+    let script = std::cell::RefCell::new(answers);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("runtime");
+    let g = rt.block_on(gather(|| {
+        calls.set(calls.get() + 1);
+        let next = script
+            .borrow_mut()
+            .pop()
+            .unwrap_or_else(|| Ok(answer(false, true, 0)));
+        async move { next }
+    }));
+    (g, calls.get())
+}
+
+#[test]
+fn capped_schedules_are_asked_again_a_bounded_number_of_times() {
+    // Capped, then clear: two calls.
+    let (g, calls) = scripted(vec![
+        Ok(answer(false, true, 31)),
+        Ok(answer(false, false, 40)),
+    ]);
+    assert_eq!(calls, 2);
+    assert!(g.error.is_none());
+    assert_eq!(g.run.expect("run").posted.len(), 40, "the run's posts");
+    // Capped every time: 1 + MAX_CAPPED_ROUNDS calls, then left for the
+    // next run (the capped row stays on the board, with no Dismiss).
+    let (g, calls) = scripted(Vec::new());
+    assert_eq!(calls, 1 + MAX_CAPPED_ROUNDS);
+    assert!(g.run.expect("run").skipped[0].reason.is_capped());
+    // `more` keeps asking without using the capped budget.
+    let (_, calls) = scripted(vec![
+        Ok(answer(true, false, 1)),
+        Ok(answer(true, false, 2)),
+        Ok(answer(false, false, 3)),
+    ]);
+    assert_eq!(calls, 3);
+}
+
+#[test]
+fn a_failed_later_round_keeps_what_was_gathered_and_the_run_id() {
+    let (g, calls) = scripted(vec![Ok(answer(true, false, 2)), Err(ApiError::Internal)]);
+    assert_eq!(calls, 2);
+    assert!(matches!(g.error, Some(ApiError::Internal)));
+    assert_eq!(g.run.as_ref().map(|r| r.posted.len()), Some(2));
+    // A lost reply is asked once more under the same id.
+    let (lost, calls) = scripted(vec![Err(ApiError::Timeout), Ok(answer(false, false, 1))]);
+    assert_eq!(calls, 2);
+    assert!(lost.error.is_none());
+    // The runner shows the posts, and the next run that day reuses the id.
+    let (_dir, link, tenant) = demo();
+    let mut r = TemplatesRunner::default();
+    r.opened(&link, tenant);
+    let today = d(2026, 11, 4);
+    let id = cl_api::new_run_id();
+    r.current = Some((today, id));
+    let f = r.finish(&link, Ok(g)).expect("shown");
+    assert!(f.posted && f.open_window, "published and summarised");
+    assert_eq!(link.due().run().map(|x| x.posted.len()), Some(2));
+    assert_eq!(r.retry, Some((today, id)));
+    assert_eq!(r.run_id_for(today), id, "the retry asks under the same id");
+    // Another day starts fresh; a clean run forgets the id.
+    r.retry = Some((today, id));
+    assert_ne!(r.run_id_for(d(2026, 11, 5)), id);
+    r.current = Some((today, id));
+    let _ = r.finish(
+        &link,
+        Ok(Gathered {
+            run: Some(answer(false, false, 0)),
+            error: None,
+        }),
+    );
+    assert_eq!(r.retry, None);
+    // No permission: silent, nothing kept.
+    r.current = Some((today, id));
+    assert!(
+        r.finish(&link, Err(ApiError::Forbidden { code: None }))
+            .is_none()
+    );
+    assert_eq!(r.retry, None);
+    // A capped row is no chip and opens nothing.
+    link.due().set(answer(false, true, 0));
+    assert_eq!(link.due().needs_you(), 0);
+}

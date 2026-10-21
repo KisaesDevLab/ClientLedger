@@ -11,7 +11,12 @@
 //!   it made: exactly-once is the engine's (one database transaction per
 //!   occurrence under its unique `(template, date)` key). The app sends a
 //!   date and a run id, never amounts; the body never carries the
-//!   closing-date password, so nothing posts into a closed period.
+//!   closing-date password, so nothing posts into a closed period. While
+//!   capped schedules (`CATCH_UP_CAPPED`, 31 dates per call) come back the
+//!   run asks again under the same id, at most 12 extra times; the rest is
+//!   left for the next run. A round that fails after others answered keeps
+//!   what they posted (shown and published) and the run id, which the next
+//!   run that day reuses.
 //! - **Errors:** no permission (403) is silent; an engine without
 //!   `recurring-run-due-v1` turns the runner off; anything else is logged
 //!   (no names or amounts) and retried at the next trigger. A company switch
@@ -37,6 +42,10 @@ use crate::screens::templates::engine::{Job, finished, run};
 pub const HOURLY_SECS: f64 = 3600.0;
 /// The most `more` rounds one run makes (200 occurrences each).
 const MAX_ROUNDS: usize = 1000;
+/// The most extra rounds one run makes only because capped schedules
+/// (`CATCH_UP_CAPPED`, 31 dates per schedule per call) came back; what is
+/// still due after that is left for the next run.
+const MAX_CAPPED_ROUNDS: usize = 12;
 
 /// The last catch-up answer of the open company, shared by the runner and
 /// the Templates Due window (on the [`CompanyLink`]).
@@ -103,7 +112,13 @@ impl DueBoard {
         run.reminders
             .iter()
             .map(|r| r.template)
-            .chain(run.skipped.iter().map(|k| k.template))
+            // A capped catch-up continues on its own: not a chip.
+            .chain(
+                run.skipped
+                    .iter()
+                    .filter(|k| !k.reason.is_capped())
+                    .map(|k| k.template),
+            )
             .collect::<BTreeSet<_>>()
             .len()
     }
@@ -166,29 +181,103 @@ fn fold(
     next
 }
 
-/// One whole run on the demo engine (every `more` round).
+/// What one run gathered: the folded answer of the rounds that answered
+/// (their posts are real and are shown), and the error that stopped a
+/// later round (the run id is kept so the retry gets those posts back).
+#[derive(Debug, Default)]
+pub(crate) struct Gathered {
+    /// The folded answer, when at least one round answered.
+    pub run: Option<RunDue>,
+    /// Why the run stopped early.
+    pub error: Option<ApiError>,
+}
+
+/// The rounds of one run (one run id).
+#[derive(Default)]
+struct Rounds {
+    new: BTreeSet<(TemplateId, CalendarDate)>,
+    acc: Option<RunDue>,
+    calls: usize,
+    capped_calls: usize,
+}
+
+impl Rounds {
+    /// Folds one answer in; true when the run asks again (same run id):
+    /// while `more`, and while capped schedules come back (bounded).
+    fn take(&mut self, r: RunDue) -> bool {
+        let more = r.more;
+        let capped = r.skipped.iter().any(|k| k.reason.is_capped());
+        self.acc = Some(fold(self.acc.take(), r, &mut self.new));
+        self.calls += 1;
+        if self.calls >= MAX_ROUNDS {
+            return false;
+        }
+        if more {
+            return true;
+        }
+        if capped && self.capped_calls < MAX_CAPPED_ROUNDS {
+            self.capped_calls += 1;
+            return true;
+        }
+        false
+    }
+
+    fn end(self, error: Option<ApiError>) -> Gathered {
+        Gathered {
+            run: self.acc,
+            error,
+        }
+    }
+}
+
+/// Every round of one run: `ask` calls run-due with the run's id. A
+/// transport error asks once more (the same run id gives the posts back,
+/// never twice); any other error ends the run with what was gathered.
+pub(crate) async fn gather<F, Fut>(mut ask: F) -> Gathered
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<RunDue, ApiError>>,
+{
+    let mut rounds = Rounds::default();
+    loop {
+        let r = match ask().await {
+            Err(e) if transient(&e) => ask().await,
+            r => r,
+        };
+        match r {
+            Ok(r) => {
+                if !rounds.take(r) {
+                    return rounds.end(None);
+                }
+            }
+            Err(e) => return rounds.end(Some(e)),
+        }
+    }
+}
+
+/// One whole run on the demo engine (every round, as [`gather`]).
 fn demo_run(
     state: &mut crate::company::demo::DemoState,
     as_of: CalendarDate,
     run_id: RunId,
     today: CalendarDate,
-) -> Result<RunDue, ApiError> {
+) -> Gathered {
     // The practice company's templates arrive with its first open (WP-D).
     let first = state.companies.first().map(|c| c.tenant_id);
     if first.is_some() && state.open == first {
         demo::seed_sample(state);
     }
-    let mut new = BTreeSet::new();
-    let mut acc = None;
-    for _ in 0..MAX_ROUNDS {
-        let (r, _) = demo::run_due(state, as_of, run_id, RUN_LIMIT_DEFAULT, today)?;
-        let more = r.more;
-        acc = Some(fold(acc, r, &mut new));
-        if !more {
-            break;
+    let mut rounds = Rounds::default();
+    loop {
+        match demo::run_due(state, as_of, run_id, RUN_LIMIT_DEFAULT, today) {
+            Ok((r, _)) => {
+                if !rounds.take(r) {
+                    return rounds.end(None);
+                }
+            }
+            Err(e) => return rounds.end(Some(e)),
         }
     }
-    acc.ok_or(ApiError::Internal)
 }
 
 /// The catch-up runner of the open company.
@@ -196,7 +285,11 @@ fn demo_run(
 pub struct TemplatesRunner {
     company: Option<TenantId>,
     group: Option<RequestGroup>,
-    job: Option<Job<RunDue>>,
+    job: Option<Job<Gathered>>,
+    /// The day and run id of the run on its way.
+    current: Option<(CalendarDate, RunId)>,
+    /// A run that stopped early: the next run that day reuses its id.
+    pub(crate) retry: Option<(CalendarDate, RunId)>,
     /// A trigger waits for the running call.
     pending: bool,
     /// The day of the last run (a new local date runs again).
@@ -289,74 +382,94 @@ impl TemplatesRunner {
         out
     }
 
+    /// The run id for a run today: the stopped run's (same day), else new.
+    fn run_id_for(&mut self, today: CalendarDate) -> RunId {
+        match self.retry.take() {
+            Some((day, id)) if day == today => id,
+            _ => cl_api::new_run_id(),
+        }
+    }
+
     fn start(&mut self, link: &Arc<CompanyLink>, today: CalendarDate) {
-        let run_id = cl_api::new_run_id();
+        let run_id = self.run_id_for(today);
+        self.current = Some((today, run_id));
         self.job = Some(run(
             link,
             self.group.as_ref(),
             Some("orphan.templates_run_due"),
-            move |s| demo_run(s, today, run_id, today),
+            move |s| Ok(demo_run(s, today, run_id, today)),
             move |s| async move {
-                let mut new = BTreeSet::new();
-                let mut acc = None;
-                for _ in 0..MAX_ROUNDS {
-                    let rec = s.recurring();
-                    let r = match rec.run_due(today, run_id, RUN_LIMIT_DEFAULT).await {
-                        // The reply may be lost: the same run id gives the
-                        // posts back, never twice.
-                        Err(e) if transient(&e) => {
-                            rec.run_due(today, run_id, RUN_LIMIT_DEFAULT).await?
-                        }
-                        r => r?,
-                    };
-                    let more = r.more;
-                    acc = Some(fold(acc, r, &mut new));
-                    if !more {
-                        break;
-                    }
-                }
-                acc.ok_or(ApiError::Internal)
+                let s = &s;
+                Ok(gather(move || async move {
+                    s.recurring()
+                        .run_due(today, run_id, RUN_LIMIT_DEFAULT)
+                        .await
+                })
+                .await)
             },
         ));
     }
 
-    fn finish(&mut self, link: &CompanyLink, r: Result<RunDue, ApiError>) -> Option<Finished> {
-        match r {
-            Ok(run) => {
-                self.runs += 1;
-                let reminders: Vec<(TemplateId, CalendarDate)> = run
-                    .reminders
-                    .iter()
-                    .flat_map(|r| r.dates.iter().map(|d| (r.template, *d)))
-                    .collect();
-                let fresh = reminders.iter().filter(|k| !self.seen.contains(k)).count();
-                self.seen.extend(reminders);
-                let new_skips = run.skipped.iter().filter(|k| k.new).count();
-                let posted = !run.posted.is_empty();
-                let open_window =
-                    cl_model::templates::should_open_due(run.posted.len(), fresh, new_skips);
-                tracing::info!(
-                    posted = run.posted.len(),
-                    reminders = run.reminders.len(),
-                    skipped = run.skipped.len(),
-                    failed = run.failed.len(),
-                    "templates catch-up ran"
-                );
-                link.due().set(run);
-                Some(Finished {
-                    posted,
-                    open_window,
-                })
+    pub(crate) fn finish(
+        &mut self,
+        link: &CompanyLink,
+        r: Result<Gathered, ApiError>,
+    ) -> Option<Finished> {
+        let current = self.current.take();
+        let (run, error) = match r {
+            Ok(g) => (g.run, g.error),
+            Err(e) => (None, Some(e)),
+        };
+        // A run stopped by anything but "no permission" or "no catch-up"
+        // keeps its id: the retry gets its posts back, never twice.
+        self.retry = match &error {
+            None
+            | Some(
+                ApiError::Forbidden { .. } | ApiError::Local(LocalValidation::RunDueUnavailable),
+            ) => None,
+            Some(_) => current,
+        };
+        let shown = run.map(|run| self.show(link, run));
+        match error {
+            None | Some(ApiError::Forbidden { .. }) => {}
+            Some(ApiError::Local(LocalValidation::RunDueUnavailable)) => self.off = true,
+            Some(e) => {
+                tracing::warn!(error = %e, "templates catch-up stopped; trying again later");
             }
-            Err(ApiError::Forbidden { .. }) => None,
-            Err(ApiError::Local(LocalValidation::RunDueUnavailable)) => {
-                self.off = true;
-                None
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "templates catch-up failed; trying again later");
-                None
-            }
+        }
+        shown
+    }
+
+    /// Puts an answer on the board (the posts it gathered are real even
+    /// when a later round failed).
+    fn show(&mut self, link: &CompanyLink, run: RunDue) -> Finished {
+        self.runs += 1;
+        let reminders: Vec<(TemplateId, CalendarDate)> = run
+            .reminders
+            .iter()
+            .flat_map(|r| r.dates.iter().map(|d| (r.template, *d)))
+            .collect();
+        let fresh = reminders.iter().filter(|k| !self.seen.contains(k)).count();
+        self.seen.extend(reminders);
+        // A capped catch-up is not a skip the owner must see.
+        let new_skips = run
+            .skipped
+            .iter()
+            .filter(|k| k.new && !k.reason.is_capped())
+            .count();
+        let posted = !run.posted.is_empty();
+        let open_window = cl_model::templates::should_open_due(run.posted.len(), fresh, new_skips);
+        tracing::info!(
+            posted = run.posted.len(),
+            reminders = run.reminders.len(),
+            skipped = run.skipped.len(),
+            failed = run.failed.len(),
+            "templates catch-up ran"
+        );
+        link.due().set(run);
+        Finished {
+            posted,
+            open_window,
         }
     }
 }

@@ -50,6 +50,13 @@ pub enum SkipReason {
     NeedsCheck,
     /// The date was already handled.
     AlreadyPosted,
+    /// The person who last saved the template lost permission to enter it
+    /// automatically (recorded and advanced like any skip).
+    Permission,
+    /// More than 31 dates were due in one call: nothing was recorded for
+    /// this template, the rest stays due and the next call continues (never
+    /// stored; not skipped or dismissed by the owner).
+    CatchUpCapped,
     /// A reason this version does not know.
     Other(String),
 }
@@ -68,6 +75,8 @@ impl SkipReason {
             "TEMPLATE_SOURCE_MISSING" => SkipReason::SourceMissing,
             "NEEDS_CHECK" => SkipReason::NeedsCheck,
             "ALREADY_POSTED" => SkipReason::AlreadyPosted,
+            "PERMISSION" => SkipReason::Permission,
+            "CATCH_UP_CAPPED" => SkipReason::CatchUpCapped,
             other => SkipReason::Other(other.to_string()),
         }
     }
@@ -85,8 +94,17 @@ impl SkipReason {
             SkipReason::SourceMissing => "TEMPLATE_SOURCE_MISSING",
             SkipReason::NeedsCheck => "NEEDS_CHECK",
             SkipReason::AlreadyPosted => "ALREADY_POSTED",
+            SkipReason::Permission => "PERMISSION",
+            SkipReason::CatchUpCapped => "CATCH_UP_CAPPED",
             SkipReason::Other(s) => s,
         }
+    }
+
+    /// A capped catch-up, not a stored skip: it can't be skipped or
+    /// dismissed, and the run asks again (same run id) to continue.
+    #[must_use]
+    pub fn is_capped(&self) -> bool {
+        *self == SkipReason::CatchUpCapped
     }
 }
 

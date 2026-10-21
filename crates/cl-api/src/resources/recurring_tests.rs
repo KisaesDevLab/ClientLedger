@@ -65,9 +65,17 @@ fn reads_every_part_exactly() {
         SkipReason::SourceMissing,
         SkipReason::NeedsCheck,
         SkipReason::AlreadyPosted,
+        SkipReason::Permission,
+        SkipReason::CatchUpCapped,
     ] {
         assert_eq!(SkipReason::from_wire(r.as_wire()), r);
+        assert_eq!(r.is_capped(), r == SkipReason::CatchUpCapped);
     }
+    assert_eq!(
+        SkipReason::from_wire("CATCH_UP_CAPPED"),
+        SkipReason::CatchUpCapped
+    );
+    assert_eq!(SkipReason::from_wire("PERMISSION"), SkipReason::Permission);
 }
 
 #[tokio::test]

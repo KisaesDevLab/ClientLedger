@@ -94,6 +94,13 @@ pub(crate) struct Row {
     pub client_form: Option<String>,
 }
 
+impl Row {
+    /// A capped catch-up (`CATCH_UP_CAPPED`): no Skip or Dismiss.
+    pub(crate) fn capped(&self) -> bool {
+        matches!(&self.section, Section::Skipped(why) if why.is_capped())
+    }
+}
+
 /// One occurrence: what the closing-date password is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Occurrence(TemplateId, CalendarDate);
@@ -452,7 +459,8 @@ impl TemplatesDueScreen {
             return;
         };
         let Some(date) = row.date else { return };
-        if !matches!(row.section, Section::Waiting | Section::Skipped(_)) {
+        if !matches!(row.section, Section::Waiting | Section::Skipped(_)) || row.capped() {
+            // A capped catch-up is not a stored skip: the next run enters it.
             return;
         }
         self.error = None;
@@ -750,19 +758,22 @@ impl TemplatesDueScreen {
                                         "skip",
                                     );
                                 }
-                                Section::Skipped(_) => {
+                                Section::Skipped(ref why) => {
                                     b(
                                         "templates_due.enter_it_now",
                                         &t("templates_due.enter_it_now.tip"),
                                         true,
                                         "enter_it_now",
                                     );
-                                    b(
-                                        "templates_due.dismiss",
-                                        &t("templates_due.dismiss.tip"),
-                                        true,
-                                        "skip",
-                                    );
+                                    // A capped catch-up continues on its own.
+                                    if !why.is_capped() {
+                                        b(
+                                            "templates_due.dismiss",
+                                            &t("templates_due.dismiss.tip"),
+                                            true,
+                                            "skip",
+                                        );
+                                    }
                                 }
                                 Section::Failed(_) => {
                                     b(
@@ -820,6 +831,8 @@ impl TemplatesDueScreen {
                         Section::Skipped(why) => Some(why.as_wire().to_string()),
                         _ => None,
                     },
+                    "can_dismiss": matches!(r.section, Section::Waiting | Section::Skipped(_))
+                        && !r.capped(),
                 })
             })
             .collect();

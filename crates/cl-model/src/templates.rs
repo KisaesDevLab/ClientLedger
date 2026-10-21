@@ -507,6 +507,8 @@ pub fn reason_key(code: &str) -> TextKey {
         "INVALID_TAG" => "templates_due.reason.invalid_tag",
         "CHECK_NUMBER" => "templates_due.reason.check_number",
         "NEEDS_CHECK" => "templates_due.reason.needs_check",
+        "PERMISSION" => "templates_due.reason.permission",
+        "CATCH_UP_CAPPED" => "templates_due.reason.catch_up_capped",
         _ => "templates_due.reason.other",
     })
 }
@@ -643,6 +645,14 @@ mod tests {
         assert_eq!(
             reason_key("CLOSED_PERIOD").as_str(),
             "templates_due.reason.closed_period"
+        );
+        assert_eq!(
+            reason_key("PERMISSION").as_str(),
+            "templates_due.reason.permission"
+        );
+        assert_eq!(
+            reason_key("CATCH_UP_CAPPED").as_str(),
+            "templates_due.reason.catch_up_capped"
         );
         assert_eq!(reason_key("NEW").as_str(), "templates_due.reason.other");
         assert!(!should_open_due(0, 0, 0) && should_open_due(0, 0, 1));

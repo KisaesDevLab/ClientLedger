@@ -235,3 +235,45 @@ fn nothing_due_and_failed_rows() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].section, Section::Failed("INTERNAL".into()));
 }
+
+#[test]
+fn a_capped_catch_up_has_no_skip_or_dismiss() {
+    let (_dir, link) = demo();
+    let mut s = screen(&link, DemoState::today());
+    let tid = TemplateId::parse("d0000000-0000-4000-8000-e00000000002").expect("id");
+    let skipped = |reason| cl_api::SkippedOccurrence {
+        template: tid,
+        name: String::new(),
+        date: d(2026, 1, 31),
+        reason,
+        new: true,
+    };
+    let run = RunDue {
+        as_of: d(2026, 11, 4),
+        run_id: cl_api::new_run_id(),
+        more: false,
+        posted: Vec::new(),
+        reminders: Vec::new(),
+        skipped: vec![
+            skipped(SkipReason::CatchUpCapped),
+            skipped(SkipReason::Permission),
+        ],
+        failed: Vec::new(),
+    };
+    s.rows = rows_of(&run, &BTreeMap::new());
+    assert!(s.rows[0].capped() && !s.rows[1].capped());
+    let st = s.state();
+    assert_eq!(st["rows"][0]["reason"], "CATCH_UP_CAPPED");
+    assert_eq!(st["rows"][0]["can_dismiss"], false);
+    assert_eq!(st["rows"][1]["can_dismiss"], true);
+    // Dismiss (keyboard or channel) does nothing on a capped row.
+    s.selected = Some(0);
+    s.skip_selected();
+    assert!(s.skip_job.is_none(), "nothing sent");
+    // Plain words for both new reasons.
+    for code in ["CATCH_UP_CAPPED", "PERMISSION"] {
+        let key = cl_model::templates::reason_key(code);
+        assert_ne!(key.as_str(), "templates_due.reason.other");
+        assert_ne!(t(key.as_str()), key.as_str(), "has English text");
+    }
+}

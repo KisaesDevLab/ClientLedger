@@ -121,6 +121,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("templates_due.reason.invalid_tag", "A tag on this template is inactive. Edit the template, then enter it."),
     ("templates_due.reason.check_number", "The check number was already used. Enter it yourself."),
     ("templates_due.reason.needs_check", "We were interrupted while entering this. Check the register before you enter it."),
+    ("templates_due.reason.permission", "The person who set this template to enter automatically no longer has permission to enter it. Enter it yourself, or save the template again so it runs under your name."),
+    ("templates_due.reason.catch_up_capped", "Many dates were due at once. The rest will be entered on the next run; nothing to do here."),
     ("templates_due.reason.other", "We couldn't enter this one. Open it in its form to see why."),
     // Work that finishes after its window closed.
     ("orphan.template_save", "saving a template"),
