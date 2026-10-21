@@ -60,6 +60,10 @@ pub struct SaveFlow {
     pub(crate) warnings: Vec<DraftWarning>,
     /// The occurrence could not be marked entered.
     pub(crate) resolve_failed: bool,
+    /// The occurrence being marked entered.
+    resolving: Option<(TemplateId, CalendarDate)>,
+    /// Marked entered; Templates Due drops it at the next look.
+    resolved: Option<(TemplateId, CalendarDate)>,
 }
 
 /// The template's warnings as the owner reads them.
@@ -234,6 +238,7 @@ impl SaveFlow {
         let Some((id, date)) = self.occurrence.take() else {
             return;
         };
+        self.resolving = Some((id, date));
         self.resolve_job = Some(run(
             link,
             group,
@@ -241,6 +246,15 @@ impl SaveFlow {
             move |s| crate::company::demo::templates::resolve(s, id, date, txn),
             move |s| async move { s.templates().resolve(id, date, txn).await },
         ));
+        self.poll();
+        self.settle_resolved(link);
+    }
+
+    /// A marked occurrence leaves Templates Due's lists (P15 lane C).
+    fn settle_resolved(&mut self, link: &CompanyLink) {
+        if let Some((id, date)) = self.resolved.take() {
+            link.due().handled(id, date);
+        }
     }
 
     fn poll(&mut self) {
@@ -279,6 +293,10 @@ impl SaveFlow {
         }
         if let Some(r) = finished(&mut self.resolve_job) {
             self.resolve_failed = r.is_err();
+            let done = self.resolving.take();
+            if r.is_ok() {
+                self.resolved = done;
+            }
         }
     }
 
@@ -293,6 +311,7 @@ impl SaveFlow {
         today: CalendarDate,
     ) -> bool {
         self.poll();
+        self.settle_resolved(link);
         let clicked = crate::forms::header::save_as_template_button(ui, state);
         let tokens = Tokens::of(ui.ctx());
         if let Some(text) = warning_text(&self.warnings) {

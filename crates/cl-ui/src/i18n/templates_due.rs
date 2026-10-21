@@ -5,6 +5,7 @@
 #[rustfmt::skip]
 pub const ENGLISH: &[(&str, &str)] = &[
     ("orphan.templates_run_due", "entering scheduled templates"),
+    ("orphan.template_skip", "skipping a scheduled date"),
     ("status.templates_need_you.one", "1 template needs you"),
     ("status.templates_need_you", "{n} templates need you"),
     ("status.templates_need_you.tip", "Open Templates Due to enter, skip or dismiss them"),

@@ -90,6 +90,7 @@ impl DueBoard {
             }
         }
         run.reminders.retain(|r| r.count > 0 && !r.dates.is_empty());
+        self.generation += 1;
     }
 
     /// How many templates wait for the owner (due reminders and open
