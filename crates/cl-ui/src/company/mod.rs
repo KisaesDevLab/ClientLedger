@@ -45,6 +45,9 @@ pub enum CompanyEvent {
     OpenWindow(cl_model::CommandId),
     /// A short confirmation for the toast line (i18n key).
     Toast(&'static str),
+    /// Take this toast (i18n key) off the status bar now, if it is the
+    /// one showing (P15: a refusal the owner has since fixed).
+    ClearToast(&'static str),
     /// A company switch was refused because a window has unsaved edits:
     /// the shell shows the close prompt for the first one.
     PromptDirty,

@@ -54,6 +54,9 @@ steps:
   - assert_state: {key: screen.difference, equals: "0.00"}
   - assert_state: {key: screen.can_save, equals: true}
   - assert_exists: {role: label, label_contains: "Difference $0.00"}
+  # The refusal and the status bar's line go as soon as it balances.
+  - assert_count: {target: {role: label, label: "Debits and credits must be equal."}, count: 0}
+  - assert_state: {key: toast, equals: null}
   - screenshot: balanced
   # Ctrl+M opens the Template dialog every form shares; Cancel keeps the
   # entry as it is.

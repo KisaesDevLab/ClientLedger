@@ -804,7 +804,18 @@ impl JournalScreen {
         let now = check(&self.compose(), &self.context())
             .err()
             .unwrap_or_default();
+        let unbalanced = |p: &[JournalProblem]| {
+            p.iter()
+                .any(|x| matches!(x, JournalProblem::Unbalanced { .. }))
+        };
+        let was = unbalanced(&self.problems);
         crate::forms::recheck(&mut self.problems, now);
+        if was && !unbalanced(&self.problems) {
+            // Balanced now: the status bar's "must be equal" goes too.
+            self.link.push(crate::company::CompanyEvent::ClearToast(
+                "journal.problem.unbalanced",
+            ));
+        }
     }
 }
 

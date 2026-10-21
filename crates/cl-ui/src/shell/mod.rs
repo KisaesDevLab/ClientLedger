@@ -122,6 +122,8 @@ pub struct ShellOptions {
 }
 
 struct Toast {
+    /// Its i18n key.
+    key: String,
     text: String,
     until: f64,
 }
@@ -432,6 +434,11 @@ impl Shell {
                         self.toast(ctx, key);
                     }
                 }
+                CompanyEvent::ClearToast(key) => {
+                    if self.toast.as_ref().is_some_and(|t| t.key == key) {
+                        self.toast = None;
+                    }
+                }
                 CompanyEvent::UserPrefs(p) => {
                     self.prefs = p;
                     if let Some(store) = self.store.as_ref().filter(|_| !self.run_only)
@@ -692,6 +699,7 @@ impl Shell {
     fn toast(&mut self, ctx: &Context, key: &str) {
         let now = ctx.input(|i| i.time);
         self.toast = Some(Toast {
+            key: key.to_owned(),
             text: t(key),
             until: now + 4.0,
         });

@@ -93,6 +93,24 @@ fn an_unbalanced_entry_cannot_save_and_nothing_is_sent() {
     assert_eq!(s.state_json()["save"]["refused"], "unbalanced");
     assert_eq!(s.saved_count, 0);
     assert_eq!(journal_count(&link), before, "the demo engine got nothing");
+    let said = |link: &CompanyLink, clear: bool| {
+        link.drain().iter().any(|e| match e {
+            crate::company::CompanyEvent::Toast(k) => !clear && *k == "journal.problem.unbalanced",
+            crate::company::CompanyEvent::ClearToast(k) => {
+                clear && *k == "journal.problem.unbalanced"
+            }
+            _ => false,
+        })
+    };
+    assert!(said(&link, false), "the status bar says why");
+    // Balanced: the refusal and the status bar's line both go.
+    set_lines(
+        &mut s,
+        &[(6100, "1200.00", "", None), (1010, "", "1200.00", None)],
+    );
+    s.recheck_problems();
+    assert!(s.problems.is_empty());
+    assert!(said(&link, true));
     // One line alone is refused too ("Add at least two lines").
     s.clear();
     set_lines(&mut s, &[(6100, "5", "", None)]);
