@@ -131,10 +131,20 @@ fn enter_now_asks_for_the_closing_password_in_a_closed_period() {
     let mut s = screen(&link);
     let mut watcher = link.bus().subscribe();
     s.selected = Some(made.id);
-    s.enter_selected(None);
+    s.enter_selected();
     assert!(s.closing_prompt.dialog_open(), "{:?}", s.error);
     assert!(link.bus().take(&mut watcher).is_empty(), "nothing posted");
-    s.enter_selected(Some(Secret::new(DEMO_CLOSING_PASSWORD.to_string())));
+    // The password retries the same template and date, under the same key
+    // (a refusal is definite: a fresh one).
+    assert_eq!(
+        s.closing_prompt.pending(),
+        Some(&EnterNow(made.id, d(2026, 9, 15)))
+    );
+    s.enter_at(
+        made.id,
+        d(2026, 9, 15),
+        Some(Secret::new(DEMO_CLOSING_PASSWORD.to_string())),
+    );
     assert_eq!(s.last_action, Some("enter"));
     assert!(s.entered.is_some());
     assert!(
@@ -144,6 +154,74 @@ fn enter_now_asks_for_the_closing_password_in_a_closed_period() {
     // The schedule moved on.
     s.poll();
     assert_eq!(s.state_json()["rows"][0]["next_date"], "2026-10-15");
+}
+
+#[test]
+fn enter_now_without_a_schedule_asks_for_the_date() {
+    let (_dir, link) = demo();
+    let made = add(&link, "Loose", None, None);
+    let mut s = screen(&link);
+    s.selected = Some(made.id);
+    s.enter_selected();
+    assert_eq!(s.state_json()["enter_date"], "2026-11-04", "today to start");
+    assert!(s.enter_job.is_none(), "nothing sent before the date");
+    // A date that doesn't parse is refused here.
+    if let Some((_, input)) = s.enter_date.as_mut() {
+        input.text = "13/45".into();
+        input.reparse(today());
+    }
+    s.enter_date_confirmed();
+    assert_eq!(s.notice, Some("templates.enter.date_missing"));
+    if let Some((_, input)) = s.enter_date.as_mut() {
+        input.set(d(2026, 11, 2));
+    }
+    s.enter_date_confirmed();
+    assert!(s.enter_date.is_none());
+    assert_eq!(s.last_action, Some("enter"));
+    let txn = s.entered.expect("entered").0;
+    let mut st = link.demo_state().expect("demo");
+    let v = crate::company::demo::journal::get(&mut st, txn).expect("posted");
+    drop(st);
+    assert_eq!(v.record.txn_date, d(2026, 11, 2), "dated as chosen");
+    // Esc closes the date card.
+    s.enter_selected();
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(s.enter_date.is_none());
+}
+
+#[test]
+fn enter_now_keeps_one_key_per_date_until_a_definite_answer() {
+    let (_dir, link) = demo();
+    let made = add(&link, "Savings", Some(d(2026, 12, 1)), None);
+    let other = add(&link, "Other", Some(d(2026, 12, 1)), None);
+    let mut s = screen(&link);
+    let occ = (made.id, d(2026, 12, 1));
+    let k1 = s.enter_key_for(occ);
+    // A lost reply: the outcome is unknown, the key stays for the retry.
+    s.enter_for = Some(occ);
+    s.enter_done(Err(ApiError::Timeout));
+    assert_eq!(s.enter_key_for(occ), k1, "the retry is the same post");
+    // Another date or template is another post.
+    assert_ne!(s.enter_key_for((made.id, d(2026, 12, 2))), k1);
+    let k2 = s.enter_key_for(occ);
+    assert_ne!(k2, k1, "the key follows the occurrence");
+    assert_ne!(s.enter_key_for((other.id, d(2026, 12, 1))), k2);
+    // "Already entered" after the lost reply counts as done and ends it.
+    let k3 = s.enter_key_for(occ);
+    s.enter_for = Some(occ);
+    s.enter_done(Err(ApiError::Conflict {
+        reason: ConflictReason::Unspecified,
+        current_version: None,
+        code: cl_api::ErrorCode::parse(cl_api::OCCURRENCE_TAKEN),
+        message: cl_api::UserText::default(),
+    }));
+    assert_eq!(s.notice, Some("templates.entered_already"));
+    assert_ne!(s.enter_key_for(occ), k3, "a definite answer: a fresh key");
+    // A definite refusal also ends it.
+    let k4 = s.enter_key_for(occ);
+    s.enter_for = Some(occ);
+    s.enter_done(Err(ApiError::NotFound { code: None }));
+    assert_ne!(s.enter_key_for(occ), k4);
 }
 
 #[test]

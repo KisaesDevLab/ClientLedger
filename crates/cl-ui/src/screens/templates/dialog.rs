@@ -508,7 +508,7 @@ impl DialogUi {
     }
 }
 
-fn date_input(ui: &mut Ui, input: &mut DateInput, today: CalendarDate, label: egui::Id) {
+pub(super) fn date_input(ui: &mut Ui, input: &mut DateInput, today: CalendarDate, label: egui::Id) {
     let before = input.text.clone();
     let r = ui
         .add(

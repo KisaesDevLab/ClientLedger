@@ -145,9 +145,15 @@ fn mode_key(t: &Template) -> &'static str {
 /// What the list reads: the templates, the groups and the chart.
 type Loaded = (Vec<Template>, Vec<TemplateGroup>, Vec<Account>);
 
-/// What the closing-date password is for.
+/// What the closing-date password is for: one template's one date.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct EnterNow(TemplateId);
+pub(crate) struct EnterNow(TemplateId, CalendarDate);
+
+/// One Enter now: the template and the date it posts on. The idempotency
+/// key is kept per occurrence until a definite answer, so a lost reply's
+/// retry is the same post (a template without a schedule writes no
+/// occurrence row: the key is its only guard).
+type Occurrence = (TemplateId, CalendarDate);
 
 /// The Templates window.
 pub struct TemplatesScreen {
@@ -168,7 +174,10 @@ pub struct TemplatesScreen {
     delete_job: Option<Job<()>>,
     use_job: Option<Job<TemplateOpen>>,
     enter_job: Option<Job<Entered>>,
-    enter_for: Option<TemplateId>,
+    enter_for: Option<Occurrence>,
+    enter_key: Option<(Occurrence, IdempotencyKey)>,
+    /// Enter now on a template without a schedule: the date to post on.
+    pub(crate) enter_date: Option<(TemplateId, form::DateInput)>,
     pub(crate) closing_prompt: ClosingPrompt<EnterNow>,
     closing: Option<CalendarDate>,
     pub(crate) new_group: Option<String>,
@@ -211,6 +220,8 @@ impl TemplatesScreen {
             use_job: None,
             enter_job: None,
             enter_for: None,
+            enter_key: None,
+            enter_date: None,
             closing_prompt: ClosingPrompt::default(),
             closing: None,
             new_group: None,
@@ -327,21 +338,49 @@ impl TemplatesScreen {
             }
         }
         if let Some(r) = finished(&mut self.enter_job) {
-            let id = self.enter_for.take();
-            match r {
-                Ok(e) => self.entered_ok(Some(e.transaction), id),
-                // A retry of a lost reply: the date is already entered.
-                Err(e) if cl_api::is_occurrence_taken(&e) => self.entered_ok(None, id),
-                Err(e) => {
-                    let supported = true;
-                    let pending = id.map(EnterNow);
-                    let took = pending.is_some_and(|p| {
-                        self.closing_prompt.failed(&e, p, supported, self.closing)
-                    });
-                    if !took {
-                        self.error = Some(e);
-                    }
+            self.enter_done(r);
+        }
+    }
+
+    /// Enter now's answer. A definite one (posted, already entered, a
+    /// refusal) ends the occurrence's key; an unknown outcome keeps it so
+    /// the retry is recognised as the same post.
+    pub(crate) fn enter_done(&mut self, r: Result<Entered, ApiError>) {
+        let occ = self.enter_for.take();
+        match r {
+            Ok(e) => {
+                self.enter_key = None;
+                self.entered_ok(Some(e.transaction), occ.map(|(id, _)| id));
+            }
+            // A retry of a lost reply: the date is already entered.
+            Err(e) if cl_api::is_occurrence_taken(&e) => {
+                self.enter_key = None;
+                self.entered_ok(None, occ.map(|(id, _)| id));
+            }
+            Err(e) => {
+                if !crate::screens::register::keeps_key(&e) {
+                    self.enter_key = None;
                 }
+                let supported = true;
+                let pending = occ.map(|(id, date)| EnterNow(id, date));
+                let took = pending
+                    .is_some_and(|p| self.closing_prompt.failed(&e, p, supported, self.closing));
+                if !took {
+                    self.error = Some(e);
+                }
+            }
+        }
+    }
+
+    /// The idempotency key of one occurrence: the same until a definite
+    /// answer, a new one for another template or date.
+    fn enter_key_for(&mut self, occ: Occurrence) -> IdempotencyKey {
+        match &self.enter_key {
+            Some((o, k)) if *o == occ => k.clone(),
+            _ => {
+                let k = IdempotencyKey::new();
+                self.enter_key = Some((occ, k.clone()));
+                k
             }
         }
     }
@@ -451,8 +490,9 @@ impl TemplatesScreen {
         self.poll();
     }
 
-    /// Enter now (with the closing-date password after a refusal).
-    pub(crate) fn enter_selected(&mut self, password: Option<Secret>) {
+    /// Enter now: a scheduled template posts on the row's next date; one
+    /// without a schedule first asks for the date (today to start).
+    pub(crate) fn enter_selected(&mut self) {
         let Some(row) = self.selected.and_then(|s| self.row(s)).cloned() else {
             return;
         };
@@ -464,20 +504,49 @@ impl TemplatesScreen {
         }
         self.error = None;
         self.notice = None;
-        let (id, today) = (row.id, self.today);
-        self.enter_for = Some(id);
+        match row.schedule {
+            Some(s) => self.enter_at(row.id, s.next_date, None),
+            None => self.enter_date = Some((row.id, form::DateInput::new(self.today))),
+        }
+    }
+
+    /// The date asked for a template without a schedule was confirmed.
+    pub(crate) fn enter_date_confirmed(&mut self) {
+        let Some((id, input)) = self.enter_date.as_ref() else {
+            return;
+        };
+        let Some(date) = input.value else {
+            self.notice = Some("templates.enter.date_missing");
+            return;
+        };
+        let id = *id;
+        self.enter_date = None;
+        self.notice = None;
+        self.enter_at(id, date, None);
+    }
+
+    /// Posts `id` on `date` (with the closing-date password after a
+    /// refusal), under the occurrence's kept idempotency key.
+    pub(crate) fn enter_at(
+        &mut self,
+        id: TemplateId,
+        date: CalendarDate,
+        password: Option<Secret>,
+    ) {
+        let today = self.today;
+        self.enter_for = Some((id, date));
+        let key = self.enter_key_for((id, date));
         let pw = password.clone();
-        let key = IdempotencyKey::new();
         self.enter_job = Some(run(
             &self.link,
             self.group.as_ref(),
             Some("orphan.template_enter"),
-            move |s| template_store::enter(s, id, None, today, pw.as_ref()).map(|(e, _)| e),
+            move |s| template_store::enter(s, id, Some(date), today, pw.as_ref()).map(|(e, _)| e),
             move |s| async move {
                 let opts = PostingOptions {
                     closed_period: password.map(ClosedPeriodAuthorization::with_password),
                 };
-                s.templates().enter(id, None, &opts, key).await
+                s.templates().enter(id, Some(date), &opts, key).await
             },
         ));
         self.poll();
@@ -572,9 +641,9 @@ impl TemplatesScreen {
     }
 
     fn submit_closing(&mut self) {
-        if let Some((EnterNow(id), secret)) = self.closing_prompt.submit() {
+        if let Some((EnterNow(id, date), secret)) = self.closing_prompt.submit() {
             self.selected = Some(id);
-            self.enter_selected(Some(secret));
+            self.enter_at(id, date, Some(secret));
         }
     }
 
@@ -673,7 +742,7 @@ impl TemplatesScreen {
         });
         match click {
             Some("templates.use") => self.use_selected(),
-            Some("templates.enter_now") => self.enter_selected(None),
+            Some("templates.enter_now") => self.enter_selected(),
             Some("templates.edit") => self.edit_selected(),
             Some("templates.delete") => self.confirm_delete = self.selected,
             Some("templates.new_group") => self.new_group = Some(String::new()),
@@ -719,6 +788,28 @@ impl TemplatesScreen {
             match answer {
                 Some(true) => self.delete_confirmed(),
                 Some(false) => self.confirm_delete = None,
+                None => {}
+            }
+        }
+        if let Some((_, input)) = self.enter_date.as_mut() {
+            let today = self.today;
+            let mut answer = None;
+            form::card(ui, tokens, |ui| {
+                ui.label(t("templates.enter.date_prompt"));
+                ui.horizontal(|ui| {
+                    let l = ui.label(t("templates.enter.date"));
+                    dialog::date_input(ui, input, today, l.id);
+                    if ui.button(t("templates.enter_now")).clicked() {
+                        answer = Some(true);
+                    }
+                    if ui.button(t("templates.dialog.cancel")).clicked() {
+                        answer = Some(false);
+                    }
+                });
+            });
+            match answer {
+                Some(true) => self.enter_date_confirmed(),
+                Some(false) => self.enter_date = None,
                 None => {}
             }
         }
@@ -862,6 +953,7 @@ impl TemplatesScreen {
     /// Arrow keys move, Enter uses (when no text field has the keyboard).
     fn keys(&mut self, ui: &Ui) {
         if self.dialog.is_some()
+            || self.enter_date.is_some()
             || self.closing_prompt.dialog_open()
             || ui.ctx().egui_wants_keyboard_input()
         {
@@ -912,6 +1004,10 @@ impl TemplatesScreen {
             "dialog": self.dialog.as_ref().map(|(_, _, d)| d.state_json()),
             "confirm_delete": self.confirm_delete.is_some(),
             "new_group": self.new_group.is_some(),
+            "enter_date": self
+                .enter_date
+                .as_ref()
+                .map(|(_, d)| d.value.map(CalendarDate::to_wire)),
             "last_action": self.last_action,
             "notice": self.notice,
             "entered": self.entered.map(|(t, _)| t.to_string()),
@@ -965,6 +1061,7 @@ impl Screen for TemplatesScreen {
                 if self.dialog.take().is_some()
                     || self.confirm_delete.take().is_some()
                     || self.new_group.take().is_some()
+                    || self.enter_date.take().is_some()
                 {
                     return true;
                 }
