@@ -43,10 +43,15 @@ impl JournalScreen {
         let template = self.template_state();
         let saved = self.editing.is_some();
         let mut clicked: Option<&'static str> = None;
-        let nav = kit::toolbar(ui, tokens, idle, self.is_dirty(), |ui| {
+        let dirty = self.is_dirty();
+        let link = std::sync::Arc::clone(&self.link);
+        let (flow, group, today) = (&mut self.template, self.group.as_ref(), self.today);
+        let nav = kit::toolbar(ui, tokens, idle, dirty, |ui| {
             ui.separator();
             ui.add_enabled_ui(idle, |ui| {
-                if header::save_as_template_button(ui, &template) {
+                // The shared Save as Template: the button, the template's
+                // warnings and the Template dialog (P15).
+                if flow.slot(ui, &link, group, &template, today) {
                     clicked = Some("form.save_as_template");
                 }
                 if ui
@@ -141,10 +146,6 @@ impl JournalScreen {
         let read_only = self.read_only().is_some();
         let enabled = self.idle() && !read_only;
         header::locked_scope(ui, enabled, read_only, |ui| self.header_ui(ui, tokens));
-        if !self.template_warnings.is_empty() {
-            ui.add_space(6.0);
-            ui.label(RichText::new(t("journal.template.warnings")).color(tokens.warn_text));
-        }
         self.link_ui(ui, tokens);
         ui.add_space(10.0);
         header::locked_scope(ui, enabled, read_only, |ui| {

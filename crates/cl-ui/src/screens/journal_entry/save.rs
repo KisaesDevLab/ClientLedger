@@ -312,6 +312,9 @@ impl JournalScreen {
     /// accounts reads them again).
     pub(crate) fn saved(&mut self, id: TransactionId, version: RecordVersion) {
         crate::forms::publish_saved(&self.link, &self.bus, &self.published);
+        // An entry opened from a Templates Due date marks it entered.
+        self.template
+            .form_saved(&self.link, self.group.as_ref(), id);
         self.closing_prompt.saved();
         let intent = self.intent.take().unwrap_or(SaveIntent::Save);
         self.saved_count += 1;

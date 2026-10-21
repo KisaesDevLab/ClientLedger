@@ -369,10 +369,32 @@ fn save_as_template_leaves_out_the_date_number_and_reverse_on() {
             (2000, "", "412.50", Some(vendor)),
         ],
     );
+    // Ctrl+M opens the Template dialog every form shares (named after the
+    // memo); its Save stores the entry's draft.
     assert!(s.command(CommandId::new("form.save_as_template")));
-    let Some(TemplateDraft::Journal(e)) = s.take_template_draft() else {
+    assert!(
+        s.state_json()["template"]["dialog"].is_object(),
+        "{}",
+        s.state_json()
+    );
+    assert!(s.template.dialog_save(&link, None), "the memo names it");
+    assert_eq!(s.state_json()["template"]["saved_count"], 1);
+    let stored = link
+        .demo_state()
+        .map(|st| crate::company::demo::template_store::list(&st))
+        .expect("demo");
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].name, "Insurance");
+    assert_eq!(
+        stored[0].client_form.as_deref(),
+        Some(cl_api::client_form::JOURNAL_ENTRY)
+    );
+    let Ok(TemplateDraft::Journal(e)) = stored[0].draft_for(s.today) else {
         panic!("a journal draft");
     };
+    // Ctrl+M again on the saved template's form: Replace or Save as new.
+    assert!(s.command(CommandId::new("form.save_as_template")));
+    assert_eq!(s.state_json()["template"]["replace_prompt"], true);
     assert_eq!(e.number(), None);
     assert_eq!(e.reverse_on(), None);
     assert!(e.adjusting());
@@ -394,7 +416,11 @@ fn save_as_template_leaves_out_the_date_number_and_reverse_on() {
     assert!(fresh.header.current().adjusting);
     assert_eq!(debit_of(&fresh.lines.value().lines[0]), Some(m("412.50")));
     assert_eq!(credit_of(&fresh.lines.value().lines[1]), Some(m("412.50")));
-    assert_eq!(fresh.state_json()["template"]["from_template"], true);
+    assert_eq!(
+        fresh.state_json()["template"]["from_template"],
+        "e0000000-0000-4000-8000-000000000001"
+    );
+    assert_eq!(fresh.state_json()["template"]["occurrence"], "2026-11-15");
     // The same check gives the same entry back (dated by the form).
     let Ok(TemplateDraft::Journal(again)) = fresh.template_draft() else {
         panic!("a journal draft");

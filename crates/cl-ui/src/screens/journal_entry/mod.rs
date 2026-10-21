@@ -176,13 +176,10 @@ pub struct JournalScreen {
     /// The lines as last seen: a line that just got its account and has no
     /// amount takes the balancing amount (Q-P15n).
     pub(crate) seen_lines: FormLines,
-    /// The template this form was filled from: (template, version) for
-    /// Replace (Q-P15l).
-    pub(crate) template_from: Option<(cl_core::ids::TemplateId, u32)>,
-    /// The template's warnings (inactive or missing references).
-    pub(crate) template_warnings: Vec<DraftWarning>,
-    /// The draft Save as Template made, for the Template dialog.
-    pub(crate) template_draft: Option<TemplateDraft>,
+    /// Save as Template (the Template dialog, Replace for a form opened
+    /// from a template, Q-P15l), the template's warnings and the Templates
+    /// Due date this entry fills in.
+    pub(crate) template: crate::screens::templates::SaveFlow,
     /// The record being read is this window's own save (Save and stay).
     pub(crate) reading_back: bool,
 }
@@ -267,9 +264,7 @@ impl JournalScreen {
             after_save_nav: None,
             after_frame: None,
             seen_lines,
-            template_from: None,
-            template_warnings: Vec::new(),
-            template_draft: None,
+            template: crate::screens::templates::SaveFlow::default(),
             reading_back: false,
         };
         s.books.start(&s.link, s.group.as_ref());
@@ -554,8 +549,7 @@ impl JournalScreen {
         self.error = None;
         self.void_open = false;
         self.delete_open = false;
-        self.template_from = None;
-        self.template_warnings.clear();
+        self.template.forget();
         if !std::mem::take(&mut self.reading_back) {
             self.last_action = Some("load");
         }
@@ -583,8 +577,7 @@ impl JournalScreen {
         self.delete_open = false;
         self.problems.clear();
         self.stale = false;
-        self.template_from = None;
-        self.template_warnings.clear();
+        self.template.forget();
         self.sync_inputs();
         self.fetch_number();
         self.poll_number();
@@ -669,15 +662,16 @@ impl JournalScreen {
     /// The Save as Template button.
     pub(crate) fn template_state(&self) -> SaveAsTemplate {
         if self.has(Capabilities::TEMPLATES) {
-            SaveAsTemplate::Enabled
+            self.template.button(&self.link, None)
         } else {
             SaveAsTemplate::Disabled(t("template.save.unavailable"))
         }
     }
 
     /// Save as Template (Ctrl+M): the same check as Save (the date, Entry
-    /// No. and Reverse on aside, Q-P15f/g); the draft waits for the
-    /// Template dialog.
+    /// No. and Reverse on aside, Q-P15f/g), then the Template dialog every
+    /// form shares (or Replace / Save as new for an entry opened from a
+    /// template).
     pub(crate) fn save_as_template(&mut self) -> bool {
         if self.template_state() != SaveAsTemplate::Enabled {
             self.notice = Some("template.save.unavailable");
@@ -689,19 +683,21 @@ impl JournalScreen {
         match self.template_draft() {
             Ok(d) => {
                 self.problems.clear();
-                self.template_draft = Some(d);
                 self.last_action = Some("template");
+                let name = self.header.current().memo.trim().to_string();
+                let link = Arc::clone(&self.link);
+                self.template.start(
+                    &link,
+                    self.group.as_ref(),
+                    d,
+                    cl_api::client_form::JOURNAL_ENTRY,
+                    name,
+                    self.today,
+                );
             }
             Err(p) => self.problems = p,
         }
         true
-    }
-
-    /// The draft Save as Template made, for the Template dialog (lane T's
-    /// dialog takes it; until it is wired the draft waits here).
-    #[allow(dead_code, reason = "the P15 Template dialog (lane T) takes the draft")]
-    pub(crate) fn take_template_draft(&mut self) -> Option<TemplateDraft> {
-        self.template_draft.take()
     }
 
     /// The control-channel state (flags, ids, dates and the owner's typed
@@ -749,16 +745,7 @@ impl JournalScreen {
             "delete_open": self.delete_open,
             "nav_at": self.nav_at,
             "nav_prompt": self.nav_prompt.is_some(),
-            "template": {
-                "button": match self.template_state() {
-                    SaveAsTemplate::Hidden => "hidden",
-                    SaveAsTemplate::Disabled(_) => "disabled",
-                    SaveAsTemplate::Enabled => "enabled",
-                },
-                "draft_ready": self.template_draft.is_some(),
-                "from_template": self.template_from.is_some(),
-                "warnings": self.template_warnings.len(),
-            },
+            "template": self.template_json(),
             "grid": { "focused": self.lines.has_focus() },
         });
         if let (Value::Object(m), Value::Object(c)) = (
@@ -766,6 +753,23 @@ impl JournalScreen {
             self.closing_prompt.state_json(self.closing_supported()),
         ) {
             m.extend(c);
+        }
+        v
+    }
+
+    /// Save as Template's state: the button, then the shared flow's (the
+    /// dialog, Replace, the template it came from, its warnings).
+    fn template_json(&self) -> Value {
+        let mut v = self.template.state_json();
+        if let Value::Object(m) = &mut v {
+            m.insert(
+                "button".into(),
+                json!(match self.template_state() {
+                    SaveAsTemplate::Hidden => "hidden",
+                    SaveAsTemplate::Disabled(_) => "disabled",
+                    SaveAsTemplate::Enabled => "enabled",
+                }),
+            );
         }
         v
     }
@@ -848,7 +852,7 @@ impl TemplateSource for JournalScreen {
             h.memo = memo;
             h.adjusting = adjusting;
         });
-        self.template_warnings = warnings.to_vec();
+        self.template.warnings = warnings.to_vec();
         self.sync_inputs();
     }
 }
@@ -918,14 +922,14 @@ impl Screen for JournalScreen {
         if template.kind.as_str() != KIND || !matches!(template.draft, TemplateDraft::Journal(_)) {
             return false;
         }
-        let from = (template.template, template.version);
         let date = template.occurrence;
-        self.fill_from_template(template.draft, &template.warnings);
+        self.fill_from_template(template.draft.clone(), &template.warnings);
         if let Some(d) = date {
             self.header.edit(field::DATE, |h| h.date = Some(d));
             self.sync_inputs();
         }
-        self.template_from = Some(from);
+        // Remembered for Replace, and the Templates Due date it fills in.
+        self.template.opened(&template);
         true
     }
 

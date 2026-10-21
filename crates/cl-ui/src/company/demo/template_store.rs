@@ -35,6 +35,9 @@ pub fn demo_caps() -> Capabilities {
         Capabilities::DEPOSIT_CASHBACK,
         Capabilities::LINE_BILLABLE,
         Capabilities::TEMPLATES,
+        // The demo journal entry has names and Adjusting (part A).
+        Capabilities::JE_NAMES,
+        Capabilities::JE_ADJUSTING,
     ]))
     .unwrap_or_default()
 }
