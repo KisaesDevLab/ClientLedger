@@ -1,0 +1,155 @@
+# Daily Sales Summary (P14 plan §6.4) against `clientledger --demo`: the
+# sample's "Plant sale counter" layout for 11/04 with sales 1,000.00, sales
+# tax 80.00, Cash 500.00 and Cards 577.65 is "2.35 short" before saving; the
+# post puts the tenders in Payments Clearing (one day, 1,077.65, waiting in
+# Make Deposit) and the 80.00 in Sales Tax Payable (its register); the engine
+# posts the 2.35 to Cash Over/Short. A "Gift cards" line saved as a new
+# layout "Counter 2", a negative amount refused, the unsaved-changes
+# question on Prev, then the day voided and "Counter 2" deleted.
+#
+# Light and dark run in the same app, so the scenario is repeatable: the
+# day is voided (a voided day can be entered again) and the new layout
+# deleted. All data is synthetic.
+name: daily_sales
+description: Over/short before saving, post, Payments Clearing and Sales Tax Payable, Make Deposit pending, new layout, negative refused, Prev prompt, Void, delete layout.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  # --- 1. The day: 2.35 short before saving --------------------------------------
+  - command: clients.daily_sales
+  - assert_exists: {role: tab, label_contains: "Daily Sales"}
+  - assert_state: {key: screen.screen, equals: daily_sales}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_state: {key: screen.date, equals: "2026-11-04"}
+  - assert_value: {target: {role: text_input, label: Layout}, equals: "Plant sale counter"}
+  - assert_state: {key: screen.layouts, equals: 1}
+  - assert_state: {key: screen.lines, equals: 5}
+  - assert_state: {key: screen.over_short, equals: even}
+  - type: {text: "1000", target: {role: text_input, label: Plant sales}}
+  - type: {text: "80", target: {role: text_input, label: Sales Tax Collected}}
+  - type: {text: "500", target: {role: text_input, label: Cash}}
+  - type: {text: "577.65", target: {role: text_input, label: Cards}}
+  - key: Tab
+  - assert_value: {target: {role: text_input, label: Cards}, equals: "577.65"}
+  - assert_state: {key: screen.values, equals: 4}
+  - assert_state: {key: screen.over_short, equals: short}
+  - assert_exists: {role: label, label: "1,077.65"}
+  - assert_exists: {role: label, label_contains: "2.35 short"}
+  - assert_no_clipping: {}
+  - screenshot: short
+
+  # --- 2. Posted: tenders wait in Payments Clearing, tax in Sales Tax Payable ----
+  - key: Alt+N
+  - assert_state: {key: screen.last_action, equals: post}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_state: {key: screen.save.error, equals: false}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_exists: {role: link, label: "11/04/2026 · Posted · 2.35 short"}
+  # The panel's Make Deposit lists the day once, at its tenders' total.
+  - click: {role: button, label: Make Deposit}
+  - assert_state: {key: screen.screen, equals: deposit}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.pending.count, equals: 3}
+  - assert_state: {key: screen.pending.clearing_balance, equals: "3170.15"}
+  - assert_exists: {role: label, label: "1,077.65"}
+  - assert_exists: {role: label, label: Daily sales}
+  - screenshot: deposit-pending
+  - command: file.close_window
+  # Sales Tax Payable's register: the 80.00 collected.
+  - command: lists.chart_of_accounts
+  - assert_state: {key: screen.screen, equals: chart_of_accounts}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_value: {target: {role: cell, label: "Balance, 10150 Payments Clearing"}, equals: "3,170.15"}
+  - click: {role: row, label_contains: "20900 Sales Tax"}
+  - click: {role: button, label: Open Register}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.account_id, equals: "d0000000-0000-4000-8000-a00000020900"}
+  - assert_value: {target: {role: cell, label: "Type, 11/04/2026, "}, equals: SALES}
+  - assert_value: {target: {role: cell, label: "Increase, 11/04/2026, "}, equals: "80.00"}
+  - screenshot: sales-tax-register
+  - command: file.close_window
+  - click: {role: tab, label: Chart of Accounts}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Daily Sales"}
+  - assert_state: {key: screen.screen, equals: daily_sales}
+
+  # --- 3. Prev: the posted day; unsaved changes on Prev ask ----------------------
+  - key: PageUp
+  - assert_state: {key: screen.mode, equals: posted}
+  - assert_state: {key: screen.read_only, equals: true}
+  - assert_state: {key: screen.over_short, equals: short}
+  - assert_exists: {role: label, label_contains: "This day is posted."}
+  - screenshot: posted
+  - click: {role: button, label: Clear}
+  - type: {text: "10", target: {role: text_input, label: Plant sales}}
+  - key: Tab
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: PageUp
+  - assert_state: {key: screen.nav_prompt, equals: true}
+  - assert_exists: {role: button, label: Keep editing}
+  - screenshot: nav-prompt
+  - click: {role: button, label: Discard changes}
+  - assert_state: {key: screen.nav_prompt, equals: false}
+  - assert_state: {key: screen.mode, equals: posted}
+  # Void the day (a voided day can be entered again on the next run).
+  - click: {role: button, label: Void}
+  - assert_exists: {role: label, label: Void this day?}
+  - click: {role: button, label: Void day}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.mode, equals: void}
+  - assert_state: {key: screen.save.error, equals: false}
+
+  # --- 4. A "Gift cards" line saved as a new layout; negatives refused --------
+  - click: {role: button, label: Clear}
+  - click: {role: button, label: Set up lines}
+  - assert_state: {key: screen.setup_open, equals: true}
+  - assert_exists: {role: label, label_contains: "amounts are never saved with a layout"}
+  - click: {role: button, label: Add line}
+  - click: {role: text_input, label: Line, index: 5}
+  - type: {text: Gift cards}
+  - click: {role: combo_box, label: Section, index: 5}
+  - click: {role: button, label: Payments received}
+  - click: {role: combo_box, label: Account, index: 5}
+  - click: {role: button, label: "1010 · Operating Checking"}
+  - click: {role: text_input, label: Layout name}
+  - key: Ctrl+A
+  - type: {text: Counter 2}
+  - assert_no_clipping: {}
+  - screenshot: setup
+  - click: {role: button, label: Save as new layout}
+  - assert_state: {key: screen.setup_open, equals: false}
+  - assert_state: {key: screen.layouts, equals: 2}
+  - assert_state: {key: screen.lines, equals: 6}
+  - assert_value: {target: {role: text_input, label: Layout}, equals: "Counter 2"}
+  - assert_exists: {role: text_input, label: Gift cards}
+  - type: {text: "-5", target: {role: text_input, label: Gift cards}}
+  - key: Tab
+  - key: Alt+N
+  - assert_state: {key: screen.save.refused, equals: negative_amount}
+  - assert_exists: {role: label, label_contains: "Amounts can't be negative."}
+  - screenshot: negative-refused
+  # Delete "Counter 2" (Clear first: nothing typed is kept).
+  - click: {role: button, label: Clear}
+  - click: {role: button, label: Set up lines}
+  - click: {role: button, label: Delete layout}
+  - assert_exists: {role: label, label_contains: "Delete this layout?"}
+  - click: {role: button, label: Delete}
+  - assert_state: {key: screen.setup_open, equals: false}
+  - assert_state: {key: screen.layouts, equals: 1}
+  - assert_value: {target: {role: text_input, label: Layout}, equals: "Plant sale counter"}
+  - assert_no_clipping: {}
+  # The tab strip doesn't scroll yet: with the demo's Home, Write Check and
+  # Bank Feed tabs, "Daily Sales Summary" runs past 960 points. Close the
+  # Bank Feed tab (first run only) before the minimum-size check.
+  - click_if_present: {role: button, label: Close Bank Feed}
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: text_input, label: Plant sales}
+  - assert_no_clipping: {}
+  - screenshot: daily-sales-960x640
+  - resize: {width: 1440, height: 940}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Daily Sales"}
