@@ -35,8 +35,8 @@ use crate::company::demo::register::DemoPosting;
 use crate::company::{CompanyEvent, CompanyLink};
 use crate::i18n::{t, t_with};
 use crate::screens::card_charge::kit::{
-    self, AmountInput, Balances, Books, Editing, MessageClick, NameInput, NameOutcome, Outbound,
-    Pending, SaveFlow, Sent, Settled,
+    self, AmountInput, Balances, Books, MessageClick, NameInput, NameOutcome, Outbound, Pending,
+    SaveFlow, Sent, Settled,
 };
 use crate::screens::card_charge::records::{self, RecordForm, RecordScope, Records};
 use crate::screens::company::form::{self, DateInput};
@@ -593,9 +593,7 @@ impl OwnerMoneyScreen {
     }
 
     fn voided(&mut self) {
-        let mut accounts = self.flow.published.clone();
-        let f = self.header.current();
-        accounts.extend(f.bank.into_iter().chain(f.equity));
+        let accounts = self.flow.void_accounts();
         let was_open = self.flow.editing.is_some();
         self.flow.voided();
         crate::forms::publish_saved(&self.link, &self.bus, &accounts);
@@ -661,7 +659,8 @@ impl OwnerMoneyScreen {
     pub(crate) fn show(&mut self, v: &Versioned<Transaction>) {
         let (form, fits) = self.form_of(v);
         self.header.load(form);
-        self.flow.opened(Editing::of(v, fits));
+        self.flow.opened_txn(v, fits);
+
         self.equity_source = None;
         self.problems.clear();
         self.focused = None;

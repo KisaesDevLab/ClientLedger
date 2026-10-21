@@ -40,7 +40,7 @@ use crate::screens::register::lists::RegisterLists;
 use crate::theme::Tokens;
 use crate::windows::{PromptAnswer, Screen};
 use kit::{
-    AmountInput, Balances, Books, Editing, MessageClick, NameInput, NameOutcome, Outbound, Pending,
+    AmountInput, Balances, Books, MessageClick, NameInput, NameOutcome, Outbound, Pending,
     SaveFlow, Sent,
 };
 use records::{RecordForm, RecordScope, Records};
@@ -663,9 +663,7 @@ impl CardChargeScreen {
     }
 
     fn voided(&mut self) {
-        let mut accounts = self.flow.published.clone();
-        accounts.extend(self.card());
-        accounts.extend(self.lines.value().used().filter_map(|l| l.account));
+        let accounts = self.flow.void_accounts();
         let was_open = self.flow.editing.is_some();
         self.flow.voided();
         crate::forms::publish_saved(&self.link, &self.bus, &accounts);
@@ -759,7 +757,8 @@ impl CardChargeScreen {
         let lists = Arc::clone(&self.books.lists);
         self.header.load(form);
         self.lines.form_mut().load(lines, &*lists);
-        self.flow.opened(Editing::of(v, fits));
+        self.flow.opened_txn(v, fits);
+
         self.problems.clear();
         self.payee.prefill = None;
         self.payee.applied = false;

@@ -37,8 +37,8 @@ use crate::company::{CompanyEvent, CompanyLink, Task};
 use crate::forms::lines_grid::{L_BILLABLE, L_CUSTOMER, LinesGrid, LinesSpec};
 use crate::i18n::t;
 use crate::screens::card_charge::kit::{
-    self, AmountInput, Balances, Books, Editing, MessageClick, NameInput, NameOutcome, Outbound,
-    Pending, SaveFlow, Sent, Settled,
+    self, AmountInput, Balances, Books, MessageClick, NameInput, NameOutcome, Outbound, Pending,
+    SaveFlow, Sent, Settled,
 };
 use crate::screens::card_charge::records::{self, RecordForm, RecordScope, Records};
 use crate::screens::company::form::{self, DateInput};
@@ -715,9 +715,7 @@ impl PersonalFundsScreen {
     }
 
     fn voided(&mut self) {
-        let mut accounts = self.flow.published.clone();
-        accounts.extend(self.header.current().offset);
-        accounts.extend(self.lines.value().used().filter_map(|l| l.account));
+        let accounts = self.flow.void_accounts();
         let was_open = self.flow.editing.is_some();
         self.flow.voided();
         crate::forms::publish_saved(&self.link, &self.bus, &accounts);
@@ -795,7 +793,8 @@ impl PersonalFundsScreen {
         self.treatment_default = form.treatment == default_treatment(self.books.entity);
         self.header.load(form);
         self.lines.form_mut().load(lines, &*lists);
-        self.flow.opened(Editing::of(v, fits));
+        self.flow.opened_txn(v, fits);
+
         self.offset_source = None;
         self.problems.clear();
         self.focused = None;

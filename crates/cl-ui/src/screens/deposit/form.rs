@@ -62,8 +62,7 @@ impl DepositScreen {
         self.toolbar(ui, &tokens);
         self.messages(ui, &tokens);
         if self.nav_prompt.is_some()
-            && let Some(a) =
-                crate::forms::nav_prompt::ui(ui, "deposit", &t("cmd.banking.deposit"))
+            && let Some(a) = crate::forms::nav_prompt::ui(ui, "deposit", &t("cmd.banking.deposit"))
         {
             self.answer_nav(a);
         }
@@ -712,7 +711,6 @@ impl DepositScreen {
             return true;
         }
         if self.void.open {
-
             self.void = VoidPrompt::default();
             return true;
         }

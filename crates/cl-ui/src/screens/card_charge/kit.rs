@@ -516,6 +516,12 @@ pub(crate) struct SaveFlow {
     pub void_reason: String,
     /// Accounts the last save touched (published, Q-262).
     pub published: Vec<AccountId>,
+    /// The accounts the open record touches in the books (as read, or as
+    /// this window saved it): an edit and a void tell them too.
+    pub record_accounts: Vec<AccountId>,
+    /// The accounts the record saved last touches (Void without an open
+    /// record voids that one).
+    pub last_accounts: Vec<AccountId>,
 }
 
 /// The engine takes the closing-date password.
@@ -589,6 +595,10 @@ impl SaveFlow {
             return Sent::Failed;
         }
         self.stale = false;
+        if self.editing.is_some() {
+            // An edit also tells the accounts the record moved off.
+            self.published.extend(self.record_accounts.iter().copied());
+        }
         let date = out.posting.date();
         let old = self.editing.map(|e| e.old_date);
         let edit = self.editing.map(|e| (e.id, e.version));
@@ -679,15 +689,38 @@ impl SaveFlow {
             read_only: None,
             void: false,
         });
+        self.record_accounts.clone_from(&self.published);
+        self.last_accounts.clone_from(&self.published);
         self.intent.take().unwrap_or(SaveIntent::Save)
     }
 
     /// A new, blank form: no record open.
     pub(crate) fn new_record(&mut self) {
         self.editing = None;
+        self.record_accounts.clear();
         self.stale = false;
         self.void_open = false;
         self.void_reason.clear();
+    }
+
+    /// The saved record `v` was read into the form (`fits`: the form shows
+    /// it exactly); its accounts are kept for an edit's or a void's notice.
+    pub(crate) fn opened_txn(&mut self, v: &Versioned<Transaction>, fits: bool) {
+        self.opened(Editing::of(v, fits));
+        let mut accounts: Vec<AccountId> = v.record.lines.iter().map(|l| l.account_id).collect();
+        accounts.sort();
+        accounts.dedup();
+        self.record_accounts = accounts;
+    }
+
+    /// What a void of [`Self::void_target`] tells (Q-262): the accounts
+    /// that record touches in the books, not what the form shows now.
+    pub(crate) fn void_accounts(&self) -> Vec<AccountId> {
+        if self.editing.is_some() {
+            self.record_accounts.clone()
+        } else {
+            self.last_accounts.clone()
+        }
     }
 
     /// A saved record was read into the form.
@@ -811,6 +844,9 @@ impl SaveFlow {
         let (Some(session), Some(group)) = (link.session(), group) else {
             return false;
         };
+        // A fresh key per try is safe here: void is idempotent at the
+        // engine (voiding a void transaction changes nothing), so a resend
+        // after a lost reply can't void twice or post anything.
         let key = IdempotencyKey::new();
         let label = OrphanLabel {
             what: "orphan.helper_void",
@@ -834,6 +870,8 @@ impl SaveFlow {
         self.void_reason.clear();
         self.last = None;
         self.editing = None;
+        self.record_accounts.clear();
+        self.last_accounts.clear();
         self.stale = false;
         self.last_action = Some("void");
     }

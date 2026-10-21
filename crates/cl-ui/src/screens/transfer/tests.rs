@@ -115,12 +115,21 @@ fn a_retry_reuses_the_key_only_for_the_same_save() {
     };
     let k = s.key_for(&id(None, false));
     s.save_failed(ApiError::Timeout);
-    assert!(s.key_for(&id(None, false)) == k, "a lost reply resends the key");
-    assert!(s.key_for(&id(None, true)) != k, "with the password: a new key");
+    assert!(
+        s.key_for(&id(None, false)) == k,
+        "a lost reply resends the key"
+    );
+    assert!(
+        s.key_for(&id(None, true)) != k,
+        "with the password: a new key"
+    );
     let txn = TransactionId::parse("5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
     let e = s.key_for(&id(Some((txn, RecordVersion::Fingerprint([0; 32]))), false));
     let newer = Some((txn, RecordVersion::Fingerprint([1; 32])));
-    assert!(s.key_for(&id(newer, false)) != e, "another version: a new key");
+    assert!(
+        s.key_for(&id(newer, false)) != e,
+        "another version: a new key"
+    );
 }
 
 #[test]
@@ -142,7 +151,10 @@ fn prev_on_unsaved_work_asks_and_esc_reverts_the_focused_field() {
     assert!(s.command(CommandId::new("form.revert")));
     assert_eq!(s.state_json()["amount"], "12.00");
     assert!(!s.is_dirty());
-    assert!(!s.command(CommandId::new("form.revert")), "clean: the shell closes");
+    assert!(
+        !s.command(CommandId::new("form.revert")),
+        "clean: the shell closes"
+    );
     // Discard moves on without saving.
     s.amount_text = "14.00".into();
     assert!(s.amount_left());

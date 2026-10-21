@@ -629,7 +629,6 @@ impl DepositScreen {
     }
 
     fn step(&mut self, older: bool) {
-
         let target = match (self.nav.at, older) {
             (None, true) => Some(0),
             (None, false) => return,

@@ -420,7 +420,8 @@ fn the_demo_saves_a_plain_deposit_and_reads_it_back() {
     // The edit drops the fee and the cash back: their accounts still hear
     // about it (M2).
     set_lines(&mut s, &[(4000, "300.00")]);
-    s.header.edit_step(|h| h.cash_back = CashBackForm::default());
+    s.header
+        .edit_step(|h| h.cash_back = CashBackForm::default());
     s.sync_inputs();
     let mut bus = link.bus().subscribe();
     assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.save.error);
@@ -486,15 +487,18 @@ fn prev_on_unsaved_work_asks_save_discard_or_keep_editing() {
     s.answer_nav(PromptAnswer::Discard);
     assert!(!s.is_dirty());
     assert_eq!(s.save.count, 1);
-    assert_eq!(s.state_json()["mode"], "new", "Next past the newest: a new one");
+    assert_eq!(
+        s.state_json()["mode"],
+        "new",
+        "Next past the newest: a new one"
+    );
 }
 
 #[test]
 fn a_lost_refund_reply_resends_under_the_same_key() {
     let (mut s, _log, _dir) = screen(all_caps());
     let draft = cl_api::VendorRefundDraft {
-        vendor: cl_core::ids::ContactId::parse("6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01")
-            .expect("id"),
+        vendor: cl_core::ids::ContactId::parse("6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
         deposit_to: account(1010),
         payables: account(2000),
         date: today(),
@@ -506,7 +510,10 @@ fn a_lost_refund_reply_resends_under_the_same_key() {
     // The reply is lost: the outcome is unknown, so the key stays.
     s.refund_failed(ApiError::Timeout);
     assert!(s.refund.key.is_some());
-    assert!(s.refund_key(&draft, false) == first, "the resend reuses the key");
+    assert!(
+        s.refund_key(&draft, false) == first,
+        "the resend reuses the key"
+    );
     // With the password it is another request.
     let with_password = s.refund_key(&draft, true);
     assert!(with_password != first);

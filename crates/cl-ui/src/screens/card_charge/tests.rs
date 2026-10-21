@@ -183,6 +183,50 @@ fn save_charge(s: &mut CardChargeScreen, amount: &str) -> cl_core::ids::Transact
 }
 
 #[test]
+fn void_and_edit_tell_the_accounts_the_record_touches_in_the_books() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "8.00", &[("6400", "8.00")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    let first = s.flow.last.expect("saved").id;
+    save_charge(&mut s, "9.00");
+    let a6400 = s.books.by_number("6400").expect("6400");
+    let a6250 = s.books.by_number("6250").expect("6250");
+    assert!(s.open_record(first));
+    // The owner moves the line to 6250 but doesn't save: an edit's save
+    // would tell 6400 (moved off) too.
+    s.lines
+        .form_mut()
+        .edit_step(|v| v.lines[0].account = Some(a6250));
+    assert!(s.flow.record_accounts.contains(&a6400));
+    // Void tells the record's accounts in the books (6400), not the form's.
+    let mut other = link.bus().subscribe();
+    s.flow.void_reason = "wrong card".into();
+    s.void_now(None);
+    assert_eq!(s.state()["last_action"], "void");
+    let heard = link.bus().take(&mut other);
+    assert!(heard.ledger_touches(a6400), "the voided line's account");
+    assert!(heard.ledger_touches(s.card().expect("card")));
+}
+
+#[test]
+fn an_edit_tells_the_account_a_line_moved_off() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "8.00", &[("6400", "8.00")]);
+    assert!(s.start_save(SaveIntent::Save, None));
+    let a6400 = s.books.by_number("6400").expect("6400");
+    let a6250 = s.books.by_number("6250").expect("6250");
+    s.lines
+        .form_mut()
+        .edit_step(|v| v.lines[0].account = Some(a6250));
+    let mut other = link.bus().subscribe();
+    assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
+    let heard = link.bus().take(&mut other);
+    assert!(heard.ledger_touches(a6400) && heard.ledger_touches(a6250));
+}
+
+#[test]
 fn prev_and_next_step_through_saved_charges_with_exact_amounts() {
     let (_d, link) = link();
     let mut s = screen(&link);

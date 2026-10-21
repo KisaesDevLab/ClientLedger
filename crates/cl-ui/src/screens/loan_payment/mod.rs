@@ -38,8 +38,8 @@ use crate::company::{CompanyEvent, CompanyLink, Task};
 use crate::forms::lines_grid::{LinesGrid, LinesSpec};
 use crate::i18n::{t, t_with};
 use crate::screens::card_charge::kit::{
-    self, AmountInput, Balances, Books, Editing, MessageClick, NameInput, NameOutcome, Outbound,
-    Pending, SaveFlow, Sent, Settled,
+    self, AmountInput, Balances, Books, MessageClick, NameInput, NameOutcome, Outbound, Pending,
+    SaveFlow, Sent, Settled,
 };
 use crate::screens::card_charge::records::{self, RecordForm, RecordScope, Records};
 use crate::screens::company::form::{self, DateInput};
@@ -762,14 +762,7 @@ impl LoanPaymentScreen {
     }
 
     fn voided(&mut self) {
-        let mut accounts = self.flow.published.clone();
-        let f = self.compose();
-        accounts.extend(
-            [f.loan, f.pay_from, f.interest_account]
-                .into_iter()
-                .flatten()
-                .chain(f.extras.used().filter_map(|l| l.account)),
-        );
+        let accounts = self.flow.void_accounts();
         let was_open = self.flow.editing.is_some();
         self.flow.voided();
         self.lender_result = None;
@@ -882,7 +875,8 @@ impl LoanPaymentScreen {
         let lists = Arc::clone(&self.books.lists);
         self.header.load(form);
         self.extras.form_mut().load(extras, &*lists);
-        self.flow.opened(Editing::of(v, fits));
+        self.flow.opened_txn(v, fits);
+
         self.problems.clear();
         self.prefill_task = None;
         self.prefill_applied = false;
