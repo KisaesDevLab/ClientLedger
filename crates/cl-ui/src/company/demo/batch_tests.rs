@@ -745,8 +745,110 @@ fn the_request_as_a_whole() {
 
 // ------------------------------------------------------------------- CSV
 
+fn fixture(name: &str) -> Vec<u8> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/batch")
+        .join(name);
+    std::fs::read(path).expect("fixture")
+}
+
 fn mapping(pairs: &[(CsvField, u16)]) -> ColumnMapping {
     ColumnMapping(pairs.iter().copied().collect())
+}
+
+/// `parse_csv_exact`: a byte-order mark, a quoted line break, doubled
+/// quotes, `(1,234.50)`, `.5`, leading zeros and a blank line.
+#[test]
+fn parse_csv_exact() {
+    let bytes = fixture("bom-quoted.csv");
+    assert_eq!(
+        &bytes[..3],
+        &[0xEF, 0xBB, 0xBF],
+        "the fixture keeps its BOM"
+    );
+    let m = mapping(&[
+        (CsvField::Date, 0),
+        (CsvField::Payee, 1),
+        (CsvField::Account, 2),
+        (CsvField::Memo, 3),
+        (CsvField::Amount, 4),
+    ]);
+    let p = parse_csv(BatchKind::Expense, &bytes, &m).expect("parsed");
+    assert_eq!(p.rows.len(), 3, "the blank record is skipped");
+    let r = &p.rows[0];
+    assert_eq!(r.row_number, 1);
+    assert_eq!(r.date.as_deref(), Some("2026-10-14"));
+    assert_eq!(
+        r.memo.as_deref(),
+        Some("Gravel, two loads\nsecond line of the memo")
+    );
+    assert_eq!(r.amount.as_deref(), Some("-1234.50"));
+    assert_eq!(
+        p.rows[1].contact_name.as_deref(),
+        Some("Crane Creek \"Tree\" Service")
+    );
+    assert_eq!(p.rows[1].amount.as_deref(), Some("0.5"));
+    assert_eq!(p.rows[2].memo, None);
+    assert_eq!(p.rows[2].amount.as_deref(), Some("7.10"));
+    assert_eq!(p.rows[2].row_number, 3);
+}
+
+#[test]
+fn three_decimals_come_back_unrounded() {
+    let p = parse_csv(
+        BatchKind::Expense,
+        &fixture("three-decimals.csv"),
+        &ColumnMapping::default(),
+    )
+    .expect("parsed");
+    let amounts: Vec<&str> = p.rows.iter().filter_map(|r| r.amount.as_deref()).collect();
+    assert_eq!(amounts, vec!["12.345", "2.675", "0.005", "1.0049"]);
+    assert_eq!(
+        p.rows[0].contact_name.as_deref(),
+        Some("Hollister Fuel Stop")
+    );
+}
+
+#[test]
+fn tabs_and_aliases() {
+    let p = parse_csv(
+        BatchKind::CardCharge,
+        &fixture("card.tsv"),
+        &ColumnMapping::default(),
+    )
+    .expect("parsed");
+    assert_eq!(p.rows.len(), 3);
+    let r = &p.rows[0];
+    assert_eq!(r.date.as_deref(), Some("2026-10-08"));
+    assert_eq!(r.contact_name.as_deref(), Some("Hollister Fuel Stop"));
+    assert_eq!(r.account_name.as_deref(), Some("Fuel"));
+    assert_eq!(r.memo.as_deref(), Some("Fuel for the mower trailer"));
+    assert_eq!(r.amount.as_deref(), Some("45.05"));
+    assert_eq!(p.rows[2].amount.as_deref(), Some("-18.25"));
+}
+
+#[test]
+fn bank_and_journal_samples() {
+    let p = parse_csv(
+        BatchKind::Check,
+        &fixture("mixed-bank.csv"),
+        &ColumnMapping::default(),
+    )
+    .expect("parsed");
+    let amounts: Vec<&str> = p.rows.iter().filter_map(|r| r.amount.as_deref()).collect();
+    assert_eq!(amounts, vec!["84.15", "1234.50", "450.00", "2300.00"]);
+    assert_eq!(p.rows[0].ref_no, None);
+    let j = parse_csv(
+        BatchKind::JournalEntry,
+        &fixture("je.csv"),
+        &ColumnMapping::default(),
+    )
+    .expect("parsed");
+    assert_eq!(j.rows.len(), 4);
+    assert_eq!(j.rows[0].ref_no.as_deref(), Some("ADJ-1"));
+    assert_eq!(j.rows[0].debit.as_deref(), Some("600.00"));
+    assert_eq!(j.rows[0].credit, None);
+    assert_eq!(j.rows[3].credit.as_deref(), Some("25.01"));
 }
 
 #[test]
