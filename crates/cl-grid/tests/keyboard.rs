@@ -309,3 +309,115 @@ fn iso_date_and_same_frame_date_key() {
     let next = cl_core::CalendarDate::from_ymd(2026, 3, 2).ok();
     assert_eq!(r.model.lines()[1].date, next);
 }
+
+fn paste(s: &str) -> Vec<egui::Event> {
+    vec![egui::Event::Paste(s.into())]
+}
+
+fn block_rig(rows: usize) -> Rig {
+    Rig::new(
+        cl_grid::GridSpec {
+            block_paste: true,
+            ..line_spec()
+        },
+        Lines::new(true, rows),
+    )
+}
+
+fn blocks(out: &cl_grid::GridOutput) -> Vec<(cl_grid::CellPos, String)> {
+    out.events
+        .iter()
+        .filter_map(|e| match e {
+            cl_grid::GridEvent::BlockPaste { at, text } => Some((*at, text.as_str().to_owned())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn shown_problem(r: &Rig) -> Option<TextKey> {
+    r.grid
+        .core()
+        .edit()
+        .and_then(|e| e.error.as_ref())
+        .map(|p| p.key)
+}
+
+#[test]
+fn block_paste_off_by_default_refuses_two_values() {
+    let mut r = rig(2);
+    assert!(!r.grid.spec().block_paste);
+    r.focus_cell(0, AMOUNT);
+    let out = r.frame(paste("1\t2"));
+    assert_eq!(blocks(&out).len(), 0);
+    assert_eq!(
+        shown_problem(&r),
+        Some(TextKey("grid.paste.one_value")),
+        "the default grid still refuses a multi-value paste"
+    );
+}
+
+#[test]
+fn block_paste_emits_the_text_at_the_cursor() {
+    let mut r = block_rig(2);
+    r.focus_cell(1, AMOUNT);
+    let text = "Date\tPayee\tAmount\r\n2026-11-04\tAcme\t12.345\r\n";
+    let out = r.frame(paste(text));
+    let at = cl_grid::CellPos {
+        row: r.model.key(1),
+        col: AMOUNT,
+    };
+    assert_eq!(blocks(&out), vec![(at, text.to_owned())]);
+    assert_eq!(shown_problem(&r), None, "no one-value refusal");
+    assert_eq!(r.model.line(r.model.key(1)).amount, None);
+}
+
+#[test]
+fn block_paste_takes_several_lines_in_a_text_cell() {
+    let mut r = block_rig(1);
+    r.focus_cell(0, MEMO);
+    let out = r.frame(paste("one\ntwo"));
+    assert_eq!(blocks(&out).len(), 1);
+    assert_eq!(r.model.lines()[0].memo, "");
+}
+
+#[test]
+fn block_paste_leaves_a_single_value_alone() {
+    let mut r = block_rig(1);
+    r.focus_cell(0, AMOUNT);
+    let out = r.frame(paste("12.50\r\n"));
+    assert_eq!(blocks(&out).len(), 0);
+    assert_eq!(shown_problem(&r), None);
+    r.frame(tab());
+    assert_eq!(r.model.lines()[0].amount, Some(money("12.50")));
+}
+
+#[test]
+fn pasted_text_debug_hides_the_content() {
+    let r = block_rig(1);
+    let text = cl_grid::PastedText::new("Acme\t1,234.56");
+    let shown = format!("{text:?}");
+    assert!(
+        !shown.contains("Acme") && !shown.contains("1,234"),
+        "{shown}"
+    );
+    let ev = cl_grid::GridEvent::BlockPaste {
+        at: cl_grid::CellPos {
+            row: r.model.key(0),
+            col: AMOUNT,
+        },
+        text,
+    };
+    assert_eq!(format!("{ev:?}"), "BlockPaste");
+}
+
+#[test]
+fn block_paste_needs_an_editable_grid() {
+    let spec = cl_grid::GridSpec {
+        block_paste: true,
+        ..cl_grid::GridSpec::browse(support::lines::columns())
+    };
+    assert_eq!(
+        spec.validate(),
+        Err(cl_grid::SpecError::EditFlagsWithoutEditing)
+    );
+}

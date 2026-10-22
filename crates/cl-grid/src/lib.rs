@@ -25,6 +25,6 @@ pub use crate::core::model::{
 };
 pub use crate::core::rowkey::{RowKey, RowKeyGen};
 pub use crate::core::selection::{Selection, SelectionMode};
-pub use crate::core::spec::{GridCommand, GridEvent, GridSpec, Handled, SpecError};
+pub use crate::core::spec::{GridCommand, GridEvent, GridSpec, Handled, PastedText, SpecError};
 pub use cl_model::TextKey;
 pub use cl_model::tags::TagChip;

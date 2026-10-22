@@ -902,7 +902,7 @@ impl Grid {
         let mut leaving = false;
         if focused {
             let raw = ctx.input_mut(|i| std::mem::take(&mut i.events));
-            let mut collector = input::Collector::default();
+            let mut collector = input::Collector::new(self.spec().block_paste);
             let mut kept = Vec::with_capacity(raw.len());
             for event in raw {
                 let mut out = Vec::new();
@@ -928,6 +928,14 @@ impl Grid {
             ctx.input_mut(|i| i.events = kept);
             if let Some(p) = collector.paste {
                 self.core.show_problem(p);
+            }
+            if let Some(at) = self.core.cursor() {
+                events.extend(
+                    collector
+                        .blocks
+                        .drain(..)
+                        .map(|text| GridEvent::BlockPaste { at, text }),
+                );
             }
             // Typing into an editor whose row scrolled away brings the row
             // back before the text lands.
