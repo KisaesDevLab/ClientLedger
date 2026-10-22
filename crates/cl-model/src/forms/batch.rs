@@ -18,7 +18,7 @@
 //! derived here (non-negotiable 7).
 //!
 //! cl-model may not depend on cl-api (layering): the engine-facing values
-//! are plain types ([`SectionKind::engine_kind`], `OutGroup`, `OutRow`)
+//! are plain types ([`SectionKind::engine_kind`], [`OutGroup`], [`OutRow`])
 //! that the screen maps 1:1 onto `cl_api::batch::{BatchGroup, BatchRowIn}`.
 
 use std::collections::BTreeMap;
@@ -29,6 +29,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::amount_entry::{self, AmountEntryError, AmountRules};
 pub use crate::rowkey::{RowKey, RowKeyGen};
+
+mod state;
+pub use state::{
+    Blocker, EngineChecks, EngineProblem, EngineProblemKind, EngineState, EngineVerdict, OutGroup,
+    OutRow, Outgoing, SaveCaps, SectionTotals, SentRow, problems_by_row,
+};
 
 /// The most rows one batch holds (Q-P15Ag).
 pub const MAX_ROWS: usize = 2_000;
@@ -163,6 +169,17 @@ impl SectionKind {
             SectionKind::Checks => MAX_CHECK_NUMBER_DIGITS,
             SectionKind::JournalEntries => MAX_ENTRY_NO_CHARS,
             _ => MAX_REF_CHARS,
+        }
+    }
+
+    const fn hash_tag(self) -> u8 {
+        match self {
+            SectionKind::Checks => 1,
+            SectionKind::Expenses => 2,
+            SectionKind::CardCharges => 3,
+            SectionKind::CardCredits => 4,
+            SectionKind::Deposits => 5,
+            SectionKind::JournalEntries => 6,
         }
     }
 }
@@ -824,3 +841,7 @@ impl Fnv {
 #[cfg(test)]
 #[path = "batch/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "batch/state_tests.rs"]
+mod state_tests;
