@@ -259,10 +259,21 @@ fn a_closed_period_row_asks_once_for_the_password() {
     assert_eq!(s.state_json()["locked_rows"], 1);
     assert!(!s.save_all(SaveIntent::Save));
     assert_eq!(s.state_json()["closing"], "asking");
+    assert_eq!(
+        s.closing_prompt.ask_text("09/30/2026"),
+        "1 row in this batch is dated on or before your closing date (09/30/2026).          Enter the closing-date password to save it.",
+        "the dialog names the batch and its locked rows"
+    );
     assert_eq!(saves(&link), (0, 0));
     assert!(!s.send_save(SaveIntent::Save, Some(Secret::new("wrong"))));
     assert_eq!(saves(&link).1, 0, "a wrong password posts nothing");
     assert!(s.closing_prompt.dialog_open(), "the dialog stays open");
+    assert!(
+        s.closing_prompt
+            .ask_text("x")
+            .starts_with("1 row in this batch"),
+        "a wrong password keeps the batch's words"
+    );
     assert!(s.send_save(SaveIntent::Save, Some(Secret::new(DEMO_CLOSING_PASSWORD))));
     assert_eq!(saves(&link).1, 1);
     assert_eq!(s.saved_count, 2);

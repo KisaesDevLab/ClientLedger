@@ -87,6 +87,9 @@ pub struct ClosingPrompt<P> {
     pub(crate) limited_until: Option<Instant>,
     /// What the password is for.
     verb: Verb,
+    /// The screen's own words for what is locked: a counted i18n key with
+    /// `{date}` (and `{n}`) and its count, in place of the verb's sentence.
+    ask: Option<(&'static str, usize)>,
 }
 
 impl<P> Default for ClosingPrompt<P> {
@@ -99,6 +102,7 @@ impl<P> Default for ClosingPrompt<P> {
             focus_password: false,
             limited_until: None,
             verb: Verb::Change,
+            ask: None,
         }
     }
 }
@@ -143,6 +147,7 @@ impl<P: Clone> ClosingPrompt<P> {
             self.flow = ClosingFlow::new(supported);
             self.password.clear();
             self.verb = Verb::Change;
+            self.ask = None;
         }
     }
 
@@ -157,6 +162,23 @@ impl<P: Clone> ClosingPrompt<P> {
     #[must_use]
     pub fn verb(&self) -> Verb {
         self.verb
+    }
+
+    /// The dialog's sentence in the screen's own words (`key` is counted
+    /// with `n`, see [`crate::i18n::t_count`], and names `{date}`). Set it
+    /// after [`ClosingPrompt::ask`] or [`ClosingPrompt::failed`]; a fresh
+    /// flow goes back to the verb's sentence.
+    pub fn set_ask(&mut self, key: &'static str, n: usize) {
+        self.ask = Some((key, n));
+    }
+
+    /// The dialog's sentence for the closing date `date`.
+    #[must_use]
+    pub fn ask_text(&self, date: &str) -> String {
+        match self.ask {
+            Some((key, n)) => crate::i18n::t_count(key, n, &[("date", date)]),
+            None => t_with(self.verb.ask_key(), &[("date", date)]),
+        }
     }
 
     /// Starts the password flow for `pending` (a locked change found by
@@ -373,7 +395,7 @@ impl<P: Clone> ClosingPrompt<P> {
                 }
                 return ClosingClick::None;
             }
-            ui.add(egui::Label::new(t_with(self.verb.ask_key(), &[("date", &date)])).wrap());
+            ui.add(egui::Label::new(self.ask_text(&date)).wrap());
             let wait = self.wait_minutes();
             if let Some(minutes) = wait {
                 ui.add(

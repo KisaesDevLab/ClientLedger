@@ -82,6 +82,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("batch_entry.closed", "In a closed period: saving asks for the closing-date password."),
     ("batch_entry.closed.count", "{n} rows are in a closed period. Save all asks for the closing-date password once for all of them."),
     ("batch_entry.closed.count.one", "1 row is in a closed period. Save all asks for the closing-date password."),
+    ("batch_entry.closing.ask", "{n} rows in this batch are dated on or before your closing date ({date}). Enter the closing-date password to save them."),
+    ("batch_entry.closing.ask.one", "1 row in this batch is dated on or before your closing date ({date}). Enter the closing-date password to save it."),
     ("batch_entry.no_problems", "No rows need attention."),
     ("batch_entry.status.attention", "Some rows need attention. Press F8 to go to the next one."),
     // Why Save all is off.

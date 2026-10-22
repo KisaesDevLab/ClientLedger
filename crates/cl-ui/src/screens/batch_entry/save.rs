@@ -16,6 +16,10 @@ use super::summary::Summary;
 use super::{BulkEntryScreen, KIND, grid, wire};
 use crate::company::Task;
 
+/// The closing-date dialog's sentence for a batch (it names the batch and
+/// how many of its rows are locked).
+const CLOSING_ASK: &str = "batch_entry.closing.ask";
+
 /// A save in flight on the live engine.
 pub(crate) struct Saving {
     /// The batch as sent.
@@ -94,11 +98,12 @@ impl BulkEntryScreen {
     /// the call.
     pub(crate) fn send_save(&mut self, intent: SaveIntent, password: Option<Secret>) -> bool {
         let closing = self.books.closing;
-        let locked = !self.batch().locked_rows(closing).is_empty();
-        if locked && password.is_none() {
+        let locked = self.batch().locked_rows(closing).len();
+        if locked > 0 && password.is_none() {
             let supported = self.caps().closing;
             if supported {
                 self.closing_prompt.ask(intent, supported, closing);
+                self.closing_prompt.set_ask(CLOSING_ASK, locked);
             } else {
                 self.closing_prompt.unavailable(supported, closing);
             }
@@ -230,6 +235,10 @@ impl BulkEntryScreen {
             .closing_prompt
             .failed(&e, intent, supported, self.books.closing)
         {
+            let locked = self.batch().locked_rows(self.books.closing).len();
+            if locked > 0 {
+                self.closing_prompt.set_ask(CLOSING_ASK, locked);
+            }
             return;
         }
         // The key stays on "busy" and on every unknown outcome, so the
