@@ -535,7 +535,11 @@ fn totals_and_counts() {
     assert_eq!(b.section_totals(9).expect("none").rows, 0);
     let counts = b.count_by_kind();
     assert_eq!(counts[&SectionKind::Checks], 2);
-    assert_eq!(counts[&SectionKind::JournalEntries], 2);
+    assert_eq!(
+        counts[&SectionKind::JournalEntries],
+        1,
+        "two lines, one journal entry"
+    );
     assert!(!counts.contains_key(&SectionKind::CardCharges));
     let by_row = problems_by_row(b.local_problems(Some(day(5))));
     assert_eq!(by_row.len(), 5, "every row is in the closed period");

@@ -775,12 +775,28 @@ impl BulkBatch {
             .collect()
     }
 
-    /// Non-blank rows per kind.
+    /// Transactions per kind: non-blank rows, and for journal entries
+    /// the entries (lines with the same date and Entry No. make one; a
+    /// line without both counts on its own).
     #[must_use]
     pub fn count_by_kind(&self) -> BTreeMap<SectionKind, usize> {
         let mut out = BTreeMap::new();
         for s in &self.sections {
-            let n = s.filled_count();
+            let n = if s.kind.is_journal() {
+                let mut groups = BTreeSet::new();
+                let mut loose = 0;
+                for r in s.filled() {
+                    match s.je_group_of(r) {
+                        Some(g) => {
+                            groups.insert(g);
+                        }
+                        None => loose += 1,
+                    }
+                }
+                groups.len() + loose
+            } else {
+                s.filled_count()
+            };
             if n > 0 {
                 *out.entry(s.kind).or_default() += n;
             }
