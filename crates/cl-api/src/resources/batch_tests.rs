@@ -574,12 +574,45 @@ async fn closing_idempotency_and_schema_errors_keep_their_meaning() {
     .await;
     assert!(is_key_reused(&e), "{e:?}");
     assert!(!is_key_reused(&ApiError::Timeout));
+    // A schema error (no rows named) refuses the whole request.
+    let e = save_error(
+        400,
+        r#"{"error":{"message":"bad","code":"VALIDATION_ERROR","details":[{"path":["groups"],"message":"Required"}]}}"#,
+    )
+    .await;
+    assert!(matches!(e, ApiError::Validation(_)), "{e:?}");
+    // Rows named: the rows are refused, whatever the code.
     let e = save_error(
         400,
         r#"{"error":{"message":"bad","code":"VALIDATION_ERROR","details":{"rowNumbers":[1]}}}"#,
     )
     .await;
-    assert!(matches!(e, ApiError::Validation(_)), "{e:?}");
+    assert!(
+        matches!(&e, ApiError::BatchRows(r) if r[0].row_number == 1),
+        "{e:?}"
+    );
+    let e = save_error(
+        500,
+        r#"{"error":{"message":"Row 1: This row could not be saved","code":"BATCH_ROW_FAILED","details":{"rowNumbers":[1]}}}"#,
+    )
+    .await;
+    assert!(
+        matches!(&e, ApiError::BatchRows(r) if r[0].row_number == 1),
+        "{e:?}"
+    );
+    // A refused group: its index, as sent.
+    let e = save_error(
+        403,
+        r#"{"error":{"message":"Permission denied","code":"PERMISSION_DENIED","details":{"groupIndex":0,"resource":"checks"}}}"#,
+    )
+    .await;
+    assert_eq!(
+        e,
+        ApiError::BatchGroup {
+            group: 0,
+            problem: crate::BatchGroupProblem::NotAllowed
+        }
+    );
 }
 
 #[tokio::test]

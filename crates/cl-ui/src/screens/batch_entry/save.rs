@@ -43,6 +43,7 @@ impl BulkEntryScreen {
         self.refresh_looks();
         self.refused = None;
         self.notice = None;
+        self.section_refused = None;
         match self
             .batch()
             .can_save(&self.checks, self.caps(), self.books.closing)
@@ -210,6 +211,7 @@ impl BulkEntryScreen {
         self.refused = None;
         self.error = None;
         self.notice = None;
+        self.section_refused = None;
         self.last_action = Some("save");
         let lists = Arc::clone(&self.books.lists);
         let _ = self.grid.save_ok(batch.clone(), &*lists);
@@ -259,6 +261,7 @@ impl BulkEntryScreen {
                     self.go_to_problem(true);
                 }
             }
+            ApiError::BatchGroup { group, problem } => self.refuse_section(out, group, problem),
             e if crate::screens::register::keeps_key(&e) => {
                 // The engine may or may not have it: the same key replays.
                 self.notice = Some("batch_entry.save.unconfirmed");
@@ -266,6 +269,42 @@ impl BulkEntryScreen {
             }
             e => self.error = Some(e),
         }
+    }
+
+    /// The engine refused a whole section (`group` of the call `out`): the
+    /// window shows that section and says why, naming it.
+    pub(crate) fn refuse_section(
+        &mut self,
+        out: &Outgoing,
+        group: u32,
+        problem: cl_api::BatchGroupProblem,
+    ) {
+        match out.section_of_group(group) {
+            Some(section) if section < self.batch().sections.len() => {
+                self.section_refused = Some((section, problem));
+                self.select_section(section);
+                self.section_refused_rev = self.grid.form().revision();
+            }
+            _ => self.error = Some(ApiError::BatchGroup { group, problem }),
+        }
+    }
+
+    /// The words for a refused section, naming it ("Checks, section 2").
+    #[must_use]
+    pub(crate) fn section_refused_text(&self) -> Option<String> {
+        let (i, problem) = self.section_refused?;
+        let kind = self.batch().sections.get(i)?.kind;
+        let key = match problem {
+            cl_api::BatchGroupProblem::NotAllowed => "batch_entry.section.not_allowed",
+            cl_api::BatchGroupProblem::ContextAccount => "batch_entry.section.bad_account",
+        };
+        Some(crate::i18n::t_with(
+            key,
+            &[
+                ("kind", &crate::i18n::t(super::sections::kind_key(kind))),
+                ("n", &(i + 1).to_string()),
+            ],
+        ))
     }
 
     /// A fresh batch: one section of the first section's type and account.
@@ -352,6 +391,7 @@ impl BulkEntryScreen {
                     self.refused = None;
                     self.error = None;
                     self.notice = None;
+                    self.section_refused = None;
                     self.mapping = None;
                     self.last_action = Some("clear");
                 }

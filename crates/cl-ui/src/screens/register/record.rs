@@ -139,6 +139,7 @@ pub(crate) fn keeps_key(e: &ApiError) -> bool {
             ..
         } => true,
         ApiError::Validation(_)
+        | ApiError::BatchGroup { .. }
         | ApiError::Local(_)
         | ApiError::Conflict { .. }
         | ApiError::ClosedPeriod(_)

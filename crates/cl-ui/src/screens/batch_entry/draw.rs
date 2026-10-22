@@ -94,6 +94,9 @@ impl BulkEntryScreen {
         if self.error.is_some() || self.notice.is_some() {
             reserve += 30.0;
         }
+        if self.section_refused.is_some() {
+            reserve += 30.0;
+        }
         if !self.batch().locked_rows(self.books.closing).is_empty() {
             reserve += 26.0;
         }
@@ -113,6 +116,9 @@ impl BulkEntryScreen {
         self.problems_ui(ui, &tokens);
         self.suggestions_ui(ui, &tokens, enabled);
         self.totals_ui(ui, &tokens);
+        if let Some(text) = self.section_refused_text() {
+            form::inline_warning(ui, &tokens, &text);
+        }
         if let Some(e) = &self.error {
             form::inline_error(ui, &tokens, e);
         }

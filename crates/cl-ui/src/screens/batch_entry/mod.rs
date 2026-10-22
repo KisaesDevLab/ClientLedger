@@ -118,6 +118,10 @@ pub struct BulkEntryScreen {
     /// Shown under the grid (i18n key).
     pub(crate) notice: Option<&'static str>,
     pub(crate) error: Option<cl_api::ApiError>,
+    /// A section the engine refused as a whole (its index and why).
+    pub(crate) section_refused: Option<(usize, cl_api::BatchGroupProblem)>,
+    /// The batch revision when it was refused (an edit clears it).
+    pub(crate) section_refused_rev: u64,
     /// The status bar's "rows need attention" line is up.
     pub(crate) attention_toast: bool,
     pub(crate) saved_count: u32,
@@ -218,6 +222,8 @@ impl BulkEntryScreen {
             confirm_remove: None,
             notice: None,
             error: None,
+            section_refused: None,
+            section_refused_rev: 0,
             attention_toast: false,
             saved_count: 0,
             last_action: None,
@@ -547,6 +553,13 @@ impl BulkEntryScreen {
             "last_action": self.last_action,
             "notice": self.notice,
             "error": self.error.is_some(),
+            "section_refused": self.section_refused.map(|(n, why)| json!({
+                "section": n,
+                "why": match why {
+                    cl_api::BatchGroupProblem::NotAllowed => "not_allowed",
+                    cl_api::BatchGroupProblem::ContextAccount => "account",
+                },
+            })),
             "confirm_remove": self.confirm_remove.is_some(),
             "refused": self.refused.map(validate::blocker_name),
             "summary": if self.summary_open { self.summary.as_ref().map(summary::Summary::state_json) } else { None },

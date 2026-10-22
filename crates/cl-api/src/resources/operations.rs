@@ -82,6 +82,16 @@ impl Operation {
     pub const fn company_scoped(&self) -> bool {
         self.company_scoped
     }
+
+    /// Which failures the route reads beyond the §2.4 table: refused rows
+    /// and groups only on `/batch/validate` and `/batch/save`.
+    pub(crate) fn failure_shape(&self) -> crate::errors::FailureShape {
+        if *self == BATCH_SAVE || *self == BATCH_VALIDATE {
+            crate::errors::FailureShape::Batch
+        } else {
+            crate::errors::FailureShape::Plain
+        }
+    }
 }
 
 const fn op(

@@ -247,6 +247,15 @@ enum SaveStep {
     Busy,
     /// The demo engine answers (a replay for a key it has seen).
     Answer,
+    /// 403 with `groupIndex`: the user may not create that group's kind.
+    Forbidden(u32),
+}
+
+fn forbidden(group: u32) -> cl_api::ApiError {
+    cl_api::ApiError::BatchGroup {
+        group,
+        problem: cl_api::BatchGroupProblem::NotAllowed,
+    }
 }
 
 /// The demo engine with a script for saves; every key a save used is kept.
@@ -256,6 +265,8 @@ struct Scripted {
     keys: Arc<std::sync::Mutex<Vec<String>>>,
     /// Rows sent to validate, over all calls.
     checked_rows: Arc<std::sync::atomic::AtomicUsize>,
+    /// Validate refuses this group (403 with `groupIndex`).
+    validate_forbids: Option<u32>,
 }
 
 impl BatchEngine for Scripted {
@@ -267,6 +278,9 @@ impl BatchEngine for Scripted {
         let n: usize = groups.iter().map(|g| g.rows.len()).sum();
         self.checked_rows
             .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+        if let Some(g) = self.validate_forbids {
+            return Err(forbidden(g));
+        }
         DemoBatchEngine.validate(link, groups)
     }
 
@@ -296,6 +310,7 @@ impl BatchEngine for Scripted {
                 message: cl_api::UserText::default(),
             }),
             SaveStep::Answer => DemoBatchEngine.save(link, groups, key, add_new_names),
+            SaveStep::Forbidden(g) => Err(forbidden(g)),
         }
     }
 
@@ -354,6 +369,65 @@ fn a_lost_reply_then_busy_retries_with_the_same_key_and_posts_once() {
     let keys = keys.lock().expect("keys");
     assert_eq!(keys.len(), 3);
     assert!(keys.iter().all(|k| *k == keys[0]), "every try used one key");
+}
+
+#[test]
+fn a_section_the_user_may_not_enter_is_named_and_shown() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let engine = Scripted {
+        steps: [SaveStep::Forbidden(1)].into(),
+        ..Scripted::default()
+    };
+    let mut s =
+        BulkEntryScreen::with_local(Arc::clone(&link), None, day(11, 4), Some(Box::new(engine)));
+    fill(&mut s, 0, &[(day(11, 2), "6100", "10.00")]);
+    s.add_section(SectionKind::Deposits);
+    fill(&mut s, 1, &[(day(11, 3), "4000", "20.00")]);
+    s.select_section(0);
+    assert!(!s.save_all(SaveIntent::Save));
+    assert_eq!(saves(&link).1, 0);
+    let v = s.state_json();
+    assert_eq!(v["section_refused"]["section"], 1);
+    assert_eq!(v["section_refused"]["why"], "not_allowed");
+    assert_eq!(v["section"], 1, "the refused section is shown");
+    let text = s.section_refused_text().expect("text");
+    assert!(
+        text.contains("Deposits") && text.contains("section 2"),
+        "{text}"
+    );
+    assert!(s.key.is_none(), "a refusal gets a fresh key next time");
+    // It stays through a frame; an edit to the batch clears it.
+    let ctx = eframe::egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    let mut out = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+        crate::windows::Screen::ui(&mut s, ui);
+    });
+    out.textures_delta.clear();
+    assert_eq!(s.state_json()["section_refused"]["section"], 1);
+    s.grid
+        .edit_step(|b| b.sections[1].rows[0].memo = "Edited".into());
+    s.after_grid();
+    assert_eq!(s.state_json()["section_refused"], serde_json::Value::Null);
+}
+
+#[test]
+fn a_section_refused_by_validate_is_named_too() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let engine = Scripted {
+        validate_forbids: Some(0),
+        ..Scripted::default()
+    };
+    let mut s =
+        BulkEntryScreen::with_local(Arc::clone(&link), None, day(11, 4), Some(Box::new(engine)));
+    fill(&mut s, 0, &[(day(11, 2), "6100", "10.00")]);
+    assert!(!s.save_all(SaveIntent::Save));
+    let v = s.state_json();
+    assert_eq!(v["section_refused"]["section"], 0);
+    assert_eq!(v["blocker"], "unchecked");
+    assert_eq!(saves(&link).0, 0, "no save was sent");
 }
 
 fn counted() -> (

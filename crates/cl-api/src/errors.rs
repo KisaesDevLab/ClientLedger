@@ -347,6 +347,15 @@ pub enum ApiError {
     /// save posted nothing. Each entry names its group and row number.
     #[error("{} bulk entry rows refused", .0.len())]
     BatchRows(Vec<crate::resources::batch::BatchRowProblem>),
+    /// The engine refused a whole Bulk Entry section (P15A,
+    /// `details.groupIndex`): nothing was posted or checked.
+    #[error("bulk entry group {group} refused ({problem:?})")]
+    BatchGroup {
+        /// 0-based index of the group in the request.
+        group: u32,
+        /// Why.
+        problem: crate::resources::batch::BatchGroupProblem,
+    },
     /// cl-api refused the input before sending anything.
     #[error("refused before sending ({0:?})")]
     Local(LocalValidation),
@@ -517,6 +526,16 @@ impl OwnerFacing for ApiError {
         let (key, fix) = match self {
             ApiError::Validation(_) => ("error.api.validation", Some("fix.api.validation")),
             ApiError::BatchRows(_) => ("error.api.batch_rows", Some("fix.api.batch_rows")),
+            ApiError::BatchGroup { problem, .. } => match problem {
+                crate::resources::batch::BatchGroupProblem::NotAllowed => (
+                    "error.api.batch_group_forbidden",
+                    Some("fix.api.batch_group_forbidden"),
+                ),
+                crate::resources::batch::BatchGroupProblem::ContextAccount => (
+                    "error.api.batch_group_account",
+                    Some("fix.api.batch_group_account"),
+                ),
+            },
             ApiError::Local(_) => ("error.api.local", Some("fix.api.validation")),
             ApiError::Conflict { reason, .. } => match reason {
                 ConflictReason::Stale => ("error.api.conflict_stale", Some("fix.api.reload")),
@@ -770,31 +789,35 @@ fn feature(body: Option<&EngineErrorBody>) -> Option<String> {
         .map(str::to_string)
 }
 
-/// A Bulk Entry refusal naming its rows (`details.rowNumbers`, P15A
-/// `batch-atomic-v1`): any 4xx except the ones with their own meaning —
-/// closed periods and the closing-date password (423, 403, 429), a reused
-/// idempotency key, and a whole-request schema error.
+/// Codes that keep their own meaning on a Bulk Entry route even when the
+/// details name rows or a group: the closed period and the closing-date
+/// password (the password dialog handles them), idempotency, and the
+/// desktop gate.
+const BATCH_OWN_MEANING: [&str; 10] = [
+    "TB_PERIOD_LOCKED",
+    "IDEMPOTENCY_KEY_REUSED",
+    "IDEMPOTENCY_KEY_INVALID",
+    "IDEMPOTENCY_UNSUPPORTED",
+    "CLOSING_PASSWORD_INVALID",
+    "CLOSING_PASSWORD_REQUIRED",
+    "CLOSING_PASSWORD_OWNER_REQUIRED",
+    "CLOSING_PASSWORD_RATE_LIMIT",
+    "DESKTOP_TOKEN_REQUIRED",
+    "WORKSPACE_TENANT",
+];
+
+/// A Bulk Entry refusal naming its rows (P15A `batch-atomic-v1`): decided
+/// by `details.rowNumbers` alone, whatever the code (`BATCH_INVALID`,
+/// `VALIDATION_ERROR`, a posting's own code, 500 `BATCH_ROW_FAILED`, ...),
+/// except the codes in [`BATCH_OWN_MEANING`] and a 401 or 429.
 fn batch_rows(
     status: u16,
     body: &EngineErrorBody,
 ) -> Option<Vec<crate::resources::batch::BatchRowProblem>> {
-    if !(400..500).contains(&status) || matches!(status, 401 | 423 | 429) {
+    if !(400..600).contains(&status) || matches!(status, 401 | 429) {
         return None;
     }
-    if [
-        "VALIDATION_ERROR",
-        "IDEMPOTENCY_KEY_REUSED",
-        "IDEMPOTENCY_KEY_INVALID",
-        "IDEMPOTENCY_UNSUPPORTED",
-        "CLOSING_PASSWORD_INVALID",
-        "CLOSING_PASSWORD_REQUIRED",
-        "CLOSING_PASSWORD_OWNER_REQUIRED",
-        "DESKTOP_TOKEN_REQUIRED",
-        "WORKSPACE_TENANT",
-    ]
-    .iter()
-    .any(|c| body.is(c))
-    {
+    if BATCH_OWN_MEANING.iter().any(|c| body.is(c)) {
         return None;
     }
     let details = body.pointer("/error/details")?;
@@ -805,15 +828,59 @@ fn batch_rows(
     )
 }
 
-/// Maps a non-2xx answer: Bulk Entry rows first, then the §2.4 table.
+/// A Bulk Entry refusal of a whole group (`details.groupIndex`): 403 (the
+/// user may not create that kind of transaction) or 400
+/// `BATCH_CONTEXT_ACCOUNT_REQUIRED` / `_INVALID`.
+fn batch_group(status: u16, body: &EngineErrorBody) -> Option<ApiError> {
+    use crate::resources::batch::BatchGroupProblem;
+    if BATCH_OWN_MEANING.iter().any(|c| body.is(c)) {
+        return None;
+    }
+    let group = body
+        .pointer("/error/details/groupIndex")?
+        .as_u64()
+        .and_then(|g| u32::try_from(g).ok())?;
+    let problem = match status {
+        403 => BatchGroupProblem::NotAllowed,
+        400 if body.is("BATCH_CONTEXT_ACCOUNT_REQUIRED")
+            || body.is("BATCH_CONTEXT_ACCOUNT_INVALID") =>
+        {
+            BatchGroupProblem::ContextAccount
+        }
+        _ => return None,
+    };
+    Some(ApiError::BatchGroup { group, problem })
+}
+
+/// Which failures a route reads beyond the §2.4 table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FailureShape {
+    /// The §2.4 table only.
+    Plain,
+    /// `/batch/validate` and `/batch/save`: refused rows
+    /// (`details.rowNumbers`) and refused groups (`details.groupIndex`)
+    /// first.
+    Batch,
+}
+
+/// Maps a non-2xx answer: on a Bulk Entry route, refused rows and groups
+/// first; then the §2.4 table.
 pub(crate) fn map_failure(
     status: u16,
     body: &[u8],
     retry_after: Option<Duration>,
     route: RouteKind,
+    shape: FailureShape,
 ) -> Mapped {
-    if let Some(rows) = EngineErrorBody::parse(body).and_then(|b| batch_rows(status, &b)) {
-        return Mapped::Final(ApiError::BatchRows(rows));
+    if shape == FailureShape::Batch
+        && let Some(b) = EngineErrorBody::parse(body)
+    {
+        if let Some(rows) = batch_rows(status, &b) {
+            return Mapped::Final(ApiError::BatchRows(rows));
+        }
+        if let Some(e) = batch_group(status, &b) {
+            return Mapped::Final(e);
+        }
     }
     map_status(status, body, retry_after, route)
 }
@@ -935,7 +1002,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn map(status: u16, body: &str, route: RouteKind) -> Mapped {
-        map_failure(status, body.as_bytes(), None, route)
+        map_failure(status, body.as_bytes(), None, route, FailureShape::Plain)
     }
 
     fn err(status: u16, body: &str, route: RouteKind) -> ApiError {
@@ -1310,6 +1377,111 @@ mod tests {
         assert_eq!((reason, code), (ConflictReason::Unspecified, None));
     }
 
+    fn batch_err(status: u16, body: &str) -> ApiError {
+        match map_failure(status, body.as_bytes(), None, S, FailureShape::Batch) {
+            Mapped::Final(e) => e,
+            other => panic!("expected a final error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn batch_routes_read_rows_by_row_numbers_whatever_the_code() {
+        let rows = |status: u16, code: &str| {
+            let body = format!(
+                r#"{{"error":{{"message":"Row 3: no","code":"{code}","details":{{"rowNumbers":[3],
+                    "rows":[{{"rowNumber":3,"errors":[{{"field":"debit","message":"Must not be negative","code":"VALIDATION_ERROR"}}]}}]}}}}}}"#
+            );
+            (batch_err(status, &body), err(status, &body, S))
+        };
+        for (status, code) in [
+            (400, "BATCH_INVALID"),
+            (400, "VALIDATION_ERROR"),
+            (400, "BATCH_CONTACT_NOT_FOUND"),
+            (409, "BATCH_ROW_CONFLICT"),
+            (500, "BATCH_ROW_FAILED"),
+            (400, "CHECK_NUMBER_DUPLICATE"),
+        ] {
+            let (batch, plain) = rows(status, code);
+            let ApiError::BatchRows(r) = batch else {
+                panic!("{code}: {batch:?}")
+            };
+            assert_eq!((r.len(), r[0].row_number), (1, 3), "{code}");
+            assert!(
+                !matches!(plain, ApiError::BatchRows(_)),
+                "{code}: other routes keep the §2.4 table"
+            );
+        }
+        // A 500 on another route stays a server error.
+        assert!(matches!(
+            rows(500, "BATCH_ROW_FAILED").1,
+            ApiError::Server { status: 500, .. }
+        ));
+        // A schema error without rows stays a validation error.
+        let schema = r#"{"error":{"message":"bad","code":"VALIDATION_ERROR","details":[{"path":["groups"],"message":"Required"}]}}"#;
+        assert!(matches!(batch_err(400, schema), ApiError::Validation(_)));
+        // Codes with their own meaning stay themselves, rows or not.
+        let locked = r#"{"error":{"message":"locked","code":"TB_PERIOD_LOCKED",
+            "details":{"rowNumbers":[1],"lockDate":"2026-03-31","canOverride":false}}}"#;
+        assert!(matches!(batch_err(423, locked), ApiError::ClosedPeriod(_)));
+        let wrong = r#"{"error":{"message":"wrong","code":"CLOSING_PASSWORD_INVALID","details":{"rowNumbers":[1]}}}"#;
+        assert_eq!(batch_err(403, wrong), ApiError::ClosingPasswordRejected);
+        let busy = r#"{"error":{"message":"busy","code":"BATCH_BUSY"}}"#;
+        assert!(matches!(
+            batch_err(409, busy),
+            ApiError::Conflict {
+                reason: ConflictReason::Busy,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn batch_routes_name_a_refused_group() {
+        use crate::resources::batch::BatchGroupProblem;
+        let denied = r#"{"error":{"message":"Permission denied","code":"PERMISSION_DENIED",
+            "details":{"groupIndex":2,"resource":"checks"}}}"#;
+        assert_eq!(
+            batch_err(403, denied),
+            ApiError::BatchGroup {
+                group: 2,
+                problem: BatchGroupProblem::NotAllowed
+            }
+        );
+        assert!(
+            matches!(err(403, denied, S), ApiError::Forbidden { .. }),
+            "other routes: plain forbidden"
+        );
+        let names = r#"{"error":{"message":"Permission denied","code":"PERMISSION_DENIED",
+            "details":{"resource":"contacts"}}}"#;
+        assert!(matches!(batch_err(403, names), ApiError::Forbidden { .. }));
+        for code in [
+            "BATCH_CONTEXT_ACCOUNT_REQUIRED",
+            "BATCH_CONTEXT_ACCOUNT_INVALID",
+        ] {
+            let body = format!(
+                r#"{{"error":{{"message":"m","code":"{code}","details":{{"groupIndex":1}}}}}}"#
+            );
+            assert_eq!(
+                batch_err(400, &body),
+                ApiError::BatchGroup {
+                    group: 1,
+                    problem: BatchGroupProblem::ContextAccount
+                },
+                "{code}"
+            );
+        }
+        let e = batch_err(403, denied);
+        assert_eq!(e.owner_message().key, "error.api.batch_group_forbidden");
+    }
+
+    #[test]
+    fn only_the_batch_save_and_validate_routes_read_batch_shapes() {
+        use crate::resources::operations::{BATCH_PARSE_CSV, BATCH_SAVE, BATCH_VALIDATE};
+        assert_eq!(BATCH_SAVE.failure_shape(), FailureShape::Batch);
+        assert_eq!(BATCH_VALIDATE.failure_shape(), FailureShape::Batch);
+        assert_eq!(BATCH_PARSE_CSV.failure_shape(), FailureShape::Plain);
+    }
+
     #[test]
     fn closed_period_reads_details_and_rejects_shifted_dates() {
         let body = r#"{"error":{"message":"locked","code":"TB_PERIOD_LOCKED",
@@ -1368,6 +1540,7 @@ mod tests {
             body("CLOSING_PASSWORD_RATE_LIMIT").as_bytes(),
             Some(Duration::from_mins(15)),
             S,
+            FailureShape::Batch,
         ) else {
             panic!("final")
         };
@@ -1562,7 +1735,13 @@ mod tests {
                 )
                 .await
                 .expect("reply");
-            got.push(map_failure(r.status, &r.body, r.retry_after, S));
+            got.push(map_failure(
+                r.status,
+                &r.body,
+                r.retry_after,
+                S,
+                FailureShape::Plain,
+            ));
         }
         let finals: Vec<ApiError> = got
             .into_iter()

@@ -169,6 +169,15 @@ impl Outgoing {
         self.sent.is_empty()
     }
 
+    /// The window's section a group of the call stood for.
+    #[must_use]
+    pub fn section_of_group(&self, group: u32) -> Option<usize> {
+        self.sent
+            .values()
+            .find(|s| s.group == group)
+            .map(|s| s.section)
+    }
+
     /// The row a row number stood for.
     #[must_use]
     pub fn key_of(&self, row_number: u32) -> Option<RowKey> {

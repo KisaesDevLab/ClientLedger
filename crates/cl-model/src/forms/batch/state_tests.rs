@@ -200,6 +200,13 @@ fn outgoing_numbers_rows_across_the_call_and_skips_blanks() {
     assert_eq!(out.key_of(3), Some(RowKey(4)));
     assert_eq!(out.sent[&3].group, 1);
     assert_eq!(out.sent[&3].section, 1);
+    assert_eq!(out.section_of_group(2), Some(2));
+    assert_eq!(out.section_of_group(9), None);
+    // A section with nothing sent has no group: groups shift past it.
+    let mut gap = mixed();
+    gap.sections[1].rows.clear();
+    let o = gap.outgoing(None, None);
+    assert_eq!(o.section_of_group(1), Some(2));
     assert!(out.groups[0].rows[0].locked);
     assert!(!out.groups[0].rows[1].locked);
     let je = &out.groups[2].rows[0];

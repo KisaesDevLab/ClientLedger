@@ -271,6 +271,11 @@ impl BulkEntryScreen {
             self.changed_at = Some(Instant::now());
             self.checks.prune(self.grid.form().current());
         }
+        if self.section_refused.is_some() && rev != self.section_refused_rev {
+            // The owner changed the batch since the refusal: the section
+            // is asked about again with the next check or save.
+            self.section_refused = None;
+        }
         if let Some(at) = self.changed_at
             && at.elapsed() >= CHECK_AFTER
             && self.checking.is_none()
@@ -404,6 +409,10 @@ impl BulkEntryScreen {
                 ) {
                     self.error = None;
                 }
+            }
+            Err(ApiError::BatchGroup { group, problem }) => {
+                self.checks.fail(out);
+                self.refuse_section(out, group, problem);
             }
             Err(e) => {
                 self.checks.fail(out);
