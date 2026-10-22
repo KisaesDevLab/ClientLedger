@@ -76,6 +76,9 @@ pub(crate) struct Checking {
     pub out: Outgoing,
     /// The live engine's answer.
     pub task: Task<cl_api::BatchValidation>,
+    /// The screen's `check_epoch` when sent: an answer from an older epoch
+    /// (the lists or the closing date changed since) is dropped.
+    pub epoch: u64,
 }
 
 /// The Bulk Entry window.
@@ -96,6 +99,9 @@ pub struct BulkEntryScreen {
     /// The engine's answers per row (outside undo).
     pub(crate) checks: EngineChecks,
     pub(crate) checking: Option<Checking>,
+    /// Goes up whenever the engine's answers stop holding (new lists, a
+    /// new closing date).
+    pub(crate) check_epoch: u64,
     /// Rows the cursor has left (their problems show).
     pub(crate) touched: BTreeSet<RowKey>,
     /// The cursor's row last frame.
@@ -112,6 +118,10 @@ pub struct BulkEntryScreen {
     /// Shown under the grid (i18n key).
     pub(crate) notice: Option<&'static str>,
     pub(crate) error: Option<cl_api::ApiError>,
+    /// A section the engine refused as a whole (its index and why).
+    pub(crate) section_refused: Option<(usize, cl_api::BatchGroupProblem)>,
+    /// The batch revision when it was refused (an edit clears it).
+    pub(crate) section_refused_rev: u64,
     /// The status bar's "rows need attention" line is up.
     pub(crate) attention_toast: bool,
     pub(crate) saved_count: u32,
@@ -202,6 +212,7 @@ impl BulkEntryScreen {
             spare: BTreeMap::new(),
             checks: EngineChecks::new(),
             checking: None,
+            check_epoch: 0,
             touched: BTreeSet::new(),
             cursor_row: None,
             seen_rev: 0,
@@ -211,6 +222,8 @@ impl BulkEntryScreen {
             confirm_remove: None,
             notice: None,
             error: None,
+            section_refused: None,
+            section_refused_rev: 0,
             attention_toast: false,
             saved_count: 0,
             last_action: None,
@@ -257,11 +270,9 @@ impl BulkEntryScreen {
         if self.local.is_some() {
             SaveCaps::ALL
         } else {
-            let mut c = wire::save_caps(BatchCaps::of(&self.link.capabilities()));
-            // The live grouped save needs `batch-mixed-v1` even for one
-            // section (lane A): without it, Save all is off.
-            c.atomic &= c.mixed;
-            c
+            // Without `batch-mixed-v1` Save all is off even for one section
+            // (`SaveCaps::can_post`).
+            wire::save_caps(BatchCaps::of(&self.link.capabilities()))
         }
     }
 
@@ -277,16 +288,33 @@ impl BulkEntryScreen {
     }
 
     pub(crate) fn poll(&mut self) {
-        if self.books.poll() {
-            self.grid.adapter_mut().lists = Arc::clone(&self.books.lists);
-            self.default_contexts();
-        }
+        let closing = self.books.closing;
+        let lists_changed = self.books.poll();
+        self.books_arrived(lists_changed, closing);
         self.poll_numbers();
         self.poll_checking();
         self.poll_save();
         self.poll_parse();
         self.maybe_suggest();
         self.poll_suggest();
+    }
+
+    /// The lists (`lists_changed`) or the closing date (it was
+    /// `closing_before`) were read again.
+    pub(crate) fn books_arrived(
+        &mut self,
+        lists_changed: bool,
+        closing_before: Option<CalendarDate>,
+    ) {
+        if lists_changed {
+            self.grid.adapter_mut().lists = Arc::clone(&self.books.lists);
+            self.default_contexts();
+        }
+        if lists_changed || self.books.closing != closing_before {
+            // A name, account or tag the engine resolved may be gone, and
+            // the closed-period rows may differ: ask again.
+            self.forget_engine_results();
+        }
     }
 
     /// Sections still without an account get the first one of their kind,
@@ -428,30 +456,38 @@ impl BulkEntryScreen {
     /// (Q-242). Part of the blank window: it adds no undo step and no
     /// dirty mark when nothing is typed.
     pub(crate) fn renumber_entry_rows(&mut self) {
-        let highest = self.grid.adapter().highest.clone();
+        let highest = &self.grid.adapter().highest;
+        // Nothing to do (the usual case): no copy of the batch at all.
+        let wanted = |s: &Section| {
+            matches!((s.kind, s.context), (SectionKind::Checks, Some(_)))
+                && s.rows
+                    .last()
+                    .is_some_and(|r| r.is_blank() && !r.print_later)
+        };
+        if !self.batch().sections.iter().any(wanted) {
+            return;
+        }
+        // One working copy, renumbered in place: each entry row's own number
+        // is left out while its next number is worked out, and the sections
+        // are taken in order, so a later section on the same bank counts the
+        // numbers given before it.
         let mut b = self.batch().clone();
         let mut changed = false;
         for i in 0..b.sections.len() {
-            let s = &b.sections[i];
-            let (SectionKind::Checks, Some(bank)) = (s.kind, s.context) else {
+            let (true, Some(bank)) = (wanted(&b.sections[i]), b.sections[i].context) else {
                 continue;
             };
-            let Some(last) = s.rows.last().filter(|r| r.is_blank() && !r.print_later) else {
-                continue;
-            };
-            let key = last.key;
-            let mut probe = b.clone();
-            if let Some(r) = probe.sections[i].rows.last_mut() {
-                r.number.clear();
-            }
-            let n = probe
+            let old = b.sections[i]
+                .rows
+                .last_mut()
+                .map(|r| std::mem::take(&mut r.number))
+                .unwrap_or_default();
+            let n = b
                 .next_check_number(bank, highest.get(&bank).copied())
                 .unwrap_or_default();
-            if let Some(r) = b.sections[i].rows.iter_mut().find(|r| r.key == key)
-                && r.number != n
-            {
+            changed |= n != old;
+            if let Some(r) = b.sections[i].rows.last_mut() {
                 r.number = n;
-                changed = true;
             }
         }
         if !changed {
@@ -523,6 +559,13 @@ impl BulkEntryScreen {
             "last_action": self.last_action,
             "notice": self.notice,
             "error": self.error.is_some(),
+            "section_refused": self.section_refused.map(|(n, why)| json!({
+                "section": n,
+                "why": match why {
+                    cl_api::BatchGroupProblem::NotAllowed => "not_allowed",
+                    cl_api::BatchGroupProblem::ContextAccount => "account",
+                },
+            })),
             "confirm_remove": self.confirm_remove.is_some(),
             "refused": self.refused.map(validate::blocker_name),
             "summary": if self.summary_open { self.summary.as_ref().map(summary::Summary::state_json) } else { None },

@@ -183,7 +183,8 @@ impl BulkEntryScreen {
         let Some(s) = self.batch().sections.get(i) else {
             return;
         };
-        if s.kind == kind || s.filled_count() > 0 || self.busy() {
+        // While an import is read, the rows it brings are for this type.
+        if s.kind == kind || s.filled_count() > 0 || self.busy() || self.parse_task.is_some() {
             return;
         }
         let context = if s.kind.needs_context() == kind.needs_context() {
@@ -355,7 +356,8 @@ impl BulkEntryScreen {
                 kit::wrap_item(ui, "batch_entry/type", |ui| {
                     ui.vertical(|ui| {
                         let l = kit::above(ui, tokens, &t("batch_entry.type"));
-                        let locked = s.filled_count() > 0;
+                        let importing = self.parse_task.is_some();
+                        let locked = s.filled_count() > 0 || importing;
                         let r = ui
                             .add_enabled_ui(!locked, |ui| {
                                 egui::ComboBox::from_id_salt(("batch_entry/type", i))
@@ -376,7 +378,9 @@ impl BulkEntryScreen {
                                     .labelled_by(l.id)
                             })
                             .inner;
-                        if locked {
+                        if importing {
+                            r.on_disabled_hover_text(t("batch_entry.type.importing"));
+                        } else if locked {
                             r.on_disabled_hover_text(t("batch_entry.type.locked"));
                         }
                     });

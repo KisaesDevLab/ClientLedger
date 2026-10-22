@@ -75,7 +75,15 @@ fn ok_all(batch: &BulkBatch, checks: &mut EngineChecks) {
     let verdicts: Vec<_> = out
         .sent
         .keys()
-        .map(|n| (*n, EngineVerdict::Ok { new_contact: false }))
+        .map(|n| {
+            (
+                *n,
+                EngineVerdict::Ok {
+                    new_contact: false,
+                    account: None,
+                },
+            )
+        })
         .collect();
     checks.apply(batch, &out, verdicts);
 }
@@ -119,6 +127,65 @@ fn engine_problem() -> EngineProblem {
 }
 
 #[test]
+fn touched_accounts_use_the_engines_match_for_typed_accounts() {
+    // A journal entry whose lines are typed by name, and an expense with
+    // a picked account.
+    let typed = |key, debit, credit| RowDraft {
+        account: None,
+        account_text: "Supplies".into(),
+        ..je_row(key, 5, RENT, debit, credit)
+    };
+    let mut b = BulkBatch::new(section(
+        SectionKind::Expenses,
+        Some(CARD),
+        vec![row(1, 2, RENT, m("5.00"))],
+    ));
+    b.sections.push(section(
+        SectionKind::JournalEntries,
+        None,
+        vec![
+            typed(2, Some(m("10.00")), None),
+            je_row(3, 5, BANK, None, Some(m("10.00"))),
+        ],
+    ));
+    let mut checks = EngineChecks::new();
+    let out = b.outgoing(None, None);
+    assert_eq!(
+        out.touched_accounts(|k| checks.resolved_account(&b, k)),
+        None,
+        "a typed account not matched yet: any account may have changed"
+    );
+    checks.begin(&out);
+    let verdicts: Vec<_> = out
+        .sent
+        .iter()
+        .map(|(n, s)| {
+            let account = (s.key == RowKey(2)).then(|| acct(SUPPLIES));
+            (
+                *n,
+                EngineVerdict::Ok {
+                    new_contact: false,
+                    account,
+                },
+            )
+        })
+        .collect();
+    checks.apply(&b, &out, verdicts);
+    assert_eq!(checks.resolved_account(&b, RowKey(2)), Some(acct(SUPPLIES)));
+    assert_eq!(
+        out.touched_accounts(|k| checks.resolved_account(&b, k)),
+        Some(
+            [acct(BANK), acct(CARD), acct(RENT), acct(SUPPLIES)]
+                .into_iter()
+                .collect()
+        )
+    );
+    // A change to the entry makes the match unknown again.
+    b.sections[1].rows[0].memo = "changed".into();
+    assert_eq!(checks.resolved_account(&b, RowKey(2)), None);
+}
+
+#[test]
 fn outgoing_numbers_rows_across_the_call_and_skips_blanks() {
     let b = mixed();
     let out = b.outgoing(None, Some(day(2)));
@@ -133,6 +200,13 @@ fn outgoing_numbers_rows_across_the_call_and_skips_blanks() {
     assert_eq!(out.key_of(3), Some(RowKey(4)));
     assert_eq!(out.sent[&3].group, 1);
     assert_eq!(out.sent[&3].section, 1);
+    assert_eq!(out.section_of_group(2), Some(2));
+    assert_eq!(out.section_of_group(9), None);
+    // A section with nothing sent has no group: groups shift past it.
+    let mut gap = mixed();
+    gap.sections[1].rows.clear();
+    let o = gap.outgoing(None, None);
+    assert_eq!(o.section_of_group(1), Some(2));
     assert!(out.groups[0].rows[0].locked);
     assert!(!out.groups[0].rows[1].locked);
     let je = &out.groups[2].rows[0];
@@ -142,10 +216,12 @@ fn outgoing_numbers_rows_across_the_call_and_skips_blanks() {
     );
     assert_eq!(out.groups[1].rows[0].amount, Some(m("50.00")));
     assert_eq!(
-        out.touched_accounts(),
-        [acct(BANK), acct(RENT), acct(SUPPLIES)]
-            .into_iter()
-            .collect()
+        out.touched_accounts(|_| None),
+        Some(
+            [acct(BANK), acct(RENT), acct(SUPPLIES)]
+                .into_iter()
+                .collect()
+        )
     );
     assert!(!out.is_empty());
     assert!(BulkBatch::default().outgoing(None, None).is_empty());
@@ -201,17 +277,6 @@ fn gate_walks_the_blockers_in_order() {
             None
         ),
         Err(Blocker::KindUnsupported(SectionKind::Checks))
-    );
-    assert_eq!(
-        b.can_save(
-            &checks,
-            SaveCaps {
-                mixed: false,
-                ..caps
-            },
-            None
-        ),
-        Err(Blocker::MixedUnsupported)
     );
     assert_eq!(b.can_save(&checks, caps, None), Err(Blocker::Unchecked(5)));
     ok_all(&b, &mut checks);
@@ -273,6 +338,46 @@ fn gate_walks_the_blockers_in_order() {
 }
 
 #[test]
+fn save_all_needs_every_capability_mixed_included() {
+    let b = mixed();
+    let checks = EngineChecks::new();
+    let caps = SaveCaps::ALL;
+    // The save always sends groups: without `batch-mixed-v1` it is off,
+    // even for one section (as `cl_api::Batch::save` refuses).
+    let no_mixed = SaveCaps {
+        mixed: false,
+        ..caps
+    };
+    assert!(!no_mixed.can_post());
+    assert_eq!(
+        b.can_save(&checks, no_mixed, None),
+        Err(Blocker::EngineTooOld)
+    );
+    let one = BulkBatch::new(b.sections[0].clone());
+    assert_eq!(
+        one.can_save(&checks, no_mixed, None),
+        Err(Blocker::EngineTooOld)
+    );
+    for missing in [
+        SaveCaps {
+            atomic: false,
+            ..caps
+        },
+        SaveCaps {
+            exact: false,
+            ..caps
+        },
+        SaveCaps {
+            idempotent: false,
+            ..caps
+        },
+    ] {
+        assert!(!missing.can_post());
+    }
+    assert!(caps.can_post());
+}
+
+#[test]
 fn engine_results_land_only_on_unchanged_rows() {
     let mut b = mixed();
     let mut checks = EngineChecks::new();
@@ -288,10 +393,28 @@ fn engine_results_land_only_on_unchanged_rows() {
         &b,
         &out,
         vec![
-            (1, EngineVerdict::Ok { new_contact: false }),
+            (
+                1,
+                EngineVerdict::Ok {
+                    new_contact: false,
+                    account: None,
+                },
+            ),
             (2, EngineVerdict::Problems(vec![engine_problem()])),
-            (3, EngineVerdict::Ok { new_contact: true }),
-            (99, EngineVerdict::Ok { new_contact: false }),
+            (
+                3,
+                EngineVerdict::Ok {
+                    new_contact: true,
+                    account: None,
+                },
+            ),
+            (
+                99,
+                EngineVerdict::Ok {
+                    new_contact: false,
+                    account: None,
+                },
+            ),
         ],
     );
     assert_eq!(landed, 2);
@@ -327,6 +450,7 @@ fn engine_results_land_only_on_unchanged_rows() {
                 *n,
                 EngineVerdict::Ok {
                     new_contact: *n == 2,
+                    account: None,
                 },
             )
         }),

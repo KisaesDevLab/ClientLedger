@@ -700,6 +700,24 @@ pub fn parse(text: &str, rules: AmountRules) -> Result<Parsed, AmountEntryError>
     })
 }
 
+/// Parse an amount read from a file or a paste: a plain amount only, never
+/// a calculation (`100/4` is refused, not 25.00). The plain-amount rules
+/// are those of [`parse`] (`$`, `,`, `(x)`, a minus sign, rounding to the
+/// field's unit).
+///
+/// # Errors
+/// See [`AmountEntryError`]; an expression gets the plain amount's refusal.
+pub fn parse_literal(text: &str, rules: AmountRules) -> Result<Parsed, AmountEntryError> {
+    let t = text.trim().replace('\u{2212}', "-");
+    if t.chars().count() > MAX_CHARS {
+        return Err(AmountEntryError::TooLong);
+    }
+    Ok(Parsed {
+        value: parse_plain(&t, rules)?,
+        calculated: false,
+    })
+}
+
 /// The live caption while typing: the result of a calculation, its error,
 /// or nothing for plain amounts and unfinished calculations.
 #[must_use]

@@ -419,6 +419,17 @@ impl BatchRowProblem {
     }
 }
 
+/// Why the engine refused a whole group ([`ApiError::BatchGroup`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BatchGroupProblem {
+    /// 403 with `details.groupIndex`: the user may not create this kind
+    /// of transaction (`checks`, `transactions` or `banking`).
+    NotAllowed,
+    /// 400 `BATCH_CONTEXT_ACCOUNT_REQUIRED` / `_INVALID`: the group's bank
+    /// account or credit card is missing or of the wrong kind.
+    ContextAccount,
+}
+
 // --------------------------------------------------------------- replies
 
 /// One row's result from `POST /batch/validate`.

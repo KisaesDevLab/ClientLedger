@@ -179,8 +179,8 @@ pub use resources::templates::{
 
 // P15A: Bulk Entry.
 pub use resources::batch::{
-    Batch, BatchAmount, BatchCaps, BatchField, BatchGroup, BatchKind, BatchRowIn, BatchRowProblem,
-    BatchSaved, BatchValidation, ColumnMapping, CsvField, ENGINE_MAX_GROUPS, ENGINE_MAX_ROWS,
-    FieldProblem, PARSE_CSV_MAX_BYTES, ParsedRow, ParsedRows, ProblemKind, RowCheck, SavedTxn,
-    is_key_reused,
+    Batch, BatchAmount, BatchCaps, BatchField, BatchGroup, BatchGroupProblem, BatchKind,
+    BatchRowIn, BatchRowProblem, BatchSaved, BatchValidation, ColumnMapping, CsvField,
+    ENGINE_MAX_GROUPS, ENGINE_MAX_ROWS, FieldProblem, PARSE_CSV_MAX_BYTES, ParsedRow, ParsedRows,
+    ProblemKind, RowCheck, SavedTxn, is_key_reused,
 };

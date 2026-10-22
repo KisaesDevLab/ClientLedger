@@ -6,8 +6,9 @@
 //! a file too); the app reads only the header and the preview locally.
 //! A headerless paste gets a synthetic `Column 1…n` header and maps left
 //! to right from the cursor column. The engine's text cells come back as
-//! rows through `rows_from_parsed`: amounts re-parsed with the money rules
-//! (rounded to the cent, Q-232), dates as typed dates.
+//! rows through `rows_from_parsed`: amounts re-parsed literally with the
+//! money rules (rounded to the cent, Q-232; never a calculation, unlike a
+//! typed cell), dates as typed dates.
 //!
 //! The rows are appended to the section, or replace rows from the cursor
 //! row when pasted onto rows; Ctrl+Z undoes the whole paste. A batch holds
@@ -330,6 +331,19 @@ impl BulkEntryScreen {
         let Some(panel) = self.mapping.take() else {
             return;
         };
+        // The rows were read for the section's type then: if the section
+        // is gone or has another type now, they would land in the wrong
+        // columns.
+        let same = self
+            .batch()
+            .sections
+            .get(panel.section)
+            .is_some_and(|s| s.kind == panel.kind);
+        if !same {
+            self.notice = Some("batch_entry.import.kind_changed");
+            self.last_action = Some("import_discarded");
+            return;
+        }
         let rows = match r {
             Ok(p) => p,
             Err(e) => {

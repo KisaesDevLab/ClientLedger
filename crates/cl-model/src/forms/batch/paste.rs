@@ -22,7 +22,7 @@ use std::fmt;
 use cl_core::CalendarDate;
 use serde::{Deserialize, Serialize};
 
-use super::{Field, RowDraft, RowKeyGen, SectionKind, parse_amount};
+use super::{Field, RowDraft, RowKeyGen, SectionKind, parse_amount_literal};
 use crate::date_entry::{self, DateOrder};
 
 /// Field → 0-based column index (the screen maps it onto
@@ -57,7 +57,7 @@ fn is_date(cell: &str) -> bool {
 }
 
 fn is_amount(cell: &str) -> bool {
-    matches!(parse_amount(cell), Ok(Some(_)))
+    matches!(parse_amount_literal(cell), Ok(Some(_)))
 }
 
 /// True when the first row of a paste is a header: it has text and no cell
@@ -305,7 +305,7 @@ fn read_amount(
     unreadable: &mut Vec<Field>,
 ) -> Option<cl_core::Money> {
     let t = cell?;
-    parse_amount(t).unwrap_or_else(|_| {
+    parse_amount_literal(t).unwrap_or_else(|_| {
         unreadable.push(field);
         None
     })
@@ -313,8 +313,9 @@ fn read_amount(
 
 /// Rows for a `kind` section from the engine's parsed text: names and
 /// accounts as typed text (resolved by the engine's Validate), amounts
-/// re-parsed with the money rules (`$`, `,`, `(x)`; rounded to the cent,
-/// Q-232; a negative stays negative and shows as a problem), dates as ISO
+/// re-parsed literally with the money rules (`$`, `,`, `(x)`; rounded to
+/// the cent, Q-232; a negative stays negative and shows as a problem;
+/// never a calculation, so `100/4` is unreadable), dates as ISO
 /// or the owner's typed date order. Journal entries take Debit and Credit;
 /// other kinds take Amount. Empty records are dropped. New keys come from
 /// `keys`.

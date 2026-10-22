@@ -53,10 +53,12 @@ impl SaveCaps {
         closing: true,
     };
 
-    /// Save all may post at all (Q-P15Ac): atomic, exact and idempotent.
+    /// Save all may post at all (Q-P15Ac): atomic, exact and idempotent,
+    /// and grouped (`batch-mixed-v1`): the save always sends `groups[]`,
+    /// even for one section, as `cl_api::Batch::save` requires.
     #[must_use]
     pub const fn can_post(self) -> bool {
-        self.atomic && self.exact && self.idempotent
+        self.atomic && self.exact && self.idempotent && self.mixed
     }
 
     /// The engine takes rows of `kind`.
@@ -169,24 +171,44 @@ impl Outgoing {
         self.sent.is_empty()
     }
 
+    /// The window's section a group of the call stood for.
+    #[must_use]
+    pub fn section_of_group(&self, group: u32) -> Option<usize> {
+        self.sent
+            .values()
+            .find(|s| s.group == group)
+            .map(|s| s.section)
+    }
+
     /// The row a row number stood for.
     #[must_use]
     pub fn key_of(&self, row_number: u32) -> Option<RowKey> {
         self.sent.get(&row_number).map(|s| s.key)
     }
 
-    /// Every account the call touches: the context accounts and the picked
-    /// line accounts (for the data-bus notice after a save).
+    /// Every account the call touches, for the data-bus notice after a
+    /// save: the context accounts, the picked line accounts, and for a row
+    /// whose account was typed (journal entry rows included) the account
+    /// the engine matched it to (`resolved`, by row). `None` when a typed
+    /// account's match is not known: then any account may have changed.
     #[must_use]
-    pub fn touched_accounts(&self) -> BTreeSet<AccountId> {
-        self.groups
-            .iter()
-            .flat_map(|g| {
-                g.context
-                    .into_iter()
-                    .chain(g.rows.iter().filter_map(|r| r.account))
-            })
-            .collect()
+    pub fn touched_accounts(
+        &self,
+        resolved: impl Fn(RowKey) -> Option<AccountId>,
+    ) -> Option<BTreeSet<AccountId>> {
+        let mut out = BTreeSet::new();
+        for g in &self.groups {
+            out.extend(g.context);
+            for r in &g.rows {
+                if let Some(a) = r.account {
+                    out.insert(a);
+                } else if r.account_name.is_some() {
+                    let key = self.key_of(r.row_number)?;
+                    out.insert(resolved(key)?);
+                }
+            }
+        }
+        Some(out)
     }
 }
 
@@ -280,6 +302,9 @@ pub enum EngineVerdict {
         /// The name is not in the lists; it is added on save only with
         /// "Add new names to the list" (otherwise the row is blocked).
         new_contact: bool,
+        /// The account the engine matched (`resolvedAccountId`; for a
+        /// typed account, the one it was matched to).
+        account: Option<AccountId>,
     },
     /// The row cannot be saved.
     Problems(Vec<EngineProblem>),
@@ -299,6 +324,8 @@ pub enum EngineState {
         hash: u64,
         /// The name would be added.
         new_contact: bool,
+        /// The account the engine matched.
+        account: Option<AccountId>,
     },
     /// The engine refused it.
     Problems(u64, Vec<EngineProblem>),
@@ -340,6 +367,15 @@ impl EngineChecks {
         }
     }
 
+    /// The account the engine matched for the row, while its "ok" holds.
+    #[must_use]
+    pub fn resolved_account(&self, batch: &BulkBatch, key: RowKey) -> Option<AccountId> {
+        match self.state(batch, key) {
+            EngineState::Ok { account, .. } => *account,
+            _ => None,
+        }
+    }
+
     /// Marks every row of `out` as being checked.
     pub fn begin(&mut self, out: &Outgoing) {
         for s in out.sent.values() {
@@ -367,9 +403,13 @@ impl EngineChecks {
                 continue;
             }
             let state = match verdict {
-                EngineVerdict::Ok { new_contact } => EngineState::Ok {
+                EngineVerdict::Ok {
+                    new_contact,
+                    account,
+                } => EngineState::Ok {
                     hash: sent.hash,
                     new_contact,
+                    account,
                 },
                 EngineVerdict::Problems(list) => EngineState::Problems(sent.hash, list),
             };
@@ -437,8 +477,9 @@ impl EngineChecks {
 /// Why Save all is off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Blocker {
-    /// The engine lacks `batch-atomic-v1`, `batch-exact-v1` or
-    /// `batch-idempotent-v1` (Q-P15Ac).
+    /// The engine lacks `batch-atomic-v1`, `batch-exact-v1`,
+    /// `batch-idempotent-v1` or `batch-mixed-v1` (Q-P15Ac,
+    /// [`SaveCaps::can_post`]).
     EngineTooOld,
     /// No rows ("Add some rows first").
     Empty,
@@ -447,8 +488,6 @@ pub enum Blocker {
     /// The engine does not take this kind (checks without
     /// `batch-check-v1`).
     KindUnsupported(SectionKind),
-    /// Several sections without `batch-mixed-v1`.
-    MixedUnsupported,
     /// A section with rows has no bank or card account (its index).
     MissingAccount(usize),
     /// Rows with problems the app found.
@@ -638,9 +677,6 @@ impl BulkBatch {
             .collect();
         if let Some((_, s)) = used.iter().find(|(_, s)| !caps.offers(s.kind)) {
             return Err(Blocker::KindUnsupported(s.kind));
-        }
-        if used.len() > 1 && !caps.mixed {
-            return Err(Blocker::MixedUnsupported);
         }
         if let Some((i, _)) = used
             .iter()

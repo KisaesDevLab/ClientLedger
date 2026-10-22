@@ -344,6 +344,21 @@ pub fn parse_amount(text: &str) -> Result<Option<Money>, AmountEntryError> {
     Ok(parsed.value.as_money())
 }
 
+/// Parse an amount from a pasted block or a CSV file: as [`parse_amount`]
+/// but literal, never a calculation (a cell holding `100/4` is not read as
+/// 25.00; the row then shows the amount as missing).
+///
+/// # Errors
+/// [`AmountEntryError`] when the text is not a plain amount.
+pub fn parse_amount_literal(text: &str) -> Result<Option<Money>, AmountEntryError> {
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    let parsed = amount_entry::parse_literal(text, AmountRules::MONEY)?;
+    // `AmountRules::MONEY` is a money field, so the value is money.
+    Ok(parsed.value.as_money())
+}
+
 // --------------------------------------------------------------- sections
 
 /// One section: rows of one kind on one context account.
