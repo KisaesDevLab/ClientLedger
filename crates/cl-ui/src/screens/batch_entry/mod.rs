@@ -456,30 +456,38 @@ impl BulkEntryScreen {
     /// (Q-242). Part of the blank window: it adds no undo step and no
     /// dirty mark when nothing is typed.
     pub(crate) fn renumber_entry_rows(&mut self) {
-        let highest = self.grid.adapter().highest.clone();
+        let highest = &self.grid.adapter().highest;
+        // Nothing to do (the usual case): no copy of the batch at all.
+        let wanted = |s: &Section| {
+            matches!((s.kind, s.context), (SectionKind::Checks, Some(_)))
+                && s.rows
+                    .last()
+                    .is_some_and(|r| r.is_blank() && !r.print_later)
+        };
+        if !self.batch().sections.iter().any(wanted) {
+            return;
+        }
+        // One working copy, renumbered in place: each entry row's own number
+        // is left out while its next number is worked out, and the sections
+        // are taken in order, so a later section on the same bank counts the
+        // numbers given before it.
         let mut b = self.batch().clone();
         let mut changed = false;
         for i in 0..b.sections.len() {
-            let s = &b.sections[i];
-            let (SectionKind::Checks, Some(bank)) = (s.kind, s.context) else {
+            let (true, Some(bank)) = (wanted(&b.sections[i]), b.sections[i].context) else {
                 continue;
             };
-            let Some(last) = s.rows.last().filter(|r| r.is_blank() && !r.print_later) else {
-                continue;
-            };
-            let key = last.key;
-            let mut probe = b.clone();
-            if let Some(r) = probe.sections[i].rows.last_mut() {
-                r.number.clear();
-            }
-            let n = probe
+            let old = b.sections[i]
+                .rows
+                .last_mut()
+                .map(|r| std::mem::take(&mut r.number))
+                .unwrap_or_default();
+            let n = b
                 .next_check_number(bank, highest.get(&bank).copied())
                 .unwrap_or_default();
-            if let Some(r) = b.sections[i].rows.iter_mut().find(|r| r.key == key)
-                && r.number != n
-            {
+            changed |= n != old;
+            if let Some(r) = b.sections[i].rows.last_mut() {
                 r.number = n;
-                changed = true;
             }
         }
         if !changed {
