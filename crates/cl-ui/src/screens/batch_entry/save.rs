@@ -389,7 +389,7 @@ impl BulkEntryScreen {
             )
         {
             // The summary's New batch (the batch is already fresh).
-            self.summary_open = false;
+            self.close_summary();
             return true;
         }
         match id.as_str() {
@@ -402,6 +402,7 @@ impl BulkEntryScreen {
                     self.notice = None;
                     self.section_refused = None;
                     self.mapping = None;
+                    self.summary = None;
                     self.last_action = Some("clear");
                 }
                 true

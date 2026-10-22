@@ -89,6 +89,13 @@ impl Summary {
 }
 
 impl BulkEntryScreen {
+    /// New batch on the summary: the card closes and its "Saved N rows"
+    /// line goes with it (the batch is already fresh).
+    pub(crate) fn close_summary(&mut self) {
+        self.summary_open = false;
+        self.summary = None;
+    }
+
     /// The summary card: what was saved, with register links and New batch.
     pub(crate) fn summary_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let Some(s) = self.summary.clone() else {
@@ -206,7 +213,7 @@ impl BulkEntryScreen {
             self.link.push(CompanyEvent::OpenRegister(a));
         }
         if fresh {
-            self.summary_open = false;
+            self.close_summary();
         }
     }
 }

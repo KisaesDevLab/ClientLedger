@@ -833,3 +833,21 @@ fn a_row_left_after_the_timer_ran_is_checked_without_another_edit() {
     s.mark_cursor_row_left();
     assert!(s.changed_at.is_none());
 }
+
+#[test]
+fn new_batch_on_the_summary_drops_the_saved_line() {
+    let (mut s, _link, _dir) = screen();
+    fill(&mut s, 0, &[(day(11, 2), "6100", "10.00")]);
+    assert!(s.save_all(SaveIntent::Save));
+    assert!(s.summary_open && s.summary.is_some());
+    s.command(CommandId::new("form.save_new"));
+    assert!(!s.summary_open);
+    assert!(
+        s.summary.is_none(),
+        "no \"Saved 1 row\" line over the new batch"
+    );
+    // Save all & New keeps the line (there was no summary card to read).
+    fill(&mut s, 0, &[(day(11, 2), "6100", "10.00")]);
+    assert!(s.save_all(SaveIntent::SaveAndNew));
+    assert!(!s.summary_open && s.summary.is_some());
+}
