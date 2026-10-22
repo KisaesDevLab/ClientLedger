@@ -270,6 +270,9 @@ pub enum LocalValidation {
     /// A Bulk Entry amount has digits below the cent (cl-model rounds
     /// before building a row, Q-232); nothing was sent.
     NotWholeCents,
+    /// A Bulk Entry CSV or paste is empty or larger than 10 MB; nothing
+    /// was sent.
+    BatchFileSize,
 }
 
 /// A save was refused because its date is on or before the closing date.
@@ -763,13 +766,56 @@ fn feature(body: Option<&EngineErrorBody>) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Maps a non-2xx answer (the §2.4 table).
+/// A Bulk Entry refusal naming its rows (`details.rowNumbers`, P15A
+/// `batch-atomic-v1`): any 4xx except the ones with their own meaning —
+/// closed periods and the closing-date password (423, 403, 429), a reused
+/// idempotency key, and a whole-request schema error.
+fn batch_rows(
+    status: u16,
+    body: &EngineErrorBody,
+) -> Option<Vec<crate::resources::batch::BatchRowProblem>> {
+    if !(400..500).contains(&status) || matches!(status, 401 | 423 | 429) {
+        return None;
+    }
+    if [
+        "VALIDATION_ERROR",
+        "IDEMPOTENCY_KEY_REUSED",
+        "IDEMPOTENCY_KEY_INVALID",
+        "IDEMPOTENCY_UNSUPPORTED",
+        "CLOSING_PASSWORD_INVALID",
+        "CLOSING_PASSWORD_REQUIRED",
+        "CLOSING_PASSWORD_OWNER_REQUIRED",
+        "DESKTOP_TOKEN_REQUIRED",
+        "WORKSPACE_TENANT",
+    ]
+    .iter()
+    .any(|c| body.is(c))
+    {
+        return None;
+    }
+    let details = body.pointer("/error/details")?;
+    crate::resources::batch::rows_from_details(
+        details,
+        &body.message,
+        body.code.as_ref().map(ErrorCode::as_str),
+    )
+}
+
+/// Maps a non-2xx answer: Bulk Entry rows first, then the §2.4 table.
 pub(crate) fn map_failure(
     status: u16,
     body: &[u8],
     retry_after: Option<Duration>,
     route: RouteKind,
 ) -> Mapped {
+    if let Some(rows) = EngineErrorBody::parse(body).and_then(|b| batch_rows(status, &b)) {
+        return Mapped::Final(ApiError::BatchRows(rows));
+    }
+    map_status(status, body, retry_after, route)
+}
+
+/// The §2.4 table.
+fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: RouteKind) -> Mapped {
     let parsed = EngineErrorBody::parse(body);
     let code = parsed.as_ref().and_then(|b| b.code.clone());
     let has = |c: &str| parsed.as_ref().is_some_and(|b| b.is(c));
