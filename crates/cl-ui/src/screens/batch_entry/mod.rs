@@ -257,7 +257,11 @@ impl BulkEntryScreen {
         if self.local.is_some() {
             SaveCaps::ALL
         } else {
-            wire::save_caps(BatchCaps::of(&self.link.capabilities()))
+            let mut c = wire::save_caps(BatchCaps::of(&self.link.capabilities()));
+            // The live grouped save needs `batch-mixed-v1` even for one
+            // section (lane A): without it, Save all is off.
+            c.atomic &= c.mixed;
+            c
         }
     }
 

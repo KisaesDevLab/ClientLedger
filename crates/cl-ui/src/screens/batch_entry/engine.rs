@@ -92,25 +92,15 @@ impl BatchEngine for DemoBatchEngine {
 }
 
 /// The live engine's Bulk Entry over the window's request group: the same
-/// four calls as [`BatchEngine`], each a queued task.
-///
-/// The `/batch/*` client calls (`validate`, `save`, `parse_csv`) arrive
-/// with lane A (`target/plans/P15A.md` WP-A1); until then they answer
-/// `BatchUnavailable` ("needs an engine update"), which the screen shows
-/// in plain words. The screen only calls them when the engine advertises
-/// the `batch-*-v1` capabilities, which the pinned engine does not yet.
-/// The account suggestion runs the engine's existing contact lookup in the
-/// suggestion task (`suggest.rs`), with the rules and the AI.
+/// calls as [`BatchEngine`] (lane A's `session.batch()`), each a queued
+/// task. The account suggestion runs in the suggestion task
+/// (`suggest.rs`), with the rules and the AI.
 pub(crate) mod live {
     use super::{
-        ApiError, BatchGroup, BatchKind, BatchSaved, BatchValidation, ColumnMapping,
-        IdempotencyKey, LocalValidation, OrphanLabel, ParsedRows, RequestGroup, Task,
+        BatchGroup, BatchKind, BatchSaved, BatchValidation, ColumnMapping, IdempotencyKey,
+        OrphanLabel, ParsedRows, RequestGroup, Task,
     };
     use crate::company::CompanyLink;
-
-    fn unavailable<T>() -> Result<T, ApiError> {
-        Err(ApiError::Local(LocalValidation::BatchUnavailable))
-    }
 
     /// `POST /batch/validate`.
     pub(crate) fn validate(
@@ -120,9 +110,8 @@ pub(crate) mod live {
     ) -> Option<Task<BatchValidation>> {
         let (session, group) = (link.session()?, group?);
         let p = group
-            .read(&session, move |_s| async move {
-                let _ = groups;
-                unavailable()
+            .read(&session, move |s| async move {
+                s.batch().validate(&groups).await
             })
             .ok()?;
         Some(Task::Pending(p))
@@ -142,9 +131,8 @@ pub(crate) mod live {
             key: Some(key.clone()),
         };
         let p = group
-            .write(&session, label, move |_s| async move {
-                let _ = (groups, key, add_new_names);
-                unavailable()
+            .write(&session, label, move |s| async move {
+                s.batch().save(&groups, key, add_new_names).await
             })
             .ok()?;
         Some(Task::Pending(p))
@@ -160,9 +148,8 @@ pub(crate) mod live {
     ) -> Option<Task<ParsedRows>> {
         let (session, group) = (link.session()?, group?);
         let p = group
-            .read(&session, move |_s| async move {
-                let _ = (kind, bytes, mapping);
-                unavailable()
+            .read(&session, move |s| async move {
+                s.batch().parse_csv(kind, &bytes, &mapping).await
             })
             .ok()?;
         Some(Task::Pending(p))

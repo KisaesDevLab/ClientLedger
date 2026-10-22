@@ -167,7 +167,7 @@ impl BulkEntryScreen {
         let under_cap = suggest::under_cap(&self.link, self.tenant.as_ref().map(|(t, _)| *t));
         let Ask { contact, rule, ai } = q;
         if let Ok(p) = group.read(&session, move |s| async move {
-            if let Ok(Some(found)) = s.contacts().suggest_account(contact).await {
+            if let Ok(Some(found)) = s.batch().suggest_account(contact).await {
                 return Ok(Some(Suggested {
                     account: found.account,
                     basis: Basis::Usual(found.source),
