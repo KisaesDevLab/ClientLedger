@@ -330,6 +330,19 @@ impl BulkEntryScreen {
         let Some(panel) = self.mapping.take() else {
             return;
         };
+        // The rows were read for the section's type then: if the section
+        // is gone or has another type now, they would land in the wrong
+        // columns.
+        let same = self
+            .batch()
+            .sections
+            .get(panel.section)
+            .is_some_and(|s| s.kind == panel.kind);
+        if !same {
+            self.notice = Some("batch_entry.import.kind_changed");
+            self.last_action = Some("import_discarded");
+            return;
+        }
         let rows = match r {
             Ok(p) => p,
             Err(e) => {

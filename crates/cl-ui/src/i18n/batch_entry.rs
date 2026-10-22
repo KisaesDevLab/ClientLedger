@@ -26,6 +26,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("batch_entry.section.not_allowed", "Nothing was saved: your user can't enter {kind} (section {n}). Ask the company's owner for access, or remove that section."),
     ("batch_entry.section.bad_account", "Nothing was saved: the bank account or credit card of {kind} (section {n}) can't be used for them. Choose another account for that section."),
     ("batch_entry.type", "Type"),
+    ("batch_entry.type.importing", "The type can't change while rows are being read for this section."),
+    ("batch_entry.import.kind_changed", "The section's type changed while the rows were being read, so they were not added. Paste or import them again."),
     ("batch_entry.type.locked", "The type can't change once the section has rows. Add a new section instead."),
     ("batch_entry.account.bank", "Bank account"),
     ("batch_entry.account.card", "Credit card"),

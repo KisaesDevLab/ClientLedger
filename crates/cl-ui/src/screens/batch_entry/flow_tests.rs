@@ -529,6 +529,51 @@ fn an_answer_from_before_the_lists_changed_is_dropped() {
     );
 }
 
+/// Opens the mapping panel on a paste and reads it as the engine would,
+/// returning the rows as a pending import (the live engine's case).
+fn import_in_flight(s: &mut BulkEntryScreen) {
+    s.open_mapping(
+        "Date\tAccount\tAmount\n11/02/2026\t6100\t12.00\n",
+        paste::Origin::Paste {
+            at: None,
+            column: 0,
+        },
+    );
+    let panel = s.mapping.as_ref().expect("panel");
+    let rows = crate::company::demo::batch::parse_csv(
+        wire::batch_kind(panel.kind),
+        &panel.bytes(),
+        &wire::column_mapping(&panel.mapping),
+    )
+    .expect("parsed");
+    s.parse_task = Some(Task::ready(rows));
+}
+
+#[test]
+fn the_type_is_locked_while_an_import_is_read() {
+    let (mut s, _link, _dir) = screen();
+    import_in_flight(&mut s);
+    s.set_kind(0, SectionKind::Deposits);
+    assert_eq!(s.batch().sections[0].kind, SectionKind::Checks);
+    s.poll_parse();
+    assert_eq!(s.batch().filled_count(), 1, "the rows came in");
+    assert_eq!(s.state_json()["last_action"], "pasted");
+}
+
+#[test]
+fn rows_read_for_another_type_are_dropped_with_a_notice() {
+    let (mut s, _link, _dir) = screen();
+    import_in_flight(&mut s);
+    // The type changes underneath (an undo, say).
+    s.grid
+        .edit_step(|b| b.sections[0] = Section::new(SectionKind::JournalEntries, None));
+    s.poll_parse();
+    assert_eq!(s.batch().filled_count(), 0, "nothing landed");
+    let v = s.state_json();
+    assert_eq!(v["notice"], "batch_entry.import.kind_changed");
+    assert_eq!(v["mapping"], serde_json::Value::Null);
+}
+
 #[test]
 fn a_pasted_block_maps_and_rounds_three_decimal_amounts() {
     let (mut s, _link, _dir) = screen();
