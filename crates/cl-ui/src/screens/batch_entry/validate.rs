@@ -274,6 +274,7 @@ impl BulkEntryScreen {
             // is asked about again with the next check or save.
             self.section_refused = None;
         }
+        self.recheck_refused();
         if let Some(at) = self.changed_at
             && at.elapsed() >= CHECK_AFTER
             && self.checking.is_none()
@@ -282,6 +283,25 @@ impl BulkEntryScreen {
             self.changed_at = None;
             self.start_check(CheckScope::Changed);
         }
+    }
+
+    /// Why the last Save all was refused, after the owner's edits (the
+    /// forms' shared rule, `forms::recheck`): it stays only while the batch
+    /// is still blocked for the same reason (with the count as it is now),
+    /// and goes as soon as that problem is fixed.
+    pub(crate) fn recheck_refused(&mut self) {
+        let Some(b) = self.refused else {
+            return;
+        };
+        let mut shown = vec![b];
+        let now = self
+            .batch()
+            .can_save(&self.checks, self.caps(), self.books.closing)
+            .err()
+            .into_iter()
+            .collect();
+        crate::forms::recheck(&mut shown, now);
+        self.refused = shown.pop();
     }
 
     /// The engine's answers no longer hold (the lists or the closing date

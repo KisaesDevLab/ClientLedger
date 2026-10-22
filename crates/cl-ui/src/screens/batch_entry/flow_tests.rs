@@ -176,6 +176,44 @@ fn a_row_not_in_the_lists_blocks_save_all_and_nothing_is_sent() {
 }
 
 #[test]
+fn a_refusal_goes_away_once_its_problem_is_fixed() {
+    let (mut s, _link, _dir) = screen();
+    fill(
+        &mut s,
+        0,
+        &[(day(11, 2), "6100", "10.00"), (day(11, 2), "9999", "20.00")],
+    );
+    assert!(!s.save_all(SaveIntent::Save));
+    assert_eq!(s.state_json()["refused"], "engine_problems");
+    // Nothing changed: the refusal stays.
+    s.after_grid();
+    assert_eq!(s.state_json()["refused"], "engine_problems");
+    let key = s.batch().sections[0].rows[1].key;
+    s.grid.edit_step(|b| {
+        let r = b.sections[0]
+            .rows
+            .iter_mut()
+            .find(|r| r.key == key)
+            .expect("row");
+        r.account_text.clear();
+        r.account = Some(account_id(5000));
+    });
+    s.refresh_looks();
+    s.after_grid();
+    assert_eq!(
+        s.state_json()["refused"],
+        serde_json::Value::Null,
+        "the fixed problem's refusal is gone at once"
+    );
+    // Checked and passing: Save all is on, nothing stale under the totals.
+    s.start_check(validate::CheckScope::Everything);
+    s.after_grid();
+    let v = s.state_json();
+    assert_eq!(v["can_save"], true, "{v:?}");
+    assert_eq!(v["refused"], serde_json::Value::Null);
+}
+
+#[test]
 fn local_problems_block_and_f8_walks_them_across_sections() {
     let (mut s, _link, _dir) = screen();
     fill(&mut s, 0, &[(day(11, 2), "6100", "10.00")]);

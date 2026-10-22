@@ -608,6 +608,7 @@ impl Screen for BulkEntryScreen {
         self.hear_changes();
         self.sync_shown_section();
         self.refresh_looks();
+        self.recheck_refused();
         self.draw(ui);
         self.after_grid();
         if let Some(cmd) = self.after_frame.take() {
