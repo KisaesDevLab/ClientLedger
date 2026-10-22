@@ -47,7 +47,7 @@ Every report ties to the trial balance; accrual vs. cash consistency; drill-down
 | --- | --- | --- | --- | --- |
 | M | L | P16 | rust-implementer (sonnet) | reviewer (opus), security-reviewer (opus), ui-verifier |
 
-**Decisions:** Q-20, Q-69, Q-91, Q-154–Q-157, Q-210, Q-211. **Engine:** users, roles and rights enforced server-side, password policy and lockout, recovery-key reset, closing date (Admin only), sensitive accounts, audit trail queries and export.
+**Decisions:** Q-20, Q-69, Q-91, Q-154–Q-157, Q-210, Q-211, Q-276. **Engine:** users, roles and rights enforced server-side, password policy and lockout, recovery-key reset, closing date (Admin only), sensitive accounts, audit trail queries and export.
 
 **Crates and files:** `crates/cl-ui/src/screens/{login.rs,users.rs,roles.rs,closing_date.rs,audit_trail.rs,recovery.rs}`, `crates/cl-model/src/permissions.rs`.
 
@@ -57,6 +57,7 @@ Every report ties to the trial balance; accrual vs. cash consistency; drill-down
 3. Closing date and password, Admin only (Q-155); exceptions report. — `feat(close): closing date`
 4. Sensitive accounts (Q-157) across registers, reports, drill-down; masked account numbers with logged reveals (Q-154). — `feat(auth): sensitive data`
 5. Audit trail viewer (filters, before/after, source); export CSV/PDF for Admins (Q-156); kept forever (Q-91). — `feat(audit): viewer and export`
+6. Company tag options (Q-276), in Company › Preferences (Admin only, audited): **Require a tag on every line** — every form, Bulk Entry, template "Use" and in-app import refuses to save a transaction with an untagged line, naming the lines in plain words; the header tag still fills empty lines (Q-178), so one header tag satisfies it. **Default tag for new transactions** — prefilled as the header tag on every new form and new Bulk Entry section (owner can change it per transaction); not applied to edits of saved transactions. App-side only (Q-276): postings that don't go through ClientLedger's forms (e.g. the MyBooks web) are not checked. Works with required tag groups (Q-180). Tests: each form refuses an untagged line with the option on and saves with it off; default tag prefilled on new forms only; Bulk Entry and templates honour both. — `feat(settings): company tag options`
 
 **Tests:** role enforcement both in UI and engine; lockout; recovery key works once and is invalidated; sensitive account hidden from Bookkeeper everywhere; closed-period edits in exceptions report.
 
@@ -64,6 +65,7 @@ Every report ties to the trial balance; accrual vs. cash consistency; drill-down
 - [ ] A/P role blocked from invoices and restricted reports (UI and engine).
 - [ ] Every closed-period edit appears in the exceptions report.
 - [ ] Sensitive payroll account hidden from Bookkeeper in P&L, register, drill-down.
+- [ ] With "Require a tag on every line" on, no form or Bulk Entry can save an untagged line; the default tag prefills new transactions.
 
 ---
 
