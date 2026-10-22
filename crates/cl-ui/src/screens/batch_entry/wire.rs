@@ -133,6 +133,7 @@ pub(crate) fn verdicts(v: &BatchValidation) -> Vec<(u32, EngineVerdict)> {
             let verdict = if r.ok && r.problems.is_empty() {
                 EngineVerdict::Ok {
                     new_contact: r.new_contact,
+                    account: r.account,
                 }
             } else {
                 EngineVerdict::Problems(r.problems.iter().map(problem).collect())

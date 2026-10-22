@@ -115,6 +115,34 @@ fn mixed_checks_and_deposits_save_in_one_call_and_tell_the_registers() {
 }
 
 #[test]
+fn a_journal_entry_typed_by_name_tells_the_matched_accounts_registers() {
+    let (mut s, link, _dir) = screen();
+    s.add_section(SectionKind::JournalEntries);
+    // Typed, not picked: the engine matches " 6100" by account number.
+    fill(
+        &mut s,
+        1,
+        &[
+            (day(11, 2), " 6100", "25.00"),
+            (day(11, 2), "1010", "-25.00"),
+        ],
+    );
+    assert!(s.batch().sections[1].rows[0].account.is_none());
+    let mut bus = link.bus().subscribe();
+    assert!(s.save_all(SaveIntent::Save), "{:?}", s.state_json());
+    let heard = link.bus().take(&mut bus);
+    assert!(
+        heard.ledger_touches(account_id(6100)),
+        "the matched account"
+    );
+    assert!(heard.ledger_touches(account_id(1010)));
+    assert!(
+        !heard.ledger_touches(account_id(5000)),
+        "only the accounts the batch used"
+    );
+}
+
+#[test]
 fn a_row_not_in_the_lists_blocks_save_all_and_nothing_is_sent() {
     let (mut s, link, _dir) = screen();
     fill(

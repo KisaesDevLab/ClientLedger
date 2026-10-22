@@ -181,8 +181,20 @@ impl BulkEntryScreen {
         saved: &cl_api::BatchSaved,
     ) {
         self.closing_prompt.saved();
-        let touched: Vec<AccountId> = out.touched_accounts().into_iter().collect();
-        crate::forms::publish_saved(&self.link, &self.bus, &touched);
+        let checks = &self.checks;
+        match out.touched_accounts(|k| checks.resolved_account(batch, k)) {
+            Some(set) => {
+                let touched: Vec<AccountId> = set.into_iter().collect();
+                crate::forms::publish_saved(&self.link, &self.bus, &touched);
+            }
+            // A typed account whose match is not known: any register may
+            // have changed.
+            None => {
+                self.link
+                    .bus()
+                    .publish_from(&self.bus, crate::data_bus::Change::Ledger(None));
+            }
+        }
         if saved.created_contacts > 0 {
             self.link
                 .bus()
