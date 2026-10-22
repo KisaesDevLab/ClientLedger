@@ -1,4 +1,4 @@
-# M7 — Post-beta (P40–P48)
+# M7 — Post-beta (P40–P49)
 
 The owner may reorder these after beta feedback (Q-39). Each phase gets a full detailed write-up, in the same format as M0–M6, as its first step: architect (opus) drafts it in `target/plans/`, and the orchestrator moves it into this file before implementation starts.
 
@@ -13,5 +13,6 @@ The owner may reorder these after beta feedback (Q-39). Each phase gets a full d
 | P46 — Workpapers and Tax Estimator | M | M | P17, P28 | PDF annotation workpapers on the PDFium viewer (annotations stored by the engine); Tax Estimator screens once the engine feature ships. | — |
 | P47 — Custom fields, form template designer, job costing | M | L | P19, P20, P28 | Custom fields on lists and lines; template designer for invoices, statements, sales receipts, credit memos; job profitability and unbilled-costs reports; group items. | Q-58 |
 | P48 — Statement of cash flows and calendar | M | M | P28 | Statement of Cash Flows (indirect method, account-to-section mapping with defaults); calendar month view of bills, invoices, and template entries (Q-256). | Q-64, Q-67 |
+| P49 — Work copies and bring back changes | H | L | P08, P33, P36 | "Make a work copy" from the main company records a starting point (engine change tracking: every transaction and list record gets a change log entry since that point). On the main company, "Bring back changes" opens a work copy and lists every new, edited, voided or deleted transaction and every new or changed list entry made in it since the starting point; anything also changed in the main company since then is a conflict shown side by side, and the owner picks which version to keep each time (Q-269); nothing is applied until the owner confirms. Changes post through the engine (audit trail, closing-date password flow for closed periods, exact money), matching names and accounts by id first and by name second; a summary and a verified backup before applying (non-negotiable 9). Acceptance: a work copy with 50 new and 5 edited transactions merges exactly once (rerunning finds nothing new); a conflicting edit is never applied without the owner's choice; trial balance equals the expected result. | Q-268, Q-269 |
 
 **Deferred options (not scheduled):** ACH vendor payments (Q-10), MICR blank-stock checks (Q-14), Positive Pay export (Q-167), direct upload to MyBooks Online (Q-25), Windows ARM64 (Q-26), opt-in MCP server (Q-16), how-to videos (Q-160), imports from QBO, Wave, or Xero (Q-124).
