@@ -216,10 +216,21 @@ impl BulkEntryScreen {
         {
             return;
         }
+        // The key stays on "busy" and on every unknown outcome, so the
+        // retry of the same rows replays a save that did go through.
         if !crate::screens::register::keeps_key(&e) {
             self.key = None;
         }
         match e {
+            e @ ApiError::Conflict {
+                reason: cl_api::ConflictReason::Busy,
+                ..
+            } => {
+                // Another save is running: "try again soon" (the owner's
+                // message), with the same key.
+                self.notice = Some("batch_entry.save.busy");
+                self.error = Some(e);
+            }
             ApiError::BatchRows(rows) => {
                 let batch = self.batch().clone();
                 self.checks.refuse(&batch, out, wire::refused(&rows));

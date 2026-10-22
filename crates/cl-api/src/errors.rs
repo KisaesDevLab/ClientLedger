@@ -713,7 +713,11 @@ fn conflict(body: &EngineErrorBody) -> ApiError {
         Some("STALE") => ConflictReason::Stale,
         Some("TAG_IN_USE") => ConflictReason::InUse,
         Some("EMAIL_EXISTS" | "ACCOUNT_NUMBER_EXISTS") => ConflictReason::AlreadyExists,
-        Some("TENANT_BUSY" | "IDEMPOTENCY_IN_PROGRESS") => ConflictReason::Busy,
+        // `BATCH_BUSY` (P15A): another batch save of the company is running,
+        // or a row lock was not free in time. Nothing was posted by this
+        // request; a retry with the same idempotency key replays a finished
+        // save.
+        Some("TENANT_BUSY" | "IDEMPOTENCY_IN_PROGRESS" | "BATCH_BUSY") => ConflictReason::Busy,
         Some("RECONCILED_TRANSACTION") => ConflictReason::Reconciled,
         Some("TXN_ALREADY_DELETED") => ConflictReason::AlreadyDeleted,
         Some("TXN_DELETE_UNSUPPORTED") => ConflictReason::DeleteUnsupported,
@@ -1284,6 +1288,7 @@ mod tests {
             ("EMAIL_EXISTS", ConflictReason::AlreadyExists),
             ("TENANT_BUSY", ConflictReason::Busy),
             ("IDEMPOTENCY_IN_PROGRESS", ConflictReason::Busy),
+            ("BATCH_BUSY", ConflictReason::Busy),
             ("SOMETHING", ConflictReason::Unspecified),
         ] {
             let body = format!(r#"{{"error":{{"message":"m","code":"{c}"}}}}"#);

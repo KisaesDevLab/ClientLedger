@@ -103,6 +103,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("batch_entry.clear.tip", "Start over with an empty batch."),
     ("batch_entry.save.rows_refused", "Nothing was saved. Fix the highlighted rows, then save all again."),
     ("batch_entry.save.unconfirmed", "We couldn't confirm the save. Try again: the books won't save the same rows twice."),
+    ("batch_entry.save.busy", "The books are busy with another save. Try again in a moment: the books won't save the same rows twice."),
     ("orphan.batch_save", "saving a bulk entry batch"),
     // Paste and import.
     ("batch_entry.paste.unavailable", "Pasting rows needs an engine update."),

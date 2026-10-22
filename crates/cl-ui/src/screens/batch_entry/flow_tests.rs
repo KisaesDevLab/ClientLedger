@@ -210,6 +210,117 @@ fn the_same_content_keeps_its_key_and_a_change_gets_a_new_one() {
     assert_ne!(s.key_for(8), a);
 }
 
+/// What the scripted engine does with the next save.
+#[derive(Clone, Copy, Debug)]
+enum SaveStep {
+    /// The save posts, but its reply is lost (an unknown outcome).
+    LoseReply,
+    /// 409 `BATCH_BUSY`: the first save still holds the company's lock.
+    Busy,
+    /// The demo engine answers (a replay for a key it has seen).
+    Answer,
+}
+
+/// The demo engine with a script for saves; every key a save used is kept.
+struct Scripted {
+    steps: std::collections::VecDeque<SaveStep>,
+    keys: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl BatchEngine for Scripted {
+    fn validate(
+        &mut self,
+        link: &CompanyLink,
+        groups: &[cl_api::BatchGroup],
+    ) -> Result<cl_api::BatchValidation, cl_api::ApiError> {
+        DemoBatchEngine.validate(link, groups)
+    }
+
+    fn save(
+        &mut self,
+        link: &CompanyLink,
+        groups: &[cl_api::BatchGroup],
+        key: &cl_api::IdempotencyKey,
+        add_new_names: bool,
+    ) -> Result<cl_api::BatchSaved, cl_api::ApiError> {
+        self.keys.lock().expect("keys").push(key.as_header());
+        match self.steps.pop_front().unwrap_or(SaveStep::Answer) {
+            SaveStep::LoseReply => {
+                DemoBatchEngine.save(link, groups, key, add_new_names)?;
+                Err(cl_api::ApiError::OutcomeUnknown {
+                    request_id: cl_core::ids::RequestId::parse(
+                        "00000000-0000-4000-8000-000000000001",
+                    )
+                    .expect("id"),
+                    idempotency_key: Some(key.clone()),
+                })
+            }
+            SaveStep::Busy => Err(cl_api::ApiError::Conflict {
+                reason: cl_api::ConflictReason::Busy,
+                current_version: None,
+                code: cl_api::ErrorCode::parse("BATCH_BUSY"),
+                message: cl_api::UserText::default(),
+            }),
+            SaveStep::Answer => DemoBatchEngine.save(link, groups, key, add_new_names),
+        }
+    }
+
+    fn suggest_account(
+        &mut self,
+        link: &CompanyLink,
+        contact: cl_core::ids::ContactId,
+    ) -> Result<Option<cl_api::SuggestedAccount>, cl_api::ApiError> {
+        DemoBatchEngine.suggest_account(link, contact)
+    }
+
+    fn parse_csv(
+        &mut self,
+        link: &CompanyLink,
+        kind: cl_api::BatchKind,
+        bytes: &[u8],
+        mapping: &cl_api::ColumnMapping,
+    ) -> Result<cl_api::ParsedRows, cl_api::ApiError> {
+        DemoBatchEngine.parse_csv(link, kind, bytes, mapping)
+    }
+}
+
+#[test]
+fn a_lost_reply_then_busy_retries_with_the_same_key_and_posts_once() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let keys = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let engine = Scripted {
+        steps: [SaveStep::LoseReply, SaveStep::Busy, SaveStep::Answer].into(),
+        keys: Arc::clone(&keys),
+    };
+    let mut s =
+        BulkEntryScreen::with_local(Arc::clone(&link), None, day(11, 4), Some(Box::new(engine)));
+    fill(&mut s, 0, &[(day(11, 2), "6100", "12.35")]);
+
+    // 1. The reply is lost: the books may have the batch.
+    assert!(!s.save_all(SaveIntent::Save));
+    assert_eq!(s.state_json()["notice"], "batch_entry.save.unconfirmed");
+    assert!(s.key.is_some(), "an unknown outcome keeps the key");
+    assert_eq!(saves(&link).1, 1, "it did post");
+
+    // 2. The retry meets BATCH_BUSY: "try again soon", same key kept.
+    assert!(!s.save_all(SaveIntent::Save));
+    let v = s.state_json();
+    assert_eq!(v["notice"], "batch_entry.save.busy");
+    assert_eq!(v["error"], true);
+    assert!(s.key.is_some(), "busy keeps the key");
+    let msg = cl_core::OwnerFacing::owner_message(s.error.as_ref().expect("error"));
+    assert_eq!(msg.suggestion_key, Some("fix.api.try_again_soon"));
+
+    // 3. The next retry replays the first save: nothing posts twice.
+    assert!(s.save_all(SaveIntent::Save), "{:?}", s.state_json());
+    assert_eq!(saves(&link).1, 1, "one batch in the books");
+    assert_eq!(s.saved_count, 1);
+    let keys = keys.lock().expect("keys");
+    assert_eq!(keys.len(), 3);
+    assert!(keys.iter().all(|k| *k == keys[0]), "every try used one key");
+}
+
 #[test]
 fn a_pasted_block_maps_and_rounds_three_decimal_amounts() {
     let (mut s, _link, _dir) = screen();

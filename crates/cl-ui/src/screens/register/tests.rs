@@ -1693,3 +1693,28 @@ fn row_keys_of_lines_no_longer_loaded_are_dropped_past_the_cap() {
     s.model.prune_keys_for_test(0);
     assert_eq!(s.model.row_key(0), Some(k));
 }
+
+#[test]
+fn busy_keeps_the_key_and_other_conflicts_drop_it() {
+    let conflict = |reason, code: &str| cl_api::ApiError::Conflict {
+        reason,
+        current_version: None,
+        code: cl_api::ErrorCode::parse(code),
+        message: cl_api::UserText::default(),
+    };
+    for code in ["BATCH_BUSY", "TENANT_BUSY", "IDEMPOTENCY_IN_PROGRESS"] {
+        assert!(
+            keeps_key(&conflict(cl_api::ConflictReason::Busy, code)),
+            "{code}"
+        );
+    }
+    assert!(!keeps_key(&conflict(
+        cl_api::ConflictReason::Stale,
+        "STALE"
+    )));
+    assert!(!keeps_key(&conflict(
+        cl_api::ConflictReason::Unspecified,
+        "IDEMPOTENCY_KEY_REUSED"
+    )));
+    assert!(keeps_key(&cl_api::ApiError::Timeout));
+}
