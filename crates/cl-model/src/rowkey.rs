@@ -6,8 +6,9 @@
 //! restore a line together with its key. Keys are never reused and are never
 //! engine line ids (the engine recreates those on every update).
 
-/// A stable row identity, assigned by the screen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+/// A stable row identity, assigned by the screen. The default, `RowKey(0)`,
+/// is never handed out by [`RowKeyGen`], so it reads as "unassigned".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct RowKey(pub u64);
 
 /// A monotonic key source: [`RowKeyGen::next`] never returns a key twice.
