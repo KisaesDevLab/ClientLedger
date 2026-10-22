@@ -110,6 +110,31 @@ impl BulkEntryScreen {
                 ));
             }
             ui.add_space(6.0);
+            // The amounts line up on the right in the figure font.
+            let mono = egui::TextStyle::Monospace.resolve(ui.style());
+            let amounts: Vec<String> = s
+                .totals
+                .iter()
+                .map(|(_, _, m)| m.format(style))
+                .chain(s.journal.map(|(_, m)| m.format(style)))
+                .collect();
+            let width = amounts
+                .iter()
+                .map(|a| {
+                    ui.painter()
+                        .layout_no_wrap(a.clone(), mono.clone(), tokens.text_secondary)
+                        .size()
+                        .x
+                })
+                .fold(0.0_f32, f32::max);
+            let figure = |ui: &mut Ui, text: String| {
+                let h = ui.spacing().interact_size.y;
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, h),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| ui.label(RichText::new(text).text_style(egui::TextStyle::Monospace)),
+                );
+            };
             egui::Grid::new("batch_entry/summary/totals")
                 .num_columns(3)
                 .spacing([16.0, 4.0])
@@ -123,9 +148,7 @@ impl BulkEntryScreen {
                             .to_string();
                         ui.label(RichText::new(t(kind_key(*k))).color(tokens.text_secondary));
                         ui.label(name);
-                        ui.label(
-                            RichText::new(m.format(style)).text_style(egui::TextStyle::Monospace),
-                        );
+                        figure(ui, m.format(style));
                         ui.end_row();
                     }
                     if let Some((_, m)) = s.journal {
@@ -134,9 +157,7 @@ impl BulkEntryScreen {
                                 .color(tokens.text_secondary),
                         );
                         ui.label(t("batch_entry.summary.debits"));
-                        ui.label(
-                            RichText::new(m.format(style)).text_style(egui::TextStyle::Monospace),
-                        );
+                        figure(ui, m.format(style));
                         ui.end_row();
                     }
                 });
