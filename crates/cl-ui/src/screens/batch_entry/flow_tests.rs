@@ -189,6 +189,14 @@ fn a_refusal_goes_away_once_its_problem_is_fixed() {
     s.after_grid();
     assert_eq!(s.state_json()["refused"], "engine_problems");
     let key = s.batch().sections[0].rows[1].key;
+    assert!(
+        s.grid
+            .adapter()
+            .looks
+            .get(&key)
+            .is_some_and(|l| l.note.is_some())
+    );
+    let captioned = s.grid.adapter().looks_gen;
     s.grid.edit_step(|b| {
         let r = b.sections[0]
             .rows
@@ -199,6 +207,16 @@ fn a_refusal_goes_away_once_its_problem_is_fixed() {
         r.account = Some(account_id(5000));
     });
     s.refresh_looks();
+    // The fixed row drops its caption, and the grid re-measures it (no
+    // empty caption band left under it).
+    assert!(
+        s.grid
+            .adapter()
+            .looks
+            .get(&key)
+            .is_none_or(|l| l.note.is_none())
+    );
+    assert_ne!(s.grid.adapter().looks_gen, captioned);
     s.after_grid();
     assert_eq!(
         s.state_json()["refused"],
