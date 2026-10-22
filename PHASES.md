@@ -2,7 +2,7 @@
 
 This is the index. Each phase's full detail — decisions, engine changes, crates and files, ordered commit-sized steps, tests, and acceptance criteria — lives in the milestone files under `phases/`. Read this index plus the milestone file for the phase marked **Next** in STATE.md.
 
-**Beta track:** P00–P39 in seven milestones. **Post-beta:** P40–P48. **Process reviews:** PR-P05, PR-P10, PR-1 to PR-10 (Fable; see docs/AGENTS.md).
+**Beta track:** P00–P39 in seven milestones. **Post-beta:** P40–P49. **Process reviews:** PR-P05, PR-P10, PR-1 to PR-10 (Fable; see docs/AGENTS.md).
 
 ## Milestones
 
@@ -15,7 +15,7 @@ This is the index. Each phase's full detail — decisions, engine changes, crate
 | M4 Reports and controls | [phases/M4-reports-controls.md](phases/M4-reports-controls.md) | P28–P30 | Reports, budgets, users and permissions, audit trail, payroll import |
 | M5 Data movement and multi-user | [phases/M5-data-multiuser.md](phases/M5-data-multiuser.md) | P31–P34 | QBD import with tie-out, transfer file, IIF, LAN multi-user, backups and integrity |
 | M6 Ship beta | [phases/M6-ship-beta.md](phases/M6-ship-beta.md) | P35–P39 | Installers, updates, hardening, help, beta (STOP) |
-| M7 Post-beta | [phases/M7-post-beta.md](phases/M7-post-beta.md) | P40–P48 | Estimates and sales orders, POs, assemblies, Plaid, Report Packs, accountant tools, workpapers, templates, cash flow |
+| M7 Post-beta | [phases/M7-post-beta.md](phases/M7-post-beta.md) | P40–P49 | Estimates and sales orders, POs, assemblies, Plaid, Report Packs, accountant tools, workpapers, templates, cash flow, work copies |
 
 ## All phases
 
@@ -55,7 +55,7 @@ Tier and agent routing: docs/AGENTS.md. Size: S ≈ under a day of agent work, M
 | P28 | Report engine UI | H | L | P12–P24 |
 | P29 | Users, permissions, closing date, audit trail | M | L | P16 |
 | P30 | Payroll import | M | M | P15 |
-| P31 | QuickBooks Desktop import with tie-out, and spreadsheet import | H | L | P11, P28 |
+| P31 | QuickBooks Desktop import with tie-out, spreadsheet import, other accounting systems | H | L | P11, P28 |
 | P32 | Transfer file for MyBooks Online, and IIF export | H | M | P08, P31 |
 | P33 | LAN multi-user | H | L | P29 |
 | P34 | Backup scheduling, recovery, and data integrity | H | M | P08, P33 |
@@ -64,7 +64,7 @@ Tier and agent routing: docs/AGENTS.md. Size: S ≈ under a day of agent work, M
 | P37 | Hardening | L | L | P35 |
 | P38 | Documentation | L | M | P35 |
 | P39 | Beta release (STOP) | L | S | P35–P38 |
-| P40–P48 | Post-beta | — | — | see M7 |
+| P40–P49 | Post-beta | — | — | see M7 |
 
 ## Critical path and parallel lanes
 
