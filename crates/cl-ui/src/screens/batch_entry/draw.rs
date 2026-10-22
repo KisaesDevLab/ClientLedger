@@ -23,6 +23,21 @@ use crate::theme::Tokens;
 /// The most problems listed under the grid (F8 finds the rest).
 const LISTED_PROBLEMS: usize = 6;
 
+/// Below this height (points, the window's content) the title row goes.
+const COMPACT_BELOW: f32 = 620.0;
+
+/// Below this height the sections and the grid scroll above the actions.
+const TIGHT_BELOW: f32 = 360.0;
+
+/// Which measured height (see `BulkEntryScreen::measured`).
+#[derive(Clone, Copy)]
+enum BelowKind {
+    /// Everything under the grid (the usual layout).
+    Below,
+    /// The totals, messages and actions (the tight layout).
+    Footer,
+}
+
 impl BulkEntryScreen {
     pub(crate) fn draw(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
@@ -35,8 +50,19 @@ impl BulkEntryScreen {
             ClosingClick::Cancel => self.closing_prompt.cancel(),
             ClosingClick::None => {}
         }
+        let room = ui.available_height();
+        if room < TIGHT_BELOW && !self.summary_open && !self.import_open && self.mapping.is_none() {
+            self.draw_tight(ui, &tokens);
+            return;
+        }
         self.toolbar(ui, &tokens);
-        kit::title_only(ui, &tokens, &t("cmd.banking.bulk_entry"));
+        // Short windows (the minimum window, large zoom): the tab names the
+        // window, so the title row goes and the grid gets its height.
+        if room >= COMPACT_BELOW {
+            kit::title_only(ui, &tokens, &t("cmd.banking.bulk_entry"));
+        } else {
+            ui.add_space(6.0);
+        }
         if self.summary_open {
             egui::ScrollArea::vertical()
                 .id_salt("batch_entry/summary")
@@ -47,18 +73,7 @@ impl BulkEntryScreen {
         if !self.caps().can_post() {
             form::hint(ui, &tokens, &t("batch_entry.unavailable"));
         }
-        if let Some(s) = &self.summary {
-            let n = s.rows;
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    RichText::new(t_count("batch_entry.summary.saved", n, &[]))
-                        .color(tokens.text_secondary),
-                );
-                if ui.link(t("batch_entry.summary.show")).clicked() {
-                    self.summary_open = true;
-                }
-            });
-        }
+        self.saved_line(ui, &tokens);
         let enabled = !self.busy() && !self.closing_prompt.dialog_open();
         self.strip_ui(ui, &tokens, enabled);
         ui.add_space(4.0);
@@ -79,7 +94,77 @@ impl BulkEntryScreen {
         }
         self.import_ui(ui, &tokens);
         ui.add_space(6.0);
-        // Room under the grid for what the footer shows this frame.
+        // Everything under the grid, as tall as it was last frame (first
+        // frame: an estimate), stays above the status bar.
+        let reserve = self.below_h.unwrap_or_else(|| self.estimate_below());
+        self.grid.set_height(cl_grid::GridHeight::Fill {
+            reserve_below: reserve,
+            min_rows: 3,
+        });
+        self.grid_ui(ui, enabled);
+        let top = ui.cursor().top();
+        self.problems_ui(ui, &tokens);
+        self.suggestions_ui(ui, &tokens, enabled);
+        self.footer_ui(ui, &tokens, enabled, false);
+        self.measured(BelowKind::Below, ui.cursor().top() - top);
+    }
+
+    /// At a very short height (200% zoom on the minimum window): the
+    /// toolbar, the sections, the grid and its problems scroll in the space
+    /// above the totals and the actions, which stay on screen (why Save all
+    /// is off is in its tooltip).
+    fn draw_tight(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let enabled = !self.busy() && !self.closing_prompt.dialog_open();
+        let footer = self.footer_h.unwrap_or(ACTION_HEIGHT + 40.0);
+        let body = (ui.available_height() - footer).max(48.0);
+        self.grid
+            .set_height(cl_grid::GridHeight::Rows { min: 3, max: 6 });
+        egui::ScrollArea::vertical()
+            .id_salt("batch_entry/body")
+            .auto_shrink([false, true])
+            .max_height(body)
+            .show(ui, |ui| {
+                self.toolbar(ui, tokens);
+                ui.add_space(6.0);
+                if !self.caps().can_post() {
+                    form::hint(ui, tokens, &t("batch_entry.unavailable"));
+                }
+                self.saved_line(ui, tokens);
+                self.strip_ui(ui, tokens, enabled);
+                ui.add_space(4.0);
+                self.section_header_ui(ui, tokens, enabled);
+                self.import_ui(ui, tokens);
+                ui.add_space(6.0);
+                self.grid_ui(ui, enabled);
+                self.problems_ui(ui, tokens);
+                self.suggestions_ui(ui, tokens, enabled);
+            });
+        let top = ui.cursor().top();
+        // Its own container: the scrolled content above is another part
+        // of the window, not drawn under the totals.
+        ui.scope_builder(
+            egui::UiBuilder::new().accessibility_role(egui::accesskit::Role::Group),
+            |ui| self.footer_ui(ui, tokens, enabled, true),
+        );
+        self.measured(BelowKind::Footer, ui.cursor().top() - top);
+    }
+
+    /// Remembers how tall the part under the grid was this frame; a change
+    /// draws again so the grid takes the right height at once.
+    fn measured(&mut self, kind: BelowKind, h: f32) {
+        let slot = match kind {
+            BelowKind::Below => &mut self.below_h,
+            BelowKind::Footer => &mut self.footer_h,
+        };
+        let h = h.max(0.0) + 4.0;
+        if slot.is_none_or(|old| (old - h).abs() > 0.5) {
+            *slot = Some(h);
+            self.relayout = true;
+        }
+    }
+
+    /// The first frame's guess at the height under the grid.
+    fn estimate_below(&self) -> f32 {
         let listed = self
             .problem_rows_in(self.selected())
             .len()
@@ -88,19 +173,11 @@ impl BulkEntryScreen {
         if !self.open_suggestions().is_empty() || self.suggest.offer.is_some() {
             reserve += 34.0;
         }
-        if self.error.is_some() || self.notice.is_some() {
-            reserve += 30.0;
-        }
-        if self.section_refused.is_some() {
-            reserve += 30.0;
-        }
-        if !self.batch().locked_rows(self.books.closing).is_empty() {
-            reserve += 26.0;
-        }
-        self.grid.set_height(cl_grid::GridHeight::Fill {
-            reserve_below: reserve,
-            min_rows: 4,
-        });
+        reserve
+    }
+
+    /// The grid and what its events start.
+    fn grid_ui(&mut self, ui: &mut Ui, enabled: bool) {
         let out = header::locked_scope(ui, enabled, false, |ui| {
             self.grid.ui(ui, &*std::sync::Arc::clone(&self.books.lists))
         });
@@ -110,25 +187,44 @@ impl BulkEntryScreen {
                 self.block_paste(at, text.as_str());
             }
         }
-        self.problems_ui(ui, &tokens);
-        self.suggestions_ui(ui, &tokens, enabled);
-        self.totals_ui(ui, &tokens);
+    }
+
+    /// The totals, the messages and the actions; `brief`: the totals line
+    /// only (the tight layout).
+    fn footer_ui(&mut self, ui: &mut Ui, tokens: &Tokens, enabled: bool, brief: bool) {
+        self.totals_ui(ui, tokens, brief);
         if let Some(text) = self.section_refused_text() {
-            form::inline_warning(ui, &tokens, &text);
+            form::inline_warning(ui, tokens, &text);
         }
         if let Some(e) = &self.error {
-            form::inline_error(ui, &tokens, e);
+            form::inline_error(ui, tokens, e);
         }
         if let Some(k) = self.notice {
-            form::hint(ui, &tokens, &t(k));
+            form::hint(ui, tokens, &t(k));
         }
         if self.busy() {
-            form::progress_line(ui, &tokens, &t("batch_entry.saving"));
+            form::progress_line(ui, tokens, &t("batch_entry.saving"));
         } else if self.checking.is_some() {
-            form::progress_line(ui, &tokens, &t("batch_entry.checking"));
+            form::progress_line(ui, tokens, &t("batch_entry.checking"));
         }
         ui.add_space(8.0);
         self.actions_ui(ui, enabled);
+    }
+
+    /// "Saved 5 rows. Show the summary" after Save all & New.
+    fn saved_line(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        if let Some(s) = &self.summary {
+            let n = s.rows;
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(t_count("batch_entry.summary.saved", n, &[]))
+                        .color(tokens.text_secondary),
+                );
+                if ui.link(t("batch_entry.summary.show")).clicked() {
+                    self.summary_open = true;
+                }
+            });
+        }
     }
 
     fn toolbar(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -245,7 +341,7 @@ impl BulkEntryScreen {
     /// "Checks: 3 rows · Total $1,234.50", and for journal entries
     /// "Debits · Credits · Difference" (warn when an entry is off), then
     /// why Save all is off.
-    fn totals_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+    fn totals_ui(&mut self, ui: &mut Ui, tokens: &Tokens, brief: bool) {
         let i = self.selected();
         let style = self.money_style;
         let Ok(tot) = self.batch().section_totals(i) else {
@@ -287,6 +383,9 @@ impl BulkEntryScreen {
         };
         ui.add_space(4.0);
         ui.add(egui::Label::new(RichText::new(text).size(13.0).color(color)).selectable(false));
+        if brief {
+            return;
+        }
         let closing = self.books.closing;
         if let Err(b) = self.batch().can_save(&self.checks, self.caps(), closing) {
             let text = blocker_text(b);

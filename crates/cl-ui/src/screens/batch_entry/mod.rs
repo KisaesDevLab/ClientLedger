@@ -152,6 +152,13 @@ pub struct BulkEntryScreen {
     pub(crate) closing_prompt: ClosingPrompt<cl_model::forms::SaveIntent>,
     pub(crate) summary: Option<summary::Summary>,
     pub(crate) summary_open: bool,
+    // ---------------------------------------------------------------- layout
+    /// How tall everything under the grid was last frame.
+    pub(crate) below_h: Option<f32>,
+    /// How tall the totals and actions were last frame (tight layout).
+    pub(crate) footer_h: Option<f32>,
+    /// A measured height changed: draw again at once.
+    pub(crate) relayout: bool,
 }
 
 /// Half a second after the last change, the changed rows go to the engine.
@@ -245,6 +252,9 @@ impl BulkEntryScreen {
             closing_prompt: ClosingPrompt::default(),
             summary: None,
             summary_open: false,
+            below_h: None,
+            footer_h: None,
+            relayout: false,
         };
         s.seen_rev = s.grid.form().revision();
         s.books.start(&s.link, s.group.as_ref());
@@ -624,6 +634,9 @@ impl Screen for BulkEntryScreen {
         if busy {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
+        }
+        if std::mem::take(&mut self.relayout) {
+            ui.ctx().request_repaint();
         }
     }
 

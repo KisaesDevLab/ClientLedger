@@ -818,7 +818,8 @@ fn a_row_left_after_the_timer_ran_is_checked_without_another_edit() {
     s.cursor_row = Some(k);
     s.mark_cursor_row_left();
     assert!(s.changed_at.is_some(), "leaving the row starts the timer");
-    s.changed_at = Some(Instant::now() - CHECK_AFTER);
+    s.changed_at = Instant::now().checked_sub(CHECK_AFTER);
+    assert!(s.changed_at.is_some());
     s.after_grid();
     s.refresh_looks();
     let look = s.grid.adapter().looks.get(&k).cloned().unwrap_or_default();
