@@ -2,7 +2,7 @@
 
 **Current phase:** P15A — Bulk Entry (Next)
 **Status:** P15 built on `phase/P15-journal-templates`; PR to open
-**Engine commit:** `886c6b5d30f9cc153dbfcefdfa6d372f335bc9a7` (`main`, pinned 2026-10-21 after engine PRs #160 and #161: je-names-v1, je-number-v1, je-adjusting-v1, je-reversing-v1, balance-exact-v1, recurring-guard-v1, templates-v1, recurring-run-due-v1, migrations 0224 and 0225; bump per Q-02)
+**Engine commit:** `c217bfd7e1f72b03a5e5ad3aaa21120da3d36246` (`main`, pinned 2026-10-21 after engine PR #163: batch-atomic-v1, batch-check-v1, batch-mixed-v1, batch-exact-v1, batch-idempotent-v1, batch-closing-v1, migration 0226; bump per Q-02)
 **Last updated:** 2026-10-21
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
