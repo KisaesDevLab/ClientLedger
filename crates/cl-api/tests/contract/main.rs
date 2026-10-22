@@ -524,9 +524,8 @@ fn main() -> std::process::ExitCode {
             "run_due::journal_template_keeps_names_and_adjusting",
             contract_run_due::journal_template_keeps_names_and_adjusting,
         ),
-        // P15A lane A: Bulk Entry (PENDING by the batch-*-v1 capabilities
-        // until the pin carries engine PR #163; one-section validate,
-        // suggestions and the parse-csv float refusal run live).
+        // P15A lane A: Bulk Entry (PENDING by the batch-*-v1 capabilities;
+        // all live from pin c217bfd, engine PR #163).
         (
             "batch::validate_one_section_live",
             contract_batch::validate_one_section_live,
@@ -557,6 +556,18 @@ fn main() -> std::process::ExitCode {
         (
             "batch::closed_period_row",
             contract_batch::closed_period_row,
+        ),
+        (
+            "batch::replay_other_user_refused",
+            contract_batch::replay_other_user_refused,
+        ),
+        (
+            "batch::permission_per_kind",
+            contract_batch::permission_per_kind,
+        ),
+        (
+            "batch::row_rules_refused",
+            contract_batch::row_rules_refused,
         ),
         (
             "lifecycle::ten_switches_under_two_seconds",

@@ -1,8 +1,8 @@
 //! Bulk Entry against the real engine (P15A lane A, WP-A2; engine PR #163,
 //! U-67–U-74). Each test is PENDING by the `batch-*-v1` capabilities it
-//! needs until the engine pin carries them; the parts the pinned engine
-//! already serves (one-section validate, account suggestions, the refusal
-//! of float amounts from `parse-csv`) run live.
+//! needs; from pin c217bfd every one of them runs live. Context accounts
+//! are real bank accounts (detail type `bank`): the engine refuses any
+//! other kind (`BATCH_CONTEXT_ACCOUNT_INVALID`).
 //!
 //! Money is built from exact strings and compared as exact engine values:
 //! a register moves by exactly the sum of the batch, never approximately.
@@ -17,7 +17,7 @@ use cl_core::ids::{AccountId, ContactId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
 use serde_json::json;
 
-use crate::common::{account, date, key, m};
+use crate::common::{account, account_fields, date, key, m};
 use crate::support::{Harness, unique};
 
 /// The capabilities a Bulk Entry save needs (P15A §2).
@@ -76,9 +76,20 @@ fn contact(h: &Harness, s: &Session, t: ContactType, prefix: &str) -> ContactId 
     .id
 }
 
+/// A bank account (asset, detail type `bank`): the only kind a check or
+/// deposit group may post from.
+fn bank_account(h: &Harness, s: &Session) -> AccountId {
+    let mut f = account_fields(AccountType::Asset, "Batch bank");
+    f.detail_type = Some("bank".into());
+    h.run(s.accounts().create(&f, key()))
+        .unwrap_or_else(|e| panic!("bank account: {e}"))
+        .record
+        .id
+}
+
 fn books(h: &Harness, s: &Session) -> Books {
     Books {
-        bank: account(h, s, AccountType::Asset, "Batch bank").id,
+        bank: bank_account(h, s),
         expense: account(h, s, AccountType::Expense, "Batch supplies").id,
         income: account(h, s, AccountType::Revenue, "Batch sales").id,
         vendor: contact(h, s, ContactType::Vendor, "Batch vendor"),
@@ -161,6 +172,36 @@ fn register_ids(h: &Harness, s: &Session, a: AccountId) -> Vec<(TransactionId, O
         .collect()
 }
 
+/// Walks the register in date order: every line's engine balance is the
+/// previous one plus its deposit less its payment, from the balance
+/// forward, and the last one is the account balance. Returns the ids.
+fn register_running(h: &Harness, s: &Session, a: AccountId) -> Vec<TransactionId> {
+    let q = RegisterQuery::new(date(1900, 1, 1), date(2199, 12, 31));
+    let page = h.run(s.register().page(a, &q, 1, 200)).expect("register");
+    assert!(page.exact, "the register is exact");
+    let exact = |v: Option<&cl_api::RegisterAmount>| {
+        v.map_or(Money::ZERO, |x| x.exact().expect("exact amount"))
+    };
+    let mut running = exact(Some(&page.balance_forward));
+    for l in &page.lines {
+        running = running
+            .checked_add(exact(l.deposit.as_ref()))
+            .and_then(|r| r.checked_sub(exact(l.payment.as_ref())))
+            .expect("running");
+        assert_eq!(
+            l.balance.exact().map(Money::to_wire),
+            Some(running.to_wire()),
+            "the engine's running balance, line by line"
+        );
+    }
+    assert_eq!(
+        running.to_wire(),
+        balance(h, s, a).to_wire(),
+        "last = account"
+    );
+    page.lines.iter().map(|l| l.txn_id).collect()
+}
+
 fn saved_ids(saved: &BatchSaved) -> Vec<TransactionId> {
     let mut ids: Vec<_> = saved.saved.iter().map(|t| t.id).collect();
     ids.sort();
@@ -235,9 +276,8 @@ pub fn fifty_rows_exact(h: &Harness) {
     let moved = balance(h, s, b.bank).checked_sub(before).expect("delta");
     let expected = sum(ins).checked_sub(sum(outs)).expect("expected");
     assert_eq!(moved.to_wire(), expected.to_wire(), "exact to the cent");
-    let lines = register_ids(h, s, b.bank);
-    assert_eq!(lines.len(), 50);
-    assert!(lines.iter().all(|(_, bal)| bal.is_some()));
+    assert_eq!(register_running(h, s, b.bank).len(), 50);
+    assert_eq!(saved_ids(&saved).len(), 50);
 }
 
 /// AC1: checks, deposits and expenses in one call; every row is in the
@@ -280,13 +320,10 @@ pub fn mixed_one_call_all_in_register(h: &Harness) {
         .map(|t| (t.row_number, t.group))
         .collect();
     assert_eq!(groups, [(1, 0), (2, 0), (3, 0), (4, 1), (5, 1), (6, 2)]);
-    let lines = register_ids(h, s, b.bank);
+    let lines = register_running(h, s, b.bank);
+    assert_eq!(lines.len(), 6, "one register line per row");
     for id in saved_ids(&saved) {
-        let (_, bal) = lines
-            .iter()
-            .find(|(t, _)| *t == id)
-            .unwrap_or_else(|| panic!("{id:?} is in the register"));
-        assert!(bal.is_some(), "engine balance");
+        assert!(lines.contains(&id), "{id:?} is in the register");
     }
     assert_eq!(balance(h, s, b.bank).to_wire(), m("117.55").to_wire());
 }
@@ -362,23 +399,23 @@ pub fn check_numbers_unique_and_counter(h: &Harness) {
     assert_eq!(balance(h, s, b.bank), before, "nothing posted");
 }
 
-/// AC2: row 37 names an inactive account; the save names it and posts
-/// nothing at all.
+/// AC2: row 37 names an account that is not in the lists; the save names
+/// it and posts nothing at all. (The engine does not refuse an inactive
+/// account on a batch row, as on the single forms, so this uses a name
+/// that matches none.)
 pub fn one_bad_row_saves_nothing(h: &Harness) {
     if !save_ready(h, &[CHECK_CAP]) {
         return;
     }
     let s = &h.s1;
     let b = books(h, s);
-    let gone = account(h, s, AccountType::Revenue, "Batch closed line").id;
-    h.run(s.accounts().deactivate(gone, key()))
-        .expect("deactivate");
     let checks: Vec<_> = (1..=20).map(|n| check_row(&b, n, "10.00", None)).collect();
     let deposits: Vec<_> = (21..=40)
         .map(|n| {
             let mut r = deposit_row(&b, n, "20.00");
             if n == 37 {
-                r.account = Some(gone);
+                r.account = None;
+                r.account_name = Some(unique("No such line"));
             }
             r
         })
@@ -398,7 +435,9 @@ pub fn one_bad_row_saves_nothing(h: &Harness) {
         panic!("{e:?}")
     };
     assert!(
-        rows.iter().any(|r| r.group == 1 && r.row_number == 37),
+        rows.iter().all(|r| r.group == 1 && r.row_number == 37)
+            && rows.iter().any(|r| r.problem.field == BatchField::Account
+                && r.problem.kind == ProblemKind::NotInLists),
         "{rows:?}"
     );
     assert_eq!(
@@ -460,10 +499,12 @@ pub fn closed_period_row(h: &Harness) {
         ))
         .expect("closing date");
     };
+    // The closing date first: once a password is set, changing the date
+    // needs it too.
+    lock(json!("2026-01-31"));
     let pw = Secret::new(unique("closing-batch"));
     h.run(s.set_closing_password(None, Some(&pw), IdempotencyKey::new()))
         .expect("password");
-    lock(json!("2026-01-31"));
     let batch = |password: Option<&Secret>| {
         let mut closed = deposit_row(&b, 1, "12.00");
         closed.date = date(2026, 1, 15);
@@ -509,9 +550,9 @@ pub fn closed_period_row(h: &Harness) {
         audit.iter().any(|r| r.action == AuditAction::Override),
         "the closed-period row is audited"
     );
-    lock(serde_json::Value::Null);
     h.run(s.set_closing_password(Some(&pw), None, IdempotencyKey::new()))
         .expect("clear password");
+    lock(serde_json::Value::Null);
 }
 
 /// A journal entry group whose debits and credits differ by a cent is
@@ -560,7 +601,10 @@ pub fn parse_csv_exact(h: &Harness) {
     let s = &h.s1;
     let file = "\u{feff}Date,No,Payee,Account,Memo,Amount\n\
                 10/01/2026,101,Feed Co,Supplies,\"line one\nline two\",\"(1,234.50)\"\n\
-                2026-10-02,102,Seed Co,Supplies,plain,12.345\n";
+                2026-10-02,102,Seed Co,Supplies,plain,12.345\n\
+                \n\
+                2026-10-03,103,Hay Co,Supplies,\"a, b\",12.50-\n\
+                2026-10-04,104,Oat Co,Supplies,\"say \"\"hi\"\"\",$.5\n";
     let mut mapping = ColumnMapping::default();
     for (i, f) in [
         CsvField::Date,
@@ -585,13 +629,21 @@ pub fn parse_csv_exact(h: &Harness) {
         return;
     }
     let rows = got.expect("parsed").rows;
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.len(), 4, "the blank record is skipped");
     assert_eq!(rows[0].date.as_deref(), Some("2026-10-01"));
     assert_eq!(rows[0].ref_no.as_deref(), Some("101"));
     assert_eq!(rows[0].memo.as_deref(), Some("line one\nline two"));
     assert_eq!(rows[0].amount.as_deref(), Some("-1234.50"));
     assert_eq!(rows[1].amount.as_deref(), Some("12.345"), "not rounded");
     assert_eq!(rows[1].contact_name.as_deref(), Some("Seed Co"));
+    assert_eq!(rows[2].memo.as_deref(), Some("a, b"));
+    assert_eq!(rows[2].amount.as_deref(), Some("-12.50"), "trailing minus");
+    assert_eq!(rows[3].memo.as_deref(), Some("say \"hi\""));
+    assert_eq!(
+        rows[3].amount.as_deref(),
+        Some("0.5"),
+        "$ and leading point"
+    );
 }
 
 /// Account suggestions come from the engine alone (no AI, offline): the
@@ -620,4 +672,192 @@ pub fn suggest_account_offline(h: &Harness) {
     assert_eq!((got.account, got.source), (fuel, SuggestSource::Default));
     let bare = contact(h, s, ContactType::Vendor, "Batch bare vendor");
     assert_eq!(h.run(s.batch().suggest_account(bare)).expect("none"), None);
+}
+
+/// The run's bookkeeper of Contract Co with these permission overrides.
+fn bookkeeper(h: &Harness, overrides: &serde_json::Value) -> Session {
+    let s = &h.s1;
+    let (user, bk) = h.bookkeeper();
+    let r = h
+        .run(s.raw(
+            Method::Put,
+            &format!("/api/v1/company/users/{user}/permissions"),
+            &[],
+            Some(&json!({ "overrides": overrides })),
+        ))
+        .expect("permissions");
+    assert_eq!(r.status, 200, "{}", r.body);
+    bk
+}
+
+/// Idempotency is per user: another user sending the same key, even with
+/// the same body, is refused (409) and nothing posts again.
+pub fn replay_other_user_refused(h: &Harness) {
+    if !save_ready(h, &[]) {
+        return;
+    }
+    let s = &h.s1;
+    let b = books(h, s);
+    let batch = [group(
+        BatchKind::Deposit,
+        Some(b.bank),
+        vec![deposit_row(&b, 1, "8.08")],
+    )];
+    let k = IdempotencyKey::new();
+    h.run(s.batch().save(&batch, k.clone(), false))
+        .expect("first");
+    let bk = bookkeeper(
+        h,
+        &json!({"batch_entry": "full", "banking": "full", "transactions": "full", "contacts": "full", "accounts": "full"}),
+    );
+    let e = h
+        .run(bk.batch().save(&batch, k, false))
+        .expect_err("another user");
+    assert!(is_key_reused(&e), "{e:?}");
+    assert_eq!(balance(h, s, b.bank).to_wire(), m("8.08").to_wire());
+    assert_eq!(register_ids(h, s, b.bank).len(), 1, "posted once");
+}
+
+/// Each group needs create on its row type's resource: a bookkeeper who
+/// may enter expenses but only view checks and banking is refused check
+/// and deposit groups (403, naming the group and the resource), and adding
+/// new names without create on contacts. Nothing posts.
+pub fn permission_per_kind(h: &Harness) {
+    if !save_ready(h, &[CHECK_CAP]) {
+        return;
+    }
+    let s = &h.s1;
+    let b = books(h, s);
+    let bk = bookkeeper(
+        h,
+        &json!({
+            "batch_entry": "full", "transactions": "full", "checks": "view",
+            "banking": "view", "contacts": "view", "accounts": "full",
+        }),
+    );
+    let mut expense = check_row(&b, 1, "3.00", None);
+    expense.contact = None;
+    let expenses = || group(BatchKind::Expense, Some(b.bank), vec![expense.clone()]);
+    let v = h
+        .run(bk.batch().validate(&[expenses()]))
+        .expect("expenses are allowed");
+    assert!(v.rows.iter().all(|r| r.ok), "{v:?}");
+    let raw = |groups: serde_json::Value| {
+        h.run(bk.raw(
+            Method::Post,
+            "/api/v1/batch/validate",
+            &[],
+            Some(&json!({ "groups": groups })),
+        ))
+        .expect("raw")
+    };
+    let bank = b.bank.to_string();
+    let row = |n: u32, a: AccountId| json!({"rowNumber": n, "date": "2026-06-15", "accountId": a.to_string(), "amount": "1.00"});
+    for (kind, resource) in [("check", "checks"), ("deposit", "banking")] {
+        let r = raw(json!([
+            {"txn_type": "expense", "context_account_id": bank, "rows": [row(1, b.expense)]},
+            {"txn_type": kind, "context_account_id": bank, "rows": [row(2, b.income)]},
+        ]));
+        assert_eq!(r.status, 403, "{kind}: {}", r.body);
+        assert_eq!(r.body["error"]["code"], "PERMISSION_DENIED");
+        assert_eq!(r.body["error"]["details"]["groupIndex"], 1, "{kind}");
+        assert_eq!(r.body["error"]["details"]["resource"], resource, "{kind}");
+    }
+    let checks = [
+        expenses(),
+        group(
+            BatchKind::Check,
+            Some(b.bank),
+            vec![check_row(&b, 2, "1.00", None)],
+        ),
+    ];
+    let e = h
+        .run(bk.batch().save(&checks, key(), false))
+        .expect_err("no checks");
+    assert!(
+        matches!(&e, ApiError::Forbidden { code: Some(c) } if c.as_str() == "PERMISSION_DENIED"),
+        "{e:?}"
+    );
+    let e = h
+        .run(bk.batch().save(&[expenses()], key(), true))
+        .expect_err("no new names");
+    assert!(matches!(e, ApiError::Forbidden { .. }), "{e:?}");
+    assert_eq!(balance(h, s, b.bank), Money::ZERO, "nothing posted");
+}
+
+/// Row rules the engine enforces: a negative journal debit is a row error
+/// on that cell, a JSON number amount refuses the request, a non-journal
+/// row may not post to A/R, and a group's context account must be a bank
+/// (or card) account.
+pub fn row_rules_refused(h: &Harness) {
+    if !save_ready(h, &[]) {
+        return;
+    }
+    let s = &h.s1;
+    let b = books(h, s);
+    let raw = |groups: serde_json::Value| {
+        h.run(s.raw(
+            Method::Post,
+            "/api/v1/batch/validate",
+            &[],
+            Some(&json!({ "groups": groups })),
+        ))
+        .expect("raw")
+    };
+    let je = |n: u32, a: AccountId, side: &str, amt: serde_json::Value| json!({"rowNumber": n, "date": "2026-06-15", "entry": "N1", "accountId": a.to_string(), side: amt});
+    let r = raw(json!([{"txn_type": "journal_entry", "rows": [
+        je(1, b.expense, "debit", json!("-5.00")),
+        je(2, b.bank, "credit", json!("-5.00")),
+    ]}]));
+    assert_eq!(r.status, 200, "{}", r.body);
+    let row1 = &r.body["rows"][0];
+    assert_eq!(row1["status"], "invalid", "{r1}", r1 = r.body);
+    assert!(
+        row1["errors"]
+            .as_array()
+            .expect("errors")
+            .iter()
+            .any(|e| e["field"] == "debit" && e["code"] == "VALIDATION_ERROR"),
+        "{}",
+        r.body
+    );
+    let r = raw(json!([{"txn_type": "journal_entry", "rows": [
+        je(1, b.expense, "debit", json!(5)),
+        je(2, b.bank, "credit", json!("5.00")),
+    ]}]));
+    assert_eq!(r.status, 400, "a JSON number: {}", r.body);
+    assert_eq!(r.body["error"]["code"], "VALIDATION_ERROR");
+
+    let accounts = h
+        .run(s.accounts().list_all(&cl_api::AccountFilter::default()))
+        .expect("accounts");
+    let ar = accounts
+        .iter()
+        .find(|a| a.system_tag.as_deref() == Some("accounts_receivable"))
+        .map(|a| a.id)
+        .expect("an A/R account");
+    let mut to_ar = deposit_row(&b, 1, "4.00");
+    to_ar.account = Some(ar);
+    let v = h
+        .run(
+            s.batch()
+                .validate(&[group(BatchKind::Deposit, Some(b.bank), vec![to_ar])]),
+        )
+        .expect("validate");
+    let r1 = &v.rows[0];
+    assert!(
+        !r1.ok && r1.problems.iter().any(|p| p.field == BatchField::Account),
+        "{r1:?}"
+    );
+
+    let r = raw(json!([
+        {"txn_type": "deposit", "context_account_id": b.bank.to_string(), "rows": [
+            {"rowNumber": 1, "date": "2026-06-15", "accountId": b.income.to_string(), "amount": "1.00"}]},
+        {"txn_type": "check", "context_account_id": b.expense.to_string(), "rows": [
+            {"rowNumber": 2, "date": "2026-06-15", "accountId": b.income.to_string(), "amount": "1.00"}]},
+    ]));
+    assert_eq!(r.status, 400, "{}", r.body);
+    assert_eq!(r.body["error"]["code"], "BATCH_CONTEXT_ACCOUNT_INVALID");
+    assert_eq!(r.body["error"]["details"]["groupIndex"], 1);
+    assert_eq!(balance(h, s, b.bank), Money::ZERO, "nothing posted");
 }
