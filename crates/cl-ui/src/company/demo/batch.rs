@@ -117,6 +117,42 @@ fn text(s: Option<&String>) -> Option<&str> {
 
 // ------------------------------------------------------ the whole request
 
+/// A bank account as the engine takes it for a section: an asset with
+/// detail type `bank`, `checking`, `savings`, `cash` or `petty_cash`.
+fn is_bank(a: &Account) -> bool {
+    a.fields.account_type == AccountType::Asset
+        && matches!(
+            a.fields.detail_type.as_deref(),
+            Some("bank" | "checking" | "savings" | "cash" | "petty_cash")
+        )
+}
+
+/// A credit card account: a liability with detail type `credit_card`.
+fn is_card(a: &Account) -> bool {
+    a.fields.account_type == AccountType::Liability
+        && a.fields.detail_type.as_deref() == Some("credit_card")
+}
+
+/// The section account a group of `kind` may use: checks and deposits a
+/// bank account, card charges and credits a card, expenses either.
+fn context_fits(kind: BatchKind, a: &Account) -> bool {
+    match kind {
+        BatchKind::Check | BatchKind::Deposit => is_bank(a),
+        BatchKind::CardCharge | BatchKind::CardCredit => is_card(a),
+        BatchKind::Expense => is_bank(a) || is_card(a),
+        BatchKind::JournalEntry => false,
+    }
+}
+
+/// A refused group's section account (400
+/// `BATCH_CONTEXT_ACCOUNT_REQUIRED` / `_INVALID` with `groupIndex`).
+fn bad_context(group: usize) -> ApiError {
+    ApiError::BatchGroup {
+        group: u32::try_from(group).unwrap_or(u32::MAX),
+        problem: cl_api::BatchGroupProblem::ContextAccount,
+    }
+}
+
 /// The schema and context-account checks: any failure refuses the whole
 /// request (400 `VALIDATION_ERROR`, `BATCH_CONTEXT_ACCOUNT_*`).
 fn check_request(lists: &Lists, groups: &[BatchGroup]) -> Result<(), ApiError> {
@@ -135,25 +171,24 @@ fn check_request(lists: &Lists, groups: &[BatchGroup]) -> Result<(), ApiError> {
     if !unique {
         return Err(invalid());
     }
-    for g in groups {
-        match (g.kind, g.context) {
-            (BatchKind::JournalEntry, None) => {}
-            (BatchKind::JournalEntry, Some(_)) | (_, None) => return Err(invalid()),
-            (kind, Some(id)) => {
-                let a = lists.account(id).ok_or_else(invalid)?;
-                let t = a.fields.account_type;
-                let allowed = match kind {
-                    BatchKind::Check | BatchKind::Deposit => t == AccountType::Asset,
-                    BatchKind::Expense => {
-                        matches!(t, AccountType::Asset | AccountType::Liability)
-                    }
-                    BatchKind::CardCharge | BatchKind::CardCredit => t == AccountType::Liability,
-                    BatchKind::JournalEntry => false,
-                };
-                if !allowed || !a.is_active {
-                    return Err(invalid());
-                }
-            }
+    // The schema first (a journal entry group never has an account), then
+    // each group's account, the first refused group named.
+    if groups
+        .iter()
+        .any(|g| g.kind == BatchKind::JournalEntry && g.context.is_some())
+    {
+        return Err(invalid());
+    }
+    for (gi, g) in groups.iter().enumerate() {
+        if g.kind == BatchKind::JournalEntry {
+            continue;
+        }
+        let fits = g
+            .context
+            .and_then(|id| lists.account(id))
+            .is_some_and(|a| a.is_active && context_fits(g.kind, a));
+        if !fits {
+            return Err(bad_context(gi));
         }
     }
     Ok(())
@@ -329,6 +364,21 @@ fn row_fields(lists: &Lists, kind: BatchKind, row: &BatchRowIn, c: &mut Checked)
         }
     }
     if kind == BatchKind::JournalEntry {
+        // Never negative (`VALIDATION_ERROR` on the field). `BatchAmount`
+        // already refuses one on this side; the engine's rule stands here
+        // for any other caller.
+        for (field, side) in [
+            (BatchField::Debit, row.debit),
+            (BatchField::Credit, row.credit),
+        ] {
+            if side.is_some_and(|a| !a.money().is_positive()) {
+                push(
+                    field,
+                    ProblemKind::Invalid,
+                    "Debits and credits can't be negative",
+                );
+            }
+        }
         if row.amount.is_some() {
             push(
                 BatchField::Amount,
@@ -523,6 +573,17 @@ fn check_rows(state: &DemoState, lists: &Lists, groups: &[BatchGroup]) -> Vec<Ch
             };
             resolve_contact(lists, g.kind, r, &mut c);
             resolve_account(lists, g.context, r, &mut c);
+            // `BATCH_ACCOUNT_AR_AP`: only a journal entry line may use
+            // Accounts Receivable or Accounts Payable.
+            if g.kind != BatchKind::JournalEntry
+                && c.account.is_some_and(|a| lists.ar_ap.contains(&a))
+            {
+                c.problems.push(problem(
+                    BatchField::Account,
+                    ProblemKind::Invalid,
+                    "Accounts Receivable and Accounts Payable can't be used here. Use an invoice, a bill or a journal entry.",
+                ));
+            }
             row_fields(lists, g.kind, r, &mut c);
             out.push(c);
         }
@@ -543,8 +604,9 @@ fn check_rows(state: &DemoState, lists: &Lists, groups: &[BatchGroup]) -> Vec<Ch
 ///
 /// # Errors
 /// `Local(InvalidValue)` for what the engine refuses as a whole (no or
-/// too many groups or rows, a row number used twice, a missing or wrong
-/// context account).
+/// too many groups or rows, a row number used twice, an account on a
+/// journal entry group); `BatchGroup` (`ContextAccount`) for a group whose
+/// bank account or card is missing, inactive or of the wrong kind.
 pub fn validate(state: &DemoState, groups: &[BatchGroup]) -> Result<BatchValidation, ApiError> {
     let lists = Lists::of(state);
     check_request(&lists, groups)?;
@@ -913,7 +975,7 @@ fn post_all(
 ///
 /// # Errors
 /// `Conflict` (key reused), `Local(InvalidValue)` (the request as a
-/// whole), `BatchRows`, `ClosedPeriod`, `ClosingPasswordRejected`. Nothing
+/// whole), `BatchGroup` (a group's account), `BatchRows`, `ClosedPeriod`, `ClosingPasswordRejected`. Nothing
 /// posts for any of them.
 pub fn save(
     state: &mut DemoState,

@@ -685,6 +685,60 @@ fn tags_must_be_live() {
 }
 
 #[test]
+fn only_journal_entry_rows_may_use_receivable_or_payable() {
+    let mut s = DemoState::new();
+    let count = txn_count(&s);
+    let groups = vec![
+        group(
+            BatchKind::Check,
+            Some(bank()),
+            vec![row(1, "1200", "5.00"), row(2, "Fuel", "5.00")],
+        ),
+        group(
+            BatchKind::CardCharge,
+            Some(card()),
+            vec![row(3, "Accounts Payable", "5.00")],
+        ),
+    ];
+    let v = validate(&s, &groups).expect("v");
+    assert_eq!(
+        (v.rows[0].problems[0].field, v.rows[0].problems[0].kind),
+        (BatchField::Account, ProblemKind::Invalid)
+    );
+    assert!(v.rows[1].ok);
+    assert!(!v.rows[2].ok);
+    let e = save(&mut s, &groups, &IdempotencyKey::new(), false).expect_err("refused");
+    let rows = rows_of(&e);
+    assert!(rows.contains(&(0, 1, BatchField::Account, ProblemKind::Invalid)));
+    assert!(rows.contains(&(1, 3, BatchField::Account, ProblemKind::Invalid)));
+    assert_eq!(txn_count(&s), count, "nothing posted");
+    // A journal entry line may (with a name).
+    let mut ar = je_row(4, "J9", "1200", Some("5.00"), None);
+    ar.contact_name = Some("Riverbend HOA".into());
+    let je = vec![group(
+        BatchKind::JournalEntry,
+        None,
+        vec![ar, je_row(5, "J9", "Service Income", None, Some("5.00"))],
+    )];
+    let v = validate(&s, &je).expect("v");
+    assert!(v.rows.iter().all(|r| r.ok), "{:?}", v.rows);
+}
+
+#[test]
+fn a_journal_entry_amount_is_never_negative() {
+    // `BatchAmount` refuses zero and negative amounts before anything is
+    // sent, so the twin's own rule can't be reached from this side.
+    assert_eq!(
+        BatchAmount::new(money("-5.00")),
+        Err(LocalValidation::NonPositiveAmount)
+    );
+    assert_eq!(
+        BatchAmount::new(Money::ZERO),
+        Err(LocalValidation::NonPositiveAmount)
+    );
+}
+
+#[test]
 fn the_request_as_a_whole() {
     let s = DemoState::new();
     let gate = Err(invalid());
@@ -695,25 +749,69 @@ fn the_request_as_a_whole() {
         validate(&s, &[group(BatchKind::JournalEntry, Some(bank()), one())]),
         gate
     );
+    // A missing or wrong section account names its group
+    // (`BATCH_CONTEXT_ACCOUNT_*`, `groupIndex`).
+    let refused = |g: u32| {
+        Err(ApiError::BatchGroup {
+            group: g,
+            problem: cl_api::BatchGroupProblem::ContextAccount,
+        })
+    };
     assert_eq!(
         validate(&s, &[group(BatchKind::Expense, None, one())]),
-        gate
+        refused(0)
     );
     assert_eq!(
         validate(&s, &[group(BatchKind::Check, Some(card()), one())]),
-        gate
+        refused(0)
     );
     assert_eq!(
         validate(&s, &[group(BatchKind::CardCharge, Some(bank()), one())]),
-        gate
+        refused(0)
     );
     assert_eq!(
         validate(
             &s,
             &[group(BatchKind::Deposit, Some(account_id(6100)), one())]
         ),
-        gate
+        refused(0)
     );
+    // An asset that is not a bank account (A/R, the clearing account).
+    for asset in [1200, 10150] {
+        assert_eq!(
+            validate(
+                &s,
+                &[group(BatchKind::Check, Some(account_id(asset)), one())]
+            ),
+            refused(0),
+            "{asset}"
+        );
+    }
+    // A/P is a liability but not a card.
+    assert_eq!(
+        validate(
+            &s,
+            &[group(BatchKind::CardCredit, Some(account_id(2000)), one())]
+        ),
+        refused(0)
+    );
+    // The first refused group is named.
+    let mut second = one();
+    second[0].row_number = 2;
+    assert_eq!(
+        validate(
+            &s,
+            &[
+                group(BatchKind::Check, Some(bank()), one()),
+                group(BatchKind::Deposit, Some(card()), second.clone()),
+            ]
+        ),
+        refused(1)
+    );
+    // Expenses take a bank account or a card.
+    for ctx in [bank(), card()] {
+        assert!(validate(&s, &[group(BatchKind::Expense, Some(ctx), one())]).is_ok());
+    }
     // Row numbers are unique across groups.
     assert_eq!(
         validate(
