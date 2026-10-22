@@ -6,17 +6,17 @@
 
 ---
 
-## P31 — QuickBooks Desktop import with tie-out, and spreadsheet import
+## P31 — QuickBooks Desktop import with tie-out, spreadsheet import, and import from other accounting systems
 
 | Tier | Size | Depends on | Implementer | Reviews |
 | --- | --- | --- | --- | --- |
 | H | L | P11, P28 | rust-implementer (opus); engine-implementer for U-07 | reviewer (opus), ui-verifier |
 
-**Decisions:** Q-24, Q-77, Q-78, Q-124, Q-125, Q-142–Q-145, Q-218. **Engine:** U-07 (desktop adjustments to the MyBooks Online report-export importer; report list and mapping unchanged).
+**Decisions:** Q-24, Q-77, Q-78, Q-124, Q-125, Q-142–Q-145, Q-218, Q-275. **Engine:** U-07 (desktop adjustments to the MyBooks Online report-export importer; report list and mapping unchanged); the MyBooks Bulk Import pipeline (`/imports`: kinds coa, contacts, trial_balance, gl_transactions; source systems accounting_power, quickbooks_online, quickbooks_desktop, generic) for step 7 — capability check first, gaps just in time (Q-230).
 
 **Mockup:** `docs/design/mockups/QBDImport.html` and `docs/design/screenshots/QBDImport.png` (tie-out step; other wizard steps follow its layout).
 
-**Crates and files:** `crates/cl-ui/src/screens/qbd_import/{wizard.rs,mapping.rs,tieout.rs,spot_check.rs}`, `crates/cl-ui/src/screens/csv_transactions.rs`, `fixtures/qbd/*` (synthetic exports), `docs/user/qbd-switch.md` draft.
+**Crates and files:** `crates/cl-ui/src/screens/qbd_import/{wizard.rs,mapping.rs,tieout.rs,spot_check.rs}`, `crates/cl-ui/src/screens/csv_transactions.rs`, `crates/cl-ui/src/screens/system_import/{wizard.rs,mapping.rs,tieout.rs}`, `fixtures/qbd/*` (synthetic exports), `docs/user/qbd-switch.md` draft.
 
 **Steps**
 1. engine-scout reads the shared importer: required reports, supported QBD versions (Q-218), history options, Other Names mapping; record findings in QUESTIONS.md. — engine notes
@@ -25,6 +25,7 @@
 4. Tie-out report vs. QBD trial balance and A/R/A/P agings; 0.00 required to mark verified. — `feat(qbd): tie-out`
 5. Guided spot-check list (Q-144) saved with the conversion record. — `feat(qbd): spot check`
 6. Spreadsheet transaction import (Q-125): invoices, bills, journal entries from CSV; saved mappings; row-level validation preview; balanced-entry checks; one-batch rollback. — `feat(import): csv transactions`
+7. Import from another accounting system (Q-275), on the engine's Bulk Import pipeline: source **Accounting Power**, **QuickBooks Online**, **QuickBooks Desktop GL** or **Generic CSV**; what to import — chart of accounts, customers and vendors, trial balance (opening balances as of a date), GL transactions; per-step file pick with the exact report/export to make in the source system (plain language); preview with row-level problems; mapping review (accounts by number then name, account types, names merged across lists Q-77, tags); automatic verified backup first; one-batch import with rollback; tie-out of the imported trial balance against the source file to 0.00 (same tie-out screen as step 4); imported transactions marked with their source; re-importing the same file is detected and refused. Synthetic fixtures for each source (never real client files; private fixtures Q-72 optional). — `feat(import): other accounting systems`
 
 **Tests:** synthetic export set ties out to 0.00; altered fixture points to the right account; rollback restores the pre-import state exactly; CSV import validation; optional private-fixtures tests (Q-72) when present.
 
@@ -32,6 +33,7 @@
 - [ ] Synthetic QBD exports import and tie out to 0.00 on TB and both agings.
 - [ ] An altered fixture shows a difference on the right account.
 - [ ] Rollback restores the exact pre-import state.
+- [ ] Synthetic Accounting Power, QuickBooks Online, QuickBooks Desktop GL and generic CSV files import and tie out to 0.00; re-importing the same file is refused.
 - [ ] Screen matches its mockup per docs/design/README.md (`ui-check --compare` reviewed by ui-verifier); any deviation is listed in the PR and QUESTIONS.md.
 
 ---

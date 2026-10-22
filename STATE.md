@@ -42,7 +42,7 @@
 | P28 | Report engine UI | H | |
 | P29 | Users, permissions, closing date, audit trail | M | |
 | P30 | Payroll import | M | |
-| P31 | QuickBooks Desktop import with tie-out, and spreadsheet import | H | |
+| P31 | QuickBooks Desktop import with tie-out, spreadsheet import, other accounting systems | H | |
 | P32 | Transfer file for MyBooks Online, and IIF export | H | |
 | P33 | LAN multi-user | H | |
 | P34 | Backup scheduling, recovery, and data integrity | H | |

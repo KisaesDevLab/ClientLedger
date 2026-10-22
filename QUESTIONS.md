@@ -132,7 +132,7 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 | Q-121 | Downloads from **GitHub Releases**, linked from ClientLedger.net; update check uses GitHub. | P35, P36 |
 | Q-122 | **Claude Code drafts original icon options**; option 1 used until the owner picks. Owner picked option 1 (Q-257). | P06 |
 | Q-123 | App and installer name: **ClientLedger**. | P06, P35 |
-| Q-124 | **No imports from other apps** (QBO, Wave, Xero) in beta. | P31 |
+| Q-124 | **No imports from other apps** (QBO, Wave, Xero) in beta. *Superseded in part by Q-275: Accounting Power, QuickBooks Online, QuickBooks Desktop GL and generic CSV imports are in beta (P31); Wave and Xero stay deferred.* | P31 |
 | Q-125 | **Mapped CSV import** of invoices, bills, and journal entries. | P31 |
 | Q-126 | **IIF export** of lists and journal entries for QuickBooks Desktop. | P32 |
 | Q-127 | **"New from existing"** company copies setup without transactions or contacts. P08 copies the chart as a flat list (sub-accounts lose their parent; P11's chart screen restores hierarchy on copy), settings and the legal form. | P08, P11 |
@@ -277,6 +277,7 @@ Answers from the owner after P11. They replace the defaults named below; later p
 | Q-261 | Look of P14 screens (no mockups). | **Follow the approved Write Check pattern** (tokens, header + lines grid + side panel); screenshots in the PR for owner review. | P14 |
 | Q-262 | Open registers don't refresh after a save in another window (P13 follow-up). | **Fix first in P14**: every save tells open registers and lists to reload. | P14 |
 | Q-263 | Bulk Entry row types whose forms aren't built yet (invoice, bill, credit memo, customer payment). | Default (per the P15A phase file): **offered only once their phase is done** (bills P17, invoices P20, payments P21, credit memos P22); P15A offers checks/expenses, card charges and credits, deposits and journal entries. | P15A, P17–P22 |
+| Q-275 | Import transactions from other accounting systems (e.g. Accounting Power) as MyBooks does? (owner, 2026-10-22) | **Yes, in P31**: an "Import from another accounting system" wizard on the MyBooks Bulk Import pipeline — sources **Accounting Power, QuickBooks Online, QuickBooks Desktop GL, Generic CSV**; chart of accounts, customers/vendors, trial balance and GL transactions; preview, mapping review, verified backup first, one-batch rollback, tie-out to 0.00, duplicate-file detection. Supersedes Q-124 for these sources. | P31 |
 | Q-253 | Early test builds before P35 packaging? | **Yes**: a GitHub workflow builds unsigned portable preview archives (Windows, macOS, Linux) automatically after each phase merges to main, and on demand, as workflow artifacts (kept 30 days), not public releases; P35 still builds the installers. | Preview build, P35 |
 
 ## Open

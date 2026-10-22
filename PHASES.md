@@ -55,7 +55,7 @@ Tier and agent routing: docs/AGENTS.md. Size: S ≈ under a day of agent work, M
 | P28 | Report engine UI | H | L | P12–P24 |
 | P29 | Users, permissions, closing date, audit trail | M | L | P16 |
 | P30 | Payroll import | M | M | P15 |
-| P31 | QuickBooks Desktop import with tie-out, and spreadsheet import | H | L | P11, P28 |
+| P31 | QuickBooks Desktop import with tie-out, spreadsheet import, other accounting systems | H | L | P11, P28 |
 | P32 | Transfer file for MyBooks Online, and IIF export | H | M | P08, P31 |
 | P33 | LAN multi-user | H | L | P29 |
 | P34 | Backup scheduling, recovery, and data integrity | H | M | P08, P33 |
