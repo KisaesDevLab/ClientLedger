@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use cl_automation::actions::{
-    ClickParams, CommandParams, FocusParams, InspectParams, KeyParams, KeySpec, ResizeParams,
-    ScreenshotParams, Target, ThemeParams, TypeParams, ZoomParams,
+    ClickParams, CommandParams, FocusParams, InspectParams, KeyParams, KeySpec, PasteParams,
+    ResizeParams, ScreenshotParams, Target, ThemeParams, TypeParams, ZoomParams,
 };
 use cl_automation::inspect::{Bounds, Node, Snapshot, WindowInfo};
 use cl_automation::screenshot::{encode_png, write_png};
@@ -410,7 +410,13 @@ impl Bridge {
             "click" => self.click(ctx, &parse!(ClickParams).target),
             "type" => {
                 let p = parse!(TypeParams);
-                self.type_text(&p)
+                self.send_text(p.target.as_ref(), Event::Text(p.text))
+            }
+            "paste" => {
+                // One paste event, as from the clipboard: a spreadsheet
+                // block keeps its tabs and line breaks (P15A).
+                let p = parse!(PasteParams);
+                self.send_text(p.target.as_ref(), Event::Paste(p.text))
             }
             "key" => self.key(&parse!(KeyParams).key),
             "focus" => self.focus(&parse!(FocusParams).target),
@@ -605,9 +611,10 @@ impl Bridge {
         self.after(Finish::Empty)
     }
 
-    fn type_text(&self, p: &TypeParams) -> Started {
+    /// `type` and `paste`: focus the target if any, then deliver `event`.
+    fn send_text(&self, target: Option<&Target>, event: Event) -> Started {
         let mut frames = Vec::new();
-        if let Some(t) = &p.target {
+        if let Some(t) = target {
             let node = match self.resolve(t) {
                 Ok(n) => n,
                 Err(e) => return e,
@@ -619,7 +626,7 @@ impl Bridge {
             }
         }
         frames.push(Scheduled {
-            events: vec![Event::Text(p.text.clone())],
+            events: vec![event],
         });
         self.schedule(frames);
         self.after(Finish::Empty)
@@ -1003,6 +1010,25 @@ mod bridge_tests {
             .filter_map(|m| m["value"].as_str())
             .collect();
         assert!(values.contains(&"bank"), "{values:?}");
+    }
+
+    #[test]
+    fn a_paste_reaches_the_focused_text_box() {
+        let mut rig = Rig::new();
+        let typed = rig.run(|c| {
+            call(c, "key", json!({"key": "Ctrl+K"})).unwrap();
+            call(c, "paste", json!({"text": "deposit"})).unwrap();
+            let typed = call(c, "inspect", json!({"target": {"role": "text_input"}})).unwrap();
+            call(c, "key", json!({"key": "Escape"})).unwrap();
+            typed
+        });
+        let values: Vec<_> = typed["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["value"].as_str())
+            .collect();
+        assert!(values.contains(&"deposit"), "{values:?}");
     }
 
     #[test]
