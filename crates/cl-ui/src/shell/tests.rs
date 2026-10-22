@@ -680,7 +680,6 @@ fn company_screens_render_in_the_demo_shell() {
         "file.open_company",
         "file.new_company",
         "file.backup",
-        "file.portable_copy",
         "file.export_all",
         "file.delete_company",
         "company.recovery_key",
@@ -885,4 +884,28 @@ fn grid_demo_renders_in_both_themes_and_small_windows() {
             );
         }
     }
+}
+
+/// Q-268: "Make Portable Copy" is gone from the File menu, the palette and
+/// the command table; Back Up Company and Restore a Backup stay.
+#[test]
+fn make_portable_copy_is_removed_q268() {
+    let shell = Shell::new(ShellOptions::default());
+    assert!(shell.find_command("file.portable_copy").is_none());
+    assert!(commands::find("file.portable_copy").is_none());
+    let file: Vec<String> = super::menu::rows(Menu::File)
+        .iter()
+        .map(|r| r.label.to_ascii_lowercase())
+        .collect();
+    assert!(file.iter().all(|l| !l.contains("portable")), "{file:?}");
+    assert!(file.iter().any(|l| l == "back up company"), "{file:?}");
+    assert!(file.iter().any(|l| l == "restore a backup"), "{file:?}");
+    assert!(
+        super::palette::matches_in("portable", true).is_empty(),
+        "palette"
+    );
+    assert!(
+        !super::palette::matches_in("back up", false).is_empty(),
+        "palette still finds Back Up"
+    );
 }

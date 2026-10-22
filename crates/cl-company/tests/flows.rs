@@ -480,6 +480,77 @@ async fn restore_imports_as_a_new_tenant_swaps_names_and_keeps_the_old_one() {
     assert_eq!(new.source.as_deref(), Some("restore"));
 }
 
+/// Q-268: a `.clbackup` made by the removed "Make Portable Copy" (host
+/// kind `portable`, history entry of the old kind) still restores.
+#[tokio::test]
+async fn an_old_portable_copy_still_restores_q268() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let server = engine(&["tenant-archive-v1"]).await;
+    let s = session(&server).await;
+    let (store, secrets) = stores(dir.path());
+    let file = write_archive(dir.path(), "arch-9");
+    let sha = cl_company::backup::sha256_file(&file).expect("sha");
+    // The history as an older version saved it (`"kind": "portable"`).
+    let old: BackupRecord = serde_json::from_value(json!({
+        "path": file, "sha256": sha, "archive_id": "arch-9",
+        "created_at": "2025-06-01T08:00:00.000Z", "kind": "portable"
+    }))
+    .expect("old record");
+    assert_eq!(old.kind, BackupKind::LegacyPortable);
+    store
+        .update(|l| {
+            l.upsert(t(T1), "Ozark Ridge Landscaping LLC");
+            l.record_backup(t(T1), old.clone());
+        })
+        .expect("store");
+    mount_import(
+        &server,
+        T2,
+        "Ozark Ridge Landscaping LLC",
+        Some(
+            json!({"app":"ClientLedger","appVersion":"0.1.0","kind":"portable",
+            "name":"Ozark Ridge Landscaping LLC","accent":"#C23B4A","flags":{}}),
+        ),
+    )
+    .await;
+    mount_tenants_list(&server).await;
+    Mock::given(method("PATCH"))
+        .and(path_regex(r"^/api/v1/tenants/[^/]+$"))
+        .respond_with(json(
+            200,
+            json!({"id":T2,"name":"x","updatedAt":"2026-11-04T08:12:00.000Z"}),
+        ))
+        .mount(&server)
+        .await;
+    let out = restore(
+        &s,
+        &store,
+        &secrets,
+        &RestoreRequest {
+            path: file.clone(),
+            passphrase: None,
+        },
+        &cl_company::backup::silent(),
+    )
+    .await
+    .expect("an old portable copy restores");
+    assert_eq!(out.new_tenant, t(T2));
+    assert!(out.file_known);
+    let list = store.load().expect("load");
+    assert_eq!(
+        list.get(t(T2)).expect("new").accent,
+        cl_settings::Accent([0xC2, 0x3B, 0x4A])
+    );
+    assert!(
+        list.get(t(T1))
+            .expect("old")
+            .backups
+            .iter()
+            .any(|b| b.kind == BackupKind::LegacyPortable),
+        "the old history entry is kept as written"
+    );
+}
+
 #[tokio::test]
 async fn restore_refuses_a_changed_file_before_anything_is_sent() {
     let dir = tempfile::tempdir().expect("tmp");

@@ -1,4 +1,6 @@
-//! Back Up and Portable copy (P08 step 5).
+//! Back Up (P08 step 5). "Make Portable Copy" was removed (Q-268):
+//! moving a company to another computer is Back Up plus Restore. Older
+//! files flagged portable still restore and are never pruned.
 //!
 //! A `.clbackup` is the engine's encrypted tenant archive byte-for-byte
 //! (P02.md §2.5): the app starts an export job with the owner's backup
@@ -32,7 +34,8 @@ pub struct HostMetadata {
     pub app: String,
     /// The app version.
     pub app_version: String,
-    /// `backup`, `portable` or `before-delete`.
+    /// `backup` or `before-delete` (`portable` in files made before
+    /// Q-268; Restore ignores this field).
     pub kind: String,
     /// Company name at export time.
     pub name: String,
@@ -61,7 +64,7 @@ impl HostMetadata {
             app_version: crate::APP_VERSION.into(),
             kind: match kind {
                 BackupKind::Backup => "backup",
-                BackupKind::Portable => "portable",
+                BackupKind::LegacyPortable => "portable",
                 BackupKind::BeforeDelete => "before-delete",
             }
             .into(),
@@ -107,12 +110,13 @@ pub fn silent() -> ProgressSink {
 pub struct BackupRequest {
     /// The company.
     pub tenant_id: TenantId,
-    /// Regular backup, portable copy, or the one before a delete.
+    /// Regular backup or the one before a delete (never
+    /// [`BackupKind::LegacyPortable`], which [`backup`] refuses).
     pub kind: BackupKind,
     /// Destination folder (created when missing).
     pub dest_dir: PathBuf,
-    /// Prune old backups of this company in `dest_dir` (never for a
-    /// portable copy).
+    /// Prune old backups of this company in `dest_dir` (regular
+    /// backups only).
     pub apply_retention: bool,
 }
 
@@ -152,7 +156,7 @@ pub fn backup_file_name(company: &str, at: Timestamp, kind: BackupKind) -> Strin
     let when = at.as_utc().format("%Y%m%d-%H%M%S");
     let suffix = match kind {
         BackupKind::Backup => "",
-        BackupKind::Portable => "-portable",
+        BackupKind::LegacyPortable => "-portable",
         BackupKind::BeforeDelete => "-before-delete",
     };
     format!("{stem}-{when}{suffix}.clbackup")
@@ -284,9 +288,19 @@ pub(crate) async fn place_archive(
     })?
 }
 
+/// Q-268: the app no longer writes portable copies; that kind exists only
+/// so older history entries keep loading.
+fn writable(kind: BackupKind) -> Result<(), CompanyError> {
+    match kind {
+        BackupKind::Backup | BackupKind::BeforeDelete => Ok(()),
+        BackupKind::LegacyPortable => Err(CompanyError::Metadata),
+    }
+}
+
 /// Backs up one company. Works from any session scope.
 ///
 /// # Errors
+/// `Metadata` for [`BackupKind::LegacyPortable`] (nothing sent);
 /// `NoPassphrase` (nothing sent); `Api` (an engine without
 /// `tenant-archive-v1` answers `NotFound`); `ExportFailed`; `Io`;
 /// `CopyMismatch`; `Settings`.
@@ -297,6 +311,7 @@ pub async fn backup(
     req: &BackupRequest,
     progress: &ProgressSink,
 ) -> Result<BackupOutcome, CompanyError> {
+    writable(req.kind)?;
     let passphrase = passphrase(secrets)?;
     let list = store.load()?;
     let rec = list
@@ -360,8 +375,9 @@ pub async fn backup(
 
 /// Applies the retention rule (last 10 plus monthly for 12 months) to a
 /// company's **own backup history**: only regular backups recorded under
-/// `dir` are candidates (never portable or before-delete copies, never a
-/// file of another company that happens to share a name stem). Deleted
+/// `dir` are candidates (never before-delete copies, never portable copies
+/// made before Q-268 removed that command, never a file of another
+/// company that happens to share a name stem). Deleted
 /// files leave the history; a file already gone is dropped from the
 /// history too.
 #[must_use]
@@ -405,8 +421,11 @@ mod tests {
             name,
             "Ozark-Ridge-Landscaping-LLC-2026-20261104-081200.clbackup"
         );
-        assert!(backup_file_name("", at, BackupKind::Portable).starts_with("Company-"));
-        assert!(backup_file_name("x", at, BackupKind::Portable).ends_with("-portable.clbackup"));
+        assert!(backup_file_name("", at, BackupKind::Backup).starts_with("Company-"));
+        assert!(
+            backup_file_name("x", at, BackupKind::BeforeDelete)
+                .ends_with("-before-delete.clbackup")
+        );
     }
 
     #[test]
@@ -447,7 +466,8 @@ mod tests {
             add(&mut rec, at, BackupKind::Backup, dir.path());
         }
         let old = Timestamp::parse_wire("2024-01-01T08:00:00.000Z").expect("ts");
-        add(&mut rec, old, BackupKind::Portable, dir.path());
+        // A portable copy made before Q-268, older than every backup.
+        add(&mut rec, old, BackupKind::LegacyPortable, dir.path());
         // A same-stem file of another company in the folder is not ours.
         std::fs::write(
             dir.path()
@@ -479,9 +499,50 @@ mod tests {
     }
 
     #[test]
+    fn portable_copies_are_never_written_q268() {
+        assert!(writable(BackupKind::Backup).is_ok());
+        assert!(writable(BackupKind::BeforeDelete).is_ok());
+        assert!(matches!(
+            writable(BackupKind::LegacyPortable),
+            Err(CompanyError::Metadata)
+        ));
+    }
+
+    #[test]
+    fn old_portable_copies_are_never_pruned_q268() {
+        // Even far past the keep-last and monthly windows, and even when
+        // they are the only files in the folder, old portable copies stay.
+        let dir = tempfile::tempdir().expect("tmp");
+        let now = Timestamp::parse_wire("2026-11-04T08:12:00.000Z").expect("ts");
+        let mut rec = cl_settings::CompanyRecord::new(
+            cl_core::ids::TenantId::parse("1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
+            "Ozark",
+            cl_settings::ACCENT_PALETTE[0],
+        );
+        for year in 2010..2030 {
+            let at = Timestamp::parse_wire(&format!("{year}-01-01T08:00:00.000Z")).expect("ts");
+            let path = dir
+                .path()
+                .join(backup_file_name("Ozark", at, BackupKind::LegacyPortable));
+            std::fs::write(&path, b"x").expect("write");
+            rec.backups.push(BackupRecord {
+                path,
+                sha256: "0".repeat(64),
+                archive_id: at.to_wire(),
+                created_at: at,
+                kind: BackupKind::LegacyPortable,
+            });
+        }
+        let pruned = prune_company_backups(&mut rec, dir.path(), now);
+        assert!(pruned.is_empty(), "{pruned:?}");
+        assert_eq!(rec.backups.len(), 20);
+        assert_eq!(std::fs::read_dir(dir.path()).expect("dir").count(), 20);
+    }
+
+    #[test]
     fn host_metadata_round_trips() {
         let h = HostMetadata::new(
-            BackupKind::Portable,
+            BackupKind::Backup,
             "Shoal Creek Farm",
             cl_settings::ACCENT_PALETTE[1],
             CompanyFlags::default(),
@@ -491,7 +552,7 @@ mod tests {
             },
         );
         let v = serde_json::to_value(&h).expect("json");
-        assert_eq!(v["kind"], "portable");
+        assert_eq!(v["kind"], "backup");
         assert_eq!(v["prefs"]["bills_due_days"], 14);
         // A P08 archive has no `prefs`: defaults apply.
         let old: HostMetadata = serde_json::from_value(serde_json::json!({

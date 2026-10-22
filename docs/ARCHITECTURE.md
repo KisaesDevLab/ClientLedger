@@ -55,11 +55,11 @@ A "company" is an engine **tenant** inside the single local database (Q-05), plu
 | Open Company | UI session scoped to the tenant; lists load |
 | Back Up | `.clbackup` = the engine tenant archive byte-for-byte (encrypted with the owner's backup passphrase from the keychain, shown once with Print/Save; manifest with engine commit, schema version, trial balance and part hashes inside), with app metadata (app version, kind, name, colour, local flags) in `manifest.host` (Q-P02i, Q-P08g) |
 | Restore | verify manifest + checksums → import into a new tenant → compare trial balance → swap names; old tenant kept until the user confirms |
-| Portable copy | same as backup, flagged portable |
+| Move to another computer | Back Up on this computer, Restore a backup on the other ("Make Portable Copy" was removed, Q-268; older `.clbackup` files flagged portable still restore and are never deleted by retention) |
 | Full data backup | whole-database `pg_dump -Fc` of all companies (File › Utilities), for disaster recovery |
 | Send to my accountant | `.clxfer` transfer file (P32) for MyBooks Online: lists, transactions, attachments, audit history, manifest, verification totals; secrets excluded |
 
-Automatic backups: on company close (configurable), before every migration, import, restore, and app upgrade. Retention configurable (default: keep last 10 + one per month for 12 months).
+Automatic backups: on company close (configurable), before every migration, import, restore, and app upgrade. Retention configurable (default: keep last 10 + one per month for 12 months); it only ever deletes regular backups the app recorded, never before-delete copies or older portable copies (Q-268).
 
 ## Engine contract
 

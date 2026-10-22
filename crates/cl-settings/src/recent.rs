@@ -101,8 +101,11 @@ pub struct CompanyFlags {
 pub enum BackupKind {
     /// A regular backup.
     Backup,
-    /// A portable copy to carry to another computer.
-    Portable,
+    /// A "portable copy" made before Q-268 removed that command. Read
+    /// only: the app never writes this kind any more, but older history
+    /// entries still load, and retention never deletes them (Q-268).
+    #[serde(rename = "portable")]
+    LegacyPortable,
     /// The backup taken before a delete or a replace-with-restore.
     BeforeDelete,
 }
@@ -516,6 +519,23 @@ mod tests {
             0
         );
         assert_eq!(RecentCompanies::parse("{}"), RecentCompanies::default());
+    }
+
+    #[test]
+    fn old_portable_history_entries_still_load_q268() {
+        // History written before Q-268 removed "Make Portable Copy".
+        let old: BackupRecord = serde_json::from_value(serde_json::json!({
+            "path": "Ozark-20240101-080000-portable.clbackup",
+            "sha256": "0".repeat(64),
+            "archive_id": "a-old",
+            "created_at": "2024-01-01T08:00:00.000Z",
+            "kind": "portable"
+        }))
+        .expect("old portable record loads");
+        assert_eq!(old.kind, BackupKind::LegacyPortable);
+        // Saving the list again keeps the old flag as written.
+        let v = serde_json::to_value(&old).expect("json");
+        assert_eq!(v["kind"], "portable");
     }
 
     #[test]

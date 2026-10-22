@@ -1,5 +1,5 @@
 //! Company lifecycle (P08): what the Open Company window, the setup
-//! interview, Back Up / Restore / Portable copy, Export All Data and
+//! interview, Back Up / Restore, Export All Data and
 //! Delete Company do, built on the typed engine client (`cl-api`) and the
 //! local recent-companies store (`cl-settings`).
 //!

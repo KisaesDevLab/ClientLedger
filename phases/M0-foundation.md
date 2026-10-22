@@ -248,14 +248,14 @@
 
 **Mockup:** `docs/design/mockups/OpenCompany.html` and `docs/design/screenshots/OpenCompany.png`.
 
-**Crates and files:** `crates/cl-company/src/{lifecycle.rs,backup.rs,restore.rs,portable.rs,retention.rs,export_all.rs,sample.rs,templates.rs}`, `crates/cl-ui/src/screens/company/{open.rs,new_interview.rs,opening_balances.rs,recovery_key.rs,delete.rs}`, `assets/coa/{general_service,contractor,retail,farm}.json`, `fixtures/sample/ozark_ridge/*`, `xtask/src/gen_sample.rs`.
+**Crates and files:** `crates/cl-company/src/{lifecycle.rs,backup.rs,restore.rs,retention.rs,export_all.rs,sample.rs,templates.rs}`, `crates/cl-ui/src/screens/company/{open.rs,new_interview.rs,opening_balances.rs,recovery_key.rs,delete.rs}`, `assets/coa/{general_service,contractor,retail,farm}.json`, `fixtures/sample/ozark_ridge/*`, `xtask/src/gen_sample.rs`.
 
 **Steps**
 1. Open Company window: recent list, open, new, restore, sample company; one company open at a time; switching only via File › Open (Q-182, Q-183), saving or prompting open forms first. — `feat(company): open window`
 2. New Company interview (plain language): names, entity type, fiscal year start, standard or 4-4-5, COA template (four, Q-49, with unique account numbers), sales tax?, inventory?, accrual/cash default (Q-44), closing-date password, company color (Q-184). — `feat(company): setup interview`
 3. Recovery key (Q-210): generated at the end of setup, shown once with Print/Save, confirmation required; engine stores only a hash. — `feat(company): recovery key`
 4. Guided opening balances (Q-45): start date; bank/card balances, open invoices, unpaid bills, other balances; post; review balance sheet. — `feat(company): opening balances`
-5. Back Up `.clbackup` (zip: engine tenant export + attachments + manifest with app version, engine commit, schema version, trial balance, SHA-256 of parts); Restore (verify manifest → import as new tenant → compare trial balance → swap names → keep old tenant until the user confirms); Portable copy; backup-on-close setting; retention (last 10 + monthly for 12). Full-database `pg_dump` under File › Utilities. — `feat(company): backup and restore`
+5. Back Up `.clbackup` (zip: engine tenant export + attachments + manifest with app version, engine commit, schema version, trial balance, SHA-256 of parts); Restore (verify manifest → import as new tenant → compare trial balance → swap names → keep old tenant until the user confirms); ~~Portable copy~~ (removed, Q-268: Back Up + Restore moves a company); backup-on-close setting; retention (last 10 + monthly for 12). Full-database `pg_dump` under File › Utilities. — `feat(company): backup and restore`
 6. New from existing (Q-127); Delete company (Q-185: Admin, typed name, verified backup first); Export All Data zip of CSV/Excel (Q-56). — `feat(company): copy, delete, export all`
 7. Year-end (Q-48): verify the engine rolls net income to retained earnings automatically; prompt to set a closing date after year-end. — `feat(company): year-end prompt`
 8. Sample company generator (`xtask gen-sample`): Ozark Ridge Landscaping LLC, one year, ~1,500 transactions that reproduce the sample figures in docs/design/README.md and the records shown in the mockups (Q-219, Q-226), with a golden test asserting each figure. — `feat(xtask): sample company`

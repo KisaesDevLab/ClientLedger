@@ -1,5 +1,5 @@
-//! Back Up, Portable copy and Export All Data (P08 steps 5 and 6): one
-//! window with the destination folder, the kind, progress, and the
+//! Back Up and Export All Data (P08 steps 5 and 6): one window with the
+//! destination folder, the kind, progress, and the
 //! result. The backup passphrase comes from the keychain; the first time,
 //! the owner sets it here (shown once, Q-P02i).
 
@@ -25,25 +25,14 @@ use crate::windows::Screen;
 pub enum Job {
     /// `.clbackup` with retention.
     Backup,
-    /// `.clbackup` flagged portable, never pruned.
-    Portable,
     /// CSV zip (Q-56).
     ExportAll,
 }
 
 impl Job {
-    fn kind(self) -> BackupKind {
-        if self == Job::Portable {
-            BackupKind::Portable
-        } else {
-            BackupKind::Backup
-        }
-    }
-
     fn title_key(self) -> &'static str {
         match self {
             Job::Backup => "backup.title",
-            Job::Portable => "backup.portable_title",
             Job::ExportAll => "backup.export_title",
         }
     }
@@ -51,7 +40,6 @@ impl Job {
     fn intro_key(self) -> &'static str {
         match self {
             Job::Backup => "backup.intro",
-            Job::Portable => "backup.portable_intro",
             Job::ExportAll => "backup.export_intro",
         }
     }
@@ -62,7 +50,7 @@ enum Outcome {
     Export(ExportAllOutcome),
 }
 
-/// The Back Up / Portable copy / Export window.
+/// The Back Up / Export window.
 pub struct BackupScreen {
     link: Arc<CompanyLink>,
     group: Option<cl_api::RequestGroup>,
@@ -142,14 +130,14 @@ impl BackupScreen {
             let file = dest_dir.join(cl_company::backup::backup_file_name(
                 &name,
                 crate::company::demo::DemoState::now(),
-                self.job.kind(),
+                BackupKind::Backup,
             ));
             self.outcome = Some(match self.job {
                 Job::ExportAll => t_with(
                     "backup.export_done",
                     &[("path", &file.with_extension("zip").display().to_string())],
                 ),
-                _ => t_with("backup.done", &[("path", &file.display().to_string())]),
+                Job::Backup => t_with("backup.done", &[("path", &file.display().to_string())]),
             });
             return;
         }
@@ -179,15 +167,15 @@ impl BackupScreen {
                         .await
                         .map(Outcome::Export)
                 }
-                Job::Backup | Job::Portable => cl_company::backup(
+                Job::Backup => cl_company::backup(
                     &session,
                     &store,
                     secrets.as_ref(),
                     &BackupRequest {
                         tenant_id,
-                        kind: job.kind(),
+                        kind: BackupKind::Backup,
                         dest_dir,
-                        apply_retention: job == Job::Backup,
+                        apply_retention: true,
                     },
                     &sink,
                 )
@@ -287,7 +275,6 @@ impl Screen for BackupScreen {
         json!({
             "screen": match self.job {
                 Job::Backup => "backup",
-                Job::Portable => "portable_copy",
                 Job::ExportAll => "export_all",
             },
             "running": self.task.is_some(),

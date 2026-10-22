@@ -1,5 +1,5 @@
 //! Company lifecycle screens (P08): Open Company, New Company interview,
-//! Recovery key, Opening balances, Back Up / Portable / Export, Delete.
+//! Recovery key, Opening balances, Back Up / Export, Delete.
 
 pub mod backup;
 pub mod delete;
@@ -37,9 +37,6 @@ pub fn make(
         "file.open_company" => Box::new(open::OpenCompanyScreen::new(link)),
         "file.new_company" => Box::new(new_interview::NewCompanyScreen::new(link)),
         "file.backup" => Box::new(backup::BackupScreen::new(link, backup::Job::Backup, open)),
-        "file.portable_copy" => {
-            Box::new(backup::BackupScreen::new(link, backup::Job::Portable, open))
-        }
         "file.export_all" => Box::new(backup::BackupScreen::new(
             link,
             backup::Job::ExportAll,
@@ -79,7 +76,6 @@ mod tests {
             ("file.open_company", "Open Company"),
             ("file.new_company", "New Company"),
             ("file.backup", "Back Up Company"),
-            ("file.portable_copy", "Make Portable Copy"),
             ("file.export_all", "Export All Data"),
             ("file.delete_company", "Delete Company"),
             (RECOVERY_KEY, "Recovery Key"),
