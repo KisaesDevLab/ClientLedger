@@ -437,7 +437,7 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P15aa | Templates Due chip | P15 | Counts dates (occurrences), matching what Templates Due lists. | Default in force |
 | Q-P15Aa | Bulk Entry layout | P15A | Sections (one type and account each) in one window, a strip plus one grid; a mixed batch saves in one call. | Default in force |
 | Q-P15Ab | Bulk Entry types | P15A | Checks, Expenses, Card charges, Card credits, Deposits, Journal entries (Q-263). Checks need `batch-check-v1`. | Default in force |
-| Q-P15Ac | Bulk Entry without engine support | P15A | Without `batch-atomic-v1`, `batch-exact-v1` or `batch-idempotent-v1`, Save all is off. Without `batch-mixed-v1`, one section per save. | Default in force |
+| Q-P15Ac | Bulk Entry without engine support | P15A | Save all needs all six batch capabilities: `batch-atomic-v1`, `batch-check-v1`, `batch-mixed-v1`, `batch-exact-v1`, `batch-idempotent-v1` and `batch-closing-v1`. Missing any one turns Save all off (superseded the one-section-per-save fallback). | Default in force |
 | Q-P15Ad | Unknown names in Bulk Entry | P15A | Unknown names are row problems unless "Add new names to the list" is ticked (off by default). Accounts are never created. | Default in force |
 | Q-P15Ae | Closed-period rows in Bulk Entry | P15A | One password per save covers them all, and each is audited by the engine. | Default in force |
 | Q-P15Af | Paste and CSV import | P15A | Both go through the engine's `parse-csv`. A headerless paste maps left to right from the cursor column. Mappings are remembered per company, type and header set. Tags are not imported. | Default in force |
@@ -449,3 +449,8 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P15Al | After a Bulk Entry save | P15A | The window shows a summary (counts, totals per account, register links) and does not close. | Default in force |
 | Q-P15Am | Bulk Entry windows | P15A | One Bulk Entry window at a time. | Default in force |
 | Q-P15An | Bulk Entry look | P15A | No mockup, Write Check pattern, screenshots in the PR, no `--compare`. | Default in force |
+| Q-P15Ao | Pasted and CSV cells | P15A | Pasted and CSV cells are parsed literally, with no calculator: "100/4" is a row problem, not 25. | Default in force |
+| Q-P15Ap | Check all rows | P15A | "Check all rows" re-sends every row to the engine's validate, not only the changed ones. | Default in force |
+| Q-P15Aq | BATCH_BUSY and the idempotency key | P15A | `BATCH_BUSY` keeps the idempotency key so a retry replays or completes. This is a shared `keeps_key` change that affects every form. | Default in force |
+| Q-P15Ar | Inactive accounts in Bulk Entry | P15A | The engine posts to inactive accounts (engine issue #164). Bulk Entry follows the engine for now and does not refuse them. | Default in force |
+| Q-P15As | Save all explanation at 200% zoom | P15A | At 200% zoom the text explaining why Save all is off moves to the button tooltip. | Default in force |
