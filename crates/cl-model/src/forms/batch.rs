@@ -30,7 +30,12 @@ use serde::{Deserialize, Serialize};
 use crate::amount_entry::{self, AmountEntryError, AmountRules};
 pub use crate::rowkey::{RowKey, RowKeyGen};
 
+mod paste;
 mod state;
+pub use paste::{
+    ImportedRow, MAX_REMEMBERED, Mapping, MappingMemory, ParsedCells, RememberedMapping,
+    default_mapping, looks_like_header, mappable_fields, positional_mapping, rows_from_parsed,
+};
 pub use state::{
     Blocker, EngineChecks, EngineProblem, EngineProblemKind, EngineState, EngineVerdict, OutGroup,
     OutRow, Outgoing, SaveCaps, SectionTotals, SentRow, problems_by_row,
@@ -845,3 +850,7 @@ mod tests;
 #[cfg(test)]
 #[path = "batch/state_tests.rs"]
 mod state_tests;
+
+#[cfg(test)]
+#[path = "batch/paste_tests.rs"]
+mod paste_tests;
