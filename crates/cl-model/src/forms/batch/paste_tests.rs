@@ -30,6 +30,43 @@ fn cells(date: &str, number: &str, contact: &str, account: &str, amount: &str) -
 }
 
 #[test]
+fn pasted_and_imported_amounts_are_literal_never_calculated() {
+    // Typed cells keep the calculator.
+    assert_eq!(parse_amount("100/4"), Ok(Some(m("25.00"))));
+    assert_eq!(parse_amount("400+44.25"), Ok(Some(m("444.25"))));
+    // Pasted or imported cells do not.
+    for calc in ["100/4", "400+44.25", "12 x 3", "5*2", "10-2", "100/4="] {
+        assert!(parse_amount_literal(calc).is_err(), "{calc}");
+    }
+    for (text, want) in [
+        ("$1,234.56", "1234.56"),
+        ("(12.50)", "-12.50"),
+        ("-7", "-7.00"),
+        ("12.345", "12.35"),
+        ("\u{2212}3.00", "-3.00"),
+        ("  42 ", "42.00"),
+    ] {
+        assert_eq!(parse_amount_literal(text), Ok(Some(m(want))), "{text}");
+    }
+    assert_eq!(parse_amount_literal("  "), Ok(None));
+    // A row from a file with a calculation: the amount is unreadable, so
+    // the row shows it as missing.
+    let mut keys = RowKeyGen::new();
+    let rows = rows_from_parsed(
+        SectionKind::Expenses,
+        &[cells("2026-10-01", "", "", "6100", "100/4")],
+        DateOrder::Mdy,
+        today(),
+        &mut keys,
+    );
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].row.amount, None);
+    assert_eq!(rows[0].unreadable, vec![Field::Amount]);
+    // A header row with a calculation-looking cell is still a header.
+    assert!(looks_like_header(&["Date", "100/4"]));
+}
+
+#[test]
 fn header_detection() {
     assert!(looks_like_header(&["Date", "Payee", "Amount"]));
     assert!(looks_like_header(&["Date", "", "Memo"]));

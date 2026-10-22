@@ -575,6 +575,27 @@ fn rows_read_for_another_type_are_dropped_with_a_notice() {
 }
 
 #[test]
+fn a_pasted_calculation_is_not_worked_out() {
+    let (mut s, _link, _dir) = screen();
+    s.open_mapping(
+        "Date\tAccount\tAmount\n11/02/2026\t6100\t100/4\n",
+        paste::Origin::Paste {
+            at: None,
+            column: 0,
+        },
+    );
+    s.apply_mapping();
+    let rows: Vec<&RowDraft> = s.batch().sections[0].filled().collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].amount, None, "100/4 is not 25.00");
+    s.cursor_row = None;
+    s.refresh_looks();
+    let v = s.state_json();
+    assert_eq!(v["problems"], 1, "the row needs attention");
+    assert_eq!(v["blocker"], "local_problems");
+}
+
+#[test]
 fn a_pasted_block_maps_and_rounds_three_decimal_amounts() {
     let (mut s, _link, _dir) = screen();
     s.open_mapping(
