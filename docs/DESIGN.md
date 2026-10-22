@@ -86,7 +86,7 @@ Derive from light with the same roles; starting values (tune for 4.5:1 text cont
 2. **Menu bar** (`surface.panel`): File, Edit, Lists, Customers, Vendors, Banking, Payroll (import only), Reports, Company (preferences, closing date, users, send to accountant), Window, Help; right side: Go to search (Ctrl+K).
 3. **Left rail** (200–220 px): Workspace (Home, Customers & Jobs, Vendors, Bank Feed with count badge (fed by bank file imports in beta), Chart of Accounts, Reports), Tools (Import Bank File, Import Payroll, Send to My Accountant, Audit Trail), Open windows. Accountant tools (Workpapers, Report Packs, Tax Estimator) are post-beta and have no rail entry in beta.
 4. **Tab strip:** one tab per open window; dirty tabs show "●"; Ctrl+Tab cycles.
-5. **Window body** (`surface.window`): form toolbar → content → action row.
+5. **Window body** (`surface.window`): form toolbar → content → action row. The title, toolbar/actions, filters and grid column headers stay fixed and only the content scrolls; the action row stays reachable (Q-265).
 6. **Status bar:** signed-in user and role, mode (single-user / multi-user N users), server, context keyboard hints.
 
 ## Screen specs (mockups in docs/design/mockups/)
