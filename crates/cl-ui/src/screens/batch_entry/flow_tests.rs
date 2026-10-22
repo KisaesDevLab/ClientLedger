@@ -693,6 +693,24 @@ fn a_name_suggestion_shows_as_a_ghost_until_accepted() {
     s.poll();
     assert_eq!(s.open_suggestions(), vec![(key, account_id(6100))]);
     assert!(s.suggestion_caption(key).is_some());
+    // The row's only problem is the account the suggestion would fill: it
+    // still counts, but it looks suggested and says "Press Tab to accept".
+    s.cursor_row = None;
+    s.touched.insert(key);
+    s.refresh_looks();
+    let look = s
+        .grid
+        .adapter()
+        .looks
+        .get(&key)
+        .cloned()
+        .unwrap_or_default();
+    assert!(look.error && look.fillable, "{look:?}");
+    match &look.note {
+        Some(grid::Note::Suggestion(t)) => assert!(t.contains("Press Tab to accept"), "{t}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(s.problem_rows().len(), 1);
     assert_eq!(
         s.batch().sections[0].rows[0].account,
         None,
@@ -704,6 +722,11 @@ fn a_name_suggestion_shows_as_a_ghost_until_accepted() {
         Some(account_id(6100))
     );
     assert_eq!(s.state_json()["suggest"]["accepted"], 1);
+    s.refresh_looks();
+    assert!(
+        s.grid.adapter().looks.get(&key).is_none_or(|l| !l.fillable),
+        "accepted: nothing left to fill"
+    );
 }
 
 #[test]

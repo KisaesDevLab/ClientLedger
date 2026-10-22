@@ -217,6 +217,9 @@ pub(crate) fn spec(kind: SectionKind) -> GridSpec {
 pub(crate) struct RowLook {
     /// The row needs attention (`warn` bar and surface).
     pub error: bool,
+    /// Its only problem is the missing account its suggestion would fill:
+    /// it still counts, but looks suggested (Tab takes it), not wrong.
+    pub fillable: bool,
     /// The caption under the row.
     pub note: Option<Note>,
 }
@@ -486,7 +489,7 @@ impl RowModel for View<'_> {
         if index + 1 == rows.len() && r.is_blank() {
             s = s | RowState::ENTRY;
         }
-        if look.is_some_and(|l| l.error) {
+        if look.is_some_and(|l| l.error && !l.fillable) {
             s = s | RowState::ERROR;
         } else if !r.has_account() && self.a.suggested.contains_key(&r.key) {
             s = s | RowState::SUGGESTED;

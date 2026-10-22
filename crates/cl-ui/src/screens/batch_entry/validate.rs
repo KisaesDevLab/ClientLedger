@@ -152,6 +152,17 @@ impl BulkEntryScreen {
             if let Some(list) = local.get(&r.key).filter(|_| shown) {
                 look.error = true;
                 look.note = list.first().map(|p| Note::Problem(TextKey(problem_key(p))));
+                // Only the account is missing and a suggestion would fill
+                // it: the row says so ("Press Tab to accept").
+                if list
+                    .iter()
+                    .all(|p| matches!(p, Problem::Missing(Field::Account)))
+                    && self.grid.adapter().suggested.contains_key(&r.key)
+                    && let Some(text) = self.suggestion_caption(r.key)
+                {
+                    look.fillable = true;
+                    look.note = Some(Note::Suggestion(text));
+                }
             } else {
                 match self.checks.state(self.batch(), r.key) {
                     EngineState::Problems(_, list) if shown => {
