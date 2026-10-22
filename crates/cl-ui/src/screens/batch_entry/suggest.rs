@@ -354,11 +354,8 @@ impl BulkEntryScreen {
         if open > 0 {
             ui.horizontal_wrapped(|ui| {
                 ui.label(
-                    RichText::new(t_with(
-                        "batch_entry.suggest.open",
-                        &[("n", &open.to_string())],
-                    ))
-                    .color(tokens.warn_text),
+                    RichText::new(crate::i18n::t_count("batch_entry.suggest.open", open, &[]))
+                        .color(tokens.warn_text),
                 );
                 crate::widgets::kbd(ui, "Tab");
                 ui.label(RichText::new(t("check.suggest.to_accept")).color(tokens.warn_text));
@@ -374,9 +371,10 @@ impl BulkEntryScreen {
             });
             if self.suggest.confirm_all {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(t_with(
+                    ui.label(crate::i18n::t_count(
                         "batch_entry.suggest.confirm",
-                        &[("n", &open.to_string())],
+                        open,
+                        &[],
                     ));
                     accept_all = ui.button(t("batch_entry.suggest.confirm.yes")).clicked();
                     if ui.button(t("batch_entry.suggest.confirm.no")).clicked() {

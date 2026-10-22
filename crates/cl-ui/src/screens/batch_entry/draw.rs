@@ -15,7 +15,7 @@ use super::grid::{Note, header_key};
 use super::validate::blocker_text;
 use crate::forms::closing_prompt::ClosingClick;
 use crate::forms::header;
-use crate::i18n::{t, t_with};
+use crate::i18n::{t, t_count, t_with};
 use crate::screens::card_charge::kit::{self, ACTION_HEIGHT};
 use crate::screens::company::form;
 use crate::theme::Tokens;
@@ -51,11 +51,8 @@ impl BulkEntryScreen {
             let n = s.rows;
             ui.horizontal_wrapped(|ui| {
                 ui.label(
-                    RichText::new(t_with(
-                        "batch_entry.summary.saved",
-                        &[("n", &n.to_string())],
-                    ))
-                    .color(tokens.text_secondary),
+                    RichText::new(t_count("batch_entry.summary.saved", n, &[]))
+                        .color(tokens.text_secondary),
                 );
                 if ui.link(t("batch_entry.summary.show")).clicked() {
                     self.summary_open = true;
@@ -262,10 +259,10 @@ impl BulkEntryScreen {
                 .try_fold(Money::ZERO, |a, d| a.checked_add(d.abs()))
                 .unwrap_or(Money::ZERO);
             (
-                t_with(
+                t_count(
                     "batch_entry.totals.journal",
+                    tot.rows,
                     &[
-                        ("n", &tot.rows.to_string()),
                         ("debits", &tot.debits.format(style)),
                         ("credits", &tot.credits.format(style)),
                         ("difference", &diff.format(style)),
@@ -275,12 +272,10 @@ impl BulkEntryScreen {
             )
         } else {
             (
-                t_with(
+                t_count(
                     "batch_entry.totals",
-                    &[
-                        ("n", &tot.rows.to_string()),
-                        ("total", &tot.amount.format(style)),
-                    ],
+                    tot.rows,
+                    &[("total", &tot.amount.format(style))],
                 ),
                 false,
             )
@@ -304,7 +299,7 @@ impl BulkEntryScreen {
             form::hint(
                 ui,
                 tokens,
-                &t_with("batch_entry.closed.count", &[("n", &locked.to_string())]),
+                &t_count("batch_entry.closed.count", locked, &[]),
             );
         }
     }

@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use super::BulkEntryScreen;
 use super::sections::kind_key;
 use crate::company::CompanyEvent;
-use crate::i18n::{t, t_with};
+use crate::i18n::{t, t_count, t_with};
 use crate::screens::card_charge::kit;
 use crate::screens::company::form;
 use crate::theme::Tokens;
@@ -101,7 +101,7 @@ impl BulkEntryScreen {
             form::heading(
                 ui,
                 tokens,
-                &t_with("batch_entry.summary.title", &[("n", &s.rows.to_string())]),
+                &t_count("batch_entry.summary.title", s.rows, &[]),
             );
             for (k, n) in &s.counts {
                 ui.label(t_with(
@@ -144,9 +144,10 @@ impl BulkEntryScreen {
                 form::hint(
                     ui,
                     tokens,
-                    &t_with(
+                    &t_count(
                         "batch_entry.summary.names_added",
-                        &[("n", &s.created_contacts.to_string())],
+                        usize::try_from(s.created_contacts).unwrap_or(usize::MAX),
+                        &[],
                     ),
                 );
             }

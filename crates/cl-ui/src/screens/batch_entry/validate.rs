@@ -83,7 +83,7 @@ pub(crate) const fn blocker_name(b: Blocker) -> &'static str {
 /// Why Save all is off, in plain words.
 #[must_use]
 pub(crate) fn blocker_text(b: Blocker) -> String {
-    let n = |k: &str, n: usize| t_with(k, &[("n", &n.to_string())]);
+    let n = |k: &str, n: usize| crate::i18n::t_count(k, n, &[]);
     match b {
         Blocker::EngineTooOld => crate::i18n::t("batch_entry.blocker.engine"),
         Blocker::Empty => crate::i18n::t("batch_entry.blocker.empty"),
