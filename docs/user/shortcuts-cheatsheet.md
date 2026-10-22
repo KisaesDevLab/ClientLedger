@@ -78,6 +78,10 @@
 - `Ctrl+Delete` Delete Line
 - `Ctrl+D` Delete Transaction
 - `Ctrl+M` Save as Template
+- `F8` Next Row That Needs Attention
+- `Shift+F8` Previous Row That Needs Attention
+- `Ctrl+Page Down` Next Section
+- `Ctrl+Page Up` Previous Section
 - `Ctrl+N` New List Entry
 - `Ctrl+Shift+I` Make Inactive or Active Again
 - `Ctrl+Shift+H` Include Inactive Entries

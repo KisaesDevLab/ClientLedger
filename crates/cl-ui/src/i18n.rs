@@ -39,6 +39,24 @@ pub fn t_with(key: &str, args: &[(&str, &str)]) -> String {
     text
 }
 
+/// Translate a counted text: `{key}.one` when `n` is 1 and that entry
+/// exists (English's singular), else `key`; `{n}` and each of `args` are
+/// replaced. A locale with more plural forms adds its own suffixes here.
+#[must_use]
+pub fn t_count(key: &str, n: usize, args: &[(&str, &str)]) -> String {
+    let one = format!("{key}.one");
+    let chosen = if n == 1 && has(&one) {
+        one.as_str()
+    } else {
+        key
+    };
+    let count = n.to_string();
+    let mut all = Vec::with_capacity(args.len() + 1);
+    all.push(("n", count.as_str()));
+    all.extend_from_slice(args);
+    t_with(chosen, &all)
+}
+
 /// True when `key` has an entry (used by tests and by error presentation).
 #[must_use]
 pub fn has(key: &str) -> bool {
@@ -69,9 +87,11 @@ mod transfer;
 mod journal_entry;
 mod templates;
 mod templates_due;
+// P15A.
+mod batch_entry;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 19] = [
+const TABLES: [&[(&str, &str)]; 20] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -91,6 +111,7 @@ const TABLES: [&[(&str, &str)]; 19] = [
     journal_entry::ENGLISH,
     templates::ENGLISH,
     templates_due::ENGLISH,
+    batch_entry::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -522,6 +543,12 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("fix.fiscal.bad_month", "Pick a month from 1 to 12."),
     ("error.api.validation", "The books engine did not accept that entry."),
     ("fix.api.validation", "Check the highlighted fields and try again."),
+    ("error.api.batch_rows", "Some rows need attention, so nothing was saved."),
+    ("fix.api.batch_rows", "Fix the highlighted rows, then save all again."),
+    ("error.api.batch_group_forbidden", "Your user can't enter this kind of transaction, so nothing was saved."),
+    ("fix.api.batch_group_forbidden", "Ask the company's owner for access, or remove that section."),
+    ("error.api.batch_group_account", "A section's bank account or credit card can't be used, so nothing was saved."),
+    ("fix.api.batch_group_account", "Choose another account for that section."),
     ("error.api.local", "Something in this entry needs fixing before it can be saved."),
     ("error.api.conflict_stale", "Someone or something else changed this record while you were editing it."),
     ("fix.api.reload", "Reload it to see the latest version, then make your change again."),
@@ -878,6 +905,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn counted_texts_pick_the_singular_for_one() {
+        assert_eq!(t_count("batch_entry.summary.saved", 1, &[]), "Saved 1 row.");
+        assert_eq!(
+            t_count("batch_entry.summary.saved", 3, &[]),
+            "Saved 3 rows."
+        );
+        assert_eq!(
+            t_count("batch_entry.summary.saved", 0, &[]),
+            "Saved 0 rows."
+        );
+        assert!(
+            t_count("batch_entry.closing.ask", 1, &[("date", "09/30/2026")]).starts_with(
+                "1 row in this batch is dated on or before your closing date (09/30/2026)."
+            ),
+        );
+        // No singular entry: the one text serves every count.
+        assert_eq!(t_count("no.such.{n}", 1, &[]), "no.such.1");
+    }
+
+    #[test]
+    fn every_singular_has_its_counted_text() {
+        for (k, v) in TABLES.iter().flat_map(|t| t.iter()) {
+            if let Some(base) = k.strip_suffix(".one") {
+                assert!(has(base), "{k} has no {base}");
+                assert!(!v.contains("{n}"), "{k} spells out its one");
+            }
+        }
+    }
+
     fn source_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
@@ -899,7 +956,7 @@ mod tests {
             let text = std::fs::read_to_string(&f).unwrap();
             // Only code before the tests module counts.
             let code = text.split("#[cfg(test)]").next().unwrap_or("");
-            for call in ["t(\"", "t_with(\""] {
+            for call in ["t(\"", "t_with(\"", "t_count(\""] {
                 let mut rest = code;
                 while let Some(at) = rest.find(call) {
                     let before = rest[..at].chars().last();

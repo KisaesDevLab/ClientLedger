@@ -1,8 +1,8 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P15A — Bulk Entry (Next)
-**Status:** P15 built on `phase/P15-journal-templates`; PR to open
-**Engine commit:** `886c6b5d30f9cc153dbfcefdfa6d372f335bc9a7` (`main`, pinned 2026-10-21 after engine PRs #160 and #161: je-names-v1, je-number-v1, je-adjusting-v1, je-reversing-v1, balance-exact-v1, recurring-guard-v1, templates-v1, recurring-run-due-v1, migrations 0224 and 0225; bump per Q-02)
+**Current phase:** P16 — Home workspace (Next)
+**Status:** P15A built on `phase/P15A-bulk-entry`; PR to open
+**Engine commit:** `c217bfd7e1f72b03a5e5ad3aaa21120da3d36246` (`main`, pinned 2026-10-21 after engine PR #163: batch-atomic-v1, batch-check-v1, batch-mixed-v1, batch-exact-v1, batch-idempotent-v1, batch-closing-v1, migration 0226; bump per Q-02)
 **Last updated:** 2026-10-21
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
@@ -26,8 +26,8 @@
 | P13 | Write Check | M | Done 2026-10-20 |
 | P14 | Deposits, transfers, sales receipts, card charges, owner and loan helpers | M | Done 2026-10-20 |
 | P15 | Journal entries, templates and recurring | H | Done 2026-10-21 |
-| P15A | Bulk Entry | M | Next |
-| P16 | Home workspace | L | |
+| P15A | Bulk Entry | M | Done 2026-10-21 |
+| P16 | Home workspace | L | Next |
 | P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | |
 | P18 | Pay Bills (checks) | M | |
 | P19 | Form printing | L | |
@@ -175,6 +175,13 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 3. The demo ledger doesn't store basis.
 4. A `--demo` launch skips the catch-up (File > Open Company runs it).
 
+## Follow-ups from P15A
+
+1. Engine issue #164: the engine accepts postings to inactive accounts (Q-P15Ar).
+2. The `BATCH_BUSY` path is not exercised live (Q-P15Aq).
+3. The `cl-host` cold-start budget still exceeds 15 s locally under load (CI uses 30/60 s).
+4. The `cl-automation` control-port test flakes under parallel local load.
+
 ## Owner-requested checkpoints
 
 - **After P13 merges, before P14 starts (owner, 2026-10-20):** Intuit compliance check — trademarks/names, copied text, icons and assets, layouts and colors vs QuickBooks, feature names, help text, fixtures, non-affiliation notice (non-negotiable 5). Report to the owner; fix findings on a `fix/` branch.
@@ -185,6 +192,9 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-21 — P15A complete on `phase/P15A-bulk-entry`; PR to open. Shipped: the Bulk Entry window (sections per type and account; checks, expenses, card charges, card credits, deposits and journal entries; other types wait for their phases, Q-263); local exact checks (cent rounding, journal entry balance, duplicate check numbers, closed-period marks); engine validate per row with highlights and F8 navigation; paste from a spreadsheet and CSV import with a remembered column mapping; account suggestions with accept; Save all in one atomic call with an idempotency key and one closing-password prompt; a summary with register links; data-bus refresh. Grid block paste and a control-channel paste step. Engine PR #163 (U-67 to U-74, migration 0226) merged after security review and fixes; pin c217bfd. Contract suite 149/149 live; scenario batch_entry 178 steps plus forms-zoom coverage; help page. Decisions Q-P15Aa to Q-P15As.
+  Acceptance (phases/M1-core-ledger.md P15A): [x] a mixed batch of checks and deposits saves and every row shows in the register with the right balance (live contract + scenario); [x] invalid rows cannot save (atomic rollback contract, unit + scenario); [x] control-channel scenario.
+  Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, Opus fallback for money lanes), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.
 - 2026-10-21 — P15 complete on `phase/P15-journal-templates`; PR to open. Shipped (2026-10-20/21): Make Journal Entry (names on lines, A/R-A/P rule, entry numbering, adjusting, reversing, autobalance, closing-password flow, edit/void/delete); Templates (store without posting, groups, remind/auto/never, Save as Template on Write Check, Deposit, Transfer, Card Charge, Journal Entry and Daily Sales, Use, Enter now); the catch-up runner and the Templates Due window. Engine PRs #160 (U-58 to U-61, U-64 to U-66, migration 0224, exact balance for all postings, rounding fixes in invoices, bills, vendor credits and estimates) and #161 (U-62, U-63, migration 0225, per-kind permissions, 31-per-run cap, month-end anchoring) merged after security reviews and fixes; pin 886c6b5; U-19 and U-22 delivered by it. Contract suite 136/136 live; practice company loads with templates and the first catch-up posts once; scenarios journal_entry 169, templates 339, templates_due 235 steps plus forms-zoom coverage; help pages x3. Decisions Q-P15a to Q-P15aa.
   Acceptance (phases/M1-core-ledger.md P15): [x] unbalanced entries cannot save (unit + contract + scenario, nothing sent); [x] missed monthly occurrences post exactly once each (contract run_due across engine restart + practice_live).
   Agents: scout/opus, architect/opus (Fable out of credits, Opus fallback for Tier H), impl/opus, engine-impl/opus, security-review/opus x2, review/opus, ui/opus, bookkeeper/sonnet.
@@ -194,7 +204,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
 - 2026-10-20 — P13 complete on `phase/P13-write-check`; PR to open. Shipped: the Write Check form (check card, amount in words, "To print", Expenses lines with Customer:Job, Billable and Tags, Save & New / Save & Close, Prev/Next with a Save/Discard prompt, History, Attach, payee panel with the open-bill warning and recent checks, prefill from the last transaction except amounts, vendor default account, offline rule suggestions and a gated AI chip with explicit accept); check edit with the printed-check choice; the closing-password flow reused; the shared lines grid and closing prompt; Q-232 typed amounts round to the cent; Q-238 "Customers" wording; Q-250 a click opens list fields; sample data for the mockup story; vendor-center focus fix. Engine PR #156 merged (U-48 check edit, U-49 line customer, U-50 billable + migration 0221, U-51 rules evaluate); pin 454fd23. Contract suite 101/101; `write_check` scenario 254 steps light+dark, `--compare` 43 steps. P15A Batch Enter Transactions added to beta (Q-252).
   Acceptance (phases/M1-core-ledger.md P13): [x] the mockup example saves, the register shows it, the GL is correct (contract `write_check::gl_effect`); [x] no save when lines and amount disagree (unit test + scenario, nothing sent); [x] mockup match via `--compare` reviewed by ui-verifier, deviations Q-P13a–p.
   Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, opus fallback for money packages), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.
-- 2026-10-20 — Engine pin 850e43d2 → 5c8e9665 (engine main with PRs #151 tenant archives, #152 AI desktop/session secrets, #153 register exact money, closing password, soft delete) on `chore/engine-pin-5c8e9665`. Live capabilities: `tenants-list-v1`, `tenant-archive-v1`, `session-secrets-v1`, `ai-desktop-v1`, `smtp-session-v1`, `ai-token-cap-v1`, `register-exact-v1`, `closing-password-v1`, `txn-delete-v1` (names match cl-api). Engine SEA rebuilt and smoke-tested; api-spec fixtures refreshed.
-  Results: cl-api contract 91 passed, 0 failed (the formerly PENDING E5a archive round trip, closing password U-15, E6 session secrets/usage summary/SMTP session/token cap, register exact money, audit before-images and delete now run); `register_property::balance_holds_after_random_edits` at 1,000 operations with the register checks and deletes on: green (25 s, seed 54358578820153362); contract_offline 6/6; spec_fixtures 4/4; rest of the workspace green.
-  Client fixes (the client follows the engine): closed-period test expects `CLOSING_PASSWORD_INVALID` for a password on a company without one; contract tests hand the Ollama address over session secrets (desktop mode ignores the stored URL) and name the session SMTP relay by LAN address (the engine resolves the host fail-closed); `OUTSIDE_SPEC` trimmed to desktop-only routes; `push_at_open` sends the AI and SMTP session secrets in separate requests so an unresolvable mail server offline no longer drops the Ollama address. No engine bugs found. Still PENDING: E5b, U-14, U-17–U-19, U-21–U-23, U-31–U-47, R5.
-  ui-check register, open-company, preferences-ai, chart-of-accounts: pass, light and dark (`--demo` data). Agents: implementer on opus.

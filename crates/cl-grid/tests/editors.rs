@@ -372,6 +372,38 @@ fn suggestion_accept_only_by_tab() {
 }
 
 #[test]
+fn the_open_editor_shows_the_suggestion_until_something_is_typed() {
+    let painted = |r: &Rig| -> Vec<String> {
+        r.last
+            .as_ref()
+            .expect("frame")
+            .shapes
+            .iter()
+            .flat_map(|c| texts(&c.shape))
+            .collect()
+    };
+    let mut r = suggested_rig();
+    r.frame(vec![]);
+    assert!(r.grid.core().edit().is_some(), "the editor is open");
+    let shown = painted(&r);
+    assert!(
+        shown.iter().any(|t| t.contains("5100 · Materials:Plants")),
+        "{shown:?}"
+    );
+    // Still not the value.
+    assert_eq!(r.model.lines()[0].account, Account::None);
+    // Typing replaces the hint.
+    r.frame(typed("Fu"));
+    r.frame(vec![]);
+    assert!(r.grid.core().edit().is_some_and(|e| e.buffer == "Fu"));
+    let shown = painted(&r);
+    assert!(
+        !shown.iter().any(|t| t.contains("5100 · Materials:Plants")),
+        "{shown:?}"
+    );
+}
+
+#[test]
 fn an_amount_suggestion_never_shows_or_commits() {
     let mut r = Rig::new(line_spec(), Lines::new(true, 2));
     r.model.suggest_amount = true;

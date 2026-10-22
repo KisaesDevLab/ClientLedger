@@ -88,6 +88,15 @@ pub enum Step {
         #[serde(default)]
         target: Option<Target>,
     },
+    /// Paste text as one clipboard paste (a spreadsheet block: tabs between
+    /// cells, a line per row). `{theme}` is replaced as in `type`.
+    Paste {
+        /// The text.
+        text: String,
+        /// Focus this first.
+        #[serde(default)]
+        target: Option<Target>,
+    },
     /// Press a key chord.
     Key(String),
     /// Run a command id.
@@ -166,6 +175,9 @@ impl Step {
             Step::ClickIfPresent(t) => format!("click {} if present", t.describe()),
             Step::Focus(t) => format!("focus {}", t.describe()),
             Step::Type { text, .. } => format!("type {} characters", text.chars().count()),
+            Step::Paste { text, .. } => {
+                format!("paste {} line(s)", text.lines().count().max(1))
+            }
             Step::Key(k) => format!("key {k}"),
             Step::Command(c) => format!("command {c}"),
             Step::Wait { ms } => format!("wait {ms} ms"),
@@ -436,6 +448,10 @@ fn run_step(
         Step::Type { text, target } => {
             let text = themed(text, theme);
             call(t, "type", json!({"text": text, "target": target})).map(drop)
+        }
+        Step::Paste { text, target } => {
+            let text = themed(text, theme);
+            call(t, "paste", json!({"text": text, "target": target})).map(drop)
         }
         Step::Key(k) => call(t, "key", json!({"key": k})).map(drop),
         Step::Command(c) => call(t, "command", json!({"id": c})).map(drop),
@@ -795,6 +811,24 @@ mod tests {
         let report = run(&mut fake, &s, out.path());
         let f = report.outcomes[0].failure.as_ref().unwrap();
         assert!(f.message.contains("Cut off"), "{}", f.message);
+    }
+
+    #[test]
+    fn paste_sends_the_block_whole_and_never_describes_it() {
+        let out = dir();
+        let yaml = "name: x\nthemes: [dark]\nsteps:\n  - paste: {text: \"Date\\tMemo\\n2026-11-04\\tLunch {theme}\\n\"}\n  - paste: {text: \"12.50\", target: {id: '2'}}\n";
+        let s = Scenario::parse(yaml).unwrap();
+        assert_eq!(s.steps[0].describe(), "paste 2 line(s)");
+        let mut fake = Fake::new();
+        let report = run(&mut fake, &s, out.path());
+        assert!(report.passed(), "{}", report.summary());
+        let pastes: Vec<_> = fake.calls.iter().filter(|(m, _)| m == "paste").collect();
+        assert_eq!(pastes.len(), 2);
+        assert_eq!(pastes[0].1["text"], "Date\tMemo\n2026-11-04\tLunch dark\n");
+        assert_eq!(pastes[0].1["target"], Value::Null);
+        assert_eq!(pastes[1].1["target"]["id"], "2");
+        let p: crate::actions::PasteParams = serde_json::from_value(pastes[0].1.clone()).unwrap();
+        assert!(!format!("{p:?}").contains("Lunch"));
     }
 
     #[test]

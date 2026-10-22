@@ -902,7 +902,7 @@ impl Grid {
         let mut leaving = false;
         if focused {
             let raw = ctx.input_mut(|i| std::mem::take(&mut i.events));
-            let mut collector = input::Collector::default();
+            let mut collector = input::Collector::new(self.spec().block_paste);
             let mut kept = Vec::with_capacity(raw.len());
             for event in raw {
                 let mut out = Vec::new();
@@ -928,6 +928,14 @@ impl Grid {
             ctx.input_mut(|i| i.events = kept);
             if let Some(p) = collector.paste {
                 self.core.show_problem(p);
+            }
+            if let Some(at) = self.core.cursor() {
+                events.extend(
+                    collector
+                        .blocks
+                        .drain(..)
+                        .map(|text| GridEvent::BlockPaste { at, text }),
+                );
             }
             // Typing into an editor whose row scrolled away brings the row
             // back before the text lands.
@@ -1514,7 +1522,17 @@ impl Grid {
                     let list_cell =
                         matches!(col.kind, CellKind::Picker { .. } | CellKind::Tags { .. });
                     let list_open = self.core.edit().is_some_and(|e| e.popup.is_some());
+                    // An unaccepted suggestion stays visible in the open
+                    // editor as a hint (Tab takes it); never the value, and
+                    // only in cells that take suggestions (NN4).
+                    let ghost = match model.rows().cell(i, col.id) {
+                        CellValue::Suggested { display, .. } if col.kind.accepts_suggestions() => {
+                            Some(display.to_string())
+                        }
+                        _ => None,
+                    };
                     if let Some(edit) = self.core.edit_mut() {
+                        let ghost = ghost.filter(|_| edit.buffer.is_empty());
                         // Tag chips sit before the text being typed.
                         let mut edit_rect = cell_rect;
                         if matches!(col.kind, CellKind::Tags { .. }) {
@@ -1570,6 +1588,12 @@ impl Grid {
                                 },
                                 max,
                             ),
+                        };
+                        let te = match ghost {
+                            Some(g) => {
+                                te.hint_text(egui::RichText::new(g).color(style.placeholder))
+                            }
+                            None => te,
                         };
                         let at = if matches!(col.kind, CellKind::Tags { .. }) {
                             edit_rect

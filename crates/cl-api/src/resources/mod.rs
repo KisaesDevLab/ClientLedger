@@ -5,6 +5,7 @@ pub mod ai;
 pub mod attachments;
 pub mod audit;
 pub mod bank_postings;
+pub mod batch;
 pub mod bills;
 pub mod checks;
 pub(crate) mod common;

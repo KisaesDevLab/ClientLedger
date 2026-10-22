@@ -27,6 +27,10 @@ pub struct GridSpec {
     pub selection: SelectionMode,
     /// `record_row` may answer `Pending` (P12's entry row).
     pub async_record: bool,
+    /// A paste holding a tab or more than one line emits
+    /// [`GridEvent::BlockPaste`] instead of the "one value" refusal (P15A
+    /// Bulk Entry). Off in every preset.
+    pub block_paste: bool,
 }
 
 /// Why a spec is refused.
@@ -47,8 +51,9 @@ pub enum SpecError {
     /// A read-only column kind marked editable.
     #[error("a display or mark column cannot be editable")]
     ReadOnlyKindEditable,
-    /// An entry line or insert/delete on a grid that cannot edit.
-    #[error("entry lines and insert/delete need an editable grid")]
+    /// An entry line, insert/delete or block paste on a grid that cannot
+    /// edit.
+    #[error("entry lines, insert/delete and block paste need an editable grid")]
     EditFlagsWithoutEditing,
 }
 
@@ -65,6 +70,7 @@ impl GridSpec {
             insert_delete: true,
             selection: SelectionMode::None,
             async_record: false,
+            block_paste: false,
         }
     }
 
@@ -79,6 +85,7 @@ impl GridSpec {
             insert_delete: false,
             selection: SelectionMode::Multi,
             async_record: false,
+            block_paste: false,
         }
     }
 
@@ -94,6 +101,7 @@ impl GridSpec {
             insert_delete: false,
             selection: SelectionMode::Multi,
             async_record: false,
+            block_paste: false,
         }
     }
 
@@ -116,7 +124,9 @@ impl GridSpec {
         if self.editable && !self.columns.iter().any(|c| c.editable) {
             return Err(SpecError::NoEditableColumn);
         }
-        if !self.editable && (self.entry_line || self.insert_delete || self.async_record) {
+        if !self.editable
+            && (self.entry_line || self.insert_delete || self.async_record || self.block_paste)
+        {
             return Err(SpecError::EditFlagsWithoutEditing);
         }
         if let RowHeight::Measured { max_rows } = self.height
@@ -249,6 +259,45 @@ pub enum GridEvent {
     VisibleRange(Range<usize>),
     /// A column was resized (the screen persists widths).
     ColumnsResized,
+    /// A multi-value paste (tabs or several lines) on a grid with
+    /// [`GridSpec::block_paste`]: the screen maps it into rows.
+    BlockPaste {
+        /// The cursor cell when the paste arrived.
+        at: CellPos,
+        /// The clipboard text, unchanged.
+        text: PastedText,
+    },
+}
+
+/// Pasted clipboard text. `Debug` never prints the content (S5): pasted
+/// rows hold names, amounts and memos.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PastedText(String);
+
+impl PastedText {
+    /// Wrap clipboard text.
+    #[must_use]
+    pub fn new(text: impl Into<String>) -> PastedText {
+        PastedText(text.into())
+    }
+
+    /// The text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The text, owned.
+    #[must_use]
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl fmt::Debug for PastedText {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "PastedText({} bytes)", self.0.len())
+    }
 }
 
 impl fmt::Debug for GridEvent {
@@ -268,6 +317,7 @@ impl fmt::Debug for GridEvent {
             GridEvent::TypedInBrowse(_) => "TypedInBrowse",
             GridEvent::VisibleRange(_) => "VisibleRange",
             GridEvent::ColumnsResized => "ColumnsResized",
+            GridEvent::BlockPaste { .. } => "BlockPaste",
         })
     }
 }

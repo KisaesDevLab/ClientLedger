@@ -362,7 +362,13 @@ impl Executor {
         reply: EngineReply,
         r: &mut Retries,
     ) -> Step {
-        match map_failure(reply.status, &reply.body, reply.retry_after, ctx.op.kind) {
+        match map_failure(
+            reply.status,
+            &reply.body,
+            reply.retry_after,
+            ctx.op.kind,
+            ctx.op.failure_shape(),
+        ) {
             // The desktop gate runs before every handler: replay once on the
             // re-read endpoint.
             Mapped::DesktopGate => {

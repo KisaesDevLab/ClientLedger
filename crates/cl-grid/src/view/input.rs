@@ -13,7 +13,7 @@ use egui::{Event, InputState, Key, Modifiers};
 
 use crate::core::keys::{GridInput, GridKey, Mods};
 use crate::core::model::{CellKind, CellProblem};
-use crate::core::spec::GridCommand;
+use crate::core::spec::{GridCommand, PastedText};
 
 /// What the collector needs to know about the cursor cell.
 // Independent facts about the cursor cell, set together each event.
@@ -66,6 +66,12 @@ pub struct Collector {
     swallow_space_text: bool,
     /// What happened to a paste this frame.
     pub paste: Option<CellProblem>,
+    /// The grid takes multi-value pastes as a block
+    /// ([`crate::GridSpec::block_paste`]); set before the first event.
+    pub block_paste: bool,
+    /// Multi-value pastes taken this frame, in order (only with
+    /// `block_paste`).
+    pub blocks: Vec<PastedText>,
     /// Plain text typed into a date cell this frame, held back so a later
     /// date-key character in the same frame applies after it (N3).
     held: Vec<String>,
@@ -85,6 +91,15 @@ fn iso_prefix(s: &str) -> bool {
 }
 
 impl Collector {
+    /// A collector for a grid with or without [`crate::GridSpec::block_paste`].
+    #[must_use]
+    pub fn new(block_paste: bool) -> Collector {
+        Collector {
+            block_paste,
+            ..Collector::default()
+        }
+    }
+
     /// Map one event. Pushes grid inputs to `out`; returns the event when it
     /// stays for egui (the editor or other widgets).
     pub fn event(
@@ -94,6 +109,15 @@ impl Collector {
         buffer: &str,
         out: &mut Vec<GridInput>,
     ) -> Option<Event> {
+        // A block paste (tabs or several lines) goes to the screen whole,
+        // whatever the cursor cell is; a single value pastes as usual.
+        if let Event::Paste(t) = event
+            && self.block_paste
+            && single_paste(t).is_err()
+        {
+            self.blocks.push(PastedText::new(t.clone()));
+            return None;
+        }
         // Text in an open date cell: a date-key character applies after the
         // text typed before it in this frame, and `-` after `2026` or
         // `2026-11` is a separator (ISO dates, N3). `buffer` is the editor's
@@ -315,6 +339,53 @@ mod tests {
         i.events = events;
         let (out, paste) = collect(&mut i, info);
         (out, i.events, paste)
+    }
+
+    #[test]
+    fn block_paste_collector_takes_multi_value_pastes_only() {
+        let mut c = Collector::new(true);
+        let mut out = Vec::new();
+        let amount = info(Some(CellKind::Amount(AmountRules::MONEY)), true);
+        let single = c.event(
+            &Event::Paste(
+                "12.50
+"
+                .into(),
+            ),
+            amount,
+            "",
+            &mut out,
+        );
+        assert_eq!(single, Some(Event::Paste("12.50".into())));
+        assert_eq!(
+            c.event(&Event::Paste("1	2".into()), amount, "", &mut out),
+            None
+        );
+        let memo = info(Some(CellKind::Display), false);
+        assert_eq!(
+            c.event(
+                &Event::Paste(
+                    "a
+b"
+                    .into()
+                ),
+                memo,
+                "",
+                &mut out
+            ),
+            None
+        );
+        assert_eq!(
+            c.blocks,
+            vec![
+                PastedText::new("1	2"),
+                PastedText::new(
+                    "a
+b"
+                )
+            ]
+        );
+        assert!(c.paste.is_none() && out.is_empty());
     }
 
     #[test]

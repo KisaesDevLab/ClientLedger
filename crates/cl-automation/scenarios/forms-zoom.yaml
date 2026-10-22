@@ -1,5 +1,5 @@
 # Write Check, the seven P14 forms, Make Journal Entry, Templates, Templates
-# Due and the Template dialog (P15) at the minimum window (960 x 640) at 200% zoom
+# Due, the Template dialog (P15) and Bulk Entry (P15A) at the minimum window (960 x 640) at 200% zoom
 # (480 x 320 points): the shared header wraps (toolbar note, title above the
 # picker), label+input groups move whole to the next line, and nothing is
 # drawn over anything or cut inside its own field. Ignored: the tab strip
@@ -12,6 +12,28 @@ steps:
   - resize: {width: 1440, height: 940}
   - click: {role: tab, label: Home}
   - resize: {width: 960, height: 640}
+  # Bulk Entry at 100% on the minimum window: no title row, the grid takes
+  # the height left over and the actions stay above the status bar.
+  - command: banking.bulk_entry
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {label: "Date, line 1"}
+  - type: {text: "T"}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: "Galena Gravel"}
+  - key: Tab
+  - type: {text: "9999"}
+  - key: Tab
+  - type: {text: "20"}
+  - key: Enter
+  - assert_state: {key: screen.problems, equals: 1}
+  - screenshot: bulk-entry-960
+  - assert_no_clipping: {}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.last_action, equals: clear}
+  - assert_state: {key: screen.rows, equals: 0}
+  - command: file.close_window
   - set_zoom: {percent: 200}
   - key: Ctrl+D
   - assert_state: {key: screen.screen, equals: deposit}
@@ -72,6 +94,17 @@ steps:
   - assert_state: {key: screen.screen, equals: templates_due}
   - screenshot: templates-due-z200
   - assert_no_clipping: *zoomed
+  - command: file.close_window
+  # Bulk Entry (P15A): the sections and the grid scroll above the totals
+  # and the actions, which stay on screen; the grid is in the window.
+  - command: banking.bulk_entry
+  - assert_state: {key: screen.screen, equals: batch_entry}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {label_contains: "Checks rows"}
+  - screenshot: bulk-entry-z200
+  - assert_no_clipping: *zoomed
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.last_action, equals: clear}
   - command: file.close_window
   - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}

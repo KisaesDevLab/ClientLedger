@@ -314,6 +314,7 @@ pub struct Harness {
     s2: Mutex<Option<Session>>,
     s3: Mutex<Option<Session>>,
     tenant_b: Mutex<Option<TenantId>>,
+    bookkeeper: Mutex<Option<(String, Session)>>,
     scratch: Scratch,
 }
 
@@ -434,6 +435,7 @@ impl Harness {
             s2: Mutex::new(None),
             s3: Mutex::new(None),
             tenant_b: Mutex::new(None),
+            bookkeeper: Mutex::new(None),
             scratch,
         })
     }
@@ -511,6 +513,46 @@ impl Harness {
         s
     }
 
+    /// A bookkeeper of Contract Co (invited by S1) with the company open:
+    /// `(user id, session)`. One per run, logged in on first use, so the
+    /// rate-limited login budget holds; each test sets the permission
+    /// overrides it needs.
+    pub fn bookkeeper(&self) -> (String, Session) {
+        let mut slot = self
+            .bookkeeper
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        slot.get_or_insert_with(|| {
+            let email = format!("bk-{}@example.com", &uuid_hex()[..12]);
+            let made = self
+                .run(self.s1.raw(
+                    Method::Post,
+                    "/api/v1/company/invite-user",
+                    &[],
+                    Some(&serde_json::json!({
+                        "email": email,
+                        "displayName": "Synthetic Bookkeeper",
+                        "role": "bookkeeper",
+                    })),
+                ))
+                .unwrap_or_else(|e| panic!("invite: {e}"));
+            assert_eq!(made.status, 201, "{}", made.body);
+            let user = made.body["user"]["id"].as_str().expect("id").to_string();
+            let pw = made.body["temporaryPassword"]
+                .as_str()
+                .expect("temporary password")
+                .to_string();
+            let bk = match self.run(self.client.login(&email, &Secret::new(pw))) {
+                Ok(LoginOutcome::Session(b)) => b,
+                other => panic!("bookkeeper login: {other:?}"),
+            };
+            self.run(bk.open_company(self.contract_co))
+                .unwrap_or_else(|e| panic!("bookkeeper opens: {e}"));
+            (user, bk)
+        })
+        .clone()
+    }
+
     /// `true` when the engine advertises `cap`; otherwise prints
     /// `PENDING(<uitem>)` and records it (or fails under
     /// `CL_API_REQUIRE_CAPS`).
@@ -584,6 +626,7 @@ impl Harness {
             s1,
             s2,
             s3,
+            bookkeeper,
             pending,
             scratch,
             ..
@@ -591,9 +634,14 @@ impl Harness {
         let pending = pending.into_inner().unwrap_or_else(PoisonError::into_inner);
         // Every session holds the client, which holds the endpoint source,
         // which holds the supervisor: log them out and drop them all first.
+        let bookkeeper = bookkeeper
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner)
+            .map(|(_, s)| s);
         let others = [s2, s3]
             .into_iter()
-            .filter_map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner));
+            .filter_map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner))
+            .chain(bookkeeper);
         for s in std::iter::once(s1).chain(others) {
             let _ = rt.block_on(async {
                 tokio::time::timeout(Duration::from_secs(10), s.logout()).await

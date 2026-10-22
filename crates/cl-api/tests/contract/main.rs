@@ -13,6 +13,7 @@ mod common;
 mod contract_accounts;
 mod contract_audit;
 mod contract_bank_postings;
+mod contract_batch;
 mod contract_capabilities;
 mod contract_census;
 mod contract_check_panel;
@@ -522,6 +523,51 @@ fn main() -> std::process::ExitCode {
         (
             "run_due::journal_template_keeps_names_and_adjusting",
             contract_run_due::journal_template_keeps_names_and_adjusting,
+        ),
+        // P15A lane A: Bulk Entry (PENDING by the batch-*-v1 capabilities;
+        // all live from pin c217bfd, engine PR #163).
+        (
+            "batch::validate_one_section_live",
+            contract_batch::validate_one_section_live,
+        ),
+        (
+            "batch::suggest_account_offline",
+            contract_batch::suggest_account_offline,
+        ),
+        ("batch::parse_csv_exact", contract_batch::parse_csv_exact),
+        ("batch::fifty_rows_exact", contract_batch::fifty_rows_exact),
+        (
+            "batch::mixed_one_call_all_in_register",
+            contract_batch::mixed_one_call_all_in_register,
+        ),
+        (
+            "batch::check_numbers_unique_and_counter",
+            contract_batch::check_numbers_unique_and_counter,
+        ),
+        (
+            "batch::one_bad_row_saves_nothing",
+            contract_batch::one_bad_row_saves_nothing,
+        ),
+        ("batch::replay_same_key", contract_batch::replay_same_key),
+        (
+            "batch::je_group_unbalanced_refused",
+            contract_batch::je_group_unbalanced_refused,
+        ),
+        (
+            "batch::closed_period_row",
+            contract_batch::closed_period_row,
+        ),
+        (
+            "batch::replay_other_user_refused",
+            contract_batch::replay_other_user_refused,
+        ),
+        (
+            "batch::permission_per_kind",
+            contract_batch::permission_per_kind,
+        ),
+        (
+            "batch::row_rules_refused",
+            contract_batch::row_rules_refused,
         ),
         (
             "lifecycle::ten_switches_under_two_seconds",

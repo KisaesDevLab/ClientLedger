@@ -82,6 +82,16 @@ impl Operation {
     pub const fn company_scoped(&self) -> bool {
         self.company_scoped
     }
+
+    /// Which failures the route reads beyond the §2.4 table: refused rows
+    /// and groups only on `/batch/validate` and `/batch/save`.
+    pub(crate) fn failure_shape(&self) -> crate::errors::FailureShape {
+        if *self == BATCH_SAVE || *self == BATCH_VALIDATE {
+            crate::errors::FailureShape::Batch
+        } else {
+            crate::errors::FailureShape::Plain
+        }
+    }
 }
 
 const fn op(
@@ -544,6 +554,20 @@ pub(crate) const RECURRING_RUN_DUE: Operation = write(Method::Post, "/api/v1/rec
 /// Due reminders and open skipped occurrences (no side effects).
 pub(crate) const RECURRING_ATTENTION: Operation = read("/api/v1/recurring/attention");
 
+// ---- P15A: Bulk Entry -------------------------------------------------------------
+// In the pinned spec; the `batch-*-v1` behavior is client-declared until the
+// P15A engine PR lands (lane A adds the calls).
+
+/// Resolves names and accounts and reports problems per row (posts
+/// nothing; a POST, so classed as a write).
+pub(crate) const BATCH_VALIDATE: Operation = write(Method::Post, "/api/v1/batch/validate");
+/// Posts every row in one transaction (`batch-atomic-v1`).
+pub(crate) const BATCH_SAVE: Operation = write(Method::Post, "/api/v1/batch/save");
+/// The default or most recent account for a name (`?contact_id=`).
+pub(crate) const BATCH_SUGGEST_ACCOUNT: Operation = read("/api/v1/batch/suggest-account");
+/// Reads a CSV or pasted file (multipart) into rows of text.
+pub(crate) const BATCH_PARSE_CSV: Operation = write(Method::Post, "/api/v1/batch/parse-csv");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -556,7 +580,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 154] = [
+pub const OPERATIONS: [Operation; 158] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -715,6 +739,11 @@ pub const OPERATIONS: [Operation; 154] = [
     TEMPLATE_RESOLVE,
     RECURRING_RUN_DUE,
     RECURRING_ATTENTION,
+    // P15A
+    BATCH_VALIDATE,
+    BATCH_SAVE,
+    BATCH_SUGGEST_ACCOUNT,
+    BATCH_PARSE_CSV,
 ];
 
 /// Looks up a covered operation.

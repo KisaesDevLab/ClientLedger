@@ -176,3 +176,11 @@ pub use resources::templates::{
     Templates, auto_start_too_early, client_form, is_auto_start_too_early, is_name_taken,
     is_occurrence_taken, use_from_json,
 };
+
+// P15A: Bulk Entry.
+pub use resources::batch::{
+    Batch, BatchAmount, BatchCaps, BatchField, BatchGroup, BatchGroupProblem, BatchKind,
+    BatchRowIn, BatchRowProblem, BatchSaved, BatchValidation, ColumnMapping, CsvField,
+    ENGINE_MAX_GROUPS, ENGINE_MAX_ROWS, FieldProblem, PARSE_CSV_MAX_BYTES, ParsedRow, ParsedRows,
+    ProblemKind, RowCheck, SavedTxn, is_key_reused,
+};

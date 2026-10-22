@@ -3,12 +3,14 @@
 //! password prompt. P14 adds [`publish_saved`], the one way a form tells
 //! the other windows what its save changed (Q-262), and [`header`], the
 //! toolbar and title row every form draws the same way. P15 adds
-//! [`template`], the Save as Template and Use hook.
+//! [`template`], the Save as Template and Use hook. P15A lifts Write Check's
+//! account suggestions into [`suggest`] for Bulk Entry.
 
 pub mod closing_prompt;
 pub mod header;
 pub mod lines_grid;
 pub mod nav_prompt;
+pub mod suggest;
 pub mod template;
 
 use std::collections::BTreeSet;

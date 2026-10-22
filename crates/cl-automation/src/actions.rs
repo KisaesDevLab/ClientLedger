@@ -189,6 +189,28 @@ pub struct TypeParams {
     pub target: Option<Target>,
 }
 
+/// `paste`: text pasted into the focused element as one clipboard paste,
+/// so tabs and line breaks arrive together. `Debug` hides the text: pasted
+/// rows hold names and amounts.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PasteParams {
+    /// The text.
+    pub text: String,
+    /// Focus this element first.
+    #[serde(default)]
+    pub target: Option<Target>,
+}
+
+impl std::fmt::Debug for PasteParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PasteParams")
+            .field("text", &format_args!("<{} bytes>", self.text.len()))
+            .field("target", &self.target)
+            .finish()
+    }
+}
+
 /// `key`: one key press such as `Ctrl+K`, `Enter`, `Escape`, `Shift+Tab`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

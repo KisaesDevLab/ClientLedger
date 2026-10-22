@@ -153,6 +153,7 @@ pub fn spec(class: AccountClass) -> GridSpec {
         insert_delete: false,
         selection: SelectionMode::None,
         async_record: false,
+        block_paste: false,
     }
 }
 

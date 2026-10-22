@@ -23,70 +23,23 @@
 
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use cl_api::{AiConfig, AiGate, AiPreviewRow, Capabilities, CompanyConsent, RuleQuery};
+use cl_api::{AiGate, AiPreviewRow, Capabilities, RuleQuery};
 use cl_core::Money;
 use cl_core::ids::{AccountId, ContactId};
 use cl_grid::RowKey;
-use cl_settings::{AiProvider, CapCheck};
 use eframe::egui::{self, RichText, Ui};
 
 use super::WriteCheckScreen;
 use crate::company::Task;
 use crate::forms::lines_grid::{L_AMOUNT, L_MEMO};
+// Shared with Bulk Entry (P15A): lifted into `forms::suggest`, no change in
+// behaviour.
+use crate::forms::suggest::clip;
+pub(crate) use crate::forms::suggest::{Asking, Basis, Suggested, TIMEOUT, gate_of};
 use crate::i18n::{t, t_with};
-use crate::prefs::SuggestionAccepts;
 use crate::theme::Tokens;
-
-/// A suggestion request is given up after this long.
-pub(crate) const TIMEOUT: Duration = Duration::from_secs(5);
-/// Accepts of the same suggestion before a rule is offered (Q-141).
-pub(crate) const OFFER_AFTER: u32 = 3;
-/// The longest text sent (the AI preview's limit; rules take more).
-const DESCRIPTION_MAX: usize = cl_api::AI_PREVIEW_DESCRIPTION_MAX_CHARS;
-
-/// Why an account is suggested.
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) enum Basis {
-    /// The owner's rule, by name.
-    Rule(String),
-    /// The AI, with what it based it on.
-    Ai(Option<String>),
-}
-
-impl Basis {
-    pub(crate) fn source(&self) -> &'static str {
-        match self {
-            Basis::Rule(_) => "rule",
-            Basis::Ai(_) => "ai",
-        }
-    }
-}
-
-/// One suggested account (never an amount).
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct Suggested {
-    pub account: AccountId,
-    pub basis: Basis,
-}
-
-/// Ids only: rule names and the AI's basis may name a vendor.
-impl std::fmt::Debug for Suggested {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Suggested")
-            .field("account", &self.account)
-            .field("source", &self.basis.source())
-            .finish()
-    }
-}
-
-/// One line's request in flight.
-pub(crate) struct Asking {
-    pub key: RowKey,
-    pub started: Instant,
-    pub task: Task<Option<Suggested>>,
-}
 
 /// Suggestions on this check.
 #[derive(Default)]
@@ -110,53 +63,6 @@ impl SuggestState {
     }
 }
 
-/// Whether the company's AI consent is for the current notice.
-fn consent_current(c: &CompanyConsent) -> bool {
-    c.ai_enabled
-        && c.accepted_at.is_some()
-        && !c.is_stale
-        && c.accepted_version.is_some()
-        && c.accepted_version == c.system_version
-}
-
-/// The AI switches as the engine reports them, with the local monthly cap
-/// for a cloud provider. Every provider the engine may use is checked: the
-/// whole fallback chain and the categorization provider. A cloud provider
-/// anywhere needs the cap to allow the call; a provider this version does
-/// not know closes the gate.
-#[must_use]
-pub(crate) fn gate_of(
-    config: Option<&AiConfig>,
-    consent: Option<&CompanyConsent>,
-    under_cap: bool,
-) -> AiGate {
-    let named: Vec<&str> = config
-        .map(|c| {
-            c.fallback_chain
-                .iter()
-                .map(String::as_str)
-                .chain(
-                    c.categorization_provider
-                        .as_deref()
-                        .filter(|p| !p.is_empty()),
-                )
-                .collect()
-        })
-        .unwrap_or_default();
-    let providers: Option<Vec<AiProvider>> =
-        named.iter().map(|p| AiProvider::from_wire(p)).collect();
-    let reachable = match providers {
-        Some(p) if !p.is_empty() => p.iter().all(|p| !p.is_cloud()) || under_cap,
-        _ => false,
-    };
-    AiGate {
-        ai_enabled: config.is_some_and(|c| c.is_enabled),
-        consented: consent.is_some_and(consent_current),
-        categorization_on: consent.is_some_and(|c| c.enabled_tasks.categorization == Some(true)),
-        provider_reachable: reachable,
-    }
-}
-
 fn signature(payee: ContactId, memo: &str, amount: Option<Money>) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     payee.hash(&mut h);
@@ -165,36 +71,17 @@ fn signature(payee: ContactId, memo: &str, amount: Option<Money>) -> u64 {
     h.finish()
 }
 
-fn clip(s: &str) -> String {
-    s.chars().take(DESCRIPTION_MAX).collect()
-}
-
 impl WriteCheckScreen {
     /// The AI may be asked (demo: its switches; an engine: the monthly cap
     /// first, the rest is read with the request). When the local store
     /// can't be read the cap is unknown, so a cloud call is not made.
     pub(crate) fn under_cap(&self) -> bool {
-        let Some((tenant, _)) = &self.tenant else {
-            return true;
-        };
-        let month = crate::screens::preferences::ai::this_month();
-        let Ok(list) = self.link.store().load() else {
-            return false;
-        };
-        list.get(*tenant)
-            .map(|r| r.prefs.ai.check(&month))
-            .is_none_or(|c| matches!(c, CapCheck::Allowed))
+        crate::forms::suggest::under_cap(&self.link, self.tenant.as_ref().map(|(t, _)| *t))
     }
 
     /// The demo's AI gate (a local model; consent given in the demo).
     fn demo_gate(&self) -> AiGate {
-        let ai = self.link.demo_state().map(|d| d.ai).unwrap_or_default();
-        AiGate {
-            ai_enabled: ai.enabled,
-            consented: ai.enabled,
-            categorization_on: ai.categorization,
-            provider_reachable: true,
-        }
+        crate::forms::suggest::demo_gate(&self.link)
     }
 
     /// Lines the owner left with a memo or an amount and no account: ask.
@@ -376,37 +263,14 @@ impl WriteCheckScreen {
         };
         self.lines.set_suggestion(key, None);
         self.suggest.accepted += 1;
-        let (Some(payee), Some((tenant, _))) = (self.header.current().payee, &self.tenant) else {
+        let Some(payee) = self.header.current().payee else {
             return;
         };
-        let Some(dir) = self
-            .link
-            .store()
-            .path()
-            .parent()
-            .map(std::path::Path::to_path_buf)
-        else {
-            return;
-        };
-        let mut book = SuggestionAccepts::load(&dir);
-        let n = book.bump(&SuggestionAccepts::key(
-            &tenant.to_string(),
-            &payee.to_string(),
-            &account.to_string(),
-            s.basis.source(),
-        ));
-        if book.save(&dir).is_err() {
-            tracing::debug!("the suggestion count was not written");
-        }
-        let offer_on = self
-            .link
-            .store()
-            .load()
-            .ok()
-            .and_then(|l| l.get(*tenant).map(|r| r.prefs.ai.suggest_rules))
-            .unwrap_or(false);
-        if offer_on && n >= OFFER_AFTER {
-            self.suggest.offer = Some((payee, account));
+        let tenant = self.tenant.as_ref().map(|(t, _)| *t);
+        if let Some(offer) =
+            crate::forms::suggest::count_accept(&self.link, tenant, payee, account, &s.basis)
+        {
+            self.suggest.offer = Some(offer);
         }
     }
 
@@ -441,6 +305,7 @@ impl WriteCheckScreen {
                 Basis::Rule(rule) => t_with("check.suggest.rule", &[("rule", rule)]),
                 Basis::Ai(Some(basis)) => t_with("check.suggest.ai_basis", &[("basis", basis)]),
                 Basis::Ai(None) => t("check.suggest.ai"),
+                Basis::Usual(_) => t("batch_entry.suggest.usual"),
             };
             egui::Frame::new()
                 .fill(tokens.warn_tint)

@@ -6,3 +6,5 @@
 *.ttf binary
 *.otf binary
 *.woff2 binary
+# Bulk Entry fixtures keep their exact bytes (BOM, CRLF inside quotes).
+fixtures/batch/** -text

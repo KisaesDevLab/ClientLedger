@@ -500,6 +500,11 @@ pub fn inline_error(ui: &mut Ui, tokens: &Tokens, error: &dyn cl_core::OwnerFaci
         text.push(' ');
         text.push_str(&t(fix));
     }
+    inline_warning(ui, tokens, &text);
+}
+
+/// Shows a plain-language problem inline, as [`inline_error`] does.
+pub fn inline_warning(ui: &mut Ui, tokens: &Tokens, text: &str) {
     egui::Frame::new()
         .fill(tokens.warn_surface)
         .corner_radius(CornerRadius::same(4))

@@ -152,5 +152,9 @@
   {"method":"POST","path":"/api/v1/templates/{id}/occurrences/{date}/skip","inSpec":true,"fragmentHash":"3eff5d7f907134ef58dd36fc2f625eee5cb04491125b644646e13201f9c2074b"},
   {"method":"POST","path":"/api/v1/templates/{id}/occurrences/{date}/resolve","inSpec":true,"fragmentHash":"078fe6ea11376cff5288b9a9d8d316d2474f3ebc1a510cffe6dc941af8898871"},
   {"method":"POST","path":"/api/v1/recurring/run-due","inSpec":true,"fragmentHash":"aa81c4fee3f4f2b5c9ba1332e56d526fac8d7ea9b16f1e3c1903fde717358661"},
-  {"method":"GET","path":"/api/v1/recurring/attention","inSpec":true,"fragmentHash":"c1bc68da1771d1c2f7742217a798409597adfbf59ab8ab86fd85bbd7b89c39b0"}
+  {"method":"GET","path":"/api/v1/recurring/attention","inSpec":true,"fragmentHash":"c1bc68da1771d1c2f7742217a798409597adfbf59ab8ab86fd85bbd7b89c39b0"},
+  {"method":"POST","path":"/api/v1/batch/validate","inSpec":true,"fragmentHash":"9c4b2902385c54ef5da540613b11da9da3d74c0a85ab15d5e38a8abde0fbab3f"},
+  {"method":"POST","path":"/api/v1/batch/save","inSpec":true,"fragmentHash":"3affa0ea99ccff54da930bf8791ae7f7c569898e59755bb2150fdb89a01f52a4"},
+  {"method":"GET","path":"/api/v1/batch/suggest-account","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/batch/parse-csv","inSpec":true,"fragmentHash":null}
 ]

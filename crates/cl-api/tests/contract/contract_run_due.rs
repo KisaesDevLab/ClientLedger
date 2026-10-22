@@ -540,24 +540,6 @@ pub fn catch_up_capped_continues_next_call(h: &Harness) {
     assert!(mine(&run(h, s, as_of), &t).is_empty(), "nothing left");
 }
 
-/// The id of a team member invited into the session's company.
-fn invite(h: &Harness, s: &Session, email: &str) -> (String, Secret) {
-    let made = h
-        .run(s.raw(
-            Method::Post,
-            "/api/v1/company/invite-user",
-            &[],
-            Some(&json!({"email": email, "displayName": "Synthetic Bookkeeper", "role": "bookkeeper"})),
-        ))
-        .expect("invite");
-    assert_eq!(made.status, 201, "{}", made.body);
-    let id = made.body["user"]["id"].as_str().expect("id").to_string();
-    let pw = made.body["temporaryPassword"]
-        .as_str()
-        .expect("temporary password");
-    (id, Secret::new(pw.to_string()))
-}
-
 fn permissions(h: &Harness, s: &Session, user: &str, transactions: &str) {
     let r = h
         .run(s.raw(
@@ -585,18 +567,8 @@ pub fn owner_without_permission_skipped(h: &Harness) {
     }
     let s = &h.s1;
     let c = card(h, s);
-    let email = format!(
-        "bk-{}@example.com",
-        unique("x").trim_start_matches("x ").to_lowercase()
-    );
-    let (user, pw) = invite(h, s, &email);
+    let (user, bk) = h.bookkeeper();
     permissions(h, s, &user, "full");
-    let bk = match h.run(h.client.login(&email, &pw)) {
-        Ok(cl_api::LoginOutcome::Session(b)) => b,
-        other => panic!("bookkeeper login: {other:?}"),
-    };
-    h.run(bk.open_company(h.contract_co))
-        .expect("bookkeeper opens");
     let first = day_back(3, 12);
     let t = auto(h, &bk, &c, ScheduleMode::Auto, first, ScheduleEnd::Never);
     permissions(h, s, &user, "view");

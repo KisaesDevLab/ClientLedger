@@ -1,0 +1,206 @@
+# Bulk Entry (P15A, `banking.bulk_entry`) against `clientledger --demo`
+# (today 11/04/2026, books closed through 09/30/2026, synthetic data only).
+# Plan §6:
+#  1. the palette opens Bulk Entry with one Checks section;
+#  2. three typed check rows (date keys, name autofill, the account
+#     suggestion accepted with Tab) and a Deposits section with two rows;
+#  3. 12.345 shows as 12.35; an account not in the lists tints its row,
+#     Save all stays off and Alt+S saves nothing;
+#  4. fixed, F8 finds nothing and Save all is on;
+#  5. a deposit dated in the closed period: Save all asks for the
+#     closing-date password once (a wrong one, then the right one);
+#  6. the summary's counts and totals, then its register link;
+#  7. a new batch from a pasted block with a header and a 3-decimal amount
+#     (the mapping remembered), and a journal entry section whose
+#     unbalanced entry shows its difference until fixed; saved.
+# Light and dark run in one app: every pass adds new rows (checks take the
+# next numbers), so the scenario repeats.
+name: batch_entry
+description: Typed checks and deposits, problems and F8, the closed-period password, the summary and register, a pasted block with a mapping and a journal entry section.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  # --- 1. Open ----------------------------------------------------------------
+  - command: banking.bulk_entry
+  - assert_exists: {role: tab, label_contains: "Bulk Entry"}
+  - assert_state: {key: screen.screen, equals: batch_entry}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.sections, equals: 1}
+  - assert_state: {key: screen.section_kind, equals: checks}
+  - assert_state: {key: screen.blocker, equals: empty}
+  - assert_exists: {label_contains: "Checks rows"}
+  # --- 2. Three checks --------------------------------------------------------
+  - click: {label: "Date, line 1"}
+  - type: {text: "T"}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: "Hollister Fuel"}
+  - key: Tab
+  - assert_value: {target: {label: "Pay to, line 1"}, equals: "Hollister Fuel Stop"}
+  - assert_state: {key: screen.suggest.open, equals: 1}
+  - key: Tab
+  - assert_value: {target: {label: "Account, line 1"}, equals: "6100 · Fuel"}
+  - assert_state: {key: screen.suggest.accepted, equals: 1}
+  - type: {text: "12.345"}
+  - key: Tab
+  - assert_value: {target: {label: "Amount, line 1"}, equals: "12.35"}
+  - type: {text: "Scenario {theme}"}
+  - key: Enter
+  - click: {label: "Pay to, line 2"}
+  - type: {text: "Galena Gravel"}
+  - key: Tab
+  - type: {text: "9999"}
+  - key: Tab
+  - type: {text: "20"}
+  - key: Tab
+  - type: {text: "Scenario {theme}"}
+  - key: Enter
+  - click: {label: "Date, line 3"}
+  - type: {text: "-"}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - type: {text: "Crane Creek Tree"}
+  - key: Tab
+  - assert_state: {key: screen.suggest.open, equals: 1}
+  - key: Tab
+  - type: {text: "30"}
+  - key: Tab
+  - type: {text: "Scenario {theme}"}
+  - key: Enter
+  - assert_state: {key: screen.rows, equals: 3}
+  # --- 3. Not in your lists ---------------------------------------------------
+  - assert_state: {key: screen.problems, equals: 1}
+  - assert_exists: {role: label, label_contains: "Not in your lists"}
+  - assert_state: {key: screen.can_save, equals: false}
+  - assert_state: {key: screen.blocker, equals: engine_problems}
+  - assert_no_clipping: {}
+  - screenshot: problems
+  - key: Alt+S
+  - assert_state: {key: screen.refused, equals: engine_problems}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - assert_state: {key: screen.grid.row, equals: 1}
+  - assert_state: {key: screen.grid.column, equals: account}
+  # --- 4. Fixed ---------------------------------------------------------------
+  - click: {label: "Account, line 2"}
+  - key: Ctrl+A
+  - type: {text: "5200"}
+  - key: Tab
+  - key: Enter
+  - assert_state: {key: screen.problems, equals: 0}
+  - key: F8
+  - assert_state: {key: screen.notice, equals: batch_entry.no_problems}
+  - assert_state: {key: screen.can_save, equals: true}
+  - screenshot: checks
+  # --- 2b. A Deposits section on 1010 with two rows ----------------------------
+  - click: {role: button, label: Add section}
+  - click: {role: button, label: Deposits}
+  - assert_state: {key: screen.sections, equals: 2}
+  - assert_state: {key: screen.section_kind, equals: deposits}
+  - assert_exists: {label_contains: "Deposits rows"}
+  - click: {label: "Received from, line 1"}
+  - type: {text: "Riverbend HOA"}
+  - key: Tab
+  - key: Ctrl+A
+  - type: {text: "4000"}
+  - key: Tab
+  - type: {text: "100"}
+  - key: Tab
+  - type: {text: "Scenario {theme}"}
+  - key: Enter
+  # --- 5. A deposit dated in the closed period ---------------------------------
+  - click: {label: "Date, line 2"}
+  - key: Ctrl+A
+  - type: {text: "09/15/2026"}
+  - key: Tab
+  - key: Tab
+  - type: {text: "Riverbend HOA"}
+  - key: Tab
+  - key: Ctrl+A
+  - type: {text: "4000"}
+  - key: Tab
+  - type: {text: "50.25"}
+  - key: Tab
+  - type: {text: "Scenario {theme}"}
+  - key: Enter
+  - assert_state: {key: screen.rows, equals: 5}
+  - assert_state: {key: screen.locked_rows, equals: 1}
+  - assert_state: {key: screen.can_save, equals: true}
+  - key: Ctrl+PageUp
+  - assert_state: {key: screen.section_kind, equals: checks}
+  - key: Ctrl+PageDown
+  - assert_state: {key: screen.section_kind, equals: deposits}
+  - screenshot: sections
+  - key: Alt+S
+  - assert_state: {key: screen.closing, equals: asking}
+  - assert_exists: {role: password_input, label: Closing-date password}
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: not-the-password}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.closing_attempt, equals: 1}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - assert_no_clipping: {}
+  - screenshot: closing
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: demo-close}
+  - click: {role: button, label: Change}
+  # --- 6. The summary, then the register ---------------------------------------
+  - assert_state: {key: screen.saved_count, equals: 5}
+  - assert_state: {key: screen.summary.rows, equals: 5}
+  - assert_state: {key: screen.summary.totals.0.kind, equals: checks}
+  - assert_state: {key: screen.summary.totals.0.total, equals: "62.35"}
+  - assert_state: {key: screen.summary.totals.1.total, equals: "150.25"}
+  - assert_exists: {role: label, label: "Saved 5 rows"}
+  - assert_no_clipping: {}
+  - screenshot: summary
+  - click: {role: link, label: "Open register: 1010 · Operating Checking"}
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.balance_mode, equals: engine}
+  - assert_exists: {role: row, label_contains: "Hollister Fuel Stop", index: 0}
+  - screenshot: register
+  - command: file.close_window
+  - command: banking.bulk_entry
+  - assert_state: {key: screen.screen, equals: batch_entry}
+  # --- 7. A new batch from a pasted block ----------------------------------------
+  - click: {role: button, label: New batch}
+  - assert_state: {key: screen.summary, equals: null}
+  - assert_state: {key: screen.rows, equals: 0}
+  - click: {label: "Date, line 1"}
+  - paste: {text: "Date\tPay to\tAccount\tAmount\tMemo\n11/02/2026\tHollister Fuel Stop\t6100\t12.345\tPaste {theme}\n11/03/2026\tGalena Gravel\t5200\t7.5\tPaste {theme}\n"}
+  - assert_state: {key: screen.mapping.first_row_headers, equals: true}
+  - assert_state: {key: screen.mapping.preview_rows, equals: 2}
+  - click: {role: check_box, label: Remember for this company}
+  - assert_no_clipping: {}
+  - screenshot: mapping
+  - click: {role: button, label: Add rows}
+  - assert_state: {key: screen.mapping, equals: null}
+  - assert_state: {key: screen.rows, equals: 2}
+  - assert_value: {target: {label: "Amount, line 1"}, equals: "12.35"}
+  - click: {role: button, label: Add section}
+  - click: {role: button, label: Journal entries}
+  - assert_state: {key: screen.section_kind, equals: journal_entries}
+  - click: {label: "Date, line 1"}
+  - paste: {text: "Date\tEntry No.\tAccount\tDebit\tCredit\n11/04/2026\tS-{theme}\t6100\t100.00\t\n11/04/2026\tS-{theme}\t1010\t\t90.00\n"}
+  - click: {role: button, label: Add rows}
+  - assert_state: {key: screen.rows, equals: 4}
+  - assert_state: {key: screen.unbalanced, equals: ["10.00"]}
+  - assert_state: {key: screen.can_save, equals: false}
+  - assert_exists: {role: label, label_contains: "Difference 10.00"}
+  - assert_no_clipping: {}
+  - screenshot: unbalanced
+  - click: {label: "Credit, line 2"}
+  - key: Ctrl+A
+  - type: {text: "100"}
+  - key: Tab
+  - assert_state: {key: screen.unbalanced, equals: []}
+  - assert_state: {key: screen.can_save, equals: true}
+  - key: Alt+S
+  - assert_state: {key: screen.summary.rows, equals: 4}
+  - assert_state: {key: screen.summary.journal.debits, equals: "100.00"}
+  - assert_no_clipping: {}
+  - screenshot: saved
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Bulk Entry"}

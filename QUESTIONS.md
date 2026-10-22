@@ -276,6 +276,7 @@ Answers from the owner after P11. They replace the defaults named below; later p
 | Q-260 | Sales tax on the daily sales summary before P23. | **Manual "Sales tax collected" line**: the owner types the tax to a sales-tax liability account; P23 replaces it with calculated tax. | P14, P20, P23 |
 | Q-261 | Look of P14 screens (no mockups). | **Follow the approved Write Check pattern** (tokens, header + lines grid + side panel); screenshots in the PR for owner review. | P14 |
 | Q-262 | Open registers don't refresh after a save in another window (P13 follow-up). | **Fix first in P14**: every save tells open registers and lists to reload. | P14 |
+| Q-263 | Bulk Entry row types whose forms aren't built yet (invoice, bill, credit memo, customer payment). | Default (per the P15A phase file): **offered only once their phase is done** (bills P17, invoices P20, payments P21, credit memos P22); P15A offers checks/expenses, card charges and credits, deposits and journal entries. | P15A, P17–P22 |
 | Q-253 | Early test builds before P35 packaging? | **Yes**: a GitHub workflow builds unsigned portable preview archives (Windows, macOS, Linux) automatically after each phase merges to main, and on demand, as workflow artifacts (kept 30 days), not public releases; P35 still builds the installers. | Preview build, P35 |
 
 ## Open
@@ -434,3 +435,22 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P15y | Register routing for journal entries | P15 | Ctrl+E or Enter on a journal entry opens Make Journal Entry (Q-P14aa extended). | Default in force |
 | Q-P15z | Make Journal Entry panels | P15 | No side panel and no History in P15 (follow-up). | Default in force |
 | Q-P15aa | Templates Due chip | P15 | Counts dates (occurrences), matching what Templates Due lists. | Default in force |
+| Q-P15Aa | Bulk Entry layout | P15A | Sections (one type and account each) in one window, a strip plus one grid; a mixed batch saves in one call. | Default in force |
+| Q-P15Ab | Bulk Entry types | P15A | Checks, Expenses, Card charges, Card credits, Deposits, Journal entries (Q-263). Checks need `batch-check-v1`. | Default in force |
+| Q-P15Ac | Bulk Entry without engine support | P15A | Save all needs all six batch capabilities: `batch-atomic-v1`, `batch-check-v1`, `batch-mixed-v1`, `batch-exact-v1`, `batch-idempotent-v1` and `batch-closing-v1`. Missing any one turns Save all off (superseded the one-section-per-save fallback). | Default in force |
+| Q-P15Ad | Unknown names in Bulk Entry | P15A | Unknown names are row problems unless "Add new names to the list" is ticked (off by default). Accounts are never created. | Default in force |
+| Q-P15Ae | Closed-period rows in Bulk Entry | P15A | One password per save covers them all, and each is audited by the engine. | Default in force |
+| Q-P15Af | Paste and CSV import | P15A | Both go through the engine's `parse-csv`. A headerless paste maps left to right from the cursor column. Mappings are remembered per company, type and header set. Tags are not imported. | Default in force |
+| Q-P15Ag | Bulk Entry limits | P15A | 2,000 rows per batch; 10 MB files. | Default in force |
+| Q-P15Ah | Bulk Entry shortcuts | P15A | No global shortcut (Banking menu, palette); Ctrl+PageUp/PageDown move between sections; F8 / Shift+F8 go to the next / previous problem; Alt+S Save all; Alt+N Save all and new. | Default in force |
+| Q-P15Ai | Bulk Entry drafts | P15A | No drafts across restarts; closing a dirty window prompts. | Default in force |
+| Q-P15Aj | Journal entry rows in Bulk Entry | P15A | Rows group by Date + Entry No.; Entry No. is required; the difference is shown, with no auto-balance helper in the grid. | Default in force |
+| Q-P15Ak | Customer / Job and Billable in Bulk Entry | P15A | No such columns (the engine batch row lacks them); use the forms. | Default in force |
+| Q-P15Al | After a Bulk Entry save | P15A | The window shows a summary (counts, totals per account, register links) and does not close. | Default in force |
+| Q-P15Am | Bulk Entry windows | P15A | One Bulk Entry window at a time. | Default in force |
+| Q-P15An | Bulk Entry look | P15A | No mockup, Write Check pattern, screenshots in the PR, no `--compare`. | Default in force |
+| Q-P15Ao | Pasted and CSV cells | P15A | Pasted and CSV cells are parsed literally, with no calculator: "100/4" is a row problem, not 25. | Default in force |
+| Q-P15Ap | Check all rows | P15A | "Check all rows" re-sends every row to the engine's validate, not only the changed ones. | Default in force |
+| Q-P15Aq | BATCH_BUSY and the idempotency key | P15A | `BATCH_BUSY` keeps the idempotency key so a retry replays or completes. This is a shared `keeps_key` change that affects every form. | Default in force |
+| Q-P15Ar | Inactive accounts in Bulk Entry | P15A | The engine posts to inactive accounts (engine issue #164). Bulk Entry follows the engine for now and does not refuse them. | Default in force |
+| Q-P15As | Save all explanation at 200% zoom | P15A | At 200% zoom the text explaining why Save all is off moves to the button tooltip. | Default in force |

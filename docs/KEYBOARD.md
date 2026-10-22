@@ -69,6 +69,10 @@ When two scopes use the same keys, the innermost one wins: a form beats a window
 | `Ctrl+Delete` | Delete Line | `form.delete_line` |
 | `Ctrl+D` | Delete Transaction | `form.delete_item` |
 | `Ctrl+M` | Save as Template | `form.save_as_template` |
+| `F8` | Next Row That Needs Attention | `batch.next_problem` |
+| `Shift+F8` | Previous Row That Needs Attention | `batch.prev_problem` |
+| `Ctrl+Page Down` | Next Section | `batch.next_section` |
+| `Ctrl+Page Up` | Previous Section | `batch.prev_section` |
 
 ## Always the same in forms and grids
 
@@ -113,7 +117,7 @@ Find these from the menus or with `Ctrl+K`.
 - **Lists:** Item List, Tags, Terms, Payment Methods, Templates, Import or Export a List
 - **Customers:** Customers & Jobs, Daily Sales Summary, Credit Memo or Refund, Statements
 - **Vendors:** Vendors, Paid with Personal Funds
-- **Banking:** Pay Yourself or Put Money In, Loan Payment, Import Bank File, Bank Feed
+- **Banking:** Pay Yourself or Put Money In, Loan Payment, Bulk Entry, Import Bank File, Bank Feed
 - **Payroll:** Import Payroll
 - **Reports:** Reports, Profit & Loss, Balance Sheet
 - **Company:** Set Closing Date, Users and Permissions, Send to My Accountant, Audit Trail

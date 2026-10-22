@@ -63,6 +63,14 @@ pub fn tools() -> Vec<Tool> {
             ),
         },
         Tool {
+            name: "paste",
+            description: "Paste text into the focused element as one clipboard paste (tabs and line breaks kept), optionally focusing a target first.",
+            input_schema: object(
+                &json!({"text": {"type": "string"}, "target": target_schema()}),
+                &["text"],
+            ),
+        },
+        Tool {
             name: "key",
             description: "Press one key chord such as Ctrl+K, Enter, Escape, Shift+Tab, F1.",
             input_schema: object(&json!({"key": {"type": "string"}}), &["key"]),
@@ -143,7 +151,7 @@ mod tests {
         let n = names.len();
         names.dedup();
         assert_eq!(n, names.len());
-        assert_eq!(n, 12);
+        assert_eq!(n, 13);
         for tool in &t {
             assert_eq!(tool.input_schema["type"], "object", "{}", tool.name);
             assert_ne!(tool.description.len(), 0);

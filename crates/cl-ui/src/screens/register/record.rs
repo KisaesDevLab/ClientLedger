@@ -127,9 +127,19 @@ pub(super) struct SaveIdentity {
 /// recognised as the same save. A definitive refusal (validation, conflict,
 /// closed period, password, rate limit, ...) gets a fresh key, so the next
 /// try is never answered with the stored refusal.
+///
+/// "Busy" (409 `TENANT_BUSY`, `IDEMPOTENCY_IN_PROGRESS`, `BATCH_BUSY`) keeps
+/// the key too: it may answer the retry of a save whose reply was lost
+/// while that save is still running, and only the same key replays it once
+/// it finishes.
 pub(crate) fn keeps_key(e: &ApiError) -> bool {
     match e {
+        ApiError::Conflict {
+            reason: cl_api::ConflictReason::Busy,
+            ..
+        } => true,
         ApiError::Validation(_)
+        | ApiError::BatchGroup { .. }
         | ApiError::Local(_)
         | ApiError::Conflict { .. }
         | ApiError::ClosedPeriod(_)
