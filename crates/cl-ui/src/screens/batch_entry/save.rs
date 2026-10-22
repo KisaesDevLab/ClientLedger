@@ -49,6 +49,7 @@ impl BulkEntryScreen {
         {
             Ok(()) => self.send_save(intent, None),
             Err(Blocker::Unchecked(_)) => {
+                let before = self.saved_count;
                 self.save_after_check = Some(intent);
                 if self.checking.is_none() && !self.start_check(true) {
                     self.save_after_check = None;
@@ -60,7 +61,8 @@ impl BulkEntryScreen {
                         Err(b) => self.refuse_save(b),
                     }
                 }
-                false
+                // The demo answers at once: the save may already be done.
+                self.saved_count != before
             }
             Err(b) => {
                 self.refuse_save(b);
@@ -72,7 +74,7 @@ impl BulkEntryScreen {
     /// The key for this content: the stored one when the same rows go
     /// again (a retry after an unknown outcome replays safely), a fresh one
     /// otherwise.
-    fn key_for(&mut self, hash: u64) -> IdempotencyKey {
+    pub(crate) fn key_for(&mut self, hash: u64) -> IdempotencyKey {
         match &self.key {
             Some((h, k)) if *h == hash => k.clone(),
             _ => {
