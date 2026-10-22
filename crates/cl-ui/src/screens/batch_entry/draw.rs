@@ -83,8 +83,11 @@ impl BulkEntryScreen {
         self.import_ui(ui, &tokens);
         ui.add_space(6.0);
         // Room under the grid for what the footer shows this frame.
-        let listed = self.problem_rows_in(self.selected()).len().min(LISTED_PROBLEMS + 1);
-        let mut reserve = 150.0 + 26.0 * listed as f32;
+        let listed = self
+            .problem_rows_in(self.selected())
+            .len()
+            .min(LISTED_PROBLEMS + 1);
+        let mut reserve = 150.0 + 26.0 * f32::from(u8::try_from(listed).unwrap_or(u8::MAX));
         if !self.open_suggestions().is_empty() || self.suggest.offer.is_some() {
             reserve += 34.0;
         }
