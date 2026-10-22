@@ -18,3 +18,5 @@ f79a832cb6802b7deac37cd02f443bf2dabc72c99bb052509f59eb8bce5169c4  engine/package
 daeea9464659f58e633df35f8946a1690ed86573f5b9cbc839497c44d0608380  engine/packages/shared/src/schemas/daily-sales.ts
 687df1aed70ec018201b96f92399f14c7ab2dd8609fb4657a08dbb9c6dd19898  engine/packages/api/src/routes/daily-sales.routes.ts
 9f625b4b6efc9eee4ad23f4ce959716bf275a2bc46a033693c61c44b74cf9635  engine/packages/api/src/routes/payments.routes.ts
+959d2ea9bf0ca503613d368b44bf5ef1fa68eb1bdc1283479d007b1e07753ded  engine/packages/shared/src/schemas/batch.ts
+ee223ec65c0195d5d7b7cb50bd3d69a2a48bb619bf945d60e75092c67471213d  engine/packages/api/src/routes/batch.routes.ts

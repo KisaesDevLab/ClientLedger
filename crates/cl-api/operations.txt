@@ -30,6 +30,8 @@
 #! schema-source engine/packages/shared/src/schemas/daily-sales.ts
 #! schema-source engine/packages/api/src/routes/daily-sales.routes.ts
 #! schema-source engine/packages/api/src/routes/payments.routes.ts
+#! schema-source engine/packages/shared/src/schemas/batch.ts
+#! schema-source engine/packages/api/src/routes/batch.routes.ts
 GET     /health                                 idempotent
 GET     /api/v1/desktop/info                    idempotent
 GET     /openapi.json                           idempotent
@@ -188,3 +190,8 @@ POST    /api/v1/templates/{id}/occurrences/{date}/skip pre-handler-only
 POST    /api/v1/templates/{id}/occurrences/{date}/resolve pre-handler-only
 POST    /api/v1/recurring/run-due               pre-handler-only
 GET     /api/v1/recurring/attention             idempotent
+# P15A: Bulk Entry (in the pinned spec; batch-*-v1 behavior client-declared until the engine PR lands)
+POST    /api/v1/batch/validate                  pre-handler-only
+POST    /api/v1/batch/save                      pre-handler-only
+GET     /api/v1/batch/suggest-account           idempotent
+POST    /api/v1/batch/parse-csv                 pre-handler-only

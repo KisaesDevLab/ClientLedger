@@ -264,6 +264,12 @@ pub enum LocalValidation {
     TemplateGrouping,
     /// The catch-up run needs `recurring-run-due-v1`; nothing was sent.
     RunDueUnavailable,
+    /// Bulk Entry needs a `batch-*-v1` capability the engine does not
+    /// advertise (P15A §2); nothing was sent.
+    BatchUnavailable,
+    /// A Bulk Entry amount has digits below the cent (cl-model rounds
+    /// before building a row, Q-232); nothing was sent.
+    NotWholeCents,
 }
 
 /// A save was refused because its date is on or before the closing date.
@@ -334,6 +340,10 @@ pub enum ApiError {
     /// The engine refused the input.
     #[error("validation failed ({})", code_text(.0.code.as_ref()))]
     Validation(ValidationError),
+    /// Bulk Entry rows the engine refused (P15A, `batch-atomic-v1`): the
+    /// save posted nothing. Each entry names its group and row number.
+    #[error("{} bulk entry rows refused", .0.len())]
+    BatchRows(Vec<crate::resources::batch::BatchRowProblem>),
     /// cl-api refused the input before sending anything.
     #[error("refused before sending ({0:?})")]
     Local(LocalValidation),
@@ -503,6 +513,7 @@ impl OwnerFacing for ApiError {
     fn owner_message(&self) -> OwnerMessage {
         let (key, fix) = match self {
             ApiError::Validation(_) => ("error.api.validation", Some("fix.api.validation")),
+            ApiError::BatchRows(_) => ("error.api.batch_rows", Some("fix.api.batch_rows")),
             ApiError::Local(_) => ("error.api.local", Some("fix.api.validation")),
             ApiError::Conflict { reason, .. } => match reason {
                 ConflictReason::Stale => ("error.api.conflict_stale", Some("fix.api.reload")),

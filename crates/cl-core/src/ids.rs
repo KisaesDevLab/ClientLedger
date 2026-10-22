@@ -155,6 +155,8 @@ typed_id!(
     TemplateGroupId,
     /// One catch-up run (`runId`; a repeat call with it is harmless).
     RunId,
+    /// One Bulk Entry save (P15A `batchId`, `batch-atomic-v1`).
+    BatchId,
 );
 
 #[cfg(test)]

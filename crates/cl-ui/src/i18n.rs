@@ -522,6 +522,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("fix.fiscal.bad_month", "Pick a month from 1 to 12."),
     ("error.api.validation", "The books engine did not accept that entry."),
     ("fix.api.validation", "Check the highlighted fields and try again."),
+    ("error.api.batch_rows", "Some rows need attention, so nothing was saved."),
+    ("fix.api.batch_rows", "Fix the highlighted rows, then save all again."),
     ("error.api.local", "Something in this entry needs fixing before it can be saved."),
     ("error.api.conflict_stale", "Someone or something else changed this record while you were editing it."),
     ("fix.api.reload", "Reload it to see the latest version, then make your change again."),

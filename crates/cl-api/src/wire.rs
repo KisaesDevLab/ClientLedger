@@ -156,6 +156,27 @@ impl Capabilities {
     /// P15 U-63: `POST /recurring/run-due` and `GET /recurring/attention`.
     pub const RECURRING_RUN_DUE: &'static str = "recurring-run-due-v1";
 
+    // ---- P15A: Bulk Entry (`/batch/*`; client-declared capabilities) ------
+    /// P15A: `POST /batch/save` posts every row in one database
+    /// transaction; a failure names `{group, rowNumber, field, message}`
+    /// and saves nothing. The engine stores `source: 'batch'` and a
+    /// `batchId`.
+    pub const BATCH_ATOMIC: &'static str = "batch-atomic-v1";
+    /// P15A: `txn_type: check` rows with `checkNumber` and `printLater`.
+    pub const BATCH_CHECK: &'static str = "batch-check-v1";
+    /// P15A: one call carries `groups[{txn_type, context_account_id,
+    /// rows}]` (several types and accounts).
+    pub const BATCH_MIXED: &'static str = "batch-mixed-v1";
+    /// P15A: string amounts read as exact decimals; `parse-csv` returns
+    /// string amounts and handles a BOM and quoted newlines.
+    pub const BATCH_EXACT: &'static str = "batch-exact-v1";
+    /// P15A: `Idempotency-Key` on `/batch/save`; a replay returns the first
+    /// result.
+    pub const BATCH_IDEMPOTENT: &'static str = "batch-idempotent-v1";
+    /// P15A: a row's `closingPassword` lets it post on or before the
+    /// closing date (audited), with the P12 closed-period errors.
+    pub const BATCH_CLOSING: &'static str = "batch-closing-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {
