@@ -204,7 +204,7 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 | --- | --- | --- | --- | --- |
 | L | M | P13–P15 | rust-implementer (sonnet) | ui-verifier |
 
-**Decisions:** Q-63, Q-71, Q-106, Q-130, Q-149, Q-169, Q-171, Q-217, Q-264, Q-265.
+**Decisions:** Q-63, Q-71, Q-106, Q-130, Q-149, Q-169, Q-171, Q-217, Q-264, Q-265, Q-266.
 
 **Mockup:** `docs/design/mockups/Home.html` and `docs/design/screenshots/Home.png` (Home content).
 
@@ -213,6 +213,7 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 **Steps**
 0. Enter-key preference (Q-264), first: Preferences gets "Enter moves between fields" (off by default). When on, Enter moves to the next field or grid cell like Tab (Shift+Enter moves back; in a grid's last cell it starts a new line) and Ctrl+Enter does Save & New on every form and in Bulk Entry; Alt+S stays Save & Close. When off, today's behavior stays (Enter = Save & New in header fields, Q-190; Enter records a grid row). One switch in the `cl-model::keymap` / form key handling, shown in menus, tooltips, the status bar and KEYBOARD.md; travels in preferences backups. Tests: unit tests for both modes; one form scenario run with the option on. — `feat(forms): Enter moves between fields option`
 0b. Persistent headers (Q-265): on every screen the title, toolbar/actions, filters and grid column headers stay fixed while only the content scrolls — list and center screens (Customers & Jobs, Vendors, Chart of Accounts, Items, Tags, Templates), registers, Bulk Entry, Templates Due and every form (header card and Save buttons stay reachable; the lines grid and side panel scroll). One shared screen-layout helper (fixed top and bottom bars, scrolling body) used by all screens; at 960×640 and 200% zoom the fixed parts wrap, and if they would take more than half the window the body still gets at least a few rows. Tests: a scenario per screen kind scrolls to the bottom and asserts the actions are still visible and clickable; forms-zoom extended. — `feat(ui): persistent headers on every screen`
+0c. Collapsible detail panel (Q-266): on Customers & Jobs and Vendors, the detailed side panel can be collapsed to a thin edge strip and expanded again (button on the panel edge, keyboard shortcut registered in `cl-model::keymap`, AccessKit label "Show details"/"Hide details"); the list takes the freed width. The choice is remembered per screen in UI preferences and restored on reopen. Built as a shared panel helper so other screens with side panels (Write Check payee panel, registers) can use it later. Tests: unit test for the remembered state; scenario collapses, reopens the screen, sees it still collapsed, expands. — `feat(ui): collapsible detail panel on Customers and Vendors`
 1. Four lanes from the command registry (later phases light up their actions; placeholders tracked in STATE.md). — `feat(home): lanes`
 2. Account balances (books vs. imported bank balance when available). — `feat(home): balances`
 3. Needs attention: bank items waiting, overdue invoices, bills overdue or due within 7 days (Q-169), unposted payroll imports, open to-dos (Q-130), reorder alerts (Q-149), weekly health-check findings (Q-171), backup reminder (Q-217). In-app only (Q-71). — `feat(home): needs attention`
@@ -224,6 +225,7 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 **Acceptance**
 - [ ] With "Enter moves between fields" on, Enter moves between fields and Ctrl+Enter saves on every form; with it off, behavior is unchanged.
 - [ ] On every screen the title, actions and column headers stay visible while scrolling (scenario per screen kind, including 960×640 and 200% zoom).
+- [ ] Customers & Jobs and Vendors detail panels collapse and expand, and the choice is remembered.
 - [ ] Every lane action opens its form or a tracked placeholder.
 - [ ] Needs-attention counts match engine queries.
 - [ ] Screen matches its mockup per docs/design/README.md (`ui-check --compare` reviewed by ui-verifier); any deviation is listed in the PR and QUESTIONS.md.
