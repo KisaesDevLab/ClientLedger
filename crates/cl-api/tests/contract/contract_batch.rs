@@ -774,8 +774,15 @@ pub fn permission_per_kind(h: &Harness) {
     let e = h
         .run(bk.batch().save(&checks, key(), false))
         .expect_err("no checks");
+    // A 403 naming the group is that group's refusal (104f3f5).
     assert!(
-        matches!(&e, ApiError::Forbidden { code: Some(c) } if c.as_str() == "PERMISSION_DENIED"),
+        matches!(
+            e,
+            ApiError::BatchGroup {
+                group: 1,
+                problem: cl_api::BatchGroupProblem::NotAllowed
+            }
+        ),
         "{e:?}"
     );
     let e = h
