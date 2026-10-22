@@ -204,22 +204,24 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 | --- | --- | --- | --- | --- |
 | L | M | P13–P15 | rust-implementer (sonnet) | ui-verifier |
 
-**Decisions:** Q-63, Q-71, Q-106, Q-130, Q-149, Q-169, Q-171, Q-217.
+**Decisions:** Q-63, Q-71, Q-106, Q-130, Q-149, Q-169, Q-171, Q-217, Q-264.
 
 **Mockup:** `docs/design/mockups/Home.html` and `docs/design/screenshots/Home.png` (Home content).
 
 **Crates and files:** `crates/cl-ui/src/screens/home/{lanes.rs,balances.rs,attention.rs,charts.rs,checklist.rs}`.
 
 **Steps**
+0. Enter-key preference (Q-264), first: Preferences gets "Enter moves between fields" (off by default). When on, Enter moves to the next field or grid cell like Tab (Shift+Enter moves back; in a grid's last cell it starts a new line) and Ctrl+Enter does Save & New on every form and in Bulk Entry; Alt+S stays Save & Close. When off, today's behavior stays (Enter = Save & New in header fields, Q-190; Enter records a grid row). One switch in the `cl-model::keymap` / form key handling, shown in menus, tooltips, the status bar and KEYBOARD.md; travels in preferences backups. Tests: unit tests for both modes; one form scenario run with the option on. — `feat(forms): Enter moves between fields option`
 1. Four lanes from the command registry (later phases light up their actions; placeholders tracked in STATE.md). — `feat(home): lanes`
 2. Account balances (books vs. imported bank balance when available). — `feat(home): balances`
 3. Needs attention: bank items waiting, overdue invoices, bills overdue or due within 7 days (Q-169), unposted payroll imports, open to-dos (Q-130), reorder alerts (Q-149), weekly health-check findings (Q-171), backup reminder (Q-217). In-app only (Q-71). — `feat(home): needs attention`
 4. Charts with a permissive egui plotting crate (Q-106), each drilling into its report. — `feat(home): charts`
 5. Setup checklist for new companies (Q-63). — `feat(home): setup checklist`
 
-**Tests:** attention counts equal engine queries; checklist auto-ticks; scenario.
+**Tests:** attention counts equal engine queries; checklist auto-ticks; scenario; Enter-key option in both modes.
 
 **Acceptance**
+- [ ] With "Enter moves between fields" on, Enter moves between fields and Ctrl+Enter saves on every form; with it off, behavior is unchanged.
 - [ ] Every lane action opens its form or a tracked placeholder.
 - [ ] Needs-attention counts match engine queries.
 - [ ] Screen matches its mockup per docs/design/README.md (`ui-check --compare` reviewed by ui-verifier); any deviation is listed in the PR and QUESTIONS.md.

@@ -198,7 +198,7 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 | Q-187 | **Balance always shown** as the true per-transaction balance in date order. | P12 |
 | Q-188 | **Subtle row colors by state.** | P10, P12 |
 | Q-189 | Register filters: **uncleared, payee, tag, amount range**. | P12 |
-| Q-190 | **Enter = Save & New** in form header fields. | P06, P13 |
+| Q-190 | **Enter = Save & New** in form header fields (default; Q-264 adds an option for Enter to move between fields with Ctrl+Enter = Save & New). | P06, P13, P16 |
 | Q-191 | Payee **prefills from last transaction** except amounts. | P13, P17 |
 | Q-192 | **Vendor default expense account.** | P11, P13 |
 | Q-193 | **Memos optional.** | All forms |
@@ -277,6 +277,7 @@ Answers from the owner after P11. They replace the defaults named below; later p
 | Q-261 | Look of P14 screens (no mockups). | **Follow the approved Write Check pattern** (tokens, header + lines grid + side panel); screenshots in the PR for owner review. | P14 |
 | Q-262 | Open registers don't refresh after a save in another window (P13 follow-up). | **Fix first in P14**: every save tells open registers and lists to reload. | P14 |
 | Q-263 | Bulk Entry row types whose forms aren't built yet (invoice, bill, credit memo, customer payment). | Default (per the P15A phase file): **offered only once their phase is done** (bills P17, invoices P20, payments P21, credit memos P22); P15A offers checks/expenses, card charges and credits, deposits and journal entries. | P15A, P17–P22 |
+| Q-264 | Option for Enter to move between fields? (owner, 2026-10-22) | **Yes, as a preference, off by default.** When on: Enter moves to the next field or grid cell (Shift+Enter back; last grid cell starts a new line) and **Ctrl+Enter = Save & New** on every form and in Bulk Entry; Alt+S stays Save & Close. When off: Q-190 behavior. Built as the first step of P16. | P16, all forms |
 | Q-253 | Early test builds before P35 packaging? | **Yes**: a GitHub workflow builds unsigned portable preview archives (Windows, macOS, Linux) automatically after each phase merges to main, and on demand, as workflow artifacts (kept 30 days), not public releases; P35 still builds the installers. | Preview build, P35 |
 
 ## Open
