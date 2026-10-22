@@ -1,18 +1,28 @@
-//! Bulk Entry (P15A, `/api/v1/batch/*`): the request and reply types.
-//!
-//! WP0 scaffold: types only. The calls (`validate`, `save`,
-//! `suggest_account`, `parse_csv`), the body builders and the engine error
-//! mapping arrive in lane A (`target/plans/P15A.md` §3 WP-A1).
+//! Bulk Entry (P15A, `/api/v1/batch/*`): validate, save, account
+//! suggestions and CSV parsing (engine contract:
+//! `target/plans/P15A-engine-shapes.md`, PR #163, U-67–U-74).
 //!
 //! - A Bulk Entry window holds sections; each section is one
 //!   [`BatchGroup`] (one [`BatchKind`] and one context account), and a
-//!   whole batch goes to the engine in one call (`batch-mixed-v1`).
+//!   whole batch goes to the engine in one call (`batch-mixed-v1`,
+//!   `groups[]`). Row numbers are unique across the whole call; the engine
+//!   names refused rows by them and cl-api maps each back to its group.
 //! - Amounts are [`BatchAmount`]s: whole cents, positive, exact
-//!   ([`Money`]), sent as `"123.45"` strings. cl-model rounds what the
-//!   owner typed (Q-232) before a row is built, so a sub-cent value here
-//!   is a bug and is refused by the type, never rounded.
-//! - The closing-date password rides on each locked row as a [`Secret`]
-//!   (`batch-closing-v1`): body only, never logged.
+//!   ([`Money`]), sent as `"123.45"` strings, never JSON numbers. cl-model
+//!   rounds what the owner typed (Q-232) before a row is built, so a
+//!   sub-cent value here is a bug and is refused by the type, never
+//!   rounded. `parse-csv` amounts come back as strings
+//!   (`batch-exact-v1`); a JSON number there is refused as
+//!   [`ApiError::InexactMoney`].
+//! - The closing-date password is set on each locked row as a [`Secret`];
+//!   the save sends it once as the body's `closingPassword`
+//!   (`batch-closing-v1`, one check per request). Body only, never logged;
+//!   `overrideConfirmed` is never sent (NN8).
+//! - Save all needs `batch-atomic-v1`, `batch-exact-v1`,
+//!   `batch-idempotent-v1` and `batch-mixed-v1`; without them nothing is
+//!   sent ([`LocalValidation::BatchUnavailable`]), so nothing posts
+//!   through the engine's float path. Validate also works on an older
+//!   engine for a single section (its one-type shape).
 //! - Names, memos, amounts and passwords never appear in `Debug`: ids,
 //!   row numbers and counts only.
 
@@ -23,8 +33,15 @@ use cl_core::ids::{AccountId, BatchId, ContactId, TagId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
 use serde::{Serialize, Serializer};
 
+use crate::client::{Call, Method};
 use crate::errors::{ApiError, LocalValidation, UserText};
-use crate::session::Session;
+use crate::idempotency::IdempotencyKey;
+use crate::resources::contacts::{SuggestSource, SuggestedAccount};
+use crate::resources::operations::{
+    BATCH_PARSE_CSV, BATCH_SAVE, BATCH_SUGGEST_ACCOUNT, BATCH_VALIDATE,
+};
+use crate::resources::versioning::saved_unreadable;
+use crate::session::{Session, decode, json_body};
 use crate::wire::Capabilities;
 
 /// The largest file `POST /batch/parse-csv` accepts (the engine's upload
@@ -221,8 +238,8 @@ impl Serialize for BatchAmount {
 /// "Add new names to the list", to create (Q-P15Ad).
 #[derive(Clone, PartialEq, Eq)]
 pub struct BatchRowIn {
-    /// 1-based position in the group, captured at send time; the engine
-    /// names failing rows by it.
+    /// 1-based, unique across the whole call, captured at send time; the
+    /// engine names failing rows by it.
     pub row_number: u32,
     /// The transaction date.
     pub date: CalendarDate,
@@ -249,7 +266,8 @@ pub struct BatchRowIn {
     /// One tag per line (Q-233).
     pub tag: Option<TagId>,
     /// The closing-date password on a row dated on or before the closing
-    /// date (`batch-closing-v1`); body only.
+    /// date (`batch-closing-v1`). The save sends it once, as the body's
+    /// `closingPassword`; every row that carries one must carry the same.
     pub closing_password: Option<Secret>,
 }
 
@@ -542,7 +560,511 @@ pub struct ParsedRows {
 
 // ----------------------------------------------------------------- calls
 
-/// Bulk Entry calls of a session (`session.batch()`); lane A adds them.
+/// The most groups (sections) one call takes.
+pub const ENGINE_MAX_GROUPS: usize = 50;
+
+/// The name of the file part `parse-csv` receives.
+const CSV_FILE_NAME: &str = "batch.csv";
+
+/// One row as the engine reads it (camelCase keys; empty values left out).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RowWire<'a> {
+    row_number: u32,
+    date: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ref_no: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    contact_id: Option<ContactId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    contact_name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account_id: Option<AccountId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account_name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    memo: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    amount: Option<BatchAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    debit: Option<BatchAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credit: Option<BatchAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tag_id: Option<TagId>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    print_later: bool,
+}
+
+/// One group (`snake_case` keys, as the engine's batch body has them).
+#[derive(Serialize)]
+struct GroupWire<'a> {
+    txn_type: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_account_id: Option<AccountId>,
+    rows: Vec<RowWire<'a>>,
+}
+
+/// `POST /batch/validate` with `groups[]`.
+#[derive(Serialize)]
+struct ValidateWire<'a> {
+    groups: Vec<GroupWire<'a>>,
+}
+
+/// `POST /batch/save` with `groups[]`.
+#[derive(Serialize)]
+struct SaveWire<'a> {
+    groups: Vec<GroupWire<'a>>,
+    auto_create_contacts: bool,
+    #[serde(rename = "closingPassword", skip_serializing_if = "Option::is_none")]
+    closing_password: Option<&'a str>,
+}
+
+/// Text worth sending: `None` for an empty or blank value.
+fn text(s: Option<&String>) -> Option<&str> {
+    s.map(String::as_str).filter(|t| !t.trim().is_empty())
+}
+
+fn invalid() -> ApiError {
+    ApiError::Local(LocalValidation::InvalidValue)
+}
+
+fn unavailable() -> ApiError {
+    ApiError::Local(LocalValidation::BatchUnavailable)
+}
+
+/// Checks one row against its kind and builds its wire form. An id wins
+/// over typed text, so the name is not sent when an id is.
+fn row_wire(kind: BatchKind, row: &BatchRowIn) -> Result<RowWire<'_>, ApiError> {
+    let journal = kind == BatchKind::JournalEntry;
+    if row.row_number == 0
+        || (journal && row.amount.is_some())
+        || (!journal && (row.debit.is_some() || row.credit.is_some()))
+        || (row.print_later && kind != BatchKind::Check)
+    {
+        return Err(invalid());
+    }
+    Ok(RowWire {
+        row_number: row.row_number,
+        date: row.date.to_wire(),
+        ref_no: text(row.number.as_ref()),
+        contact_id: row.contact,
+        contact_name: if row.contact.is_some() {
+            None
+        } else {
+            text(row.contact_name.as_ref())
+        },
+        account_id: row.account,
+        account_name: if row.account.is_some() {
+            None
+        } else {
+            text(row.account_name.as_ref())
+        },
+        memo: text(row.memo.as_ref()),
+        amount: row.amount,
+        debit: row.debit,
+        credit: row.credit,
+        tag_id: row.tag,
+        print_later: row.print_later,
+    })
+}
+
+/// The checked groups of a call and each row number's group index.
+struct Prepared<'a> {
+    groups: Vec<GroupWire<'a>>,
+    group_of: BTreeMap<u32, u32>,
+}
+
+/// Checks the shape of a batch (nothing is sent when it fails): 1 to 50
+/// non-empty groups, at most 10,000 rows, row numbers from 1 and unique
+/// across the call, a context account exactly for the kinds that have one,
+/// money fields that match the kind, and the kinds the engine offers.
+fn prepare(groups: &[BatchGroup], caps: BatchCaps) -> Result<Prepared<'_>, ApiError> {
+    let total: usize = groups.iter().map(|g| g.rows.len()).sum();
+    if groups.is_empty() || groups.len() > ENGINE_MAX_GROUPS || total > ENGINE_MAX_ROWS {
+        return Err(invalid());
+    }
+    let mut group_of = BTreeMap::new();
+    let mut wire = Vec::with_capacity(groups.len());
+    for (index, g) in groups.iter().enumerate() {
+        if !caps.offers(g.kind) {
+            return Err(unavailable());
+        }
+        if g.rows.is_empty() || g.kind.has_context() != g.context.is_some() {
+            return Err(invalid());
+        }
+        // At most 50 groups (checked above).
+        let index = u32::try_from(index).map_err(|_| invalid())?;
+        let mut rows = Vec::with_capacity(g.rows.len());
+        for r in &g.rows {
+            if group_of.insert(r.row_number, index).is_some() {
+                return Err(invalid());
+            }
+            rows.push(row_wire(g.kind, r)?);
+        }
+        wire.push(GroupWire {
+            txn_type: g.kind.wire(),
+            context_account_id: g.context,
+            rows,
+        });
+    }
+    Ok(Prepared {
+        groups: wire,
+        group_of,
+    })
+}
+
+/// The one closing-date password of a save: the rows that carry one must
+/// all carry the same.
+fn closing_password(groups: &[BatchGroup]) -> Result<Option<&Secret>, ApiError> {
+    let mut found: Option<&Secret> = None;
+    for pw in groups
+        .iter()
+        .flat_map(|g| &g.rows)
+        .filter_map(|r| r.closing_password.as_ref())
+    {
+        match found {
+            Some(seen) if seen.expose() != pw.expose() => return Err(invalid()),
+            _ => found = Some(pw),
+        }
+    }
+    Ok(found)
+}
+
+/// The cell an engine error `field` is about.
+fn field_of(field: &str) -> BatchField {
+    match field {
+        "date" => BatchField::Date,
+        "ref_no" | "refNo" | "print_later" | "printLater" | "entry" => BatchField::Number,
+        "contact_name" | "contactName" | "contact_id" | "contactId" => BatchField::Contact,
+        "account_name" | "accountName" | "account_id" | "accountId" => BatchField::Account,
+        "amount" => BatchField::Amount,
+        "debit" => BatchField::Debit,
+        "credit" => BatchField::Credit,
+        "memo" | "description" => BatchField::Memo,
+        "tag" | "tag_id" | "tagId" => BatchField::Tag,
+        _ => BatchField::Row,
+    }
+}
+
+/// What kind of problem an engine row error is: by its code first, then
+/// (engines without codes) by its message.
+fn kind_of(code: Option<&str>, message: &str) -> ProblemKind {
+    match code {
+        Some("TXN_UNBALANCED") => return ProblemKind::Unbalanced,
+        Some("TB_PERIOD_LOCKED") => return ProblemKind::ClosedPeriod,
+        Some("JE_AR_AP_NAME_REQUIRED") => return ProblemKind::Required,
+        Some("CHECK_NUMBER_DUPLICATE" | "VALIDATION_ERROR" | "JE_AR_AP_ONE_PER_ENTRY") => {
+            return ProblemKind::Invalid;
+        }
+        _ => {}
+    }
+    let m = message.to_ascii_lowercase();
+    if m.contains("not found") {
+        ProblemKind::NotInLists
+    } else if m.contains("inactive") {
+        ProblemKind::Inactive
+    } else if m.contains("does not balance") {
+        ProblemKind::Unbalanced
+    } else if m.contains("required") {
+        ProblemKind::Required
+    } else {
+        ProblemKind::Other
+    }
+}
+
+/// One engine row error (`{field, message, code?}`).
+#[derive(serde::Deserialize)]
+struct ErrorWire {
+    #[serde(default)]
+    field: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    code: Option<String>,
+}
+
+impl ErrorWire {
+    fn problem(&self) -> FieldProblem {
+        let message = self.message.as_deref().unwrap_or("");
+        FieldProblem::new(
+            field_of(self.field.as_deref().unwrap_or("row")),
+            kind_of(self.code.as_deref(), message),
+            message,
+        )
+    }
+}
+
+/// `Row 12: …` → `…` (the engine prefixes a posting failure's message).
+fn strip_row_prefix(message: &str) -> &str {
+    message
+        .strip_prefix("Row ")
+        .and_then(|rest| {
+            let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+            (digits > 0).then(|| rest[digits..].strip_prefix(": "))?
+        })
+        .unwrap_or(message)
+}
+
+/// The refused rows of a failed save (`details.rowNumbers` and
+/// `details.rows`). Groups are filled in by the caller, which knows them
+/// (0 until then). `None` when the details name no rows.
+pub(crate) fn rows_from_details(
+    details: &serde_json::Value,
+    message: &str,
+    code: Option<&str>,
+) -> Option<Vec<BatchRowProblem>> {
+    let numbers: Vec<u32> = details
+        .get("rowNumbers")?
+        .as_array()?
+        .iter()
+        .filter_map(|n| n.as_u64().and_then(|n| u32::try_from(n).ok()))
+        .collect();
+    if numbers.is_empty() {
+        return None;
+    }
+    let mut by_row: BTreeMap<u32, Vec<FieldProblem>> = BTreeMap::new();
+    for row in details
+        .get("rows")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(n) = row
+            .get("rowNumber")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+        else {
+            continue;
+        };
+        let errors: Vec<ErrorWire> = row
+            .get("errors")
+            .cloned()
+            .and_then(|e| serde_json::from_value(e).ok())
+            .unwrap_or_default();
+        by_row
+            .entry(n)
+            .or_default()
+            .extend(errors.iter().map(ErrorWire::problem));
+    }
+    let fallback = strip_row_prefix(message);
+    let mut out = Vec::new();
+    for n in numbers {
+        let problems = by_row
+            .remove(&n)
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| {
+                vec![FieldProblem::new(
+                    BatchField::Row,
+                    kind_of(code, fallback),
+                    fallback,
+                )]
+            });
+        out.extend(problems.into_iter().map(|problem| BatchRowProblem {
+            group: 0,
+            row_number: n,
+            problem,
+        }));
+    }
+    Some(out)
+}
+
+/// Puts each refused row in its group.
+fn with_groups(e: ApiError, group_of: &BTreeMap<u32, u32>) -> ApiError {
+    match e {
+        ApiError::BatchRows(mut rows) => {
+            for r in &mut rows {
+                if let Some(g) = group_of.get(&r.row_number) {
+                    r.group = *g;
+                }
+            }
+            ApiError::BatchRows(rows)
+        }
+        other => other,
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ValidateReply {
+    rows: Vec<ValidateRowWire>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ValidateRowWire {
+    row_number: u32,
+    #[serde(default)]
+    group_index: Option<u32>,
+    status: String,
+    #[serde(default)]
+    resolved_contact_id: Option<ContactId>,
+    #[serde(default)]
+    resolved_account_id: Option<AccountId>,
+    #[serde(default)]
+    errors: Vec<ErrorWire>,
+    #[serde(default)]
+    new_contact: Option<serde::de::IgnoredAny>,
+}
+
+fn validation_from(reply: ValidateReply, group_of: &BTreeMap<u32, u32>) -> BatchValidation {
+    BatchValidation {
+        rows: reply
+            .rows
+            .into_iter()
+            .map(|r| {
+                let problems: Vec<FieldProblem> = r.errors.iter().map(ErrorWire::problem).collect();
+                RowCheck {
+                    group: r
+                        .group_index
+                        .or_else(|| group_of.get(&r.row_number).copied())
+                        .unwrap_or(0),
+                    row_number: r.row_number,
+                    ok: problems.is_empty() && matches!(r.status.as_str(), "valid" | "warning"),
+                    contact: r.resolved_contact_id,
+                    account: r.resolved_account_id,
+                    problems,
+                    new_contact: r.new_contact.is_some(),
+                }
+            })
+            .collect(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveReply {
+    #[serde(default)]
+    batch_id: Option<BatchId>,
+    #[serde(default)]
+    created_contacts: Vec<serde::de::IgnoredAny>,
+    #[serde(default)]
+    transactions: Vec<SavedWire>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedWire {
+    row_number: u32,
+    id: TransactionId,
+}
+
+fn saved_from(reply: SaveReply, group_of: &BTreeMap<u32, u32>) -> BatchSaved {
+    BatchSaved {
+        batch_id: reply.batch_id,
+        saved: reply
+            .transactions
+            .into_iter()
+            .map(|t| SavedTxn {
+                group: group_of.get(&t.row_number).copied().unwrap_or(0),
+                row_number: t.row_number,
+                id: t.id,
+            })
+            .collect(),
+        created_contacts: u32::try_from(reply.created_contacts.len()).unwrap_or(u32::MAX),
+    }
+}
+
+/// An amount cell of `parse-csv`: a string (kept exactly), absent or
+/// null; a JSON number may have been rounded and is refused.
+fn csv_amount(v: Option<&serde_json::Value>) -> Result<Option<String>, ApiError> {
+    match v {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(s)) => Ok((!s.trim().is_empty()).then(|| s.clone())),
+        Some(serde_json::Value::Number(_)) => Err(ApiError::InexactMoney {
+            what: "parse-csv amounts",
+        }),
+        Some(_) => Err(ApiError::Decode {
+            what: "parse-csv rows",
+        }),
+    }
+}
+
+fn csv_text(row: &serde_json::Value, key: &str) -> Result<Option<String>, ApiError> {
+    match row.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(s)) => Ok((!s.is_empty()).then(|| s.clone())),
+        Some(_) => Err(ApiError::Decode {
+            what: "parse-csv rows",
+        }),
+    }
+}
+
+/// Reads a `parse-csv` reply: `{rows: [...]}` with text cells and string
+/// amounts.
+pub(crate) fn parsed_from_json(body: &[u8]) -> Result<ParsedRows, ApiError> {
+    let bad = || ApiError::Decode {
+        what: "parse-csv rows",
+    };
+    let v: serde_json::Value = serde_json::from_slice(body).map_err(|_| bad())?;
+    let rows = v
+        .get("rows")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(bad)?;
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        let row_number = r
+            .get("rowNumber")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(bad)?;
+        out.push(ParsedRow {
+            row_number,
+            date: csv_text(r, "date")?,
+            ref_no: csv_text(r, "refNo")?,
+            contact_name: csv_text(r, "contactName")?,
+            account_name: csv_text(r, "accountName")?,
+            memo: csv_text(r, "memo")?,
+            amount: csv_amount(r.get("amount"))?,
+            debit: csv_amount(r.get("debit"))?,
+            credit: csv_amount(r.get("credit"))?,
+        });
+    }
+    Ok(ParsedRows { rows: out })
+}
+
+/// `multipart/form-data`: `txn_type`, the explicit `column_mapping` (a
+/// JSON string) and the file part `batch.csv`. The boundary is random and
+/// checked not to occur in the file.
+fn csv_multipart(txn_type: &str, mapping: &str, bytes: &[u8]) -> (String, Vec<u8>) {
+    let boundary = loop {
+        let b = format!("cl-{}", uuid::Uuid::new_v4().simple());
+        if !bytes.windows(b.len()).any(|w| w == b.as_bytes()) {
+            break b;
+        }
+    };
+    let mut body = Vec::with_capacity(bytes.len() + 512);
+    for (field, value) in [("txn_type", txn_type), ("column_mapping", mapping)] {
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"\r\n\r\n{value}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{CSV_FILE_NAME}\"\r\nContent-Type: text/csv\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    (boundary, body)
+}
+
+/// True when a save was refused because its idempotency key was already
+/// used with a different body (409 `IDEMPOTENCY_KEY_REUSED`): a new key is
+/// needed only if the batch changed.
+#[must_use]
+pub fn is_key_reused(e: &ApiError) -> bool {
+    matches!(
+        e,
+        ApiError::Conflict { code: Some(c), .. } if c.as_str() == "IDEMPOTENCY_KEY_REUSED"
+    )
+}
+
+/// Bulk Entry calls of a session (`session.batch()`).
 #[derive(Clone, Copy, Debug)]
 pub struct Batch<'a>(pub(crate) &'a Session);
 
@@ -560,7 +1082,158 @@ impl Batch<'_> {
     pub fn caps(self) -> BatchCaps {
         BatchCaps::of(&self.0.client().capabilities())
     }
+
+    /// Checks rows without posting anything: names and accounts are
+    /// resolved and each row's problems reported. Closing-date passwords
+    /// on the rows are not sent.
+    ///
+    /// With `batch-mixed-v1` the whole batch goes as `groups[]`; an older
+    /// engine takes one section at a time (its one-type shape).
+    ///
+    /// # Errors
+    /// `Local(InvalidValue)` for a malformed batch and
+    /// `Local(BatchUnavailable)` for what the engine does not offer
+    /// (nothing sent); any [`ApiError`].
+    pub async fn validate(self, groups: &[BatchGroup]) -> Result<BatchValidation, ApiError> {
+        let caps = self.caps();
+        let prepared = prepare(groups, caps)?;
+        let body = if caps.mixed {
+            json_body(&ValidateWire {
+                groups: prepared.groups,
+            })?
+        } else {
+            let mut groups = prepared.groups;
+            let (Some(one), true) = (groups.pop(), groups.is_empty()) else {
+                return Err(unavailable());
+            };
+            json_body(&one)?
+        };
+        let call = Call::at(Method::Post, BATCH_VALIDATE.route()).json_body(body);
+        let reply = self.0.send(&BATCH_VALIDATE, call, None).await?;
+        let wire: ValidateReply = decode(&reply, "batch validation")?;
+        Ok(validation_from(wire, &prepared.group_of))
+    }
+
+    /// Posts every row in one engine transaction: all rows are saved or
+    /// none. `key` is kept for retries of the same batch (a replay returns
+    /// the first result and posts nothing again); `add_new_names` adds
+    /// names that are not in the lists.
+    ///
+    /// # Errors
+    /// `Local(..)` with nothing sent: `BatchUnavailable` (the engine lacks
+    /// an atomic, exact, idempotent grouped save or a kind),
+    /// `InvalidValue` (a malformed batch, or two different passwords),
+    /// `ClosedPeriodOverrideUnavailable` (a password without
+    /// `batch-closing-v1`). From the engine: `BatchRows` (refused rows, in
+    /// their groups), `ClosedPeriod`, `ClosingPasswordRejected`,
+    /// `ClosingPasswordRateLimited`, `Conflict` (see [`is_key_reused`]);
+    /// any [`ApiError`].
+    pub async fn save(
+        self,
+        groups: &[BatchGroup],
+        key: IdempotencyKey,
+        add_new_names: bool,
+    ) -> Result<BatchSaved, ApiError> {
+        let caps = self.caps();
+        if !(caps.can_save() && caps.mixed) {
+            return Err(unavailable());
+        }
+        let prepared = prepare(groups, caps)?;
+        let password = closing_password(groups)?;
+        if password.is_some() && !caps.closing {
+            return Err(ApiError::Local(
+                LocalValidation::ClosedPeriodOverrideUnavailable,
+            ));
+        }
+        let body = json_body(&SaveWire {
+            groups: prepared.groups,
+            auto_create_contacts: add_new_names,
+            closing_password: password.map(Secret::expose),
+        })?;
+        let mut call = Call::at(Method::Post, BATCH_SAVE.route()).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self
+            .0
+            .send(&BATCH_SAVE, call, None)
+            .await
+            .map_err(|e| with_groups(e, &prepared.group_of))?;
+        let wire: SaveReply = decode(&reply, "batch save").map_err(saved_unreadable)?;
+        Ok(saved_from(wire, &prepared.group_of))
+    }
+
+    /// The account to suggest for a name: its default, else the account of
+    /// its most recent transaction. Works offline (no AI).
+    ///
+    /// # Errors
+    /// Any [`ApiError`].
+    pub async fn suggest_account(
+        self,
+        contact: ContactId,
+    ) -> Result<Option<SuggestedAccount>, ApiError> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct W {
+            #[serde(default)]
+            account_id: Option<AccountId>,
+            #[serde(default)]
+            source: Option<String>,
+        }
+        let mut call = Call::at(Method::Get, BATCH_SUGGEST_ACCOUNT.route());
+        call.query = vec![("contact_id".into(), contact.to_string())];
+        let reply = self.0.send(&BATCH_SUGGEST_ACCOUNT, call, None).await?;
+        let w: W = decode(&reply, "suggested account")?;
+        let source = match w.source.as_deref() {
+            Some("default") => SuggestSource::Default,
+            Some("recent") => SuggestSource::Recent,
+            // No suggestion, or a source this version does not know.
+            _ => return Ok(None),
+        };
+        Ok(w.account_id
+            .map(|account| SuggestedAccount { account, source }))
+    }
+
+    /// Reads a CSV file or a pasted block (tabs are detected by the
+    /// engine) into rows of text with the explicit `mapping`. The first
+    /// line is the header; amounts come back as exact strings for cl-model
+    /// to parse with the owner's money rules.
+    ///
+    /// # Errors
+    /// `Local(BatchFileSize)` (empty or over 10 MB) or
+    /// `Local(InvalidValue)` (an empty mapping), nothing sent;
+    /// `InexactMoney` when the engine sends amounts as numbers (an engine
+    /// without `batch-exact-v1`); `Validation` (`CSV_EMPTY`,
+    /// `CSV_MALFORMED`, `CSV_TOO_MANY_ROWS`); any [`ApiError`].
+    pub async fn parse_csv(
+        self,
+        kind: BatchKind,
+        bytes: &[u8],
+        mapping: &ColumnMapping,
+    ) -> Result<ParsedRows, ApiError> {
+        if bytes.is_empty() || bytes.len() > PARSE_CSV_MAX_BYTES {
+            return Err(ApiError::Local(LocalValidation::BatchFileSize));
+        }
+        if mapping.0.is_empty() {
+            return Err(invalid());
+        }
+        // The kind only steers the engine's own column guessing, which the
+        // explicit mapping replaces; an engine without check rows reads a
+        // check file as expenses.
+        let txn_type = if self.caps().offers(kind) {
+            kind.wire()
+        } else {
+            BatchKind::Expense.wire()
+        };
+        let mapping = serde_json::to_string(mapping).map_err(|_| invalid())?;
+        let (boundary, body) = csv_multipart(txn_type, &mapping, bytes);
+        let call = Call::at(Method::Post, BATCH_PARSE_CSV.route()).multipart_body(&boundary, body);
+        let reply = self.0.send(&BATCH_PARSE_CSV, call, None).await?;
+        parsed_from_json(&reply.body)
+    }
 }
+
+#[cfg(test)]
+#[path = "batch_tests.rs"]
+mod call_tests;
 
 #[cfg(test)]
 mod tests {
