@@ -69,9 +69,11 @@ mod transfer;
 mod journal_entry;
 mod templates;
 mod templates_due;
+// P15A.
+mod batch_entry;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 19] = [
+const TABLES: [&[(&str, &str)]; 20] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -91,6 +93,7 @@ const TABLES: [&[(&str, &str)]; 19] = [
     journal_entry::ENGLISH,
     templates::ENGLISH,
     templates_due::ENGLISH,
+    batch_entry::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {

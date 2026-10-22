@@ -5,6 +5,7 @@ use cl_core::ids::TenantId;
 use cl_core::{CalendarDate, Timestamp};
 use cl_settings::{ACCENT_PALETTE, Accent};
 
+pub mod batch;
 pub mod checks;
 pub mod contacts;
 pub mod daily_sales;
@@ -97,6 +98,8 @@ pub struct DemoState {
     /// permission: the run skips their dates with `PERMISSION` (the demo
     /// has one user; tests and scenarios set this).
     pub templates_owner_revoked: std::collections::BTreeSet<cl_core::ids::TemplateId>,
+    /// Bulk Entry saves (P15A): the idempotency replay map.
+    pub batch: batch::DemoBatches,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -188,6 +191,7 @@ impl DemoState {
             journal: journal::DemoJournals::default(),
             templates_seeded: false,
             templates_owner_revoked: std::collections::BTreeSet::new(),
+            batch: batch::DemoBatches::default(),
         }
     }
 

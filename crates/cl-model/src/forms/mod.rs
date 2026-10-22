@@ -27,6 +27,7 @@ use cl_core::OwnerMessage;
 use crate::undo::UndoStack;
 
 pub mod amount_words;
+pub mod batch;
 pub mod card;
 pub mod check;
 pub mod daily_sales;

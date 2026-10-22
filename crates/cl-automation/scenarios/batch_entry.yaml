@@ -1,0 +1,19 @@
+# Bulk Entry (P15A, `banking.bulk_entry`) against `clientledger --demo`
+# (today 11/04/2026, books closed through 09/30/2026, synthetic data only).
+#
+# WP0 header: the window opens from the palette with no global shortcut
+# (Q-P15Ah). Lane D (WP-D4) grows this into the full scenario of
+# `target/plans/P15A.md` §6: typed check and deposit sections, local and
+# engine problems, the closed-period password, the summary and register,
+# then a pasted TSV with a mapping and an unbalanced journal entry group,
+# in light and dark.
+name: batch_entry
+description: Bulk Entry opens from the palette (scaffold; the full flow arrives with the screen).
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: banking.bulk_entry
+  - assert_exists: {role: tab, label_contains: "Bulk Entry"}
+  - assert_state: {key: screen.screen, equals: batch_entry}
+  - assert_state: {key: screen.can_save, equals: false}
+  - screenshot: opened

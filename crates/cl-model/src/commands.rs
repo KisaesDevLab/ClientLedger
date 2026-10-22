@@ -303,6 +303,8 @@ pub const COMMANDS: &[Command] = &[
     built("banking.transfer", "Transfer Funds", Some(Menu::Banking), 0, ctrl('T')),
     built("banking.owner_money", "Pay Yourself or Put Money In", Some(Menu::Banking), 0, None),
     built("banking.loan_payment", "Loan Payment", Some(Menu::Banking), 0, None),
+    // Bulk Entry (P15A): no global shortcut (Q-P15Ah)
+    built("banking.bulk_entry", "Bulk Entry", Some(Menu::Banking), 0, None),
     screen("banking.reconcile", "Reconcile", Some(Menu::Banking), 1, ctrl_shift('E'), "P27"),
     screen("banking.import_file", "Import Bank File", Some(Menu::Banking), 2, None, "P25"),
     screen("banking.feed", "Bank Feed", Some(Menu::Banking), 2, None, "P26"),
@@ -446,6 +448,8 @@ mod tests {
             "company.journal_entry",
             "lists.templates",
             "lists.templates_due",
+            // P15A
+            "banking.bulk_entry",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -613,6 +617,18 @@ mod tests {
                 .map(CommandId::as_str),
             Some("form.save_as_template")
         );
+    }
+
+    #[test]
+    fn p15a_bulk_entry_command() {
+        let c = find("banking.bulk_entry").unwrap();
+        assert_eq!(c.label, "Bulk Entry");
+        // Banking menu and palette; no global shortcut (Q-P15Ah).
+        assert_eq!(
+            (c.menu, c.shortcut, c.scope),
+            (Some(Menu::Banking), None, Scope::Global)
+        );
+        assert!(c.opens && c.arrives.is_none() && c.palette);
     }
 
     #[test]

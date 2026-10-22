@@ -435,3 +435,17 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P15y | Register routing for journal entries | P15 | Ctrl+E or Enter on a journal entry opens Make Journal Entry (Q-P14aa extended). | Default in force |
 | Q-P15z | Make Journal Entry panels | P15 | No side panel and no History in P15 (follow-up). | Default in force |
 | Q-P15aa | Templates Due chip | P15 | Counts dates (occurrences), matching what Templates Due lists. | Default in force |
+| Q-P15Aa | Bulk Entry layout | P15A | Sections (one type and account each) in one window, a strip plus one grid; a mixed batch saves in one call. | Default in force |
+| Q-P15Ab | Bulk Entry types | P15A | Checks, Expenses, Card charges, Card credits, Deposits, Journal entries (Q-263). Checks need `batch-check-v1`. | Default in force |
+| Q-P15Ac | Bulk Entry without engine support | P15A | Without `batch-atomic-v1`, `batch-exact-v1` or `batch-idempotent-v1`, Save all is off. Without `batch-mixed-v1`, one section per save. | Default in force |
+| Q-P15Ad | Unknown names in Bulk Entry | P15A | Unknown names are row problems unless "Add new names to the list" is ticked (off by default). Accounts are never created. | Default in force |
+| Q-P15Ae | Closed-period rows in Bulk Entry | P15A | One password per save covers them all, and each is audited by the engine. | Default in force |
+| Q-P15Af | Paste and CSV import | P15A | Both go through the engine's `parse-csv`. A headerless paste maps left to right from the cursor column. Mappings are remembered per company, type and header set. Tags are not imported. | Default in force |
+| Q-P15Ag | Bulk Entry limits | P15A | 2,000 rows per batch; 10 MB files. | Default in force |
+| Q-P15Ah | Bulk Entry shortcuts | P15A | No global shortcut (Banking menu, palette); Ctrl+PageUp/PageDown move between sections; F8 / Shift+F8 go to the next / previous problem; Alt+S Save all; Alt+N Save all and new. | Default in force |
+| Q-P15Ai | Bulk Entry drafts | P15A | No drafts across restarts; closing a dirty window prompts. | Default in force |
+| Q-P15Aj | Journal entry rows in Bulk Entry | P15A | Rows group by Date + Entry No.; Entry No. is required; the difference is shown, with no auto-balance helper in the grid. | Default in force |
+| Q-P15Ak | Customer / Job and Billable in Bulk Entry | P15A | No such columns (the engine batch row lacks them); use the forms. | Default in force |
+| Q-P15Al | After a Bulk Entry save | P15A | The window shows a summary (counts, totals per account, register links) and does not close. | Default in force |
+| Q-P15Am | Bulk Entry windows | P15A | One Bulk Entry window at a time. | Default in force |
+| Q-P15An | Bulk Entry look | P15A | No mockup, Write Check pattern, screenshots in the PR, no `--compare`. | Default in force |
