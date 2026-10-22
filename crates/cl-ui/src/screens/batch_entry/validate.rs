@@ -24,6 +24,18 @@ use super::{BulkEntryScreen, CHECK_AFTER, Checking, wire};
 use crate::company::CompanyEvent;
 use crate::i18n::t_with;
 
+/// Which rows a check sends (rows with problems of the app's own, and the
+/// rest of their journal entries, never go).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CheckScope {
+    /// The timer: rows the cursor has left with no current answer.
+    Changed,
+    /// Save all: every row with no current answer.
+    Unchecked,
+    /// "Check all rows": every row again, answered or not.
+    Everything,
+}
+
 /// The status bar's line while rows need attention.
 pub(crate) const ATTENTION: &str = "batch_entry.status.attention";
 
@@ -265,17 +277,26 @@ impl BulkEntryScreen {
             && !self.busy()
         {
             self.changed_at = None;
-            self.start_check(false);
+            self.start_check(CheckScope::Changed);
         }
     }
 
-    /// Sends rows to the engine's Validate: those the cursor has left that
-    /// pass the app's own checks and have no current answer (`all`: every
-    /// row, "Check all rows"). Whole journal entries go together.
-    pub(crate) fn start_check(&mut self, all: bool) -> bool {
+    /// The engine's answers no longer hold (the lists or the closing date
+    /// changed): every row is unchecked again, an answer in flight is
+    /// dropped when it arrives, and the rows are checked again shortly.
+    pub(crate) fn forget_engine_results(&mut self) {
+        self.checks.clear();
+        self.check_epoch = self.check_epoch.wrapping_add(1);
+        self.changed_at = Some(Instant::now());
+    }
+
+    /// Sends rows to the engine's Validate (see [`CheckScope`]) that pass
+    /// the app's own checks. Whole journal entries go together.
+    pub(crate) fn start_check(&mut self, scope: CheckScope) -> bool {
         if self.checking.is_some() || !self.caps().exact {
             return false;
         }
+        let all = scope != CheckScope::Changed;
         if all {
             let keys: Vec<RowKey> = self.batch().filled().map(|(_, r)| r.key).collect();
             self.touched.extend(keys);
@@ -293,13 +314,16 @@ impl BulkEntryScreen {
                 }
             }
         }
-        let candidates = if all {
-            b.all_sendable()
+        let candidates = match scope {
+            // "Check all rows": the engine's books may have changed since
+            // an earlier answer, so every row goes again.
+            CheckScope::Everything => b.all_sendable(),
+            CheckScope::Unchecked => b
+                .all_sendable()
                 .into_iter()
                 .filter(|k| matches!(self.checks.state(b, *k), EngineState::Unchecked))
-                .collect()
-        } else {
-            b.rows_to_check(&self.checks)
+                .collect(),
+            CheckScope::Changed => b.rows_to_check(&self.checks),
         };
         let send: BTreeSet<RowKey> = candidates
             .into_iter()
@@ -330,7 +354,11 @@ impl BulkEntryScreen {
             return true;
         }
         if let Some(task) = super::engine::live::validate(&self.link, self.group.as_ref(), groups) {
-            self.checking = Some(Checking { out, task });
+            self.checking = Some(Checking {
+                out,
+                task,
+                epoch: self.check_epoch,
+            });
             true
         } else {
             self.checks.fail(&out);
@@ -344,7 +372,17 @@ impl BulkEntryScreen {
         };
         match c.task.try_take() {
             None => self.checking = Some(c),
+            Some(_) if c.epoch != self.check_epoch => self.stale_check(&c.out),
             Some(r) => self.checked(&c.out, r),
+        }
+    }
+
+    /// An answer given against older lists or an older closing date: it is
+    /// dropped. A Save all waiting for it checks the rows again.
+    fn stale_check(&mut self, out: &cl_model::forms::batch::Outgoing) {
+        self.checks.fail(out);
+        if self.save_after_check.is_some() && !self.start_check(CheckScope::Unchecked) {
+            self.after_check();
         }
     }
 

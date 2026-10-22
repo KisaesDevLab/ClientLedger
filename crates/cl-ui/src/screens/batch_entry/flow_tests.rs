@@ -222,9 +222,12 @@ enum SaveStep {
 }
 
 /// The demo engine with a script for saves; every key a save used is kept.
+#[derive(Default)]
 struct Scripted {
     steps: std::collections::VecDeque<SaveStep>,
     keys: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Rows sent to validate, over all calls.
+    checked_rows: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl BatchEngine for Scripted {
@@ -233,6 +236,9 @@ impl BatchEngine for Scripted {
         link: &CompanyLink,
         groups: &[cl_api::BatchGroup],
     ) -> Result<cl_api::BatchValidation, cl_api::ApiError> {
+        let n: usize = groups.iter().map(|g| g.rows.len()).sum();
+        self.checked_rows
+            .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
         DemoBatchEngine.validate(link, groups)
     }
 
@@ -292,6 +298,7 @@ fn a_lost_reply_then_busy_retries_with_the_same_key_and_posts_once() {
     let engine = Scripted {
         steps: [SaveStep::LoseReply, SaveStep::Busy, SaveStep::Answer].into(),
         keys: Arc::clone(&keys),
+        ..Scripted::default()
     };
     let mut s =
         BulkEntryScreen::with_local(Arc::clone(&link), None, day(11, 4), Some(Box::new(engine)));
@@ -319,6 +326,105 @@ fn a_lost_reply_then_busy_retries_with_the_same_key_and_posts_once() {
     let keys = keys.lock().expect("keys");
     assert_eq!(keys.len(), 3);
     assert!(keys.iter().all(|k| *k == keys[0]), "every try used one key");
+}
+
+fn counted() -> (
+    BulkEntryScreen,
+    Arc<CompanyLink>,
+    Arc<std::sync::atomic::AtomicUsize>,
+    tempfile::TempDir,
+) {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let engine = Scripted {
+        checked_rows: Arc::clone(&counter),
+        ..Scripted::default()
+    };
+    let s =
+        BulkEntryScreen::with_local(Arc::clone(&link), None, day(11, 4), Some(Box::new(engine)));
+    (s, link, counter, dir)
+}
+
+fn sent(c: &std::sync::atomic::AtomicUsize) -> usize {
+    c.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[test]
+fn check_all_rows_sends_every_row_again() {
+    use super::validate::CheckScope;
+    let (mut s, _link, counter, _dir) = counted();
+    fill(
+        &mut s,
+        0,
+        &[(day(11, 2), "6100", "10.00"), (day(11, 3), "6100", "5.00")],
+    );
+    assert!(s.start_check(CheckScope::Unchecked));
+    assert_eq!(sent(&counter), 2);
+    assert_eq!(s.state_json()["can_save"], true);
+    assert!(
+        !s.start_check(CheckScope::Unchecked),
+        "Save all sends only rows without an answer"
+    );
+    assert!(s.start_check(CheckScope::Everything));
+    assert_eq!(sent(&counter), 4, "Check all rows sends every row again");
+    assert_eq!(s.state_json()["can_save"], true);
+}
+
+#[test]
+fn new_lists_or_a_new_closing_date_forget_the_engine_answers() {
+    use super::validate::CheckScope;
+    let (mut s, link, _counter, _dir) = counted();
+    fill(&mut s, 0, &[(day(11, 2), "6100", "10.00")]);
+    assert!(s.start_check(CheckScope::Unchecked));
+    assert_eq!(s.state_json()["can_save"], true);
+
+    // The lists are read again (a save in another window).
+    s.books.start(&link, None);
+    s.poll();
+    assert_eq!(s.state_json()["blocker"], "unchecked");
+    assert!(s.changed_at.is_some(), "the rows are checked again soon");
+    assert!(s.start_check(CheckScope::Unchecked));
+    assert_eq!(s.state_json()["can_save"], true);
+
+    // Only the closing date moved.
+    let before = s.books.closing;
+    s.books.closing = Some(day(11, 2));
+    s.books_arrived(false, before);
+    assert_eq!(s.state_json()["blocker"], "unchecked");
+
+    // The same lists and date: the answers stand.
+    assert!(s.start_check(CheckScope::Unchecked));
+    let now = s.books.closing;
+    s.books_arrived(false, now);
+    assert_eq!(s.state_json()["blocker"], serde_json::Value::Null);
+}
+
+#[test]
+fn an_answer_from_before_the_lists_changed_is_dropped() {
+    let (mut s, link, _counter, _dir) = counted();
+    fill(&mut s, 0, &[(day(11, 2), "6100", "10.00")]);
+    let out = s.batch().outgoing(None, None);
+    let groups = wire::groups(&out, None).expect("groups");
+    let answer = {
+        let d = link.demo_state().expect("demo");
+        crate::company::demo::batch::validate(&d, &groups).expect("validate")
+    };
+    assert!(answer.rows[0].ok);
+    s.checks.begin(&out);
+    s.checking = Some(Checking {
+        out,
+        task: Task::ready(answer),
+        epoch: s.check_epoch,
+    });
+    s.forget_engine_results();
+    s.poll_checking();
+    assert!(s.checking.is_none());
+    assert_eq!(
+        s.state_json()["blocker"],
+        "unchecked",
+        "the old answer did not land"
+    );
 }
 
 #[test]

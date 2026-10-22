@@ -159,7 +159,7 @@ impl BulkEntryScreen {
         });
         match clicked {
             Some("check_all") => {
-                self.start_check(true);
+                self.start_check(super::validate::CheckScope::Everything);
             }
             Some("import") => {
                 self.import_open = true;

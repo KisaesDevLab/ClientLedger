@@ -51,7 +51,9 @@ impl BulkEntryScreen {
             Err(Blocker::Unchecked(_)) => {
                 let before = self.saved_count;
                 self.save_after_check = Some(intent);
-                if self.checking.is_none() && !self.start_check(true) {
+                if self.checking.is_none()
+                    && !self.start_check(super::validate::CheckScope::Unchecked)
+                {
                     self.save_after_check = None;
                     let b = self
                         .batch()

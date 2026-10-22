@@ -76,6 +76,9 @@ pub(crate) struct Checking {
     pub out: Outgoing,
     /// The live engine's answer.
     pub task: Task<cl_api::BatchValidation>,
+    /// The screen's `check_epoch` when sent: an answer from an older epoch
+    /// (the lists or the closing date changed since) is dropped.
+    pub epoch: u64,
 }
 
 /// The Bulk Entry window.
@@ -96,6 +99,9 @@ pub struct BulkEntryScreen {
     /// The engine's answers per row (outside undo).
     pub(crate) checks: EngineChecks,
     pub(crate) checking: Option<Checking>,
+    /// Goes up whenever the engine's answers stop holding (new lists, a
+    /// new closing date).
+    pub(crate) check_epoch: u64,
     /// Rows the cursor has left (their problems show).
     pub(crate) touched: BTreeSet<RowKey>,
     /// The cursor's row last frame.
@@ -202,6 +208,7 @@ impl BulkEntryScreen {
             spare: BTreeMap::new(),
             checks: EngineChecks::new(),
             checking: None,
+            check_epoch: 0,
             touched: BTreeSet::new(),
             cursor_row: None,
             seen_rev: 0,
@@ -277,16 +284,33 @@ impl BulkEntryScreen {
     }
 
     pub(crate) fn poll(&mut self) {
-        if self.books.poll() {
-            self.grid.adapter_mut().lists = Arc::clone(&self.books.lists);
-            self.default_contexts();
-        }
+        let closing = self.books.closing;
+        let lists_changed = self.books.poll();
+        self.books_arrived(lists_changed, closing);
         self.poll_numbers();
         self.poll_checking();
         self.poll_save();
         self.poll_parse();
         self.maybe_suggest();
         self.poll_suggest();
+    }
+
+    /// The lists (`lists_changed`) or the closing date (it was
+    /// `closing_before`) were read again.
+    pub(crate) fn books_arrived(
+        &mut self,
+        lists_changed: bool,
+        closing_before: Option<CalendarDate>,
+    ) {
+        if lists_changed {
+            self.grid.adapter_mut().lists = Arc::clone(&self.books.lists);
+            self.default_contexts();
+        }
+        if lists_changed || self.books.closing != closing_before {
+            // A name, account or tag the engine resolved may be gone, and
+            // the closed-period rows may differ: ask again.
+            self.forget_engine_results();
+        }
     }
 
     /// Sections still without an account get the first one of their kind,
