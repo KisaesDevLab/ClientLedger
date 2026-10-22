@@ -12,7 +12,7 @@
 | --- | --- | --- | --- | --- |
 | H | L | P12–P24 | rust-implementer (opus; work packages by report family) | reviewer (opus), ui-verifier |
 
-**Decisions:** Q-44, Q-53, Q-65, Q-73, Q-104, Q-105, Q-107, Q-157, Q-172, Q-207. **Engine:** report endpoints (filters, columns by period/tag/client/job, basis, drill-down ids), budgets, duplicate finder query.
+**Decisions:** Q-44, Q-53, Q-65, Q-73, Q-104, Q-105, Q-107, Q-157, Q-172, Q-207, Q-270, Q-271. **Engine:** report endpoints (filters, columns by period/tag/client/job, basis, drill-down ids), budgets, duplicate finder query.
 
 **Mockup:** `docs/design/mockups/Reports.html` and `docs/design/screenshots/Reports.png`.
 
@@ -24,6 +24,7 @@
 3. Drill-down to transaction detail and source form; sensitive accounts hidden by role (Q-157, enforced in P29). — `feat(reports): drill-down`
 4. Memorized reports and groups; export Excel (permissive crate, numbers as numbers), CSV, PDF with full header (Q-107); print. — `feat(reports): memorize and export`
 5. Beta catalog (work packages): P&L variants, Balance Sheet variants, Trial Balance, GL, Journal, Transaction Detail by Account, A/R and A/P agings, Open Invoices, Unpaid Bills, Sales by Client/Item, Expenses by Vendor, Sales Tax Liability, Inventory Valuation and Stock Status, 1099 Summary (Q-53), Audit Trail, Closing Date Exceptions, Duplicate Finder (Q-172). — `feat(reports): catalog`
+5b. Tag rows under accounts (Q-271): a report option "Show tagged amounts separately" on account-based reports (P&L variants, Balance Sheet, Trial Balance, GL, Budget vs. Actual) with a tag-group picker. The account row (6100 - Repairs) shows only the **untagged** amount; each tag gets its own row with that tag's amount (6100-10 Repairs - Lake Area); an optional setting "Show a total for each account" adds a total row (Total 6100 - Repairs) equal to the untagged amount plus every tag row, exactly. Row label option: tag number appended to the account number (6100-10), prepended (10-6100) or not shown, separator "-" by default. Section and report totals are unchanged whichever way the rows are shown. Amounts come from the engine (tag-split report query; no UI arithmetic beyond display); drill-down from any row lists exactly its lines; memorized reports keep the options; Excel/CSV/PDF export the rows with the chosen codes. Engine: tag-split report query if the existing columns-by-tag path can't return it (just in time, Q-230). Tests: golden CSV with tag rows, with and without the account total; untagged + tag rows equal the account's full amount; append/prepend labels; drill-down sums. — `feat(reports): tag rows under accounts`
 6. Simple P&L budgets and Budget vs. Actual (Q-65). — `feat(reports): budgets`
 7. Ask-a-question (Q-73): AI maps a question to a catalog report + filters + dates, shows the mapping, runs it via the engine; never states numbers itself; works with Ollama. — `feat(reports): ask a question`
 
@@ -34,6 +35,7 @@
 - [ ] Drill-down from any P&L amount sums to that amount.
 - [ ] Excel exports keep numbers numeric.
 - [ ] Budget vs. Actual matches the hand-computed fixture.
+- [ ] With tagged amounts shown separately, the account row shows the untagged amount, each tag has its own row labelled with the tag number appended or prepended as chosen, and the optional account total equals untagged + tag rows exactly.
 - [ ] Screen matches its mockup per docs/design/README.md (`ui-check --compare` reviewed by ui-verifier); any deviation is listed in the PR and QUESTIONS.md.
 
 ### Checkpoint PR-6 — Reports (fable)
