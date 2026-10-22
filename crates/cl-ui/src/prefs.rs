@@ -535,6 +535,104 @@ pub fn safe_name(raw: &str) -> String {
     if s.is_empty() { "default".into() } else { s }
 }
 
+/// Bulk Entry's remembered column mappings ("Remember for this company",
+/// Q-P15Af): per company (by [`key_hash`]), per section type and header
+/// set. Header names only; never a row of a file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BulkEntryMappings {
+    companies: Vec<(String, cl_model::forms::batch::MappingMemory)>,
+}
+
+impl BulkEntryMappings {
+    /// The file in the settings folder.
+    pub const FILE: &'static str = "bulk-entry-mappings.json";
+    /// File format version.
+    pub const VERSION: u64 = 1;
+    /// Most companies kept; one more forgets the oldest.
+    pub const MAX_COMPANIES: usize = 20;
+
+    /// The memory of one company.
+    #[must_use]
+    pub fn get(&self, company: &str) -> cl_model::forms::batch::MappingMemory {
+        let k = key_hash(company);
+        self.companies
+            .iter()
+            .find(|(c, _)| *c == k)
+            .map(|(_, m)| m.clone())
+            .unwrap_or_default()
+    }
+
+    /// Replaces the memory of one company (most recent last).
+    pub fn set(&mut self, company: &str, memory: cl_model::forms::batch::MappingMemory) {
+        let k = key_hash(company);
+        self.companies.retain(|(c, _)| *c != k);
+        self.companies.push((k, memory));
+        while self.companies.len() > Self::MAX_COMPANIES {
+            self.companies.remove(0);
+        }
+    }
+
+    /// Read the file's text; anything malformed reads as empty.
+    #[must_use]
+    pub fn parse(text: &str) -> BulkEntryMappings {
+        let Ok(serde_json::Value::Object(root)) = serde_json::from_str::<serde_json::Value>(text)
+        else {
+            return BulkEntryMappings::default();
+        };
+        if root.get("version").and_then(serde_json::Value::as_u64) != Some(Self::VERSION) {
+            return BulkEntryMappings::default();
+        }
+        let Some(serde_json::Value::Array(list)) = root.get("companies") else {
+            return BulkEntryMappings::default();
+        };
+        let companies = list
+            .iter()
+            .filter_map(|pair| {
+                let [key, memory] = pair.as_array().map(Vec::as_slice)? else {
+                    return None;
+                };
+                let key = key
+                    .as_str()
+                    .filter(|k| k.len() == 16 && k.chars().all(|c| c.is_ascii_hexdigit()))?;
+                let memory = serde_json::from_value(memory.clone()).ok()?;
+                Some((key.to_string(), memory))
+            })
+            .take(Self::MAX_COMPANIES)
+            .collect();
+        BulkEntryMappings { companies }
+    }
+
+    /// The file's text.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let list: Vec<serde_json::Value> = self
+            .companies
+            .iter()
+            .map(|(k, m)| serde_json::json!([k, m]))
+            .collect();
+        serde_json::to_string_pretty(&serde_json::json!({
+            "version": Self::VERSION,
+            "companies": list,
+        }))
+        .unwrap_or_default()
+    }
+
+    /// Load from `dir` (empty when missing, oversized or unreadable).
+    #[must_use]
+    pub fn load(dir: &Path) -> BulkEntryMappings {
+        read_capped(&dir.join(Self::FILE))
+            .map_or_else(BulkEntryMappings::default, |t| BulkEntryMappings::parse(&t))
+    }
+
+    /// Save into `dir`.
+    ///
+    /// # Errors
+    /// Any file error.
+    pub fn save(&self, dir: &Path) -> io::Result<()> {
+        write_atomic(&dir.join(Self::FILE), &self.to_text())
+    }
+}
+
 /// Largest preference or layout file that is read.
 pub const MAX_READ: u64 = 64 * 1024;
 
@@ -850,5 +948,24 @@ mod tests {
         book.save(&dir).expect("save");
         assert_eq!(SuggestionAccepts::load(&dir), book);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bulk_entry_mappings_round_trip_per_company() {
+        use cl_model::forms::batch::{Field, Mapping, MappingMemory, SectionKind};
+        let mut memory = MappingMemory::default();
+        let mapping: Mapping = [(Field::Date, 0), (Field::Amount, 2)].into();
+        memory.remember(SectionKind::Checks, &["Date", "Payee", "Amount"], &mapping);
+        let mut book = BulkEntryMappings::default();
+        book.set("tenant-a", memory.clone());
+        assert_eq!(book.get("tenant-a"), memory);
+        assert_eq!(book.get("tenant-b"), MappingMemory::default());
+        let text = book.to_text();
+        assert!(!text.contains("tenant-a"), "companies are hashed");
+        assert_eq!(BulkEntryMappings::parse(&text), book);
+        assert_eq!(BulkEntryMappings::parse("{}"), BulkEntryMappings::default());
+        let dir = tempfile::tempdir().expect("tmp");
+        book.save(dir.path()).expect("save");
+        assert_eq!(BulkEntryMappings::load(dir.path()), book);
     }
 }

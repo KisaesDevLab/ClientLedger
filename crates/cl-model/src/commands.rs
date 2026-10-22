@@ -260,6 +260,11 @@ pub const COMMANDS: &[Command] = &[
     cmd("form.save_as_template", "Save as Template", None, 3, ctrl('M'), Scope::Form),
     // Write Check (P13; Page Up/Down, Ctrl+F, Ctrl+P, Alt+N and Alt+S above apply too)
     cmd("check.print_later", "Print Later", None, 4, None, Scope::Form),
+    // Bulk Entry (P15A, Q-P15Ah; Alt+S and Alt+N above save all)
+    cmd("batch.next_problem", "Next Row That Needs Attention", None, 4, key(Mods::NONE, Key::F(8)), Scope::Form),
+    cmd("batch.prev_problem", "Previous Row That Needs Attention", None, 4, key(Mods::SHIFT, Key::F(8)), Scope::Form),
+    cmd("batch.next_section", "Next Section", None, 4, key(Mods::CMD, Key::PageDown), Scope::Form),
+    cmd("batch.prev_section", "Previous Section", None, 4, key(Mods::CMD, Key::PageUp), Scope::Form),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
@@ -629,6 +634,22 @@ mod tests {
             (Some(Menu::Banking), None, Scope::Global)
         );
         assert!(c.opens && c.arrives.is_none() && c.palette);
+        // Its own keys, in the form scope (Q-P15Ah).
+        let km = crate::keymap::Keymap::new(COMMANDS).unwrap();
+        for (id, mods, k) in [
+            ("batch.next_problem", Mods::NONE, Key::F(8)),
+            ("batch.prev_problem", Mods::SHIFT, Key::F(8)),
+            ("batch.next_section", Mods::CMD, Key::PageDown),
+            ("batch.prev_section", Mods::CMD, Key::PageUp),
+        ] {
+            let c = find(id).unwrap();
+            assert_eq!(c.scope, Scope::Form, "{id}");
+            assert_eq!(
+                km.resolve(Scope::Form, Shortcut::new(mods, k))
+                    .map(CommandId::as_str),
+                Some(id)
+            );
+        }
     }
 
     #[test]

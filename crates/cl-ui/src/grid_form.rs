@@ -118,6 +118,33 @@ impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
         &self.grid
     }
 
+    /// Shows the form through another grid (a different column set, P15A
+    /// Bulk Entry sections) and returns the one it replaces. The new grid's
+    /// cursor is put back on rows of the current value.
+    pub fn swap_grid(
+        &mut self,
+        grid: Grid,
+        label: impl Into<String>,
+        lookups: &dyn Lookups,
+    ) -> Grid {
+        let old = std::mem::replace(&mut self.grid, grid);
+        self.label = label.into();
+        self.widths_loaded = false;
+        self.with(lookups, Grid::reset);
+        old
+    }
+
+    /// The model's rows changed under the grid without an edit (another
+    /// section is shown): the cursor goes back to a row that exists.
+    pub fn reset_view(&mut self, lookups: &dyn Lookups) {
+        self.with(lookups, Grid::reset);
+    }
+
+    /// Remember column widths under this key from now on.
+    pub fn set_widths_key(&mut self, key: impl Into<String>) {
+        self.widths_key = Some(key.into());
+    }
+
     /// Positions and counts from the last frame or command (no values).
     #[must_use]
     pub fn snapshot(&self) -> GridSnapshot {
