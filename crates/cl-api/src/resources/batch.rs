@@ -405,7 +405,7 @@ impl FieldProblem {
 pub struct BatchRowProblem {
     /// 0-based index of the group in the request.
     pub group: u32,
-    /// The row's 1-based `row_number` in its group.
+    /// The row's 1-based `row_number` (unique across the call).
     pub row_number: u32,
     /// What is wrong.
     pub problem: FieldProblem,
