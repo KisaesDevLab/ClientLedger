@@ -1,0 +1,5 @@
+Date,Ref,Account,Debit,Credit,Memo
+10/31/2026,ADJ-1,Insurance,600.00,,Insurance used in October
+10/31/2026,ADJ-1,1010,,600.00,Insurance used in October
+10/31/2026,ADJ-2,Fuel,25.10,,Fuel reclass
+10/31/2026,ADJ-2,Repairs and Maintenance,,25.01,Fuel reclass
