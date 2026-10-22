@@ -258,8 +258,12 @@ pub(crate) struct BulkAdapter {
     pub today: CalendarDate,
     /// The highest check number in the books per bank account (Q-242).
     pub highest: BTreeMap<AccountId, u64>,
-    /// Problems and notes per row (the screen refreshes it each frame).
+    /// Problems and notes per row (set through [`BulkAdapter::set_looks`]).
     pub looks: BTreeMap<RowKey, RowLook>,
+    /// Goes up whenever `looks` change: part of the grid's
+    /// revision, so a caption that arrives with no edit (the engine's
+    /// answer) re-measures its row.
+    pub looks_gen: u64,
     /// A suggested account per row (a ghost value in the empty Account
     /// cell); Tab or Accept sets it. Never an amount (non-negotiable 4).
     pub suggested: BTreeMap<RowKey, AccountId>,
@@ -277,9 +281,20 @@ impl BulkAdapter {
             today,
             highest: BTreeMap::new(),
             looks: BTreeMap::new(),
+            looks_gen: 0,
             suggested: BTreeMap::new(),
             accepted: Vec::new(),
             snapshot: None,
+        }
+    }
+}
+
+impl BulkAdapter {
+    /// What each row looks like now; a change bumps the grid's revision.
+    pub(crate) fn set_looks(&mut self, looks: BTreeMap<RowKey, RowLook>) {
+        if looks != self.looks {
+            self.looks = looks;
+            self.looks_gen = self.looks_gen.wrapping_add(1);
         }
     }
 }
@@ -443,11 +458,14 @@ fn picked(lists: &RegisterLists, list: cl_grid::ListId, key: Option<u64>) -> Cel
 
 impl RowModel for View<'_> {
     fn revision(&self) -> u64 {
-        // The shown section is part of what the grid draws.
+        // The shown section and the rows' captions are part of what the
+        // grid draws (a caption adds a line to its row).
         self.form
             .revision()
             .wrapping_mul(64)
             .wrapping_add(self.a.selected as u64)
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add(self.a.looks_gen)
     }
     fn row_count(&self) -> usize {
         self.rows().len()

@@ -261,7 +261,7 @@ fn a_closed_period_row_asks_once_for_the_password() {
     assert_eq!(s.state_json()["closing"], "asking");
     assert_eq!(
         s.closing_prompt.ask_text("09/30/2026"),
-        "1 row in this batch is dated on or before your closing date (09/30/2026).          Enter the closing-date password to save it.",
+        crate::i18n::t_count("batch_entry.closing.ask", 1, &[("date", "09/30/2026")]),
         "the dialog names the batch and its locked rows"
     );
     assert_eq!(saves(&link), (0, 0));
@@ -720,4 +720,75 @@ fn the_window_draws_in_a_frame() {
         out.textures_delta.clear();
     }
     assert_eq!(s.state_json()["screen"], "batch_entry");
+}
+
+#[test]
+fn every_row_not_in_the_lists_gets_its_caption() {
+    let (mut s, _link, _dir) = screen();
+    fill(
+        &mut s,
+        0,
+        &[
+            (day(11, 2), "6100", "10.00"),
+            (day(11, 2), "9999", "20.00"),
+            (day(11, 3), "9998", "30.00"),
+        ],
+    );
+    s.cursor_row = None;
+    s.refresh_looks();
+    let before = s.grid.adapter().looks_gen;
+    s.start_check(validate::CheckScope::Everything);
+    s.refresh_looks();
+    // The engine's answer changed no row, yet the grid re-measures the
+    // rows that now have a caption (row 3's was missing, P15A verify).
+    assert_ne!(s.grid.adapter().looks_gen, before);
+    let gen_now = s.grid.adapter().looks_gen;
+    s.refresh_looks();
+    assert_eq!(
+        s.grid.adapter().looks_gen,
+        gen_now,
+        "same looks, same revision"
+    );
+    let rows: Vec<_> = s.batch().sections[0].rows.iter().map(|r| r.key).collect();
+    for k in &rows[1..3] {
+        let look = s.grid.adapter().looks.get(k).cloned().unwrap_or_default();
+        assert!(look.error, "{look:?}");
+        assert!(
+            matches!(look.note, Some(grid::Note::Problem(t)) if t.0 == "batch_entry.problem.not_in_lists"),
+            "{look:?}"
+        );
+    }
+}
+
+#[test]
+fn a_row_left_after_the_timer_ran_is_checked_without_another_edit() {
+    let (mut s, _link, _dir) = screen();
+    fill(
+        &mut s,
+        0,
+        &[(day(11, 2), "6100", "10.00"), (day(11, 2), "9999", "20.00")],
+    );
+    s.after_grid();
+    let k = s.batch().sections[0].rows[1].key;
+    // The timer ran while the cursor was still on the row: nothing was
+    // sent for it, and no edit follows.
+    s.touched.clear();
+    s.changed_at = None;
+    s.cursor_row = Some(k);
+    s.mark_cursor_row_left();
+    assert!(s.changed_at.is_some(), "leaving the row starts the timer");
+    s.changed_at = Some(Instant::now() - CHECK_AFTER);
+    s.after_grid();
+    s.refresh_looks();
+    let look = s.grid.adapter().looks.get(&k).cloned().unwrap_or_default();
+    assert!(
+        matches!(look.note, Some(grid::Note::Problem(t)) if t.0 == "batch_entry.problem.not_in_lists"),
+        "{look:?}"
+    );
+    // Leaving a row that has its answer starts nothing.
+    s.changed_at = None;
+    s.cursor_row = Some(k);
+    s.touched.remove(&k);
+    s.mark_cursor_row_left();
+    assert!(s.changed_at.is_none());
 }

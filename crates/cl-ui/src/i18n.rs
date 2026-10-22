@@ -916,6 +916,11 @@ mod tests {
             t_count("batch_entry.summary.saved", 0, &[]),
             "Saved 0 rows."
         );
+        assert!(
+            t_count("batch_entry.closing.ask", 1, &[("date", "09/30/2026")]).starts_with(
+                "1 row in this batch is dated on or before your closing date (09/30/2026)."
+            ),
+        );
         // No singular entry: the one text serves every count.
         assert_eq!(t_count("no.such.{n}", 1, &[]), "no.such.1");
     }

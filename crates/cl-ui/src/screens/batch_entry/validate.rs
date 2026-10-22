@@ -179,7 +179,7 @@ impl BulkEntryScreen {
                 looks.insert(r.key, look);
             }
         }
-        self.grid.adapter_mut().looks = looks;
+        self.grid.adapter_mut().set_looks(looks);
         let attention = !self.problem_rows().is_empty();
         if attention != self.attention_toast {
             self.attention_toast = attention;
@@ -238,7 +238,21 @@ impl BulkEntryScreen {
     /// The cursor left a row: its problems show from now on.
     pub(crate) fn mark_cursor_row_left(&mut self) {
         if let Some(k) = self.cursor_row.take() {
-            self.touched.insert(k);
+            self.touch(k);
+        }
+    }
+
+    /// Row `key`'s problems show from now on. A row the timer skipped
+    /// while the cursor was on it (typed into more than half a second
+    /// before it was left) has no engine answer yet: the timer starts, so
+    /// its "Not in your lists" shows without another edit.
+    pub(crate) fn touch(&mut self, key: RowKey) {
+        if self.touched.insert(key)
+            && self.changed_at.is_none()
+            && self.batch().find(key).is_some_and(|(_, r)| !r.is_blank())
+            && matches!(self.checks.state(self.batch(), key), EngineState::Unchecked)
+        {
+            self.changed_at = Some(Instant::now());
         }
     }
 
@@ -247,7 +261,7 @@ impl BulkEntryScreen {
     pub(crate) fn after_grid_events(&mut self, events: &[GridEvent]) {
         for e in events {
             if let GridEvent::RowRecorded { key } = e {
-                self.touched.insert(*key);
+                self.touch(*key);
             }
         }
         let now = self.grid.grid().core().cursor().map(|c| c.row);
