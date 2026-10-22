@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Company lifecycle for ClientLedger: setup interview, open, backup and restore, portable copies, retention, export all data, delete, the practice company."
+description = "Company lifecycle for ClientLedger: setup interview, open, backup and restore, retention, export all data, delete, the practice company."
 
 [dependencies]
 cl-api = { path = "../cl-api" }

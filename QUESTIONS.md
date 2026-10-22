@@ -277,6 +277,7 @@ Answers from the owner after P11. They replace the defaults named below; later p
 | Q-261 | Look of P14 screens (no mockups). | **Follow the approved Write Check pattern** (tokens, header + lines grid + side panel); screenshots in the PR for owner review. | P14 |
 | Q-262 | Open registers don't refresh after a save in another window (P13 follow-up). | **Fix first in P14**: every save tells open registers and lists to reload. | P14 |
 | Q-263 | Bulk Entry row types whose forms aren't built yet (invoice, bill, credit memo, customer payment). | Default (per the P15A phase file): **offered only once their phase is done** (bills P17, invoices P20, payments P21, credit memos P22); P15A offers checks/expenses, card charges and credits, deposits and journal entries. | P15A, P17–P22 |
+| Q-268 | Keep "Make Portable Copy"? (owner, 2026-10-22) | **Removed.** To move a company to another computer, use Back Up Company and Restore a backup. Older .clbackup files made as portable copies still restore; they are still never deleted automatically. | P08 backup, File menu |
 | Q-253 | Early test builds before P35 packaging? | **Yes**: a GitHub workflow builds unsigned portable preview archives (Windows, macOS, Linux) automatically after each phase merges to main, and on demand, as workflow artifacts (kept 30 days), not public releases; P35 still builds the installers. | Preview build, P35 |
 
 ## Open
