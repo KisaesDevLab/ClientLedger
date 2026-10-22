@@ -140,6 +140,11 @@ impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
         self.with(lookups, Grid::reset);
     }
 
+    /// How tall the grid is from now on (a screen whose footer grows).
+    pub fn set_height(&mut self, height: GridHeight) {
+        self.height = height;
+    }
+
     /// Remember column widths under this key from now on.
     pub fn set_widths_key(&mut self, key: impl Into<String>) {
         self.widths_key = Some(key.into());

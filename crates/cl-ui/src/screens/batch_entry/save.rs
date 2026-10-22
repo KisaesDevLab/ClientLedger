@@ -361,7 +361,12 @@ impl BulkEntryScreen {
                 self.grid.command(id, &*lists) == crate::grid_form::Routed::Handled
             }
             "form.revert" => {
-                if self.confirm_remove.take().is_some() {
+                if self.confirm_remove.take().is_some() || self.mapping.take().is_some() {
+                    return true;
+                }
+                if self.import_open {
+                    self.import_open = false;
+                    self.import_error = None;
                     return true;
                 }
                 false

@@ -66,9 +66,38 @@ impl BulkEntryScreen {
         self.strip_ui(ui, &tokens, enabled);
         ui.add_space(4.0);
         self.section_header_ui(ui, &tokens, enabled);
+        if self.import_open || self.mapping.is_some() {
+            // The panel stands in for the grid until rows are added.
+            egui::ScrollArea::vertical()
+                .id_salt("batch_entry/panel")
+                .auto_shrink([false, true])
+                .max_height((ui.available_height() - 70.0).max(120.0))
+                .show(ui, |ui| {
+                    self.import_ui(ui, &tokens);
+                    self.mapping_ui(ui, &tokens);
+                });
+            ui.add_space(8.0);
+            self.actions_ui(ui, false);
+            return;
+        }
         self.import_ui(ui, &tokens);
-        self.mapping_ui(ui, &tokens);
         ui.add_space(6.0);
+        // Room under the grid for what the footer shows this frame.
+        let listed = self.problem_rows_in(self.selected()).len().min(LISTED_PROBLEMS + 1);
+        let mut reserve = 150.0 + 26.0 * listed as f32;
+        if !self.open_suggestions().is_empty() || self.suggest.offer.is_some() {
+            reserve += 34.0;
+        }
+        if self.error.is_some() || self.notice.is_some() {
+            reserve += 30.0;
+        }
+        if !self.batch().locked_rows(self.books.closing).is_empty() {
+            reserve += 26.0;
+        }
+        self.grid.set_height(cl_grid::GridHeight::Fill {
+            reserve_below: reserve,
+            min_rows: 4,
+        });
         let out = header::locked_scope(ui, enabled, false, |ui| {
             self.grid.ui(ui, &*std::sync::Arc::clone(&self.books.lists))
         });
