@@ -278,17 +278,39 @@ fn gate_walks_the_blockers_in_order() {
         ),
         Err(Blocker::KindUnsupported(SectionKind::Checks))
     );
+    // The save always sends groups: without `batch-mixed-v1` it is off,
+    // even for one section (as `cl_api::Batch::save` refuses).
+    let no_mixed = SaveCaps {
+        mixed: false,
+        ..caps
+    };
+    assert!(!no_mixed.can_post());
     assert_eq!(
-        b.can_save(
-            &checks,
-            SaveCaps {
-                mixed: false,
-                ..caps
-            },
-            None
-        ),
-        Err(Blocker::MixedUnsupported)
+        b.can_save(&checks, no_mixed, None),
+        Err(Blocker::EngineTooOld)
     );
+    let one = BulkBatch::new(b.sections[0].clone());
+    assert_eq!(
+        one.can_save(&checks, no_mixed, None),
+        Err(Blocker::EngineTooOld)
+    );
+    for missing in [
+        SaveCaps {
+            atomic: false,
+            ..caps
+        },
+        SaveCaps {
+            exact: false,
+            ..caps
+        },
+        SaveCaps {
+            idempotent: false,
+            ..caps
+        },
+    ] {
+        assert!(!missing.can_post());
+    }
+    assert!(caps.can_post());
     assert_eq!(b.can_save(&checks, caps, None), Err(Blocker::Unchecked(5)));
     ok_all(&b, &mut checks);
     assert_eq!(b.can_save(&checks, caps, None), Ok(()));

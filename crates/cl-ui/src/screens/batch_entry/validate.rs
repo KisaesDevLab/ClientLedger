@@ -71,7 +71,6 @@ pub(crate) const fn blocker_name(b: Blocker) -> &'static str {
         Blocker::Empty => "empty",
         Blocker::TooManyRows(_) => "too_many_rows",
         Blocker::KindUnsupported(_) => "kind_unsupported",
-        Blocker::MixedUnsupported => "mixed_unsupported",
         Blocker::MissingAccount(_) => "missing_account",
         Blocker::LocalProblems(_) => "local_problems",
         Blocker::ClosedUnsupported(_) => "closed_unsupported",
@@ -93,7 +92,6 @@ pub(crate) fn blocker_text(b: Blocker) -> String {
             "batch_entry.blocker.kind",
             &[("kind", &crate::i18n::t(super::sections::kind_key(k)))],
         ),
-        Blocker::MixedUnsupported => crate::i18n::t("batch_entry.blocker.mixed"),
         Blocker::MissingAccount(_) => crate::i18n::t("batch_entry.blocker.missing_account"),
         Blocker::LocalProblems(c) | Blocker::EngineProblems(c) => {
             n("batch_entry.blocker.problems", c)

@@ -53,10 +53,12 @@ impl SaveCaps {
         closing: true,
     };
 
-    /// Save all may post at all (Q-P15Ac): atomic, exact and idempotent.
+    /// Save all may post at all (Q-P15Ac): atomic, exact and idempotent,
+    /// and grouped (`batch-mixed-v1`): the save always sends `groups[]`,
+    /// even for one section, as `cl_api::Batch::save` requires.
     #[must_use]
     pub const fn can_post(self) -> bool {
-        self.atomic && self.exact && self.idempotent
+        self.atomic && self.exact && self.idempotent && self.mixed
     }
 
     /// The engine takes rows of `kind`.
@@ -475,8 +477,9 @@ impl EngineChecks {
 /// Why Save all is off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Blocker {
-    /// The engine lacks `batch-atomic-v1`, `batch-exact-v1` or
-    /// `batch-idempotent-v1` (Q-P15Ac).
+    /// The engine lacks `batch-atomic-v1`, `batch-exact-v1`,
+    /// `batch-idempotent-v1` or `batch-mixed-v1` (Q-P15Ac,
+    /// [`SaveCaps::can_post`]).
     EngineTooOld,
     /// No rows ("Add some rows first").
     Empty,
@@ -485,8 +488,6 @@ pub enum Blocker {
     /// The engine does not take this kind (checks without
     /// `batch-check-v1`).
     KindUnsupported(SectionKind),
-    /// Several sections without `batch-mixed-v1`.
-    MixedUnsupported,
     /// A section with rows has no bank or card account (its index).
     MissingAccount(usize),
     /// Rows with problems the app found.
@@ -676,9 +677,6 @@ impl BulkBatch {
             .collect();
         if let Some((_, s)) = used.iter().find(|(_, s)| !caps.offers(s.kind)) {
             return Err(Blocker::KindUnsupported(s.kind));
-        }
-        if used.len() > 1 && !caps.mixed {
-            return Err(Blocker::MixedUnsupported);
         }
         if let Some((i, _)) = used
             .iter()

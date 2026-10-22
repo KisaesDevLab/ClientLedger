@@ -86,7 +86,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("batch_entry.blocker.empty", "Add some rows first."),
     ("batch_entry.blocker.too_many", "A batch holds at most 2,000 rows (this one has {n}). Save some, then add the rest."),
     ("batch_entry.blocker.kind", "This engine can't save {kind} in a batch yet."),
-    ("batch_entry.blocker.mixed", "This engine saves one section at a time. Remove the other sections, or save them one by one."),
     ("batch_entry.blocker.missing_account", "Choose the bank account or credit card for each section."),
     ("batch_entry.blocker.problems", "{n} rows need attention. Press F8 to go to the next one."),
     ("batch_entry.blocker.not_in_lists", "{n} rows name someone who isn't in your lists. Pick a name, or turn on \u{201c}Add new names to the list\u{201d}."),
