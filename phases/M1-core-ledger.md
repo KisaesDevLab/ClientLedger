@@ -2,7 +2,7 @@
 
 **Outcome:** a QBD switcher can set up lists and tags, work a two-line register, write checks, make deposits and transfers, record card charges and owner transactions, post journal entries and templates (recurring transactions), and start from Home.
 
-**Milestone exit:** all phases merged; **PR-1** process review (fable) of the core ledger with no unresolved Blocking items; milestone summary in STATE.md. **PR-P10** reviews the grid plan inside P10.
+**Milestone exit:** all phases merged; **PR-1** process review (opus) of the core ledger with no unresolved Blocking items; milestone summary in STATE.md. **PR-P10** reviews the grid plan inside P10.
 
 Common to every screen phase: test-writer writes the scenario YAML and unit tests first; ui-verifier checks light/dark screenshots, 200% zoom, and AccessKit labels before the PR; docs-writer drafts the help page.
 
@@ -12,9 +12,9 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 
 | Tier | Size | Depends on | Implementer | Reviews |
 | --- | --- | --- | --- | --- |
-| H | L | P06, P07 | rust-implementer (opus, effort high) | reviewer (opus); **PR-P10** process-reviewer (fable) on the plan |
+| H | L | P06, P07 | rust-implementer (opus, effort high) | reviewer (opus); **PR-P10** process-reviewer (opus) on the plan |
 
-**Agents:** architect (opus) → **process-reviewer (fable) plan review** → test-writer → rust-implementer in up to 3 work packages (core/virtualization, editors, keyboard and a11y) → reviewer → ui-verifier.
+**Agents:** architect (opus) → **process-reviewer (opus) plan review** → test-writer → rust-implementer in up to 3 work packages (core/virtualization, editors, keyboard and a11y) → reviewer → ui-verifier.
 
 **Decisions:** Q-12, Q-59, Q-188.
 
@@ -242,6 +242,6 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 
 ---
 
-## Checkpoint PR-1 — Core ledger process review (fable)
+## Checkpoint PR-1 — Core ledger process review (opus)
 
 Run `process-reviewer` on: register, checks, deposits/transfers, card charges, owner helpers, journal entries, template catch-up, closed-period enforcement, delete/void audit trail. Fix Blocking findings on `fix/PR-1` before M2 starts.

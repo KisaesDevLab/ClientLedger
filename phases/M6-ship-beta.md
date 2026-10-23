@@ -49,7 +49,7 @@
 - [ ] Upgrade from the previous beta migrates the sample company and passes golden reports.
 - [ ] Forced migration failure restores the pre-upgrade backup.
 
-### Checkpoint PR-9 — Upgrades and migrations (fable)
+### Checkpoint PR-9 — Upgrades and migrations (opus)
 Interrupted migrations, rollback, schema/version compatibility of backups and transfer files, LAN host and workstation version mismatch. Fix Blocking findings on `fix/PR-9`.
 
 ---
@@ -99,7 +99,7 @@ Interrupted migrations, rollback, schema/version compatibility of backups and tr
 
 | Tier | Size | Depends on | Implementer | Reviews |
 | --- | --- | --- | --- | --- |
-| L | S | P35–P38 | orchestrator + bookkeeper | **PR-10** process-reviewer (fable) |
+| L | S | P35–P38 | orchestrator + bookkeeper | **PR-10** process-reviewer (opus) |
 
 **Decisions:** Q-35, Q-46, Q-47, Q-75, Q-120, Q-121. **Upstream:** U-10.
 

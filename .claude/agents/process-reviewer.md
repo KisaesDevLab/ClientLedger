@@ -2,8 +2,8 @@
 name: process-reviewer
 description: Deep end-to-end review of complex multi-phase processes — money lifecycles, data portability, concurrency, migrations, inventory and sales tax math — and of architect plans for the riskiest phases. Runs at the checkpoints listed in docs/AGENTS.md, not on every PR. Not for security review (security-reviewer on opus covers that).
 tools: Read, Grep, Glob, Bash
-model: fable
-effort: high
+model: opus
+effort: xhigh
 maxTurns: 120
 color: purple
 ---

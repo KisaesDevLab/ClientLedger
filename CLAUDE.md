@@ -52,13 +52,13 @@ Read these before every session, in order. Read only what your task needs (token
 
 ### Agents and models
 
-The main session is the **orchestrator**. Model routing follows the owner's rules (2026-10-18): **Fable for complex code, crucial functions and financial calculations; Opus for other areas; Sonnet for purely mechanical jobs.** Details and the token rules are in `docs/AGENTS.md` (Q-221):
+The main session is the **orchestrator**. Model routing follows the owner's rules (2026-10-22, Q-277): **Opus is the default for everything not purely mechanical; Sonnet for mechanical jobs; Fable only when the owner explicitly asks for a specific task.** Details and the token rules are in `docs/AGENTS.md` (Q-221):
 
-- `fable` — `architect` and `reviewer` for Tier H, `process-reviewer`, implementers for Tier H phases, engine changes that touch posting, balances, closing dates, sales tax, inventory costing, secrets or tenant export/import, and any work package involving money, posting, concurrency, data movement, backup/restore or secret handling.
-- `opus` — `engine-scout`, `test-writer`, `ui-verifier`, `security-reviewer`, `architect`/`reviewer` for Tier L/M, implementers for Tier L/M work, small engine changes, and the fallback for any `fable` job when Fable is unavailable (note it in STATE.md).
+- `opus` — the default for all non-mechanical work: `architect` and `reviewer` for every tier, `process-reviewer` (effort `xhigh` for Tier H phases and process checkpoints), implementers for every tier, engine changes of any size including posting, balances, closing dates, sales tax, inventory costing, secrets or tenant export/import, any work package involving money, posting, concurrency, data movement, backup/restore or secret handling, plus `engine-scout`, `test-writer`, `ui-verifier` and `security-reviewer`.
+- `fable` — only when the owner explicitly asks for it on a specific task; never for security review. Never choose it on your own.
 - `sonnet` — mechanical jobs only: `explorer` searches, `bookkeeper` (STATE/QUESTIONS/UPSTREAM upkeep), `ci-fixer` log triage, `docs-writer`. Never production logic, money code or reviews.
 
-Pass the model per invocation according to `docs/AGENTS.md`. Reviews are fresh-eyes: never share the implementation transcript with `reviewer` or `security-reviewer`. Fix passes after a review start a **fresh** implementer with one combined brief (findings, file:line, plan section) rather than resuming the original implementer. Escalate after two failed attempts (opus → fable → re-plan → block that item and continue). Log the agents and models used in each phase's STATE.md entry.
+Pass the model per invocation according to `docs/AGENTS.md`. Reviews are fresh-eyes: never share the implementation transcript with `reviewer` or `security-reviewer`. Fix passes after a review start a **fresh** implementer with one combined brief (findings, file:line, plan section) rather than resuming the original implementer. Escalate after two failed attempts (opus → fresh opus at effort `xhigh` with the architect re-planning → block that item and continue; the owner may then ask for Fable). Log the agents and models used in each phase's STATE.md entry.
 
 ### Commits
 

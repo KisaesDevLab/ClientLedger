@@ -2,7 +2,7 @@
 
 **Outcome:** a full report engine with drill-down, budgets, and AI question-to-report; users, roles, closing date, sensitive accounts, audit trail; payroll import.
 
-**Milestone exit:** all phases merged; **PR-6** process review (fable) after P28 with no unresolved Blocking items; milestone summary in STATE.md.
+**Milestone exit:** all phases merged; **PR-6** process review (opus) after P28 with no unresolved Blocking items; milestone summary in STATE.md.
 
 ---
 
@@ -38,7 +38,7 @@
 - [ ] With tagged amounts shown separately, the account row shows the untagged amount, each tag has its own row labelled with the tag number appended or prepended as chosen, and the optional account total equals untagged + tag rows exactly.
 - [ ] Screen matches its mockup per docs/design/README.md (`ui-check --compare` reviewed by ui-verifier); any deviation is listed in the PR and QUESTIONS.md.
 
-### Checkpoint PR-6 — Reports (fable)
+### Checkpoint PR-6 — Reports (opus)
 Every report ties to the trial balance; accrual vs. cash consistency; drill-down completeness; sensitive-account hiding; ask-a-question never fabricates numbers. Fix Blocking findings on `fix/PR-6`.
 
 ---

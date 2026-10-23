@@ -2,7 +2,7 @@
 
 This is the index. Each phase's full detail — decisions, engine changes, crates and files, ordered commit-sized steps, tests, and acceptance criteria — lives in the milestone files under `phases/`. Read this index plus the milestone file for the phase marked **Next** in STATE.md.
 
-**Beta track:** P00–P39 in seven milestones. **Post-beta:** P40–P49. **Process reviews:** PR-P05, PR-P10, PR-1 to PR-10 (Fable; see docs/AGENTS.md).
+**Beta track:** P00–P39 in seven milestones. **Post-beta:** P40–P49. **Process reviews:** PR-P05, PR-P10, PR-1 to PR-10 (opus; see docs/AGENTS.md).
 
 ## Milestones
 
@@ -79,7 +79,7 @@ Phases that may run in parallel with the critical path (rules in docs/AGENTS.md)
 - P29–P30 alongside P25–P28
 - P37–P38 alongside P36
 
-## Process-review checkpoints (Fable)
+## Process-review checkpoints (opus)
 
 | ID | Where | Reviews |
 | --- | --- | --- |
