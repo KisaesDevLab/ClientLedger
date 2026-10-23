@@ -2,7 +2,7 @@
 
 **Outcome:** owners import bank and card files, review and match them with rules (and optional AI), detect transfers, and reconcile with discrepancy reporting.
 
-**Milestone exit:** all phases merged; **PR-5** process review (fable) with no unresolved Blocking items; milestone summary in STATE.md.
+**Milestone exit:** all phases merged; **PR-5** process review (opus) with no unresolved Blocking items; milestone summary in STATE.md.
 
 ---
 
@@ -91,5 +91,5 @@
 - [ ] Reconciled-transaction edits appear in the discrepancy report.
 - [ ] Screen matches its mockup per docs/design/README.md (`ui-check --compare` reviewed by ui-verifier); any deviation is listed in the PR and QUESTIONS.md.
 
-### Checkpoint PR-5 — Bank lifecycle (fable)
+### Checkpoint PR-5 — Bank lifecycle (opus)
 File import → dedupe → rules and matching → transfers → accept/post → reconcile → discrepancies → undo. Adversarial cases: edited re-import, overlapping files, deleted matched transaction. Fix Blocking findings on `fix/PR-5`.

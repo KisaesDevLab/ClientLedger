@@ -87,7 +87,7 @@
 - [ ] Field positions within ±0.5 mm at 100% scale.
 - [ ] Reprint voids the original number and logs it.
 
-### Checkpoint PR-2 — Purchasing lifecycle (fable)
+### Checkpoint PR-2 — Purchasing lifecycle (opus)
 Bill → vendor credit → Pay Bills (discounts, credits, partials) → check printing → reprint/void → vendor statement match. Fix Blocking findings on `fix/PR-2`.
 
 ---
@@ -171,7 +171,7 @@ Bill → vendor credit → Pay Bills (discounts, credits, partials) → check pr
 - [ ] Credit memo and refund flows balance exactly.
 - [ ] Finance-charge assessment is idempotent per period.
 
-### Checkpoint PR-3 — Sales lifecycle (fable)
+### Checkpoint PR-3 — Sales lifecycle (opus)
 Invoice → payment (discounts, deposits, write-offs, bounced checks) → deposit → credit memos and refunds → statements and finance charges. Fix Blocking findings on `fix/PR-3`.
 
 ---
@@ -222,5 +222,5 @@ Invoice → payment (discounts, deposits, write-offs, bounced checks) → deposi
 - [ ] Average cost matches reference calculations, including after negative stock.
 - [ ] Inventory valuation equals the GL inventory account.
 
-### Checkpoint PR-4 — Sales tax and inventory (fable)
+### Checkpoint PR-4 — Sales tax and inventory (opus)
 Rounding consistency end to end; liability vs. GL; average cost through receipts, sales, adjustments, negative stock, voids, and deletes. Fix Blocking findings on `fix/PR-4`.

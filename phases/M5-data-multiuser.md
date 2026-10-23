@@ -64,7 +64,7 @@
 - [ ] Package contains no secrets.
 - [ ] Screen matches its mockup per docs/design/README.md (`ui-check --compare` reviewed by ui-verifier); any deviation is listed in the PR and QUESTIONS.md.
 
-### Checkpoint PR-7 — Data movement (fable)
+### Checkpoint PR-7 — Data movement (opus)
 Tenant export/import, backups and restore, QBD import and tie-out, CSV import rollback, transfer files, IIF. Adversarial cases: restore during an import, transfer from an older version, partial attachment loss. Fix Blocking findings on `fix/PR-7`.
 
 ---
@@ -94,7 +94,7 @@ Tenant export/import, backups and restore, QBD import and tie-out, CSV import ro
 - [ ] Workstations reconnect after a host restart; saved work intact.
 - [ ] Five concurrent users for 30 minutes meet the save budget.
 
-### Checkpoint PR-8 — LAN multi-user (fable)
+### Checkpoint PR-8 — LAN multi-user (opus)
 Concurrency on every form type, host loss mid-save, maintenance mode during active sessions, notification gaps. Fix Blocking findings on `fix/PR-8`.
 
 ---

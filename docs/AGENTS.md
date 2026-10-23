@@ -15,16 +15,16 @@ How Claude Code builds ClientLedger with subagents and the right model for each 
 | Model alias | Used by | Why |
 | --- | --- | --- |
 | `sonnet` | `explorer`, `bookkeeper`, `ci-fixer` (log triage and mechanical fixes; escalate to opus for logic changes), `docs-writer` | Purely mechanical work (owner, 2026-10-18); never production logic, money code or reviews |
-| `opus` | orchestrator (main session, unless the owner sets another with `/model`), `engine-scout`, `rust-implementer` (Tier L/M), `engine-implementer` (S changes), `test-writer`, `ui-verifier`, `architect` (Tier M), `reviewer` (Tier L/M), `security-reviewer`; fallback for every `fable` job when Fable is unavailable (`process-reviewer` then runs at effort `xhigh`) | Everything that is not complex, crucial, financial or purely mechanical |
-| `fable` | `architect` (Tier H), `reviewer` (Tier H), `process-reviewer`, `rust-implementer` (Tier H), `engine-implementer` (M/L or accounting-rule changes, tenant export/import, posting, balances, closing date, sales tax, inventory costing), any work package the architect marks crucial (money, posting, concurrency, data movement, backup/restore, secret handling) | Complex code, crucial functions and financial calculations |
+| `opus` | default for all non-mechanical work: orchestrator (main session, unless the owner sets another with `/model`), `engine-scout`, `rust-implementer` (all tiers), `engine-implementer` (all sizes, including accounting-rule changes), `test-writer`, `ui-verifier`, `architect` (all tiers), `reviewer` (all tiers), `process-reviewer` (effort `xhigh` for Tier H phases and process checkpoints), `security-reviewer`; any money, posting, concurrency, data-movement, backup/restore or secret work package | Everything that is not purely mechanical (owner, 2026-10-22, Q-277) |
+| `fable` | only when the owner explicitly asks for a specific task; never for security review | On-request only (Q-277) |
 
-Owner routing (2026-10-18): **Fable for complex code, crucial functions and financial calculations; Opus for other areas; Sonnet for purely mechanical jobs.** Haiku is not used. Launch the main session on the model the owner chooses with `/model` (Opus by default). The orchestrator passes a per-invocation `model` when it starts `rust-implementer` or `engine-implementer`; that overrides the agent file's default (Claude Code resolves the invocation parameter first, then the frontmatter, then `CLAUDE_CODE_SUBAGENT_MODEL`, then the main model). Do not set `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, which would disable this routing.
+Owner routing (2026-10-22, Q-277): **Opus is the default for everything not purely mechanical; Sonnet for mechanical jobs; Fable only when the owner explicitly asks for a specific task.** Haiku is not used. Launch the main session on the model the owner chooses with `/model` (Opus by default). The orchestrator passes a per-invocation `model` when it starts `rust-implementer` or `engine-implementer`; that overrides the agent file's default (Claude Code resolves the invocation parameter first, then the frontmatter, then `CLAUDE_CODE_SUBAGENT_MODEL`, then the main model). Do not set `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, which would disable this routing.
 
 **Effort:** `low` for search and records; `medium` for routine implementation and verification; `high` for architect, reviewers, and Tier H implementation; `xhigh` only for an escalated re-plan.
 
-## Process reviews (Fable)
+## Process reviews (process-reviewer)
 
-`process-reviewer` runs on `fable` at the checkpoints below, in addition to the per-phase `reviewer`. It traces a whole process across phases, checks accounting invariants, and builds adversarial scenarios. Blocking findings become fix work on a `fix/<checkpoint-id>` branch before the next milestone closes. Reports go to `target/reviews/<checkpoint-id>.md` and a summary goes into the STATE.md log.
+`process-reviewer` runs on `opus` at effort `xhigh` at the checkpoints below, in addition to the per-phase `reviewer`. It traces a whole process across phases, checks accounting invariants, and builds adversarial scenarios. Blocking findings become fix work on a `fix/<checkpoint-id>` branch before the next milestone closes. Reports go to `target/reviews/<checkpoint-id>.md` and a summary goes into the STATE.md log.
 
 | ID | When | What it reviews |
 | --- | --- | --- |
@@ -43,19 +43,19 @@ Owner routing (2026-10-18): **Fable for complex code, crucial functions and fina
 
 Also use `process-reviewer` for the architect plan of any engine change sized L that touches posting, balances, inventory costing, sales tax, or tenant export/import.
 
-If `fable` is unavailable on the account, run `process-reviewer` with `model: opus` and `effort: xhigh` per invocation, and note it in STATE.md.
+Fable is used only when the owner explicitly asks for it on a specific task (Q-277); the orchestrator never selects it on its own.
 
 ## Phase tiers
 
 | Tier | Phases | Implementer | Architect plan | Reviews |
 | --- | --- | --- | --- | --- |
-| **H** — money, posting, concurrency, data movement, migrations, core widget | P02, P05, P10, P12, P15, P21, P23, P24, P25, P27, P28, P31, P32, P33, P34, P36; post-beta P40, P42 | `fable`, effort high | required (`architect` on fable) | `reviewer` (fable) + `ui-verifier` (opus); `security-reviewer` (opus) where listed below |
-| **M** — feature screens with accounting effects | P08, P09, P11, P13, P14, P17, P18, P20, P22, P26, P29, P30; post-beta P41, P43, P45, P46, P47, P48 | `opus`, effort medium; `fable` for any work package touching money, posting, closing date, backup/restore or secrets | only if engine-scout reports an M/L gap | `reviewer` (opus; fable for the money packages) + `ui-verifier` |
+| **H** — money, posting, concurrency, data movement, migrations, core widget | P02, P05, P10, P12, P15, P21, P23, P24, P25, P27, P28, P31, P32, P33, P34, P36; post-beta P40, P42 | `opus`, effort high | required (`architect` on opus) | `reviewer` (opus) + `ui-verifier` (opus); `security-reviewer` (opus) where listed below |
+| **M** — feature screens with accounting effects | P08, P09, P11, P13, P14, P17, P18, P20, P22, P26, P29, P30; post-beta P41, P43, P45, P46, P47, P48 | `opus`, effort medium; effort high for any work package touching money, posting, closing date, backup/restore or secrets | only if engine-scout reports an M/L gap | `reviewer` (opus) + `ui-verifier` |
 | **L** — scaffolding, shell, printing, packaging, docs | P00, P01, P03, P04, P06, P07, P16, P19, P35, P37, P38, P39; post-beta P44 | `opus`, effort medium | no | `ui-verifier` for screens; `reviewer` optional |
 
 `security-reviewer` (opus) also runs on P03, P04, P07, P09, P29, P32, P33, P35, P36, and P37, regardless of tier.
 
-Engine changes: `engine-implementer` runs on `opus` for S-sized changes and on `fable` for M/L changes or anything touching posting, balances, inventory costing, sales tax math, closing dates, secrets, or tenant export/import.
+Engine changes: `engine-implementer` runs on `opus` for every size, at effort high for M/L changes or anything touching posting, balances, inventory costing, sales tax math, closing dates, secrets, or tenant export/import.
 
 ## The loop for one phase
 
@@ -65,11 +65,11 @@ orchestrator (opus)
  │   engine-scout (opus)        capability check              │
  │   test-writer (opus)         failing tests from criteria   │
  │   explorer ×N (sonnet)        locate code/patterns          │
- ├─ architect (fable)            plan → target/plans/Pxx.md    │ Tier H, or M with M/L gap
+ ├─ architect (opus)            plan → target/plans/Pxx.md    │ Tier H, or M with M/L gap
  ├─ engine-implementer          upstream changes first        │ if gaps
  ├─ rust-implementer            model by tier                 │ may split into work packages
  ├─ in parallel ──────────────────────────────────────────────┤
- │   reviewer (opus/fable)      fresh-eyes diff review        │ also covers security on non-listed phases
+ │   reviewer (opus)      fresh-eyes diff review        │ also covers security on non-listed phases
  │   security-reviewer (opus)   listed phases only            │
  │   docs-writer (sonnet)       help pages                    │
  ├─ rust-implementer (fresh)    fix all findings, one brief   │ a new agent, not a resume
@@ -95,12 +95,12 @@ Each runs in its own worktree and branch, with its own PR. Examples that qualify
 
 | Situation | Action |
 | --- | --- |
-| Opus implementer fails the same acceptance criterion twice, or `ci-fixer` fails the same error twice | Re-run that work package on `fable`, effort high |
-| Fable implementer fails twice | `architect` (fable) re-plans that package on effort `xhigh`; implement the new plan on `fable` |
-| Still failing (non-security work) | Ask `process-reviewer` (fable) to diagnose the root cause; implement its fix on `fable` |
+| Opus implementer fails the same acceptance criterion twice, or `ci-fixer` fails the same error twice | Re-run that work package with a fresh `opus` implementer at effort `xhigh`, with the `architect` re-planning it first |
+| Fresh opus (xhigh) fails twice | Mark only that item blocked in STATE.md, note that the owner may ask for Fable, and continue |
+| Still failing (non-security work) | Ask `process-reviewer` (opus, xhigh) to diagnose the root cause; implement its fix on a fresh `opus` |
 | Still failing | Mark only that item blocked in STATE.md, add a QUESTIONS.md row with a default, and continue other work (Q-220) |
 | Reviewer finds a Blocking issue | Fix on the same branch with a fresh implementer. Re-run `reviewer` on the fix diff only when the Blocking item is in money, posting, closing-date, backup/restore, concurrency or secret handling; otherwise CI plus the tests named for each finding close it |
-| Engine gap sized L | `architect` plans it first; `engine-implementer` on `fable` |
+| Engine gap sized L | `architect` plans it first; `engine-implementer` on `opus`, effort high |
 
 ## Cost and context guardrails
 
@@ -116,8 +116,8 @@ Token rules (owner, 2026-10-18) — keep quality, cut waste:
 
 
 - Sonnet never writes production logic, money code, tests of money code, or reviews.
-- Fable is never used for security review (it carries extra cybersecurity safeguards); `security-reviewer` stays on opus.
+- Fable is used only when the owner explicitly asks for a specific task, and never for security review (it carries extra cybersecurity safeguards); `security-reviewer` stays on opus.
 - Subagents return summaries with file paths, not file dumps; `explorer` caps replies at about 300 words.
 - `maxTurns` is set on every agent; hitting it counts as one failed attempt for escalation.
 - At most 4 subagents run at once (`.claude/settings.json`), so parallel work stays reviewable.
-- Each phase's STATE.md log entry lists the agents used and their models, for example `agents: scout/opus, tests/opus, architect/fable, impl/fable, review/fable, ui/opus`, so the owner can see where effort went.
+- Each phase's STATE.md log entry lists the agents used and their models, for example `agents: scout/opus, tests/opus, architect/opus, impl/opus, review/opus, ui/opus`, so the owner can see where effort went.

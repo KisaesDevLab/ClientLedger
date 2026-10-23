@@ -155,9 +155,9 @@
 
 | Tier | Size | Depends on | Implementer | Reviews |
 | --- | --- | --- | --- | --- |
-| H | L | P02, P04 | rust-implementer (opus) | reviewer (opus); **PR-P05** process-reviewer (fable) on the plan |
+| H | L | P02, P04 | rust-implementer (opus) | reviewer (opus); **PR-P05** process-reviewer (opus) on the plan |
 
-**Agents:** engine-scout → architect (opus) → **process-reviewer (fable) reviews the plan** → test-writer → rust-implementer (opus) → reviewer. **Decisions:** Q-04, Q-116.
+**Agents:** engine-scout → architect (opus) → **process-reviewer (opus) reviews the plan** → test-writer → rust-implementer (opus) → reviewer. **Decisions:** Q-04, Q-116.
 
 **Crates and files:** `crates/cl-core/src/{money.rs,ids.rs,dates.rs,fiscal.rs,errors.rs}`, `crates/cl-api/src/{client.rs,queue.rs,errors.rs,idempotency.rs,resources/*.rs}`, `crates/cl-api/tests/contract_*.rs`, `crates/cl-api/tests/fixtures/openapi.sha256`.
 
