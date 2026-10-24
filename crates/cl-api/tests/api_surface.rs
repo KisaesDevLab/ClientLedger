@@ -167,6 +167,7 @@ fn every_request_type_omits_both_keys() {
         color: None,
         group_id: None,
         description: None,
+        tag_number: None,
     };
     assert_clean("TagFields", &tag);
     assert_clean(

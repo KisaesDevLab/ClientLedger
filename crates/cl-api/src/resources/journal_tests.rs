@@ -602,6 +602,7 @@ async fn master_data_create_is_found_by_exact_name_and_delete_by_absence() {
         color: None,
         group_id: None,
         description: None,
+        tag_number: None,
     };
     let tag = s
         .tags()
@@ -652,6 +653,7 @@ async fn master_data_candidate_with_other_fields_is_unknown_not_retried() {
         color: None,
         group_id: None,
         description: None,
+        tag_number: None,
     };
     let e = s
         .tags()
@@ -822,6 +824,7 @@ async fn master_data_reconciliation_stops_at_a_switch() {
         color: None,
         group_id: None,
         description: None,
+        tag_number: None,
     };
     let e = s
         .tags()

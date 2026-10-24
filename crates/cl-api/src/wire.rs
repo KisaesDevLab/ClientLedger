@@ -78,6 +78,10 @@ impl Capabilities {
     pub const TAG_MERGE: &'static str = "tag-merge-v1";
     /// U-42 tag groups required for chosen account types.
     pub const TAG_REQUIRED_GROUPS: &'static str = "tag-required-groups-v1";
+    /// U-75 tag numbers (Q-270): `tagNumber` on tags, unique per company
+    /// (409 `TAG_NUMBER_EXISTS`), lists sorted number then name, `search`
+    /// matches the number, carried by tenant archives.
+    pub const TAG_NUMBER: &'static str = "tag-number-v1";
     /// U-43 editable payment terms (with discount terms) and payment
     /// methods.
     pub const TERMS_LISTS: &'static str = "terms-lists-v1";

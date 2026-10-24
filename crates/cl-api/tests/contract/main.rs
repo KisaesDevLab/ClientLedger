@@ -146,6 +146,12 @@ fn main() -> std::process::ExitCode {
             "tags::several_line_tags_u45",
             contract_tags::several_line_tags_u45,
         ),
+        // P16 step 0e: tag numbers (PENDING until the pin has U-75).
+        ("tags::numbers_u75", contract_tags::numbers_u75),
+        (
+            "tags::number_archive_round_trip_u75",
+            contract_tags::number_archive_round_trip_u75,
+        ),
         (
             "list_csv::exports_and_imports",
             contract_list_csv::exports_and_imports,

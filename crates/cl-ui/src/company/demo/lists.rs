@@ -158,6 +158,7 @@ pub fn tags() -> Vec<Tag> {
                 color: None,
                 group_id: group,
                 description: None,
+                tag_number: None,
             },
             is_active: active,
             usage_count: Some(0),

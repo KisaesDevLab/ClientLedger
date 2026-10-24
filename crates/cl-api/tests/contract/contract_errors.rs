@@ -103,6 +103,7 @@ pub fn tag_conflicts_in_use_and_duplicate(h: &Harness) {
         color: None,
         group_id: None,
         description: None,
+        tag_number: None,
     };
     let tag = h.run(s.tags().create(&fields, key())).expect("tag").record;
     let e = h
