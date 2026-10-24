@@ -65,6 +65,9 @@ pub struct CompanyPrefs {
     /// account-type names such as `expense`, Q-180). Kept here and checked
     /// by the forms until the engine stores and enforces the rule (U-42).
     pub required_tag_groups: BTreeMap<TagGroupId, BTreeSet<String>>,
+    /// The owner hid Home's setup checklist (Q-63). It travels with the
+    /// company, so a restored company does not show it again.
+    pub setup_checklist_dismissed: bool,
 }
 
 impl Default for CompanyPrefs {
@@ -78,6 +81,7 @@ impl Default for CompanyPrefs {
             account_numbers: true,
             sensitive_accounts: BTreeSet::new(),
             required_tag_groups: BTreeMap::new(),
+            setup_checklist_dismissed: false,
         }
     }
 }
@@ -135,6 +139,7 @@ impl CompanyPrefs {
             account_numbers: self.account_numbers,
             sensitive_accounts: self.sensitive_accounts.clone(),
             required_tag_groups: self.required_tag_groups.clone(),
+            setup_checklist_dismissed: self.setup_checklist_dismissed,
         }
     }
 
@@ -167,6 +172,7 @@ impl CompanyPrefs {
             account_numbers: archive.account_numbers,
             sensitive_accounts: archive.sensitive_accounts.clone(),
             required_tag_groups: archive.required_tag_groups.clone(),
+            setup_checklist_dismissed: archive.setup_checklist_dismissed,
         };
         out.normalize();
         out
@@ -283,6 +289,13 @@ mod tests {
             old.account_numbers,
             "records from before P11 keep numbers on"
         );
+        // Hiding Home's setup checklist travels with the company (Q-63, P16).
+        assert!(!old.setup_checklist_dismissed, "shown until hidden");
+        let mut hidden = local.clone();
+        hidden.setup_checklist_dismissed = true;
+        assert!(hidden.for_archive().setup_checklist_dismissed);
+        let back = CompanyPrefs::merged_from_archive(&hidden.for_archive(), Some(&local));
+        assert!(back.setup_checklist_dismissed);
         archive.ai.monthly_token_cap = Some(1000);
         assert_eq!(
             CompanyPrefs::merged_from_archive(&archive, Some(&local))

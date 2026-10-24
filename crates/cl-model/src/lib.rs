@@ -23,6 +23,7 @@ pub mod commands;
 pub mod date_entry;
 pub mod date_rules;
 pub mod forms;
+pub mod home;
 pub mod keymap;
 pub mod lists;
 pub mod lookup;

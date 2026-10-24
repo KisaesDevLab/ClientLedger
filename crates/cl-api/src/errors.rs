@@ -273,6 +273,13 @@ pub enum LocalValidation {
     /// A Bulk Entry CSV or paste is empty or larger than 10 MB; nothing
     /// was sent.
     BatchFileSize,
+    // ---- P16 WP6a: Home ----
+    /// Dashboard money needs `dashboard-exact-v1` (U-76); nothing was
+    /// sent. Home shows a dash instead.
+    DashboardUnavailable,
+    /// The dashboard's bills-due window must be 1 to 90 days; nothing was
+    /// sent (Home counts a longer window with the bills list instead).
+    DueWindow,
 }
 
 /// A save was refused because its date is on or before the closing date.

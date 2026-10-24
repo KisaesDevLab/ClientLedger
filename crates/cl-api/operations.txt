@@ -32,6 +32,8 @@
 #! schema-source engine/packages/api/src/routes/payments.routes.ts
 #! schema-source engine/packages/shared/src/schemas/batch.ts
 #! schema-source engine/packages/api/src/routes/batch.routes.ts
+#! schema-source engine/packages/api/src/routes/dashboard.routes.ts
+#! schema-source engine/packages/shared/src/schemas/payroll.ts
 GET     /health                                 idempotent
 GET     /api/v1/desktop/info                    idempotent
 GET     /openapi.json                           idempotent
@@ -195,3 +197,13 @@ POST    /api/v1/batch/validate                  pre-handler-only
 POST    /api/v1/batch/save                      pre-handler-only
 GET     /api/v1/batch/suggest-account           idempotent
 POST    /api/v1/batch/parse-csv                 pre-handler-only
+# P16 WP6a: Home (in the pinned spec; dashboard-exact-v1 money and asOf with engine PR #168)
+GET     /api/v1/dashboard/cash-position         idempotent
+GET     /api/v1/dashboard/receivables           idempotent
+GET     /api/v1/dashboard/payables              idempotent
+GET     /api/v1/dashboard/action-items          idempotent
+GET     /api/v1/dashboard/summary               idempotent
+GET     /api/v1/bills                           idempotent
+GET     /api/v1/payroll-import/sessions         idempotent
+GET     /api/v1/banking/reconciliations         idempotent
+GET     /api/v1/banking/statements              idempotent
