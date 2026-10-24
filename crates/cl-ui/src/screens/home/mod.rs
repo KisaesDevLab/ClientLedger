@@ -374,6 +374,17 @@ impl HomeScreen {
         self.poll();
     }
 
+    /// Takes the shell's date when it published one; true when it moved.
+    pub(crate) fn follow_shell_date(&mut self, ctx: &egui::Context) -> bool {
+        match crate::grid_env::published(ctx) {
+            Some(f) if f.today != self.today => {
+                self.today = f.today;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Reconciliations of the bank and card accounts, once the chart is in.
     fn read_reconciliations(&mut self) {
         let Some(accounts) = self.data.accounts.value.as_ref() else {
@@ -823,7 +834,11 @@ impl Screen for HomeScreen {
     }
 
     fn ui(&mut self, ui: &mut Ui) {
-        if !self.link.bus().take(&mut self.sub).is_empty() {
+        let changed = !self.link.bus().take(&mut self.sub).is_empty();
+        // The shell's date (it moves on at midnight): a new day reads
+        // everything again for that day.
+        let day_moved = self.follow_shell_date(ui.ctx());
+        if changed || day_moved {
             self.reload();
         }
         self.poll();

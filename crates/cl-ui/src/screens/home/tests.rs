@@ -197,6 +197,65 @@ fn the_bills_line_takes_the_payables_panel_for_its_window() {
     );
 }
 
+/// Home follows the shell's date: when the shell's day moves on (midnight
+/// with Home open) Home reads everything again for the new day; outside a
+/// shell it keeps the date it was opened with.
+#[test]
+fn home_follows_the_shells_date() {
+    use eframe::egui::{Pos2, RawInput, Rect, vec2};
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let opened = DemoState::today();
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    let frame = |ctx: &egui::Context, h: &mut HomeScreen| {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| h.ui(ui));
+        });
+        out.textures_delta.clear();
+    };
+    frame(&ctx, &mut h);
+    assert_eq!(h.today, opened, "no shell: the date Home opened with");
+    let months = |h: &HomeScreen| {
+        h.data
+            .chart
+            .value
+            .as_ref()
+            .map(|m| m.last().map(|m| m.range.end))
+    };
+    let before = months(&h);
+    // The shell's day moves to the first of next month.
+    let next = date(2026, 12, 1);
+    crate::grid_env::publish(
+        &ctx,
+        egui::ViewportId::ROOT,
+        crate::grid_env::ShellFrame::new(next, &crate::prefs::UiPrefs::default(), false),
+    );
+    frame(&ctx, &mut h);
+    assert_eq!(h.today, next);
+    for _ in 0..3 {
+        frame(&ctx, &mut h);
+    }
+    assert_ne!(months(&h), before, "the chart read again for the new day");
+    assert_eq!(
+        h.data
+            .chart
+            .value
+            .as_ref()
+            .and_then(|m| m.last())
+            .map(|m| m.range.end),
+        Some(date(2026, 11, 30)),
+        "the last whole month: November"
+    );
+    // The same day again: no new read.
+    assert!(!h.follow_shell_date(&ctx));
+}
+
 /// The lines Home draws: a dash for what can't be counted (overdue invoices
 /// before U-76, a failed query), one muted line for what arrives later,
 /// nothing for a zero, "Nothing needs attention" when all is clear.
