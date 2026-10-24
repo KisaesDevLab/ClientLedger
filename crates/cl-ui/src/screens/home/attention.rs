@@ -33,6 +33,21 @@ fn count_of(slot: Option<&Result<u64, ApiError>>, kind: AttentionKind) -> Attent
     }
 }
 
+/// Bills overdue or due within `days` from the payables panel
+/// (`dashboard-exact-v1`): its overdue count plus its due-soon count, the
+/// same bills as Home's line (posted, open, a balance left, due on or before
+/// today + `days`; voided bills out). Only when the panel was read for this
+/// very window (the engine takes 1 to 90 days); else `None` and Home counts
+/// from the bills list.
+#[must_use]
+pub(crate) fn payables_due(data: &HomeData, days: u16, exact: bool) -> Option<u64> {
+    if !exact || !(1..=cl_api::DUE_WITHIN_DAYS_MAX).contains(&days) {
+        return None;
+    }
+    let p = data.summary.value.as_ref()?.payables.as_ref()?;
+    (p.due_within_days == days).then(|| p.overdue_count.saturating_add(p.due_soon_count))
+}
+
 /// Every Needs attention item, in display order: each count is exactly the
 /// engine's answer (`None` while unknown).
 #[must_use]
@@ -47,7 +62,10 @@ pub(crate) fn items(
         .into_iter()
         .map(|kind| match kind {
             AttentionKind::BankWaiting => count_of(counts.map(|c| &c.feed), kind),
-            AttentionKind::BillsDue { .. } => count_of(counts.map(|c| &c.bills), kind),
+            AttentionKind::BillsDue { days } => match payables_due(data, days, exact) {
+                Some(n) => AttentionItem::counted(kind, n),
+                None => count_of(counts.map(|c| &c.bills), kind),
+            },
             AttentionKind::PayrollUnposted => count_of(counts.map(|c| &c.payroll), kind),
             AttentionKind::ReconcileUnfinished => match &data.reconcile.value {
                 Some(r) => AttentionItem::counted(

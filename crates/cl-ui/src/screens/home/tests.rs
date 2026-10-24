@@ -143,6 +143,60 @@ fn attention_counts_are_exactly_the_engine_answers() {
     assert_eq!(counted(&items, "payroll_unposted"), Some(2));
 }
 
+/// With `dashboard-exact-v1` and a window of 1 to 90 days the bills line is
+/// the payables panel's overdue plus due-soon count (voided bills out on the
+/// engine); for another window, or without the panel, the list's count.
+#[test]
+fn the_bills_line_takes_the_payables_panel_for_its_window() {
+    let mut summary = demo::summary(&mut DemoState::new(), DemoState::today(), 7);
+    if let Some(p) = summary.payables.as_mut() {
+        p.overdue_count = 2;
+        p.due_soon_count = 5;
+    }
+    let data = HomeData {
+        counts: Slot::ready(Counts {
+            feed: Ok(0),
+            bills: Ok(9),
+            payroll: Ok(0),
+            clients: Ok(0),
+            vendors: Ok(0),
+        }),
+        summary: Slot::ready(summary),
+        ..HomeData::default()
+    };
+    assert_eq!(attention::payables_due(&data, 7, true), Some(7));
+    let items = attention::items(&data, 7, true, false);
+    assert_eq!(counted(&items, "bills_due"), Some(7), "overdue + due soon");
+    // Another window than the panel was read for: the list.
+    assert_eq!(attention::payables_due(&data, 14, true), None);
+    assert_eq!(
+        counted(&attention::items(&data, 14, true, false), "bills_due"),
+        Some(9)
+    );
+    // Past the engine's 90 days, and without the capability: the list.
+    assert_eq!(attention::payables_due(&data, 120, true), None);
+    assert_eq!(attention::payables_due(&data, 7, false), None);
+    assert_eq!(
+        counted(&attention::items(&data, 7, false, false), "bills_due"),
+        Some(9)
+    );
+    // The list's count failed (past its page cap): a dash, not a number.
+    let data = HomeData {
+        counts: Slot::ready(Counts {
+            feed: Ok(0),
+            bills: Err(ApiError::Local(cl_api::LocalValidation::PageLimit)),
+            payroll: Ok(0),
+            clients: Ok(0),
+            vendors: Ok(0),
+        }),
+        ..HomeData::default()
+    };
+    assert_eq!(
+        counted(&attention::items(&data, 7, false, false), "bills_due"),
+        None
+    );
+}
+
 /// The lines Home draws: a dash for what can't be counted (overdue invoices
 /// before U-76, a failed query), one muted line for what arrives later,
 /// nothing for a zero, "Nothing needs attention" when all is clear.
