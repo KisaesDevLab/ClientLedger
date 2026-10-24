@@ -123,9 +123,22 @@ fn report_json_has_whole_points() {
         body_h: 100.6,
         top_scrolls: false,
         bottom_scrolls: false,
+        body_scrolled: true,
+        body_at_end: false,
     };
     let v = r.json();
+    assert_eq!(v["body_scrolled"], true);
+    assert_eq!(v["body_at_end"], false);
     assert_eq!(v["top_h"], 40.0);
     assert_eq!(v["body_h"], 101.0);
     assert_eq!(v["top_scrolls"], false);
+}
+
+#[test]
+fn the_report_says_whether_a_scrolling_body_is_scrolled_and_at_its_end() {
+    let s = frame(Vec2::new(480.0, 320.0), 1, Body::Scroll);
+    assert!(!s.report.body_scrolled, "{:?}", s.report);
+    assert!(!s.report.body_at_end, "60 lines do not fit: {:?}", s.report);
+    let s = frame(Vec2::new(480.0, 320.0), 1, Body::Fill);
+    assert!(!s.report.body_scrolled && s.report.body_at_end);
 }
