@@ -540,9 +540,11 @@ impl HomeScreen {
     ) -> (bool, Option<checklist::Action>) {
         let mut refresh = false;
         let mut todo = None;
+        // The window title, 22/600 (DESIGN.md typography: the Heading
+        // style is IBM Plex Sans SemiBold 22).
+        let title_font = egui::TextStyle::Heading.resolve(ui.style());
         let title = RichText::new(t("cmd.nav.home"))
-            .size(22.0)
-            .strong()
+            .font(title_font.clone())
             .color(tokens.text_primary);
         let subtitle = RichText::new(t("home.subtitle")).color(tokens.text_secondary);
         let measure = |s: String, font: egui::FontId| {
@@ -554,7 +556,7 @@ impl HomeScreen {
         let body = egui::TextStyle::Body.resolve(ui.style());
         let button_w =
             measure(t("home.refresh"), body.clone()) + 2.0 * ui.spacing().button_padding.x;
-        let title_w = measure(t("cmd.nav.home"), egui::FontId::proportional(22.0));
+        let title_w = measure(t("cmd.nav.home"), title_font);
         let subtitle_w = measure(t("home.subtitle"), body);
         let line_w = list.map_or(0.0, |c| {
             measure(checklist::line_text(c), egui::FontId::proportional(12.0)) + 16.0

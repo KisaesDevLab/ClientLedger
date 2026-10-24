@@ -458,6 +458,59 @@ fn tree(s: &mut HomeScreen, width: f32) -> Vec<(Role, String)> {
         .collect()
 }
 
+/// Draws Home a few frames at `width`; each button's (name, height).
+fn button_heights(s: &mut HomeScreen, width: f32) -> Vec<(String, f64)> {
+    use eframe::egui::{Pos2, RawInput, Rect, vec2};
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut all = std::collections::HashMap::new();
+    for _ in 0..4 {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 940.0))),
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        if let Some(t) = out.platform_output.accesskit_update {
+            all.extend(t.nodes);
+        }
+    }
+    all.into_values()
+        .filter(|n| n.role() == Role::Button)
+        .filter_map(|n| {
+            let b = n.bounds()?;
+            Some((n.label().unwrap_or_default().to_string(), b.y1 - b.y0))
+        })
+        .collect()
+}
+
+/// DESIGN.md: Home's lane actions are primary targets, at least 44 px.
+#[test]
+fn lane_actions_are_44_points_tall() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    for width in [1440.0, 480.0] {
+        let buttons = button_heights(&mut h, width);
+        let mut seen = 0;
+        for lane in &LANES {
+            for id in lane.actions {
+                let label = lanes::action_label(id);
+                let (_, height) = buttons
+                    .iter()
+                    .find(|(n, _)| *n == label)
+                    .unwrap_or_else(|| panic!("{label} at {width}"));
+                assert!(*height >= 44.0, "{label}: {height} at {width}");
+                seen += 1;
+            }
+        }
+        assert_eq!(seen, LANES.iter().map(|l| l.actions.len()).sum::<usize>());
+    }
+}
+
 #[test]
 fn every_lane_action_opens_its_form_or_a_tracked_placeholder() {
     let (_d, link) = demo_link();
