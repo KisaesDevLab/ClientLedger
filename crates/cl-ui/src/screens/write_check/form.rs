@@ -57,11 +57,6 @@ fn above(ui: &mut Ui, tokens: &Tokens, label: &str) -> egui::Response {
     )
 }
 
-/// Enter left a single-line header field: Save & New (Q-190).
-fn entered(r: &egui::Response) -> bool {
-    r.lost_focus() && r.ctx.input(|i| i.key_pressed(egui::Key::Enter))
-}
-
 impl WriteCheckScreen {
     pub(crate) fn style(&self, _ui: &Ui) -> cl_core::MoneyStyle {
         self.money_style
@@ -270,7 +265,7 @@ impl WriteCheckScreen {
             form::heading(ui, tokens, &t("check.void.title"));
             form::hint(ui, tokens, &t("check.void.explain"));
             let r = form::field(ui, &t("check.void.reason"), &mut self.void.reason);
-            send |= entered(&r);
+            send |= crate::forms::enter::submitted(&r);
             ui.horizontal(|ui| {
                 send |= ui.button(t("check.void.confirm")).clicked();
                 cancel = ui.button(t("check.void.cancel")).clicked();
@@ -355,10 +350,11 @@ impl WriteCheckScreen {
                         })
                         .response
                         .labelled_by(l.id);
-                    if std::mem::take(&mut self.focus) == Some(Field::Bank) {
+                    // Only a Bank request is taken here; a request for a
+                    // later field stays for that field.
+                    if self.focus == Some(Field::Bank) {
+                        self.focus = None;
                         r.request_focus();
-                    } else if let Some(f) = self.focus.filter(|f| *f != Field::Bank) {
-                        self.focus = Some(f);
                     }
                 });
             });
@@ -514,7 +510,7 @@ impl WriteCheckScreen {
             self.inputs.rev = self.header.revision();
             self.save.duplicate = None;
         }
-        if entered(&r) {
+        if crate::forms::enter::entered(&r).saves() {
             self.after_frame = Some(CommandId::new("form.save_new"));
         }
     }
@@ -545,7 +541,7 @@ impl WriteCheckScreen {
                 self.inputs.rev = self.header.revision();
             }
         }
-        if entered(&r) {
+        if crate::forms::enter::entered(&r).saves() {
             self.after_frame = Some(CommandId::new("form.save_new"));
         }
     }
@@ -577,7 +573,7 @@ impl WriteCheckScreen {
             self.pick_payee(id);
         } else if r.lost_focus() {
             self.resolve_payee();
-            if entered(&r) {
+            if crate::forms::enter::entered(&r).saves() {
                 self.after_frame = Some(CommandId::new("form.save_new"));
             }
         }
@@ -680,7 +676,7 @@ impl WriteCheckScreen {
         }
         if r.lost_focus() {
             self.amount_left();
-            if entered(&r) && self.inputs.amount_problem.is_none() {
+            if crate::forms::enter::entered(&r).saves() && self.inputs.amount_problem.is_none() {
                 self.after_frame = Some(CommandId::new("form.save_new"));
             }
         }
@@ -770,7 +766,7 @@ impl WriteCheckScreen {
             self.header.edit(field::MEMO, |h| h.memo = text);
             self.inputs.rev = self.header.revision();
         }
-        if entered(&r) {
+        if crate::forms::enter::entered(&r).saves() {
             self.after_frame = Some(CommandId::new("form.save_new"));
         }
     }

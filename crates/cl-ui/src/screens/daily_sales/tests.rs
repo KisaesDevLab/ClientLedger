@@ -949,3 +949,32 @@ fn a_kept_draft_dated_in_the_closed_period_does_not_ask_for_the_password() {
     );
     assert_eq!(r.fake().posts, 1);
 }
+
+/// Q-264: Enter in Date posts the day (Save & New) by default and moves to
+/// the next field when "Enter moves between fields" is on.
+#[test]
+fn header_enter_saves_or_moves_by_the_preference() {
+    use crate::forms::enter::testing::{context, enter, frame, settle};
+    use cl_model::forms::EnterMode;
+    for mode in [EnterMode::SaveAndNew, EnterMode::MoveBetweenFields] {
+        let mut r = rig();
+        r.plan_day("500.00");
+        let ctx = context();
+        r.s.focus = Some(Field::Date);
+        settle(&ctx, mode, &mut |ui| r.s.ui(ui));
+        assert_eq!(r.s.focused, Some(Field::Date), "{mode:?}");
+        frame(&ctx, mode, enter(false), &mut |ui| r.s.ui(ui));
+        settle(&ctx, mode, &mut |ui| r.s.ui(ui));
+        match mode {
+            EnterMode::SaveAndNew => assert_eq!(r.fake().posts, 1, "Enter = Save & New"),
+            EnterMode::MoveBetweenFields => {
+                assert_eq!(r.fake().posts, 0, "Enter never saves here");
+                assert!(
+                    r.s.focused.is_some_and(|f| f != Field::Date),
+                    "the next field: {:?}",
+                    r.s.focused
+                );
+            }
+        }
+    }
+}

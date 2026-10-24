@@ -1029,7 +1029,7 @@ impl PersonalFundsScreen {
                             );
                             self.apply_name(field::PAYEE, out);
                             kit::track(&mut self.focused, &r, field::PAYEE);
-                            if kit::entered(&r) {
+                            if crate::forms::enter::entered(&r).saves() {
                                 self.after_frame = Some(CommandId::new("form.save_new"));
                             }
                         });
@@ -1052,7 +1052,7 @@ impl PersonalFundsScreen {
                                 self.inputs.rev = self.header.revision();
                             }
                             kit::track(&mut self.focused, &r, field::DATE);
-                            if kit::entered(&r) {
+                            if crate::forms::enter::entered(&r).saves() {
                                 self.after_frame = Some(CommandId::new("form.save_new"));
                             }
                         });

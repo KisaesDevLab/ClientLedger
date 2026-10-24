@@ -12,6 +12,7 @@ use cl_core::{CalendarDate, MoneyStyle, Weekday};
 use cl_model::TextKey;
 use cl_model::amount_entry::{self, Preview};
 use cl_model::date_entry::DateOrder;
+use cl_model::forms::EnterMode;
 use egui::{
     Align2, Color32, CornerRadius, EventFilter, FontId, Id, Pos2, Rect, Response, Role, Sense,
     Stroke, StrokeKind, Ui, UiBuilder, Vec2, pos2, vec2,
@@ -86,6 +87,9 @@ pub struct GridEnv<'a> {
     /// False while a shell modal is open: the grid gives up focus and
     /// ignores input (B6).
     pub input_enabled: bool,
+    /// What Enter does: Save & New style (record the row) or move to the
+    /// next cell (the "Enter moves between fields" preference, Q-264).
+    pub enter_mode: EnterMode,
 }
 
 impl GridEnv<'_> {
@@ -95,6 +99,7 @@ impl GridEnv<'_> {
             first_weekday: self.first_weekday,
             date_order: self.date_order,
             money: self.money_style,
+            enter_mode: self.enter_mode,
         }
     }
 
@@ -717,6 +722,17 @@ impl Grid {
             ..Mods::NONE
         };
         match gi {
+            // Space picks the highlighted choice and stays, in both Enter
+            // modes (Enter would move on when Enter moves between fields).
+            GridInput::Key(GridKey::Space, Mods::NONE)
+                if open && env.enter_mode == EnterMode::MoveBetweenFields =>
+            {
+                match edit.popup.as_ref().and_then(|p| p.highlight) {
+                    // The commit closes the list.
+                    Some(i) => vec![GridInput::PopupPicked(i)],
+                    None => vec![GridInput::ToggleList],
+                }
+            }
             GridInput::Key(GridKey::Space, Mods::NONE) if open => {
                 vec![GridInput::Key(GridKey::Enter, Mods::NONE)]
             }

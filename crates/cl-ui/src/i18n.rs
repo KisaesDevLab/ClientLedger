@@ -884,6 +884,13 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // the tag form shows with the number it sent (`t_with`, `{n}`).
     ("error.api.tag_number_taken", "Another tag already uses that number. Tag numbers must be unique; pick a different number."),
     ("error.api.tag_number_taken_n", "Another tag already uses number {n}."),
+    // WP1 (P16): Enter moves between fields (Q-264).
+    ("prefs.user.enter_moves", "Enter moves between fields"),
+    (
+        "prefs.user.enter_moves.tip",
+        "Enter goes to the next field, like Tab. Ctrl+Enter saves and starts a new one.",
+    ),
+    ("status.hint.save_new", "save & new"),
 ];
 
 #[cfg(test)]

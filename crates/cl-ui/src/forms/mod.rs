@@ -4,9 +4,11 @@
 //! the other windows what its save changed (Q-262), and [`header`], the
 //! toolbar and title row every form draws the same way. P15 adds
 //! [`template`], the Save as Template and Use hook. P15A lifts Write Check's
-//! account suggestions into [`suggest`] for Bulk Entry.
+//! account suggestions into [`suggest`] for Bulk Entry. P16 adds [`enter`],
+//! what Enter does in a header field (Save & New, or the next field, Q-264).
 
 pub mod closing_prompt;
+pub mod enter;
 pub mod header;
 pub mod lines_grid;
 pub mod nav_prompt;

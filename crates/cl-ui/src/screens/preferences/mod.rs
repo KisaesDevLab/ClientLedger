@@ -147,7 +147,7 @@ impl Category {
     /// Words the search box matches besides the label.
     fn search_terms(self) -> &'static str {
         match self {
-            Category::LookAndFeel => "theme dark light zoom colour color",
+            Category::LookAndFeel => "theme dark light zoom colour color enter keyboard tab",
             Category::DatesNumbers => "date format negative parentheses warning",
             Category::Reminders => "bills due backup remind",
             Category::Accounting => "basis cash accrual fiscal year closing date account numbers",
@@ -1105,6 +1105,7 @@ impl Screen for PreferencesScreen {
                 "zoom": self.edits.user.zoom_percent,
                 "date_format": format!("{:?}", self.edits.user.date_format).to_ascii_lowercase(),
                 "negatives": format!("{:?}", self.edits.user.negatives).to_ascii_lowercase(),
+                "enter_moves_fields": self.edits.user.enter_moves_fields,
             },
         })
     }
@@ -1181,6 +1182,7 @@ mod tests {
         }
         assert!(Category::Ai.matches("ollama"));
         assert!(!Category::Backups.matches("ollama"));
+        assert!(Category::LookAndFeel.matches("enter"));
         assert_eq!(Category::LookAndFeel.group(), Group::Me);
         assert_eq!(Category::Email.group(), Group::Company);
     }
@@ -1202,6 +1204,24 @@ mod tests {
         assert_eq!(s.title(), "Preferences");
         assert_eq!(s.state()["category"], "look");
         assert!(!s.dirty());
+    }
+
+    #[test]
+    fn the_enter_option_is_a_just_for_me_preference() {
+        let (_d, mut s) = demo_screen(true);
+        assert_eq!(s.state()["user"]["enter_moves_fields"], false);
+        s.edits_mut().user.enter_moves_fields = true;
+        assert!(s.dirty());
+        assert_eq!(s.state()["user"]["enter_moves_fields"], true);
+        assert!(Screen::save(&mut s));
+        assert!(
+            s.link
+                .drain()
+                .iter()
+                .any(|e| matches!(e, CompanyEvent::UserPrefs(p) if p.enter_moves_fields))
+        );
+        assert!(crate::i18n::has("prefs.user.enter_moves"));
+        assert!(crate::i18n::has("prefs.user.enter_moves.tip"));
     }
 
     #[test]

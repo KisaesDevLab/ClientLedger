@@ -265,8 +265,9 @@ fn map(
                 _ => None,
             };
             let Some(k) = grid_key else { return keep };
-            // Shift+Enter is a newline only in a multiline memo (step 13a).
-            let m = if k == GridKey::Enter { Mods::NONE } else { m };
+            // Shift+Enter keeps its Shift: it is Enter when Enter records
+            // the row and "previous cell" when Enter moves between fields
+            // (Q-264). In a multiline memo it stayed for the editor above.
             out.push(GridInput::Key(k, m));
             None
         }
@@ -470,6 +471,15 @@ b"
         );
         assert_eq!(out, vec![GridInput::Key(GridKey::Enter, Mods::NONE)]);
         assert_eq!(left.len(), 1, "the arrow moves the caret");
+    }
+
+    #[test]
+    fn shift_enter_keeps_its_shift_outside_a_memo() {
+        // The core treats it as Enter or as "previous cell" (Q-264).
+        let date = info(Some(CellKind::Date), true);
+        let (out, left, _) = run(vec![press(Key::Enter, Modifiers::SHIFT, false)], date);
+        assert_eq!(out, vec![GridInput::Key(GridKey::Enter, Mods::SHIFT)]);
+        assert_eq!(left, Vec::<Event>::new());
     }
 
     #[test]

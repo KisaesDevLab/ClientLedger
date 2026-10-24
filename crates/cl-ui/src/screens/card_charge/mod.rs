@@ -1031,7 +1031,7 @@ impl CardChargeScreen {
                         );
                         self.apply_payee(out);
                         kit::track(&mut self.focused, &r, field::PAYEE);
-                        if kit::entered(&r) {
+                        if crate::forms::enter::entered(&r).saves() {
                             self.after_frame = Some(CommandId::new("form.save_new"));
                         }
                     });
@@ -1052,7 +1052,7 @@ impl CardChargeScreen {
                             self.inputs.rev = self.header.revision();
                         }
                         kit::track(&mut self.focused, &r, field::DATE);
-                        if kit::entered(&r) {
+                        if crate::forms::enter::entered(&r).saves() {
                             self.after_frame = Some(CommandId::new("form.save_new"));
                         }
                     });
@@ -1117,7 +1117,9 @@ impl CardChargeScreen {
                         kit::track(&mut self.focused, &r, field::AMOUNT);
                         if r.lost_focus() {
                             self.amount_left();
-                            if kit::entered(&r) && self.inputs.amount.problem.is_none() {
+                            if crate::forms::enter::entered(&r).saves()
+                                && self.inputs.amount.problem.is_none()
+                            {
                                 self.after_frame = Some(CommandId::new("form.save_new"));
                             }
                         }

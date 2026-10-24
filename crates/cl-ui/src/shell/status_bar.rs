@@ -2,6 +2,7 @@
 //! context keyboard hints read from the keymap.
 
 use cl_model::commands::{self, CommandId};
+use cl_model::{EnterMode, Key, Mods, Shortcut};
 use eframe::egui::{self, Align, Frame, Layout, Margin, RichText, Ui};
 
 use super::{HostView, Shell, chip_text};
@@ -97,9 +98,26 @@ fn keymap_hints(list: &[(&str, &str)]) -> Vec<Hint> {
 
 /// The hints for the window in front (`None` when no window is open): the
 /// register and the transaction forms show their own, every other screen
-/// the general ones.
+/// the general ones. When Enter moves between fields (Q-264) the forms
+/// also show Ctrl+Enter, their Save & New.
 #[must_use]
-pub fn hints_for(active: Option<CommandId>) -> Vec<Hint> {
+pub fn hints_for(active: Option<CommandId>, mode: EnterMode) -> Vec<Hint> {
+    let mut out = base_hints(active);
+    if mode == EnterMode::MoveBetweenFields
+        && active.is_some_and(|k| form_hints(k.as_str()).is_some())
+    {
+        out.insert(
+            1,
+            Hint {
+                chips: vec![chip_text(Shortcut::new(Mods::CMD, Key::Enter))],
+                label: t("status.hint.save_new"),
+            },
+        );
+    }
+    out
+}
+
+fn base_hints(active: Option<CommandId>) -> Vec<Hint> {
     match active.map(CommandId::as_str) {
         Some("banking.register") => {}
         Some(kind @ ("lists.templates" | "lists.templates_due")) => {
@@ -233,7 +251,7 @@ pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) -> bool {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         let active = shell.windows.active().map(|w| w.kind);
-                        for hint in hints_for(active).into_iter().rev() {
+                        for hint in hints_for(active, shell.enter_mode()).into_iter().rev() {
                             ui.label(small(hint.label));
                             for chip in hint.chips.iter().rev() {
                                 kbd(ui, chip);

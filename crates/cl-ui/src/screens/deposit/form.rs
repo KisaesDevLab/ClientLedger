@@ -47,11 +47,6 @@ fn above(ui: &mut Ui, tokens: &Tokens, label: &str) -> egui::Response {
     )
 }
 
-/// Enter left a single-line header field: Save & New (Q-190).
-fn entered(r: &egui::Response) -> bool {
-    r.lost_focus() && r.ctx.input(|i| i.key_pressed(egui::Key::Enter))
-}
-
 /// The deposit Memo box's width (it moves under Date when it doesn't fit).
 const MEMO_WIDTH: f32 = 260.0;
 
@@ -194,7 +189,7 @@ impl DepositScreen {
             };
             form::hint(ui, tokens, &t(key));
             let r = form::field(ui, &t("deposit.void.reason"), &mut self.void.reason);
-            send |= entered(&r);
+            send |= crate::forms::enter::submitted(&r);
             ui.horizontal(|ui| {
                 send |= ui.button(t("deposit.void.confirm")).clicked();
                 cancel = ui.button(t("deposit.void.cancel")).clicked();
@@ -333,7 +328,7 @@ impl DepositScreen {
                                 self.inputs.rev = self.header.revision();
                             }
                         }
-                        if entered(&r) {
+                        if crate::forms::enter::entered(&r).saves() {
                             self.after_frame = Some(CommandId::new("form.save_new"));
                         }
                     });
@@ -356,7 +351,7 @@ impl DepositScreen {
                             self.header.edit(field::MEMO, |h| h.memo = text);
                             self.inputs.rev = self.header.revision();
                         }
-                        if entered(&r) {
+                        if crate::forms::enter::entered(&r).saves() {
                             self.after_frame = Some(CommandId::new("form.save_new"));
                         }
                     });

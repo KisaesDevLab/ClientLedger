@@ -6,7 +6,7 @@
 
 mod support;
 
-use cl_grid::core::keys::{GridInput, GridKey, Mods};
+use cl_grid::core::keys::{Formats, GridInput, GridKey, Mods};
 use cl_grid::core::state::{CHANGED_UNDERNEATH, Core, Effects, PopupKind, ROW_GONE};
 use cl_grid::{
     CellPos, GridCommand, GridEvent, GridSpec, ModelRef, RowKey, RowModel, Source, TextKey,
@@ -14,13 +14,14 @@ use cl_grid::{
 use support::KeysModel;
 use support::lines::{
     ACCOUNT, AMOUNT, Account, BILLABLE, DATE, Lines, MEMO, TAGS, TestLookups, fixed_spec, formats,
-    line_spec, money,
+    line_spec, money, move_formats,
 };
 
 struct Rig {
     core: Core,
     m: Lines,
     l: TestLookups,
+    fm: Formats,
 }
 
 impl Rig {
@@ -29,6 +30,7 @@ impl Rig {
             core: Core::new(line_spec()),
             m: Lines::new(true, rows),
             l: TestLookups::default(),
+            fm: formats(),
         };
         r.input(GridInput::FocusGained { from_below: false });
         r
@@ -39,6 +41,7 @@ impl Rig {
             core: Core::new(fixed_spec()),
             m: Lines::new(false, rows),
             l: TestLookups::default(),
+            fm: formats(),
         };
         r.input(GridInput::FocusGained { from_below: false });
         r
@@ -46,7 +49,7 @@ impl Rig {
 
     fn input(&mut self, i: GridInput) -> Effects {
         let mut mr = ModelRef::Edit(&mut self.m);
-        self.core.handle(i, &mut mr, &self.l, formats())
+        self.core.handle(i, &mut mr, &self.l, self.fm)
     }
     fn key(&mut self, k: GridKey) -> Effects {
         self.input(GridInput::Key(k, Mods::NONE))
@@ -89,11 +92,11 @@ impl Rig {
     }
     fn resync(&mut self, after_undo: bool) -> Effects {
         let mut mr = ModelRef::Edit(&mut self.m);
-        self.core.resync(&mut mr, formats(), after_undo)
+        self.core.resync(&mut mr, self.fm, after_undo)
     }
     fn commit_pending(&mut self) -> Result<(), cl_grid::CellProblem> {
         let mut mr = ModelRef::Edit(&mut self.m);
-        self.core.commit_pending(&mut mr, &self.l, formats()).0
+        self.core.commit_pending(&mut mr, &self.l, self.fm).0
     }
     /// Account 5100 and an amount on the cursor row, then back to Account.
     fn fill_row(&mut self, amount: &str) {
@@ -217,6 +220,95 @@ fn enter_in_an_open_list_accepts_and_does_not_record() {
     assert_eq!(r.m.line(r.m.key(0)).account, Account::Id(5110));
     assert_eq!(r.at(), (0, ACCOUNT));
     assert!(r.core.edit().unwrap().popup.is_none());
+}
+
+#[test]
+fn shift_enter_records_too_when_enter_saves() {
+    let mut r = Rig::line(0);
+    r.fill_row("10");
+    let fx = r.shift(GridKey::Enter);
+    assert!(has(&fx, |e| matches!(e, GridEvent::RowRecorded { .. })));
+    assert_eq!(r.at(), (1, ACCOUNT));
+}
+
+impl Rig {
+    /// A line grid with "Enter moves between fields" on (Q-264).
+    fn line_move(rows: usize) -> Rig {
+        let mut r = Rig::line(rows);
+        r.fm = move_formats();
+        r
+    }
+}
+
+#[test]
+fn move_mode_enter_moves_across_cells_and_shift_enter_goes_back() {
+    let mut r = Rig::line_move(1);
+    r.typ("5100");
+    let fx = r.key(GridKey::Enter);
+    assert!(!has(&fx, |e| matches!(e, GridEvent::RowRecorded { .. })));
+    assert_eq!(r.m.line(r.m.key(0)).account, Account::Id(5100));
+    assert_eq!(r.at(), (0, AMOUNT));
+    r.typ("10");
+    r.key(GridKey::Enter);
+    assert_eq!(r.m.line(r.m.key(0)).amount, Some(money("10")));
+    assert_eq!(r.at(), (0, MEMO));
+    r.shift(GridKey::Enter);
+    assert_eq!(r.at(), (0, AMOUNT), "Shift+Enter is Shift+Tab");
+    assert_eq!(r.buffer(), "10.00");
+    // An invalid cell still keeps the cursor.
+    r.typ("5/0");
+    r.key(GridKey::Enter);
+    assert_eq!(r.at(), (0, AMOUNT));
+    assert_eq!(r.error(), Some(TextKey("grid.calc.divide_by_zero")));
+}
+
+#[test]
+fn move_mode_enter_in_the_last_cell_records_and_opens_a_new_line() {
+    let mut r = Rig::line_move(0);
+    r.fill_row("10");
+    let mut recorded_from = None;
+    for _ in 0..10 {
+        let before = r.at();
+        let fx = r.key(GridKey::Enter);
+        if has(&fx, |e| matches!(e, GridEvent::RowRecorded { .. })) {
+            recorded_from = Some(before);
+            break;
+        }
+    }
+    assert_eq!(
+        recorded_from,
+        Some((0, TAGS)),
+        "only the row's last editable cell records"
+    );
+    assert_eq!(r.at(), (1, ACCOUNT), "the new line's first cell");
+    assert_eq!(r.m.row_count(), 2);
+}
+
+#[test]
+fn move_mode_enter_never_saves_from_the_untouched_entry_line() {
+    let mut r = Rig::line_move(0);
+    let fx = r.key(GridKey::Enter);
+    assert!(!has(&fx, |e| *e == GridEvent::EnterOnEmptyEntry));
+    assert_eq!(r.at(), (0, AMOUNT));
+    // The last cell of the untouched entry line leaves the grid like Tab.
+    r.input(GridInput::FocusLost);
+    r.input(GridInput::FocusGained { from_below: true });
+    assert_eq!(r.at(), (0, TAGS));
+    let fx = r.key(GridKey::Enter);
+    assert!(!has(&fx, |e| *e == GridEvent::EnterOnEmptyEntry));
+    assert!(!has(&fx, |e| matches!(e, GridEvent::RowRecorded { .. })));
+    assert_eq!(fx.leave, Some(true));
+    assert!(r.m.set_calls.is_empty());
+}
+
+#[test]
+fn move_mode_enter_in_an_open_list_takes_the_entry_and_moves_on() {
+    let mut r = Rig::line_move(0);
+    r.typ("Mulch");
+    let fx = r.key(GridKey::Enter);
+    assert!(!has(&fx, |e| matches!(e, GridEvent::RowRecorded { .. })));
+    assert_eq!(r.m.line(r.m.key(0)).account, Account::Id(5110));
+    assert_eq!(r.at(), (0, AMOUNT), "like Tab (Q-P10c)");
 }
 
 #[test]
@@ -617,6 +709,7 @@ fn keys_typed_while_a_row_is_pending_land_in_the_next_row() {
         core: Core::new(spec),
         m: Lines::new(true, 0),
         l: TestLookups::default(),
+        fm: formats(),
     };
     r.m.async_records = true;
     r.input(GridInput::FocusGained { from_below: false });
@@ -957,6 +1050,7 @@ fn computed_money_column_is_locked() {
         core: Core::new(spec),
         m: Lines::new(true, 2),
         l: TestLookups::default(),
+        fm: formats(),
     };
     r.input(GridInput::FocusGained { from_below: false });
     r.click(0, TAGS);

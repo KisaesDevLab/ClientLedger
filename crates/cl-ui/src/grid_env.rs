@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use cl_core::{CalendarDate, MoneyStyle, NegativeStyle, Weekday};
 use cl_grid::{ColumnId, GridEnv, GridHeight, GridStyle, Lookups, TextKey};
 use cl_model::date_entry::{DateOrder, US_FIRST_WEEKDAY};
+use cl_model::forms::EnterMode;
 use eframe::egui::{Context, Id, ViewportId};
 
 use crate::prefs::{GridWidths, UiPrefs};
@@ -30,6 +31,9 @@ pub struct ShellFrame {
     /// A shell modal (prompt, palette, dialog) is open: grids give up focus
     /// and ignore input (B6).
     pub modal_open: bool,
+    /// What Enter does in forms and grids ("Enter moves between fields",
+    /// Q-264).
+    pub enter_mode: EnterMode,
 }
 
 impl ShellFrame {
@@ -52,8 +56,15 @@ impl ShellFrame {
                 symbol: false,
             },
             modal_open,
+            enter_mode: EnterMode::from_pref(prefs.enter_moves_fields),
         }
     }
+}
+
+/// The Enter mode of the viewport being drawn (Save & New outside a shell).
+#[must_use]
+pub fn enter_mode(ctx: &Context) -> EnterMode {
+    shell_frame(ctx).enter_mode
 }
 
 impl Default for ShellFrame {
@@ -210,6 +221,7 @@ impl EnvParts {
             height,
             label,
             input_enabled: !self.frame.modal_open,
+            enter_mode: self.frame.enter_mode,
         }
     }
 }
@@ -253,6 +265,19 @@ mod tests {
         assert_eq!(f.date_order, DateOrder::Ymd);
         assert_eq!(f.money_style.negative, NegativeStyle::Parens);
         assert_eq!(f.first_weekday, Weekday::Sun);
+        assert_eq!(f.enter_mode, EnterMode::SaveAndNew, "off by default");
+        let on = UiPrefs {
+            enter_moves_fields: true,
+            ..UiPrefs::default()
+        };
+        let f = ShellFrame::new(CalendarDate::min(), &on, false);
+        assert_eq!(f.enter_mode, EnterMode::MoveBetweenFields);
+        let parts = EnvParts {
+            frame: f,
+            ..EnvParts::default()
+        };
+        let env = parts.env(&NoLookups, "Lines", GridHeight::Rows { min: 3, max: 8 });
+        assert_eq!(env.enter_mode, EnterMode::MoveBetweenFields);
     }
 
     #[test]

@@ -970,11 +970,6 @@ pub(crate) fn above(ui: &mut Ui, tokens: &Tokens, label: &str) -> egui::Response
     )
 }
 
-/// Enter left a single-line header field: Save & New (Q-190).
-pub(crate) fn entered(r: &egui::Response) -> bool {
-    r.lost_focus() && r.ctx.input(|i| i.key_pressed(egui::Key::Enter))
-}
-
 /// An account picker with its label above. Returns the account picked
 /// this frame.
 pub(crate) fn account_combo(
@@ -1370,7 +1365,7 @@ pub(crate) fn messages(
             form::heading(ui, tokens, &t("helper.void.title"));
             form::hint(ui, tokens, &t("helper.void.explain"));
             let r = form::field(ui, &t("helper.void.reason"), &mut flow.void_reason);
-            send |= entered(&r);
+            send |= crate::forms::enter::submitted(&r);
             ui.horizontal(|ui| {
                 send |= ui.button(t("helper.void.confirm")).clicked();
                 cancel = ui.button(t("helper.void.cancel")).clicked();

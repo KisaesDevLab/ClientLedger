@@ -87,6 +87,8 @@ pub struct Rig {
     pub footer: String,
     pub size: Vec2,
     pub last: Option<egui::FullOutput>,
+    /// What Enter does (Q-264); Save & New style by default.
+    pub enter_mode: cl_model::forms::EnterMode,
 }
 
 pub const HEADER: &str = "header-field";
@@ -104,6 +106,7 @@ impl Rig {
             footer: String::new(),
             size: Vec2::new(1000.0, 600.0),
             last: None,
+            enter_mode: cl_model::forms::EnterMode::SaveAndNew,
         }
     }
 
@@ -129,6 +132,7 @@ impl Rig {
         let model = &mut self.model;
         let header = &mut self.header;
         let footer = &mut self.footer;
+        let enter_mode = self.enter_mode;
         let mut out = self.ctx.run_ui(input, |ui| {
             ui.add(egui::TextEdit::singleline(header).id(Rig::header_id()));
             let env = GridEnv {
@@ -142,6 +146,7 @@ impl Rig {
                 height: GridHeight::Rows { min: 3, max: 12 },
                 label: "Expense lines",
                 input_enabled: true,
+                enter_mode,
             };
             result = grid.show(ui, ModelRef::Edit(model), &env);
             ui.add(egui::TextEdit::singleline(footer).id(Rig::footer_id()));
@@ -189,6 +194,7 @@ impl Rig {
             height: GridHeight::Rows { min: 3, max: 12 },
             label: "Expense lines",
             input_enabled: true,
+            enter_mode: self.enter_mode,
         };
         self.grid.focus(pos, ModelRef::Edit(&mut self.model), &env);
         self.frame(vec![]);
@@ -210,6 +216,7 @@ impl Rig {
             height: GridHeight::Rows { min: 3, max: 12 },
             label: "Expense lines",
             input_enabled: true,
+            enter_mode: self.enter_mode,
         };
         f(&mut self.grid, ModelRef::Edit(&mut self.model), &env)
     }

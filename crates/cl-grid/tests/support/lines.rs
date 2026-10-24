@@ -524,6 +524,15 @@ pub fn formats() -> Formats {
             negative: NegativeStyle::Minus,
             symbol: false,
         },
+        enter_mode: cl_model::forms::EnterMode::SaveAndNew,
+    }
+}
+
+/// [`formats`] with "Enter moves between fields" on (Q-264).
+pub fn move_formats() -> Formats {
+    Formats {
+        enter_mode: cl_model::forms::EnterMode::MoveBetweenFields,
+        ..formats()
     }
 }
 

@@ -330,7 +330,8 @@ impl HostProbe for Probe {
 
 #[test]
 fn status_bar_hints_follow_the_window_in_front() {
-    use super::status_bar::hints_for;
+    use super::status_bar::hints_for as hints_in;
+    let hints_for = |a: Option<CommandId>| hints_in(a, cl_model::EnterMode::SaveAndNew);
     let chip = |id: &str| super::chip_text(commands::find(id).unwrap().shortcut.unwrap());
     let general = hints_for(None);
     assert_eq!(general.len(), 4);
@@ -396,6 +397,54 @@ fn status_bar_hints_follow_the_window_in_front() {
     let due = hints_for(Some(CommandId::new("lists.templates_due")));
     let labels: Vec<&str> = due.iter().map(|h| h.label.as_str()).collect();
     assert_eq!(labels, ["enter or open", "open form", "close"]);
+}
+
+#[test]
+fn the_enter_preference_rebuilds_the_keymap_and_the_hints() {
+    use super::status_bar::hints_for;
+    use cl_model::{EnterMode, Scope, Shortcut};
+    let ctrl_enter = Shortcut::new(cl_model::Mods::CMD, cl_model::Key::Enter);
+    let ctx = context();
+    let mut shell = demo();
+    settle(&ctx, &mut shell, WIDE);
+    assert_eq!(shell.enter_mode(), EnterMode::SaveAndNew, "off by default");
+    assert_eq!(shell.keymap().resolve(Scope::Form, ctrl_enter), None);
+    // Preferences saved the option (CompanyEvent::UserPrefs sets it).
+    shell.prefs.enter_moves_fields = true;
+    frame(&ctx, &mut shell, WIDE, vec![]);
+    assert_eq!(shell.enter_mode(), EnterMode::MoveBetweenFields);
+    assert_eq!(
+        shell.keymap().resolve(Scope::Form, ctrl_enter),
+        Some(CommandId::new("form.save_new"))
+    );
+    assert_eq!(
+        crate::grid_env::shell_frame(&ctx).enter_mode,
+        EnterMode::MoveBetweenFields,
+        "screens and grids see it"
+    );
+    let check = Some(CommandId::new("vendors.write_check"));
+    let labels = |mode| {
+        hints_for(check, mode)
+            .into_iter()
+            .map(|h| h.label)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        labels(EnterMode::MoveBetweenFields),
+        ["next field", "save & new", "insert line", "list", "revert"]
+    );
+    assert_eq!(
+        hints_for(check, EnterMode::MoveBetweenFields)[1].chips,
+        vec![super::chip_text(ctrl_enter)]
+    );
+    assert_eq!(
+        hints_for(None, EnterMode::MoveBetweenFields),
+        hints_for(None, EnterMode::SaveAndNew),
+        "only forms say so"
+    );
+    shell.prefs.enter_moves_fields = false;
+    frame(&ctx, &mut shell, WIDE, vec![]);
+    assert_eq!(shell.keymap().resolve(Scope::Form, ctrl_enter), None);
 }
 
 #[test]

@@ -12,7 +12,9 @@
 //!   intent is remembered across the (asynchronous) save and returned by
 //!   [`FormState::save_ok`] so the shell knows what to do next.
 //! * Enter in a header field is Save & New (Q-190); Enter in a grid row records
-//!   the row ([`FormState::enter`]).
+//!   the row ([`FormState::enter`]). With "Enter moves between fields" on,
+//!   Enter and Shift+Enter move like Tab and Shift+Tab and Ctrl+Enter is
+//!   Save & New (Q-264, [`FormState::enter_with`], [`enter_action`]).
 //! * Esc reverts the focused field, then closes when nothing is dirty, and asks
 //!   first when the form is dirty ([`FormState::escape`]).
 //! * Undo and redo cover unsaved edits only (Q-59).
@@ -149,6 +151,51 @@ pub enum EnterAction {
     SaveAndNew,
     /// Record the grid row.
     RecordRow,
+    /// Go to the next field, like Tab (Q-264).
+    NextField,
+    /// Go to the previous field, like Shift+Tab (Q-264).
+    PrevField,
+    /// Record the grid row and go to the new line's first cell (Enter in a
+    /// row's last editable cell, Q-264).
+    NextLine,
+}
+
+impl EnterMode {
+    /// The mode for the "Enter moves between fields" preference.
+    #[must_use]
+    pub fn from_pref(enter_moves_fields: bool) -> EnterMode {
+        if enter_moves_fields {
+            EnterMode::MoveBetweenFields
+        } else {
+            EnterMode::SaveAndNew
+        }
+    }
+}
+
+/// What Enter does in `ctx` under `mode` (Q-190, Q-264). `shift` is true
+/// for Shift+Enter; `last_cell` is true when a grid row's last editable cell
+/// has the keyboard (ignored in header fields).
+///
+/// | mode | context | Enter | Shift+Enter |
+/// |---|---|---|---|
+/// | Save & New | header | Save & New | Save & New |
+/// | Save & New | grid | record row | record row |
+/// | Move | header | next field | previous field |
+/// | Move | grid | next cell, or record + new line in the last cell | previous cell |
+#[must_use]
+pub fn enter_action(
+    ctx: EnterContext,
+    mode: EnterMode,
+    shift: bool,
+    last_cell: bool,
+) -> EnterAction {
+    match (mode, ctx) {
+        (EnterMode::SaveAndNew, EnterContext::Header) => EnterAction::SaveAndNew,
+        (EnterMode::SaveAndNew, EnterContext::GridRow) => EnterAction::RecordRow,
+        (EnterMode::MoveBetweenFields, _) if shift => EnterAction::PrevField,
+        (EnterMode::MoveBetweenFields, EnterContext::GridRow) if last_cell => EnterAction::NextLine,
+        (EnterMode::MoveBetweenFields, _) => EnterAction::NextField,
+    }
 }
 
 /// What to do when the owner tries to leave (close, switch record, quit).
@@ -372,13 +419,18 @@ impl<V: Clone + PartialEq> FormState<V> {
         }
     }
 
-    /// Enter pressed in `ctx` (Q-190).
+    /// Enter pressed in `ctx` with the default mode (Q-190).
     #[must_use]
     pub fn enter(&self, ctx: EnterContext) -> EnterAction {
-        match ctx {
-            EnterContext::Header => EnterAction::SaveAndNew,
-            EnterContext::GridRow => EnterAction::RecordRow,
-        }
+        self.enter_with(ctx, EnterMode::SaveAndNew, false)
+    }
+
+    /// Enter (or Shift+Enter) pressed in `ctx` under `mode` (Q-264); see
+    /// [`enter_action`]. In grids this answers for a cell that is not the
+    /// row's last; the grid itself knows which cell is last.
+    #[must_use]
+    pub fn enter_with(&self, ctx: EnterContext, mode: EnterMode, shift: bool) -> EnterAction {
+        enter_action(ctx, mode, shift, false)
     }
 
     /// Whether leaving (close, Prev/Next record, quit) needs a prompt.
@@ -549,6 +601,38 @@ mod tests {
         let f = FormState::new(Check::default());
         assert_eq!(f.enter(EnterContext::Header), EnterAction::SaveAndNew);
         assert_eq!(f.enter(EnterContext::GridRow), EnterAction::RecordRow);
+    }
+
+    #[test]
+    fn enter_with_truth_table() {
+        use EnterAction as A;
+        use EnterContext::{GridRow, Header};
+        use EnterMode::{MoveBetweenFields as Move, SaveAndNew as Save};
+        let f = FormState::new(Check::default());
+        for (ctx, mode, shift, want) in [
+            (Header, Save, false, A::SaveAndNew),
+            (Header, Save, true, A::SaveAndNew),
+            (GridRow, Save, false, A::RecordRow),
+            (GridRow, Save, true, A::RecordRow),
+            (Header, Move, false, A::NextField),
+            (Header, Move, true, A::PrevField),
+            (GridRow, Move, false, A::NextField),
+            (GridRow, Move, true, A::PrevField),
+        ] {
+            assert_eq!(
+                f.enter_with(ctx, mode, shift),
+                want,
+                "{ctx:?} {mode:?} {shift}"
+            );
+        }
+        // The last cell of a grid row: record and start a new line in Move
+        // mode; Shift still goes back; Save & New mode is unchanged.
+        assert_eq!(enter_action(GridRow, Move, false, true), A::NextLine);
+        assert_eq!(enter_action(GridRow, Move, true, true), A::PrevField);
+        assert_eq!(enter_action(GridRow, Save, false, true), A::RecordRow);
+        assert_eq!(enter_action(Header, Move, false, true), A::NextField);
+        assert_eq!(EnterMode::from_pref(true), Move);
+        assert_eq!(EnterMode::from_pref(false), Save);
     }
 
     #[test]
