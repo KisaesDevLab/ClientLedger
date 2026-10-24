@@ -56,6 +56,7 @@
 - `Ctrl+Tab` Next Window
 - `Ctrl+Shift+Tab` Previous Window
 - `Ctrl+Shift+O` Move Window to Its Own Window
+- `Ctrl+Shift+D` Show or Hide Details
 - `Ctrl++` Zoom In
 - `Ctrl+-` Zoom Out
 - `Ctrl+0` Actual Size
@@ -87,5 +88,10 @@
 - `Ctrl+Shift+H` Include Inactive Entries
 - `Ctrl+Shift+Q` Account or Transaction Report
 - `Delete` Delete List Entry
+
+**In a grid**
+
+- `Ctrl+D` Copy Down
+- `Ctrl+A` Select All Rows
 
 **Dates**: `+ / -` Next / previous day; `T` Today; `M / H` First / last day of the month; `Y / R` First / last day of the year; `W / K` First / last day of the week

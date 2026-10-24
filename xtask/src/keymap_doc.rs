@@ -3,7 +3,7 @@
 //! `cl-model` command table (Q-161). `--check` fails when either file is stale.
 
 use anyhow::{Result, bail};
-use cl_model::keymap::{BANK_FEED_KEYS, DATE_KEYS, FIXED_KEYS, Scope};
+use cl_model::keymap::{BANK_FEED_KEYS, DATE_KEYS, EnterMode, Scope, fixed_keys};
 use cl_model::{COMMANDS, Command, Menu};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -34,10 +34,10 @@ pub fn keyboard_md() -> String {
          Every action is reachable from the keyboard. Press `Ctrl+K` to search for any \
          command, or `Ctrl+/` to see the shortcuts for the screen you are on. On macOS, \
          `Ctrl` means `Cmd` and `Alt` means `Option`.\n\n\
-         When two scopes use the same keys, the innermost one wins: a form beats a window, \
-         and a window beats the whole app.\n\n",
+         When two scopes use the same keys, the innermost one wins: a grid beats a form, \
+         a form beats a window, and a window beats the whole app.\n\n",
     );
-    for scope in [Scope::Global, Scope::Window, Scope::Form] {
+    for scope in Scope::ALL.iter().copied() {
         let bound: Vec<&Command> = COMMANDS
             .iter()
             .filter(|c| c.scope == scope && c.shortcut.is_some())
@@ -55,7 +55,16 @@ pub fn keyboard_md() -> String {
         }
         out.push('\n');
     }
-    pairs(&mut out, "Always the same in forms and grids", FIXED_KEYS);
+    pairs(
+        &mut out,
+        "Always the same in forms and grids",
+        fixed_keys(EnterMode::SaveAndNew),
+    );
+    pairs(
+        &mut out,
+        "When \"Enter moves between fields\" is on (Preferences)",
+        fixed_keys(EnterMode::MoveBetweenFields),
+    );
     pairs(&mut out, "Date fields", DATE_KEYS);
     pairs(&mut out, "Bank Feed", BANK_FEED_KEYS);
     out.push_str(
@@ -95,14 +104,17 @@ pub fn cheatsheet_md() -> String {
         }
         out.push('\n');
     }
-    let forms: Vec<&Command> = COMMANDS
-        .iter()
-        .filter(|c| c.menu.is_none() && c.shortcut.is_some())
-        .collect();
-    out.push_str("**Forms and grids**\n\n");
-    for c in forms {
-        if let Some(s) = c.shortcut {
-            let _ = writeln!(out, "- `{s}` {}", c.label);
+    for (title, grid) in [
+        ("**Forms and grids**\n\n", false),
+        ("\n**In a grid**\n\n", true),
+    ] {
+        out.push_str(title);
+        for c in COMMANDS.iter().filter(|c| {
+            c.menu.is_none() && c.shortcut.is_some() && (c.scope == Scope::Grid) == grid
+        }) {
+            if let Some(s) = c.shortcut {
+                let _ = writeln!(out, "- `{s}` {}", c.label);
+            }
         }
     }
     out.push_str("\n**Dates**: ");
@@ -172,6 +184,29 @@ mod tests {
         }
         assert!(md.contains("`Ctrl+Shift+R`"));
         assert!(md.contains("Date fields"));
+    }
+
+    #[test]
+    fn p16_grid_scope_and_enter_mode_are_documented() {
+        let md = keyboard_md();
+        // Scopes in order, outermost first; the grid section comes last.
+        let pos = |s: &str| md.find(s).unwrap_or_else(|| panic!("missing {s}"));
+        let headings = [
+            "## Anywhere",
+            "## In a window",
+            "## In a form or grid",
+            "## In a grid",
+        ];
+        for pair in headings.windows(2) {
+            assert!(pos(pair[0]) < pos(pair[1]), "{pair:?}");
+        }
+        assert!(md.contains("| `Ctrl+D` | Copy Down | `grid.copy_down` |"));
+        assert!(md.contains("| `Ctrl+A` | Select All Rows | `grid.select_all` |"));
+        assert!(md.contains("| `Ctrl+Shift+D` | Show or Hide Details | `window.toggle_details` |"));
+        assert!(md.contains("Enter moves between fields"));
+        assert!(md.contains("| `Ctrl+Enter` | Save & New |"));
+        let sheet = cheatsheet_md();
+        assert!(sheet.contains("**In a grid**\n\n- `Ctrl+D` Copy Down"));
     }
 
     #[test]

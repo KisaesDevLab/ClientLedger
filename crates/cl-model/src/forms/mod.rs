@@ -129,6 +129,19 @@ pub enum EnterContext {
     GridRow,
 }
 
+/// What the Enter key means in forms and grids (Q-190, Q-264). A personal
+/// preference ("Enter moves between fields"), off by default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum EnterMode {
+    /// Enter = Save & New in header fields and records the row in grids
+    /// (Q-190).
+    #[default]
+    SaveAndNew,
+    /// Enter moves to the next field or cell, Shift+Enter moves back, and
+    /// Ctrl+Enter = Save & New (Q-264).
+    MoveBetweenFields,
+}
+
 /// What Enter does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnterAction {

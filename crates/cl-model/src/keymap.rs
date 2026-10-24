@@ -5,15 +5,21 @@
 //! types never appear in this crate; `cl-ui` converts a key press into a
 //! [`Shortcut`] and asks [`Keymap::resolve`].
 //!
-//! Scope rules: the innermost scope wins (`Form` over `Window` over
-//! `Global`), so Ctrl+D can mean "Make Deposit" globally and "delete this
-//! transaction" inside a form. Two commands may not share a shortcut in the
-//! same scope ([`Keymap::new`] refuses).
+//! Scope rules: the innermost scope wins (`Grid` over `Form` over `Window`
+//! over `Global`), so Ctrl+D can mean "Make Deposit" globally, "delete this
+//! transaction" inside a form and "copy down" in a grid that opted in. Two
+//! commands may not share a shortcut in the same scope ([`Keymap::new`]
+//! refuses).
+//!
+//! The Enter key's meaning is a preference ([`EnterMode`], Q-264): build the
+//! keymap with [`Keymap::with_mode`] so "Enter moves between fields" also
+//! binds Ctrl+Enter to Save & New.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use crate::commands::{Command, CommandId};
+pub use crate::forms::EnterMode;
 
 /// Where a command is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -24,9 +30,16 @@ pub enum Scope {
     Window,
     /// While a form or grid has focus.
     Form,
+    /// While a grid that opted in to grid commands (copy down, select all)
+    /// has focus. Innermost; the form, window and global keys still apply
+    /// underneath it.
+    Grid,
 }
 
 impl Scope {
+    /// Every scope, outermost first (the order of `KEYBOARD.md`).
+    pub const ALL: &'static [Scope] = &[Scope::Global, Scope::Window, Scope::Form, Scope::Grid];
+
     /// Heading used in `KEYBOARD.md` and the overlay.
     #[must_use]
     pub fn title(self) -> &'static str {
@@ -34,6 +47,7 @@ impl Scope {
             Scope::Global => "Anywhere",
             Scope::Window => "In a window",
             Scope::Form => "In a form or grid",
+            Scope::Grid => "In a grid",
         }
     }
 
@@ -41,6 +55,7 @@ impl Scope {
     #[must_use]
     pub fn active_from(self) -> &'static [Scope] {
         match self {
+            Scope::Grid => &[Scope::Grid, Scope::Form, Scope::Window, Scope::Global],
             Scope::Form => &[Scope::Form, Scope::Window, Scope::Global],
             Scope::Window => &[Scope::Window, Scope::Global],
             Scope::Global => &[Scope::Global],
@@ -204,35 +219,91 @@ pub enum KeymapError {
     DuplicateId(&'static str),
 }
 
+/// Ctrl+Enter: Save & New when Enter moves between fields (Q-264).
+const CTRL_ENTER: Shortcut = Shortcut::new(Mods::CMD, Key::Enter);
+
+/// Bindings that exist only in one [`EnterMode`], on top of the command
+/// table: `(scope, shortcut, command id)`.
+fn mode_bindings(mode: EnterMode) -> &'static [(Scope, Shortcut, &'static str)] {
+    match mode {
+        EnterMode::SaveAndNew => &[],
+        EnterMode::MoveBetweenFields => &[(Scope::Form, CTRL_ENTER, "form.save_new")],
+    }
+}
+
 /// Shortcut lookup built from the command table.
 #[derive(Debug, Clone)]
 pub struct Keymap {
     by_shortcut: HashMap<(Scope, Shortcut), CommandId>,
+    /// Every shortcut of a command, the table's own first.
+    by_command: HashMap<&'static str, Vec<Shortcut>>,
+    mode: EnterMode,
 }
 
 impl Keymap {
-    /// Build the lookup.
+    /// Build the lookup with the default Enter behavior
+    /// ([`EnterMode::SaveAndNew`]).
     ///
     /// # Errors
     /// [`KeymapError`] on a duplicate id or a shortcut shared inside a scope.
     pub fn new(commands: &[Command]) -> Result<Keymap, KeymapError> {
+        Keymap::with_mode(commands, EnterMode::SaveAndNew)
+    }
+
+    /// Build the lookup for an Enter preference. In
+    /// [`EnterMode::MoveBetweenFields`] Ctrl+Enter is also Save & New in
+    /// forms (Q-264). A mode binding whose command is not in `commands` is
+    /// skipped.
+    ///
+    /// # Errors
+    /// [`KeymapError`] on a duplicate id or a shortcut shared inside a scope.
+    pub fn with_mode(commands: &[Command], mode: EnterMode) -> Result<Keymap, KeymapError> {
         let mut ids: HashSet<&'static str> = HashSet::new();
         let mut by_shortcut: HashMap<(Scope, Shortcut), CommandId> = HashMap::new();
+        let mut by_command: HashMap<&'static str, Vec<Shortcut>> = HashMap::new();
+        let mut bind = |scope: Scope, s: Shortcut, id: CommandId| {
+            if let Some(prev) = by_shortcut.insert((scope, s), id) {
+                return Err(KeymapError::Conflict {
+                    shortcut: s.to_string(),
+                    first: prev.as_str(),
+                    second: id.as_str(),
+                });
+            }
+            by_command.entry(id.as_str()).or_default().push(s);
+            Ok(())
+        };
         for c in commands {
             if !ids.insert(c.id.as_str()) {
                 return Err(KeymapError::DuplicateId(c.id.as_str()));
             }
-            if let Some(s) = c.shortcut
-                && let Some(prev) = by_shortcut.insert((c.scope, s), c.id)
-            {
-                return Err(KeymapError::Conflict {
-                    shortcut: s.to_string(),
-                    first: prev.as_str(),
-                    second: c.id.as_str(),
-                });
+            if let Some(s) = c.shortcut {
+                bind(c.scope, s, c.id)?;
             }
         }
-        Ok(Keymap { by_shortcut })
+        for (scope, s, id) in mode_bindings(mode) {
+            if let Some(c) = commands.iter().find(|c| c.id.as_str() == *id) {
+                bind(*scope, *s, c.id)?;
+            }
+        }
+        Ok(Keymap {
+            by_shortcut,
+            by_command,
+            mode,
+        })
+    }
+
+    /// The Enter behavior this keymap was built for.
+    #[must_use]
+    pub fn mode(&self) -> EnterMode {
+        self.mode
+    }
+
+    /// Every shortcut bound to the command `id`, the table's own first
+    /// (tooltips and the overlay show "Alt+N or Ctrl+Enter"). Empty when the
+    /// command has none or does not exist.
+    #[must_use]
+    pub fn shortcuts_of(&self, id: &str) -> Vec<Shortcut> {
+        self.by_command.get(id).cloned().unwrap_or_default()
     }
 
     /// The command for `shortcut` when focus is in `focus`: the innermost
@@ -258,14 +329,52 @@ impl Keymap {
     }
 }
 
-/// Keys that belong to text fields and grids and are not commands; listed in
-/// the overlay and `KEYBOARD.md` so the document is complete.
+/// Keys that belong to text fields and grids and are not commands, for an
+/// Enter preference; listed in the overlay and `KEYBOARD.md` so the document
+/// is complete.
+#[must_use]
+pub fn fixed_keys(mode: EnterMode) -> &'static [(&'static str, &'static str)] {
+    match mode {
+        EnterMode::SaveAndNew => FIXED_KEYS,
+        EnterMode::MoveBetweenFields => FIXED_KEYS_MOVE,
+    }
+}
+
+/// [`fixed_keys`] for [`EnterMode::SaveAndNew`], the default (Q-190).
 pub const FIXED_KEYS: &[(&str, &str)] = &[
     ("Tab / Shift+Tab", "Next / previous field or cell"),
     (
         "Enter",
         "Record the row (registers and grids); Save & New in form header fields",
     ),
+    ("Arrow keys", "Move between rows and cells"),
+    (
+        "Page Up / Page Down",
+        "Previous / next record in forms; page in grids",
+    ),
+    (
+        "Esc",
+        "Revert the field, then the form, then close (asks first if there are unsaved changes)",
+    ),
+    ("Ctrl+Home / Ctrl+End", "First / last row in grids"),
+    (
+        "Space",
+        "Tick a checkbox or open the choices in a grid cell; select the row in registers",
+    ),
+    (
+        "+ - * / in an amount",
+        "Work the amount out; the exact result shows under the cell before you leave it",
+    ),
+];
+
+/// [`fixed_keys`] for [`EnterMode::MoveBetweenFields`] (Q-264).
+pub const FIXED_KEYS_MOVE: &[(&str, &str)] = &[
+    ("Tab / Shift+Tab", "Next / previous field or cell"),
+    (
+        "Enter / Shift+Enter",
+        "Next / previous field or cell; Enter in the last cell of a grid line starts a new line",
+    ),
+    ("Ctrl+Enter", "Save & New"),
     ("Arrow keys", "Move between rows and cells"),
     (
         "Page Up / Page Down",
@@ -351,6 +460,99 @@ mod tests {
             km.resolve(Scope::Window, ctrl_d).map(CommandId::as_str),
             Some("banking.deposit")
         );
+    }
+
+    #[test]
+    fn grid_scope_is_innermost() {
+        let km = Keymap::new(COMMANDS).unwrap();
+        let at = |focus: Scope, c: char| {
+            km.resolve(focus, Shortcut::new(Mods::CMD, Key::Letter(c)))
+                .map(CommandId::as_str)
+        };
+        // Ctrl+D: copy down in an opted-in grid, delete in a form.
+        assert_eq!(at(Scope::Grid, 'D'), Some("grid.copy_down"));
+        assert_eq!(at(Scope::Form, 'D'), Some("form.delete_item"));
+        assert_eq!(at(Scope::Global, 'D'), Some("banking.deposit"));
+        // Ctrl+A: select all in a grid, the Chart of Accounts elsewhere.
+        assert_eq!(at(Scope::Grid, 'A'), Some("grid.select_all"));
+        assert_eq!(at(Scope::Form, 'A'), Some("lists.chart_of_accounts"));
+        assert_eq!(at(Scope::Global, 'A'), Some("lists.chart_of_accounts"));
+        // Form keys still work underneath the grid scope.
+        assert_eq!(
+            km.resolve(Scope::Grid, Shortcut::new(Mods::ALT, Key::Letter('N')))
+                .map(CommandId::as_str),
+            Some("form.save_new")
+        );
+        assert_eq!(Scope::Grid.title(), "In a grid");
+        assert_eq!(Scope::Grid.active_from()[0], Scope::Grid);
+        assert_eq!(Scope::ALL.len(), 4);
+    }
+
+    #[test]
+    fn enter_mode_binds_ctrl_enter_to_save_and_new() {
+        let ctrl_enter = Shortcut::new(Mods::CMD, Key::Enter);
+        let alt_n = Shortcut::new(Mods::ALT, Key::Letter('N'));
+
+        let def = Keymap::new(COMMANDS).unwrap();
+        assert_eq!(def.mode(), EnterMode::SaveAndNew);
+        assert_eq!(def.resolve(Scope::Form, ctrl_enter), None);
+        assert_eq!(def.shortcuts_of("form.save_new"), vec![alt_n]);
+        assert_eq!(EnterMode::default(), EnterMode::SaveAndNew);
+
+        let mv = Keymap::with_mode(COMMANDS, EnterMode::MoveBetweenFields).unwrap();
+        assert_eq!(mv.mode(), EnterMode::MoveBetweenFields);
+        for focus in [Scope::Form, Scope::Grid] {
+            assert_eq!(
+                mv.resolve(focus, ctrl_enter).map(CommandId::as_str),
+                Some("form.save_new")
+            );
+        }
+        assert_eq!(mv.resolve(Scope::Global, ctrl_enter), None);
+        assert_eq!(mv.shortcuts_of("form.save_new"), vec![alt_n, ctrl_enter]);
+        assert_eq!(mv.len(), def.len() + 1);
+        // Unknown or unbound commands have no shortcuts.
+        assert_eq!(mv.shortcuts_of("nope"), Vec::<Shortcut>::new());
+        assert_eq!(mv.shortcuts_of("form.attach"), Vec::<Shortcut>::new());
+    }
+
+    #[test]
+    fn mode_binding_skips_a_missing_command_and_refuses_a_clash() {
+        let without: Vec<Command> = COMMANDS
+            .iter()
+            .copied()
+            .filter(|c| c.id.as_str() != "form.save_new")
+            .collect();
+        let km = Keymap::with_mode(&without, EnterMode::MoveBetweenFields).unwrap();
+        assert_eq!(
+            km.resolve(Scope::Form, Shortcut::new(Mods::CMD, Key::Enter)),
+            None
+        );
+        // A table command already on Ctrl+Enter in a form clashes.
+        let mut clash = COMMANDS.to_vec();
+        let mut c = *clash
+            .iter()
+            .find(|c| c.id.as_str() == "form.attach")
+            .unwrap();
+        c.id = CommandId::new("test.ctrl_enter");
+        c.shortcut = Some(Shortcut::new(Mods::CMD, Key::Enter));
+        clash.push(c);
+        assert!(Keymap::new(&clash).is_ok());
+        assert!(matches!(
+            Keymap::with_mode(&clash, EnterMode::MoveBetweenFields),
+            Err(KeymapError::Conflict { .. })
+        ));
+    }
+
+    #[test]
+    fn fixed_keys_follow_the_enter_mode() {
+        assert_eq!(fixed_keys(EnterMode::SaveAndNew), FIXED_KEYS);
+        let mv = fixed_keys(EnterMode::MoveBetweenFields);
+        assert!(
+            mv.iter()
+                .any(|(k, a)| *k == "Ctrl+Enter" && *a == "Save & New")
+        );
+        assert!(mv.iter().any(|(k, _)| k.starts_with("Enter / Shift+Enter")));
+        assert!(FIXED_KEYS.iter().all(|(k, _)| *k != "Ctrl+Enter"));
     }
 
     #[test]

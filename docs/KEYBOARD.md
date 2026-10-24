@@ -4,7 +4,7 @@
 
 Every action is reachable from the keyboard. Press `Ctrl+K` to search for any command, or `Ctrl+/` to see the shortcuts for the screen you are on. On macOS, `Ctrl` means `Cmd` and `Alt` means `Option`.
 
-When two scopes use the same keys, the innermost one wins: a form beats a window, and a window beats the whole app.
+When two scopes use the same keys, the innermost one wins: a grid beats a form, a form beats a window, and a window beats the whole app.
 
 ## Anywhere
 
@@ -52,6 +52,7 @@ When two scopes use the same keys, the innermost one wins: a form beats a window
 | `Ctrl+Shift+Q` | Account or Transaction Report | `list.quick_report` |
 | `Delete` | Delete List Entry | `list.delete` |
 | `Ctrl+Shift+O` | Move Window to Its Own Window | `window.pop_out` |
+| `Ctrl+Shift+D` | Show or Hide Details | `window.toggle_details` |
 
 ## In a form or grid
 
@@ -74,12 +75,33 @@ When two scopes use the same keys, the innermost one wins: a form beats a window
 | `Ctrl+Page Down` | Next Section | `batch.next_section` |
 | `Ctrl+Page Up` | Previous Section | `batch.prev_section` |
 
+## In a grid
+
+| Keys | Command | Id |
+| --- | --- | --- |
+| `Ctrl+D` | Copy Down | `grid.copy_down` |
+| `Ctrl+A` | Select All Rows | `grid.select_all` |
+
 ## Always the same in forms and grids
 
 | Keys | Action |
 | --- | --- |
 | `Tab / Shift+Tab` | Next / previous field or cell |
 | `Enter` | Record the row (registers and grids); Save & New in form header fields |
+| `Arrow keys` | Move between rows and cells |
+| `Page Up / Page Down` | Previous / next record in forms; page in grids |
+| `Esc` | Revert the field, then the form, then close (asks first if there are unsaved changes) |
+| `Ctrl+Home / Ctrl+End` | First / last row in grids |
+| `Space` | Tick a checkbox or open the choices in a grid cell; select the row in registers |
+| `+ - * / in an amount` | Work the amount out; the exact result shows under the cell before you leave it |
+
+## When "Enter moves between fields" is on (Preferences)
+
+| Keys | Action |
+| --- | --- |
+| `Tab / Shift+Tab` | Next / previous field or cell |
+| `Enter / Shift+Enter` | Next / previous field or cell; Enter in the last cell of a grid line starts a new line |
+| `Ctrl+Enter` | Save & New |
 | `Arrow keys` | Move between rows and cells |
 | `Page Up / Page Down` | Previous / next record in forms; page in grids |
 | `Esc` | Revert the field, then the form, then close (asks first if there are unsaved changes) |

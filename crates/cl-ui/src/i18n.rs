@@ -877,6 +877,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("dev.grid_demo.col.due", "Due"),
     ("dev.grid_demo.col.amount_due", "Amount due"),
     ("dev.grid_demo.col.to_pay", "Amount to pay"),
+    // WP0 (P16): keymap registry. Command labels (`cmd.*`) resolve from the
+    // cl-model command table; only the new overlay heading lives here.
+    ("shortcuts.scope.grid", "In this grid"),
 ];
 
 #[cfg(test)]
