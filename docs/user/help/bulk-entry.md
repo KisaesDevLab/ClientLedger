@@ -41,6 +41,42 @@ A name or account that isn't in your lists shows "Not in your lists". Pick
 one from the list, or tick **Add new names to the list** to add new names
 when you save. Accounts are never added for you.
 
+## Fill many rows at once
+
+### Copy down
+
+Click a cell and press **Ctrl+D** to copy its value into the same column of the other filled-in rows. You can also use the right-click menu (see below), which also has **Copy to rows below**. It is one undo step (`Ctrl+Z`).
+
+Amounts, Debit, Credit and check or entry numbers are never copied. Copy down is refused, with a note on the status line, when:
+
+- you are on the empty line at the bottom for a new entry: "This is the empty line for a new entry. Copy from a line that is filled in."
+- the row has no amount yet: "Enter this line's amount first, then copy from it."
+- the cell is empty: "This cell is empty, so there is nothing to copy."
+
+### Set
+
+Tick rows in the column at the left (or press Ctrl+A, below). A bar appears with **Set Date**, **Set Name**, **Set Account**, **Set Tag**, **Set Memo** and, for checks, **Set Print Later**. Pick the value, then choose **Apply**. Blank rows are skipped. Amounts and numbers can't be set. It is one undo step.
+
+### Delete Rows
+
+With rows selected, choose **Delete Rows**. It asks first. The rows aren't saved yet, so they are simply removed, and `Ctrl+Z` brings them back.
+
+### Select all with Ctrl+A
+
+If the cell you are in has text, the first **Ctrl+A** selects that text. Press it again to select all rows. If the cell is empty, the first press selects all rows. **Select All Rows** is also in the right-click menu. The empty line for a new entry isn't selected.
+
+### Journal entries stay apart
+
+Journal entry lines with the same date and Entry No. make one entry. Copy down or Set never moves a line into a different entry. If it would, those rows stay as they were and the status line says: "This would join two journal entries with the same date and Entry No., so N rows were left as they were." The rest of your change still applies.
+
+## Menu and columns
+
+**Shift+F10** or the **Menu** key opens the same menu as a right-click, for the cell you are on or for a column heading.
+
+**Columns…** shows, hides and reorders the columns of the section's type. Untick a column to hide it. Hidden columns keep their values and still save. Select a column and press Alt+Up or Alt+Down to move it, or use the Up and Down buttons. **Reset to default** brings back the original set. **Done** closes the panel. The columns a type needs to save, such as the amount, can't be hidden; they say "Needed to save checks." and so on.
+
+**F8** (next row that needs attention) shows a hidden column again if a row has a problem in it: "The Memo column is shown again: a row has a problem in it."
+
 ## Account suggestions
 
 When you pick a name and leave the Account empty, ClientLedger suggests an
