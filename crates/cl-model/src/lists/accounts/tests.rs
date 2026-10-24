@@ -391,3 +391,68 @@ fn balances_are_carried_not_combined() {
     assert_eq!(chart.entry_at(0).map(|e| e.id), Some(id(6)));
     assert_eq!(chart.full_name(id(5)), Some("Materials:Plants"));
 }
+
+/// Review P16-part1 #3: `9 < 10 < 1a < 9` used to be a cycle, and Rust's sort
+/// may panic on a comparator that is not a total order.
+#[test]
+fn number_cmp_sorts_mixed_numbers_without_a_cycle() {
+    use std::cmp::Ordering::{Greater, Less};
+    assert_eq!(number_cmp("9", "10"), Less);
+    assert_eq!(
+        number_cmp("10", "1a"),
+        Greater,
+        "1a has the smaller leading number"
+    );
+    assert_eq!(number_cmp("1a", "9"), Less);
+    let mut numbers = vec![
+        "9", "10", "1a", "1A", "100", "1000", "1000-A", "1000-b", "900", "010", "0", "00", "A-1",
+        "a-2", "a-10", "B-1", "2000", "20", "2", "2.1", "2.10", "2.9", "x", "X", "1 0", "CC",
+        "cc-5", "5cc", "50", "05", "",
+    ];
+    numbers.sort_by(|a, b| number_cmp(a, b));
+    assert_eq!(
+        numbers,
+        [
+            "", "0", "00", "1 0", "1A", "1a", "2", "2.1", "2.9", "2.10", "5cc", "05", "9", "10",
+            "010", "20", "50", "100", "900", "1000", "1000-A", "1000-b", "2000", "A-1", "a-2",
+            "a-10", "B-1", "CC", "cc-5", "X", "x",
+        ]
+    );
+}
+
+mod number_order {
+    use super::number_cmp;
+    use proptest::prelude::*;
+    use std::cmp::Ordering;
+
+    fn short() -> impl Strategy<Value = String> {
+        "[0-9aA. -]{0,5}"
+    }
+
+    proptest! {
+        #[test]
+        fn antisymmetric_and_equal_only_for_same_text(a in short(), b in short()) {
+            prop_assert_eq!(number_cmp(&a, &b), number_cmp(&b, &a).reverse());
+            prop_assert_eq!(number_cmp(&a, &b) == Ordering::Equal, a == b);
+        }
+
+        #[test]
+        fn transitive(a in short(), b in short(), c in short()) {
+            let (ab, bc) = (number_cmp(&a, &b), number_cmp(&b, &c));
+            if ab != Ordering::Greater && bc != Ordering::Greater {
+                prop_assert_ne!(number_cmp(&a, &c), Ordering::Greater);
+            }
+            if ab == Ordering::Less && bc == Ordering::Less {
+                prop_assert_eq!(number_cmp(&a, &c), Ordering::Less);
+            }
+        }
+
+        #[test]
+        fn sorting_never_panics(mut v in proptest::collection::vec(short(), 0..60)) {
+            v.sort_by(|a, b| number_cmp(a, b));
+            for w in v.windows(2) {
+                prop_assert_ne!(number_cmp(&w[0], &w[1]), Ordering::Greater);
+            }
+        }
+    }
+}
