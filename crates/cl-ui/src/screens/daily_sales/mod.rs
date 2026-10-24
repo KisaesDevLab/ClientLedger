@@ -612,6 +612,8 @@ pub struct DailySalesScreen {
     pub(crate) after_frame: Option<CommandId>,
     /// The fixed bars' sizes last frame (Q-265).
     pub(crate) frame_report: crate::layout::FrameReport,
+    /// Where the condensed lines went last frame (Q-267; sizes only).
+    pub(crate) condensed: crate::forms::condensed::CondensedReport,
     pub(crate) money_style: cl_core::MoneyStyle,
     pub(crate) bus: crate::data_bus::Subscription,
     pub(crate) open_task: Option<Job>,
@@ -749,6 +751,7 @@ impl DailySalesScreen {
             layout_list: false,
             after_frame: None,
             frame_report: crate::layout::FrameReport::default(),
+            condensed: crate::forms::condensed::CondensedReport::default(),
             money_style: cl_core::MoneyStyle::default(),
             bus: crate::data_bus::Subscription::detached(),
             open_task: None,

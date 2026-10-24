@@ -820,6 +820,55 @@ fn every_input_is_named_and_the_form_draws_at_both_sizes() {
     }
 }
 
+/// Q-267: on wide windows the lines sit in the condensed table (each
+/// amount box within 760 of its label, stripes alternating within a
+/// section); under 760 the columns are the old ones.
+#[test]
+fn wide_windows_draw_the_lines_condensed_and_striped() {
+    use crate::forms::condensed::{CondensedTable, MAX_WIDTH};
+    for width in [1440.0, 1920.0] {
+        let mut r = rig();
+        r.plan_day("500.00");
+        let _ = tree(&mut r.s, width);
+        let c = &r.s.condensed;
+        let lines =
+            r.s.layout
+                .lines
+                .iter()
+                .filter(|l| l.active && l.id.is_some())
+                .count();
+        assert_eq!(c.rows.len(), lines, "{width}");
+        assert!((c.width - MAX_WIDTH).abs() < 0.5, "{width}: {}", c.width);
+        for row in &c.rows {
+            let gap = row.amount.left() - row.label.left();
+            assert!(gap > 0.0 && gap <= MAX_WIDTH, "{width}: {gap}");
+        }
+        assert!(c.widest_gap() <= MAX_WIDTH);
+        // A section with two or more lines has a striped second line, and
+        // no two neighbours in a section are both striped.
+        assert!(c.rows.iter().any(|x| x.striped), "{width}: {c:?}");
+        assert!(
+            c.rows.windows(2).all(|w| !(w[0].striped && w[1].striped)),
+            "{width}"
+        );
+        let state = r.s.state_json();
+        assert_eq!(state["condensed"]["rows"], lines);
+    }
+    // A narrow window: the form is under 760 wide and the columns are the
+    // ones Daily Sales always drew.
+    let mut r = rig();
+    let _ = tree(&mut r.s, 700.0);
+    let c = r.s.condensed.clone();
+    assert!(c.width < MAX_WIDTH, "{}", c.width);
+    let expect = CondensedTable::default().label_width(c.width);
+    assert!(
+        c.rows
+            .iter()
+            .all(|x| (x.label.width() - expect).abs() < 1.0),
+        "{c:?}"
+    );
+}
+
 /// `--demo`: the screen answers through the demo twin. It opens on the
 /// sample's layout and posts a 2.35-short day with the over/short line on
 /// Cash Over/Short (60900).
