@@ -150,6 +150,118 @@ impl FieldValue {
     }
 }
 
+/// Why Copy down is off for a cell (the menu greys the item and the status
+/// line says why in plain words).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CopyRefusal {
+    /// Amount, Debit, Credit or the number: never copied.
+    Protected,
+    /// The row is not in the section.
+    UnknownRow,
+    /// The row is blank: the empty line for a new entry (its carried-over
+    /// date alone is not something to copy).
+    BlankRow,
+    /// The row has no amount yet (no Amount, Debit or Credit).
+    NoAmount,
+    /// The cell is empty: copying it would empty the column.
+    EmptyCell,
+    /// No other filled-in row is in reach.
+    NoTargets,
+}
+
+/// What Copy down needs to know about one row: its key and which cells are
+/// filled, never a name, memo or amount (the menu keeps these per frame).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RowFacts {
+    /// The row.
+    pub key: RowKey,
+    /// [`RowDraft::is_blank`].
+    pub blank: bool,
+    /// Amount, Debit or Credit is filled in.
+    pub has_amount: bool,
+    /// One bit per copyable field that has a value.
+    filled: u16,
+}
+
+/// The bit of `f` in [`RowFacts::filled`].
+const fn field_bit(f: Field) -> u16 {
+    1 << (f as u16)
+}
+
+impl RowFacts {
+    /// The facts of `row`.
+    #[must_use]
+    pub fn of(row: &RowDraft) -> RowFacts {
+        let mut filled = 0;
+        for (f, on) in [
+            (Field::Date, row.date.is_some()),
+            (Field::Contact, row.has_contact()),
+            (Field::Account, row.has_account()),
+            (Field::Memo, !row.memo.trim().is_empty()),
+            (Field::Tag, row.tag.is_some()),
+            // Ticked or not, Print later always has a value.
+            (Field::PrintLater, true),
+        ] {
+            if on {
+                filled |= field_bit(f);
+            }
+        }
+        RowFacts {
+            key: row.key,
+            blank: row.is_blank(),
+            has_amount: row.amount.is_some() || row.debit.is_some() || row.credit.is_some(),
+            filled,
+        }
+    }
+
+    /// True when the row's `f` cell has a value to copy.
+    #[must_use]
+    pub const fn filled(&self, f: Field) -> bool {
+        self.filled & field_bit(f) != 0
+    }
+}
+
+/// The facts of every row of `s`, in order.
+#[must_use]
+pub fn row_facts(s: &Section) -> Vec<RowFacts> {
+    s.rows.iter().map(RowFacts::of).collect()
+}
+
+/// Why Copy down of `f` from `from` is off, over the rows' facts; `None`
+/// when it would fill at least one row. The source must be a filled-in row
+/// with an amount and a value in the cell (review P16-part1 #2: Ctrl+D on
+/// the blank entry line must not empty a whole column).
+#[must_use]
+pub fn copy_refusal(
+    kind: SectionKind,
+    rows: &[RowFacts],
+    from: RowKey,
+    f: Field,
+    scope: CopyScope,
+) -> Option<CopyRefusal> {
+    if !copyable(kind, f) {
+        return Some(CopyRefusal::Protected);
+    }
+    let Some(at) = rows.iter().position(|r| r.key == from) else {
+        return Some(CopyRefusal::UnknownRow);
+    };
+    let src = rows[at];
+    if src.blank {
+        return Some(CopyRefusal::BlankRow);
+    }
+    if !src.has_amount {
+        return Some(CopyRefusal::NoAmount);
+    }
+    if !src.filled(f) {
+        return Some(CopyRefusal::EmptyCell);
+    }
+    let any = rows
+        .iter()
+        .enumerate()
+        .any(|(i, r)| i != at && !r.blank && (scope == CopyScope::AllDisplayed || i > at));
+    (!any).then_some(CopyRefusal::NoTargets)
+}
+
 /// The rows Copy down from `from` fills: not blank, not `from` itself, and
 /// for [`CopyScope::Below`] after it. Empty when `from` is not in `s`.
 fn copy_targets(s: &Section, from: RowKey, scope: CopyScope) -> Vec<usize> {
@@ -165,25 +277,96 @@ fn copy_targets(s: &Section, from: RowKey, scope: CopyScope) -> Vec<usize> {
 }
 
 /// True when Copy down of `f` from `from` would reach at least one row (the
-/// menu item is disabled otherwise, e.g. in a section with no other rows).
+/// menu item is disabled otherwise): see [`copy_refusal`].
 #[must_use]
 pub fn can_copy_down(s: &Section, from: RowKey, f: Field, scope: CopyScope) -> bool {
-    copyable(s.kind, f)
-        && s.rows
+    copy_refusal(s.kind, &row_facts(s), from, f, scope).is_none()
+}
+
+/// What a Copy down or Set did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Applied {
+    /// Rows changed.
+    pub changed: usize,
+    /// Rows left as they were because the change would have joined two
+    /// journal entries ([`keep_entries_apart`]).
+    pub kept_apart: usize,
+}
+
+/// Puts back the rows of a journal entry section whose change would join
+/// two different journal entries (Q-P16 default, review P16-part1 #5):
+/// entries are grouped by date and Entry No. (`JeGroupKey`), so moving a
+/// line of entry "1" on 11/02 to 11/01 would silently make it part of entry
+/// "1" on 11/01. A row that had no date or no Entry No. was not part of an
+/// entry and may join one. Repeats until no change joins two entries (a put
+/// back row may expose another). Returns how many rows were put back.
+fn keep_entries_apart(before: &Section, after: &mut Section) -> usize {
+    use std::collections::{BTreeMap, HashMap};
+
+    use super::JeGroupKey;
+
+    if !after.kind.is_journal() {
+        return 0;
+    }
+    let old: HashMap<RowKey, &RowDraft> = before.rows.iter().map(|r| (r.key, r)).collect();
+    let origin = |r: &RowDraft| {
+        old.get(&r.key)
+            .filter(|b| !b.is_blank())
+            .and_then(|b| JeGroupKey::of(b))
+    };
+    let mut put_back = BTreeSet::new();
+    loop {
+        // Each entry after the change, and the entries its rows came from.
+        let mut from: BTreeMap<JeGroupKey, BTreeSet<JeGroupKey>> = BTreeMap::new();
+        for r in after.rows.iter().filter(|r| !r.is_blank()) {
+            if let (Some(now), Some(was)) = (JeGroupKey::of(r), origin(r)) {
+                from.entry(now).or_default().insert(was);
+            }
+        }
+        let joins: Vec<usize> = after
+            .rows
             .iter()
-            .find(|r| r.key == from)
-            .and_then(|r| FieldValue::of(r, f))
-            .is_some()
-        && !copy_targets(s, from, scope).is_empty()
+            .enumerate()
+            .filter(|(_, r)| !r.is_blank() && old.get(&r.key).is_some_and(|b| *b != *r))
+            .filter(|(_, r)| match (JeGroupKey::of(r), origin(r)) {
+                (Some(now), Some(was)) => {
+                    now != was && from.get(&now).is_some_and(|set| set.len() > 1)
+                }
+                _ => false,
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if joins.is_empty() {
+            return put_back.len();
+        }
+        for i in joins {
+            let key = after.rows[i].key;
+            if let Some(b) = old.get(&key) {
+                after.rows[i] = (*b).clone();
+                put_back.insert(key);
+            }
+        }
+    }
+}
+
+/// Rows of `after` that differ from `before` (same keys, same order).
+fn count_changed(before: &Section, after: &Section) -> usize {
+    after
+        .rows
+        .iter()
+        .zip(&before.rows)
+        .filter(|(a, b)| a != b)
+        .count()
 }
 
 /// Copy `from`'s value of `f` onto the other rows of the section (every
 /// row, or only the later ones). Blank rows are skipped and no rows are
-/// added. Amounts and numbers are refused ([`copyable`]). Returns how many
-/// rows changed.
-pub fn copy_down(s: &mut Section, from: RowKey, f: Field, scope: CopyScope) -> usize {
-    if !copyable(s.kind, f) {
-        return 0;
+/// added. Amounts and numbers are refused ([`copyable`]), and so is every
+/// source [`copy_refusal`] names. Rows that would join two journal entries
+/// keep their value.
+pub fn copy_down(s: &mut Section, from: RowKey, f: Field, scope: CopyScope) -> Applied {
+    if copy_refusal(s.kind, &row_facts(s), from, f, scope).is_some() {
+        return Applied::default();
     }
     let Some(value) = s
         .rows
@@ -191,31 +374,38 @@ pub fn copy_down(s: &mut Section, from: RowKey, f: Field, scope: CopyScope) -> u
         .find(|r| r.key == from)
         .and_then(|r| FieldValue::of(r, f))
     else {
-        return 0;
+        return Applied::default();
     };
-    let mut changed = 0;
+    let before = s.clone();
     for i in copy_targets(s, from, scope) {
-        if value.apply(&mut s.rows[i]) {
-            changed += 1;
-        }
+        value.apply(&mut s.rows[i]);
     }
-    changed
+    let kept_apart = keep_entries_apart(&before, s);
+    Applied {
+        changed: count_changed(&before, s),
+        kept_apart,
+    }
 }
 
 /// Set `v` on the selected rows of the section. Blank rows are skipped;
 /// fields the section does not have, amounts and numbers are refused
-/// ([`settable`]). Returns how many rows changed.
-pub fn set_field(s: &mut Section, rows: &BTreeSet<RowKey>, v: &FieldValue) -> usize {
+/// ([`settable`]). Rows that would join two journal entries keep their
+/// value.
+pub fn set_field(s: &mut Section, rows: &BTreeSet<RowKey>, v: &FieldValue) -> Applied {
     if !settable(s.kind, v.field()) {
-        return 0;
+        return Applied::default();
     }
-    let mut changed = 0;
+    let before = s.clone();
     for r in &mut s.rows {
-        if rows.contains(&r.key) && !r.is_blank() && v.apply(r) {
-            changed += 1;
+        if rows.contains(&r.key) && !r.is_blank() {
+            v.apply(r);
         }
     }
-    changed
+    let kept_apart = keep_entries_apart(&before, s);
+    Applied {
+        changed: count_changed(&before, s),
+        kept_apart,
+    }
 }
 
 /// Remove the selected rows from the section (unsaved rows only: nothing

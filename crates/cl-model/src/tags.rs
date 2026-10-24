@@ -57,8 +57,9 @@ impl PartialOrd for TagSortKey {
     }
 }
 
-/// Sort key of a tag: numbered tags first, by number (as numbers when both
-/// are all digits, else as text, ignoring case), then by name ignoring case;
+/// Sort key of a tag: numbered tags first, by number (natural order: runs of
+/// digits as numbers, other text ignoring case, like account numbers), then
+/// by name ignoring case;
 /// tags without a number (or with a blank one) last, by name.
 #[must_use]
 pub fn sort_key(number: Option<&str>, name: &str) -> TagSortKey {

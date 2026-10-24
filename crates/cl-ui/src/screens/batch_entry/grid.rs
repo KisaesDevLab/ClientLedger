@@ -212,8 +212,9 @@ pub(crate) fn spec(kind: SectionKind, choice: &ColumnChoice) -> GridSpec {
         .enumerate()
         .map(|(i, f)| {
             let mut c = column(kind, *f, header_key(kind, *f));
-            // The blank entry row's first cell says what to type first.
-            c.placeholder = (i == 0).then_some(TextKey("batch_entry.col.date"));
+            // The blank entry row's first cell names its column (the
+            // owner may have moved another column first).
+            c.placeholder = (i == 0).then_some(TextKey(header_key(kind, *f)));
             c
         })
         .collect();
@@ -760,7 +761,10 @@ mod tests {
                 s.columns.len(),
                 cl_model::forms::batch::required_fields(kind).len()
             );
-            assert!(s.columns[0].placeholder.is_some());
+            assert_eq!(
+                s.columns[0].placeholder,
+                Some(TextKey(header_key(kind, choice.visible()[0])))
+            );
             for f in kind.columns() {
                 if cl_model::forms::batch::ops::settable(kind, *f) {
                     let p = picker_spec(kind, *f);

@@ -27,6 +27,39 @@ steps:
   - click: {role: button, label: Post opening balances}
   - assert_state: {key: screen.posted, equals: false}
   - assert_state: {key: screen.issues, equals: 1}
+  # Enter in a field is Post, like Alt+N (Q-190; refused the same way).
+  - focus: {role: text_input, label: Books start on}
+  - assert_focused: {role: text_input, label: Books start on}
+  - key: Enter
+  - assert_state: {key: screen.last_enter, equals: save}
+  - assert_state: {key: screen.posted, equals: false}
+  # With "Enter moves between fields" on (Q-264) Enter moves on and never
+  # posts; Shift+Enter goes back (review P16-part1 #6).
+  - command: edit.preferences
+  - click: {role: button, label: Look and feel}
+  - click: {role: check_box, label: Enter moves between fields}
+  - assert_state: {key: screen.user.enter_moves_fields, equals: true}
+  - click: {role: button, label: Save}
+  - key: Escape
+  - click: {role: tab, label: Opening Balances}
+  - assert_state: {key: screen.screen, equals: opening_balances}
+  - focus: {role: text_input, label: Books start on}
+  - assert_focused: {role: text_input, label: Books start on}
+  - key: Enter
+  - assert_state: {key: screen.last_enter, equals: next}
+  - focus: {role: text_input, label: Balance}
+  - assert_focused: {role: text_input, label: Balance}
+  - key: Shift+Enter
+  - assert_state: {key: screen.last_enter, equals: prev}
+  - assert_state: {key: screen.posted, equals: false}
+  - command: edit.preferences
+  - click: {role: button, label: Look and feel}
+  - click: {role: check_box, label: Enter moves between fields}
+  - assert_state: {key: screen.user.enter_moves_fields, equals: false}
+  - click: {role: button, label: Save}
+  - key: Escape
+  - click: {role: tab, label: Opening Balances}
+  - assert_state: {key: screen.screen, equals: opening_balances}
 
   # Start date, then the date key M (first of the month).
   - click: {role: text_input, label: Books start on}
@@ -50,13 +83,21 @@ steps:
   - type: {text: Riverbend HOA}
   - click: {role: text_input, label: Amount}
   - type: {text: "1,250.00"}
+  # The cards scroll between the fixed title and Post (review P16-part1
+  # #8): bring the bills card into view.
+  - scroll: {target: {role: button, label: Add a line, index: 1}, to: end}
+  - assert_state: {key: screen.layout.body_scrolled, equals: true}
   - click: {role: button, label: Add a line, index: 2}
   - assert_state: {key: screen.bill_rows, equals: 1}
   - click: {role: text_input, label: Vendor}
   - type: {text: Ozark Mulch Supply}
   - click: {role: text_input, label: Amount, index: 1}
   - type: {text: "300.00"}
-  - assert_no_clipping: {}
+  - assert_no_clipping:
+      ignore:
+        # Cards scrolled up out of the body (centres above the window's top
+        # edge); the title, the cards in view and Post are checked.
+        - {x: -4000, y: -4000, width: 8480, height: 4000}
   - screenshot: filled
 
   - click: {role: button, label: Post opening balances}

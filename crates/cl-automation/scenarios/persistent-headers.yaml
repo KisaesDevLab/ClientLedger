@@ -2,10 +2,11 @@
 # one screen of each kind (a list: Vendors; the register; Bulk Entry;
 # Templates Due; a form: Write Check), the title, toolbar and column headings
 # stay at the top and the actions at the bottom while the content between
-# them scrolls. Each screen moves to the end of its content with the keyboard
-# (End in a list or the register, Tab into the lines of a form), then its
-# toolbar button and its bottom action are still there and clickable. Run at
-# the minimum window (960 x 640), then at 200% zoom on it (480 x 320 points).
+# them scrolls. Each screen moves to the end of its content (Ctrl+End in a
+# list or the register; the form's body is scrolled to its end with the mouse
+# wheel, and the frame reports it scrolled and at its end), then its toolbar
+# button and its bottom action are still there and clickable. Run at the
+# minimum window (960 x 640), then at 200% zoom on it (480 x 320 points).
 # Nothing is saved: the form's Save & Close is checked enabled and Clear is
 # clicked. Synthetic demo data.
 name: persistent-headers
@@ -77,18 +78,24 @@ steps:
   - command: vendors.write_check
   - assert_state: {key: screen.screen, equals: write_check}
   - assert_state: {key: screen.loaded, equals: true}
-  - click: {label: "Account, line 1"}
-  - key: Tab
-  - key: Tab
-  - key: Tab
-  - key: Tab
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.layout.body_scrolled, equals: false}
+  - assert_state: {key: screen.layout.body_at_end, equals: false}
+  # The wheel over the form scrolls its body to the end (review P16-part1
+  # #7): the toolbar and the actions stay on screen and work.
+  - scroll: {target: {role: label, label: Bank account}, to: end}
+  - assert_state: {key: screen.layout.body_scrolled, equals: true}
+  - assert_state: {key: screen.layout.body_at_end, equals: true}
   - assert_exists: {role: button, label: Attach}
   - click: {role: button, label: Attach}
   - assert_enabled: {role: button, label_contains: Save & Close}
-  - click: {role: button, label: Clear}
-  - assert_state: {key: screen.dirty, equals: false}
   - assert_no_clipping: {}
   - screenshot: write-check-960
+  # And back to the top (the body remembers its place for the next window).
+  - scroll: {target: {role: button, label: Attach file}, to: start}
+  - assert_state: {key: screen.layout.body_scrolled, equals: false}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
   - command: file.close_window
 
   # ========================= 960 x 640 at 200% ===============================
@@ -103,17 +110,10 @@ steps:
   - assert_exists: {role: button, label: New vendor}
   - assert_exists: {role: button, label: Hide details}
   - screenshot: vendors-z200
-  - assert_no_clipping: &zoomed
+  - assert_no_clipping:
       ignore:
         # The tab strip scrolls (the » list).
-        - {x: -4000, y: 70, width: 8480, height: 40}
-        # A top bar too tall for this window scrolls on its own, both ways
-        # (its room under the tabs; the register's filter row runs past the
-        # right edge).
-        - {x: -4000, y: 104, width: 8480, height: 56}
-        # The bottom band (as in forms-zoom): a scrolled bar's rows report
-        # their full bounds past the window's bottom edge.
-        - {x: -4000, y: 260, width: 8480, height: 80}
+        - &tabs {x: -4000, y: 70, width: 8480, height: 40}
         # The details panel's body scrolls by design.
         - {x: 264, y: 100, width: 300, height: 260}
   - command: file.close_window
@@ -143,28 +143,41 @@ steps:
   - click: {role: button, label: Clear}
   - assert_state: {key: screen.last_action, equals: clear}
   - screenshot: bulk-entry-z200
-  - assert_no_clipping: *zoomed
+  - assert_state: {key: screen.layout.top_scrolls, equals: true}
+  - assert_no_clipping:
+      ignore:
+        - *tabs
+        # Bulk Entry's top bar is too tall here and scrolls on its own (30
+        # points of room): its wrapped rows below that room (the "Add new
+        # names to the list" box) report their unscrolled bounds, centred
+        # past the window's bottom edge (y 320). Only centres from y 316 on
+        # are left out; the visible top bar, the grid and the actions (y
+        # 238-282) are all checked.
+        - {x: -4000, y: 316, width: 8480, height: 40}
   - command: file.close_window
 
   - command: lists.templates_due
   - key: Ctrl+End
   - click: {role: button, label: Check now}
   - screenshot: templates-due-z200
-  - assert_no_clipping: *zoomed
+  - assert_no_clipping: {ignore: [*tabs]}
   - command: file.close_window
 
   - command: vendors.write_check
   - assert_state: {key: screen.loaded, equals: true}
-  - click: {label: "Account, line 1"}
-  - key: Tab
-  - key: Tab
-  - key: Tab
-  - key: Tab
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.layout.body_scrolled, equals: false}
+  - scroll: {target: {role: label, label: Bank account}, to: end}
+  - assert_state: {key: screen.layout.body_scrolled, equals: true}
+  - assert_state: {key: screen.layout.body_at_end, equals: true}
   - click: {role: button, label: Attach}
   - assert_enabled: {role: button, label_contains: Save & Close}
-  - click: {role: button, label: Clear}
   - screenshot: write-check-z200
-  - assert_no_clipping: *zoomed
+  - assert_no_clipping: {ignore: [*tabs]}
+  - scroll: {target: {role: button, label: Attach file}, to: start}
+  - assert_state: {key: screen.layout.body_scrolled, equals: false}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
   - command: file.close_window
 
   - set_zoom: {percent: 100}

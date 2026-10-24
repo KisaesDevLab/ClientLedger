@@ -167,6 +167,8 @@ pub struct CsvScreen {
     import: Option<Task<Outcome>>,
     outcome: Option<Outcome>,
     import_error: Option<ApiError>,
+    /// Where the frame's bars went (control channel).
+    layout: crate::layout::FrameReport,
 }
 
 impl CsvScreen {
@@ -196,6 +198,7 @@ impl CsvScreen {
             import: None,
             outcome: None,
             import_error: None,
+            layout: crate::layout::FrameReport::default(),
         }
     }
 
@@ -1209,22 +1212,33 @@ impl Screen for CsvScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
         let tokens = Tokens::of(ui.ctx());
-        egui::ScrollArea::vertical()
-            .id_salt("csv-scroll")
-            .show(ui, |ui| {
-                form::heading(ui, &tokens, &self.title());
-                ui.add_space(4.0);
-                self.list_choice_ui(ui);
-                ui.add_space(8.0);
-                self.export_ui(ui, &tokens);
-                ui.add_space(8.0);
-                self.import_ui(ui, &tokens);
-            });
+        // The title and the list choice stay at the top; the export and
+        // import cards scroll under them (Q-265, review P16-part1 #8).
+        let mut frame =
+            crate::layout::FixedFrame::begin(ui, "csv", crate::layout::FrameOpts::default());
+        frame.top(|ui| {
+            form::heading(ui, &tokens, &self.title());
+            ui.add_space(4.0);
+            self.list_choice_ui(ui);
+            ui.add_space(4.0);
+        });
+        frame.body(crate::layout::Body::Scroll, |ui| {
+            ui.add_space(4.0);
+            self.export_ui(ui, &tokens);
+            ui.add_space(8.0);
+            self.import_ui(ui, &tokens);
+        });
+        self.layout = frame.end();
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 
     fn state(&self) -> Value {
         json!({
             "screen": "import_export",
+            "layout": self.layout.json(),
             "list": self.list.key(),
             "exporting": self.export.is_some(),
             "exported": self.exported.is_some(),

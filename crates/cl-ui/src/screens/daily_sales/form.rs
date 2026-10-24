@@ -1,6 +1,6 @@
 //! Drawing Daily Sales Summary on the Write Check pattern (Q-261): the
-//! toolbar, the header card (Layout Â· Date Â· Tag Â· Notes), the lines by
-//! section (Line Â· Account Â· Amount), the summary with the cash
+//! toolbar, the header card (Layout · Date · Tag · Notes), the lines by
+//! section (Line · Account · Amount), the summary with the cash
 //! over/short, the action row and the side panel; and the keymap commands.
 //!
 //! Every input carries its visible label as its accessible name. Amounts
@@ -67,7 +67,7 @@ pub(crate) const fn section_key(s: DailySection) -> &'static str {
     }
 }
 
-/// "2.35 short â€” posts to Cash Over/Short" and the like (Q-204).
+/// "2.35 short — posts to Cash Over/Short" and the like (Q-204).
 pub(crate) fn over_short_text(o: OverShort, style: cl_core::MoneyStyle) -> String {
     match o {
         OverShort::Even => t("daily.over_short.even"),
@@ -299,7 +299,7 @@ impl DailySalesScreen {
         }
     }
 
-    /// The header card: Layout Â· Date on top, Tag Â· Notes below.
+    /// The header card: Layout · Date on top, Tag · Notes below.
     fn header_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         egui::Frame::new()
             .fill(tokens.surface_form)
@@ -512,7 +512,7 @@ impl DailySalesScreen {
         }
     }
 
-    /// The lines by section: Line Â· Account (read-only) Â· Amount.
+    /// The lines by section: Line · Account (read-only) · Amount.
     fn lines_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         if self.template.is_none() {
             form::progress_line(ui, tokens, &t("daily.loading"));
@@ -926,7 +926,7 @@ impl DailySalesScreen {
     }
 }
 
-/// " Â· 2.35 short" for the recent-days list ("" when even).
+/// " · 2.35 short" for the recent-days list ("" when even).
 fn over_short_short(o: OverShort, style: cl_core::MoneyStyle) -> String {
     match o {
         OverShort::Even => String::new(),

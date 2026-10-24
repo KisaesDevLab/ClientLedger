@@ -302,6 +302,15 @@ impl BulkEntryScreen {
                 return Some(true);
             }
         }
+        // Ctrl+Enter (Save & New when Enter moves between fields) while a
+        // Set picker is open applies the picker, as Enter does; it never
+        // saves the whole batch from there.
+        if id.as_str() == "form.save_new" && self.picker.is_some() {
+            if !self.busy() {
+                self.apply_picker();
+            }
+            return Some(true);
+        }
         if id.as_str() == "form.revert" {
             if std::mem::take(&mut self.confirm_delete) {
                 return Some(true);

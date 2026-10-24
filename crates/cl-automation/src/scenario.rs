@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::actions::Target;
+use crate::actions::{ScrollTo, Target};
 use crate::client::{ClientError, Transport};
 use crate::inspect::{Bounds, Snapshot};
 
@@ -78,6 +78,14 @@ pub enum Step {
     ClickIfPresent(Target),
     /// Focus an element.
     Focus(Target),
+    /// Turn the mouse wheel over an element until what scrolls there (a
+    /// form's body) reaches its start or end.
+    Scroll {
+        /// Where the pointer goes.
+        target: Target,
+        /// `start` or `end`.
+        to: ScrollTo,
+    },
     /// Type text. `{theme}` in the text becomes the theme being run, so a
     /// record a scenario creates gets a name of its own in each run (lists
     /// whose names stay taken after a record is made inactive).
@@ -174,6 +182,7 @@ impl Step {
             Step::Click(t) => format!("click {}", t.describe()),
             Step::ClickIfPresent(t) => format!("click {} if present", t.describe()),
             Step::Focus(t) => format!("focus {}", t.describe()),
+            Step::Scroll { target, to } => format!("scroll {} to the {to:?}", target.describe()),
             Step::Type { text, .. } => format!("type {} characters", text.chars().count()),
             Step::Paste { text, .. } => {
                 format!("paste {} line(s)", text.lines().count().max(1))
@@ -445,6 +454,12 @@ fn run_step(
             })?;
             call(t, "focus", json!({"target": target})).map(drop)
         }
+        Step::Scroll { target, to } => {
+            eventually(t, |s| {
+                s.resolve(target).map(drop).map_err(|e| e.to_string())
+            })?;
+            call(t, "scroll", json!({"target": target, "to": to})).map(drop)
+        }
         Step::Type { text, target } => {
             let text = themed(text, theme);
             call(t, "type", json!({"text": text, "target": target})).map(drop)
@@ -711,6 +726,40 @@ mod tests {
         .unwrap();
         assert_eq!(s.themes, vec!["light", "dark"]);
         assert_eq!(s.steps.len(), 7);
+    }
+
+    #[test]
+    fn scroll_sends_the_target_and_the_end() {
+        let s = Scenario::parse(
+            "name: x\nthemes: [light]\nsteps:\n  - scroll: {target: {id: '2'}, to: end}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            s.steps[0],
+            Step::Scroll {
+                target: Target {
+                    id: Some("2".into()),
+                    ..Target::default()
+                },
+                to: ScrollTo::End,
+            }
+        );
+        let mut fake = Fake::new();
+        let out = dir();
+        let report = run(&mut fake, &s, out.path());
+        assert!(report.passed(), "{}", report.summary());
+        let sent = fake
+            .calls
+            .iter()
+            .find(|(m, _)| m == "scroll")
+            .map(|(_, p)| p.clone())
+            .expect("a scroll call");
+        assert_eq!(sent["to"], "end");
+        assert_eq!(sent["target"]["id"], "2");
+        assert!(
+            Scenario::parse("name: x\nsteps:\n  - scroll: {target: {id: '2'}, to: middle}\n")
+                .is_err()
+        );
     }
 
     #[test]

@@ -91,6 +91,10 @@ pub struct FrameReport {
     /// The bottom bar is taller than a very short window allows and scrolls
     /// on its own, its end (the actions) in view.
     pub bottom_scrolls: bool,
+    /// A scrolling body is scrolled down from its top.
+    pub body_scrolled: bool,
+    /// A scrolling body shows its end (true when it has nothing to scroll).
+    pub body_at_end: bool,
 }
 
 impl FrameReport {
@@ -106,6 +110,8 @@ impl FrameReport {
             "body_h": points(self.body_h),
             "top_scrolls": self.top_scrolls,
             "bottom_scrolls": self.bottom_scrolls,
+            "body_scrolled": self.body_scrolled,
+            "body_at_end": self.body_at_end,
         })
     }
 }
@@ -268,17 +274,22 @@ impl<'u> FixedFrame<'u> {
         let mut child = self.child(rect, "body");
         let inner = match body {
             Body::Scroll => {
-                egui::ScrollArea::both()
+                let out = egui::ScrollArea::both()
                     .id_salt((self.id, "body-scroll"))
                     .auto_shrink([false, false])
                     .max_height(rect.height())
                     .min_scrolled_height(rect.height())
-                    .show(&mut child, add)
-                    .inner
+                    .show(&mut child, add);
+                let offset = out.state.clamped_offset().y;
+                self.report.body_scrolled = offset > 0.5;
+                self.report.body_at_end =
+                    offset + out.inner_rect.height() + 1.0 >= out.content_size.y;
+                out.inner
             }
             // Too short for its rows (200% zoom on the minimum window): the
             // content gets its minimum height and scrolls in the room.
             Body::Fill if rect.height() + 0.5 < self.min_body() => {
+                self.report.body_at_end = true;
                 let min = self.min_body();
                 egui::ScrollArea::vertical()
                     .id_salt((self.id, "body-fill-scroll"))
@@ -294,7 +305,10 @@ impl<'u> FixedFrame<'u> {
                     })
                     .inner
             }
-            Body::Fill => add(&mut child),
+            Body::Fill => {
+                self.report.body_at_end = true;
+                add(&mut child)
+            }
         };
         self.cursor_y = bottom;
         inner

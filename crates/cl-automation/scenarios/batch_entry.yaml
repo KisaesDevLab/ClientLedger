@@ -225,6 +225,49 @@ steps:
   - assert_value: {target: {label: "Date, line 3"}, equals: "11/02/2026"}
   - key: Ctrl+Z
   - assert_value: {target: {label: "Date, line 3"}, equals: "11/04/2026"}
+  # Ctrl+D on the blank entry line (its date carried over) copies nothing
+  # and says why in plain words (review P16-part1 #2).
+  - click: {label: "Date, line 4"}
+  - key: Ctrl+D
+  - assert_state: {key: screen.last_action, equals: copy_refused}
+  - assert_state: {key: screen.rows_changed, equals: 0}
+  - assert_value: {target: {label: "Date, line 1"}, equals: "11/02/2026"}
+  - assert_value: {target: {label: "Date, line 3"}, equals: "11/04/2026"}
+  - assert_exists: {role: label, label_contains: "empty line for a new entry"}
+  # Ctrl+A in the grid (review #1): in an empty cell it selects every row;
+  # in a cell with text the first Ctrl+A selects the text, the second the
+  # rows.
+  - click: {label: "Memo, line 4"}
+  - key: Ctrl+A
+  - assert_state: {key: screen.selected, equals: 3}
+  - assert_state: {key: screen.last_action, equals: select_all}
+  - click: {role: button, label: Clear Selection}
+  - assert_state: {key: screen.selected, equals: 0}
+  - click: {label: "Memo, line 1"}
+  - key: Ctrl+A
+  - assert_state: {key: screen.selected, equals: 0}
+  - key: Ctrl+A
+  - assert_state: {key: screen.selected, equals: 3}
+  - screenshot: select_all
+  - click: {role: button, label: Clear Selection}
+  - assert_state: {key: screen.selected, equals: 0}
+  # A problem in a hidden column: F8 shows the column again (review #4).
+  - click: {label: "No., line 1"}
+  - type: {text: "880001"}
+  - key: Tab
+  - click: {label: "No., line 2"}
+  - type: {text: "880001"}
+  - key: Tab
+  - click: {role: button, label: "Columns…"}
+  - click: {role: check_box, label: "No."}
+  - assert_state: {key: screen.columns.hidden, equals: [number]}
+  - click: {role: button, label: Done}
+  - assert_not_exists: {label: "No., line 1"}
+  - key: F8
+  - assert_state: {key: screen.columns.hidden, equals: []}
+  - assert_state: {key: screen.grid.column, equals: number}
+  - assert_exists: {role: label, label_contains: "column is shown again"}
+  - screenshot: hidden_problem
   # Columns…: the columns a check needs stay; Memo hidden is remembered.
   - click: {role: button, label: "Columns…"}
   - assert_state: {key: screen.columns_open, equals: true}

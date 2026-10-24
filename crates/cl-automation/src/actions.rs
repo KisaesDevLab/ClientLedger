@@ -227,6 +227,27 @@ pub struct FocusParams {
     pub target: Target,
 }
 
+/// `scroll`: the mouse wheel over an element, to one end of whatever
+/// scrolls there (a form's body, a list).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScrollParams {
+    /// Where the pointer goes (the element's centre).
+    pub target: Target,
+    /// Which end.
+    pub to: ScrollTo,
+}
+
+/// Which end `scroll` goes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScrollTo {
+    /// The top.
+    Start,
+    /// The bottom.
+    End,
+}
+
 /// `command`: run a registered command by id (`file.quit`, `help.palette`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

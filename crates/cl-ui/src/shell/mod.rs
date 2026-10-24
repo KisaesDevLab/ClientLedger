@@ -904,19 +904,29 @@ impl Shell {
             return;
         }
         let modal = self.modal_open();
-        let text_focus = ctx.egui_wants_keyboard_input();
-        let scope = target
-            .and_then(|id| self.windows.get(id))
-            .map_or(Scope::Global, |w| w.screen.scope());
+        let window = target.and_then(|id| self.windows.get(id));
+        let scope = window.map_or(Scope::Global, |w| w.screen.scope());
+        // A focused text field keeps its edit keys; the window decides (a
+        // grid lets Ctrl+A through when its cell has nothing to select).
+        let kept: Vec<bool> = pressed
+            .iter()
+            .map(|s| {
+                input::reserved_by_text_fields(*s)
+                    && window.map_or_else(
+                        || ctx.egui_wants_keyboard_input(),
+                        |w| w.screen.keeps_text_key(ctx, *s),
+                    )
+            })
+            .collect();
         let mut handled: Vec<cl_model::Shortcut> = Vec::new();
-        for s in pressed {
+        for (s, kept) in pressed.into_iter().zip(kept) {
             let Some(id) = self.keymap.resolve(scope, s) else {
                 continue;
             };
             if modal && !matches!(id.as_str(), "help.palette" | "help.shortcuts") {
                 continue;
             }
-            if text_focus && input::reserved_by_text_fields(s) {
+            if kept {
                 continue;
             }
             handled.push(s);

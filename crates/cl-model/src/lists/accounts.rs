@@ -255,18 +255,61 @@ pub struct Chart {
     numbers: bool,
 }
 
-/// Account numbers compare as numbers when both are all digits (`900`
-/// before `1000`), otherwise as text.
+/// Splits a number into runs of ASCII digits and runs of anything else.
+fn number_chunks(s: &str) -> impl Iterator<Item = &str> {
+    let mut rest = s;
+    std::iter::from_fn(move || {
+        let first = rest.chars().next()?;
+        let digit = first.is_ascii_digit();
+        let end = rest
+            .char_indices()
+            .find(|(_, c)| c.is_ascii_digit() != digit)
+            .map_or(rest.len(), |(i, _)| i);
+        let (chunk, tail) = rest.split_at(end);
+        rest = tail;
+        Some(chunk)
+    })
+}
+
+/// One run of a number: digit runs compare by value (shorter after trimming
+/// leading zeros is smaller; `10` before `010`), and come before text runs;
+/// text runs compare ignoring case.
+fn chunk_cmp(a: &str, b: &str) -> Ordering {
+    let digit = |s: &str| s.bytes().next().is_some_and(|c| c.is_ascii_digit());
+    match (digit(a), digit(b)) {
+        (true, true) => {
+            let (ta, tb) = (a.trim_start_matches('0'), b.trim_start_matches('0'));
+            ta.len()
+                .cmp(&tb.len())
+                .then_with(|| ta.cmp(tb))
+                .then_with(|| a.len().cmp(&b.len()))
+        }
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        (false, false) => a
+            .chars()
+            .flat_map(char::to_lowercase)
+            .cmp(b.chars().flat_map(char::to_lowercase)),
+    }
+}
+
+/// Account and tag numbers in "natural" order: runs of digits compare as
+/// numbers (`900` before `1000`, `1000` before `1000-A` before `2000`), other
+/// text ignoring case. A total order (equal only for the same text), so it is
+/// safe for every sort.
 pub(crate) fn number_cmp(a: &str, b: &str) -> Ordering {
-    let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
-    if digits(a) && digits(b) {
-        let (ta, tb) = (a.trim_start_matches('0'), b.trim_start_matches('0'));
-        ta.len()
-            .cmp(&tb.len())
-            .then_with(|| ta.cmp(tb))
-            .then_with(|| a.len().cmp(&b.len()))
-    } else {
-        a.to_lowercase().cmp(&b.to_lowercase())
+    let mut ca = number_chunks(a);
+    let mut cb = number_chunks(b);
+    loop {
+        match (ca.next(), cb.next()) {
+            (None, None) => return a.cmp(b),
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) => match chunk_cmp(x, y) {
+                Ordering::Equal => {}
+                other => return other,
+            },
+        }
     }
 }
 
