@@ -230,13 +230,34 @@ pub(crate) struct Local {
     pub last_backup: Option<Timestamp>,
     /// Now.
     pub now: Timestamp,
-    /// How far local time is from UTC (UTC in the demo, so screenshots
-    /// stay the same on every machine).
-    pub offset: chrono::FixedOffset,
+    /// The clock times are shown in (UTC in the demo, so screenshots stay
+    /// the same on every machine).
+    pub zone: Zone,
     /// Standard months or a retail calendar (kept on this computer, U-25).
     pub calendar: cl_settings::FiscalCalendar,
     /// The owner hid the setup checklist (kept with the company's prefs).
     pub checklist_dismissed: bool,
+}
+
+/// The clock Home shows a time in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Zone {
+    /// This computer's time zone, with the offset of each instant (a
+    /// backup made before a daylight-saving change shows its own offset).
+    Local,
+    /// A fixed offset (the demo: UTC).
+    Fixed(chrono::FixedOffset),
+}
+
+impl Zone {
+    /// `at` on this clock.
+    #[must_use]
+    pub(crate) fn at(self, at: Timestamp) -> chrono::DateTime<chrono::FixedOffset> {
+        match self {
+            Zone::Local => at.as_utc().with_timezone(&chrono::Local).fixed_offset(),
+            Zone::Fixed(o) => at.as_utc().with_timezone(&o),
+        }
+    }
 }
 
 /// The Home window.
@@ -390,18 +411,22 @@ impl HomeScreen {
         let Some(accounts) = self.data.accounts.value.as_ref() else {
             return;
         };
-        let ids: Vec<AccountId> = money_accounts(accounts)
-            .into_iter()
-            .map(|a| a.id)
-            .take(RECONCILE_ACCOUNTS_MAX)
-            .collect();
+        // Every bank and card account, read in batches of
+        // `RECONCILE_ACCOUNTS_MAX` (none is left out).
+        let ids: Vec<AccountId> = money_accounts(accounts).into_iter().map(|a| a.id).collect();
         let demo_ids = ids.clone();
         self.data.reconcile.start(run(
             &self.link,
             self.group.as_ref(),
             None,
             move |_| Ok(demo::reconcile(&demo_ids)),
-            move |s| async move { s.home().reconcile_state(&ids).await },
+            move |s| async move {
+                let mut state = ReconcileState::default();
+                for batch in ids.chunks(RECONCILE_ACCOUNTS_MAX) {
+                    state.merge(s.home().reconcile_state(batch).await?);
+                }
+                Ok(state)
+            },
         ));
     }
 
@@ -744,7 +769,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
             bills_due_days,
             last_backup: last.or_else(|| Some(demo::last_backup())),
             now: demo::now(),
-            offset: utc(),
+            zone: Zone::Fixed(utc()),
             calendar,
             checklist_dismissed,
         };
@@ -755,7 +780,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
         last_backup: last,
         now: Timestamp::from_unix_millis(now.timestamp_millis())
             .unwrap_or_else(|_| crate::company::demo::DemoState::now()),
-        offset: *now.with_timezone(&chrono::Local).offset(),
+        zone: Zone::Local,
         calendar,
         checklist_dismissed,
     }

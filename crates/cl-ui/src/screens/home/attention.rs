@@ -18,7 +18,7 @@ use cl_model::home::{AttentionItem, AttentionKind};
 use eframe::egui::{self, Align, Layout, Margin, RichText, Ui, Vec2};
 
 use super::balances::{failed, heading, note, rule};
-use super::{HomeData, HomeScreen};
+use super::{HomeData, HomeScreen, Zone};
 use crate::i18n::{t, t_count, t_with};
 use crate::screens::company::form::activated;
 use crate::theme::Tokens;
@@ -96,11 +96,17 @@ pub(crate) fn items(
         .collect()
 }
 
+/// `days` as words: "1 day", "14 days".
+#[must_use]
+pub(crate) fn days_text(days: u16) -> String {
+    t_count("home.days", usize::from(days), &[])
+}
+
 /// When `at` was, for the backup line: "today 8:12 AM", else the date.
 #[must_use]
-pub(crate) fn when_text(at: Timestamp, offset: chrono::FixedOffset, today: CalendarDate) -> String {
+pub(crate) fn when_text(at: Timestamp, zone: Zone, today: CalendarDate) -> String {
     use chrono::Datelike as _;
-    let local = at.as_utc().with_timezone(&offset);
+    let local = zone.at(at);
     let day = CalendarDate::from_ymd(local.year(), local.month(), local.day()).ok();
     if day == Some(today) {
         t_with(
@@ -119,6 +125,8 @@ pub(crate) struct Line {
     pub text: String,
     /// The link at its right: its text and the command it opens.
     pub link: Option<(String, &'static str)>,
+    /// The link's tooltip (a plain word for a bookkeeping term).
+    pub link_tip: Option<String>,
     /// A dash at the right with this tooltip (a count not known).
     pub dash: Option<String>,
     /// Muted (information, not a task).
@@ -130,6 +138,8 @@ impl Line {
         Line {
             text,
             link: opens.map(|o| (t(link_key), o)),
+            link_tip: crate::i18n::has(&format!("{link_key}.tip"))
+                .then(|| t(&format!("{link_key}.tip"))),
             dash: None,
             muted: false,
         }
@@ -139,6 +149,7 @@ impl Line {
         Line {
             text,
             link: None,
+            link_tip: None,
             dash: Some(tip),
             muted: false,
         }
@@ -148,6 +159,7 @@ impl Line {
         Line {
             text,
             link: None,
+            link_tip: None,
             dash: None,
             muted: true,
         }
@@ -223,7 +235,7 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
                 t_count(
                     "home.attention.bills",
                     shown,
-                    &[("days", &days.to_string())],
+                    &[("within", &days_text(days))],
                 ),
                 "home.attention.pay_bills",
                 opens,
@@ -241,7 +253,7 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
     let local = home.local;
     let when = local
         .last_backup
-        .map(|b| when_text(b, local.offset, home.today));
+        .map(|b| when_text(b, local.zone, home.today));
     if home.backup_due() {
         let text = match &when {
             Some(w) => t_with("home.attention.backup_due", &[("when", w)]),
@@ -329,7 +341,10 @@ fn line(ui: &mut Ui, tokens: &Tokens, l: &Line, clicked: &mut Option<&'static st
                 );
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                     if let Some((text, opens)) = &l.link {
-                        let r = ui.link(text);
+                        let mut r = ui.link(text);
+                        if let Some(tip) = &l.link_tip {
+                            r = r.on_hover_text(tip);
+                        }
                         if activated(&r) {
                             *clicked = Some(*opens);
                         }

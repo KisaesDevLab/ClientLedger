@@ -921,11 +921,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.month.11", "Nov"),
     ("home.month.12", "Dec"),
     ("home.footer.clients_owe", "Clients owe you"),
-    ("home.footer.bills_due", "Bills due in {days} days"),
+    ("home.footer.bills_due", "Bills due in {within}"),
     ("home.footer.last_reconciled", "Last reconciled"),
     ("home.footer.sales_tax_owed", "Sales tax owed"),
     ("home.footer.not_yet", "Not yet"),
-    ("home.footer.later.tip", "Shown after the next engine update."),
+    ("home.footer.later.tip", "Shown after a future update."),
     ("home.footer.failed.tip", "Couldn't load this. Choose Refresh to try again."),
     ("home.footer.window.tip", "Shown when the bills window is 90 days or less. You can change it in Preferences."),
     ("home.footer.sales_tax.tip", "Shown when the sales tax reports arrive."),
@@ -955,8 +955,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.attention.invoices", "{n} invoices past due"),
     ("home.attention.invoices.one", "1 invoice past due"),
     ("home.attention.open_aging", "Open aging"),
-    ("home.attention.bills", "{n} bills overdue or due within {days} days"),
-    ("home.attention.bills.one", "1 bill overdue or due within {days} days"),
+    ("home.attention.bills", "{n} bills overdue or due within {within}"),
+    ("home.attention.bills.one", "1 bill overdue or due within {within}"),
     ("home.attention.pay_bills", "Pay bills"),
     ("home.attention.payroll", "{n} payroll imports not posted yet"),
     ("home.attention.payroll.one", "1 payroll import not posted yet"),
@@ -1011,6 +1011,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.checklist.hide.tip", "Hide the setup checklist for this company. Steps still tick as you finish them."),
     ("home.checklist.note", "Steps tick by themselves as you finish them."),
     ("home.kofi", "Support ClientLedger on Ko-fi"),
+    // P16 fix2: day counts, the aging tooltip, more reconciliations.
+    ("home.days", "{n} days"),
+    ("home.days.one", "1 day"),
+    ("home.attention.open_aging.tip", "See your unpaid invoices grouped by how many days they are past due (the A/R aging report)."),
 ];
 
 #[cfg(test)]

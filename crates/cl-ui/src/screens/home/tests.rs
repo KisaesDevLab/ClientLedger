@@ -256,6 +256,70 @@ fn home_follows_the_shells_date() {
     assert!(!h.follow_shell_date(&ctx));
 }
 
+/// "1 day", never "1 days"; "Open aging" explains itself on hover; a past
+/// backup shows in its own instant's offset.
+#[test]
+fn day_counts_aging_tip_and_backup_offsets() {
+    use chrono::Offset as _;
+    assert_eq!(attention::days_text(1), "1 day");
+    assert_eq!(attention::days_text(14), "14 days");
+    let mut summary = demo::summary(&mut DemoState::new(), DemoState::today(), 1);
+    if let Some(p) = summary.payables.as_mut() {
+        p.overdue_count = 1;
+        p.due_soon_count = 0;
+    }
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    h.local.bills_due_days = 1;
+    h.data.summary = Slot::ready(summary);
+    let lines = attention::lines(&h, &h.attention());
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.text == "1 bill overdue or due within 1 day"),
+        "{lines:#?}"
+    );
+    let aging = lines
+        .iter()
+        .find(|l| l.link.as_ref().is_some_and(|(t, _)| t == "Open aging"))
+        .expect("aging link");
+    assert!(
+        aging
+            .link_tip
+            .as_deref()
+            .is_some_and(|t| t.contains("past due"))
+    );
+    assert!(
+        lines
+            .iter()
+            .filter(|l| l.link.as_ref().is_some_and(|(t, _)| t != "Open aging"))
+            .all(|l| l.link_tip.is_none())
+    );
+
+    // A summer backup seen in winter: its own (summer) offset.
+    let summer = chrono::FixedOffset::west_opt(5 * 3600).expect("CDT");
+    let at = Timestamp::from_unix_millis(
+        chrono::DateTime::parse_from_rfc3339("2026-07-01T03:30:00Z")
+            .expect("ts")
+            .timestamp_millis(),
+    )
+    .expect("ts");
+    assert_eq!(
+        attention::when_text(at, Zone::Fixed(summer), date(2026, 11, 4)),
+        "06/30/2026"
+    );
+    assert_eq!(
+        attention::when_text(at, Zone::Fixed(summer), date(2026, 6, 30)),
+        "today 10:30 PM"
+    );
+    let local = Zone::Local.at(at);
+    let expected = at.as_utc().with_timezone(&chrono::Local);
+    assert_eq!(
+        local.offset().local_minus_utc(),
+        expected.offset().fix().local_minus_utc()
+    );
+}
+
 /// The lines Home draws: a dash for what can't be counted (overdue invoices
 /// before U-76, a failed query), one muted line for what arrives later,
 /// nothing for a zero, "Nothing needs attention" when all is clear.

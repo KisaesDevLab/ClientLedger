@@ -179,7 +179,10 @@ pub(crate) fn footer_view(home: &HomeScreen, footer: LaneFooter, style: MoneySty
                 tip = Some(t("home.footer.window.tip"));
             }
             FooterView {
-                label: t_with("home.footer.bills_due", &[("days", &days.to_string())]),
+                label: t_with(
+                    "home.footer.bills_due",
+                    &[("within", &super::attention::days_text(days))],
+                ),
                 value,
                 money: true,
                 tip,
