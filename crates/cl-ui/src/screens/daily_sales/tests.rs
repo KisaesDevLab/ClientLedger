@@ -869,6 +869,35 @@ fn wide_windows_draw_the_lines_condensed_and_striped() {
     );
 }
 
+/// The Tag picker shows "number · name" (WP4b), as every screen does.
+#[test]
+fn the_tag_picker_shows_the_tag_number() {
+    let mut r = rig();
+    let tag = cl_api::Tag {
+        id: cl_core::ids::TagId::parse("70000000-0000-4000-8000-000000000010").expect("id"),
+        fields: cl_api::TagFields {
+            name: "Lake Area".into(),
+            color: None,
+            group_id: None,
+            description: None,
+            tag_number: Some("10".into()),
+        },
+        is_active: true,
+        usage_count: None,
+        sort_order: None,
+        created_at: None,
+        updated_at: None,
+    };
+    let id = tag.id;
+    r.s.tags = vec![tag];
+    assert_eq!(r.s.tag_shown(), "No tag");
+    r.s.header.edit(super::field::TAG, |h| h.tag = Some(id));
+    assert_eq!(r.s.tag_shown(), "10 \u{b7} Lake Area");
+    // The picker still draws with it.
+    let nodes = tree(&mut r.s, 1440.0);
+    assert!(nodes.iter().any(|(_, n)| n == "Tag"));
+}
+
 /// `--demo`: the screen answers through the demo twin. It opens on the
 /// sample's layout and posts a 2.35-short day with the over/short line on
 /// Cash Over/Short (60900).

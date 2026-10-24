@@ -449,12 +449,21 @@ impl DailySalesScreen {
         }
     }
 
+    /// The Tag picker's text: "number · name" as on every screen, or
+    /// "No tag".
+    pub(crate) fn tag_shown(&self) -> String {
+        self.header
+            .current()
+            .tag
+            .map(|id| crate::tag_names::label_of(&self.tags, id))
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| t("daily.tag.none"))
+    }
+
     fn tag_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
         let l = above(ui, tokens, &t("daily.tag"));
         let current = self.header.current().tag;
-        let shown = current
-            .and_then(|id| self.tags.iter().find(|g| g.id == id))
-            .map_or_else(|| t("daily.tag.none"), |g| g.fields.name.clone());
+        let shown = self.tag_shown();
         let mut picked = None;
         let r = egui::ComboBox::from_id_salt("daily_sales/tag")
             .width(width - 8.0)
@@ -466,9 +475,9 @@ impl DailySalesScreen {
                 {
                     picked = Some(None);
                 }
-                for g in self.tags.iter().filter(|g| g.is_active) {
+                for g in crate::tag_names::sorted(self.tags.iter().filter(|g| g.is_active)) {
                     if ui
-                        .selectable_label(current == Some(g.id), &g.fields.name)
+                        .selectable_label(current == Some(g.id), crate::tag_names::label(g))
                         .clicked()
                     {
                         picked = Some(Some(g.id));
