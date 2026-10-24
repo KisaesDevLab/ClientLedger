@@ -11,9 +11,9 @@
 //!   pin carries it.
 
 use cl_api::{
-    AccountType, BillLine, BillQuery, Capabilities, ContactFields, ContactType, InvoiceLine,
-    Method, NewBill, NewContact, NewInvoice, PayrollStatus, Session, action_items_from_json,
-    cash_position_from_json, payables_from_json, receivables_from_json,
+    AccountType, BillLine, BillQuery, Capabilities, ContactFields, ContactFilter, ContactType,
+    InvoiceLine, Method, NewBill, NewContact, NewInvoice, PageRequest, PayrollStatus, Session,
+    action_items_from_json, cash_position_from_json, payables_from_json, receivables_from_json,
 };
 use cl_core::ids::{AccountId, ContactId};
 use cl_core::{CalendarDate, Money, Quantity, Rate};
@@ -198,6 +198,36 @@ pub fn counts_match_the_engine(h: &Harness) {
     assert!(cancel.status < 300, "{}", cancel.body);
     let state = h.run(home.reconcile_state(&[bank])).expect("reconcile");
     assert_eq!(state.in_progress, Vec::<AccountId>::new());
+}
+
+/// P16 WP7: the rail's client and vendor counts read one row and take the
+/// list's `total`; it equals the number of active contacts the whole list
+/// returns.
+pub fn rail_counts_match_the_lists(h: &Harness) {
+    let s = &h.s1;
+    contact(h, s, ContactType::Customer, "Home rail client");
+    contact(h, s, ContactType::Vendor, "Home rail vendor");
+    for kind in [ContactType::Customer, ContactType::Vendor] {
+        let filter = ContactFilter {
+            contact_type: Some(kind),
+            is_active: Some(true),
+            ..ContactFilter::default()
+        };
+        let page = h
+            .run(
+                s.contacts()
+                    .list(&filter, PageRequest::new(1, 0).expect("page")),
+            )
+            .expect("one row");
+        let all = h.run(s.contacts().list_all(&filter)).expect("all");
+        assert!(page.data.len() <= 1, "one row read");
+        assert_eq!(
+            page.total,
+            u64::try_from(all.len()).expect("len"),
+            "{kind:?}"
+        );
+        assert!(page.total > 0, "{kind:?}");
+    }
 }
 
 fn raw_dashboard(h: &Harness, s: &Session, panel: &str, query: &[(&str, &str)]) -> Vec<u8> {
