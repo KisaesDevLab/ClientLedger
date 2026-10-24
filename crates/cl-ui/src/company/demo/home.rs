@@ -371,5 +371,22 @@ mod tests {
         let pl = oct.pl.as_ref().expect("report");
         assert_eq!(pl.net_income.display(2).as_deref(), Some("13865.14"));
         assert!(pl.total_income.is_some() && pl.total_expenses.is_some());
+        // Plausible months: the sample's year-to-date plug is spread over
+        // January to September, so no month's expenses dwarf its income.
+        for month in &months {
+            let pl = month.pl.as_ref().expect("report");
+            let figure = |a: Option<&cl_api::ReportAmount>| {
+                a.and_then(|a| a.display(2))
+                    .and_then(|s| Money::parse_wire(&s).ok())
+                    .expect("a figure")
+            };
+            let (income, expenses) = (
+                figure(pl.total_income.as_ref()),
+                figure(pl.total_expenses.as_ref()),
+            );
+            let twice = income.checked_add(income).expect("sum");
+            assert!(expenses < twice, "month {}", month.range.named);
+            assert!(expenses.is_positive() && income.is_positive());
+        }
     }
 }
