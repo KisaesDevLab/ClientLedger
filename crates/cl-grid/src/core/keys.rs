@@ -155,4 +155,6 @@ pub struct Formats {
     pub date_order: cl_model::date_entry::DateOrder,
     /// Negative amounts.
     pub money: cl_core::MoneyStyle,
+    /// What Enter does in editable grids (Q-190, Q-264).
+    pub enter_mode: cl_model::forms::EnterMode,
 }

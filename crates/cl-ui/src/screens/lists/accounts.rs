@@ -1333,9 +1333,10 @@ pub(crate) fn demo_save(
     }
 }
 
-/// True when Enter was pressed to leave `r`.
-fn enter_left(ui: &Ui, r: &egui::Response) -> bool {
-    r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
+/// Enter left `r` and means Save & New (Q-190); with "Enter moves between
+/// fields" on it moved the focus instead (Q-264).
+fn enter_left(_ui: &Ui, r: &egui::Response) -> bool {
+    crate::forms::enter::entered(r).saves()
 }
 
 /// A labelled single-line field with its own id.

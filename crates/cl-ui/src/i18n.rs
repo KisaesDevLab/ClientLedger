@@ -880,6 +880,13 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // WP0 (P16): keymap registry. Command labels (`cmd.*`) resolve from the
     // cl-model command table; only the new overlay heading lives here.
     ("shortcuts.scope.grid", "In this grid"),
+    // WP1 (P16): Enter moves between fields (Q-264).
+    ("prefs.user.enter_moves", "Enter moves between fields"),
+    (
+        "prefs.user.enter_moves.tip",
+        "Enter goes to the next field, like Tab. Ctrl+Enter saves and starts a new one.",
+    ),
+    ("status.hint.save_new", "save & new"),
 ];
 
 #[cfg(test)]

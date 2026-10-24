@@ -399,6 +399,7 @@ fn a_grid_in_a_short_scroll_area_stays_inside_it() {
                     height: GridHeight::Rows { min: 3, max: 12 },
                     label: "Expense lines",
                     input_enabled: true,
+                    enter_mode: cl_model::forms::EnterMode::SaveAndNew,
                 };
                 let _ = grid.show(ui, ModelRef::Edit(&mut model), &env);
             });

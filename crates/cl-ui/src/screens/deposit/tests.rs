@@ -537,3 +537,32 @@ fn a_lost_refund_reply_resends_under_the_same_key() {
     assert!(s.refund.key.is_none());
     assert_ne!(s.refund_key(&draft, true), with_password);
 }
+
+/// Q-264: Enter in Date is Save & New by default and moves on to Memo
+/// (Shift+Enter back) when "Enter moves between fields" is on.
+#[test]
+fn header_enter_saves_or_moves_by_the_preference() {
+    use crate::forms::enter::testing::{context, enter, frame, settle};
+    use cl_model::forms::EnterMode;
+    for mode in [EnterMode::SaveAndNew, EnterMode::MoveBetweenFields] {
+        let (mut s, log, _dir) = screen(DepositCaps::default());
+        set_lines(&mut s, &[(4000, "100.00")]);
+        let ctx = context();
+        s.focus = Some(Field::Date);
+        settle(&ctx, mode, &mut |ui| s.ui(ui));
+        assert_eq!(s.focused, Some(Field::Date), "{mode:?}");
+        frame(&ctx, mode, enter(false), &mut |ui| s.ui(ui));
+        settle(&ctx, mode, &mut |ui| s.ui(ui));
+        let saved = log.lock().expect("log").saved.len();
+        match mode {
+            EnterMode::SaveAndNew => assert_eq!(saved, 1, "Enter = Save & New (Q-190)"),
+            EnterMode::MoveBetweenFields => {
+                assert_eq!(saved, 0, "Enter never saves here");
+                assert_eq!(s.focused, Some(Field::Memo));
+                frame(&ctx, mode, enter(true), &mut |ui| s.ui(ui));
+                settle(&ctx, mode, &mut |ui| s.ui(ui));
+                assert_eq!(s.focused, Some(Field::Date), "Shift+Enter goes back");
+            }
+        }
+    }
+}

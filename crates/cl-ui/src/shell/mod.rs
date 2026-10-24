@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cl_core::CalendarDate;
-use cl_model::{COMMANDS, Command, CommandId, Keymap, Scope, commands};
+use cl_model::{COMMANDS, Command, CommandId, EnterMode, Keymap, Scope, commands};
 use eframe::egui::{self, Color32, Context, Frame, Margin, ViewportBuilder, ViewportCommand};
 
 use crate::about::AboutDialog;
@@ -200,7 +200,8 @@ impl Shell {
         }
         // The table is checked for conflicts by a unit test, so this cannot
         // fail in a shipped build.
-        let keymap = Keymap::new(COMMANDS).expect("the command table has no shortcut conflicts");
+        let keymap = Keymap::with_mode(COMMANDS, EnterMode::from_pref(prefs.enter_moves_fields))
+            .expect("the command table has no shortcut conflicts");
         let company_link = options.company.or_else(|| {
             options.demo.then(|| {
                 let dir =
@@ -934,7 +935,28 @@ impl Shell {
         }
     }
 
+    /// The Enter preference changed (Q-264): rebuild the keymap so
+    /// Ctrl+Enter is Save & New only when Enter moves between fields.
+    fn sync_keymap(&mut self) {
+        let mode = EnterMode::from_pref(self.prefs.enter_moves_fields);
+        if self.keymap.mode() == mode {
+            return;
+        }
+        match Keymap::with_mode(COMMANDS, mode) {
+            Ok(k) => self.keymap = k,
+            // A unit test rules this out; keep the old keymap if it happens.
+            Err(e) => tracing::warn!(error = %e, "could not rebuild the keymap"),
+        }
+    }
+
+    /// What Enter does now (the preference, Q-264).
+    #[must_use]
+    pub fn enter_mode(&self) -> EnterMode {
+        self.keymap.mode()
+    }
+
     fn begin_frame(&mut self, ctx: &Context) {
+        self.sync_keymap();
         if self.applied_theme != Some(self.prefs.theme) {
             theme::apply(ctx, self.prefs.theme);
             self.applied_theme = Some(self.prefs.theme);
@@ -1070,6 +1092,8 @@ impl Shell {
         let frame = crate::grid_env::ShellFrame::new(self.today, &self.prefs, self.modal_open());
         crate::grid_env::publish(ctx, viewport, frame);
         crate::grid_env::publish_widths(ctx, &self.widths);
+        // Shift+Enter in a header field last frame: focus moves back now.
+        crate::forms::enter::begin_frame(ctx);
     }
 
     /// Write changed column widths a second after the last change (`now`

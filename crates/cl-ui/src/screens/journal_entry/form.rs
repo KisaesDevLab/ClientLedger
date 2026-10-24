@@ -130,7 +130,7 @@ impl JournalScreen {
                 form::heading(ui, tokens, &t("journal.void.title"));
                 form::hint(ui, tokens, &t("journal.void.explain"));
                 let r = form::field(ui, &t("journal.void.reason"), &mut self.void_reason);
-                send |= kit::entered(&r);
+                send |= crate::forms::enter::submitted(&r);
                 ui.horizontal(|ui| {
                     send |= ui.button(t("journal.void.confirm")).clicked();
                     cancel = ui.button(t("journal.void.cancel")).clicked();
@@ -227,7 +227,7 @@ impl JournalScreen {
                             self.inputs.rev = self.header.revision();
                         }
                         kit::track(&mut self.focused, &r, field::DATE);
-                        if kit::entered(&r) {
+                        if crate::forms::enter::entered(&r).saves() {
                             self.after_frame = Some(CommandId::new("form.save_new"));
                         }
                     });

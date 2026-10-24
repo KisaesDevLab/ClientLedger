@@ -481,7 +481,7 @@ impl CenterScreen {
                 if r.changed() {
                     panel.form.edit(undo, |x| set(x, v));
                 }
-                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if crate::forms::enter::entered(&r).saves() {
                     save = Some(SaveIntent::SaveAndNew);
                 }
             };

@@ -1066,7 +1066,7 @@ impl LoanPaymentScreen {
                             );
                             self.pick_lender(out);
                             kit::track(&mut self.focused, &r, field::LENDER);
-                            if kit::entered(&r) {
+                            if crate::forms::enter::entered(&r).saves() {
                                 self.after_frame = Some(CommandId::new("form.save_new"));
                             }
                         });
@@ -1115,7 +1115,7 @@ impl LoanPaymentScreen {
                                 self.inputs.rev = self.header.revision();
                             }
                             kit::track(&mut self.focused, &r, field::DATE);
-                            if kit::entered(&r) {
+                            if crate::forms::enter::entered(&r).saves() {
                                 self.after_frame = Some(CommandId::new("form.save_new"));
                             }
                         });

@@ -907,6 +907,52 @@ fn modal_blocks_grid_input() {
     assert_eq!(rig.probe.borrow().saved.len(), 0);
 }
 
+/// Q-264: with "Enter moves between fields" on, Enter goes to the next
+/// cell (no record), Shift+Enter back, and Ctrl+Enter is Save & New with
+/// the open cell committed first (B4).
+#[test]
+fn enter_moves_and_ctrl_enter_saves_when_the_option_is_on() {
+    let mut rig = Rig::new();
+    rig.shell.prefs.enter_moves_fields = true;
+    rig.idle();
+    rig.type_text("12");
+    rig.frame(tap(Key::Enter, Modifiers::NONE));
+    rig.idle();
+    let snap = rig.probe.borrow().snap;
+    assert_eq!(
+        (snap.cursor_row, snap.cursor_col),
+        (Some(0), Some(MEMO.0)),
+        "Enter moved to Memo on the same line"
+    );
+    rig.frame(tap(Key::Enter, Modifiers::SHIFT));
+    rig.idle();
+    assert_eq!(rig.probe.borrow().snap.cursor_col, Some(AMOUNT.0));
+    rig.frame(tap(Key::Tab, Modifiers::NONE));
+    rig.idle();
+    rig.type_text("rent");
+    assert!(rig.probe.borrow().snap.uncommitted);
+    assert_eq!(rig.probe.borrow().saved.len(), 0, "Enter never saved");
+    rig.frame(tap(Key::Enter, CTRL));
+    rig.idle();
+    let saved = rig.probe.borrow().saved.last().cloned().expect("saved");
+    assert_eq!(saved[0].amount, Some(money("12.00")));
+    assert_eq!(saved[0].memo, "rent", "the open cell was committed first");
+}
+
+/// Q-190: with the option off, Ctrl+Enter is not a shortcut and Enter
+/// records the row.
+#[test]
+fn ctrl_enter_does_nothing_when_enter_saves() {
+    let mut rig = Rig::new();
+    rig.type_text("12");
+    rig.frame(tap(Key::Enter, CTRL));
+    rig.idle();
+    assert_eq!(rig.probe.borrow().saved.len(), 0);
+    rig.frame(tap(Key::Enter, Modifiers::NONE));
+    rig.idle();
+    assert_eq!(rig.probe.borrow().snap.cursor_row, Some(1), "recorded");
+}
+
 /// T9: the prompt's Save button has focus when the prompt opens, so Enter
 /// saves.
 #[test]

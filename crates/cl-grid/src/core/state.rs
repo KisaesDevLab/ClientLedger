@@ -13,6 +13,7 @@ use std::fmt;
 use cl_model::TextKey;
 use cl_model::date_entry;
 use cl_model::date_rules::DateKey;
+use cl_model::forms::EnterMode;
 use cl_model::tags::{self, TagAdd, TagChip};
 
 use super::codec::{
@@ -159,6 +160,18 @@ impl Effects {
             handled: true,
             ..Effects::default()
         }
+    }
+
+    /// `later` happened after `self` in the same input: events in order,
+    /// the later scroll, leave and copy win.
+    fn then(mut self, later: Effects) -> Effects {
+        self.events.extend(later.events);
+        self.handled |= later.handled;
+        self.scroll_to = later.scroll_to.or(self.scroll_to);
+        self.leave = later.leave.or(self.leave);
+        self.copy = later.copy.or(self.copy);
+        self.reset_editor |= later.reset_editor;
+        self
     }
 }
 
@@ -407,6 +420,22 @@ impl Core {
                 });
             }
         }
+    }
+
+    /// No editable cell follows the cursor in its row (Enter there records
+    /// the row when Enter moves between fields, Q-264).
+    fn at_last_editable_cell(&self, model: &ModelRef<'_>) -> bool {
+        let Some(pos) = self.cursor else { return true };
+        let Some(index) = model.rows().index_of(pos.row) else {
+            return true;
+        };
+        let cols = self.col_order();
+        let Some(ci) = cols.iter().position(|c| *c == pos.col) else {
+            return true;
+        };
+        !cols[ci + 1..]
+            .iter()
+            .any(|c| self.cell_is_editable(model, index, *c))
     }
 
     fn row_at(model: &ModelRef<'_>, index: usize, col: ColumnId) -> Option<CellPos> {
@@ -1330,6 +1359,45 @@ impl Core {
         fx
     }
 
+    /// Enter (Shift+Enter when `back`) when Enter moves between fields
+    /// (Q-264): Tab (Shift+Tab), taking an open list's highlighted entry
+    /// like Tab does (Q-P10c). In the row's last editable cell Enter commits
+    /// and records the row like [`Core::enter`], which then puts the cursor
+    /// on the next line's first cell; on the untouched entry line it moves
+    /// on like Tab instead, so Enter never saves the form in this mode
+    /// (Ctrl+Enter does).
+    fn enter_move(
+        &mut self,
+        back: bool,
+        model: &mut ModelRef<'_>,
+        lookups: &dyn Lookups,
+        fmt: Formats,
+    ) -> Effects {
+        if back || !self.at_last_editable_cell(model) {
+            return self.tab(!back, model, lookups, fmt);
+        }
+        let mut fx = Effects::handled();
+        if self.cursor.is_none() {
+            return fx;
+        }
+        if self
+            .commit(model, lookups, fmt, Accept::Tab, &mut fx)
+            .is_err()
+        {
+            return fx;
+        }
+        self.close_popup();
+        let pristine = self
+            .cursor_index(model)
+            .is_some_and(|i| self.pristine_entry(model, i));
+        let next = if pristine {
+            self.tab(true, model, lookups, fmt)
+        } else {
+            self.enter(model, lookups, fmt)
+        };
+        fx.then(next)
+    }
+
     fn toggle_checkbox(&mut self, model: &mut ModelRef<'_>, fx: &mut Effects) -> bool {
         let Some(pos) = self.cursor else { return false };
         if self.column_kind(pos.col) != Some(CellKind::Checkbox) {
@@ -1362,7 +1430,14 @@ impl Core {
         match (k, m) {
             (GridKey::Tab, Mods::NONE) => self.tab(true, model, lookups, fmt),
             (GridKey::Tab, Mods::SHIFT) => self.tab(false, model, lookups, fmt),
-            (GridKey::Enter, Mods::NONE) => self.enter(model, lookups, fmt),
+            (GridKey::Enter, Mods::NONE | Mods::SHIFT)
+                if fmt.enter_mode == EnterMode::MoveBetweenFields =>
+            {
+                self.enter_move(m.shift, model, lookups, fmt)
+            }
+            // Shift+Enter is Enter here (Q-190); in a multiline memo the
+            // editor keeps it as a line break before it reaches the grid.
+            (GridKey::Enter, Mods::NONE | Mods::SHIFT) => self.enter(model, lookups, fmt),
             (GridKey::Up | GridKey::Down, Mods::NONE) => {
                 if self.move_highlight(if k == GridKey::Up { -1 } else { 1 }) {
                     return Effects::handled();
@@ -1503,7 +1578,7 @@ impl Core {
                     });
                 }
             }
-            (GridKey::Enter, Mods::NONE) => {
+            (GridKey::Enter, Mods::NONE | Mods::SHIFT) => {
                 if let Some(pos) = self.cursor {
                     fx.events.push(GridEvent::Activate { key: pos.row });
                 }

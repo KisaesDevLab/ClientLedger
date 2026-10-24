@@ -51,11 +51,6 @@ fn above(ui: &mut Ui, tokens: &Tokens, label: &str) -> egui::Response {
     )
 }
 
-/// Enter left a single-line field: Save & New (Q-190).
-fn entered(r: &egui::Response) -> bool {
-    r.lost_focus() && r.ctx.input(|i| i.key_pressed(egui::Key::Enter))
-}
-
 /// One line on the form: its index, id, label and account text.
 type Row = (usize, DailyLineId, String, String);
 
@@ -366,7 +361,7 @@ impl DailySalesScreen {
             self.pick_layout(id);
         } else if r.lost_focus() {
             self.resolve_layout();
-            if entered(&r) {
+            if crate::forms::enter::entered(&r).saves() {
                 self.after_frame = Some(CommandId::new("form.save_new"));
             }
         }
@@ -428,7 +423,7 @@ impl DailySalesScreen {
                 self.inputs.rev = self.header.revision();
             }
         }
-        if entered(&r) {
+        if crate::forms::enter::entered(&r).saves() {
             self.after_frame = Some(CommandId::new("form.save_new"));
         }
     }
@@ -482,7 +477,7 @@ impl DailySalesScreen {
             self.header.edit(field::NOTES, |h| h.notes = text);
             self.inputs.rev = self.header.revision();
         }
-        if entered(&r) {
+        if crate::forms::enter::entered(&r).saves() {
             self.after_frame = Some(CommandId::new("form.save_new"));
         }
     }
@@ -580,7 +575,9 @@ impl DailySalesScreen {
         }
         if r.lost_focus() {
             self.amount_left(index, id);
-            if entered(&r) && !self.inputs.amount_problems.contains_key(&id) {
+            if crate::forms::enter::entered(&r).saves()
+                && !self.inputs.amount_problems.contains_key(&id)
+            {
                 self.after_frame = Some(CommandId::new("form.save_new"));
             }
         }

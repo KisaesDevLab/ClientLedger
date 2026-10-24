@@ -1531,7 +1531,7 @@ impl TagsScreen {
             if r.changed() {
                 f.form.edit(F_NAME, |x| x.name = name);
             }
-            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            if crate::forms::enter::entered(&r).saves() {
                 save = Some(SaveIntent::SaveAndNew);
             }
             let cur = group_ids.iter().position(|g| *g == d.group).unwrap_or(0);
