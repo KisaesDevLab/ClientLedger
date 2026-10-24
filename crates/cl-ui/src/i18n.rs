@@ -880,6 +880,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // WP0 (P16): keymap registry. Command labels (`cmd.*`) resolve from the
     // cl-model command table; only the new overlay heading lives here.
     ("shortcuts.scope.grid", "In this grid"),
+    // WP4a (P16): tag numbers (Q-270). The generic error, and the wording
+    // the tag form shows with the number it sent (`t_with`, `{n}`).
+    ("error.api.tag_number_taken", "Another tag already uses that number. Tag numbers must be unique; pick a different number."),
+    ("error.api.tag_number_taken_n", "Another tag already uses number {n}."),
 ];
 
 #[cfg(test)]

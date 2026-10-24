@@ -5,12 +5,17 @@
 //! `PENDING(U-xx)` until the capability is advertised: U-41 (merge of line
 //! tags, one tag per group on the replace path, the group reorder route),
 //! U-42 (required groups by account type) and U-45 (several tags on one
-//! line).
+//! line). Tag numbers (Q-270) are U-75 (`tag-number-v1`): written against
+//! the documented contract and PENDING until the pin has it.
+
+use std::time::{Duration, Instant};
 
 use cl_api::{
-    Basis, Capabilities, JeLine, Method, NewJournalEntry, Side, Tag, TagFields, TagGroupFields,
-    TagUpdate,
+    ApiError, ArchiveRequest, Basis, Capabilities, ConflictReason, ImportRequest, JeLine, JobState,
+    LocalValidation, Method, NewCompany, NewJournalEntry, PageRequest, Side, Tag, TagFields,
+    TagFilter, TagGroupFields, TagUpdate,
 };
+use cl_core::Secret;
 use serde_json::json;
 
 use crate::common::{date, key, line, m, pair, post};
@@ -24,6 +29,7 @@ fn tag(h: &Harness, name: &str, group: Option<cl_core::ids::TagGroupId>) -> Tag 
             color: None,
             group_id: group,
             description: None,
+            tag_number: None,
         },
         key(),
     ))
@@ -270,6 +276,302 @@ pub fn required_groups_u42(h: &Harness) {
         ))
         .expect("raw");
     assert_eq!(gone.status, 200, "{}", gone.body);
+}
+
+/// A tag number no other run used: `9` and nine digits (≤ 20 characters).
+fn fresh_number() -> String {
+    let digits: String = unique("")
+        .trim()
+        .bytes()
+        .map(|b| char::from(b'0' + b % 10))
+        .collect();
+    format!("9{}", &digits[..9])
+}
+
+fn numbered(name: &str, number: Option<&str>) -> TagFields {
+    TagFields {
+        name: name.to_string(),
+        color: None,
+        group_id: None,
+        description: None,
+        tag_number: number.map(str::to_string),
+    }
+}
+
+fn search(h: &Harness, text: &str) -> Vec<Tag> {
+    h.run(h.s1.tags().list(
+        &TagFilter {
+            search: Some(text.to_string()),
+            ..TagFilter::default()
+        },
+        PageRequest::first_max(),
+    ))
+    .expect("list")
+    .data
+}
+
+/// U-75 (Q-270): create with a number (sent trimmed), a used number is 409
+/// `TAG_NUMBER_EXISTS` on create and on update, edit, clear with `""`, the
+/// list sorts number then name (unnumbered last), and `search` matches the
+/// number. Without `tag-number-v1` a number is refused before sending and
+/// the engine drops the key.
+pub fn numbers_u75(h: &Harness) {
+    let s = &h.s1;
+    let number = fresh_number();
+    if !h.require_cap(Capabilities::TAG_NUMBER, "U-75") {
+        let before = h.observer.total();
+        let e = h
+            .run(
+                s.tags()
+                    .create(&numbered(&unique("Numbered"), Some(&number)), key()),
+            )
+            .expect_err("refused locally");
+        assert_eq!(e, ApiError::Local(LocalValidation::InvalidValue));
+        assert_eq!(h.observer.total(), before, "nothing may be sent");
+        let raw = h
+            .run(s.raw(
+                Method::Post,
+                "/api/v1/tags",
+                &[],
+                Some(&json!({"name": unique("Numbered raw"), "tagNumber": number})),
+            ))
+            .expect("raw");
+        assert_eq!(raw.status, 201, "{}", raw.body);
+        assert!(
+            raw.body["tag"]["tagNumber"].is_null(),
+            "dropped today: {}",
+            raw.body
+        );
+        let id = cl_core::ids::TagId::parse(raw.body["tag"]["id"].as_str().expect("id"))
+            .expect("tag id");
+        h.run(s.tags().delete(id, key())).expect("clean up");
+        return;
+    }
+
+    // Create (trimmed) and read back.
+    let first = h
+        .run(s.tags().create(
+            &numbered(&unique("Lake Area"), Some(&format!(" {number} "))),
+            key(),
+        ))
+        .expect("create")
+        .record;
+    assert_eq!(first.fields.tag_number.as_deref(), Some(number.as_str()));
+    let got = h.run(s.tags().get(first.id)).expect("get");
+    assert_eq!(
+        got.record.fields.tag_number.as_deref(),
+        Some(number.as_str())
+    );
+
+    // A used number: create and update are both refused, nothing created.
+    let dup_name = unique("Lake Area again");
+    let dup = h
+        .run(s.tags().create(&numbered(&dup_name, Some(&number)), key()))
+        .expect_err("used number");
+    assert!(
+        matches!(
+            dup,
+            ApiError::Conflict {
+                reason: ConflictReason::TagNumberTaken,
+                ..
+            }
+        ),
+        "{dup:?}"
+    );
+    assert!(search(h, &dup_name).is_empty(), "nothing created");
+    let other = h
+        .run(s.tags().create(&numbered(&unique("Hill"), None), key()))
+        .expect("other");
+    let mut taken = other.record.fields.clone();
+    taken.tag_number = Some(number.clone());
+    let e = h
+        .run(s.tags().update(
+            other.record.id,
+            &other.version,
+            &TagUpdate {
+                fields: taken,
+                is_active: true,
+            },
+            key(),
+        ))
+        .expect_err("used number on update");
+    assert!(
+        matches!(
+            e,
+            ApiError::Conflict {
+                reason: ConflictReason::TagNumberTaken,
+                ..
+            }
+        ),
+        "{e:?}"
+    );
+
+    // Edit, then clear with "".
+    let edited_number = fresh_number();
+    let mut fields = got.record.fields.clone();
+    fields.tag_number = Some(edited_number.clone());
+    let edited = h
+        .run(s.tags().update(
+            first.id,
+            &got.version,
+            &TagUpdate {
+                fields: fields.clone(),
+                is_active: true,
+            },
+            key(),
+        ))
+        .expect("edit");
+    assert_eq!(
+        edited.record.fields.tag_number.as_deref(),
+        Some(edited_number.as_str())
+    );
+    // Leaving the number out of a PUT keeps it.
+    let mut kept_fields = fields.clone();
+    kept_fields.tag_number = None;
+    kept_fields.description = Some("kept".into());
+    let kept = h
+        .run(s.tags().update(
+            first.id,
+            &edited.version,
+            &TagUpdate {
+                fields: kept_fields,
+                is_active: true,
+            },
+            key(),
+        ))
+        .expect("keep");
+    assert_eq!(
+        kept.record.fields.tag_number.as_deref(),
+        Some(edited_number.as_str())
+    );
+    fields.tag_number = Some(String::new());
+    let cleared = h
+        .run(s.tags().update(
+            first.id,
+            &kept.version,
+            &TagUpdate {
+                fields,
+                is_active: true,
+            },
+            key(),
+        ))
+        .expect("clear");
+    assert_eq!(cleared.record.fields.tag_number, None);
+    // The old number is free again.
+    let reused = h
+        .run(
+            s.tags()
+                .create(&numbered(&unique("Reused"), Some(&number)), key()),
+        )
+        .expect("number free after the edit");
+
+    // List order: number, then name; unnumbered last. Search by number.
+    let tok = unique("Order");
+    let base = fresh_number();
+    let (n1, n2) = (format!("{}1", &base[..9]), format!("{}2", &base[..9]));
+    for (suffix, n) in [("c", None), ("b", Some(&n1)), ("a", Some(&n2))] {
+        h.run(s.tags().create(
+            &numbered(&format!("{tok} {suffix}"), n.map(String::as_str)),
+            key(),
+        ))
+        .expect("order tag");
+    }
+    let names: Vec<String> = search(h, &tok).into_iter().map(|t| t.fields.name).collect();
+    assert_eq!(
+        names,
+        [format!("{tok} b"), format!("{tok} a"), format!("{tok} c")],
+        "number then name, unnumbered last"
+    );
+    let by_number = search(h, &n2);
+    assert!(
+        by_number
+            .iter()
+            .any(|t| t.fields.tag_number.as_deref() == Some(n2.as_str())),
+        "search matches the number"
+    );
+    for id in [first.id, other.record.id, reused.record.id] {
+        h.run(s.tags().delete(id, key())).expect("clean up");
+    }
+}
+
+/// Polls an archive job to its end.
+fn finish_job(h: &Harness, s: &cl_api::Session, job: &cl_api::JobId) -> cl_api::ArchiveJobStatus {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        let st = h.run(s.tenants().archive_job(job)).expect("job");
+        match st.status {
+            JobState::Succeeded | JobState::Failed => return st,
+            JobState::Queued | JobState::Running => {
+                assert!(Instant::now() < deadline, "job did not finish");
+                std::thread::sleep(Duration::from_millis(300));
+            }
+        }
+    }
+}
+
+/// U-75: a tag number survives a tenant archive export and import.
+pub fn number_archive_round_trip_u75(h: &Harness) {
+    let numbers = h.require_cap(Capabilities::TAG_NUMBER, "U-75");
+    let archives = h.require_cap(Capabilities::TENANT_ARCHIVE, "U-05");
+    if !(numbers && archives) {
+        return;
+    }
+    let s = h.s3();
+    let co = h
+        .run(h.s1.create_company(&NewCompany {
+            company_name: unique("Tag number Co"),
+            business_type: Some("default".into()),
+            entity_type: Some("single_member_llc".into()),
+            system_accounts_only: Some(true),
+        }))
+        .expect("company")
+        .tenant_id;
+    h.run(s.open_company(co)).expect("open");
+    let number = fresh_number();
+    let name = unique("Archived");
+    h.run(s.tags().create(&numbered(&name, Some(&number)), key()))
+        .expect("tag");
+    h.run(s.close_company()).expect("workspace");
+    let passphrase = Secret::new(format!("contract-{}", unique("pass")));
+    let job = h
+        .run(s.tenants().export_archive(
+            co,
+            &ArchiveRequest {
+                include_attachments: false,
+                include_audit: true,
+                host: json!({"app": "ClientLedger", "appVersion": "test", "kind": "backup"}),
+                passphrase: passphrase.clone(),
+            },
+        ))
+        .expect("export job");
+    let st = finish_job(h, &s, &job.job_id);
+    assert_eq!(st.status, JobState::Succeeded, "{:?}", st.error);
+    let path = st
+        .export_result()
+        .expect("export result")
+        .path
+        .clone()
+        .expect("path");
+    let job = h
+        .run(s.tenants().import_archive(&ImportRequest {
+            path,
+            passphrase,
+            scratch: false,
+        }))
+        .expect("import job");
+    let st = finish_job(h, &s, &job.job_id);
+    assert_eq!(st.status, JobState::Succeeded, "{:?}", st.error);
+    let imported = st.import_result().expect("import result").tenant_id;
+    h.run(s.open_company(imported)).expect("open restored");
+    let found = h
+        .run(s.tags().list_all(&TagFilter {
+            search: Some(name.clone()),
+            ..TagFilter::default()
+        }))
+        .expect("tags");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].fields.tag_number.as_deref(), Some(number.as_str()));
+    h.run(s.close_company()).expect("workspace");
 }
 
 /// U-45: a journal line holds one tag today (`tagId`); a list of tags on

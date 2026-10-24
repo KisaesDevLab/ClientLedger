@@ -504,6 +504,7 @@ fn tag(h: &Harness, s: &Session, name: &str) -> TagId {
             color: None,
             group_id: None,
             description: None,
+            tag_number: None,
         },
         key(),
     ))

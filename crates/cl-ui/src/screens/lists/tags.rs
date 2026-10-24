@@ -842,6 +842,7 @@ impl TagsScreen {
             color: checked.color,
             group_id: checked.group,
             description: checked.description,
+            tag_number: None,
         };
         let existing = f
             .editing
