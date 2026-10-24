@@ -69,11 +69,12 @@ pub struct Timeouts {
     pub reconcile: Duration,
     /// How often a waiting request re-reads the endpoint.
     pub poll: Duration,
-    /// After a refused connect on an endpoint that is still published, how
-    /// long a request waits for the endpoint to change before it falls back
-    /// to an ordinary retry. A killed engine stays published until its
-    /// supervisor's next check (about 250 ms, longer while a health or
-    /// listener check runs).
+    /// After a second refused connect on an endpoint that is still published
+    /// as the same generation, how long a request waits for the endpoint to
+    /// change before it falls back to an ordinary retry. A killed engine
+    /// stays published until its supervisor's next check (every 250 ms, plus
+    /// the loopback health or listener check that may share that pass), so
+    /// 1 s covers about four checks.
     pub refused_settle: Duration,
 }
 
@@ -88,7 +89,7 @@ impl Default for Timeouts {
             archive: Budget::secs(600, 620),
             reconcile: Duration::from_secs(15),
             poll: Duration::from_millis(150),
-            refused_settle: Duration::from_secs(5),
+            refused_settle: Duration::from_secs(1),
         }
     }
 }
@@ -371,6 +372,9 @@ pub(crate) struct Transport {
     /// Test-only request observer (feature `test-support`).
     #[cfg(feature = "test-support")]
     pub(crate) observer: crate::testing::ObserverSlot,
+    /// Unit tests only: refuses chosen connects without a socket.
+    #[cfg(test)]
+    connect_stub: Option<Arc<tests::ConnectStub>>,
 }
 
 impl Transport {
@@ -400,7 +404,16 @@ impl Transport {
             last_generation: AtomicU64::new(0),
             #[cfg(feature = "test-support")]
             observer: crate::testing::ObserverSlot::default(),
+            #[cfg(test)]
+            connect_stub: None,
         })
+    }
+
+    /// Unit tests only: route every connect through `stub` first.
+    #[cfg(test)]
+    pub(crate) fn with_connect_stub(mut self, stub: Arc<tests::ConnectStub>) -> Transport {
+        self.connect_stub = Some(stub);
+        self
     }
 
     pub(crate) fn config(&self) -> &ClientConfig {
@@ -484,6 +497,16 @@ impl Transport {
             .timeout(per_attempt);
         if let Some(body) = &call.body {
             req = req.body(body.to_vec());
+        }
+        #[cfg(test)]
+        if self
+            .connect_stub
+            .as_ref()
+            .is_some_and(|s| s.refuses(ep.generation))
+        {
+            return Err(TransportError::NotSent {
+                generation: ep.generation,
+            });
         }
         let started = Instant::now();
         #[cfg(feature = "test-support")]
@@ -664,12 +687,40 @@ fn retry_after(headers: &HeaderMap) -> Option<Duration> {
 pub(crate) mod tests {
     use super::*;
     use crate::endpoint::FixedEndpoint;
-    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::{AtomicU32, AtomicUsize};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     pub(crate) const TOKEN: &str = "launch-token-canary-0123456789";
+
+    /// Decides, per connect, whether it is refused (`NotSent`) before any
+    /// socket is opened, and counts connects. No real port is involved, so a
+    /// refusal cannot be undone by another test binding the same port.
+    pub(crate) struct ConnectStub {
+        /// `(connect number from 1, generation) -> refused?`
+        refuse: Box<dyn Fn(u32, u64) -> bool + Send + Sync>,
+        connects: AtomicU32,
+    }
+
+    impl ConnectStub {
+        pub(crate) fn new(refuse: impl Fn(u32, u64) -> bool + Send + Sync + 'static) -> Arc<Self> {
+            Arc::new(ConnectStub {
+                refuse: Box::new(refuse),
+                connects: AtomicU32::new(0),
+            })
+        }
+
+        /// Connects attempted so far, refused or not.
+        pub(crate) fn connects(&self) -> u32 {
+            self.connects.load(Ordering::SeqCst)
+        }
+
+        pub(super) fn refuses(&self, generation: u64) -> bool {
+            let n = self.connects.fetch_add(1, Ordering::SeqCst) + 1;
+            (self.refuse)(n, generation)
+        }
+    }
 
     #[test]
     fn call_debug_shows_no_query_or_body() {
@@ -951,7 +1002,11 @@ pub(crate) mod tests {
         assert_eq!(e, TransportError::NotReady { permanent: false });
     }
 
-    pub(crate) fn dead_port() -> u16 {
+    /// A port nothing listened on a moment ago. Only for a single immediate
+    /// connect that must go through a real socket (classification); tests
+    /// that need a refusal to last use [`ConnectStub`], since a parallel test
+    /// may bind this port again.
+    fn dead_port() -> u16 {
         let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         l.local_addr().expect("addr").port()
     }

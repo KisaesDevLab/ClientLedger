@@ -194,6 +194,9 @@ struct Retries {
     /// An earlier attempt may have reached a handler (timeout, broken
     /// connection, 5xx).
     maybe_committed: bool,
+    /// Generation whose first refused connect was retried after the ordinary
+    /// backoff.
+    probed_generation: Option<u64>,
     /// Generation whose refused connect last waited for the endpoint to move
     /// on, and how many such waits this request has had.
     settle_generation: Option<u64>,
@@ -334,8 +337,7 @@ impl Executor {
             // `Never` (rate-limited and rotating routes stay single-shot).
             TransportError::NotSent { generation } => {
                 if ctx.class != RetryClass::Never
-                    && (self.endpoint_moved_on(generation, r, ctx.deadline).await
-                        || self.backoff(r, ctx.deadline).await)
+                    && self.retry_refused(generation, r, ctx.deadline).await
                 {
                     Step::Again
                 } else {
@@ -526,14 +528,30 @@ impl Executor {
         }
     }
 
-    /// A connect refused by an endpoint that is still published as the same
-    /// generation: the engine has most likely just died and its supervisor
-    /// has not unpublished it yet (it does on its next check). Wait, within
-    /// the deadline and `refused_settle`, for the endpoint to change instead
-    /// of spending the transient retries against a dead port, so a request
-    /// issued while the engine is down waits for the next generation like
-    /// one issued while it is `Restarting`. Nothing was sent, so the retry is
-    /// safe. Waits once per generation; returns whether the endpoint moved.
+    /// Whether to retry after a refused connect (nothing was sent, so a retry
+    /// is safe). The first refusal on a generation is retried after the
+    /// ordinary backoff: a live engine can refuse once (a full listen backlog,
+    /// say). A refusal after that is most likely a dead engine, so the request
+    /// waits for the endpoint to move on before it falls back to the backoff.
+    async fn retry_refused(&self, generation: u64, r: &mut Retries, deadline: Instant) -> bool {
+        if r.probed_generation != Some(generation) {
+            r.probed_generation = Some(generation);
+            if self.backoff(r, deadline).await {
+                return true;
+            }
+        }
+        self.endpoint_moved_on(generation, r, deadline).await || self.backoff(r, deadline).await
+    }
+
+    /// A connect refused again by an endpoint that is still published as the
+    /// same generation: the engine has most likely just died and its
+    /// supervisor has not unpublished it yet (it does on its next check).
+    /// Wait, within the deadline and `refused_settle`, for the endpoint to
+    /// change instead of spending the transient retries against a dead port,
+    /// so a request issued while the engine is down waits for the next
+    /// generation like one issued while it is `Restarting`. Waits once per
+    /// generation and at most `MAX_SETTLE_WAITS` times per request; returns
+    /// whether the endpoint moved, never true at or after the deadline.
     async fn endpoint_moved_on(&self, generation: u64, r: &mut Retries, deadline: Instant) -> bool {
         if r.settle_generation == Some(generation) || r.settle_waits >= MAX_SETTLE_WAITS {
             return false;
@@ -545,6 +563,10 @@ impl Executor {
             .checked_add(timeouts.refused_settle)
             .map_or(deadline, |t| t.min(deadline));
         loop {
+            let now = Instant::now();
+            if now >= deadline {
+                return false;
+            }
             let same = matches!(
                 self.transport.current(),
                 EndpointState::Ready(ep) if ep.generation == generation
@@ -552,7 +574,6 @@ impl Executor {
             if !same {
                 return true;
             }
-            let now = Instant::now();
             if now >= until {
                 return false;
             }
@@ -602,9 +623,9 @@ fn jitter(max: u64) -> u64 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::client::tests::{TOKEN, dead_port, fast_config, idle_closing_server};
-    use crate::client::{Method, Transport};
-    use crate::endpoint::{EndpointSource, EngineEndpoint, FixedEndpoint};
+    use crate::client::tests::{ConnectStub, TOKEN, fast_config, idle_closing_server};
+    use crate::client::{ClientConfig, Method, Transport};
+    use crate::endpoint::{EndpointSource, EngineEndpoint, FixedEndpoint, Purpose};
     use crate::resources::operations::{AUTH_ME, LOGIN, find};
     use cl_core::Secret;
     use std::sync::atomic::AtomicUsize;
@@ -890,29 +911,32 @@ pub(crate) mod tests {
             .mount(&server)
             .await;
         let port = server.address().port();
-        let src = Arc::new(SeqEndpoint::new(vec![
-            ready(dead_port(), TOKEN, 1),
-            ready(port, TOKEN, 2),
-        ]));
-        let ex = exec_on(src);
+        // Generation 1 refuses every connect; generation 2 answers.
+        let seq = || -> Arc<dyn EndpointSource> {
+            Arc::new(SeqEndpoint::new(vec![
+                ready(port, TOKEN, 1),
+                ready(port, TOKEN, 2),
+            ]))
+        };
+        let stub = ConnectStub::new(|_, generation| generation == 1);
+        let ex = exec_stubbed(seq(), fast_config(), &stub);
         let r = ex
             .run(&post_op(), post_call(), &none(), None)
             .await
             .expect("retried");
         assert_eq!(r.generation, 2);
+        assert_eq!(stub.connects(), 2);
         assert_eq!(count(&server).await, 1);
 
-        let src = Arc::new(SeqEndpoint::new(vec![
-            ready(dead_port(), TOKEN, 1),
-            ready(port, TOKEN, 2),
-        ]));
-        let ex = exec_on(src);
+        let stub = ConnectStub::new(|_, generation| generation == 1);
+        let ex = exec_stubbed(seq(), fast_config(), &stub);
         let login = Call::at(Method::Post, "/api/v1/auth/login").json_body(b"{}".to_vec());
         let e = ex
             .run(&LOGIN, login, &none(), None)
             .await
             .expect_err("never class");
         assert_eq!(e, ApiError::EngineUnavailable { permanent: false });
+        assert_eq!(stub.connects(), 1);
         assert_eq!(count(&server).await, 1);
     }
 
@@ -934,13 +958,100 @@ pub(crate) mod tests {
         }
     }
 
-    /// `fast_config` with a short connect limit: a refused loopback connect
-    /// is instant on Linux and macOS but takes seconds of SYN retries on
-    /// Windows, where the limit ends it.
-    fn quick_refusal_config() -> crate::client::ClientConfig {
+    /// A port no test connects to: every connect on it is refused by the
+    /// [`ConnectStub`] before a socket is opened.
+    const UNUSED_PORT: u16 = 9;
+
+    /// An executor whose connects go through `stub` first.
+    fn exec_stubbed(
+        src: Arc<dyn EndpointSource>,
+        cfg: ClientConfig,
+        stub: &Arc<ConnectStub>,
+    ) -> Executor {
+        Executor::new(
+            Transport::new(src, cfg)
+                .expect("client")
+                .with_connect_stub(Arc::clone(stub)),
+        )
+    }
+
+    /// Wraps a source and records after which connect the executor re-read
+    /// the endpoint outside `wait_ready` (`current`, not `current_for`). In a
+    /// refused-connect run only the settle wait does that, so the recorded
+    /// connect numbers are the settle waits, one entry per wait.
+    struct SettleWatch {
+        inner: Arc<dyn EndpointSource>,
+        stub: Arc<ConnectStub>,
+        waits_after: Mutex<Vec<u32>>,
+    }
+
+    impl SettleWatch {
+        fn new(inner: Arc<dyn EndpointSource>, stub: &Arc<ConnectStub>) -> Arc<SettleWatch> {
+            Arc::new(SettleWatch {
+                inner,
+                stub: Arc::clone(stub),
+                waits_after: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn waits_after(&self) -> Vec<u32> {
+            self.waits_after.lock().expect("lock").clone()
+        }
+    }
+
+    impl EndpointSource for SettleWatch {
+        fn current(&self) -> EndpointState {
+            let n = self.stub.connects();
+            let mut w = self.waits_after.lock().expect("lock");
+            if w.last() != Some(&n) {
+                w.push(n);
+            }
+            self.inner.current()
+        }
+        fn current_for(&self, _: Purpose) -> EndpointState {
+            self.inner.current()
+        }
+    }
+
+    /// Ready on a generation one past the connects made so far: every
+    /// connect lands on a new generation.
+    struct MovingEndpoint(Arc<ConnectStub>);
+
+    impl EndpointSource for MovingEndpoint {
+        fn current(&self) -> EndpointState {
+            ready(UNUSED_PORT, TOKEN, u64::from(self.0.connects()) + 1)
+        }
+    }
+
+    #[tokio::test]
+    async fn one_refused_connect_on_a_live_endpoint_is_retried_quickly() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(json(201, "{}"))
+            .mount(&server)
+            .await;
+        let fixed = Arc::new(FixedEndpoint::new(
+            server.address().port(),
+            Secret::new(TOKEN),
+            1,
+        ));
+        let stub = ConnectStub::new(|n, _| n == 1);
+        let src = SettleWatch::new(fixed, &stub);
         let mut cfg = fast_config();
-        cfg.connect_timeout = Duration::from_millis(100);
-        cfg
+        cfg.timeouts.refused_settle = Duration::from_secs(3);
+        let ex = exec_stubbed(src.clone(), cfg, &stub);
+        let started = Instant::now();
+        let r = ex
+            .run(&post_op(), post_call(), &none(), None)
+            .await
+            .expect("second connect answers");
+        let took = started.elapsed();
+        assert_eq!(r.generation, 1);
+        assert_eq!(stub.connects(), 2);
+        assert_eq!(count(&server).await, 1, "sent exactly once");
+        assert_eq!(src.waits_after(), Vec::<u32>::new(), "no settle wait");
+        // One backoff of at most 200 ms, far below `refused_settle`.
+        assert!(took < Duration::from_secs(1), "{took:?}");
     }
 
     #[tokio::test]
@@ -951,56 +1062,82 @@ pub(crate) mod tests {
             .mount(&server)
             .await;
         let port = server.address().port();
-        // Refused for longer than the whole transient budget (three connects
-        // of at most 100 ms and at most 200 + 400 ms of backoff), all on the
-        // same published generation; the deadline is 4 s.
+        // Generation 1 refuses for 800 ms, longer than the whole transient
+        // budget (three instant connects, at most 200 + 400 ms of backoff),
+        // but within one settle wait (1 s by default) after the quick retry.
         let stale = || -> Arc<dyn EndpointSource> {
             Arc::new(FlipEndpoint {
-                before: ready(dead_port(), TOKEN, 1),
-                flip_at: Instant::now() + Duration::from_millis(2000),
+                before: ready(port, TOKEN, 1),
+                flip_at: Instant::now() + Duration::from_millis(800),
                 after: ready(port, TOKEN, 2),
             })
         };
-        let exec =
-            |src| Executor::new(Transport::new(src, quick_refusal_config()).expect("client"));
-        let ex = exec(stale());
+        let stub = ConnectStub::new(|_, generation| generation == 1);
+        let src = SettleWatch::new(stale(), &stub);
+        let ex = exec_stubbed(src.clone(), fast_config(), &stub);
         let r = ex
             .run(&post_op(), post_call(), &none(), None)
             .await
             .expect("sent to the next generation");
         assert_eq!(r.generation, 2);
         assert_eq!(count(&server).await, 1, "sent exactly once");
+        // Refused, quick retry refused, one settle wait, then generation 2.
+        assert_eq!(stub.connects(), 3);
+        assert_eq!(src.waits_after(), vec![2]);
 
-        // A `Never` route stays single-shot: it does not wait.
-        let ex = exec(stale());
-        let started = Instant::now();
+        // A `Never` route stays single-shot: it neither retries nor waits.
+        let stub = ConnectStub::new(|_, generation| generation == 1);
+        let src = SettleWatch::new(stale(), &stub);
+        let ex = exec_stubbed(src.clone(), fast_config(), &stub);
         let login = Call::at(Method::Post, "/api/v1/auth/login").json_body(b"{}".to_vec());
         let e = ex
             .run(&LOGIN, login, &none(), None)
             .await
             .expect_err("never class");
         assert_eq!(e, ApiError::EngineUnavailable { permanent: false });
-        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(stub.connects(), 1);
+        assert_eq!(src.waits_after(), Vec::<u32>::new(), "no settle wait");
         assert_eq!(count(&server).await, 1);
     }
 
     #[tokio::test]
     async fn refused_connect_on_an_endpoint_that_never_moves_gives_up_after_one_settle_wait() {
-        let src = Arc::new(FixedEndpoint::new(dead_port(), Secret::new(TOKEN), 1));
-        let mut cfg = quick_refusal_config();
+        let fixed = Arc::new(FixedEndpoint::new(UNUSED_PORT, Secret::new(TOKEN), 1));
+        let stub = ConnectStub::new(|_, _| true);
+        let src = SettleWatch::new(fixed, &stub);
+        let mut cfg = fast_config();
         cfg.timeouts.refused_settle = Duration::from_millis(300);
-        let ex = Executor::new(Transport::new(src, cfg).expect("client"));
+        let ex = exec_stubbed(src.clone(), cfg, &stub);
         let started = Instant::now();
         let e = ex
             .run(&post_op(), post_call(), &none(), None)
             .await
-            .expect_err("dead port");
-        assert_eq!(e, ApiError::EngineUnavailable { permanent: false });
-        // One settle wait (300 ms), then the ordinary backoff (at most
-        // 600 ms) and connects of at most 100 ms each; never the whole 4 s
-        // deadline.
+            .expect_err("always refused");
         let took = started.elapsed();
-        assert!(took < Duration::from_millis(1500), "{took:?}");
+        assert_eq!(e, ApiError::EngineUnavailable { permanent: false });
+        // Refused; quick retry refused; one full settle wait; last retry
+        // refused; no second wait on the same generation.
+        assert_eq!(stub.connects(), 3);
+        assert_eq!(src.waits_after(), vec![2]);
+        assert!(took >= Duration::from_millis(300), "{took:?}");
+        // Backstop: well before the 4 s deadline.
+        assert!(took < Duration::from_secs(3), "{took:?}");
+    }
+
+    #[tokio::test]
+    async fn refused_connects_on_ever_new_generations_wait_at_most_three_times() {
+        let stub = ConnectStub::new(|_, _| true);
+        let src = SettleWatch::new(Arc::new(MovingEndpoint(Arc::clone(&stub))), &stub);
+        let ex = exec_stubbed(src.clone(), fast_config(), &stub);
+        let e = ex
+            .run(&post_op(), post_call(), &none(), None)
+            .await
+            .expect_err("always refused");
+        assert_eq!(e, ApiError::EngineUnavailable { permanent: false });
+        // Connects 1 and 2 use the two backoffs; 3, 4 and 5 each see the
+        // endpoint move on at once (three settle waits); 6 gives up.
+        assert_eq!(stub.connects(), 6);
+        assert_eq!(src.waits_after(), vec![3, 4, 5]);
     }
 
     #[tokio::test]
