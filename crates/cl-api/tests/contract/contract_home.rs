@@ -15,7 +15,7 @@ use cl_api::{
     InvoiceLine, Method, NewBill, NewContact, NewInvoice, PageRequest, PayrollStatus, Session,
     action_items_from_json, cash_position_from_json, payables_from_json, receivables_from_json,
 };
-use cl_core::ids::{AccountId, ContactId};
+use cl_core::ids::{AccountId, ContactId, TransactionId};
 use cl_core::{CalendarDate, Money, Quantity, Rate};
 use serde_json::{Value, json};
 
@@ -57,7 +57,7 @@ fn bill(
     expense: AccountId,
     due: CalendarDate,
     amount: &str,
-) {
+) -> TransactionId {
     h.run(s.create_bill(
         &NewBill {
             contact_id: vendor,
@@ -73,7 +73,8 @@ fn bill(
         },
         key(),
     ))
-    .unwrap_or_else(|e| panic!("bill: {e}"));
+    .unwrap_or_else(|e| panic!("bill: {e}"))
+    .id
 }
 
 /// `total` of a raw list query.
@@ -87,17 +88,47 @@ fn raw_total(h: &Harness, s: &Session, path: &str, query: &[(&str, &str)]) -> u6
         .unwrap_or_else(|| panic!("GET {path}: no integer total: {}", r.body))
 }
 
-fn bills_total(h: &Harness, s: &Session, q: &BillQuery) -> u64 {
-    let pairs = q.query();
-    let refs: Vec<(&str, &str)> = pairs
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
-    raw_total(h, s, "/api/v1/bills", &refs)
+/// Posted bills of a hand-written `/bills` query (`billStatus` set and due
+/// date spelled out here, not taken from [`BillQuery`]), voided rows left
+/// out by their `status`.
+fn posted_bills_due_by(h: &Harness, s: &Session, through: CalendarDate) -> u64 {
+    let r = h
+        .run(s.raw(
+            Method::Get,
+            "/api/v1/bills",
+            &[
+                ("billStatus", "unpaid,partial,overdue"),
+                ("dueOnOrBefore", &through.to_wire()),
+                ("limit", "500"),
+            ],
+            None,
+        ))
+        .expect("bills");
+    assert_eq!(r.status, 200, "{}", r.body);
+    let rows = r.body["data"].as_array().expect("rows");
+    assert!(
+        u64::try_from(rows.len()).expect("len") == r.body["total"].as_u64().expect("total"),
+        "one page holds the test tenant's bills"
+    );
+    let posted = rows.iter().filter(|b| b["status"] != "void").count();
+    u64::try_from(posted).expect("count")
 }
 
-/// Two overdue bills and one due in five days: the counts move by exactly
-/// that, and always equal the engine's own list total.
+fn void_bill(h: &Harness, s: &Session, id: TransactionId) {
+    let r = h
+        .run(s.raw(
+            Method::Post,
+            &format!("/api/v1/bills/{id}/void"),
+            &[],
+            Some(&json!({ "reason": "Entered twice" })),
+        ))
+        .expect("void");
+    assert!(r.status < 300, "void: {}", r.body);
+}
+
+/// Two overdue bills and one due in five days count; a voided bill due in
+/// two days does not (the engine keeps its `billStatus` unpaid). The counts
+/// equal a hand-built list query.
 pub fn bills_count_matches_the_list(h: &Harness) {
     let s = &h.s1;
     let vendor = contact(h, s, ContactType::Vendor, "Home vendor");
@@ -107,60 +138,142 @@ pub fn bills_count_matches_the_list(h: &Harness) {
     let overdue = BillQuery::overdue(today).expect("q");
     let count = |q: &BillQuery| h.run(s.home().bills_count(q)).expect("bills count");
     let (due_before, overdue_before) = (count(&due7), count(&overdue));
-    assert_eq!(due_before, bills_total(h, s, &due7));
+    assert_eq!(due_before, posted_bills_due_by(h, s, day(7)));
     bill(h, s, vendor, expense, day(-10), "120.00");
     bill(h, s, vendor, expense, day(-3), "75.50");
     bill(h, s, vendor, expense, day(5), "7471.90");
+    let voided = bill(h, s, vendor, expense, day(2), "310.00");
+    void_bill(h, s, voided);
     let (due_after, overdue_after) = (count(&due7), count(&overdue));
-    assert_eq!(due_after, bills_total(h, s, &due7), "Home equals the list");
-    assert_eq!(overdue_after, bills_total(h, s, &overdue));
+    assert_eq!(
+        due_after,
+        posted_bills_due_by(h, s, day(7)),
+        "Home equals the list"
+    );
+    assert_eq!(overdue_after, posted_bills_due_by(h, s, day(-1)));
     assert_eq!(
         due_after - due_before,
         3,
-        "two overdue and one due in 5 days"
+        "two overdue and one due in 5 days; the voided bill left out"
     );
+    assert!(due_after >= 3);
     assert_eq!(overdue_after - overdue_before, 2, "only the two past due");
     let three_days = BillQuery::due_within(today, 3).expect("q");
-    assert_eq!(count(&three_days), bills_total(h, s, &three_days));
+    assert_eq!(count(&three_days), posted_bills_due_by(h, s, day(3)));
+    if h.caps.has(Capabilities::DASHBOARD_EXACT) {
+        // The payables panel agrees: overdue plus due within the window.
+        let p = h.run(s.dashboard().payables(today, 7)).expect("payables");
+        assert_eq!(p.overdue_count + p.due_soon_count, due_after);
+    }
 }
 
-/// Unposted payroll imports, reconciliations, statements, transactions and
-/// waiting bank-feed items equal the engine's own answers.
+/// A multipart upload of one CSV file under `field` (`file`).
+fn multipart(
+    h: &Harness,
+    s: &Session,
+    path: &str,
+    fields: &[(&str, &str)],
+    name: &str,
+    csv: &str,
+) -> Value {
+    // A boundary token: no spaces (`unique` puts one after the prefix).
+    let boundary = unique("cl-boundary").replace(' ', "-");
+    let mut body = Vec::new();
+    for (k, v) in fields {
+        body.extend_from_slice(
+            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n")
+                .as_bytes(),
+        );
+    }
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\nContent-Type: text/csv\r\n\r\n{csv}\r\n--{boundary}--\r\n"
+        )
+        .as_bytes(),
+    );
+    h.run(s.raw_multipart_mapped(path, &boundary, body))
+        .unwrap_or_else(|e| panic!("upload {path}: {e}"))
+}
+
+/// Rows of a raw list whose `field` is one of `values` (all rows read).
+fn raw_rows_where(h: &Harness, s: &Session, path: &str, field: &str, values: &[&str]) -> u64 {
+    let r = h
+        .run(s.raw(Method::Get, path, &[("limit", "500")], None))
+        .unwrap_or_else(|e| panic!("GET {path}: {e}"));
+    assert_eq!(r.status, 200, "GET {path}: {}", r.body);
+    let rows = r.body["data"]
+        .as_array()
+        .or_else(|| r.body["sessions"].as_array())
+        .unwrap_or_else(|| panic!("GET {path}: no rows: {}", r.body));
+    let n = rows
+        .iter()
+        .filter(|row| row[field].as_str().is_some_and(|v| values.contains(&v)))
+        .count();
+    u64::try_from(n).expect("count")
+}
+
+/// An unposted payroll import and a bank file's items count; each count
+/// equals the engine's rows read whole and filtered here.
 pub fn counts_match_the_engine(h: &Harness) {
     let s = &h.s1;
     let home = s.home();
-    let payroll: u64 = PayrollStatus::UNPOSTED
-        .iter()
-        .map(|st| {
-            raw_total(
-                h,
-                s,
-                "/api/v1/payroll-import/sessions",
-                &[("status", st.as_wire()), ("limit", "1")],
-            )
-        })
-        .sum();
-    assert_eq!(
-        h.run(home.payroll_sessions_count(&PayrollStatus::UNPOSTED))
-            .expect("payroll"),
-        payroll
+    // A payroll file uploaded and not posted.
+    let csv = "Employee,Gross Pay,Net Pay\nPat Doe,1000.00,800.00\n";
+    multipart(
+        h,
+        s,
+        "/api/v1/payroll-import/upload",
+        &[],
+        "payroll.csv",
+        csv,
     );
+    let payroll = h
+        .run(home.payroll_sessions_count(&PayrollStatus::UNPOSTED))
+        .expect("payroll");
+    assert!(payroll > 0, "the upload waits to be posted");
     assert_eq!(
-        h.run(home.bank_statements_any()).expect("statements"),
-        raw_total(h, s, "/api/v1/banking/statements", &[("limit", "1")]) > 0
+        payroll,
+        raw_rows_where(
+            h,
+            s,
+            "/api/v1/payroll-import/sessions",
+            "status",
+            &["uploaded", "mapped", "validated"]
+        )
     );
-    assert_eq!(
-        h.run(home.has_any_transaction()).expect("transactions"),
-        raw_total(h, s, "/api/v1/transactions", &[("limit", "1")]) > 0
+    // A bank file: its items wait in the feed.
+    let bank = crate::contract_bank_postings::detail_account(h, s, AccountType::Asset, "bank");
+    let feed_csv = format!(
+        "Date,Description,Amount\n{},HOME TEST DEPOSIT,-125.00\n{},HOME TEST FUEL,42.10\n",
+        day(-2).to_wire(),
+        day(-1).to_wire()
     );
-    let raw = h
-        .run(s.raw(Method::Get, "/api/v1/dashboard/action-items", &[], None))
-        .expect("action items");
+    multipart(
+        h,
+        s,
+        "/api/v1/banking/feed/import",
+        &[("accountId", &bank.to_string())],
+        "feed.csv",
+        &feed_csv,
+    );
+    assert!(
+        h.run(home.bank_feed_any()).expect("feed any"),
+        "a bank file was imported"
+    );
+    let waiting = h.run(home.feed_pending_count(today())).expect("feed");
+    assert!(waiting >= 2, "the two new items wait: {waiting}");
     assert_eq!(
-        h.run(home.feed_pending_count(today())).expect("feed"),
-        raw.body["pendingFeedCount"]
-            .as_u64()
-            .expect("integer count")
+        waiting,
+        raw_rows_where(h, s, "/api/v1/banking/feed", "status", &["pending"])
+    );
+    assert!(h.run(home.has_any_transaction()).expect("transactions"));
+    assert!(
+        raw_total(
+            h,
+            s,
+            "/api/v1/transactions",
+            &[("status", "posted"), ("limit", "1")]
+        ) > 0
     );
 
     // A reconciliation left open shows; once canceled it does not.
@@ -199,7 +312,6 @@ pub fn counts_match_the_engine(h: &Harness) {
     let state = h.run(home.reconcile_state(&[bank])).expect("reconcile");
     assert_eq!(state.in_progress, Vec::<AccountId>::new());
 }
-
 /// P16 WP7: the rail's client and vendor counts read one row and take the
 /// list's `total`; it equals the number of active contacts the whole list
 /// returns.
@@ -347,7 +459,7 @@ pub fn exact_strings_u76(h: &Harness) {
     let cash = h.run(dash.cash_position(today)).expect("cash");
     assert_eq!(sum.cash_position.as_ref(), Some(&cash));
     // Home's bill count agrees with the engine's soon-due figure: overdue
-    // plus due within the window.
+    // plus due within the window (voided bills out of both).
     let due7 = BillQuery::due_within(today, 7).expect("q");
     assert_eq!(
         h.run(s.home().bills_count(&due7)).expect("bills"),
