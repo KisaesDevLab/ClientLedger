@@ -1,13 +1,16 @@
 # "Enter moves between fields" (P16 step 0, Q-264) against
 # `clientledger --demo`: the Just-for-me option in Preferences, then Enter
 # and Shift+Enter move between header fields in Write Check and Make
-# Deposit and between cells in Make Journal Entry and Bulk Entry, and
-# Ctrl+Enter is Save & New (each form refuses its incomplete entry, so
-# nothing is saved and the scenario repeats). The option is turned off at
-# the end, so the light and dark runs both start from the default (Q-190).
+# Deposit and Transfer Funds and between cells in Make Journal Entry and
+# Bulk Entry, and Ctrl+Enter is Save & New (each form refuses its incomplete
+# entry, so nothing is saved and the scenario repeats). The option is turned
+# off at the end, so the light and dark runs both start from the default
+# (Q-190); then Enter in Transfer Funds is Save & New again. Opening
+# Balances is reached only through the interview: its Enter steps are in
+# opening-balances.yaml.
 # All data is synthetic.
 name: forms-enter
-description: The Enter option on; Enter and Shift+Enter move in Write Check, Make Deposit, Make Journal Entry and Bulk Entry; Ctrl+Enter is Save & New; the option off again.
+description: The Enter option on; Enter and Shift+Enter move in Write Check, Make Deposit, Transfer Funds, Make Journal Entry and Bulk Entry; Ctrl+Enter is Save & New; the option off again, and Enter saves in Transfer Funds.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -126,6 +129,30 @@ steps:
   - assert_state: {key: screen.rows, equals: 0}
   - command: file.close_window
 
+  # --- 5b. Transfer Funds: header fields (review P16-part1 #6) ----------------
+  - key: Ctrl+T
+  - assert_state: {key: screen.screen, equals: transfer}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Date}
+  - assert_state: {key: screen.focused, equals: date}
+  - key: Enter
+  - assert_state: {key: screen.focused, equals: amount}
+  - type: {text: "15"}
+  - key: Enter
+  - assert_state: {key: screen.amount, equals: "15.00"}
+  - assert_state: {key: screen.focused, equals: memo}
+  - key: Shift+Enter
+  - assert_state: {key: screen.focused, equals: amount}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - screenshot: transfer
+  # Ctrl+Enter = Save & New: no To account yet, so it is refused.
+  - key: Ctrl+Enter
+  - assert_state: {key: screen.save.refused, equals: to_missing}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+
   # --- 6. The option off again (Enter = Save & New, Q-190) --------------------
   - command: edit.preferences
   - click: {role: button, label: Look and feel}
@@ -135,3 +162,16 @@ steps:
   - assert_state: {key: screen.dirty, equals: false}
   - key: Escape
   - assert_not_exists: {role: tab, label: Preferences}
+
+  # --- 7. Transfer Funds with the option off: Enter is Save & New ------------
+  - key: Ctrl+T
+  - assert_state: {key: screen.screen, equals: transfer}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Amount}
+  - type: {text: "15"}
+  - key: Enter
+  - assert_state: {key: screen.save.refused, equals: to_missing}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - click: {role: button, label: Clear}
+  - command: file.close_window

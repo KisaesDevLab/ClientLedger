@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 
 use cl_automation::actions::{
     ClickParams, CommandParams, FocusParams, InspectParams, KeyParams, KeySpec, PasteParams,
-    ResizeParams, ScreenshotParams, Target, ThemeParams, TypeParams, ZoomParams,
+    ResizeParams, ScreenshotParams, ScrollParams, ScrollTo, Target, ThemeParams, TypeParams,
+    ZoomParams,
 };
 use cl_automation::inspect::{Bounds, Node, Snapshot, WindowInfo};
 use cl_automation::screenshot::{encode_png, write_png};
@@ -44,9 +45,13 @@ pub fn hide_secrets_id() -> egui::Id {
 const SETTLE_FRAMES: u64 = 2;
 /// How long a screenshot or resize may take.
 const JOB_TIMEOUT: Duration = Duration::from_secs(15);
+/// One turn of the `scroll` wheel (points) and how many turns it takes:
+/// more than any screen is tall, so the area reaches its end.
+const WHEEL_STEP: f32 = 4_000.0;
+const WHEEL_TURNS: usize = 6;
 
 /// Events to inject into one coming frame.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Scheduled {
     events: Vec<Event>,
 }
@@ -420,6 +425,7 @@ impl Bridge {
             }
             "key" => self.key(&parse!(KeyParams).key),
             "focus" => self.focus(&parse!(FocusParams).target),
+            "scroll" => self.scroll(ctx, &parse!(ScrollParams)),
             "command" => Self::command(shell, &parse!(CommandParams).id, self),
             "screenshot" => Self::screenshot(ctx, &parse!(ScreenshotParams)),
             "resize" => {
@@ -597,6 +603,44 @@ impl Bridge {
                 data: None,
             })],
         })
+    }
+
+    /// The mouse wheel over the target until what scrolls there reaches
+    /// the asked end (the area clamps the far end; egui smooths the turn
+    /// over a few frames).
+    fn scroll(&self, ctx: &Context, p: &ScrollParams) -> Started {
+        let node = match self.resolve(&p.target) {
+            Ok(n) => n,
+            Err(e) => return e,
+        };
+        let Some(b) = node.bounds else {
+            return fail(ErrorCode::Failed, "that element has no position on screen");
+        };
+        let (x, y) = b.center();
+        let pos = Pos2::new(x, y);
+        let dy = match p.to {
+            ScrollTo::End => -WHEEL_STEP,
+            ScrollTo::Start => WHEEL_STEP,
+        };
+        let wheel = Scheduled {
+            events: vec![
+                Event::PointerMoved(pos),
+                Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, dy),
+                    modifiers: Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                    source: egui::MouseWheelSource::Wheel,
+                },
+            ],
+        };
+        let mut frames = vec![Scheduled {
+            events: vec![Event::PointerMoved(pos)],
+        }];
+        frames.extend(std::iter::repeat_n(wheel, WHEEL_TURNS));
+        self.schedule(frames);
+        ctx.request_repaint();
+        self.after(Finish::Empty)
     }
 
     fn focus(&self, target: &Target) -> Started {

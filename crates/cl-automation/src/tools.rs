@@ -81,6 +81,17 @@ pub fn tools() -> Vec<Tool> {
             input_schema: object(&json!({"target": target_schema()}), &["target"]),
         },
         Tool {
+            name: "scroll",
+            description: "Turn the mouse wheel over an element until what scrolls there reaches its start or end.",
+            input_schema: object(
+                &json!({
+                    "target": target_schema(),
+                    "to": {"type": "string", "enum": ["start", "end"]}
+                }),
+                &["target", "to"],
+            ),
+        },
+        Tool {
             name: "command",
             description: "Run a registered command by id, for example help.palette or file.quit.",
             input_schema: object(&json!({"id": {"type": "string"}}), &["id"]),
@@ -151,7 +162,7 @@ mod tests {
         let n = names.len();
         names.dedup();
         assert_eq!(n, names.len());
-        assert_eq!(n, 13);
+        assert_eq!(n, 14);
         for tool in &t {
             assert_eq!(tool.input_schema["type"], "object", "{}", tool.name);
             assert_ne!(tool.description.len(), 0);

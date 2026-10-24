@@ -661,3 +661,20 @@ fn f8_to_a_problem_in_a_hidden_column_shows_the_column() {
         Some("The No. column is shown again: a row has a problem in it.")
     );
 }
+
+/// Review nit: Ctrl+Enter (Save & New in the Move mode) while a Set picker
+/// is open applies the picker; it never saves the batch from there.
+#[test]
+fn save_and_new_with_a_set_picker_open_applies_the_picker() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let (mut s, _link) = screen_in(dir.path());
+    let k = three(&mut s);
+    s.select_all();
+    assert!(s.open_picker(Field::Memo));
+    s.picker_value(CellInput::Text("Picked".into()));
+    assert!(s.form_command(CommandId::new("form.save_new")));
+    assert!(s.picker.is_none());
+    assert_eq!(row(&s, k[2]).memo, "Picked");
+    assert_eq!(s.state_json()["saved_count"], 0, "nothing saved");
+    assert_eq!(s.state_json()["last_action"], "set");
+}
