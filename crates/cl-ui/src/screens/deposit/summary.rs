@@ -4,9 +4,10 @@
 //! is the engine's bank amount. Printing comes in P19.
 
 use cl_model::forms::deposit::{DepositSummary, SummaryRow};
-use eframe::egui::{self, RichText, Ui};
+use eframe::egui::{RichText, Ui};
 
 use super::DepositScreen;
+use crate::forms::condensed;
 use crate::i18n::t;
 use crate::screens::company::form;
 use crate::theme::Tokens;
@@ -52,65 +53,52 @@ impl DepositScreen {
         })
     }
 
-    /// Draws the summary.
-    pub(crate) fn summary_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+    /// Draws the summary; returns where its rows went (sizes only).
+    pub(crate) fn summary_ui(
+        &self,
+        ui: &mut Ui,
+        tokens: &Tokens,
+    ) -> Option<condensed::CondensedReport> {
         let style = self.money_style;
         let Some(s) = self.summary() else {
             form::hint(ui, tokens, &t("deposit.summary.saved_only"));
-            return;
+            return None;
         };
-        form::card(ui, tokens, |ui| {
-            form::heading(ui, tokens, &t("deposit.summary.title"));
-            ui.label(format!("{} \u{b7} {}", Self::row_date(s.date), s.account));
-            if !s.memo.is_empty() {
-                ui.label(RichText::new(&s.memo).color(tokens.text_secondary));
-            }
-            let row = |ui: &mut Ui, r: &SummaryRow| {
-                ui.label(&r.label);
-                ui.label(RichText::new(&r.detail).color(tokens.text_secondary));
-                ui.label(
-                    RichText::new(r.amount.format(style)).text_style(egui::TextStyle::Monospace),
-                );
-                ui.end_row();
-            };
-            egui::Grid::new("deposit/summary")
-                .num_columns(3)
-                .striped(true)
-                .show(ui, |ui| {
-                    if !s.items.is_empty() {
-                        ui.label(RichText::new(t("deposit.summary.payments")).strong());
-                        ui.end_row();
-                        for r in &s.items {
-                            row(ui, r);
+        let mut out = None;
+        // The condensed table (Q-267): Name · Memo · Amount, striped, the
+        // amounts and the total right-aligned in one column.
+        condensed::capped(ui, |ui| {
+            form::card(ui, tokens, |ui| {
+                form::heading(ui, tokens, &t("deposit.summary.title"));
+                ui.label(format!("{} \u{b7} {}", Self::row_date(s.date), s.account));
+                if !s.memo.is_empty() {
+                    ui.label(RichText::new(&s.memo).color(tokens.text_secondary));
+                }
+                let fig = |r: &SummaryRow| r.amount.format(style);
+                let ((), report) = condensed::condensed_rows(ui, "deposit/summary", |c| {
+                    for (key, rows) in [
+                        ("deposit.summary.payments", &s.items),
+                        ("deposit.summary.other", &s.other),
+                    ] {
+                        if rows.is_empty() {
+                            continue;
+                        }
+                        c.section(&t(key));
+                        for r in rows {
+                            c.figure(&r.label, &r.detail, &fig(r));
                         }
                     }
-                    if !s.other.is_empty() {
-                        ui.label(RichText::new(t("deposit.summary.other")).strong());
-                        ui.end_row();
-                        for r in &s.other {
-                            row(ui, r);
-                        }
+                    if let Some(cb) = s.cash_back {
+                        c.figure(&t("deposit.summary.cash_back"), "", &cb.format(style));
                     }
-                    if let Some(c) = s.cash_back {
-                        ui.label(t("deposit.summary.cash_back"));
-                        ui.label("");
-                        ui.label(
-                            RichText::new(c.format(style)).text_style(egui::TextStyle::Monospace),
-                        );
-                        ui.end_row();
-                    }
-                    ui.label(RichText::new(t("deposit.summary.total")).strong());
-                    ui.label("");
-                    ui.label(
-                        RichText::new(s.total.format(style))
-                            .strong()
-                            .text_style(egui::TextStyle::Monospace),
-                    );
-                    ui.end_row();
+                    c.total(&t("deposit.summary.total"), &s.total.format(style));
                 });
-            if !s.parts_agree() {
-                form::hint(ui, tokens, &t("deposit.summary.parts_differ"));
-            }
+                out = Some(report);
+                if !s.parts_agree() {
+                    form::hint(ui, tokens, &t("deposit.summary.parts_differ"));
+                }
+            });
         });
+        out
     }
 }

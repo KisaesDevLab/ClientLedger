@@ -19,6 +19,7 @@ use eframe::egui::{self, Align, CornerRadius, Layout, Margin, RichText, Stroke, 
 use super::{DailySalesScreen, Field, field};
 use crate::company::CompanyEvent;
 use crate::forms::closing_prompt::ClosingClick;
+use crate::forms::condensed;
 use crate::forms::header;
 use crate::i18n::{t, t_with};
 use crate::layout::{Body, FixedFrame, FrameOpts};
@@ -32,8 +33,6 @@ const SIDE_BY_SIDE: f32 = 1100.0;
 const PANEL_WIDTH: f32 = 270.0;
 /// The height of Clear / Save & New / Save & Close (DESIGN.md).
 const ACTION_HEIGHT: f32 = 44.0;
-/// The amount column's width.
-const AMOUNT_WIDTH: f32 = 140.0;
 
 /// The shortcut chip text of a command ("Alt N"), from the keymap.
 fn chip(id: &str) -> String {
@@ -140,12 +139,13 @@ impl DailySalesScreen {
                 self.panel_ui(ui, &tokens);
             }
         });
+        // The actions share the form's condensed width (Q-267).
         frame.bottom(|ui| {
             if wide {
-                let w = form_width(ui);
+                let w = form_width(ui).min(condensed::MAX_WIDTH);
                 ui.allocate_ui(Vec2::new(w, ACTION_HEIGHT), |ui| self.actions_ui(ui));
             } else {
-                self.actions_ui(ui);
+                condensed::capped(ui, |ui| self.actions_ui(ui));
             }
         });
         self.frame_report = frame.end();
@@ -258,7 +258,13 @@ impl DailySalesScreen {
         });
     }
 
+    /// The form, no wider than the condensed table (Q-267): the header
+    /// card, the lines and the totals share one width.
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        condensed::capped(ui, |ui| self.form_column(ui, tokens));
+    }
+
+    fn form_column(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let enabled =
             self.save.task.is_none() && !self.closing_prompt.dialog_open() && !self.read_only();
         if self.read_only() {
@@ -443,12 +449,21 @@ impl DailySalesScreen {
         }
     }
 
+    /// The Tag picker's text: "number · name" as on every screen, or
+    /// "No tag".
+    pub(crate) fn tag_shown(&self) -> String {
+        self.header
+            .current()
+            .tag
+            .map(|id| crate::tag_names::label_of(&self.tags, id))
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| t("daily.tag.none"))
+    }
+
     fn tag_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
         let l = above(ui, tokens, &t("daily.tag"));
         let current = self.header.current().tag;
-        let shown = current
-            .and_then(|id| self.tags.iter().find(|g| g.id == id))
-            .map_or_else(|| t("daily.tag.none"), |g| g.fields.name.clone());
+        let shown = self.tag_shown();
         let mut picked = None;
         let r = egui::ComboBox::from_id_salt("daily_sales/tag")
             .width(width - 8.0)
@@ -460,9 +475,9 @@ impl DailySalesScreen {
                 {
                     picked = Some(None);
                 }
-                for g in self.tags.iter().filter(|g| g.is_active) {
+                for g in crate::tag_names::sorted(self.tags.iter().filter(|g| g.is_active)) {
                     if ui
-                        .selectable_label(current == Some(g.id), &g.fields.name)
+                        .selectable_label(current == Some(g.id), crate::tag_names::label(g))
                         .clicked()
                     {
                         picked = Some(Some(g.id));
@@ -525,46 +540,22 @@ impl DailySalesScreen {
             form::hint(ui, tokens, &t("daily.no_lines"));
             return;
         }
-        for (section, lines) in rows {
-            ui.add_space(6.0);
-            let r = ui.add(
-                egui::Label::new(
-                    RichText::new(t(section_key(section)))
-                        .strong()
-                        .color(tokens.text_primary),
-                )
-                .selectable(false),
-            );
-            ui.painter().hline(
-                r.rect.x_range(),
-                r.rect.bottom() + 2.0,
-                Stroke::new(2.0, tokens.accent),
-            );
-            if section == DailySection::Tax {
-                form::hint(ui, tokens, &t("daily.section.tax.hint"));
+        // Line · Account · Amount in the condensed table (Q-267): striped,
+        // the whole row lit on hover and focus, no wider than 760.
+        let ((), report) = condensed::condensed_rows(ui, "daily_sales/lines", |c| {
+            for (section, lines) in rows {
+                c.section(&t(section_key(section)));
+                if section == DailySection::Tax {
+                    form::hint(c.ui(), tokens, &t("daily.section.tax.hint"));
+                }
+                for (index, id, label, account) in lines {
+                    c.row(&label, &account, |ui, l| {
+                        self.amount_ui(ui, tokens, index, id, l)
+                    });
+                }
             }
-            let width = ui.available_width();
-            for (index, id, label, account) in lines {
-                ui.horizontal(|ui| {
-                    let line_w = (width - AMOUNT_WIDTH - 24.0) * 0.45;
-                    let l = ui.add_sized(
-                        [line_w, 22.0],
-                        egui::Label::new(RichText::new(&label).color(tokens.text_primary))
-                            .truncate(),
-                    );
-                    ui.add_sized(
-                        [line_w, 22.0],
-                        egui::Label::new(
-                            RichText::new(&account)
-                                .size(12.0)
-                                .color(tokens.text_secondary),
-                        )
-                        .truncate(),
-                    );
-                    self.amount_ui(ui, tokens, index, id, &l);
-                });
-            }
-        }
+        });
+        self.condensed = report;
     }
 
     fn amount_ui(
@@ -574,12 +565,12 @@ impl DailySalesScreen {
         index: usize,
         id: DailyLineId,
         label: &egui::Response,
-    ) {
+    ) -> egui::Response {
         let text = self.inputs.amounts.entry(id).or_default();
         let r = ui
             .add(
                 egui::TextEdit::singleline(text)
-                    .desired_width(AMOUNT_WIDTH)
+                    .desired_width(condensed::AMOUNT_WIDTH)
                     .font(egui::TextStyle::Monospace)
                     .align(egui::Align2::RIGHT_CENTER),
             )
@@ -599,6 +590,7 @@ impl DailySalesScreen {
         if let Some(key) = self.inputs.amount_problems.get(&id) {
             ui.label(RichText::new(t(key)).size(12.0).color(tokens.warn_text));
         }
+        r
     }
 
     /// The owner left an amount: the text (a plain amount or a
@@ -657,23 +649,14 @@ impl DailySalesScreen {
         };
         let style = self.money_style;
         let fig = |m: Money| m.format(style);
-        ui.horizontal_wrapped(|ui| {
+        // The totals right-aligned in the lines' amount column (Q-267).
+        let _ = condensed::condensed_rows(ui, "daily_sales/totals", |c| {
             for (key, m) in [
                 ("daily.total.sales", totals.sales),
                 ("daily.total.tax", totals.tax),
                 ("daily.total.payments", totals.payments),
             ] {
-                ui.label(
-                    RichText::new(t(key))
-                        .size(12.0)
-                        .color(tokens.text_secondary),
-                );
-                ui.label(
-                    RichText::new(fig(m))
-                        .text_style(egui::TextStyle::Monospace)
-                        .color(tokens.text_primary),
-                );
-                ui.add_space(8.0);
+                c.total(&t(key), &fig(m));
             }
         });
         let color = match totals.over_short {

@@ -39,6 +39,16 @@ steps:
   - assert_exists: {role: label, label_contains: "2.35 short"}
   - assert_no_clipping: {}
   - screenshot: short
+  # Q-267: on a wide screen the lines sit in the condensed, striped table
+  # (no wider than 760) and the header card and buttons share its width.
+  - resize: {width: 1920, height: 1080}
+  - assert_state: {key: screen.condensed.capped, equals: true}
+  - assert_state: {key: screen.condensed.fits, equals: true}
+  - assert_state: {key: screen.condensed.rows, equals: 5}
+  - assert_exists: {role: button, label_contains: "Save & Close"}
+  - assert_no_clipping: {}
+  - screenshot: daily-sales-1920x1080
+  - resize: {width: 1440, height: 940}
 
   # --- 2. Posted: tenders wait in Undeposited Funds, tax in Sales Tax Payable ----
   - key: Alt+N

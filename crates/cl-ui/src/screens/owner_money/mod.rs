@@ -33,6 +33,7 @@ use serde_json::{Value, json};
 
 use crate::company::demo::register::DemoPosting;
 use crate::company::{CompanyEvent, CompanyLink};
+use crate::forms::condensed;
 use crate::i18n::t;
 use crate::screens::card_charge::kit::{
     self, AmountInput, Balances, Books, MessageClick, NameInput, NameOutcome, Outbound, Pending,
@@ -785,11 +786,14 @@ impl OwnerMoneyScreen {
         self.layout = kit::form_frame(ui, "owner_money", false, |ui, col| match col {
             kit::Column::Top => self.top_ui(ui, &tokens),
             kit::Column::Empty => {}
-            kit::Column::Form => self.form_ui(ui, &tokens),
+            // The card and the actions share the condensed width (Q-267).
+            kit::Column::Form => condensed::capped(ui, |ui| self.form_ui(ui, &tokens)),
             kit::Column::Panel => self.panel_ui(ui, &tokens),
             kit::Column::Actions => {
                 let enabled = self.flow.idle();
-                if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
+                if let Some(cmd) =
+                    condensed::capped(ui, |ui| kit::actions_row(ui, enabled, enabled))
+                {
                     self.after_frame = Some(CommandId::new(cmd));
                 }
             }

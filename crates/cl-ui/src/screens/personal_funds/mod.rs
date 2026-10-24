@@ -959,6 +959,8 @@ impl PersonalFundsScreen {
             kit::Column::Empty => {}
             kit::Column::Form => self.form_ui(ui, &tokens),
             kit::Column::Panel => Self::panel_ui(ui, &tokens),
+            // The actions stay under the lines grid's right edge: the grid
+            // keeps the column's width (Q-267 condenses the card only).
             kit::Column::Actions => {
                 let enabled = self.flow.idle();
                 if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
@@ -1002,109 +1004,113 @@ impl PersonalFundsScreen {
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         kit::title_only(ui, tokens, &t("cmd.vendors.personal_funds"));
         let enabled = self.flow.idle();
-        ui.add_enabled_ui(enabled, |ui| {
-            egui::Frame::new()
-                .fill(tokens.surface_form)
-                .stroke(Stroke::new(1.0, tokens.accent_border))
-                .corner_radius(CornerRadius::same(8))
-                .inner_margin(Margin::symmetric(20, 16))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    let width = ui.available_width();
-                    let sp = ui.spacing().item_spacing.x;
-                    let half = ((width - 16.0 - sp) / 2.0).max(160.0);
-                    let f = self.header.current().clone();
-                    let lists = Arc::clone(&self.books.lists);
-                    ui.horizontal_top(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let (out, r) = kit::name_field(
-                                ui,
-                                tokens,
-                                &t("personal_funds.who"),
-                                &mut self.inputs.who,
-                                &lists,
-                                f.who,
-                                half,
-                            );
-                            self.apply_name(field::WHO, out);
-                            kit::track(&mut self.focused, &r, field::WHO);
+        // The header card at the condensed width (Q-267); the lines grid
+        // below keeps the column's width.
+        crate::forms::condensed::capped(ui, |ui| {
+            ui.add_enabled_ui(enabled, |ui| {
+                egui::Frame::new()
+                    .fill(tokens.surface_form)
+                    .stroke(Stroke::new(1.0, tokens.accent_border))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(Margin::symmetric(20, 16))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        let width = ui.available_width();
+                        let sp = ui.spacing().item_spacing.x;
+                        let half = ((width - 16.0 - sp) / 2.0).max(160.0);
+                        let f = self.header.current().clone();
+                        let lists = Arc::clone(&self.books.lists);
+                        ui.horizontal_top(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let (out, r) = kit::name_field(
+                                    ui,
+                                    tokens,
+                                    &t("personal_funds.who"),
+                                    &mut self.inputs.who,
+                                    &lists,
+                                    f.who,
+                                    half,
+                                );
+                                self.apply_name(field::WHO, out);
+                                kit::track(&mut self.focused, &r, field::WHO);
+                            });
+                            ui.add_space(16.0);
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let (out, r) = kit::name_field(
+                                    ui,
+                                    tokens,
+                                    &t("personal_funds.payee"),
+                                    &mut self.inputs.payee,
+                                    &lists,
+                                    f.payee,
+                                    half,
+                                );
+                                self.apply_name(field::PAYEE, out);
+                                kit::track(&mut self.focused, &r, field::PAYEE);
+                                if crate::forms::enter::entered(&r).saves() {
+                                    self.after_frame = Some(CommandId::new("form.save_new"));
+                                }
+                            });
                         });
-                        ui.add_space(16.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let (out, r) = kit::name_field(
-                                ui,
-                                tokens,
-                                &t("personal_funds.payee"),
-                                &mut self.inputs.payee,
-                                &lists,
-                                f.payee,
-                                half,
-                            );
-                            self.apply_name(field::PAYEE, out);
-                            kit::track(&mut self.focused, &r, field::PAYEE);
-                            if crate::forms::enter::entered(&r).saves() {
-                                self.after_frame = Some(CommandId::new("form.save_new"));
-                            }
+                        ui.add_space(8.0);
+                        ui.horizontal_top(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let today = self.today;
+                                let (r, d) = kit::date_field(
+                                    ui,
+                                    tokens,
+                                    &t("helper.date"),
+                                    &mut self.inputs.date,
+                                    today,
+                                    half,
+                                );
+                                if let kit::DateChange::Set(d) = d {
+                                    self.header.edit(field::DATE, |h| h.date = d);
+                                    self.inputs.rev = self.header.revision();
+                                }
+                                kit::track(&mut self.focused, &r, field::DATE);
+                                if crate::forms::enter::entered(&r).saves() {
+                                    self.after_frame = Some(CommandId::new("form.save_new"));
+                                }
+                            });
+                            ui.add_space(16.0);
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let r = kit::amount_field(
+                                    ui,
+                                    tokens,
+                                    &t("helper.amount"),
+                                    &mut self.inputs.amount,
+                                    half,
+                                    true,
+                                );
+                                kit::track(&mut self.focused, &r, field::AMOUNT);
+                                if r.lost_focus() {
+                                    self.amount_left();
+                                }
+                            });
                         });
+                        ui.add_space(8.0);
+                        let mut memo = f.memo.clone();
+                        let r = kit::text_field(
+                            ui,
+                            tokens,
+                            &t("helper.memo"),
+                            &mut memo,
+                            width,
+                            cl_api::PRINTED_MEMO_MAX,
+                        );
+                        if r.changed() {
+                            self.header.edit(field::MEMO, |h| h.memo = memo);
+                        }
+                        kit::track(&mut self.focused, &r, field::MEMO);
+                        ui.add_space(8.0);
+                        self.treatment_ui(ui, tokens, half);
                     });
-                    ui.add_space(8.0);
-                    ui.horizontal_top(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let today = self.today;
-                            let (r, d) = kit::date_field(
-                                ui,
-                                tokens,
-                                &t("helper.date"),
-                                &mut self.inputs.date,
-                                today,
-                                half,
-                            );
-                            if let kit::DateChange::Set(d) = d {
-                                self.header.edit(field::DATE, |h| h.date = d);
-                                self.inputs.rev = self.header.revision();
-                            }
-                            kit::track(&mut self.focused, &r, field::DATE);
-                            if crate::forms::enter::entered(&r).saves() {
-                                self.after_frame = Some(CommandId::new("form.save_new"));
-                            }
-                        });
-                        ui.add_space(16.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let r = kit::amount_field(
-                                ui,
-                                tokens,
-                                &t("helper.amount"),
-                                &mut self.inputs.amount,
-                                half,
-                                true,
-                            );
-                            kit::track(&mut self.focused, &r, field::AMOUNT);
-                            if r.lost_focus() {
-                                self.amount_left();
-                            }
-                        });
-                    });
-                    ui.add_space(8.0);
-                    let mut memo = f.memo.clone();
-                    let r = kit::text_field(
-                        ui,
-                        tokens,
-                        &t("helper.memo"),
-                        &mut memo,
-                        width,
-                        cl_api::PRINTED_MEMO_MAX,
-                    );
-                    if r.changed() {
-                        self.header.edit(field::MEMO, |h| h.memo = memo);
-                    }
-                    kit::track(&mut self.focused, &r, field::MEMO);
-                    ui.add_space(8.0);
-                    self.treatment_ui(ui, tokens, half);
-                });
+            })
         });
         ui.add_space(12.0);
         let total = lines_total(self.lines.value()).unwrap_or(Money::ZERO);
