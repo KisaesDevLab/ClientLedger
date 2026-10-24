@@ -972,6 +972,29 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.attention.bills_due.name", "Bills overdue or due soon"),
     ("home.attention.payroll_unposted.name", "Payroll imports not posted"),
     ("home.when.today", "today {time}"),
+    // WP8 (P16): Home — the income and expenses chart, the setup
+    // checklist, the Ko-fi support button.
+    ("home.chart.title", "Income and expenses \u{b7} last 6 months"),
+    ("home.chart.income", "Income"),
+    ("home.chart.expenses", "Expenses"),
+    ("home.chart.profit", "{month} profit"),
+    ("home.chart.group", "{month}: income {income}, expenses {expenses}"),
+    ("home.chart.group.missing", "{month}: couldn't load"),
+    ("home.chart.loading", "Loading income and expenses\u{2026}"),
+    ("home.chart.empty", "Your first months will show here."),
+    ("home.chart.failed", "Couldn't load income and expenses. Try again."),
+    ("home.month_long.1", "January"),
+    ("home.month_long.2", "February"),
+    ("home.month_long.3", "March"),
+    ("home.month_long.4", "April"),
+    ("home.month_long.5", "May"),
+    ("home.month_long.6", "June"),
+    ("home.month_long.7", "July"),
+    ("home.month_long.8", "August"),
+    ("home.month_long.9", "September"),
+    ("home.month_long.10", "October"),
+    ("home.month_long.11", "November"),
+    ("home.month_long.12", "December"),
 ];
 
 #[cfg(test)]

@@ -8,8 +8,8 @@
 //! is synthetic.
 
 use cl_api::{
-    Account, ActionItems, CashAccount, CashPosition, ContactType, DashboardSummary, LastReconciled,
-    Payables, Receivables, ReconcileState,
+    Account, ActionItems, ApiError, CashAccount, CashPosition, ContactType, DashboardSummary,
+    LastReconciled, Payables, ProfitLoss, Receivables, ReconcileState,
 };
 use cl_core::ids::AccountId;
 use cl_core::{CalendarDate, Money, Timestamp};
@@ -229,6 +229,67 @@ pub fn summary(state: &mut DemoState, today: CalendarDate, days: u16) -> Dashboa
     }
 }
 
+/// `/reports/profit-loss` for `from..=to` as the demo engine answers it:
+/// the sample's income, expenses and net income for those dates (as decimal
+/// strings, the form the engine's report numbers take after U-14).
+///
+/// # Errors
+/// `Internal` if the answer cannot be built (it always can).
+pub fn profit_loss(from: CalendarDate, to: CalendarDate) -> Result<ProfitLoss, ApiError> {
+    use cl_api::AccountType;
+    let sample = cl_company::Sample::load();
+    let kinds: std::collections::HashMap<&str, AccountType> = sample
+        .company
+        .accounts
+        .iter()
+        .map(|a| (a.number.as_str(), a.account_type))
+        .collect();
+    let (mut income, mut expenses) = (Money::ZERO, Money::ZERO);
+    for t in sample
+        .transactions
+        .iter()
+        .filter(|t| t.date >= from && t.date <= to)
+    {
+        for l in &t.lines {
+            let (into, net) = match kinds.get(l.account.as_str()) {
+                Some(AccountType::Revenue | AccountType::OtherRevenue) => {
+                    (&mut income, l.credit.checked_sub(l.debit))
+                }
+                Some(AccountType::Cogs | AccountType::Expense | AccountType::OtherExpense) => {
+                    (&mut expenses, l.debit.checked_sub(l.credit))
+                }
+                _ => continue,
+            };
+            *into = net
+                .and_then(|n| into.checked_add(n))
+                .map_err(|_| ApiError::Internal)?;
+        }
+    }
+    serde_json::from_value(serde_json::json!({
+        "totalIncome": income.to_wire(),
+        "totalExpenses": expenses.to_wire(),
+        "netIncome": sample.net_income(from, to).to_wire(),
+    }))
+    .map_err(|_| ApiError::Internal)
+}
+
+/// The chart's six months on `today` (standard months in the demo company,
+/// or the retail calendar chosen on this computer).
+#[must_use]
+pub(crate) fn profit_loss_months(
+    today: CalendarDate,
+    calendar: cl_settings::FiscalCalendar,
+) -> Vec<crate::screens::home::charts::MonthPl> {
+    use crate::screens::home::charts::{MonthPl, months, spec};
+    months(spec(Some(1), calendar), today)
+        .into_iter()
+        .map(|range| MonthPl {
+            range,
+            pl: profit_loss(range.start, range.end),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +343,20 @@ mod tests {
         let (clients, vendors) = contact_counts(&mut state);
         assert!(clients > 0 && vendors > 0);
         assert!(last_backup() < now(), "backed up this morning");
+    }
+
+    /// The chart's months on the story date: May to October, October's net
+    /// income the README's figure.
+    #[test]
+    fn the_demo_chart_is_may_to_october() {
+        let months = profit_loss_months(DemoState::today(), cl_settings::FiscalCalendar::Standard);
+        let names: Vec<u32> = months.iter().map(|m| m.range.named).collect();
+        assert_eq!(names, [5, 6, 7, 8, 9, 10]);
+        let oct = months.last().expect("october");
+        assert_eq!(oct.range.start.to_wire(), "2026-10-01");
+        assert_eq!(oct.range.end.to_wire(), "2026-10-31");
+        let pl = oct.pl.as_ref().expect("report");
+        assert_eq!(pl.net_income.display(2).as_deref(), Some("13865.14"));
+        assert!(pl.total_income.is_some() && pl.total_expenses.is_some());
     }
 }

@@ -75,6 +75,15 @@ steps:
   - assert_exists: {role: label, label_contains: arrive in a later update}
   - assert_exists: {role: label, label: Backed up today 8:12 AM}
   - assert_exists: {role: link, label: Review}
+
+  # --- Income and expenses: six months of the engine's Profit & Loss --------
+  - assert_exists: {role: label, label: "Income and expenses · last 6 months"}
+  - assert_state: {key: screen.chart.months, equals: 6}
+  - assert_state: {key: screen.chart.missing, equals: 0}
+  - assert_exists: {role: button, label_contains: "May: income "}
+  - assert_exists: {role: button, label_contains: "October: income "}
+  - assert_exists: {role: label, label: October profit}
+  - assert_exists: {role: label, label: "$13,865.14"}
   - assert_no_clipping: {}
   - screenshot: home
 
@@ -101,6 +110,13 @@ steps:
   - click: {role: button, label: Refresh}
   - assert_state: {key: screen.loading, equals: false}
   - assert_state: {key: screen.attention.bills_due, equals: 3}
+
+  # --- A chart month drills into Profit & Loss (a placeholder until P28) ----
+  - click: {role: button, label_contains: "October: income "}
+  - assert_state: {key: active_tab, equals: Profit & Loss}
+  - command: file.close_window
+  - key: Alt+H
+  - assert_state: {key: screen.chart.drill, equals: "2026-10-01..2026-10-31"}
 
   # --- Minimum window (960 x 640): lanes two to a row -------------------------
   - resize: {width: 960, height: 640}

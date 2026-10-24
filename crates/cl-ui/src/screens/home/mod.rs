@@ -15,16 +15,17 @@
 //!   a dash for what arrives later (to-dos U-37, reorder alerts U-78, the
 //!   health check U-12) and the app's own backup reminder (Q-217)
 //!   (`attention.rs`).
+//! - **Income and expenses** draws six months of the engine's Profit &
+//!   Loss, each month drilling into the report (`charts.rs`, D1).
 //!
 //! Every read goes through the request queue and is polled each frame; the
 //! egui thread never waits. Home reads on open, when another window saves
 //! something (the data bus, Q-262), and on Refresh: there is no timer, so
-//! nothing runs in the background. The setup checklist link, the chart and
-//! the Ko-fi button arrive with the next work package (D10); the layout
-//! leaves their places marked below.
+//! nothing runs in the background.
 
 mod attention;
 mod balances;
+pub(crate) mod charts;
 mod lanes;
 
 use std::sync::Arc;
@@ -169,6 +170,8 @@ pub(crate) struct HomeData {
     pub reconcile: Slot<ReconcileState>,
     /// The closing date (the Set Closing Date chip).
     pub closing: Slot<Option<CalendarDate>>,
+    /// Six months of Profit & Loss (the chart).
+    pub chart: Slot<Vec<charts::MonthPl>>,
 }
 
 impl HomeData {
@@ -183,6 +186,7 @@ impl HomeData {
             || self.counts.loading()
             || self.reconcile.loading()
             || self.closing.loading()
+            || self.chart.loading()
     }
 }
 
@@ -224,6 +228,8 @@ pub(crate) struct Local {
     /// How far local time is from UTC (UTC in the demo, so screenshots
     /// stay the same on every machine).
     pub offset: chrono::FixedOffset,
+    /// Standard months or a retail calendar (kept on this computer, U-25).
+    pub calendar: cl_settings::FiscalCalendar,
 }
 
 /// The Home window.
@@ -240,6 +246,9 @@ pub struct HomeScreen {
     pub(crate) data: HomeData,
     /// The command a lane action or a Needs attention link opened last.
     pub(crate) last_opened: Option<CommandId>,
+    /// The month the chart drilled into last (Profit & Loss takes the range
+    /// when it arrives in P28).
+    pub(crate) chart_drill: Option<charts::Month>,
     /// Lanes per row last frame.
     lane_columns: usize,
     /// The fixed bars' sizes last frame (Q-265).
@@ -267,6 +276,7 @@ impl HomeScreen {
             exact,
             data: HomeData::default(),
             last_opened: None,
+            chart_drill: None,
             lane_columns: 4,
             layout: FrameReport::default(),
         };
@@ -335,6 +345,14 @@ impl HomeScreen {
             |s| Ok(demo::closing_date(s)),
             |s| async move { Ok(s.company_settings().await?.lock_date) },
         ));
+        let calendar = self.local.calendar;
+        self.data.chart.start(run(
+            &self.link,
+            group,
+            None,
+            move |_| Ok(demo::profit_loss_months(today, calendar)),
+            move |s| async move { charts::read(&s, today, calendar).await },
+        ));
         self.poll();
     }
 
@@ -381,6 +399,14 @@ impl HomeScreen {
         }
         self.data.reconcile.poll();
         self.data.closing.poll();
+        self.data.chart.poll();
+    }
+
+    /// Opens the Profit & Loss of a chart month (a placeholder until P28,
+    /// which takes the range; STATE tracks it).
+    pub(crate) fn drill(&mut self, month: charts::Month) {
+        self.chart_drill = Some(month);
+        self.open("reports.profit_loss");
     }
 
     /// Opens a command's window (its screen, or the placeholder that says
@@ -480,12 +506,11 @@ impl HomeScreen {
         refresh
     }
 
-    /// The cards under the lanes: Account balances and Needs attention,
-    /// side by side when there is room (the mockup's wrapping row).
+    /// The cards under the lanes: Account balances, Income and expenses and
+    /// Needs attention, side by side when there is room (the mockup's
+    /// wrapping row).
     fn cards(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        // WP8 (D10): the "Income and expenses" chart card goes between the
-        // two (min width 300), so this row holds three cards.
-        let mins = [340.0_f32, 340.0];
+        let mins = [340.0_f32, 300.0, 340.0];
         let width = ui.available_width();
         let (mut cols, mut need) = (1, mins[0]);
         while cols < mins.len() {
@@ -498,6 +523,7 @@ impl HomeScreen {
         let id = ui.scope_id().with("home-cards");
         let mut clicked: Option<&'static str> = None;
         let mut retry = false;
+        let mut drill = None;
         tiles(ui, id, mins.len(), cols, |ui, i, min_h| {
             card(ui, tokens, min_h, |ui| match i {
                 0 => {
@@ -505,6 +531,11 @@ impl HomeScreen {
                         retry = true;
                     }
                 }
+                1 => match charts::show(ui, self, tokens) {
+                    Some(charts::Action::Retry) => retry = true,
+                    Some(charts::Action::Drill(m)) => drill = Some(m),
+                    None => {}
+                },
                 _ => {
                     if let Some(c) = attention::show(ui, self, tokens) {
                         if c == attention::RETRY {
@@ -518,6 +549,9 @@ impl HomeScreen {
         });
         if let Some(id) = clicked {
             self.open(id);
+        }
+        if let Some(m) = drill {
+            self.drill(m);
         }
         if retry {
             self.reload();
@@ -556,9 +590,11 @@ impl HomeScreen {
             "balances_rows": rows.as_ref().map(Vec::len),
             "balances_source": balances::source(&self.data, self.exact),
             "loading": self.data.loading(),
+            "chart": charts::state(self),
             "errors": {
                 "balances": rows.is_none() && self.data.accounts.error.is_some(),
                 "attention": self.data.counts.error.is_some(),
+                "chart": self.data.chart.error.is_some(),
             },
             "last_opened": self.last_opened.map(CommandId::as_str),
         })
@@ -592,6 +628,11 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
         .map_or(cl_settings::CompanyPrefs::default().bills_due_days, |r| {
             r.prefs.bills_due_days
         });
+    let calendar = record
+        .as_ref()
+        .map_or_else(cl_settings::FiscalCalendar::default, |r| {
+            r.flags.fiscal_calendar
+        });
     let last = record.and_then(|r| r.last_backup);
     if link.is_demo() {
         return Local {
@@ -599,6 +640,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
             last_backup: last.or_else(|| Some(demo::last_backup())),
             now: demo::now(),
             offset: utc(),
+            calendar,
         };
     }
     let now = chrono::Utc::now();
@@ -608,6 +650,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
         now: Timestamp::from_unix_millis(now.timestamp_millis())
             .unwrap_or_else(|_| crate::company::demo::DemoState::now()),
         offset: *now.with_timezone(&chrono::Local).offset(),
+        calendar,
     }
 }
 

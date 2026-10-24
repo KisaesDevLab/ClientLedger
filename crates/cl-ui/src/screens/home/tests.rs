@@ -621,3 +621,156 @@ fn a_change_elsewhere_reads_home_again_and_feeds_the_rail() {
     let _ = tree(&mut h, 1440.0);
     assert_eq!(rail(link.drain()).len(), 1, "a save elsewhere reads again");
 }
+
+// ----------------------------------------------------------------- WP8
+
+fn date(y: i32, m: u32, d: u32) -> CalendarDate {
+    CalendarDate::from_ymd(y, m, d).expect("date")
+}
+
+fn pl(income: &str, expenses: &str, net: &str) -> cl_api::ProfitLoss {
+    serde_json::from_value(json!({
+        "totalIncome": income, "totalExpenses": expenses, "netIncome": net,
+    }))
+    .expect("profit and loss")
+}
+
+/// Standard months are calendar months; a 4-4-5 year's periods are whole
+/// weeks named by their middle day. Six whole periods before today's.
+#[test]
+fn chart_months_follow_the_fiscal_calendar() {
+    use cl_settings::FiscalCalendar;
+    let today = date(2026, 11, 4);
+    let std = charts::months(charts::spec(Some(1), FiscalCalendar::Standard), today);
+    let ranges: Vec<(u32, String, String)> = std
+        .iter()
+        .map(|m| (m.named, m.start.to_wire(), m.end.to_wire()))
+        .collect();
+    assert_eq!(ranges.len(), charts::MONTHS);
+    assert_eq!(ranges[0], (5, "2026-05-01".into(), "2026-05-31".into()));
+    assert_eq!(ranges[5], (10, "2026-10-01".into(), "2026-10-31".into()));
+
+    let retail = charts::months(charts::spec(Some(1), FiscalCalendar::Retail445), today);
+    let names: Vec<u32> = retail.iter().map(|m| m.named).collect();
+    assert_eq!(names, [5, 6, 7, 8, 9, 10]);
+    assert_eq!(
+        (retail[0].start.to_wire(), retail[0].end.to_wire()),
+        ("2026-04-26".into(), "2026-05-23".into())
+    );
+    assert_eq!(
+        (retail[5].start.to_wire(), retail[5].end.to_wire()),
+        ("2026-09-27".into(), "2026-10-24".into()),
+        "the period holding 11/04 starts 10/25"
+    );
+    for w in retail.windows(2) {
+        assert_eq!(w[0].end.add_days(1).expect("day"), w[1].start, "contiguous");
+    }
+    for m in &retail {
+        let days = m.start.days_until(m.end) + 1;
+        assert!(days == 28 || days == 35, "{days}");
+    }
+    // A July fiscal start still shows calendar months.
+    let july = charts::months(charts::spec(Some(7), FiscalCalendar::Standard), today);
+    assert_eq!(july.last().map(|m| m.named), Some(10));
+    assert_eq!(charts::basis(Some("cash")), cl_api::ReportBasis::Cash);
+    assert_eq!(charts::basis(None), cl_api::ReportBasis::Accrual);
+}
+
+/// The figure is the report's net income, even when it is not income minus
+/// expenses; a failed month is missing (a dash), not a zero.
+#[test]
+fn the_chart_shows_the_engines_net_income_and_missing_months() {
+    let m = |n: u32| charts::Month {
+        named: n,
+        start: date(2026, n, 1),
+        end: date(2026, n, 28),
+    };
+    let months = vec![
+        charts::MonthPl {
+            range: m(9),
+            pl: Err(ApiError::Internal),
+        },
+        charts::MonthPl {
+            range: m(10),
+            pl: Ok(pl("21400", "7534.86", "13865.1")),
+        },
+    ];
+    let style = cl_core::MoneyStyle::default();
+    let v = charts::views(&months, style);
+    assert!(v[0].missing && v[0].income.is_none() && v[0].income_cents == 0);
+    assert_eq!(
+        v[1].net.as_deref(),
+        Some("13,865.10"),
+        "the engine's figure"
+    );
+    assert_ne!(
+        v[1].net.as_deref(),
+        Some("13,865.14"),
+        "not 21,400 - 7,534.86"
+    );
+    assert_eq!(
+        (v[1].income_cents, v[1].expense_cents),
+        (2_140_000, 753_486)
+    );
+    assert_eq!(
+        charts::accessible(&v[1]),
+        "October: income 21,400.00, expenses 7,534.86"
+    );
+    assert_eq!(charts::accessible(&v[0]), "September: couldn't load");
+    let tokens = crate::theme::Tokens::LIGHT;
+    let g = charts::groups(&v, &tokens);
+    assert_eq!(g[0].bars, None);
+    assert_eq!(g[1].bars.as_ref().map(Vec::len), Some(2));
+    assert_eq!(g[1].label, "Oct");
+    assert!(!charts::empty(&v));
+    let zero = vec![charts::MonthPl {
+        range: m(10),
+        pl: Ok(pl("0", "0", "0")),
+    }];
+    assert!(charts::empty(&charts::views(&zero, style)), "a new company");
+    let neg: cl_api::ReportAmount = serde_json::from_str("-12.345").expect("amount");
+    assert_eq!(charts::cents(&neg), Some(-1235));
+}
+
+/// The demo's chart on Home: six months, each group a named button,
+/// October's profit, and a click drills into Profit & Loss with the range.
+#[test]
+fn the_demo_chart_shows_the_mockup_and_drills_into_the_report() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let nodes = tree(&mut h, 1440.0);
+    let has = |role: Role, name: &str| nodes.iter().any(|(r, n)| *r == role && n == name);
+    assert!(has(Role::Label, "Income and expenses \u{b7} last 6 months"));
+    assert!(has(Role::Label, "October profit"));
+    assert!(has(Role::Label, "$13,865.14"));
+    assert!(has(Role::Label, "Income") && has(Role::Label, "Expenses"));
+    let groups: Vec<&String> = nodes
+        .iter()
+        .filter(|(r, n)| *r == Role::Button && n.contains(": income "))
+        .map(|(_, n)| n)
+        .collect();
+    assert_eq!(groups.len(), 6, "{groups:?}");
+    assert!(groups.iter().any(|n| n.starts_with("October: income ")));
+    let st = h.state();
+    assert_eq!(st["chart"]["months"], 6);
+    assert_eq!(st["chart"]["missing"], 0);
+    assert_eq!(
+        st["chart"]["labels"],
+        json!(["May", "Jun", "Jul", "Aug", "Sep", "Oct"])
+    );
+    assert!(!st.to_string().contains("13865"), "no amounts in the state");
+    let _ = link.drain();
+    let oct = charts::Month {
+        named: 10,
+        start: date(2026, 10, 1),
+        end: date(2026, 10, 31),
+    };
+    h.drill(oct);
+    assert_eq!(
+        link.drain(),
+        vec![CompanyEvent::OpenWindow(CommandId::new(
+            "reports.profit_loss"
+        ))]
+    );
+    assert_eq!(h.state()["chart"]["drill"], "2026-10-01..2026-10-31");
+}
