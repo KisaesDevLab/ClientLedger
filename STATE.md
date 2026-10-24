@@ -1,9 +1,9 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P16 — Home workspace (Next)
-**Status:** P15A built on `phase/P15A-bulk-entry`; PR to open
+**Current phase:** Checkpoint PR-1 (end of M1), then P17 — Enter Bill, vendor credits, receipt inbox, attachment viewer (Next)
+**Status:** P16 built on `phase/P16-home-workspace`; PR open with auto-merge. Engine PR #168 (U-75 tag numbers, U-76 dashboard exact) awaits the owner's merge; then bump the pin (Q-02)
 **Engine commit:** `c217bfd7e1f72b03a5e5ad3aaa21120da3d36246` (`main`, pinned 2026-10-21 after engine PR #163: batch-atomic-v1, batch-check-v1, batch-mixed-v1, batch-exact-v1, batch-idempotent-v1, batch-closing-v1, migration 0226; bump per Q-02)
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-24
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
 ## Phase board — beta track
@@ -27,7 +27,8 @@
 | P14 | Deposits, transfers, sales receipts, card charges, owner and loan helpers | M | Done 2026-10-20 |
 | P15 | Journal entries, templates and recurring | H | Done 2026-10-21 |
 | P15A | Bulk Entry | M | Done 2026-10-21 |
-| P16 | Home workspace | L | Next |
+| P16 | Home workspace | L | Done 2026-10-24 (tag numbers and exact dashboard figures PENDING by U-75/U-76, engine PR #168) |
+| PR-1 | Checkpoint: core ledger process review | — | Next |
 | P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | |
 | P18 | Pay Bills (checks) | M | |
 | P19 | Form printing | L | |
@@ -94,6 +95,8 @@ Format: `Pxx — blocked by U-xx/Q-xx — what is pending — workaround in plac
 - P11 your own terms (including discount terms) and payment methods — blocked by U-43 — `list_csv::terms_lists_u43` is PENDING — in place: the engine's fixed lists, read-only, with a note (Q-P11y).
 - P11 item CSV import in one call and full contact rows — blocked by U-46 — `list_csv::items_import_u46` is PENDING — in place: items created one at a time; contacts import name, company, email and phone only (Q-P11x).
 - P12 toggling cleared marks in the register (R5) — blocked by `register-cleared-v1` — in place: ✓/R read-only (Q-P12k). Also still PENDING for P12: U-17 (server-side version check; fingerprint stopgap) and U-18 (idempotency keys; lost-reply probe).
+- P16 tag numbers — blocked by U-75 (`tag-number-v1`, engine PR #168, owner to merge) — `tags::numbers_u75`, `tags::number_archive_round_trip_u75` are PENDING — in place: the Number field and "number · name" display are built and gated on the capability.
+- P16 exact Home figures (lane footers, overdue invoices, cash position) — blocked by U-76 (`dashboard-exact-v1`, engine PR #168) — `home::exact_strings_u76` is PENDING — in place: "—" for lane figures, balances from each account's exact stored balance, overdue invoices hidden (Q-P16g, Q-P16i). After the pin bump run `CL_API_REQUIRE_CAPS=tag-number-v1,dashboard-exact-v1`; the engine schema hash changes then.
 
 ## Placeholders tracked
 
@@ -101,8 +104,12 @@ Screens or actions that link to a later phase. Remove each line when its phase l
 
 - P34/P08 — restore UI must call `Cluster::restore(src, store, allow_unregistered)` with `allow_unregistered = false` by default and set it to `true` only after an explicit owner confirmation that the file came from a trusted source (Q-P03h).
 
-- P06 shell placeholders (Q-P06g): every menu, rail and palette command whose screen is built later opens a placeholder tab. The phase that builds the screen removes its entry: P11 Item List / Tags / Clients & Jobs / Vendors, P12 Open Register, P13 Write Check, P14 Make Deposit / Transfer Funds / Sales Receipt / Record Card Charge, P16 Home (replaces the Home placeholder and the demo rail counts), P17 Enter Bill, P18 Pay Bills, P20 Create Invoice, P21 Receive Payment, P22 Credit Memo or Refund / Statements, P25 Import Bank File, P26 Bank Feed, P27 Reconcile, P28 Reports / Profit & Loss / Balance Sheet / Trial Balance, P29 Set Closing Date / Users and Permissions / Audit Trail, P30 Import Payroll, P32 Send to My Accountant, P38 bundled help (F1 says "not available yet").
+- P06 shell placeholders (Q-P06g): every menu, rail and palette command whose screen is built later opens a placeholder tab. The phase that builds the screen removes its entry: P11 Item List / Tags / Clients & Jobs / Vendors, P12 Open Register, P13 Write Check, P14 Make Deposit / Transfer Funds / Sales Receipt / Record Card Charge, P17 Enter Bill, P18 Pay Bills, P20 Create Invoice, P21 Receive Payment, P22 Credit Memo or Refund / Statements, P25 Import Bank File, P26 Bank Feed, P27 Reconcile, P28 Reports / Profit & Loss / Balance Sheet / Trial Balance, P29 Set Closing Date / Users and Permissions / Audit Trail, P30 Import Payroll, P32 Send to My Accountant, P38 bundled help (F1 says "not available yet").
 - P06 native macOS menu bar (Q-70, muda) is deferred (Q-P06b): in-window menu on every platform until macOS packaging.
+- P16 Home lane actions open "arrives in Pxx" placeholders (Q-P16k): P17 Enter Bill, P18 Pay Bills, P20 Create Invoice / Sales Receipt, P21 Receive Payment, P26 Review Bank Feed, P27 Reconcile, P28 Profit & Loss, P29 Set Closing Date, P32 Send to My Accountant. Each phase wires its lane action.
+- P16 Home chart: a month click opens the Profit & Loss placeholder; P28 must open the report for that month's range (Q-P16h).
+- P16 Home "Bank file" balance column — U-77 / P25 (Q-P16d); "ready to accept" count — P26 (Q-P16f); "invoices more than 60 days past due" — P28 aging (Q-P16g); "Send to My Accountant · last sent" — P32 (Q-P16i).
+- P16 Needs attention placeholder line for to-dos, reorder alerts and the weekly health check — U-37, U-78, U-12 (Q-P16e).
 
 ## Follow-ups from P03 security review
 
@@ -182,6 +189,17 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 3. The `cl-host` cold-start budget still exceeds 15 s locally under load (CI uses 30/60 s).
 4. The `cl-automation` control-port test flakes under parallel local load.
 
+## Follow-ups from P16
+
+1. Tag CSV export (`csv_import.rs`) doesn't carry tag numbers yet.
+2. `cl-pg fresh_start` exceeds its 10 s budget under parallel local builds (passes alone).
+3. This Windows dev machine has Smart App Control enforcing; it sometimes blocks a freshly built test binary (os error 4551). Re-running or touching a source file works; the owner is turning it off for development (2026-10-24).
+4. The `recovery-key` scenario fails on this machine on `main` too: the long temp path is wider than the "Save to file" box (`recovery-key.yaml:44`, `assert_no_clipping`). Widen the box or let it scroll.
+5. `cargo xtask keymap-doc` (shortcuts cheatsheet) omits the fixed grid keys that KEYBOARD.md lists (Shift+F10, Shift+↑/↓, Alt+↑/↓).
+6. U-79 (proposed): `/bills` status filter / leave voided bills out; Home counts posted bills client-side until then (Q-P16r).
+7. U-77 bank-file balance and U-78 reorder alerts proposed; U-37 and U-12 amended for Home.
+8. Home's Refresh issues many engine reads per data-bus event (one per reconciled account batch plus lanes); measure before P33 LAN mode.
+
 ## Owner-requested checkpoints
 
 - **After P13 merges, before P14 starts (owner, 2026-10-20):** Intuit compliance check — trademarks/names, copied text, icons and assets, layouts and colors vs QuickBooks, feature names, help text, fixtures, non-affiliation notice (non-negotiable 5). Report to the owner; fix findings on a `fix/` branch.
@@ -192,6 +210,52 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-24 — P16 complete on `phase/P16-home-workspace`; PR with auto-merge. Work moved to a new Windows 11 dev machine (toolchain reinstalled; PowerShell added to the agent definitions). Shipped:
+  - Steps 0–0h:
+    - "Enter moves between fields" preference (both modes on every form, Bulk Entry and list forms).
+    - Fixed top and bottom bars on every screen (`layout::FixedFrame`).
+    - Collapsible detail panel on Customers & Jobs and Vendors.
+    - Condensed entry rows on wide screens.
+    - Tag numbers ("10 · Lake Area", sorted like account numbers).
+    - Bulk Entry Copy down, column chooser, multi-row selection with Set and Delete actions, and a shared cl-grid context menu.
+  - Steps 1–6, the Home workspace:
+    - Four lanes from the command registry.
+    - Account balances.
+    - Needs attention: bills, payroll imports, bank items, reconciliations, backup reminder.
+    - Profit-and-loss chart drawn in-house.
+    - Setup checklist.
+    - Ko-fi support button (Q-278).
+    - Rail counts from engine reads.
+  - Control channel `hover` and `scroll` steps.
+  - Engine and CI:
+    - Engine PR #168 (U-75 `tag-number-v1`, U-76 `dashboard-exact-v1`, migration 0228) is open for the owner; its contract tests are PENDING.
+    - CI fixes merged first: PR #32 (output drain race, cargo-deny advisories) and PR #33 (refused-connect retry race in cl-api).
+  - Reviews: two fresh-eyes reviews (part 1 Bulk Entry and forms; part 2 Home) and a ui-verifier pass. Each was followed by a fresh fix pass, among them:
+    - voided bills counted on Home
+    - Ctrl+A never reaching the grid
+    - Copy down from the blank row
+    - `number_cmp` not being a total order (proptest added)
+    - journal entries merging
+    - a flaky scroll scenario
+  - The card-balance sign on Home now matches Q-241.
+  - Help pages: home, enter-key, tag-numbers, bulk-entry.
+  - Decisions Q-P16a to Q-P16y; U-77, U-78 and U-79 proposed.
+
+  Acceptance (phases/M1-core-ledger.md P16):
+  - [x] Enter-moves option in both modes (unit tests + `forms-enter.yaml`).
+  - [x] Headers stay visible while scrolling, at 960×640 and 200% (`persistent-headers.yaml`, stable 6/6).
+  - [x] Detail panels collapse and stay remembered (`client-center.yaml`).
+  - [x] Condensed striped rows on wide screens (draw tests + daily_sales screenshots).
+  - [x] Unique tag numbers shown and sorted everywhere (unit + tags scenario; live contract PENDING U-75).
+  - [x] Copy down in one undo step (model + UI tests, batch_entry).
+  - [x] Columns shown, hidden and reordered, remembered; required columns locked.
+  - [x] Multi-select with Set actions in one undo step.
+  - [x] Every lane action opens its form or a tracked placeholder (registry test + `home.yaml`).
+  - [x] Needs-attention counts match engine queries (`contract_home.rs` live on the pin with seeded payroll, feed and a voided bill; dashboard part PENDING U-76).
+  - [x] Ko-fi opens only when clicked (unit tests; the scenario hovers only).
+  - [x] `ui-check home --compare` reviewed by ui-verifier, deviations in Q-P16d to Q-P16u.
+
+  Agents: scout/opus, architect/opus, impl/opus (WP0–WP8 and two fix passes; the phase is tier L, but opus was used per Q-277), engine-impl/opus, review/opus ×2, ui-verifier/opus, docs-writer/sonnet.
 - 2026-10-21 — P15A complete on `phase/P15A-bulk-entry`; PR to open. Shipped: the Bulk Entry window (sections per type and account; checks, expenses, card charges, card credits, deposits and journal entries; other types wait for their phases, Q-263); local exact checks (cent rounding, journal entry balance, duplicate check numbers, closed-period marks); engine validate per row with highlights and F8 navigation; paste from a spreadsheet and CSV import with a remembered column mapping; account suggestions with accept; Save all in one atomic call with an idempotency key and one closing-password prompt; a summary with register links; data-bus refresh. Grid block paste and a control-channel paste step. Engine PR #163 (U-67 to U-74, migration 0226) merged after security review and fixes; pin c217bfd. Contract suite 149/149 live; scenario batch_entry 178 steps plus forms-zoom coverage; help page. Decisions Q-P15Aa to Q-P15As.
   Acceptance (phases/M1-core-ledger.md P15A): [x] a mixed batch of checks and deposits saves and every row shows in the register with the right balance (live contract + scenario); [x] invalid rows cannot save (atomic rollback contract, unit + scenario); [x] control-channel scenario.
   Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, Opus fallback for money lanes), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.
@@ -201,6 +265,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
 - 2026-10-20 — P14 complete on `phase/P14-money-forms`; PR to open. Shipped: Make Deposit (grouping clears Undeposited Funds exactly, fee lines, cash back, vendor refunds, bank-deposit suggestions, on-screen summary), Transfer Funds, Daily Sales Summary (engine templates, over/short exact against the engine, manual tax line), Card Charge/Credit (header tags, payee panel, prefill), Pay Yourself/Put Money In and Paid with Personal Funds by entity type (equity roles), Loan Payment helper (lender fixture exact), cross-window refresh bus (Q-262), shared form header with navigation prompt, tab strip overflow, Undeposited Funds naming, jargon tooltips. Engine PR #159 (U-52 to U-57, migration 0223) merged after security review and fixes; pin f78583e. Contract suite 116/116 live; scenarios deposit 190, transfer 152, daily_sales 126, card_charge 141, owner_money 126, personal_funds 101, loan_payment 108 steps, plus forms-zoom; help pages x7. The preview build workflow (Q-253) and the Intuit compliance fixes (Q-254 to Q-258) merged between P13 and P14. Decisions Q-P14a to Q-P14ad.
   Acceptance (phases/M1-core-ledger.md P14): [x] two grouped payments equal the bank deposit and clear Undeposited Funds (contract `deposits::grouping_clears_payments_clearing` + scenario); [x] transfers match in both registers (contract + scenario); [x] loan payment splits exactly and the balance matches the lender fixture (contract + model proptest).
   Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, Opus fallback for money lanes), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.
-- 2026-10-20 — P13 complete on `phase/P13-write-check`; PR to open. Shipped: the Write Check form (check card, amount in words, "To print", Expenses lines with Customer:Job, Billable and Tags, Save & New / Save & Close, Prev/Next with a Save/Discard prompt, History, Attach, payee panel with the open-bill warning and recent checks, prefill from the last transaction except amounts, vendor default account, offline rule suggestions and a gated AI chip with explicit accept); check edit with the printed-check choice; the closing-password flow reused; the shared lines grid and closing prompt; Q-232 typed amounts round to the cent; Q-238 "Customers" wording; Q-250 a click opens list fields; sample data for the mockup story; vendor-center focus fix. Engine PR #156 merged (U-48 check edit, U-49 line customer, U-50 billable + migration 0221, U-51 rules evaluate); pin 454fd23. Contract suite 101/101; `write_check` scenario 254 steps light+dark, `--compare` 43 steps. P15A Batch Enter Transactions added to beta (Q-252).
-  Acceptance (phases/M1-core-ledger.md P13): [x] the mockup example saves, the register shows it, the GL is correct (contract `write_check::gl_effect`); [x] no save when lines and amount disagree (unit test + scenario, nothing sent); [x] mockup match via `--compare` reviewed by ui-verifier, deviations Q-P13a–p.
-  Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, opus fallback for money packages), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.
