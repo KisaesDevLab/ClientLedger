@@ -1,5 +1,8 @@
-# Home (P16 steps 1-3) against `clientledger --demo`: the four lanes from the
-# command registry, the account balances "In your books" and Needs attention.
+# Home (P16 steps 1-6) against `clientledger --demo`: the four lanes from the
+# command registry, the account balances "In your books", Needs attention,
+# the setup checklist (5 of 6 done), six months of income and expenses from
+# the (demo) engine's Profit & Loss, and the Ko-fi button (hovered, never
+# clicked).
 # The demo stands in for an engine with dashboard-exact-v1 (U-76), so the
 # lane figures show; the bank-file column is a dash until bank-file import
 # (U-77). A lane action opens its form (Write Check) or the placeholder of a
@@ -19,6 +22,21 @@ steps:
   - assert_state: {key: screen.lane_columns, equals: 4}
   - assert_exists: {role: label, label: Home}
   - assert_exists: {role: button, label: Refresh}
+
+  # --- Setup checklist: ticks come from the reads (5 of 6; no mail server) ---
+  - assert_exists: {role: button, label: Setup checklist 5 of 6 done}
+  - assert_exists: {role: link, label: Set up email for invoices}
+  - assert_state: {key: screen.checklist.done, equals: 5}
+  - assert_state: {key: screen.checklist.total, equals: 6}
+  - assert_state: {key: screen.checklist.first_open, equals: email}
+  - assert_state: {key: screen.checklist.expanded, equals: false}
+  - click: {role: button, label: Setup checklist 5 of 6 done}
+  - assert_state: {key: screen.checklist.expanded, equals: true}
+  - assert_exists: {role: button, label: Hide checklist}
+  - assert_exists: {role: label, label: Add a bank account (done)}
+  - screenshot: home-checklist
+  - click: {role: button, label: Setup checklist 5 of 6 done}
+  - assert_state: {key: screen.checklist.expanded, equals: false}
 
   # --- Lanes: each heading and action ---------------------------------------
   - assert_exists: {role: label, label: MONEY IN}
@@ -75,8 +93,28 @@ steps:
   - assert_exists: {role: label, label_contains: arrive in a later update}
   - assert_exists: {role: label, label: Backed up today 8:12 AM}
   - assert_exists: {role: link, label: Review}
+
+  # --- Income and expenses: six months of the engine's Profit & Loss --------
+  - assert_exists: {role: label, label: "Income and expenses · last 6 months"}
+  - assert_state: {key: screen.chart.months, equals: 6}
+  - assert_state: {key: screen.chart.missing, equals: 0}
+  - assert_exists: {role: button, label_contains: "May: income "}
+  - assert_exists: {role: button, label_contains: "October: income "}
+  - assert_exists: {role: label, label: October profit}
+  - assert_exists: {role: label, label: "$13,865.14"}
   - assert_no_clipping: {}
   - screenshot: home
+
+  # --- Ko-fi (Q-278): found by its label; hovering shows the address. ------
+  # Never clicked here: a click opens the owner's browser (the control
+  # channel records it instead, but the scenario does not rely on that).
+  # egui puts a tooltip's text in the widget's accessible description (the
+  # popup is not in the tree); the screenshot shows the tooltip itself.
+  - assert_exists: {role: button, label: Support ClientLedger on Ko-fi}
+  - hover: {role: button, label: Support ClientLedger on Ko-fi}
+  - assert_exists: {role: button, label: Support ClientLedger on Ko-fi, description_contains: "ko-fi.com/I3D3227TTP"}
+  - wait: {ms: 800}
+  - screenshot: home-kofi-tooltip
 
   # --- A built action opens its form ---------------------------------------
   - click: {role: button, label: Write Check}
@@ -101,6 +139,13 @@ steps:
   - click: {role: button, label: Refresh}
   - assert_state: {key: screen.loading, equals: false}
   - assert_state: {key: screen.attention.bills_due, equals: 3}
+
+  # --- A chart month drills into Profit & Loss (a placeholder until P28) ----
+  - click: {role: button, label_contains: "October: income "}
+  - assert_state: {key: active_tab, equals: Profit & Loss}
+  - command: file.close_window
+  - key: Alt+H
+  - assert_state: {key: screen.chart.drill, equals: "2026-10-01..2026-10-31"}
 
   # --- Minimum window (960 x 640): lanes two to a row -------------------------
   - resize: {width: 960, height: 640}

@@ -621,3 +621,337 @@ fn a_change_elsewhere_reads_home_again_and_feeds_the_rail() {
     let _ = tree(&mut h, 1440.0);
     assert_eq!(rail(link.drain()).len(), 1, "a save elsewhere reads again");
 }
+
+// ----------------------------------------------------------------- WP8
+
+fn date(y: i32, m: u32, d: u32) -> CalendarDate {
+    CalendarDate::from_ymd(y, m, d).expect("date")
+}
+
+fn pl(income: &str, expenses: &str, net: &str) -> cl_api::ProfitLoss {
+    serde_json::from_value(json!({
+        "totalIncome": income, "totalExpenses": expenses, "netIncome": net,
+    }))
+    .expect("profit and loss")
+}
+
+/// Standard months are calendar months; a 4-4-5 year's periods are whole
+/// weeks named by their middle day. Six whole periods before today's.
+#[test]
+fn chart_months_follow_the_fiscal_calendar() {
+    use cl_settings::FiscalCalendar;
+    let today = date(2026, 11, 4);
+    let std = charts::months(charts::spec(Some(1), FiscalCalendar::Standard), today);
+    let ranges: Vec<(u32, String, String)> = std
+        .iter()
+        .map(|m| (m.named, m.start.to_wire(), m.end.to_wire()))
+        .collect();
+    assert_eq!(ranges.len(), charts::MONTHS);
+    assert_eq!(ranges[0], (5, "2026-05-01".into(), "2026-05-31".into()));
+    assert_eq!(ranges[5], (10, "2026-10-01".into(), "2026-10-31".into()));
+
+    let retail = charts::months(charts::spec(Some(1), FiscalCalendar::Retail445), today);
+    let names: Vec<u32> = retail.iter().map(|m| m.named).collect();
+    assert_eq!(names, [5, 6, 7, 8, 9, 10]);
+    assert_eq!(
+        (retail[0].start.to_wire(), retail[0].end.to_wire()),
+        ("2026-04-26".into(), "2026-05-23".into())
+    );
+    assert_eq!(
+        (retail[5].start.to_wire(), retail[5].end.to_wire()),
+        ("2026-09-27".into(), "2026-10-24".into()),
+        "the period holding 11/04 starts 10/25"
+    );
+    for w in retail.windows(2) {
+        assert_eq!(w[0].end.add_days(1).expect("day"), w[1].start, "contiguous");
+    }
+    for m in &retail {
+        let days = m.start.days_until(m.end) + 1;
+        assert!(days == 28 || days == 35, "{days}");
+    }
+    // A July fiscal start still shows calendar months.
+    let july = charts::months(charts::spec(Some(7), FiscalCalendar::Standard), today);
+    assert_eq!(july.last().map(|m| m.named), Some(10));
+    assert_eq!(charts::basis(Some("cash")), cl_api::ReportBasis::Cash);
+    assert_eq!(charts::basis(None), cl_api::ReportBasis::Accrual);
+}
+
+/// The figure is the report's net income, even when it is not income minus
+/// expenses; a failed month is missing (a dash), not a zero.
+#[test]
+fn the_chart_shows_the_engines_net_income_and_missing_months() {
+    let m = |n: u32| charts::Month {
+        named: n,
+        start: date(2026, n, 1),
+        end: date(2026, n, 28),
+    };
+    let months = vec![
+        charts::MonthPl {
+            range: m(9),
+            pl: Err(ApiError::Internal),
+        },
+        charts::MonthPl {
+            range: m(10),
+            pl: Ok(pl("21400", "7534.86", "13865.1")),
+        },
+    ];
+    let style = cl_core::MoneyStyle::default();
+    let v = charts::views(&months, style);
+    assert!(v[0].missing && v[0].income.is_none() && v[0].income_cents == 0);
+    assert_eq!(
+        v[1].net.as_deref(),
+        Some("13,865.10"),
+        "the engine's figure"
+    );
+    assert_ne!(
+        v[1].net.as_deref(),
+        Some("13,865.14"),
+        "not 21,400 - 7,534.86"
+    );
+    assert_eq!(
+        (v[1].income_cents, v[1].expense_cents),
+        (2_140_000, 753_486)
+    );
+    assert_eq!(
+        charts::accessible(&v[1]),
+        "October: income 21,400.00, expenses 7,534.86"
+    );
+    assert_eq!(charts::accessible(&v[0]), "September: couldn't load");
+    let tokens = crate::theme::Tokens::LIGHT;
+    let g = charts::groups(&v, &tokens);
+    assert_eq!(g[0].bars, None);
+    assert_eq!(g[1].bars.as_ref().map(Vec::len), Some(2));
+    assert_eq!(g[1].label, "Oct");
+    assert!(!charts::empty(&v));
+    let zero = vec![charts::MonthPl {
+        range: m(10),
+        pl: Ok(pl("0", "0", "0")),
+    }];
+    assert!(charts::empty(&charts::views(&zero, style)), "a new company");
+    let neg: cl_api::ReportAmount = serde_json::from_str("-12.345").expect("amount");
+    assert_eq!(charts::cents(&neg), Some(-1235));
+}
+
+/// The demo's chart on Home: six months, each group a named button,
+/// October's profit, and a click drills into Profit & Loss with the range.
+#[test]
+fn the_demo_chart_shows_the_mockup_and_drills_into_the_report() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let nodes = tree(&mut h, 1440.0);
+    let has = |role: Role, name: &str| nodes.iter().any(|(r, n)| *r == role && n == name);
+    assert!(has(Role::Label, "Income and expenses \u{b7} last 6 months"));
+    assert!(has(Role::Label, "October profit"));
+    assert!(has(Role::Label, "$13,865.14"));
+    assert!(has(Role::Label, "Income") && has(Role::Label, "Expenses"));
+    let groups: Vec<&String> = nodes
+        .iter()
+        .filter(|(r, n)| *r == Role::Button && n.contains(": income "))
+        .map(|(_, n)| n)
+        .collect();
+    assert_eq!(groups.len(), 6, "{groups:?}");
+    assert!(groups.iter().any(|n| n.starts_with("October: income ")));
+    let st = h.state();
+    assert_eq!(st["chart"]["months"], 6);
+    assert_eq!(st["chart"]["missing"], 0);
+    assert_eq!(
+        st["chart"]["labels"],
+        json!(["May", "Jun", "Jul", "Aug", "Sep", "Oct"])
+    );
+    assert!(!st.to_string().contains("13865"), "no amounts in the state");
+    let _ = link.drain();
+    let oct = charts::Month {
+        named: 10,
+        start: date(2026, 10, 1),
+        end: date(2026, 10, 31),
+    };
+    h.drill(oct);
+    assert_eq!(
+        link.drain(),
+        vec![CompanyEvent::OpenWindow(CommandId::new(
+            "reports.profit_loss"
+        ))]
+    );
+    assert_eq!(h.state()["chart"]["drill"], "2026-10-01..2026-10-31");
+}
+
+/// The checklist ticks from the reads alone: the profile, the chart, any
+/// transaction, a bank file, the mail server and the last backup.
+#[test]
+fn the_setup_checklist_ticks_from_the_reads() {
+    use cl_model::home::ChecklistItem;
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let c = checklist::checklist(&h).expect("read");
+    assert_eq!(
+        (c.done_count(), c.total()),
+        (5, 6),
+        "no opening-balance step (Q-P16j)"
+    );
+    assert_eq!(c.first_open(), Some(ChecklistItem::Email));
+    assert!(!c.is_done(ChecklistItem::OpeningBalances));
+
+    // A new company: nothing done, the list opens by itself.
+    h.data.checklist = Slot::ready(checklist::Facts::default());
+    h.data.accounts = Slot::ready(Vec::new());
+    h.local.last_backup = None;
+    let c = checklist::checklist(&h).expect("read");
+    assert_eq!(c.done_count(), 0);
+    assert!(h.checklist_expanded(), "prominent for a new company");
+    assert_eq!(h.state()["checklist"]["expanded"], true);
+
+    // Everything done: the checklist hides itself.
+    h.data.checklist = Slot::ready(checklist::Facts {
+        company_info: true,
+        transaction: true,
+        bank_file: true,
+        email: true,
+    });
+    h.data.accounts = Slot::ready(demo::accounts(&mut DemoState::new()));
+    h.local.last_backup = Some(demo::last_backup());
+    assert!(checklist::checklist(&h).expect("read").complete());
+    assert!(h.checklist_shown().is_none());
+    assert_eq!(h.state()["checklist"]["visible"], false);
+
+    // Not read yet: nothing shown.
+    h.data.checklist = Slot::default();
+    assert!(checklist::checklist(&h).is_none());
+
+    let mut p = cl_api::CompanyProfileUpdate {
+        business_name: "Ozark Ridge".into(),
+        ..cl_api::CompanyProfileUpdate::default()
+    };
+    assert!(!checklist::profile_filled(&p), "no address yet");
+    p.address_line1 = Some("12 Main".into());
+    assert!(checklist::profile_filled(&p));
+    p.business_name = "  ".into();
+    assert!(!checklist::profile_filled(&p));
+}
+
+/// The demo's title row: "Setup checklist 5 of 6 done · Set up email for
+/// invoices"; the summary opens the full list, a link opens its window, and
+/// Hide checklist is kept in the company's preferences.
+#[test]
+fn the_setup_checklist_opens_hides_and_stays_hidden() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let nodes = tree(&mut h, 1440.0);
+    let has = |nodes: &[(Role, String)], role: Role, name: &str| {
+        nodes.iter().any(|(r, n)| *r == role && n == name)
+    };
+    assert!(has(&nodes, Role::Button, "Setup checklist 5 of 6 done"));
+    assert!(has(&nodes, Role::Link, "Set up email for invoices"));
+    assert!(
+        !has(&nodes, Role::Button, "Hide checklist"),
+        "closed at 5 of 6"
+    );
+    let st = h.state();
+    assert_eq!(st["checklist"]["done"], 5);
+    assert_eq!(st["checklist"]["total"], 6);
+    assert_eq!(st["checklist"]["first_open"], "email");
+
+    h.checklist_action(checklist::Action::Toggle);
+    let nodes = tree(&mut h, 1440.0);
+    assert!(has(&nodes, Role::Button, "Hide checklist"));
+    assert!(has(&nodes, Role::Label, "Add a bank account (done)"));
+    assert!(has(&nodes, Role::Label, "Set up email for invoices"));
+    // Narrow: the line moves under the title and still shows.
+    let nodes = tree(&mut h, 480.0);
+    assert!(has(&nodes, Role::Link, "Set up email for invoices"));
+
+    let _ = link.drain();
+    h.checklist_action(checklist::Action::Open("edit.preferences"));
+    assert_eq!(
+        link.drain(),
+        vec![CompanyEvent::OpenWindow(CommandId::new("edit.preferences"))]
+    );
+
+    h.checklist_action(checklist::Action::Dismiss);
+    assert!(h.checklist_shown().is_none());
+    let (id, _) = tenant(&link).expect("demo company");
+    let saved = link.store().load().expect("store");
+    assert!(
+        saved
+            .get(id)
+            .expect("record")
+            .prefs
+            .setup_checklist_dismissed,
+        "kept in CompanyPrefs"
+    );
+    let again = home(&link);
+    assert!(again.local.checklist_dismissed);
+    assert!(again.checklist_shown().is_none());
+    assert_eq!(again.state()["checklist"]["dismissed"], true);
+}
+
+/// Ko-fi (Q-278): the address is the constant, drawing Home never opens
+/// it, and one click records exactly one URL (the test sink stands in for
+/// the browser).
+#[test]
+fn the_kofi_button_opens_the_page_only_when_clicked() {
+    use eframe::egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2};
+    assert_eq!(support::KOFI_URL, "https://ko-fi.com/I3D3227TTP");
+    assert!(!support::KOFI_URL.contains('?'), "no tracking parameters");
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let sink = crate::links::LinkSink::install(&ctx);
+    let frame = |h: &mut HomeScreen, events: Vec<Event>| {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 1400.0))),
+            events,
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| h.ui(ui));
+        });
+        out.textures_delta.clear();
+        out
+    };
+    let mut button = None;
+    for _ in 0..5 {
+        let out = frame(&mut h, Vec::new());
+        assert!(
+            !out.platform_output
+                .commands
+                .iter()
+                .any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))),
+            "no browser without a click"
+        );
+        if let Some(u) = out.platform_output.accesskit_update {
+            for (_, n) in u.nodes {
+                if n.role() == Role::Button && n.label() == Some("Support ClientLedger on Ko-fi") {
+                    button = n.bounds();
+                }
+            }
+        }
+    }
+    assert!(sink.opened().is_empty(), "nothing opened by drawing");
+    let b = button.expect("the Ko-fi button is drawn and named");
+    #[allow(clippy::cast_possible_truncation)]
+    let at = Pos2::new(
+        f64::midpoint(b.x0, b.x1) as f32,
+        f64::midpoint(b.y0, b.y1) as f32,
+    );
+    let press = |pressed| Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    frame(&mut h, vec![Event::PointerMoved(at)]);
+    frame(&mut h, vec![press(true)]);
+    let out = frame(&mut h, vec![press(false)]);
+    assert!(
+        !out.platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))),
+        "the sink, not the browser"
+    );
+    frame(&mut h, Vec::new());
+    assert_eq!(sink.opened(), [support::KOFI_URL], "exactly one");
+}

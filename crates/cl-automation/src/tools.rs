@@ -24,6 +24,7 @@ fn target_schema() -> Value {
             "id": {"type": "string", "description": "Element id from inspect."},
             "label": {"type": "string", "description": "Exact accessible label."},
             "label_contains": {"type": "string", "description": "Case-insensitive part of the label."},
+            "description_contains": {"type": "string", "description": "Case-insensitive part of the description (a widget's tooltip text)."},
             "role": {"type": "string", "description": "Role such as button, tab, text_input."},
             "index": {"type": "integer", "minimum": 0, "description": "Which match when several."}
         },
@@ -40,6 +41,15 @@ fn object(properties: &Value, required: &[&str]) -> Value {
     })
 }
 
+/// A method whose only input is the element it acts on.
+fn target_only(name: &'static str, description: &'static str) -> Tool {
+    Tool {
+        name,
+        description,
+        input_schema: object(&json!({"target": target_schema()}), &["target"]),
+    }
+}
+
 /// All methods, in a stable order.
 #[must_use]
 pub fn tools() -> Vec<Tool> {
@@ -49,11 +59,7 @@ pub fn tools() -> Vec<Tool> {
             description: "Return the accessibility tree (id, role, label, bounds, focus, enabled), or the elements matching a target. Secret field values are hidden.",
             input_schema: object(&json!({"target": target_schema()}), &[]),
         },
-        Tool {
-            name: "click",
-            description: "Click the centre of an element.",
-            input_schema: object(&json!({"target": target_schema()}), &["target"]),
-        },
+        target_only("click", "Click the centre of an element."),
         Tool {
             name: "type",
             description: "Type text into the focused element, optionally focusing a target first.",
@@ -75,11 +81,7 @@ pub fn tools() -> Vec<Tool> {
             description: "Press one key chord such as Ctrl+K, Enter, Escape, Shift+Tab, F1.",
             input_schema: object(&json!({"key": {"type": "string"}}), &["key"]),
         },
-        Tool {
-            name: "focus",
-            description: "Move keyboard focus to an element.",
-            input_schema: object(&json!({"target": target_schema()}), &["target"]),
-        },
+        target_only("focus", "Move keyboard focus to an element."),
         Tool {
             name: "scroll",
             description: "Turn the mouse wheel over an element until what scrolls there reaches its start or end.",
@@ -91,6 +93,10 @@ pub fn tools() -> Vec<Tool> {
                 &["target", "to"],
             ),
         },
+        target_only(
+            "hover",
+            "Move the pointer over the centre of an element without clicking (shows its tooltip).",
+        ),
         Tool {
             name: "command",
             description: "Run a registered command by id, for example help.palette or file.quit.",
@@ -162,7 +168,7 @@ mod tests {
         let n = names.len();
         names.dedup();
         assert_eq!(n, names.len());
-        assert_eq!(n, 14);
+        assert_eq!(n, 15);
         for tool in &t {
             assert_eq!(tool.input_schema["type"], "object", "{}", tool.name);
             assert_ne!(tool.description.len(), 0);

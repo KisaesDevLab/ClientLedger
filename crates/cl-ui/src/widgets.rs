@@ -9,6 +9,8 @@ use eframe::egui::{
 
 use crate::theme::{Tokens, styles};
 
+pub mod bar_chart;
+
 /// A keyboard chip such as `Ctrl K`.
 pub fn kbd(ui: &mut Ui, text: &str) -> Response {
     let t = Tokens::of(ui.ctx());

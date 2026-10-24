@@ -150,6 +150,7 @@ fn build(
             .find_map(|l| l.label().or(l.value()).map(str::to_owned));
     }
     let mut value = n.value().map(str::to_owned);
+    let description = n.description().map(str::to_owned);
     // Plain text is exposed as the node value; treat it as the label so
     // `text equals` works on both buttons and static text.
     if role == "label" && label.is_none() {
@@ -178,6 +179,7 @@ fn build(
         role,
         label,
         value,
+        description,
         bounds,
         focused: id == focus,
         enabled: !n.is_disabled(),
@@ -218,7 +220,7 @@ enum JobKind {
     AfterFrame { until: u64, finish: Finish },
     /// The target was scrolled into view; once the frames settle, find it
     /// again at its new position and click it.
-    ClickAfterScroll { target: Target, until: u64 },
+    ClickAfterScroll { target: Box<Target>, until: u64 },
     /// Wait for the rendered pixels.
     Screenshot {
         path: PathBuf,
@@ -257,6 +259,8 @@ impl Bridge {
     #[must_use]
     pub fn install(ctx: &Context, server: ControlServer) -> Bridge {
         let shared = Arc::new(Mutex::new(Shared::default()));
+        // A controlled run never opens a browser: links are recorded.
+        let _ = crate::links::LinkSink::install(ctx);
         ctx.add_plugin(Hooks(Arc::clone(&shared)));
         ctx.enable_accesskit();
         let waker_ctx = ctx.clone();
@@ -426,6 +430,7 @@ impl Bridge {
             "key" => self.key(&parse!(KeyParams).key),
             "focus" => self.focus(&parse!(FocusParams).target),
             "scroll" => self.scroll(ctx, &parse!(ScrollParams)),
+            "hover" => self.hover(ctx, &parse!(FocusParams).target),
             "command" => Self::command(shell, &parse!(CommandParams).id, self),
             "screenshot" => Self::screenshot(ctx, &parse!(ScreenshotParams)),
             "resize" => {
@@ -534,7 +539,7 @@ impl Bridge {
             self.schedule(vec![scroll]);
             ctx.request_repaint();
             return Started::Job(JobKind::ClickAfterScroll {
-                target: target.clone(),
+                target: Box::new(target.clone()),
                 until: self.frame() + self.queued() + SETTLE_FRAMES + 1,
             });
         }
@@ -603,6 +608,24 @@ impl Bridge {
                 data: None,
             })],
         })
+    }
+
+    /// Moves the pointer over the target (no button), so its hover state
+    /// and tooltip show. Nothing is clicked.
+    fn hover(&self, ctx: &Context, target: &Target) -> Started {
+        let node = match self.resolve(target) {
+            Ok(n) => n,
+            Err(e) => return e,
+        };
+        let Some(b) = node.bounds else {
+            return fail(ErrorCode::Failed, "that element has no position on screen");
+        };
+        let (x, y) = b.center();
+        self.schedule(vec![Scheduled {
+            events: vec![Event::PointerMoved(Pos2::new(x, y))],
+        }]);
+        ctx.request_repaint();
+        self.after(Finish::Empty)
     }
 
     /// The mouse wheel over the target until what scrolls there reaches
