@@ -80,6 +80,7 @@ impl CondensedTable {
                 count: 0,
                 totals: false,
                 report: CondensedReport {
+                    left,
                     width,
                     rows: Vec::new(),
                 },
@@ -130,6 +131,8 @@ pub struct RowReport {
 /// Where a condensed table's rows went.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CondensedReport {
+    /// The table's left edge.
+    pub left: f32,
     /// The table's width.
     pub width: f32,
     /// Every row, top to bottom.
@@ -147,6 +150,16 @@ impl CondensedReport {
             .fold(0.0, f32::max)
     }
 
+    /// True when every row's label and amount box lie inside the table
+    /// (nothing pushed past its right edge on a narrow or a wide window).
+    #[must_use]
+    pub fn fits(&self) -> bool {
+        let (left, right) = (self.left - 0.5, self.left + self.width + 0.5);
+        self.rows
+            .iter()
+            .all(|r| r.label.left() >= left && r.amount.right() <= right)
+    }
+
     /// The control-channel view (sizes only, never a label or amount).
     #[must_use]
     pub fn state_json(&self) -> serde_json::Value {
@@ -157,8 +170,8 @@ impl CondensedReport {
             "widest_gap": self.widest_gap(),
             // The table is at its cap (the window is wide).
             "capped": self.width >= MAX_WIDTH - 0.5,
-            // Every amount box is within the cap of its label.
-            "fits": self.widest_gap() <= MAX_WIDTH,
+            // Every label and amount box is inside the table.
+            "fits": self.fits(),
         })
     }
 }
@@ -432,6 +445,7 @@ mod tests {
                 "{width}"
             );
             assert!(r.rows.last().is_some_and(|x| x.total && !x.striped));
+            assert!(r.fits(), "{width}");
             // Totals and figures sit in the amount column, right edges level.
             let right = r.rows[0].amount.right();
             for row in &r.rows {
@@ -470,5 +484,11 @@ mod tests {
                 .is_some_and(|g| g <= f64::from(MAX_WIDTH))
         );
         assert!(!v.to_string().contains("Sales"));
+        assert_eq!(v["fits"], true);
+        // A row pushed past the table's right edge does not fit.
+        let mut wide = r.clone();
+        wide.rows[0].amount = wide.rows[0].amount.translate(vec2(wide.width, 0.0));
+        assert!(!wide.fits());
+        assert_eq!(wide.state_json()["fits"], false);
     }
 }
