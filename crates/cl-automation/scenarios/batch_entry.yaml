@@ -12,7 +12,10 @@
 #  6. the summary's counts and totals, then its register link;
 #  7. a new batch from a pasted block with a header and a 3-decimal amount
 #     (the mapping remembered), and a journal entry section whose
-#     unbalanced entry shows its difference until fixed; saved.
+#     unbalanced entry shows its difference until fixed; saved;
+#  8. P16 (Q-272-Q-274): Shift+F10 Copy Down and one Ctrl+Z, Columns…
+#     (Amount can't be hidden, Memo hidden, still hidden on reopen, Reset),
+#     two rows ticked, Set Account, Delete Rows asked first. Nothing saved.
 # Light and dark run in one app: every pass adds new rows (checks take the
 # next numbers), so the scenario repeats.
 name: batch_entry
@@ -202,5 +205,69 @@ steps:
   - assert_state: {key: screen.summary.journal.debits, equals: "100.00"}
   - assert_no_clipping: {}
   - screenshot: saved
+  # --- 8. Copy down, columns and bulk actions (P16, Q-272-Q-274) ---------------
+  - click: {role: button, label: New batch}
+  - assert_state: {key: screen.rows, equals: 0}
+  - click: {label: "Date, line 1"}
+  - paste: {text: "Date\tPay to\tAccount\tAmount\tMemo\n11/02/2026\tHollister Fuel Stop\t6100\t1.00\tBulk {theme}\n11/03/2026\tGalena Gravel\t5200\t2.00\tBulk {theme}\n11/04/2026\tCrane Creek Tree\t6100\t3.00\tBulk {theme}\n"}
+  - click: {role: button, label: Add rows}
+  - assert_state: {key: screen.rows, equals: 3}
+  # The cell's actions menu (Shift+F10, as a right-click) copies the date down.
+  - click: {label: "Date, line 1"}
+  - key: Shift+F10
+  - assert_exists: {role: menu_item, label: Copy Down}
+  - assert_exists: {role: menu_item, label: Copy to Rows Below}
+  - assert_no_clipping: {}
+  - screenshot: copy_menu
+  - click: {role: menu_item, label: Copy Down}
+  - assert_state: {key: screen.rows_changed, equals: 2}
+  - assert_state: {key: screen.last_action, equals: copy_down}
+  - assert_value: {target: {label: "Date, line 3"}, equals: "11/02/2026"}
+  - key: Ctrl+Z
+  - assert_value: {target: {label: "Date, line 3"}, equals: "11/04/2026"}
+  # Columns…: the columns a check needs stay; Memo hidden is remembered.
+  - click: {role: button, label: "Columns…"}
+  - assert_state: {key: screen.columns_open, equals: true}
+  - assert_disabled: {role: check_box, label: Amount}
+  - assert_disabled: {role: check_box, label: Pay to}
+  - click: {role: check_box, label: Memo}
+  - assert_state: {key: screen.columns.hidden, equals: [memo]}
+  - assert_no_clipping: {}
+  - screenshot: columns
+  - click: {role: button, label: Done}
+  - assert_state: {key: screen.columns_open, equals: false}
+  - assert_not_exists: {label: "Memo, line 1"}
+  - click: {role: button, label: "Columns…"}
+  - assert_state: {key: screen.columns.hidden, equals: [memo]}
+  - click: {role: button, label: Reset to default}
+  - assert_state: {key: screen.columns.default, equals: true}
+  - click: {role: button, label: Done}
+  - assert_exists: {label: "Memo, line 1"}
+  # Two rows ticked: Set Account, then Delete Rows (asked first).
+  - click: {role: check_box, label: Select row 1}
+  - click: {role: check_box, label: Select row 3}
+  - assert_state: {key: screen.selected, equals: 2}
+  - assert_exists: {role: label, label: "2 rows selected"}
+  - click: {role: button, label: Set Account}
+  - assert_state: {key: screen.picker, equals: account}
+  - click: {label: "New account, line 1"}
+  - type: {text: "5200"}
+  - key: Tab
+  - click: {role: button, label: Apply}
+  - assert_state: {key: screen.picker, equals: null}
+  - assert_state: {key: screen.rows_changed, equals: 2}
+  - assert_state: {key: screen.selected, equals: 2}
+  - assert_no_clipping: {}
+  - screenshot: selection
+  - click: {role: button, label: Delete Rows}
+  - assert_state: {key: screen.confirm_delete, equals: true}
+  - click: {role: button, label: Keep them}
+  - assert_state: {key: screen.confirm_delete, equals: false}
+  - assert_state: {key: screen.rows, equals: 3}
+  - click: {role: button, label: Delete Rows}
+  - click: {role: button, label: Delete 2 rows}
+  - assert_state: {key: screen.rows, equals: 1}
+  - assert_state: {key: screen.selected, equals: 0}
+  - click: {role: button, label: Clear}
   - command: file.close_window
   - assert_not_exists: {role: tab, label_contains: "Bulk Entry"}

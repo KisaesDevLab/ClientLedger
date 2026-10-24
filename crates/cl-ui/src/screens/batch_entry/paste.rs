@@ -101,8 +101,13 @@ impl MappingPanel {
     }
 
     /// The mapping for the current header choice: remembered, else from
-    /// the header names, else left to right from the cursor column.
-    pub(crate) fn remap(&mut self, memory: &cl_model::forms::batch::MappingMemory) {
+    /// the header names, else left to right from the cursor column over the
+    /// columns the grid shows, in their order (`shown`, Q-273).
+    pub(crate) fn remap(
+        &mut self,
+        memory: &cl_model::forms::batch::MappingMemory,
+        shown: &[Field],
+    ) {
         let headers = self.headers();
         let refs: Vec<&str> = headers.iter().map(String::as_str).collect();
         self.recalled = false;
@@ -118,7 +123,7 @@ impl MappingPanel {
                 Origin::Paste { column, .. } => column,
                 Origin::File => 0,
             };
-            self.mapping = positional_mapping(self.kind, start, self.width);
+            self.mapping = positional_mapping(shown, start, self.width);
         }
     }
 
@@ -172,14 +177,15 @@ fn records(text: &str) -> Result<(char, Vec<Vec<String>>), String> {
 }
 
 impl BulkEntryScreen {
-    /// The company the remembered mappings belong to.
-    fn company_key(&self) -> String {
+    /// The company the remembered mappings and column choices belong to.
+    pub(crate) fn company_key(&self) -> String {
         self.tenant
             .as_ref()
             .map_or_else(|| "demo".to_string(), |(t, _)| t.to_string())
     }
 
-    fn settings_dir(&self) -> Option<std::path::PathBuf> {
+    /// The settings folder the remembered choices are kept in.
+    pub(crate) fn settings_dir(&self) -> Option<std::path::PathBuf> {
         self.link
             .store()
             .path()
@@ -235,7 +241,7 @@ impl BulkEntryScreen {
             recalled: false,
             error: None,
         };
-        panel.remap(&self.memory());
+        panel.remap(&self.memory(), &self.choice(kind).visible());
         self.import_error = None;
         self.mapping = Some(panel);
         self.last_action = Some("mapping");
@@ -243,9 +249,10 @@ impl BulkEntryScreen {
 
     /// The grid's block paste.
     pub(crate) fn block_paste(&mut self, at: cl_grid::CellPos, text: &str) {
-        let kind = self.shown_kind;
+        // The cursor column's place among the shown columns (Q-273).
+        let shown = self.choice(self.shown_kind).visible();
         let column = super::grid::field_of(at.col)
-            .and_then(|f| kind.columns().iter().position(|c| *c == f))
+            .and_then(|f| shown.iter().position(|c| *c == f))
             .unwrap_or(0);
         self.open_mapping(
             text,
@@ -530,9 +537,14 @@ impl BulkEntryScreen {
         });
         if let Some(on) = flip {
             let memory = self.memory();
+            let shown = self
+                .mapping
+                .as_ref()
+                .map(|p| self.choice(p.kind).visible())
+                .unwrap_or_default();
             if let Some(p) = self.mapping.as_mut() {
                 p.first_row_headers = on;
-                p.remap(&memory);
+                p.remap(&memory, &shown);
             }
         }
         if cancel {
@@ -642,7 +654,10 @@ mod tests {
             recalled: false,
             error: None,
         };
-        p.remap(&cl_model::forms::batch::MappingMemory::default());
+        p.remap(
+            &cl_model::forms::batch::MappingMemory::default(),
+            kind.columns(),
+        );
         p
     }
 

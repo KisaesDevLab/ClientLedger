@@ -522,10 +522,13 @@ impl BulkEntryScreen {
             return;
         };
         self.select_section(section);
+        // The cell of the problem when its column is shown (Q-273), else
+        // the row's date.
         let kind = self.batch().sections[section].kind;
+        let shown = self.choice(kind).visible();
         let field = self
             .first_field(key)
-            .filter(|f| kind.columns().contains(f))
+            .filter(|f| shown.contains(f))
             .unwrap_or(Field::Date);
         let lists = Arc::clone(&self.books.lists);
         self.grid.focus(

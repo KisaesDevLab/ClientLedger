@@ -1129,3 +1129,225 @@ mod tests {
         assert_eq!(BulkEntryMappings::load(dir.path()), book);
     }
 }
+
+// WP5b (P16): Bulk Entry's column choice per company and section type
+// (Q-273).
+
+/// Bulk Entry's column order and hidden columns ("Columns…", Q-273): one
+/// [`cl_model::forms::batch::ColumnChoice`] per company (by [`key_hash`])
+/// and section type. Column names only; never a row.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BulkColumnsBook {
+    /// (company hash, section type, choice), least recently set first.
+    entries: Vec<(
+        String,
+        cl_model::forms::batch::SectionKind,
+        cl_model::forms::batch::ColumnChoice,
+    )>,
+}
+
+impl BulkColumnsBook {
+    /// The file in the settings folder.
+    pub const FILE: &'static str = "bulk-columns.json";
+    /// File format version.
+    pub const VERSION: u64 = 1;
+    /// Most choices kept (20 companies of 6 section types); one more
+    /// forgets the oldest.
+    pub const MAX_ENTRIES: usize = 120;
+
+    /// The remembered choice of `company` for `kind`, made to fit the type
+    /// (`ColumnChoice::normalized`: required columns shown again).
+    #[must_use]
+    pub fn get(
+        &self,
+        company: &str,
+        kind: cl_model::forms::batch::SectionKind,
+    ) -> Option<cl_model::forms::batch::ColumnChoice> {
+        let k = key_hash(company);
+        self.entries
+            .iter()
+            .find(|(c, t, _)| *c == k && *t == kind)
+            .map(|(_, _, choice)| choice.clone().normalized(kind))
+    }
+
+    /// Remember `choice` (most recent last). The default choice is not
+    /// stored: it is forgotten instead (Reset to default).
+    pub fn set(
+        &mut self,
+        company: &str,
+        kind: cl_model::forms::batch::SectionKind,
+        choice: &cl_model::forms::batch::ColumnChoice,
+    ) {
+        let k = key_hash(company);
+        self.entries.retain(|(c, t, _)| !(*c == k && *t == kind));
+        if *choice == cl_model::forms::batch::ColumnChoice::default_for(kind) {
+            return;
+        }
+        self.entries.push((k, kind, choice.clone()));
+        while self.entries.len() > Self::MAX_ENTRIES {
+            self.entries.remove(0);
+        }
+    }
+
+    /// Read the file's text; a malformed entry drops only itself.
+    #[must_use]
+    pub fn parse(text: &str) -> BulkColumnsBook {
+        let mut out = BulkColumnsBook::default();
+        let Ok(serde_json::Value::Object(root)) = serde_json::from_str::<serde_json::Value>(text)
+        else {
+            return out;
+        };
+        if root.get("version").and_then(serde_json::Value::as_u64) != Some(Self::VERSION) {
+            return out;
+        }
+        let Some(serde_json::Value::Array(list)) = root.get("choices") else {
+            return out;
+        };
+        for item in list.iter().take(Self::MAX_ENTRIES) {
+            let Some([key, kind, choice]) = item.as_array().map(Vec::as_slice) else {
+                continue;
+            };
+            let Some(key) = key
+                .as_str()
+                .filter(|k| k.len() == 16 && k.chars().all(|c| c.is_ascii_hexdigit()))
+            else {
+                continue;
+            };
+            let (Ok(kind), Ok(choice)) = (
+                serde_json::from_value::<cl_model::forms::batch::SectionKind>(kind.clone()),
+                serde_json::from_value::<cl_model::forms::batch::ColumnChoice>(choice.clone()),
+            ) else {
+                continue;
+            };
+            out.entries
+                .retain(|(c, t, _)| !(c.as_str() == key && *t == kind));
+            out.entries.push((key.to_string(), kind, choice));
+        }
+        out
+    }
+
+    /// The file's text.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let list: Vec<serde_json::Value> = self
+            .entries
+            .iter()
+            .map(|(k, t, c)| serde_json::json!([k, t, c]))
+            .collect();
+        serde_json::to_string_pretty(&serde_json::json!({
+            "version": Self::VERSION,
+            "choices": list,
+        }))
+        .unwrap_or_default()
+    }
+
+    /// Load from `dir` (empty when missing, oversized or unreadable).
+    #[must_use]
+    pub fn load(dir: &Path) -> BulkColumnsBook {
+        read_capped(&dir.join(Self::FILE))
+            .map_or_else(BulkColumnsBook::default, |t| Self::parse(&t))
+    }
+
+    /// Save into `dir`.
+    ///
+    /// # Errors
+    /// Any file error.
+    pub fn save(&self, dir: &Path) -> io::Result<()> {
+        write_atomic(&dir.join(Self::FILE), &self.to_text())
+    }
+
+    /// How many choices are remembered.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// True when none is remembered.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod bulk_columns_tests {
+    use cl_model::forms::batch::{ColumnChoice, Field, SectionKind};
+
+    use super::*;
+
+    #[test]
+    fn bulk_columns_round_trip_per_company_and_type() {
+        let mut memo_hidden = ColumnChoice::default_for(SectionKind::Checks);
+        memo_hidden
+            .set_hidden(SectionKind::Checks, Field::Memo, true)
+            .expect("Memo may be hidden");
+        assert!(memo_hidden.move_by(Field::Tag, -3));
+        let mut book = BulkColumnsBook::default();
+        book.set("tenant-a", SectionKind::Checks, &memo_hidden);
+        assert_eq!(
+            book.get("tenant-a", SectionKind::Checks),
+            Some(memo_hidden.clone())
+        );
+        assert_eq!(
+            book.get("tenant-a", SectionKind::Deposits),
+            None,
+            "per type"
+        );
+        assert_eq!(
+            book.get("tenant-b", SectionKind::Checks),
+            None,
+            "per company"
+        );
+        let text = book.to_text();
+        assert!(!text.contains("tenant-a"), "companies are hashed");
+        assert_eq!(BulkColumnsBook::parse(&text), book);
+        let dir = tempfile::tempdir().expect("tmp");
+        book.save(dir.path()).expect("save");
+        assert_eq!(BulkColumnsBook::load(dir.path()), book);
+        // Reset to default forgets the entry.
+        book.set(
+            "tenant-a",
+            SectionKind::Checks,
+            &ColumnChoice::default_for(SectionKind::Checks),
+        );
+        assert!(book.is_empty());
+    }
+
+    #[test]
+    fn bad_entries_drop_and_hidden_required_columns_show_again() {
+        let hash = key_hash("tenant-a");
+        let text = format!(
+            r#"{{"version":1,"choices":[
+                ["{hash}","checks",{{"order":["date","amount"],"hidden":["amount","memo"]}}],
+                ["../x","checks",{{"order":[],"hidden":[]}}],
+                ["{hash}","nonsense",{{"order":[],"hidden":[]}}],
+                "junk"
+            ]}}"#
+        );
+        let book = BulkColumnsBook::parse(&text);
+        assert_eq!(book.len(), 1);
+        let c = book.get("tenant-a", SectionKind::Checks).expect("kept");
+        assert!(!c.is_hidden(Field::Amount), "a required column shows again");
+        assert!(c.is_hidden(Field::Memo));
+        assert_eq!(
+            c.all().len(),
+            SectionKind::Checks.columns().len(),
+            "missing ones added"
+        );
+        assert!(BulkColumnsBook::parse("{\"version\":2,\"choices\":[]}").is_empty());
+        let mut many = BulkColumnsBook::default();
+        let mut hide_tag = ColumnChoice::default_for(SectionKind::Expenses);
+        hide_tag
+            .set_hidden(SectionKind::Expenses, Field::Tag, true)
+            .expect("Tag may be hidden");
+        for n in 0..(BulkColumnsBook::MAX_ENTRIES + 5) {
+            many.set(&format!("co-{n}"), SectionKind::Expenses, &hide_tag);
+        }
+        assert_eq!(many.len(), BulkColumnsBook::MAX_ENTRIES);
+        assert_eq!(
+            many.get("co-0", SectionKind::Expenses),
+            None,
+            "the oldest goes"
+        );
+    }
+}

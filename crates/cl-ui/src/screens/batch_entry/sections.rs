@@ -8,7 +8,6 @@
 use std::sync::Arc;
 
 use cl_core::ids::AccountId;
-use cl_grid::Grid;
 use cl_model::forms::batch::{ContextKind, Section, SectionKind};
 use cl_model::register::AccountClass;
 use eframe::egui::{self, RichText, Ui};
@@ -62,10 +61,10 @@ impl BulkEntryScreen {
         if kind == self.shown_kind {
             return;
         }
-        let next = self.spare.remove(&kind).unwrap_or_else(|| {
-            // Fixed specs, covered by `every_section_spec_is_valid_with_its_own_headers`.
-            Grid::new(grid::grid_id(kind), grid::spec(kind)).expect("the Bulk Entry spec is valid")
-        });
+        let next = self
+            .spare
+            .remove(&kind)
+            .unwrap_or_else(|| grid::new_grid(kind, &self.choice(kind)));
         let old = self.grid.swap_grid(next, grid_label(kind), &*lists);
         self.grid
             .set_widths_key(format!("{KIND}/{}", grid::grid_id(kind)));
@@ -86,6 +85,9 @@ impl BulkEntryScreen {
         self.sync_shown_section();
         self.grid.reset_view(&*lists);
         self.confirm_remove = None;
+        // The selection was the other section's rows.
+        self.picker = None;
+        self.confirm_delete = false;
     }
 
     /// Ctrl+PageDown (`forward`) / Ctrl+PageUp: the next or previous

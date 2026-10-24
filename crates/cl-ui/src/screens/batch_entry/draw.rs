@@ -73,9 +73,19 @@ impl BulkEntryScreen {
             self.strip_ui(ui, &tokens, enabled);
             ui.add_space(4.0);
             self.section_header_ui(ui, &tokens, enabled);
+            if !self.columns_open {
+                self.selection_bar_ui(ui, &tokens, enabled);
+            }
         });
         if self.summary_open {
             frame.body(Body::Scroll, |ui| self.summary_ui(ui, &tokens));
+            self.layout = frame.end();
+            return;
+        }
+        if self.columns_open {
+            // "Columns…" stands in for the grid until Done.
+            frame.body(Body::Scroll, |ui| self.columns_ui(ui, &tokens));
+            frame.bottom(|ui| self.actions_ui(ui, false));
             self.layout = frame.end();
             return;
         }
@@ -139,13 +149,19 @@ impl BulkEntryScreen {
 
     /// The grid and what its events start.
     fn grid_ui(&mut self, ui: &mut Ui, enabled: bool) {
+        // The right-click menu's entries (Q-272, Q-274), worked out before
+        // the grid takes the batch to draw it.
+        let menu = self.menu();
         let out = header::locked_scope(ui, enabled, false, |ui| {
-            self.grid.ui(ui, &*std::sync::Arc::clone(&self.books.lists))
+            self.grid
+                .ui_with(ui, &*std::sync::Arc::clone(&self.books.lists), Some(&menu))
         });
         self.after_grid_events(&out.events);
         for e in out.events {
-            if let GridEvent::BlockPaste { at, text } = e {
-                self.block_paste(at, text.as_str());
+            match e {
+                GridEvent::BlockPaste { at, text } => self.block_paste(at, text.as_str()),
+                GridEvent::ContextPicked { target, item } => self.menu_picked(target, item),
+                _ => {}
             }
         }
     }
@@ -162,6 +178,9 @@ impl BulkEntryScreen {
         }
         if let Some(k) = self.notice {
             form::hint(ui, tokens, &t(k));
+        }
+        if let Some(note) = &self.bulk_note {
+            form::hint(ui, tokens, note);
         }
         if self.busy() {
             form::progress_line(ui, tokens, &t("batch_entry.saving"));
@@ -214,6 +233,13 @@ impl BulkEntryScreen {
                     .clicked()
                 {
                     clicked = Some("batch.next_problem");
+                }
+                if ui
+                    .button(t("cmd.batch.columns"))
+                    .on_hover_text(t("batch_entry.columns.tip"))
+                    .clicked()
+                {
+                    clicked = Some("batch.columns");
                 }
             });
         });

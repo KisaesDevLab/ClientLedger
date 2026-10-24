@@ -24,12 +24,14 @@ use cl_core::ids::AccountId;
 use cl_core::{CalendarDate, Money};
 use cl_grid::{
     Align, CellInput, CellKind, CellPos, CellProblem, CellValue, Column, ColumnId, EditableModel,
-    GridSpec, Line, Lookups, RecordOutcome, RowHeight, RowKey, RowKeyGen, RowModel, RowNote,
-    RowState, Source, TextKey, WidthSpec,
+    Grid, GridSpec, Line, Lookups, RecordOutcome, RowHeight, RowKey, RowKeyGen, RowModel, RowNote,
+    RowState, SelectionMode, Source, TextKey, WidthSpec,
 };
 use cl_model::amount_entry::AmountRules;
 use cl_model::forms::FormState;
-use cl_model::forms::batch::{BulkBatch, Field, RowDraft, Section, SectionKind, parse_amount};
+use cl_model::forms::batch::{
+    BulkBatch, ColumnChoice, Field, RowDraft, Section, SectionKind, parse_amount,
+};
 
 use crate::grid_form::LinesAdapter;
 use crate::screens::register::lists::{ACCOUNTS, NAMES, RegisterLists, TAGS};
@@ -122,93 +124,178 @@ pub(crate) const fn grid_id(kind: SectionKind) -> &'static str {
     }
 }
 
-/// The grid spec of a section type: a line grid (entry line, Ctrl+Insert
-/// and Ctrl+Delete) with block paste on and rows measured for their note.
+/// One column of a section type's grid (the same cell for the grid and the
+/// selection bar's pickers, Q-274).
+fn column(kind: SectionKind, f: Field, header: &'static str) -> Column {
+    let (cell, width, align, mono) = match f {
+        Field::Date => (CellKind::Date, (96, 104, 0), Align::Left, true),
+        Field::Number => (
+            CellKind::Text {
+                max_chars: u32::try_from(kind.max_number_chars()).unwrap_or(50),
+            },
+            (64, 80, 0),
+            Align::Left,
+            true,
+        ),
+        Field::PrintLater => (CellKind::Checkbox, (70, 80, 0), Align::Center, false),
+        Field::Contact => (
+            CellKind::Picker {
+                list: NAMES,
+                add_new: false,
+            },
+            (120, 180, 2),
+            Align::Left,
+            false,
+        ),
+        Field::Account => (
+            CellKind::Picker {
+                list: ACCOUNTS,
+                add_new: false,
+            },
+            (130, 200, 2),
+            Align::Left,
+            false,
+        ),
+        Field::Amount | Field::Debit | Field::Credit => (
+            CellKind::Amount(AmountRules::MONEY),
+            (90, 110, 0),
+            Align::Right,
+            true,
+        ),
+        Field::Memo => (
+            CellKind::Text {
+                max_chars: u32::try_from(cl_model::forms::batch::MAX_MEMO_CHARS).unwrap_or(2000),
+            },
+            (100, 180, 2),
+            Align::Left,
+            false,
+        ),
+        Field::Tag => (
+            CellKind::Picker {
+                list: TAGS,
+                add_new: false,
+            },
+            (90, 120, 1),
+            Align::Left,
+            false,
+        ),
+    };
+    Column {
+        id: column_of(f),
+        header: TextKey(header),
+        placeholder: None,
+        empty: None,
+        help: help_key(kind, f).map(TextKey),
+        kind: cell,
+        line: Line::First,
+        align,
+        width: WidthSpec {
+            min: width.0,
+            preferred: width.1,
+            flex: width.2,
+        },
+        editable: true,
+        mono,
+    }
+}
+
+/// The grid spec of a section type with the owner's column choice (shown
+/// columns in their order, Q-273; a column keeps its `ColumnId` wherever it
+/// sits, so its width is remembered): a line grid (entry line, Ctrl+Insert
+/// and Ctrl+Delete) with block paste, the context menu and the select
+/// column on (Q-272, Q-274), rows measured for their note.
 #[must_use]
-pub(crate) fn spec(kind: SectionKind) -> GridSpec {
-    let columns = kind
-        .columns()
+pub(crate) fn spec(kind: SectionKind, choice: &ColumnChoice) -> GridSpec {
+    let shown = choice.visible();
+    let columns = shown
         .iter()
-        .map(|f| {
-            let (cell, width, align, mono) = match f {
-                Field::Date => (CellKind::Date, (96, 104, 0), Align::Left, true),
-                Field::Number => (
-                    CellKind::Text {
-                        max_chars: u32::try_from(kind.max_number_chars()).unwrap_or(50),
-                    },
-                    (64, 80, 0),
-                    Align::Left,
-                    true,
-                ),
-                Field::PrintLater => (CellKind::Checkbox, (70, 80, 0), Align::Center, false),
-                Field::Contact => (
-                    CellKind::Picker {
-                        list: NAMES,
-                        add_new: false,
-                    },
-                    (120, 180, 2),
-                    Align::Left,
-                    false,
-                ),
-                Field::Account => (
-                    CellKind::Picker {
-                        list: ACCOUNTS,
-                        add_new: false,
-                    },
-                    (130, 200, 2),
-                    Align::Left,
-                    false,
-                ),
-                Field::Amount | Field::Debit | Field::Credit => (
-                    CellKind::Amount(AmountRules::MONEY),
-                    (90, 110, 0),
-                    Align::Right,
-                    true,
-                ),
-                Field::Memo => (
-                    CellKind::Text {
-                        max_chars: u32::try_from(cl_model::forms::batch::MAX_MEMO_CHARS)
-                            .unwrap_or(2000),
-                    },
-                    (100, 180, 2),
-                    Align::Left,
-                    false,
-                ),
-                Field::Tag => (
-                    CellKind::Picker {
-                        list: TAGS,
-                        add_new: false,
-                    },
-                    (90, 120, 1),
-                    Align::Left,
-                    false,
-                ),
-            };
-            Column {
-                id: column_of(*f),
-                header: TextKey(header_key(kind, *f)),
-                placeholder: (*f == kind.columns()[0]).then_some(TextKey("batch_entry.col.date")),
-                empty: None,
-                help: help_key(kind, *f).map(TextKey),
-                kind: cell,
-                line: Line::First,
-                align,
-                width: WidthSpec {
-                    min: width.0,
-                    preferred: width.1,
-                    flex: width.2,
-                },
-                editable: true,
-                mono,
-            }
+        .enumerate()
+        .map(|(i, f)| {
+            let mut c = column(kind, *f, header_key(kind, *f));
+            // The blank entry row's first cell says what to type first.
+            c.placeholder = (i == 0).then_some(TextKey("batch_entry.col.date"));
+            c
         })
         .collect();
     let mut s = GridSpec::line_entry(columns);
     s.block_paste = true;
+    s.context_menu = true;
+    s.selection = SelectionMode::Multi;
+    s.select_column = true;
     s.height = RowHeight::Measured {
         max_rows: u32::try_from(cl_model::forms::batch::MAX_ROWS + 1).unwrap_or(2_001),
     };
     s
+}
+
+/// The grid of a section type with the owner's column choice.
+#[must_use]
+pub(crate) fn new_grid(kind: SectionKind, choice: &ColumnChoice) -> Grid {
+    // The specs are built from fixed columns; every kind with any choice
+    // is covered by `every_section_spec_is_valid_with_its_own_headers`.
+    Grid::new(grid_id(kind), spec(kind, choice)).expect("the Bulk Entry spec is valid")
+}
+
+/// The i18n key of a Set picker's column ("New account").
+#[must_use]
+pub(crate) const fn picker_header_key(f: Field) -> &'static str {
+    match f {
+        Field::Date => "batch_entry.set.col.date",
+        Field::Contact => "batch_entry.set.col.name",
+        Field::Account => "batch_entry.set.col.account",
+        Field::Tag => "batch_entry.set.col.tag",
+        Field::PrintLater => "batch_entry.set.col.print_later",
+        _ => "batch_entry.set.col.memo",
+    }
+}
+
+/// The spec of a Set picker (Q-274): one editable cell of `f`, the same
+/// cell kind as the grid's (a click opens the list, Q-250; Ctrl+L the full
+/// list; date keys in a date).
+#[must_use]
+pub(crate) fn picker_spec(kind: SectionKind, f: Field) -> GridSpec {
+    let mut c = column(kind, f, picker_header_key(f));
+    c.width.flex = 1;
+    c.width.preferred = c.width.preferred.max(220);
+    let mut s = GridSpec::fixed_edit(vec![c]);
+    s.selection = SelectionMode::None;
+    s
+}
+
+/// A row's cell as the grid shows it (`suggested`: the account suggestion
+/// shown as a ghost in an empty Account cell).
+pub(crate) fn cell_value<'a>(
+    r: &'a RowDraft,
+    f: Option<Field>,
+    lists: &'a RegisterLists,
+    suggested: Option<AccountId>,
+) -> CellValue<'a> {
+    match f {
+        Some(Field::Date) => r.date.map_or(CellValue::Empty, CellValue::Date),
+        Some(Field::Number) => CellValue::Text(Cow::Borrowed(&r.number)),
+        Some(Field::PrintLater) => CellValue::Bool(r.print_later),
+        Some(Field::Contact) => match r.contact {
+            Some(c) => picked(lists, NAMES, lists.name_key(c)),
+            None if !r.contact_text.is_empty() => CellValue::Text(Cow::Borrowed(&r.contact_text)),
+            None => CellValue::Empty,
+        },
+        Some(Field::Account) => match r.account {
+            Some(a) => picked(lists, ACCOUNTS, lists.account_key(a)),
+            None if !r.account_text.is_empty() => CellValue::Text(Cow::Borrowed(&r.account_text)),
+            None => suggested
+                .and_then(|a| lists.account_key(a))
+                .map_or(CellValue::Empty, |id| CellValue::Suggested {
+                    id,
+                    display: lists.display(ACCOUNTS, id).unwrap_or(Cow::Borrowed("")),
+                }),
+        },
+        Some(Field::Amount) => r.amount.map_or(CellValue::Empty, CellValue::Money),
+        Some(Field::Debit) => r.debit.map_or(CellValue::Empty, CellValue::Money),
+        Some(Field::Credit) => r.credit.map_or(CellValue::Empty, CellValue::Money),
+        Some(Field::Memo) => CellValue::Text(Cow::Borrowed(&r.memo)),
+        Some(Field::Tag) => picked(lists, TAGS, r.tag.and_then(|t| lists.tag_key(t))),
+        None => CellValue::Empty,
+    }
 }
 
 /// What a row shows besides its cells (worked out by the screen each frame
@@ -500,40 +587,12 @@ impl RowModel for View<'_> {
         let Some(r) = self.rows().get(index) else {
             return CellValue::Empty;
         };
-        let lists = &*self.a.lists;
-        match field_of(col) {
-            Some(Field::Date) => r.date.map_or(CellValue::Empty, CellValue::Date),
-            Some(Field::Number) => CellValue::Text(Cow::Borrowed(&r.number)),
-            Some(Field::PrintLater) => CellValue::Bool(r.print_later),
-            Some(Field::Contact) => match r.contact {
-                Some(c) => picked(lists, NAMES, lists.name_key(c)),
-                None if !r.contact_text.is_empty() => {
-                    CellValue::Text(Cow::Borrowed(&r.contact_text))
-                }
-                None => CellValue::Empty,
-            },
-            Some(Field::Account) => match r.account {
-                Some(a) => picked(lists, ACCOUNTS, lists.account_key(a)),
-                None if !r.account_text.is_empty() => {
-                    CellValue::Text(Cow::Borrowed(&r.account_text))
-                }
-                None => self
-                    .a
-                    .suggested
-                    .get(&r.key)
-                    .and_then(|a| lists.account_key(*a))
-                    .map_or(CellValue::Empty, |id| CellValue::Suggested {
-                        id,
-                        display: lists.display(ACCOUNTS, id).unwrap_or(Cow::Borrowed("")),
-                    }),
-            },
-            Some(Field::Amount) => r.amount.map_or(CellValue::Empty, CellValue::Money),
-            Some(Field::Debit) => r.debit.map_or(CellValue::Empty, CellValue::Money),
-            Some(Field::Credit) => r.credit.map_or(CellValue::Empty, CellValue::Money),
-            Some(Field::Memo) => CellValue::Text(Cow::Borrowed(&r.memo)),
-            Some(Field::Tag) => picked(lists, TAGS, r.tag.and_then(|t| lists.tag_key(t))),
-            None => CellValue::Empty,
-        }
+        cell_value(
+            r,
+            field_of(col),
+            &self.a.lists,
+            self.a.suggested.get(&r.key).copied(),
+        )
     }
     fn row_note(&self, index: usize) -> Option<RowNote<'_>> {
         let r = self.rows().get(index)?;
@@ -670,9 +729,10 @@ mod tests {
     #[test]
     fn every_section_spec_is_valid_with_its_own_headers() {
         for kind in SectionKind::ALL {
-            let s = spec(kind);
+            let s = spec(kind, &ColumnChoice::default_for(kind));
             assert_eq!(s.validate(), Ok(()), "{kind:?}");
             assert!(s.block_paste && s.entry_line && s.insert_delete);
+            assert!(s.context_menu && s.select_column, "Q-272, Q-274");
             let ids: Vec<ColumnId> = s.columns.iter().map(|c| c.id).collect();
             let want: Vec<ColumnId> = kind.columns().iter().map(|f| column_of(*f)).collect();
             assert_eq!(ids, want);
@@ -680,6 +740,32 @@ mod tests {
                 assert!(crate::i18n::has(c.header.0), "{}", c.header.0);
                 if let Some(h) = c.help {
                     assert!(crate::i18n::has(h.0), "{}", h.0);
+                }
+            }
+            // Every column hidden that may be, the rest reversed: still a
+            // valid spec, the ids follow the shown order.
+            let mut choice = ColumnChoice::default_for(kind);
+            for f in kind.columns() {
+                let _ = choice.set_hidden(kind, *f, true);
+            }
+            for f in kind.columns().iter().rev() {
+                choice.move_by(*f, -100);
+            }
+            let s = spec(kind, &choice);
+            assert_eq!(s.validate(), Ok(()), "{kind:?}");
+            let ids: Vec<ColumnId> = s.columns.iter().map(|c| c.id).collect();
+            let want: Vec<ColumnId> = choice.visible().iter().map(|f| column_of(*f)).collect();
+            assert_eq!(ids, want);
+            assert_eq!(
+                s.columns.len(),
+                cl_model::forms::batch::required_fields(kind).len()
+            );
+            assert!(s.columns[0].placeholder.is_some());
+            for f in kind.columns() {
+                if cl_model::forms::batch::ops::settable(kind, *f) {
+                    let p = picker_spec(kind, *f);
+                    assert_eq!(p.validate(), Ok(()), "{kind:?} {f:?}");
+                    assert!(crate::i18n::has(p.columns[0].header.0));
                 }
             }
         }

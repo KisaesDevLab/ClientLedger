@@ -365,6 +365,18 @@ pub const FIXED_KEYS: &[(&str, &str)] = &[
         "+ - * / in an amount",
         "Work the amount out; the exact result shows under the cell before you leave it",
     ),
+    (
+        "Shift+F10 / Menu key",
+        "Open the actions menu of a grid cell or column heading (Bulk Entry: Copy Down, Columns\u{2026})",
+    ),
+    (
+        "Shift+Up / Shift+Down",
+        "Select rows from the cursor row in grids with a select column (Bulk Entry)",
+    ),
+    (
+        "Alt+Up / Alt+Down",
+        "Move the focused column up or down in Bulk Entry's Columns\u{2026}",
+    ),
 ];
 
 /// [`fixed_keys`] for [`EnterMode::MoveBetweenFields`] (Q-264).
@@ -392,6 +404,18 @@ pub const FIXED_KEYS_MOVE: &[(&str, &str)] = &[
     (
         "+ - * / in an amount",
         "Work the amount out; the exact result shows under the cell before you leave it",
+    ),
+    (
+        "Shift+F10 / Menu key",
+        "Open the actions menu of a grid cell or column heading (Bulk Entry: Copy Down, Columns\u{2026})",
+    ),
+    (
+        "Shift+Up / Shift+Down",
+        "Select rows from the cursor row in grids with a select column (Bulk Entry)",
+    ),
+    (
+        "Alt+Up / Alt+Down",
+        "Move the focused column up or down in Bulk Entry's Columns\u{2026}",
     ),
 ];
 

@@ -132,11 +132,12 @@ pub fn default_mapping(kind: SectionKind, headers: &[&str]) -> Mapping {
 }
 
 /// The mapping for a headerless paste: pasted column `j` fills grid column
-/// `start_column + j` of `kind`; columns that land on Print later, Tag or
-/// past the last column are not imported.
+/// `start_column + j` of `columns`, the columns the grid shows in their
+/// shown order (`ColumnChoice::visible`, Q-273); columns that land on Print
+/// later, Tag or past the last column are not imported.
 #[must_use]
-pub fn positional_mapping(kind: SectionKind, start_column: usize, width: usize) -> Mapping {
-    let cols = kind.columns();
+pub fn positional_mapping(columns: &[Field], start_column: usize, width: usize) -> Mapping {
+    let cols = columns;
     let mut out = Mapping::new();
     for j in 0..width {
         let (Some(f), Ok(col)) = (cols.get(start_column + j), u16::try_from(j)) else {
