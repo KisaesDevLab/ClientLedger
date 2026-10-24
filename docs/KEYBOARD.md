@@ -94,6 +94,9 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Ctrl+Home / Ctrl+End` | First / last row in grids |
 | `Space` | Tick a checkbox or open the choices in a grid cell; select the row in registers |
 | `+ - * / in an amount` | Work the amount out; the exact result shows under the cell before you leave it |
+| `Shift+F10 / Menu key` | Open the actions menu of a grid cell or column heading (Bulk Entry: Copy Down, Columns…) |
+| `Shift+Up / Shift+Down` | Select rows from the cursor row in grids with a select column (Bulk Entry) |
+| `Alt+Up / Alt+Down` | Move the focused column up or down in Bulk Entry's Columns… |
 
 ## When "Enter moves between fields" is on (Preferences)
 
@@ -108,6 +111,9 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Ctrl+Home / Ctrl+End` | First / last row in grids |
 | `Space` | Tick a checkbox or open the choices in a grid cell; select the row in registers |
 | `+ - * / in an amount` | Work the amount out; the exact result shows under the cell before you leave it |
+| `Shift+F10 / Menu key` | Open the actions menu of a grid cell or column heading (Bulk Entry: Copy Down, Columns…) |
+| `Shift+Up / Shift+Down` | Select rows from the cursor row in grids with a select column (Bulk Entry) |
+| `Alt+Up / Alt+Down` | Move the focused column up or down in Bulk Entry's Columns… |
 
 ## Date fields
 
