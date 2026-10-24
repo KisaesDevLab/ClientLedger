@@ -145,16 +145,50 @@ fn default_mapping_uses_aliases_per_kind() {
 #[test]
 fn positional_mapping_runs_from_the_cursor_column() {
     // Checks: Date, No., Print later, Pay to, Account, Amount, Memo, Tag.
-    let map = positional_mapping(SectionKind::Checks, 1, 6);
+    let checks = SectionKind::Checks.columns();
+    let map = positional_mapping(checks, 1, 6);
     assert_eq!(map[&Field::Number], 0);
     assert!(!map.contains_key(&Field::PrintLater));
     assert_eq!(map[&Field::Contact], 2);
     assert_eq!(map[&Field::Account], 3);
     assert_eq!(map[&Field::Amount], 4);
     assert_eq!(map[&Field::Memo], 5);
-    let past_end = positional_mapping(SectionKind::Checks, 6, 4);
+    let past_end = positional_mapping(checks, 6, 4);
     assert_eq!(past_end.len(), 1, "Memo only; Tag and beyond are dropped");
     assert_eq!(past_end[&Field::Memo], 0);
+}
+
+#[test]
+fn positional_mapping_follows_the_shown_column_order() {
+    // Q-273: Memo moved before Account and No. hidden.
+    let mut choice = super::ColumnChoice::default_for(SectionKind::Checks);
+    choice
+        .set_hidden(SectionKind::Checks, Field::Number, true)
+        .expect("No. may be hidden");
+    choice.move_by(Field::Memo, -2);
+    let shown = choice.visible();
+    assert_eq!(
+        shown,
+        [
+            Field::Date,
+            Field::PrintLater,
+            Field::Contact,
+            Field::Memo,
+            Field::Account,
+            Field::Amount,
+            Field::Tag
+        ]
+    );
+    let map = positional_mapping(&shown, 0, 6);
+    assert_eq!(map[&Field::Date], 0);
+    assert_eq!(map[&Field::Contact], 2);
+    assert_eq!(map[&Field::Memo], 3);
+    assert_eq!(map[&Field::Account], 4);
+    assert_eq!(map[&Field::Amount], 5);
+    assert!(
+        !map.contains_key(&Field::Number),
+        "a hidden column is skipped"
+    );
 }
 
 #[test]

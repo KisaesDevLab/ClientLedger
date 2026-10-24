@@ -251,7 +251,9 @@ impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
         self.with(lookups, |g, m, env| g.focus(pos, m, env));
     }
 
-    fn grid_command(&mut self, cmd: GridCommand, lookups: &dyn Lookups) -> bool {
+    /// Run a grid command (Select all, Clear selection, P16 D6) with the
+    /// environment captured last frame; true when the grid acted.
+    pub fn grid_command(&mut self, cmd: GridCommand, lookups: &dyn Lookups) -> bool {
         self.with(lookups, |g, m, env| g.command(cmd, m, env).0.yes())
     }
 
@@ -324,6 +326,17 @@ impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
     /// Draw the grid. Captures this frame's environment for the commands
     /// that arrive before the next frame, and keeps column widths.
     pub fn ui(&mut self, ui: &mut Ui, lookups: &dyn Lookups) -> GridOutput {
+        self.ui_with(ui, lookups, None)
+    }
+
+    /// [`GridForm::ui`] with the screen's context menu entries (grids whose
+    /// spec opts in, P16 D6).
+    pub fn ui_with(
+        &mut self,
+        ui: &mut Ui,
+        lookups: &dyn Lookups,
+        context: Option<&dyn cl_grid::ContextMenuSource>,
+    ) -> GridOutput {
         self.parts = EnvParts::capture(ui.ctx());
         if !self.widths_loaded {
             self.widths_loaded = true;
@@ -339,6 +352,7 @@ impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
         // While a save is in flight the grid takes no input (its edits
         // would be refused); it gets focus back when the save finishes.
         env.input_enabled &= !self.form.is_saving();
+        env.context = context;
         let mut model = self.adapter.model(&mut self.form);
         let out = self.grid.show(ui, ModelRef::Edit(&mut *model), &env);
         self.snapshot = self.grid.snapshot(&ModelRef::Edit(&mut *model));

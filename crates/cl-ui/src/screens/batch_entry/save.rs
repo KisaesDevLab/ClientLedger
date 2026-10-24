@@ -280,6 +280,85 @@ impl BulkEntryScreen {
         }
     }
 
+    /// The P16 commands (Copy down, the selection actions, Columns…) and
+    /// the keys the Set picker and Delete rows' question take first.
+    /// `None`: not one of them.
+    fn bulk_command(&mut self, id: CommandId) -> Option<bool> {
+        let lists = Arc::clone(&self.books.lists);
+        // The Set picker has the keyboard: Esc, Ctrl+L and undo go to its
+        // cell; Esc on a clean cell closes it.
+        if let Some(p) = self.picker.as_mut()
+            && p.has_focus()
+            && matches!(
+                id.as_str(),
+                "form.revert" | "edit.open_list" | "edit.undo" | "edit.redo"
+            )
+        {
+            if p.form.command(id, &*lists) == crate::grid_form::Routed::Handled {
+                return Some(true);
+            }
+            if id.as_str() == "form.revert" {
+                self.picker = None;
+                return Some(true);
+            }
+        }
+        if id.as_str() == "form.revert" {
+            if std::mem::take(&mut self.confirm_delete) {
+                return Some(true);
+            }
+            if self.picker.is_some() && !self.grid.grid().has_focus() {
+                self.picker = None;
+                return Some(true);
+            }
+        }
+        let busy = self.busy() || self.summary_open;
+        Some(match id.as_str() {
+            "grid.copy_down" | "grid.copy_down_below" => {
+                if !busy {
+                    let scope = if id.as_str() == "grid.copy_down" {
+                        cl_model::forms::batch::CopyScope::AllDisplayed
+                    } else {
+                        cl_model::forms::batch::CopyScope::Below
+                    };
+                    self.copy_down(scope);
+                }
+                true
+            }
+            "grid.select_all" => {
+                if !busy {
+                    self.select_all();
+                }
+                true
+            }
+            "grid.clear_selection" => {
+                self.clear_selection();
+                true
+            }
+            "batch.columns" => {
+                self.open_columns();
+                true
+            }
+            "batch.delete_rows" => {
+                self.ask_delete();
+                true
+            }
+            "edit.undo" | "edit.redo" => {
+                // The bar's question or picker would act on rows the undo
+                // may take away: they close.
+                self.confirm_delete = false;
+                self.picker = None;
+                return None;
+            }
+            other => {
+                let f = super::selection_bar::set_field_of(other)?;
+                if !busy {
+                    self.open_picker(f);
+                }
+                true
+            }
+        })
+    }
+
     /// The engine refused a whole section (`group` of the call `out`): the
     /// window shows that section and says why, naming it.
     pub(crate) fn refuse_section(
@@ -336,6 +415,10 @@ impl BulkEntryScreen {
         self.touched.clear();
         self.cursor_row = None;
         self.changed_at = None;
+        self.picker = None;
+        self.confirm_delete = false;
+        self.bulk_note = None;
+        self.rows_changed = 0;
         self.seen_rev = self.grid.form().revision();
         self.reset_suggestions();
         self.sync_shown_section();
@@ -366,6 +449,9 @@ impl BulkEntryScreen {
 
     /// Keymap commands.
     pub(crate) fn form_command(&mut self, id: CommandId) -> bool {
+        if let Some(handled) = self.bulk_command(id) {
+            return handled;
+        }
         if self.grid.grid().has_focus()
             && matches!(
                 id.as_str(),
@@ -437,6 +523,9 @@ impl BulkEntryScreen {
             }
             "form.revert" => {
                 if self.confirm_remove.take().is_some() || self.mapping.take().is_some() {
+                    return true;
+                }
+                if std::mem::take(&mut self.columns_open) {
                     return true;
                 }
                 if self.import_open {
