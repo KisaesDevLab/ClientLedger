@@ -394,9 +394,8 @@ impl OpeningBalancesScreen {
         changed
     }
 
-    /// The balance rows; true when Enter in one of them means post.
-    fn balance_rows(&mut self, ui: &mut Ui, tokens: &Tokens, which: &str) -> bool {
-        let mut save = false;
+    /// The balance rows.
+    fn balance_rows(&mut self, ui: &mut Ui, tokens: &Tokens, which: &str) {
         let mut rows = if which == "bank" {
             std::mem::take(&mut self.bank_rows)
         } else {
@@ -415,7 +414,7 @@ impl OpeningBalancesScreen {
                 if r.changed() {
                     self.dirty = true;
                 }
-                save |= self.entered(&r);
+                self.entered(&r);
                 if ui.small_button(t("opening.remove_row")).clicked() {
                     remove = Some(i);
                 }
@@ -433,12 +432,10 @@ impl OpeningBalancesScreen {
         } else {
             self.other_rows = rows;
         }
-        save
     }
 
-    /// The invoice or bill rows; true when Enter in one of them means post.
-    fn doc_rows(&mut self, ui: &mut Ui, which: &str) -> bool {
-        let mut save = false;
+    /// The invoice or bill rows.
+    fn doc_rows(&mut self, ui: &mut Ui, which: &str) {
         let mut rows = if which == "invoices" {
             std::mem::take(&mut self.invoices)
         } else {
@@ -460,17 +457,17 @@ impl OpeningBalancesScreen {
                 if r.changed() {
                     self.dirty = true;
                 }
-                save |= self.entered(&r);
+                self.entered(&r);
                 let date = row
                     .date
                     .get_or_insert_with(|| DateInput::new(today.start_of_year()));
                 let r = form::date_field(ui, &t("opening.date"), date, today);
-                save |= self.entered(&r);
+                self.entered(&r);
                 let l = ui.add(egui::Label::new(t("opening.number")).selectable(false));
                 let r = ui
                     .add_sized([90.0, 24.0], egui::TextEdit::singleline(&mut row.number))
                     .labelled_by(l.id);
-                save |= self.entered(&r);
+                self.entered(&r);
                 let l = ui.add(egui::Label::new(t("opening.amount")).selectable(false));
                 let r = ui
                     .add_sized([120.0, 24.0], egui::TextEdit::singleline(&mut row.amount))
@@ -478,7 +475,7 @@ impl OpeningBalancesScreen {
                 if r.changed() {
                     self.dirty = true;
                 }
-                save |= self.entered(&r);
+                self.entered(&r);
                 if ui.small_button(t("opening.remove_row")).clicked() {
                     remove = Some(i);
                 }
@@ -495,22 +492,21 @@ impl OpeningBalancesScreen {
         } else {
             self.bills = rows;
         }
-        save
     }
 
-    /// Enter in field `r` (Q-190, Q-264): true when it means Save & New
-    /// (here: post, like Alt+N); in the Move mode the focus moves on.
-    fn entered(&mut self, r: &egui::Response) -> bool {
+    /// Enter in field `r` (Q-264, Q-P16q): in the Move mode the focus moves
+    /// on; in the default mode Enter does nothing here (owner 2026-10-24),
+    /// so opening balances are posted only with the button or Alt+N.
+    fn entered(&mut self, r: &egui::Response) {
         let e = crate::forms::enter::entered(r);
         if e != HeaderEnter::None {
             self.last_enter = Some(match e {
-                HeaderEnter::SaveAndNew => "save",
+                HeaderEnter::SaveAndNew => "ignored",
                 HeaderEnter::MovedNext => "next",
                 HeaderEnter::MovedPrev => "prev",
                 HeaderEnter::None => "none",
             });
         }
-        e.saves()
     }
 
     /// "Posted: 3 lines in the opening entry, 1 invoice, 2 bills."
@@ -683,7 +679,6 @@ impl Screen for OpeningBalancesScreen {
             }
             return;
         }
-        let mut save = false;
         frame.body(Body::Scroll, |ui| {
             form::card(ui, &tokens, |ui| {
                 form::heading(ui, &tokens, &t("opening.start"));
@@ -695,30 +690,30 @@ impl Screen for OpeningBalancesScreen {
                 if r.changed() {
                     self.dirty = true;
                 }
-                save |= self.entered(&r);
+                self.entered(&r);
             });
             ui.add_space(8.0);
             form::card(ui, &tokens, |ui| {
                 form::heading(ui, &tokens, &t("opening.bank"));
-                save |= self.balance_rows(ui, &tokens, "bank");
+                self.balance_rows(ui, &tokens, "bank");
             });
             ui.add_space(8.0);
             form::card(ui, &tokens, |ui| {
                 form::heading(ui, &tokens, &t("opening.invoices"));
                 form::hint(ui, &tokens, &t("opening.invoices_hint"));
-                save |= self.doc_rows(ui, "invoices");
+                self.doc_rows(ui, "invoices");
             });
             ui.add_space(8.0);
             form::card(ui, &tokens, |ui| {
                 form::heading(ui, &tokens, &t("opening.bills"));
                 form::hint(ui, &tokens, &t("opening.bills_hint"));
-                save |= self.doc_rows(ui, "bills");
+                self.doc_rows(ui, "bills");
             });
             ui.add_space(8.0);
             form::card(ui, &tokens, |ui| {
                 form::heading(ui, &tokens, &t("opening.other"));
                 form::hint(ui, &tokens, &t("opening.other_hint"));
-                save |= self.balance_rows(ui, &tokens, "other");
+                self.balance_rows(ui, &tokens, "other");
             });
         });
         let picked = frame.bottom(|ui| {
@@ -746,9 +741,6 @@ impl Screen for OpeningBalancesScreen {
                 self.link.push(CompanyEvent::CloseWindow(CommandId::new(
                     "company.opening_balances",
                 )));
-            }
-            None if save && self.task.is_none() => {
-                self.command(CommandId::new("form.save_new"));
             }
             None => {}
         }
@@ -800,9 +792,8 @@ impl Screen for OpeningBalancesScreen {
 mod tests {
     use super::*;
 
-    /// Review P16-part1 #6: Enter in a field posts by default (Q-190, the
-    /// same as Alt+N; here refused because nothing is typed) and moves
-    /// between the fields when the option is on (Q-264).
+    /// Enter in a field never posts (Q-P16q): it does nothing by default
+    /// and moves between the fields when the option is on (Q-264).
     #[test]
     fn enter_posts_or_moves_between_fields() {
         use crate::forms::enter::testing::{context, enter, frame, settle};
@@ -820,8 +811,9 @@ mod tests {
             let v = s.state();
             match mode {
                 EnterMode::SaveAndNew => {
-                    assert_eq!(v["last_enter"], "save");
-                    assert_eq!(v["issues"], 1, "posting was asked: nothing to post");
+                    assert_eq!(v["last_enter"], "ignored");
+                    assert_eq!(v["issues"], 0, "Enter never asks to post");
+                    assert_eq!(v["posted"], false);
                 }
                 EnterMode::MoveBetweenFields => {
                     assert_eq!(v["last_enter"], "next");

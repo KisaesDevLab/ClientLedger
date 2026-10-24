@@ -27,11 +27,12 @@ steps:
   - click: {role: button, label: Post opening balances}
   - assert_state: {key: screen.posted, equals: false}
   - assert_state: {key: screen.issues, equals: 1}
-  # Enter in a field is Post, like Alt+N (Q-190; refused the same way).
+  # Enter in a field does nothing by default (Q-P16q); only the button or
+  # Alt+N posts.
   - focus: {role: text_input, label: Books start on}
   - assert_focused: {role: text_input, label: Books start on}
   - key: Enter
-  - assert_state: {key: screen.last_enter, equals: save}
+  - assert_state: {key: screen.last_enter, equals: ignored}
   - assert_state: {key: screen.posted, equals: false}
   # With "Enter moves between fields" on (Q-264) Enter moves on and never
   # posts; Shift+Enter goes back (review P16-part1 #6).
