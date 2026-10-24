@@ -591,6 +591,11 @@ fn main() -> std::process::ExitCode {
             contract_home::float_dashboard_refused,
         ),
         ("home::exact_strings_u76", contract_home::exact_strings_u76),
+        // P16 WP7: the rail counts Home reads.
+        (
+            "home::rail_counts_match_the_lists",
+            contract_home::rail_counts_match_the_lists,
+        ),
         (
             "lifecycle::ten_switches_under_two_seconds",
             contract_lifecycle::ten_switches_under_two_seconds,

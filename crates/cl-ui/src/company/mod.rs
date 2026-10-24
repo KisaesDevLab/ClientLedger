@@ -65,6 +65,9 @@ pub enum CompanyEvent {
     /// The owner saved new user preferences (theme, zoom, dates): the
     /// shell applies and persists them.
     UserPrefs(cl_settings::UserPrefs),
+    /// Home read the rail's counts (clients, vendors, bank items waiting;
+    /// P16). Counts only.
+    RailCounts(crate::shell::RailCounts),
 }
 
 struct Live {

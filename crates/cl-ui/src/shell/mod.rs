@@ -401,6 +401,8 @@ impl Shell {
                         self.windows.close_now(id);
                     }
                     self.open_tenant = Some((tenant_id, name.clone()));
+                    // The new company's Home reads its own counts.
+                    self.counts = RailCounts::default();
                     self.set_company(
                         &key,
                         Some(CompanyBanner {
@@ -423,6 +425,7 @@ impl Shell {
                     }
                     self.open_tenant = None;
                     self.company = None;
+                    self.counts = RailCounts::default();
                     self.company_key = "default".into();
                     self.last_saved_layout = Some(self.windows.snapshot());
                     self.dispatch_now(CommandId::new("file.open_company"));
@@ -463,6 +466,13 @@ impl Shell {
                 CompanyEvent::OpenRegister(account) => self.open_register(account),
                 CompanyEvent::OpenRecord(kind, txn) => self.open_record(kind, txn),
                 CompanyEvent::OpenTemplate(t) => self.open_template(*t),
+                CompanyEvent::RailCounts(c) => {
+                    // Only while a company is open (Opened and Closed clear
+                    // them; the new company's Home reads its own).
+                    if self.open_tenant.is_some() || self.demo {
+                        self.counts = c;
+                    }
+                }
             }
         }
     }
@@ -524,11 +534,7 @@ impl Shell {
             self.today = d;
             self.fixed_today = true;
         }
-        self.counts = RailCounts {
-            clients: Some(64),
-            vendors: Some(38),
-            bank_feed: Some(37),
-        };
+        // The rail counts come from Home's reads (P16), as in a real company.
         self.status = StatusInfo {
             user: Some("Kurt \u{b7} Admin".into()),
             mode: Some("Single-user \u{b7} this computer".into()),
@@ -541,10 +547,8 @@ impl Shell {
             self.open_tenant = Some((c.tenant_id, c.name.clone()));
         }
         let mk = |id: &str| commands::find(id).map_or_else(|| CommandId::new("nav.home"), |c| c.id);
-        self.windows.open_new(
-            mk("nav.home"),
-            Box::new(Placeholder::for_command(mk("nav.home"))),
-        );
+        let home = self.make_screen(mk("nav.home"));
+        self.windows.open_new(mk("nav.home"), home);
         // The real Write Check with the mockup's unsaved draft (P13).
         let check: Box<dyn Screen> = match &self.company_link {
             Some(link) => Box::new(crate::screens::write_check::WriteCheckScreen::demo_draft(
@@ -1369,6 +1373,7 @@ fn make_any(
             .iter()
             .chain(&crate::screens::P15_SCREENS)
             .chain(&crate::screens::P15A_SCREENS)
+            .chain(&crate::screens::P16_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;

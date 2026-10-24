@@ -116,6 +116,13 @@ impl Placeholder {
     pub fn kind(&self) -> CommandId {
         self.kind
     }
+
+    /// The phase that builds the real screen (`None` for a built command
+    /// shown without a company).
+    #[must_use]
+    pub fn arrives(&self) -> Option<&'static str> {
+        self.arrives
+    }
 }
 
 impl Screen for Placeholder {
@@ -130,14 +137,10 @@ impl Screen for Placeholder {
             ui.heading(&self.title);
         });
         ui.add_space(6.0);
-        // A built command can still show a placeholder until its screen is
-        // wired in (Write Check during P13), so only Home gets its own text.
-        let message = if self.arrives.is_none() && self.kind.as_str() == "nav.home" {
-            t("window.placeholder.home")
-        } else {
-            t("window.placeholder.coming")
-        };
-        ui.label(eframe::egui::RichText::new(message).color(tokens.text_secondary));
+        ui.label(
+            eframe::egui::RichText::new(t("window.placeholder.coming"))
+                .color(tokens.text_secondary),
+        );
     }
 
     fn dirty(&self) -> bool {

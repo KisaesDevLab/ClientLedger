@@ -27,6 +27,9 @@ pub mod templates_due;
 // P15A: Bulk Entry.
 pub mod batch_entry;
 
+// P16: Home.
+pub mod home;
+
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
     deposit::make,
@@ -44,6 +47,9 @@ pub(crate) const P15_SCREENS: [crate::shell::MakeScreen; 3] =
 
 /// Every P15A screen's `make` (the shell tries each after P15's).
 pub(crate) const P15A_SCREENS: [crate::shell::MakeScreen; 1] = [batch_entry::make];
+
+/// Every P16 screen's `make` (the shell tries each after P15A's).
+pub(crate) const P16_SCREENS: [crate::shell::MakeScreen; 1] = [home::make];
 
 #[cfg(test)]
 mod tests {

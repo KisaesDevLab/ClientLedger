@@ -16,7 +16,11 @@ steps:
   - assert_exists: {role: button, label: Go to a screen or command}
   - assert_exists: {role: button, label: File}
   - assert_exists: {role: label, label: Kurt · Admin}
-  - assert_no_clipping: {}
+  - assert_no_clipping:
+      ignore:
+        # Home's body scrolls under its title (P16): a row cut by the bottom
+        # of the body reports its full bounds past the window's edge.
+        - {x: 212, y: 760, width: 10000, height: 200}
   - screenshot: home
 
   # --- Tabs ----------------------------------------------------------------
@@ -77,6 +81,8 @@ steps:
       ignore:
         - {x: 0, y: 100, width: 212, height: 10000}
         - {x: 212, y: 70, width: 10000, height: 45}
+        # Home's body scrolls under its title (P16).
+        - {x: 212, y: 580, width: 10000, height: 200}
   - screenshot: min-window
 
   # --- 200% zoom at the minimum window (480 x 320 points) -------------------
@@ -92,6 +98,8 @@ steps:
       ignore:
         - {x: 0, y: 100, width: 212, height: 10000}
         - {x: 212, y: 70, width: 10000, height: 45}
+        # Home's body scrolls under its title (P16).
+        - {x: 0, y: 260, width: 10000, height: 200}
   - screenshot: min-window-zoom-200
   # The tabs that don't fit: the strip scrolls, Ctrl+Tab brings each one
   # into view, and the button at the right lists the ones out of view.

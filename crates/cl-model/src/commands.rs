@@ -342,7 +342,7 @@ pub const COMMANDS: &[Command] = &[
     screen("company.send_to_accountant", "Send to My Accountant", Some(Menu::Company), 2, None, "P32"),
     screen("company.audit_trail", "Audit Trail", Some(Menu::Company), 2, None, "P29"),
     // Window
-    screen("nav.home", "Home", Some(Menu::Window), 0, alt('H'), "P16"),
+    built("nav.home", "Home", Some(Menu::Window), 0, alt('H')),
     cmd("window.next", "Next Window", Some(Menu::Window), 1, key(Mods::CMD, Key::Tab), Scope::Global),
     cmd("window.prev", "Previous Window", Some(Menu::Window), 1, key(Mods::CMD_SHIFT, Key::Tab), Scope::Global),
     cmd("window.pop_out", "Move Window to Its Own Window", Some(Menu::Window), 1, ctrl_shift('O'), Scope::Window),
@@ -471,6 +471,8 @@ mod tests {
             "lists.templates_due",
             // P15A
             "banking.bulk_entry",
+            // P16
+            "nav.home",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
