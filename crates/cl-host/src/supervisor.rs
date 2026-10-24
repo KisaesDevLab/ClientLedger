@@ -195,7 +195,8 @@ pub struct RestartPolicy {
     pub listener_check_every: Duration,
     /// Time the engine gets to exit after being asked (Unix).
     pub stop_grace: Duration,
-    /// Wait after the engine exited on its own, to collect its last output.
+    /// Longest wait after the engine exited on its own, to collect its last
+    /// output (the wait ends as soon as both output streams are closed).
     /// The endpoint is unpublished *before* this wait, so no client sends
     /// to a port another program could now take.
     pub exit_drain: Duration,
@@ -218,7 +219,7 @@ impl Default for RestartPolicy {
             poll_interval: Duration::from_millis(250),
             listener_check_every: Duration::from_secs(15),
             stop_grace: Duration::from_secs(10),
-            exit_drain: Duration::from_millis(100),
+            exit_drain: Duration::from_secs(1),
         }
     }
 }
@@ -932,7 +933,7 @@ impl Worker {
                             i.endpoint = None;
                             i.status.engine_pid = None;
                         });
-                        std::thread::sleep(self.policy.exit_drain);
+                        proc.drain_output(self.policy.exit_drain);
                         let code = status.code();
                         let permanent = code == Some(engine::EXIT_CONFIG);
                         let fatal = proc.fatal_code();
