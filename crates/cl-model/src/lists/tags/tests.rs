@@ -22,6 +22,7 @@ fn group(n: u32, name: &str, single: bool, order: i64) -> GroupEntry {
 fn tag(n: u32, name: &str, group: Option<u32>, active: bool) -> TagEntry {
     TagEntry {
         id: tid(n),
+        number: None,
         name: name.to_string(),
         group: group.map(gid),
         color: None,
@@ -140,6 +141,7 @@ fn tag_check() {
     let l = sample();
     let ok = check_tag(
         &TagDraft {
+            number: String::new(),
             name: " North ".into(),
             group: Some(gid(1)),
             color: "#A1B2C3".into(),
@@ -154,6 +156,7 @@ fn tag_check() {
     assert_eq!(ok.description, None);
     let bad = check_tag(
         &TagDraft {
+            number: String::new(),
             name: "east".into(),
             group: Some(gid(9)),
             color: "red".into(),
@@ -327,4 +330,69 @@ fn twenty_thousand_tags_filter_quickly() {
     });
     assert!(!rows.is_empty() && !all.is_empty());
     assert!(took.as_millis() < 100, "filtering took {took:?}");
+}
+
+/// Q-270: numbered tags first in their group, by number (`9` before `10`),
+/// then by name; the filter and the duplicate check see the number.
+#[test]
+fn tag_numbers_order_find_and_stay_unique() {
+    let numbered = |n: u32, number: Option<&str>, name: &str, group: Option<u32>| TagEntry {
+        number: number.map(str::to_string),
+        ..tag(n, name, group, true)
+    };
+    let l = TagList::new(
+        vec![group(1, "Region", true, 1)],
+        vec![
+            numbered(1, None, "Alpha", Some(1)),
+            numbered(2, Some("10"), "West", Some(1)),
+            numbered(3, Some("9"), "East", Some(1)),
+            numbered(4, Some(" "), "Beta", Some(1)),
+            numbered(5, Some("A-1"), "Promo", None),
+            numbered(6, None, "Misc", None),
+        ],
+    );
+    let shown: Vec<String> = l.tags().iter().map(TagEntry::label).collect();
+    assert_eq!(
+        shown,
+        [
+            "9 · East",
+            "10 · West",
+            "Alpha",
+            "Beta",
+            "A-1 · Promo",
+            "Misc"
+        ]
+    );
+    let by_number = TagFilter {
+        search: "a-".into(),
+        ..TagFilter::default()
+    };
+    assert_eq!(l.visible(&by_number), vec![4]);
+    assert_eq!(l.tag_number_owner(" a-1 ", None), Some(tid(5)));
+    assert_eq!(l.tag_number_owner("A-1", Some(tid(5))), None);
+    assert_eq!(l.tag_number_owner("  ", None), None);
+
+    let draft = |number: &str| TagDraft {
+        number: number.into(),
+        name: "New".into(),
+        ..TagDraft::default()
+    };
+    assert_eq!(
+        check_tag(&draft("10"), &l, None).expect_err("taken"),
+        vec![TagProblem::NumberTaken]
+    );
+    assert_eq!(TagProblem::NumberTaken.field(), TagField::Number);
+    assert!(
+        check_tag(&draft("10"), &l, Some(tid(2))).is_ok(),
+        "its own number"
+    );
+    assert_eq!(
+        check_tag(&draft(&"9".repeat(NUMBER_MAX + 1)), &l, None).expect_err("long"),
+        vec![TagProblem::NumberTooLong]
+    );
+    let ok = check_tag(&draft(" 11 "), &l, None).expect("ok");
+    assert_eq!(ok.number, "11");
+    assert_eq!(check_tag(&draft(""), &l, None).expect("ok").number, "");
+    let edit = TagDraft::from_entry(l.tag(tid(2)).expect("west"));
+    assert_eq!(edit.number, "10");
 }

@@ -651,15 +651,15 @@ impl RegisterScreen {
         }
     }
 
-    /// "Any tag" then the active tags (and the chosen one), by name.
+    /// "Any tag" then the active tags (and the chosen one), by number, then
+    /// name, each as `number · name` (Q-270).
     fn tag_choices(&self) -> (Vec<Choice>, Vec<Option<TagId>>) {
-        let mut tags: Vec<_> = self
-            .entry
-            .tags
-            .iter()
-            .filter(|g| g.is_active || Some(g.id) == self.filters.tag)
-            .collect();
-        tags.sort_by(|a, b| a.fields.name.cmp(&b.fields.name));
+        let tags = crate::tag_names::sorted(
+            self.entry
+                .tags
+                .iter()
+                .filter(|g| g.is_active || Some(g.id) == self.filters.tag),
+        );
         let mut choices = vec![Choice {
             text: t("register.filter.any_tag"),
             caption: false,
@@ -667,7 +667,7 @@ impl RegisterScreen {
         let mut ids = vec![None];
         for g in tags {
             choices.push(Choice {
-                text: g.fields.name.clone(),
+                text: crate::tag_names::label(g),
                 caption: false,
             });
             ids.push(Some(g.id));
