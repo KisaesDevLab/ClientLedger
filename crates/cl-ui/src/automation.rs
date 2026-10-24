@@ -45,10 +45,15 @@ pub fn hide_secrets_id() -> egui::Id {
 const SETTLE_FRAMES: u64 = 2;
 /// How long a screenshot or resize may take.
 const JOB_TIMEOUT: Duration = Duration::from_secs(15);
-/// One turn of the `scroll` wheel (points) and how many turns it takes:
-/// more than any screen is tall, so the area reaches its end.
-const WHEEL_STEP: f32 = 4_000.0;
-const WHEEL_TURNS: usize = 6;
+/// One `scroll` turn (points): far more than any screen is tall; the area
+/// clamps it at its end.
+const WHEEL_STEP: f32 = 100_000.0;
+/// How long the tree must hold still, in frames and in time, before a
+/// `scroll` answers.
+const SCROLL_STILL_FRAMES: u64 = 3;
+const SCROLL_STILL: Duration = Duration::from_millis(150);
+/// A `scroll` whose tree never holds still answers after this long.
+const SCROLL_WAIT_MAX: Duration = Duration::from_secs(3);
 
 /// Events to inject into one coming frame.
 #[derive(Clone, Default)]
@@ -221,11 +226,46 @@ enum JobKind {
     /// The target was scrolled into view; once the frames settle, find it
     /// again at its new position and click it.
     ClickAfterScroll { target: Box<Target>, until: u64 },
+    /// Wheel turns until a turn moves nothing.
+    Scroll(Box<ScrollJob>),
     /// Wait for the rendered pixels.
     Screenshot {
         path: PathBuf,
         slot: Arc<Mutex<Option<Arc<ColorImage>>>>,
     },
+}
+
+/// A `scroll` under way: waits for the tree to hold still.
+struct ScrollJob {
+    /// The layout last seen, and since when (frame, time) it held still.
+    last: u64,
+    still_since: (u64, Instant),
+    /// When the turn was sent.
+    started: Instant,
+    /// Wait for this frame first (the turn delivered).
+    until: u64,
+}
+
+/// A hash of every element's position and size: it changes while anything
+/// moves.
+fn layout_signature(snapshot: Option<&Snapshot>) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+    fn walk(n: &Node, h: &mut std::collections::hash_map::DefaultHasher) {
+        n.id.hash(h);
+        if let Some(b) = &n.bounds {
+            for v in [b.x, b.y, b.width, b.height] {
+                v.to_bits().hash(h);
+            }
+        }
+        for c in &n.children {
+            walk(c, h);
+        }
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    if let Some(s) = snapshot {
+        walk(&s.tree, &mut h);
+    }
+    h.finish()
 }
 
 struct Job {
@@ -326,13 +366,22 @@ impl Bridge {
     }
 
     /// Complete the job if it is ready; hand it back if it is not.
-    fn finish(&self, ctx: &Context, shell: &Shell, job: Job) -> Option<Job> {
+    fn finish(&self, ctx: &Context, shell: &Shell, mut job: Job) -> Option<Job> {
         if Instant::now() > job.deadline {
             job.pending.respond(Response::failure(
                 ErrorCode::Timeout,
                 "the app did not finish in time",
             ));
             return None;
+        }
+        if let JobKind::Scroll(s) = &mut job.kind {
+            return match self.scroll_step(ctx, s) {
+                Some(value) => {
+                    job.pending.respond(Response::success(value));
+                    None
+                }
+                None => Some(job),
+            };
         }
         match &job.kind {
             JobKind::AfterFrame { until, finish } => {
@@ -371,6 +420,7 @@ impl Bridge {
                     Err(Started::Job(_)) => None,
                 }
             }
+            JobKind::Scroll(_) => Some(job),
             JobKind::Screenshot { path, slot } => {
                 let image = slot.lock().ok().and_then(|mut s| s.take());
                 let Some(image) = image else {
@@ -628,9 +678,13 @@ impl Bridge {
         self.after(Finish::Empty)
     }
 
-    /// The mouse wheel over the target until what scrolls there reaches
-    /// the asked end (the area clamps the far end; egui smooths the turn
-    /// over a few frames).
+    /// The mouse wheel over the target, far enough that what scrolls there
+    /// reaches the asked end. The turn is sent as a touch (start, move, end)
+    /// so egui applies all of it in one frame instead of smoothing it over
+    /// many: a smoothed turn kept scrolling after the content moved, and its
+    /// rest landed on whatever came under the pointer (a grid's own scroll
+    /// area), so the end was reached only some of the time. The answer
+    /// waits until the tree holds still.
     fn scroll(&self, ctx: &Context, p: &ScrollParams) -> Started {
         let node = match self.resolve(&p.target) {
             Ok(n) => n,
@@ -645,25 +699,66 @@ impl Bridge {
             ScrollTo::End => -WHEEL_STEP,
             ScrollTo::Start => WHEEL_STEP,
         };
-        let wheel = Scheduled {
-            events: vec![
-                Event::PointerMoved(pos),
-                Event::MouseWheel {
-                    unit: egui::MouseWheelUnit::Point,
-                    delta: egui::vec2(0.0, dy),
-                    modifiers: Modifiers::NONE,
-                    phase: egui::TouchPhase::Move,
-                    source: egui::MouseWheelSource::Wheel,
-                },
-            ],
+        let wheel = |phase, dy| Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, dy),
+            modifiers: Modifiers::NONE,
+            phase,
+            source: egui::MouseWheelSource::Wheel,
         };
-        let mut frames = vec![Scheduled {
-            events: vec![Event::PointerMoved(pos)],
-        }];
-        frames.extend(std::iter::repeat_n(wheel, WHEEL_TURNS));
-        self.schedule(frames);
+        let now = self.layout();
+        self.schedule(vec![
+            Scheduled {
+                events: vec![Event::PointerMoved(pos)],
+            },
+            Scheduled {
+                events: vec![
+                    Event::PointerMoved(pos),
+                    wheel(egui::TouchPhase::Start, 0.0),
+                    wheel(egui::TouchPhase::Move, dy),
+                ],
+            },
+            Scheduled {
+                events: vec![wheel(egui::TouchPhase::End, 0.0)],
+            },
+        ]);
         ctx.request_repaint();
-        self.after(Finish::Empty)
+        Started::Job(JobKind::Scroll(Box::new(ScrollJob {
+            last: now,
+            still_since: (self.frame(), Instant::now()),
+            started: Instant::now(),
+            until: self.frame() + self.queued() + 1,
+        })))
+    }
+
+    fn layout(&self) -> u64 {
+        layout_signature(self.snapshot().as_ref())
+    }
+
+    /// One poll of a scroll: `Some(answer)` once the turn arrived and the
+    /// tree held still for [`SCROLL_STILL_FRAMES`] frames and
+    /// [`SCROLL_STILL`].
+    fn scroll_step(&self, ctx: &Context, s: &mut ScrollJob) -> Option<Value> {
+        if self.frame() < s.until || self.queued() > 0 || sequencer_busy(ctx) {
+            return None;
+        }
+        if s.started.elapsed() > SCROLL_WAIT_MAX {
+            // Something on screen keeps moving: answer anyway.
+            return Some(json!({ "settled": false }));
+        }
+        let now = self.layout();
+        if now != s.last {
+            s.last = now;
+            s.still_since = (self.frame(), Instant::now());
+            ctx.request_repaint();
+            return None;
+        }
+        let (frame, at) = s.still_since;
+        if self.frame() < frame + SCROLL_STILL_FRAMES || at.elapsed() < SCROLL_STILL {
+            ctx.request_repaint();
+            return None;
+        }
+        Some(json!({ "settled": true }))
     }
 
     fn focus(&self, target: &Target) -> Started {
