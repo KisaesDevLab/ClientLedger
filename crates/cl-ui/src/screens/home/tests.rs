@@ -1,13 +1,233 @@
 //! Home on the demo engine (both P16 capabilities simulated) and on hand-made
-//! answers (neither): lane wiring, chips and the lane figures.
+//! answers (neither): lane wiring, chips, exact balances, dashes, and
+//! attention counts that are exactly the engine's answers.
 
 use super::*;
 use crate::company::demo::DemoState;
 use crate::shell::{Shell, ShellOptions};
 use cl_api::Account;
 use cl_core::Money;
-use cl_model::home::LaneFooter;
+use cl_model::home::{AttentionItem, AttentionKind, LaneFooter};
 use eframe::egui::accesskit::Role;
+
+fn counted(items: &[AttentionItem], key: &str) -> Option<u64> {
+    items
+        .iter()
+        .find(|i| i.kind.key() == key)
+        .and_then(|i| i.count)
+}
+
+/// The mockup's Needs attention on the demo, at every width.
+#[test]
+fn the_demo_needs_attention_shows_the_mockup() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    for width in [1440.0, 960.0, 480.0] {
+        let nodes = tree(&mut h, width);
+        let has = |role: Role, name: &str| nodes.iter().any(|(r, n)| *r == role && n == name);
+        for name in [
+            "Needs attention",
+            "37 bank transactions to review",
+            "Reconcile not finished for Operating Checking",
+            "2 invoices past due",
+            "1 payroll import not posted yet",
+            "Backed up today 8:12 AM",
+        ] {
+            assert!(has(Role::Label, name), "{name} at {width}");
+        }
+        assert!(nodes.iter().any(|(r, n)| *r == Role::Label
+            && n.starts_with("To-dos, reorder alerts and the weekly health check")));
+        for link_name in ["Review", "Resume", "Open aging", "Pay bills", "Import"] {
+            assert!(has(Role::Link, link_name), "{link_name}");
+        }
+    }
+    let st = h.state();
+    assert_eq!(st["attention"]["bank_waiting"], 37);
+    assert_eq!(st["attention"]["payroll_unposted"], 1);
+    assert_eq!(st["attention"]["todos"], Value::Null);
+    assert_eq!(st["backup_due"], false);
+    assert_eq!(
+        st["attention_available"],
+        json!([
+            "bank_waiting",
+            "reconcile_unfinished",
+            "invoices_overdue",
+            "bills_due",
+            "payroll_unposted",
+            "backup"
+        ])
+    );
+    let text = st.to_string();
+    for figure in ["84210", "48912", "7471", "Operating"] {
+        assert!(!text.contains(figure), "{figure} in {text}");
+    }
+    // A link opens its window.
+    let _ = link.drain();
+    h.open("vendors.pay_bills");
+    assert_eq!(
+        link.drain(),
+        vec![CompanyEvent::OpenWindow(CommandId::new(
+            "vendors.pay_bills"
+        ))]
+    );
+}
+
+#[test]
+fn attention_counts_are_exactly_the_engine_answers() {
+    let op = crate::company::demo::account_id(1010);
+    let card = crate::company::demo::account_id(2050);
+    let mut summary = demo::summary(&mut DemoState::new(), DemoState::today(), 7);
+    if let Some(r) = summary.receivables.as_mut() {
+        r.overdue_count = 4;
+    }
+    let data = HomeData {
+        counts: Slot::ready(Counts {
+            feed: Ok(5),
+            bills: Ok(3),
+            payroll: Ok(0),
+            clients: Ok(64),
+            vendors: Ok(38),
+        }),
+        reconcile: Slot::ready(ReconcileState {
+            in_progress: vec![op, card],
+            last_completed: None,
+        }),
+        summary: Slot::ready(summary),
+        ..HomeData::default()
+    };
+    let items = attention::items(&data, 14, true, false);
+    assert_eq!(counted(&items, "bank_waiting"), Some(5));
+    assert_eq!(counted(&items, "bills_due"), Some(3));
+    assert_eq!(counted(&items, "payroll_unposted"), Some(0));
+    assert_eq!(counted(&items, "reconcile_unfinished"), Some(2));
+    assert_eq!(counted(&items, "invoices_overdue"), Some(4));
+    assert_eq!(counted(&items, "backup"), Some(0));
+    for later in ["todos", "reorder", "health_check"] {
+        let i = items.iter().find(|i| i.kind.key() == later).expect("item");
+        assert_eq!((i.count, i.available), (None, false), "{later}");
+    }
+    assert!(items.contains(&AttentionItem::counted(
+        AttentionKind::BillsDue { days: 14 },
+        3
+    )));
+
+    // Before U-76 overdue invoices can't be counted: a dash, not a zero.
+    let items = attention::items(&data, 14, false, true);
+    let inv = items
+        .iter()
+        .find(|i| i.kind == AttentionKind::InvoicesOverdue)
+        .expect("invoices");
+    assert_eq!((inv.count, inv.available), (None, false));
+    assert_eq!(counted(&items, "backup"), Some(1), "a backup is due");
+
+    // One failed query is one unknown count; the rest still show.
+    let data = HomeData {
+        counts: Slot::ready(Counts {
+            feed: Err(ApiError::Internal),
+            bills: Ok(1),
+            payroll: Ok(2),
+            clients: Ok(0),
+            vendors: Ok(0),
+        }),
+        reconcile: Slot::failed(ApiError::Internal),
+        ..HomeData::default()
+    };
+    let items = attention::items(&data, 7, true, false);
+    let bank = items
+        .iter()
+        .find(|i| i.kind == AttentionKind::BankWaiting)
+        .expect("bank");
+    assert_eq!((bank.count, bank.available), (None, true));
+    assert_eq!(counted(&items, "reconcile_unfinished"), None);
+    assert_eq!(counted(&items, "bills_due"), Some(1));
+    assert_eq!(counted(&items, "payroll_unposted"), Some(2));
+}
+
+/// The lines Home draws: a dash for what can't be counted (overdue invoices
+/// before U-76, a failed query), one muted line for what arrives later,
+/// nothing for a zero, "Nothing needs attention" when all is clear.
+#[test]
+fn attention_lines_show_dashes_and_the_later_note() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    h.exact = false;
+    h.data = HomeData {
+        accounts: Slot::ready(demo::accounts(&mut DemoState::new())),
+        counts: Slot::ready(Counts {
+            feed: Err(ApiError::Internal),
+            bills: Ok(0),
+            payroll: Ok(0),
+            clients: Ok(0),
+            vendors: Ok(0),
+        }),
+        reconcile: Slot::ready(ReconcileState::default()),
+        ..HomeData::default()
+    };
+    let lines = attention::lines(&h, &h.attention());
+    let dash = |text: &str| {
+        lines
+            .iter()
+            .find(|l| l.text == text)
+            .unwrap_or_else(|| panic!("{text}: {lines:#?}"))
+            .clone()
+    };
+    let invoices = dash("Invoices past due");
+    assert!(invoices.dash.is_some() && invoices.link.is_none());
+    assert!(dash("Bank transactions to review").dash.is_some());
+    assert!(
+        !lines.iter().any(|l| l.text.contains("bills overdue")),
+        "a zero shows nothing"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.muted && l.text.starts_with("To-dos, reorder alerts"))
+    );
+    assert!(
+        !h.attention().iter().any(AttentionItem::needs_attention),
+        "all clear"
+    );
+    for kind in AttentionKind::all(7) {
+        if kind.supported() && kind != AttentionKind::Backup {
+            assert!(
+                crate::i18n::has(&format!("home.attention.{}.name", kind.key())),
+                "{}",
+                kind.key()
+            );
+        }
+    }
+}
+
+#[test]
+fn the_backup_reminder_follows_the_last_backup() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let line_of = |h: &HomeScreen| {
+        attention::lines(h, &h.attention())
+            .into_iter()
+            .last()
+            .expect("the backup line")
+    };
+    let l = line_of(&h);
+    assert_eq!(l.text, "Backed up today 8:12 AM");
+    assert!(l.muted && l.link.is_none());
+
+    h.local.last_backup = None;
+    let l = line_of(&h);
+    assert_eq!(l.text, "This company hasn't been backed up yet");
+    assert_eq!(l.link.map(|(_, opens)| opens), Some("file.backup"));
+
+    let eight_days =
+        Timestamp::from_unix_millis(h.local.now.unix_millis() - 8 * 86_400_000).expect("ts");
+    h.local.last_backup = Some(eight_days);
+    assert!(h.backup_due());
+    let l = line_of(&h);
+    assert_eq!(l.text, "Not backed up since 10/27/2026");
+    assert_eq!(
+        l.link.map(|(text, _)| text),
+        Some("Back up now".to_string())
+    );
+}
 
 fn demo_link() -> (tempfile::TempDir, Arc<CompanyLink>) {
     let dir = tempfile::tempdir().expect("tmp");

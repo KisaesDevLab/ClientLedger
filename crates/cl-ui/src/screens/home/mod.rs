@@ -23,17 +23,19 @@
 //! the Ko-fi button arrive with the next work package (D10); the layout
 //! leaves their places marked below.
 
+mod attention;
 mod balances;
 mod lanes;
 
 use std::sync::Arc;
 
 use cl_api::{
-    Account, AccountFilter, ApiError, Capabilities, ContactFilter, ContactType, DashboardSummary,
-    PageRequest, RECONCILE_ACCOUNTS_MAX, ReconcileState, RequestGroup,
+    Account, AccountFilter, ApiError, BillQuery, Capabilities, ContactFilter, ContactType,
+    DashboardSummary, PageRequest, PayrollStatus, RECONCILE_ACCOUNTS_MAX, ReconcileState,
+    RequestGroup,
 };
-use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, TenantId};
+use cl_core::{CalendarDate, Timestamp};
 use cl_model::CommandId;
 use cl_model::home::LANES;
 use cl_model::register::AccountClass;
@@ -144,6 +146,10 @@ impl<T> Slot<T> {
 pub(crate) struct Counts {
     /// Bank-feed items waiting (`pendingFeedCount`).
     pub feed: Result<u64, ApiError>,
+    /// Open bills overdue or due within the company's window (Q-169).
+    pub bills: Result<u64, ApiError>,
+    /// Payroll imports not posted.
+    pub payroll: Result<u64, ApiError>,
     /// Active clients (the rail).
     pub clients: Result<u64, ApiError>,
     /// Active vendors (the rail).
@@ -211,6 +217,13 @@ pub(crate) fn money_accounts(accounts: &[Account]) -> Vec<&Account> {
 pub(crate) struct Local {
     /// Bills overdue or due within this many days (Q-169).
     pub bills_due_days: u16,
+    /// The last backup this app made of the company.
+    pub last_backup: Option<Timestamp>,
+    /// Now.
+    pub now: Timestamp,
+    /// How far local time is from UTC (UTC in the demo, so screenshots
+    /// stay the same on every machine).
+    pub offset: chrono::FixedOffset,
 }
 
 /// The Home window.
@@ -290,17 +303,26 @@ impl HomeScreen {
             group,
             None,
             move |s| {
+                let through = today.add_days(i64::from(days)).unwrap_or(today);
                 let (clients, vendors) = demo::contact_counts(s);
                 Ok(Counts {
                     feed: Ok(demo::feed_waiting()),
+                    bills: Ok(demo::bills_due(through).0),
+                    payroll: Ok(demo::PAYROLL_UNPOSTED),
                     clients: Ok(clients),
                     vendors: Ok(vendors),
                 })
             },
             move |s| async move {
                 let home = s.home();
+                let bills = match BillQuery::due_within(today, days) {
+                    Ok(q) => home.bills_count(&q).await,
+                    Err(e) => Err(e),
+                };
                 Ok(Counts {
                     feed: home.feed_pending_count(today).await,
+                    bills,
+                    payroll: home.payroll_sessions_count(&PayrollStatus::UNPOSTED).await,
                     clients: contact_count(&s, ContactType::Customer).await,
                     vendors: contact_count(&s, ContactType::Vendor).await,
                 })
@@ -371,6 +393,25 @@ impl HomeScreen {
         self.link.push(CompanyEvent::OpenWindow(cmd.id));
     }
 
+    /// Whether a backup is due (Q-217: none in the last 7 days).
+    pub(crate) fn backup_due(&self) -> bool {
+        cl_model::home::backup_due(
+            self.local.last_backup,
+            self.local.now,
+            cl_model::home::BACKUP_DAYS_DEFAULT,
+        )
+    }
+
+    /// The Needs attention items, in display order.
+    pub(crate) fn attention(&self) -> Vec<cl_model::home::AttentionItem> {
+        attention::items(
+            &self.data,
+            self.local.bills_due_days,
+            self.exact,
+            self.backup_due(),
+        )
+    }
+
     // ------------------------------------------------------------ drawing
 
     fn draw(&mut self, ui: &mut Ui) {
@@ -439,12 +480,12 @@ impl HomeScreen {
         refresh
     }
 
-    /// The cards under the lanes, side by side when there is room (the
-    /// mockup's wrapping row).
+    /// The cards under the lanes: Account balances and Needs attention,
+    /// side by side when there is room (the mockup's wrapping row).
     fn cards(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        // WP8 (D10): the "Income and expenses" chart card (min width 300)
-        // joins this row.
-        let mins = [340.0_f32];
+        // WP8 (D10): the "Income and expenses" chart card goes between the
+        // two (min width 300), so this row holds three cards.
+        let mins = [340.0_f32, 340.0];
         let width = ui.available_width();
         let (mut cols, mut need) = (1, mins[0]);
         while cols < mins.len() {
@@ -455,20 +496,45 @@ impl HomeScreen {
             cols += 1;
         }
         let id = ui.scope_id().with("home-cards");
+        let mut clicked: Option<&'static str> = None;
         let mut retry = false;
-        tiles(ui, id, mins.len(), cols, |ui, _i, min_h| {
-            card(ui, tokens, min_h, |ui| {
-                if balances::show(ui, self, tokens) {
-                    retry = true;
+        tiles(ui, id, mins.len(), cols, |ui, i, min_h| {
+            card(ui, tokens, min_h, |ui| match i {
+                0 => {
+                    if balances::show(ui, self, tokens) {
+                        retry = true;
+                    }
+                }
+                _ => {
+                    if let Some(c) = attention::show(ui, self, tokens) {
+                        if c == attention::RETRY {
+                            retry = true;
+                        } else {
+                            clicked = Some(c);
+                        }
+                    }
                 }
             })
         });
+        if let Some(id) = clicked {
+            self.open(id);
+        }
         if retry {
             self.reload();
         }
     }
 
     fn state_json(&self) -> Value {
+        let items = self.attention();
+        let attention: serde_json::Map<String, Value> = items
+            .iter()
+            .map(|i| (i.kind.key().to_string(), json!(i.count)))
+            .collect();
+        let available: Vec<&str> = items
+            .iter()
+            .filter(|i| i.available)
+            .map(|i| i.kind.key())
+            .collect();
         let rows = balances::rows(&self.data, self.exact);
         json!({
             "screen": "home",
@@ -482,12 +548,17 @@ impl HomeScreen {
                 .map(|l| (l.id.key().to_string(), json!(l.actions)))
                 .collect::<serde_json::Map<String, Value>>(),
             "footers": lanes::footers_shown(self),
+            "attention": attention,
+            "attention_available": available,
+            "needs_attention": items.iter().filter(|i| i.needs_attention()).count(),
             "bills_due_days": self.local.bills_due_days,
+            "backup_due": self.backup_due(),
             "balances_rows": rows.as_ref().map(Vec::len),
             "balances_source": balances::source(&self.data, self.exact),
             "loading": self.data.loading(),
             "errors": {
                 "balances": rows.is_none() && self.data.accounts.error.is_some(),
+                "attention": self.data.counts.error.is_some(),
             },
             "last_opened": self.last_opened.map(CommandId::as_str),
         })
@@ -507,7 +578,8 @@ async fn contact_count(s: &cl_api::Session, kind: ContactType) -> Result<u64, Ap
         .total)
 }
 
-/// The bills window from this computer's record of the company.
+/// The window, the last backup and the clock from this computer's record
+/// of the company (the demo's own figures when it has none).
 fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local {
     let record = tenant.and_then(|(id, _)| {
         link.store()
@@ -520,7 +592,27 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
         .map_or(cl_settings::CompanyPrefs::default().bills_due_days, |r| {
             r.prefs.bills_due_days
         });
-    Local { bills_due_days }
+    let last = record.and_then(|r| r.last_backup);
+    if link.is_demo() {
+        return Local {
+            bills_due_days,
+            last_backup: last.or_else(|| Some(demo::last_backup())),
+            now: demo::now(),
+            offset: utc(),
+        };
+    }
+    let now = chrono::Utc::now();
+    Local {
+        bills_due_days,
+        last_backup: last,
+        now: Timestamp::from_unix_millis(now.timestamp_millis())
+            .unwrap_or_else(|_| crate::company::demo::DemoState::now()),
+        offset: *now.with_timezone(&chrono::Local).offset(),
+    }
+}
+
+fn utc() -> chrono::FixedOffset {
+    chrono::FixedOffset::east_opt(0).unwrap_or_else(|| unreachable!("zero is a valid offset"))
 }
 
 /// A bordered white card, at least `min_h` tall inside. Returns the height
