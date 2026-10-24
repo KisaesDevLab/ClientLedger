@@ -174,6 +174,8 @@ impl Scrubber {
 struct Output {
     lines: VecDeque<String>,
     fatal_code: Option<String>,
+    /// Reader threads (stdout, stderr) that have not reached end of stream.
+    open_streams: u8,
 }
 
 /// A running engine.
@@ -203,6 +205,20 @@ impl EngineProcess {
             .lock()
             .map(|o| o.lines.iter().cloned().collect())
             .unwrap_or_default()
+    }
+
+    /// After the engine exited: wait until both reader threads have read to
+    /// end of stream (so its last lines are kept), but no longer than `max`
+    /// (a leftover child process can hold the pipes open).
+    pub(crate) fn drain_output(&self, max: Duration) {
+        let deadline = Instant::now() + max;
+        loop {
+            let open = self.output.lock().map_or(0, |o| o.open_streams);
+            if open == 0 || Instant::now() >= deadline {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     /// The `code` of a `{"event":"fatal"}` line, when the engine printed one.
@@ -351,6 +367,18 @@ fn push_line(out: &Mutex<Output>, scrubber: &Scrubber, line: &str) {
     }
 }
 
+fn stream_opened(out: &Mutex<Output>) {
+    if let Ok(mut o) = out.lock() {
+        o.open_streams += 1;
+    }
+}
+
+fn stream_closed(out: &Mutex<Output>) {
+    if let Ok(mut o) = out.lock() {
+        o.open_streams = o.open_streams.saturating_sub(1);
+    }
+}
+
 /// Start the engine and wait for its ready line.
 ///
 /// `cancelled` is polled while waiting so a shutdown request is prompt.
@@ -384,6 +412,7 @@ pub(crate) fn launch(
     let (ready_tx, ready_rx) = mpsc::channel::<(String, u16)>();
     if let Some(stdout) = child.stdout.take() {
         let (out, scrub) = (Arc::clone(&output), scrubber.clone());
+        stream_opened(&out);
         std::thread::spawn(move || {
             for_each_line(stdout, |line| {
                 if let Some(ready) = parse_ready_line(line) {
@@ -391,11 +420,16 @@ pub(crate) fn launch(
                 }
                 push_line(&out, &scrub, line);
             });
+            stream_closed(&out);
         });
     }
     if let Some(stderr) = child.stderr.take() {
         let (out, scrub) = (Arc::clone(&output), scrubber.clone());
-        std::thread::spawn(move || for_each_line(stderr, |line| push_line(&out, &scrub, line)));
+        stream_opened(&out);
+        std::thread::spawn(move || {
+            for_each_line(stderr, |line| push_line(&out, &scrub, line));
+            stream_closed(&out);
+        });
     }
     let mut proc = EngineProcess {
         child,
@@ -425,7 +459,7 @@ pub(crate) fn launch(
         }
         if let Ok(Some(status)) = proc.child.try_wait() {
             // Let the reader threads drain what the engine printed last.
-            std::thread::sleep(Duration::from_millis(100));
+            proc.drain_output(Duration::from_secs(1));
             let err = LaunchError::Exited {
                 code: status.code(),
                 fatal_code: proc.fatal_code(),
