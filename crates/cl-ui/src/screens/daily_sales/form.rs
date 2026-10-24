@@ -1,6 +1,6 @@
 //! Drawing Daily Sales Summary on the Write Check pattern (Q-261): the
-//! toolbar, the header card (Layout · Date · Tag · Notes), the lines by
-//! section (Line · Account · Amount), the summary with the cash
+//! toolbar, the header card (Layout Â· Date Â· Tag Â· Notes), the lines by
+//! section (Line Â· Account Â· Amount), the summary with the cash
 //! over/short, the action row and the side panel; and the keymap commands.
 //!
 //! Every input carries its visible label as its accessible name. Amounts
@@ -21,6 +21,7 @@ use crate::company::CompanyEvent;
 use crate::forms::closing_prompt::ClosingClick;
 use crate::forms::header;
 use crate::i18n::{t, t_with};
+use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::company::form;
 use crate::screens::register::account_text;
 use crate::theme::Tokens;
@@ -67,7 +68,7 @@ pub(crate) const fn section_key(s: DailySection) -> &'static str {
     }
 }
 
-/// "2.35 short — posts to Cash Over/Short" and the like (Q-204).
+/// "2.35 short â€” posts to Cash Over/Short" and the like (Q-204).
 pub(crate) fn over_short_text(o: OverShort, style: cl_core::MoneyStyle) -> String {
     match o {
         OverShort::Even => t("daily.over_short.even"),
@@ -84,54 +85,70 @@ impl DailySalesScreen {
             form::progress_line(ui, &tokens, &t("daily.loading"));
             return;
         }
-        self.toolbar(ui, &tokens);
-        self.messages(ui, &tokens);
-        if self.nav_prompt.is_some()
-            && let Some(a) =
-                crate::forms::nav_prompt::ui(ui, "daily_sales", &t("cmd.clients.daily_sales"))
-        {
-            self.answer_nav(a);
-        }
+        let wide = ui.available_width() >= SIDE_BY_SIDE;
+        // Toolbar and messages on top, the actions at the bottom; the rest
+        // scrolls (Q-265).
+        let mut frame = FixedFrame::begin(ui, "daily_sales", FrameOpts::default());
+        frame.top(|ui| {
+            self.toolbar(ui, &tokens);
+            self.messages(ui, &tokens);
+            if self.nav_prompt.is_some()
+                && let Some(a) =
+                    crate::forms::nav_prompt::ui(ui, "daily_sales", &t("cmd.clients.daily_sales"))
+            {
+                self.answer_nav(a);
+            }
+        });
         if self.books.is_none() && self.link.session().is_none() {
-            form::hint(ui, &tokens, &t("daily.unavailable"));
+            frame.body(Body::Scroll, |ui| {
+                form::hint(ui, &tokens, &t("daily.unavailable"));
+            });
+            self.frame_report = frame.end();
             return;
         }
         if self.setup.is_some() {
-            egui::ScrollArea::vertical()
-                .id_salt("daily_sales/setup_scroll")
-                .auto_shrink([false, false])
-                .show(ui, |ui| self.setup_ui(ui, &tokens));
+            frame.body(Body::Scroll, |ui| self.setup_ui(ui, &tokens));
+            self.frame_report = frame.end();
             return;
         }
         if self.templates.is_empty() {
-            self.starter_ui(ui, &tokens);
+            frame.body(Body::Scroll, |ui| self.starter_ui(ui, &tokens));
+            self.frame_report = frame.end();
             return;
         }
-        let wide = ui.available_width() >= SIDE_BY_SIDE;
-        egui::ScrollArea::vertical()
-            .id_salt("daily_sales/scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if wide {
-                    ui.horizontal_top(|ui| {
-                        let spacing = 2.0 * ui.spacing().item_spacing.x;
-                        let form_width = ui.available_width() - PANEL_WIDTH - 20.0 - spacing;
-                        ui.vertical(|ui| {
-                            ui.set_width(form_width);
-                            self.form_ui(ui, &tokens);
-                        });
-                        ui.add_space(20.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(PANEL_WIDTH);
-                            self.panel_ui(ui, &tokens);
-                        });
+        let form_width = |ui: &Ui| {
+            let spacing = 2.0 * ui.spacing().item_spacing.x;
+            ui.available_width() - PANEL_WIDTH - 20.0 - spacing
+        };
+        frame.body(Body::Scroll, |ui| {
+            if wide {
+                ui.horizontal_top(|ui| {
+                    let form_width = form_width(ui);
+                    ui.vertical(|ui| {
+                        ui.set_width(form_width);
+                        self.form_ui(ui, &tokens);
                     });
-                } else {
-                    self.form_ui(ui, &tokens);
-                    ui.add_space(12.0);
-                    self.panel_ui(ui, &tokens);
-                }
-            });
+                    ui.add_space(20.0);
+                    ui.vertical(|ui| {
+                        ui.set_width(PANEL_WIDTH);
+                        self.panel_ui(ui, &tokens);
+                    });
+                });
+            } else {
+                self.form_ui(ui, &tokens);
+                ui.add_space(12.0);
+                self.panel_ui(ui, &tokens);
+            }
+        });
+        frame.bottom(|ui| {
+            if wide {
+                let w = form_width(ui);
+                ui.allocate_ui(Vec2::new(w, ACTION_HEIGHT), |ui| self.actions_ui(ui));
+            } else {
+                self.actions_ui(ui);
+            }
+        });
+        self.frame_report = frame.end();
     }
 
     fn toolbar(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -262,8 +279,6 @@ impl DailySalesScreen {
         ui.add_space(6.0);
         self.summary_ui(ui, tokens);
         self.problems_ui(ui, tokens);
-        ui.add_space(12.0);
-        self.actions_ui(ui);
     }
 
     fn take_focus(&mut self, f: Field, r: &egui::Response) {
@@ -278,7 +293,7 @@ impl DailySalesScreen {
         }
     }
 
-    /// The header card: Layout · Date on top, Tag · Notes below.
+    /// The header card: Layout Â· Date on top, Tag Â· Notes below.
     fn header_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         egui::Frame::new()
             .fill(tokens.surface_form)
@@ -482,7 +497,7 @@ impl DailySalesScreen {
         }
     }
 
-    /// The lines by section: Line · Account (read-only) · Amount.
+    /// The lines by section: Line Â· Account (read-only) Â· Amount.
     fn lines_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         if self.template.is_none() {
             form::progress_line(ui, tokens, &t("daily.loading"));
@@ -928,7 +943,7 @@ impl DailySalesScreen {
     }
 }
 
-/// " · 2.35 short" for the recent-days list ("" when even).
+/// " Â· 2.35 short" for the recent-days list ("" when even).
 fn over_short_short(o: OverShort, style: cl_core::MoneyStyle) -> String {
     match o {
         OverShort::Even => String::new(),

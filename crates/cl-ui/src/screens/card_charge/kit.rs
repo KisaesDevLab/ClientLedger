@@ -1457,43 +1457,75 @@ pub(crate) fn with_figure(
     job
 }
 
-/// Which column `two_columns` is drawing.
+/// Which part `form_frame` is drawing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Column {
+    /// The toolbar and the messages (fixed at the top).
+    Top,
+    /// What shows instead of the form when it can't be filled in (no
+    /// account of the kind yet); no actions then.
+    Empty,
     /// The form.
     Form,
     /// The side panel.
     Panel,
+    /// Clear · Save & New · Save & Close (fixed at the bottom).
+    Actions,
 }
 
-/// The form's two columns: the form, then the side panel beside it (wide)
-/// or under it (narrow), in one scroll area. `draw` draws one column.
-pub(crate) fn two_columns(ui: &mut Ui, id_salt: &str, mut draw: impl FnMut(&mut Ui, Column)) {
+/// A form window (Q-265): the toolbar and messages stay at the top, the
+/// actions at the bottom, and between them the form and the side panel
+/// (beside it when wide, under it when narrow) scroll. `empty` draws
+/// [`Column::Empty`] as the body instead, with no actions. `draw` draws one
+/// part.
+pub(crate) fn form_frame(
+    ui: &mut Ui,
+    id_salt: &str,
+    empty: bool,
+    mut draw: impl FnMut(&mut Ui, Column),
+) -> crate::layout::FrameReport {
+    use crate::layout::{Body, FixedFrame, FrameOpts};
     let wide = ui.available_width() >= SIDE_BY_SIDE;
-    egui::ScrollArea::vertical()
-        .id_salt(id_salt)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            if wide {
-                ui.horizontal_top(|ui| {
-                    let spacing = 2.0 * ui.spacing().item_spacing.x;
-                    let form_width = ui.available_width() - PANEL_WIDTH - 20.0 - spacing;
-                    ui.vertical(|ui| {
-                        ui.set_width(form_width);
-                        draw(ui, Column::Form);
-                    });
-                    ui.add_space(20.0);
-                    ui.vertical(|ui| {
-                        ui.set_width(PANEL_WIDTH);
-                        draw(ui, Column::Panel);
-                    });
+    let form_width = |ui: &Ui| {
+        let spacing = 2.0 * ui.spacing().item_spacing.x;
+        ui.available_width() - PANEL_WIDTH - 20.0 - spacing
+    };
+    let mut frame = FixedFrame::begin(ui, id_salt, FrameOpts::default());
+    frame.top(|ui| draw(ui, Column::Top));
+    if empty {
+        frame.body(Body::Scroll, |ui| draw(ui, Column::Empty));
+        return frame.end();
+    }
+    frame.body(Body::Scroll, |ui| {
+        if wide {
+            ui.horizontal_top(|ui| {
+                let form_width = form_width(ui);
+                ui.vertical(|ui| {
+                    ui.set_width(form_width);
+                    draw(ui, Column::Form);
                 });
-            } else {
-                draw(ui, Column::Form);
-                ui.add_space(12.0);
-                draw(ui, Column::Panel);
-            }
-        });
+                ui.add_space(20.0);
+                ui.vertical(|ui| {
+                    ui.set_width(PANEL_WIDTH);
+                    draw(ui, Column::Panel);
+                });
+            });
+        } else {
+            draw(ui, Column::Form);
+            ui.add_space(12.0);
+            draw(ui, Column::Panel);
+        }
+    });
+    frame.bottom(|ui| {
+        // Under the form's column, as in the mockups.
+        if wide {
+            let w = form_width(ui);
+            ui.allocate_ui(Vec2::new(w, ACTION_HEIGHT), |ui| draw(ui, Column::Actions));
+        } else {
+            draw(ui, Column::Actions);
+        }
+    });
+    frame.end()
 }
 
 /// The tooltip key that explains the entity type's words for owner money

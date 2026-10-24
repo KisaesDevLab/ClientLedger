@@ -16,6 +16,7 @@ use super::validate::blocker_text;
 use crate::forms::closing_prompt::ClosingClick;
 use crate::forms::header;
 use crate::i18n::{t, t_count, t_with};
+use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::card_charge::kit::{self, ACTION_HEIGHT};
 use crate::screens::company::form;
 use crate::theme::Tokens;
@@ -26,17 +27,8 @@ const LISTED_PROBLEMS: usize = 6;
 /// Below this height (points, the window's content) the title row goes.
 const COMPACT_BELOW: f32 = 620.0;
 
-/// Below this height the sections and the grid scroll above the actions.
+/// Below this height the bottom bar shows the totals line only.
 const TIGHT_BELOW: f32 = 360.0;
-
-/// Which measured height (see `BulkEntryScreen::measured`).
-#[derive(Clone, Copy)]
-enum BelowKind {
-    /// Everything under the grid (the usual layout).
-    Below,
-    /// The totals, messages and actions (the tight layout).
-    Footer,
-}
 
 impl BulkEntryScreen {
     pub(crate) fn draw(&mut self, ui: &mut Ui) {
@@ -51,125 +43,94 @@ impl BulkEntryScreen {
             ClosingClick::None => {}
         }
         let room = ui.available_height();
-        if room < TIGHT_BELOW && !self.summary_open && !self.import_open && self.mapping.is_none() {
-            self.draw_tight(ui, &tokens);
-            return;
-        }
-        self.toolbar(ui, &tokens);
-        // Short windows (the minimum window, large zoom): the tab names the
-        // window, so the title row goes and the grid gets its height.
-        if room >= COMPACT_BELOW {
-            kit::title_only(ui, &tokens, &t("cmd.banking.bulk_entry"));
-        } else {
-            ui.add_space(6.0);
-        }
-        if self.summary_open {
-            egui::ScrollArea::vertical()
-                .id_salt("batch_entry/summary")
-                .auto_shrink([false, false])
-                .show(ui, |ui| self.summary_ui(ui, &tokens));
-            return;
-        }
-        if !self.caps().can_post() {
-            form::hint(ui, &tokens, &t("batch_entry.unavailable"));
-        }
-        self.saved_line(ui, &tokens);
+        // A very short window (200% zoom on the minimum window): the totals
+        // line only above the actions (why Save all is off is in its
+        // tooltip).
+        let tight = room < TIGHT_BELOW;
         let enabled = !self.busy() && !self.closing_prompt.dialog_open();
-        self.strip_ui(ui, &tokens, enabled);
-        ui.add_space(4.0);
-        self.section_header_ui(ui, &tokens, enabled);
+        // The toolbar, the sections and the column headings stay at the top,
+        // the totals and the actions at the bottom; the grid takes the room
+        // between them and scrolls its own rows (Q-265). A top too tall for
+        // a short window scrolls on its own.
+        let mut frame = FixedFrame::begin(ui, super::KIND, FrameOpts::default());
+        frame.top(|ui| {
+            self.toolbar(ui, &tokens);
+            // Short windows (the minimum window, large zoom): the tab names
+            // the window, so the title row goes and the grid gets its
+            // height.
+            if room >= COMPACT_BELOW {
+                kit::title_only(ui, &tokens, &t("cmd.banking.bulk_entry"));
+            } else {
+                ui.add_space(6.0);
+            }
+            if self.summary_open {
+                return;
+            }
+            if !self.caps().can_post() {
+                form::hint(ui, &tokens, &t("batch_entry.unavailable"));
+            }
+            self.saved_line(ui, &tokens);
+            self.strip_ui(ui, &tokens, enabled);
+            ui.add_space(4.0);
+            self.section_header_ui(ui, &tokens, enabled);
+        });
+        if self.summary_open {
+            frame.body(Body::Scroll, |ui| self.summary_ui(ui, &tokens));
+            self.layout = frame.end();
+            return;
+        }
         if self.import_open || self.mapping.is_some() {
             // The panel stands in for the grid until rows are added.
-            egui::ScrollArea::vertical()
-                .id_salt("batch_entry/panel")
-                .auto_shrink([false, true])
-                .max_height((ui.available_height() - 70.0).max(120.0))
-                .show(ui, |ui| {
-                    self.import_ui(ui, &tokens);
-                    self.mapping_ui(ui, &tokens);
-                });
-            ui.add_space(8.0);
-            self.actions_ui(ui, false);
+            frame.body(Body::Scroll, |ui| {
+                self.import_ui(ui, &tokens);
+                self.mapping_ui(ui, &tokens);
+            });
+            frame.bottom(|ui| self.actions_ui(ui, false));
+            self.layout = frame.end();
             return;
         }
-        self.import_ui(ui, &tokens);
-        ui.add_space(6.0);
-        // Everything under the grid, as tall as it was last frame (first
-        // frame: an estimate), stays above the status bar.
-        let reserve = self.below_h.unwrap_or_else(|| self.estimate_below());
-        self.grid.set_height(cl_grid::GridHeight::Fill {
-            reserve_below: reserve,
-            min_rows: 3,
-        });
-        self.grid_ui(ui, enabled);
-        let top = ui.cursor().top();
-        self.problems_ui(ui, &tokens);
-        self.suggestions_ui(ui, &tokens, enabled);
-        self.footer_ui(ui, &tokens, enabled, false);
-        self.measured(BelowKind::Below, ui.cursor().top() - top);
-    }
-
-    /// At a very short height (200% zoom on the minimum window): the
-    /// toolbar, the sections, the grid and its problems scroll in the space
-    /// above the totals and the actions, which stay on screen (why Save all
-    /// is off is in its tooltip).
-    fn draw_tight(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        let enabled = !self.busy() && !self.closing_prompt.dialog_open();
-        let footer = self.footer_h.unwrap_or(ACTION_HEIGHT + 40.0);
-        let body = (ui.available_height() - footer).max(48.0);
-        self.grid
-            .set_height(cl_grid::GridHeight::Rows { min: 3, max: 6 });
-        egui::ScrollArea::vertical()
-            .id_salt("batch_entry/body")
-            .auto_shrink([false, true])
-            .max_height(body)
-            .show(ui, |ui| {
-                self.toolbar(ui, tokens);
-                ui.add_space(6.0);
-                if !self.caps().can_post() {
-                    form::hint(ui, tokens, &t("batch_entry.unavailable"));
-                }
-                self.saved_line(ui, tokens);
-                self.strip_ui(ui, tokens, enabled);
-                ui.add_space(4.0);
-                self.section_header_ui(ui, tokens, enabled);
-                self.import_ui(ui, tokens);
-                ui.add_space(6.0);
-                self.grid_ui(ui, enabled);
-                self.problems_ui(ui, tokens);
-                self.suggestions_ui(ui, tokens, enabled);
+        frame.body(Body::Fill, |ui| {
+            self.import_ui(ui, &tokens);
+            // The problems and suggestions under the grid; they scroll in
+            // their room when there are more than fit.
+            let under = self
+                .reserve_under_grid()
+                .min((ui.available_height() - 120.0).max(0.0));
+            self.grid.set_height(cl_grid::GridHeight::Fill {
+                reserve_below: under,
+                min_rows: 3,
             });
-        let top = ui.cursor().top();
-        // Its own container: the scrolled content above is another part
-        // of the window, not drawn under the totals.
-        ui.scope_builder(
-            egui::UiBuilder::new().accessibility_role(egui::accesskit::Role::Group),
-            |ui| self.footer_ui(ui, tokens, enabled, true),
-        );
-        self.measured(BelowKind::Footer, ui.cursor().top() - top);
+            self.grid_ui(ui, enabled);
+            egui::ScrollArea::vertical()
+                .id_salt("batch_entry/under_grid")
+                .auto_shrink([false, true])
+                .max_height(ui.available_height())
+                .show(ui, |ui| {
+                    self.problems_ui(ui, &tokens);
+                    self.suggestions_ui(ui, &tokens, enabled);
+                });
+        });
+        frame.bottom(|ui| {
+            // Its own container: the grid above is another part of the
+            // window, not drawn under the totals.
+            ui.scope_builder(
+                egui::UiBuilder::new().accessibility_role(egui::accesskit::Role::Group),
+                |ui| self.footer_ui(ui, &tokens, enabled, tight),
+            );
+        });
+        self.layout = frame.end();
     }
 
-    /// Remembers how tall the part under the grid was this frame; a change
-    /// draws again so the grid takes the right height at once.
-    fn measured(&mut self, kind: BelowKind, h: f32) {
-        let slot = match kind {
-            BelowKind::Below => &mut self.below_h,
-            BelowKind::Footer => &mut self.footer_h,
-        };
-        let h = h.max(0.0) + 4.0;
-        if slot.is_none_or(|old| (old - h).abs() > 0.5) {
-            *slot = Some(h);
-            self.relayout = true;
-        }
-    }
-
-    /// The first frame's guess at the height under the grid.
-    fn estimate_below(&self) -> f32 {
+    /// The room the problems and suggestions under the grid take.
+    fn reserve_under_grid(&self) -> f32 {
         let listed = self
             .problem_rows_in(self.selected())
             .len()
             .min(LISTED_PROBLEMS + 1);
-        let mut reserve = 150.0 + 26.0 * f32::from(u8::try_from(listed).unwrap_or(u8::MAX));
+        let mut reserve = 26.0 * f32::from(u8::try_from(listed).unwrap_or(u8::MAX));
+        if listed > 0 {
+            reserve += 8.0;
+        }
         if !self.open_suggestions().is_empty() || self.suggest.offer.is_some() {
             reserve += 34.0;
         }

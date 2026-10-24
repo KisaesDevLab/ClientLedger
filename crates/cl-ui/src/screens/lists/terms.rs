@@ -7,6 +7,7 @@ use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
 use crate::i18n::{t, t_with};
+use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::company::form;
 use crate::theme::Tokens;
 use crate::windows::Screen;
@@ -28,13 +29,18 @@ pub enum FixedList {
 /// A read-only fixed list window.
 pub struct FixedListScreen {
     which: FixedList,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
 }
 
 impl FixedListScreen {
     /// The window for `which`.
     #[must_use]
     pub fn new(which: FixedList) -> FixedListScreen {
-        FixedListScreen { which }
+        FixedListScreen {
+            which,
+            layout: crate::layout::FrameReport::default(),
+        }
     }
 
     fn kind(&self) -> &'static str {
@@ -73,30 +79,41 @@ impl Screen for FixedListScreen {
 
     fn ui(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
-        form::heading(ui, &tokens, &self.title());
-        ui.add_space(4.0);
         let (col1, col2, note) = match self.which {
             FixedList::Terms => ("terms.col.name", Some("terms.col.due"), "terms.fixed_note"),
             FixedList::Methods => ("methods.col.name", None, "methods.fixed_note"),
         };
-        form::hint(ui, &tokens, &t(note));
-        ui.add_space(8.0);
+        // The title and the note stay put; the rows scroll (Q-265).
+        let mut frame = FixedFrame::begin(ui, self.kind(), FrameOpts::default());
+        frame.top(|ui| {
+            form::heading(ui, &tokens, &self.title());
+            ui.add_space(4.0);
+            form::hint(ui, &tokens, &t(note));
+        });
         let rows = self.rows();
-        egui::Grid::new(("fixed-list", self.kind()))
-            .num_columns(2)
-            .striped(true)
-            .min_col_width(160.0)
-            .spacing([24.0, 8.0])
-            .show(ui, |ui| {
-                ui.label(RichText::new(t(col1)).strong());
-                ui.label(RichText::new(col2.map(t).unwrap_or_default()).strong());
-                ui.end_row();
-                for (name, detail) in &rows {
-                    ui.label(name);
-                    ui.label(RichText::new(detail).color(tokens.text_secondary));
+        let kind = self.kind();
+        frame.body(Body::Scroll, |ui| {
+            egui::Grid::new(("fixed-list", kind))
+                .num_columns(2)
+                .striped(true)
+                .min_col_width(160.0)
+                .spacing([24.0, 8.0])
+                .show(ui, |ui| {
+                    ui.label(RichText::new(t(col1)).strong());
+                    ui.label(RichText::new(col2.map(t).unwrap_or_default()).strong());
                     ui.end_row();
-                }
-            });
+                    for (name, detail) in &rows {
+                        ui.label(name);
+                        ui.label(RichText::new(detail).color(tokens.text_secondary));
+                        ui.end_row();
+                    }
+                });
+        });
+        self.layout = frame.end();
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 
     fn state(&self) -> Value {
@@ -107,6 +124,7 @@ impl Screen for FixedListScreen {
             },
             "rows": self.rows().len(),
             "editable": false,
+            "layout": self.layout.json(),
         })
     }
 }

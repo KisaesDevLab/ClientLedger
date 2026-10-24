@@ -124,6 +124,8 @@ pub struct PersonalFundsScreen {
     lists_stale: bool,
     in_grid: bool,
     after_frame: Option<CommandId>,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
     pub(crate) money_style: MoneyStyle,
     /// Prev/Next and the saved record being read.
     pub(crate) records: Records,
@@ -201,6 +203,7 @@ impl PersonalFundsScreen {
             lists_stale: false,
             in_grid: false,
             after_frame: None,
+            layout: crate::layout::FrameReport::default(),
             money_style: MoneyStyle::default(),
             records: Records::default(),
             focused: None,
@@ -951,8 +954,24 @@ impl PersonalFundsScreen {
             form::progress_line(ui, &tokens, &t("helper.loading"));
             return;
         }
+        self.layout = kit::form_frame(ui, "personal_funds", false, |ui, col| match col {
+            kit::Column::Top => self.top_ui(ui, &tokens),
+            kit::Column::Empty => {}
+            kit::Column::Form => self.form_ui(ui, &tokens),
+            kit::Column::Panel => Self::panel_ui(ui, &tokens),
+            kit::Column::Actions => {
+                let enabled = self.flow.idle();
+                if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
+                    self.after_frame = Some(CommandId::new(cmd));
+                }
+            }
+        });
+    }
+
+    /// The toolbar and the messages.
+    fn top_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let idle = self.flow.idle();
-        let clicked = kit::toolbar(ui, &tokens, idle, self.is_dirty(), |ui| {
+        let clicked = kit::toolbar(ui, tokens, idle, self.is_dirty(), |ui| {
             ui.separator();
             ui.add(
                 egui::Label::new(
@@ -966,7 +985,7 @@ impl PersonalFundsScreen {
         if let Some(cmd) = clicked {
             self.after_frame = Some(CommandId::new(cmd));
         }
-        match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
+        match kit::messages(ui, tokens, &mut self.flow, self.books.closing) {
             MessageClick::SubmitClosing => self.submit_closing(),
             MessageClick::Void => self.void_now(None),
             MessageClick::Reload => self.reload(),
@@ -977,10 +996,6 @@ impl PersonalFundsScreen {
         {
             self.answer_nav(a);
         }
-        kit::two_columns(ui, "personal_funds/scroll", |ui, col| match col {
-            kit::Column::Form => self.form_ui(ui, &tokens),
-            kit::Column::Panel => Self::panel_ui(ui, &tokens),
-        });
     }
 
     #[allow(clippy::too_many_lines)] // One card of fields, top to bottom.
@@ -1131,10 +1146,6 @@ impl PersonalFundsScreen {
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
         kit::status(ui, tokens, &self.flow);
-        ui.add_space(12.0);
-        if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
-            self.after_frame = Some(CommandId::new(cmd));
-        }
     }
 
     fn treatment_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
@@ -1256,6 +1267,7 @@ impl PersonalFundsScreen {
         });
         let mut v = json!({
             "screen": "personal_funds",
+            "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.books.loaded,
             "entity_type": self.books.entity.map(Entity::name),
@@ -1355,6 +1367,10 @@ impl Screen for PersonalFundsScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }
 

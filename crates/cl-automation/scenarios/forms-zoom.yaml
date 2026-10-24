@@ -1,5 +1,6 @@
 # Write Check, the seven P14 forms, Make Journal Entry, Templates, Templates
-# Due, the Template dialog (P15) and Bulk Entry (P15A) at the minimum window (960 x 640) at 200% zoom
+# Due, the Template dialog (P15), Bulk Entry (P15A), Customers & Jobs and
+# Vendors (P16) at the minimum window (960 x 640) at 200% zoom
 # (480 x 320 points): the shared header wraps (toolbar note, title above the
 # picker), label+input groups move whole to the next line, and nothing is
 # drawn over anything or cut inside its own field. Ignored: the tab strip
@@ -105,6 +106,29 @@ steps:
   - assert_no_clipping: *zoomed
   - click: {role: button, label: Clear}
   - assert_state: {key: screen.last_action, equals: clear}
+  - command: file.close_window
+  # Customers & Jobs and Vendors (P16): the title and toolbar stay at the
+  # top (scrolling on their own at this height), the list keeps its
+  # headings and three rows, and the details panel sits beside it.
+  - command: clients.center
+  - assert_state: {key: screen.screen, equals: client_center}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: button, label: Hide details}
+  - screenshot: customers-z200
+  - assert_no_clipping: &centers
+      ignore:
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        # The top bar scrolls on its own at this height.
+        - {x: -4000, y: 104, width: 8480, height: 56}
+        # The details panel's body scrolls by design.
+        - {x: 264, y: 100, width: 300, height: 260}
+  - command: file.close_window
+  - command: vendors.center
+  - assert_state: {key: screen.screen, equals: vendor_center}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: button, label: Hide details}
+  - screenshot: vendors-z200
+  - assert_no_clipping: *centers
   - command: file.close_window
   - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}

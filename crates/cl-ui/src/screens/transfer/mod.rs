@@ -113,6 +113,8 @@ pub struct TransferScreen {
     pub(crate) loaded: bool,
     pub(crate) closing: Option<CalendarDate>,
     pub(crate) form: FormState<TransferForm>,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
     date: DateInput,
     pub(crate) amount_text: String,
     amount_problem: Option<&'static str>,
@@ -242,6 +244,7 @@ impl TransferScreen {
             problems: Vec::new(),
             error: None,
             notice: None,
+            layout: crate::layout::FrameReport::default(),
             stale: false,
             saved_count: 0,
             last_action: None,
@@ -1110,25 +1113,37 @@ impl TransferScreen {
             form::progress_line(ui, &tokens, &t("transfer.loading"));
             return;
         }
+        let empty = self.transfer_accounts().len() < 2;
+        self.layout = kit::form_frame(ui, "transfer", empty, |ui, col| match col {
+            kit::Column::Top => self.top_ui(ui, &tokens),
+            kit::Column::Empty => form::hint(ui, &tokens, &t("transfer.no_accounts")),
+            kit::Column::Form => self.form_ui(ui, &tokens),
+            kit::Column::Panel => self.panel_ui(ui, &tokens),
+            kit::Column::Actions => self.actions_ui(ui),
+        });
+    }
+
+    /// The toolbar, the messages and the void card.
+    fn top_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let working = self.save_task.is_some();
-        if let Some(cmd) = kit::toolbar(ui, &tokens, !working, self.is_dirty(), |ui| {
+        if let Some(cmd) = kit::toolbar(ui, tokens, !working, self.is_dirty(), |ui| {
             self.template_slot(ui);
         }) {
             self.command(CommandId::new(cmd));
         }
-        match self.closing_prompt.ui(ui, &tokens) {
+        match self.closing_prompt.ui(ui, tokens) {
             ClosingClick::Submit => self.submit_closing(),
             ClosingClick::Cancel => self.closing_prompt.cancel(),
             ClosingClick::None => {}
         }
         if let Some(k) = self.notice {
-            form::hint(ui, &tokens, &t(k));
+            form::hint(ui, tokens, &t(k));
         }
         if self.void_open {
             let mut send = false;
             let mut cancel = false;
-            form::card(ui, &tokens, |ui| {
-                form::heading(ui, &tokens, &t("transfer.void.title"));
+            form::card(ui, tokens, |ui| {
+                form::heading(ui, tokens, &t("transfer.void.title"));
                 form::field(ui, &t("transfer.void.reason"), &mut self.void_reason);
                 ui.horizontal(|ui| {
                     send = ui.button(t("transfer.void.confirm")).clicked();
@@ -1142,14 +1157,6 @@ impl TransferScreen {
                 self.send_void(&r, None);
             }
         }
-        if self.transfer_accounts().len() < 2 {
-            form::hint(ui, &tokens, &t("transfer.no_accounts"));
-            return;
-        }
-        kit::two_columns(ui, "transfer/scroll", |ui, col| match col {
-            kit::Column::Form => self.form_ui(ui, &tokens),
-            kit::Column::Panel => self.panel_ui(ui, &tokens),
-        });
         if self.nav_prompt.is_some()
             && let Some(a) =
                 crate::forms::nav_prompt::ui(ui, "transfer", &t("cmd.banking.transfer"))
@@ -1252,8 +1259,12 @@ impl TransferScreen {
         if let Some(e) = &self.error {
             form::inline_error(ui, tokens, e);
         }
-        ui.add_space(12.0);
-        let idle = !working && !self.closing_prompt.dialog_open();
+    }
+
+    /// Clear · Save & New · Save & Close.
+    fn actions_ui(&mut self, ui: &mut Ui) {
+        let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
+        let idle = self.save_task.is_none() && !self.closing_prompt.dialog_open();
         if let Some(c) = kit::actions_row(ui, idle && !read_only, idle) {
             self.command(CommandId::new(c));
         }
@@ -1328,6 +1339,7 @@ impl TransferScreen {
         let f = self.form.current();
         let mut v = json!({
             "screen": "transfer",
+            "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.loaded,
             "mode": if self.editing.is_some() { "edit" } else { "new" },
@@ -1478,6 +1490,10 @@ impl Screen for TransferScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }
 

@@ -20,6 +20,7 @@ use crate::company::CompanyEvent;
 use crate::forms::closing_prompt::ClosingClick;
 use crate::forms::header;
 use crate::i18n::{t, t_with};
+use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::company::form;
 use crate::screens::register::account_text;
 use crate::theme::Tokens;
@@ -58,48 +59,68 @@ impl DepositScreen {
             form::progress_line(ui, &tokens, &t("deposit.loading"));
             return;
         }
-        self.toolbar(ui, &tokens);
-        self.messages(ui, &tokens);
-        if self.nav_prompt.is_some()
-            && let Some(a) = crate::forms::nav_prompt::ui(ui, "deposit", &t("cmd.banking.deposit"))
-        {
-            self.answer_nav(a);
-        }
-        if self.deposit_accounts().is_empty() {
-            ui.add_space(8.0);
-            ui.label(RichText::new(t("deposit.no_bank")).color(tokens.text_secondary));
-            if ui.button(t("deposit.open_chart")).clicked() {
-                self.link.push(CompanyEvent::OpenWindow(CommandId::new(
-                    crate::screens::lists::accounts::KIND,
-                )));
-            }
-            return;
-        }
         let wide = ui.available_width() >= SIDE_BY_SIDE;
-        egui::ScrollArea::vertical()
-            .id_salt("deposit/scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if wide {
-                    ui.horizontal_top(|ui| {
-                        let spacing = 2.0 * ui.spacing().item_spacing.x;
-                        let form_width = ui.available_width() - PANEL_WIDTH - 20.0 - spacing;
-                        ui.vertical(|ui| {
-                            ui.set_width(form_width);
-                            self.body_ui(ui, &tokens);
-                        });
-                        ui.add_space(20.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(PANEL_WIDTH);
-                            self.panel_ui(ui, &tokens);
-                        });
-                    });
-                } else {
-                    self.body_ui(ui, &tokens);
-                    ui.add_space(12.0);
-                    self.panel_ui(ui, &tokens);
+        // Toolbar and messages on top, the actions at the bottom; the rest
+        // scrolls (Q-265).
+        let mut frame = FixedFrame::begin(ui, "deposit", FrameOpts::default());
+        frame.top(|ui| {
+            self.toolbar(ui, &tokens);
+            self.messages(ui, &tokens);
+            if self.nav_prompt.is_some()
+                && let Some(a) =
+                    crate::forms::nav_prompt::ui(ui, "deposit", &t("cmd.banking.deposit"))
+            {
+                self.answer_nav(a);
+            }
+        });
+        if self.deposit_accounts().is_empty() {
+            frame.body(Body::Scroll, |ui| {
+                ui.add_space(8.0);
+                ui.label(RichText::new(t("deposit.no_bank")).color(tokens.text_secondary));
+                if ui.button(t("deposit.open_chart")).clicked() {
+                    self.link.push(CompanyEvent::OpenWindow(CommandId::new(
+                        crate::screens::lists::accounts::KIND,
+                    )));
                 }
             });
+            self.layout = frame.end();
+            return;
+        }
+        let form_width = |ui: &Ui| {
+            let spacing = 2.0 * ui.spacing().item_spacing.x;
+            ui.available_width() - PANEL_WIDTH - 20.0 - spacing
+        };
+        frame.body(Body::Scroll, |ui| {
+            if wide {
+                ui.horizontal_top(|ui| {
+                    let form_width = form_width(ui);
+                    ui.vertical(|ui| {
+                        ui.set_width(form_width);
+                        self.body_ui(ui, &tokens);
+                    });
+                    ui.add_space(20.0);
+                    ui.vertical(|ui| {
+                        ui.set_width(PANEL_WIDTH);
+                        self.panel_ui(ui, &tokens);
+                    });
+                });
+            } else {
+                self.body_ui(ui, &tokens);
+                ui.add_space(12.0);
+                self.panel_ui(ui, &tokens);
+            }
+        });
+        if !self.show_summary {
+            frame.bottom(|ui| {
+                if wide {
+                    let w = form_width(ui);
+                    ui.allocate_ui(Vec2::new(w, ACTION_HEIGHT), |ui| self.actions_ui(ui));
+                } else {
+                    self.actions_ui(ui);
+                }
+            });
+        }
+        self.layout = frame.end();
     }
 
     fn body_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -225,8 +246,6 @@ impl DepositScreen {
         ui.add_space(6.0);
         self.totals_ui(ui, tokens);
         self.problems_ui(ui, tokens);
-        ui.add_space(12.0);
-        self.actions_ui(ui);
     }
 
     fn take_focus(&mut self, f: Field, r: &egui::Response) {

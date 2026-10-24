@@ -673,6 +673,166 @@ fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
     result
 }
 
+/// Which detail panels the owner hid (Q-266): one choice per screen kind
+/// (`clients.center`), not per company, in its own capped file like
+/// [`GridWidths`] so a bad entry drops only itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PanelPrefsBook {
+    /// (screen kind, collapsed), least recently set first.
+    entries: Vec<(String, bool)>,
+}
+
+impl PanelPrefsBook {
+    /// The file under the UI store folder.
+    pub const FILE: &'static str = "panel-prefs.json";
+    /// File format version.
+    pub const VERSION: u64 = 1;
+    /// Most screens remembered; one more forgets the oldest.
+    pub const MAX_ENTRIES: usize = 64;
+
+    /// Read the file's text; a malformed entry drops only itself.
+    #[must_use]
+    pub fn parse(text: &str) -> PanelPrefsBook {
+        let mut out = PanelPrefsBook::default();
+        let Ok(serde_json::Value::Object(root)) = serde_json::from_str::<serde_json::Value>(text)
+        else {
+            return out;
+        };
+        if root.get("version").and_then(serde_json::Value::as_u64) != Some(Self::VERSION) {
+            return out;
+        }
+        let Some(serde_json::Value::Object(list)) = root.get("collapsed") else {
+            return out;
+        };
+        for (key, value) in list {
+            if out.entries.len() >= Self::MAX_ENTRIES {
+                break;
+            }
+            if GridWidths::key_ok(key)
+                && let Some(c) = value.as_bool()
+            {
+                out.entries.push((key.clone(), c));
+            }
+        }
+        out
+    }
+
+    /// The file's text.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let list: serde_json::Map<String, serde_json::Value> = self
+            .entries
+            .iter()
+            .map(|(k, c)| (k.clone(), serde_json::Value::Bool(*c)))
+            .collect();
+        serde_json::to_string_pretty(&serde_json::json!({
+            "version": Self::VERSION,
+            "collapsed": list,
+        }))
+        .unwrap_or_default()
+    }
+
+    /// True when the owner hid the panel of `key`; `None` when never set.
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<bool> {
+        self.entries.iter().find(|(k, _)| k == key).map(|(_, c)| *c)
+    }
+
+    /// Remember the choice for `key`. Returns false when nothing changed or
+    /// the key could not be read back.
+    pub fn set(&mut self, key: &str, collapsed: bool) -> bool {
+        if !GridWidths::key_ok(key) || self.get(key) == Some(collapsed) {
+            return false;
+        }
+        self.entries.retain(|(k, _)| k != key);
+        self.entries.push((key.to_string(), collapsed));
+        while self.entries.len() > Self::MAX_ENTRIES {
+            self.entries.remove(0);
+        }
+        true
+    }
+
+    /// Load from `dir` (empty when missing, oversized or unreadable).
+    #[must_use]
+    pub fn load(dir: &Path) -> PanelPrefsBook {
+        read_capped(&dir.join(Self::FILE)).map_or_else(PanelPrefsBook::default, |t| Self::parse(&t))
+    }
+
+    /// Save into `dir`.
+    ///
+    /// # Errors
+    /// Any file error.
+    pub fn save(&self, dir: &Path) -> io::Result<()> {
+        write_atomic(&dir.join(Self::FILE), &self.to_text())
+    }
+
+    /// How many screens are remembered.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// True when none is remembered.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod panel_tests {
+    use super::*;
+
+    #[test]
+    fn panel_prefs_round_trip_and_bad_entries_drop() {
+        let dir = std::env::temp_dir().join(format!("cl-ui-panels-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(PanelPrefsBook::load(&dir).is_empty());
+        let mut book = PanelPrefsBook::default();
+        assert!(book.set("clients.center", true));
+        assert!(
+            !book.set("clients.center", true),
+            "unchanged is not a change"
+        );
+        assert!(book.set("vendors.center", false));
+        assert!(!book.set("../x", true));
+        book.save(&dir).unwrap();
+        let back = PanelPrefsBook::load(&dir);
+        assert_eq!(back, book);
+        assert_eq!(back.get("clients.center"), Some(true));
+        assert_eq!(back.get("items"), None);
+        let text = r#"{"version":1,"collapsed":{"a.b":true,"c":"yes","../x":true}}"#;
+        let p = PanelPrefsBook::parse(text);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p.get("a.b"), Some(true));
+        assert!(PanelPrefsBook::parse("nope").is_empty());
+        assert!(PanelPrefsBook::parse(r#"{"version":2,"collapsed":{"a":true}}"#).is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn panel_prefs_are_capped() {
+        let mut book = PanelPrefsBook::default();
+        for i in 0..=PanelPrefsBook::MAX_ENTRIES {
+            book.set(&format!("s{i}"), true);
+        }
+        assert_eq!(book.len(), PanelPrefsBook::MAX_ENTRIES);
+        assert_eq!(book.get("s0"), None, "the oldest is forgotten");
+        let dir = std::env::temp_dir().join(format!("cl-ui-panels-big-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let big = format!(
+            "{{\"version\":1,\"collapsed\":{{\"a\":true}},\"pad\":\"{}\"}}",
+            "x".repeat(70_000)
+        );
+        std::fs::write(dir.join(PanelPrefsBook::FILE), big).unwrap();
+        assert!(
+            PanelPrefsBook::load(&dir).is_empty(),
+            "an oversized file is unreadable"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

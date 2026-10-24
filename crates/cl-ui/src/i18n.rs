@@ -894,6 +894,12 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // WP5a (P16): grid row selection and context menu (Q-272, Q-274).
     ("grid.a11y.select_row", "Select row {n}"),
     ("grid.a11y.menu", "Actions"),
+    // WP2 (P16): the collapsible detail panel (Q-266).
+    ("panel.show_details", "Show details"),
+    ("panel.hide_details", "Hide details"),
+    ("panel.show_details.tip", "Show the details panel ({keys})"),
+    ("panel.hide_details.tip", "Hide the details panel to widen the list ({keys})"),
+    ("panel.form_open.tip", "Save or close the form first; the details panel stays open while you edit."),
 ];
 
 #[cfg(test)]

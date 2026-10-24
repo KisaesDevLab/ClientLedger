@@ -562,3 +562,32 @@ fn fastest_of<T>(runs: usize, mut f: impl FnMut() -> T) -> (T, std::time::Durati
     }
     (out.expect("ran once"), best)
 }
+
+#[test]
+fn ctrl_shift_d_hides_the_details_and_a_new_window_remembers() {
+    let mut r = Rig::new(Role::Vendor);
+    let handle = crate::grid_env::WidthsHandle::default();
+    crate::grid_env::publish_widths(&r.ctx, &handle);
+    r.frames(1);
+    assert_eq!(r.s.state()["details_collapsed"], false);
+    assert!(r.s.command(CommandId::new("window.toggle_details")));
+    r.frames(1);
+    assert_eq!(r.s.state()["details_collapsed"], true);
+    assert_eq!(
+        handle.lock().expect("lock").panels.get("vendors.center"),
+        Some(true)
+    );
+    // A form shows the panel; the command leaves the choice alone.
+    assert!(r.s.command(CommandId::new("list.new")));
+    r.frames(1);
+    assert_eq!(r.s.state()["details_collapsed"], false);
+    assert!(r.s.command(CommandId::new("window.toggle_details")));
+    assert_eq!(r.s.state()["details_remembered"], true);
+    // A new Vendors window reads the choice; Customers & Jobs has its own.
+    r.s = r.other(Role::Vendor);
+    r.frames(2);
+    assert_eq!(r.s.state()["details_collapsed"], true);
+    r.s = r.other(Role::Client);
+    r.frames(2);
+    assert_eq!(r.s.state()["details_collapsed"], false);
+}

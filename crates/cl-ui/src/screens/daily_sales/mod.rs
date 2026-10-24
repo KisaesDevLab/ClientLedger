@@ -1,10 +1,10 @@
 //! Daily Sales Summary (P14 lane B, `clients.daily_sales`): one business
 //! day's register report on the Write Check pattern (Q-261): the header
-//! card (Layout · Date · Tag · Notes), the lines by section, the summary
-//! with the cash over/short, Clear · Save & New · Save & Close, and a side
+//! card (Layout Â· Date Â· Tag Â· Notes), the lines by section, the summary
+//! with the cash over/short, Clear Â· Save & New Â· Save & Close, and a side
 //! panel (Payments Clearing, the days not posted yet, the last 10 days).
 //!
-//! Money (plan §4): every amount is the owner's typed `Money`. The form's
+//! Money (plan Â§4): every amount is the owner's typed `Money`. The form's
 //! totals and over/short come from `cl_model::forms::daily_sales::totals`,
 //! an exact twin of the engine's `computeEntry`; the engine posts the
 //! over/short line itself. A save writes a draft, asks the engine for its
@@ -610,6 +610,8 @@ pub struct DailySalesScreen {
     pub(crate) focused: Option<Field>,
     pub(crate) layout_list: bool,
     pub(crate) after_frame: Option<CommandId>,
+    /// The fixed bars' sizes last frame (Q-265).
+    pub(crate) frame_report: crate::layout::FrameReport,
     pub(crate) money_style: cl_core::MoneyStyle,
     pub(crate) bus: crate::data_bus::Subscription,
     pub(crate) open_task: Option<Job>,
@@ -675,7 +677,7 @@ pub(crate) fn layout_of(t: &DailyTemplate) -> DailyLayout {
     }
 }
 
-/// The engine's account with `tag` (`payments_clearing`, …).
+/// The engine's account with `tag` (`payments_clearing`, â€¦).
 pub(crate) fn system_account(accounts: &[Account], tag: &str) -> Option<AccountId> {
     accounts
         .iter()
@@ -746,6 +748,7 @@ impl DailySalesScreen {
             focused: None,
             layout_list: false,
             after_frame: None,
+            frame_report: crate::layout::FrameReport::default(),
             money_style: cl_core::MoneyStyle::default(),
             bus: crate::data_bus::Subscription::detached(),
             open_task: None,

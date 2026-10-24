@@ -27,6 +27,7 @@ pub mod grid_form;
 pub mod i18n;
 pub mod icon;
 pub mod input;
+pub mod layout;
 pub mod list_field;
 pub mod logging;
 pub mod prefs;

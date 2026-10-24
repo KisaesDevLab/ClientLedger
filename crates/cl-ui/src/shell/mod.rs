@@ -215,6 +215,7 @@ impl Shell {
         {
             w.book = store.load_grid_widths();
             w.registers = store.load_register_prefs();
+            w.panels = crate::prefs::PanelPrefsBook::load(store.dir());
         }
         let mut shell = Shell {
             widths,
@@ -1074,11 +1075,11 @@ impl Shell {
         self.save_layout();
         let now = ctx.input(|i| i.time);
         self.flush_widths(Some(now));
-        if self
-            .widths
-            .lock()
-            .is_ok_and(|w| w.changed_at.is_some() || w.registers_changed_at.is_some())
-        {
+        if self.widths.lock().is_ok_and(|w| {
+            w.changed_at.is_some()
+                || w.registers_changed_at.is_some()
+                || w.panels_changed_at.is_some()
+        }) {
             ctx.request_repaint_after(Duration::from_millis(1100));
         }
         if self.toast.is_some() {
@@ -1122,6 +1123,15 @@ impl Shell {
             w.registers_changed_at = None;
             if let Err(e) = store.save_register_prefs(&w.registers) {
                 tracing::warn!(error = %e, "could not save register choices");
+            }
+        }
+        let due = w
+            .panels_changed_at
+            .is_some_and(|at| now.is_none_or(|n| n - at >= 1.0));
+        if due {
+            w.panels_changed_at = None;
+            if let Err(e) = w.panels.save(store.dir()) {
+                tracing::warn!(error = %e, "could not save panel choices");
             }
         }
     }
@@ -1174,9 +1184,7 @@ impl Shell {
                     dock = Some(id);
                 }
             } else {
-                egui::ScrollArea::both()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| w.screen.ui(ui));
+                draw_screen(ui, w.screen.as_mut());
             }
         });
         if let Some(id) = dock {
@@ -1215,7 +1223,7 @@ impl Shell {
                     let screen = &mut w.screen;
                     egui::CentralPanel::default()
                         .frame(Frame::new().fill(fill).inner_margin(Margin::same(16)))
-                        .show(ui, |ui| screen.ui(ui));
+                        .show(ui, |ui| draw_screen(ui, screen.as_mut()));
                 }
                 if vctx.input(|i| i.viewport().close_requested()) {
                     dock.push(wid);
@@ -1398,6 +1406,18 @@ pub fn weekday_date(d: CalendarDate) -> String {
 #[must_use]
 pub fn chip_text(s: cl_model::Shortcut) -> String {
     input::shortcut_text(s).replace('+', " ")
+}
+
+/// A window body: a screen with fixed bars (Q-265) gets the rectangle and
+/// scrolls its own body; any other screen scrolls whole.
+fn draw_screen(ui: &mut egui::Ui, screen: &mut dyn crate::windows::Screen) {
+    if screen.fixed_layout() {
+        screen.ui(ui);
+    } else {
+        egui::ScrollArea::both()
+            .auto_shrink([false, false])
+            .show(ui, |ui| screen.ui(ui));
+    }
 }
 
 #[cfg(test)]

@@ -101,6 +101,8 @@ pub struct CardChargeScreen {
     lists_stale: bool,
     in_grid: bool,
     after_frame: Option<CommandId>,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
     pub(crate) money_style: MoneyStyle,
     focus_amount: bool,
     /// Prev/Next and the saved record being read.
@@ -149,6 +151,7 @@ impl CardChargeScreen {
             lists_stale: false,
             in_grid: false,
             after_frame: None,
+            layout: crate::layout::FrameReport::default(),
             money_style: MoneyStyle::default(),
             focus_amount: false,
             records: Records::default(),
@@ -877,31 +880,39 @@ impl CardChargeScreen {
             form::progress_line(ui, &tokens, &t("helper.loading"));
             return;
         }
-        self.toolbar(ui, &tokens);
-        match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
-            MessageClick::SubmitClosing => self.submit_closing(),
-            MessageClick::Void => self.void_now(None),
-            MessageClick::Reload => self.reload(),
-            MessageClick::None => {}
-        }
-        if self.records.prompt.is_some()
-            && let Some(a) = records::prompt_ui(ui, KIND, &self.title_text())
-        {
-            self.answer_nav(a);
-        }
-        if self.cards().is_empty() {
-            ui.add_space(8.0);
-            ui.label(RichText::new(t("card.no_card")).color(tokens.text_secondary));
-            if ui.button(t("helper.open_chart")).clicked() {
-                self.link.push(CompanyEvent::OpenWindow(CommandId::new(
-                    crate::screens::lists::accounts::KIND,
-                )));
+        let empty = self.cards().is_empty();
+        self.layout = kit::form_frame(ui, "card_charge", empty, |ui, col| match col {
+            kit::Column::Top => {
+                self.toolbar(ui, &tokens);
+                match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
+                    MessageClick::SubmitClosing => self.submit_closing(),
+                    MessageClick::Void => self.void_now(None),
+                    MessageClick::Reload => self.reload(),
+                    MessageClick::None => {}
+                }
+                if self.records.prompt.is_some()
+                    && let Some(a) = records::prompt_ui(ui, KIND, &self.title_text())
+                {
+                    self.answer_nav(a);
+                }
             }
-            return;
-        }
-        kit::two_columns(ui, "card_charge/scroll", |ui, col| match col {
+            kit::Column::Empty => {
+                ui.add_space(8.0);
+                ui.label(RichText::new(t("card.no_card")).color(tokens.text_secondary));
+                if ui.button(t("helper.open_chart")).clicked() {
+                    self.link.push(CompanyEvent::OpenWindow(CommandId::new(
+                        crate::screens::lists::accounts::KIND,
+                    )));
+                }
+            }
             kit::Column::Form => self.form_ui(ui, &tokens),
             kit::Column::Panel => self.panel_ui(ui, &tokens),
+            kit::Column::Actions => {
+                let enabled = self.flow.idle();
+                if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
+                    self.after_frame = Some(CommandId::new(cmd));
+                }
+            }
         });
     }
 
@@ -964,10 +975,6 @@ impl CardChargeScreen {
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
         kit::status(ui, tokens, &self.flow);
-        ui.add_space(12.0);
-        if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
-            self.after_frame = Some(CommandId::new(cmd));
-        }
     }
 
     fn card_row(&mut self, ui: &mut Ui, tokens: &Tokens, enabled: bool) {
@@ -1230,6 +1237,7 @@ impl CardChargeScreen {
         });
         let mut v = json!({
             "screen": "card_charge",
+            "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.books.loaded,
             "mode": match f.mode { CardMode::Charge => "charge", CardMode::Credit => "credit" },
@@ -1332,6 +1340,10 @@ impl Screen for CardChargeScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }
 

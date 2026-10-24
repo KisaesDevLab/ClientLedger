@@ -111,6 +111,8 @@ pub struct OwnerMoneyScreen {
     pub(crate) bus: crate::data_bus::Subscription,
     lists_stale: bool,
     after_frame: Option<CommandId>,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
     pub(crate) money_style: MoneyStyle,
     /// Prev/Next and the saved record being read.
     pub(crate) records: Records,
@@ -156,6 +158,7 @@ impl OwnerMoneyScreen {
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,
             after_frame: None,
+            layout: crate::layout::FrameReport::default(),
             money_style: MoneyStyle::default(),
             records: Records::default(),
             focused: None,
@@ -779,10 +782,26 @@ impl OwnerMoneyScreen {
             form::progress_line(ui, &tokens, &t("helper.loading"));
             return;
         }
+        self.layout = kit::form_frame(ui, "owner_money", false, |ui, col| match col {
+            kit::Column::Top => self.top_ui(ui, &tokens),
+            kit::Column::Empty => {}
+            kit::Column::Form => self.form_ui(ui, &tokens),
+            kit::Column::Panel => self.panel_ui(ui, &tokens),
+            kit::Column::Actions => {
+                let enabled = self.flow.idle();
+                if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
+                    self.after_frame = Some(CommandId::new(cmd));
+                }
+            }
+        });
+    }
+
+    /// The toolbar (with Pay yourself · Put money in) and the messages.
+    fn top_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let idle = self.flow.idle();
         let d = self.header.current().direction;
         let mut picked = None;
-        let clicked = kit::toolbar(ui, &tokens, idle, self.is_dirty(), |ui| {
+        let clicked = kit::toolbar(ui, tokens, idle, self.is_dirty(), |ui| {
             ui.separator();
             ui.add_enabled_ui(idle, |ui| {
                 if ui
@@ -805,7 +824,7 @@ impl OwnerMoneyScreen {
         if let Some(p) = picked {
             self.set_direction(p);
         }
-        match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
+        match kit::messages(ui, tokens, &mut self.flow, self.books.closing) {
             MessageClick::SubmitClosing => self.submit_closing(),
             MessageClick::Void => self.void_now(None),
             MessageClick::Reload => self.reload(),
@@ -816,10 +835,6 @@ impl OwnerMoneyScreen {
         {
             self.answer_nav(a);
         }
-        kit::two_columns(ui, "owner_money/scroll", |ui, col| match col {
-            kit::Column::Form => self.form_ui(ui, &tokens),
-            kit::Column::Panel => self.panel_ui(ui, &tokens),
-        });
     }
 
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -975,10 +990,6 @@ impl OwnerMoneyScreen {
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
         kit::status(ui, tokens, &self.flow);
-        ui.add_space(12.0);
-        if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
-            self.after_frame = Some(CommandId::new(cmd));
-        }
     }
 
     fn method_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
@@ -1085,6 +1096,7 @@ impl OwnerMoneyScreen {
         let f = self.header.current();
         let mut v = json!({
             "screen": "owner_money",
+            "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.books.loaded,
             "direction": match f.direction {
@@ -1173,6 +1185,10 @@ impl Screen for OwnerMoneyScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }
 
