@@ -36,6 +36,10 @@ pub(crate) mod item {
     pub const HIDE_COLUMN: u16 = 7;
 }
 
+/// Ctrl+A: Select All Rows in the grid, select all text in a text field.
+pub(crate) const SELECT_ALL_KEY: cl_model::Shortcut =
+    cl_model::Shortcut::new(cl_model::Mods::CMD, cl_model::Key::Letter('A'));
+
 /// The shortcut a command shows in menus ("Ctrl+D"), if it has one.
 fn shortcut_of(id: &str) -> Option<String> {
     cl_model::commands::find(id)
@@ -54,45 +58,52 @@ fn entry(id: u16, command: &str) -> ContextItem {
 /// (the grid holds the batch while it draws). Keys and flags only.
 pub(crate) struct BulkMenu {
     kind: SectionKind,
-    /// Each row of the shown section in grid order: (key, blank, dated).
-    rows: Vec<(RowKey, bool, bool)>,
+    /// Each row of the shown section in grid order (which cells are filled,
+    /// never their values).
+    rows: Vec<ops::RowFacts>,
     /// How many rows are selected.
     selected: usize,
     choice: ColumnChoice,
 }
 
+/// The status line's words for a refused Copy down.
+pub(crate) const fn refusal_key(r: ops::CopyRefusal) -> &'static str {
+    match r {
+        ops::CopyRefusal::Protected => "batch_entry.copy.protected",
+        ops::CopyRefusal::BlankRow => "batch_entry.copy.blank_row",
+        ops::CopyRefusal::NoAmount => "batch_entry.copy.no_amount",
+        ops::CopyRefusal::EmptyCell => "batch_entry.copy.empty_cell",
+        ops::CopyRefusal::UnknownRow | ops::CopyRefusal::NoTargets => "batch_entry.copy.nothing",
+    }
+}
+
 impl BulkMenu {
-    /// True when Copy down of `f` from `from` reaches a row: the same rule
-    /// as `ops::can_copy_down` (a date to copy, another non-blank row in
-    /// reach), over the flags.
+    /// Why Copy down of `f` from `from` is off (`None`: it reaches a row):
+    /// `ops::copy_refusal` over the facts.
+    fn refusal(&self, from: RowKey, f: Field, scope: CopyScope) -> Option<ops::CopyRefusal> {
+        ops::copy_refusal(self.kind, &self.rows, from, f, scope)
+    }
+
+    /// True when Copy down of `f` from `from` reaches a row.
+    #[cfg(test)]
     fn can_copy(&self, from: RowKey, f: Field, scope: CopyScope) -> bool {
-        if !ops::copyable(self.kind, f) {
-            return false;
-        }
-        let Some(at) = self.rows.iter().position(|r| r.0 == from) else {
-            return false;
-        };
-        if f == Field::Date && !self.rows[at].2 {
-            return false;
-        }
-        self.rows
-            .iter()
-            .enumerate()
-            .any(|(i, r)| i != at && !r.1 && (scope == CopyScope::AllDisplayed || i > at))
+        self.refusal(from, f, scope).is_none()
     }
 
     fn cell_items(&self, pos: CellPos) -> Vec<ContextItem> {
         let field = field_of(pos.col);
-        let why_not = match field {
-            Some(f) if !ops::copyable(self.kind, f) => t("batch_entry.copy.protected"),
-            _ => t("batch_entry.copy.nothing"),
-        };
         let copy = |id: u16, command: &str, scope: CopyScope| {
-            let on = field.is_some_and(|f| self.can_copy(pos.row, f, scope));
-            let i = entry(id, command).enabled(on);
-            if on { i } else { i.tooltip(why_not.clone()) }
+            let why_not = match field {
+                Some(f) => self.refusal(pos.row, f, scope),
+                None => Some(ops::CopyRefusal::NoTargets),
+            };
+            let i = entry(id, command).enabled(why_not.is_none());
+            match why_not {
+                None => i,
+                Some(r) => i.tooltip(t(refusal_key(r))),
+            }
         };
-        let any_rows = self.rows.iter().any(|r| !r.1);
+        let any_rows = self.rows.iter().any(|r| !r.blank);
         vec![
             copy(item::COPY_DOWN, "grid.copy_down", CopyScope::AllDisplayed),
             copy(item::COPY_BELOW, "grid.copy_down_below", CopyScope::Below),
@@ -132,12 +143,7 @@ impl BulkEntryScreen {
             .batch()
             .sections
             .get(self.selected())
-            .map(|s| {
-                s.rows
-                    .iter()
-                    .map(|r| (r.key, r.is_blank(), r.date.is_some()))
-                    .collect()
-            })
+            .map(ops::row_facts)
             .unwrap_or_default();
         BulkMenu {
             kind: self.shown_kind,
@@ -256,32 +262,86 @@ impl BulkEntryScreen {
         let Some(f) = field_of(pos.col) else {
             return 0;
         };
-        if !ops::copyable(kind, f) {
-            self.bulk_note = Some(t("batch_entry.copy.protected"));
+        // The blank entry line, a line with no amount, an empty cell or an
+        // amount: nothing happens and the status line says why (review
+        // P16-part1 #2).
+        let refusal = self
+            .batch()
+            .sections
+            .get(self.selected())
+            .and_then(|s| ops::copy_refusal(kind, &ops::row_facts(s), pos.row, f, scope));
+        if let Some(r) = refusal {
+            self.bulk_note = Some(t(refusal_key(r)));
             self.rows_changed = 0;
+            self.kept_apart = 0;
+            self.last_action = Some("copy_refused");
             return 0;
         }
-        let n = self.change_section(|s| ops::copy_down(s, pos.row, f, scope));
+        let mut applied = ops::Applied::default();
+        let n = self.change_section(|s| {
+            applied = ops::copy_down(s, pos.row, f, scope);
+            applied.changed
+        });
         self.rows_changed = n;
+        self.kept_apart = applied.kept_apart;
         self.last_action = Some(match scope {
             CopyScope::AllDisplayed => "copy_down",
             CopyScope::Below => "copy_below",
         });
-        self.bulk_note = Some(if n == 0 {
+        let column = t(header_key(kind, f));
+        let done = if n == 0 && applied.kept_apart == 0 {
             t("batch_entry.copy.nothing")
         } else {
-            t_count(
-                "batch_entry.copy.done",
-                n,
-                &[("column", &t(header_key(kind, f)))],
-            )
-        });
+            t_count("batch_entry.copy.done", n, &[("column", &column)])
+        };
+        self.bulk_note = Some(with_kept_apart(done, applied.kept_apart));
         n
+    }
+
+    /// The open cell's position and a hash of its text (`None`: no cell
+    /// editor, or it is empty). Only the hash is kept, never the text.
+    fn cell_text_mark(&self) -> Option<(CellPos, u64)> {
+        use std::hash::{Hash, Hasher};
+        let core = self.grid.grid().core();
+        let edit = core.edit().filter(|e| !e.buffer.is_empty())?;
+        let pos = core.cursor()?;
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        edit.buffer.hash(&mut h);
+        Some((pos, h.finish()))
+    }
+
+    /// True while the open cell still wants Ctrl+A for its text: it has
+    /// text and Ctrl+A has not selected it yet. An empty cell, or a second
+    /// Ctrl+A on the same unchanged cell, lets Select All Rows through.
+    pub(crate) fn cell_keeps_ctrl_a(&self) -> bool {
+        match self.cell_text_mark() {
+            None => false,
+            Some(mark) => self.select_all_armed != Some(mark),
+        }
+    }
+
+    /// Before the grid draws: a Ctrl+A the shell left to the cell's text
+    /// (it is still in this frame's events) arms the next one for all rows.
+    pub(crate) fn arm_select_all(&mut self, ctx: &eframe::egui::Context) {
+        if !self.grid.grid().has_focus() {
+            self.select_all_armed = None;
+            return;
+        }
+        let mark = self.cell_text_mark();
+        if self.select_all_armed.is_some() && self.select_all_armed != mark {
+            // The cursor moved or the text changed.
+            self.select_all_armed = None;
+        }
+        let pressed = ctx.input(crate::input::pressed_shortcuts);
+        if pressed.contains(&SELECT_ALL_KEY) && mark.is_some() {
+            self.select_all_armed = mark;
+        }
     }
 
     /// Select every row of the section (Ctrl+A in the grid; not the blank
     /// entry row).
     pub(crate) fn select_all(&mut self) {
+        self.select_all_armed = None;
         let lists = Arc::clone(&self.books.lists);
         self.grid.grid_command(GridCommand::SelectAll, &*lists);
         self.last_action = Some("select_all");
@@ -323,15 +383,32 @@ impl BulkEntryScreen {
         n
     }
 
-    /// "Set on 3 rows." plus, for a hidden column, that it is hidden.
-    pub(crate) fn set_note(&self, f: Field, n: usize) -> String {
+    /// "Set on 3 rows." plus, for a hidden column, that it is hidden, and
+    /// the rows kept out of another journal entry.
+    pub(crate) fn set_note(&self, f: Field, applied: ops::Applied) -> String {
         let kind = self.shown_kind;
         let column = t(header_key(kind, f));
-        if self.choice(kind).is_hidden(f) {
+        let n = applied.changed;
+        let done = if self.choice(kind).is_hidden(f) {
             t_count("batch_entry.set.done_hidden", n, &[("column", &column)])
         } else {
             t_count("batch_entry.set.done", n, &[("column", &column)])
-        }
+        };
+        with_kept_apart(done, applied.kept_apart)
+    }
+}
+
+/// `done` plus, when rows were left as they were because the change would
+/// have joined two journal entries, a sentence saying so (review
+/// P16-part1 #5).
+fn with_kept_apart(done: String, kept_apart: usize) -> String {
+    if kept_apart == 0 {
+        done
+    } else {
+        format!(
+            "{done} {}",
+            t_count("batch_entry.copy.kept_apart", kept_apart, &[])
+        )
     }
 }
 
@@ -358,11 +435,7 @@ mod tests {
         }
         let menu = BulkMenu {
             kind: s.kind,
-            rows: s
-                .rows
-                .iter()
-                .map(|r| (r.key, r.is_blank(), r.date.is_some()))
-                .collect(),
+            rows: ops::row_facts(&s),
             selected: 0,
             choice: ColumnChoice::default_for(s.kind),
         };

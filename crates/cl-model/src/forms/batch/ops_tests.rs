@@ -148,7 +148,17 @@ fn copy_down_each_column_kind() {
             let money = protected(&s);
             let blank = blanks(&s);
             let before = s.rows.len();
-            let changed = ops::copy_down(&mut s, RowKey(from), f, CopyScope::AllDisplayed);
+            if f == Field::Tag && from == 2 {
+                // Row 2 has no tag: copying an empty cell is refused.
+                let before = s.clone();
+                assert_eq!(
+                    ops::copy_down(&mut s, RowKey(2), f, CopyScope::AllDisplayed).changed,
+                    0
+                );
+                assert_eq!(s, before);
+                continue;
+            }
+            let changed = ops::copy_down(&mut s, RowKey(from), f, CopyScope::AllDisplayed).changed;
             assert!(changed >= 1, "{f:?} from {from}");
             let src = row(&s, from).clone();
             for k in [1, 2, 3, 4] {
@@ -177,7 +187,7 @@ fn copy_down_copies_the_name_and_account_ids_with_their_text() {
 #[test]
 fn copy_down_below_limits_it_to_later_rows() {
     let mut s = checks();
-    let changed = ops::copy_down(&mut s, RowKey(2), Field::Memo, CopyScope::Below);
+    let changed = ops::copy_down(&mut s, RowKey(2), Field::Memo, CopyScope::Below).changed;
     assert_eq!(changed, 2, "rows 3 and 4");
     assert_eq!(row(&s, 1).memo, "memo 1", "an earlier row keeps its memo");
     assert_eq!(row(&s, 3).memo, "memo 2");
@@ -190,7 +200,7 @@ fn copy_down_below_limits_it_to_later_rows() {
         CopyScope::Below
     ));
     assert_eq!(
-        ops::copy_down(&mut s, RowKey(4), Field::Memo, CopyScope::Below),
+        ops::copy_down(&mut s, RowKey(4), Field::Memo, CopyScope::Below).changed,
         0
     );
     assert!(ops::can_copy_down(
@@ -213,7 +223,7 @@ fn copy_down_refuses_money_numbers_and_unknown_rows() {
             CopyScope::AllDisplayed
         ));
         assert_eq!(
-            ops::copy_down(&mut s, RowKey(1), f, CopyScope::AllDisplayed),
+            ops::copy_down(&mut s, RowKey(1), f, CopyScope::AllDisplayed).changed,
             0
         );
         assert_eq!(s, before, "{f:?}");
@@ -248,7 +258,7 @@ fn copy_down_refuses_money_numbers_and_unknown_rows() {
         Field::PrintLater,
     ] {
         assert_eq!(
-            ops::copy_down(&mut je, RowKey(1), f, CopyScope::AllDisplayed),
+            ops::copy_down(&mut je, RowKey(1), f, CopyScope::AllDisplayed).changed,
             0
         );
     }
@@ -256,7 +266,7 @@ fn copy_down_refuses_money_numbers_and_unknown_rows() {
     // A row that is not in the section, and a source without a date.
     let mut s = checks();
     assert_eq!(
-        ops::copy_down(&mut s, RowKey(99), Field::Memo, CopyScope::AllDisplayed),
+        ops::copy_down(&mut s, RowKey(99), Field::Memo, CopyScope::AllDisplayed).changed,
         0
     );
     s.rows[0].date = None;
@@ -267,7 +277,7 @@ fn copy_down_refuses_money_numbers_and_unknown_rows() {
         CopyScope::AllDisplayed
     ));
     assert_eq!(
-        ops::copy_down(&mut s, RowKey(1), Field::Date, CopyScope::AllDisplayed),
+        ops::copy_down(&mut s, RowKey(1), Field::Date, CopyScope::AllDisplayed).changed,
         0
     );
 }
@@ -328,7 +338,7 @@ fn set_field_for_each_settable_field() {
     for v in values {
         let mut s = checks();
         let money = protected(&s);
-        let changed = ops::set_field(&mut s, &picked, &v);
+        let changed = ops::set_field(&mut s, &picked, &v).changed;
         assert_eq!(changed, 2, "{v:?}: rows 1 and 3; blank row 5 is skipped");
         for k in [1, 3] {
             assert_eq!(
@@ -345,7 +355,7 @@ fn set_field_for_each_settable_field() {
         assert!(row(&s, 5).is_blank());
         assert_eq!(protected(&s), money);
         // Setting the same value again changes nothing.
-        assert_eq!(ops::set_field(&mut s, &picked, &v), 0);
+        assert_eq!(ops::set_field(&mut s, &picked, &v).changed, 0);
     }
 }
 
@@ -356,7 +366,7 @@ fn set_field_refuses_a_column_the_section_does_not_have() {
     let before = s.clone();
     let all: BTreeSet<RowKey> = s.rows.iter().map(|r| r.key).collect();
     assert_eq!(
-        ops::set_field(&mut s, &all, &FieldValue::PrintLater(true)),
+        ops::set_field(&mut s, &all, &FieldValue::PrintLater(true)).changed,
         0
     );
     assert_eq!(s, before);
@@ -708,10 +718,247 @@ proptest! {
             ops::set_field(&mut s, &all, &v);
         }
         prop_assert_eq!(protected(&s), money);
-        // A blank row is never filled in (copying an empty memo may empty
-        // a row; that is the owner's choice).
+        // A blank row is never filled in (setting an empty memo may empty a
+        // row; that is the owner's choice).
         let after: BTreeSet<RowKey> = blanks(&s).into_iter().collect();
         prop_assert!(blank.is_subset(&after));
         prop_assert_eq!(s.rows.len(), n);
+    }
+}
+
+// ------------------------------- refused sources (review P16-part1 #2)
+
+#[test]
+fn copy_down_from_the_blank_entry_row_does_nothing() {
+    // The entry row after Enter: today's date carried over, nothing else.
+    let mut s = checks();
+    s.rows[5].date = Some(day(9));
+    s.rows[5].print_later = true;
+    let before = s.clone();
+    for f in [
+        Field::Date,
+        Field::Memo,
+        Field::Account,
+        Field::Contact,
+        Field::Tag,
+        Field::PrintLater,
+    ] {
+        for scope in [CopyScope::AllDisplayed, CopyScope::Below] {
+            assert!(!ops::can_copy_down(&s, RowKey(6), f, scope), "{f:?}");
+            assert_eq!(
+                ops::copy_refusal(s.kind, &ops::row_facts(&s), RowKey(6), f, scope),
+                Some(ops::CopyRefusal::BlankRow)
+            );
+            assert_eq!(
+                ops::copy_down(&mut s, RowKey(6), f, scope),
+                ops::Applied::default()
+            );
+        }
+    }
+    assert_eq!(s, before, "no column was emptied or redated");
+}
+
+#[test]
+fn copy_down_needs_an_amount_and_a_value_in_the_cell() {
+    let mut s = checks();
+    s.rows[0].amount = None;
+    let facts = ops::row_facts(&s);
+    let refusal =
+        |from, f| ops::copy_refusal(s.kind, &facts, RowKey(from), f, CopyScope::AllDisplayed);
+    assert_eq!(refusal(1, Field::Memo), Some(ops::CopyRefusal::NoAmount));
+    assert_eq!(refusal(1, Field::Amount), Some(ops::CopyRefusal::Protected));
+    assert_eq!(refusal(2, Field::Tag), Some(ops::CopyRefusal::EmptyCell));
+    assert_eq!(refusal(99, Field::Memo), Some(ops::CopyRefusal::UnknownRow));
+    assert_eq!(refusal(2, Field::Memo), None);
+    assert_eq!(
+        ops::copy_refusal(s.kind, &facts, RowKey(4), Field::Memo, CopyScope::Below),
+        Some(ops::CopyRefusal::NoTargets)
+    );
+    let before = s.clone();
+    assert_eq!(
+        ops::copy_down(&mut s, RowKey(1), Field::Memo, CopyScope::AllDisplayed).changed,
+        0
+    );
+    assert_eq!(s, before);
+    // The facts never carry a value.
+    let d = format!("{:?}", facts[0]);
+    assert!(!d.contains("memo") && !d.contains("Payee"), "{d}");
+}
+
+// --------------------------- journal entries stay apart (review #5)
+
+fn je_line(
+    key: u64,
+    date: u32,
+    number: &str,
+    debit: Option<&str>,
+    credit: Option<&str>,
+) -> RowDraft {
+    RowDraft {
+        key: RowKey(key),
+        date: Some(day(date)),
+        number: number.into(),
+        account: Some(acct(if debit.is_some() { RENT } else { SUPPLIES })),
+        debit: debit.map(m),
+        credit: credit.map(m),
+        ..RowDraft::default()
+    }
+}
+
+/// Entry "1" on 3/1 (rows 1-2), entry "1" on 3/2 (rows 3-4), entry "2" on
+/// 3/2 (rows 5-6), a line with no Entry No. yet (7) and the entry row (8).
+fn journal() -> Section {
+    let mut undated = je_line(7, 2, "", Some("1.00"), None);
+    undated.date = None;
+    undated.number = "3".into();
+    Section {
+        kind: SectionKind::JournalEntries,
+        context: None,
+        rows: vec![
+            je_line(1, 1, "1", Some("10.00"), None),
+            je_line(2, 1, "1", None, Some("10.00")),
+            je_line(3, 2, "1", Some("20.00"), None),
+            je_line(4, 2, "1", None, Some("20.00")),
+            je_line(5, 2, "2", Some("30.00"), None),
+            je_line(6, 2, "2", None, Some("30.00")),
+            undated,
+            RowDraft::new(RowKey(8)),
+        ],
+    }
+}
+
+fn groups(s: &Section) -> Vec<Option<(CalendarDate, String)>> {
+    s.rows
+        .iter()
+        .map(|r| s.je_group_of(r).map(|k| (k.date, k.number)))
+        .collect()
+}
+
+#[test]
+fn copy_down_date_never_joins_two_journal_entries() {
+    let mut s = journal();
+    let a = ops::copy_down(&mut s, RowKey(1), Field::Date, CopyScope::AllDisplayed);
+    // Rows 3-4 would join entry 1 on 3/1: kept. Entry 2 moves whole to 3/1
+    // (no entry 2 there), and the undated line 7 gets the date.
+    assert_eq!(
+        a,
+        ops::Applied {
+            changed: 3,
+            kept_apart: 2
+        }
+    );
+    assert_eq!(row(&s, 3).date, Some(day(2)));
+    assert_eq!(row(&s, 4).date, Some(day(2)));
+    assert_eq!(row(&s, 5).date, Some(day(1)));
+    assert_eq!(row(&s, 6).date, Some(day(1)));
+    assert_eq!(row(&s, 7).date, Some(day(1)));
+}
+
+#[test]
+fn set_date_on_part_of_an_entry_keeps_it_out_of_another() {
+    let mut s = journal();
+    // Row 3 alone to 3/1 would join entry 1 there: refused.
+    let one: BTreeSet<RowKey> = [RowKey(3)].into();
+    let a = ops::set_field(&mut s, &one, &FieldValue::Date(day(1)));
+    assert_eq!(
+        a,
+        ops::Applied {
+            changed: 0,
+            kept_apart: 1
+        }
+    );
+    assert_eq!(s, journal());
+    // Rows 1-4 to 3/9: entry 1 on 3/1 and entry 1 on 3/2 would become one.
+    let four: BTreeSet<RowKey> = (1..=4).map(RowKey).collect();
+    let a = ops::set_field(&mut s, &four, &FieldValue::Date(day(9)));
+    assert_eq!(
+        a,
+        ops::Applied {
+            changed: 0,
+            kept_apart: 4
+        }
+    );
+    assert_eq!(groups(&s), groups(&journal()));
+    // A whole entry to a free date is fine; memos never regroup.
+    let a = ops::set_field(
+        &mut s,
+        &[RowKey(5), RowKey(6)].into(),
+        &FieldValue::Date(day(9)),
+    );
+    assert_eq!(
+        a,
+        ops::Applied {
+            changed: 2,
+            kept_apart: 0
+        }
+    );
+    let all: BTreeSet<RowKey> = (1..=8).map(RowKey).collect();
+    let a = ops::set_field(&mut s, &all, &FieldValue::Memo("x".into()));
+    assert_eq!(
+        a,
+        ops::Applied {
+            changed: 7,
+            kept_apart: 0
+        }
+    );
+}
+
+#[test]
+fn a_refused_join_with_the_rest_applied_is_one_undo_step() {
+    let original = BulkBatch::new(journal());
+    let mut form = FormState::new(original.clone());
+    let mut got = ops::Applied::default();
+    assert!(form.edit_step(|b| {
+        got = ops::copy_down(
+            &mut b.sections[0],
+            RowKey(1),
+            Field::Date,
+            CopyScope::AllDisplayed,
+        );
+    }));
+    assert_eq!(got.kept_apart, 2);
+    assert!(form.undo());
+    assert_eq!(form.current(), &original);
+    assert!(!form.can_undo());
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// Copy down and Set Date never put rows of two journal entries into
+    /// one (rows with no full date and Entry No. are not an entry yet).
+    #[test]
+    fn copy_and_set_never_join_journal_entries(
+        s in any_section(),
+        from in 1u64..8,
+        picked in proptest::collection::btree_set(1u64..8, 0..8),
+        d in 1u32..28,
+    ) {
+        let mut s = s;
+        s.kind = SectionKind::JournalEntries;
+        s.context = None;
+        let before = s.clone();
+        let mut after = s.clone();
+        ops::copy_down(&mut after, RowKey(from), Field::Date, CopyScope::AllDisplayed);
+        let rows: BTreeSet<RowKey> = picked.into_iter().map(RowKey).collect();
+        let mut set = s.clone();
+        ops::set_field(&mut set, &rows, &FieldValue::Date(day(d)));
+        for after in [after, set] {
+            let mut origin: std::collections::BTreeMap<_, BTreeSet<_>> =
+                std::collections::BTreeMap::default();
+            for (a, b) in after.rows.iter().zip(&before.rows) {
+                if a.is_blank() {
+                    continue;
+                }
+                if let (Some(now), Some(was)) = (after.je_group_of(a), before.je_group_of(b)) {
+                    origin.entry(now).or_default().insert(was);
+                }
+            }
+            for (now, was) in origin {
+                // Either one entry, or the entry that was already there and
+                // nothing else moved in.
+                prop_assert!(was.len() <= 1, "{:?} joins {} entries", now.number, was.len());
+            }
+        }
     }
 }

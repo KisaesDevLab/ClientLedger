@@ -226,10 +226,15 @@ impl BulkEntryScreen {
             return 0;
         };
         let rows = self.selected_rows();
-        let n = self.change_section(|s| ops::set_field(s, &rows, &value));
+        let mut applied = ops::Applied::default();
+        let n = self.change_section(|s| {
+            applied = ops::set_field(s, &rows, &value);
+            applied.changed
+        });
         self.rows_changed = n;
+        self.kept_apart = applied.kept_apart;
         self.last_action = Some("set");
-        self.bulk_note = Some(self.set_note(p.field, n));
+        self.bulk_note = Some(self.set_note(p.field, applied));
         n
     }
 

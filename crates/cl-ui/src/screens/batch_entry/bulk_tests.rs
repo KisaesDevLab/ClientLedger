@@ -416,3 +416,248 @@ fn the_window_draws_columns_and_the_selection_bar() {
     assert!(s.form_command(CommandId::new("form.revert")));
     assert_eq!(s.state_json()["columns_open"], false);
 }
+
+/// Review P16-part1 #1: the real Ctrl+A key, through the shell's key
+/// handling, selects every row from an empty cell; in a cell with text the
+/// first Ctrl+A selects the text and the second selects the rows.
+#[test]
+fn ctrl_a_through_the_shell_selects_all_rows() {
+    use eframe::egui::{self, Event, Modifiers};
+    let ctrl = Modifiers {
+        ctrl: true,
+        command: true,
+        ..Modifiers::NONE
+    };
+    let tap = |k: egui::Key| {
+        vec![
+            Event::Key {
+                key: k,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: ctrl,
+            },
+            Event::Key {
+                key: k,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: ctrl,
+            },
+        ]
+    };
+    for (cell, presses) in [("empty", 1), ("text", 2)] {
+        let dir = tempfile::tempdir().expect("tmp");
+        let (mut s, _link) = screen_in(dir.path());
+        let k = three(&mut s);
+        let entry = s.batch().sections[0].rows.last().expect("entry row").key;
+        let row = if cell == "empty" { entry } else { k[0] };
+        s.grid.focus(
+            CellPos {
+                row,
+                col: column_of(Field::Memo),
+            },
+            &*Arc::clone(&s.books.lists),
+        );
+        let mut shell = crate::shell::Shell::new(crate::shell::ShellOptions {
+            demo: true,
+            ..crate::shell::ShellOptions::default()
+        });
+        let id = shell
+            .windows
+            .open_new(CommandId::new("banking.bulk_entry"), Box::new(s));
+        let ctx = egui::Context::default();
+        crate::shell::Shell::install(&ctx);
+        cl_grid::sequencer::install(&ctx);
+        let frame = |shell: &mut crate::shell::Shell, events: Vec<Event>| {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 940.0),
+                )),
+                events,
+                ..egui::RawInput::default()
+            };
+            let mut out = ctx.run_ui(raw, |ui| shell.ui(ui));
+            out.textures_delta.clear();
+        };
+        for _ in 0..4 {
+            frame(&mut shell, Vec::new());
+        }
+        let state =
+            |shell: &crate::shell::Shell| shell.windows.get(id).expect("window").screen.state();
+        assert_eq!(state(&shell)["grid"]["focused"], true, "{cell}");
+        assert_eq!(state(&shell)["selected"], 0);
+        for n in 1..=presses {
+            frame(&mut shell, tap(egui::Key::A));
+            frame(&mut shell, Vec::new());
+            let want = if n == presses { 3 } else { 0 };
+            assert_eq!(state(&shell)["selected"], want, "{cell}: Ctrl+A #{n}");
+        }
+        assert_eq!(state(&shell)["last_action"], "select_all");
+    }
+}
+
+/// Review P16-part1 #2: Ctrl+D on the blank entry row (its date carried
+/// over) does nothing, greys the menu items and says why.
+#[test]
+fn copy_down_from_the_blank_entry_row_is_refused_in_plain_words() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let (mut s, _link) = screen_in(dir.path());
+    let k = three(&mut s);
+    let entry = s.batch().sections[0].rows.last().expect("entry row").key;
+    assert!(
+        row(&s, entry).date.is_some(),
+        "the entry row carries a date"
+    );
+    let before = s.batch().clone();
+    let rev = s.grid.form().revision();
+    for f in [Field::Date, Field::Memo, Field::Account] {
+        let at = CellPos {
+            row: entry,
+            col: column_of(f),
+        };
+        for scope in [CopyScope::AllDisplayed, CopyScope::Below] {
+            assert_eq!(s.copy_down_at(at, scope), 0, "{f:?}");
+            assert_eq!(
+                s.bulk_note.as_deref(),
+                Some("This is the empty line for a new entry. Copy from a line that is filled in.")
+            );
+        }
+        let items = cl_grid::ContextMenuSource::items(&s.menu(), cl_grid::ContextTarget::Cell(at));
+        assert!(!items[0].enabled && !items[1].enabled, "{f:?}");
+        assert!(
+            items[0]
+                .tooltip
+                .as_deref()
+                .is_some_and(|t| t.contains("empty line"))
+        );
+    }
+    // Ctrl+D (the command) on the entry row's date: the same.
+    s.grid.focus(
+        CellPos {
+            row: entry,
+            col: column_of(Field::Date),
+        },
+        &*Arc::clone(&s.books.lists),
+    );
+    assert!(s.form_command(CommandId::new("grid.copy_down")));
+    assert_eq!(*s.batch(), before, "no date or column changed");
+    assert_eq!(s.grid.form().revision(), rev, "no undo step");
+    assert_eq!(s.state_json()["last_action"], "copy_refused");
+    // A row without an amount, and an empty cell, are refused too.
+    s.grid.edit_step(|b| b.sections[0].rows[0].amount = None);
+    let at = |f| CellPos {
+        row: k[0],
+        col: column_of(f),
+    };
+    assert_eq!(s.copy_down_at(at(Field::Memo), CopyScope::AllDisplayed), 0);
+    assert_eq!(
+        s.bulk_note.as_deref(),
+        Some("Enter this line's amount first, then copy from it.")
+    );
+    assert_eq!(
+        s.copy_down_at(
+            CellPos {
+                row: k[1],
+                col: column_of(Field::Tag)
+            },
+            CopyScope::AllDisplayed
+        ),
+        0
+    );
+    assert_eq!(
+        s.bulk_note.as_deref(),
+        Some("This cell is empty, so there is nothing to copy.")
+    );
+}
+
+/// Review P16-part1 #5: Set Date that would join two journal entries
+/// leaves those rows and says so; the rest is one undo step.
+#[test]
+fn set_date_keeps_journal_entries_apart_and_says_so() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let (mut s, _link) = screen_in(dir.path());
+    let today = s.today;
+    let highest = s.grid.adapter().highest.clone();
+    let mut keys = std::mem::take(&mut s.grid.adapter_mut().keys);
+    let mut k = Vec::new();
+    s.grid.edit_step(|b| {
+        let sec = &mut b.sections[0];
+        sec.kind = SectionKind::JournalEntries;
+        sec.context = None;
+        sec.rows.clear();
+        for (d, debit) in [(1, true), (1, false), (2, true), (2, false)] {
+            let mut r = RowDraft::new(keys.next_key());
+            r.date = Some(day(11, d));
+            r.number = "1".into();
+            r.account = Some(account_id(if debit { 6100 } else { 1010 }));
+            if debit {
+                r.debit = Some(m("5.00"));
+            } else {
+                r.credit = Some(m("5.00"));
+            }
+            k.push(r.key);
+            sec.rows.push(r);
+        }
+        grid::ensure_entry(b, 0, &mut keys, today, &highest);
+    });
+    s.grid.adapter_mut().keys = keys;
+    s.sync_shown_section();
+    // All four rows: 11/01's lines already have the date; 11/02's would join.
+    s.select_all();
+    assert_eq!(s.selected_rows().len(), 4);
+    let rev = s.grid.form().revision();
+    assert!(s.open_picker(Field::Date));
+    s.picker_value(CellInput::Date(day(11, 1)));
+    assert_eq!(s.apply_picker(), 0);
+    assert_eq!(s.state_json()["kept_apart"], 2);
+    assert_eq!(
+        row(&s, k[2]).date,
+        Some(day(11, 2)),
+        "entry 1 on 11/02 stays"
+    );
+    assert_eq!(
+        s.grid.form().revision(),
+        rev,
+        "nothing changed, no undo step"
+    );
+    assert!(
+        s.bulk_note
+            .as_deref()
+            .is_some_and(|n| n.contains("This would join two journal entries")),
+        "{:?}",
+        s.bulk_note
+    );
+}
+
+/// Review P16-part1 #4: F8 to a problem in a hidden column shows the
+/// column again and puts the cursor on the cell.
+#[test]
+fn f8_to_a_problem_in_a_hidden_column_shows_the_column() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let (mut s, _link) = screen_in(dir.path());
+    let k = three(&mut s);
+    // Two checks numbered 2001: a problem on No.
+    s.grid
+        .edit_step(|b| b.sections[0].rows[1].number = "2001".into());
+    s.hide_column(Field::Number, true)
+        .expect("No. may be hidden");
+    assert!(s.choice(SectionKind::Checks).is_hidden(Field::Number));
+    s.touched.extend(k.iter().copied());
+    s.cursor_row = None;
+    s.refresh_looks();
+    assert!(s.state_json()["problems"].as_u64().is_some_and(|n| n >= 1));
+    assert!(s.form_command(CommandId::new("batch.next_problem")));
+    assert!(
+        !s.choice(SectionKind::Checks).is_hidden(Field::Number),
+        "shown again"
+    );
+    let v = s.state_json();
+    assert_eq!(v["grid"]["column"], "number");
+    assert_eq!(v["columns"]["hidden"], serde_json::json!([]));
+    assert_eq!(
+        s.bulk_note.as_deref(),
+        Some("The No. column is shown again: a row has a problem in it.")
+    );
+}

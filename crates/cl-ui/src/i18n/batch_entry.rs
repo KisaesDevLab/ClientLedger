@@ -206,4 +206,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("batch_entry.delete.no", "Keep them"),
     ("batch_entry.delete.done", "Deleted {n} rows."),
     ("batch_entry.delete.done.one", "Deleted 1 row."),
+    // P16-fix1: refused Copy down sources and journal entries kept apart.
+    ("batch_entry.copy.blank_row", "This is the empty line for a new entry. Copy from a line that is filled in."),
+    ("batch_entry.copy.no_amount", "Enter this line's amount first, then copy from it."),
+    ("batch_entry.copy.empty_cell", "This cell is empty, so there is nothing to copy."),
+    ("batch_entry.copy.kept_apart", "This would join two journal entries with the same date and Entry No., so {n} rows were left as they were."),
+    ("batch_entry.columns.shown_for_problem", "The {column} column is shown again: a row has a problem in it."),
+    ("batch_entry.copy.kept_apart.one", "This would join two journal entries with the same date and Entry No., so 1 row was left as it was."),
 ];

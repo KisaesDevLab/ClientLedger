@@ -73,6 +73,17 @@ pub trait Screen {
     fn fixed_layout(&self) -> bool {
         false
     }
+
+    /// True when a text field of this window keeps `s` (one of the keys
+    /// [`crate::input::reserved_by_text_fields`] names: Ctrl+A, C, V, X,
+    /// Delete) for itself this frame, so the shell does not run its
+    /// shortcut. The default: whenever any widget has the keyboard. A grid
+    /// screen says false for Ctrl+A when its cell editor has nothing left to
+    /// select, so Select All Rows (`Scope::Grid`) reaches it.
+    fn keeps_text_key(&self, ctx: &eframe::egui::Context, s: cl_model::Shortcut) -> bool {
+        let _ = s;
+        ctx.egui_wants_keyboard_input()
+    }
 }
 
 /// Stand-in for a screen a later phase builds.

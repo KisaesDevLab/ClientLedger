@@ -172,6 +172,12 @@ pub struct BulkEntryScreen {
     pub(crate) confirm_delete: bool,
     /// Rows the last Copy down, Set or Delete rows changed.
     pub(crate) rows_changed: usize,
+    /// Rows the last Copy down or Set left as they were because the change
+    /// would have joined two journal entries.
+    pub(crate) kept_apart: usize,
+    /// Ctrl+A already selected the text of this cell (its position and a
+    /// hash of its text): the next Ctrl+A there selects all rows.
+    pub(crate) select_all_armed: Option<(cl_grid::CellPos, u64)>,
     /// What the last bulk action did ("Set on 3 rows."), under the grid.
     pub(crate) bulk_note: Option<String>,
 }
@@ -270,6 +276,8 @@ impl BulkEntryScreen {
             picker: None,
             confirm_delete: false,
             rows_changed: 0,
+            kept_apart: 0,
+            select_all_armed: None,
             bulk_note: None,
         };
         s.load_columns();
@@ -605,6 +613,7 @@ impl BulkEntryScreen {
             "columns_open": self.columns_open,
             "selected": self.selected_rows().len(),
             "rows_changed": self.rows_changed,
+            "kept_apart": self.kept_apart,
             "picker": self.picker.as_ref().map(|p| p.field),
             "confirm_delete": self.confirm_delete,
             "grid": {
@@ -643,6 +652,7 @@ impl Screen for BulkEntryScreen {
         self.sync_shown_section();
         self.refresh_looks();
         self.recheck_refused();
+        self.arm_select_all(ui.ctx());
         self.draw(ui);
         self.after_grid();
         if let Some(cmd) = self.after_frame.take() {
@@ -688,6 +698,15 @@ impl Screen for BulkEntryScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    /// Ctrl+A in the grid (review P16-part1 #1): the cell's text first,
+    /// all rows when the cell has nothing (more) to select.
+    fn keeps_text_key(&self, ctx: &eframe::egui::Context, s: cl_model::Shortcut) -> bool {
+        if s != ops::SELECT_ALL_KEY || !self.grid.grid().has_focus() {
+            return ctx.egui_wants_keyboard_input();
+        }
+        self.cell_keeps_ctrl_a()
     }
 
     fn fixed_layout(&self) -> bool {
