@@ -19,6 +19,7 @@ use cl_model::tags::{self, TagAdd, TagChip};
 use super::codec::{
     NOT_IN_LIST, PickerResolution, TAG_NOT_IN_LIST, cell_text, parse_buffer, resolve_picker,
 };
+use super::context::{ContextItem, ContextMenu, ContextTarget};
 use super::keys::{Formats, GridInput, GridKey, Mods};
 use super::model::{
     CellInput, CellKind, CellPos, CellProblem, CellValue, ColumnId, LookupResult, Lookups,
@@ -189,6 +190,7 @@ pub struct Core {
     page_rows: usize,
     notice: Option<TextKey>,
     last_index: usize,
+    menu: Option<ContextMenu>,
 }
 
 /// Where Tab-style commits come from: only Tab accepts an AI suggestion.
@@ -214,7 +216,121 @@ impl Core {
             page_rows: 10,
             notice: None,
             last_index: 0,
+            menu: None,
         }
+    }
+
+    /// The open context menu.
+    #[must_use]
+    pub fn menu(&self) -> Option<&ContextMenu> {
+        self.menu.as_ref()
+    }
+
+    /// Close the context menu; true when one was open.
+    pub fn close_menu(&mut self) -> bool {
+        self.menu.take().is_some()
+    }
+
+    /// Get ready to open a context menu on `target`
+    /// ([`GridSpec::context_menu`] only): close any menu, commit the open
+    /// cell like a click does (so the menu acts on the value the owner
+    /// sees), close its list, and for a cell move the cursor there. False
+    /// when no menu may open (not opted in, an invalid cell keeps the
+    /// cursor, or the row is gone); the view then asks the screen for items
+    /// and calls [`Core::open_menu`].
+    pub fn prepare_menu(
+        &mut self,
+        target: ContextTarget,
+        model: &mut ModelRef<'_>,
+        lookups: &dyn Lookups,
+        fmt: Formats,
+    ) -> (bool, Effects) {
+        if !self.spec.context_menu {
+            return (false, Effects::default());
+        }
+        self.menu = None;
+        self.focused = true;
+        let mut fx = Effects::handled();
+        if self
+            .commit(model, lookups, fmt, Accept::Other, &mut fx)
+            .is_err()
+        {
+            return (false, fx); // stay with the error (S11)
+        }
+        self.close_popup();
+        if let ContextTarget::Cell(pos) = target {
+            if model.rows().index_of(pos.row).is_none() {
+                return (false, fx);
+            }
+            if self.cursor != Some(pos) {
+                self.move_to(pos, model, fmt, &mut fx);
+            }
+        }
+        (true, fx)
+    }
+
+    /// Open the context menu with the screen's `items` (after
+    /// [`Core::prepare_menu`]). An empty list opens nothing; false then.
+    pub fn open_menu(&mut self, target: ContextTarget, items: Vec<ContextItem>) -> bool {
+        if !self.spec.context_menu || items.is_empty() {
+            return false;
+        }
+        self.close_popup();
+        self.menu = Some(ContextMenu::new(target, items));
+        true
+    }
+
+    /// Input while the context menu is open: Up/Down/Home/End move the
+    /// highlight, Enter or Space picks, Esc, Tab and Shift+F10 close it,
+    /// typing is ignored. Anything else (a click elsewhere, focus lost,
+    /// another command) closes the menu and goes on (`None`).
+    fn menu_input(&mut self, input: &GridInput) -> Option<Effects> {
+        let menu = self.menu.as_mut()?;
+        match input {
+            GridInput::Key(GridKey::Up | GridKey::Down, Mods::NONE) => {
+                menu.step(matches!(input, GridInput::Key(GridKey::Down, _)));
+                Some(Effects::handled())
+            }
+            GridInput::Key(GridKey::Home | GridKey::End, _) => {
+                menu.jump(matches!(input, GridInput::Key(GridKey::End, _)));
+                Some(Effects::handled())
+            }
+            GridInput::Key(GridKey::Enter | GridKey::Space, Mods::NONE) => {
+                let at = menu.highlight;
+                Some(self.menu_pick(at))
+            }
+            GridInput::MenuPicked(i) => {
+                let at = Some(*i);
+                Some(self.menu_pick(at))
+            }
+            GridInput::Key(GridKey::Escape | GridKey::Tab | GridKey::ContextMenu, _)
+            | GridInput::Command(GridCommand::Revert) => {
+                self.menu = None;
+                Some(Effects::handled())
+            }
+            GridInput::Text(_) => Some(Effects::handled()),
+            _ => {
+                self.menu = None;
+                None
+            }
+        }
+    }
+
+    /// Pick the entry at `at` when it is enabled: the screen gets
+    /// [`GridEvent::ContextPicked`] and the menu closes.
+    fn menu_pick(&mut self, at: Option<usize>) -> Effects {
+        let mut fx = Effects::handled();
+        let Some(menu) = self.menu.as_ref() else {
+            return fx;
+        };
+        if let Some(item) = at.and_then(|i| menu.pickable(i)) {
+            fx.events.push(GridEvent::ContextPicked {
+                target: menu.target,
+                item: item.id,
+            });
+            self.menu = None;
+        }
+        fx
     }
 
     /// The spec.
@@ -774,6 +890,9 @@ impl Core {
         {
             self.recover_cursor(model, fmt);
         }
+        if let Some(fx) = self.menu_input(&input) {
+            return fx;
+        }
         match input {
             GridInput::FocusGained { from_below } => self.focus_gained(from_below, model, fmt),
             GridInput::FocusLost => self.focus_lost(model, lookups, fmt),
@@ -822,7 +941,113 @@ impl Core {
                     self.open_list(model, lookups, PopupKind::Browse)
                 }
             }
+            GridInput::GutterClick { row, mods } => self.gutter_click(row, mods, model),
+            // A menu entry without an open menu (a stale click).
+            GridInput::MenuPicked(_) => Effects::default(),
         }
+    }
+
+    // ---- selection (P16 D6) ---------------------------------------------
+
+    /// The row at `index` can be selected: loaded and not the blank ENTRY
+    /// row.
+    fn selectable(model: &ModelRef<'_>, index: usize) -> Option<RowKey> {
+        let rows = model.rows();
+        let key = rows.row_key(index)?;
+        (!rows.row_state(index).contains(RowState::ENTRY)).then_some(key)
+    }
+
+    /// A range may run onto the ENTRY row: take it out again.
+    fn drop_entry_rows(&mut self, model: &ModelRef<'_>) {
+        if !self.spec.entry_line {
+            return;
+        }
+        let rows = model.rows();
+        let entry: Vec<RowKey> = self
+            .selection
+            .iter()
+            .filter(|k| {
+                rows.index_of(*k)
+                    .is_some_and(|i| rows.row_state(i).contains(RowState::ENTRY))
+            })
+            .collect();
+        for k in entry {
+            self.selection.remove(k);
+        }
+    }
+
+    /// The select checkbox of `row`: a click (or Ctrl+click) toggles it;
+    /// Shift+click selects from the anchor (the cursor row when there is
+    /// none) to it. The cursor and the open cell stay.
+    fn gutter_click(&mut self, row: RowKey, mods: Mods, model: &ModelRef<'_>) -> Effects {
+        if !self.spec.select_column {
+            return Effects::default();
+        }
+        let Some(index) = model.rows().index_of(row) else {
+            return Effects::default();
+        };
+        if Self::selectable(model, index).is_none() {
+            return Effects::default();
+        }
+        let sel_mode = self.spec.selection;
+        if mods.shift {
+            if let Some(from) = self.cursor {
+                self.selection.anchor_if_none(from.row);
+            }
+            self.selection.extend_to(model.rows(), row, sel_mode);
+            self.drop_entry_rows(model);
+        } else {
+            self.selection.toggle(row, sel_mode);
+        }
+        Effects {
+            events: vec![GridEvent::SelectionChanged],
+            ..Effects::handled()
+        }
+    }
+
+    /// Select every displayed row but the ENTRY row (rows not loaded yet
+    /// are skipped). Multi-row selection only; with no rows it does
+    /// nothing.
+    fn select_all(&mut self, model: &ModelRef<'_>) -> Effects {
+        if self.spec.selection != SelectionMode::Multi {
+            return Effects::default();
+        }
+        let n = model.rows().row_count();
+        let keys: Vec<RowKey> = (0..n).filter_map(|i| Self::selectable(model, i)).collect();
+        let mut fx = Effects::handled();
+        if self.selection.select_only(keys) {
+            fx.events.push(GridEvent::SelectionChanged);
+        }
+        fx
+    }
+
+    /// Shift+Up/Down in an editable grid with a select column: move like
+    /// the arrow (the open cell commits first) and extend the selection
+    /// from the anchor (the row the cursor was on) to the new row.
+    fn extend_vertical(
+        &mut self,
+        by: isize,
+        model: &mut ModelRef<'_>,
+        lookups: &dyn Lookups,
+        fmt: Formats,
+    ) -> Effects {
+        let Some(from) = self.cursor else {
+            return Effects::handled();
+        };
+        let mut fx = self.vertical(by, model, lookups, fmt);
+        let Some(to) = self.cursor.filter(|c| c.row != from.row) else {
+            return fx;
+        };
+        if let Some(i) = model.rows().index_of(from.row)
+            && Self::selectable(model, i).is_some()
+        {
+            self.selection.anchor_if_none(from.row);
+        }
+        self.selection
+            .extend_to(model.rows(), to.row, self.spec.selection);
+        self.drop_entry_rows(model);
+        fx.events.push(GridEvent::SelectionChanged);
+        fx
     }
 
     fn open_choices(&mut self, items: Vec<Suggestion>, model: &ModelRef<'_>) -> Effects {
@@ -1003,6 +1228,17 @@ impl Core {
             },
             GridCommand::Redo => Effects::default(),
             GridCommand::Copy => self.copy(model, fmt),
+            GridCommand::SelectAll => self.select_all(model),
+            GridCommand::ClearSelection => {
+                if self.selection.clear() {
+                    Effects {
+                        events: vec![GridEvent::SelectionChanged],
+                        ..Effects::handled()
+                    }
+                } else {
+                    Effects::handled()
+                }
+            }
         }
     }
 
@@ -1444,6 +1680,13 @@ impl Core {
                 }
                 self.vertical(if k == GridKey::Up { -1 } else { 1 }, model, lookups, fmt)
             }
+            // Shift+Up/Down extends the selection (P16 D6); an open list
+            // keeps the arrows.
+            (GridKey::Up | GridKey::Down, Mods::SHIFT)
+                if self.spec.select_column && !self.popup_open() =>
+            {
+                self.extend_vertical(if k == GridKey::Up { -1 } else { 1 }, model, lookups, fmt)
+            }
             (GridKey::Home, Mods::CTRL) => self.jump_to_row(false, model, lookups, fmt),
             (GridKey::End, Mods::CTRL) => self.jump_to_row(true, model, lookups, fmt),
             (GridKey::PageUp, Mods::NONE) => self.page(false, model, lookups, fmt),
@@ -1781,6 +2024,12 @@ impl Core {
         if self.selection.retain_existing(model.rows()) {
             fx.events.push(GridEvent::SelectionChanged);
         }
+        // A menu about a row that is gone closes.
+        if let Some(ContextTarget::Cell(p)) = self.menu.as_ref().map(|m| m.target)
+            && model.rows().index_of(p.row).is_none()
+        {
+            self.menu = None;
+        }
         let rows = model.rows();
         self.pending.retain(|k| rows.index_of(*k).is_some());
         let Some(pos) = self.cursor else { return fx };
@@ -1834,6 +2083,7 @@ impl Core {
     pub fn reset(&mut self, model: &mut ModelRef<'_>, fmt: Formats) -> Effects {
         self.edit = None;
         self.parked = false;
+        self.menu = None;
         self.selection.clear();
         self.pending.clear();
         self.notice = None;

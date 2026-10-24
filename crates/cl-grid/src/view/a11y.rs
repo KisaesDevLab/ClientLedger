@@ -47,21 +47,33 @@ pub enum Request {
     SetValue(CellPos, String),
     /// `ScrollDown` (true) or `ScrollUp` (false) on the grid.
     Page(bool),
+    /// Click on a row's select checkbox (P16 D6).
+    Gutter(RowKey),
+    /// `ShowContextMenu` on a cell (grids with a context menu).
+    Menu(CellPos),
 }
 
-/// Take this frame's requests aimed at the grid, its rows and its cells
-/// (as drawn last frame). Other nodes' requests stay for egui.
+/// Take this frame's requests aimed at the grid, its rows, its cells and
+/// its select checkboxes (as drawn last frame). `menu`: the grid offers a
+/// context menu, so cells answer `ShowContextMenu`. Other nodes' requests
+/// stay for egui.
 pub fn take_requests(
     input: &mut InputState,
     grid: Id,
     rows: &[(Id, RowKey)],
     cells: &[(Id, CellPos)],
+    gutters: &[(Id, RowKey)],
+    menu: bool,
 ) -> Vec<Request> {
     let mut out = Vec::new();
     for (id, pos) in cells {
         input.consume_accesskit_action_requests(*id, |r| match r.action {
             Action::Focus | Action::Click => {
                 out.push(Request::Press(*pos));
+                true
+            }
+            Action::ShowContextMenu if menu => {
+                out.push(Request::Menu(*pos));
                 true
             }
             Action::ScrollIntoView => {
@@ -83,6 +95,15 @@ pub fn take_requests(
             let hit = r.action == Action::ScrollIntoView;
             if hit {
                 out.push(Request::IntoView(*key));
+            }
+            hit
+        });
+    }
+    for (id, key) in gutters {
+        input.consume_accesskit_action_requests(*id, |r| {
+            let hit = r.action == Action::Click;
+            if hit {
+                out.push(Request::Gutter(*key));
             }
             hit
         });
@@ -166,6 +187,8 @@ pub struct CellInfo<'a> {
     /// is never the cell's value (the value stays empty until accepted);
     /// it is spoken as a description.
     pub suggested: Option<&'a str>,
+    /// The grid offers a context menu here (`ShowContextMenu`).
+    pub menu: bool,
 }
 
 /// A cell node (`Cell` read-only, `GridCell` editable).
@@ -187,6 +210,9 @@ pub fn cell_node(node: &mut Node, bounds: Rect, cell: &CellInfo<'_>) {
     node.add_action(Action::Focus);
     node.add_action(Action::Click);
     node.add_action(Action::ScrollIntoView);
+    if cell.menu {
+        node.add_action(Action::ShowContextMenu);
+    }
     if cell.editable && cell.locked.is_none() && cell.toggled.is_none() {
         node.add_action(Action::SetValue);
     }
@@ -213,6 +239,45 @@ pub fn cell_node(node: &mut Node, bounds: Rect, cell: &CellInfo<'_>) {
     }
     if !description.is_empty() {
         node.set_description(description.join(". "));
+    }
+}
+
+/// A row's select checkbox (P16 D6): "Select row N", checked while the row
+/// is selected; Click toggles it.
+pub fn gutter_node(node: &mut Node, bounds: Rect, label: String, selected: bool) {
+    node.set_bounds(ak_rect(bounds));
+    node.set_role(Role::CheckBox);
+    node.set_label(label);
+    node.set_toggled(if selected {
+        Toggled::True
+    } else {
+        Toggled::False
+    });
+    node.add_action(Action::Click);
+}
+
+/// A context menu entry: its label, shortcut and hover text; a disabled
+/// entry cannot be clicked.
+pub fn menu_item_node(
+    node: &mut Node,
+    item: &crate::core::context::ContextItem,
+    highlighted: bool,
+) {
+    node.set_role(Role::MenuItem);
+    node.set_label(item.label.clone());
+    if let Some(s) = &item.shortcut {
+        node.set_keyboard_shortcut(s.clone());
+    }
+    if let Some(t) = &item.tooltip {
+        node.set_description(t.clone());
+    }
+    if item.enabled {
+        node.add_action(Action::Click);
+    } else {
+        node.set_disabled();
+    }
+    if highlighted {
+        node.set_selected(true);
     }
 }
 
@@ -262,30 +327,66 @@ mod tests {
             },
         );
         let row = (grid.with(2), RowKey(9));
+        let gutter = (grid.with(3), RowKey(9));
         let other = Id::unique("elsewhere");
-        let mut input = InputState::default();
-        input.events = vec![
+        let events = vec![
             request(cell.0, Action::Click, None),
             request(
                 cell.0,
                 Action::SetValue,
                 Some(ActionData::Value("12.50".into())),
             ),
+            request(cell.0, Action::ShowContextMenu, None),
             request(row.0, Action::ScrollIntoView, None),
+            request(gutter.0, Action::Click, None),
             request(grid, Action::ScrollDown, None),
             request(other, Action::Click, None),
         ];
-        let got = take_requests(&mut input, grid, &[row], &[cell]);
+        let mut input = InputState::default();
+        input.events = events.clone();
+        let got = take_requests(&mut input, grid, &[row], &[cell], &[gutter], true);
         assert_eq!(
             got,
             vec![
                 Request::Press(cell.1),
                 Request::SetValue(cell.1, "12.50".into()),
+                Request::Menu(cell.1),
                 Request::IntoView(RowKey(9)),
+                Request::Gutter(RowKey(9)),
                 Request::Page(true),
             ]
         );
         assert_eq!(input.events.len(), 1, "other nodes' requests stay");
+        // Without a context menu, ShowContextMenu stays for egui.
+        let mut input = InputState::default();
+        input.events = events;
+        let got = take_requests(&mut input, grid, &[row], &[cell], &[], false);
+        assert!(!got.contains(&Request::Menu(cell.1)));
+        assert_eq!(input.events.len(), 3, "menu, gutter and other stay");
+    }
+
+    #[test]
+    fn gutter_and_menu_item_semantics() {
+        let r = Rect::from_min_max(pos2(0.0, 0.0), pos2(10.0, 10.0));
+        let mut node = Node::new(Role::Unknown);
+        gutter_node(&mut node, r, "Select row 3".into(), true);
+        assert_eq!(node.role(), Role::CheckBox);
+        assert_eq!(node.label(), Some("Select row 3"));
+        assert_eq!(node.toggled(), Some(Toggled::True));
+        assert!(node.supports_action(Action::Click));
+        let item = crate::core::context::ContextItem::new(4, "Copy down")
+            .shortcut("Ctrl+D")
+            .tooltip("Copies this value to every row");
+        let mut node = Node::new(Role::Unknown);
+        menu_item_node(&mut node, &item, true);
+        assert_eq!(node.role(), Role::MenuItem);
+        assert_eq!(node.keyboard_shortcut(), Some("Ctrl+D"));
+        assert!(node.is_selected().unwrap_or(false));
+        assert!(!node.is_disabled());
+        let mut node = Node::new(Role::Unknown);
+        menu_item_node(&mut node, &item.enabled(false), false);
+        assert!(node.is_disabled());
+        assert!(!node.supports_action(Action::Click));
     }
 
     #[test]
@@ -306,6 +407,7 @@ mod tests {
                 locked: Some("Locked"),
                 problem: Some("Pick an account"),
                 suggested: None,
+                menu: true,
             },
         );
         assert_eq!(node.role(), Role::GridCell);
@@ -314,6 +416,7 @@ mod tests {
         assert_eq!(node.description(), Some("Locked. Pick an account"));
         assert_eq!(node.numeric_value(), None, "money is never a number");
         assert!(!node.supports_action(Action::SetValue), "locked");
+        assert!(node.supports_action(Action::ShowContextMenu));
     }
 
     fn account_cell(suggested: Option<&str>) -> Node {
@@ -333,6 +436,7 @@ mod tests {
                 locked: None,
                 problem: None,
                 suggested,
+                menu: false,
             },
         );
         node

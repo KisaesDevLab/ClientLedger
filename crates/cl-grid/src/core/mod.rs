@@ -12,6 +12,7 @@
 )]
 
 pub mod codec;
+pub mod context;
 pub mod keys;
 pub mod model;
 pub mod rowkey;

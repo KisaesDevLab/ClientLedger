@@ -35,6 +35,9 @@ pub enum GridKey {
     Space,
     /// Backspace.
     Backspace,
+    /// Shift+F10 or the Menu key: the context menu on the cursor cell (the
+    /// view opens it; with a menu open the core closes it).
+    ContextMenu,
 }
 
 /// Modifiers, matched exactly.
@@ -115,6 +118,16 @@ pub enum GridInput {
     /// The list chevron on the cursor cell was clicked: open its list, or
     /// close it when open (Q-250).
     ToggleList,
+    /// A press on a row's select checkbox ([`super::spec::GridSpec::select_column`]):
+    /// toggles the row, Shift extends from the anchor.
+    GutterClick {
+        /// The row.
+        row: super::rowkey::RowKey,
+        /// Modifiers.
+        mods: Mods,
+    },
+    /// A context menu entry was clicked (by index).
+    MenuPicked(usize),
 }
 
 impl std::fmt::Debug for GridInput {
@@ -139,6 +152,12 @@ impl std::fmt::Debug for GridInput {
             GridInput::PopupPicked(i) => f.debug_tuple("PopupPicked").field(i).finish(),
             GridInput::OpenChoices(items) => write!(f, "OpenChoices({} items)", items.len()),
             GridInput::ToggleList => f.write_str("ToggleList"),
+            GridInput::GutterClick { row, mods } => f
+                .debug_struct("GutterClick")
+                .field("row", row)
+                .field("mods", mods)
+                .finish(),
+            GridInput::MenuPicked(i) => f.debug_tuple("MenuPicked").field(i).finish(),
         }
     }
 }

@@ -154,6 +154,8 @@ pub fn spec(class: AccountClass) -> GridSpec {
         selection: SelectionMode::None,
         async_record: false,
         block_paste: false,
+        context_menu: false,
+        select_column: false,
     }
 }
 
