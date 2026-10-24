@@ -1,7 +1,7 @@
 ---
 name: rust-implementer
 description: Implements a phase (or one work package from an architect plan) in the ClientLedger Rust workspace — crates, UI screens, xtask, tests. Model is set per invocation by the orchestrator according to the phase tier in docs/AGENTS.md (sonnet by default, opus for Tier H).
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell
 model: opus
 effort: medium
 maxTurns: 150

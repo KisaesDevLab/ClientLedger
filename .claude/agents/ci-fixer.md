@@ -1,7 +1,7 @@
 ---
 name: ci-fixer
 description: Diagnoses and fixes a failing CI run on a phase branch (fmt, clippy, tests, cargo-deny, layering, coverage, platform-specific failures). Use when a pull request's checks fail.
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell
 model: sonnet
 effort: medium
 maxTurns: 80
