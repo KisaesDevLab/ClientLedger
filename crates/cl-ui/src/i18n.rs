@@ -995,6 +995,21 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.month_long.10", "October"),
     ("home.month_long.11", "November"),
     ("home.month_long.12", "December"),
+    ("home.checklist.summary", "Setup checklist {done} of {total} done"),
+    ("home.checklist.title", "Setup checklist \u{b7} {done} of {total} done"),
+    ("home.checklist.toggle.tip", "Show or hide the setup checklist"),
+    ("home.checklist.company_info", "Add your company name and address"),
+    ("home.checklist.bank_account", "Add a bank account"),
+    ("home.checklist.opening_balances", "Enter opening balances"),
+    ("home.checklist.first_transaction", "Enter your first transaction"),
+    ("home.checklist.bank_file", "Import a bank file"),
+    ("home.checklist.email", "Set up email for invoices"),
+    ("home.checklist.first_backup", "Make your first backup"),
+    ("home.checklist.done_item", "{item} (done)"),
+    ("home.checklist.do_it", "Start"),
+    ("home.checklist.hide", "Hide checklist"),
+    ("home.checklist.hide.tip", "Hide the setup checklist for this company. Steps still tick as you finish them."),
+    ("home.checklist.note", "Steps tick by themselves as you finish them."),
 ];
 
 #[cfg(test)]

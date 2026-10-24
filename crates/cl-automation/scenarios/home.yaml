@@ -20,6 +20,21 @@ steps:
   - assert_exists: {role: label, label: Home}
   - assert_exists: {role: button, label: Refresh}
 
+  # --- Setup checklist: ticks come from the reads (5 of 6; no mail server) ---
+  - assert_exists: {role: button, label: Setup checklist 5 of 6 done}
+  - assert_exists: {role: link, label: Set up email for invoices}
+  - assert_state: {key: screen.checklist.done, equals: 5}
+  - assert_state: {key: screen.checklist.total, equals: 6}
+  - assert_state: {key: screen.checklist.first_open, equals: email}
+  - assert_state: {key: screen.checklist.expanded, equals: false}
+  - click: {role: button, label: Setup checklist 5 of 6 done}
+  - assert_state: {key: screen.checklist.expanded, equals: true}
+  - assert_exists: {role: button, label: Hide checklist}
+  - assert_exists: {role: label, label: Add a bank account (done)}
+  - screenshot: home-checklist
+  - click: {role: button, label: Setup checklist 5 of 6 done}
+  - assert_state: {key: screen.checklist.expanded, equals: false}
+
   # --- Lanes: each heading and action ---------------------------------------
   - assert_exists: {role: label, label: MONEY IN}
   - assert_exists: {role: label, label: MONEY OUT}

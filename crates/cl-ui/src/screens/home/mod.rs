@@ -26,6 +26,7 @@
 mod attention;
 mod balances;
 pub(crate) mod charts;
+pub(crate) mod checklist;
 mod lanes;
 
 use std::sync::Arc;
@@ -172,6 +173,8 @@ pub(crate) struct HomeData {
     pub closing: Slot<Option<CalendarDate>>,
     /// Six months of Profit & Loss (the chart).
     pub chart: Slot<Vec<charts::MonthPl>>,
+    /// What the setup checklist reads from the engine.
+    pub checklist: Slot<checklist::Facts>,
 }
 
 impl HomeData {
@@ -187,6 +190,7 @@ impl HomeData {
             || self.reconcile.loading()
             || self.closing.loading()
             || self.chart.loading()
+            || self.checklist.loading()
     }
 }
 
@@ -230,6 +234,8 @@ pub(crate) struct Local {
     pub offset: chrono::FixedOffset,
     /// Standard months or a retail calendar (kept on this computer, U-25).
     pub calendar: cl_settings::FiscalCalendar,
+    /// The owner hid the setup checklist (kept with the company's prefs).
+    pub checklist_dismissed: bool,
 }
 
 /// The Home window.
@@ -249,6 +255,9 @@ pub struct HomeScreen {
     /// The month the chart drilled into last (Profit & Loss takes the range
     /// when it arrives in P28).
     pub(crate) chart_drill: Option<charts::Month>,
+    /// The owner opened or closed the full setup checklist (none: it
+    /// opens by itself while fewer than half the steps are done).
+    pub(crate) checklist_open: Option<bool>,
     /// Lanes per row last frame.
     lane_columns: usize,
     /// The fixed bars' sizes last frame (Q-265).
@@ -277,6 +286,7 @@ impl HomeScreen {
             data: HomeData::default(),
             last_opened: None,
             chart_drill: None,
+            checklist_open: None,
             lane_columns: 4,
             layout: FrameReport::default(),
         };
@@ -353,6 +363,13 @@ impl HomeScreen {
             move |_| Ok(demo::profit_loss_months(today, calendar)),
             move |s| async move { charts::read(&s, today, calendar).await },
         ));
+        self.data.checklist.start(run(
+            &self.link,
+            group,
+            None,
+            |_| Ok(demo::checklist_facts()),
+            |s| async move { checklist::read(&s).await },
+        ));
         self.poll();
     }
 
@@ -400,6 +417,7 @@ impl HomeScreen {
         self.data.reconcile.poll();
         self.data.closing.poll();
         self.data.chart.poll();
+        self.data.checklist.poll();
     }
 
     /// Opens the Profit & Loss of a chart month (a placeholder until P28,
@@ -442,10 +460,19 @@ impl HomeScreen {
 
     fn draw(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
+        let list = self.checklist_shown();
         let mut frame = FixedFrame::begin(ui, KIND, FrameOpts::default());
-        let refresh = frame.top(|ui| self.top(ui, &tokens));
+        let (refresh, mut todo) = frame.top(|ui| self.top(ui, &tokens, list.as_ref()));
         frame.body(Body::Scroll, |ui| {
             ui.add_space(4.0);
+            if let Some(c) = list.as_ref().filter(|_| self.checklist_expanded()) {
+                let mut picked = None;
+                card(ui, &tokens, 0.0, |ui| {
+                    picked = checklist::card(ui, &tokens, c);
+                });
+                todo = todo.or(picked);
+                ui.add_space(GAP + 6.0);
+            }
             self.lane_columns = lanes::show(ui, self, &tokens);
             ui.add_space(GAP + 6.0);
             self.cards(ui, &tokens);
@@ -454,14 +481,24 @@ impl HomeScreen {
             ui.add_space(12.0);
         });
         self.layout = frame.end();
+        if let Some(a) = todo {
+            self.checklist_action(a);
+        }
         if refresh {
             self.reload();
         }
     }
 
-    /// The title row. Returns true when Refresh was chosen.
-    fn top(&self, ui: &mut Ui, tokens: &Tokens) -> bool {
+    /// The title row: Refresh, and the setup checklist line when it shows.
+    /// Returns whether Refresh was chosen and what the checklist asked.
+    fn top(
+        &self,
+        ui: &mut Ui,
+        tokens: &Tokens,
+        list: Option<&cl_model::home::Checklist>,
+    ) -> (bool, Option<checklist::Action>) {
         let mut refresh = false;
+        let mut todo = None;
         let title = RichText::new(t("cmd.nav.home"))
             .size(22.0)
             .strong()
@@ -478,9 +515,15 @@ impl HomeScreen {
             measure(t("home.refresh"), body.clone()) + 2.0 * ui.spacing().button_padding.x;
         let title_w = measure(t("cmd.nav.home"), egui::FontId::proportional(22.0));
         let subtitle_w = measure(t("home.subtitle"), body);
-        // The subtitle sits beside the title when it fits there, else on
-        // its own line under it (narrow windows, 200% zoom).
-        let beside = title_w + subtitle_w + button_w + 3.0 * 16.0 <= ui.available_width();
+        let line_w = list.map_or(0.0, |c| {
+            measure(checklist::line_text(c), egui::FontId::proportional(12.0)) + 16.0
+        });
+        let room = ui.available_width();
+        // The checklist line sits in the title row when it fits there, else
+        // on its own line under it; the subtitle likewise.
+        let line_beside = title_w + line_w + button_w + 3.0 * 16.0 <= room;
+        let beside_w = if line_beside { line_w } else { 0.0 };
+        let beside = title_w + subtitle_w + beside_w + button_w + 4.0 * 16.0 <= room;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 16.0;
             ui.add(egui::Label::new(title).selectable(false));
@@ -488,8 +531,6 @@ impl HomeScreen {
                 ui.add(egui::Label::new(subtitle.clone()).selectable(false));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                // WP8 (D10): the setup checklist link ("Setup checklist 6 of
-                // 7 done · …") goes at the right end of this row.
                 let busy = self.data.loading();
                 if ui
                     .add_enabled(!busy, egui::Button::new(t("home.refresh")))
@@ -498,14 +539,58 @@ impl HomeScreen {
                 {
                     refresh = true;
                 }
+                if let Some(c) = list.filter(|_| line_beside) {
+                    ui.add_space(4.0);
+                    todo = checklist::top_line(ui, tokens, c);
+                }
             });
         });
+        if let Some(c) = list.filter(|_| !line_beside) {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                todo = checklist::top_line(ui, tokens, c);
+            });
+        }
         if !beside {
             ui.add(egui::Label::new(subtitle).wrap());
         }
-        refresh
+        (refresh, todo)
     }
 
+    /// The setup checklist when Home shows it: read, not hidden, not done.
+    pub(crate) fn checklist_shown(&self) -> Option<cl_model::home::Checklist> {
+        checklist::checklist(self).filter(|c| c.visible(self.local.checklist_dismissed))
+    }
+
+    /// Whether the full list is open (by itself while fewer than half the
+    /// steps are done, else when the owner opened it).
+    pub(crate) fn checklist_expanded(&self) -> bool {
+        self.checklist_shown().is_some_and(|c| {
+            self.checklist_open
+                .unwrap_or_else(|| checklist::opens_by_itself(&c))
+        })
+    }
+
+    /// Does what the checklist asked.
+    pub(crate) fn checklist_action(&mut self, a: checklist::Action) {
+        match a {
+            checklist::Action::Open(id) => self.open(id),
+            checklist::Action::Toggle => self.checklist_open = Some(!self.checklist_expanded()),
+            checklist::Action::Dismiss => self.dismiss_checklist(),
+        }
+    }
+
+    /// Hides the checklist for this company (`setup_checklist_dismissed`,
+    /// kept with the company's preferences).
+    pub(crate) fn dismiss_checklist(&mut self) {
+        self.local.checklist_dismissed = true;
+        if let Some((id, name)) = &self.tenant
+            && let Err(e) = self.link.store().update(|l| {
+                l.upsert(*id, name).prefs.setup_checklist_dismissed = true;
+            })
+        {
+            tracing::warn!("could not save the hidden setup checklist: {e}");
+        }
+    }
     /// The cards under the lanes: Account balances, Income and expenses and
     /// Needs attention, side by side when there is room (the mockup's
     /// wrapping row).
@@ -591,6 +676,7 @@ impl HomeScreen {
             "balances_source": balances::source(&self.data, self.exact),
             "loading": self.data.loading(),
             "chart": charts::state(self),
+            "checklist": checklist::state(self),
             "errors": {
                 "balances": rows.is_none() && self.data.accounts.error.is_some(),
                 "attention": self.data.counts.error.is_some(),
@@ -633,6 +719,9 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
         .map_or_else(cl_settings::FiscalCalendar::default, |r| {
             r.flags.fiscal_calendar
         });
+    let checklist_dismissed = record
+        .as_ref()
+        .is_some_and(|r| r.prefs.setup_checklist_dismissed);
     let last = record.and_then(|r| r.last_backup);
     if link.is_demo() {
         return Local {
@@ -641,6 +730,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
             now: demo::now(),
             offset: utc(),
             calendar,
+            checklist_dismissed,
         };
     }
     let now = chrono::Utc::now();
@@ -651,6 +741,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
             .unwrap_or_else(|_| crate::company::demo::DemoState::now()),
         offset: *now.with_timezone(&chrono::Local).offset(),
         calendar,
+        checklist_dismissed,
     }
 }
 

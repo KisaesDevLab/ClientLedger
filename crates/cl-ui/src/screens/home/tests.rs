@@ -774,3 +774,112 @@ fn the_demo_chart_shows_the_mockup_and_drills_into_the_report() {
     );
     assert_eq!(h.state()["chart"]["drill"], "2026-10-01..2026-10-31");
 }
+
+/// The checklist ticks from the reads alone: the profile, the chart, any
+/// transaction, a bank file, the mail server and the last backup.
+#[test]
+fn the_setup_checklist_ticks_from_the_reads() {
+    use cl_model::home::ChecklistItem;
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let c = checklist::checklist(&h).expect("read");
+    assert_eq!(
+        (c.done_count(), c.total()),
+        (5, 6),
+        "no opening-balance step (Q-P16j)"
+    );
+    assert_eq!(c.first_open(), Some(ChecklistItem::Email));
+    assert!(!c.is_done(ChecklistItem::OpeningBalances));
+
+    // A new company: nothing done, the list opens by itself.
+    h.data.checklist = Slot::ready(checklist::Facts::default());
+    h.data.accounts = Slot::ready(Vec::new());
+    h.local.last_backup = None;
+    let c = checklist::checklist(&h).expect("read");
+    assert_eq!(c.done_count(), 0);
+    assert!(h.checklist_expanded(), "prominent for a new company");
+    assert_eq!(h.state()["checklist"]["expanded"], true);
+
+    // Everything done: the checklist hides itself.
+    h.data.checklist = Slot::ready(checklist::Facts {
+        company_info: true,
+        transaction: true,
+        bank_file: true,
+        email: true,
+    });
+    h.data.accounts = Slot::ready(demo::accounts(&mut DemoState::new()));
+    h.local.last_backup = Some(demo::last_backup());
+    assert!(checklist::checklist(&h).expect("read").complete());
+    assert!(h.checklist_shown().is_none());
+    assert_eq!(h.state()["checklist"]["visible"], false);
+
+    // Not read yet: nothing shown.
+    h.data.checklist = Slot::default();
+    assert!(checklist::checklist(&h).is_none());
+
+    let mut p = cl_api::CompanyProfileUpdate {
+        business_name: "Ozark Ridge".into(),
+        ..cl_api::CompanyProfileUpdate::default()
+    };
+    assert!(!checklist::profile_filled(&p), "no address yet");
+    p.address_line1 = Some("12 Main".into());
+    assert!(checklist::profile_filled(&p));
+    p.business_name = "  ".into();
+    assert!(!checklist::profile_filled(&p));
+}
+
+/// The demo's title row: "Setup checklist 5 of 6 done · Set up email for
+/// invoices"; the summary opens the full list, a link opens its window, and
+/// Hide checklist is kept in the company's preferences.
+#[test]
+fn the_setup_checklist_opens_hides_and_stays_hidden() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let nodes = tree(&mut h, 1440.0);
+    let has = |nodes: &[(Role, String)], role: Role, name: &str| {
+        nodes.iter().any(|(r, n)| *r == role && n == name)
+    };
+    assert!(has(&nodes, Role::Button, "Setup checklist 5 of 6 done"));
+    assert!(has(&nodes, Role::Link, "Set up email for invoices"));
+    assert!(
+        !has(&nodes, Role::Button, "Hide checklist"),
+        "closed at 5 of 6"
+    );
+    let st = h.state();
+    assert_eq!(st["checklist"]["done"], 5);
+    assert_eq!(st["checklist"]["total"], 6);
+    assert_eq!(st["checklist"]["first_open"], "email");
+
+    h.checklist_action(checklist::Action::Toggle);
+    let nodes = tree(&mut h, 1440.0);
+    assert!(has(&nodes, Role::Button, "Hide checklist"));
+    assert!(has(&nodes, Role::Label, "Add a bank account (done)"));
+    assert!(has(&nodes, Role::Label, "Set up email for invoices"));
+    // Narrow: the line moves under the title and still shows.
+    let nodes = tree(&mut h, 480.0);
+    assert!(has(&nodes, Role::Link, "Set up email for invoices"));
+
+    let _ = link.drain();
+    h.checklist_action(checklist::Action::Open("edit.preferences"));
+    assert_eq!(
+        link.drain(),
+        vec![CompanyEvent::OpenWindow(CommandId::new("edit.preferences"))]
+    );
+
+    h.checklist_action(checklist::Action::Dismiss);
+    assert!(h.checklist_shown().is_none());
+    let (id, _) = tenant(&link).expect("demo company");
+    let saved = link.store().load().expect("store");
+    assert!(
+        saved
+            .get(id)
+            .expect("record")
+            .prefs
+            .setup_checklist_dismissed,
+        "kept in CompanyPrefs"
+    );
+    let again = home(&link);
+    assert!(again.local.checklist_dismissed);
+    assert!(again.checklist_shown().is_none());
+    assert_eq!(again.state()["checklist"]["dismissed"], true);
+}

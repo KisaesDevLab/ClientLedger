@@ -229,6 +229,19 @@ pub fn summary(state: &mut DemoState, today: CalendarDate, days: u16) -> Dashboa
     }
 }
 
+/// The setup checklist's reads in the demo: the sample company has its name
+/// and address, transactions and an imported bank file, and no mail server
+/// yet ("Set up email for invoices", as the mockup shows).
+#[must_use]
+pub(crate) fn checklist_facts() -> crate::screens::home::checklist::Facts {
+    crate::screens::home::checklist::Facts {
+        company_info: true,
+        transaction: true,
+        bank_file: true,
+        email: false,
+    }
+}
+
 /// `/reports/profit-loss` for `from..=to` as the demo engine answers it:
 /// the sample's income, expenses and net income for those dates (as decimal
 /// strings, the form the engine's report numbers take after U-14).
