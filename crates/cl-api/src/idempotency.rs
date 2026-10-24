@@ -169,6 +169,11 @@ impl AuthHook for StaticAuth {
 /// Up to three attempts for transient failures of retryable requests.
 const MAX_TRANSIENT_RETRIES: u32 = 2;
 
+/// Refused connects of one request that may wait for the endpoint to move
+/// on (one per generation), so an endpoint that keeps changing to dead ports
+/// cannot spin the retry loop.
+const MAX_SETTLE_WAITS: u32 = 3;
+
 /// Runs logical requests through the transport with the §2.6 policy.
 pub(crate) struct Executor {
     transport: Transport,
@@ -189,6 +194,10 @@ struct Retries {
     /// An earlier attempt may have reached a handler (timeout, broken
     /// connection, 5xx).
     maybe_committed: bool,
+    /// Generation whose refused connect last waited for the endpoint to move
+    /// on, and how many such waits this request has had.
+    settle_generation: Option<u64>,
+    settle_waits: u32,
 }
 
 enum Step {
@@ -307,7 +316,7 @@ impl Executor {
         let give_up = |e: TransportError| match e {
             TransportError::NotReady { permanent } => ApiError::EngineUnavailable { permanent },
             TransportError::Timeout { .. } => ApiError::Timeout,
-            TransportError::NotSent | TransportError::Ambiguous { .. } => {
+            TransportError::NotSent { .. } | TransportError::Ambiguous { .. } => {
                 ApiError::EngineUnavailable { permanent: false }
             }
             TransportError::TooLarge => ApiError::Decode {
@@ -323,8 +332,11 @@ impl Executor {
             | TransportError::BadHeader => Step::Done(Err(give_up(e))),
             // Nothing reached the engine: safe to retry for every class but
             // `Never` (rate-limited and rotating routes stay single-shot).
-            TransportError::NotSent => {
-                if ctx.class != RetryClass::Never && self.backoff(r, ctx.deadline).await {
+            TransportError::NotSent { generation } => {
+                if ctx.class != RetryClass::Never
+                    && (self.endpoint_moved_on(generation, r, ctx.deadline).await
+                        || self.backoff(r, ctx.deadline).await)
+                {
                     Step::Again
                 } else {
                     Step::Done(Err(keyed_give_up(ctx, r, give_up(e))))
@@ -511,6 +523,40 @@ impl Executor {
                 tracing::info!(outcome = "unknown", reconciled = true, "mutation outcome");
                 Step::Done(Err(unknown()))
             }
+        }
+    }
+
+    /// A connect refused by an endpoint that is still published as the same
+    /// generation: the engine has most likely just died and its supervisor
+    /// has not unpublished it yet (it does on its next check). Wait, within
+    /// the deadline and `refused_settle`, for the endpoint to change instead
+    /// of spending the transient retries against a dead port, so a request
+    /// issued while the engine is down waits for the next generation like
+    /// one issued while it is `Restarting`. Nothing was sent, so the retry is
+    /// safe. Waits once per generation; returns whether the endpoint moved.
+    async fn endpoint_moved_on(&self, generation: u64, r: &mut Retries, deadline: Instant) -> bool {
+        if r.settle_generation == Some(generation) || r.settle_waits >= MAX_SETTLE_WAITS {
+            return false;
+        }
+        r.settle_generation = Some(generation);
+        r.settle_waits += 1;
+        let timeouts = &self.transport.config().timeouts;
+        let until = Instant::now()
+            .checked_add(timeouts.refused_settle)
+            .map_or(deadline, |t| t.min(deadline));
+        loop {
+            let same = matches!(
+                self.transport.current(),
+                EndpointState::Ready(ep) if ep.generation == generation
+            );
+            if !same {
+                return true;
+            }
+            let now = Instant::now();
+            if now >= until {
+                return false;
+            }
+            tokio::time::sleep(timeouts.poll.min(until - now)).await;
         }
     }
 
@@ -868,6 +914,93 @@ pub(crate) mod tests {
             .expect_err("never class");
         assert_eq!(e, ApiError::EngineUnavailable { permanent: false });
         assert_eq!(count(&server).await, 1);
+    }
+
+    /// `before` until `flip_at`, then `after`: an engine that died while its
+    /// supervisor still publishes it, then the next generation.
+    struct FlipEndpoint {
+        before: EndpointState,
+        flip_at: Instant,
+        after: EndpointState,
+    }
+
+    impl EndpointSource for FlipEndpoint {
+        fn current(&self) -> EndpointState {
+            if Instant::now() < self.flip_at {
+                self.before.clone()
+            } else {
+                self.after.clone()
+            }
+        }
+    }
+
+    /// `fast_config` with a short connect limit: a refused loopback connect
+    /// is instant on Linux and macOS but takes seconds of SYN retries on
+    /// Windows, where the limit ends it.
+    fn quick_refusal_config() -> crate::client::ClientConfig {
+        let mut cfg = fast_config();
+        cfg.connect_timeout = Duration::from_millis(100);
+        cfg
+    }
+
+    #[tokio::test]
+    async fn refused_write_on_a_stale_endpoint_waits_for_the_next_generation() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(json(201, "{}"))
+            .mount(&server)
+            .await;
+        let port = server.address().port();
+        // Refused for longer than the whole transient budget (three connects
+        // of at most 100 ms and at most 200 + 400 ms of backoff), all on the
+        // same published generation; the deadline is 4 s.
+        let stale = || -> Arc<dyn EndpointSource> {
+            Arc::new(FlipEndpoint {
+                before: ready(dead_port(), TOKEN, 1),
+                flip_at: Instant::now() + Duration::from_millis(2000),
+                after: ready(port, TOKEN, 2),
+            })
+        };
+        let exec =
+            |src| Executor::new(Transport::new(src, quick_refusal_config()).expect("client"));
+        let ex = exec(stale());
+        let r = ex
+            .run(&post_op(), post_call(), &none(), None)
+            .await
+            .expect("sent to the next generation");
+        assert_eq!(r.generation, 2);
+        assert_eq!(count(&server).await, 1, "sent exactly once");
+
+        // A `Never` route stays single-shot: it does not wait.
+        let ex = exec(stale());
+        let started = Instant::now();
+        let login = Call::at(Method::Post, "/api/v1/auth/login").json_body(b"{}".to_vec());
+        let e = ex
+            .run(&LOGIN, login, &none(), None)
+            .await
+            .expect_err("never class");
+        assert_eq!(e, ApiError::EngineUnavailable { permanent: false });
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(count(&server).await, 1);
+    }
+
+    #[tokio::test]
+    async fn refused_connect_on_an_endpoint_that_never_moves_gives_up_after_one_settle_wait() {
+        let src = Arc::new(FixedEndpoint::new(dead_port(), Secret::new(TOKEN), 1));
+        let mut cfg = quick_refusal_config();
+        cfg.timeouts.refused_settle = Duration::from_millis(300);
+        let ex = Executor::new(Transport::new(src, cfg).expect("client"));
+        let started = Instant::now();
+        let e = ex
+            .run(&post_op(), post_call(), &none(), None)
+            .await
+            .expect_err("dead port");
+        assert_eq!(e, ApiError::EngineUnavailable { permanent: false });
+        // One settle wait (300 ms), then the ordinary backoff (at most
+        // 600 ms) and connects of at most 100 ms each; never the whole 4 s
+        // deadline.
+        let took = started.elapsed();
+        assert!(took < Duration::from_millis(1500), "{took:?}");
     }
 
     #[tokio::test]

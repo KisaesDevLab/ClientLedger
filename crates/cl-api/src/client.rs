@@ -69,6 +69,12 @@ pub struct Timeouts {
     pub reconcile: Duration,
     /// How often a waiting request re-reads the endpoint.
     pub poll: Duration,
+    /// After a refused connect on an endpoint that is still published, how
+    /// long a request waits for the endpoint to change before it falls back
+    /// to an ordinary retry. A killed engine stays published until its
+    /// supervisor's next check (about 250 ms, longer while a health or
+    /// listener check runs).
+    pub refused_settle: Duration,
 }
 
 impl Default for Timeouts {
@@ -82,6 +88,7 @@ impl Default for Timeouts {
             archive: Budget::secs(600, 620),
             reconcile: Duration::from_secs(15),
             poll: Duration::from_millis(150),
+            refused_settle: Duration::from_secs(5),
         }
     }
 }
@@ -343,7 +350,7 @@ pub(crate) enum TransportError {
     /// The engine did not become ready before the deadline, or is down.
     NotReady { permanent: bool },
     /// The connection could not be opened: nothing reached the engine.
-    NotSent,
+    NotSent { generation: u64 },
     /// The attempt timed out after the request may have been written.
     Timeout { generation: u64 },
     /// The connection failed after the request may have been written.
@@ -551,7 +558,7 @@ impl Transport {
 /// Connect failures are the only errors that prove nothing was sent.
 fn classify(e: &reqwest::Error, generation: u64) -> TransportError {
     if e.is_connect() {
-        TransportError::NotSent
+        TransportError::NotSent { generation }
     } else if e.is_timeout() {
         TransportError::Timeout { generation }
     } else {
@@ -957,7 +964,7 @@ pub(crate) mod tests {
             .attempt(&call, &AttemptAuth::default(), 1, soon())
             .await
             .expect_err("refused");
-        assert_eq!(e, TransportError::NotSent);
+        assert_eq!(e, TransportError::NotSent { generation: 1 });
     }
 
     #[tokio::test]
