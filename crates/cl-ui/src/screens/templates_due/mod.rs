@@ -36,6 +36,7 @@ use crate::company::{CompanyEvent, CompanyLink};
 use crate::forms::closing_prompt::{ClosingClick, ClosingPrompt};
 use crate::forms::template::TemplateOpen;
 use crate::i18n::{t, t_with};
+use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::company::form;
 use crate::screens::templates::engine::{Job, finished, run};
 use crate::screens::templates::form_kind;
@@ -195,6 +196,8 @@ pub struct TemplatesDueScreen {
     pub(crate) error: Option<ApiError>,
     pub(crate) last_action: Option<&'static str>,
     pub(crate) checking: bool,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
 }
 
 impl TemplatesDueScreen {
@@ -235,6 +238,7 @@ impl TemplatesDueScreen {
             error: None,
             last_action: None,
             checking: false,
+            layout: crate::layout::FrameReport::default(),
         };
         s.load_info();
         s.poll();
@@ -582,12 +586,47 @@ impl TemplatesDueScreen {
 
     fn draw(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
-        crate::forms::header::title_only(ui, &tokens, &t("cmd.lists.templates_due"));
-        ui.add_space(6.0);
-        if !runs_on(&self.link) {
-            form::hint(ui, &tokens, &t("templates_due.unavailable"));
-            return;
+        // The title, Check now and the messages stay put; the lists scroll
+        // under them (Q-265).
+        let mut frame = FixedFrame::begin(ui, KIND, FrameOpts::default());
+        let on = runs_on(&self.link);
+        frame.top(|ui| {
+            crate::forms::header::title_only(ui, &tokens, &t("cmd.lists.templates_due"));
+            ui.add_space(6.0);
+            if on {
+                self.top_ui(ui, &tokens);
+            }
+        });
+        let click = frame.body(Body::Scroll, |ui| {
+            if !on {
+                form::hint(ui, &tokens, &t("templates_due.unavailable"));
+                return None;
+            }
+            if self.rows.is_empty() {
+                ui.add_space(12.0);
+                form::hint(ui, &tokens, &t("templates_due.nothing"));
+                return None;
+            }
+            self.sections(ui, &tokens)
+        });
+        self.layout = frame.end();
+        if let Some((i, action)) = click {
+            self.selected = Some(i);
+            match action {
+                "open" => self.open_posted(),
+                "enter_now" => self.enter_now(None),
+                "open_in_form" | "enter_it_now" => self.open_in_form(),
+                "skip" => self.skip_selected(),
+                "copy" => self.copy_details(ui.ctx()),
+                _ => {}
+            }
         }
+    }
+
+    /// The as-of line with Check now, the closing-date prompt and the
+    /// messages.
+    fn top_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let tokens = *tokens;
         ui.horizontal(|ui| {
             if let Some(d) = self.as_of {
                 form::hint(
@@ -619,27 +658,6 @@ impl TemplatesDueScreen {
             ClosingClick::None => {}
         }
         self.messages(ui, &tokens);
-        if self.rows.is_empty() {
-            ui.add_space(12.0);
-            form::hint(ui, &tokens, &t("templates_due.nothing"));
-            return;
-        }
-        let click = egui::ScrollArea::vertical()
-            .id_salt("templates_due/scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| self.sections(ui, &tokens))
-            .inner;
-        if let Some((i, action)) = click {
-            self.selected = Some(i);
-            match action {
-                "open" => self.open_posted(),
-                "enter_now" => self.enter_now(None),
-                "open_in_form" | "enter_it_now" => self.open_in_form(),
-                "skip" => self.skip_selected(),
-                "copy" => self.copy_details(ui.ctx()),
-                _ => {}
-            }
-        }
     }
 
     fn messages(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -853,6 +871,7 @@ impl TemplatesDueScreen {
             .collect();
         let mut v = json!({
             "screen": "templates_due",
+            "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "available": runs_on(&self.link),
             "as_of": self.as_of.map(CalendarDate::to_wire),
@@ -919,6 +938,10 @@ impl Screen for TemplatesDueScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }
 

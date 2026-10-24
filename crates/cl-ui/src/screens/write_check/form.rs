@@ -23,6 +23,7 @@ use crate::company::CompanyEvent;
 use crate::forms::closing_prompt::ClosingClick;
 use crate::forms::header;
 use crate::i18n::{t, t_with};
+use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::company::form;
 use crate::screens::register::account_text;
 use crate::screens::register::lists::NAMES;
@@ -69,46 +70,63 @@ impl WriteCheckScreen {
             form::progress_line(ui, &tokens, &t("check.loading"));
             return;
         }
-        self.toolbar(ui, &tokens);
-        self.messages(ui, &tokens);
-        if self.bank_accounts().is_empty() {
-            ui.add_space(8.0);
-            ui.label(RichText::new(t("check.no_bank")).color(tokens.text_secondary));
-            if ui.button(t("check.open_chart")).clicked() {
-                self.link.push(CompanyEvent::OpenWindow(CommandId::new(
-                    crate::screens::lists::accounts::KIND,
-                )));
-            }
-            return;
-        }
         let wide = ui.available_width() >= SIDE_BY_SIDE;
-        egui::ScrollArea::vertical()
-            .id_salt("write_check/scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if wide {
-                    ui.horizontal_top(|ui| {
-                        // The gap, and the spacing egui puts between the
-                        // three items, so the panel's right edge stays on
-                        // screen.
-                        let spacing = 2.0 * ui.spacing().item_spacing.x;
-                        let form_width = ui.available_width() - PANEL_WIDTH - 20.0 - spacing;
-                        ui.vertical(|ui| {
-                            ui.set_width(form_width);
-                            self.form_ui(ui, &tokens);
-                        });
-                        ui.add_space(20.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(PANEL_WIDTH);
-                            self.panel_ui(ui, &tokens);
-                        });
-                    });
-                } else {
-                    self.form_ui(ui, &tokens);
-                    ui.add_space(12.0);
-                    self.panel_ui(ui, &tokens);
+        // The toolbar and its messages stay at the top, the actions at the
+        // bottom; the check, its lines and the side panel scroll (Q-265).
+        let mut frame = FixedFrame::begin(ui, "write_check", FrameOpts::default());
+        frame.top(|ui| {
+            self.toolbar(ui, &tokens);
+            self.messages(ui, &tokens);
+        });
+        if self.bank_accounts().is_empty() {
+            frame.body(Body::Scroll, |ui| {
+                ui.add_space(8.0);
+                ui.label(RichText::new(t("check.no_bank")).color(tokens.text_secondary));
+                if ui.button(t("check.open_chart")).clicked() {
+                    self.link.push(CompanyEvent::OpenWindow(CommandId::new(
+                        crate::screens::lists::accounts::KIND,
+                    )));
                 }
             });
+            self.layout = frame.end();
+            return;
+        }
+        // The gap, and the spacing egui puts between the three items, so
+        // the panel's right edge stays on screen.
+        let form_width = |ui: &Ui| {
+            let spacing = 2.0 * ui.spacing().item_spacing.x;
+            ui.available_width() - PANEL_WIDTH - 20.0 - spacing
+        };
+        frame.body(Body::Scroll, |ui| {
+            if wide {
+                ui.horizontal_top(|ui| {
+                    let form_width = form_width(ui);
+                    ui.vertical(|ui| {
+                        ui.set_width(form_width);
+                        self.form_ui(ui, &tokens);
+                    });
+                    ui.add_space(20.0);
+                    ui.vertical(|ui| {
+                        ui.set_width(PANEL_WIDTH);
+                        self.panel_ui(ui, &tokens);
+                    });
+                });
+            } else {
+                self.form_ui(ui, &tokens);
+                ui.add_space(12.0);
+                self.panel_ui(ui, &tokens);
+            }
+        });
+        frame.bottom(|ui| {
+            // Under the check's column, as in the mockup.
+            if wide {
+                let w = form_width(ui);
+                ui.allocate_ui(Vec2::new(w, ACTION_HEIGHT), |ui| self.actions_ui(ui));
+            } else {
+                self.actions_ui(ui);
+            }
+        });
+        self.layout = frame.end();
     }
 
     fn toolbar(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -315,8 +333,6 @@ impl WriteCheckScreen {
         ui.add_space(6.0);
         self.totals_ui(ui, tokens);
         self.problems_ui(ui, tokens);
-        ui.add_space(12.0);
-        self.actions_ui(ui);
     }
 
     fn bank_row(&mut self, ui: &mut Ui, tokens: &Tokens, enabled: bool) {

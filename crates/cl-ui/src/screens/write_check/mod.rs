@@ -274,6 +274,8 @@ pub struct WriteCheckScreen {
     /// A command to run once the frame's fields are drawn (Enter in a
     /// header field is Save & New, Q-190).
     pub(crate) after_frame: Option<CommandId>,
+    /// The fixed bars' sizes last frame (Q-265).
+    pub(crate) layout: crate::layout::FrameReport,
     /// The owner's money display style (from the shell each frame).
     pub(crate) money_style: cl_core::MoneyStyle,
     /// Payee prefill (WP7).
@@ -382,6 +384,7 @@ impl WriteCheckScreen {
             payee_list: false,
             in_grid: false,
             after_frame: None,
+            layout: crate::layout::FrameReport::default(),
             money_style: cl_core::MoneyStyle::default(),
             prefill: prefill::PrefillState::default(),
             panel: panel::PanelState::default(),
@@ -982,6 +985,10 @@ impl Screen for WriteCheckScreen {
         self.state_json()
     }
 
+    fn fixed_layout(&self) -> bool {
+        true
+    }
+
     fn open_template(&mut self, t: crate::forms::template::TemplateOpen) -> bool {
         self.fill_template(&t)
     }
@@ -1072,6 +1079,7 @@ impl WriteCheckScreen {
             "grid": {
                 "focused": self.lines.has_focus(),
             },
+            "layout": self.layout.json(),
         });
         let wp7 = json!({
             "prefill": {

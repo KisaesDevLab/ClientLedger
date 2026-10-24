@@ -1174,9 +1174,7 @@ impl Shell {
                     dock = Some(id);
                 }
             } else {
-                egui::ScrollArea::both()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| w.screen.ui(ui));
+                draw_screen(ui, w.screen.as_mut());
             }
         });
         if let Some(id) = dock {
@@ -1215,7 +1213,7 @@ impl Shell {
                     let screen = &mut w.screen;
                     egui::CentralPanel::default()
                         .frame(Frame::new().fill(fill).inner_margin(Margin::same(16)))
-                        .show(ui, |ui| screen.ui(ui));
+                        .show(ui, |ui| draw_screen(ui, screen.as_mut()));
                 }
                 if vctx.input(|i| i.viewport().close_requested()) {
                     dock.push(wid);
@@ -1398,6 +1396,18 @@ pub fn weekday_date(d: CalendarDate) -> String {
 #[must_use]
 pub fn chip_text(s: cl_model::Shortcut) -> String {
     input::shortcut_text(s).replace('+', " ")
+}
+
+/// A window body: a screen with fixed bars (Q-265) gets the rectangle and
+/// scrolls its own body; any other screen scrolls whole.
+fn draw_screen(ui: &mut egui::Ui, screen: &mut dyn crate::windows::Screen) {
+    if screen.fixed_layout() {
+        screen.ui(ui);
+    } else {
+        egui::ScrollArea::both()
+            .auto_shrink([false, false])
+            .show(ui, |ui| screen.ui(ui));
+    }
 }
 
 #[cfg(test)]

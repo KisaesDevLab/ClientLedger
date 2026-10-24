@@ -9,6 +9,7 @@ use super::{JournalScreen, field};
 use crate::forms::closing_prompt::ClosingClick;
 use crate::forms::header;
 use crate::i18n::{t, t_with};
+use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::card_charge::kit::{self, ACTION_HEIGHT};
 use crate::screens::company::form;
 use crate::theme::Tokens;
@@ -20,22 +21,33 @@ impl JournalScreen {
             form::progress_line(ui, &tokens, &t("journal.loading"));
             return;
         }
-        self.toolbar(ui, &tokens);
-        self.messages(ui, &tokens);
-        if self.nav_prompt.is_some()
-            && let Some(a) =
-                crate::forms::nav_prompt::ui(ui, "journal_entry", &t("cmd.company.journal_entry"))
-        {
-            self.answer_nav(a);
-        }
+        // Toolbar and messages on top, the actions at the bottom; the rest
+        // scrolls (Q-265).
+        let mut frame = FixedFrame::begin(ui, "journal_entry", FrameOpts::default());
+        frame.top(|ui| {
+            self.toolbar(ui, &tokens);
+            self.messages(ui, &tokens);
+            if self.nav_prompt.is_some()
+                && let Some(a) = crate::forms::nav_prompt::ui(
+                    ui,
+                    "journal_entry",
+                    &t("cmd.company.journal_entry"),
+                )
+            {
+                self.answer_nav(a);
+            }
+        });
         if self.books.accounts.is_empty() {
-            form::hint(ui, &tokens, &t("journal.no_accounts"));
+            frame.body(Body::Scroll, |ui| {
+                form::hint(ui, &tokens, &t("journal.no_accounts"));
+            });
+            self.layout = frame.end();
             return;
         }
-        egui::ScrollArea::vertical()
-            .id_salt("journal_entry/scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| self.form_ui(ui, &tokens));
+        frame.body(Body::Scroll, |ui| self.form_ui(ui, &tokens));
+        let read_only = self.read_only().is_some();
+        frame.bottom(|ui| self.actions_ui(ui, read_only));
+        self.layout = frame.end();
     }
 
     fn toolbar(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -196,8 +208,6 @@ impl JournalScreen {
         if self.busy() {
             form::progress_line(ui, tokens, &t("helper.saving"));
         }
-        ui.add_space(12.0);
-        self.actions_ui(ui, read_only);
     }
 
     fn header_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {

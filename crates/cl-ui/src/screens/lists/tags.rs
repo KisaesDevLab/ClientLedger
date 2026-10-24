@@ -40,6 +40,7 @@ use serde_json::{Value, json};
 use crate::company::{CompanyLink, Task};
 use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
+use crate::layout::{Body, FixedFrame, LIST_FRAME};
 use crate::screens::company::form;
 use crate::screens::lists::detail_pane as pane;
 use crate::screens::lists::rows::{TextRow, TextRows, column, list_spec};
@@ -234,6 +235,8 @@ pub struct TagsScreen {
     note: Option<&'static str>,
     warn: Option<&'static str>,
     parts: EnvParts,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
     snap: GridSnapshot,
     focus_search: bool,
     want_cursor: Option<TagId>,
@@ -283,6 +286,7 @@ impl TagsScreen {
             note: None,
             warn: None,
             parts: EnvParts::default(),
+            layout: crate::layout::FrameReport::default(),
             snap: GridSnapshot::default(),
             focus_search: false,
             want_cursor: None,
@@ -1352,7 +1356,7 @@ impl TagsScreen {
             &label,
             GridHeight::Fill {
                 reserve_below: reserve,
-                min_rows: 5,
+                min_rows: 3,
             },
         );
         let out = self.grid.show(ui, ModelRef::Browse(&mut self.model), &env);
@@ -1828,33 +1832,44 @@ impl Screen for TagsScreen {
         self.sync_compact();
         self.follow_selection();
         let tokens = Tokens::of(ui.ctx());
-        form::heading(ui, &tokens, &t("cmd.lists.tags"));
-        ui.add_space(4.0);
-        self.toolbar(ui);
-        self.messages(ui, &tokens);
-        ui.add_space(4.0);
-        if !self.loaded {
-            form::progress_line(ui, &tokens, &t("tags.loading"));
-            return;
-        }
-        if matches!(self.panel, Panel::None) {
-            self.list_ui(ui, &tokens);
-        } else {
-            ui.horizontal_top(|ui| {
-                let left = (ui.available_width() - PANEL_WIDTH - 16.0).max(300.0);
-                ui.vertical(|ui| {
-                    ui.set_width(left);
-                    self.list_ui(ui, &tokens);
+        // The title, toolbar and messages stay put; the list keeps its
+        // column headers at the top of its own area (Q-265).
+        let mut frame = FixedFrame::begin(ui, KIND, LIST_FRAME);
+        frame.top(|ui| {
+            form::heading(ui, &tokens, &t("cmd.lists.tags"));
+            ui.add_space(4.0);
+            self.toolbar(ui);
+            self.messages(ui, &tokens);
+        });
+        frame.body(Body::Fill, |ui| {
+            if !self.loaded {
+                form::progress_line(ui, &tokens, &t("tags.loading"));
+                return;
+            }
+            if matches!(self.panel, Panel::None) {
+                self.list_ui(ui, &tokens);
+            } else {
+                ui.horizontal_top(|ui| {
+                    let left = (ui.available_width() - PANEL_WIDTH - 16.0).max(300.0);
+                    ui.vertical(|ui| {
+                        ui.set_width(left);
+                        self.list_ui(ui, &tokens);
+                    });
+                    ui.separator();
+                    ui.vertical(|ui| {
+                        ui.set_width(PANEL_WIDTH);
+                        egui::ScrollArea::vertical()
+                            .id_salt("tags-panel-scroll")
+                            .show(ui, |ui| self.panel_ui(ui, &tokens));
+                    });
                 });
-                ui.separator();
-                ui.vertical(|ui| {
-                    ui.set_width(PANEL_WIDTH);
-                    egui::ScrollArea::vertical()
-                        .id_salt("tags-panel-scroll")
-                        .show(ui, |ui| self.panel_ui(ui, &tokens));
-                });
-            });
-        }
+            }
+        });
+        self.layout = frame.end();
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 
     fn dirty(&self) -> bool {
@@ -1975,6 +1990,7 @@ impl Screen for TagsScreen {
         let usage = self.selected_usage();
         json!({
             "screen": "tags",
+            "layout": self.layout.json(),
             "loaded": self.loaded,
             "load_error": self.load_error.is_some(),
             "rows": self.model.len(),

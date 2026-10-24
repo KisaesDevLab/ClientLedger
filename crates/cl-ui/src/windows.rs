@@ -66,6 +66,13 @@ pub trait Screen {
     fn state(&self) -> serde_json::Value {
         serde_json::Value::Null
     }
+
+    /// True when the screen lays itself out with [`crate::layout::FixedFrame`]
+    /// (its bars stay put and only its body scrolls, Q-265): the shell then
+    /// gives it the window's rectangle instead of scrolling it whole.
+    fn fixed_layout(&self) -> bool {
+        false
+    }
 }
 
 /// Stand-in for a screen a later phase builds.

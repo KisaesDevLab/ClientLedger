@@ -138,6 +138,8 @@ pub struct LoanPaymentScreen {
     pub(crate) bus: crate::data_bus::Subscription,
     lists_stale: bool,
     after_frame: Option<CommandId>,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
     pub(crate) money_style: MoneyStyle,
     /// Prev/Next and the saved record being read.
     pub(crate) records: Records,
@@ -211,6 +213,7 @@ impl LoanPaymentScreen {
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,
             after_frame: None,
+            layout: crate::layout::FrameReport::default(),
             money_style: MoneyStyle::default(),
             records: Records::default(),
             focused: None,
@@ -981,36 +984,44 @@ impl LoanPaymentScreen {
             form::progress_line(ui, &tokens, &t("helper.loading"));
             return;
         }
-        let idle = self.flow.idle();
-        // "No payment schedules" is said in the side panel: beside the
-        // buttons it ran into the heading at the minimum width.
-        if let Some(cmd) = kit::toolbar(ui, &tokens, idle, self.is_dirty(), |_| {}) {
-            self.after_frame = Some(CommandId::new(cmd));
-        }
-        match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
-            MessageClick::SubmitClosing => self.submit_closing(),
-            MessageClick::Void => self.void_now(None),
-            MessageClick::Reload => self.reload(),
-            MessageClick::None => {}
-        }
-        if self.records.prompt.is_some()
-            && let Some(a) = records::prompt_ui(ui, KIND, &t("cmd.banking.loan_payment"))
-        {
-            self.answer_nav(a);
-        }
-        if self.loans().is_empty() {
-            ui.add_space(8.0);
-            ui.label(RichText::new(t("loan.no_loan")).color(tokens.text_secondary));
-            if ui.button(t("helper.open_chart")).clicked() {
-                self.link.push(CompanyEvent::OpenWindow(CommandId::new(
-                    crate::screens::lists::accounts::KIND,
-                )));
+        let empty = self.loans().is_empty();
+        self.layout = kit::form_frame(ui, "loan_payment", empty, |ui, col| match col {
+            kit::Column::Top => {
+                let idle = self.flow.idle();
+                // "No payment schedules" is said in the side panel: beside
+                // the buttons it ran into the heading at the minimum width.
+                if let Some(cmd) = kit::toolbar(ui, &tokens, idle, self.is_dirty(), |_| {}) {
+                    self.after_frame = Some(CommandId::new(cmd));
+                }
+                match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
+                    MessageClick::SubmitClosing => self.submit_closing(),
+                    MessageClick::Void => self.void_now(None),
+                    MessageClick::Reload => self.reload(),
+                    MessageClick::None => {}
+                }
+                if self.records.prompt.is_some()
+                    && let Some(a) = records::prompt_ui(ui, KIND, &t("cmd.banking.loan_payment"))
+                {
+                    self.answer_nav(a);
+                }
             }
-            return;
-        }
-        kit::two_columns(ui, "loan_payment/scroll", |ui, col| match col {
+            kit::Column::Empty => {
+                ui.add_space(8.0);
+                ui.label(RichText::new(t("loan.no_loan")).color(tokens.text_secondary));
+                if ui.button(t("helper.open_chart")).clicked() {
+                    self.link.push(CompanyEvent::OpenWindow(CommandId::new(
+                        crate::screens::lists::accounts::KIND,
+                    )));
+                }
+            }
             kit::Column::Form => self.form_ui(ui, &tokens),
             kit::Column::Panel => self.panel_ui(ui, &tokens),
+            kit::Column::Actions => {
+                let enabled = self.flow.idle();
+                if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
+                    self.after_frame = Some(CommandId::new(cmd));
+                }
+            }
         });
     }
 
@@ -1236,10 +1247,6 @@ impl LoanPaymentScreen {
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
         kit::status(ui, tokens, &self.flow);
-        ui.add_space(12.0);
-        if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
-            self.after_frame = Some(CommandId::new(cmd));
-        }
     }
 
     fn method_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
@@ -1367,6 +1374,7 @@ impl LoanPaymentScreen {
         let f = self.compose();
         let mut v = json!({
             "screen": "loan_payment",
+            "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.books.loaded,
             "loan_id": f.loan.map(|a| a.to_string()),
@@ -1458,6 +1466,10 @@ impl Screen for LoanPaymentScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }
 

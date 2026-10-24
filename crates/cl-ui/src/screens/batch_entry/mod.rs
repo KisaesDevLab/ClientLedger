@@ -153,12 +153,8 @@ pub struct BulkEntryScreen {
     pub(crate) summary: Option<summary::Summary>,
     pub(crate) summary_open: bool,
     // ---------------------------------------------------------------- layout
-    /// How tall everything under the grid was last frame.
-    pub(crate) below_h: Option<f32>,
-    /// How tall the totals and actions were last frame (tight layout).
-    pub(crate) footer_h: Option<f32>,
-    /// A measured height changed: draw again at once.
-    pub(crate) relayout: bool,
+    /// The fixed bars' sizes last frame (Q-265).
+    pub(crate) layout: crate::layout::FrameReport,
 }
 
 /// Half a second after the last change, the changed rows go to the engine.
@@ -252,9 +248,7 @@ impl BulkEntryScreen {
             closing_prompt: ClosingPrompt::default(),
             summary: None,
             summary_open: false,
-            below_h: None,
-            footer_h: None,
-            relayout: false,
+            layout: crate::layout::FrameReport::default(),
         };
         s.seen_rev = s.grid.form().revision();
         s.books.start(&s.link, s.group.as_ref());
@@ -550,6 +544,7 @@ impl BulkEntryScreen {
         });
         let mut v = json!({
             "screen": "batch_entry",
+            "layout": self.layout.json(),
             "loaded": self.books.loaded,
             "sections": b.sections.len(),
             "section": i,
@@ -635,9 +630,6 @@ impl Screen for BulkEntryScreen {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
         }
-        if std::mem::take(&mut self.relayout) {
-            ui.ctx().request_repaint();
-        }
     }
 
     fn scope(&self) -> Scope {
@@ -661,6 +653,10 @@ impl Screen for BulkEntryScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }
 

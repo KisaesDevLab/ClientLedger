@@ -46,6 +46,7 @@ use self::model::{
 use crate::company::{CompanyLink, Task};
 use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
+use crate::layout::{Body, FixedFrame, LIST_FRAME};
 use crate::screens::company::form as cform;
 use crate::screens::lists::detail_pane as pane;
 use crate::theme::Tokens;
@@ -175,6 +176,8 @@ pub struct CenterScreen {
     /// A plain warning (i18n key) under the toolbar.
     warn: Option<&'static str>,
     parts: EnvParts,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
     snap: GridSnapshot,
     focus_search: bool,
     want_cursor: Option<ContactId>,
@@ -249,6 +252,7 @@ impl CenterScreen {
             note: None,
             warn: None,
             parts: EnvParts::default(),
+            layout: crate::layout::FrameReport::default(),
             snap: GridSnapshot::default(),
             focus_search: false,
             want_cursor: None,
@@ -1027,7 +1031,7 @@ impl CenterScreen {
             &label,
             GridHeight::Fill {
                 reserve_below: 28.0,
-                min_rows: 6,
+                min_rows: 3,
             },
         );
         let out = self.grid.show(ui, ModelRef::Browse(&mut self.model), &env);
@@ -1434,36 +1438,47 @@ impl Screen for CenterScreen {
         self.hear_changes();
         self.sync_compact();
         let tokens = Tokens::of(ui.ctx());
-        cform::heading(ui, &tokens, &self.title());
-        ui.add_space(4.0);
-        self.toolbar(ui);
-        self.messages(ui, &tokens);
-        ui.add_space(4.0);
-        if !self.loaded {
-            cform::progress_line(ui, &tokens, &t("center.loading"));
-            return;
-        }
-        self.follow_selection();
-        ui.horizontal_top(|ui| {
-            let left = (ui.available_width() - PANEL_WIDTH - 16.0).max(320.0);
-            ui.vertical(|ui| {
-                ui.set_width(left);
-                self.list_ui(ui, &tokens);
-            });
-            ui.separator();
-            ui.vertical(|ui| {
-                ui.set_width(PANEL_WIDTH);
-                match self.panel {
-                    Panel::Form(_) => {
-                        egui::ScrollArea::vertical()
-                            .id_salt("center-form-scroll")
-                            .show(ui, |ui| self.form_ui(ui, &tokens));
+        // The title, toolbar and messages stay put; the list keeps its
+        // column headers at the top of its own area (Q-265).
+        let mut frame = FixedFrame::begin(ui, self.kind(), LIST_FRAME);
+        frame.top(|ui| {
+            cform::heading(ui, &tokens, &self.title());
+            ui.add_space(4.0);
+            self.toolbar(ui);
+            self.messages(ui, &tokens);
+        });
+        frame.body(Body::Fill, |ui| {
+            if !self.loaded {
+                cform::progress_line(ui, &tokens, &t("center.loading"));
+                return;
+            }
+            self.follow_selection();
+            ui.horizontal_top(|ui| {
+                let left = (ui.available_width() - PANEL_WIDTH - 16.0).max(320.0);
+                ui.vertical(|ui| {
+                    ui.set_width(left);
+                    self.list_ui(ui, &tokens);
+                });
+                ui.separator();
+                ui.vertical(|ui| {
+                    ui.set_width(PANEL_WIDTH);
+                    match self.panel {
+                        Panel::Form(_) => {
+                            egui::ScrollArea::vertical()
+                                .id_salt("center-form-scroll")
+                                .show(ui, |ui| self.form_ui(ui, &tokens));
+                        }
+                        Panel::Merge(_) => self.merge_ui(ui, &tokens),
+                        Panel::None => self.detail_ui(ui, &tokens),
                     }
-                    Panel::Merge(_) => self.merge_ui(ui, &tokens),
-                    Panel::None => self.detail_ui(ui, &tokens),
-                }
+                });
             });
         });
+        self.layout = frame.end();
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 
     fn dirty(&self) -> bool {
@@ -1599,6 +1614,7 @@ impl Screen for CenterScreen {
             "merge_source_1099": matches!(&self.panel, Panel::Merge(m) if m.source_1099),
             "jobs_available": false,
             "attachments_available": false,
+            "layout": self.layout.json(),
         })
     }
 }

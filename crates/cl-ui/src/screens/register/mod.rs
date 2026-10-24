@@ -54,6 +54,7 @@ use crate::account_names::shown_name;
 use crate::company::{CompanyEvent, CompanyLink, Task};
 use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
+use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::company::form;
 use crate::screens::lists::accounts::model::kind_of;
 use crate::theme::Tokens;
@@ -160,6 +161,8 @@ pub struct RegisterScreen {
     load_error: Option<ApiError>,
     custom: CustomRange,
     parts: EnvParts,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
     snap: GridSnapshot,
     /// The account whose remembered choices were applied.
     prefs_for: Option<AccountId>,
@@ -275,6 +278,7 @@ impl RegisterScreen {
             load_error: None,
             custom: CustomRange::default(),
             parts: EnvParts::default(),
+            layout: crate::layout::FrameReport::default(),
             snap: GridSnapshot::default(),
             prefs_for: None,
             prefs_dirty: false,
@@ -1075,9 +1079,9 @@ impl Screen for RegisterScreen {
         self.sync_prefs(ui.ctx());
         self.watch_stamp(ui.ctx());
         let tokens = Tokens::of(ui.ctx());
-        self.heading(ui, &tokens);
-        ui.add_space(4.0);
         if !self.accounts_loaded {
+            self.heading(ui, &tokens);
+            ui.add_space(4.0);
             form::progress_line(ui, &tokens, &t("register.loading"));
             if self.accounts_task.is_some() {
                 ui.ctx()
@@ -1085,24 +1089,43 @@ impl Screen for RegisterScreen {
             }
             return;
         }
-        self.toolbar(ui, &tokens);
-        self.goto_ui(ui, &tokens);
-        self.quick_report_ui(ui, &tokens);
-        self.messages(ui, &tokens);
-        self.actions_ui(ui, &tokens);
-        ui.add_space(4.0);
-        if self.empty_ui(ui, &tokens) {
-            self.request_pages();
+        // The title, toolbar, Go To, the messages and the row actions stay
+        // at the top; the entry row and the ending balance at the bottom;
+        // the register's rows scroll between them under their fixed column
+        // headings (Q-265).
+        let mut frame = FixedFrame::begin(ui, KIND, FrameOpts::default());
+        frame.top(|ui| {
+            self.heading(ui, &tokens);
+            ui.add_space(4.0);
+            self.toolbar(ui, &tokens);
+            self.goto_ui(ui, &tokens);
+            self.quick_report_ui(ui, &tokens);
+            self.messages(ui, &tokens);
+            self.actions_ui(ui, &tokens);
+        });
+        // (empty, rows shown)
+        let (empty, shown) = frame.body(Body::Fill, |ui| {
+            if self.empty_ui(ui, &tokens) {
+                return (true, false);
+            }
+            if self.model.total().is_none() {
+                form::progress_line(ui, &tokens, &t("register.loading"));
+                return (false, false);
+            }
+            self.grid_ui(ui, 0.0);
+            (false, true)
+        });
+        if shown {
+            frame.bottom(|ui| {
+                self.entry_ui(ui, &tokens);
+                self.footer_ui(ui, &tokens);
+            });
+        }
+        self.layout = frame.end();
+        self.request_pages();
+        if empty {
             return;
         }
-        if self.model.total().is_none() {
-            form::progress_line(ui, &tokens, &t("register.loading"));
-        } else {
-            self.grid_ui(ui, footer::HEIGHT + self.entry.height);
-            self.entry_ui(ui, &tokens);
-            self.footer_ui(ui, &tokens);
-        }
-        self.request_pages();
         self.footer_load();
         self.finish_jump(ui.ctx());
         self.finish_goto();
@@ -1172,10 +1195,15 @@ impl Screen for RegisterScreen {
         }
     }
 
+    fn fixed_layout(&self) -> bool {
+        true
+    }
+
     fn state(&self) -> Value {
         let total = self.model.total();
         json!({
             "screen": "register",
+            "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "account_id": self.account.map(|a| a.to_string()),
             "account_class": self.account.map(|_| filters::class_name(self.class)),

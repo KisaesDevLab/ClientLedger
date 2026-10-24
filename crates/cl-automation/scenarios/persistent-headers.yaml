@@ -1,0 +1,172 @@
+# Persistent headers (Q-265, P16 step 0b) against `clientledger --demo`: on
+# one screen of each kind (a list: Vendors; the register; Bulk Entry;
+# Templates Due; a form: Write Check), the title, toolbar and column headings
+# stay at the top and the actions at the bottom while the content between
+# them scrolls. Each screen moves to the end of its content with the keyboard
+# (End in a list or the register, Tab into the lines of a form), then its
+# toolbar button and its bottom action are still there and clickable. Run at
+# the minimum window (960 x 640), then at 200% zoom on it (480 x 320 points).
+# Nothing is saved: the form's Save & Close is checked enabled and Clear is
+# clicked. Synthetic demo data.
+name: persistent-headers
+description: Toolbar, headings and actions stay put while the content scrolls, on a list, the register, Bulk Entry, Templates Due and Write Check, at 960 x 640 and at 200%.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - click: {role: tab, label: Home}
+  - resize: {width: 960, height: 640}
+
+  # ============================== 960 x 640 ==================================
+  # --- A list: Vendors --------------------------------------------------------
+  - command: vendors.center
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_state: {key: screen.layout.top_scrolls, equals: false}
+  - key: Ctrl+End
+  - assert_exists: {role: button, label: New vendor}
+  - click: {role: button, label: Transaction Report}
+  - assert_state: {key: screen.tab, equals: transactions}
+  - assert_no_clipping: &list960
+      ignore:
+        # The detail pane's body scrolls by design.
+        - {x: 560, y: 270, width: 10000, height: 10000}
+  - screenshot: vendors-960
+  - key: Escape
+  - command: file.close_window
+
+  # --- The register -----------------------------------------------------------
+  - key: Ctrl+G
+  - assert_state: {key: screen.screen, equals: register}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: row, label_contains: "11/04/2026", index: 0}
+  - key: Ctrl+End
+  - assert_exists: {role: column_header, label: Balance}
+  - assert_exists: {role: combo_box, label: Sort by}
+  - assert_exists: {role: button, label: Record}
+  - assert_exists: {role: label, label: Ending balance}
+  - click: {role: button, label: Go To}
+  - assert_state: {key: screen.goto.open, equals: true}
+  - assert_no_clipping: {}
+  - screenshot: register-960
+  - key: Escape
+  - command: file.close_window
+
+  # --- Bulk Entry -------------------------------------------------------------
+  - command: banking.bulk_entry
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {label: "Date, line 1"}
+  - key: Ctrl+End
+  - assert_exists: {role: button, label: Check all rows}
+  - assert_exists: {role: button, label: Save all}
+  - click: {role: button, label: Check all rows}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.last_action, equals: clear}
+  - assert_no_clipping: {}
+  - screenshot: bulk-entry-960
+  - command: file.close_window
+
+  # --- Templates Due ----------------------------------------------------------
+  - command: lists.templates_due
+  - assert_state: {key: screen.screen, equals: templates_due}
+  - key: Ctrl+End
+  - click: {role: button, label: Check now}
+  - assert_no_clipping: {}
+  - screenshot: templates-due-960
+  - command: file.close_window
+
+  # --- A form: Write Check ----------------------------------------------------
+  - command: vendors.write_check
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {label: "Account, line 1"}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - assert_exists: {role: button, label: Attach}
+  - click: {role: button, label: Attach}
+  - assert_enabled: {role: button, label_contains: Save & Close}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_no_clipping: {}
+  - screenshot: write-check-960
+  - command: file.close_window
+
+  # ========================= 960 x 640 at 200% ===============================
+  # 480 x 320 points: the bars stay whole, the body keeps its rows (it
+  # scrolls when it's shorter), and a top bar too tall for the window
+  # scrolls on its own.
+  - set_zoom: {percent: 200}
+
+  - command: vendors.center
+  - assert_state: {key: screen.loaded, equals: true}
+  - key: Ctrl+End
+  - assert_exists: {role: button, label: New vendor}
+  - assert_exists: {role: button, label: Hide details}
+  - screenshot: vendors-z200
+  - assert_no_clipping: &zoomed
+      ignore:
+        # The tab strip scrolls (the » list).
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        # A top bar too tall for this window scrolls on its own, both ways
+        # (its room under the tabs; the register's filter row runs past the
+        # right edge).
+        - {x: -4000, y: 104, width: 8480, height: 56}
+        # The bottom band (as in forms-zoom): a scrolled bar's rows report
+        # their full bounds past the window's bottom edge.
+        - {x: -4000, y: 260, width: 8480, height: 80}
+        # The details panel's body scrolls by design.
+        - {x: 264, y: 100, width: 300, height: 260}
+  - command: file.close_window
+
+  - key: Ctrl+G
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: row, label_contains: "11/04/2026", index: 0}
+  - key: Ctrl+End
+  # The top bar (title, account, toolbar, quick filters) scrolls on its
+  # own here, and the bottom bar (the entry row, Record and the ending
+  # balance) is taller than this window allows, so it scrolls too with its
+  # end in view; two register rows stay between them. No clipping check:
+  # the scrolled top bar's filter row reports its full bounds past the
+  # window's bottom edge.
+  - assert_state: {key: screen.layout.top_scrolls, equals: true}
+  - assert_state: {key: screen.layout.bottom_scrolls, equals: true}
+  - assert_exists: {role: button, label: Record}
+  - assert_enabled: {role: button, label: Record}
+  - assert_exists: {role: label, label: Ending balance}
+  - screenshot: register-z200
+  - command: file.close_window
+
+  - command: banking.bulk_entry
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {label_contains: "Checks rows"}
+  - assert_exists: {role: button, label: Save all}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.last_action, equals: clear}
+  - screenshot: bulk-entry-z200
+  - assert_no_clipping: *zoomed
+  - command: file.close_window
+
+  - command: lists.templates_due
+  - key: Ctrl+End
+  - click: {role: button, label: Check now}
+  - screenshot: templates-due-z200
+  - assert_no_clipping: *zoomed
+  - command: file.close_window
+
+  - command: vendors.write_check
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {label: "Account, line 1"}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - click: {role: button, label: Attach}
+  - assert_enabled: {role: button, label_contains: Save & Close}
+  - click: {role: button, label: Clear}
+  - screenshot: write-check-z200
+  - assert_no_clipping: *zoomed
+  - command: file.close_window
+
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}
+  - click: {role: tab, label: Home}
