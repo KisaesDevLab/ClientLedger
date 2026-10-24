@@ -1010,6 +1010,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.checklist.hide", "Hide checklist"),
     ("home.checklist.hide.tip", "Hide the setup checklist for this company. Steps still tick as you finish them."),
     ("home.checklist.note", "Steps tick by themselves as you finish them."),
+    ("home.kofi", "Support ClientLedger on Ko-fi"),
 ];
 
 #[cfg(test)]

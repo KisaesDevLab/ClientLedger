@@ -28,6 +28,7 @@ mod balances;
 pub(crate) mod charts;
 pub(crate) mod checklist;
 mod lanes;
+mod support;
 
 use std::sync::Arc;
 
@@ -476,8 +477,12 @@ impl HomeScreen {
             self.lane_columns = lanes::show(ui, self, &tokens);
             ui.add_space(GAP + 6.0);
             self.cards(ui, &tokens);
-            // WP8 (D10): the Ko-fi button sits here, at the bottom right
-            // of the body.
+            // The Ko-fi support button, at the bottom right (D10, Q-278).
+            ui.add_space(GAP);
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                ui.add_space(EDGE);
+                support::show(ui, &tokens);
+            });
             ui.add_space(12.0);
         });
         self.layout = frame.end();

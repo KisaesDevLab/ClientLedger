@@ -28,6 +28,7 @@ methods:
   inspect [target]               the element tree, or elements matching a target
   click <target>                 click an element
   focus <target>                 move keyboard focus to an element
+  hover <target>                 move the pointer over an element (no click)
   type <text> [target]           type text (focus the target first, if given)
   type --stdin [target]          read the text from standard input instead
   key <chord>                    press a key, for example Ctrl+K or Escape
@@ -122,7 +123,7 @@ fn request(sub: &str, args: &[String]) -> Result<(String, Value), String> {
             };
             Ok(("inspect".into(), p))
         }
-        "click" | "focus" => {
+        "click" | "focus" | "hover" => {
             need(0, "target flags (--label, --role, --id)")?;
             if target.is_empty() {
                 return Err(format!("`{sub}` needs a target"));

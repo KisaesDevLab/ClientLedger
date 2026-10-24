@@ -28,6 +28,7 @@ pub mod i18n;
 pub mod icon;
 pub mod input;
 pub mod layout;
+pub mod links;
 pub mod list_field;
 pub mod logging;
 pub mod prefs;

@@ -1,5 +1,8 @@
-# Home (P16 steps 1-3) against `clientledger --demo`: the four lanes from the
-# command registry, the account balances "In your books" and Needs attention.
+# Home (P16 steps 1-6) against `clientledger --demo`: the four lanes from the
+# command registry, the account balances "In your books", Needs attention,
+# the setup checklist (5 of 6 done), six months of income and expenses from
+# the (demo) engine's Profit & Loss, and the Ko-fi button (hovered, never
+# clicked).
 # The demo stands in for an engine with dashboard-exact-v1 (U-76), so the
 # lane figures show; the bank-file column is a dash until bank-file import
 # (U-77). A lane action opens its form (Write Check) or the placeholder of a
@@ -101,6 +104,17 @@ steps:
   - assert_exists: {role: label, label: "$13,865.14"}
   - assert_no_clipping: {}
   - screenshot: home
+
+  # --- Ko-fi (Q-278): found by its label; hovering shows the address. ------
+  # Never clicked here: a click opens the owner's browser (the control
+  # channel records it instead, but the scenario does not rely on that).
+  # egui puts a tooltip's text in the widget's accessible description (the
+  # popup is not in the tree); the screenshot shows the tooltip itself.
+  - assert_exists: {role: button, label: Support ClientLedger on Ko-fi}
+  - hover: {role: button, label: Support ClientLedger on Ko-fi}
+  - assert_exists: {role: button, label: Support ClientLedger on Ko-fi, description_contains: "ko-fi.com/I3D3227TTP"}
+  - wait: {ms: 800}
+  - screenshot: home-kofi-tooltip
 
   # --- A built action opens its form ---------------------------------------
   - click: {role: button, label: Write Check}

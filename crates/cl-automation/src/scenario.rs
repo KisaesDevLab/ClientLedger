@@ -78,6 +78,9 @@ pub enum Step {
     ClickIfPresent(Target),
     /// Focus an element.
     Focus(Target),
+    /// Move the pointer over an element without clicking (its tooltip
+    /// shows after egui's delay; assert it with a later step).
+    Hover(Target),
     /// Type text. `{theme}` in the text becomes the theme being run, so a
     /// record a scenario creates gets a name of its own in each run (lists
     /// whose names stay taken after a record is made inactive).
@@ -174,6 +177,7 @@ impl Step {
             Step::Click(t) => format!("click {}", t.describe()),
             Step::ClickIfPresent(t) => format!("click {} if present", t.describe()),
             Step::Focus(t) => format!("focus {}", t.describe()),
+            Step::Hover(t) => format!("hover over {}", t.describe()),
             Step::Type { text, .. } => format!("type {} characters", text.chars().count()),
             Step::Paste { text, .. } => {
                 format!("paste {} line(s)", text.lines().count().max(1))
@@ -444,6 +448,12 @@ fn run_step(
                 s.resolve(target).map(drop).map_err(|e| e.to_string())
             })?;
             call(t, "focus", json!({"target": target})).map(drop)
+        }
+        Step::Hover(target) => {
+            eventually(t, |s| {
+                s.resolve(target).map(drop).map_err(|e| e.to_string())
+            })?;
+            call(t, "hover", json!({"target": target})).map(drop)
         }
         Step::Type { text, target } => {
             let text = themed(text, theme);

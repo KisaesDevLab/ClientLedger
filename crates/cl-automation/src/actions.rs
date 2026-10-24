@@ -119,6 +119,10 @@ pub struct Target {
     /// Label contains this text (case-insensitive).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label_contains: Option<String>,
+    /// Description (a widget's tooltip text) contains this text
+    /// (case-insensitive).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_contains: Option<String>,
     /// Role name, for example `button`, `tab`, `text_input`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
@@ -134,6 +138,7 @@ impl Target {
         self.id.is_none()
             && self.label.is_none()
             && self.label_contains.is_none()
+            && self.description_contains.is_none()
             && self.role.is_none()
     }
 
@@ -152,6 +157,9 @@ impl Target {
         }
         if let Some(v) = &self.label_contains {
             parts.push(format!("label containing \"{v}\""));
+        }
+        if let Some(v) = &self.description_contains {
+            parts.push(format!("description containing \"{v}\""));
         }
         if parts.is_empty() {
             "anything".into()

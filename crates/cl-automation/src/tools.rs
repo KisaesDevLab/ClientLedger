@@ -24,6 +24,7 @@ fn target_schema() -> Value {
             "id": {"type": "string", "description": "Element id from inspect."},
             "label": {"type": "string", "description": "Exact accessible label."},
             "label_contains": {"type": "string", "description": "Case-insensitive part of the label."},
+            "description_contains": {"type": "string", "description": "Case-insensitive part of the description (a widget's tooltip text)."},
             "role": {"type": "string", "description": "Role such as button, tab, text_input."},
             "index": {"type": "integer", "minimum": 0, "description": "Which match when several."}
         },
@@ -78,6 +79,11 @@ pub fn tools() -> Vec<Tool> {
         Tool {
             name: "focus",
             description: "Move keyboard focus to an element.",
+            input_schema: object(&json!({"target": target_schema()}), &["target"]),
+        },
+        Tool {
+            name: "hover",
+            description: "Move the pointer over the centre of an element without clicking (shows its tooltip).",
             input_schema: object(&json!({"target": target_schema()}), &["target"]),
         },
         Tool {
@@ -151,7 +157,7 @@ mod tests {
         let n = names.len();
         names.dedup();
         assert_eq!(n, names.len());
-        assert_eq!(n, 13);
+        assert_eq!(n, 14);
         for tool in &t {
             assert_eq!(tool.input_schema["type"], "object", "{}", tool.name);
             assert_ne!(tool.description.len(), 0);

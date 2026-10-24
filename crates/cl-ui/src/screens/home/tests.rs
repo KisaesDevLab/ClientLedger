@@ -883,3 +883,75 @@ fn the_setup_checklist_opens_hides_and_stays_hidden() {
     assert!(again.checklist_shown().is_none());
     assert_eq!(again.state()["checklist"]["dismissed"], true);
 }
+
+/// Ko-fi (Q-278): the address is the constant, drawing Home never opens
+/// it, and one click records exactly one URL (the test sink stands in for
+/// the browser).
+#[test]
+fn the_kofi_button_opens_the_page_only_when_clicked() {
+    use eframe::egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2};
+    assert_eq!(support::KOFI_URL, "https://ko-fi.com/I3D3227TTP");
+    assert!(!support::KOFI_URL.contains('?'), "no tracking parameters");
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let sink = crate::links::LinkSink::install(&ctx);
+    let frame = |h: &mut HomeScreen, events: Vec<Event>| {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 1400.0))),
+            events,
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| h.ui(ui));
+        });
+        out.textures_delta.clear();
+        out
+    };
+    let mut button = None;
+    for _ in 0..5 {
+        let out = frame(&mut h, Vec::new());
+        assert!(
+            !out.platform_output
+                .commands
+                .iter()
+                .any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))),
+            "no browser without a click"
+        );
+        if let Some(u) = out.platform_output.accesskit_update {
+            for (_, n) in u.nodes {
+                if n.role() == Role::Button && n.label() == Some("Support ClientLedger on Ko-fi") {
+                    button = n.bounds();
+                }
+            }
+        }
+    }
+    assert!(sink.opened().is_empty(), "nothing opened by drawing");
+    let b = button.expect("the Ko-fi button is drawn and named");
+    #[allow(clippy::cast_possible_truncation)]
+    let at = Pos2::new(
+        f64::midpoint(b.x0, b.x1) as f32,
+        f64::midpoint(b.y0, b.y1) as f32,
+    );
+    let press = |pressed| Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    frame(&mut h, vec![Event::PointerMoved(at)]);
+    frame(&mut h, vec![press(true)]);
+    let out = frame(&mut h, vec![press(false)]);
+    assert!(
+        !out.platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))),
+        "the sink, not the browser"
+    );
+    frame(&mut h, Vec::new());
+    assert_eq!(sink.opened(), [support::KOFI_URL], "exactly one");
+}
