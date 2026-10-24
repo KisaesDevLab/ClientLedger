@@ -112,6 +112,33 @@ pub struct WidthsState {
     pub registers: crate::prefs::RegisterPrefsBook,
     /// When a register entry last changed and is not written yet.
     pub registers_changed_at: Option<f64>,
+    /// The detail panels the owner hid, per screen kind (Q-266).
+    pub panels: crate::prefs::PanelPrefsBook,
+    /// When a panel choice last changed and is not written yet.
+    pub panels_changed_at: Option<f64>,
+}
+
+/// True when the owner hid the detail panel of screen kind `key`; `None`
+/// when never set or outside a shell.
+#[must_use]
+pub fn load_panel_collapsed(ctx: &Context, key: &str) -> Option<bool> {
+    let handle: WidthsHandle = ctx.data(|d| d.get_temp(widths_id()))?;
+    let state = handle.lock().ok()?;
+    state.panels.get(key)
+}
+
+/// Remember the panel choice of screen kind `key`; the shell writes the
+/// file a second after the last change, and never during a controlled run.
+pub fn store_panel_collapsed(ctx: &Context, key: &str, collapsed: bool) {
+    let Some(handle): Option<WidthsHandle> = ctx.data(|d| d.get_temp(widths_id())) else {
+        return;
+    };
+    let now = ctx.input(|i| i.time);
+    if let Ok(mut state) = handle.lock()
+        && state.panels.set(key, collapsed)
+    {
+        state.panels_changed_at = Some(now);
+    }
 }
 
 /// The register choices remembered for `key` (see

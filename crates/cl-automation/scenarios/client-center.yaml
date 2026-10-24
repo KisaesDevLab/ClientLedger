@@ -122,3 +122,26 @@ steps:
   - assert_state: {key: screen.show_inactive, equals: false}
   - key: Escape
   - assert_not_exists: {role: tab, label: Customers & Jobs}
+
+  # --- Hide the details panel (Ctrl+Shift+D, Q-266) ---------------------------
+  # Remembered per screen: hidden here, it is hidden when Customers & Jobs
+  # opens again; the edge button shows it (and leaves it shown for the next
+  # run).
+  - command: clients.center
+  - assert_state: {key: screen.details_collapsed, equals: false}
+  - key: Ctrl+Shift+D
+  - assert_state: {key: screen.details_collapsed, equals: true}
+  - assert_exists: {role: button, label: Show details}
+  - assert_not_exists: {label_contains: "From the customer balance report"}
+  - assert_no_clipping: {}
+  - screenshot: details-hidden
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Customers & Jobs}
+  - command: clients.center
+  - assert_state: {key: screen.details_collapsed, equals: true}
+  - assert_exists: {role: button, label: Show details}
+  - click: {role: button, label: Show details}
+  - assert_state: {key: screen.details_collapsed, equals: false}
+  - assert_exists: {role: button, label: Hide details}
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Customers & Jobs}

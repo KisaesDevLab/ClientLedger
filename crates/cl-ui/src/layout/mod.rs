@@ -33,6 +33,8 @@ use std::hash::Hash;
 use eframe::egui::{self, Id, Rect, Ui, UiBuilder};
 use serde::Serialize;
 
+pub mod side_panel;
+
 /// How the content between the bars is laid out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Body {

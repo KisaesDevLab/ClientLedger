@@ -46,6 +46,7 @@ use self::model::{
 use crate::company::{CompanyLink, Task};
 use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
+use crate::layout::side_panel::{PanelEvent, Part, SidePanel, with_side_panel};
 use crate::layout::{Body, FixedFrame, LIST_FRAME};
 use crate::screens::company::form as cform;
 use crate::screens::lists::detail_pane as pane;
@@ -59,6 +60,19 @@ pub const VENDORS_KIND: &str = "vendors.center";
 
 /// Width of the detail pane and the add/edit panel.
 const PANEL_WIDTH: f32 = 500.0;
+
+/// The details panel's hide/show choice: read once from the shared book,
+/// written back when Ctrl+Shift+D changes it.
+#[derive(Debug, Clone, Copy, Default)]
+struct DetailsChoice {
+    /// Hidden by the owner.
+    collapsed: bool,
+    /// Read from the book.
+    loaded: bool,
+    /// Changed by the command; written next frame.
+    changed: bool,
+}
+
 /// Typed letters within this many seconds build one find prefix.
 const TYPE_AHEAD_SECS: f64 = 1.0;
 /// Transactions the pane shows at first.
@@ -176,6 +190,8 @@ pub struct CenterScreen {
     /// A plain warning (i18n key) under the toolbar.
     warn: Option<&'static str>,
     parts: EnvParts,
+    /// The details panel's remembered choice (Q-266).
+    details: DetailsChoice,
     /// The fixed bars' sizes last frame (Q-265).
     layout: crate::layout::FrameReport,
     snap: GridSnapshot,
@@ -252,6 +268,7 @@ impl CenterScreen {
             note: None,
             warn: None,
             parts: EnvParts::default(),
+            details: DetailsChoice::default(),
             layout: crate::layout::FrameReport::default(),
             snap: GridSnapshot::default(),
             focus_search: false,
@@ -272,6 +289,12 @@ impl CenterScreen {
     #[must_use]
     pub fn role(&self) -> Role {
         self.role
+    }
+
+    /// A form (New, Edit, Merge) is in the details panel: it shows whatever
+    /// the remembered choice, and the hide control is off.
+    fn panel_forced_open(&self) -> bool {
+        !matches!(self.panel, Panel::None)
     }
 
     fn kind(&self) -> &'static str {
@@ -1438,6 +1461,16 @@ impl Screen for CenterScreen {
         self.hear_changes();
         self.sync_compact();
         let tokens = Tokens::of(ui.ctx());
+        // The panel choice remembered for this screen kind (Q-266).
+        if !self.details.loaded {
+            self.details.loaded = true;
+            if let Some(c) = crate::grid_env::load_panel_collapsed(ui.ctx(), self.kind()) {
+                self.details.collapsed = c;
+            }
+        }
+        if std::mem::take(&mut self.details.changed) {
+            crate::grid_env::store_panel_collapsed(ui.ctx(), self.kind(), self.details.collapsed);
+        }
         // The title, toolbar and messages stay put; the list keeps its
         // column headers at the top of its own area (Q-265).
         let mut frame = FixedFrame::begin(ui, self.kind(), LIST_FRAME);
@@ -1453,16 +1486,16 @@ impl Screen for CenterScreen {
                 return;
             }
             self.follow_selection();
-            ui.horizontal_top(|ui| {
-                let left = (ui.available_width() - PANEL_WIDTH - 16.0).max(320.0);
-                ui.vertical(|ui| {
-                    ui.set_width(left);
-                    self.list_ui(ui, &tokens);
-                });
-                ui.separator();
-                ui.vertical(|ui| {
-                    ui.set_width(PANEL_WIDTH);
-                    match self.panel {
+            let panel = SidePanel {
+                key: self.kind(),
+                width: PANEL_WIDTH,
+            };
+            let forced = self.panel_forced_open();
+            let mut collapsed = self.details.collapsed;
+            let event =
+                with_side_panel(ui, &panel, &mut collapsed, forced, |ui, part| match part {
+                    Part::Main => self.list_ui(ui, &tokens),
+                    Part::Side => match self.panel {
                         Panel::Form(_) => {
                             egui::ScrollArea::vertical()
                                 .id_salt("center-form-scroll")
@@ -1470,9 +1503,12 @@ impl Screen for CenterScreen {
                         }
                         Panel::Merge(_) => self.merge_ui(ui, &tokens),
                         Panel::None => self.detail_ui(ui, &tokens),
-                    }
+                    },
                 });
-            });
+            if event == PanelEvent::Toggled {
+                self.details.collapsed = collapsed;
+                crate::grid_env::store_panel_collapsed(ui.ctx(), self.kind(), collapsed);
+            }
         });
         self.layout = frame.end();
     }
@@ -1499,6 +1535,14 @@ impl Screen for CenterScreen {
             "list.quick_report" => self.open_report(),
             "list.merge" => self.open_merge(),
             "edit.find" => self.focus_search = true,
+            // Ctrl+Shift+D: hide or show the details panel (Q-266); it
+            // stays open while a form is in it.
+            crate::layout::side_panel::TOGGLE => {
+                if !self.panel_forced_open() {
+                    self.details.collapsed = !self.details.collapsed;
+                    self.details.changed = true;
+                }
+            }
             "form.save_new" | "form.save_close" => {
                 if !matches!(self.panel, Panel::Form(_)) {
                     return false;
@@ -1614,6 +1658,8 @@ impl Screen for CenterScreen {
             "merge_source_1099": matches!(&self.panel, Panel::Merge(m) if m.source_1099),
             "jobs_available": false,
             "attachments_available": false,
+            "details_collapsed": self.details.collapsed && !self.panel_forced_open(),
+            "details_remembered": self.details.collapsed,
             "layout": self.layout.json(),
         })
     }
