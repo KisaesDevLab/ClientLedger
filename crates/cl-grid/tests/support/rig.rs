@@ -5,7 +5,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use cl_grid::{Grid, GridEnv, GridHeight, GridOutput, GridSpec, GridStyle, ModelRef, TextKey};
+use cl_grid::{
+    ContextItem, ContextMenuSource, ContextTarget, Grid, GridEnv, GridHeight, GridOutput, GridSpec,
+    GridStyle, ModelRef, TextKey,
+};
 use egui::{
     Context, Event, FontData, FontDefinitions, FontFamily, Id, Key, MissingGlyphPolicy, Modifiers,
     Pos2, RawInput, Rect, Vec2,
@@ -24,6 +27,8 @@ pub fn text(k: TextKey) -> String {
         "grid.a11y.row_of" => "row {n} of {total}".into(),
         "grid.calc.preview" => "= {value}".into(),
         "grid.popup.add_new" => "Add \"{text}\"".into(),
+        "grid.a11y.select_row" => "Select row {n}".into(),
+        "grid.a11y.menu" => "Actions".into(),
         other => other.into(),
     }
 }
@@ -89,6 +94,44 @@ pub struct Rig {
     pub last: Option<egui::FullOutput>,
     /// What Enter does (Q-264); Save & New style by default.
     pub enter_mode: cl_model::forms::EnterMode,
+    /// The screen's context menu (P16 D6); none by default.
+    pub menu: Option<TestMenu>,
+    /// Modifiers held from the next frame on (Shift+click).
+    pub modifiers: Modifiers,
+    sent_modifiers: Modifiers,
+}
+
+/// A context menu source that offers fixed entries and records what it was
+/// asked about.
+#[derive(Default)]
+pub struct TestMenu {
+    pub items: Vec<ContextItem>,
+    pub asked: std::cell::RefCell<Vec<ContextTarget>>,
+}
+
+impl TestMenu {
+    /// "Copy down" (Ctrl+D), "Copy to rows below", a disabled "Paste" and
+    /// "Delete rows".
+    pub fn standard() -> TestMenu {
+        TestMenu {
+            items: vec![
+                ContextItem::new(1, "Copy down").shortcut("Ctrl+D"),
+                ContextItem::new(2, "Copy to rows below"),
+                ContextItem::new(3, "Paste")
+                    .enabled(false)
+                    .tooltip("Nothing to paste"),
+                ContextItem::new(4, "Delete rows"),
+            ],
+            asked: std::cell::RefCell::default(),
+        }
+    }
+}
+
+impl ContextMenuSource for TestMenu {
+    fn items(&self, target: ContextTarget) -> Vec<ContextItem> {
+        self.asked.borrow_mut().push(target);
+        self.items.clone()
+    }
 }
 
 pub const HEADER: &str = "header-field";
@@ -107,6 +150,9 @@ impl Rig {
             size: Vec2::new(1000.0, 600.0),
             last: None,
             enter_mode: cl_model::forms::EnterMode::SaveAndNew,
+            menu: None,
+            modifiers: Modifiers::NONE,
+            sent_modifiers: Modifiers::NONE,
         }
     }
 
@@ -119,7 +165,12 @@ impl Rig {
     }
 
     /// One frame with these events.
-    pub fn frame(&mut self, events: Vec<Event>) -> GridOutput {
+    pub fn frame(&mut self, mut events: Vec<Event>) -> GridOutput {
+        // Held modifiers reach egui as a change event, once.
+        if self.modifiers != self.sent_modifiers {
+            events.insert(0, Event::ModifiersChanged(self.modifiers));
+            self.sent_modifiers = self.modifiers;
+        }
         let input = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
             events,
@@ -133,6 +184,7 @@ impl Rig {
         let header = &mut self.header;
         let footer = &mut self.footer;
         let enter_mode = self.enter_mode;
+        let menu = self.menu.as_ref();
         let mut out = self.ctx.run_ui(input, |ui| {
             ui.add(egui::TextEdit::singleline(header).id(Rig::header_id()));
             let env = GridEnv {
@@ -147,6 +199,7 @@ impl Rig {
                 label: "Expense lines",
                 input_enabled: true,
                 enter_mode,
+                context: menu.map(|m| m as &dyn ContextMenuSource),
             };
             result = grid.show(ui, ModelRef::Edit(model), &env);
             ui.add(egui::TextEdit::singleline(footer).id(Rig::footer_id()));
@@ -195,6 +248,7 @@ impl Rig {
             label: "Expense lines",
             input_enabled: true,
             enter_mode: self.enter_mode,
+            context: self.menu.as_ref().map(|m| m as &dyn ContextMenuSource),
         };
         self.grid.focus(pos, ModelRef::Edit(&mut self.model), &env);
         self.frame(vec![]);
@@ -217,6 +271,7 @@ impl Rig {
             label: "Expense lines",
             input_enabled: true,
             enter_mode: self.enter_mode,
+            context: self.menu.as_ref().map(|m| m as &dyn ContextMenuSource),
         };
         f(&mut self.grid, ModelRef::Edit(&mut self.model), &env)
     }
@@ -267,23 +322,30 @@ impl Rig {
 
     /// A primary click at `p`: press in one frame, release in the next.
     pub fn click_at(&mut self, p: Pos2) -> Vec<cl_grid::GridEvent> {
+        self.button_at(p, egui::PointerButton::Primary)
+    }
+
+    /// A click of `button` at `p` with [`Rig::modifiers`] held: press in
+    /// one frame, release in the next.
+    pub fn button_at(&mut self, p: Pos2, button: egui::PointerButton) -> Vec<cl_grid::GridEvent> {
+        let modifiers = self.modifiers;
         let mut events = self
             .frame(vec![
                 Event::PointerMoved(p),
                 Event::PointerButton {
                     pos: p,
-                    button: egui::PointerButton::Primary,
+                    button,
                     pressed: true,
-                    modifiers: Modifiers::NONE,
+                    modifiers,
                 },
             ])
             .events;
         events.extend(
             self.frame(vec![Event::PointerButton {
                 pos: p,
-                button: egui::PointerButton::Primary,
+                button,
                 pressed: false,
-                modifiers: Modifiers::NONE,
+                modifiers,
             }])
             .events,
         );

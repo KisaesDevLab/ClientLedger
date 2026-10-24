@@ -19,7 +19,8 @@ use egui::{
 };
 
 use crate::core::codec::cell_text;
-use crate::core::keys::{Formats, GridInput};
+use crate::core::context::{ContextMenuSource, ContextTarget};
+use crate::core::keys::{Formats, GridInput, GridKey, Mods};
 use crate::core::model::{
     CellKind, CellPos, CellProblem, CellValue, ColumnId, Line, Lookups, MarkKind, ModelRef,
     RowHeight, RowState,
@@ -90,6 +91,9 @@ pub struct GridEnv<'a> {
     /// What Enter does: Save & New style (record the row) or move to the
     /// next cell (the "Enter moves between fields" preference, Q-264).
     pub enter_mode: EnterMode,
+    /// The screen's context menu entries ([`GridSpec::context_menu`]);
+    /// `None` opens no menu.
+    pub context: Option<&'a dyn ContextMenuSource>,
 }
 
 impl GridEnv<'_> {
@@ -174,6 +178,16 @@ pub struct Grid {
     popup_rect: Option<Rect>,
     /// The popup's first shown entry.
     popup_top: usize,
+    /// Select checkboxes drawn last frame (AccessKit Click targets).
+    gutters: Vec<(Id, RowKey)>,
+    /// Where the open context menu sits: the pointer of the right-click,
+    /// or `None` for under the cursor cell (Shift+F10, the Menu key).
+    menu_at: Option<Pos2>,
+    /// The open context menu's rect last frame (presses there keep focus;
+    /// a press anywhere else closes it).
+    menu_rect: Option<Rect>,
+    /// The cursor cell's rect last painted (the keyboard menu's anchor).
+    cursor_rect: Option<Rect>,
 }
 
 fn group(n: usize) -> String {
@@ -243,7 +257,33 @@ impl Grid {
             measured: std::cell::RefCell::new(None),
             popup_rect: None,
             popup_top: 0,
+            gutters: Vec::new(),
+            menu_at: None,
+            menu_rect: None,
+            cursor_rect: None,
         })
+    }
+
+    /// The open context menu's id (its `Menu` node; entries are
+    /// `view::context_menu::item_id(menu_id, index)`).
+    #[must_use]
+    pub fn menu_id(&self) -> Id {
+        self.id.with("menu")
+    }
+
+    /// The id of a row's select checkbox ([`GridSpec::select_column`]).
+    #[must_use]
+    pub fn gutter_id(&self, key: RowKey) -> Id {
+        self.id.with(("select", key.0))
+    }
+
+    /// Width of the select-checkbox gutter (0 without a select column).
+    fn gutter(&self) -> f32 {
+        if self.spec().select_column {
+            GUTTER
+        } else {
+            0.0
+        }
     }
 
     /// The grid's egui id (its AccessKit grid node).
@@ -580,6 +620,10 @@ impl Grid {
 const BAR: f32 = 12.0;
 /// Room kept for the lock glyph at the right end of a locked row.
 const LOCK_GUTTER: f32 = 22.0;
+/// Width of the select-checkbox gutter at the left (P16 D6).
+const GUTTER: f32 = 28.0;
+/// The select checkbox's size.
+const GUTTER_BOX: f32 = 14.0;
 
 /// Measured heights keyed by (revision, rows, row unit, open memo).
 type MeasuredCache = (u64, usize, u64, Option<(usize, u64)>, Heights);
@@ -772,7 +816,19 @@ impl Grid {
             .and_then(|c| self.spec().column(c.col))
             .map(|c| c.kind);
         let edit = self.core.edit();
+        // An open calculator keeps Shift+arrows for its text.
+        let calculator = match (kind, edit) {
+            (Some(CellKind::Amount(rules)), Some(e)) => {
+                amount_entry::preview(&e.buffer, rules) != Preview::None
+            }
+            _ => false,
+        };
         CursorInfo {
+            context_menu: self.spec().context_menu,
+            menu_open: self.core.menu().is_some(),
+            extend_rows: self.spec().select_column
+                && edit.is_none_or(|e| e.popup.is_none())
+                && !calculator,
             editable_grid: self.spec().editable,
             kind,
             editing: edit.is_some()
@@ -823,6 +879,81 @@ impl Grid {
         (self.apply(fx, model, Some(ctx)), leave)
     }
 
+    /// Open the context menu on `target` (a right-click at `at`, or
+    /// Shift+F10, the Menu key or AccessKit `ShowContextMenu` under the
+    /// cursor cell): the core commits the open cell and moves the cursor,
+    /// then the screen gives the entries. Nothing happens unless the spec
+    /// opts in and the screen provides a source.
+    fn open_menu(
+        &mut self,
+        target: ContextTarget,
+        at: Option<Pos2>,
+        model: &mut ModelRef<'_>,
+        env: &GridEnv<'_>,
+        ctx: &egui::Context,
+    ) -> Vec<GridEvent> {
+        let Some(source) = env.context.filter(|_| self.spec().context_menu) else {
+            return Vec::new();
+        };
+        let (ready, fx) = self
+            .core
+            .prepare_menu(target, model, env.lookups, env.formats());
+        let events = self.apply(fx, model, Some(ctx));
+        if ready && self.core.open_menu(target, source.items(target)) {
+            self.menu_at = at;
+            self.menu_rect = None;
+            ctx.request_repaint();
+        }
+        let focus_id = self.focus_id();
+        if !ctx.memory(|m| m.has_focus(focus_id)) {
+            ctx.memory_mut(|m| m.request_focus(focus_id));
+        }
+        events
+    }
+
+    /// Draw the open context menu and act on a click on an entry.
+    fn show_menu(
+        &mut self,
+        ctx: &egui::Context,
+        model: &mut ModelRef<'_>,
+        env: &GridEnv<'_>,
+        grid_rect: Rect,
+    ) -> Vec<GridEvent> {
+        self.menu_rect = None;
+        let Some((items, highlight)) = self.core.menu().map(|m| (m.items.clone(), m.highlight))
+        else {
+            self.menu_at = None;
+            return Vec::new();
+        };
+        let at = self
+            .menu_at
+            .or_else(|| self.cursor_rect.map(|r| r.left_bottom()))
+            .unwrap_or(grid_rect.min);
+        let menu = self.menu_id();
+        let view = crate::view::context_menu::MenuView {
+            items: &items,
+            highlight,
+            label: env.t(TextKey("grid.a11y.menu")),
+        };
+        let (hit, r) = crate::view::context_menu::show(ctx, menu, at, &view, env.style);
+        self.menu_rect = Some(r);
+        // The focus widget controls the menu; the highlighted entry is its
+        // active descendant (only nodes that exist this pass, as for the
+        // list popup).
+        if ctx.has_accesskit_node(menu) {
+            let item = highlight
+                .map(|i| crate::view::context_menu::item_id(menu, i))
+                .filter(|i| ctx.has_accesskit_node(*i));
+            ctx.accesskit_node_builder(self.focus_id(), |node| {
+                a11y::popup_owner(node, menu, item);
+            });
+        }
+        match hit {
+            Some(i) => self.handle(GridInput::MenuPicked(i), model, env, ctx).0,
+            None => Vec::new(),
+        }
+    }
+
     /// Draw the grid and handle this frame's input.
     // The frame's steps in order (size, model watch, focus, input, a11y
     // requests, wheel, paint, clicks) read best as one function.
@@ -833,10 +964,11 @@ impl Grid {
         let mut events = Vec::new();
         // Layout and size.
         let avail_w = ui.available_width().max(120.0);
+        let gutter = self.gutter();
         self.layout = ColumnLayout::compute(
             &self.core.spec().columns,
             &self.effective_widths(),
-            avail_w - BAR,
+            avail_w - BAR - gutter,
         );
         self.note_unit = units(style.note_line);
         let row_h = self.row_points(style);
@@ -896,12 +1028,28 @@ impl Grid {
         self.sync_focus(&ctx, &mut model, env, &mut events);
         let focused = ctx.memory(|m| m.has_focus(focus_id));
         let popup_rect = self.popup_rect;
+        let menu_rect = self.menu_rect;
+        let in_overlay = |p: Pos2| {
+            popup_rect.is_some_and(|r| r.contains(p)) || menu_rect.is_some_and(|r| r.contains(p))
+        };
         let press_inside = ctx.input(|i| {
             (i.pointer.any_pressed() || i.pointer.any_click())
                 && i.pointer
                     .interact_pos()
-                    .is_some_and(|p| rect.contains(p) || popup_rect.is_some_and(|r| r.contains(p)))
+                    .is_some_and(|p| rect.contains(p) || in_overlay(p))
         });
+        // A press anywhere but on the open menu closes it (a press on a
+        // cell then acts as usual).
+        if self.core.menu().is_some()
+            && ctx.input(|i| {
+                i.pointer.any_pressed()
+                    && i.pointer
+                        .interact_pos()
+                        .is_some_and(|p| !menu_rect.is_some_and(|r| r.contains(p)))
+            })
+        {
+            self.core.close_menu();
+        }
         ctx.input(|i| {
             for e in &i.events {
                 match e {
@@ -933,6 +1081,22 @@ impl Grid {
                     kept.push(keep);
                 }
                 for gi in out {
+                    // Shift+F10 or the Menu key: the screen's menu on the
+                    // cursor cell (with a menu open, the core closes it).
+                    if matches!(gi, GridInput::Key(GridKey::ContextMenu, _))
+                        && self.core.menu().is_none()
+                    {
+                        if let Some(pos) = self.core.cursor() {
+                            events.extend(self.open_menu(
+                                ContextTarget::Cell(pos),
+                                None,
+                                &mut model,
+                                env,
+                                &ctx,
+                            ));
+                        }
+                        continue;
+                    }
                     for gi in self.translate(gi, env) {
                         let (ev, leave) = self.handle(gi, &mut model, env, &ctx);
                         leaving |= leave;
@@ -973,8 +1137,19 @@ impl Grid {
         // (F5, §2.11).
         let mut presses: Vec<Press> = Vec::new();
         let mut set_values: Vec<(CellPos, String)> = Vec::new();
-        let requests =
-            ctx.input_mut(|i| a11y::take_requests(i, self.id, &self.row_nodes, &self.cells));
+        let mut gutter_presses: Vec<(RowKey, Mods)> = Vec::new();
+        let mut menu_reqs: Vec<(ContextTarget, Option<Pos2>)> = Vec::new();
+        let offers_menu = self.spec().context_menu && env.context.is_some();
+        let requests = ctx.input_mut(|i| {
+            a11y::take_requests(
+                i,
+                self.id,
+                &self.row_nodes,
+                &self.cells,
+                &self.gutters,
+                offers_menu,
+            )
+        });
         for r in requests {
             match r {
                 Request::Press(pos) => presses.push(Press {
@@ -989,11 +1164,13 @@ impl Grid {
                 }
                 Request::SetValue(pos, v) => set_values.push((pos, v)),
                 Request::Page(forward) => self.viewport.page(forward, &h, model.rows()),
+                Request::Gutter(key) => gutter_presses.push((key, Mods::NONE)),
+                Request::Menu(pos) => menu_reqs.push((ContextTarget::Cell(pos), None)),
             }
         }
 
         // The wheel scrolls the grid, not the screen around it (§12 R3).
-        let overflow = (self.layout.content_width - (avail_w - BAR)).max(0.0);
+        let overflow = (self.layout.content_width - (avail_w - BAR - gutter)).max(0.0);
         if ui.rect_contains_pointer(rect) {
             let (dx, dy) = ctx.input_mut(|i| {
                 let d = i.smooth_scroll_delta;
@@ -1085,6 +1262,21 @@ impl Grid {
                 ctx.memory_mut(|m| m.request_focus(focus_id));
             }
         }
+        // Select checkboxes (P16 D6).
+        gutter_presses.extend(painted.gutter_presses);
+        for (row, mods) in gutter_presses {
+            let (ev, _) = self.handle(GridInput::GutterClick { row, mods }, &mut model, env, &ctx);
+            events.extend(ev);
+            if !focused {
+                ctx.memory_mut(|m| m.request_focus(focus_id));
+            }
+        }
+        // Right-clicks and AccessKit ShowContextMenu open the menu.
+        menu_reqs.extend(painted.menu_req.map(|(t, at)| (t, Some(at))));
+        if let Some((target, at)) = menu_reqs.pop() {
+            events.extend(self.open_menu(target, at, &mut model, env, &ctx));
+        }
+        events.extend(self.show_menu(&ctx, &mut model, env, rect));
         // egui's Tab traversal hands focus over while widgets register, so a
         // gain shows up only now: hold the next navigation key (§2.4.3).
         if !leaving {
@@ -1118,6 +1310,10 @@ struct Painted {
     /// The list chevron on the open cell was clicked (Q-250).
     toggles: bool,
     resized: bool,
+    /// Presses on select checkboxes (P16 D6).
+    gutter_presses: Vec<(RowKey, Mods)>,
+    /// A right-click on a cell or header, at the pointer.
+    menu_req: Option<(ContextTarget, Pos2)>,
 }
 
 /// A cell's text as drawn.
@@ -1148,10 +1344,25 @@ impl Grid {
             .replace("{row}", &row)
     }
 
-    /// Draw the header; returns true when a column was resized.
-    fn paint_header(&mut self, ui: &mut Ui, header: Rect, env: &GridEnv<'_>) -> bool {
+    /// Draw the header; returns true when a column was resized, and a
+    /// right-click on a column header (grids with a context menu).
+    // One pass over the columns: resize handle, node, menu and text.
+    #[allow(clippy::too_many_lines)]
+    fn paint_header(
+        &mut self,
+        ui: &mut Ui,
+        header: Rect,
+        env: &GridEnv<'_>,
+    ) -> (bool, Option<(ContextTarget, Pos2)>) {
         let style = env.style;
         let mut resized = false;
+        let mut menu_req = None;
+        let menu = self.spec().context_menu && env.context.is_some();
+        let gutter = self.gutter();
+        // Column headers start after the select gutter and never draw over
+        // it when the columns scroll sideways.
+        let columns_area =
+            Rect::from_min_max(pos2(header.left() + gutter, header.top()), header.max);
         let ctx = ui.ctx().clone();
         let header_row = self.id.with("header");
         ui.painter()
@@ -1164,7 +1375,7 @@ impl Grid {
                 .max_rect(header)
                 .accessibility_role(Role::Row),
         );
-        header_ui.shrink_clip_rect(header);
+        header_ui.shrink_clip_rect(columns_area);
         // Bounds are what is visible: a grid scrolled partly out of its
         // panel reports only the part on screen.
         let vis = ui.clip_rect();
@@ -1183,7 +1394,7 @@ impl Grid {
             let line = if place.line == Line::Second { 1.0 } else { 0.0 };
             let r = Rect::from_min_size(
                 pos2(
-                    header.left() + place.x - self.hscroll,
+                    columns_area.left() + place.x - self.hscroll,
                     header.top() + line * style.header_line,
                 ),
                 vec2(place.width, style.header_line),
@@ -1217,12 +1428,20 @@ impl Grid {
             let text = env.t(col.header);
             let help = col.help.map(|k| env.t(k));
             let id = self.id.with(("header", col.id.0));
-            let resp = header_ui.interact(r, id, Sense::hover());
+            // A header answers a right-click only where a menu is offered.
+            let sense = if menu { Sense::CLICK } else { Sense::hover() };
+            let resp = header_ui.interact(r, id, sense);
+            if menu
+                && resp.secondary_clicked()
+                && let Some(p) = ctx.input(|i| i.pointer.latest_pos())
+            {
+                menu_req = Some((ContextTarget::Header(col.id), p));
+            }
             if let Some(h) = &help {
                 let _ = resp.on_hover_text(h.as_str());
             }
             ctx.accesskit_node_builder(id, |node| {
-                node.set_bounds(ak_rect(r.intersect(header).intersect(vis)));
+                node.set_bounds(ak_rect(r.intersect(columns_area).intersect(vis)));
                 node.set_role(Role::ColumnHeader);
                 node.set_label(text.clone());
                 node.set_column_index(ci);
@@ -1254,7 +1473,7 @@ impl Grid {
                 style.header_text,
             );
         }
-        resized
+        (resized, menu_req)
     }
 
     fn row_fill(style: &GridStyle, state: RowState, is_cursor_row: bool) -> Option<Color32> {
@@ -1297,6 +1516,17 @@ impl Grid {
             pos2(rect.right() - BAR, rect.bottom()),
         );
         let bar = Rect::from_min_max(pos2(rect.right() - BAR, header.bottom()), rect.max);
+        // Cells start after the select gutter (P16 D6) and never draw over
+        // it when the columns scroll sideways.
+        let gutter = self.gutter();
+        let cells_body = Rect::from_min_max(pos2(body.left() + gutter, body.top()), body.max);
+        let cells_left = cells_body.left();
+        let mut gutter_presses = Vec::new();
+        let mut gutters = Vec::new();
+        let mut menu_req = None;
+        let offers_menu = self.spec().context_menu && env.context.is_some();
+        let pointer_at = || ctx.input(|i| i.pointer.latest_pos());
+        self.cursor_rect = None;
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, CornerRadius::ZERO, style.surface);
 
@@ -1317,7 +1547,8 @@ impl Grid {
         ctx.accesskit_node_builder(self.id, |node| {
             a11y::grid_node(node, rect.intersect(vis), total, columns.len());
         });
-        let resized = self.paint_header(&mut grid_ui, header, env);
+        let (resized, header_menu) = self.paint_header(&mut grid_ui, header, env);
+        menu_req = menu_req.or(header_menu);
 
         // Rows.
         let range = self.viewport.visible_range(&h);
@@ -1430,7 +1661,7 @@ impl Grid {
                 };
                 rows_painter.text(
                     pos2(
-                        body.left() + style.pad + 4.0 - self.hscroll,
+                        cells_left + style.pad + 4.0 - self.hscroll,
                         top + row_h + memo_pts + style.note_line / 2.0,
                     ),
                     Align2::LEFT_CENTER,
@@ -1476,6 +1707,50 @@ impl Grid {
                 a11y::row_node(node, row_rect.intersect(body).intersect(vis), &row_info);
             });
             row_nodes.push((row_id, key));
+            // The select checkbox in the gutter (not on the ENTRY row): a
+            // child of the row node, outside the cells' clip.
+            if gutter > 0.0 && !state.contains(RowState::ENTRY) {
+                let box_rect = Rect::from_center_size(
+                    pos2(body.left() + gutter / 2.0 + 2.0, top + row_h / 2.0),
+                    vec2(GUTTER_BOX, GUTTER_BOX),
+                );
+                let gid = self.gutter_id(key);
+                let resp = row_ui.interact(box_rect.intersect(body), gid, Sense::CLICK);
+                if resp.clicked() {
+                    gutter_presses.push((key, ctx.input(|i| input::mods(i.modifiers))));
+                }
+                if box_rect.top() >= body.top() - 0.5 {
+                    row_ui.painter().rect_stroke(
+                        box_rect,
+                        CornerRadius::same(2),
+                        Stroke::new(
+                            1.0,
+                            if selected {
+                                style.accent
+                            } else {
+                                style.text_secondary
+                            },
+                        ),
+                        StrokeKind::Inside,
+                    );
+                    if selected {
+                        check(row_ui.painter(), box_rect.shrink(3.0), style.accent);
+                    }
+                }
+                let label = env
+                    .t(TextKey("grid.a11y.select_row"))
+                    .replace("{n}", &group(i + 1));
+                ctx.accesskit_node_builder(gid, |node| {
+                    a11y::gutter_node(
+                        node,
+                        box_rect.intersect(body).intersect(vis),
+                        label,
+                        selected,
+                    );
+                });
+                gutters.push((gid, key));
+            }
+            row_ui.shrink_clip_rect(cells_body);
             let locked_text = state
                 .contains(RowState::LOCKED)
                 .then(|| env.t(TextKey("grid.a11y.locked")));
@@ -1509,7 +1784,7 @@ impl Grid {
                     }
                 );
                 let cell_rect = Rect::from_min_size(
-                    pos2(body.left() + place.x - self.hscroll, y),
+                    pos2(cells_left + place.x - self.hscroll, y),
                     vec2(place.width, line_h + if is_memo { memo_pts } else { 0.0 }),
                 );
                 let pos = CellPos {
@@ -1517,6 +1792,9 @@ impl Grid {
                     col: col.id,
                 };
                 let is_cursor = cursor == Some(pos);
+                if is_cursor {
+                    self.cursor_rect = Some(cell_rect);
+                }
                 let header_text = env.t(col.header);
                 let cell_label = self.cell_label(env, &header_text, i, &row_label_text);
                 if is_cursor && editor_visible {
@@ -1618,6 +1896,12 @@ impl Grid {
                         };
                         let resp: Response = row_ui.put(at, te);
                         buffer_changed |= resp.changed();
+                        if offers_menu
+                            && resp.secondary_clicked()
+                            && let Some(p) = pointer_at()
+                        {
+                            menu_req = Some((ContextTarget::Cell(pos), p));
+                        }
                         if list_cell {
                             crate::view::chevron::paint(
                                 row_ui.painter(),
@@ -1649,7 +1933,7 @@ impl Grid {
                     });
                     if focused {
                         rows_painter.rect_stroke(
-                            cell_rect.intersect(body),
+                            cell_rect.intersect(cells_body),
                             CornerRadius::ZERO,
                             Stroke::new(2.0, style.accent),
                             StrokeKind::Inside,
@@ -1658,7 +1942,15 @@ impl Grid {
                     continue;
                 }
                 let cell_id = self.cell_id(pos);
-                let mut resp = row_ui.interact(cell_rect.intersect(body), cell_id, Sense::CLICK);
+                let mut resp =
+                    row_ui.interact(cell_rect.intersect(cells_body), cell_id, Sense::CLICK);
+                // A right-click opens the menu only where one is offered.
+                if offers_menu
+                    && resp.secondary_clicked()
+                    && let Some(p) = pointer_at()
+                {
+                    menu_req = Some((ContextTarget::Cell(pos), p));
+                }
                 if let Some(h) = col.help {
                     resp = resp.on_hover_text(env.t(h));
                 }
@@ -1694,9 +1986,10 @@ impl Grid {
                     suggested: (matches!(value, CellValue::Suggested { .. })
                         && col.kind.accepts_suggestions())
                     .then_some(suggested_text.as_str()),
+                    menu: offers_menu,
                 };
                 ctx.accesskit_node_builder(cell_id, |node| {
-                    a11y::cell_node(node, cell_rect.intersect(body).intersect(vis), &info);
+                    a11y::cell_node(node, cell_rect.intersect(cells_body).intersect(vis), &info);
                 });
                 let suggested_desc = info.suggested.map(|s| s.replace("{value}", &shown.text));
                 // The cursor cell without a text editor: the focus target's
@@ -1798,7 +2091,7 @@ impl Grid {
                 }
                 if is_cursor && focused {
                     rows_painter.rect_stroke(
-                        cell_rect.intersect(body),
+                        cell_rect.intersect(cells_body),
                         CornerRadius::ZERO,
                         Stroke::new(2.0, style.accent),
                         StrokeKind::Inside,
@@ -1808,6 +2101,7 @@ impl Grid {
         }
         self.cells = cells;
         self.row_nodes = row_nodes;
+        self.gutters = gutters;
         self.rows_drawn = range.len();
 
         // Scrollbar (integer thumb maths).
@@ -1858,7 +2152,7 @@ impl Grid {
                 let (hit, r) = crate::view::overlay::popup(
                     &ctx,
                     self.popup_id(),
-                    pos2(body.left() + place.x - self.hscroll, top),
+                    pos2(cells_left + place.x - self.hscroll, top),
                     &view,
                     style,
                 );
@@ -1888,7 +2182,7 @@ impl Grid {
             crate::view::overlay::caption(
                 &ctx,
                 self.id.with("caption"),
-                pos2(body.left() + x - self.hscroll, top),
+                pos2(cells_left + x - self.hscroll, top),
                 &text,
                 style,
             );
@@ -1902,6 +2196,8 @@ impl Grid {
             buffer_changed,
             toggles,
             resized,
+            gutter_presses,
+            menu_req,
         }
     }
 

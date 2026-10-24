@@ -4,6 +4,7 @@
 use std::fmt;
 use std::ops::Range;
 
+use super::context::ContextTarget;
 use super::model::{CellKind, CellPos, Column, ColumnId, MEASURED_MAX_ROWS, RowHeight, Source};
 use super::rowkey::RowKey;
 use super::selection::SelectionMode;
@@ -31,6 +32,14 @@ pub struct GridSpec {
     /// [`GridEvent::BlockPaste`] instead of the "one value" refusal (P15A
     /// Bulk Entry). Off in every preset.
     pub block_paste: bool,
+    /// A right-click (or Shift+F10, or the Menu key) opens the screen's
+    /// context menu (`GridEnv::context`, P16 D6). Off in every preset.
+    pub context_menu: bool,
+    /// A checkbox gutter at the left selects rows (click toggles,
+    /// Shift+click is a range), and Shift+Up/Down extends the selection in
+    /// an editable grid (P16 D6). Needs [`SelectionMode::Multi`]. Off in
+    /// every preset.
+    pub select_column: bool,
 }
 
 /// Why a spec is refused.
@@ -55,6 +64,9 @@ pub enum SpecError {
     /// edit.
     #[error("entry lines, insert/delete and block paste need an editable grid")]
     EditFlagsWithoutEditing,
+    /// A select column on a grid without multi-row selection.
+    #[error("a select column needs multi-row selection")]
+    SelectColumnWithoutMulti,
 }
 
 impl GridSpec {
@@ -71,6 +83,8 @@ impl GridSpec {
             selection: SelectionMode::None,
             async_record: false,
             block_paste: false,
+            context_menu: false,
+            select_column: false,
         }
     }
 
@@ -86,6 +100,8 @@ impl GridSpec {
             selection: SelectionMode::Multi,
             async_record: false,
             block_paste: false,
+            context_menu: false,
+            select_column: false,
         }
     }
 
@@ -102,6 +118,8 @@ impl GridSpec {
             selection: SelectionMode::Multi,
             async_record: false,
             block_paste: false,
+            context_menu: false,
+            select_column: false,
         }
     }
 
@@ -128,6 +146,9 @@ impl GridSpec {
             && (self.entry_line || self.insert_delete || self.async_record || self.block_paste)
         {
             return Err(SpecError::EditFlagsWithoutEditing);
+        }
+        if self.select_column && self.selection != SelectionMode::Multi {
+            return Err(SpecError::SelectColumnWithoutMulti);
         }
         if let RowHeight::Measured { max_rows } = self.height
             && max_rows > MEASURED_MAX_ROWS
@@ -173,6 +194,11 @@ pub enum GridCommand {
     Redo,
     /// Ctrl+C in Browse.
     Copy,
+    /// Select every displayed row (not the blank ENTRY row). Multi-row
+    /// selection only.
+    SelectAll,
+    /// Clear the selection.
+    ClearSelection,
 }
 
 /// Whether a command did anything. `NotHandled` lets the shell run its
@@ -267,6 +293,14 @@ pub enum GridEvent {
         /// The clipboard text, unchanged.
         text: PastedText,
     },
+    /// An entry of the context menu was picked
+    /// ([`GridSpec::context_menu`]).
+    ContextPicked {
+        /// What the menu was about.
+        target: ContextTarget,
+        /// The entry's [`super::context::ContextItem::id`].
+        item: u16,
+    },
 }
 
 /// Pasted clipboard text. `Debug` never prints the content (S5): pasted
@@ -318,6 +352,7 @@ impl fmt::Debug for GridEvent {
             GridEvent::VisibleRange(_) => "VisibleRange",
             GridEvent::ColumnsResized => "ColumnsResized",
             GridEvent::BlockPaste { .. } => "BlockPaste",
+            GridEvent::ContextPicked { .. } => "ContextPicked",
         })
     }
 }
@@ -397,6 +432,24 @@ mod tests {
             GridSpec::line_entry(disp).validate(),
             Err(SpecError::ReadOnlyKindEditable)
         );
+        // P16 D6: the select column needs multi-row selection.
+        let mut sel = GridSpec::line_entry(vec![col(1, CellKind::Date, true)]);
+        sel.select_column = true;
+        assert_eq!(sel.validate(), Err(SpecError::SelectColumnWithoutMulti));
+        sel.selection = SelectionMode::Multi;
+        sel.context_menu = true;
+        assert_eq!(sel.validate(), Ok(()));
+        for p in [
+            GridSpec::line_entry(cols_of(CellKind::Date)),
+            GridSpec::fixed_edit(cols_of(CellKind::Date)),
+            GridSpec::browse(cols_of(CellKind::Display)),
+        ] {
+            assert!(!p.context_menu && !p.select_column, "off in every preset");
+        }
+    }
+
+    fn cols_of(kind: CellKind) -> Vec<Column> {
+        vec![col(1, kind, !matches!(kind, CellKind::Display))]
     }
 
     #[test]

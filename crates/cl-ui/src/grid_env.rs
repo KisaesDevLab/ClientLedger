@@ -222,6 +222,7 @@ impl EnvParts {
             label,
             input_enabled: !self.frame.modal_open,
             enter_mode: self.frame.enter_mode,
+            context: None,
         }
     }
 }

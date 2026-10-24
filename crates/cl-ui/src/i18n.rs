@@ -891,6 +891,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
         "Enter goes to the next field, like Tab. Ctrl+Enter saves and starts a new one.",
     ),
     ("status.hint.save_new", "save & new"),
+    // WP5a (P16): grid row selection and context menu (Q-272, Q-274).
+    ("grid.a11y.select_row", "Select row {n}"),
+    ("grid.a11y.menu", "Actions"),
 ];
 
 #[cfg(test)]
