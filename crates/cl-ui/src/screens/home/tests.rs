@@ -751,9 +751,9 @@ fn without_the_dashboard_capability_balances_stay_exact() {
         [
             ("1010 \u{b7} Operating Checking", Some(m("84210.55"))),
             ("1020 \u{b7} Payroll Checking", Some(m("12004.00"))),
-            ("2050 \u{b7} Business Card", Some(m("-6388.21"))),
+            ("2050 \u{b7} Business Card", Some(m("6388.21"))),
         ],
-        "banks first, then cards; the engine's figure as stored"
+        "banks first, then cards; a card owed reads positive (Q-241)"
     );
     assert_eq!(balances::source(&data, false), "accounts");
     // With the capability but no cash position yet, the chart's figures.

@@ -2,20 +2,24 @@
 //! with the balance the engine reports, "In your books", and the bank
 //! file's balance, a dash until bank-file import (U-77, P25; Q-P16d).
 //!
-//! The figure is the engine's, shown as it stores it (debits minus
-//! credits, so a card owed reads negative, as in the mockup): the cash
-//! position of `dashboard-exact-v1` (U-76) when the engine has it, else the
-//! account's own stored balance (`Account.balance`, read exactly). Nothing
-//! here adds, subtracts or re-derives a balance (Non-negotiable 7), and no
-//! amount is logged or put in the control channel's state.
+//! The figure is the engine's stored balance: the cash position of
+//! `dashboard-exact-v1` (U-76) when the engine has it, else the account's
+//! own stored balance (`Account.balance`, read exactly). Both are debits
+//! minus credits, so a card's figure is flipped for display the way the
+//! Chart of Accounts flips it (`DisplaySign`, Q-P12h, Q-241): an amount
+//! owed reads positive. Nothing here adds, subtracts or re-derives a
+//! balance (Non-negotiable 7), and no amount is logged or put in the
+//! control channel's state.
 
 use cl_api::ApiError;
 use cl_core::ids::AccountId;
 use cl_core::{Money, OwnerFacing};
+use cl_model::register::DisplaySign;
 use eframe::egui::{self, Align, Layout, Margin, RichText, Stroke, Ui, Vec2};
 
 use super::{HomeData, HomeScreen, money_accounts};
 use crate::i18n::t;
+use crate::screens::lists::accounts::model::kind_of;
 use crate::theme::{Tokens, styles};
 
 /// Room between columns and around each figure.
@@ -51,17 +55,18 @@ pub(crate) fn rows(data: &HomeData, exact: bool) -> Option<Vec<BalanceRow>> {
             .as_ref()
             .and_then(|s| s.cash_position.as_ref())
     {
+        let banks = cash.bank_accounts.iter().map(|c| (c, DisplaySign::AsSent));
+        let cards = cash.credit_cards.iter().map(|c| (c, DisplaySign::Negated));
         return Some(
-            cash.bank_accounts
-                .iter()
-                .chain(&cash.credit_cards)
-                .map(|c| BalanceRow {
+            banks
+                .chain(cards)
+                .map(|(c, sign)| BalanceRow {
                     account: c.id,
                     label: data.account(c.id).map_or_else(
                         || number_name(c.account_number.as_deref(), &c.name),
                         crate::screens::register::account_text,
                     ),
-                    books: Some(c.balance),
+                    books: sign.apply(c.balance).ok(),
                 })
                 .collect(),
         );
@@ -73,7 +78,11 @@ pub(crate) fn rows(data: &HomeData, exact: bool) -> Option<Vec<BalanceRow>> {
             .map(|a| BalanceRow {
                 account: a.id,
                 label: crate::screens::register::account_text(a),
-                books: a.balance,
+                books: a.balance.and_then(|b| {
+                    DisplaySign::for_stored_balance(kind_of(a.fields.account_type))
+                        .apply(b)
+                        .ok()
+                }),
             })
             .collect(),
     )
