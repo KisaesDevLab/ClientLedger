@@ -4,6 +4,8 @@
 use super::*;
 use crate::company::demo::DemoState;
 use crate::shell::{Shell, ShellOptions};
+use cl_api::Account;
+use cl_core::Money;
 use cl_model::home::LaneFooter;
 use eframe::egui::accesskit::Role;
 
@@ -200,6 +202,126 @@ fn without_the_dashboard_capability_lane_figures_are_dashes() {
     let last = lanes::footer_view(&h, LaneFooter::LastReconciled, style);
     assert_eq!(last.value, None);
     assert!(last.tip.is_some(), "a failed read says so");
+}
+
+fn m(s: &str) -> Money {
+    Money::parse_wire(s).expect("money")
+}
+
+/// The demo's balances: the card shows the demo engine's figures, exactly.
+#[test]
+fn the_demo_balances_follow_the_demo_engine() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let rows = balances::rows(&h.data, h.exact).expect("rows");
+    assert_eq!(
+        rows.first().map(|r| r.label.as_str()),
+        Some("1010 \u{b7} Operating Checking")
+    );
+    assert_eq!(rows.first().and_then(|r| r.books), Some(m("84210.55")));
+    assert!(rows.iter().all(|r| r.books.is_some()));
+    let nodes = tree(&mut h, 1440.0);
+    let has = |role: Role, name: &str| nodes.iter().any(|(r, n)| *r == role && n == name);
+    for name in [
+        "Account balances",
+        "Account",
+        "In your books",
+        "Bank file",
+        "1010 \u{b7} Operating Checking",
+        "84,210.55",
+    ] {
+        assert!(has(Role::Label, name), "{name}");
+    }
+    let st = h.state();
+    assert_eq!(st["balances_source"], "cash_position");
+    assert_eq!(st["balances_rows"], json!(rows.len()));
+    assert!(!st.to_string().contains("84210"), "no amounts in the state");
+}
+
+/// Without `dashboard-exact-v1` the balances are the chart's own stored
+/// balances: strings, read exactly, banks first, never summed here.
+#[test]
+fn without_the_dashboard_capability_balances_stay_exact() {
+    let account = |id: u32, number: &str, name: &str, detail: &str, kind: &str, balance: &str| {
+        serde_json::from_value::<Account>(json!({
+            "id": crate::company::demo::account_id(id).to_string(),
+            "name": name,
+            "accountNumber": number,
+            "accountType": kind,
+            "detailType": detail,
+            "isActive": true,
+            "balance": balance,
+        }))
+        .expect("account")
+    };
+    let accounts = vec![
+        account(
+            2050,
+            "2050",
+            "Business Card",
+            "credit_card",
+            "liability",
+            "-6388.21",
+        ),
+        account(
+            1020,
+            "1020",
+            "Payroll Checking",
+            "bank",
+            "asset",
+            "12004.00",
+        ),
+        account(
+            1010,
+            "1010",
+            "Operating Checking",
+            "bank",
+            "asset",
+            "84210.55",
+        ),
+        account(6100, "6100", "Fuel", "fuel", "expense", "99.00"),
+    ];
+    // A JSON number is never read as money.
+    assert!(
+        serde_json::from_value::<Account>(json!({
+            "id": crate::company::demo::account_id(1).to_string(),
+            "name": "X", "accountType": "asset", "isActive": true, "balance": 84210.55,
+        }))
+        .is_err()
+    );
+    let data = HomeData {
+        accounts: Slot::ready(accounts),
+        ..HomeData::default()
+    };
+    let rows = balances::rows(&data, false).expect("rows");
+    let shown: Vec<(&str, Option<Money>)> =
+        rows.iter().map(|r| (r.label.as_str(), r.books)).collect();
+    assert_eq!(
+        shown,
+        [
+            ("1010 \u{b7} Operating Checking", Some(m("84210.55"))),
+            ("1020 \u{b7} Payroll Checking", Some(m("12004.00"))),
+            ("2050 \u{b7} Business Card", Some(m("-6388.21"))),
+        ],
+        "banks first, then cards; the engine's figure as stored"
+    );
+    assert_eq!(balances::source(&data, false), "accounts");
+    // With the capability but no cash position yet, the chart's figures.
+    assert_eq!(balances::source(&data, true), "accounts");
+
+    // Nothing read yet: no rows (loading); an empty chart has none.
+    assert_eq!(balances::rows(&HomeData::default(), false), None);
+    let empty = HomeData {
+        accounts: Slot::ready(Vec::new()),
+        ..HomeData::default()
+    };
+    assert_eq!(balances::rows(&empty, false), Some(Vec::new()));
+    let failed = HomeData {
+        accounts: Slot::failed(ApiError::Internal),
+        ..HomeData::default()
+    };
+    assert_eq!(balances::rows(&failed, false), None);
+    assert_eq!(balances::source(&failed, false), "none");
 }
 
 #[test]

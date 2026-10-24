@@ -23,6 +23,7 @@
 //! the Ko-fi button arrive with the next work package (D10); the layout
 //! leaves their places marked below.
 
+mod balances;
 mod lanes;
 
 use std::sync::Arc;
@@ -380,6 +381,7 @@ impl HomeScreen {
             ui.add_space(4.0);
             self.lane_columns = lanes::show(ui, self, &tokens);
             ui.add_space(GAP + 6.0);
+            self.cards(ui, &tokens);
             // WP8 (D10): the Ko-fi button sits here, at the bottom right
             // of the body.
             ui.add_space(12.0);
@@ -437,7 +439,37 @@ impl HomeScreen {
         refresh
     }
 
+    /// The cards under the lanes, side by side when there is room (the
+    /// mockup's wrapping row).
+    fn cards(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        // WP8 (D10): the "Income and expenses" chart card (min width 300)
+        // joins this row.
+        let mins = [340.0_f32];
+        let width = ui.available_width();
+        let (mut cols, mut need) = (1, mins[0]);
+        while cols < mins.len() {
+            need += GAP + mins[cols];
+            if need > width {
+                break;
+            }
+            cols += 1;
+        }
+        let id = ui.scope_id().with("home-cards");
+        let mut retry = false;
+        tiles(ui, id, mins.len(), cols, |ui, _i, min_h| {
+            card(ui, tokens, min_h, |ui| {
+                if balances::show(ui, self, tokens) {
+                    retry = true;
+                }
+            })
+        });
+        if retry {
+            self.reload();
+        }
+    }
+
     fn state_json(&self) -> Value {
+        let rows = balances::rows(&self.data, self.exact);
         json!({
             "screen": "home",
             "layout": self.layout.json(),
@@ -451,7 +483,12 @@ impl HomeScreen {
                 .collect::<serde_json::Map<String, Value>>(),
             "footers": lanes::footers_shown(self),
             "bills_due_days": self.local.bills_due_days,
+            "balances_rows": rows.as_ref().map(Vec::len),
+            "balances_source": balances::source(&self.data, self.exact),
             "loading": self.data.loading(),
+            "errors": {
+                "balances": rows.is_none() && self.data.accounts.error.is_some(),
+            },
             "last_opened": self.last_opened.map(CommandId::as_str),
         })
     }
@@ -484,6 +521,26 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
             r.prefs.bills_due_days
         });
     Local { bills_due_days }
+}
+
+/// A bordered white card, at least `min_h` tall inside. Returns the height
+/// its content took (before the padding).
+fn card(ui: &mut Ui, tokens: &Tokens, min_h: f32, add: impl FnOnce(&mut Ui)) -> f32 {
+    egui::Frame::new()
+        .fill(tokens.surface_window)
+        .stroke(egui::Stroke::new(1.0, tokens.border_default))
+        .corner_radius(egui::CornerRadius::same(6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let top = ui.cursor().top();
+            add(ui);
+            let natural = ui.cursor().top() - top;
+            if min_h > natural {
+                ui.add_space(min_h - natural);
+            }
+            natural
+        })
+        .inner
 }
 
 /// Draws `n` boxes in rows of `cols`, each the same width, and every box
