@@ -257,3 +257,40 @@ fn a_closed_period_transfer_asks_for_the_password() {
     );
     assert_eq!(s.saved_count, 1);
 }
+
+/// Review P16-part1 #6: Enter in Date, Amount and Memo is Save & New by
+/// default (Q-190) and moves between the fields when the option is on
+/// (Q-264); Shift+Enter goes back.
+#[test]
+fn enter_saves_or_moves_between_fields() {
+    use crate::forms::enter::testing::{context, enter, frame, settle};
+    use crate::windows::Screen as _;
+    use cl_model::forms::EnterMode;
+    for mode in [EnterMode::SaveAndNew, EnterMode::MoveBetweenFields] {
+        let (mut s, _link, _dir) = screen();
+        fill(&mut s, 1010, 2050, "12.00");
+        let ctx = context();
+        s.focus = Some(field::DATE);
+        settle(&ctx, mode, &mut |ui| s.ui(ui));
+        assert_eq!(s.focused, Some(field::DATE), "{mode:?}");
+        frame(&ctx, mode, enter(false), &mut |ui| s.ui(ui));
+        settle(&ctx, mode, &mut |ui| s.ui(ui));
+        match mode {
+            EnterMode::SaveAndNew => {
+                assert_eq!(s.saved_count, 1, "Enter = Save & New");
+                assert_eq!(s.state_json()["mode"], "new");
+            }
+            EnterMode::MoveBetweenFields => {
+                assert_eq!(s.saved_count, 0, "Enter never saves here");
+                assert_eq!(s.state_json()["focused"], "amount");
+                frame(&ctx, mode, enter(false), &mut |ui| s.ui(ui));
+                settle(&ctx, mode, &mut |ui| s.ui(ui));
+                assert_eq!(s.state_json()["focused"], "memo");
+                frame(&ctx, mode, enter(true), &mut |ui| s.ui(ui));
+                settle(&ctx, mode, &mut |ui| s.ui(ui));
+                assert_eq!(s.state_json()["focused"], "amount", "Shift+Enter goes back");
+                assert_eq!(s.saved_count, 0);
+            }
+        }
+    }
+}

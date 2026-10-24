@@ -71,6 +71,18 @@ mod field {
     pub const DATE: u64 = 3;
     pub const AMOUNT: u64 = 4;
     pub const MEMO: u64 = 5;
+
+    /// The field's name for the control channel.
+    pub fn name(f: u64) -> &'static str {
+        match f {
+            FROM => "from",
+            TO => "to",
+            DATE => "date",
+            AMOUNT => "amount",
+            MEMO => "memo",
+            _ => "other",
+        }
+    }
 }
 
 /// What the closing-date password is for.
@@ -153,6 +165,8 @@ pub struct TransferScreen {
     pub(crate) lists_stale: bool,
     /// The field with the keyboard (Esc reverts it).
     pub(crate) focused: Option<u64>,
+    /// A field to give the keyboard to on the next frame.
+    pub(crate) focus: Option<u64>,
     /// Prev (true) or Next asked on unsaved changes: Save / Discard /
     /// Keep editing.
     pub(crate) nav_prompt: Option<bool>,
@@ -264,6 +278,7 @@ impl TransferScreen {
             money_style: cl_core::MoneyStyle::default(),
             lists_stale: false,
             focused: None,
+            focus: None,
             nav_prompt: None,
             after_save_nav: None,
             template: crate::screens::templates::SaveFlow::default(),
@@ -856,6 +871,9 @@ impl TransferScreen {
     }
 
     fn track(&mut self, r: &egui::Response, f: u64) {
+        if self.focus.take_if(|x| *x == f).is_some() {
+            r.request_focus();
+        }
         if r.has_focus() {
             self.focused = Some(f);
         } else if self.focused == Some(f) {
@@ -1180,6 +1198,9 @@ impl TransferScreen {
             form::hint(ui, tokens, &t("closing.edit_note"));
         }
         let enabled = !working && !self.closing_prompt.dialog_open() && !read_only;
+        // Enter in Date, Amount or Memo: Save & New, or the next field when
+        // Enter moves between fields (Q-264).
+        let mut save_new = false;
         // A read-only transfer keeps readable text (contrast >= 4.5:1).
         crate::forms::header::locked_scope(ui, true, read_only, |ui| {
             form::card(ui, tokens, |ui| {
@@ -1216,6 +1237,7 @@ impl TransferScreen {
                                 self.date.settle();
                             }
                             self.track(&r, field::DATE);
+                            save_new |= crate::forms::enter::entered(&r).saves();
                         });
                         kit::wrap_item(ui, "transfer/amount", |ui| {
                             let l = kit::above(ui, tokens, &t("transfer.amount"));
@@ -1229,6 +1251,8 @@ impl TransferScreen {
                                 .labelled_by(l.id);
                             if r.lost_focus() {
                                 self.amount_left();
+                                save_new |= crate::forms::enter::entered(&r).saves()
+                                    && self.amount_problem.is_none();
                             }
                             self.track(&r, field::AMOUNT);
                             if let Some(k) = self.amount_problem {
@@ -1246,11 +1270,15 @@ impl TransferScreen {
                                 self.rev = self.form.revision();
                             }
                             self.track(&r, field::MEMO);
+                            save_new |= crate::forms::enter::entered(&r).saves();
                         });
                     });
                 });
             });
         });
+        if save_new && enabled {
+            self.command(CommandId::new("form.save_new"));
+        }
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
         if self.stale {
@@ -1365,6 +1393,7 @@ impl TransferScreen {
             "void_open": self.void_open,
             "nav_at": self.nav_at,
             "nav_prompt": self.nav_prompt.is_some(),
+            "focused": self.focused.map(field::name),
             "template": self.template.state_json(),
         });
         if let (Value::Object(m), Value::Object(c)) = (
