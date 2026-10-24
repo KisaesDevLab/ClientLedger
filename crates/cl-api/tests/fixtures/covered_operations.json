@@ -156,5 +156,14 @@
   {"method":"POST","path":"/api/v1/batch/validate","inSpec":true,"fragmentHash":"9c4b2902385c54ef5da540613b11da9da3d74c0a85ab15d5e38a8abde0fbab3f"},
   {"method":"POST","path":"/api/v1/batch/save","inSpec":true,"fragmentHash":"3affa0ea99ccff54da930bf8791ae7f7c569898e59755bb2150fdb89a01f52a4"},
   {"method":"GET","path":"/api/v1/batch/suggest-account","inSpec":true,"fragmentHash":null},
-  {"method":"POST","path":"/api/v1/batch/parse-csv","inSpec":true,"fragmentHash":null}
+  {"method":"POST","path":"/api/v1/batch/parse-csv","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/dashboard/cash-position","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/dashboard/receivables","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/dashboard/payables","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/dashboard/action-items","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/dashboard/summary","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/bills","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/payroll-import/sessions","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/banking/reconciliations","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/banking/statements","inSpec":true,"fragmentHash":null}
 ]

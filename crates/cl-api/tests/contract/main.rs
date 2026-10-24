@@ -25,6 +25,7 @@ mod contract_daily_sales;
 mod contract_deposits;
 mod contract_errors;
 mod contract_harness;
+mod contract_home;
 mod contract_items;
 mod contract_journal;
 mod contract_journal_entries;
@@ -575,6 +576,21 @@ fn main() -> std::process::ExitCode {
             "batch::row_rules_refused",
             contract_batch::row_rules_refused,
         ),
+        // P16 WP6a: Home reads (the dashboard money test is PENDING(U-76)
+        // until the pin carries dashboard-exact-v1, engine PR #168).
+        (
+            "home::bills_count_matches_the_list",
+            contract_home::bills_count_matches_the_list,
+        ),
+        (
+            "home::counts_match_the_engine",
+            contract_home::counts_match_the_engine,
+        ),
+        (
+            "home::float_dashboard_refused",
+            contract_home::float_dashboard_refused,
+        ),
+        ("home::exact_strings_u76", contract_home::exact_strings_u76),
         (
             "lifecycle::ten_switches_under_two_seconds",
             contract_lifecycle::ten_switches_under_two_seconds,
