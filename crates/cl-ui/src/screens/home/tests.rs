@@ -778,9 +778,16 @@ fn without_the_dashboard_capability_balances_stay_exact() {
 fn lane_chips_come_from_the_registry_and_the_engine() {
     let (_d, link) = demo_link();
     let h = home(&link);
+    // "Ctrl W", or "Cmd W" on macOS: the shell's chip text for the
+    // registry's shortcut.
+    let write_check = cl_model::commands::find("vendors.write_check")
+        .and_then(|c| c.shortcut)
+        .expect("Write Check has a shortcut");
+    let chip = crate::shell::chip_text(write_check);
+    assert!(chip.ends_with(" W"), "{chip}");
     assert_eq!(
         lanes::trailing(&h, "vendors.write_check"),
-        lanes::Trailing::Chip("Ctrl W".into())
+        lanes::Trailing::Chip(chip)
     );
     assert_eq!(
         lanes::trailing(&h, "banking.feed"),
