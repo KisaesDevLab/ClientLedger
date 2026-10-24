@@ -4,8 +4,9 @@
 //! than half the steps are done, so a new company sees it first).
 //!
 //! Every tick comes from a read, never from a click: the company profile
-//! (name and address), the chart (a bank account), any transaction, any
-//! imported bank statement, the email settings, and this computer's record
+//! (name and address), the chart (a bank account), any posted transaction,
+//! any bank-feed item (an imported OFX, QFX or CSV bank file lands in the
+//! bank feed), the email settings, and this computer's record
 //! of the last backup. The engine keeps no opening-balance mark on an
 //! account (verified: `Account` has none), so that step is left out and the
 //! list has six steps (Q-P16j). "Hide checklist" sets
@@ -42,9 +43,9 @@ pub(crate) const ITEMS: [ChecklistItem; 6] = [
 pub(crate) struct Facts {
     /// The company has a name and a street address.
     pub company_info: bool,
-    /// Any transaction exists.
+    /// Any posted transaction exists.
     pub transaction: bool,
-    /// Any bank statement was imported.
+    /// A bank file was imported (any bank-feed item).
     pub bank_file: bool,
     /// Email for invoices is set up (a mail server is saved).
     pub email: bool,
@@ -79,7 +80,7 @@ pub(crate) async fn read(s: &cl_api::Session) -> Result<Facts, ApiError> {
                 .map(|p| profile_filled(&p.record.profile)),
         ),
         transaction: ok("transactions", home.has_any_transaction().await),
-        bank_file: ok("bank_statements", home.bank_statements_any().await),
+        bank_file: ok("bank_feed", home.bank_feed_any().await),
         email: ok("smtp", s.smtp_settings().await.map(|m| m.configured)),
     })
 }

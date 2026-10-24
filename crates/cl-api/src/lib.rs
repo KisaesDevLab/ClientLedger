@@ -192,7 +192,7 @@ pub use resources::dashboard::{
     payables_from_json, receivables_from_json, summary_from_json,
 };
 pub use resources::home_queries::{
-    BillQuery, HomeQueries, LastReconciled, OpenBillStatus, PayrollStatus, RECONCILE_ACCOUNTS_MAX,
-    ReconcileState,
+    BILLS_PAGE, BILLS_PAGES_MAX, BillQuery, HomeQueries, LastReconciled, OpenBillStatus,
+    PayrollStatus, RECONCILE_ACCOUNTS_MAX, ReconcileState,
 };
 pub use wire::money_str_strict;

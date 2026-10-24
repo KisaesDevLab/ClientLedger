@@ -833,9 +833,27 @@ fn generate() -> Fixture {
         &mut invoice_no,
         "INV",
     );
+    // The Jan..Sep plug is spread over those nine months (one each, on the
+    // 28th; the remainder in September), so no month's Profit & Loss
+    // carries the whole year's difference (one September plug made that
+    // month's expenses about four times its income on Home's chart).
     let jan_oct_now = ni(&txns, Day(2026, 1, 1), Day(2026, 10, 31));
     let diff = NI_JAN_OCT - jan_oct_now;
-    push_income_plug(&mut txns, Day(2026, 9, 29), diff, &mut invoice_no, "INV");
+    let per_month = diff / 9;
+    for month in 1..=9 {
+        let part = if month == 9 {
+            diff - per_month * 8
+        } else {
+            per_month
+        };
+        push_income_plug(
+            &mut txns,
+            Day(2026, month, 28),
+            part,
+            &mut invoice_no,
+            "INV",
+        );
+    }
     assert_eq!(ni(&txns, oct.0, oct.1), NI_OCT);
     assert_eq!(ni(&txns, Day(2026, 1, 1), Day(2026, 10, 31)), NI_JAN_OCT);
 

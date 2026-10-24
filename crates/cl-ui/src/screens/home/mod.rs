@@ -230,13 +230,34 @@ pub(crate) struct Local {
     pub last_backup: Option<Timestamp>,
     /// Now.
     pub now: Timestamp,
-    /// How far local time is from UTC (UTC in the demo, so screenshots
-    /// stay the same on every machine).
-    pub offset: chrono::FixedOffset,
+    /// The clock times are shown in (UTC in the demo, so screenshots stay
+    /// the same on every machine).
+    pub zone: Zone,
     /// Standard months or a retail calendar (kept on this computer, U-25).
     pub calendar: cl_settings::FiscalCalendar,
     /// The owner hid the setup checklist (kept with the company's prefs).
     pub checklist_dismissed: bool,
+}
+
+/// The clock Home shows a time in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Zone {
+    /// This computer's time zone, with the offset of each instant (a
+    /// backup made before a daylight-saving change shows its own offset).
+    Local,
+    /// A fixed offset (the demo: UTC).
+    Fixed(chrono::FixedOffset),
+}
+
+impl Zone {
+    /// `at` on this clock.
+    #[must_use]
+    pub(crate) fn at(self, at: Timestamp) -> chrono::DateTime<chrono::FixedOffset> {
+        match self {
+            Zone::Local => at.as_utc().with_timezone(&chrono::Local).fixed_offset(),
+            Zone::Fixed(o) => at.as_utc().with_timezone(&o),
+        }
+    }
 }
 
 /// The Home window.
@@ -374,23 +395,38 @@ impl HomeScreen {
         self.poll();
     }
 
+    /// Takes the shell's date when it published one; true when it moved.
+    pub(crate) fn follow_shell_date(&mut self, ctx: &egui::Context) -> bool {
+        match crate::grid_env::published(ctx) {
+            Some(f) if f.today != self.today => {
+                self.today = f.today;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Reconciliations of the bank and card accounts, once the chart is in.
     fn read_reconciliations(&mut self) {
         let Some(accounts) = self.data.accounts.value.as_ref() else {
             return;
         };
-        let ids: Vec<AccountId> = money_accounts(accounts)
-            .into_iter()
-            .map(|a| a.id)
-            .take(RECONCILE_ACCOUNTS_MAX)
-            .collect();
+        // Every bank and card account, read in batches of
+        // `RECONCILE_ACCOUNTS_MAX` (none is left out).
+        let ids: Vec<AccountId> = money_accounts(accounts).into_iter().map(|a| a.id).collect();
         let demo_ids = ids.clone();
         self.data.reconcile.start(run(
             &self.link,
             self.group.as_ref(),
             None,
             move |_| Ok(demo::reconcile(&demo_ids)),
-            move |s| async move { s.home().reconcile_state(&ids).await },
+            move |s| async move {
+                let mut state = ReconcileState::default();
+                for batch in ids.chunks(RECONCILE_ACCOUNTS_MAX) {
+                    state.merge(s.home().reconcile_state(batch).await?);
+                }
+                Ok(state)
+            },
         ));
     }
 
@@ -504,9 +540,11 @@ impl HomeScreen {
     ) -> (bool, Option<checklist::Action>) {
         let mut refresh = false;
         let mut todo = None;
+        // The window title, 22/600 (DESIGN.md typography: the Heading
+        // style is IBM Plex Sans SemiBold 22).
+        let title_font = egui::TextStyle::Heading.resolve(ui.style());
         let title = RichText::new(t("cmd.nav.home"))
-            .size(22.0)
-            .strong()
+            .font(title_font.clone())
             .color(tokens.text_primary);
         let subtitle = RichText::new(t("home.subtitle")).color(tokens.text_secondary);
         let measure = |s: String, font: egui::FontId| {
@@ -518,7 +556,7 @@ impl HomeScreen {
         let body = egui::TextStyle::Body.resolve(ui.style());
         let button_w =
             measure(t("home.refresh"), body.clone()) + 2.0 * ui.spacing().button_padding.x;
-        let title_w = measure(t("cmd.nav.home"), egui::FontId::proportional(22.0));
+        let title_w = measure(t("cmd.nav.home"), title_font);
         let subtitle_w = measure(t("home.subtitle"), body);
         let line_w = list.map_or(0.0, |c| {
             measure(checklist::line_text(c), egui::FontId::proportional(12.0)) + 16.0
@@ -733,7 +771,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
             bills_due_days,
             last_backup: last.or_else(|| Some(demo::last_backup())),
             now: demo::now(),
-            offset: utc(),
+            zone: Zone::Fixed(utc()),
             calendar,
             checklist_dismissed,
         };
@@ -744,7 +782,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
         last_backup: last,
         now: Timestamp::from_unix_millis(now.timestamp_millis())
             .unwrap_or_else(|_| crate::company::demo::DemoState::now()),
-        offset: *now.with_timezone(&chrono::Local).offset(),
+        zone: Zone::Local,
         calendar,
         checklist_dismissed,
     }
@@ -823,7 +861,11 @@ impl Screen for HomeScreen {
     }
 
     fn ui(&mut self, ui: &mut Ui) {
-        if !self.link.bus().take(&mut self.sub).is_empty() {
+        let changed = !self.link.bus().take(&mut self.sub).is_empty();
+        // The shell's date (it moves on at midnight): a new day reads
+        // everything again for that day.
+        let day_moved = self.follow_shell_date(ui.ctx());
+        if changed || day_moved {
             self.reload();
         }
         self.poll();

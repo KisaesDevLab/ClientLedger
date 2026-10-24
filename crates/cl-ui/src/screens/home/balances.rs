@@ -18,8 +18,8 @@ use super::{HomeData, HomeScreen, money_accounts};
 use crate::i18n::t;
 use crate::theme::{Tokens, styles};
 
-/// Width of each figure column.
-const FIGURE_W: f32 = 112.0;
+/// Room between columns and around each figure.
+const COLUMN_PAD: f32 = 12.0;
 
 /// One row of the card.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -187,14 +187,40 @@ pub(super) fn show(ui: &mut Ui, home: &HomeScreen, tokens: &Tokens) -> bool {
             ui.add(label.truncate());
         }
     };
-    table_row(ui, tokens, 30.0, |ui, col| match col {
+    // Each figure column is as wide as its header or widest figure (the
+    // mockup's table); the account name takes the rest, so it is cut only
+    // when the card is truly narrow.
+    let figures: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            r.books
+                .map_or_else(|| "\u{2014}".to_string(), |m| m.format(style))
+        })
+        .collect();
+    let measure = |s: &str, font: egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(s.to_owned(), font, tokens.text_primary)
+            .size()
+            .x
+    };
+    let head = egui::FontId::proportional(13.0);
+    let mono = egui::TextStyle::Monospace.resolve(ui.style());
+    let books_w = figures
+        .iter()
+        .map(|f| measure(f, mono.clone()))
+        .fold(measure(&t("home.balances.books"), head.clone()), f32::max)
+        + COLUMN_PAD;
+    let file_w =
+        measure(&t("home.balances.bank_file"), head).max(measure("\u{2014}", mono)) + COLUMN_PAD;
+    let widths = [books_w, file_w];
+    table_row(ui, widths, 30.0, |ui, col| match col {
         0 => header(ui, &t("home.balances.account"), false),
         1 => header(ui, &t("home.balances.books"), true),
         _ => header(ui, &t("home.balances.bank_file"), true),
     });
-    for row in &rows {
+    for (row, figure) in rows.iter().zip(&figures) {
         rule(ui, tokens.border_row);
-        table_row(ui, tokens, 31.0, |ui, col| match col {
+        table_row(ui, widths, 31.0, |ui, col| match col {
             0 => {
                 ui.add(
                     egui::Label::new(RichText::new(&row.label).color(tokens.text_primary))
@@ -202,9 +228,7 @@ pub(super) fn show(ui: &mut Ui, home: &HomeScreen, tokens: &Tokens) -> bool {
                 );
             }
             1 => {
-                let text = row
-                    .books
-                    .map_or_else(|| "\u{2014}".to_string(), |m| m.format(style));
+                let text = figure.as_str();
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add(
                         egui::Label::new(
@@ -237,16 +261,17 @@ pub(super) fn show(ui: &mut Ui, home: &HomeScreen, tokens: &Tokens) -> bool {
 }
 
 /// One row of the table: the account column takes what the two figure
-/// columns leave.
-fn table_row(ui: &mut Ui, _tokens: &Tokens, h: f32, mut cell: impl FnMut(&mut Ui, usize)) {
+/// columns (`figures` wide) leave.
+fn table_row(ui: &mut Ui, figures: [f32; 2], h: f32, mut cell: impl FnMut(&mut Ui, usize)) {
     egui::Frame::new()
         .inner_margin(Margin::symmetric(14, 0))
         .show(ui, |ui| {
             let width = ui.available_width();
-            let name_w = (width - 2.0 * FIGURE_W - 8.0).max(80.0);
+            let [books_w, file_w] = figures;
+            let name_w = (width - books_w - file_w - 8.0).max(80.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                for (col, w) in [(0, name_w), (1, FIGURE_W), (2, FIGURE_W)] {
+                for (col, w) in [(0, name_w), (1, books_w), (2, file_w)] {
                     let layout = if col == 0 {
                         Layout::left_to_right(Align::Center)
                     } else {

@@ -179,7 +179,10 @@ pub(crate) fn footer_view(home: &HomeScreen, footer: LaneFooter, style: MoneySty
                 tip = Some(t("home.footer.window.tip"));
             }
             FooterView {
-                label: t_with("home.footer.bills_due", &[("days", &days.to_string())]),
+                label: t_with(
+                    "home.footer.bills_due",
+                    &[("within", &super::attention::days_text(days))],
+                ),
                 value,
                 money: true,
                 tip,
@@ -358,6 +361,10 @@ fn footer(ui: &mut Ui, tokens: &Tokens, v: &FooterView) {
     }
 }
 
+/// The smallest lane action (DESIGN.md: 44 px targets for Home's lane
+/// actions).
+pub(crate) const ACTION_MIN_H: f32 = 44.0;
+
 /// A lane action: a full-width bordered row with the label at the left
 /// and its chip, badge or note at the right. The accessible name is the
 /// label alone.
@@ -407,7 +414,8 @@ fn action_row(ui: &mut Ui, tokens: &Tokens, label: &str, trailing: &Trailing) ->
         tokens.text_primary,
         wrap,
     );
-    let h = (galley.size().y + 18.0).max(40.0);
+    // At least 44 points: a primary action's target (DESIGN.md spacing).
+    let h = (galley.size().y + 18.0).max(ACTION_MIN_H);
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, h), Sense::click());
     let enabled = ui.is_enabled();
     resp.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, label));

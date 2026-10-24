@@ -91,12 +91,19 @@ pub fn publish(ctx: &Context, viewport: ViewportId, frame: ShellFrame) {
 /// one has none; defaults outside a shell (tests).
 #[must_use]
 pub fn shell_frame(ctx: &Context) -> ShellFrame {
+    published(ctx).unwrap_or_default()
+}
+
+/// The facts the shell published for the viewport being drawn (or the
+/// root's); `None` outside a shell, where [`shell_frame`] falls back to
+/// defaults.
+#[must_use]
+pub fn published(ctx: &Context) -> Option<ShellFrame> {
     let here = ctx.viewport_id();
     ctx.data(|d| {
         d.get_temp::<ShellFrame>(frame_id(here))
             .or_else(|| d.get_temp(frame_id(ViewportId::ROOT)))
     })
-    .unwrap_or_default()
 }
 
 /// Remembered column widths shared between the shell (which loads and

@@ -143,6 +143,183 @@ fn attention_counts_are_exactly_the_engine_answers() {
     assert_eq!(counted(&items, "payroll_unposted"), Some(2));
 }
 
+/// With `dashboard-exact-v1` and a window of 1 to 90 days the bills line is
+/// the payables panel's overdue plus due-soon count (voided bills out on the
+/// engine); for another window, or without the panel, the list's count.
+#[test]
+fn the_bills_line_takes_the_payables_panel_for_its_window() {
+    let mut summary = demo::summary(&mut DemoState::new(), DemoState::today(), 7);
+    if let Some(p) = summary.payables.as_mut() {
+        p.overdue_count = 2;
+        p.due_soon_count = 5;
+    }
+    let data = HomeData {
+        counts: Slot::ready(Counts {
+            feed: Ok(0),
+            bills: Ok(9),
+            payroll: Ok(0),
+            clients: Ok(0),
+            vendors: Ok(0),
+        }),
+        summary: Slot::ready(summary),
+        ..HomeData::default()
+    };
+    assert_eq!(attention::payables_due(&data, 7, true), Some(7));
+    let items = attention::items(&data, 7, true, false);
+    assert_eq!(counted(&items, "bills_due"), Some(7), "overdue + due soon");
+    // Another window than the panel was read for: the list.
+    assert_eq!(attention::payables_due(&data, 14, true), None);
+    assert_eq!(
+        counted(&attention::items(&data, 14, true, false), "bills_due"),
+        Some(9)
+    );
+    // Past the engine's 90 days, and without the capability: the list.
+    assert_eq!(attention::payables_due(&data, 120, true), None);
+    assert_eq!(attention::payables_due(&data, 7, false), None);
+    assert_eq!(
+        counted(&attention::items(&data, 7, false, false), "bills_due"),
+        Some(9)
+    );
+    // The list's count failed (past its page cap): a dash, not a number.
+    let data = HomeData {
+        counts: Slot::ready(Counts {
+            feed: Ok(0),
+            bills: Err(ApiError::Local(cl_api::LocalValidation::PageLimit)),
+            payroll: Ok(0),
+            clients: Ok(0),
+            vendors: Ok(0),
+        }),
+        ..HomeData::default()
+    };
+    assert_eq!(
+        counted(&attention::items(&data, 7, false, false), "bills_due"),
+        None
+    );
+}
+
+/// Home follows the shell's date: when the shell's day moves on (midnight
+/// with Home open) Home reads everything again for the new day; outside a
+/// shell it keeps the date it was opened with.
+#[test]
+fn home_follows_the_shells_date() {
+    use eframe::egui::{Pos2, RawInput, Rect, vec2};
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let opened = DemoState::today();
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    let frame = |ctx: &egui::Context, h: &mut HomeScreen| {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| h.ui(ui));
+        });
+        out.textures_delta.clear();
+    };
+    frame(&ctx, &mut h);
+    assert_eq!(h.today, opened, "no shell: the date Home opened with");
+    let months = |h: &HomeScreen| {
+        h.data
+            .chart
+            .value
+            .as_ref()
+            .map(|m| m.last().map(|m| m.range.end))
+    };
+    let before = months(&h);
+    // The shell's day moves to the first of next month.
+    let next = date(2026, 12, 1);
+    crate::grid_env::publish(
+        &ctx,
+        egui::ViewportId::ROOT,
+        crate::grid_env::ShellFrame::new(next, &crate::prefs::UiPrefs::default(), false),
+    );
+    frame(&ctx, &mut h);
+    assert_eq!(h.today, next);
+    for _ in 0..3 {
+        frame(&ctx, &mut h);
+    }
+    assert_ne!(months(&h), before, "the chart read again for the new day");
+    assert_eq!(
+        h.data
+            .chart
+            .value
+            .as_ref()
+            .and_then(|m| m.last())
+            .map(|m| m.range.end),
+        Some(date(2026, 11, 30)),
+        "the last whole month: November"
+    );
+    // The same day again: no new read.
+    assert!(!h.follow_shell_date(&ctx));
+}
+
+/// "1 day", never "1 days"; "Open aging" explains itself on hover; a past
+/// backup shows in its own instant's offset.
+#[test]
+fn day_counts_aging_tip_and_backup_offsets() {
+    use chrono::Offset as _;
+    assert_eq!(attention::days_text(1), "1 day");
+    assert_eq!(attention::days_text(14), "14 days");
+    let mut summary = demo::summary(&mut DemoState::new(), DemoState::today(), 1);
+    if let Some(p) = summary.payables.as_mut() {
+        p.overdue_count = 1;
+        p.due_soon_count = 0;
+    }
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    h.local.bills_due_days = 1;
+    h.data.summary = Slot::ready(summary);
+    let lines = attention::lines(&h, &h.attention());
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.text == "1 bill overdue or due within 1 day"),
+        "{lines:#?}"
+    );
+    let aging = lines
+        .iter()
+        .find(|l| l.link.as_ref().is_some_and(|(t, _)| t == "Open aging"))
+        .expect("aging link");
+    assert!(
+        aging
+            .link_tip
+            .as_deref()
+            .is_some_and(|t| t.contains("past due"))
+    );
+    assert!(
+        lines
+            .iter()
+            .filter(|l| l.link.as_ref().is_some_and(|(t, _)| t != "Open aging"))
+            .all(|l| l.link_tip.is_none())
+    );
+
+    // A summer backup seen in winter: its own (summer) offset.
+    let summer = chrono::FixedOffset::west_opt(5 * 3600).expect("CDT");
+    let at = Timestamp::from_unix_millis(
+        chrono::DateTime::parse_from_rfc3339("2026-07-01T03:30:00Z")
+            .expect("ts")
+            .timestamp_millis(),
+    )
+    .expect("ts");
+    assert_eq!(
+        attention::when_text(at, Zone::Fixed(summer), date(2026, 11, 4)),
+        "06/30/2026"
+    );
+    assert_eq!(
+        attention::when_text(at, Zone::Fixed(summer), date(2026, 6, 30)),
+        "today 10:30 PM"
+    );
+    let local = Zone::Local.at(at);
+    let expected = at.as_utc().with_timezone(&chrono::Local);
+    assert_eq!(
+        local.offset().local_minus_utc(),
+        expected.offset().fix().local_minus_utc()
+    );
+}
+
 /// The lines Home draws: a dash for what can't be counted (overdue invoices
 /// before U-76, a failed query), one muted line for what arrives later,
 /// nothing for a zero, "Nothing needs attention" when all is clear.
@@ -279,6 +456,59 @@ fn tree(s: &mut HomeScreen, width: f32) -> Vec<(Role, String)> {
             (n.role(), name)
         })
         .collect()
+}
+
+/// Draws Home a few frames at `width`; each button's (name, height).
+fn button_heights(s: &mut HomeScreen, width: f32) -> Vec<(String, f64)> {
+    use eframe::egui::{Pos2, RawInput, Rect, vec2};
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut all = std::collections::HashMap::new();
+    for _ in 0..4 {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 940.0))),
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        if let Some(t) = out.platform_output.accesskit_update {
+            all.extend(t.nodes);
+        }
+    }
+    all.into_values()
+        .filter(|n| n.role() == Role::Button)
+        .filter_map(|n| {
+            let b = n.bounds()?;
+            Some((n.label().unwrap_or_default().to_string(), b.y1 - b.y0))
+        })
+        .collect()
+}
+
+/// DESIGN.md: Home's lane actions are primary targets, at least 44 px.
+#[test]
+fn lane_actions_are_44_points_tall() {
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    for width in [1440.0, 480.0] {
+        let buttons = button_heights(&mut h, width);
+        let mut seen = 0;
+        for lane in &LANES {
+            for id in lane.actions {
+                let label = lanes::action_label(id);
+                let (_, height) = buttons
+                    .iter()
+                    .find(|(n, _)| *n == label)
+                    .unwrap_or_else(|| panic!("{label} at {width}"));
+                assert!(*height >= 44.0, "{label}: {height} at {width}");
+                seen += 1;
+            }
+        }
+        assert_eq!(seen, LANES.iter().map(|l| l.actions.len()).sum::<usize>());
+    }
 }
 
 #[test]

@@ -3,11 +3,12 @@
 //! only thing read, so no row amount is ever decoded here.
 //!
 //! - [`HomeQueries::bills_count`]: `GET /bills` with a status set and a due
-//!   date (`total`).
+//!   date, voided bills left out (each row's `status` is read, nothing
+//!   else).
 //! - [`HomeQueries::payroll_sessions_count`]: unposted payroll imports.
 //! - [`HomeQueries::reconcile_state`]: reconciliations left open, and the
 //!   latest finished one, of the accounts named.
-//! - [`HomeQueries::bank_statements_any`], [`HomeQueries::has_any_transaction`]:
+//! - [`HomeQueries::bank_feed_any`], [`HomeQueries::has_any_transaction`]:
 //!   setup checklist ticks.
 //! - [`HomeQueries::feed_pending_count`]: `pendingFeedCount` of
 //!   `/dashboard/action-items` (an integer, so allowed before U-76; nothing
@@ -23,7 +24,7 @@ use crate::client::{Call, Method};
 use crate::errors::{ApiError, LocalValidation};
 use crate::resources::dashboard::dashboard_query;
 use crate::resources::operations::{
-    BANK_STATEMENTS, BILLS_LIST, DASHBOARD_ACTIONS, Operation, PAYROLL_SESSIONS, RECONCILIATIONS,
+    BILLS_LIST, DASHBOARD_ACTIONS, FEED_LIST, Operation, PAYROLL_SESSIONS, RECONCILIATIONS,
     TXNS_LIST,
 };
 use crate::session::Session;
@@ -108,7 +109,8 @@ impl BillQuery {
         })
     }
 
-    /// The query pairs (`limit=1`: only `total` is read).
+    /// The filter pairs (no paging; [`HomeQueries::bills_count`] adds
+    /// `limit` and `offset`).
     #[must_use]
     pub fn query(&self) -> Vec<(String, String)> {
         let mut q = Vec::new();
@@ -122,9 +124,49 @@ impl BillQuery {
         if self.overdue_only {
             q.push(("overdueOnly".into(), "true".into()));
         }
-        q.push(("limit".into(), "1".into()));
         q
     }
+}
+
+/// Bills read per page by [`HomeQueries::bills_count`] (the engine's most).
+pub const BILLS_PAGE: u32 = 500;
+
+/// The most pages [`HomeQueries::bills_count`] reads (10,000 bills); past
+/// that it answers `Local(PageLimit)` and Home shows a dash, never a short
+/// count.
+pub const BILLS_PAGES_MAX: u32 = 20;
+
+#[derive(Deserialize)]
+struct BillRow {
+    /// `posted`, `void`, … (the transaction's status; absent on an engine
+    /// that does not send it).
+    #[serde(default)]
+    status: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct BillPage {
+    data: Vec<BillRow>,
+    total: u64,
+}
+
+/// One page of `/bills`: (bills that count, rows read, the list's `total`).
+/// A voided bill keeps its open `billStatus` on the engine, so only posted
+/// bills count (the payables panel's rule); a row without a status counts.
+/// Nothing but `status` is decoded.
+pub(crate) fn count_bill_page(body: &[u8]) -> Result<(u64, usize, u64), ApiError> {
+    let page: BillPage =
+        serde_json::from_slice(body).map_err(|_| ApiError::Decode { what: "bills page" })?;
+    let counted = page
+        .data
+        .iter()
+        .filter(|r| r.status.as_deref().is_none_or(|s| s == "posted"))
+        .count();
+    Ok((
+        u64::try_from(counted).unwrap_or(u64::MAX),
+        page.data.len(),
+        page.total,
+    ))
 }
 
 /// An unposted payroll import status.
@@ -175,6 +217,20 @@ pub struct ReconcileState {
     pub in_progress: Vec<AccountId>,
     /// The finished reconciliation with the latest statement date.
     pub last_completed: Option<LastReconciled>,
+}
+
+impl ReconcileState {
+    /// Adds the state of a later batch of accounts.
+    pub fn merge(&mut self, other: ReconcileState) {
+        self.in_progress.extend(other.in_progress);
+        if let Some(l) = other.last_completed
+            && self
+                .last_completed
+                .is_none_or(|m| l.statement_date > m.statement_date)
+        {
+            self.last_completed = Some(l);
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -280,12 +336,31 @@ impl HomeQueries<'_> {
         total_of(&reply.body, what)
     }
 
-    /// The number of bills matching `q` (the engine's `total`).
+    /// The number of posted bills matching `q`. The engine's list has no
+    /// status filter and keeps a voided bill's open `billStatus`, so the
+    /// rows are read ([`BILLS_PAGE`] at a time) and voided ones left out;
+    /// only each row's `status` is decoded.
     ///
     /// # Errors
-    /// `Decode`; any [`ApiError`].
+    /// `Local(PageLimit)` past [`BILLS_PAGES_MAX`] pages (a count Home can't
+    /// finish shows a dash); `Decode`; any [`ApiError`].
     pub async fn bills_count(&self, q: &BillQuery) -> Result<u64, ApiError> {
-        self.total(&BILLS_LIST, q.query(), "bills total").await
+        let mut counted: u64 = 0;
+        let mut offset: u64 = 0;
+        for _ in 0..BILLS_PAGES_MAX {
+            let mut call = Call::at(Method::Get, BILLS_LIST.route());
+            call.query = q.query();
+            call.query.push(("limit".into(), BILLS_PAGE.to_string()));
+            call.query.push(("offset".into(), offset.to_string()));
+            let reply = self.0.send(&BILLS_LIST, call, None).await?;
+            let (n, rows, total) = count_bill_page(&reply.body)?;
+            counted = counted.saturating_add(n);
+            offset = offset.saturating_add(u64::try_from(rows).unwrap_or(u64::MAX));
+            if rows == 0 || offset >= total {
+                return Ok(counted);
+            }
+        }
+        Err(ApiError::Local(LocalValidation::PageLimit))
     }
 
     /// Payroll imports in one of `statuses` (one call each, summed).
@@ -311,7 +386,8 @@ impl HomeQueries<'_> {
     }
 
     /// Reconciliations of `accounts` (the bank and card accounts Home
-    /// shows; at most [`RECONCILE_ACCOUNTS_MAX`], one call each).
+    /// shows; at most [`RECONCILE_ACCOUNTS_MAX`], one call each; Home reads
+    /// a longer chart in batches and [`ReconcileState::merge`]s them).
     ///
     /// # Errors
     /// `Local(PageLimit)` for more accounts (nothing sent); `Decode`; any
@@ -333,24 +409,28 @@ impl HomeQueries<'_> {
         Ok(state)
     }
 
-    /// Whether any bank statement was imported.
+    /// Whether a bank file was ever imported: any bank-feed item, in any
+    /// status (OFX, QFX and CSV imports land in the bank feed;
+    /// `/banking/statements` holds statements for reconciling, not
+    /// imports).
     ///
     /// # Errors
     /// `Decode`; any [`ApiError`].
-    pub async fn bank_statements_any(&self) -> Result<bool, ApiError> {
+    pub async fn bank_feed_any(&self) -> Result<bool, ApiError> {
         let q = vec![("limit".into(), "1".into())];
-        Ok(self
-            .total(&BANK_STATEMENTS, q, "bank statements total")
-            .await?
-            > 0)
+        Ok(self.total(&FEED_LIST, q, "bank feed total").await? > 0)
     }
 
-    /// Whether the company has any transaction.
+    /// Whether the company has any posted transaction (voided ones do not
+    /// count).
     ///
     /// # Errors
     /// `Decode`; any [`ApiError`].
     pub async fn has_any_transaction(&self) -> Result<bool, ApiError> {
-        let q = vec![("limit".into(), "1".into())];
+        let q = vec![
+            ("status".into(), "posted".into()),
+            ("limit".into(), "1".into()),
+        ];
         Ok(self.total(&TXNS_LIST, q, "transactions total").await? > 0)
     }
 
