@@ -33,6 +33,7 @@ pub mod logging;
 pub mod prefs;
 pub mod screens;
 pub mod shell;
+pub mod tag_names;
 pub mod templates_runner;
 pub mod theme;
 pub mod widgets;

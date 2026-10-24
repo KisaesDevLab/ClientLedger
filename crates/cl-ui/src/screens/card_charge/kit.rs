@@ -25,7 +25,7 @@ use cl_model::amount_entry::{self, AmountRules};
 use cl_model::closing::{is_locked, needs_password};
 use cl_model::forms::SaveIntent;
 use cl_model::forms::owner_money::{Entity, Role};
-use cl_model::lists::tags::{TagEntry, TagList};
+use cl_model::lists::tags::TagList;
 use cl_model::register::AccountClass;
 use eframe::egui::{self, Align, Layout, RichText, Ui, Vec2};
 
@@ -116,17 +116,7 @@ pub(crate) fn demo_roles(
 pub(crate) fn tag_list(tags: &[Tag]) -> TagList {
     TagList::new(
         Vec::new(),
-        tags.iter()
-            .map(|t| TagEntry {
-                id: t.id,
-                name: t.fields.name.clone(),
-                group: t.fields.group_id,
-                color: t.fields.color.clone(),
-                description: t.fields.description.clone(),
-                active: t.is_active,
-                usage: t.usage_count,
-            })
-            .collect(),
+        tags.iter().map(crate::tag_names::entry).collect(),
     )
 }
 
@@ -1627,11 +1617,7 @@ pub(crate) fn tags_row(
     ui.horizontal_wrapped(|ui| {
         let l = above(ui, tokens, &t("helper.tags"));
         for id in header {
-            let name = tags
-                .iter()
-                .find(|g| g.id == *id)
-                .map(|g| g.fields.name.clone())
-                .unwrap_or_default();
+            let name = crate::tag_names::label_of(tags, *id);
             let r = ui
                 .add(
                     egui::Button::new(
@@ -1647,11 +1633,14 @@ pub(crate) fn tags_row(
         egui::ComboBox::from_id_salt(id_salt)
             .selected_text(t("check.tags.add"))
             .show_ui(ui, |ui| {
-                for g in tags
-                    .iter()
-                    .filter(|g| g.is_active && !header.contains(&g.id))
-                {
-                    if ui.selectable_label(false, &g.fields.name).clicked() {
+                for g in crate::tag_names::sorted(
+                    tags.iter()
+                        .filter(|g| g.is_active && !header.contains(&g.id)),
+                ) {
+                    if ui
+                        .selectable_label(false, crate::tag_names::label(g))
+                        .clicked()
+                    {
                         edit = Some(TagEdit::Add(g.id));
                     }
                 }

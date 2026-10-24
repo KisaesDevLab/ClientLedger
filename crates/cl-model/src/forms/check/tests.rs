@@ -49,6 +49,7 @@ fn tags() -> TagList {
     };
     let t = |id, name: &str, grp: Option<u64>| TagEntry {
         id: tag(id),
+        number: None,
         name: name.into(),
         group: grp.map(group),
         color: None,

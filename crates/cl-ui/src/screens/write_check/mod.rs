@@ -42,7 +42,7 @@ use cl_core::{CalendarDate, Money};
 use cl_model::forms::FormState;
 use cl_model::forms::check::{CheckForm, CheckProblem, NumberField, propose_number};
 use cl_model::forms::lines::FormLines;
-use cl_model::lists::tags::{TagEntry, TagList};
+use cl_model::lists::tags::TagList;
 use cl_model::register::AccountClass;
 use cl_model::rowkey::RowKeyGen;
 use cl_model::{CommandId, Scope};
@@ -306,17 +306,7 @@ pub struct WriteCheckScreen {
 fn tag_list(tags: &[Tag]) -> TagList {
     TagList::new(
         Vec::new(),
-        tags.iter()
-            .map(|t| TagEntry {
-                id: t.id,
-                name: t.fields.name.clone(),
-                group: t.fields.group_id,
-                color: t.fields.color.clone(),
-                description: t.fields.description.clone(),
-                active: t.is_active,
-                usage: t.usage_count,
-            })
-            .collect(),
+        tags.iter().map(crate::tag_names::entry).collect(),
     )
 }
 

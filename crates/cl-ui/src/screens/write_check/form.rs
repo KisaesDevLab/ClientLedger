@@ -803,12 +803,7 @@ impl WriteCheckScreen {
                 .selectable(false),
             );
             for id in &header {
-                let name = self
-                    .tags
-                    .iter()
-                    .find(|g| g.id == *id)
-                    .map(|g| g.fields.name.clone())
-                    .unwrap_or_default();
+                let name = crate::tag_names::label_of(&self.tags, *id);
                 let r = ui
                     .add(
                         egui::Button::new(
@@ -825,12 +820,15 @@ impl WriteCheckScreen {
             egui::ComboBox::from_id_salt("write_check/tags")
                 .selected_text(t("check.tags.add"))
                 .show_ui(ui, |ui| {
-                    for g in self
-                        .tags
-                        .iter()
-                        .filter(|g| g.is_active && !header.contains(&g.id))
-                    {
-                        if ui.selectable_label(false, &g.fields.name).clicked() {
+                    for g in crate::tag_names::sorted(
+                        self.tags
+                            .iter()
+                            .filter(|g| g.is_active && !header.contains(&g.id)),
+                    ) {
+                        if ui
+                            .selectable_label(false, crate::tag_names::label(g))
+                            .clicked()
+                        {
                             add = Some(g.id);
                         }
                     }

@@ -11,6 +11,12 @@
 //! offered only for a tag the engine reports as used on transactions alone,
 //! never on lines or as a default.
 //!
+//! Tag numbers (Q-270, `tag-number-v1`): a Number column and form field,
+//! tags listed by number, then name within their group, typed-ahead by
+//! number or name, and a used number refused on the number field. Without
+//! the capability both are hidden and the form says the numbers come with
+//! the next engine update.
+//!
 //! Keyboard: Ctrl+N new tag, Enter or Ctrl+E edit, Ctrl+Shift+I make
 //! inactive or active again, Ctrl+D delete an unused tag, Ctrl+Shift+H
 //! include inactive, Ctrl+F find; New group and Merge are toolbar buttons
@@ -54,6 +60,7 @@ const COL_NAME: cl_grid::ColumnId = cl_grid::ColumnId(1);
 const COL_GROUP: cl_grid::ColumnId = cl_grid::ColumnId(2);
 const COL_DESCRIPTION: cl_grid::ColumnId = cl_grid::ColumnId(3);
 const COL_STATUS: cl_grid::ColumnId = cl_grid::ColumnId(4);
+const COL_NUMBER: cl_grid::ColumnId = cl_grid::ColumnId(5);
 
 // Field ids for undo merging.
 const F_NAME: u64 = 1;
@@ -62,6 +69,7 @@ const F_COLOR: u64 = 3;
 const F_DESCRIPTION: u64 = 4;
 const F_SINGLE: u64 = 5;
 const F_REQUIRED: u64 = 6;
+const F_NUMBER: u64 = 7;
 
 const PANEL_WIDTH: f32 = 420.0;
 const TYPE_AHEAD_SECS: f64 = 1.0;
@@ -81,26 +89,39 @@ fn shortcut_hint(id: &str) -> String {
         .unwrap_or_default()
 }
 
-fn new_grid(compact: bool) -> (Grid, TextRows<TagId>) {
-    let cols = if compact {
-        vec![
+/// The list grid: a Number column first when the engine stores tag numbers
+/// (`numbers`), and fewer columns while a panel is open (`compact`).
+fn new_grid(compact: bool, numbers: bool) -> (Grid, TextRows<TagId>) {
+    let mut cols = Vec::new();
+    if numbers {
+        cols.push(column(
+            COL_NUMBER,
+            "tags.col.number",
+            if compact { 70 } else { 90 },
+            0,
+        ));
+    }
+    if compact {
+        cols.extend([
             column(COL_NAME, "tags.col.name", 200, 2),
             column(COL_GROUP, "tags.col.group", 140, 1),
             column(COL_STATUS, "tags.col.status", 90, 0),
-        ]
+        ]);
     } else {
-        vec![
+        cols.extend([
             column(COL_NAME, "tags.col.name", 220, 2),
             column(COL_GROUP, "tags.col.group", 180, 1),
             column(COL_DESCRIPTION, "tags.col.description", 260, 2),
             column(COL_STATUS, "tags.col.status", 90, 0),
-        ]
-    };
+        ]);
+    }
     let ids = cols.iter().map(|c| c.id).collect();
-    let salt = if compact {
-        "tags/list-compact"
-    } else {
-        "tags/list"
+    // The column set is part of the grid's saved layout.
+    let salt = match (compact, numbers) {
+        (true, false) => "tags/list-compact",
+        (false, false) => "tags/list",
+        (true, true) => "tags/list-compact-n",
+        (false, true) => "tags/list-n",
     };
     // The specs are fixed and covered by tests; a failure is a programming
     // error in this file.
@@ -119,14 +140,24 @@ struct TagForm {
 }
 
 impl TagForm {
-    /// Takes the engine's refusal of a save: a used name (another window
-    /// got there first) reads like the local check, on the name field.
+    /// Takes the engine's refusal of a save: a used name or number
+    /// (another window got there first) reads like the local check, on the
+    /// name or number field.
     fn save_failed(&mut self, e: ApiError) {
         self.form.save_failed(cl_model::forms::SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
         });
         if matches!(
+            &e,
+            ApiError::Conflict {
+                reason: ConflictReason::TagNumberTaken,
+                ..
+            }
+        ) {
+            self.problems = vec![TagProblem::NumberTaken];
+            self.focus = Some(TagField::Number);
+        } else if matches!(
             &e,
             ApiError::Conflict {
                 reason: ConflictReason::AlreadyExists | ConflictReason::Unspecified,
@@ -210,6 +241,8 @@ struct Usage {
 #[derive(Clone, Copy, Default)]
 struct Caps {
     merge_lines: bool,
+    /// Tag numbers (`tag-number-v1`, Q-270); the demo has them.
+    numbers: bool,
 }
 
 /// The Tags window.
@@ -257,13 +290,15 @@ impl TagsScreen {
     #[must_use]
     pub fn new(link: Arc<CompanyLink>, tenant: Option<(TenantId, String)>) -> TagsScreen {
         let group = link.group().and_then(Result::ok);
-        let caps =
+        let mut caps =
             link.client()
                 .map(cl_api::Client::capabilities)
                 .map_or_else(Caps::default, |c| Caps {
                     merge_lines: c.has(Capabilities::TAG_MERGE),
+                    numbers: c.has(Capabilities::TAG_NUMBER),
                 });
-        let (grid, model) = new_grid(false);
+        caps.numbers |= link.is_demo();
+        let (grid, model) = new_grid(false, caps.numbers);
         let mut s = TagsScreen {
             link,
             tenant,
@@ -393,19 +428,7 @@ impl TagsScreen {
                 order: g.sort_order.unwrap_or(0),
             })
             .collect();
-        let tags = self
-            .tags
-            .iter()
-            .map(|t| TagEntry {
-                id: t.id,
-                name: t.fields.name.clone(),
-                group: t.fields.group_id,
-                color: t.fields.color.clone(),
-                description: t.fields.description.clone(),
-                active: t.is_active,
-                usage: t.usage_count,
-            })
-            .collect();
+        let tags = self.tags.iter().map(crate::tag_names::entry).collect();
         self.list = TagList::new(groups, tags);
         self.refilter();
         self.loaded = true;
@@ -461,23 +484,22 @@ impl TagsScreen {
                 } else {
                     inactive.clone()
                 };
-                let mut label = e.name.clone();
+                let mut label = e.label();
                 if !group.is_empty() {
                     label = format!("{label}, {group}");
                 }
                 if !e.active {
                     label = format!("{label}, {inactive}");
                 }
-                let cells = if self.compact {
-                    vec![e.name.clone(), group, status]
-                } else {
-                    vec![
-                        e.name.clone(),
-                        group,
-                        e.description.clone().unwrap_or_default(),
-                        status,
-                    ]
-                };
+                let mut cells = Vec::with_capacity(5);
+                if self.caps.numbers {
+                    cells.push(e.number.clone().unwrap_or_default());
+                }
+                cells.extend([e.name.clone(), group]);
+                if !self.compact {
+                    cells.push(e.description.clone().unwrap_or_default());
+                }
+                cells.push(status);
                 TextRow {
                     id: e.id,
                     cells,
@@ -527,7 +549,7 @@ impl TagsScreen {
         }
         let keep = self.selected();
         self.compact = want;
-        (self.grid, self.model) = new_grid(want);
+        (self.grid, self.model) = new_grid(want, self.caps.numbers);
         self.refilter();
         if let Some(key) = keep.and_then(|id| self.model.key_of(id)) {
             self.focus_row(key, !want);
@@ -719,8 +741,13 @@ impl TagsScreen {
         self.warn = None;
         self.note = None;
         self.action_error = None;
+        let mut fields = tag.fields.clone();
+        if self.caps.numbers {
+            // Send the number shown, so a lost reply can still be confirmed.
+            fields.tag_number = Some(fields.tag_number.unwrap_or_default());
+        }
         let update = TagUpdate {
-            fields: tag.fields.clone(),
+            fields,
             is_active: !tag.is_active,
         };
         let task = if let Some(mut d) = self.link.demo_state() {
@@ -846,7 +873,9 @@ impl TagsScreen {
             color: checked.color,
             group_id: checked.group,
             description: checked.description,
-            tag_number: None,
+            // With numbers, always the number the form shows (`""` clears
+            // it); without, nothing (an older engine keeps no number).
+            tag_number: self.caps.numbers.then_some(checked.number),
         };
         let existing = f
             .editing
@@ -1374,10 +1403,10 @@ impl TagsScreen {
                     }
                     self.typed_at = now;
                     self.typed.push_str(&text);
-                    let mut key = self.model.find_prefix(&self.typed);
+                    let mut key = self.find_typed(&self.typed);
                     if key.is_none() {
                         self.typed.clone_from(&text);
-                        key = self.model.find_prefix(&text);
+                        key = self.find_typed(&text);
                     }
                     if let Some(key) = key {
                         self.focus_row(key, true);
@@ -1400,14 +1429,33 @@ impl TagsScreen {
         self.groups_ui(ui, tokens);
     }
 
+    /// Type-ahead in the list: the first shown tag whose number starts with
+    /// `text`, else the first whose name does (any case, Q-270).
+    fn find_typed(&self, text: &str) -> Option<RowKey> {
+        let q = text.trim_start().to_lowercase();
+        if q.is_empty() {
+            return None;
+        }
+        let starts = |s: &str| s.trim_start().to_lowercase().starts_with(&q);
+        let rows = self.model.rows();
+        let entry = |r: &TextRow<TagId>| self.list.tag(r.id);
+        rows.iter()
+            .position(|r| {
+                entry(r)
+                    .and_then(|e| e.number.as_deref())
+                    .is_some_and(starts)
+            })
+            .or_else(|| {
+                rows.iter()
+                    .position(|r| entry(r).is_some_and(|e| starts(&e.name)))
+            })
+            .and_then(|i| cl_grid::RowModel::row_key(&self.model, i))
+    }
+
     /// Where the selected tag is used.
     fn usage_ui(&self, ui: &mut Ui, tokens: &Tokens) {
         let Some(sel) = self.selected() else { return };
-        let name = self
-            .list
-            .tag(sel)
-            .map(|e| e.name.clone())
-            .unwrap_or_default();
+        let name = self.list.tag(sel).map(TagEntry::label).unwrap_or_default();
         let text = match self.selected_usage() {
             None => t("tags.usage.loading"),
             Some(u) if u.total == 0 => t_with("tags.usage.none", &[("tag", &name)]),
@@ -1502,6 +1550,7 @@ impl TagsScreen {
     }
 
     fn tag_form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let numbers = self.caps.numbers;
         let group_ids: Vec<Option<TagGroupId>> = std::iter::once(None)
             .chain(self.list.groups().iter().map(|g| Some(g.id)))
             .collect();
@@ -1525,6 +1574,23 @@ impl TagsScreen {
             let d = f.form.current().clone();
             let focus = f.focus.take();
             let want = |x: TagField| focus == Some(x);
+            if numbers {
+                let mut number = d.number.clone();
+                let r = pane::text_row(
+                    ui,
+                    field_id("tag", TagField::Number),
+                    &t("tags.form.number"),
+                    &mut number,
+                    want(TagField::Number),
+                )
+                .on_hover_text(t("tags.form.number_hint"));
+                if r.changed() {
+                    f.form.edit(F_NUMBER, |x| x.number = number);
+                }
+                if crate::forms::enter::entered(&r).saves() {
+                    save = Some(SaveIntent::SaveAndNew);
+                }
+            }
             let mut name = d.name.clone();
             let r = pane::text_row(
                 ui,
@@ -1573,8 +1639,12 @@ impl TagsScreen {
             if r.changed() {
                 f.form.edit(F_DESCRIPTION, |x| x.description = description);
             }
+            if !numbers {
+                pane::pending(ui, tokens, &t("tags.numbers_later"));
+            }
         });
-        problems_ui(ui, tokens, &f.problems, f.error.as_ref());
+        let number = f.form.current().number.trim().to_string();
+        problems_ui(ui, tokens, &f.problems, f.error.as_ref(), &number);
         if saving {
             form::progress_line(ui, tokens, &t("tags.form.saving"));
         }
@@ -1652,7 +1722,7 @@ impl TagsScreen {
             });
             form::hint(ui, tokens, &t("tags.group_form.required_hint"));
         });
-        problems_ui(ui, tokens, &f.problems, f.error.as_ref());
+        problems_ui(ui, tokens, &f.problems, f.error.as_ref(), "");
         if busy {
             form::progress_line(ui, tokens, &t("tags.form.saving"));
         }
@@ -1684,17 +1754,12 @@ impl TagsScreen {
             Panel::Merge(m) => m
                 .targets
                 .iter()
-                .map(|id| {
-                    self.list
-                        .tag(*id)
-                        .map(|e| e.name.clone())
-                        .unwrap_or_default()
-                })
+                .map(|id| self.list.tag(*id).map(TagEntry::label).unwrap_or_default())
                 .collect(),
             _ => return,
         };
         let source = match &self.panel {
-            Panel::Merge(m) => self.list.tag(m.source).map(|e| e.name.clone()),
+            Panel::Merge(m) => self.list.tag(m.source).map(TagEntry::label),
             _ => None,
         }
         .unwrap_or_default();
@@ -1751,10 +1816,19 @@ impl TagsScreen {
     }
 }
 
-fn problems_ui(ui: &mut Ui, tokens: &Tokens, problems: &[TagProblem], error: Option<&ApiError>) {
+/// The form's problems in plain words; `number` fills a used number's
+/// message ("Another tag already uses number 10.").
+fn problems_ui(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    problems: &[TagProblem],
+    error: Option<&ApiError>,
+    number: &str,
+) {
     ui.add_space(6.0);
     for p in problems {
-        ui.label(RichText::new(t(p.key().as_str())).color(tokens.warn_text));
+        let text = t_with(p.key().as_str(), &[("n", number)]);
+        ui.label(RichText::new(text).color(tokens.warn_text));
     }
     if let Some(e) = error {
         form::inline_error(ui, tokens, e);
@@ -1785,7 +1859,16 @@ fn save_buttons(ui: &mut Ui, save: &mut Option<SaveIntent>, cancel: &mut bool, n
 }
 
 /// Saves into the demo tags at once (no engine).
-fn demo_save_tag(link: &CompanyLink, existing: Option<Tag>, fields: TagFields) -> Versioned<Tag> {
+fn demo_save_tag(
+    link: &CompanyLink,
+    existing: Option<Tag>,
+    mut fields: TagFields,
+) -> Versioned<Tag> {
+    // Like the engine: a blank number reads back as none.
+    fields.tag_number = fields
+        .tag_number
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty());
     let mut d = link.demo_state();
     let tag = if let Some(mut x) = existing {
         x.fields = fields;
@@ -2001,6 +2084,9 @@ impl Screen for TagsScreen {
             "cursor_row": self.snap.cursor_row,
             "focused": self.snap.focused,
             "selected_active": selected.map(|e| e.active),
+            "numbers": self.caps.numbers,
+            "selected_number": selected.and_then(|e| e.number.clone()),
+            "selected_label": selected.map(TagEntry::label),
             "selected_group": selected
                 .and_then(|e| e.group)
                 .and_then(|g| self.list.group(g))
