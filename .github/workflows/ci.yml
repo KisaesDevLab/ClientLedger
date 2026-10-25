@@ -276,6 +276,9 @@ jobs:
         env:
           # Fail instead of skipping when the engine, PostgreSQL or engine/ are missing.
           CL_API_REQUIRE: "1"
+          # Capabilities the pinned engine has (Q-P05h): a missing one fails
+          # instead of going PENDING. Pin f3ce33fd: engine PR-A, PR-B, U-18.
+          CL_API_REQUIRE_CAPS: "ap-closing-v1,ap-edit-v1,bill-lines-v1,bill-terms-v1,bill-received-v1,bill-ocr-v2,idempotency-v1,idempotency-ap-v1"
           # Same hosted-runner override as the cl-host step above (cold start is
           # slower than the 15 s product budget on shared runners). The contract
           # harness has its own boot limit, CL_API_BOOT_BUDGET_SECS (default 90 s).

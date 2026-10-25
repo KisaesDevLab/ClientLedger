@@ -1,7 +1,6 @@
 //! Request idempotency against the real engine (U-18 `idempotency-v1`,
-//! engine PR #171). PENDING until the engine pin carries the capability
-//! (pin 7b267e48 does not); `CL_ENGINE_EXE` pointed at an engine main build
-//! runs them today.
+//! engine PR #171; `idempotency-ap-v1`, U-83 to U-87). The pin f3ce33fd
+//! carries both; against an older engine they are PENDING by capability.
 //!
 //! - `lost_reply_replays_one_posting`: a `POST /transactions` whose reply
 //!   is lost is sent again by cl-api with the same key; the engine answers
@@ -13,6 +12,8 @@
 //! - `keyed_routes_replay`: one keyable route of each kind (Write Check,
 //!   Enter Bill, a template's Enter now, a daily-sales post) loses its
 //!   reply and is replayed to exactly one effect.
+//! - `ap_routes_replay`: the A/P set (vendor credit create, bill edit, bill
+//!   void) under `idempotency-ap-v1`, the same way.
 
 use cl_api::{
     AccountType, ApiError, BankPosting, BillLine, Capabilities, CardChargeDraft, ContactFields,
