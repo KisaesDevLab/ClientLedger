@@ -2,7 +2,7 @@
 
 **Current phase:** P17 — Enter Bill, vendor credits, receipt inbox, attachment viewer (Next, after the `fix/PR-1` PR merges)
 **Status:** Checkpoint PR-1 fixes on `fix/PR-1`; PR open with auto-merge. M1 complete (summary below). Engine pin bumped to `f3ce33fd` (engine PRs #171–#174) on `chore/engine-pin-main`
-**Engine commit:** `16aff64b` (`main`, pinned 2026-10-25 after engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
+**Engine commit:** `b483c02e` (`main`, pinned 2026-10-25 after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
 **Last updated:** 2026-10-25
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
