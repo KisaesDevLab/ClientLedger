@@ -27,6 +27,8 @@ mod service;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use service::intake_problems;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};

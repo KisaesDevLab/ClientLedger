@@ -762,3 +762,10 @@ pub(crate) fn badge(ctx: &Context) -> usize {
     ctx.data(|d| d.get_temp::<Handle>(handle_id()))
         .map_or(0, |h| h.lock().badge())
 }
+
+/// Intake folders that need the owner (Home's Needs attention line, A01 D6).
+/// A01 WP-A stub: 0 until WP-C's multi-folder service counts them.
+#[must_use]
+pub(crate) fn intake_problems(_ctx: &Context) -> usize {
+    0
+}
