@@ -730,6 +730,16 @@ pub(crate) const BILL_PAYMENTS_LIST: Operation = read("/api/v1/bill-payments");
 pub(crate) const BILL_PAYMENT_VOID: Operation =
     keyable_ap(Method::Post, "/api/v1/bill-payments/{id}/void");
 
+// ---- A01: intake folders (engine U-93, `intake-settings-v1`) ---------------
+// Client-declared (`OUTSIDE_SPEC`) until the engine PR lands and the pin moves.
+
+/// The company's intake folders and their change token.
+pub(crate) const INTAKE_SETTINGS_GET: Operation = read("/api/v1/company/intake-settings");
+/// Replaces the folder list (`expectedUpdatedAt`, 409 `STALE`). Not in an
+/// idempotency set: a retried full replace either matches or is `STALE`.
+pub(crate) const INTAKE_SETTINGS_PUT: Operation =
+    write(Method::Put, "/api/v1/company/intake-settings");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -742,7 +752,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 186] = [
+pub const OPERATIONS: [Operation; 188] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -936,6 +946,9 @@ pub const OPERATIONS: [Operation; 186] = [
     ATTACHMENTS_UNLINKED,
     BILL_PAYMENTS_LIST,
     BILL_PAYMENT_VOID,
+    // A01
+    INTAKE_SETTINGS_GET,
+    INTAKE_SETTINGS_PUT,
 ];
 
 /// Looks up a covered operation.

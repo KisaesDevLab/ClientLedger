@@ -233,3 +233,6 @@ POST    /api/v1/attachments/{id}/link           pre-handler-only
 GET     /api/v1/attachments/unlinked            idempotent
 GET     /api/v1/bill-payments                   idempotent
 POST    /api/v1/bill-payments/{id}/void         keyable-ap
+# A01: intake folders (engine U-93, intake-settings-v1; client-declared until the pin has it)
+GET     /api/v1/company/intake-settings     idempotent
+PUT     /api/v1/company/intake-settings     pre-handler-only

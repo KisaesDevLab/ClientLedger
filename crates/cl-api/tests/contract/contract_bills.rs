@@ -534,6 +534,7 @@ pub fn backup_restore_keeps_the_bill_file_live(h: &Harness) {
             &ArchiveRequest {
                 include_attachments: true,
                 include_audit: true,
+                omit_intake_settings: false,
                 host: json!({"app": "ClientLedger", "appVersion": "test", "kind": "backup"}),
                 passphrase: passphrase.clone(),
             },

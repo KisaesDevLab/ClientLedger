@@ -90,9 +90,7 @@ fn shown_path_in(path: &Path, home: Option<&Path>) -> String {
 /// An i18n key for the owner.
 pub(crate) fn save_copy(dir: &Path, bytes: &[u8]) -> Result<PathBuf, &'static str> {
     let ext = match cl_api::check_file(bytes) {
-        Ok(cl_api::FileKind::Pdf) => "pdf",
-        Ok(cl_api::FileKind::Png) => "png",
-        Ok(cl_api::FileKind::Jpeg) => "jpg",
+        Ok(kind) => kind.extension(),
         Err(_) => return Err("check.attach.download_wrong_type"),
     };
     for n in 1..1000 {
