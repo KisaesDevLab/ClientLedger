@@ -887,14 +887,20 @@ mod tests {
             ..QueueConfig::default()
         });
         let g = q.group().expect("group");
-        // Hold the only request slot.
+        // Hold the only request slot, and wait until it is held, so the
+        // second write is queued behind it rather than racing it.
         let (release, gate) = oneshot::channel::<()>();
+        let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
         let _blocker = g
             .write(&session, label(), move |_| async move {
+                let _ = held_tx.send(());
                 let _ = gate.await;
                 Ok(())
             })
             .expect("blocker");
+        held_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the blocker holds the slot");
         let l = OrphanLabel {
             what: "save.pinned",
             key: None,
