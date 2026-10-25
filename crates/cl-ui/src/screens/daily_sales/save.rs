@@ -155,7 +155,12 @@ impl DailySalesScreen {
     /// Save & New / Save & Close / Save: check, then post (see the module
     /// docs). True when the form is done (nothing was waiting).
     pub(crate) fn start_save(&mut self, intent: SaveIntent, password: Option<Secret>) -> bool {
-        if self.save.task.is_some() || self.setup.is_some() {
+        if self.save.task.is_some() || self.setup.is_some() || self.save.lost_check.is_some() {
+            return false;
+        }
+        // The last save's outcome is unknown: nothing is sent until the
+        // recheck answers or the owner confirms (B2).
+        if self.header.is_unconfirmed() {
             return false;
         }
         self.save.error = None;
@@ -236,6 +241,10 @@ impl DailySalesScreen {
     }
 
     pub(crate) fn poll_save(&mut self) {
+        self.poll_lost();
+        if let Some(ev) = self.save.lost.poll(&mut self.header) {
+            self.lost_event(ev);
+        }
         if let Some(r) = self.save.task.as_mut().and_then(Task::poll_result) {
             self.save.task = None;
             match r {
@@ -267,6 +276,66 @@ impl DailySalesScreen {
                         self.save.error = Some(e);
                     }
                 }
+            }
+        }
+    }
+
+    /// The recheck or the owner answered an unknown save (B2).
+    pub(crate) fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
+        use crate::forms::lost_save::LostEvent;
+        match ev {
+            LostEvent::CheckRequested => {
+                let Some(id) = self.saved.as_ref().map(|s| s.id) else {
+                    return;
+                };
+                if self.save.lost.begin_own(&mut self.header) {
+                    self.save.lost_check = self.run(Call::Entry(id), false);
+                    if self.save.lost_check.is_none() {
+                        let ev = self
+                            .save
+                            .lost
+                            .answer(&mut self.header, cl_api::Recheck::Unknown);
+                        self.lost_event(ev);
+                    }
+                    self.poll_lost();
+                }
+            }
+            LostEvent::Saved(Some(txn)) => {
+                self.save.key = None;
+                self.open_task = self.run(Call::FindTransaction(txn), false);
+            }
+            _ => {}
+        }
+    }
+
+    /// The day's entry, read for Check again: posted is saved (shown),
+    /// still a draft is not saved.
+    pub(crate) fn poll_lost(&mut self) {
+        let Some(r) = self.save.lost_check.as_mut().and_then(Task::poll_result) else {
+            return;
+        };
+        self.save.lost_check = None;
+        match r {
+            Ok(Reply::Entry(e)) if e.status == EntryStatus::Posted => {
+                let _ = self.save.lost.answer(
+                    &mut self.header,
+                    cl_api::Recheck::Committed {
+                        transaction: e.transaction,
+                    },
+                );
+                self.posted(&e);
+            }
+            Ok(Reply::Entry(e)) if e.status == EntryStatus::Draft => {
+                let _ = self
+                    .save
+                    .lost
+                    .answer(&mut self.header, cl_api::Recheck::NotCommitted);
+            }
+            _ => {
+                let _ = self
+                    .save
+                    .lost
+                    .answer(&mut self.header, cl_api::Recheck::Unknown);
             }
         }
     }
@@ -324,6 +393,7 @@ impl DailySalesScreen {
 
     /// The engine posted the day.
     fn posted(&mut self, e: &DailyEntry) {
+        self.save.lost.saved();
         let form = self.header.current().clone();
         crate::forms::publish_saved(&self.link, &self.bus, &self.touched(&form));
         if let Some(txn) = e.transaction {
@@ -410,10 +480,22 @@ impl DailySalesScreen {
         if !crate::screens::register::keeps_key(&e) {
             self.save.key = None;
         }
-        self.header.save_failed(SaveFailure {
+        let failure = SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
-        });
+        };
+        if self.save.lost.lost(&e) {
+            self.header.save_unknown(failure);
+            // A lost post of a known draft: the draft's status settles it
+            // (posting flips it in one database transaction).
+            let draft = self
+                .saved
+                .as_ref()
+                .is_some_and(|s| s.status == EntryStatus::Draft);
+            self.save.lost.own_check(draft);
+            return;
+        }
+        self.header.save_failed(failure);
         let supported = self.lock_supported();
         if self
             .closing_prompt

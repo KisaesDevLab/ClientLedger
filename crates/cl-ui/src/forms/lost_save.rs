@@ -34,6 +34,10 @@ pub enum LostEvent {
     StillUnknown,
     /// The owner looked in the register and confirmed saving again.
     OwnerConfirmed,
+    /// Check again on a form with its own, safer check
+    /// ([`LostSave::own_check`]): the form reads what it needs and hands
+    /// the answer to [`LostSave::answer`].
+    CheckRequested,
 }
 
 /// One form's unknown save.
@@ -54,6 +58,9 @@ pub struct LostSave {
     pub(crate) after_unknown: bool,
     /// Rechecks run (control channel).
     pub(crate) checks: u32,
+    /// The form answers Check again itself (Daily Sales reads the day's
+    /// entry by id: its status settles it).
+    own_check: bool,
 }
 
 impl LostSave {
@@ -69,6 +76,7 @@ impl LostSave {
                 self.key.clone_from(idempotency_key);
                 self.notice = None;
                 self.confirm_open = false;
+                self.own_check = false;
                 true
             }
             _ => false,
@@ -124,6 +132,38 @@ impl LostSave {
         );
     }
 
+    /// The form runs its own check for this unknown save (`true`) or the
+    /// stored probe (`false`, the default).
+    pub fn own_check(&mut self, on: bool) {
+        self.own_check = on;
+    }
+
+    /// The form's own check started: false when nothing is unknown or a
+    /// check is running.
+    pub fn begin_own<V: Clone + PartialEq>(&mut self, form: &mut FormState<V>) -> bool {
+        if !self.pending || !form.begin_recheck() {
+            return false;
+        }
+        self.checks += 1;
+        self.notice = None;
+        true
+    }
+
+    /// The form's own check answered.
+    pub fn answer<V: Clone + PartialEq>(
+        &mut self,
+        form: &mut FormState<V>,
+        r: Recheck,
+    ) -> LostEvent {
+        let ev = match r {
+            Recheck::Committed { transaction } => LostEvent::Saved(transaction),
+            Recheck::NotCommitted => LostEvent::NotSaved,
+            Recheck::Unknown => LostEvent::StillUnknown,
+        };
+        self.apply(form, ev);
+        ev
+    }
+
     /// Tests: a recheck whose engine answers `r`.
     #[cfg(test)]
     pub(crate) fn recheck_answering<V: Clone + PartialEq>(
@@ -175,6 +215,7 @@ impl LostSave {
                 self.end();
                 self.after_unknown = true;
             }
+            LostEvent::CheckRequested => {}
         }
     }
 
@@ -249,7 +290,11 @@ impl LostSave {
                     let check =
                         ui.add_enabled(!self.checking(), egui::Button::new(t("lost.check_again")));
                     if check.clicked() {
-                        self.recheck(form, link, group);
+                        if self.own_check {
+                            out = Some(LostEvent::CheckRequested);
+                        } else {
+                            self.recheck(form, link, group);
+                        }
                     }
                     if ui
                         .add_enabled(!self.checking(), egui::Button::new(t("lost.save_anyway")))

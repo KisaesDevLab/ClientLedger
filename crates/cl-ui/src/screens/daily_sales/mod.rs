@@ -542,6 +542,10 @@ pub(crate) struct SaveState {
     pub count: u32,
     /// `post`, `void`, `clear`, `load`, `mismatch`, `not_posted`.
     pub last_action: Option<&'static str>,
+    /// A save whose outcome is unknown (B2).
+    pub lost: crate::forms::lost_save::LostSave,
+    /// Check again on a lost post: the day's entry, read by id.
+    pub lost_check: Option<Job>,
 }
 
 /// Void: the confirmation and its request.
