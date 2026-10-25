@@ -1,0 +1,101 @@
+# Match Vendor Statement (P17 WP6, plan §6 "Phase tests: statement match
+# fixture") against `clientledger --demo`: Vendors › Match Vendor
+# Statement… opens on last month (October; the demo's today is 11/04/2026),
+# a vendor is picked and the synthetic October statement
+# (`fixtures/statement-match/vendor_oct.tsv`) is pasted as a spreadsheet
+# block. The demo books are `fixtures/statement-match/books.json`. Match
+# pairs five lines and leaves one bill missing on each side; without
+# `ap-edit-v1` the credit pairs by amount and date (review S6) and the note
+# says so. Create bill hands the statement line to Enter Bill (the
+# `OpenWith` hand-off fires; WP4's form takes the prefill). Then the
+# minimum window at 200%. Nothing is saved: the bill opened from the
+# statement is closed without saving.
+name: statement_match
+description: Paste the October statement, five matched and one missing on each side, Create bill hands off the line, minimum window at 200%.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: nav.statement_match
+  - assert_state: {key: screen.screen, equals: statement_match}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_exists: {role: label, label: Match a vendor statement}
+  - assert_value: {target: {role: text_input, label: From}, equals: "10/01/2026"}
+  - assert_value: {target: {role: text_input, label: To}, equals: "10/31/2026"}
+
+  # --- Refused without a vendor ------------------------------------------------
+  - click: {role: button, label: Match}
+  - assert_state: {key: screen.problem, equals: statement.problem.vendor}
+  - assert_exists: {role: label, label: Choose the vendor whose statement this is.}
+
+  # --- Vendor, paste, Match ------------------------------------------------------
+  - click: {role: combo_box, label: Vendor}
+  - click: {role: button, label: Branson Equipment Rental}
+  - assert_state: {key: screen.vendor, equals: true}
+  - paste:
+      text: "Date\tRef. no.\tAmount\tType\n10/02/2026\tINV-55790\t1,330.00\tInvoice\n10/09/2026\tINV-55811\t480.00\tInvoice\n10/12/2026\tCM-2041\t(75.00)\tCredit\n10/15/2026\tPMT 1043\t-1,810.00\t\n10/20/2026\tINV-55840\t265.50\tInvoice\n10/27/2026\tinv-55852\t912.40\tInvoice\n"
+      target: {role: multiline_text_input, label: Statement lines}
+  - click: {role: button, label: Match}
+  - assert_state: {key: screen.problem, equals: null}
+  - assert_state: {key: screen.rows, equals: 6}
+  - assert_state: {key: screen.bad_lines, equals: []}
+  - assert_state: {key: screen.result.complete, equals: true}
+  - assert_state: {key: screen.result.books, equals: 6}
+  - assert_state: {key: screen.result.matched.0.line, equals: 2}
+  - assert_state: {key: screen.result.matched.0.pass, equals: reference}
+  - assert_state: {key: screen.result.matched.2.line, equals: 4}
+  - assert_state: {key: screen.result.matched.2.pass, equals: amount_and_date}
+  - assert_state: {key: screen.result.matched.3.line, equals: 5}
+  - assert_state: {key: screen.result.matched.3.pass, equals: amount_and_date}
+  - assert_state: {key: screen.result.matched.4.line, equals: 7}
+  - assert_state: {key: screen.result.missing_in_books, equals: [6]}
+  - assert_state: {key: screen.result.missing_on_statement, equals: 1}
+  - assert_state: {key: screen.result.ambiguous, equals: []}
+  - assert_exists: {role: label, label: "The first line looked like column headings, so it was skipped."}
+  - assert_exists: {role: label, label: "Vendor credits in your books don't keep the vendor's ref. no. yet, so credits are matched by amount and date only."}
+  - assert_exists: {role: label, label: Matched (5)}
+  - assert_exists: {role: label, label: "On the statement, not in your books (1)"}
+  - assert_exists: {role: label, label: "In your books, not on the statement (1)"}
+  - assert_not_exists: {role: label, label_contains: Needs your choice}
+  - assert_exists: {role: label, label: INV-55840}
+  - assert_exists: {role: label, label: INV-55866}
+  - assert_count: {target: {role: button, label: Create bill}, count: 1}
+  - assert_count: {target: {role: button, label: Open}, count: 1}
+  - screenshot: matched
+  - scroll: {target: {role: label, label: Matched (5)}, to: end}
+  - screenshot: missing
+
+  # --- Create bill: Enter Bill opens with the statement line ----------------------
+  - click: {role: button, label: Create bill}
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - command: file.close_window
+  - click_if_present: {role: button, label: Discard changes}
+  - click: {role: tab, label_contains: Match Vendor Statement}
+  - assert_state: {key: screen.screen, equals: statement_match}
+  - assert_state: {key: screen.handoffs, equals: 1}
+  - assert_state: {key: screen.last_handoff, equals: bill}
+
+  # --- Minimum window at 200%: nothing drawn over anything ---------------------
+  - resize: {width: 960, height: 640}
+  - set_zoom: {percent: 200}
+  - screenshot: statement-z200
+  - assert_no_clipping:
+      ignore:
+        # The tab strip scrolls, with the » list.
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        # The window body scrolls by design: only the bottom band of the
+        # scroll area may be cut by the window edge (points: 480 x 320 at
+        # 200%).
+        - {x: 0, y: 250, width: 10000, height: 200}
+  - scroll: {target: {role: label, label: Match a vendor statement}, to: end}
+  - screenshot: statement-z200-end
+  - assert_no_clipping:
+      ignore:
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        - {x: 0, y: 250, width: 10000, height: 200}
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}
+
+  # --- Close (nothing to save) ------------------------------------------------------
+  - command: file.close_window
+  - click: {role: tab, label: Home}
