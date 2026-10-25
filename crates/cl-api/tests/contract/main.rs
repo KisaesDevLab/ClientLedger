@@ -660,6 +660,10 @@ fn main() -> std::process::ExitCode {
             contract_bills::attach_draft_live,
         ),
         (
+            "bills::attachments_company_u90_live",
+            contract_bills::attachments_company_u90_live,
+        ),
+        (
             "bills::attachment_10mb_edge_live",
             contract_bills::attachment_10mb_edge_live,
         ),

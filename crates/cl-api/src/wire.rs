@@ -234,6 +234,11 @@ impl Capabilities {
     /// the A/P document mutations (bill edit and void, vendor credit create,
     /// edit and void, bill-payment void), on top of `idempotency-v1`.
     pub const IDEMPOTENCY_AP: &'static str = "idempotency-ap-v1";
+    /// U-90 (engine PR #175, pin 16aff64b): attachment routes work in the
+    /// request's company (`X-Company-Id`): uploads are stamped with it, and
+    /// reads, downloads, links and deletes see only that company's files and
+    /// tenant-wide ones.
+    pub const ATTACHMENTS_COMPANY: &'static str = "attachments-company-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

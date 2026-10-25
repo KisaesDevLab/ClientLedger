@@ -385,6 +385,43 @@ pub fn attach_draft_live(h: &Harness) {
     assert_eq!(got.attachable_id, id.to_string());
 }
 
+/// U-90 (`attachments-company-v1`): an upload is stamped with the open
+/// company (cl-api sends `X-Company-Id` on every attachment route), reads
+/// and the download work in that company, and another company's session
+/// does not see the file.
+pub fn attachments_company_u90_live(h: &Harness) {
+    if !h.require_cap(Capabilities::ATTACHMENTS_COMPANY, "U-90") {
+        return;
+    }
+    let s = &h.s1;
+    let cl_api::Scope::Company { company_id, .. } = s.scope() else {
+        panic!("Contract Co is open");
+    };
+    let up = h
+        .run(
+            s.attachments()
+                .upload_draft(DraftKey::new(), "u90.pdf", PDF, key()),
+        )
+        .expect("upload");
+    let path = format!("/api/v1/attachments/{}", up.id);
+    let got = h
+        .run(s.raw(Method::Get, &path, &[], None))
+        .expect("get raw");
+    assert_eq!(got.status, 200, "{}", got.body);
+    assert_eq!(
+        got.body["attachment"]["companyId"].as_str(),
+        Some(company_id.to_string().as_str()),
+        "the upload carries the open company"
+    );
+    assert_eq!(h.run(s.attachments().download(up.id)).expect("bytes"), PDF);
+    let other = h.s3();
+    let e = h
+        .run(other.attachments().get(up.id))
+        .expect_err("another company's file");
+    assert!(matches!(e, ApiError::NotFound { .. }), "{e:?}");
+    h.run(s.attachments().delete(up.id, key())).expect("delete");
+}
+
 /// Exactly 10 MB is accepted; 10 MB + 1 is refused by cl-api with nothing
 /// sent, and by the engine (a raw multipart upload).
 pub fn attachment_10mb_edge_live(h: &Harness) {
@@ -518,6 +555,22 @@ pub fn backup_restore_keeps_the_bill_file_live(h: &Harness) {
         }))
         .expect("import job");
     let st = finish_job(h, &s, &job.job_id);
+    // U-91 (engine bug): the import's content check compares
+    // `companies.check_settings` as text after mapping the new ids back, but
+    // jsonb re-sorts `nextCheckNumbers` by the new account ids, so a company
+    // with checks from two or more bank accounts (tenant B by now) fails the
+    // restore at random. Only that exact refusal is pending.
+    if st.status == JobState::Failed
+        && st.error.as_ref().is_some_and(|e| {
+            e.code == "ARCHIVE_VERIFY_FAILED" && e.message.contains("(content(companies))")
+        })
+    {
+        h.pending(
+            "U-91",
+            "restore refused: check_settings.nextCheckNumbers key order changes when ids are remapped",
+        );
+        return;
+    }
     assert_eq!(st.status, JobState::Succeeded, "{:?}", st.error);
     let restored = st.import_result().expect("import result").tenant_id;
     h.run(s.open_company(restored)).expect("open restored");
