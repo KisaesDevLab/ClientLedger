@@ -19,7 +19,7 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::{Mutex, PoisonError};
 
-use cl_core::ids::AccountId;
+use cl_core::ids::{AccountId, ContactId};
 
 /// How many notices the bus remembers.
 pub const KEEP: usize = 256;
@@ -41,6 +41,9 @@ pub enum Change {
     /// Templates (saved, replaced, edited or deleted): an open Templates
     /// list reads them again.
     Templates,
+    /// Bills or vendor credits of this vendor were saved, voided or deleted
+    /// (P17): its vendor panel and open-bill lists read them again.
+    Bills(ContactId),
 }
 
 impl Change {
@@ -79,6 +82,10 @@ pub struct Changes {
     pub items: bool,
     /// Templates.
     pub templates: bool,
+    /// The vendors whose bills or credits changed (P17).
+    pub bill_vendors: BTreeSet<ContactId>,
+    /// Bills of any vendor may have changed (a subscriber that fell behind).
+    pub bills_all: bool,
 }
 
 impl Changes {
@@ -92,6 +99,8 @@ impl Changes {
             tags: true,
             items: true,
             templates: true,
+            bill_vendors: BTreeSet::new(),
+            bills_all: true,
         }
     }
 
@@ -117,6 +126,12 @@ impl Changes {
         }
     }
 
+    /// Bills or credits of `vendor` may have changed (P17).
+    #[must_use]
+    pub fn bills_touch(&self, vendor: ContactId) -> bool {
+        self.bills_all || self.bill_vendors.contains(&vendor)
+    }
+
     /// Contacts, accounts or tags changed (the pickers' lists).
     #[must_use]
     pub fn lists(&self) -> bool {
@@ -138,6 +153,9 @@ impl Changes {
             Change::Tags => self.tags = true,
             Change::Items => self.items = true,
             Change::Templates => self.templates = true,
+            Change::Bills(vendor) => {
+                self.bill_vendors.insert(*vendor);
+            }
         }
     }
 }
@@ -294,6 +312,20 @@ mod tests {
         let c = bus.take(&mut sub);
         assert_eq!(c.ledger, LedgerScope::All);
         assert!(c.ledger_touches(account(3)));
+    }
+
+    #[test]
+    fn bill_notices_name_their_vendors() {
+        let vendor = |n: u8| {
+            ContactId::parse(&format!("00000000-0000-4000-8000-0000000001{n:02x}")).expect("id")
+        };
+        let bus = DataBus::new();
+        let mut sub = bus.subscribe();
+        bus.publish(Change::Bills(vendor(1)));
+        let c = bus.take(&mut sub);
+        assert!(c.bills_touch(vendor(1)) && !c.bills_touch(vendor(2)));
+        assert!(!c.ledger_any() && !c.is_empty());
+        assert!(Changes::everything().bills_touch(vendor(2)));
     }
 
     #[test]

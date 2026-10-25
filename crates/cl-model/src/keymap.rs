@@ -5,8 +5,8 @@
 //! types never appear in this crate; `cl-ui` converts a key press into a
 //! [`Shortcut`] and asks [`Keymap::resolve`].
 //!
-//! Scope rules: the innermost scope wins (`Grid` over `Form` over `Window`
-//! over `Global`), so Ctrl+D can mean "Make Deposit" globally, "delete this
+//! Scope rules: the innermost scope wins (`Grid` or `Viewer` over `Form`
+//! over `Window` over `Global`), so Ctrl+D can mean "Make Deposit" globally, "delete this
 //! transaction" inside a form and "copy down" in a grid that opted in. Two
 //! commands may not share a shortcut in the same scope ([`Keymap::new`]
 //! refuses).
@@ -34,11 +34,23 @@ pub enum Scope {
     /// has focus. Innermost; the form, window and global keys still apply
     /// underneath it.
     Grid,
+    /// While a document preview (the PDF and image viewer, P17) has focus,
+    /// in a form's source-document card or its own full-size tab.
+    /// Innermost like [`Scope::Grid`]: its zoom keys win over the window
+    /// zoom and Page Up/Down turn pages instead of records; the form,
+    /// window and global keys still apply underneath it.
+    Viewer,
 }
 
 impl Scope {
     /// Every scope, outermost first (the order of `KEYBOARD.md`).
-    pub const ALL: &'static [Scope] = &[Scope::Global, Scope::Window, Scope::Form, Scope::Grid];
+    pub const ALL: &'static [Scope] = &[
+        Scope::Global,
+        Scope::Window,
+        Scope::Form,
+        Scope::Grid,
+        Scope::Viewer,
+    ];
 
     /// Heading used in `KEYBOARD.md` and the overlay.
     #[must_use]
@@ -48,6 +60,7 @@ impl Scope {
             Scope::Window => "In a window",
             Scope::Form => "In a form or grid",
             Scope::Grid => "In a grid",
+            Scope::Viewer => "In a document preview",
         }
     }
 
@@ -56,6 +69,7 @@ impl Scope {
     pub fn active_from(self) -> &'static [Scope] {
         match self {
             Scope::Grid => &[Scope::Grid, Scope::Form, Scope::Window, Scope::Global],
+            Scope::Viewer => &[Scope::Viewer, Scope::Form, Scope::Window, Scope::Global],
             Scope::Form => &[Scope::Form, Scope::Window, Scope::Global],
             Scope::Window => &[Scope::Window, Scope::Global],
             Scope::Global => &[Scope::Global],
@@ -509,7 +523,62 @@ mod tests {
         );
         assert_eq!(Scope::Grid.title(), "In a grid");
         assert_eq!(Scope::Grid.active_from()[0], Scope::Grid);
-        assert_eq!(Scope::ALL.len(), 4);
+        assert_eq!(Scope::ALL.len(), 5);
+    }
+
+    #[test]
+    fn viewer_scope_is_innermost_and_keeps_form_keys() {
+        let km = Keymap::new(COMMANDS).unwrap();
+        let at = |focus: Scope, mods: Mods, k: Key| {
+            km.resolve(focus, Shortcut::new(mods, k))
+                .map(CommandId::as_str)
+        };
+        // Zoom keys zoom the document in a preview, the app elsewhere.
+        assert_eq!(
+            at(Scope::Viewer, Mods::CMD, Key::Equals),
+            Some("viewer.zoom_in")
+        );
+        assert_eq!(
+            at(Scope::Viewer, Mods::CMD, Key::Minus),
+            Some("viewer.zoom_out")
+        );
+        assert_eq!(
+            at(Scope::Viewer, Mods::CMD, Key::Digit(0)),
+            Some("viewer.fit")
+        );
+        assert_eq!(
+            at(Scope::Form, Mods::CMD, Key::Equals),
+            Some("window.zoom_in")
+        );
+        assert_eq!(
+            at(Scope::Window, Mods::CMD, Key::Digit(0)),
+            Some("window.zoom_reset")
+        );
+        // Page Up/Down turn pages in a preview, records in a form.
+        assert_eq!(
+            at(Scope::Viewer, Mods::NONE, Key::PageDown),
+            Some("viewer.page_next")
+        );
+        assert_eq!(
+            at(Scope::Viewer, Mods::NONE, Key::PageUp),
+            Some("viewer.page_prev")
+        );
+        assert_eq!(
+            at(Scope::Form, Mods::NONE, Key::PageDown),
+            Some("form.next_record")
+        );
+        // Form keys still work underneath the preview.
+        assert_eq!(
+            at(Scope::Viewer, Mods::ALT, Key::Letter('S')),
+            Some("form.save_close")
+        );
+        assert_eq!(
+            at(Scope::Viewer, Mods::ALT, Key::Letter('A')),
+            Some("bill.accept_read")
+        );
+        // A grid never sees viewer keys.
+        assert!(!Scope::Grid.active_from().contains(&Scope::Viewer));
+        assert_eq!(Scope::Viewer.title(), "In a document preview");
     }
 
     #[test]

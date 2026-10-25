@@ -199,6 +199,33 @@ impl Capabilities {
     /// also moves line tags and default-tag references.
     pub const MERGE_CLOSING_DATE: &'static str = "merge-closing-date-v1";
 
+    // ---- P17: Enter Bill, vendor credits (engine PR-A U-83..U-87, PR-B U-89;
+    // client-declared until the pin moves) ------------------------------------
+    /// U-83: bill and vendor credit create, edit, void (and bill-capture
+    /// enter) honour the closing date and take `closingPassword` (423
+    /// `TB_PERIOD_LOCKED`, 403 `CLOSING_PASSWORD_INVALID`), audited.
+    pub const AP_CLOSING: &'static str = "ap-closing-v1";
+    /// U-84: `PUT /vendor-credits/{id}` (409 `CREDIT_APPLIED`), bill and
+    /// credit delete through `DELETE /transactions/{id}` when unpaid and
+    /// unapplied (409 `BILL_HAS_PAYMENTS`), `expectedUpdatedAt` on edit, void
+    /// and delete (409 `STALE_DOCUMENT`), vendor summary counts posted bills
+    /// only.
+    pub const AP_EDIT: &'static str = "ap-edit-v1";
+    /// U-85: bill and credit lines with `itemId`, `quantity`, `unitPrice`
+    /// (amount = qty × price rounded half away from zero, 400
+    /// `LINE_AMOUNT_MISMATCH`), `contactId`, `isBillable`, `tagId`, and
+    /// `draftAttachmentId` on create.
+    pub const BILL_LINES: &'static str = "bill-lines-v1";
+    /// U-86: the shared payment terms (with discount terms), `GET
+    /// /bills/terms-dates`, `GET /payment-terms`, calendar-exact due dates.
+    pub const BILL_TERMS: &'static str = "bill-terms-v1";
+    /// U-87: `billReceived` on bills (false = left out of `/bills/payable`).
+    pub const BILL_RECEIVED: &'static str = "bill-received-v1";
+    /// U-89: no OCR on upload in desktop mode; `fieldConfidence` and line
+    /// `confidence` strings on `POST /bills/extract-from-attachment/{id}`,
+    /// amounts as decimal strings or null.
+    pub const BILL_OCR_V2: &'static str = "bill-ocr-v2";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {

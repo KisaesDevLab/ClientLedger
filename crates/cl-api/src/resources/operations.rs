@@ -591,6 +591,57 @@ pub(crate) const RECONCILIATIONS: Operation = read("/api/v1/banking/reconciliati
 /// Imported bank statements.
 pub(crate) const BANK_STATEMENTS: Operation = read("/api/v1/banking/statements");
 
+// ---- P17: Enter Bill, vendor credits, receipt inbox, document reading ---------
+// `BILLS_LIST` (P16) and `BILLS_CREATE` (P08) are above. The vendor credit
+// edit, the terms dates and the payment terms list are client-declared
+// (engine PR-A, U-84/U-86) until the pin moves; bill and credit delete use
+// `TXN_DELETE` (U-84b).
+
+/// One bill with its lines.
+pub(crate) const BILL_GET: Operation = read("/api/v1/bills/{id}");
+/// Changes a bill (`expectedUpdatedAt` and `closingPassword` with
+/// `ap-edit-v1` / `ap-closing-v1`).
+pub(crate) const BILL_PUT: Operation = write(Method::Put, "/api/v1/bills/{id}");
+/// Voids an unpaid bill.
+pub(crate) const BILL_VOID: Operation = write(Method::Post, "/api/v1/bills/{id}/void");
+/// The due and discount dates a bill would get (`bill-terms-v1`, U-86d).
+pub(crate) const BILL_TERMS_DATES: Operation = read("/api/v1/bills/terms-dates");
+/// The fixed payment terms list (`bill-terms-v1`, U-86e).
+pub(crate) const PAYMENT_TERMS: Operation = read("/api/v1/payment-terms");
+/// Links the files of a draft to a saved bill.
+pub(crate) const BILL_ATTACH_DRAFT: Operation =
+    write(Method::Post, "/api/v1/bills/{id}/attach-draft");
+/// Reads a bill out of an uploaded file with the owner's AI provider (only
+/// on the owner's click, Q-73; a POST, so classed as a write).
+pub(crate) const BILL_EXTRACT: Operation = write(
+    Method::Post,
+    "/api/v1/bills/extract-from-attachment/{attachmentId}",
+);
+/// Vendor credits by vendor, date and text.
+pub(crate) const VENDOR_CREDITS_LIST: Operation = read("/api/v1/vendor-credits");
+/// Records a vendor credit.
+pub(crate) const VENDOR_CREDITS_CREATE: Operation = write(Method::Post, "/api/v1/vendor-credits");
+/// One vendor credit with its lines.
+pub(crate) const VENDOR_CREDIT_GET: Operation = read("/api/v1/vendor-credits/{id}");
+/// Changes an unapplied vendor credit (`ap-edit-v1`, U-84a).
+pub(crate) const VENDOR_CREDIT_PUT: Operation = write(Method::Put, "/api/v1/vendor-credits/{id}");
+/// Voids a vendor credit.
+pub(crate) const VENDOR_CREDIT_VOID: Operation =
+    write(Method::Post, "/api/v1/vendor-credits/{id}/void");
+/// A vendor's credits with an unused balance.
+pub(crate) const VENDOR_CREDITS_AVAILABLE: Operation =
+    read("/api/v1/vendor-credits/available/{vendorId}");
+/// One file's details.
+pub(crate) const ATTACHMENT_GET: Operation = read("/api/v1/attachments/{id}");
+/// Deletes a file.
+pub(crate) const ATTACHMENT_DELETE: Operation = write(Method::Delete, "/api/v1/attachments/{id}");
+/// Links a file to a record.
+pub(crate) const ATTACHMENT_LINK: Operation = write(Method::Post, "/api/v1/attachments/{id}/link");
+/// Files not linked to any record.
+pub(crate) const ATTACHMENTS_UNLINKED: Operation = read("/api/v1/attachments/unlinked");
+/// Bill payments by vendor and date (statement match).
+pub(crate) const BILL_PAYMENTS_LIST: Operation = read("/api/v1/bill-payments");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -603,7 +654,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 167] = [
+pub const OPERATIONS: [Operation; 185] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -777,6 +828,25 @@ pub const OPERATIONS: [Operation; 167] = [
     PAYROLL_SESSIONS,
     RECONCILIATIONS,
     BANK_STATEMENTS,
+    // P17
+    BILL_GET,
+    BILL_PUT,
+    BILL_VOID,
+    BILL_TERMS_DATES,
+    PAYMENT_TERMS,
+    BILL_ATTACH_DRAFT,
+    BILL_EXTRACT,
+    VENDOR_CREDITS_LIST,
+    VENDOR_CREDITS_CREATE,
+    VENDOR_CREDIT_GET,
+    VENDOR_CREDIT_PUT,
+    VENDOR_CREDIT_VOID,
+    VENDOR_CREDITS_AVAILABLE,
+    ATTACHMENT_GET,
+    ATTACHMENT_DELETE,
+    ATTACHMENT_LINK,
+    ATTACHMENTS_UNLINKED,
+    BILL_PAYMENTS_LIST,
 ];
 
 /// Looks up a covered operation.
