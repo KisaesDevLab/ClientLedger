@@ -91,7 +91,9 @@ fn every_operation_is_recorded_and_in_the_spec() {
 
 /// The engine's keyed route sets as recorded: `idempotency-v1` (U-18) and
 /// `idempotency-ap-v1` (U-83 to U-87), sorted and disjoint.
-fn recorded_idempotency_sets() -> (Vec<(String, String)>, Vec<(String, String)>) {
+type Routes = Vec<(String, String)>;
+
+fn recorded_idempotency_sets() -> (Routes, Routes) {
     let v1 = spec::route_lines(&fixture("idempotency_v1_routes.txt"));
     let ap = spec::route_lines(&fixture("idempotency_ap_v1_routes.txt"));
     assert_eq!(v1.len(), 20, "the idempotency-v1 set has 20 routes");
@@ -106,7 +108,7 @@ fn recorded_idempotency_sets() -> (Vec<(String, String)>, Vec<(String, String)>)
 /// The keyable rows `operations.txt` must have: every `idempotency-v1`
 /// route, plus the `idempotency-ap-v1` routes the registry already covers
 /// (none on main; P17 adds the bill PUT and void routes).
-fn expected_keyable() -> Vec<(String, String)> {
+fn expected_keyable() -> Routes {
     let (v1, ap) = recorded_idempotency_sets();
     let mut out = v1;
     out.extend(ap.into_iter().filter(|(m, r)| {

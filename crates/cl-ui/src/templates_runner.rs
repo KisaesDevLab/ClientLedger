@@ -14,7 +14,10 @@
 //!   closing-date password, so nothing posts into a closed period. While
 //!   capped schedules (`CATCH_UP_CAPPED`, 31 dates per call) come back the
 //!   run asks again under the same id, at most 12 extra times; the rest is
-//!   left for the next run. A round that fails after others answered keeps
+//!   left for the next run. With `run-due-filter-v1` (U-82) the run leaves
+//!   out the templates a catch-up question is open for
+//!   (`excludeTemplateIds`) and an answered one runs alone (`templateIds`,
+//!   Q-PR1d). A round that fails after others answered keeps
 //!   what they posted (shown and published) and the run id, which the next
 //!   run that day reuses.
 //! - **Errors:** no permission (403) is silent; an engine without
@@ -59,6 +62,10 @@ pub struct DueBoard {
     questions: Vec<CatchUpQuestion>,
     /// "Post all" answers: the template and its first missed date then.
     confirmed: BTreeSet<(TemplateId, CalendarDate)>,
+    /// "Post all" answers not yet run on their own: with
+    /// `run-due-filter-v1` each goes as a run of that template only
+    /// (`templateIds: [id]`, Q-PR1d), oldest answer first.
+    answered: Vec<TemplateId>,
     /// Occurrences a form saved whose link to the date is still being
     /// made (S2): the saved transaction and the tries so far. Templates Due
     /// shows them as already entered; the runner tries again.
@@ -155,9 +162,17 @@ impl DueBoard {
             if let Some(first) = q.dates.first() {
                 self.confirmed.insert((template, *first));
             }
+            if !self.answered.contains(&template) {
+                self.answered.push(template);
+            }
             self.generation += 1;
             self.check_now = true;
         }
+    }
+
+    /// The next "Post all" answer to run on its own (Q-PR1d, U-82).
+    fn take_answered(&mut self) -> Option<TemplateId> {
+        (!self.answered.is_empty()).then(|| self.answered.remove(0))
     }
 
     /// "Skip these" for `template` finished (each date went through the
@@ -417,6 +432,7 @@ impl DueBoard {
         self.check_now = false;
         self.questions.clear();
         self.confirmed.clear();
+        self.answered.clear();
         self.linking.clear();
         self.store = None;
         self.skipping.clear();
@@ -554,6 +570,30 @@ where
             Err(e) => return rounds.end(Some(e)),
         }
     }
+}
+
+/// What one run sends (Q-PR1d), `None` for nothing (the run waits for the
+/// owner's answers). Without `run-due-filter-v1` (`filtered` false) a
+/// catch-up question holds the whole run. With it the others post at once
+/// (`excludeTemplateIds`), and a "Post all" answer runs that template alone
+/// (`templateIds: [id]`).
+pub(crate) fn run_filter(
+    filtered: bool,
+    questions: &[CatchUpQuestion],
+    only: Option<TemplateId>,
+) -> Option<cl_api::RunDueFilter> {
+    let asked = |id: TemplateId| questions.iter().any(|q| q.template == id);
+    if !filtered {
+        return questions.is_empty().then_some(cl_api::RunDueFilter::All);
+    }
+    if let Some(id) = only.filter(|id| !asked(*id)) {
+        return Some(cl_api::RunDueFilter::Only(vec![id]));
+    }
+    if questions.is_empty() {
+        return Some(cl_api::RunDueFilter::All);
+    }
+    (questions.len() <= cl_api::RUN_FILTER_MAX)
+        .then(|| cl_api::RunDueFilter::Except(questions.iter().map(|q| q.template).collect()))
 }
 
 /// An automatic template has a due date held by a saved form whose link to
@@ -803,10 +843,20 @@ impl TemplatesRunner {
     fn start(&mut self, link: &Arc<CompanyLink>, today: CalendarDate) {
         let run_id = self.run_id_for(today);
         self.current = Some((today, run_id));
-        let (confirmed, held) = {
+        // U-82: with the run filter a question holds only its own template
+        // (the demo has no filter and keeps the waiting run).
+        let filtered = !link.is_demo()
+            && link
+                .capabilities()
+                .has(cl_api::Capabilities::RUN_DUE_FILTER);
+        let (confirmed, held, only) = {
             let mut board = link.due();
             board.running = true;
-            (board.confirmed(), board.held_dates())
+            let only = board.take_answered().filter(|_| filtered);
+            if !filtered {
+                board.answered.clear();
+            }
+            (board.confirmed(), board.held_dates(), only)
         };
         let demo_confirmed = confirmed.clone();
         let demo_held = held.clone();
@@ -826,41 +876,49 @@ impl TemplatesRunner {
             },
             move |s| async move {
                 // An automatic template with more than three missed dates
-                // asks first (Q-PR1d): the run waits for the answer. The
-                // engine's run takes no template filter, so nothing is
-                // sent until then.
-                match s.templates().list_all().await {
+                // asks first (Q-PR1d). Without `run-due-filter-v1` the
+                // whole run waits for the answer (nothing is sent until
+                // then); with it the others post now and the asked
+                // templates are left out (U-82).
+                let mut questions = Vec::new();
+                let filter = match s.templates().list_all().await {
                     Ok(rows) => {
-                        let questions = questions_of(&rows, today, &confirmed);
-                        if !questions.is_empty() {
+                        questions = questions_of(&rows, today, &confirmed);
+                        let Some(filter) = run_filter(filtered, &questions, only) else {
                             return Ok(Gathered {
                                 questions,
                                 ..Gathered::default()
                             });
-                        }
+                        };
                         if waits_on_links(&rows, today, &held) {
                             return Ok(Gathered {
+                                questions,
                                 links_wait: true,
                                 ..Gathered::default()
                             });
                         }
+                        filter
                     }
                     // No templates here: nothing to ask about.
-                    Err(ApiError::Local(LocalValidation::TemplatesUnavailable)) => {}
+                    Err(ApiError::Local(LocalValidation::TemplatesUnavailable)) => {
+                        cl_api::RunDueFilter::All
+                    }
                     Err(e) => {
                         return Ok(Gathered {
                             error: Some(e),
                             ..Gathered::default()
                         });
                     }
-                }
-                let s = &s;
-                Ok(gather(move || async move {
+                };
+                let (s, filter) = (&s, &filter);
+                let mut g = gather(move || async move {
                     s.recurring()
-                        .run_due(today, run_id, RUN_LIMIT_DEFAULT)
+                        .run_due_filtered(today, run_id, RUN_LIMIT_DEFAULT, filter)
                         .await
                 })
-                .await)
+                .await;
+                g.questions = questions;
+                Ok(g)
             },
         ));
     }
@@ -876,7 +934,8 @@ impl TemplatesRunner {
             Ok(g) => (g.run, g.error, g.questions, g.links_wait),
             Err(e) => (None, Some(e), Vec::new(), false),
         };
-        if !questions.is_empty() {
+        let nothing_sent = run.is_none() && error.is_none();
+        if nothing_sent && !questions.is_empty() && !links_wait {
             // Nothing was sent; the run id stays for the run after the
             // answer. Templates Due opens with a question asked for the
             // first time this session; after that the chip stays (an
@@ -886,9 +945,7 @@ impl TemplatesRunner {
                 "templates catch-up waits for the owner"
             );
             self.retry = current;
-            let fresh = questions.iter().any(|q| !self.asked.contains(&q.template));
-            self.asked.extend(questions.iter().map(|q| q.template));
-            link.due().set_questions(questions);
+            let fresh = self.ask(link, questions);
             return Some(Finished {
                 posted: false,
                 open_window: fresh,
@@ -897,18 +954,30 @@ impl TemplatesRunner {
         if links_wait {
             // Nothing was sent: an automatic template's date waits for a
             // saved form's link (or the owner's Dismiss); the run goes on
-            // as soon as it is settled.
+            // as soon as it is settled. Questions asked meanwhile (with
+            // the run filter) are shown.
             tracing::info!("templates catch-up waits for a saved form's link");
             self.retry = current;
+            let fresh = !questions.is_empty() && self.ask(link, questions);
             let mut board = link.due();
             board.links_wait = true;
             board.generation += 1;
-            return None;
+            return fresh.then_some(Finished {
+                posted: false,
+                open_window: true,
+            });
         }
-        {
-            let mut board = link.due();
-            board.links_wait = false;
-            board.set_questions(Vec::new());
+        // With the run filter (U-82) the others ran while these ask.
+        let fresh = if questions.is_empty() {
+            link.due().set_questions(Vec::new());
+            false
+        } else {
+            self.ask(link, questions)
+        };
+        link.due().links_wait = false;
+        // More "Post all" answers wait to run on their own.
+        if !link.due().answered.is_empty() {
+            self.pending = true;
         }
         // A run stopped by anything but "no permission" or "no catch-up"
         // keeps its id: the retry gets its posts back, never twice.
@@ -919,7 +988,16 @@ impl TemplatesRunner {
             ) => None,
             Some(_) => current,
         };
-        let shown = run.map(|run| self.show(link, run));
+        let shown = match run.map(|run| self.show(link, run)) {
+            Some(mut f) => {
+                f.open_window |= fresh;
+                Some(f)
+            }
+            None => fresh.then_some(Finished {
+                posted: false,
+                open_window: true,
+            }),
+        };
         match error {
             None | Some(ApiError::Forbidden { .. }) => {}
             Some(ApiError::Local(LocalValidation::RunDueUnavailable)) => self.off = true,
@@ -928,6 +1006,15 @@ impl TemplatesRunner {
             }
         }
         shown
+    }
+
+    /// Puts catch-up questions on the board; true when one is asked for the
+    /// first time this session (Templates Due opens for it once).
+    fn ask(&mut self, link: &CompanyLink, questions: Vec<CatchUpQuestion>) -> bool {
+        let fresh = questions.iter().any(|q| !self.asked.contains(&q.template));
+        self.asked.extend(questions.iter().map(|q| q.template));
+        link.due().set_questions(questions);
+        fresh
     }
 
     /// Puts an answer on the board (the posts it gathered are real even

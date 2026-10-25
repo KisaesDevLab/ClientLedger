@@ -472,3 +472,106 @@ fn pending_links_survive_a_restart_and_hold_the_automatic_run() {
         "the file forgets it"
     );
 }
+
+fn tpl(n: u8) -> TemplateId {
+    TemplateId::parse(&format!("5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a{n:02x}")).expect("id")
+}
+
+fn question(t: TemplateId) -> CatchUpQuestion {
+    CatchUpQuestion {
+        template: t,
+        dates: (1..=4).map(|n| d(2026, 11, n)).collect(),
+    }
+}
+
+/// Q-PR1d with U-82: without `run-due-filter-v1` a question holds the
+/// whole run; with it the others run (`excludeTemplateIds`) and a "Post
+/// all" answer runs that template alone (`templateIds`).
+#[test]
+fn the_run_filter_holds_only_the_asked_templates() {
+    use cl_api::RunDueFilter as F;
+    let (a, b) = (tpl(1), tpl(2));
+    // Without the capability: today's behaviour.
+    assert_eq!(run_filter(false, &[], None), Some(F::All));
+    assert_eq!(run_filter(false, &[question(a)], None), None);
+    // With it.
+    assert_eq!(run_filter(true, &[], None), Some(F::All));
+    assert_eq!(
+        run_filter(true, &[question(a), question(b)], None),
+        Some(F::Except(vec![a, b]))
+    );
+    assert_eq!(
+        run_filter(true, &[question(b)], Some(a)),
+        Some(F::Only(vec![a])),
+        "the answered one runs alone"
+    );
+    assert_eq!(
+        run_filter(true, &[question(a)], Some(a)),
+        Some(F::Except(vec![a])),
+        "asked again (a new first date): it is not run"
+    );
+    // More templates asked than one filter carries: the run waits.
+    let many: Vec<_> = (0..=cl_api::RUN_FILTER_MAX).map(|_| question(a)).collect();
+    assert_eq!(run_filter(true, &many, None), None);
+}
+
+/// With the filter, a run that posted the others and asks about one shows
+/// both: the posts are published, the question stays on the board (not
+/// cleared by the run), Templates Due opens once; "Post all" queues that
+/// template's own run and further answers keep the runner pending.
+#[test]
+fn a_filtered_run_posts_the_others_and_keeps_the_question() {
+    let (_dir, link, tenant) = demo();
+    let mut r = TemplatesRunner::default();
+    r.opened(&link, tenant);
+    let today = d(2026, 11, 4);
+    let (a, b) = (tpl(1), tpl(2));
+    r.current = Some((today, cl_api::new_run_id()));
+    let f = r
+        .finish(
+            &link,
+            Ok(Gathered {
+                run: Some(answer(false, false, 2)),
+                questions: vec![question(a), question(b)],
+                ..Gathered::default()
+            }),
+        )
+        .expect("shown");
+    assert!(f.posted && f.open_window);
+    assert_eq!(r.retry, None, "the run went through: a fresh id next time");
+    assert_eq!(link.due().questions().len(), 2, "still asked");
+    assert_eq!(link.due().run().map(|x| x.posted.len()), Some(2));
+    // The same questions again with nothing posted: no window, the chip.
+    r.current = Some((today, cl_api::new_run_id()));
+    let f = r.finish(
+        &link,
+        Ok(Gathered {
+            run: Some(answer(false, false, 0)),
+            questions: vec![question(a), question(b)],
+            ..Gathered::default()
+        }),
+    );
+    assert!(f.is_none_or(|f| !f.open_window));
+    // Two answers: each queued for its own run, oldest first.
+    link.due().confirm(a);
+    link.due().confirm(b);
+    assert_eq!(link.due().questions().len(), 0);
+    assert_eq!(link.due().take_answered(), Some(a));
+    r.pending = false;
+    r.current = Some((today, cl_api::new_run_id()));
+    let _ = r.finish(
+        &link,
+        Ok(Gathered {
+            run: Some(answer(false, false, 1)),
+            ..Gathered::default()
+        }),
+    );
+    assert!(r.pending, "b's run follows");
+    assert_eq!(link.due().take_answered(), Some(b));
+    assert_eq!(link.due().take_answered(), None);
+    // The demo has no filter: answers are not queued for it.
+    link.due().set_questions(vec![question(a)]);
+    link.due().confirm(a);
+    r.start(&link, today);
+    assert!(link.due().answered.is_empty(), "no filter, no queue");
+}
