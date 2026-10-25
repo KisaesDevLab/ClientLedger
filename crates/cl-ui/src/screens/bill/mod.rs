@@ -266,6 +266,20 @@ pub(crate) struct VoidPrompt {
     pub delete: bool,
     pub reason: String,
     pub task: Option<Task<()>>,
+    /// The key of the last void or delete sent, kept after an unknown
+    /// outcome so sending the same one again is a replay (Q-PR1a,
+    /// `idempotency-ap-v1` / `idempotency-v1`), never a second write.
+    pub key: Option<(VoidIdentity, IdempotencyKey)>,
+}
+
+/// What a void or delete key belongs to: the record, void or delete, the
+/// reason and whether the closing-date password went with it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct VoidIdentity {
+    pub id: cl_core::ids::TransactionId,
+    pub delete: bool,
+    pub reason: String,
+    pub password: bool,
 }
 
 /// History of a saved bill.
