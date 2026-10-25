@@ -246,4 +246,12 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.row_action.pick_row", "Select a transaction in the register first."),
     ("register.row_action.reading", "Reading the transaction\u{2026}"),
     ("register.row_action.working", "Working\u{2026}"),
+    // P17 WP2b: Void and Delete on bills, vendor credits and bill payments
+    ("register.ap.delete_document", "Bills and vendor credits can be voided, not deleted, for now. You can void it instead; it stays in the audit trail."),
+    ("register.ap.delete_payment", "Bill payments can be voided, not deleted, for now. Voiding it makes the bills it paid owed again; it stays in the audit trail."),
+    ("register.ap.void_bill_paid", "This bill has payments applied, so it can't be voided. Void the bill payments first, then void the bill."),
+    ("register.ap.void_credit_applied", "This vendor credit has been used to pay bills, so it can't be voided. Void the bill payments that used it first."),
+    ("register.ap.void_payment_refused", "This bill payment can't be voided. If it's part of a finished reconciliation, undo the reconciliation first."),
+    ("register.ap.void_payment_body", "Its amounts become zero and the bills it paid are owed again. It stays in the register and in the audit trail."),
+    ("register.ap.closed", "This is dated in a closed period. Voiding a bill, vendor credit or bill payment in a closed period isn't available yet."),
 ];
