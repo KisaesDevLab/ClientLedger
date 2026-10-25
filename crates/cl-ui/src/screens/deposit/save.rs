@@ -215,6 +215,11 @@ impl DepositScreen {
         if self.save.task.is_some() {
             return false;
         }
+        // The last save's outcome is unknown: nothing is sent until the
+        // recheck answers or the owner confirms (B2).
+        if self.header.is_unconfirmed() {
+            return false;
+        }
         if let Some(e) = self.editing.as_ref().filter(|e| e.read_only) {
             self.save.notice = Some(e.note);
             return false;
@@ -373,6 +378,9 @@ impl DepositScreen {
                 Err(e) => self.save_failed(e),
             }
         }
+        if let Some(ev) = self.save.lost.poll(&mut self.header) {
+            self.lost_event(ev);
+        }
         if let Some(r) = self.load_task.as_mut().and_then(Task::try_take) {
             self.load_task = None;
             match r {
@@ -416,8 +424,34 @@ impl DepositScreen {
             .failed(e, pending, supported, self.closing)
     }
 
+    /// The recheck or the owner answered an unknown save (B2). Found: the
+    /// deposit is in the books, so the form shows it.
+    pub(crate) fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
+        use crate::forms::lost_save::LostEvent;
+        if let LostEvent::Saved(found) = ev {
+            crate::forms::publish_saved(&self.link, &self.bus, &self.save.published);
+            self.save.key = None;
+            self.save.count += 1;
+            self.save.last_action = Some("save");
+            let lists = Arc::clone(&self.lists);
+            let header = self.header.current().clone();
+            self.header.load(header);
+            let lines = self.lines.value().clone();
+            self.lines.form_mut().load(lines, &*lists);
+            self.refresh_pending();
+            self.refresh_facts();
+            if let (Some(id), Some(account)) = (found, self.header.current().account) {
+                self.template
+                    .form_saved(&self.link, self.group.as_ref(), id);
+                self.nav = Nav::default();
+                self.load_deposit(id, account);
+            }
+        }
+    }
+
     /// The engine took the save.
     fn saved(&mut self, s: &Saved) {
+        self.save.lost.saved();
         crate::forms::publish_saved(&self.link, &self.bus, &self.save.published);
         self.template
             .form_saved(&self.link, self.group.as_ref(), s.id);
@@ -521,6 +555,11 @@ impl DepositScreen {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
         };
+        if self.save.lost.lost(&e) {
+            self.header.save_unknown(failure.clone());
+            self.lines.form_mut().save_failed(failure);
+            return;
+        }
         self.header.save_failed(failure.clone());
         self.lines.form_mut().save_failed(failure);
         if self.closing_failed(&e, Pending::Save(intent)) {

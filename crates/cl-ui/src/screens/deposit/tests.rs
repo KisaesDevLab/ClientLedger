@@ -52,6 +52,8 @@ struct Log {
     saved: Vec<DepositDraft>,
     /// The next save answers 409 ALREADY_DEPOSITED.
     conflict_next: bool,
+    /// The next save is posted but its reply is lost (B2).
+    lost_next: bool,
     /// What pending answers.
     pending: Vec<PendingPayment>,
     record: Option<Transaction>,
@@ -138,6 +140,13 @@ impl LocalDeposits for Fake {
             });
         }
         log.saved.push(draft.clone());
+        if std::mem::take(&mut log.lost_next) {
+            return Err(ApiError::OutcomeUnknown {
+                request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000004")
+                    .expect("id"),
+                idempotency_key: Some(cl_api::IdempotencyKey::new()),
+            });
+        }
         let picked: Vec<_> = draft.payments.iter().map(|p| p.source).collect();
         log.pending.retain(|p| !picked.contains(&p.source));
         Ok(Saved {
@@ -609,4 +618,36 @@ fn header_enter_saves_or_moves_by_the_preference() {
             }
         }
     }
+}
+
+#[test]
+fn b2_after_an_unknown_outcome_a_second_save_sends_nothing_until_the_recheck_answers() {
+    let (mut s, log, _dir) = screen(all_caps());
+    set_lines(&mut s, &[(4100, "125.00")]);
+    log.lock().expect("log").lost_next = true;
+    assert!(!s.start_save(SaveIntent::SaveAndNew, None));
+    assert_eq!(log.lock().expect("log").saved.len(), 1);
+    assert!(s.save.lost.pending());
+    for intent in [
+        SaveIntent::Save,
+        SaveIntent::SaveAndNew,
+        SaveIntent::SaveAndClose,
+    ] {
+        assert!(!s.start_save(intent, None));
+    }
+    // A vendor refund from the same window waits too.
+    s.send_refund(None);
+    assert_eq!(log.lock().expect("log").saved.len(), 1, "nothing sent");
+    s.save
+        .lost
+        .recheck_answering(&mut s.header, cl_api::Recheck::Unknown);
+    s.poll_save();
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(log.lock().expect("log").saved.len(), 1);
+    s.save
+        .lost
+        .recheck_answering(&mut s.header, cl_api::Recheck::NotCommitted);
+    s.poll_save();
+    assert!(s.start_save(SaveIntent::Save, None));
+    assert_eq!(log.lock().expect("log").saved.len(), 2);
 }

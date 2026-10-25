@@ -289,6 +289,9 @@ impl LoanPaymentScreen {
             Some(Err(e)) => self.save_failed(e),
             None => {}
         }
+        if let Some(ev) = self.flow.lost.poll(&mut self.header) {
+            self.lost_event(ev);
+        }
         match voided {
             Some(Ok(())) => self.voided(),
             Some(Err(e)) => {
@@ -669,6 +672,26 @@ impl LoanPaymentScreen {
         }
     }
 
+    /// The recheck or the owner answered an unknown save (B2). Found: it is
+    /// in the books, so the form opens it.
+    fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
+        if let crate::forms::lost_save::LostEvent::Saved(found) = ev {
+            self.flow.found();
+            crate::forms::publish_saved(&self.link, &self.bus, &self.flow.published);
+            let lists = Arc::clone(&self.books.lists);
+            let header = self.header.current().clone();
+            self.header.load(header);
+            let lines = self.extras.value().clone();
+            self.extras.form_mut().load(lines, &*lists);
+            if let Some(loan) = self.header.current().loan {
+                self.balances.fetch(&self.link, self.group.as_ref(), loan);
+            }
+            self.records.forget();
+            if let Some(id) = found {
+                self.open_saved(id);
+            }
+        }
+    }
     fn save_failed(&mut self, e: ApiError) {
         self.lender_check = None;
         let closing = self.books.closing;
@@ -676,7 +699,7 @@ impl LoanPaymentScreen {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
         };
-        self.header.save_failed(failure.clone());
+        kit::header_failed(&mut self.header, &e, failure.clone());
         self.extras.form_mut().save_failed(failure);
         self.flow.failed(&self.link, e, closing);
     }
@@ -1256,7 +1279,17 @@ impl LoanPaymentScreen {
         });
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
-        kit::status(ui, tokens, &self.flow);
+        if let Some(ev) = kit::status(
+            ui,
+            tokens,
+            &mut self.flow,
+            &mut self.header,
+            &self.link,
+            self.group.as_ref(),
+            "loan_payment",
+        ) {
+            self.lost_event(ev);
+        }
     }
 
     fn method_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {

@@ -599,3 +599,69 @@ fn owner_money_words_get_a_plain_tooltip_for_each_entity_type() {
     // never mentions the engine's name for it.
     assert!(!crate::i18n::t("jargon.undeposited_funds").contains("Payments Clearing"));
 }
+
+fn lose_the_reply(s: &mut CardChargeScreen) {
+    let lists = Arc::clone(&s.books.lists);
+    let _ = s.lines.form_mut().begin_save(SaveIntent::Save, &*lists);
+    let _ = s.header.begin_save(SaveIntent::Save);
+    s.flow.intent = Some(SaveIntent::Save);
+    s.save_failed(ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000005")
+            .expect("id"),
+        idempotency_key: Some(cl_api::IdempotencyKey::new()),
+    });
+}
+
+#[test]
+fn b2_helper_forms_send_nothing_after_an_unknown_outcome_until_the_recheck_answers() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "64.10", &[("6250", "40.00"), ("6400", "24.10")]);
+    lose_the_reply(&mut s);
+    assert!(s.flow.lost.pending());
+    assert!(s.flow.error.is_none(), "the banner speaks");
+    let before = posted(&link);
+    for intent in [
+        SaveIntent::Save,
+        SaveIntent::SaveAndNew,
+        SaveIntent::SaveAndClose,
+    ] {
+        assert!(!s.start_save(intent, None));
+    }
+    assert_eq!(posted(&link), before, "nothing sent");
+    s.flow
+        .lost
+        .recheck_answering(&mut s.header, cl_api::Recheck::Unknown);
+    s.poll();
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(posted(&link), before);
+    s.flow
+        .lost
+        .recheck_answering(&mut s.header, cl_api::Recheck::NotCommitted);
+    s.poll();
+    assert!(s.start_save(SaveIntent::Save, None));
+    assert_eq!(posted(&link), before + 1);
+}
+
+#[test]
+fn b2_a_found_charge_opens_and_nothing_is_sent() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "64.10", &[("6250", "40.00"), ("6400", "24.10")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    let id = s.flow.last.expect("saved").id;
+    fill(&mut s, "64.10", &[("6250", "40.00"), ("6400", "24.10")]);
+    lose_the_reply(&mut s);
+    let before = posted(&link);
+    s.flow.lost.recheck_answering(
+        &mut s.header,
+        cl_api::Recheck::Committed {
+            transaction: Some(id),
+        },
+    );
+    s.poll();
+    assert!(!s.flow.lost.pending());
+    assert_eq!(s.flow.editing.map(|e| e.id), Some(id), "the saved charge");
+    assert!(!s.is_dirty());
+    assert_eq!(posted(&link), before);
+}

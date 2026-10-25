@@ -599,6 +599,15 @@ impl DepositScreen {
         if let Some(e) = &self.save.error {
             form::inline_error(ui, tokens, e);
         }
+        if let Some(ev) = self.save.lost.ui(
+            ui,
+            &mut self.header,
+            &self.link,
+            self.group.as_ref(),
+            "deposit",
+        ) {
+            self.lost_event(ev);
+        }
         if self.save.task.is_some() {
             form::progress_line(ui, tokens, &t("deposit.saving"));
         }
