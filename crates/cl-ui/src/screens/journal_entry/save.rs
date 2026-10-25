@@ -130,6 +130,11 @@ impl JournalScreen {
         if self.busy() || (self.closing_prompt.dialog_open() && password.is_none()) {
             return false;
         }
+        // The last save's outcome is unknown: nothing is sent until the
+        // recheck answers or the owner confirms (B2).
+        if self.header.is_unconfirmed() {
+            return false;
+        }
         if let Some(note) = self.read_only() {
             self.notice = Some(note);
             return false;
@@ -330,7 +335,33 @@ impl JournalScreen {
 
     /// The engine took the save (Q-262: every window showing these
     /// accounts reads them again).
+    /// The recheck or the owner answered an unknown save (B2). Found: the
+    /// entry is in the books, so the form shows it.
+    pub(crate) fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
+        use crate::forms::lost_save::LostEvent;
+        if let LostEvent::Saved(found) = ev {
+            crate::forms::publish_saved(&self.link, &self.bus, &self.published);
+            self.key = None;
+            self.saved_count += 1;
+            self.last_action = Some("save");
+            let lists = Arc::clone(&self.books.lists);
+            let header = self.header.current().clone();
+            self.header.load(header);
+            let lines = self.lines.value().clone();
+            self.lines.form_mut().load(lines, &*lists);
+            if let Some(id) = found {
+                self.template
+                    .form_saved(&self.link, self.group.as_ref(), id);
+                self.last_saved = Some(id);
+                self.nav_at = None;
+                self.listed = false;
+                self.load(id);
+            }
+        }
+    }
+
     pub(crate) fn saved(&mut self, id: TransactionId, version: RecordVersion) {
+        self.lost.saved();
         crate::forms::publish_saved(&self.link, &self.bus, &self.published);
         // An entry opened from a Templates Due date marks it entered.
         self.template
@@ -401,6 +432,11 @@ impl JournalScreen {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
         };
+        if self.lost.lost(&e) {
+            self.header.save_unknown(failure.clone());
+            self.lines.form_mut().save_failed(failure);
+            return;
+        }
         self.header.save_failed(failure.clone());
         self.lines.form_mut().save_failed(failure);
         if self.closing_failed(&e, Pending::Save(intent)) {

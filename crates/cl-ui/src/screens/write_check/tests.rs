@@ -1458,3 +1458,92 @@ fn header_enter_saves_or_moves_by_the_preference() {
         }
     }
 }
+
+fn unknown() -> ApiError {
+    ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000003")
+            .expect("id"),
+        idempotency_key: Some(IdempotencyKey::new()),
+    }
+}
+
+fn checks_numbered(link: &Arc<CompanyLink>, bank: AccountId, n: u32) -> Vec<TransactionId> {
+    let mut demo = link.demo_state().expect("demo");
+    crate::company::demo::checks::list(&mut demo, bank)
+        .into_iter()
+        .filter(|c| c.number == Some(n))
+        .map(|c| c.id)
+        .collect()
+}
+
+#[test]
+fn b2_after_an_unknown_outcome_save_sends_nothing_and_a_used_number_opens_the_first_check() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "1286.40", &[("5100", "842.15"), ("5110", "444.25")]);
+    let bank = s.bank().expect("bank");
+    let header = s.header.current().clone();
+    let lines = s.lines.value().clone();
+    // The first try reached the engine, but its reply was lost.
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.poll();
+    let first = checks_numbered(&link, bank, 4418);
+    assert_eq!(first.len(), 1);
+    s.header.edit_step(|h| *h = header.clone());
+    let lists = Arc::clone(&s.lists);
+    s.lines.form_mut().edit_step(|v| *v = lines.clone());
+    let _ = s.lines.form_mut().begin_save(SaveIntent::Save, &*lists);
+    let _ = s.header.begin_save(SaveIntent::Save);
+    s.save_failed(unknown());
+    assert!(s.save.lost.pending());
+    let before = writes(&link);
+    for intent in [
+        SaveIntent::Save,
+        SaveIntent::SaveAndNew,
+        SaveIntent::SaveAndClose,
+    ] {
+        assert!(!s.start_save(intent, None));
+    }
+    assert_eq!(writes(&link), before, "a second Save sends nothing");
+    // The recheck can't tell (demo); the owner looks and confirms.
+    s.save.lost.recheck(&mut s.header, &link, None);
+    s.poll();
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(writes(&link), before);
+    s.save.lost.ask_owner();
+    s.save.lost.owner_confirmed(&mut s.header, "write_check");
+    s.start_save(SaveIntent::Save, None);
+    s.poll();
+    // The number is used: the first check opens; no 4419 is offered.
+    assert_eq!(s.save.duplicate, None, "never n+1 after an unknown outcome");
+    assert_eq!(s.editing.as_ref().map(|e| e.id), Some(first[0]));
+    assert_eq!(checks_numbered(&link, bank, 4418).len(), 1);
+    assert!(
+        checks_numbered(&link, bank, 4419).is_empty(),
+        "no second check"
+    );
+}
+
+#[test]
+fn b2_a_recheck_that_finds_the_check_shows_it() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "1286.40", &[("5100", "842.15"), ("5110", "444.25")]);
+    let bank = s.bank().expect("bank");
+    let lists = Arc::clone(&s.lists);
+    let _ = s.lines.form_mut().begin_save(SaveIntent::Save, &*lists);
+    let _ = s.header.begin_save(SaveIntent::Save);
+    s.save_failed(unknown());
+    // Say the engine had it after all (its id from another check here).
+    let other = checks_numbered(&link, bank, 4417);
+    s.save.lost.recheck_answering(
+        &mut s.header,
+        cl_api::Recheck::Committed {
+            transaction: other.first().copied(),
+        },
+    );
+    s.poll();
+    assert!(!s.header.is_unconfirmed());
+    assert_eq!(s.editing.as_ref().map(|e| e.id), other.first().copied());
+    assert!(!s.is_dirty());
+}

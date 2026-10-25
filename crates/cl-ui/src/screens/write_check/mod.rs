@@ -182,6 +182,11 @@ pub(crate) struct SaveState {
     /// The owner's answer for a printed check whose printed face changes
     /// (sent with the next save of this check).
     pub printed_choice: Option<cl_api::PrintedCheckChange>,
+    /// A save whose outcome is unknown (B2).
+    pub lost: crate::forms::lost_save::LostSave,
+    /// After an unknown outcome the engine said the number is used: the
+    /// check with that number is being looked up (never n+1, B2).
+    pub lookup: Option<Task<Option<TransactionId>>>,
 }
 
 /// "This check was already printed": Reprint / Keep number / Cancel.

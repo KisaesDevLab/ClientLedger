@@ -205,6 +205,8 @@ pub struct JournalScreen {
     pub(crate) template: crate::screens::templates::SaveFlow,
     /// The record being read is this window's own save (Save and stay).
     pub(crate) reading_back: bool,
+    /// A save whose outcome is unknown (B2).
+    pub(crate) lost: crate::forms::lost_save::LostSave,
 }
 
 impl JournalScreen {
@@ -292,6 +294,7 @@ impl JournalScreen {
             seen_lines,
             template: crate::screens::templates::SaveFlow::default(),
             reading_back: false,
+            lost: crate::forms::lost_save::LostSave::default(),
         };
         s.books.start(&s.link, s.group.as_ref());
         s.fetch_number();
@@ -408,6 +411,9 @@ impl JournalScreen {
                 Ok((id, v)) => self.saved(id, v),
                 Err(e) => self.save_failed(e),
             }
+        }
+        if let Some(ev) = self.lost.poll(&mut self.header) {
+            self.lost_event(ev);
         }
         if let Some((pending, mut task)) = self.action_task.take() {
             match task.try_take() {

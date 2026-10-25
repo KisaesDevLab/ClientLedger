@@ -610,3 +610,157 @@ fn find_opens_the_first_accounts_register() {
         crate::company::CompanyEvent::OpenRegister(a) if *a == account_id(6100)
     )));
 }
+
+/// The demo engine whose first save goes through but whose reply is lost
+/// (`OutcomeUnknown`); counts every save it is sent.
+struct LostReply {
+    inner: super::engine::DemoJournalEngine,
+    sent: Arc<std::sync::Mutex<Vec<TransactionId>>>,
+}
+
+impl super::engine::JournalEngine for LostReply {
+    fn save(
+        &mut self,
+        link: &CompanyLink,
+        entry: &NewJournalEntry,
+        edit: Option<(TransactionId, RecordVersion)>,
+        password: Option<&Secret>,
+    ) -> Result<(TransactionId, RecordVersion), ApiError> {
+        let r = self.inner.save(link, entry, edit, password)?;
+        let mut sent = self.sent.lock().expect("lock");
+        sent.push(r.0);
+        if sent.len() == 1 {
+            return Err(ApiError::OutcomeUnknown {
+                request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000002")
+                    .expect("id"),
+                idempotency_key: Some(IdempotencyKey::new()),
+            });
+        }
+        Ok(r)
+    }
+    fn get(
+        &mut self,
+        link: &CompanyLink,
+        id: TransactionId,
+    ) -> Result<Versioned<Transaction>, ApiError> {
+        self.inner.get(link, id)
+    }
+    fn list(&mut self, link: &CompanyLink) -> Vec<TransactionId> {
+        self.inner.list(link)
+    }
+    fn void(
+        &mut self,
+        link: &CompanyLink,
+        id: TransactionId,
+        password: Option<&Secret>,
+    ) -> Result<(), ApiError> {
+        self.inner.void(link, id, password)
+    }
+    fn delete(
+        &mut self,
+        link: &CompanyLink,
+        id: TransactionId,
+        password: Option<&Secret>,
+    ) -> Result<(), ApiError> {
+        self.inner.delete(link, id, password)
+    }
+    fn next_number(&mut self, link: &CompanyLink) -> Option<String> {
+        self.inner.next_number(link)
+    }
+}
+
+fn lost_screen() -> (
+    JournalScreen,
+    Arc<CompanyLink>,
+    Arc<std::sync::Mutex<Vec<TransactionId>>>,
+    tempfile::TempDir,
+) {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let engine = LostReply {
+        inner: super::engine::DemoJournalEngine,
+        sent: Arc::clone(&sent),
+    };
+    let mut s =
+        JournalScreen::with_local(Arc::clone(&link), None, day(11, 4), Some(Box::new(engine)));
+    set_lines(
+        &mut s,
+        &[(6100, "75.00", "", None), (1010, "", "75.00", None)],
+    );
+    (s, link, sent, dir)
+}
+
+#[test]
+fn b2_after_an_unknown_outcome_a_second_save_sends_nothing_until_the_recheck_answers() {
+    let (mut s, _link, sent, _dir) = lost_screen();
+    assert!(!s.start_save(SaveIntent::SaveAndNew, None));
+    assert_eq!(sent.lock().expect("l").len(), 1);
+    assert!(s.lost.pending());
+    assert!(s.error.is_none(), "the banner speaks, not the error");
+    // Save again (every intent, and after an edit): nothing is sent.
+    for intent in [
+        SaveIntent::Save,
+        SaveIntent::SaveAndNew,
+        SaveIntent::SaveAndClose,
+    ] {
+        assert!(!s.start_save(intent, None));
+    }
+    s.header.edit(field::MEMO, |h| h.memo = "changed".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(sent.lock().expect("l").len(), 1, "blocked");
+    // The recheck can't tell: still blocked.
+    s.lost
+        .recheck_answering(&mut s.header, cl_api::Recheck::Unknown);
+    s.poll();
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(sent.lock().expect("l").len(), 1);
+    // Provably not saved: Save works again.
+    s.lost
+        .recheck_answering(&mut s.header, cl_api::Recheck::NotCommitted);
+    s.poll();
+    assert!(!s.lost.pending());
+    s.start_save(SaveIntent::Save, None);
+    assert_eq!(sent.lock().expect("l").len(), 2);
+}
+
+#[test]
+fn b2_a_recheck_that_finds_the_entry_shows_it_and_sends_nothing() {
+    let (mut s, link, sent, _dir) = lost_screen();
+    let before = journal_count(&link);
+    s.start_save(SaveIntent::SaveAndNew, None);
+    let id = sent.lock().expect("l")[0];
+    assert_eq!(journal_count(&link), before + 1, "the first save took");
+    s.lost.recheck_answering(
+        &mut s.header,
+        cl_api::Recheck::Committed {
+            transaction: Some(id),
+        },
+    );
+    s.poll();
+    assert!(!s.header.is_unconfirmed());
+    assert_eq!(
+        s.editing.as_ref().map(|e| e.id),
+        Some(id),
+        "the saved entry"
+    );
+    assert!(!s.is_dirty());
+    assert_eq!(sent.lock().expect("l").len(), 1);
+    assert_eq!(journal_count(&link), before + 1, "posted once");
+}
+
+#[test]
+fn b2_the_owner_override_needs_the_dialog() {
+    let (mut s, _link, sent, _dir) = lost_screen();
+    s.start_save(SaveIntent::Save, None);
+    s.lost.ask_owner();
+    assert!(s.lost.confirm_open);
+    assert!(
+        !s.start_save(SaveIntent::Save, None),
+        "the dialog alone lifts nothing"
+    );
+    let ev = s.lost.owner_confirmed(&mut s.header, "journal_entry");
+    assert_eq!(ev, Some(crate::forms::lost_save::LostEvent::OwnerConfirmed));
+    s.start_save(SaveIntent::Save, None);
+    assert_eq!(sent.lock().expect("l").len(), 2);
+}
