@@ -40,6 +40,7 @@ Owner routing (2026-10-22, Q-277): **Opus is the default for everything not pure
 | PR-8 | After P33 | LAN multi-user: conflicts, host loss, single-user maintenance mode, live refresh |
 | PR-9 | After P36 | Upgrades and migrations: interrupted migration, rollback, schema/version compatibility of backups and transfers |
 | PR-10 | Before P39 sign-off | Whole-app owner journeys on the sample company: setup → a month of work → close → send to accountant → restore |
+| PR-A1 | After A05 (ADD-01; opus, xhigh) | Document to books: folder arrival → reading (text, OCR, template, optional Ollama) → checks and duplicates → draft → accept → bill or expense → Pay Bills or Bank Feed match → reconcile; inbox-folder migration; restore on another computer; hostile file |
 
 Also use `process-reviewer` for the architect plan of any engine change sized L that touches posting, balances, inventory costing, sales tax, or tenant export/import.
 
@@ -54,6 +55,10 @@ Fable is used only when the owner explicitly asks for it on a specific task (Q-2
 | **L** — scaffolding, shell, printing, packaging, docs | P00, P01, P03, P04, P06, P07, P16, P19, P35, P37, P38, P39; post-beta P44 | `opus`, effort medium | no | `ui-verifier` for screens; `reviewer` optional |
 
 `security-reviewer` (opus) also runs on P03, P04, P07, P09, P29, P32, P33, P35, P36, and P37, regardless of tier.
+
+`security-reviewer` (opus) also runs on A01, A03, and A04 (ADD-01).
+
+Addendum tiers (ADD-01): **H** A03 · **M** A01, A02, A04, A05; all on opus, stepping up to effort xhigh (and the escalation ladder) when needed (owner 2026-10-25).
 
 Engine changes: `engine-implementer` runs on `opus` for every size, at effort high for M/L changes or anything touching posting, balances, inventory costing, sales tax math, closing dates, secrets, or tenant export/import.
 

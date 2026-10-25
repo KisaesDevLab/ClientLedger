@@ -1,6 +1,6 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P17 — Enter Bill, vendor credits, receipt inbox, attachment viewer (Next, after the `fix/PR-1` PR merges)
+**Current phase:** P17 — Enter Bill, vendor credits, receipt inbox, attachment viewer (in progress on `phase/P17-enter-bill`); then ADD-01 A01–A04; then P18
 **Status:** Checkpoint PR-1 fixes on `fix/PR-1`; PR open with auto-merge. M1 complete (summary below). Engine pin bumped to `f3ce33fd` (engine PRs #171–#174) on `chore/engine-pin-main`
 **Engine commit:** `b483c02e` (`main`, pinned 2026-10-25 after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
 **Last updated:** 2026-10-25
@@ -29,7 +29,7 @@
 | P15A | Bulk Entry | M | Done 2026-10-21 |
 | P16 | Home workspace | L | Done 2026-10-24 |
 | PR-1 | Checkpoint: core ledger process review | — | Done 2026-10-25 (fixes on `fix/PR-1`; U-18 and U-82 engine PRs open) |
-| P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | Next |
+| P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | In progress (`phase/P17-enter-bill`) |
 | P18 | Pay Bills (checks) | M | |
 | P19 | Form printing | L | |
 | P20 | Create Invoice | M | |
@@ -52,6 +52,18 @@
 | P37 | Hardening | L | |
 | P38 | Documentation | L | |
 | P39 | Beta release (STOP for owner sign-off) | L | |
+
+## Active addenda
+
+**ADD-01 — Document intake, local reading, pop-out viewer** (`addenda/ADD-01-document-intake.md`; part of the beta). Scheduling: A01–A04 run right after P17 merges, before P18; then the beta track resumes; A05 runs right after P26; PR-A1 after A05.
+
+| Phase | Title | Tier | Status |
+| --- | --- | --- | --- |
+| A01 | Mapped intake folders, a setting of each company | M | Next after P17 |
+| A02 | Pop-out document viewer | M | |
+| A03 | Local document reading engine | H | |
+| A04 | Review queue and compare tools | M | |
+| A05 | Match document drafts in the Bank Feed | M | After P26 |
 
 ## Post-beta (owner may reorder, Q-39)
 
@@ -226,6 +238,7 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-25 — **ADD-01 added during the build** (between P17 and P26): mapped intake folders as a per-company setting, local document reading with no internet or AI required, review queue with compare tools, pop-out document viewer, Bank Feed matching of receipts. Phases A01–A05, decisions Q-279–Q-293, engine U-92 and U-93, checkpoint PR-A1. Completed phases unchanged; migration for P09/P17 behavior is in the addendum. IDs renumbered on apply (the bundle's Q-230–Q-244 and U-14/U-15 were taken); models per Q-294 (opus, stepping up when needed).
 - 2026-10-25 — Engine pin 7b267e48 → f3ce33fd (engine main with PRs #171 U-18, #172 U-82, #173 U-83–U-87, #174 U-89) on `chore/engine-pin-main`. Live capabilities: `idempotency-v1`, `run-due-filter-v1`, `ap-closing-v1`, `ap-edit-v1`, `bill-lines-v1`, `bill-terms-v1`, `bill-received-v1`, `idempotency-ap-v1`, `bill-ocr-v2`. Engine SEA rebuilt; api-spec fixtures refreshed; the engine's keyed routes are recorded (`idempotency_v1_routes.txt`, new `idempotency_ap_v1_routes.txt`); main keys only the 20 `idempotency-v1` routes, P17 adds the A/P ones gated on `idempotency-ap-v1`. Live contract suite 162 passed with `CL_API_REQUIRE_CAPS=idempotency-v1,run-due-filter-v1,tag-number-v1,dashboard-exact-v1,merge-closing-date-v1` (the U-18 tests run for real), offline binary 6 passed (`restart::engine_dies_after_commit_is_reconciled_as_committed` now expects the keyed re-send the engine replays). Catch-up questions hold only their own templates (U-82, Q-PR1d; new `run_due::filter_holds_only_the_asked_template_u82`). An archive made on 7b267e48 restores on f3ce33fd (verified by hand: content and trial balance equal, bills `billReceived: true`). Agents: rust-implementer/opus.
 - 2026-10-25 — Checkpoint PR-1 (core ledger process review, process-reviewer/opus xhigh) complete on `fix/PR-1`.
   - Findings: B1 register edit of a linked deposit un-deposited its payments; B2 a second Save after an unknown outcome could post twice (the engine had idempotency only on `/batch/save`); B3 register edit of a numbered journal entry erased its number; B4 register edit of a printed check skipped the printed-check question. Plus S1–S3 and four follow-ups (`target/reviews/PR-1.md`).
@@ -236,52 +249,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   - Decisions Q-PR1a–g. Live contract suite 158/158 on 7b267e48.
   - Agents: process-reviewer/opus (xhigh), architect/opus (U-18), engine-impl/opus ×5, security-review/opus, rust-impl/opus ×4, review/opus.
 - 2026-10-24 — Engine pin c217bfd → 7b267e48 (engine main with PRs #168 U-75/U-76, #169 U-80/U-81, #170 U-47) on `chore/engine-pin-7b267e48`. Live capabilities: `tag-number-v1`, `dashboard-exact-v1`, `ledger-guards-v1`, `merge-closing-date-v1`. Engine SEA rebuilt; api-spec fixtures refreshed; live contract suite 157 passed with `CL_API_REQUIRE_CAPS=tag-number-v1,dashboard-exact-v1` (`tags::numbers_u75`, `tags::number_archive_round_trip_u75`, `home::exact_strings_u76`, `tags::line_tag_merge_u41` now run for real). Contact and tag merges use the closing-date password flow (U-47, Q-231; new `merges::closed_period_needs_the_password_u47`); tag merge no longer limited to header-only tags (Q-P11t). The engine now accepts several named A/R or A/P lines in one journal entry (`JE_AR_AP_ONE_PER_ENTRY` gone); the client keeps Q-206 locally. Agents: rust-implementer/opus.
-- 2026-10-24 — P16 complete on `phase/P16-home-workspace`; PR with auto-merge. Work moved to a new Windows 11 dev machine (toolchain reinstalled; PowerShell added to the agent definitions). Shipped:
-  - Steps 0–0h:
-    - "Enter moves between fields" preference (both modes on every form, Bulk Entry and list forms).
-    - Fixed top and bottom bars on every screen (`layout::FixedFrame`).
-    - Collapsible detail panel on Customers & Jobs and Vendors.
-    - Condensed entry rows on wide screens.
-    - Tag numbers ("10 · Lake Area", sorted like account numbers).
-    - Bulk Entry Copy down, column chooser, multi-row selection with Set and Delete actions, and a shared cl-grid context menu.
-  - Steps 1–6, the Home workspace:
-    - Four lanes from the command registry.
-    - Account balances.
-    - Needs attention: bills, payroll imports, bank items, reconciliations, backup reminder.
-    - Profit-and-loss chart drawn in-house.
-    - Setup checklist.
-    - Ko-fi support button (Q-278).
-    - Rail counts from engine reads.
-  - Control channel `hover` and `scroll` steps.
-  - Engine and CI:
-    - Engine PR #168 (U-75 `tag-number-v1`, U-76 `dashboard-exact-v1`, migration 0228) is open for the owner; its contract tests are PENDING.
-    - CI fixes merged first: PR #32 (output drain race, cargo-deny advisories) and PR #33 (refused-connect retry race in cl-api).
-  - Reviews: two fresh-eyes reviews (part 1 Bulk Entry and forms; part 2 Home) and a ui-verifier pass. Each was followed by a fresh fix pass, among them:
-    - voided bills counted on Home
-    - Ctrl+A never reaching the grid
-    - Copy down from the blank row
-    - `number_cmp` not being a total order (proptest added)
-    - journal entries merging
-    - a flaky scroll scenario
-  - The card-balance sign on Home now matches Q-241.
-  - Help pages: home, enter-key, tag-numbers, bulk-entry.
-  - Decisions Q-P16a to Q-P16y; U-77, U-78 and U-79 proposed.
-
-  Acceptance (phases/M1-core-ledger.md P16):
-  - [x] Enter-moves option in both modes (unit tests + `forms-enter.yaml`).
-  - [x] Headers stay visible while scrolling, at 960×640 and 200% (`persistent-headers.yaml`, stable 6/6).
-  - [x] Detail panels collapse and stay remembered (`client-center.yaml`).
-  - [x] Condensed striped rows on wide screens (draw tests + daily_sales screenshots).
-  - [x] Unique tag numbers shown and sorted everywhere (unit + tags scenario; live contract PENDING U-75).
-  - [x] Copy down in one undo step (model + UI tests, batch_entry).
-  - [x] Columns shown, hidden and reordered, remembered; required columns locked.
-  - [x] Multi-select with Set actions in one undo step.
-  - [x] Every lane action opens its form or a tracked placeholder (registry test + `home.yaml`).
-  - [x] Needs-attention counts match engine queries (`contract_home.rs` live on the pin with seeded payroll, feed and a voided bill; dashboard part PENDING U-76).
-  - [x] Ko-fi opens only when clicked (unit tests; the scenario hovers only).
-  - [x] `ui-check home --compare` reviewed by ui-verifier, deviations in Q-P16d to Q-P16u.
-
-  Agents: scout/opus, architect/opus, impl/opus (WP0–WP8 and two fix passes; the phase is tier L, but opus was used per Q-277), engine-impl/opus, review/opus ×2, ui-verifier/opus, docs-writer/sonnet.
-- 2026-10-21 — P15A complete on `phase/P15A-bulk-entry`; PR to open. Shipped: the Bulk Entry window (sections per type and account; checks, expenses, card charges, card credits, deposits and journal entries; other types wait for their phases, Q-263); local exact checks (cent rounding, journal entry balance, duplicate check numbers, closed-period marks); engine validate per row with highlights and F8 navigation; paste from a spreadsheet and CSV import with a remembered column mapping; account suggestions with accept; Save all in one atomic call with an idempotency key and one closing-password prompt; a summary with register links; data-bus refresh. Grid block paste and a control-channel paste step. Engine PR #163 (U-67 to U-74, migration 0226) merged after security review and fixes; pin c217bfd. Contract suite 149/149 live; scenario batch_entry 178 steps plus forms-zoom coverage; help page. Decisions Q-P15Aa to Q-P15As.
-  Acceptance (phases/M1-core-ledger.md P15A): [x] a mixed batch of checks and deposits saves and every row shows in the register with the right balance (live contract + scenario); [x] invalid rows cannot save (atomic rollback contract, unit + scenario); [x] control-channel scenario.
-  Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, Opus fallback for money lanes), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.

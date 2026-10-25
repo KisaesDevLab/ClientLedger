@@ -330,6 +330,7 @@ One widget shows bills, receipts and other attachments everywhere: the Enter Bil
 | --- | --- |
 | Bank data | Bank file import (QIF, QFX, OFX, CSV) only in beta; Plaid is post-beta (P43) |
 | AI suggestions (accounts, bill reading, categorization) | Off by default. Anthropic or OpenAI with the owner's key needs internet; a local Ollama model works fully offline (U-11). Keys passed to the engine per session (U-09). Rules engine always categorizes. |
+| Reading bills and receipts (ADD-01) | Works fully offline: PDF text layer, local OCR, field rules, and learned vendor templates in a sandboxed worker. Optional local Ollama works offline; cloud reading needs its own consent. |
 | Email invoices / statements | Through the owner's SMTP settings when online; otherwise queue to Outbox or save PDF |
 | Transfer to MyBooks Online | Export file only (no direct upload in v1) |
 | Updates | Manual check against GitHub Releases; never auto-download without consent |

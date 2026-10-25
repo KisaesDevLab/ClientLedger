@@ -62,7 +62,7 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 | Q-51 | Performance and test target: **up to 10 companies** per install. | P08, P37 |
 | Q-52 | Recurring invoices are **post-beta** (P40). | P15, P40 |
 | Q-53 | Beta includes a **1099 vendor flag, tax ID, W-9 on file, account-to-box mapping, and a 1099 Summary report** for the CPA. | P11, P28 |
-| Q-54 | **Receipt inbox folder**: new photos/PDFs appear for attaching to bills, checks, or bank items. | P09, P17 |
+| Q-54 | **Receipt inbox folder**: new photos/PDFs appear for attaching to bills, checks, or bank items. *Expanded 2026-10-25 by ADD-01 into per-company mapped intake folders (Q-287).* | P09, P17 |
 | Q-55 | Check printing **confirms after print**; reprints get new numbers and void the originals, logged. | P19 |
 | Q-56 | **Export All Data** to a CSV + Excel zip (lists, transactions with lines, standard reports). | P08 |
 | Q-57 | **Tabs with optional pop-out** to separate OS windows. | P06 |
@@ -237,6 +237,14 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 | Q-226 | **Mockups are the visual reference.** `docs/design/` holds 15 owner-approved screens (HTML + PNG) with an index mapping each to its phase. Precedence on conflict: non-negotiables and QUESTIONS decisions → DESIGN.md → mockup → judgment (logged here). Build in egui, not HTML; compare by structure via `ui-check --compare`; the P08 sample company reproduces the mockup figures. Claude Code never edits `docs/design/`. | P06–P32 screens, P07, P08 |
 | Q-227 | **PROPOSED elements are not built.** The "Send directly" panel on the Send to My Accountant mockup waits for an owner decision; Q-25 (export file only) stands until then. | P32 |
 | Q-228 | **Mockup updates:** the owner revises screens on the private design canvas; a session then re-exports them into `docs/design/` (HTML + PNG) in a `docs(design):` commit. The canvas link is never committed (public repo). | All screens |
+| Q-279 | **Local document reading is built in.** Bills and receipts are read on the owner's computer and work with AI off and networking disabled; AI (local Ollama or cloud) is an optional improvement only. | A03 |
+| Q-280 | **Reading pipeline:** PDF text layer → offline OCR for scans and photos → field rules + learned vendor templates → optional local Ollama second opinion (text or vision model) when enabled. | A03 |
+| Q-281 | **Drafts only.** Every read amount is linked to its spot in the document; totals must reconcile or are flagged; nothing posts without the owner's accept. | A03 |
+| Q-282 | **No duplicate expenses from receipts.** A receipt that matches an existing register or bank-feed transaction is attached to it instead of creating a new one. | A04, A05 |
+| Q-287 | **Mapped intake folders, a setting of each company** (stored in the company's preferences, carried by backups, excluded from transfer files): an Admin maps one or more folders per company (local, mapped drive, UNC share, or cloud-sync folder) where bills and receipts are first saved; each has a name, default kind (Bills / Receipts / Let ClientLedger decide), and an auto-read switch. | A01 |
+| Q-290 | **Pop-out document viewer**: docked beside the form by default, poppable to its own OS window that follows the active form or queue item and remembers monitor, position, size, and zoom per user. | A02, A04 |
+| Q-291 | **Compare tools**: field ↔ page highlights both ways with confidence colors, click-to-fill from the page, and a check-list view with source snippets. | A04 |
+| Q-294 | **ADD-01 models**: Opus for all A-phase work and PR-A1, stepping up when needed (owner 2026-10-25; the kit's Fable checkpoints and Sonnet implementers don't apply, Q-277 stands). | ADD-01, docs/AGENTS.md |
 
 ## Owner Q&A 2026-10-19
 
@@ -523,3 +531,11 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P17t | Ghost accounts on bill lines | P17 | Read lines get the vendor's usual account; other lines ask the engine's suggestion then AI; a ghost is taken only by Tab or Accept (Q-P10w). No bank rules (a bill has no bank account). | Default in force |
 | Q-P17u | "Add as a new vendor?" after a reading | P17 | Opens the vendor list (not a prefilled vendor form) for now; follow-up. | Default in force |
 | Q-P17v | Shell text | P17 | Status bar "Ctrl Insert" (Q-P13n); menu "Customers & Jobs" (Q-P16u); "Receipt Inbox" and "Match Vendor Statement…" in the Vendors menu (the inbox with a count), not rail entries. | Default in force |
+| Q-283 | OCR engine. | A03 | `ocrs` (Rust) if its code **and model files** pass the license allowlist and the accuracy spike; otherwise Tesseract (Apache-2.0) with bundled English data. Decided and recorded in A03 step 1. | Open |
+| Q-284 | Cloud reading of document images. | A03 | Off. Allowed only after a separate consent screen (images can't be redacted like text), recorded in the audit trail. | Open |
+| Q-285 | Accuracy minimums. | A03 | Header fields with AI off: ≥ 95% text PDFs, ≥ 85% scans/photos; ≥ 98% with a saved vendor template; line items best effort — if lines can't be read confidently, one line for the total to the vendor's default account. | Open |
+| Q-286 | Review queue mockup. | A04 | Follow DESIGN.md and the Enter Bill mockup; draw a queue mockup if the owner wants one before A04. | Open |
+| Q-288 | What happens to original files after handling. | A01 | Copy into the company's attachments store on arrival; move the original to `Processed/YYYY-MM/` (or `Discarded/`) inside the mapped folder; never delete; option to leave originals untouched. | Open |
+| Q-289 | Which computer watches a company's mapped folders in LAN mode. | A01, P33 | The LAN host, for the company open there (paths must be valid on the host); workstations see the shared inbox and queue. | Open |
+| Q-292 | File types for intake. | A01, A02 | PDF, JPG, PNG, and multi-page TIFF. No HEIC (its common decoders are LGPL); iPhone users set the camera or scanning app to save JPG or PDF, and the inbox explains this when a HEIC file arrives. | Open |
+| Q-293 | Mockup for the popped-out viewer and the check list. | A02, A04 | Follow DESIGN.md (Document viewer) and the Enter Bill mockup; draw mockups if the owner wants them first. | Open |
