@@ -460,7 +460,9 @@ fn open<'a>(pdfium: Option<&'a Pdfium>, doc: u64, bytes: &[u8]) -> (DocReply, Op
             ),
             None => (DocReply::Unreadable { doc }, None),
         },
-        None => (DocReply::Unreadable { doc }, None),
+        // A TIFF is taken in (Q-A01n) but not shown until the new viewer
+        // (A02).
+        Some(cl_api::FileKind::Tiff) | None => (DocReply::Unreadable { doc }, None),
     }
 }
 

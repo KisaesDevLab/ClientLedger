@@ -151,11 +151,7 @@ const RESERVED: [&str; 22] = [
 
 /// The extension a file of `kind` is saved with.
 fn extension(kind: FileKind) -> &'static str {
-    match kind {
-        FileKind::Pdf => "pdf",
-        FileKind::Png => "png",
-        FileKind::Jpeg => "jpg",
-    }
+    kind.extension()
 }
 
 /// A safe file stem from the engine's file name: the last path part only,
