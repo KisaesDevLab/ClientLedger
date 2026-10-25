@@ -1164,14 +1164,8 @@ impl PersonalFundsScreen {
         } else {
             tokens.text_secondary
         };
-        ui.label(kit::with_figure(
-            ui,
-            key,
-            var,
-            &figure.format(self.money_style),
-            12.0,
-            color,
-        ));
+        let job = kit::with_figure(ui, key, var, &figure.format(self.money_style), 12.0, color);
+        crate::widgets::label_with_check(ui, job, false);
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
         if let Some(ev) = kit::status(

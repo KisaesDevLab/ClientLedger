@@ -1038,15 +1038,16 @@ fn duplicate_line(
                 );
             }
             None => {
-                ui.add(
-                    egui::Label::new(small(
+                crate::widgets::label_with_check(
+                    ui,
+                    small(
                         t_with(
                             pick("bill.panel.dup.none", "bill.panel.dup.none_credit"),
                             &[("ref", reference)],
                         ),
                         tokens.accent,
-                    ))
-                    .wrap(),
+                    ),
+                    true,
                 );
             }
         },
