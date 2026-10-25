@@ -394,6 +394,12 @@ pub const AI_PARSE_FAILED: &str = "AI_PARSE_FAILED";
 /// A scan local reading could not read, at a privacy level that never
 /// sends images to a cloud provider.
 pub const OCR_UNREADABLE_AT_PII_LEVEL: &str = "OCR_UNREADABLE_AT_PII_LEVEL";
+/// A PDF with no text layer (a scan) had to be turned into page pictures,
+/// which needs poppler's `pdftoppm`: ClientLedger does not ship it (GPL),
+/// so a scanned PDF cannot be read yet. Text PDFs are read in the engine.
+pub const PDF_RENDER_FAILED: &str = "PDF_RENDER_FAILED";
+/// The PDF gave no page pictures (same cause, an empty result).
+pub const PDF_RENDER_EMPTY: &str = "PDF_RENDER_EMPTY";
 
 /// The engine's AI gates (any of these is `AiUnavailable`).
 const GATE_CODES: [&str; 4] = [
@@ -424,7 +430,8 @@ impl BillOcr<'_> {
     /// engine's AI gate refuses (AI off, the function off, no consent, or
     /// its code-less "not enabled"); `Validation` with [`AI_OCR_FAILED`],
     /// [`AI_ALL_PROVIDERS_FAILED`], [`AI_PARSE_FAILED`] or
-    /// [`OCR_UNREADABLE_AT_PII_LEVEL`] when it could not read the file;
+    /// [`OCR_UNREADABLE_AT_PII_LEVEL`] when it could not read the file,
+    /// [`PDF_RENDER_FAILED`] or [`PDF_RENDER_EMPTY`] for a scanned PDF;
     /// `NotFound`; `OfflineUnavailable`; `Decode`; any [`ApiError`]. The
     /// owner types the bill in by hand in every case.
     pub async fn extract(
@@ -591,6 +598,26 @@ mod tests {
             .await
             .expect_err("failed");
         assert!(crate::has_code(&e, AI_OCR_FAILED), "{e:?}");
+
+        // A scanned PDF: the engine's 422 keeps its upper-case code.
+        for code in [PDF_RENDER_FAILED, PDF_RENDER_EMPTY] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path(format!("/api/v1/bills/extract-from-attachment/{ATT}")))
+                .respond_with(json(
+                    422,
+                    &format!(r#"{{"error":{{"message":"Failed to render PDF","code":"{code}"}}}}"#),
+                ))
+                .mount(&server)
+                .await;
+            let s = company_session(&server);
+            let e = s
+                .bill_reading()
+                .extract(OPEN, att(), IdempotencyKey::new())
+                .await
+                .expect_err("scanned");
+            assert!(crate::has_code(&e, code), "{e:?}");
+        }
 
         let server = MockServer::start().await;
         Mock::given(method("POST"))

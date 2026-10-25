@@ -453,6 +453,55 @@ fn a_failed_reading_is_a_plain_message_and_manual_entry_goes_on() {
     }
 }
 
+/// A scanned PDF (the engine's `PDF_RENDER_FAILED` / `PDF_RENDER_EMPTY`,
+/// no GPL rasterizer is shipped) is a plain "not available yet" message,
+/// never the engine's code or its generic failure.
+#[test]
+fn a_scanned_pdf_says_reading_it_is_not_available_yet() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let att = cl_api::AttachmentId::parse("5c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
+    let open = cl_api::BillReadGate {
+        ai_enabled: true,
+        bill_reading_on: true,
+        provider_set: true,
+    };
+    for code in ["PDF_RENDER_FAILED", "PDF_RENDER_EMPTY"] {
+        let e = rt.block_on(async {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path(format!("/api/v1/bills/extract-from-attachment/{att}")))
+                .respond_with(ResponseTemplate::new(422).set_body_raw(
+                    format!(r#"{{"error":{{"message":"Failed to render PDF: spawn pdftoppm ENOENT","code":"{code}"}}}}"#),
+                    "application/json",
+                ))
+                .mount(&server)
+                .await;
+            let session = cl_api::testing::stub_session(server.address().port());
+            session
+                .bill_reading()
+                .extract(open, att, cl_api::IdempotencyKey::new())
+                .await
+                .expect_err("scanned")
+        });
+        let key = problem_of(&e);
+        assert_eq!(key, "bill.read.problem.scanned_pdf", "{e:?}");
+        let shown = crate::i18n::t(key);
+        assert!(shown.contains("scanned PDFs isn't available yet"), "{shown}");
+        assert!(!shown.contains("PDF_RENDER"), "{shown}");
+        let (_d, link) = link();
+        let mut s = with_document(&link);
+        s.read.job = Some(crate::company::Task::ready(Err(e)));
+        s.poll_read();
+        assert_eq!(s.read.problem, Some("bill.read.problem.scanned_pdf"));
+        assert!(s.header.current().read.is_empty());
+    }
+}
+
 #[test]
 fn a_line_without_an_account_gets_a_ghost_that_only_tab_or_accept_sets() {
     let (_d, link) = link();
