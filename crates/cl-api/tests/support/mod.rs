@@ -928,6 +928,31 @@ impl OllamaStub {
         }
     }
 
+    /// Also answers `POST /api/chat` (a non-streaming chat reply) with
+    /// `content` as the model's message: a canned provider for the engine's
+    /// AI paths, on loopback only.
+    pub fn serve_chat(&self, h: &Harness, content: &str) {
+        use wiremock::matchers::{method, path};
+        let body = serde_json::json!({
+            "model": "llama3.1:8b",
+            "message": { "role": "assistant", "content": content },
+            "done": true,
+            "done_reason": "stop",
+            "prompt_eval_count": 1,
+            "eval_count": 1,
+        })
+        .to_string();
+        h.run(async {
+            wiremock::Mock::given(method("POST"))
+                .and(path("/api/chat"))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(200).set_body_raw(body, "application/json"),
+                )
+                .mount(&self.server)
+                .await;
+        });
+    }
+
     /// Requests served so far.
     pub fn hits(&self, h: &Harness) -> u64 {
         h.run(async {

@@ -386,6 +386,10 @@ fn main() -> std::process::ExitCode {
             contract_idempotency::keyed_routes_replay,
         ),
         (
+            "idempotency::ap_routes_replay",
+            contract_idempotency::ap_routes_replay,
+        ),
+        (
             "capabilities::je_line_contact_u22",
             contract_capabilities::je_line_contact_u22,
         ),
