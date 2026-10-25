@@ -94,6 +94,28 @@ pub trait FolderFs: Send + Sync {
     /// # Errors
     /// [`FileError`].
     fn read(&self, path: &Path) -> Result<ReadFile, FileError>;
+
+    /// Checks that files can be created in `root`: creates a new hidden
+    /// `.clientledger-write-test-…` file (`create_new`, so no existing file
+    /// is ever opened) and removes it.
+    ///
+    /// # Errors
+    /// The system's error.
+    fn write_probe(&self, root: &Path) -> io::Result<()>;
+}
+
+/// A name no other file has (time, process and a counter).
+fn unique_suffix() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!(
+        "{nanos:x}-{:x}-{:x}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +262,26 @@ impl FolderFs for RealFs {
     fn read(&self, path: &Path) -> Result<ReadFile, FileError> {
         super::read_for_upload(path)
     }
+
+    fn write_probe(&self, root: &Path) -> io::Result<()> {
+        for _ in 0..3 {
+            let path = root.join(format!(".clientledger-write-test-{}", unique_suffix()));
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(f) => {
+                    drop(f);
+                    // Only the file made just now is removed.
+                    return fs::remove_file(&path);
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Err(io::Error::from(io::ErrorKind::AlreadyExists))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +305,7 @@ struct FakeDir {
     fail: Option<(i32, u32)>,
     delay: Duration,
     canonical: Option<PathBuf>,
+    read_only: bool,
 }
 
 #[derive(Default)]
@@ -400,6 +443,15 @@ impl FakeFs {
             .canonical = Some(to.to_path_buf());
     }
 
+    /// Nothing can be created in `root` (or, `false`, it can again).
+    pub fn set_read_only(&self, root: &Path, read_only: bool) {
+        self.lock()
+            .dirs
+            .entry(root.to_path_buf())
+            .or_default()
+            .read_only = read_only;
+    }
+
     /// The file at `path` is held open for writing (or not, `false`).
     pub fn set_locked(&self, path: &Path, locked: bool) {
         let mut i = self.lock();
@@ -531,6 +583,14 @@ impl FolderFs for FakeFs {
             modified_ms: f.modified_ms,
             bytes: f.bytes,
         })
+    }
+
+    fn write_probe(&self, root: &Path) -> io::Result<()> {
+        self.gate(root)?;
+        if self.lock().dirs.get(root).is_some_and(|d| d.read_only) {
+            return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+        }
+        Ok(())
     }
 }
 

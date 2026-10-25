@@ -824,6 +824,7 @@ dependencies = [
  "cl-host",
  "cl-pg",
  "cl-settings",
+ "proptest",
  "serde",
  "serde_json",
  "sha2",

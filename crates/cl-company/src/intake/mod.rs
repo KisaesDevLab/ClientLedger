@@ -33,10 +33,14 @@ use sha2::{Digest, Sha256};
 pub mod fs;
 pub mod legacy;
 pub mod path;
+pub mod probe;
 pub mod scan;
 
 pub use fs::{EntryInfo, FakeFs, FolderFs, RawListing, RealFs};
-pub use path::classify;
+pub use path::{
+    MAX_PATH_CHARS, PathProblem, canonical_key, canonical_key_with, check_path_syntax, classify,
+};
+pub use probe::{PROBE_DEADLINE, ProbeCounts, ProbeReport, probe, probe_async, probe_async_with};
 pub use scan::{
     DocKind, IntakeFile, ItemState, Listing, MAX_FILE_BYTES, MAX_LISTED, MAX_SCANNED, STABLE_FOR,
     Stability, doc_kind, read_for_upload, scan, skipped_name,
