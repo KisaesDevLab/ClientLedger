@@ -18,6 +18,7 @@ pub mod dates;
 pub mod errors;
 pub mod fiscal;
 pub mod ids;
+pub mod intake;
 pub mod money;
 pub mod secret;
 
