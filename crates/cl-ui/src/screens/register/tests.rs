@@ -1245,7 +1245,8 @@ fn delete_offers_void_without_the_capability_or_for_other_kinds() {
         let k = s.model.row_key(i).expect("key");
         s.actions.cursor = Some(k);
         s.actions.panel = dialogs::Panel::None;
-        if !r.txn_type.is_deletable() && !seen.0 {
+        // A/P documents have their own refusal (P17 WP2b).
+        if !r.txn_type.is_deletable() && !dialogs::VoidRoute::of(r.txn_type).is_ap() && !seen.0 {
             assert!(s.start_delete());
             assert_eq!(
                 s.state()["row_action"]["notice"],
@@ -1446,6 +1447,7 @@ fn rate_limits_and_conflicts_are_plain_messages() {
     s.row_action_failed(
         &dialogs::Pending::Row {
             kind: dialogs::ActionKind::Void,
+            route: dialogs::VoidRoute::Generic,
             id: row.txn_id,
             date: row.date,
             version: None,
@@ -1927,4 +1929,398 @@ fn b2_the_entry_row_sends_nothing_after_an_unknown_outcome_until_the_recheck_ans
     assert!(s.start_record());
     settle(&mut s, None);
     assert_eq!(s.model.total(), Some(before + 1), "sent once");
+}
+
+// ------------------------------------------------- P17 WP2b: the A/P guard
+
+/// Every row of the register of `account` (all dates), with its key.
+fn all_rows(s: &mut RegisterScreen) -> Vec<(cl_grid::RowKey, view::RegRow)> {
+    s.set_range(cl_model::register::RangePreset::AllDates);
+    // Read again: the test may have entered something in the demo.
+    s.ledger_changed();
+    settle(s, None);
+    let total = s.model.total().expect("total");
+    settle(s, Some(&(0..total)));
+    (0..usize::try_from(total).expect("rows"))
+        .filter_map(|i| Some((s.model.row_key(i)?, s.model.row_at(i)?.clone())))
+        .collect()
+}
+
+/// Enters a bill (or, with `credit`, a vendor credit) of 12.00 on the
+/// demo's Accounts Payable (2000) against fuel (6100), dated today.
+fn demo_ap_document(link: &Arc<CompanyLink>, kind: &'static str, credit: bool) {
+    let ap = demo_account(link, "2000");
+    let fuel = demo_account(link, "6100");
+    let mut demo = link.demo_state().expect("demo");
+    let chart = demo
+        .chart
+        .get_or_insert_with(crate::company::demo::chart)
+        .clone();
+    let posting = crate::company::demo::register::DemoPosting {
+        kind,
+        date: today(),
+        number: String::new(),
+        contact: Some("Hollister Fuel Stop".into()),
+        memo: String::new(),
+        own: ap,
+        own_debit: credit,
+        lines: vec![(fuel, money("12.00"))],
+    };
+    demo.ledger.save(&chart, &posting, None).expect("saved");
+}
+
+/// The first open (not void) row of `kind`, in or out of the closed period.
+fn ap_row(
+    s: &mut RegisterScreen,
+    kind: cl_api::TxnType,
+    locked: bool,
+) -> (cl_grid::RowKey, view::RegRow) {
+    all_rows(s)
+        .into_iter()
+        .find(|(_, r)| r.txn_type == kind && !r.void && s.model.locked(r) == locked)
+        .unwrap_or_else(|| panic!("no {kind:?} row (locked {locked}) in the demo"))
+}
+
+#[test]
+fn void_routes_follow_the_kind() {
+    use cl_api::TxnType as T;
+    use dialogs::VoidRoute as R;
+    let all = [
+        T::Invoice,
+        T::CustomerPayment,
+        T::CashSale,
+        T::Expense,
+        T::Deposit,
+        T::Transfer,
+        T::JournalEntry,
+        T::CreditMemo,
+        T::CustomerRefund,
+        T::Bill,
+        T::VendorCredit,
+        T::BillPayment,
+        T::DailySales,
+        T::Aje,
+    ];
+    for t in all {
+        let r = R::of(t);
+        let ap = matches!(t, T::Bill | T::VendorCredit | T::BillPayment);
+        assert_eq!(r.is_ap(), ap, "{t:?}");
+        assert_eq!(r.delete_refused().is_some(), ap, "{t:?}");
+        assert_eq!(r.refused().is_some(), ap, "{t:?}");
+        // The engine never soft-deletes an A/P document either (Q-245).
+        assert!(!(ap && t.is_deletable()), "{t:?}");
+    }
+    assert_eq!(R::of(T::Bill), R::Bill);
+    assert_eq!(R::of(T::VendorCredit), R::VendorCredit);
+    assert_eq!(R::of(T::BillPayment), R::BillPayment);
+    assert_eq!(R::of(T::Expense), R::Generic);
+    assert_eq!(
+        R::Bill.delete_refused(),
+        Some("register.ap.delete_document")
+    );
+    assert_eq!(
+        R::VendorCredit.delete_refused(),
+        Some("register.ap.delete_document")
+    );
+    assert_eq!(
+        R::BillPayment.delete_refused(),
+        Some("register.ap.delete_payment")
+    );
+    for key in [
+        "register.ap.delete_document",
+        "register.ap.delete_payment",
+        "register.ap.void_bill_paid",
+        "register.ap.void_credit_applied",
+        "register.ap.void_payment_refused",
+        "register.ap.void_payment_body",
+        "register.ap.closed",
+    ] {
+        assert_ne!(crate::i18n::t(key), key, "{key} has English text");
+    }
+}
+
+#[test]
+fn a_bill_row_is_never_deleted_and_voids_through_the_bill_route() {
+    let (_d, link) = link();
+    let ap = demo_account(&link, "2000");
+    let mut s = RegisterScreen::new(Arc::clone(&link), None, today(), Some(ap));
+    // The demo's sample bills post to an A/P account outside its chart, so
+    // one is entered on Accounts Payable here.
+    demo_ap_document(&link, "bill", false);
+    let (key, row) = ap_row(&mut s, cl_api::TxnType::Bill, false);
+    s.actions.cursor = Some(key);
+    // Delete is refused in plain words and offers Void, with or without
+    // the engine's delete; nothing is sent.
+    for caps in [None, Some((true, false))] {
+        s.actions.caps = caps;
+        s.actions.panel = dialogs::Panel::None;
+        assert!(s.command(CommandId::new("form.delete_item")));
+        let st = s.state()["row_action"].clone();
+        assert_eq!(st["panel"], "offer_void");
+        assert_eq!(st["notice"], "register.ap.delete_document");
+        assert_eq!(st["count"], 0, "nothing sent");
+        assert_eq!(st["route"], serde_json::Value::Null);
+    }
+    s.actions.caps = None;
+    s.actions.panel = dialogs::Panel::None;
+    assert!(!row_of(&s, key).void);
+    // Void asks first, then goes to the bill's own route.
+    assert!(s.command(CommandId::new("edit.void_transaction")));
+    assert_eq!(s.state()["row_action"]["panel"], "confirm_void");
+    s.confirm();
+    let st = s.state()["row_action"].clone();
+    assert_eq!(st["last"], "void");
+    assert_eq!(st["route"], "bill");
+    assert_eq!(st["error"], false);
+    let rows = all_rows(&mut s);
+    assert!(
+        rows.iter().any(|(_, r)| r.txn_id == row.txn_id && r.void),
+        "the bill is void"
+    );
+    // A vendor credit: the same refusal, and its own route.
+    demo_ap_document(&link, "vendor_credit", true);
+    let (key, _) = ap_row(&mut s, cl_api::TxnType::VendorCredit, false);
+    s.actions.cursor = Some(key);
+    s.actions.panel = dialogs::Panel::None;
+    assert!(s.command(CommandId::new("form.delete_item")));
+    assert_eq!(
+        s.state()["row_action"]["notice"],
+        "register.ap.delete_document"
+    );
+    s.actions.panel = dialogs::Panel::None;
+    assert!(s.command(CommandId::new("edit.void_transaction")));
+    s.confirm();
+    assert_eq!(s.state()["row_action"]["route"], "vendor_credit");
+    assert_eq!(s.state()["row_action"]["count"], 2);
+}
+
+#[test]
+fn a_bill_payment_row_voids_through_its_own_route_and_is_never_deleted() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let (key, row) = ap_row(&mut s, cl_api::TxnType::BillPayment, false);
+    s.actions.cursor = Some(key);
+    assert!(s.command(CommandId::new("form.delete_item")));
+    assert_eq!(
+        s.state()["row_action"]["notice"],
+        "register.ap.delete_payment"
+    );
+    assert_eq!(s.state()["row_action"]["count"], 0);
+    // The offer's Void: read, asked, then the bill-payment route.
+    s.open_confirm(dialogs::ActionKind::Void, row.txn_id, row.date);
+    assert_eq!(s.state()["row_action"]["panel"], "confirm_void");
+    s.confirm();
+    let st = s.state()["row_action"].clone();
+    assert_eq!(
+        (st["last"].clone(), st["route"].clone()),
+        ("void".into(), "bill_payment".into())
+    );
+}
+
+#[test]
+fn a_closed_period_ap_row_is_explained_and_nothing_is_sent() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let (key, row) = ap_row(&mut s, cl_api::TxnType::BillPayment, true);
+    s.actions.cursor = Some(key);
+    assert!(s.command(CommandId::new("edit.void_transaction")));
+    s.confirm();
+    let st = s.state()["row_action"].clone();
+    assert_eq!(st["panel"], "notice");
+    assert_eq!(st["notice"], "register.ap.closed");
+    assert_eq!(st["closing"], "idle", "no password is asked for: {st}");
+    assert_eq!(
+        (st["count"].clone(), st["working"].clone()),
+        (0.into(), false.into())
+    );
+    let rows = all_rows(&mut s);
+    assert!(rows.iter().any(|(_, r)| r.txn_id == row.txn_id && !r.void));
+}
+
+#[test]
+fn ap_rows_never_open_an_in_place_edit() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let own = s.account().expect("account");
+    let (key, row) = ap_row(&mut s, cl_api::TxnType::BillPayment, false);
+    s.begin_edit(key, false);
+    assert!(s.entry.editing.is_none(), "no edit in the row");
+    // Whatever its shape, an A/P document is shown read-only: the register's
+    // save (an expense or journal update) never reaches it.
+    let (_, check) = all_rows(&mut s)
+        .into_iter()
+        .find(|(_, r)| r.txn_type == cl_api::TxnType::Expense && r.editable && !r.void)
+        .expect("a check");
+    let read = |id| {
+        let mut demo = link.demo_state().expect("demo");
+        let chart = demo
+            .chart
+            .get_or_insert_with(crate::company::demo::chart)
+            .clone();
+        let contacts = demo.contacts_mut().clone();
+        demo.ledger.get(&chart, &contacts, id).expect("read")
+    };
+    let paid = read(row.txn_id);
+    assert!(matches!(
+        edit::seed(&paid, own, AccountClass::Bank),
+        edit::Seed::ReadOnly(_)
+    ));
+    let mut v = read(check.txn_id);
+    assert!(matches!(
+        edit::seed(&v, own, AccountClass::Bank),
+        edit::Seed::Edit { .. }
+    ));
+    for t in [
+        cl_api::TxnType::Bill,
+        cl_api::TxnType::VendorCredit,
+        cl_api::TxnType::BillPayment,
+    ] {
+        v.record.txn_type = t;
+        assert!(
+            matches!(
+                edit::seed(&v, own, AccountClass::Bank),
+                edit::Seed::ReadOnly(_)
+            ),
+            "{t:?}"
+        );
+        assert_eq!(edit::form_for(&v.record, &|_| None), None, "{t:?}");
+    }
+}
+
+/// The stub engine's writes, as `METHOD /path`.
+async fn posts(server: &wiremock::MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .expect("recorded")
+        .into_iter()
+        .filter(|r| r.method.as_str() != "GET")
+        .map(|r| format!("{} {}", r.method, r.url.path()))
+        .collect()
+}
+
+/// The write the queue runs, against a stub engine: a bill's Void goes to
+/// `POST /bills/{id}/void` and never to the generic route; an A/P Delete,
+/// or a password for an A/P route, sends nothing at all; the engine's
+/// refusal comes back as a plain notice on the screen.
+#[test]
+fn the_ap_write_never_reaches_the_generic_routes() {
+    use dialogs::{ActionKind, RowWrite, VoidRoute, row_write};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    const ID: &str = "4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+    let id = cl_core::ids::TransactionId::parse(ID).expect("id");
+    let w = |kind, route, password: Option<cl_core::Secret>| RowWrite {
+        kind,
+        route,
+        id,
+        version: None,
+        reason: None,
+        void_reason: "Voided in the register".into(),
+        password,
+        key: cl_api::IdempotencyKey::new(),
+    };
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let refused = rt.block_on(async {
+        let server = MockServer::start().await;
+        let session = cl_api::testing::stub_session(server.address().port());
+        // Refused before anything goes out.
+        for (kind, route, pw) in [
+            (ActionKind::Delete, VoidRoute::Bill, None),
+            (ActionKind::Delete, VoidRoute::VendorCredit, None),
+            (ActionKind::Delete, VoidRoute::BillPayment, None),
+            (ActionKind::Void, VoidRoute::Bill, Some(cl_core::Secret::new("pw"))),
+        ] {
+            let e = row_write(session.clone(), w(kind, route, pw))
+                .await
+                .expect_err("refused");
+            assert_eq!(e, ApiError::Local(cl_api::LocalValidation::InvalidValue));
+        }
+        assert_eq!(
+            server.received_requests().await.map(|r| r.len()),
+            Some(0),
+            "nothing sent"
+        );
+        // Void on a bill: its own route only.
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v1/bills/{ID}/void")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(r#"{"bill":{}}"#, "application/json"),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        row_write(session.clone(), w(ActionKind::Void, VoidRoute::Bill, None))
+            .await
+            .expect("voided");
+        assert_eq!(
+            posts(&server).await,
+            vec![format!("POST /api/v1/bills/{ID}/void")]
+        );
+        // The engine refuses a paid bill: a validation error, still only the
+        // bill route.
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v1/bills/{ID}/void")))
+            .respond_with(ResponseTemplate::new(400).set_body_raw(
+                r#"{"error":{"message":"Cannot void a bill that has payments applied. Void the payments first."}}"#,
+                "application/json",
+            ))
+            .mount(&server)
+            .await;
+        let e = row_write(session.clone(), w(ActionKind::Void, VoidRoute::Bill, None))
+            .await
+            .expect_err("paid");
+        assert!(matches!(e, ApiError::Validation(_)), "{e:?}");
+        let sent = posts(&server).await;
+        assert_eq!(sent.len(), 2);
+        assert!(
+            sent.iter().all(|p| !p.contains("/transactions/")),
+            "never the generic route: {sent:?}"
+        );
+        e
+    });
+    // The screen says it plainly, with no generic error and no reload.
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let row = all_rows(&mut s).remove(0).1;
+    let pending = |route| dialogs::Pending::Row {
+        kind: dialogs::ActionKind::Void,
+        route,
+        id: row.txn_id,
+        date: row.date,
+        version: None,
+        reason: None,
+    };
+    s.row_action_failed(&pending(VoidRoute::Bill), refused.clone());
+    let st = s.state()["row_action"].clone();
+    assert_eq!(st["notice"], "register.ap.void_bill_paid");
+    assert_eq!(
+        (st["error"].clone(), st["stale"].clone()),
+        (false.into(), false.into())
+    );
+    s.row_action_failed(&pending(VoidRoute::VendorCredit), refused.clone());
+    assert_eq!(
+        s.state()["row_action"]["notice"],
+        "register.ap.void_credit_applied"
+    );
+    s.row_action_failed(&pending(VoidRoute::BillPayment), refused);
+    assert_eq!(
+        s.state()["row_action"]["notice"],
+        "register.ap.void_payment_refused"
+    );
+    // A closed period on an A/P route has no password path: explained.
+    let closed = ApiError::ClosedPeriod(cl_api::ClosedPeriod {
+        lock_date: s.model.closing,
+        can_override: true,
+        password_required: Some(true),
+        message: cl_api::UserText::default(),
+    });
+    s.row_action_failed(&pending(VoidRoute::Bill), closed);
+    let st = s.state()["row_action"].clone();
+    assert_eq!(st["notice"], "register.ap.closed");
+    assert_eq!(st["closing"], "idle");
 }

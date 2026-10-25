@@ -183,5 +183,6 @@
   {"method":"DELETE","path":"/api/v1/attachments/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"POST","path":"/api/v1/attachments/{id}/link","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"GET","path":"/api/v1/attachments/unlinked","inSpec":true,"fragmentHash":null},
-  {"method":"GET","path":"/api/v1/bill-payments","inSpec":true,"fragmentHash":null}
+  {"method":"GET","path":"/api/v1/bill-payments","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/bill-payments/{id}/void","inSpec":true,"fragmentHash":"a38ebffd6a54df241f185613c51f6f4f483eb221cb091af23b6f5e4b7cc50999"}
 ]

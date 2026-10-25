@@ -641,6 +641,10 @@ pub(crate) const ATTACHMENT_LINK: Operation = write(Method::Post, "/api/v1/attac
 pub(crate) const ATTACHMENTS_UNLINKED: Operation = read("/api/v1/attachments/unlinked");
 /// Bill payments by vendor and date (statement match).
 pub(crate) const BILL_PAYMENTS_LIST: Operation = read("/api/v1/bill-payments");
+/// Voids a bill payment and takes its applications off the bills and
+/// credits it paid (the register's A/P void guard, review B1).
+pub(crate) const BILL_PAYMENT_VOID: Operation =
+    write(Method::Post, "/api/v1/bill-payments/{id}/void");
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
@@ -654,7 +658,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 185] = [
+pub const OPERATIONS: [Operation; 186] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -847,6 +851,7 @@ pub const OPERATIONS: [Operation; 185] = [
     ATTACHMENT_LINK,
     ATTACHMENTS_UNLINKED,
     BILL_PAYMENTS_LIST,
+    BILL_PAYMENT_VOID,
 ];
 
 /// Looks up a covered operation.

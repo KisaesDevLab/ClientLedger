@@ -227,3 +227,4 @@ DELETE  /api/v1/attachments/{id}                pre-handler-only
 POST    /api/v1/attachments/{id}/link           pre-handler-only
 GET     /api/v1/attachments/unlinked            idempotent
 GET     /api/v1/bill-payments                   idempotent
+POST    /api/v1/bill-payments/{id}/void         pre-handler-only
