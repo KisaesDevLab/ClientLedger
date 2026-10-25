@@ -389,6 +389,39 @@ fn s2_a_failed_link_shows_already_entered_and_is_tried_again_with_the_saved_txn(
     assert!(s.rows.iter().all(|r| r.template != tid), "handled");
 }
 
+/// Review fix-PR-1 should-fix 5: a link the engine refused for good never
+/// brings "Enter it now" back: the date shows "Saved separately" with
+/// Dismiss, which goes through the skip path.
+#[test]
+fn a_refused_link_shows_saved_separately_and_dismiss_settles_it() {
+    let (_dir, link) = demo();
+    let today = DemoState::today();
+    let tid = remind(&link, "Savings", today);
+    let _r = caught_up(&link, today);
+    let txn = TransactionId::parse("d0000000-0000-4000-8000-b0000000aa02").expect("t");
+    link.due().linking(tid, today, txn);
+    link.due().link_refused(tid, today);
+    let mut s = screen(&link, today);
+    let row = s
+        .rows
+        .iter()
+        .position(|r| r.template == tid)
+        .expect("the row");
+    assert_eq!(s.rows[row].section, Section::SavedSeparately);
+    assert_eq!(s.state()["rows"][row]["saved_separately"], true);
+    assert_eq!(s.state()["rows"][row]["can_dismiss"], true);
+    s.selected = Some(row);
+    s.enter_now(None);
+    s.open_in_form();
+    assert!(s.enter_job.is_none() && s.open_job.is_none(), "never entered again");
+    // Dismiss (Enter on the row): skipped in the books, off the board.
+    s.default_action(None);
+    assert_eq!(s.last_action, Some("skip"));
+    assert!(!link.due().is_saved_separately(tid, today));
+    s.poll();
+    assert!(s.rows.iter().all(|r| r.template != tid), "handled");
+}
+
 #[test]
 fn catch_up_skip_these_sends_each_date_through_the_skip_path() {
     let (_dir, link) = demo();

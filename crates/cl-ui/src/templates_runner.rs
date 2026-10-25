@@ -63,6 +63,17 @@ pub struct DueBoard {
     /// made (S2): the saved transaction and the tries so far. Templates Due
     /// shows them as already entered; the runner tries again.
     linking: BTreeMap<(TemplateId, CalendarDate), Linking>,
+    /// Where `linking` is kept between runs (review fix-PR-1 should-fix
+    /// 5): the settings folder and the company.
+    store: Option<(std::path::PathBuf, String)>,
+    /// "Skip these dates" on its way for these templates: no run starts
+    /// meanwhile (it could post a date the owner is skipping).
+    skipping: BTreeSet<TemplateId>,
+    /// A run is on its way: "Skip these dates" waits for it.
+    running: bool,
+    /// The run waits because an automatic template's date has a saved
+    /// form whose link has not taken (it could post the date again).
+    links_wait: bool,
 }
 
 /// One pending link of a saved form to its date (S2).
@@ -72,6 +83,8 @@ struct Linking {
     tries: u32,
     /// The last try failed and may go again (none is on its way).
     ready: bool,
+    /// The engine refused it for good: "Saved separately", dismissable.
+    refused: bool,
 }
 
 /// How often a failed link of a saved form to its date is tried (S2).
@@ -162,29 +175,80 @@ impl DueBoard {
             txn,
             tries: 0,
             ready: false,
+            refused: false,
         });
         l.tries += 1;
         l.ready = false;
+        l.refused = false;
         self.generation += 1;
+        self.persist();
     }
 
-    /// The link of `(template, date)` is done (or no longer tried).
+    /// The link of `(template, date)` took: the date is entered. A run
+    /// that waited on it goes on.
     pub fn linked(&mut self, template: TemplateId, date: CalendarDate) {
         if self.linking.remove(&(template, date)).is_some() {
             self.generation += 1;
+            self.persist();
+            if self.links_wait {
+                self.check_now = true;
+            }
         }
+    }
+
+    /// The engine refused the link of `(template, date)` for good: the
+    /// saved transaction stands on its own ("Saved separately"); the date
+    /// stays off "Enter it now" until the owner dismisses it.
+    pub fn link_refused(&mut self, template: TemplateId, date: CalendarDate) {
+        if let Some(l) = self.linking.get_mut(&(template, date)) {
+            l.refused = true;
+            l.ready = false;
+            self.generation += 1;
+            self.persist();
+        }
+    }
+
+    /// The owner dismissed a "Saved separately" date (it went through the
+    /// skip path, so the engine never posts it).
+    pub fn link_dismissed(&mut self, template: TemplateId, date: CalendarDate) {
+        self.linked(template, date);
     }
 
     /// A saved form's link to `(template, date)` is still being made.
     #[must_use]
     pub fn is_linking(&self, template: TemplateId, date: CalendarDate) -> bool {
-        self.linking.contains_key(&(template, date))
+        self.linking
+            .get(&(template, date))
+            .is_some_and(|l| !Self::separately(l))
+    }
+
+    /// The saved form's link to `(template, date)` was refused, or every
+    /// try this session failed: shown as "Saved separately" with Dismiss.
+    #[must_use]
+    pub fn is_saved_separately(&self, template: TemplateId, date: CalendarDate) -> bool {
+        self.linking
+            .get(&(template, date))
+            .is_some_and(Self::separately)
+    }
+
+    fn separately(l: &Linking) -> bool {
+        l.refused || (l.ready && l.tries >= LINK_TRIES)
+    }
+
+    /// Every date a saved form holds (pending or saved separately).
+    #[must_use]
+    pub fn held_dates(&self) -> Vec<(TemplateId, CalendarDate)> {
+        self.linking.keys().copied().collect()
     }
 
     /// A try of the link of `(template, date)` failed and may go again.
     pub fn link_failed(&mut self, template: TemplateId, date: CalendarDate) {
         if let Some(l) = self.linking.get_mut(&(template, date)) {
             l.ready = true;
+            if l.tries >= LINK_TRIES {
+                // Shown as saved separately now.
+                self.generation += 1;
+            }
         }
     }
 
@@ -194,10 +258,73 @@ impl DueBoard {
         let (key, l) = self
             .linking
             .iter_mut()
-            .find(|(_, l)| l.ready && l.tries < LINK_TRIES)?;
+            .find(|(_, l)| l.ready && !l.refused && l.tries < LINK_TRIES)?;
         l.tries += 1;
         l.ready = false;
         Some((key.0, key.1, l.txn))
+    }
+
+    /// Keeps the pending links of `company` in `dir` and reads the ones
+    /// left from before (a restart tries them again).
+    pub fn attach(&mut self, dir: std::path::PathBuf, company: String) {
+        let book = crate::prefs::PendingLinksBook::load(&dir);
+        for p in book.get(&company) {
+            self.linking.insert(
+                (p.template, p.date),
+                Linking {
+                    txn: p.txn,
+                    tries: 0,
+                    ready: !p.refused,
+                    refused: p.refused,
+                },
+            );
+        }
+        self.store = Some((dir, company));
+        self.generation += 1;
+    }
+
+    fn persist(&self) {
+        let Some((dir, company)) = &self.store else {
+            return;
+        };
+        let links: Vec<crate::prefs::PendingLink> = self
+            .linking
+            .iter()
+            .map(|((template, date), l)| crate::prefs::PendingLink {
+                template: *template,
+                date: *date,
+                txn: l.txn,
+                refused: l.refused,
+            })
+            .collect();
+        let mut book = crate::prefs::PendingLinksBook::load(dir);
+        book.set(company, &links);
+        if let Err(e) = book.save(dir) {
+            tracing::warn!(error = %e, "could not keep the pending template links");
+        }
+    }
+
+    /// "Skip these dates" for `template` started: no run starts until it
+    /// ends ([`Self::skip_ended`]).
+    pub fn skip_started(&mut self, template: TemplateId) {
+        self.skipping.insert(template);
+    }
+
+    /// "Skip these dates" for `template` ended (done or failed).
+    pub fn skip_ended(&mut self, template: TemplateId) {
+        self.skipping.remove(&template);
+    }
+
+    /// A run is on its way ("Skip these dates" waits for it).
+    #[must_use]
+    pub fn running(&self) -> bool {
+        self.running
+    }
+
+    /// The run waits on a saved form's link of an automatic template.
+    #[must_use]
+    pub fn links_wait(&self) -> bool {
+        self.links_wait
     }
     /// A new answer.
     pub fn set(&mut self, run: RunDue) {
@@ -247,32 +374,54 @@ impl DueBoard {
     /// How many dates wait for the owner (due reminder dates and open
     /// skipped dates, each a row in Templates Due): the status-bar chip
     /// ("4 entries need you").
+    /// Also counted: a catch-up question (one per template, until it is
+    /// answered: the window opens for it once, then the chip stays) and a
+    /// "Saved separately" date to dismiss.
     #[must_use]
     pub fn needs_you(&self) -> usize {
-        let Some(run) = &self.run else {
-            return 0;
-        };
-        run.reminders
-            .iter()
-            .flat_map(|r| r.dates.iter().map(move |d| (r.template, *d)))
-            // A capped catch-up continues on its own: not a chip.
-            .chain(
-                run.skipped
+        let mut all: BTreeSet<(TemplateId, CalendarDate)> = BTreeSet::new();
+        if let Some(run) = &self.run {
+            all.extend(
+                run.reminders
                     .iter()
-                    .filter(|k| !k.reason.is_capped())
-                    .map(|k| (k.template, k.date)),
-            )
-            .collect::<BTreeSet<_>>()
-            .len()
+                    .flat_map(|r| r.dates.iter().map(move |d| (r.template, *d)))
+                    // A capped catch-up continues on its own: not a chip.
+                    .chain(
+                        run.skipped
+                            .iter()
+                            .filter(|k| !k.reason.is_capped())
+                            .map(|k| (k.template, k.date)),
+                    )
+                    // A date a saved form holds is no longer waiting.
+                    .filter(|(t, d)| !self.is_linking(*t, *d)),
+            );
+        }
+        all.extend(
+            self.linking
+                .iter()
+                .filter(|(_, l)| Self::separately(l))
+                .map(|(k, _)| *k),
+        );
+        all.extend(
+            self.questions
+                .iter()
+                .filter_map(|q| q.dates.first().map(|d| (q.template, *d))),
+        );
+        all.len()
     }
 
-    /// Forget everything (the company closed).
+    /// Forget everything (the company closed). The pending links stay in
+    /// their file for the next open.
     pub fn clear(&mut self) {
         self.run = None;
         self.check_now = false;
         self.questions.clear();
         self.confirmed.clear();
         self.linking.clear();
+        self.store = None;
+        self.skipping.clear();
+        self.running = false;
+        self.links_wait = false;
         self.generation += 1;
     }
 }
@@ -338,6 +487,9 @@ pub(crate) struct Gathered {
     pub error: Option<ApiError>,
     /// The run did not start: these templates ask first (Q-PR1d).
     pub questions: Vec<CatchUpQuestion>,
+    /// The run did not start: an automatic template's date is held by a
+    /// saved form whose link has not taken (review fix-PR-1 should-fix 5).
+    pub links_wait: bool,
 }
 
 /// The rounds of one run (one run id).
@@ -374,7 +526,7 @@ impl Rounds {
         Gathered {
             run: self.acc,
             error,
-            questions: Vec::new(),
+            ..Gathered::default()
         }
     }
 }
@@ -404,6 +556,25 @@ where
     }
 }
 
+/// An automatic template has a due date held by a saved form whose link to
+/// it has not taken: the engine's run (no template filter) could post that
+/// date a second time, so the run waits (review fix-PR-1 should-fix 5).
+pub(crate) fn waits_on_links(
+    rows: &[cl_api::Template],
+    today: CalendarDate,
+    held: &[(TemplateId, CalendarDate)],
+) -> bool {
+    held.iter().any(|(id, date)| {
+        *date <= today
+            && rows.iter().any(|t| {
+                t.id == *id
+                    && t.schedule
+                        .as_ref()
+                        .is_some_and(|s| s.mode == cl_api::ScheduleMode::Auto)
+            })
+    })
+}
+
 /// One whole run on the demo engine (every round, as [`gather`]).
 fn demo_run(
     state: &mut crate::company::demo::DemoState,
@@ -411,20 +582,24 @@ fn demo_run(
     run_id: RunId,
     today: CalendarDate,
     confirmed: &BTreeSet<(TemplateId, CalendarDate)>,
+    held: &[(TemplateId, CalendarDate)],
 ) -> Gathered {
     // The practice company's templates arrive with its first open (WP-D).
     let first = state.companies.first().map(|c| c.tenant_id);
     if first.is_some() && state.open == first {
         demo::seed_sample(state);
     }
-    let questions = questions_of(
-        &crate::company::demo::template_store::list(state),
-        as_of,
-        confirmed,
-    );
+    let rows = crate::company::demo::template_store::list(state);
+    let questions = questions_of(&rows, as_of, confirmed);
     if !questions.is_empty() {
         return Gathered {
             questions,
+            ..Gathered::default()
+        };
+    }
+    if waits_on_links(&rows, as_of, held) {
+        return Gathered {
+            links_wait: true,
             ..Gathered::default()
         };
     }
@@ -467,6 +642,9 @@ pub struct TemplatesRunner {
     link_job: Option<((TemplateId, CalendarDate), Job<()>)>,
     /// When the next link try may start (`egui` seconds).
     next_link_at: f64,
+    /// Templates whose catch-up question was shown this session: a later
+    /// run asking the same opens no window (the chip stays).
+    asked: BTreeSet<TemplateId>,
 }
 
 /// A refusal that another try of the same link can't change: the date or
@@ -501,7 +679,13 @@ impl TemplatesRunner {
             pending: true,
             ..TemplatesRunner::default()
         };
-        link.due().clear();
+        let mut board = link.due();
+        board.clear();
+        // The links saved forms still owe their dates (review fix-PR-1
+        // should-fix 5), kept in the settings folder.
+        if let Some(dir) = link.store().path().parent() {
+            board.attach(dir.to_path_buf(), tenant.to_string());
+        }
     }
 
     /// The company closed.
@@ -546,7 +730,10 @@ impl TemplatesRunner {
         }
         self.tick_links(link, now);
         let mut out = finished(&mut self.job).and_then(|r| self.finish(link, r));
-        if self.pending && self.job.is_none() {
+        // "Skip these dates" on its way: a run now could post a date the
+        // owner is skipping, so it waits.
+        let skipping = !link.due().skipping.is_empty();
+        if self.pending && self.job.is_none() && !skipping {
             self.pending = false;
             self.last_day = Some(today);
             self.next_hour = Some(now + HOURLY_SECS);
@@ -577,8 +764,9 @@ impl TemplatesRunner {
                     board.linked(template, date);
                     board.handled(template, date);
                 }
-                // The reminder stays and can be dismissed (Q-P15p).
-                Err(e) if link_final(&e) => board.linked(template, date),
+                // Another try can't change this: the saved transaction
+                // stands on its own ("Saved separately", dismissable).
+                Err(e) if link_final(&e) => board.link_refused(template, date),
                 Err(_) => board.link_failed(template, date),
             }
         }
@@ -615,13 +803,18 @@ impl TemplatesRunner {
     fn start(&mut self, link: &Arc<CompanyLink>, today: CalendarDate) {
         let run_id = self.run_id_for(today);
         self.current = Some((today, run_id));
-        let confirmed = link.due().confirmed();
+        let (confirmed, held) = {
+            let mut board = link.due();
+            board.running = true;
+            (board.confirmed(), board.held_dates())
+        };
         let demo_confirmed = confirmed.clone();
+        let demo_held = held.clone();
         self.job = Some(run(
             link,
             self.group.as_ref(),
             Some("orphan.templates_run_due"),
-            move |s| Ok(demo_run(s, today, run_id, today, &demo_confirmed)),
+            move |s| Ok(demo_run(s, today, run_id, today, &demo_confirmed, &demo_held)),
             move |s| async move {
                 // An automatic template with more than three missed dates
                 // asks first (Q-PR1d): the run waits for the answer. The
@@ -633,6 +826,12 @@ impl TemplatesRunner {
                         if !questions.is_empty() {
                             return Ok(Gathered {
                                 questions,
+                                ..Gathered::default()
+                            });
+                        }
+                        if waits_on_links(&rows, today, &held) {
+                            return Ok(Gathered {
+                                links_wait: true,
                                 ..Gathered::default()
                             });
                         }
@@ -663,25 +862,45 @@ impl TemplatesRunner {
         r: Result<Gathered, ApiError>,
     ) -> Option<Finished> {
         let current = self.current.take();
-        let (run, error, questions) = match r {
-            Ok(g) => (g.run, g.error, g.questions),
-            Err(e) => (None, Some(e), Vec::new()),
+        link.due().running = false;
+        let (run, error, questions, links_wait) = match r {
+            Ok(g) => (g.run, g.error, g.questions, g.links_wait),
+            Err(e) => (None, Some(e), Vec::new(), false),
         };
         if !questions.is_empty() {
             // Nothing was sent; the run id stays for the run after the
-            // answer. Templates Due opens with the question.
+            // answer. Templates Due opens with a question asked for the
+            // first time this session; after that the chip stays (an
+            // hourly run never opens it again for the same question).
             tracing::info!(
                 templates = questions.len(),
                 "templates catch-up waits for the owner"
             );
             self.retry = current;
+            let fresh = questions.iter().any(|q| !self.asked.contains(&q.template));
+            self.asked.extend(questions.iter().map(|q| q.template));
             link.due().set_questions(questions);
             return Some(Finished {
                 posted: false,
-                open_window: true,
+                open_window: fresh,
             });
         }
-        link.due().set_questions(Vec::new());
+        if links_wait {
+            // Nothing was sent: an automatic template's date waits for a
+            // saved form's link (or the owner's Dismiss); the run goes on
+            // as soon as it is settled.
+            tracing::info!("templates catch-up waits for a saved form's link");
+            self.retry = current;
+            let mut board = link.due();
+            board.links_wait = true;
+            board.generation += 1;
+            return None;
+        }
+        {
+            let mut board = link.due();
+            board.links_wait = false;
+            board.set_questions(Vec::new());
+        }
         // A run stopped by anything but "no permission" or "no catch-up"
         // keeps its id: the retry gets its posts back, never twice.
         self.retry = match &error {

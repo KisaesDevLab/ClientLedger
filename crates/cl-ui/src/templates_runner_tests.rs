@@ -265,8 +265,7 @@ fn a_failed_later_round_keeps_what_was_gathered_and_the_run_id() {
         &link,
         Ok(Gathered {
             run: Some(answer(false, false, 0)),
-            error: None,
-            questions: Vec::new(),
+            ..Gathered::default()
         }),
     );
     assert_eq!(r.retry, None);
@@ -380,4 +379,90 @@ fn three_missed_dates_post_automatically_as_before() {
         Some(4),
         "the summary: the three and the sample's one"
     );
+}
+
+/// Review fix-PR-1 nit: a catch-up question opens Templates Due once a
+/// session; later runs asking the same keep only the chip.
+#[test]
+fn a_catch_up_question_opens_the_window_once_then_keeps_the_chip() {
+    let (_dir, link, tenant) = demo();
+    let today = DemoState::today();
+    let _id = add_auto(&link, "Daily sweep", today.add_days(-3).expect("d"));
+    let mut r = TemplatesRunner::default();
+    r.opened(&link, tenant);
+    assert!(r.tick(&link, today, 0.0).expect("asked").open_window);
+    let chip = link.due().needs_you();
+    assert!(chip >= 1, "the question counts on the chip");
+    // The hourly run asks the same: no window again.
+    let again = r.tick(&link, today, HOURLY_SECS + 1.0).expect("asked");
+    assert!(!again.open_window, "never every hour");
+    assert_eq!(link.due().needs_you(), chip, "the chip stays");
+}
+
+/// Review fix-PR-1 nit: while "Skip these dates" is on its way no run
+/// starts (it could post a date being skipped); while a run is on its way
+/// the skip waits.
+#[test]
+fn skip_these_dates_and_a_run_never_overlap() {
+    let (_dir, link, tenant) = demo();
+    let today = DemoState::today();
+    let id = add_auto(&link, "Daily sweep", today.add_days(-3).expect("d"));
+    let mut r = TemplatesRunner::default();
+    r.opened(&link, tenant);
+    let _ = r.tick(&link, today, 0.0);
+    let runs = r.runs;
+    link.due().skip_started(id);
+    link.due().request_check();
+    assert_eq!(r.tick(&link, today, HOURLY_SECS + 1.0), None);
+    assert!(!r.busy() && r.runs == runs, "no run while skipping");
+    assert_eq!(posted_for(&link, id), 0);
+    link.due().skip_ended(id);
+    assert!(r.tick(&link, today, HOURLY_SECS + 2.0).is_some(), "it runs now");
+    // A run on its way: the board says so, and Skip these dates waits.
+    link.due().running = true;
+    let mut s = crate::screens::templates_due::TemplatesDueScreen::new(
+        Arc::clone(&link),
+        None,
+        today,
+    );
+    s.catch_up_skip(id);
+    assert_eq!(s.notice, Some("templates_due.catch_up.wait"));
+    assert!(link.due().skipping.is_empty(), "not started");
+}
+
+/// Review fix-PR-1 should-fix 5: a saved form's pending link survives a
+/// restart; a refused one shows "Saved separately"; an automatic
+/// template's run waits until it is settled, so the date never posts twice.
+#[test]
+fn pending_links_survive_a_restart_and_hold_the_automatic_run() {
+    let (dir, link, tenant) = demo();
+    let today = DemoState::today();
+    let yesterday = today.add_days(-1).expect("d");
+    let id = add_auto(&link, "Daily sweep", yesterday);
+    let txn = cl_core::ids::TransactionId::parse("d0000000-0000-4000-8000-b0000000aa01")
+        .expect("t");
+    let mut r = TemplatesRunner::default();
+    r.opened(&link, tenant);
+    // The form saved yesterday's sweep; its link was refused for good.
+    link.due().linking(id, yesterday, txn);
+    link.due().link_refused(id, yesterday);
+    // App restart: a new link on the same settings folder reads it back.
+    let link2 = Arc::new(CompanyLink::demo(dir.path()));
+    let mut r2 = TemplatesRunner::default();
+    r2.opened(&link2, tenant);
+    assert!(link2.due().is_saved_separately(id, yesterday), "kept on disk");
+    assert!(!link2.due().is_linking(id, yesterday));
+    // The automatic template's run waits: yesterday is never posted again.
+    assert_eq!(r.tick(&link, today, 0.0), None);
+    assert!(link.due().links_wait());
+    assert_eq!(posted_for(&link, id), 0);
+    // Dismissed (the skip path, then off the board): the run goes on.
+    crate::company::demo::templates::skip(&mut link.demo_state().expect("demo"), id, yesterday)
+        .expect("skipped");
+    link.due().link_dismissed(id, yesterday);
+    assert!(r.tick(&link, today, 1.0).is_some());
+    assert!(!link.due().links_wait());
+    assert_eq!(posted_for(&link, id), 1, "today only");
+    let back = crate::prefs::PendingLinksBook::load(&dir.path().join("settings"));
+    assert!(back.get(&tenant.to_string()).is_empty(), "the file forgets it");
 }

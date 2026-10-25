@@ -52,4 +52,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("templates_due.catch_up.skip_all", "Skip these dates"),
     ("templates_due.catch_up.posting", "Entering the missed dates…"),
     ("templates_due.catch_up.skipped", "Skipped. Those dates won't be entered."),
+    ("templates_due.catch_up.wait", "Checking for due entries right now. Try Skip these dates again in a moment."),
+    ("templates_due.saved_separately", "Saved separately"),
+    ("templates_due.saved_separately.tip", "You saved this date from its form, but it could not be marked as entered. Dismiss it so it is never entered again."),
 ];

@@ -310,8 +310,10 @@ impl SaveFlow {
                     self.resolve_failed = false;
                     self.resolved = done;
                 }
-                // Another try can't change this: the reminder stays and
-                // can be dismissed (Q-P15p).
+                // Another try can't change this: the saved transaction
+                // stands on its own; Templates Due shows "Saved separately"
+                // with Dismiss, never "Enter it now" (review fix-PR-1
+                // should-fix 5).
                 Err(
                     ApiError::Validation(_)
                     | ApiError::NotFound { .. }
@@ -319,7 +321,7 @@ impl SaveFlow {
                 ) => {
                     self.resolve_failed = true;
                     if let Some((id, date)) = done {
-                        link.due().linked(id, date);
+                        link.due().link_refused(id, date);
                     }
                 }
                 // Anything else is tried again by the runner (S2).

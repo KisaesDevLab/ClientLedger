@@ -74,12 +74,16 @@ pub(crate) enum Section {
     /// A form saved this date and its link to the date is still being
     /// made (S2): already entered, nothing to do.
     Linking,
+    /// A form saved this date but the engine refused its link for good
+    /// (or every try this session failed): the transaction stands on its
+    /// own. Dismiss only, never Enter it now (review fix-PR-1 should-fix 5).
+    SavedSeparately,
 }
 
 impl Section {
     fn word(&self) -> &'static str {
         match self {
-            Section::Entered(_) | Section::Linking => "entered",
+            Section::Entered(_) | Section::Linking | Section::SavedSeparately => "entered",
             Section::Waiting => "waiting",
             Section::Skipped(_) => "skipped",
             Section::Failed(_) => "failed",
@@ -320,10 +324,13 @@ impl TemplatesDueScreen {
             // entered (S2), never "Enter it now".
             let board = self.link.due();
             for r in &mut self.rows {
-                if matches!(r.section, Section::Waiting | Section::Skipped(_))
-                    && r.date.is_some_and(|d| board.is_linking(r.template, d))
-                {
+                if !matches!(r.section, Section::Waiting | Section::Skipped(_)) {
+                    continue;
+                }
+                if r.date.is_some_and(|d| board.is_linking(r.template, d)) {
                     r.section = Section::Linking;
+                } else if r.date.is_some_and(|d| board.is_saved_separately(r.template, d)) {
+                    r.section = Section::SavedSeparately;
                 }
             }
         }
@@ -405,11 +412,15 @@ impl TemplatesDueScreen {
                 Ok(()) => {
                     self.notice = Some("templates_due.done.skipped");
                     self.last_action = Some("skip");
-                    self.link.due().handled(id, date);
+                    let mut board = self.link.due();
+                    board.link_dismissed(id, date);
+                    board.handled(id, date);
                 }
                 Err(e) if cl_api::is_occurrence_taken(&e) => {
                     self.notice = Some("templates_due.done.already");
-                    self.link.due().handled(id, date);
+                    let mut board = self.link.due();
+                    board.link_dismissed(id, date);
+                    board.handled(id, date);
                 }
                 Err(e) => self.error = Some(e),
             }
@@ -419,6 +430,7 @@ impl TemplatesDueScreen {
         {
             let id = *id;
             self.catch_up_job = None;
+            self.link.due().skip_ended(id);
             match r {
                 Ok(()) => {
                     self.notice = Some("templates_due.catch_up.skipped");
@@ -478,7 +490,7 @@ impl TemplatesDueScreen {
             return;
         };
         let Some(date) = row.date else { return };
-        if row.section == Section::Linking {
+        if matches!(row.section, Section::Linking | Section::SavedSeparately) {
             return;
         }
         // A lost Enter now of this date: nothing is sent until the recheck
@@ -613,6 +625,12 @@ impl TemplatesDueScreen {
         if self.busy() {
             return;
         }
+        // A run on its way could post these dates while they are being
+        // skipped: wait for it (and no run starts while they are).
+        if self.link.due().running() {
+            self.notice = Some("templates_due.catch_up.wait");
+            return;
+        }
         let Some(q) = self.questions.iter().find(|q| q.template == template) else {
             return;
         };
@@ -640,6 +658,7 @@ impl TemplatesDueScreen {
                 Ok(())
             },
         );
+        self.link.due().skip_started(template);
         self.catch_up_job = Some((template, job));
         self.poll();
     }
@@ -653,7 +672,11 @@ impl TemplatesDueScreen {
             return;
         };
         let Some(date) = row.date else { return };
-        if !matches!(row.section, Section::Waiting | Section::Skipped(_)) || row.capped() {
+        if !matches!(
+            row.section,
+            Section::Waiting | Section::Skipped(_) | Section::SavedSeparately
+        ) || row.capped()
+        {
             // A capped catch-up is not a stored skip: the next run enters it.
             return;
         }
@@ -722,6 +745,7 @@ impl TemplatesDueScreen {
                     self.copy_details(ctx);
                 }
             }
+            Some(Section::SavedSeparately) => self.skip_selected(),
             Some(Section::Linking) | None => {}
         }
     }
@@ -994,6 +1018,12 @@ impl TemplatesDueScreen {
                             Section::Failed(_) => {
                                 ui.label(t("templates_due.failed"));
                             }
+                            Section::SavedSeparately => {
+                                ui.label(
+                                    RichText::new(t("templates_due.saved_separately"))
+                                        .color(tokens.warn_text),
+                                );
+                            }
                             _ => {
                                 ui.label(self.account_text(r.template));
                             }
@@ -1011,6 +1041,14 @@ impl TemplatesDueScreen {
                             match r.section {
                                 Section::Linking => {
                                     form::hint(ui, tokens, &t("templates_due.linking"));
+                                }
+                                Section::SavedSeparately => {
+                                    b(
+                                        "templates_due.dismiss",
+                                        &t("templates_due.saved_separately.tip"),
+                                        true,
+                                        "skip",
+                                    );
                                 }
                                 Section::Entered(_) => {
                                     b(
@@ -1120,8 +1158,11 @@ impl TemplatesDueScreen {
                         Section::Skipped(why) => Some(why.as_wire().to_string()),
                         _ => None,
                     },
-                    "can_dismiss": matches!(r.section, Section::Waiting | Section::Skipped(_))
-                        && !r.capped(),
+                    "can_dismiss": matches!(
+                        r.section,
+                        Section::Waiting | Section::Skipped(_) | Section::SavedSeparately
+                    ) && !r.capped(),
+                    "saved_separately": r.section == Section::SavedSeparately,
                 })
             })
             .collect();
@@ -1149,6 +1190,16 @@ impl TemplatesDueScreen {
             m.extend(c);
         }
         v
+    }
+}
+
+impl Drop for TemplatesDueScreen {
+    /// A "Skip these dates" still on its way when the window closes no
+    /// longer holds the runner (its answer is not read any more).
+    fn drop(&mut self) {
+        if let Some((id, _)) = &self.catch_up_job {
+            self.link.due().skip_ended(*id);
+        }
     }
 }
 
