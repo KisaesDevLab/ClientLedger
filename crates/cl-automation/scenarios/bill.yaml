@@ -109,6 +109,59 @@ steps:
   # Save & New keeps the date.
   - assert_state: {key: screen.date, equals: "2026-11-03"}
 
+  # === P17 WP8: vendor panel and duplicate ref (begin) =======================
+  # --- 5b. The panel shows the engine's open balance (the bill just saved),
+  # the default account and 1099 rows; a new ref gets the check mark; typing
+  # INV-55871 again warns, and Save asks "Save anyway / Go back" (a warning,
+  # never a block, Q-P17n). Go back saves nothing; Clear leaves the form as
+  # Save & New did (the next step starts from a blank bill).
+  - type: {text: Midwest Equip, target: {role: text_input, label: Vendor}}
+  - key: Tab
+  - assert_state: {key: screen.has_vendor, equals: true}
+  - assert_state: {key: screen.panel.summary, equals: ready}
+  - assert_exists: {role: label, label: Open balance}
+  - assert_exists: {role: label, label: "1,480.00", index: 0}
+  - assert_exists: {role: label, label: Default account}
+  - assert_exists: {role: label, label: "6210 · Equipment rental"}
+  - assert_exists: {role: label, label: 1099 vendor}
+  - assert_state: {key: screen.panel.open_bills_count, equals: 1}
+  - assert_state: {key: screen.panel.open_bills_shown, equals: 1}
+  - type: {text: "INV-55872", target: {role: text_input, label: Ref. no.}}
+  - assert_state: {key: screen.panel.duplicate_check, equals: clear}
+  - assert_exists: {role: label, label: "No other bill uses ref. no. INV-55872 ✓"}
+  - click: {role: text_input, label: Ref. no.}
+  - key: Ctrl+A
+  - type: {text: "INV-55871"}
+  - assert_state: {key: screen.panel.duplicate_check, equals: found}
+  - assert_exists: {role: label, label_contains: "already uses ref. no. INV-55871."}
+  - assert_exists: {label: Open that bill}
+  - assert_no_clipping: {}
+  - screenshot: duplicate-ref
+  - type: {text: "1480.00", target: {role: text_input, label: "Amount due ($)"}}
+  - key: Tab
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - type: {text: "1330.00"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Amount, line 2"}
+  - type: {text: "150.00"}
+  - key: Tab
+  - assert_state: {key: screen.totals, equals: balanced}
+  - key: Alt+S
+  - assert_state: {key: screen.panel.duplicate_prompt, equals: true}
+  - assert_exists: {role: label, label_contains: "Another bill from this vendor already uses ref. no. INV-55871 (11/03/2026)"}
+  - assert_exists: {role: button, label: Save anyway}
+  - assert_exists: {role: button, label: Go back}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - screenshot: duplicate-prompt
+  - click: {role: button, label: Go back}
+  - assert_state: {key: screen.panel.duplicate_prompt, equals: false}
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.focused, equals: reference}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.has_vendor, equals: false}
+  # === P17 WP8 (end) =========================================================
+
   # --- 6. A vendor credit: the vendor's last bill comes over, no amounts -------
   - click: {label: Vendor credit}
   - assert_state: {key: screen.kind, equals: credit}

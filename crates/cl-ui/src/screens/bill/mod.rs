@@ -125,6 +125,10 @@ mod field {
     pub const AMOUNT: u64 = 5;
     pub const DUE: u64 = 6;
     pub const MEMO: u64 = 7;
+    /// Custom discount % and days (WP8).
+    pub const DISCOUNT: u64 = 8;
+    /// The discount date typed by the owner (WP8).
+    pub const DISCOUNT_DATE: u64 = 9;
 }
 
 /// A header field the keyboard can be put in.
@@ -135,6 +139,12 @@ pub(crate) enum Field {
     Reference,
     Terms,
     TermsDays,
+    /// Custom terms: Discount % (WP8).
+    Discount,
+    /// Custom terms: Discount days (WP8).
+    DiscountDays,
+    /// The discount date (`bill-terms-v1`, WP8).
+    DiscountDate,
     Amount,
     DueDate,
     Memo,
@@ -160,6 +170,11 @@ pub(crate) struct Inputs {
     pub vendor_problem: bool,
     pub due: DateInput,
     pub terms_days: String,
+    /// Custom terms: Discount % and Discount days as typed (WP8).
+    pub discount_percent: String,
+    pub discount_days: String,
+    /// The discount date as typed (WP8).
+    pub discount: DateInput,
     /// The header revision the texts were last taken from.
     pub rev: u64,
 }
@@ -262,8 +277,16 @@ pub(crate) struct HistoryView {
     pub error: bool,
 }
 
-/// What a terms-dates request is for: date, terms, custom days, vendor.
-pub(crate) type TermsKey = (CalendarDate, Option<String>, Option<u16>, Option<ContactId>);
+/// What a terms-dates request is for: date, terms, custom days, custom
+/// discount days and percentage, vendor.
+pub(crate) type TermsKey = (
+    CalendarDate,
+    Option<String>,
+    Option<u16>,
+    Option<u16>,
+    Option<cl_model::forms::bill::Percent>,
+    Option<ContactId>,
+);
 
 /// The Enter Bill window.
 pub struct EnterBillScreen {
@@ -411,6 +434,9 @@ impl EnterBillScreen {
                 vendor_problem: false,
                 due: empty_date(),
                 terms_days: String::new(),
+                discount_percent: String::new(),
+                discount_days: String::new(),
+                discount: empty_date(),
                 rev: u64::MAX,
             },
             editing: None,
@@ -764,6 +790,12 @@ impl EnterBillScreen {
         self.inputs.amount = f.amount_due.map(|m| m.format(style)).unwrap_or_default();
         self.inputs.due = f.due_date.map_or_else(empty_date, DateInput::new);
         self.inputs.terms_days = f.terms_days.map(|d| d.to_string()).unwrap_or_default();
+        self.inputs.discount_percent = f
+            .discount_percent
+            .map(save::percent_text)
+            .unwrap_or_default();
+        self.inputs.discount_days = f.discount_days.map(|d| d.to_string()).unwrap_or_default();
+        self.inputs.discount = f.discount_date.map_or_else(empty_date, DateInput::new);
         self.inputs.amount_problem = None;
         self.inputs.vendor_problem = false;
         self.inputs.rev = self.header.revision();
@@ -845,7 +877,14 @@ impl EnterBillScreen {
             })
             .unwrap_or_default();
         let live = !self.link.is_demo() && self.caps().terms;
-        let key = (date, code.clone(), f.terms_days, f.vendor);
+        let key = (
+            date,
+            code.clone(),
+            f.terms_days,
+            f.discount_days,
+            f.discount_percent,
+            f.vendor,
+        );
         if live {
             if self.terms_dates_for.as_ref() == Some(&key) {
                 return;
@@ -854,11 +893,23 @@ impl EnterBillScreen {
             if let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) {
                 let q = cl_api::TermsDatesQuery {
                     date,
-                    terms: code.map(|c| cl_api::BillTerms {
-                        days: (c == cl_api::TERMS_CUSTOM)
-                            .then_some(f.terms_days.map(u32::from))
-                            .flatten(),
-                        ..cl_api::BillTerms::code(&c)
+                    terms: code.map(|c| {
+                        let custom = c == cl_api::TERMS_CUSTOM;
+                        cl_api::BillTerms {
+                            days: custom.then_some(f.terms_days.map(u32::from)).flatten(),
+                            // The custom discount (WP8): both or neither.
+                            discount_percent: custom
+                                .then(|| f.discount_percent.zip(f.discount_days))
+                                .flatten()
+                                .and_then(|(p, _)| {
+                                    cl_api::Percent::parse(&save::percent_text(p)).ok()
+                                }),
+                            discount_days: custom
+                                .then(|| f.discount_percent.zip(f.discount_days))
+                                .flatten()
+                                .map(|(_, d)| u32::from(d)),
+                            ..cl_api::BillTerms::code(&c)
+                        }
                     }),
                     vendor: f.vendor,
                 };
@@ -903,6 +954,7 @@ impl EnterBillScreen {
                 self.header.load(f);
             }
             self.inputs.due = due.map_or_else(empty_date, DateInput::new);
+            self.inputs.discount = disc.map_or_else(empty_date, DateInput::new);
         }
     }
 
@@ -1181,19 +1233,40 @@ impl EnterBillScreen {
         self.sync_inputs();
     }
 
-    /// The vendor panel's reads, every frame (drawn or not).
+    /// The vendor panel's reads, every frame (drawn or not); then the save
+    /// that waited for the duplicate check, or that the owner chose to
+    /// send anyway (WP8).
     fn panel_tick(&mut self) {
-        let f = self.header.current();
-        let reference = f.reference.clone();
+        let now = std::time::Instant::now();
+        self.with_panel(|panel, input| panel.tick(input, now));
+        if let Some(intent) = self.panel.take_resume() {
+            self.start_save(intent, None);
+        }
+    }
+
+    /// Runs `f` with the vendor panel and what it needs from the form.
+    pub(crate) fn with_panel<R>(
+        &mut self,
+        f: impl FnOnce(&mut vendor_panel::VendorPanel, &vendor_panel::PanelInput<'_>) -> R,
+    ) -> R {
+        let mut panel = std::mem::take(&mut self.panel);
+        let h = self.header.current();
         let input = vendor_panel::PanelInput {
             link: &self.link,
-            kind: f.kind,
-            vendor: f.vendor,
-            ref_no: &reference,
-            date: f.date,
+            kind: h.kind,
+            vendor: h.vendor,
+            ref_no: &h.reference,
+            date: h.date,
             editing: self.editing.as_ref().map(|e| e.id),
+            contact: h
+                .vendor
+                .and_then(|v| self.contacts.iter().find(|c| c.id == v)),
+            accounts: &self.accounts,
+            money_style: self.money_style,
         };
-        self.panel.tick(&input, std::time::Instant::now());
+        let r = f(&mut panel, &input);
+        self.panel = panel;
+        r
     }
 
     /// The default account of the vendor picked (Q-192), when active.

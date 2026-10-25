@@ -150,7 +150,7 @@ pub fn to_draft(c: &CheckedBill, draft: Option<DraftKey>, lines: bool) -> Draft 
 }
 
 /// A percentage as the engine's strict text (`2`, `1.5`).
-fn percent_text(p: cl_model::forms::bill::Percent) -> String {
+pub(crate) fn percent_text(p: cl_model::forms::bill::Percent) -> String {
     let w = p.to_wire();
     if w.contains('.') {
         w.trim_end_matches('0').trim_end_matches('.').to_string()
@@ -197,6 +197,11 @@ pub(crate) fn form_of(
     f.reference = r.vendor_invoice_number.clone().unwrap_or_default();
     f.terms.clone_from(&r.payment_terms);
     f.terms_days = r.terms_days.and_then(|d| u16::try_from(d).ok());
+    // A custom term's discount (WP8; `bill-terms-v1`).
+    f.discount_percent = r
+        .discount_percent
+        .and_then(|p| cl_model::forms::bill::Percent::parse_user(&p.to_wire()));
+    f.discount_days = r.discount_days.and_then(|d| u16::try_from(d).ok());
     f.amount_due = r.txn.total;
     f.due_date = r.due_date;
     f.discount_date = r.discount_date;
@@ -428,6 +433,12 @@ impl EnterBillScreen {
                 return false;
             }
         };
+        // Another bill of this vendor uses the ref (WP8, Q-P17n): ask "Save
+        // anyway / Go back" first; it warns, never blocks. A save waiting
+        // for the check is sent once it answers.
+        if password.is_none() && !self.with_panel(|p, input| p.clear_to_save(input, intent)) {
+            return false;
+        }
         // A change touching the closed period needs the closing-date
         // password (NN8): ask before anything is sent.
         if checked.needs_closing_password && password.is_none() {
