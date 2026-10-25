@@ -1335,6 +1335,8 @@ mod tests {
                             && n.label() == Some("Create bill")),
                     "Create bill"
                 );
+                let unnamed = crate::screens::unnamed_widgets(&nodes);
+                assert!(unnamed.is_empty(), "{size:?}: unnamed widgets: {unnamed:?}");
             }
         }
     }

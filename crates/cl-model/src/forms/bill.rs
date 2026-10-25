@@ -531,7 +531,8 @@ pub enum BillProblem {
     /// The date is on or before the closing date and the engine cannot take
     /// the closing password yet (no `ap-closing-v1`).
     ClosedPeriodNeedsUpdate,
-    /// Ref. no. is longer than [`REF_MAX`] characters.
+    /// Ref. no. is longer than [`REF_MAX`] characters (UTF-16 units, as the
+    /// engine counts them).
     RefTooLong,
     /// The term is not one the engine accepts.
     TermsUnknown,
@@ -960,7 +961,8 @@ pub fn check(form: &BillForm, ctx: &BillContext<'_>) -> Result<CheckedBill, Vec<
             }
         }
     }
-    if form.reference.trim().chars().count() > REF_MAX {
+    // UTF-16 units, as cl-api and the engine count them.
+    if crate::lists::engine_len(form.reference.trim()) > REF_MAX {
         problems.push(BillProblem::RefTooLong);
     }
     let terms = if is_bill {

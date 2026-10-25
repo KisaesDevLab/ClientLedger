@@ -70,7 +70,7 @@ pub enum ReadTarget {
     /// Amount due (the document total).
     AmountDue,
     /// One expense line filled from the document (its amount, memo and
-    /// account).
+    /// account). Accepted by Accept or by changing its amount only.
     Line(RowKey),
 }
 
@@ -108,7 +108,10 @@ impl ReadState {
     }
 
     /// The owner edited `target`: that field counts as accepted. A field
-    /// that was not read is not tracked.
+    /// that was not read is not tracked. For a [`ReadTarget::Line`] the
+    /// caller reports only a change of the line's *amount*: editing its
+    /// description or account must not accept the AI-read amount
+    /// (non-negotiable 4).
     pub fn edited(&mut self, target: ReadTarget) {
         if let Some(f) = self.fields.get_mut(&target) {
             *f = ReadField::Edited;

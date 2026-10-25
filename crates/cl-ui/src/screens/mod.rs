@@ -65,6 +65,44 @@ pub(crate) const P17_SCREENS: [crate::shell::MakeScreen; 4] = [
     document_view::make,
 ];
 
+/// Tests: the interactive widgets in `nodes` (AccessKit) that have no
+/// accessible name (no label, `labelled_by`, value or description), as
+/// "Role" strings. Screen readers and the control channel need one.
+#[cfg(test)]
+pub(crate) fn unnamed_widgets(
+    nodes: &[(
+        eframe::egui::accesskit::NodeId,
+        eframe::egui::accesskit::Node,
+    )],
+) -> Vec<String> {
+    use eframe::egui::accesskit::Role;
+    nodes
+        .iter()
+        .filter(|(_, n)| {
+            matches!(
+                n.role(),
+                Role::Button
+                    | Role::Tab
+                    | Role::TextInput
+                    | Role::MultilineTextInput
+                    | Role::PasswordInput
+                    | Role::CheckBox
+                    | Role::ComboBox
+                    | Role::RadioButton
+                    | Role::Link
+                    | Role::MenuItem
+            )
+        })
+        .filter(|(_, n)| {
+            !(n.label().is_some_and(|l| !l.is_empty())
+                || !n.labelled_by().is_empty()
+                || n.value().is_some_and(|v| !v.is_empty())
+                || n.description().is_some_and(|d| !d.is_empty()))
+        })
+        .map(|(_, n)| format!("{:?}", n.role()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

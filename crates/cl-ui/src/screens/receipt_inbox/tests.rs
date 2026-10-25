@@ -166,6 +166,60 @@ fn add_to_a_check_attaches_and_files_the_original_away() {
     until(&ctx, &mut s, "one file left", |s| s.state()["badge"] == 1);
 }
 
+/// Every interactive widget of the inbox has an accessible name: the list,
+/// a selected file with its preview and actions, and the record picker.
+#[test]
+fn every_inbox_widget_has_an_accessible_name() {
+    let (_dir, link) = link();
+    let ctx = context();
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut s = screen(&link);
+    until(&ctx, &mut s, "two ready files", ready);
+    let check = |s: &mut ReceiptInboxScreen, what: &str| {
+        let mut nodes = Vec::new();
+        for _ in 0..3 {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 940.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ui| s.ui(ui),
+            );
+            out.textures_delta.clear();
+            nodes.extend(
+                out.platform_output
+                    .accesskit_update
+                    .map(|u| u.nodes)
+                    .unwrap_or_default(),
+            );
+        }
+        assert!(
+            nodes
+                .iter()
+                .any(|(_, n)| n.role() == egui::accesskit::Role::Button),
+            "{what}: drawn"
+        );
+        let unnamed = crate::screens::unnamed_widgets(&nodes);
+        assert!(unnamed.is_empty(), "{what}: unnamed widgets: {unnamed:?}");
+    };
+    check(&mut s, "list");
+    let png = file_named(&s, &ctx, "Ozark Feed receipt.png");
+    s.select(&png);
+    until(&ctx, &mut s, "the file read", |s| {
+        s.state()["loaded"] == true
+    });
+    check(&mut s, "selected");
+    s.picker = Some(picker::Picker::new(PickKind::Check));
+    until(&ctx, &mut s, "the checks", |s| {
+        s.picker.as_ref().is_some_and(|p| p.loaded)
+    });
+    check(&mut s, "picker");
+}
+
 #[test]
 fn new_check_leaves_the_file_until_a_saved_check_holds_it() {
     let (_dir, link) = link();

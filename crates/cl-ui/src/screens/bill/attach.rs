@@ -31,6 +31,7 @@ use super::EnterBillScreen;
 use crate::company::{CompanyEvent, Task};
 use crate::i18n::{t, t_with};
 use crate::screens::company::form;
+use crate::screens::write_check::attach::{FileRead, poll_file_read, read_in_background};
 use crate::theme::Tokens;
 use crate::widgets::pdf_viewer::{DocSource, DocViewer, ViewerEvent, ViewerState};
 
@@ -66,11 +67,14 @@ pub(crate) struct AttachState {
     pub saved_to: Option<PathBuf>,
     /// The Attach button asked for the keyboard in the file field.
     pub focus: bool,
+    /// A chosen file being read off the egui thread.
+    pub reading: Option<std::sync::mpsc::Receiver<FileRead>>,
 }
 
 impl AttachState {
     pub(crate) fn busy(&self) -> bool {
-        self.list_task.is_some()
+        self.reading.is_some()
+            || self.list_task.is_some()
             || self.upload.is_some()
             || self.download.is_some()
             || self.preview.is_some()
@@ -93,6 +97,7 @@ impl AttachState {
         self.problem = None;
         self.saved_to = None;
         self.focus = false;
+        self.reading = None;
     }
 
     /// The control channel's view (no file names).
@@ -213,11 +218,12 @@ impl EnterBillScreen {
     pub(crate) fn attach_path(&mut self, path: &Path) {
         self.attach.problem = None;
         self.attach.saved_to = None;
-        if self.attach.upload.is_some() {
+        if self.attach.upload.is_some() || self.attach.reading.is_some() {
             return;
         }
-        match read_file(path) {
-            Ok((name, bytes)) => self.upload_bytes(&name, bytes),
+        // Read off the egui thread; `poll_attach` uploads it.
+        match read_in_background(path, read_file) {
+            Ok(rx) => self.attach.reading = Some(rx),
             Err(key) => self.attach.problem = Some(key),
         }
     }
@@ -345,6 +351,12 @@ impl EnterBillScreen {
 
     /// Polls uploads, the list, downloads and the preview.
     pub(crate) fn poll_attach(&mut self) {
+        if let Some(r) = poll_file_read(&mut self.attach.reading) {
+            match r {
+                Ok((name, bytes)) => self.upload_bytes(&name, bytes),
+                Err(key) => self.attach.problem = Some(key),
+            }
+        }
         if let Some(r) = self.attach.upload.as_mut().and_then(Task::try_take) {
             self.attach.upload = None;
             let source = self.attach.uploading.take();

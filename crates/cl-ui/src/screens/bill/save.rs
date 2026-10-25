@@ -906,8 +906,29 @@ impl EnterBillScreen {
             let items = self.items.value().clone();
             self.items.load(items);
             if let Some(id) = found {
+                // Before `bill-lines-v1` the files move in a second call
+                // after the create, which the lost reply may have cut off:
+                // offer Try again (the move is safe to repeat).
+                let files: Vec<AttachmentId> = self
+                    .compose()
+                    .attachments
+                    .iter()
+                    .filter_map(|a| AttachmentId::parse(&a.id).ok())
+                    .collect();
+                if let (Some(draft), false) = (self.attach.draft, self.caps().lines)
+                    && !files.is_empty()
+                {
+                    self.save.attach_failed = Some(AttachRetry {
+                        id,
+                        kind: self.kind(),
+                        draft,
+                        files,
+                    });
+                }
+                self.attach.draft = None;
                 self.nav = super::Nav::default();
                 self.read_bill(id, Some(self.kind()));
+                self.retry_attach();
             }
         }
     }

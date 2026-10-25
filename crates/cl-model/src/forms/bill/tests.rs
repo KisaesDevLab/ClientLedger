@@ -203,6 +203,15 @@ fn header_problems() {
         check(&f, &ctx(&tags, &terms, ALL)).is_ok(),
         "100 after trimming"
     );
+    // Counted in UTF-16 units like cl-api: 50 emoji are 100 units (fits),
+    // 51 are 102 (too long) though only 51 characters.
+    f.reference = "\u{1F69C}".repeat(REF_MAX / 2);
+    assert!(check(&f, &ctx(&tags, &terms, ALL)).is_ok(), "100 units");
+    f.reference = "\u{1F69C}".repeat(REF_MAX / 2 + 1);
+    assert_eq!(
+        problems(&f, &ctx(&tags, &terms, ALL)),
+        vec![BillProblem::RefTooLong]
+    );
     f.reference = "é".repeat(REF_MAX + 1);
     assert_eq!(
         problems(&f, &ctx(&tags, &terms, ALL)),

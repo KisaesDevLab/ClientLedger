@@ -414,6 +414,22 @@ fn plain_file(path: &Path) -> Result<fs::Metadata, FileError> {
     Ok(meta)
 }
 
+/// The open handle's metadata `held` against the path's `before` (checked
+/// without following links): a plain file, not online only, the same size
+/// and modification time.
+fn same_file(before: &fs::Metadata, held: &fs::Metadata) -> Result<(), FileError> {
+    if !held.file_type().is_file() {
+        return Err(FileError::NotAFile);
+    }
+    if online_only(held) {
+        return Err(FileError::OnlineOnly);
+    }
+    if held.len() != before.len() || millis(held.modified()) != millis(before.modified()) {
+        return Err(FileError::Unstable);
+    }
+    Ok(())
+}
+
 /// Reads an inbox file for upload, checking again everything the listing
 /// said: a plain file (no link), not online only, at most 10 MB, not
 /// empty, a PDF, PNG or JPEG by its first bytes, and unchanged while read.
@@ -429,8 +445,13 @@ pub fn read_for_upload(path: &Path) -> Result<ReadFile, FileError> {
         io::ErrorKind::NotFound => FileError::Gone,
         _ => FileError::Io,
     })?;
+    // What was opened is checked on the open handle itself, so a file
+    // swapped in between the check and the open is noticed.
+    let held = file.metadata().map_err(|_| FileError::Io)?;
+    same_file(&before, &held)?;
     let mut bytes = Vec::new();
-    file.take(MAX_FILE_BYTES + 1)
+    (&file)
+        .take(MAX_FILE_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| FileError::Io)?;
     let size = bytes.len() as u64;
@@ -441,6 +462,7 @@ pub fn read_for_upload(path: &Path) -> Result<ReadFile, FileError> {
         return Err(FileError::Empty);
     }
     let after = plain_file(path)?;
+    same_file(&after, &file.metadata().map_err(|_| FileError::Io)?)?;
     let modified_ms = millis(after.modified());
     if after.len() != size || millis(before.modified()) != modified_ms {
         return Err(FileError::Unstable);
@@ -535,7 +557,7 @@ pub fn file_away(
         .ok_or(FileError::NotAFile)?
         .to_string();
     let dir = filed_dir(inbox, year, month);
-    fs::create_dir_all(&dir).map_err(|_| FileError::Io)?;
+    make_filed_dir(inbox, &dir)?;
     let target = reserve(&dir, &name)?;
     // The reserved name is ours: the rename replaces only our empty file.
     if fs::rename(path, &target).is_ok() {
@@ -555,6 +577,31 @@ pub fn file_away(
             Err(e)
         }
     }
+}
+
+/// Creates `<inbox>/Filed` and `dir` (its month folder) without following
+/// a link: a `Filed` or month folder that is a link (or not a folder) is
+/// refused, so a filed bill never lands outside the inbox.
+fn make_filed_dir(inbox: &Path, dir: &Path) -> Result<(), FileError> {
+    for d in [inbox.join(FILED_DIR), dir.to_path_buf()] {
+        match fs::symlink_metadata(&d) {
+            Ok(meta) if meta.file_type().is_dir() => {}
+            Ok(_) => return Err(FileError::NotAFile),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => match fs::create_dir(&d) {
+                Ok(()) => {}
+                // Made by someone else just now: check it again.
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                    let meta = fs::symlink_metadata(&d).map_err(|_| FileError::Io)?;
+                    if !meta.file_type().is_dir() {
+                        return Err(FileError::NotAFile);
+                    }
+                }
+                Err(_) => return Err(FileError::Io),
+            },
+            Err(_) => return Err(FileError::Io),
+        }
+    }
+    Ok(())
 }
 
 fn copy_verified(from: &Path, to: &Path, expected: &str) -> Result<(), FileError> {
@@ -791,6 +838,57 @@ mod tests {
             file_away(dir.path(), &dir.path().join("gone.pdf"), "x", 2026, 11),
             Err(FileError::Gone)
         );
+    }
+
+    /// A `Filed` that is a link is never followed: the bill stays in the
+    /// inbox instead of landing wherever the link points.
+    #[test]
+    fn a_linked_or_odd_filed_folder_is_refused() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let outside = tempfile::tempdir().expect("tmp");
+        let p = write(dir.path(), "r.pdf", PDF);
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(outside.path(), dir.path().join(FILED_DIR)).is_ok();
+        // Needs developer mode or admin rights on Windows.
+        #[cfg(windows)]
+        let linked =
+            std::os::windows::fs::symlink_dir(outside.path(), dir.path().join(FILED_DIR)).is_ok();
+        if linked {
+            assert_eq!(
+                file_away(dir.path(), &p, &sha256_hex(PDF), 2026, 11),
+                Err(FileError::NotAFile)
+            );
+            assert!(p.exists(), "left where it is");
+            assert_eq!(
+                fs::read_dir(outside.path()).expect("dir").count(),
+                0,
+                "nothing was made through the link"
+            );
+            fs::remove_dir(dir.path().join(FILED_DIR))
+                .or_else(|_| fs::remove_file(dir.path().join(FILED_DIR)))
+                .expect("unlink");
+        }
+        // A plain file named `Filed` (works on every system).
+        write(dir.path(), FILED_DIR, b"not a folder");
+        assert_eq!(
+            file_away(dir.path(), &p, &sha256_hex(PDF), 2026, 11),
+            Err(FileError::NotAFile)
+        );
+        assert!(p.exists());
+    }
+
+    /// The open handle is checked against the path's metadata: a different
+    /// file (size or time) or a folder is refused.
+    #[test]
+    fn the_open_handle_must_be_the_checked_file() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let a = write(dir.path(), "a.pdf", PDF);
+        let b = write(dir.path(), "b.pdf", b"%PDF-1.4 a longer, different file\n");
+        let meta = |p: &Path| fs::File::open(p).and_then(|f| f.metadata()).expect("meta");
+        assert_eq!(same_file(&meta(&a), &meta(&a)), Ok(()));
+        assert_eq!(same_file(&meta(&a), &meta(&b)), Err(FileError::Unstable));
+        let d = fs::metadata(dir.path()).expect("dir");
+        assert_eq!(same_file(&meta(&a), &d), Err(FileError::NotAFile));
     }
 
     #[test]

@@ -219,8 +219,9 @@ pub(crate) struct Snapshot {
     pub due: Option<CalendarDate>,
     pub reference: String,
     pub amount_due: Option<Money>,
-    /// Each read line's amount and description.
-    pub lines: BTreeMap<RowKey, (Option<Money>, String)>,
+    /// Each read line's amount (only an amount change accepts a read line;
+    /// non-negotiable 4).
+    pub lines: BTreeMap<RowKey, Option<Money>>,
 }
 
 /// Ghost account suggestions on the expense lines.
@@ -289,6 +290,28 @@ impl std::fmt::Debug for ReadState {
             .field("unaccepted", &self.unaccepted)
             .finish_non_exhaustive()
     }
+}
+
+/// Sends the extract on the write lane: it spends AI tokens, so a reply
+/// lost when the window closes is labelled ("reading a bill with AI") like
+/// any other unconfirmed write instead of being cancelled unseen.
+///
+/// # Errors
+/// The queue refused it (full or closed).
+pub(crate) fn send_extract(
+    group: &RequestGroup,
+    session: &cl_api::Session,
+    gate: BillReadGate,
+    attachment: AttachmentId,
+) -> Result<cl_api::Pending<Result<BillReading, ApiError>>, cl_api::QueueError> {
+    let key = cl_api::IdempotencyKey::new();
+    let label = cl_api::OrphanLabel {
+        what: "orphan.bill_read",
+        key: Some(key.clone()),
+    };
+    group.write(session, label, move |s| async move {
+        Ok(s.bill_reading().extract(gate, attachment, key).await)
+    })
 }
 
 /// The plain message for a failed reading (i18n key).
@@ -508,12 +531,7 @@ impl ReadState {
             self.problem = Some("bill.read.problem.unreachable");
             return;
         };
-        let gate = switches.gate();
-        match group.read(&session, move |s| async move {
-            Ok(s.bill_reading()
-                .extract(gate, attachment, cl_api::IdempotencyKey::new())
-                .await)
-        }) {
+        match send_extract(group, &session, switches.gate(), attachment) {
             Ok(p) => {
                 self.sent += 1;
                 self.job = Some(Task::Pending(p));
@@ -957,7 +975,7 @@ impl EnterBillScreen {
                 .lines
                 .iter()
                 .filter(|l| filled.contains(&ReadTarget::Line(l.key)))
-                .map(|l| (l.key, (l.amount, l.memo.clone())))
+                .map(|l| (l.key, l.amount))
                 .collect(),
         };
         let read_lines: Vec<RowKey> = snapshot.lines.keys().copied().collect();
@@ -1027,7 +1045,7 @@ impl EnterBillScreen {
     }
 
     /// Every frame after drawing: a read field the owner changed counts as
-    /// accepted (a line: its amount or description); deleted read lines are
+    /// accepted (a line: only its amount); deleted read lines are
     /// forgotten. The counts for the banner are kept.
     pub(crate) fn track_read(&mut self) {
         let Some(filled) = self.read.filled.as_ref() else {
@@ -1053,10 +1071,10 @@ impl EnterBillScreen {
                         gone.push(k);
                         false
                     }
-                    Some(l) => snap
-                        .lines
-                        .get(&k)
-                        .is_none_or(|(amount, memo)| l.amount != *amount || l.memo != *memo),
+                    // Only the amount: a description or account change
+                    // leaves the AI-read amount unaccepted (non-negotiable
+                    // 4); Accept or typing the amount accepts it.
+                    Some(l) => snap.lines.get(&k).is_none_or(|amount| l.amount != *amount),
                 },
             };
             if changed {

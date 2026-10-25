@@ -105,6 +105,73 @@ fn frames(s: &mut EnterBillScreen, n: usize) {
     }
 }
 
+/// Three frames at `size`, returning every AccessKit node drawn.
+fn nodes(
+    s: &mut EnterBillScreen,
+    size: (f32, f32),
+    theme: crate::theme::ThemeChoice,
+) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+    use eframe::egui::{Pos2, RawInput, Rect, vec2};
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, theme);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut all = Vec::new();
+    for _ in 0..3 {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(size.0, size.1))),
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        all.extend(
+            out.platform_output
+                .accesskit_update
+                .map(|u| u.nodes)
+                .unwrap_or_default(),
+        );
+    }
+    all
+}
+
+/// Every interactive widget of Enter Bill has an accessible name: a new
+/// bill, a read document (banner, marks, Accept), the Items tab, and a
+/// vendor credit, at both scenario sizes in light and dark.
+#[test]
+fn every_enter_bill_widget_has_an_accessible_name() {
+    use crate::theme::ThemeChoice;
+    for theme in [ThemeChoice::Light, ThemeChoice::Dark] {
+        for size in [(1440.0, 940.0), (960.0, 640.0)] {
+            let (_d, link) = link();
+            let mut s = screen(&link);
+            let blank = nodes(&mut s, size, theme);
+            assert!(blank.len() > 20, "drawn");
+            let mut s = with_document(&link);
+            read(&mut s);
+            let read_nodes = nodes(&mut s, size, theme);
+            s.tab = crate::screens::bill::Tab::Items;
+            let items = nodes(&mut s, size, theme);
+            s.header
+                .edit_step(|h| h.kind = cl_model::forms::bill::BillKind::Credit);
+            let credit = nodes(&mut s, size, theme);
+            for (what, n) in [
+                ("new", blank),
+                ("read", read_nodes),
+                ("items", items),
+                ("credit", credit),
+            ] {
+                let unnamed = crate::screens::unnamed_widgets(&n);
+                assert!(
+                    unnamed.is_empty(),
+                    "{what} {size:?} {theme:?}: unnamed widgets: {unnamed:?}"
+                );
+            }
+        }
+    }
+}
+
 fn reading(body: &str) -> BillReading {
     cl_api::reading_from_json(body.as_bytes()).expect("reading")
 }
@@ -277,8 +344,22 @@ fn editing_a_read_field_accepts_that_field_only() {
         Some(ReadField::Edited)
     );
     assert_eq!(s.read.unaccepted, 6);
-    // A read line's amount typed over: that line is accepted.
+    // A read line's description edited: its AI-read amount is NOT accepted
+    // (non-negotiable 4); only the amount (or Accept) accepts it.
     let key = s.expenses.value().lines[0].key;
+    s.expenses
+        .form_mut()
+        .edit_step(|v| v.lines[0].memo = "Excavator, two days".into());
+    s.track_read();
+    assert!(
+        matches!(
+            s.read_state_of(ReadTarget::Line(key)),
+            Some(ReadField::Read { .. })
+        ),
+        "a description edit leaves the read amount unaccepted"
+    );
+    assert_eq!(s.read.unaccepted, 6);
+    // A read line's amount typed over: that line is accepted.
     s.expenses
         .form_mut()
         .edit_step(|v| v.lines[0].amount = Some(money("1331.00")));
@@ -503,6 +584,59 @@ fn a_scanned_pdf_says_reading_it_is_not_available_yet() {
         assert_eq!(s.read.problem, Some("bill.read.problem.scanned_pdf"));
         assert!(s.header.current().read.is_empty());
     }
+}
+
+/// The extract spends AI tokens: it runs on the write lane, so a reply
+/// lost when the window closes comes back as a labelled orphan ("reading a
+/// bill with AI"), never a silently cancelled read.
+#[test]
+fn the_read_runs_on_the_write_lane_and_a_lost_reply_is_labelled() {
+    use std::time::Duration;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let server = rt.block_on(async {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_millis(400))
+                    .set_body_raw(r#"{"extraction":{"status":"ok"}}"#, "application/json"),
+            )
+            .mount(&server)
+            .await;
+        server
+    });
+    let q =
+        cl_api::ApiQueue::start(Arc::new(|| {}), cl_api::QueueConfig::default()).expect("queue");
+    let g = q.group().expect("group");
+    let session = cl_api::testing::stub_session(server.address().port());
+    let att = AttachmentId::parse("5c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
+    let open = cl_api::BillReadGate {
+        ai_enabled: true,
+        bill_reading_on: true,
+        provider_set: true,
+    };
+    let p = send_extract(&g, &session, open, att).expect("sent");
+    assert_eq!(q.pending_writes(), 1, "the extract is a write");
+    // The window closes before the answer.
+    g.cancel();
+    drop(p);
+    drop(g);
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    while q.pending_writes() > 0 {
+        assert!(std::time::Instant::now() < end, "the write never ended");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let orphans = q.take_orphans();
+    assert_eq!(orphans.len(), 1, "{orphans:?}");
+    assert_eq!(orphans[0].label.what, "orphan.bill_read");
+    assert_eq!(crate::i18n::t("orphan.bill_read"), "reading a bill with AI");
+    let _ = q.shutdown(Duration::from_secs(1), None);
+    drop(server);
 }
 
 #[test]

@@ -8,8 +8,10 @@
 //!
 //! 1. **By reference:** equal ref ([`crate::forms::bill::ref_matches`]),
 //!    compatible kind and the **exact** amount. Statement lines are taken in
-//!    a canonical order (by value); each takes the unmatched candidate
-//!    closest in date, ties broken by date, then id.
+//!    a canonical order (by value); a line with exactly one unmatched
+//!    candidate takes it. A line with several (the same ref and amount
+//!    entered twice in the books) is listed as [`Ambiguous`] with them,
+//!    never picked by date.
 //! 2. **By amount and date:** what is left pairs on the exact amount and a
 //!    compatible kind with the dates at most `date_slack_days` apart, but
 //!    only when the candidate is unique **on both sides**. Anything else
@@ -344,6 +346,89 @@ fn books_order(a: &BooksItem, b: &BooksItem) -> Ordering {
     (a.date, a.id).cmp(&(b.date, b.id))
 }
 
+/// Pass 1: equal ref + kind + exact amount, statement lines in canonical
+/// order. One unmatched candidate pairs; several (the same ref and amount
+/// twice in the books) are returned as a tie for the owner, never picked by
+/// date.
+fn pass_one(
+    stmt: &[StatementLine],
+    books: &[BooksItem],
+    s_order: &[usize],
+    b_order: &[usize],
+    s_taken: &mut [bool],
+    b_taken: &mut [bool],
+    pairs: &mut Vec<MatchPair>,
+) -> Vec<(usize, Vec<usize>)> {
+    let mut ties = Vec::new();
+    for &si in s_order {
+        let s = &stmt[si];
+        if s.reference.trim().is_empty() {
+            continue;
+        }
+        let cands: Vec<usize> = b_order
+            .iter()
+            .copied()
+            .filter(|&bi| {
+                let b = &books[bi];
+                !b_taken[bi]
+                    && same_amount_and_kind(s, b)
+                    && ref_matches(&s.reference, &b.reference)
+            })
+            .collect();
+        match cands.as_slice() {
+            [] => {}
+            [bi] => {
+                s_taken[si] = true;
+                b_taken[*bi] = true;
+                pairs.push(MatchPair {
+                    statement: si,
+                    books: books[*bi].id,
+                    pass: MatchPass::Reference,
+                });
+            }
+            _ => {
+                s_taken[si] = true;
+                ties.push((si, cands));
+            }
+        }
+    }
+    ties
+}
+
+/// The reference ties of pass 1 (statement index, candidate book indexes):
+/// their candidates less any item paired since (by a later reference line
+/// or by pass 2) go to `ambiguous`; a tie whose items were all paired
+/// elsewhere has nothing left in the books. Returns which books items are
+/// still a tie's candidate.
+fn add_reference_ties(
+    reference_ties: Vec<(usize, Vec<usize>)>,
+    books: &[BooksItem],
+    pairs: &[MatchPair],
+    ambiguous: &mut Vec<Ambiguous>,
+    missing_in_books: &mut Vec<usize>,
+) -> Vec<bool> {
+    let paired: std::collections::BTreeSet<TransactionId> = pairs.iter().map(|p| p.books).collect();
+    let mut tied = vec![false; books.len()];
+    for (si, cands) in reference_ties {
+        let left: Vec<usize> = cands
+            .into_iter()
+            .filter(|&bi| !paired.contains(&books[bi].id))
+            .collect();
+        if left.is_empty() {
+            missing_in_books.push(si);
+            continue;
+        }
+        for &bi in &left {
+            tied[bi] = true;
+        }
+        ambiguous.push(Ambiguous {
+            statement: si,
+            candidates: left.iter().map(|&bi| books[bi].id).collect(),
+        });
+    }
+    tied
+}
+
 /// Pairs statement lines with books items (see the module docs).
 /// `date_slack_days` below zero is treated as zero.
 #[must_use]
@@ -364,38 +449,15 @@ pub fn match_lines(
     let mut b_taken = vec![false; books.len()];
     let mut pairs = Vec::new();
 
-    // Pass 1: equal ref + kind + exact amount; closest date, then date, id.
-    for &si in &s_order {
-        let s = &stmt[si];
-        if s.reference.trim().is_empty() {
-            continue;
-        }
-        let best = b_order
-            .iter()
-            .copied()
-            .filter(|&bi| {
-                let b = &books[bi];
-                !b_taken[bi]
-                    && same_amount_and_kind(s, b)
-                    && ref_matches(&s.reference, &b.reference)
-            })
-            .min_by_key(|&bi| {
-                (
-                    s.date.days_until(books[bi].date).abs(),
-                    books[bi].date,
-                    books[bi].id,
-                )
-            });
-        if let Some(bi) = best {
-            s_taken[si] = true;
-            b_taken[bi] = true;
-            pairs.push(MatchPair {
-                statement: si,
-                books: books[bi].id,
-                pass: MatchPass::Reference,
-            });
-        }
-    }
+    let ref_ambiguous = pass_one(
+        stmt,
+        books,
+        &s_order,
+        &b_order,
+        &mut s_taken,
+        &mut b_taken,
+        &mut pairs,
+    );
 
     // Pass 2: exact amount + kind within the slack, unique on both sides.
     let near = |si: usize, bi: usize| {
@@ -445,16 +507,25 @@ pub fn match_lines(
             }),
         }
     }
+    let tied = add_reference_ties(
+        ref_ambiguous,
+        books,
+        &pairs,
+        &mut ambiguous,
+        &mut missing_in_books,
+    );
     // Pass-2 pairs are disjoint (each item had exactly one candidate line),
     // and every unpaired item with a candidate line is in that line's
     // ambiguous list, so only items without any candidate are missing.
     let missing_on_statement = b_order
         .iter()
         .copied()
-        .filter(|&bi| !b_taken[bi] && b_cands[bi] == 0)
+        .filter(|&bi| !b_taken[bi] && b_cands[bi] == 0 && !tied[bi])
         .map(|bi| books[bi].id)
         .collect();
     pairs.sort_by_key(|p| p.statement);
+    ambiguous.sort_by_key(|a| a.statement);
+    missing_in_books.sort_unstable();
     MatchResult {
         pairs,
         missing_in_books,

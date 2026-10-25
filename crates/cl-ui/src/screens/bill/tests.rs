@@ -353,6 +353,89 @@ fn an_unknown_outcome_blocks_the_save_in_every_window_until_answered() {
     assert!(!s.save.lost.pending());
 }
 
+/// A file attached by path is read on a background thread (up to 10 MB),
+/// never on the egui thread; the frames' polling uploads it.
+#[test]
+fn a_file_by_path_is_read_off_the_egui_thread() {
+    let (dir, link) = link();
+    let mut s = screen(&link);
+    let pdf = dir.path().join("invoice.pdf");
+    std::fs::write(&pdf, demo_bills::STORY_PDF).expect("write");
+    s.attach_path(&pdf);
+    assert!(s.attach.reading.is_some(), "reading in the background");
+    assert!(s.attach.upload.is_none() && s.attach.shown.is_none());
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while s.attach.reading.is_some() {
+        assert!(std::time::Instant::now() < until, "the read never ended");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        s.poll_attach();
+    }
+    assert_eq!(s.attach.problem, None);
+    assert!(s.attach.shown.is_some(), "uploaded and shown");
+    // A missing file is a plain message, also from the background.
+    s.attach_path(&dir.path().join("missing.pdf"));
+    while s.attach.reading.is_some() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        s.poll_attach();
+    }
+    assert_eq!(s.attach.problem, Some("check.attach.not_found"));
+}
+
+/// Before `bill-lines-v1` the draft's files move in a second call after the
+/// create. A lost reply cuts that off; when Check again finds the bill, the
+/// move runs then (the review's should-fix 4).
+#[test]
+fn a_lost_reply_found_saved_still_moves_the_draft_files() {
+    let (_d, link) = link();
+    link.demo_state().expect("demo").bills.lines_off = true;
+    let mut s = screen(&link);
+    s.upload_bytes(demo_bills::STORY_PDF_NAME, demo_bills::STORY_PDF.to_vec());
+    let draft = s.attach.draft.expect("a draft key");
+    fill(
+        &mut s,
+        demo_bills::STORY_VENDOR,
+        "18.25",
+        &[("6210", "18.25")],
+    );
+    let before: Vec<_> = demo_bills::list(&mut link.demo_state().expect("demo"), false);
+    link.demo_state().expect("demo").bills.lose_next_reply = true;
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert!(s.save.lost.pending());
+    let id = demo_bills::list(&mut link.demo_state().expect("demo"), false)
+        .into_iter()
+        .map(|(id, _)| id)
+        .find(|id| !before.iter().any(|(b, _)| b == id))
+        .expect("the bill was written");
+    {
+        let demo = link.demo_state().expect("demo");
+        assert_eq!(demo_bills::attachments(&demo, AttachTo::Bill(id)).len(), 0);
+        assert_eq!(
+            demo_bills::attachments(&demo, AttachTo::Draft(draft)).len(),
+            1
+        );
+    }
+    s.save.lost.recheck_answering(
+        &mut s.header,
+        cl_api::Recheck::Committed {
+            transaction: Some(id),
+        },
+    );
+    s.poll_save();
+    assert!(!s.save.lost.pending());
+    let demo = link.demo_state().expect("demo");
+    assert_eq!(
+        demo_bills::attachments(&demo, AttachTo::Bill(id)).len(),
+        1,
+        "the file is on the bill"
+    );
+    assert_eq!(
+        demo_bills::attachments(&demo, AttachTo::Draft(draft)).len(),
+        0
+    );
+    drop(demo);
+    assert!(s.save.attach_failed.is_none(), "the retry went through");
+}
+
 #[test]
 fn a_paid_bill_keeps_vendor_date_and_amount_and_is_not_voided() {
     let (_d, link) = link();
