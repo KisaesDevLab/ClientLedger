@@ -368,6 +368,7 @@ impl BatchEngine for Scripted {
                     )
                     .expect("id"),
                     idempotency_key: Some(key.clone()),
+                    keyed: false,
                 })
             }
             SaveStep::Busy => Err(cl_api::ApiError::Conflict {

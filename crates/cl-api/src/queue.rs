@@ -217,6 +217,8 @@ impl<T> Pending<T> {
                     IfLost::Unknown(key) => ApiError::OutcomeUnknown {
                         request_id: RequestId::from_uuid(uuid::Uuid::new_v4()),
                         idempotency_key: key.clone(),
+                        // A job lost on the way: the block stays (Q-PR1a).
+                        keyed: false,
                     },
                     IfLost::Internal => ApiError::Internal,
                 }))
@@ -533,6 +535,7 @@ impl RequestGroup {
                     Err(_) => Err(ApiError::OutcomeUnknown {
                         request_id: RequestId::from_uuid(uuid::Uuid::new_v4()),
                         idempotency_key: label.as_ref().and_then(|l| l.key.clone()),
+                        keyed: false,
                     }),
                 }
             } else {

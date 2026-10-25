@@ -1,12 +1,21 @@
-//! Idempotency keys and the safe-retry policy (P05 plan §2.6).
+//! Idempotency keys and the safe-retry policy (P05 plan §2.6, U-18).
 //!
-//! The engine ignores `Idempotency-Key` until U-18, so sending it is harmless
-//! and also no protection: a mutation is retried only when it provably never
-//! reached a handler, or when outcome reconciliation proves the first attempt
-//! did not commit.
+//! Without `idempotency-v1` the engine ignores `Idempotency-Key` (except
+//! `/batch/save`, `batch-idempotent-v1`), so sending it is harmless and also
+//! no protection: a mutation is retried only when it provably never reached
+//! a handler, or when outcome reconciliation proves the first attempt did not
+//! commit.
+//!
+//! With `idempotency-v1` the engine replays a repeated key on exactly its
+//! route set (the `keyable` rows of `operations.txt`). Those routes, and only
+//! those, send the key and are retried like reads with it (`KeyedOnce`): a
+//! repeat gets the first result (`Idempotent-Replayed: true`), a key still
+//! running gets 409 `IDEMPOTENCY_IN_PROGRESS` (waited for, `Retry-After`).
+//! Every other mutation keeps the rules above.
 
 use std::fmt;
 use std::future::Future;
+use std::hash::{Hash, Hasher};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -18,23 +27,71 @@ use tracing::Instrument;
 use crate::client::{AttemptAuth, Call, EngineReply, Transport, TransportError};
 use crate::endpoint::EndpointState;
 use crate::errors::{ApiError, AuthFailure, Mapped, RouteKind, map_failure};
-use crate::resources::operations::{Operation, RetryClass};
+use crate::resources::operations::{BATCH_SAVE, Operation, RetryClass};
 
-/// Opaque key sent as `Idempotency-Key` on mutations.
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct IdempotencyKey(uuid::Uuid);
+/// The engine forgets a key after 24 hours (U-18, Q-U18c); cl-api relies on
+/// a key for a replay only while it is younger than this, so clock and
+/// timing slack can never turn a "replay" into a second posting.
+pub(crate) const KEY_REPLAY_AGE: Duration = Duration::from_hours(20);
+
+/// Opaque key sent as `Idempotency-Key` on mutations. Two keys are equal
+/// when their values are; the creation instant only says how old it is.
+#[derive(Clone)]
+pub struct IdempotencyKey {
+    id: uuid::Uuid,
+    /// When the key was made (monotonic clock).
+    born: std::time::Instant,
+}
+
+impl PartialEq for IdempotencyKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for IdempotencyKey {}
+
+impl Hash for IdempotencyKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
 
 impl IdempotencyKey {
     /// A fresh random key (one per logical user action).
     #[must_use]
     pub fn new() -> IdempotencyKey {
-        IdempotencyKey(uuid::Uuid::new_v4())
+        IdempotencyKey {
+            id: uuid::Uuid::new_v4(),
+            born: std::time::Instant::now(),
+        }
     }
 
     /// Header value (36-character lower-case UUID).
     #[must_use]
     pub fn as_header(&self) -> String {
-        self.0.hyphenated().to_string()
+        self.id.hyphenated().to_string()
+    }
+
+    /// The engine still replays this key at `now` with a wide margin (it
+    /// is younger than [`KEY_REPLAY_AGE`]).
+    pub(crate) fn replayable_at(&self, now: std::time::Instant) -> bool {
+        now.saturating_duration_since(self.born) < KEY_REPLAY_AGE
+    }
+
+    /// [`Self::replayable_at`] now.
+    pub(crate) fn replayable(&self) -> bool {
+        self.replayable_at(std::time::Instant::now())
+    }
+
+    /// Tests: a key made `age` ago (`None` when the monotonic clock does
+    /// not reach that far back, for example shortly after boot).
+    #[cfg(test)]
+    pub(crate) fn aged(age: Duration) -> Option<IdempotencyKey> {
+        Some(IdempotencyKey {
+            id: uuid::Uuid::new_v4(),
+            born: std::time::Instant::now().checked_sub(age)?,
+        })
     }
 }
 
@@ -46,13 +103,13 @@ impl Default for IdempotencyKey {
 
 impl fmt::Display for IdempotencyKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.hyphenated())
+        write!(f, "{}", self.id.hyphenated())
     }
 }
 
 impl fmt::Debug for IdempotencyKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "IdempotencyKey({})", self.0.hyphenated())
+        write!(f, "IdempotencyKey({})", self.id.hyphenated())
     }
 }
 
@@ -177,6 +234,20 @@ const MAX_TRANSIENT_RETRIES: u32 = 2;
 /// cannot spin the retry loop.
 const MAX_SETTLE_WAITS: u32 = 3;
 
+/// 409 `IDEMPOTENCY_IN_PROGRESS` (U-18): another request with this key holds
+/// its lock (`Retry-After: 1`).
+pub(crate) const IDEMPOTENCY_IN_PROGRESS: &str = "IDEMPOTENCY_IN_PROGRESS";
+
+/// Waits for a key still in progress, at most, per request (each within the
+/// request's deadline).
+const MAX_IN_PROGRESS_RETRIES: u32 = 5;
+
+/// The wait when the engine names none.
+const IN_PROGRESS_WAIT: Duration = Duration::from_secs(1);
+
+/// The longest single wait for a key in progress.
+const MAX_IN_PROGRESS_WAIT: Duration = Duration::from_secs(5);
+
 /// Runs logical requests through the transport with the §2.6 policy.
 pub(crate) struct Executor {
     transport: Transport,
@@ -191,6 +262,8 @@ pub(crate) struct Executor {
 )]
 struct Retries {
     transient: u32,
+    /// Waits for 409 `IDEMPOTENCY_IN_PROGRESS` so far.
+    in_progress: u32,
     gate_replayed: bool,
     auth_replayed: bool,
     same_key_retried: bool,
@@ -245,12 +318,22 @@ impl Executor {
         auth: &dyn AuthHook,
         reconciler: Option<&dyn Reconciler>,
     ) -> Result<EngineReply, ApiError> {
-        let class = op
-            .retry()
-            .effective(self.idempotency_v1.load(Ordering::Relaxed));
         if !call.method.is_read() && call.idempotency_key.is_none() {
             call.idempotency_key = Some(IdempotencyKey::new());
         }
+        let idempotency_v1 = self.idempotency_v1.load(Ordering::Relaxed);
+        let class = op.retry().effective(
+            idempotency_v1
+                && call
+                    .idempotency_key
+                    .as_ref()
+                    .is_some_and(IdempotencyKey::replayable),
+        );
+        // With `idempotency-v1` the key goes only where the engine replays
+        // it: its route set, and `/batch/save` (its own
+        // `batch-idempotent-v1`). Without it every mutation sends the key as
+        // before (the engine ignores it there).
+        call.send_key = !idempotency_v1 || op.is_keyable() || *op == BATCH_SAVE;
         let span = tracing::debug_span!(
             "engine_request",
             method = call.method.as_str(),
@@ -292,6 +375,8 @@ impl Executor {
                     return Err(ApiError::OutcomeUnknown {
                         request_id: call.request_id,
                         idempotency_key: call.idempotency_key.clone(),
+                        // The company was switched: never "save again" here.
+                        keyed: false,
                     });
                 }
                 Err(e) => return Err(e),
@@ -301,7 +386,7 @@ impl Executor {
                 .attempt(call, &creds.auth, attempt, ctx.deadline)
                 .await;
             let step = match outcome {
-                Ok(reply) if (200..300).contains(&reply.status) => Step::Done(Ok(reply)),
+                Ok(reply) if (200..300).contains(&reply.status) => Step::Done(success(reply)),
                 Ok(reply) => self.on_status(&ctx, auth, &creds, reply, &mut r).await,
                 Err(e) => self.on_transport(&ctx, e, &mut r).await,
             };
@@ -358,7 +443,9 @@ impl Executor {
                         }
                     }
                     RetryClass::Never => Step::Done(Err(give_up(e))),
-                    RetryClass::PreHandlerOnly => {
+                    // `Keyable` is never in effect (`effective` maps it);
+                    // were it, the unkeyed rule is the safe one.
+                    RetryClass::PreHandlerOnly | RetryClass::Keyable => {
                         let cause = if matches!(e, TransportError::Timeout { .. }) {
                             AmbiguityCause::Timeout
                         } else {
@@ -435,11 +522,21 @@ impl Executor {
                     Err(e) => Step::Done(Err(e)),
                 }
             }
-            Mapped::Final(e) => self.on_final(ctx, e, reply.generation, r).await,
+            Mapped::Final(e) => {
+                self.on_final(ctx, e, reply.generation, reply.retry_after, r)
+                    .await
+            }
         }
     }
 
-    async fn on_final(&self, ctx: &Ctx<'_>, e: ApiError, generation: u64, r: &mut Retries) -> Step {
+    async fn on_final(
+        &self,
+        ctx: &Ctx<'_>,
+        e: ApiError,
+        generation: u64,
+        retry_after: Option<Duration>,
+        r: &mut Retries,
+    ) -> Step {
         if matches!(e, ApiError::Server { .. }) {
             r.maybe_committed = true;
         }
@@ -478,6 +575,28 @@ impl Executor {
                     Step::Done(Err(e))
                 }
             }
+            // U-18: the same key is still running (another attempt of this
+            // save, whose reply may have been lost). Nothing was posted by
+            // this attempt; wait as asked and send the same key again, which
+            // the engine replays once the first one finishes.
+            (RetryClass::KeyedOnce, ApiError::Conflict { code: Some(c), .. })
+                if c.as_str() == IDEMPOTENCY_IN_PROGRESS =>
+            {
+                r.maybe_committed = true;
+                let wait = retry_after
+                    .unwrap_or(IN_PROGRESS_WAIT)
+                    .clamp(Duration::from_millis(100), MAX_IN_PROGRESS_WAIT);
+                let in_time = Instant::now()
+                    .checked_add(wait)
+                    .is_some_and(|t| t < ctx.deadline);
+                if r.in_progress < MAX_IN_PROGRESS_RETRIES && in_time {
+                    r.in_progress += 1;
+                    tokio::time::sleep(wait).await;
+                    Step::Again
+                } else {
+                    Step::Done(Err(keyed_give_up(ctx, r, e)))
+                }
+            }
             // A 5xx after a mutation's handler may have run is ambiguous.
             (RetryClass::PreHandlerOnly, ApiError::Server { status, .. }) => {
                 let cause = AmbiguityCause::ServerError(*status);
@@ -499,6 +618,7 @@ impl Executor {
         let unknown = || ApiError::OutcomeUnknown {
             request_id: ctx.call.request_id,
             idempotency_key: ctx.call.idempotency_key.clone(),
+            keyed: false,
         };
         let Some(rec) = ctx.reconciler else {
             tracing::info!(outcome = "unknown", reconciled = false, "mutation outcome");
@@ -603,18 +723,74 @@ impl Executor {
 }
 
 /// Giving up on a keyed mutation (U-18 `KeyedOnce`) after an attempt that
-/// may have reached a handler: the outcome is unknown, and the owner's
-/// "Check again" needs the idempotency key, so it is `OutcomeUnknown`, not
-/// `Timeout` or `EngineUnavailable`.
+/// may have reached a handler: the outcome is unknown, so it is
+/// `OutcomeUnknown`, not `Timeout` or `EngineUnavailable`. It is `keyed`:
+/// sending the same request again with the same key is a replay, never a
+/// second posting (Q-PR1a).
 fn keyed_give_up(ctx: &Ctx<'_>, r: &Retries, e: ApiError) -> ApiError {
     if ctx.class == RetryClass::KeyedOnce && r.maybe_committed {
-        tracing::info!(outcome = "unknown", reconciled = false, "mutation outcome");
+        tracing::info!(
+            outcome = "unknown",
+            reconciled = false,
+            keyed = true,
+            "mutation outcome"
+        );
         ApiError::OutcomeUnknown {
             request_id: ctx.call.request_id,
             idempotency_key: ctx.call.idempotency_key.clone(),
+            keyed: true,
         }
     } else {
         e
+    }
+}
+
+/// A 2xx answer. A replay (`Idempotent-Replayed: true`, U-18) is an
+/// ordinary success: the first request's stored answer, or its record as it
+/// is now. When that record is gone the engine answers only
+/// `{"idempotency":{"state":"committed",…}}`: the save is in the books but
+/// there is nothing to show, so it is `SavedUnreadable` ("saved, reload").
+fn success(reply: EngineReply) -> Result<EngineReply, ApiError> {
+    if reply.replayed {
+        tracing::debug!(replayed = true, "the engine replayed an earlier answer");
+        if committed_marker(&reply.body) {
+            return Err(ApiError::SavedUnreadable {
+                what: "replayed save without its record",
+            });
+        }
+    }
+    Ok(reply)
+}
+
+/// The engine's minimal committed-replay body (U-18 plan §2.6).
+fn committed_marker(body: &[u8]) -> bool {
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_slice::<serde_json::Value>(body)
+    else {
+        return false;
+    };
+    map.len() == 1
+        && map
+            .get("idempotency")
+            .and_then(|i| i.get("state"))
+            .and_then(serde_json::Value::as_str)
+            == Some("committed")
+}
+
+/// An unknown outcome of a call whose key the caller does not hold (the
+/// resource made a fresh key for that one call): sending "the same save"
+/// again would carry a new key, so it is not `keyed` for the caller.
+pub(crate) fn unkeyed(e: ApiError) -> ApiError {
+    match e {
+        ApiError::OutcomeUnknown {
+            request_id,
+            idempotency_key,
+            ..
+        } => ApiError::OutcomeUnknown {
+            request_id,
+            idempotency_key,
+            keyed: false,
+        },
+        other => other,
     }
 }
 
@@ -893,6 +1069,7 @@ pub(crate) mod tests {
         let ApiError::OutcomeUnknown {
             request_id,
             idempotency_key,
+            keyed: false,
         } = e
         else {
             panic!("{e:?}")
@@ -1613,10 +1790,222 @@ pub(crate) mod tests {
                 .await
                 .expect_err("gave up");
             assert!(
-                matches!(e, ApiError::OutcomeUnknown { idempotency_key: Some(ref k), .. } if *k == key),
+                matches!(e, ApiError::OutcomeUnknown { idempotency_key: Some(ref k), keyed: true, .. } if *k == key),
                 "{e:?}"
             );
         }
+    }
+
+    fn post_to(route: &'static str) -> (Operation, Call) {
+        let op = *find(Method::Post, route).expect("covered");
+        (op, Call::at(Method::Post, route).json_body(b"{}".to_vec()))
+    }
+
+    /// U-18 plan §10.1: with `idempotency-v1` the key goes only to the
+    /// engine's route set (and `/batch/save`, its own capability); a route
+    /// outside it is never blind-retried. Without the capability every
+    /// mutation sends the key, as before.
+    #[tokio::test]
+    async fn idempotency_v1_sends_the_key_only_where_the_engine_replays_it() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(json(503, r#"{"error":{"message":"x"}}"#))
+            .mount(&server)
+            .await;
+        let ex = exec_at(server.address().port());
+        ex.set_idempotency_v1(true);
+        // Outside the set: no header, one attempt, outcome unknown (unkeyed).
+        let (op, call) = post_to("/api/v1/contacts/merge");
+        let e = ex.run(&op, call, &none(), None).await.expect_err("5xx");
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { keyed: false, .. }),
+            "{e:?}"
+        );
+        let reqs = server.received_requests().await.expect("r");
+        assert_eq!(reqs.len(), 1, "never blind-retried");
+        assert!(reqs[0].headers.get("idempotency-key").is_none());
+        // Batch save keeps its own key mechanism.
+        let (op, call) = post_to("/api/v1/batch/save");
+        let _ = ex.run(&op, call, &none(), None).await;
+        let reqs = server.received_requests().await.expect("r");
+        assert!(reqs[1].headers.get("idempotency-key").is_some());
+        // In the set: the key, retried with it.
+        let (op, call) = post_to("/api/v1/transactions");
+        let e = ex.run(&op, call, &none(), None).await.expect_err("5xx");
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { keyed: true, .. }),
+            "{e:?}"
+        );
+        let reqs = server.received_requests().await.expect("r");
+        let keyed: Vec<_> = reqs[2..]
+            .iter()
+            .map(|r| r.headers.get("idempotency-key").cloned())
+            .collect();
+        assert_eq!(keyed.len(), 3, "retried with the key");
+        assert!(keyed.iter().all(|k| k.is_some() && *k == keyed[0]));
+        // Without the capability: every mutation carries a key, none is
+        // retried after it may have reached a handler.
+        ex.set_idempotency_v1(false);
+        let before = reqs.len();
+        let (op, call) = post_to("/api/v1/contacts/merge");
+        let _ = ex.run(&op, call, &none(), None).await;
+        let (op, call) = post_to("/api/v1/transactions");
+        let _ = ex.run(&op, call, &none(), None).await;
+        let reqs = server.received_requests().await.expect("r");
+        assert_eq!(reqs.len(), before + 2);
+        assert!(
+            reqs[before..]
+                .iter()
+                .all(|r| r.headers.get("idempotency-key").is_some())
+        );
+    }
+
+    /// C3: 409 `IDEMPOTENCY_IN_PROGRESS` on a keyed route is waited for
+    /// (`Retry-After`) and sent again with the same key; the replay is an
+    /// ordinary success.
+    #[tokio::test]
+    async fn in_progress_waits_retry_after_and_the_replay_is_a_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                json(
+                    409,
+                    r#"{"error":{"message":"x","code":"IDEMPOTENCY_IN_PROGRESS"}}"#,
+                )
+                .insert_header("retry-after", "1"),
+            )
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .respond_with(
+                json(201, r#"{"first":true}"#).insert_header("idempotent-replayed", "true"),
+            )
+            .mount(&server)
+            .await;
+        let ex = exec_at(server.address().port());
+        ex.set_idempotency_v1(true);
+        let t = Instant::now();
+        let r = ex
+            .run(&post_op(), post_call(), &none(), None)
+            .await
+            .expect("replayed");
+        assert!(r.replayed);
+        assert_eq!(&r.body[..], br#"{"first":true}"#);
+        assert!(
+            t.elapsed() >= Duration::from_millis(900),
+            "waited Retry-After"
+        );
+        let reqs = server.received_requests().await.expect("r");
+        assert_eq!(reqs.len(), 2);
+        assert_eq!(
+            reqs[0].headers.get("idempotency-key"),
+            reqs[1].headers.get("idempotency-key")
+        );
+    }
+
+    /// The waits are bounded by the deadline: then the outcome is unknown
+    /// but keyed (sending the same key again is safe). Without the
+    /// capability a 409 in progress is a plain `Busy`, not retried.
+    #[tokio::test]
+    async fn in_progress_waits_are_bounded_and_need_the_capability() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                json(
+                    409,
+                    r#"{"error":{"message":"x","code":"IDEMPOTENCY_IN_PROGRESS"}}"#,
+                )
+                .insert_header("retry-after", "1"),
+            )
+            .mount(&server)
+            .await;
+        let ex = exec_at(server.address().port());
+        let e = ex
+            .run(&post_op(), post_call(), &none(), None)
+            .await
+            .expect_err("busy");
+        assert!(
+            matches!(
+                e,
+                ApiError::Conflict {
+                    reason: crate::errors::ConflictReason::Busy,
+                    ..
+                }
+            ),
+            "{e:?}"
+        );
+        assert_eq!(count(&server).await, 1);
+        ex.set_idempotency_v1(true);
+        let e = ex
+            .run(&post_op(), post_call(), &none(), None)
+            .await
+            .expect_err("still running");
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { keyed: true, .. }),
+            "{e:?}"
+        );
+        let n = count(&server).await - 1;
+        assert!(
+            (2..=1 + MAX_IN_PROGRESS_RETRIES as usize).contains(&n),
+            "{n}"
+        );
+    }
+
+    /// C4: a replay whose record is gone answers only the committed marker:
+    /// the save is in the books, so it is `SavedUnreadable` (reload), never
+    /// a failure that invites a second save.
+    #[tokio::test]
+    async fn a_replay_without_its_record_is_saved_unreadable() {
+        let marker = r#"{"idempotency":{"state":"committed","entityType":"transaction","entityId":"5f6e3c1a-8d2b-4c7e-9a10-2b3c4d5e6f70"}}"#;
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/transactions"))
+            .respond_with(json(200, marker).insert_header("idempotent-replayed", "true"))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .respond_with(json(200, marker))
+            .mount(&server)
+            .await;
+        let ex = exec_at(server.address().port());
+        ex.set_idempotency_v1(true);
+        let (op, call) = post_to("/api/v1/transactions");
+        let e = ex.run(&op, call, &none(), None).await.expect_err("marker");
+        assert!(matches!(e, ApiError::SavedUnreadable { .. }), "{e:?}");
+        // The same body without the replay header is an ordinary answer.
+        let (op, call) = post_to("/api/v1/accounts");
+        ex.run(&op, call, &none(), None).await.expect("plain");
+    }
+
+    /// C5: a key older than 20 hours is not relied on (the engine forgets
+    /// keys after 24): the save is treated as unkeyed, never blind-retried.
+    #[tokio::test]
+    async fn an_old_key_is_not_relied_on() {
+        let young = IdempotencyKey::new();
+        let now = std::time::Instant::now();
+        assert!(young.replayable_at(now));
+        assert!(young.replayable_at(now + Duration::from_hours(19)));
+        assert!(!young.replayable_at(now + KEY_REPLAY_AGE));
+        let Some(old) = IdempotencyKey::aged(Duration::from_hours(21)) else {
+            eprintln!("SKIPPED: the monotonic clock does not reach 21 hours back");
+            return;
+        };
+        let server = failing_post_server(503).await;
+        let ex = exec_at(server.address().port());
+        ex.set_idempotency_v1(true);
+        let mut call = post_call();
+        call.idempotency_key = Some(old.clone());
+        let e = ex
+            .run(&post_op(), call, &none(), None)
+            .await
+            .expect_err("unknown");
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { keyed: false, idempotency_key: Some(ref k), .. } if *k == old),
+            "{e:?}"
+        );
+        assert_eq!(count(&server).await, 1, "not retried");
     }
 
     #[tokio::test]

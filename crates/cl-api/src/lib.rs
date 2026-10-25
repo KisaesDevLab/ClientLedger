@@ -42,7 +42,7 @@ pub use client::{Budget, ClientConfig, LOOPBACK_HOST, Method, Timeouts};
 pub use endpoint::{EndpointSource, EndpointState, EngineEndpoint, FixedEndpoint, Purpose};
 pub use errors::{
     ApiError, AuthFailure, ClosedPeriod, ConflictReason, DEPOSIT_LINKS_DROPPED, ErrorCode,
-    FieldPath, LocalValidation, UserText, ValidationError, ValidationIssue,
+    FieldPath, LocalValidation, SavedEntity, UserText, ValidationError, ValidationIssue,
     is_deposit_links_dropped,
 };
 pub use idempotency::IdempotencyKey;

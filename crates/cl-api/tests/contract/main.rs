@@ -26,6 +26,7 @@ mod contract_deposits;
 mod contract_errors;
 mod contract_harness;
 mod contract_home;
+mod contract_idempotency;
 mod contract_items;
 mod contract_journal;
 mod contract_journal_entries;
@@ -369,6 +370,18 @@ fn main() -> std::process::ExitCode {
         (
             "capabilities::idempotency_u18",
             contract_capabilities::idempotency_u18,
+        ),
+        (
+            "idempotency::lost_reply_replays_one_posting",
+            contract_idempotency::lost_reply_replays_one_posting,
+        ),
+        (
+            "idempotency::reused_key_is_refused",
+            contract_idempotency::reused_key_is_refused,
+        ),
+        (
+            "idempotency::keyed_routes_replay",
+            contract_idempotency::keyed_routes_replay,
         ),
         (
             "capabilities::je_line_contact_u22",

@@ -471,13 +471,27 @@ pub enum ApiError {
         /// The engine will not come back without the owner.
         permanent: bool,
     },
-    /// A save may or may not have been recorded; check before trying again.
-    #[error("outcome unknown, request {request_id}")]
+    /// A save may or may not have been recorded. Unless `keyed`, check
+    /// before trying again (Q-PR1a).
+    #[error("outcome unknown, request {request_id} (keyed: {keyed})")]
     OutcomeUnknown {
         /// The request's `X-Request-Id`.
         request_id: RequestId,
         /// The idempotency key the save used.
         idempotency_key: Option<IdempotencyKey>,
+        /// The engine replays this key on this route (`idempotency-v1`,
+        /// U-18): sending the same save again with `idempotency_key` is
+        /// safe (the first result comes back, nothing posts twice). False
+        /// otherwise; then a second send could post twice.
+        keyed: bool,
+    },
+    /// This idempotency key already saved a different request (422
+    /// `IDEMPOTENCY_KEY_REUSED`, U-18): the first save went through, and
+    /// this one was not entered. `entity` names what the first one saved.
+    #[error("idempotency key already used for another save")]
+    IdempotencyKeyReused {
+        /// What the first request saved, when the engine said.
+        entity: Option<SavedEntity>,
     },
     /// The engine did not answer in time.
     #[error("timed out")]
@@ -525,6 +539,57 @@ pub enum ApiError {
     Internal,
 }
 
+impl ApiError {
+    /// A save whose outcome is unknown and that must not simply be sent
+    /// again: the engine does not replay its key (no `idempotency-v1`, a
+    /// route outside its set, or a key too old to rely on), so a second
+    /// send could post twice. Forms block Save until the owner's recheck or
+    /// confirmation (Q-PR1a). A `keyed` unknown outcome is not this: the
+    /// same save goes again under the same key and the engine replays it.
+    #[must_use]
+    pub fn needs_recheck(&self) -> bool {
+        matches!(self, ApiError::OutcomeUnknown { keyed: false, .. })
+    }
+}
+
+/// What an earlier request with the same idempotency key saved (422
+/// `IDEMPOTENCY_KEY_REUSED` `details {entityType, entityId}`, U-18).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedEntity {
+    /// The engine's entity type (`transaction`, `contact`, ...; short ASCII).
+    pub entity_type: String,
+    /// Its id (a UUID).
+    pub entity_id: String,
+}
+
+fn key_reused(body: Option<&EngineErrorBody>) -> ApiError {
+    ApiError::IdempotencyKeyReused {
+        entity: body.and_then(saved_entity),
+    }
+}
+
+fn saved_entity(body: &EngineErrorBody) -> Option<SavedEntity> {
+    let entity_type = body
+        .pointer("/error/details/entityType")?
+        .as_str()
+        .filter(|t| {
+            !t.is_empty()
+                && t.len() <= 64
+                && t.bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+        })?
+        .to_string();
+    let entity_id = body
+        .pointer("/error/details/entityId")?
+        .as_str()
+        .and_then(|s| cl_core::ids::parse_uuid(s).ok())?
+        .to_string();
+    Some(SavedEntity {
+        entity_type,
+        entity_id,
+    })
+}
+
 /// 409 on `PUT /transactions/{id}` of a deposit whose payment or vendor
 /// refund links the edit would drop (`ledger-guards-v1`, engine PR #169;
 /// `details.sourceTransactionIds`). The edit belongs in Make Deposit.
@@ -541,21 +606,67 @@ pub fn is_deposit_links_dropped(e: &ApiError) -> bool {
     matches!(e, ApiError::Conflict { code: Some(c), .. } if c.as_str() == DEPOSIT_LINKS_DROPPED)
 }
 
+/// 400 `IDEMPOTENCY_KEY_INVALID` (U-18): the key is not 16 to 64 characters
+/// of `[A-Za-z0-9_-]`. cl-api always sends a UUID, so this is a bug.
+const IDEMPOTENCY_KEY_INVALID: &str = "IDEMPOTENCY_KEY_INVALID";
+
 fn code_text(code: Option<&ErrorCode>) -> &str {
     code.map_or("no code", ErrorCode::as_str)
 }
 
+/// Owner wording for engine codes that mean more than their status, and
+/// for the U-18 idempotency answers.
+fn special_message(e: &ApiError) -> Option<(&'static str, Option<&'static str>)> {
+    match e {
+        ApiError::OutcomeUnknown { keyed: true, .. } => {
+            return Some((
+                "error.api.outcome_unknown",
+                Some("fix.api.save_again_safely"),
+            ));
+        }
+        ApiError::IdempotencyKeyReused { .. } => {
+            return Some((
+                "error.api.idempotency_key_reused",
+                Some("fix.api.idempotency_key_reused"),
+            ));
+        }
+        _ => {}
+    }
+    let (ApiError::Conflict { code: Some(c), .. } | ApiError::Protocol { code: Some(c), .. }) = e
+    else {
+        return None;
+    };
+    let conflict = matches!(e, ApiError::Conflict { .. });
+    match c.as_str() {
+        // Engine `ledger-guards-v1` (engine PR #169, U-80/U-81).
+        DEPOSIT_LINKS_DROPPED if conflict => Some((
+            "error.api.deposit_links_dropped",
+            Some("fix.api.open_make_deposit"),
+        )),
+        CHECK_PRINTED_CODE if conflict => {
+            Some(("error.api.check_printed", Some("fix.api.check_printed")))
+        }
+        // U-18: the same save is still being finished.
+        crate::idempotency::IDEMPOTENCY_IN_PROGRESS if conflict => Some((
+            "error.api.save_in_progress",
+            Some("fix.api.save_in_progress"),
+        )),
+        IDEMPOTENCY_KEY_INVALID if !conflict => {
+            Some(("error.api.save_key_invalid", Some("fix.api.report")))
+        }
+        _ => None,
+    }
+}
+
 impl OwnerFacing for ApiError {
     fn owner_message(&self) -> OwnerMessage {
+        if let Some((key, fix)) = special_message(self) {
+            return OwnerMessage {
+                key,
+                suggestion_key: fix,
+            };
+        }
         let (key, fix) = match self {
-            // Engine `ledger-guards-v1` (engine PR #169, U-80/U-81).
-            ApiError::Conflict { code: Some(c), .. } if c.as_str() == DEPOSIT_LINKS_DROPPED => (
-                "error.api.deposit_links_dropped",
-                Some("fix.api.open_make_deposit"),
-            ),
-            ApiError::Conflict { code: Some(c), .. } if c.as_str() == CHECK_PRINTED_CODE => {
-                ("error.api.check_printed", Some("fix.api.check_printed"))
-            }
             ApiError::Validation(_) => ("error.api.validation", Some("fix.api.validation")),
             ApiError::BatchRows(_) => ("error.api.batch_rows", Some("fix.api.batch_rows")),
             ApiError::BatchGroup { problem, .. } => match problem {
@@ -629,6 +740,8 @@ impl OwnerFacing for ApiError {
             ApiError::OutcomeUnknown { .. } => {
                 ("error.api.outcome_unknown", Some("fix.api.check_again"))
             }
+            // Worded in `special_message`.
+            ApiError::IdempotencyKeyReused { .. } => ("error.api.internal", None),
             ApiError::Server { .. }
             | ApiError::Protocol { .. }
             | ApiError::Decode { .. }
@@ -916,6 +1029,15 @@ pub(crate) fn map_failure(
             return Mapped::Final(e);
         }
     }
+    // U-18: a key the engine refuses is a bug on our side, never the
+    // owner's input.
+    if status == 400 && EngineErrorBody::parse(body).is_some_and(|b| b.is(IDEMPOTENCY_KEY_INVALID))
+    {
+        return Mapped::Final(ApiError::Protocol {
+            status,
+            code: ErrorCode::parse(IDEMPOTENCY_KEY_INVALID),
+        });
+    }
     map_status(status, body, retry_after, route)
 }
 
@@ -1000,7 +1122,7 @@ fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: Ro
         },
         413 => fin(ApiError::PayloadTooLarge),
         421 => Mapped::DesktopGate,
-        422 if has("IDEMPOTENCY_KEY_REUSED") => fin(ApiError::Protocol { status, code }),
+        422 if has("IDEMPOTENCY_KEY_REUSED") => fin(key_reused(parsed.as_ref())),
         422 => match &parsed {
             Some(b) => fin(ApiError::Validation(validation(b))),
             None => fin(ApiError::Protocol { status, code: None }),
@@ -1198,9 +1320,32 @@ mod tests {
                 422,
                 r#"{"error":{"message":"x","code":"IDEMPOTENCY_KEY_REUSED"}}"#,
                 S,
+                ApiError::IdempotencyKeyReused { entity: None },
+            ),
+            (
+                422,
+                r#"{"error":{"message":"x","code":"IDEMPOTENCY_KEY_REUSED","details":{"entityType":"transaction","entityId":"5f6e3c1a-8d2b-4c7e-9a10-2b3c4d5e6f70"}}}"#,
+                S,
+                ApiError::IdempotencyKeyReused {
+                    entity: Some(SavedEntity {
+                        entity_type: "transaction".into(),
+                        entity_id: "5f6e3c1a-8d2b-4c7e-9a10-2b3c4d5e6f70".into(),
+                    }),
+                },
+            ),
+            (
+                422,
+                r#"{"error":{"message":"x","code":"IDEMPOTENCY_KEY_REUSED","details":{"entityType":"a b","entityId":"not-an-id"}}}"#,
+                S,
+                ApiError::IdempotencyKeyReused { entity: None },
+            ),
+            (
+                400,
+                r#"{"error":{"message":"x","code":"IDEMPOTENCY_KEY_INVALID"}}"#,
+                S,
                 ApiError::Protocol {
-                    status: 422,
-                    code: code("IDEMPOTENCY_KEY_REUSED"),
+                    status: 400,
+                    code: code("IDEMPOTENCY_KEY_INVALID"),
                 },
             ),
             (
@@ -1765,7 +1910,14 @@ mod tests {
             ApiError::OutcomeUnknown {
                 request_id: RequestId::from_uuid(uuid::Uuid::nil()),
                 idempotency_key: Some(IdempotencyKey::new()),
+                keyed: false,
             },
+            ApiError::OutcomeUnknown {
+                request_id: RequestId::from_uuid(uuid::Uuid::nil()),
+                idempotency_key: Some(IdempotencyKey::new()),
+                keyed: true,
+            },
+            ApiError::IdempotencyKeyReused { entity: None },
             ApiError::Unauthorized(AuthFailure::SessionExpired),
         ];
         for e in all {

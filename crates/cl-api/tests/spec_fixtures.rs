@@ -89,6 +89,80 @@ fn every_operation_is_recorded_and_in_the_spec() {
     }
 }
 
+/// C2 (U-18 plan §10.1): the `keyable` rows of `operations.txt` are exactly
+/// the engine's `idempotency-v1` route set, as its `openapi.json` marks it
+/// (`x-idempotency: true`, recorded in `idempotency_v1_routes.txt`), and
+/// the typed table agrees. No engine checkout needed.
+#[test]
+fn keyable_rows_are_the_engines_idempotency_routes() {
+    let recorded = spec::route_lines(&fixture("idempotency_v1_routes.txt"));
+    assert_eq!(recorded.len(), 20, "the idempotency-v1 set has 20 routes");
+    assert_eq!(spec::keyable_operations(OPERATIONS_TXT), recorded);
+    let mut typed: Vec<(String, String)> = cl_api::OPERATIONS
+        .iter()
+        .filter(|o| o.is_keyable())
+        .map(|o| (o.method().as_str().to_string(), o.route().to_string()))
+        .collect();
+    typed.sort();
+    assert_eq!(typed, recorded);
+}
+
+/// The engine spec's `x-idempotency` marks equal the `keyable` rows. Reads
+/// `CL_ENGINE_OPENAPI` (a path) when set, else the pinned
+/// `engine/openapi.json`. A spec without any mark is an engine without
+/// `idempotency-v1` (pin 7b267e48): PENDING, unless `CL_API_REQUIRE_CAPS`
+/// lists the capability.
+#[test]
+fn engine_idempotency_marks_equal_the_keyable_rows() {
+    let path = std::env::var_os("CL_ENGINE_OPENAPI")
+        .map_or_else(|| repo_root().join("engine/openapi.json"), PathBuf::from);
+    if !path.is_file() {
+        assert!(
+            !require(),
+            "{} is missing and CL_API_REQUIRE=1",
+            path.display()
+        );
+        eprintln!("SKIPPED: {} is absent", path.display());
+        return;
+    }
+    let raw = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let spec: serde_json::Value = serde_json::from_slice(&raw).expect("openapi json");
+    let marked = spec::idempotent_operations(&spec);
+    if marked.is_empty() {
+        let caps = std::env::var("CL_API_REQUIRE_CAPS").unwrap_or_default();
+        assert!(
+            !caps.split(',').any(|c| c.trim() == "idempotency-v1"),
+            "CL_API_REQUIRE_CAPS lists idempotency-v1 but {} marks no route",
+            path.display()
+        );
+        eprintln!(
+            "PENDING(U-18): {} marks no x-idempotency route",
+            path.display()
+        );
+        return;
+    }
+    assert_eq!(marked, spec::keyable_operations(OPERATIONS_TXT));
+}
+
+#[test]
+fn idempotency_marks_are_read_per_operation() {
+    let spec: serde_json::Value = serde_json::from_str(
+        r#"{"paths":{
+            "/a":{"post":{"x-idempotency":true},"get":{}},
+            "/a/{id}":{"put":{"x-idempotency":true},"delete":{"x-idempotency":false}},
+            "/b":{"post":{}}
+        }}"#,
+    )
+    .expect("json");
+    assert_eq!(
+        spec::idempotent_operations(&spec),
+        vec![
+            ("POST".to_string(), "/a".to_string()),
+            ("PUT".to_string(), "/a/{id}".to_string()),
+        ]
+    );
+}
+
 #[test]
 fn schema_sources_are_listed_and_recorded() {
     let sources = spec::schema_sources(OPERATIONS_TXT);
