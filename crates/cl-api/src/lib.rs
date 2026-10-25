@@ -41,8 +41,9 @@ pub mod wire;
 pub use client::{Budget, ClientConfig, LOOPBACK_HOST, Method, Timeouts};
 pub use endpoint::{EndpointSource, EndpointState, EngineEndpoint, FixedEndpoint, Purpose};
 pub use errors::{
-    ApiError, AuthFailure, ClosedPeriod, ConflictReason, ErrorCode, FieldPath, LocalValidation,
-    UserText, ValidationError, ValidationIssue,
+    ApiError, AuthFailure, ClosedPeriod, ConflictReason, DEPOSIT_LINKS_DROPPED, ErrorCode,
+    FieldPath, LocalValidation, UserText, ValidationError, ValidationIssue,
+    is_deposit_links_dropped,
 };
 pub use idempotency::IdempotencyKey;
 pub use queue::{
@@ -86,6 +87,7 @@ pub use resources::ledger::LedgerStamp;
 pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, ContactImportRow};
 pub use resources::operations::{OPERATIONS, Operation, RetryClass};
 pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
+pub use resources::reconcile::Recheck;
 pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};
 pub use resources::register::{
     Category, ClearState, ClearedFilter, EntryType, REGISTER_MAX_PER_PAGE, Register,

@@ -528,6 +528,22 @@ pub enum ApiError {
     Internal,
 }
 
+/// 409 on `PUT /transactions/{id}` of a deposit whose payment or vendor
+/// refund links the edit would drop (`ledger-guards-v1`, engine PR #169;
+/// `details.sourceTransactionIds`). The edit belongs in Make Deposit.
+pub const DEPOSIT_LINKS_DROPPED: &str = "DEPOSIT_LINKS_DROPPED";
+
+/// 409 on an edit of a printed check whose printed face changes (also on
+/// `PUT /transactions/{id}` of a printed check's expense with
+/// `ledger-guards-v1`; `details {checkNumber, printedAt, changedFields}`).
+const CHECK_PRINTED_CODE: &str = "CHECK_PRINTED";
+
+/// True for [`DEPOSIT_LINKS_DROPPED`].
+#[must_use]
+pub fn is_deposit_links_dropped(e: &ApiError) -> bool {
+    matches!(e, ApiError::Conflict { code: Some(c), .. } if c.as_str() == DEPOSIT_LINKS_DROPPED)
+}
+
 fn code_text(code: Option<&ErrorCode>) -> &str {
     code.map_or("no code", ErrorCode::as_str)
 }
@@ -535,6 +551,14 @@ fn code_text(code: Option<&ErrorCode>) -> &str {
 impl OwnerFacing for ApiError {
     fn owner_message(&self) -> OwnerMessage {
         let (key, fix) = match self {
+            // Engine `ledger-guards-v1` (engine PR #169, U-80/U-81).
+            ApiError::Conflict { code: Some(c), .. } if c.as_str() == DEPOSIT_LINKS_DROPPED => (
+                "error.api.deposit_links_dropped",
+                Some("fix.api.open_make_deposit"),
+            ),
+            ApiError::Conflict { code: Some(c), .. } if c.as_str() == CHECK_PRINTED_CODE => {
+                ("error.api.check_printed", Some("fix.api.check_printed"))
+            }
             ApiError::Validation(_) => ("error.api.validation", Some("fix.api.validation")),
             ApiError::BatchRows(_) => ("error.api.batch_rows", Some("fix.api.batch_rows")),
             ApiError::BatchGroup { problem, .. } => match problem {
@@ -1550,6 +1574,40 @@ mod tests {
             cp.lock_date.map(CalendarDate::to_wire).as_deref(),
             Some("2026-03-31")
         );
+    }
+
+    #[test]
+    fn ledger_guard_codes_have_plain_words() {
+        // PUT /transactions/:id on a linked deposit (engine PR #169).
+        let dropped = r#"{"error":{"message":"links","code":"DEPOSIT_LINKS_DROPPED",
+            "details":{"sourceTransactionIds":["d0000000-0000-4000-8000-b00000000001"]}}}"#;
+        let e = err(409, dropped, S);
+        assert!(is_deposit_links_dropped(&e));
+        assert_eq!(e.owner_message().key, "error.api.deposit_links_dropped");
+        assert_eq!(
+            e.owner_message().suggestion_key,
+            Some("fix.api.open_make_deposit")
+        );
+        // An expense edit of a printed check.
+        let printed = r#"{"error":{"message":"printed","code":"CHECK_PRINTED",
+            "details":{"checkNumber":4418,"printedAt":"2026-11-04T10:00:00.000Z","changedFields":["amount"]}}}"#;
+        let e = err(409, printed, S);
+        assert!(crate::is_check_printed(&e));
+        assert!(!is_deposit_links_dropped(&e));
+        assert_eq!(e.owner_message().key, "error.api.check_printed");
+        // Check print routes: closed period and a wrong closing password.
+        let locked = r#"{"error":{"message":"locked","code":"TB_PERIOD_LOCKED",
+            "details":{"lockDate":"2026-03-31","canOverride":true}}}"#;
+        let e = err(423, locked, S);
+        assert!(matches!(e, ApiError::ClosedPeriod(_)));
+        assert_eq!(e.owner_message().key, "error.api.closed_period");
+        let wrong = r#"{"error":{"message":"wrong","code":"CLOSING_PASSWORD_INVALID"}}"#;
+        let e = err(403, wrong, S);
+        assert_eq!(e, ApiError::ClosingPasswordRejected);
+        assert_eq!(e.owner_message().key, "error.api.closing_password_wrong");
+        // Any other conflict keeps its reason's words.
+        let other = r#"{"error":{"message":"x","code":"SOMETHING_NEW"}}"#;
+        assert_eq!(err(409, other, S).owner_message().key, "error.api.conflict");
     }
 
     #[test]

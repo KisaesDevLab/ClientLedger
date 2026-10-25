@@ -1384,7 +1384,21 @@ impl Templates<'_> {
         )
         .json_body(body);
         call.idempotency_key = Some(key);
-        let reply = self.0.send(&TEMPLATE_ENTER, call, None).await?;
+        // A lost reply is recognised by the posting's provenance (a template
+        // without a schedule writes no occurrence row, B2). Without a date
+        // the engine picks it, so nothing can be matched.
+        let reply = match date {
+            Some(date) => {
+                let s = self.0.pinned();
+                let matcher = crate::resources::reconcile::OutcomeMatcher::FromTemplate {
+                    template: id,
+                    date,
+                };
+                let probe = crate::resources::reconcile::Probe::new(&s, matcher, true).await;
+                s.send(&TEMPLATE_ENTER, call, Some(&probe)).await?
+            }
+            None => self.0.send(&TEMPLATE_ENTER, call, None).await?,
+        };
         entered_from_json(&reply.body).map_err(saved_unreadable)
     }
 

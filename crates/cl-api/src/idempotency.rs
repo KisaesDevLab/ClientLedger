@@ -92,6 +92,9 @@ pub(crate) struct Ambiguity {
     /// Generation of the endpoint the attempt used.
     pub generation: u64,
     pub cause: AmbiguityCause,
+    /// The idempotency key the attempt carried: the owner's recheck finds
+    /// the stored probe by it (B2).
+    pub key: Option<IdempotencyKey>,
 }
 
 impl Ambiguity {
@@ -505,6 +508,7 @@ impl Executor {
             request_id: ctx.call.request_id,
             generation,
             cause,
+            key: ctx.call.idempotency_key.clone(),
         };
         match rec.reconcile(&amb).await {
             Reconciled::Committed(reply) => {
@@ -1489,6 +1493,7 @@ pub(crate) mod tests {
             request_id: RequestId::from_uuid(uuid::Uuid::nil()),
             generation: 1,
             cause: AmbiguityCause::Timeout,
+            key: None,
         };
         assert!(amb.settled(&src.current()));
         assert!(!amb.settled(&EndpointState::Restarting));
