@@ -299,8 +299,28 @@ steps:
   - assert_state: {key: screen.read.save_refused, equals: true}
   - assert_state: {key: screen.saved_count, equals: 3}
   - assert_exists: {role: label, label_contains: "then choose Accept these values"}
-  - assert_no_clipping: {}
+  # With the reading banner and the document preview the side column (source
+  # document, then the vendor panel) is taller than the body, so the body
+  # scrolls by design: a row cut by the bottom of the body (under Save &
+  # Close and the status bar) reports its full bounds past the window's edge.
+  # The band starts below the action row, so nothing visible is excused; the
+  # end of the panel is then checked scrolled into view.
+  - assert_no_clipping:
+      ignore:
+        - {x: 212, y: 905, width: 10000, height: 200}
   - screenshot: read-with-ai
+  # Scrolled to the end, the title and the top of the header card run up
+  # under the toolbar and the reading banner and report bounds past the
+  # window's top edge; the second band (above the top bar's text) excuses
+  # only those.
+  - scroll: {target: {role: label, label: Source document}, to: end}
+  - assert_exists: {role: label, label: 1099 vendor}
+  - assert_no_clipping:
+      ignore:
+        - {x: 212, y: 905, width: 10000, height: 200}
+        - {x: 212, y: -200, width: 10000, height: 225}
+  - screenshot: read-with-ai-panel-end
+  - scroll: {target: {role: label, label: 1099 vendor}, to: start}
   - key: Alt+A
   - assert_state: {key: screen.read.unaccepted, equals: 0}
   - assert_not_exists: {role: button, label: Accept these values}
