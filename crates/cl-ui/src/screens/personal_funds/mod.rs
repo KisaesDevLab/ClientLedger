@@ -1386,6 +1386,10 @@ impl Screen for PersonalFundsScreen {
         self.is_dirty()
     }
 
+    fn save_unconfirmed(&self) -> bool {
+        self.flow.lost.pending()
+    }
+
     fn save(&mut self) -> bool {
         self.start_save(SaveIntent::Save, None)
     }

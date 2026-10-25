@@ -416,9 +416,12 @@ impl Shell {
                     }
                     // Catch-up runs after every open (P15, Q-P15h).
                     self.runner.opened(&link, tenant_id);
+                    // This company's unknown saves (kept for the session).
+                    link.lost_saves().set_company(Some(tenant_id));
                 }
                 CompanyEvent::Closed => {
                     self.runner.closed(&link);
+                    link.lost_saves().set_company(None);
                     self.save_layout();
                     for id in self.windows.all().iter().map(|w| w.id).collect::<Vec<_>>() {
                         self.windows.close_now(id);
@@ -1279,13 +1282,22 @@ impl Shell {
             .get(prompt.window)
             .map(crate::windows::Window::title)
             .unwrap_or_default();
+        // A save whose outcome is unknown may already be in the books.
+        let unconfirmed = self
+            .windows
+            .get(prompt.window)
+            .is_some_and(crate::windows::Window::save_unconfirmed);
         let mut answer: Option<PromptAnswer> = None;
         egui::Window::new(t("window.prompt.title"))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label(crate::windows::prompt_message(&title));
+                ui.label(if unconfirmed {
+                    crate::windows::prompt_message_unconfirmed(&title)
+                } else {
+                    crate::windows::prompt_message(&title)
+                });
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     let save = crate::widgets::primary_button(ui, &t("window.prompt.save"));

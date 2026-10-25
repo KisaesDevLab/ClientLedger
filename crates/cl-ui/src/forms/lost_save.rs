@@ -10,11 +10,20 @@
 //! explicit **I checked the register — save again**, which asks once more
 //! in a dialog before it lifts the block (owner answer 2026-10-24). The
 //! override is logged without amounts, names or memo text.
+//!
+//! The block outlives the window (review fix-PR-1 blocking 2): an unknown
+//! save is also written in the company link's [`LostBook`] under its
+//! [`LostScope`] (the form, or the template for "Enter now"), for the
+//! whole app session. Closing the window and opening another of the same
+//! form (or a second window already open) picks the block up again with
+//! the same key, so Check again still runs the stored probe; an answer in
+//! one window reaches the others. Only an app restart forgets it (the
+//! session's stored probes are gone then too; Q-PR1a).
 
 use std::sync::Arc;
 
 use cl_api::{ApiError, IdempotencyKey, Recheck, RequestGroup};
-use cl_core::ids::TransactionId;
+use cl_core::ids::{TemplateId, TenantId, TransactionId};
 use cl_model::forms::{FormState, RecheckAnswer};
 use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
@@ -34,10 +43,115 @@ pub enum LostEvent {
     StillUnknown,
     /// The owner looked in the register and confirmed saving again.
     OwnerConfirmed,
-    /// Check again on a form with its own, safer check
-    /// ([`LostSave::own_check`]): the form reads what it needs and hands
-    /// the answer to [`LostSave::answer`].
-    CheckRequested,
+}
+
+/// What an unknown save blocks: one form (every window of it), or "Enter
+/// now" of one template (Templates and Templates Due alike).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LostScope {
+    /// A form, by the name its banner uses (`write_check`, `deposit`, ...).
+    Form(&'static str),
+    /// "Enter now" of a template.
+    Template(TemplateId),
+}
+
+/// Where an unknown save stands in the [`LostBook`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BookState {
+    /// Still unknown: every window of the scope blocks Save.
+    Open,
+    /// Found in the books (the transaction, when known).
+    Saved(Option<TransactionId>),
+    /// Not saved, or the owner confirmed saving again.
+    Cleared,
+}
+
+/// The open company's unknown saves, for the whole app session (on the
+/// [`CompanyLink`]): keyed by company and [`LostScope`]. Keys only; no
+/// amounts, names or memo text.
+#[derive(Debug, Default)]
+pub struct LostBook {
+    company: Option<TenantId>,
+    entries: Vec<(Option<TenantId>, LostScope, Option<IdempotencyKey>, BookState)>,
+}
+
+/// The most entries kept (oldest answered ones go first).
+const BOOK_MAX: usize = 256;
+
+impl LostBook {
+    /// The company now open (`None`: none). Entries of other companies are
+    /// kept for when it opens again, but never seen meanwhile.
+    pub fn set_company(&mut self, company: Option<TenantId>) {
+        self.company = company;
+    }
+
+    fn find(&self, scope: LostScope) -> Option<usize> {
+        self.entries
+            .iter()
+            .position(|(c, s, _, _)| *c == self.company && *s == scope)
+    }
+
+    /// An unknown save of `scope` with `key`.
+    pub fn remember(&mut self, scope: LostScope, key: Option<IdempotencyKey>) {
+        if let Some(i) = self.find(scope) {
+            self.entries.remove(i);
+        }
+        self.entries
+            .push((self.company, scope, key, BookState::Open));
+        while self.entries.len() > BOOK_MAX {
+            let old = self
+                .entries
+                .iter()
+                .position(|e| e.3 != BookState::Open)
+                .unwrap_or(0);
+            self.entries.remove(old);
+        }
+    }
+
+    /// The unknown save of `scope` with `key` was answered.
+    fn answer(&mut self, scope: LostScope, key: Option<&IdempotencyKey>, state: BookState) {
+        if let Some(i) = self.find(scope)
+            && self.entries[i].2.as_ref() == key
+        {
+            self.entries[i].3 = state;
+        }
+    }
+
+    /// The key of the still unknown save of `scope`, if one is open
+    /// (`Some(None)`: open without a key).
+    #[must_use]
+    pub fn open(&self, scope: LostScope) -> Option<Option<IdempotencyKey>> {
+        self.find(scope)
+            .map(|i| &self.entries[i])
+            .filter(|e| e.3 == BookState::Open)
+            .map(|e| e.2.clone())
+    }
+
+    /// True while an unknown save of `scope` is open.
+    #[must_use]
+    pub fn is_open(&self, scope: LostScope) -> bool {
+        self.open(scope).is_some()
+    }
+
+    /// The templates whose "Enter now" is still unknown, oldest first.
+    #[must_use]
+    pub fn open_templates(&self) -> Vec<TemplateId> {
+        self.entries
+            .iter()
+            .filter(|e| e.0 == self.company && e.3 == BookState::Open)
+            .filter_map(|e| match e.1 {
+                LostScope::Template(id) => Some(id),
+                LostScope::Form(_) => None,
+            })
+            .collect()
+    }
+
+    fn state_of(&self, scope: LostScope, key: Option<&IdempotencyKey>) -> Option<BookState> {
+        self.find(scope)
+            .map(|i| &self.entries[i])
+            .filter(|e| e.2.as_ref() == key)
+            .map(|e| e.3)
+    }
 }
 
 /// One form's unknown save.
@@ -58,12 +172,98 @@ pub struct LostSave {
     pub(crate) after_unknown: bool,
     /// Rechecks run (control channel).
     pub(crate) checks: u32,
-    /// The form answers Check again itself (Daily Sales reads the day's
-    /// entry by id: its status settles it).
-    own_check: bool,
+    /// The company link whose [`LostBook`] keeps this form's unknown save
+    /// beyond the window, and the scope it is kept under.
+    book: Option<(Arc<CompanyLink>, LostScope)>,
+    /// The pending save is in the book (ours or picked up from it).
+    shared: bool,
+    /// "Enter now" of templates: the scope is the template being entered
+    /// ([`Self::set_scope`]), never the window's form name.
+    templates: bool,
 }
 
 impl LostSave {
+    /// The unknown "Enter now" of the Templates and Templates Due windows:
+    /// kept per template ([`LostScope::Template`]).
+    #[must_use]
+    pub fn for_templates() -> LostSave {
+        LostSave {
+            templates: true,
+            ..LostSave::default()
+        }
+    }
+
+    /// Keeps this form's unknown saves in `link`'s [`LostBook`] under
+    /// `scope`, and picks up one already open there (another window, or a
+    /// window closed before an answer): `form` blocks Save then.
+    pub fn bind<V: Clone + PartialEq>(
+        &mut self,
+        link: &Arc<CompanyLink>,
+        scope: LostScope,
+        form: &mut FormState<V>,
+    ) -> Option<LostEvent> {
+        let same = self
+            .book
+            .as_ref()
+            .is_some_and(|(l, s)| Arc::ptr_eq(l, link) && *s == scope);
+        if !same {
+            self.book = Some((Arc::clone(link), scope));
+            if !self.pending {
+                self.shared = false;
+            }
+        }
+        self.sync(form)
+    }
+
+    /// [`Self::lost`] for a save kept under `scope` ("Enter now" of one
+    /// template): an unknown outcome is written in `link`'s book there, and
+    /// this window's banner is for it now.
+    pub fn lost_as(&mut self, e: &ApiError, link: &Arc<CompanyLink>, scope: LostScope) -> bool {
+        if !matches!(e, ApiError::OutcomeUnknown { .. }) {
+            return false;
+        }
+        self.book = Some((Arc::clone(link), scope));
+        self.shared = false;
+        self.lost(e)
+    }
+
+    /// Brings this window in step with the book: an unknown save of the
+    /// scope opened elsewhere blocks this form too; one answered elsewhere
+    /// is answered here the same way.
+    pub fn sync<V: Clone + PartialEq>(&mut self, form: &mut FormState<V>) -> Option<LostEvent> {
+        let (link, scope) = self.book.clone()?;
+        if self.pending {
+            if !self.shared {
+                return None;
+            }
+            let state = link.lost_saves().state_of(scope, self.key.as_ref());
+            let ev = match state {
+                // Still open, or the entry was replaced by a newer unknown
+                // save of the scope: ours stays unknown.
+                Some(BookState::Open) | None => return None,
+                Some(BookState::Saved(txn)) => LostEvent::Saved(txn),
+                // Answered elsewhere: not saved, or the owner looked in the
+                // register there and confirmed saving again.
+                Some(BookState::Cleared) => {
+                    self.end();
+                    form.recheck_answered(RecheckAnswer::NotSaved);
+                    self.notice = Some("lost.answered_elsewhere");
+                    return Some(LostEvent::NotSaved);
+                }
+            };
+            self.apply(form, ev);
+            return Some(ev);
+        }
+        let key = link.lost_saves().open(scope)?;
+        self.pending = true;
+        self.shared = true;
+        self.key = key;
+        self.notice = None;
+        self.confirm_open = false;
+        form.mark_unconfirmed();
+        Some(LostEvent::StillUnknown)
+    }
+
     /// Takes note of a failed save. True when its outcome is unknown: the
     /// form then calls `save_unknown` instead of `save_failed` and shows
     /// this banner instead of the error.
@@ -76,10 +276,23 @@ impl LostSave {
                 self.key.clone_from(idempotency_key);
                 self.notice = None;
                 self.confirm_open = false;
-                self.own_check = false;
+                if let Some((link, scope)) = &self.book {
+                    link.lost_saves().remember(*scope, self.key.clone());
+                    self.shared = true;
+                }
                 true
             }
             _ => false,
+        }
+    }
+
+    /// Writes this form's answer in the book.
+    fn tell_book(&self, state: BookState) {
+        if self.shared
+            && let Some((link, scope)) = &self.book
+        {
+            link.lost_saves()
+                .answer(*scope, self.key.as_ref(), state);
         }
     }
 
@@ -98,7 +311,11 @@ impl LostSave {
     /// The save that was sent went through normally (the form's own
     /// success path): nothing is unknown any more.
     pub fn saved(&mut self) {
+        if self.pending {
+            self.tell_book(BookState::Cleared);
+        }
         self.pending = false;
+        self.shared = false;
         self.key = None;
         self.task = None;
         self.confirm_open = false;
@@ -130,38 +347,6 @@ impl LostSave {
                 Err(_) => Task::ready(Recheck::Unknown),
             },
         );
-    }
-
-    /// The form runs its own check for this unknown save (`true`) or the
-    /// stored probe (`false`, the default).
-    pub fn own_check(&mut self, on: bool) {
-        self.own_check = on;
-    }
-
-    /// The form's own check started: false when nothing is unknown or a
-    /// check is running.
-    pub fn begin_own<V: Clone + PartialEq>(&mut self, form: &mut FormState<V>) -> bool {
-        if !self.pending || !form.begin_recheck() {
-            return false;
-        }
-        self.checks += 1;
-        self.notice = None;
-        true
-    }
-
-    /// The form's own check answered.
-    pub fn answer<V: Clone + PartialEq>(
-        &mut self,
-        form: &mut FormState<V>,
-        r: &Recheck,
-    ) -> LostEvent {
-        let ev = match *r {
-            Recheck::Committed { transaction } => LostEvent::Saved(transaction),
-            Recheck::NotCommitted => LostEvent::NotSaved,
-            Recheck::Unknown => LostEvent::StillUnknown,
-        };
-        self.apply(form, ev);
-        ev
     }
 
     /// Tests: a recheck whose engine answers `r`.
@@ -196,13 +381,15 @@ impl LostSave {
 
     fn apply<V: Clone + PartialEq>(&mut self, form: &mut FormState<V>, ev: LostEvent) {
         match ev {
-            LostEvent::Saved(_) => {
+            LostEvent::Saved(txn) => {
                 form.recheck_answered(RecheckAnswer::Saved);
+                self.tell_book(BookState::Saved(txn));
                 self.end();
                 self.notice = Some("lost.saved");
             }
             LostEvent::NotSaved => {
                 form.recheck_answered(RecheckAnswer::NotSaved);
+                self.tell_book(BookState::Cleared);
                 self.end();
                 self.notice = Some("lost.not_saved");
             }
@@ -212,15 +399,16 @@ impl LostSave {
             }
             LostEvent::OwnerConfirmed => {
                 form.owner_confirms();
+                self.tell_book(BookState::Cleared);
                 self.end();
                 self.after_unknown = true;
             }
-            LostEvent::CheckRequested => {}
         }
     }
 
     fn end(&mut self) {
         self.pending = false;
+        self.shared = false;
         self.key = None;
         self.confirm_open = false;
     }
@@ -264,12 +452,19 @@ impl LostSave {
         what: &'static str,
     ) -> Option<LostEvent> {
         let tokens = Tokens::of(ui.ctx());
-        let mut out = None;
+        // Every frame: the form's unknown saves live in the company's book
+        // under its name, and one opened or answered in another window of
+        // the same form shows here too.
+        let mut out = if self.book.is_none() && !self.templates {
+            self.bind(link, LostScope::Form(what), form)
+        } else {
+            self.sync(form)
+        };
         if let Some(n) = self.notice.filter(|_| !self.pending) {
             ui.label(RichText::new(t(n)).color(tokens.text_secondary));
         }
         if !self.pending {
-            return None;
+            return out;
         }
         egui::Frame::new()
             .fill(tokens.warn_tint)
@@ -290,11 +485,7 @@ impl LostSave {
                     let check =
                         ui.add_enabled(!self.checking(), egui::Button::new(t("lost.check_again")));
                     if check.clicked() {
-                        if self.own_check {
-                            out = Some(LostEvent::CheckRequested);
-                        } else {
-                            self.recheck(form, link, group);
-                        }
+                        self.recheck(form, link, group);
                     }
                     if ui
                         .add_enabled(!self.checking(), egui::Button::new(t("lost.save_anyway")))
@@ -366,6 +557,50 @@ mod tests {
             message: OwnerMessage::plain("error.api.outcome_unknown"),
             detail: String::new(),
         }
+    }
+
+    /// Review fix-PR-1 blocking 2: the book keeps an unknown save per
+    /// company and scope; a second window picks it up and hears the answer.
+    #[test]
+    fn the_book_spans_windows_and_is_kept_per_company() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(CompanyLink::demo(dir.path()));
+        let a = TenantId::parse("d0000000-0000-4000-8000-000000000001").expect("t");
+        let b = TenantId::parse("d0000000-0000-4000-8000-000000000002").expect("t");
+        link.lost_saves().set_company(Some(a));
+        let scope = LostScope::Form("deposit");
+        let (mut one, mut two) = (FormState::new(String::new()), FormState::new(String::new()));
+        let (mut first, mut second) = (LostSave::default(), LostSave::default());
+        assert_eq!(first.bind(&link, scope, &mut one), None);
+        assert_eq!(second.bind(&link, scope, &mut two), None);
+        let _ = one.begin_save(SaveIntent::Save);
+        assert!(first.lost(&unknown()));
+        one.save_unknown(failure());
+        // The other window of the form blocks too, with the same key.
+        assert_eq!(second.sync(&mut two), Some(LostEvent::StillUnknown));
+        assert!(second.pending() && two.is_unconfirmed());
+        assert_eq!(second.key, first.key);
+        // Another company never sees it; back in this one it is there.
+        link.lost_saves().set_company(Some(b));
+        assert!(!link.lost_saves().is_open(scope));
+        link.lost_saves().set_company(Some(a));
+        assert!(link.lost_saves().is_open(scope));
+        // Found in the first window: the second shows it as saved.
+        first.recheck_answering(&mut one, Recheck::Committed { transaction: None });
+        assert_eq!(first.poll(&mut one), Some(LostEvent::Saved(None)));
+        assert_eq!(second.sync(&mut two), Some(LostEvent::Saved(None)));
+        assert!(!second.pending() && !two.is_unconfirmed());
+        assert!(!link.lost_saves().is_open(scope));
+        // A new unknown save, answered "not saved" elsewhere: lifted here.
+        let _ = one.begin_save(SaveIntent::Save);
+        assert!(first.lost(&unknown()));
+        one.save_unknown(failure());
+        assert_eq!(second.sync(&mut two), Some(LostEvent::StillUnknown));
+        first.recheck_answering(&mut one, Recheck::NotCommitted);
+        let _ = first.poll(&mut one);
+        assert_eq!(second.sync(&mut two), Some(LostEvent::NotSaved));
+        assert_eq!(second.notice, Some("lost.answered_elsewhere"));
+        assert!(!two.is_unconfirmed());
     }
 
     #[test]

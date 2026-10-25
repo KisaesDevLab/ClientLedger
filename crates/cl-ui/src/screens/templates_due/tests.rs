@@ -192,6 +192,45 @@ fn enter_now_asks_for_the_closing_password_and_skip_moves_on() {
     assert_eq!(next, Some(d(2026, 11, 30)));
 }
 
+/// Review fix-PR-1 blocking 2: an Enter now lost in Templates (or in a
+/// window closed since) blocks Enter now and Open in form of that template
+/// here too, with the banner.
+#[test]
+fn a_lost_enter_now_from_another_window_blocks_this_template_here() {
+    use crate::forms::lost_save::LostScope;
+    let (_dir, link) = demo();
+    let today = DemoState::today();
+    let id = remind(&link, "Savings", d(2026, 10, 30));
+    let _r = caught_up(&link, today);
+    link.lost_saves().remember(
+        LostScope::Template(id),
+        Some(cl_api::IdempotencyKey::new()),
+    );
+    let mut s = screen(&link, today);
+    assert!(s.lost.pending(), "the banner shows on open");
+    let mut watcher = link.bus().subscribe();
+    s.selected = s.rows.iter().position(|r| r.template == id);
+    assert!(s.selected.is_some());
+    s.enter_now(None);
+    assert!(s.entered.is_none() && s.last_action.is_none(), "nothing sent");
+    s.open_in_form();
+    assert!(
+        !link
+            .drain()
+            .iter()
+            .any(|e| matches!(e, CompanyEvent::OpenTemplate(_))),
+        "no form to enter it a second time"
+    );
+    assert!(link.bus().take(&mut watcher).is_empty());
+    assert_eq!(s.state()["waiting"], 1);
+    // The owner looked and confirms: Enter now works again.
+    s.lost.ask_owner();
+    s.lost.owner_confirmed(&mut s.lost_gate, "templates_due_enter");
+    assert!(!link.lost_saves().is_open(LostScope::Template(id)));
+    s.enter_now(None);
+    assert_eq!(s.last_action, Some("enter"));
+}
+
 #[test]
 fn keys_and_the_state_name_no_owner_text() {
     let (_dir, link) = demo();

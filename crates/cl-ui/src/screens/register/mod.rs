@@ -1144,6 +1144,10 @@ impl Screen for RegisterScreen {
         self.entry_dirty()
     }
 
+    fn save_unconfirmed(&self) -> bool {
+        self.entry.lost.pending()
+    }
+
     fn save(&mut self) -> bool {
         self.start_record()
     }

@@ -693,6 +693,10 @@ impl Screen for BulkEntryScreen {
         self.is_dirty()
     }
 
+    fn save_unconfirmed(&self) -> bool {
+        self.lost.pending()
+    }
+
     fn save(&mut self) -> bool {
         self.save_all(cl_model::forms::SaveIntent::Save)
     }

@@ -413,6 +413,10 @@ impl Screen for DailySalesScreen {
         self.is_dirty() || self.setup.as_ref().is_some_and(layout::Setup::dirty)
     }
 
+    fn save_unconfirmed(&self) -> bool {
+        self.save.lost.pending()
+    }
+
     fn save(&mut self) -> bool {
         self.start_save(cl_model::forms::SaveIntent::Save, None)
     }

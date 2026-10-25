@@ -34,6 +34,7 @@ use serde_json::{Value, json};
 use crate::company::demo::{template_store, templates as demo};
 use crate::company::{CompanyEvent, CompanyLink};
 use crate::forms::closing_prompt::{ClosingClick, ClosingPrompt};
+use crate::forms::lost_save::LostScope;
 use crate::forms::template::TemplateOpen;
 use crate::i18n::{t, t_with};
 use crate::layout::{Body, FixedFrame, FrameOpts};
@@ -251,11 +252,17 @@ impl TemplatesDueScreen {
             checking: false,
             questions: Vec::new(),
             catch_up_job: None,
-            lost: crate::forms::lost_save::LostSave::default(),
+            lost: crate::forms::lost_save::LostSave::for_templates(),
             lost_for: None,
             lost_gate: cl_model::forms::FormState::new(()),
             layout: crate::layout::FrameReport::default(),
         };
+        // An "Enter now" still unknown from earlier this session shows its
+        // banner again (review fix-PR-1 blocking 2).
+        let open = s.link.lost_saves().open_templates();
+        if let Some(id) = open.first() {
+            s.adopt_lost(*id);
+        }
         s.load_info();
         s.poll();
         s
@@ -361,12 +368,17 @@ impl TemplatesDueScreen {
             self.enter_job = None;
             match r {
                 Ok(e) => {
-                    self.lost.saved();
-                    self.lost_for = None;
+                    // Another template's unknown Enter now stays unknown.
+                    if self.lost_for.is_some_and(|o| o.0 == occ.0) {
+                        self.lost.saved();
+                        self.lost_for = None;
+                    }
                     self.entered_ok(occ, Some(e.transaction));
                 }
-                // Could not tell: this date waits for the recheck (B2).
-                Err(e) if self.lost.lost(&e) => {
+                // Could not tell: this template waits for the recheck (B2),
+                // here, in Templates and after this window closes (the
+                // link's book, review fix-PR-1 blocking 2).
+                Err(e) if self.lost.lost_as(&e, &self.link, LostScope::Template(occ.0)) => {
                     self.lost_gate.mark_unconfirmed();
                     self.lost_for = Some(occ);
                 }
@@ -475,6 +487,16 @@ impl TemplatesDueScreen {
         {
             return;
         }
+        // One lost before (here, in Templates, or in a window closed since):
+        // the same block, per template (review fix-PR-1 blocking 2).
+        if self
+            .link
+            .lost_saves()
+            .is_open(LostScope::Template(row.template))
+        {
+            self.adopt_lost(row.template);
+            return;
+        }
         if row.section != Section::Waiting || !enters_directly(&row.kind) {
             self.open_in_form();
             return;
@@ -511,6 +533,16 @@ impl TemplatesDueScreen {
             self.notice = Some("templates.online_read_only");
             return;
         };
+        // Its Enter now may already be in the books: the form could enter
+        // it a second time.
+        if self
+            .link
+            .lost_saves()
+            .is_open(LostScope::Template(row.template))
+        {
+            self.adopt_lost(row.template);
+            return;
+        }
         self.error = None;
         let id = row.template;
         let version = self.info.get(&id).map_or(0, |t| t.version);
@@ -533,17 +565,36 @@ impl TemplatesDueScreen {
         self.poll();
     }
 
+    /// Shows the banner of the still unknown "Enter now" of `template`
+    /// (made elsewhere or in a window closed before an answer; its date is
+    /// not known here).
+    fn adopt_lost(&mut self, template: TemplateId) {
+        if self.lost.pending() {
+            if self.lost_for.is_none_or(|o| o.0 != template) {
+                self.notice = Some("templates.enter.lost_other");
+            }
+            return;
+        }
+        self.lost
+            .bind(&self.link, LostScope::Template(template), &mut self.lost_gate);
+        self.lost_for = None;
+    }
+
     /// The recheck or the owner answered a lost Enter now (B2).
     fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
         use crate::forms::lost_save::LostEvent;
         match ev {
-            LostEvent::Saved(txn) => {
-                if let Some(occ) = self.lost_for.take() {
-                    self.entered_ok(occ, txn);
+            LostEvent::Saved(txn) => match self.lost_for.take() {
+                Some(occ) => self.entered_ok(occ, txn),
+                // Picked up from elsewhere: the next run shows the date as
+                // entered.
+                None => {
+                    self.notice = Some("templates_due.done.entered");
+                    self.check_now();
                 }
-            }
+            },
             LostEvent::NotSaved | LostEvent::OwnerConfirmed => self.lost_for = None,
-            LostEvent::StillUnknown | LostEvent::CheckRequested => {}
+            LostEvent::StillUnknown => {}
         }
     }
 

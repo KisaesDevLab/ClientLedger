@@ -28,6 +28,13 @@ pub trait Screen {
         false
     }
 
+    /// True while a save of this window ended with an unknown outcome: the
+    /// close prompt then says it may already be in the books (review
+    /// fix-PR-1 B2).
+    fn save_unconfirmed(&self) -> bool {
+        false
+    }
+
     /// The keymap scope while this window has focus. Forms return
     /// [`Scope::Form`] so form shortcuts (Alt+N, Esc, Ctrl+Insert) apply.
     fn scope(&self) -> Scope {
@@ -194,6 +201,12 @@ impl Window {
     #[must_use]
     pub fn dirty(&self) -> bool {
         self.screen.dirty()
+    }
+
+    /// A save of this window may already be in the books.
+    #[must_use]
+    pub fn save_unconfirmed(&self) -> bool {
+        self.screen.save_unconfirmed()
     }
 }
 
@@ -597,6 +610,13 @@ pub struct SavedTab {
 #[must_use]
 pub fn prompt_message(title: &str) -> String {
     t_with("window.prompt.message", &[("title", title)])
+}
+
+/// The close prompt's words for a window whose last save could not be
+/// confirmed: it may already be in the books.
+#[must_use]
+pub fn prompt_message_unconfirmed(title: &str) -> String {
+    t_with("window.prompt.message_unconfirmed", &[("title", title)])
 }
 
 #[cfg(test)]

@@ -1494,6 +1494,10 @@ impl Screen for TransferScreen {
         self.is_dirty()
     }
 
+    fn save_unconfirmed(&self) -> bool {
+        self.lost.pending()
+    }
+
     fn save(&mut self) -> bool {
         self.start_save(SaveIntent::Save, None)
     }

@@ -714,6 +714,10 @@ impl Screen for DepositScreen {
         self.is_dirty()
     }
 
+    fn save_unconfirmed(&self) -> bool {
+        self.save.lost.pending()
+    }
+
     fn save(&mut self) -> bool {
         self.start_save(cl_model::forms::SaveIntent::Save, None)
     }
