@@ -23,7 +23,7 @@
 //! Every engine call runs on the request queue and is polled each frame;
 //! `--demo` answers from `company::demo::checks`.
 
-mod attach;
+pub(crate) mod attach;
 mod form;
 mod panel;
 pub(crate) mod prefill;

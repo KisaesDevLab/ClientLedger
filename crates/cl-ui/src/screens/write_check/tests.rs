@@ -632,6 +632,25 @@ fn accepts_are_counted_locally_per_payee_and_account() {
     );
 }
 
+/// Attach a file by path: it is read off the egui thread (nothing happens
+/// synchronously), then the frames' polling uploads it.
+fn attach_and_wait(s: &mut WriteCheckScreen, path: &std::path::Path) {
+    s.attach_path(path);
+    if s.attach.problem.is_some() {
+        return;
+    }
+    assert!(
+        s.attach.reading.is_some() && s.attach.upload.is_none(),
+        "the file is read on a background thread"
+    );
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while s.attach.reading.is_some() {
+        assert!(std::time::Instant::now() < until, "the read never ended");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        s.poll_attach();
+    }
+}
+
 #[test]
 fn a_receipt_rides_on_the_first_save_and_bad_files_are_never_sent() {
     let (dir, link) = link();
@@ -639,21 +658,21 @@ fn a_receipt_rides_on_the_first_save_and_bad_files_are_never_sent() {
     // Not a PDF or image: refused here.
     let text = dir.path().join("notes.txt");
     std::fs::write(&text, b"hello").expect("write");
-    s.attach_path(&text);
+    attach_and_wait(&mut s, &text);
     assert_eq!(s.attach.problem, Some("check.attach.wrong_type"));
     assert!(s.header.current().draft_attachment.is_none());
     let missing = dir.path().join("missing.pdf");
-    s.attach_path(&missing);
+    attach_and_wait(&mut s, &missing);
     assert_eq!(s.attach.problem, Some("check.attach.not_found"));
     // A PDF: uploaded as a draft, listed, carried on the create.
     let pdf = dir.path().join("receipt.pdf");
     std::fs::write(&pdf, b"%PDF-1.4\n%synthetic\n").expect("write");
-    s.attach_path(&pdf);
+    attach_and_wait(&mut s, &pdf);
     assert_eq!(s.attach.problem, None);
     assert!(s.header.current().draft_attachment.is_some());
     assert_eq!(s.state()["attachments"]["count"], 1);
     // One file before the first save.
-    s.attach_path(&pdf);
+    attach_and_wait(&mut s, &pdf);
     assert_eq!(s.attach.problem, Some("check.attach.one_before_save"));
     fill(&mut s, "10.00", &[("5110", "10.00")]);
     assert!(s.start_save(SaveIntent::SaveAndNew, None));
@@ -663,7 +682,7 @@ fn a_receipt_rides_on_the_first_save_and_bad_files_are_never_sent() {
     s.poll();
     assert_eq!(s.state()["mode"], "edit");
     assert_eq!(s.state()["attachments"]["count"], 1);
-    s.attach_path(&pdf);
+    attach_and_wait(&mut s, &pdf);
     assert_eq!(s.state()["attachments"]["count"], 2);
 }
 

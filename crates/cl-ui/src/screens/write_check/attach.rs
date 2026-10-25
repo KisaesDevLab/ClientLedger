@@ -48,11 +48,14 @@ pub(crate) struct AttachState {
     /// The receipt-inbox file this new check started from (its name, for
     /// "Attached from … in your receipt inbox.", P17).
     pub from_inbox: Option<String>,
+    /// A chosen file being read off the egui thread.
+    pub reading: Option<std::sync::mpsc::Receiver<FileRead>>,
 }
 
 impl AttachState {
     pub(crate) fn busy(&self) -> bool {
-        self.list_task.is_some()
+        self.reading.is_some()
+            || self.list_task.is_some()
             || self.upload.is_some()
             || self.download.is_some()
             || self.preview.is_some()
@@ -79,6 +82,44 @@ pub(crate) fn read_file(path: &Path) -> Result<(String, Vec<u8>), &'static str> 
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
     Ok((name, bytes))
+}
+
+/// A file read on its way to an upload: the name and bytes, or an i18n key.
+pub(crate) type FileRead = Result<(String, Vec<u8>), &'static str>;
+
+/// Reads the file at `path` with `read` on a background thread (up to 10 MB
+/// from a possibly slow disk or network share), so the egui thread never
+/// waits on it. Poll the answer with [`poll_file_read`].
+///
+/// # Errors
+/// `check.attach.failed` when no thread could be started.
+pub(crate) fn read_in_background(
+    path: &Path,
+    read: fn(&Path) -> FileRead,
+) -> Result<std::sync::mpsc::Receiver<FileRead>, &'static str> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let path = path.to_path_buf();
+    std::thread::Builder::new()
+        .name("cl-attach-read".into())
+        .spawn(move || {
+            let _ = tx.send(read(&path));
+        })
+        .map(|_| rx)
+        .map_err(|_| "check.attach.failed")
+}
+
+/// The background read's answer once it is there (taking it out of `slot`).
+pub(crate) fn poll_file_read(
+    slot: &mut Option<std::sync::mpsc::Receiver<FileRead>>,
+) -> Option<FileRead> {
+    let rx = slot.as_ref()?;
+    let r = match rx.try_recv() {
+        Ok(r) => r,
+        Err(std::sync::mpsc::TryRecvError::Empty) => return None,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("check.attach.failed"),
+    };
+    *slot = None;
+    Some(r)
 }
 
 /// The local checks on a file's bytes.
@@ -229,7 +270,7 @@ impl WriteCheckScreen {
     pub(crate) fn attach_path(&mut self, path: &Path) {
         self.attach.problem = None;
         self.attach.saved_to = None;
-        if self.attach.upload.is_some() {
+        if self.attach.upload.is_some() || self.attach.reading.is_some() {
             return;
         }
         if self.editing.is_none() && self.header.current().draft_attachment.is_some() {
@@ -237,8 +278,9 @@ impl WriteCheckScreen {
             self.attach.problem = Some("check.attach.one_before_save");
             return;
         }
-        match read_file(path) {
-            Ok((name, bytes)) => self.upload_bytes(&name, bytes),
+        // Read off the egui thread; `poll_attach` uploads it.
+        match read_in_background(path, read_file) {
+            Ok(rx) => self.attach.reading = Some(rx),
             Err(key) => self.attach.problem = Some(key),
         }
     }
@@ -361,6 +403,12 @@ impl WriteCheckScreen {
 
     /// Polls uploads, the list and downloads.
     pub(crate) fn poll_attach(&mut self) {
+        if let Some(r) = poll_file_read(&mut self.attach.reading) {
+            match r {
+                Ok((name, bytes)) => self.upload_bytes(&name, bytes),
+                Err(key) => self.attach.problem = Some(key),
+            }
+        }
         if let Some(r) = self.attach.preview.as_mut().and_then(Task::try_take) {
             self.attach.preview = None;
             match r {
