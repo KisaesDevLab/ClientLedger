@@ -2,7 +2,8 @@
 //!
 //! - [`user_prefs`]: per-user look-and-feel and entry choices (P09).
 //! - [`company_prefs`]: company-local choices the engine has no column for
-//!   (receipt inbox, bills-due window, AI switches and cap, consent note).
+//!   (P17 receipt inbox, this computer's intake-folder confirmations,
+//!   bills-due window, AI switches and cap, consent note).
 //! - [`inbox_state`]: which receipt-inbox files were uploaded (by hash,
 //!   never by name), so a file is not offered twice (P17).
 //! - [`ai`] and [`smtp`]: provider names, keychain entry names, the token
@@ -30,7 +31,9 @@ mod store;
 pub mod user_prefs;
 
 pub use ai::{AiLocalPrefs, AiProvider, CapCheck, OllamaUrlError, validate_ollama_url};
-pub use company_prefs::{AiConsentNote, CompanyPrefs, FolderError, check_inbox_folder};
+pub use company_prefs::{
+    AiConsentNote, CompanyPrefs, FolderError, HereNote, check_inbox_folder, path_hash,
+};
 pub use recent::{
     ACCENT_PALETTE, Accent, BackupKind, BackupRecord, CompanyFlags, CompanyRecord, FiscalCalendar,
     RecentCompanies, RecentError, RecentStore,
