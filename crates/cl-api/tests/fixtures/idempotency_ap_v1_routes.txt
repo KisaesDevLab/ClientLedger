@@ -1,0 +1,18 @@
+# The engine's `idempotency-ap-v1` route set (U-83 to U-87): the A/P
+# document mutations its openapi.json marks `x-idempotency: true` on top of
+# `idempotency-v1`, recorded from engine main f3ce33fd (PR #173) and listed
+# in its docs/DESKTOP.md "Request idempotency". Append-only for this
+# capability name. tests/spec_fixtures.rs checks that the pinned engine
+# marks exactly idempotency_v1_routes.txt plus these.
+#
+# None of these is in main's operations registry yet, so none is `keyable`
+# here. P17 adds them (bill PUT and void, vendor credits, bill-payment void):
+# mark each `keyable` in operations.txt, and send its key only while the
+# engine advertises `idempotency-ap-v1` (an engine with only
+# `idempotency-v1` does not replay these).
+POST /api/v1/bill-payments/{id}/void
+POST /api/v1/bills/{id}/void
+POST /api/v1/vendor-credits
+POST /api/v1/vendor-credits/{id}/void
+PUT /api/v1/bills/{id}
+PUT /api/v1/vendor-credits/{id}
