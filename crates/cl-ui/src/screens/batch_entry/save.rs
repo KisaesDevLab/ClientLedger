@@ -112,7 +112,7 @@ impl BulkEntryScreen {
         let lists = Arc::clone(&self.books.lists);
         let batch = match self.grid.begin_save(intent, &*lists) {
             Ok(SaveStart::Send(v)) => v,
-            Ok(SaveStart::Skip(_) | SaveStart::Busy) | Err(_) => {
+            Ok(SaveStart::Skip(_) | SaveStart::Busy | SaveStart::Unconfirmed) | Err(_) => {
                 self.closing_prompt.nothing_sent();
                 return false;
             }

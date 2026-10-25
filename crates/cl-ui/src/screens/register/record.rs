@@ -418,7 +418,7 @@ impl RegisterScreen {
                     return true;
                 }
             }
-            Ok(SaveStart::Busy) | Err(_) => return false,
+            Ok(SaveStart::Busy | SaveStart::Unconfirmed) | Err(_) => return false,
         }
         if self.link.is_demo() {
             let dates: Vec<_> = old_date.into_iter().chain([new_date]).collect();

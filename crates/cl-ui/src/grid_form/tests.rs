@@ -261,7 +261,7 @@ impl TestScreen {
                 true
             }
             SaveStart::Skip(_) => true,
-            SaveStart::Busy => false,
+            SaveStart::Busy | SaveStart::Unconfirmed => false,
         }
     }
 

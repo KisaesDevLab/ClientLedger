@@ -307,7 +307,7 @@ impl CenterScreen {
                 self.after_save(after, None);
                 return true;
             }
-            SaveStart::Busy => return false,
+            SaveStart::Busy | SaveStart::Unconfirmed => return false,
         }
         let editing = panel.editing;
         let existing = editing.and_then(|id| self.contacts.iter().find(|c| c.id == id).cloned());

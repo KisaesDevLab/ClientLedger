@@ -678,7 +678,7 @@ impl ChartScreen {
                 self.after_save(after, None);
                 return true;
             }
-            SaveStart::Busy => return false,
+            SaveStart::Busy | SaveStart::Unconfirmed => return false,
         }
         let editing = panel.editing;
         let existing = editing.and_then(|id| self.accounts.iter().find(|a| a.id == id).cloned());

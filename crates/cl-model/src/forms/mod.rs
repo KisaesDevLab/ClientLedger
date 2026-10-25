@@ -107,6 +107,36 @@ pub enum SaveStart<V> {
     Skip(AfterSave),
     /// A save is already running.
     Busy,
+    /// The last save's outcome is unknown ("could not tell whether that was
+    /// saved"): nothing may be sent until a recheck answers or the owner
+    /// confirms (B2, Q-PR1a). The engine has no request idempotency on
+    /// posting routes until U-18, so a second send could post twice.
+    Unconfirmed,
+}
+
+/// A save whose outcome is unknown (B2, Q-PR1a). It survives edits, undo,
+/// Clear and record loads: only a recheck answer
+/// ([`FormState::confirm_not_saved`], [`FormState::confirm_saved`]) or the
+/// owner's explicit "I checked the register — save again"
+/// ([`FormState::owner_confirms`]) lifts it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Unconfirmed {
+    /// A recheck is running.
+    pub checking: bool,
+    /// Rechecks that could not tell (or could not reach the engine).
+    pub still_unknown: u32,
+}
+
+/// What a recheck of an unknown save found (cl-api `Recheck`, without the
+/// record).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecheckAnswer {
+    /// The save is in the books.
+    Saved,
+    /// It provably was not saved: Save is allowed again.
+    NotSaved,
+    /// Still cannot tell (or the engine could not be reached).
+    Unknown,
 }
 
 /// What Esc does.
@@ -226,6 +256,7 @@ pub struct FormState<V> {
     phase: Phase,
     undo: UndoStack<V>,
     revision: u64,
+    unconfirmed: Option<Unconfirmed>,
 }
 
 impl<V: Clone + PartialEq> FormState<V> {
@@ -238,7 +269,81 @@ impl<V: Clone + PartialEq> FormState<V> {
             phase: Phase::Clean,
             undo: UndoStack::new(UNDO_LIMIT),
             revision: 0,
+            unconfirmed: None,
         }
+    }
+
+    /// The unknown save that blocks Save, if any (B2).
+    #[must_use]
+    pub fn unconfirmed(&self) -> Option<&Unconfirmed> {
+        self.unconfirmed.as_ref()
+    }
+
+    /// True while an unknown save blocks Save (B2).
+    #[must_use]
+    pub fn is_unconfirmed(&self) -> bool {
+        self.unconfirmed.is_some()
+    }
+
+    /// The running save's outcome is unknown: like [`Self::save_failed`],
+    /// and Save stays blocked until a recheck answers or the owner
+    /// confirms (B2).
+    pub fn save_unknown(&mut self, failure: SaveFailure) {
+        if self.is_saving() {
+            self.phase = Phase::Failed(failure);
+        }
+        self.unconfirmed = Some(Unconfirmed::default());
+    }
+
+    /// Marks a lost save as unconfirmed outside a running save (a second
+    /// state of the same form, kept in step).
+    pub fn mark_unconfirmed(&mut self) {
+        if self.unconfirmed.is_none() {
+            self.unconfirmed = Some(Unconfirmed::default());
+        }
+    }
+
+    /// A recheck starts. False (start nothing) when no save is unknown or
+    /// one is already running.
+    pub fn begin_recheck(&mut self) -> bool {
+        match self.unconfirmed.as_mut() {
+            Some(u) if !u.checking => {
+                u.checking = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The recheck's answer. `Saved` and `NotSaved` lift the block (for
+    /// `Saved` the form shows the saved record next); `Unknown` keeps it.
+    pub fn recheck_answered(&mut self, answer: RecheckAnswer) {
+        match answer {
+            RecheckAnswer::Saved | RecheckAnswer::NotSaved => self.unconfirmed = None,
+            RecheckAnswer::Unknown => {
+                if let Some(u) = self.unconfirmed.as_mut() {
+                    u.checking = false;
+                    u.still_unknown = u.still_unknown.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    /// The recheck proved the save did not happen: Save is allowed.
+    pub fn confirm_not_saved(&mut self) {
+        self.recheck_answered(RecheckAnswer::NotSaved);
+    }
+
+    /// The recheck found the save in the books.
+    pub fn confirm_saved(&mut self) {
+        self.recheck_answered(RecheckAnswer::Saved);
+    }
+
+    /// The owner looked in the register and says "save again" (an
+    /// explicit confirmation behind a dialog; owner answer 2026-10-24).
+    /// Lifts the block whatever the recheck said.
+    pub fn owner_confirms(&mut self) {
+        self.unconfirmed = None;
     }
 
     /// A counter that changes whenever the value on screen changes (an edit,
@@ -374,6 +479,9 @@ impl<V: Clone + PartialEq> FormState<V> {
         if self.is_saving() {
             return SaveStart::Busy;
         }
+        if self.unconfirmed.is_some() {
+            return SaveStart::Unconfirmed;
+        }
         if !self.is_dirty() {
             return SaveStart::Skip(intent.into());
         }
@@ -393,6 +501,7 @@ impl<V: Clone + PartialEq> FormState<V> {
         self.current = stored;
         self.undo.clear();
         self.phase = Phase::Clean;
+        self.unconfirmed = None;
         self.bump();
         after
     }
@@ -594,6 +703,42 @@ mod tests {
         let _ = f.begin_save(SaveIntent::Save);
         f.save_failed(failure());
         assert!(matches!(f.begin_save(SaveIntent::Save), SaveStart::Send(_)));
+    }
+
+    #[test]
+    fn an_unknown_save_blocks_save_until_a_recheck_or_the_owner_answers() {
+        let mut f = FormState::new(Check::default());
+        typed(&mut f, "Acme");
+        let _ = f.begin_save(SaveIntent::Save);
+        f.save_unknown(failure());
+        assert!(f.is_unconfirmed());
+        assert_eq!(f.begin_save(SaveIntent::Save), SaveStart::Unconfirmed);
+        // Edits, undo, Clear and loads never lift it.
+        typed(&mut f, "Acme Co");
+        f.undo();
+        f.revert_form();
+        typed(&mut f, "Other");
+        f.load(Check::default());
+        typed(&mut f, "Again");
+        assert_eq!(f.begin_save(SaveIntent::SaveAndNew), SaveStart::Unconfirmed);
+        // A recheck that can't tell keeps it.
+        assert!(f.begin_recheck());
+        assert!(!f.begin_recheck(), "one recheck at a time");
+        f.recheck_answered(RecheckAnswer::Unknown);
+        assert_eq!(f.unconfirmed().map(|u| u.still_unknown), Some(1));
+        assert_eq!(f.begin_save(SaveIntent::Save), SaveStart::Unconfirmed);
+        // "Not saved" lifts it.
+        assert!(f.begin_recheck());
+        f.confirm_not_saved();
+        assert!(matches!(f.begin_save(SaveIntent::Save), SaveStart::Send(_)));
+        // So do "saved" and the owner's confirmation.
+        f.save_unknown(failure());
+        f.confirm_saved();
+        assert!(!f.is_unconfirmed());
+        f.mark_unconfirmed();
+        f.owner_confirms();
+        assert!(!f.is_unconfirmed());
+        assert!(!f.begin_recheck(), "nothing to recheck");
     }
 
     #[test]
