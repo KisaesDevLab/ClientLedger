@@ -395,7 +395,7 @@ pub const AI_PARSE_FAILED: &str = "AI_PARSE_FAILED";
 /// sends images to a cloud provider.
 pub const OCR_UNREADABLE_AT_PII_LEVEL: &str = "OCR_UNREADABLE_AT_PII_LEVEL";
 /// A PDF with no text layer (a scan) had to be turned into page pictures,
-/// which needs poppler's `pdftoppm`: ClientLedger does not ship it (GPL),
+/// which needs poppler's `pdftoppm`: `ClientLedger` does not ship it (GPL),
 /// so a scanned PDF cannot be read yet. Text PDFs are read in the engine.
 pub const PDF_RENDER_FAILED: &str = "PDF_RENDER_FAILED";
 /// The PDF gave no page pictures (same cause, an empty result).

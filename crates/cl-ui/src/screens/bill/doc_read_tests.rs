@@ -491,7 +491,10 @@ fn a_scanned_pdf_says_reading_it_is_not_available_yet() {
         let key = problem_of(&e);
         assert_eq!(key, "bill.read.problem.scanned_pdf", "{e:?}");
         let shown = crate::i18n::t(key);
-        assert!(shown.contains("scanned PDFs isn't available yet"), "{shown}");
+        assert!(
+            shown.contains("scanned PDFs isn't available yet"),
+            "{shown}"
+        );
         assert!(!shown.contains("PDF_RENDER"), "{shown}");
         let (_d, link) = link();
         let mut s = with_document(&link);
