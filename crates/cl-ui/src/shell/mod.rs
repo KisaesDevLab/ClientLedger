@@ -1047,6 +1047,26 @@ impl Shell {
         }
     }
 
+    /// The receipt inbox (P17): listed in the background while a company
+    /// is open, often while the inbox or Enter Bill is in front; its count
+    /// shows in the Vendors menu.
+    fn tick_receipt_inbox(&self, ctx: &Context) {
+        let Some(link) = &self.company_link else {
+            return;
+        };
+        let fast = self
+            .windows
+            .active()
+            .is_some_and(|w| crate::screens::receipt_inbox::FAST_KINDS.contains(&w.kind.as_str()));
+        crate::screens::receipt_inbox::tick(
+            ctx,
+            link,
+            self.open_tenant.as_ref().map(|t| t.0),
+            self.today,
+            fast,
+        );
+    }
+
     /// How many templates wait for the owner (the status-bar chip).
     #[must_use]
     pub fn templates_need_you(&self) -> usize {
@@ -1109,6 +1129,7 @@ impl Shell {
         }
         self.apply_company_events(Some(&ctx));
         self.run_templates(&ctx);
+        self.tick_receipt_inbox(&ctx);
         self.save_layout();
         let now = ctx.input(|i| i.time);
         self.flush_widths(Some(now));
