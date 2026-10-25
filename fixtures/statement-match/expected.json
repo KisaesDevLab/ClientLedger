@@ -1,0 +1,15 @@
+{
+  "description": "match_lines(vendor_oct.tsv, books.json, 7 days). line = line number in the TSV (the heading is line 1). One bill missing on each side: INV-55840 is on the statement only, INV-55866 is in the books only.",
+  "header_skipped": true,
+  "bad_rows": [],
+  "pairs": [
+    { "line": 2, "books": "00000000-0000-0000-0000-000000000101", "pass": "reference" },
+    { "line": 3, "books": "00000000-0000-0000-0000-000000000102", "pass": "reference" },
+    { "line": 4, "books": "00000000-0000-0000-0000-000000000103", "pass": "reference" },
+    { "line": 5, "books": "00000000-0000-0000-0000-000000000104", "pass": "amount_and_date" },
+    { "line": 7, "books": "00000000-0000-0000-0000-000000000105", "pass": "reference" }
+  ],
+  "missing_in_books": [6],
+  "missing_on_statement": ["00000000-0000-0000-0000-000000000106"],
+  "ambiguous": []
+}
