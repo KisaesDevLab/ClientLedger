@@ -555,22 +555,10 @@ pub fn backup_restore_keeps_the_bill_file_live(h: &Harness) {
         }))
         .expect("import job");
     let st = finish_job(h, &s, &job.job_id);
-    // U-91 (engine bug): the import's content check compares
-    // `companies.check_settings` as text after mapping the new ids back, but
-    // jsonb re-sorts `nextCheckNumbers` by the new account ids, so a company
-    // with checks from two or more bank accounts (tenant B by now) fails the
-    // restore at random. Only that exact refusal is pending.
-    if st.status == JobState::Failed
-        && st.error.as_ref().is_some_and(|e| {
-            e.code == "ARCHIVE_VERIFY_FAILED" && e.message.contains("(content(companies))")
-        })
-    {
-        h.pending(
-            "U-91",
-            "restore refused: check_settings.nextCheckNumbers key order changes when ids are remapped",
-        );
-        return;
-    }
+    // U-91 (engine #176, pinned): the content check compares id-keyed jsonb
+    // such as `companies.check_settings.nextCheckNumbers` semantically, so a
+    // company with checks from several bank accounts (tenant B by now) must
+    // restore every time.
     assert_eq!(st.status, JobState::Succeeded, "{:?}", st.error);
     let restored = st.import_result().expect("import result").tenant_id;
     h.run(s.open_company(restored)).expect("open restored");
