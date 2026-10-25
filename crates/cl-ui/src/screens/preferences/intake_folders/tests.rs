@@ -556,3 +556,24 @@ fn block_and_health_texts_exist() {
         assert!(crate::i18n::has(kind_key(k)));
     }
 }
+
+#[test]
+fn the_engine_limits_and_the_stale_answer_match_the_client() {
+    assert_eq!(MAX_FOLDERS, cl_api::INTAKE_FOLDERS_MAX);
+    assert_eq!(
+        crate::company::demo::intake::MAX_FOLDERS,
+        cl_api::INTAKE_FOLDERS_MAX
+    );
+    assert_eq!(source::CAPABILITY, "intake-settings-v1");
+    let stale = CompanyError::Api(cl_api::ApiError::Conflict {
+        reason: cl_api::ConflictReason::Stale,
+        current_version: None,
+        code: None,
+        message: cl_api::UserText::default(),
+    });
+    assert!(source::is_stale(&stale));
+    let unsupported = CompanyError::Api(cl_api::ApiError::Local(
+        cl_api::LocalValidation::Unsupported,
+    ));
+    assert!(!source::is_stale(&unsupported));
+}

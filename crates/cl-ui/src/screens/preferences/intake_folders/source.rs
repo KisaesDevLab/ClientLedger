@@ -8,13 +8,11 @@
 //!   [`CAPABILITY`]; the pinned engine does not yet, so the panel shows
 //!   "Document intake needs the latest engine" (Q-A01q).
 //!
-//! When WP-E's client lands, swap the bodies of [`engine_get`] and
-//! [`engine_put`] for `session.intake().get()` / `.put(folders, expected)`
-//! (one line each), use `Capabilities::INTAKE_SETTINGS` for
-//! [`CAPABILITY`], and check that [`is_stale`] matches the error WP-E
-//! returns for `409 STALE`.
+//! The engine side is `cl_api`'s `session.intake()` (A01 WP-E). A `409
+//! STALE` arrives as `ApiError::Conflict { reason: Stale, .. }`
+//! ([`is_stale`]).
 
-use cl_api::{ApiError, ConflictReason, LocalValidation, Session};
+use cl_api::{ApiError, Capabilities, ConflictReason, Session};
 use cl_company::CompanyError;
 use cl_core::ids::TenantId;
 use cl_core::intake::IntakeFolder;
@@ -23,7 +21,7 @@ use crate::company::CompanyLink;
 use crate::company::demo::intake::DemoIntakeError;
 
 /// The engine capability for intake settings (U-93).
-pub const CAPABILITY: &str = "intake-settings-v1";
+pub const CAPABILITY: &str = Capabilities::INTAKE_SETTINGS;
 
 /// The engine role that is ClientLedger's Admin until P29 (Q-A01k).
 pub const ADMIN_ROLE: &str = "owner";
@@ -57,9 +55,14 @@ pub fn supported(link: &CompanyLink) -> bool {
 /// # Errors
 /// Any [`ApiError`].
 pub async fn engine_get(session: &Session) -> Result<Stored, ApiError> {
-    // A01 WP-E: `session.intake().get().await.map(|s| Stored { folders: s.folders, updated_at: s.updated_at })`.
-    let _ = session;
-    Err(ApiError::Local(LocalValidation::Unsupported))
+    session.intake().get().await.map(stored)
+}
+
+fn stored(s: cl_api::IntakeSettings) -> Stored {
+    Stored {
+        folders: s.folders,
+        updated_at: s.updated_at,
+    }
 }
 
 /// Replaces the engine's folders when its stamp is still `expected`
@@ -72,9 +75,7 @@ pub async fn engine_put(
     folders: &[IntakeFolder],
     expected: Option<&str>,
 ) -> Result<Stored, ApiError> {
-    // A01 WP-E: `session.intake().put(folders, expected).await.map(|s| Stored { folders: s.folders, updated_at: s.updated_at })`.
-    let _ = (session, folders, expected);
-    Err(ApiError::Local(LocalValidation::Unsupported))
+    session.intake().put(folders, expected).await.map(stored)
 }
 
 /// The user's engine role in `tenant`, from the company list.
