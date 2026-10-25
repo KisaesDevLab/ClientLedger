@@ -292,6 +292,28 @@ impl std::fmt::Debug for ReadState {
     }
 }
 
+/// Sends the extract on the write lane: it spends AI tokens, so a reply
+/// lost when the window closes is labelled ("reading a bill with AI") like
+/// any other unconfirmed write instead of being cancelled unseen.
+///
+/// # Errors
+/// The queue refused it (full or closed).
+pub(crate) fn send_extract(
+    group: &RequestGroup,
+    session: &cl_api::Session,
+    gate: BillReadGate,
+    attachment: AttachmentId,
+) -> Result<cl_api::Pending<Result<BillReading, ApiError>>, cl_api::QueueError> {
+    let key = cl_api::IdempotencyKey::new();
+    let label = cl_api::OrphanLabel {
+        what: "orphan.bill_read",
+        key: Some(key.clone()),
+    };
+    group.write(session, label, move |s| async move {
+        Ok(s.bill_reading().extract(gate, attachment, key).await)
+    })
+}
+
 /// The plain message for a failed reading (i18n key).
 #[must_use]
 pub(crate) fn problem_of(e: &ApiError) -> &'static str {
@@ -509,17 +531,7 @@ impl ReadState {
             self.problem = Some("bill.read.problem.unreachable");
             return;
         };
-        let gate = switches.gate();
-        // A write: the extract spends AI tokens, so a lost reply is
-        // labelled like any other unconfirmed write.
-        let key = cl_api::IdempotencyKey::new();
-        let label = cl_api::OrphanLabel {
-            what: "orphan.bill_read",
-            key: Some(key.clone()),
-        };
-        match group.write(&session, label, move |s| async move {
-            Ok(s.bill_reading().extract(gate, attachment, key).await)
-        }) {
+        match send_extract(group, &session, switches.gate(), attachment) {
             Ok(p) => {
                 self.sent += 1;
                 self.job = Some(Task::Pending(p));

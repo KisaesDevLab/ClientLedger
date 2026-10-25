@@ -29,9 +29,9 @@ use serde_json::{Value, json};
 
 use super::EnterBillScreen;
 use crate::company::{CompanyEvent, Task};
-use crate::screens::write_check::attach::{FileRead, poll_file_read, read_in_background};
 use crate::i18n::{t, t_with};
 use crate::screens::company::form;
+use crate::screens::write_check::attach::{FileRead, poll_file_read, read_in_background};
 use crate::theme::Tokens;
 use crate::widgets::pdf_viewer::{DocSource, DocViewer, ViewerEvent, ViewerState};
 

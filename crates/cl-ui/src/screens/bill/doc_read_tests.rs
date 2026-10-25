@@ -153,7 +153,8 @@ fn every_enter_bill_widget_has_an_accessible_name() {
             let read_nodes = nodes(&mut s, size, theme);
             s.tab = crate::screens::bill::Tab::Items;
             let items = nodes(&mut s, size, theme);
-            s.header.edit_step(|h| h.kind = cl_model::forms::bill::BillKind::Credit);
+            s.header
+                .edit_step(|h| h.kind = cl_model::forms::bill::BillKind::Credit);
             let credit = nodes(&mut s, size, theme);
             for (what, n) in [
                 ("new", blank),
@@ -583,6 +584,59 @@ fn a_scanned_pdf_says_reading_it_is_not_available_yet() {
         assert_eq!(s.read.problem, Some("bill.read.problem.scanned_pdf"));
         assert!(s.header.current().read.is_empty());
     }
+}
+
+/// The extract spends AI tokens: it runs on the write lane, so a reply
+/// lost when the window closes comes back as a labelled orphan ("reading a
+/// bill with AI"), never a silently cancelled read.
+#[test]
+fn the_read_runs_on_the_write_lane_and_a_lost_reply_is_labelled() {
+    use std::time::Duration;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let server = rt.block_on(async {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_millis(400))
+                    .set_body_raw(r#"{"extraction":{"status":"ok"}}"#, "application/json"),
+            )
+            .mount(&server)
+            .await;
+        server
+    });
+    let q =
+        cl_api::ApiQueue::start(Arc::new(|| {}), cl_api::QueueConfig::default()).expect("queue");
+    let g = q.group().expect("group");
+    let session = cl_api::testing::stub_session(server.address().port());
+    let att = AttachmentId::parse("5c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
+    let open = cl_api::BillReadGate {
+        ai_enabled: true,
+        bill_reading_on: true,
+        provider_set: true,
+    };
+    let p = send_extract(&g, &session, open, att).expect("sent");
+    assert_eq!(q.pending_writes(), 1, "the extract is a write");
+    // The window closes before the answer.
+    g.cancel();
+    drop(p);
+    drop(g);
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    while q.pending_writes() > 0 {
+        assert!(std::time::Instant::now() < end, "the write never ended");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let orphans = q.take_orphans();
+    assert_eq!(orphans.len(), 1, "{orphans:?}");
+    assert_eq!(orphans[0].label.what, "orphan.bill_read");
+    assert_eq!(crate::i18n::t("orphan.bill_read"), "reading a bill with AI");
+    let _ = q.shutdown(Duration::from_secs(1), None);
+    drop(server);
 }
 
 #[test]

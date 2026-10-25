@@ -389,10 +389,7 @@ fn a_lost_reply_found_saved_still_moves_the_draft_files() {
     let (_d, link) = link();
     link.demo_state().expect("demo").bills.lines_off = true;
     let mut s = screen(&link);
-    s.upload_bytes(
-        demo_bills::STORY_PDF_NAME,
-        demo_bills::STORY_PDF.to_vec(),
-    );
+    s.upload_bytes(demo_bills::STORY_PDF_NAME, demo_bills::STORY_PDF.to_vec());
     let draft = s.attach.draft.expect("a draft key");
     fill(
         &mut s,
@@ -412,7 +409,10 @@ fn a_lost_reply_found_saved_still_moves_the_draft_files() {
     {
         let demo = link.demo_state().expect("demo");
         assert_eq!(demo_bills::attachments(&demo, AttachTo::Bill(id)).len(), 0);
-        assert_eq!(demo_bills::attachments(&demo, AttachTo::Draft(draft)).len(), 1);
+        assert_eq!(
+            demo_bills::attachments(&demo, AttachTo::Draft(draft)).len(),
+            1
+        );
     }
     s.save.lost.recheck_answering(
         &mut s.header,
@@ -428,7 +428,10 @@ fn a_lost_reply_found_saved_still_moves_the_draft_files() {
         1,
         "the file is on the bill"
     );
-    assert_eq!(demo_bills::attachments(&demo, AttachTo::Draft(draft)).len(), 0);
+    assert_eq!(
+        demo_bills::attachments(&demo, AttachTo::Draft(draft)).len(),
+        0
+    );
     drop(demo);
     assert!(s.save.attach_failed.is_none(), "the retry went through");
 }

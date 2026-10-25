@@ -155,7 +155,7 @@ fn duplicates_in_the_books_are_listed_never_picked_by_date() {
         item(2, 11, "INV-1", Charge, "100"),
     ];
     let r = match_lines(&stmt, &books, 7);
-    assert!(r.pairs.is_empty(), "no closest-date guess");
+    assert_eq!(r.pairs, Vec::new(), "no closest-date guess");
     assert_eq!(
         r.ambiguous,
         vec![Ambiguous {
@@ -176,7 +176,7 @@ fn duplicates_in_the_books_are_listed_never_picked_by_date() {
         item(2, 11, "INV-1", Charge, "100"),
     ];
     let r = match_lines(&stmt, &books, 7);
-    assert!(r.pairs.is_empty());
+    assert_eq!(r.pairs, Vec::new());
     assert_eq!(r.ambiguous.len(), 2);
 
     // One books entry for a repeated statement line: it pairs once; the

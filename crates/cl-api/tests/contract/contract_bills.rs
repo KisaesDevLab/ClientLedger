@@ -929,7 +929,11 @@ pub fn item_lines_u85(h: &Harness) {
         vec![("0.0000".to_string(), "1481.0000".to_string())],
         "A/P is credited exactly the bill total"
     );
-    assert_eq!(balance(h, s, parts.id), m("1.0000"), "the item line posts 1.00");
+    assert_eq!(
+        balance(h, s, parts.id),
+        m("1.0000"),
+        "the item line posts 1.00"
+    );
 
     // The vendor's open balance moves by exactly the total.
     let after = h.run(s.bills().vendor_summary(v)).expect("summary");

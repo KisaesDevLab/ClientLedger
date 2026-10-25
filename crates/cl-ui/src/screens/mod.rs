@@ -70,7 +70,10 @@ pub(crate) const P17_SCREENS: [crate::shell::MakeScreen; 4] = [
 /// "Role" strings. Screen readers and the control channel need one.
 #[cfg(test)]
 pub(crate) fn unnamed_widgets(
-    nodes: &[(eframe::egui::accesskit::NodeId, eframe::egui::accesskit::Node)],
+    nodes: &[(
+        eframe::egui::accesskit::NodeId,
+        eframe::egui::accesskit::Node,
+    )],
 ) -> Vec<String> {
     use eframe::egui::accesskit::Role;
     nodes
