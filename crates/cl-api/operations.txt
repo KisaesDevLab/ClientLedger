@@ -207,3 +207,7 @@ GET     /api/v1/bills                           idempotent
 GET     /api/v1/payroll-import/sessions         idempotent
 GET     /api/v1/banking/reconciliations         idempotent
 GET     /api/v1/banking/statements              idempotent
+# P17 WP2b: the register's A/P void guard (review B1)
+POST    /api/v1/bills/{id}/void                 pre-handler-only
+POST    /api/v1/vendor-credits/{id}/void        pre-handler-only
+POST    /api/v1/bill-payments/{id}/void         pre-handler-only

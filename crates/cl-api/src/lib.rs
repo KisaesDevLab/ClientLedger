@@ -135,6 +135,7 @@ pub use wire::{Capabilities, DesktopInfo, Health, Page, PageRequest, ReportAmoun
 pub use resources::ai::{
     AI_PREVIEW_DESCRIPTION_MAX_CHARS, AI_PREVIEW_MAX_ROWS, AiGate, AiPreviewRow, AiSuggestion,
 };
+pub use resources::ap_void::ApVoids;
 pub use resources::attachments::{
     ATTACHMENT_MAX_BYTES, AttachTo, Attachment, AttachmentId, Attachments, DraftKey, FileKind,
     check_file,

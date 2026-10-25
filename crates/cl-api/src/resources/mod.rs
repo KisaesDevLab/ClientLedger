@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod ai;
+pub mod ap_void;
 pub mod attachments;
 pub mod audit;
 pub mod bank_postings;

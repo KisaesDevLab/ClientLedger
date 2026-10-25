@@ -591,6 +591,18 @@ pub(crate) const RECONCILIATIONS: Operation = read("/api/v1/banking/reconciliati
 /// Imported bank statements.
 pub(crate) const BANK_STATEMENTS: Operation = read("/api/v1/banking/statements");
 
+// ---- P17 WP2b: the register's A/P void guard (review B1) ------------------
+
+/// Voids a bill; the engine refuses one with payments applied.
+pub(crate) const BILL_VOID: Operation = write(Method::Post, "/api/v1/bills/{id}/void");
+/// Voids a vendor credit; the engine refuses one applied to bills.
+pub(crate) const VENDOR_CREDIT_VOID: Operation =
+    write(Method::Post, "/api/v1/vendor-credits/{id}/void");
+/// Voids a bill payment and takes its applications off the bills and
+/// credits it paid.
+pub(crate) const BILL_PAYMENT_VOID: Operation =
+    write(Method::Post, "/api/v1/bill-payments/{id}/void");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -603,7 +615,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 167] = [
+pub const OPERATIONS: [Operation; 170] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -777,6 +789,10 @@ pub const OPERATIONS: [Operation; 167] = [
     PAYROLL_SESSIONS,
     RECONCILIATIONS,
     BANK_STATEMENTS,
+    // P17 WP2b
+    BILL_VOID,
+    VENDOR_CREDIT_VOID,
+    BILL_PAYMENT_VOID,
 ];
 
 /// Looks up a covered operation.

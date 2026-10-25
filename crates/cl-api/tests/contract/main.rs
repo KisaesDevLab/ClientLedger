@@ -11,6 +11,7 @@ mod support;
 
 mod common;
 mod contract_accounts;
+mod contract_ap_void;
 mod contract_audit;
 mod contract_bank_postings;
 mod contract_batch;
@@ -604,6 +605,11 @@ fn main() -> std::process::ExitCode {
         (
             "home::rail_counts_match_the_lists",
             contract_home::rail_counts_match_the_lists,
+        ),
+        // P17 WP2b: the register's A/P void guard (review B1).
+        (
+            "ap_void::paid_bill_void_is_refused_and_links_remain",
+            contract_ap_void::paid_bill_void_is_refused_and_links_remain,
         ),
         (
             "lifecycle::ten_switches_under_two_seconds",

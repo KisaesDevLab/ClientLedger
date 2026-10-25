@@ -165,5 +165,8 @@
   {"method":"GET","path":"/api/v1/bills","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/payroll-import/sessions","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/banking/reconciliations","inSpec":true,"fragmentHash":null},
-  {"method":"GET","path":"/api/v1/banking/statements","inSpec":true,"fragmentHash":null}
+  {"method":"GET","path":"/api/v1/banking/statements","inSpec":true,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/bills/{id}/void","inSpec":true,"fragmentHash":"a38ebffd6a54df241f185613c51f6f4f483eb221cb091af23b6f5e4b7cc50999"},
+  {"method":"POST","path":"/api/v1/vendor-credits/{id}/void","inSpec":true,"fragmentHash":"a38ebffd6a54df241f185613c51f6f4f483eb221cb091af23b6f5e4b7cc50999"},
+  {"method":"POST","path":"/api/v1/bill-payments/{id}/void","inSpec":true,"fragmentHash":"a38ebffd6a54df241f185613c51f6f4f483eb221cb091af23b6f5e4b7cc50999"}
 ]
