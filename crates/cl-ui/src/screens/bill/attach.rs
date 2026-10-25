@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use cl_api::{
-    ATTACHMENT_MAX_BYTES, ApiError, AttachTo, Attachment, AttachmentId, DraftKey, FileKind,
-    IdempotencyKey, LocalValidation, OrphanLabel,
+    ATTACHMENT_MAX_BYTES, ApiError, AttachTo, Attachment, AttachmentId, DraftKey, IdempotencyKey,
+    LocalValidation, OrphanLabel,
 };
 use cl_model::forms::bill::{BillForm, BillKind};
 use cl_model::forms::check::AttachmentRef;
@@ -168,11 +168,7 @@ fn copy_dir() -> PathBuf {
 /// An i18n key for the owner.
 pub(crate) fn save_copy(dir: &Path, bytes: &[u8]) -> Result<PathBuf, &'static str> {
     let kind = cl_api::check_file(bytes).map_err(|_| "check.attach.download_wrong_type")?;
-    let ext = match kind {
-        FileKind::Pdf => "pdf",
-        FileKind::Png => "png",
-        FileKind::Jpeg => "jpg",
-    };
+    let ext = kind.extension();
     let stem = t("bill.attach.copy_name");
     for n in 1..1000 {
         let file = if n == 1 {

@@ -21,6 +21,7 @@ pub mod export;
 pub mod feed;
 pub mod form1099;
 pub mod home_queries;
+pub mod intake;
 pub mod items;
 pub mod ledger;
 pub mod list_csv;

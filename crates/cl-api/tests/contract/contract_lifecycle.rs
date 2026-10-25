@@ -555,6 +555,7 @@ pub fn archive_export_import_e5a(h: &Harness) {
                 &ArchiveRequest {
                     include_attachments: true,
                     include_audit: true,
+                    omit_intake_settings: false,
                     host: json!({"app": "ClientLedger", "appVersion": "test", "kind": "backup", "accent": "#3E7CB1"}),
                     passphrase: passphrase.clone(),
                 },

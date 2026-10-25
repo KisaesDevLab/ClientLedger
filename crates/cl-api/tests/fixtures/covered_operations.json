@@ -184,5 +184,7 @@
   {"method":"POST","path":"/api/v1/attachments/{id}/link","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"GET","path":"/api/v1/attachments/unlinked","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/bill-payments","inSpec":true,"fragmentHash":null},
-  {"method":"POST","path":"/api/v1/bill-payments/{id}/void","inSpec":true,"fragmentHash":"c36a5cd7d5db64b7cc4d730b5542f420f793446ce235d3870b32f136846683da"}
+  {"method":"POST","path":"/api/v1/bill-payments/{id}/void","inSpec":true,"fragmentHash":"c36a5cd7d5db64b7cc4d730b5542f420f793446ce235d3870b32f136846683da"},
+  {"method":"GET","path":"/api/v1/company/intake-settings","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/company/intake-settings","inSpec":false,"fragmentHash":null}
 ]

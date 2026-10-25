@@ -52,3 +52,10 @@ harness = false
 name = "contract_offline"
 path = "tests/contract_offline.rs"
 harness = false
+
+# A01 intake folders (engine U-93): its own engine, so the archive round trip
+# and the extra read-only login stay inside a fresh auth budget.
+[[test]]
+name = "intake_settings"
+path = "tests/intake_settings.rs"
+harness = false

@@ -193,6 +193,10 @@ pub enum FileKind {
     Png,
     /// `FF D8 FF`.
     Jpeg,
+    /// TIFF in either byte order, `II*\0` (little-endian) or `MM\0*`
+    /// (big-endian), the two signatures the engine checks (Q-A01n; scanners
+    /// save it). 64-bit "big" TIFF is not taken.
+    Tiff,
 }
 
 impl FileKind {
@@ -205,6 +209,8 @@ impl FileKind {
             Some(FileKind::Png)
         } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
             Some(FileKind::Jpeg)
+        } else if bytes.starts_with(b"II*\0") || bytes.starts_with(b"MM\0*") {
+            Some(FileKind::Tiff)
         } else {
             None
         }
@@ -217,12 +223,24 @@ impl FileKind {
             FileKind::Pdf => "application/pdf",
             FileKind::Png => "image/png",
             FileKind::Jpeg => "image/jpeg",
+            FileKind::Tiff => "image/tiff",
+        }
+    }
+
+    /// The extension a copy of this kind is saved with.
+    #[must_use]
+    pub const fn extension(self) -> &'static str {
+        match self {
+            FileKind::Pdf => "pdf",
+            FileKind::Png => "png",
+            FileKind::Jpeg => "jpg",
+            FileKind::Tiff => "tif",
         }
     }
 }
 
-/// Checks a file before upload: not empty, at most 10 MB, a PDF, PNG or
-/// JPEG.
+/// Checks a file before upload: not empty, at most 10 MB, a PDF, PNG, JPEG
+/// or TIFF.
 ///
 /// # Errors
 /// `AttachmentTooLarge` or `AttachmentType`.
@@ -279,12 +297,7 @@ fn safe_name(name: &str, kind: FileKind) -> String {
         .collect();
     let cleaned = cleaned.trim().to_string();
     if cleaned.is_empty() {
-        let ext = match kind {
-            FileKind::Pdf => "pdf",
-            FileKind::Png => "png",
-            FileKind::Jpeg => "jpg",
-        };
-        format!("attachment.{ext}")
+        format!("attachment.{}", kind.extension())
     } else {
         cleaned
     }
@@ -537,6 +550,18 @@ mod tests {
             Err(LocalValidation::AttachmentType)
         );
         assert_eq!(check_file(b"GIF89a"), Err(LocalValidation::AttachmentType));
+        // TIFF in both byte orders; a wrong magic number, BigTIFF and a
+        // bare byte-order mark are not TIFF.
+        assert_eq!(check_file(b"II*\0\x08\0\0\0"), Ok(FileKind::Tiff));
+        assert_eq!(check_file(b"MM\0*\0\0\0\x08"), Ok(FileKind::Tiff));
+        assert_eq!(FileKind::Tiff.mime(), "image/tiff");
+        for not_tiff in [&b"II\0*"[..], b"MM*\0", b"II+\0", b"MM\0+", b"II", b"MM\0"] {
+            assert_eq!(
+                check_file(not_tiff),
+                Err(LocalValidation::AttachmentType),
+                "{not_tiff:?}"
+            );
+        }
         let mut big = b"%PDF-".to_vec();
         big.resize(ATTACHMENT_MAX_BYTES, b' ');
         assert_eq!(check_file(&big), Ok(FileKind::Pdf), "exactly 10 MB is fine");
@@ -553,6 +578,7 @@ mod tests {
         );
         assert_eq!(safe_name("../../etc/x.jpg", FileKind::Jpeg), "x.jpg");
         assert_eq!(safe_name("  ", FileKind::Jpeg), "attachment.jpg");
+        assert_eq!(safe_name("", FileKind::Tiff), "attachment.tif");
         assert_eq!(
             safe_name(&"é".repeat(300), FileKind::Pdf).chars().count(),
             200
@@ -599,6 +625,31 @@ mod tests {
         assert!(body.contains("name=\"file\"; filename=\"Receipt Oct.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4\n%canary\n\r\n"));
         assert!(body.ends_with(&format!("\r\n--{boundary}--\r\n")));
         assert!(posts[0].headers.get("idempotency-key").is_some());
+    }
+
+    #[tokio::test]
+    async fn a_tiff_goes_up_as_image_tiff() {
+        let server = MockServer::start().await;
+        let draft = DraftKey::new();
+        Mock::given(method("POST"))
+            .and(path("/api/v1/attachments"))
+            .respond_with(json(201, &reply("draft", &draft.to_string())))
+            .mount(&server)
+            .await;
+        let tiff: &[u8] = b"MM\0*\0\0\0\x08canary";
+        company_session(&server)
+            .attachments()
+            .upload_draft(draft, "", tiff, IdempotencyKey::new())
+            .await
+            .expect("upload");
+        let posts = requests(&server, "POST").await;
+        let body = String::from_utf8_lossy(&posts[0].body).into_owned();
+        assert!(
+            body.contains(
+                "name=\"file\"; filename=\"attachment.tif\"\r\nContent-Type: image/tiff\r\n\r\n"
+            ),
+            "{body}"
+        );
     }
 
     #[tokio::test]

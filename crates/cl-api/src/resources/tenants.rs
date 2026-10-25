@@ -122,6 +122,11 @@ pub struct ArchiveRequest {
     pub include_attachments: bool,
     /// Bundle the audit trail.
     pub include_audit: bool,
+    /// Leave the company's intake folders out (U-93 `omitIntakeSettings`,
+    /// Q-A01l): the archive carries the empty default instead, so a
+    /// transfer file (P32) never holds folder paths. Needs
+    /// `intake-settings-v1`; only written when `true`.
+    pub omit_intake_settings: bool,
     /// Opaque application metadata kept in `manifest.host` (≤ 16 KiB).
     pub host: Value,
     /// The owner's backup passphrase (never logged).
@@ -130,9 +135,13 @@ pub struct ArchiveRequest {
 
 impl Serialize for ArchiveRequest {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let mut st = s.serialize_struct("ArchiveRequest", 4)?;
+        let fields = if self.omit_intake_settings { 5 } else { 4 };
+        let mut st = s.serialize_struct("ArchiveRequest", fields)?;
         st.serialize_field("includeAttachments", &self.include_attachments)?;
         st.serialize_field("includeAudit", &self.include_audit)?;
+        if self.omit_intake_settings {
+            st.serialize_field("omitIntakeSettings", &true)?;
+        }
         st.serialize_field("host", &self.host)?;
         st.serialize_field("passphrase", self.passphrase.expose())?;
         st.end()
@@ -572,12 +581,23 @@ impl Tenants<'_> {
     ///
     /// # Errors
     /// `Local(InvalidValue)` when `host` exceeds 16 KiB or the passphrase
-    /// is empty (nothing sent); any [`ApiError`].
+    /// is empty, `Local(Unsupported)` for `omit_intake_settings` without
+    /// `intake-settings-v1` (nothing sent; such an engine keeps no intake
+    /// folders, so leave the flag off there); any [`ApiError`].
     pub async fn export_archive(
         &self,
         id: TenantId,
         request: &ArchiveRequest,
     ) -> Result<ArchiveJob, ApiError> {
+        if request.omit_intake_settings
+            && !self
+                .0
+                .client()
+                .capabilities()
+                .has(crate::wire::Capabilities::INTAKE_SETTINGS)
+        {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
+        }
         if request.passphrase.is_empty()
             || serde_json::to_vec(&request.host).is_ok_and(|b| b.len() > HOST_METADATA_MAX_BYTES)
             || serde_json::to_vec(&request.host).is_err()
@@ -828,6 +848,7 @@ mod tests {
         let req = ArchiveRequest {
             include_attachments: true,
             include_audit: true,
+            omit_intake_settings: false,
             host: serde_json::json!({"app":"ClientLedger","kind":"backup"}),
             passphrase: Secret::new("pass-canary-123"),
         };
@@ -841,6 +862,10 @@ mod tests {
         let body: Value = serde_json::from_slice(&posts[0].body).expect("json");
         assert_eq!(body["passphrase"], "pass-canary-123");
         assert_eq!(body["host"]["kind"], "backup");
+        assert!(
+            body.get("omitIntakeSettings").is_none(),
+            "only written when set: {body}"
+        );
         assert!(!format!("{req:?}").contains("pass-canary"));
         let st = s.tenants().archive_job(&job.job_id).await.expect("status");
         assert_eq!(st.status, JobState::Succeeded);
@@ -851,6 +876,40 @@ mod tests {
         let r = st.export_result().expect("result");
         assert_eq!(r.file_name.as_str(), "a-1.zip");
         assert_eq!(r.path.as_deref(), Some(Path::new("/tmp/x/a-1.zip")));
+    }
+
+    #[tokio::test]
+    async fn omit_intake_settings_needs_the_capability() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v1/tenants/{TENANT}/archives")))
+            .respond_with(json(202, r#"{"jobId":"job_2","archiveId":"a-2"}"#))
+            .mount(&server)
+            .await;
+        let req = ArchiveRequest {
+            include_attachments: false,
+            include_audit: true,
+            omit_intake_settings: true,
+            host: serde_json::json!({"app":"ClientLedger","kind":"transfer"}),
+            passphrase: Secret::new("pass-canary-123"),
+        };
+        let tenant = TenantId::parse(TENANT).expect("id");
+        assert_eq!(
+            ws(&server).tenants().export_archive(tenant, &req).await,
+            Err(ApiError::Local(LocalValidation::Unsupported))
+        );
+        assert!(requests(&server, "POST").await.is_empty(), "nothing sent");
+
+        let s = crate::resources::testkit::session_with_caps(
+            &server,
+            &[crate::Capabilities::INTAKE_SETTINGS],
+        )
+        .await;
+        s.tenants().export_archive(tenant, &req).await.expect("job");
+        let posts = requests(&server, "POST").await;
+        let body: Value = serde_json::from_slice(&posts[0].body).expect("json");
+        assert_eq!(body["omitIntakeSettings"], true);
+        assert_eq!(body["includeAudit"], true);
     }
 
     #[tokio::test]

@@ -219,4 +219,6 @@ pub use resources::home_queries::{
     BILLS_PAGE, BILLS_PAGES_MAX, BillQuery, HomeQueries, LastReconciled, OpenBillStatus,
     PayrollStatus, RECONCILE_ACCOUNTS_MAX, ReconcileState,
 };
+// A01: intake folders (U-93).
+pub use resources::intake::{INTAKE_FOLDERS_MAX, Intake, IntakeSettings};
 pub use wire::money_str_strict;
