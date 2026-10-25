@@ -284,59 +284,29 @@ impl DailySalesScreen {
     pub(crate) fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
         use crate::forms::lost_save::LostEvent;
         match ev {
-            LostEvent::CheckRequested => {
-                let Some(id) = self.saved.as_ref().map(|s| s.id) else {
-                    return;
-                };
-                if self.save.lost.begin_own(&mut self.header) {
+            LostEvent::Saved(_) => {
+                // The stored probe found the day posted: read it again and
+                // show it as saved.
+                self.save.key = None;
+                if let Some(id) = self.saved.as_ref().map(|s| s.id) {
                     self.save.lost_check = self.run(Call::Entry(id), false);
-                    if self.save.lost_check.is_none() {
-                        let ev = self
-                            .save
-                            .lost
-                            .answer(&mut self.header, &cl_api::Recheck::Unknown);
-                        self.lost_event(ev);
-                    }
                     self.poll_lost();
                 }
-            }
-            LostEvent::Saved(Some(txn)) => {
-                self.save.key = None;
-                self.open_task = self.run(Call::FindTransaction(txn), false);
             }
             _ => {}
         }
     }
 
-    /// The day's entry, read for Check again: posted is saved (shown),
-    /// still a draft is not saved.
+    /// The day read again after Check again found it posted.
     pub(crate) fn poll_lost(&mut self) {
         let Some(r) = self.save.lost_check.as_mut().and_then(Task::poll_result) else {
             return;
         };
         self.save.lost_check = None;
-        match r {
-            Ok(Reply::Entry(e)) if e.status == EntryStatus::Posted => {
-                let _ = self.save.lost.answer(
-                    &mut self.header,
-                    &cl_api::Recheck::Committed {
-                        transaction: e.transaction,
-                    },
-                );
-                self.posted(&e);
-            }
-            Ok(Reply::Entry(e)) if e.status == EntryStatus::Draft => {
-                let _ = self
-                    .save
-                    .lost
-                    .answer(&mut self.header, &cl_api::Recheck::NotCommitted);
-            }
-            _ => {
-                let _ = self
-                    .save
-                    .lost
-                    .answer(&mut self.header, &cl_api::Recheck::Unknown);
-            }
+        if let Ok(Reply::Entry(e)) = r
+            && e.status == EntryStatus::Posted
+        {
+            self.posted(&e);
         }
     }
 
@@ -485,14 +455,11 @@ impl DailySalesScreen {
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
         };
         if self.save.lost.lost(&e) {
+            // Check again runs the post's stored probe (`Session::recheck`):
+            // posted is saved; still a draft is "not saved" only once the
+            // engine that took the post is gone, because a slow post on the
+            // same engine may still flip it (review fix-PR-1 blocking 1).
             self.header.save_unknown(failure);
-            // A lost post of a known draft: the draft's status settles it
-            // (posting flips it in one database transaction).
-            let draft = self
-                .saved
-                .as_ref()
-                .is_some_and(|s| s.status == EntryStatus::Draft);
-            self.save.lost.own_check(draft);
             return;
         }
         self.header.save_failed(failure);

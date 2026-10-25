@@ -542,6 +542,55 @@ fn a_failed_post_keeps_the_draft_and_it_shows_on_reopen() {
     assert_eq!(r.fake().drafts_made, 1);
 }
 
+/// Review fix-PR-1 blocking 1: a lost post whose day still reads as a
+/// draft is "can't tell" (the stored probe decides; a slow post may still
+/// flip it), so nothing is posted again; once the day shows up posted,
+/// Check again shows it as saved.
+#[test]
+fn a_lost_post_still_a_draft_stays_blocked_until_it_shows_up_posted() {
+    let mut r = rig();
+    r.fake().fail_post = Some(ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000009")
+            .expect("id"),
+        idempotency_key: Some(cl_api::IdempotencyKey::new()),
+    });
+    r.plan_day("500.00");
+    r.s.command(CommandId::new("form.save_new"));
+    assert!(r.s.save.lost.pending());
+    assert_eq!(r.fake().posts, 0);
+    // The day is still a draft; Check again can't tell on the same engine.
+    r.s.save
+        .lost
+        .recheck_answering(&mut r.s.header, cl_api::Recheck::Unknown);
+    r.s.poll();
+    assert!(r.s.save.lost.pending(), "a draft is not proof");
+    r.s.command(CommandId::new("form.save_close"));
+    assert_eq!(r.fake().posts, 0, "nothing is posted again");
+    assert_eq!(r.fake().drafts_made, 1);
+    // The slow first post finishes; Check again finds the day posted.
+    let txn = TransactionId::parse(&fresh()).expect("id");
+    {
+        let mut f = r.fake();
+        let e = f.entries.first_mut().expect("the day");
+        e.status = EntryStatus::Posted;
+        e.transaction = Some(txn);
+    }
+    r.s.save.lost.recheck_answering(
+        &mut r.s.header,
+        cl_api::Recheck::Committed {
+            transaction: Some(txn),
+        },
+    );
+    r.s.poll();
+    assert!(!r.s.save.lost.pending());
+    assert_eq!(
+        r.s.saved.as_ref().map(|s| s.status.clone()),
+        Some(EntryStatus::Posted),
+        "shown as the posted day"
+    );
+    assert_eq!(r.fake().posts, 0, "posted once, by the first try");
+}
+
 #[test]
 fn a_negative_or_unmapped_amount_is_refused_with_nothing_sent() {
     let mut r = rig();

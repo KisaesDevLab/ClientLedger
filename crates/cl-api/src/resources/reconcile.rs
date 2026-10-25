@@ -541,11 +541,12 @@ pub enum Recheck {
     Unknown,
 }
 
-/// The transaction a committed answer names (`{transaction}`, `{check}`
-/// or a bare record).
+/// The transaction a committed answer names (`{transaction}`, `{check}`,
+/// a daily-sales day's journal entry `{entry: {transactionId}}`, or a bare
+/// record).
 fn committed_id(reply: &EngineReply) -> Option<TransactionId> {
     let v: Value = serde_json::from_slice(&reply.body).ok()?;
-    ["/transaction/id", "/check/id", "/id"]
+    ["/transaction/id", "/check/id", "/entry/transactionId", "/id"]
         .iter()
         .find_map(|p| v.pointer(p).and_then(Value::as_str))
         .and_then(|s| TransactionId::parse(s).ok())

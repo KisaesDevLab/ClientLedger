@@ -178,6 +178,87 @@ async fn recheck_finds_the_saved_entry_once_it_shows_up() {
     assert_eq!(requests(&server, "POST").await.len(), 1);
 }
 
+const DAY: &str = "3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a05";
+
+fn day_entry(status: &str, txn: Option<&str>) -> String {
+    let txn = txn.map_or_else(|| "null".to_string(), |t| format!(r#""{t}""#));
+    format!(
+        r#"{{"entry":{{"id":"{DAY}","templateId":"{TPL}","businessDate":"2026-10-15",
+        "status":"{status}","transactionId":{txn},"tagId":null,"notes":null,
+        "overShortAmount":"0.0000","totalSales":"0.0000","totalTax":"0.0000",
+        "totalPayments":"0.0000","values":[]}}}}"#
+    )
+}
+
+async fn day_reads(server: &MockServer, status: &str, txn: Option<&str>, priority: u8) {
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/daily-sales/entries/{DAY}")))
+        .respond_with(json(200, &day_entry(status, txn)))
+        .with_priority(priority)
+        .mount(server)
+        .await;
+}
+
+async fn lost_day_post(s: &Session) -> IdempotencyKey {
+    let key = IdempotencyKey::new();
+    let e = s
+        .daily_sales()
+        .post(
+            cl_core::ids::DailyEntryId::parse(DAY).expect("day"),
+            &crate::resources::daily_sales::DailyPostOptions::default(),
+            key.clone(),
+        )
+        .await
+        .expect_err("unknown");
+    assert!(
+        matches!(e, ApiError::OutcomeUnknown { idempotency_key: Some(ref k), .. } if k == &key),
+        "{e:?}"
+    );
+    key
+}
+
+/// Review fix-PR-1 blocking 1: a day still a draft on the same engine is
+/// "can't tell" (a slow post may still flip it), never "not saved".
+#[tokio::test]
+async fn a_lost_daily_post_still_a_draft_is_unknown_until_the_engine_moved_on() {
+    let server = MockServer::start().await;
+    let (s, src) = session(&server);
+    Mock::given(method("POST"))
+        .respond_with(wiremock::ResponseTemplate::new(502))
+        .mount(&server)
+        .await;
+    day_reads(&server, "draft", None, 5).await;
+    let key = lost_day_post(&s).await;
+    assert_eq!(s.recheck(&key).await, Ok(Recheck::Unknown));
+    restart(&src, server.address().port());
+    assert_eq!(s.recheck(&key).await, Ok(Recheck::NotCommitted));
+    assert_eq!(
+        requests(&server, "POST").await.len(),
+        1,
+        "recheck never posts"
+    );
+}
+
+#[tokio::test]
+async fn a_lost_daily_post_that_shows_up_posted_names_its_journal_entry() {
+    let server = MockServer::start().await;
+    let (s, _) = session(&server);
+    Mock::given(method("POST"))
+        .respond_with(wiremock::ResponseTemplate::new(502))
+        .mount(&server)
+        .await;
+    day_reads(&server, "draft", None, 5).await;
+    let key = lost_day_post(&s).await;
+    day_reads(&server, "posted", Some(T1), 1).await;
+    assert_eq!(
+        s.recheck(&key).await,
+        Ok(Recheck::Committed {
+            transaction: TransactionId::parse(T1).ok()
+        })
+    );
+    assert_eq!(requests(&server, "POST").await.len(), 1);
+}
+
 async fn templates_session(server: &MockServer) -> (Session, Arc<FixedEndpoint>) {
     Mock::given(method("GET"))
         .and(path("/api/v1/desktop/info"))
