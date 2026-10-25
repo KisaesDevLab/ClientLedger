@@ -598,6 +598,7 @@ impl PreferencesScreen {
             demo.ai = crate::company::demo::DemoAi {
                 enabled: edits.ai.enabled,
                 categorization: edits.ai.bank_feed,
+                reading: edits.ai.read_documents,
             };
         }
         if self.link.is_demo() || self.tenant.is_none() {

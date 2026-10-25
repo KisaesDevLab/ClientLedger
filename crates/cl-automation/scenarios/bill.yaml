@@ -4,12 +4,15 @@
 # due 11/18), no save while the lines and the amount due disagree, "Lines
 # total = amount due ✓", Save & New, the next bill copying the last one
 # without amounts, a vendor credit, the closing-date password, the
-# unsaved-changes question on Prev, and Void.
+# unsaved-changes question on Prev, Void, Read with AI on the story invoice
+# (the demo's canned reading: read values refused until accepted, ghost
+# accounts set with Tab) and the same bill typed by hand with reading
+# switched off (AC3).
 #
 # The demo plays an engine with the P17 engine work (PR-A); the pinned
 # engine's refusals (closed period without `ap-closing-v1`, no Items tab
 # without `bill-lines-v1`) are covered by the unit tests. The vendor panel
-# (WP8) and Read with AI (WP7) have their own scenarios.
+# (WP8) has its own steps; Read with AI (WP7) is sections 9 and 10.
 #
 # Light and dark run in the same app, so the scenario is repeatable: it voids
 # the story bill at the end (Q-P13w), so the vendor has no posted bill when
@@ -17,7 +20,7 @@
 # synthetic demo closing-date password is "demo-close". All data is
 # synthetic.
 name: bill
-description: Mockup bill, refused mismatch, Save & New, prefill, vendor credit, closing password, Prev prompt, void.
+description: Mockup bill, refused mismatch, Save & New, prefill, vendor credit, closing password, Prev prompt, void, Read with AI, reading off.
 steps:
   # --- 1. The window and its toolbar -----------------------------------------
   - resize: {width: 1440, height: 940}
@@ -205,6 +208,124 @@ steps:
   - assert_state: {key: screen.last_action, equals: void}
   - assert_state: {key: screen.save.error, equals: false}
   - assert_state: {key: screen.mode, equals: new}
+  - assert_no_clipping: {}
+
+  # --- 9. Read with AI (WP7): the demo engine's canned reading of the story
+  # invoice (no AI provider is called). Read values wait for the owner's
+  # accept (non-negotiable 4); the accounts are ghosts set only by Tab ------
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.read.filled, equals: false}
+  - assert_not_exists: {role: button, label: Read with AI}
+  - type: {text: "assets/sample/docs/midwest_inv_55871.pdf", target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.draft_files, equals: 1}
+  - assert_state: {key: screen.read.available, equals: true}
+  # Nothing is read on upload: only the owner's click reads.
+  - assert_state: {key: screen.read.requests, equals: 0}
+  - assert_state: {key: screen.has_vendor, equals: false}
+  - click: {role: button, label: Read with AI}
+  - assert_state: {key: screen.read.filled, equals: true}
+  - assert_state: {key: screen.read.requests, equals: 1}
+  - assert_state: {key: screen.read.unaccepted, equals: 7}
+  - assert_state: {key: screen.read.low, equals: 1}
+  - assert_state: {key: screen.read.reconciled, equals: true}
+  - assert_state: {key: screen.has_vendor, equals: true}
+  - assert_state: {key: screen.date, equals: "2026-11-03"}
+  - assert_state: {key: screen.due_date, equals: "2026-11-18"}
+  - assert_value: {target: {role: text_input, label: Ref. no.}, equals: "INV-55871"}
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "1,480.00"}
+  - assert_exists: {role: label, label_contains: "Filled from midwest_inv_55871.pdf"}
+  - assert_exists: {role: label, label_contains: "Read from the document", index: 0}
+  - assert_exists: {role: label, label_contains: "Not sure about these lines"}
+  - assert_exists: {role: button, label: Clear and type it myself}
+  - assert_state: {key: screen.read.ghosts.open, equals: 2}
+  # A ghost is described, never the cell's value, until accepted.
+  - assert_value: {target: {label: "Account, line 1"}, equals: ""}
+  - assert_state: {key: screen.totals, equals: balanced}
+  - key: Alt+S
+  - assert_state: {key: screen.read.save_refused, equals: true}
+  - assert_state: {key: screen.saved_count, equals: 3}
+  - assert_exists: {role: label, label_contains: "then choose Accept these values"}
+  - assert_no_clipping: {}
+  - screenshot: read-with-ai
+  - key: Alt+A
+  - assert_state: {key: screen.read.unaccepted, equals: 0}
+  - assert_not_exists: {role: button, label: Accept these values}
+  - click: {label: "Account, line 1"}
+  - key: Tab
+  - assert_value: {target: {label: "Account, line 1"}, equals: "6210 · Equipment rental"}
+  - click: {label: "Account, line 2"}
+  - key: Tab
+  - assert_value: {target: {label: "Account, line 2"}, equals: "6210 · Equipment rental"}
+  - assert_state: {key: screen.read.ghosts.accepted, equals: 2}
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 4}
+  - assert_state: {key: screen.read.filled, equals: false}
+  # Void it again (Q-P13w): newest first by date, the sample's 11/04 bill,
+  # then this one.
+  - key: PageUp
+  - key: PageUp
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.date, equals: "2026-11-03"}
+  - assert_exists: {role: tab, label_contains: "INV-55871"}
+  - command: edit.void_transaction
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.mode, equals: new}
+
+  # --- 10. Reading switched off (AC3): no Read with AI, nothing sent, and
+  # the bill is typed and saved by hand as always -----------------------------
+  - command: edit.preferences
+  - assert_state: {key: screen.screen, equals: preferences}
+  - click: {role: button, label: AI suggestions}
+  - click: {role: check_box, label: Read bills and receipts}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dirty, equals: false}
+  - click: {role: tab, label_contains: "Enter Bill"}
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - click: {role: button, label: Clear}
+  - type: {text: "assets/sample/docs/midwest_inv_55871.pdf", target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.draft_files, equals: 1}
+  - assert_not_exists: {role: button, label: Read with AI}
+  - assert_state: {key: screen.read.available, equals: false}
+  - assert_state: {key: screen.read.requests, equals: 0}
+  - type: {text: Midwest Equip, target: {role: text_input, label: Vendor}}
+  - key: Tab
+  - assert_state: {key: screen.prefill.source, equals: default}
+  - click: {role: text_input, label: Date}
+  - key: Ctrl+A
+  - type: {text: "11/03/2026"}
+  - key: Tab
+  - type: {text: "INV-55902", target: {role: text_input, label: Ref. no.}}
+  - type: {text: "42.00", target: {role: text_input, label: "Amount due ($)"}}
+  - key: Tab
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - type: {text: "42.00"}
+  - key: Tab
+  - assert_state: {key: screen.totals, equals: balanced}
+  - assert_not_exists: {label_contains: "Read from the document"}
+  - screenshot: reading-off
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 5}
+  - assert_state: {key: screen.read.requests, equals: 0}
+  - key: PageUp
+  - key: PageUp
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_exists: {role: tab, label_contains: "INV-55902"}
+  - command: edit.void_transaction
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  # The switch back on, so the next theme's run starts the same.
+  - click: {role: tab, label: Preferences}
+  - click: {role: check_box, label: Read bills and receipts}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dirty, equals: false}
+  - command: file.close_window
+  - click: {role: tab, label_contains: "Enter Bill"}
+  - assert_state: {key: screen.screen, equals: enter_bill}
   - assert_no_clipping: {}
   # Minimum window (960 x 640): the side panel goes under the form.
   - resize: {width: 960, height: 640}

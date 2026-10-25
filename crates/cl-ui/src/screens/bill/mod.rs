@@ -1058,13 +1058,12 @@ impl Screen for EnterBillScreen {
         if self.inputs.rev != self.header.revision() {
             self.sync_inputs();
         }
-        let mut form = self.compose();
-        if self.read.poll(&mut form) {
-            // The reading filled the form (WP7): read, never accepted.
-            self.take_form(form);
-        }
+        // A finished reading fills the form (WP7): read, never accepted.
+        self.poll_read();
         self.panel_tick();
         self.draw(ui);
+        // A read field the owner changed counts as accepted.
+        self.track_read();
         // Leaving the lines (Q-P13r b).
         let in_grid = self.expenses.has_focus() || self.items.has_focus();
         if self.in_grid && !in_grid {

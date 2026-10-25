@@ -115,6 +115,8 @@ pub struct DemoAi {
     pub enabled: bool,
     /// The account-suggestion task (`categorization`) is on.
     pub categorization: bool,
+    /// Reading bills and receipts (`receipt_ocr`) is on (P17 Read with AI).
+    pub reading: bool,
 }
 
 impl Default for DemoAi {
@@ -122,6 +124,7 @@ impl Default for DemoAi {
         DemoAi {
             enabled: true,
             categorization: true,
+            reading: true,
         }
     }
 }
@@ -297,7 +300,7 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
         "acceptedAt": "2026-10-01T08:05:00.000Z",
         "aiEnabled": switches.enabled,
         "enabledTasks": {
-            "categorization": switches.categorization, "receipt_ocr": true, "report_summary": true,
+            "categorization": switches.categorization, "receipt_ocr": switches.reading, "report_summary": true,
         },
         "isStale": false,
     }))
