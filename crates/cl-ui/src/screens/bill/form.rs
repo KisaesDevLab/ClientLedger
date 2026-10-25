@@ -231,9 +231,27 @@ impl EnterBillScreen {
         if self.prefill.dropped {
             form::hint(ui, tokens, &t("bill.prefill.dropped"));
         }
-        // The source-document banner (WP7): "Attached from <file> in your
-        // receipt inbox", or the reading's values to accept.
+        // The source-document banner: "Attached from <file> in your receipt
+        // inbox" (Q-P17j, WP5's text), then the reading's values to accept
+        // (WP7).
         let name = self.attach.viewer.source().map(|s| s.name.clone());
+        if let Some(n) = name.as_deref().filter(|_| self.attach.from_inbox) {
+            egui::Frame::new()
+                .fill(tokens.info_tint)
+                .stroke(Stroke::new(1.0, tokens.border_default))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(t_with("inbox.attached_from", &[("name", n)]))
+                                .color(tokens.text_primary),
+                        )
+                        .wrap(),
+                    );
+                });
+        }
         let input = super::doc_read::ReadInput {
             link: &self.link,
             file_name: name.as_deref(),

@@ -423,6 +423,45 @@ fn a_statement_line_opens_a_prefilled_unsaved_bill() {
 }
 
 #[test]
+fn an_inbox_file_rides_on_the_save_and_is_filed_onto_the_bill() {
+    let (_d, link) = link();
+    let draft = cl_api::DraftKey::new();
+    let a = demo_bills::upload(
+        &mut link.demo_state().expect("demo"),
+        AttachTo::Draft(draft),
+        demo_bills::STORY_PDF_NAME,
+        demo_bills::STORY_PDF,
+    )
+    .expect("uploaded");
+    let mut s = screen(&link);
+    assert!(s.open_with(OpenPayload::InboxDraft(
+        crate::screens::receipt_inbox::InboxDraft {
+            draft,
+            attachment: a.id,
+            file: crate::widgets::pdf_viewer::DocSource {
+                name: demo_bills::STORY_PDF_NAME.into(),
+                bytes: Arc::from(demo_bills::STORY_PDF.to_vec()),
+            },
+        }
+    )));
+    assert_eq!(s.state()["attachments"]["from_inbox"], true);
+    assert_eq!(s.state()["attachments"]["draft_files"], 1);
+    frames(&mut s, 1440.0, 1);
+    fill(
+        &mut s,
+        demo_bills::STORY_VENDOR,
+        "18.25",
+        &[("6210", "18.25")],
+    );
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    let id = s.save.last.as_ref().expect("last").id;
+    let demo = link.demo_state().expect("demo");
+    let filed = crate::company::demo::checks::find_attachment(&demo, a.id).expect("file");
+    assert_eq!(filed.attachable_type, "bill");
+    assert_eq!(filed.attachable_id, id.to_string());
+}
+
+#[test]
 fn the_draft_is_mapped_field_by_field_with_item_lines() {
     let (_d, link) = link();
     let mut s = screen(&link);

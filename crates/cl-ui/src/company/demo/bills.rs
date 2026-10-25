@@ -53,7 +53,6 @@ pub const STORY_PDF_NAME: &str = "midwest_inv_55871.pdf";
 pub struct DemoBills {
     info: BTreeMap<TransactionId, BillInfo>,
     history: Vec<(TransactionId, &'static str)>,
-    files: Vec<DemoFile>,
     /// Write requests that reached the demo engine (creates, edits, voids,
     /// deletes). Tests use it to prove that a refused save sent nothing.
     pub writes: u32,
@@ -79,18 +78,6 @@ impl fmt::Debug for DemoBills {
             .field("writes", &self.writes)
             .finish_non_exhaustive()
     }
-}
-
-/// A file in the demo's bill attachment store.
-#[derive(Clone)]
-struct DemoFile {
-    id: AttachmentId,
-    /// `draft`, `bill` or `vendor_credit`.
-    kind: &'static str,
-    /// The draft key or the record id.
-    to: String,
-    name: String,
-    bytes: Vec<u8>,
 }
 
 /// One line's own fields (the ledger keeps account, amount and memo).
@@ -470,20 +457,15 @@ fn save(
     Ok(id)
 }
 
+/// Moves a draft's files onto the saved record (the shared store's
+/// `link_draft`, so the receipt inbox sees the file filed).
 fn relink(state: &mut DemoState, draft: DraftKey, id: TransactionId, credit: bool) -> u64 {
-    let key = draft.to_string();
-    let mut moved = 0;
-    for f in state
-        .bills
-        .files
-        .iter_mut()
-        .filter(|f| f.kind == "draft" && f.to == key)
-    {
-        f.kind = if credit { "vendor_credit" } else { "bill" };
-        f.to = id.to_string();
-        moved += 1;
-    }
-    moved
+    let to = if credit {
+        AttachTo::VendorCredit(id)
+    } else {
+        AttachTo::Bill(id)
+    };
+    super::checks::link_draft(state, draft, to) as u64
 }
 
 fn check_caps(state: &DemoState, doc: &Doc<'_>, password: Option<&Secret>) -> Result<(), ApiError> {
@@ -909,19 +891,8 @@ pub fn history(state: &DemoState, id: TransactionId) -> Vec<&'static str> {
 // ------------------------------------------------------------------------
 // Files.
 
-fn attachment(f: &DemoFile) -> Option<Attachment> {
-    serde_json::from_value(serde_json::json!({
-        "id": f.id.to_string(),
-        "fileName": f.name,
-        "fileSize": f.bytes.len(),
-        "mimeType": cl_api::FileKind::sniff(&f.bytes).map(cl_api::FileKind::mime),
-        "attachableType": f.kind,
-        "attachableId": f.to,
-    }))
-    .ok()
-}
-
-/// `POST /attachments`: the file is checked as the client checks it.
+/// `POST /attachments`: into the demo's one attachment store (shared with
+/// Write Check and the receipt inbox).
 ///
 /// # Errors
 /// `Local(AttachmentTooLarge | AttachmentType)`.
@@ -931,33 +902,13 @@ pub fn upload(
     name: &str,
     bytes: &[u8],
 ) -> Result<Attachment, ApiError> {
-    cl_api::check_file(bytes).map_err(ApiError::Local)?;
-    let n = state.bills.files.len() + 1;
-    let id =
-        AttachmentId::parse(&format!("d0000000-0000-4000-8000-e{n:011}")).map_err(|_| invalid())?;
-    let f = DemoFile {
-        id,
-        kind: to.attachable_type(),
-        to: to.attachable_id(),
-        name: name.to_string(),
-        bytes: bytes.to_vec(),
-    };
-    let a = attachment(&f).ok_or_else(invalid)?;
-    state.bills.files.push(f);
-    Ok(a)
+    super::checks::upload(state, to, name, bytes)
 }
 
 /// `GET /attachments` for a bill, a credit or a draft.
 #[must_use]
 pub fn attachments(state: &DemoState, of: AttachTo) -> Vec<Attachment> {
-    let (kind, to) = (of.attachable_type(), of.attachable_id());
-    state
-        .bills
-        .files
-        .iter()
-        .filter(|f| f.kind == kind && f.to == to)
-        .filter_map(attachment)
-        .collect()
+    super::checks::attachments(state, of)
 }
 
 /// `GET /attachments/{id}/download`.
@@ -965,13 +916,7 @@ pub fn attachments(state: &DemoState, of: AttachTo) -> Vec<Attachment> {
 /// # Errors
 /// `NotFound`.
 pub fn download(state: &DemoState, id: AttachmentId) -> Result<Vec<u8>, ApiError> {
-    state
-        .bills
-        .files
-        .iter()
-        .find(|f| f.id == id)
-        .map(|f| f.bytes.clone())
-        .ok_or(ApiError::NotFound { code: None })
+    super::checks::download(state, id)
 }
 
 /// `POST /bills/{id}/attach-draft`: moves the draft's files onto the bill.
