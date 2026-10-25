@@ -1,0 +1,264 @@
+# Enter Bill (P17 plan §6) against `clientledger --demo`: the mockup's story
+# (Midwest Equipment Rental, INV-55871, 1,330.00 + 150.00 = 1,480.00 on
+# 6210 · Equipment rental), the vendor's default account and terms (Net 15,
+# due 11/18), no save while the lines and the amount due disagree, "Lines
+# total = amount due ✓", Save & New, the next bill copying the last one
+# without amounts, a vendor credit, the closing-date password, the
+# unsaved-changes question on Prev, and Void.
+#
+# The demo plays an engine with the P17 engine work (PR-A); the pinned
+# engine's refusals (closed period without `ap-closing-v1`, no Items tab
+# without `bill-lines-v1`) are covered by the unit tests. The vendor panel
+# (WP8) and Read with AI (WP7) have their own scenarios.
+#
+# Light and dark run in the same app, so the scenario is repeatable: it voids
+# the story bill at the end (Q-P13w), so the vendor has no posted bill when
+# the next pass starts; the closed-period bill is for another vendor. The
+# synthetic demo closing-date password is "demo-close". All data is
+# synthetic.
+name: bill
+description: Mockup bill, refused mismatch, Save & New, prefill, vendor credit, closing password, Prev prompt, void.
+steps:
+  # --- 1. The window and its toolbar -----------------------------------------
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+B
+  - assert_exists: {role: tab, label_contains: "Enter Bill"}
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_state: {key: screen.kind, equals: bill}
+  - assert_state: {key: screen.date, equals: "2026-11-04"}
+  - assert_state: {key: screen.bill_received, equals: true}
+  - assert_exists: {role: check_box, label: Bill received}
+  - assert_disabled: {role: button, label: Save as Template}
+  - assert_exists: {label: Vendor credit}
+  - assert_exists: {label_contains: "Items"}
+  - assert_exists: {label: Source document}
+
+  # --- 2. Vendor: the default account and terms (no earlier bill) ------------
+  - type: {text: Midwest Equip, target: {role: text_input, label: Vendor}}
+  - key: Tab
+  - assert_value: {target: {role: text_input, label: Vendor}, equals: "Midwest Equipment Rental"}
+  - assert_state: {key: screen.has_vendor, equals: true}
+  - assert_state: {key: screen.prefill.source, equals: default}
+  - assert_state: {key: screen.terms, equals: net_15}
+  - assert_value: {target: {label: "Account, line 1"}, equals: "6210 · Equipment rental"}
+  - assert_value: {target: {label: "Amount, line 1"}, equals: ""}
+  - assert_value: {target: {role: multiline_text_input, label: Address}, equals: "Midwest Equipment Rental\n88 Industrial Pkwy\nJoplin, MO 64801"}
+
+  # --- 3. Date, ref, amount due, memo ----------------------------------------
+  - click: {role: text_input, label: Date}
+  - key: Ctrl+A
+  - type: {text: "11/03/2026"}
+  - key: Tab
+  - assert_state: {key: screen.date, equals: "2026-11-03"}
+  # Net 15 from 11/03.
+  - assert_state: {key: screen.due_date, equals: "2026-11-18"}
+  - assert_value: {target: {role: text_input, label: Bill due}, equals: "11/18/2026"}
+  - type: {text: "INV-55871", target: {role: text_input, label: Ref. no.}}
+  - type: {text: "1480.00", target: {role: text_input, label: "Amount due ($)"}}
+  - key: Tab
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "1,480.00"}
+  - click: {role: text_input, label: Memo}
+  - type: {text: "Mini excavator + delivery · Long Creek Marina seawall"}
+  - assert_exists: {role: tab, label_contains: "INV-55871"}
+
+  # --- 4. Lines that disagree: nothing is saved ------------------------------
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - type: {text: "1330.00"}
+  - key: Tab
+  - type: {text: Mini excavator, 2 days}
+  - key: Enter
+  - type: {text: "6210"}
+  - key: Tab
+  - type: {text: "149.00"}
+  - key: Tab
+  - type: {text: Delivery and pickup}
+  - key: Enter
+  - assert_state: {key: screen.expense_lines, equals: 2}
+  - assert_state: {key: screen.totals, equals: remaining}
+  - assert_exists: {role: label, label_contains: "1.00 left to assign"}
+  - key: Alt+S
+  - assert_state: {key: screen.save.refused, equals: lines_disagree}
+  - assert_state: {key: screen.saving, equals: false}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - assert_exists: {role: label, label_contains: "lines don't add up to the amount due"}
+  - assert_exists: {role: tab, label_contains: "Enter Bill"}
+  - screenshot: lines-disagree
+
+  # --- 5. Fixed: "Lines total = amount due ✓", Save & New ---------------------
+  - click: {role: grid_cell, label: "Amount, line 2"}
+  - type: {text: "150.00"}
+  - key: Tab
+  - assert_state: {key: screen.totals, equals: balanced}
+  - assert_exists: {role: label, label: "Lines total = amount due ✓"}
+  - assert_state: {key: screen.save.refused, equals: null}
+  - assert_no_clipping: {}
+  - screenshot: balanced
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 1}
+  - assert_state: {key: screen.last_saved.kind, equals: bill}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.has_vendor, equals: false}
+  # Save & New keeps the date.
+  - assert_state: {key: screen.date, equals: "2026-11-03"}
+
+  # --- 6. A vendor credit: the vendor's last bill comes over, no amounts -------
+  - click: {label: Vendor credit}
+  - assert_state: {key: screen.kind, equals: credit}
+  - assert_exists: {role: tab, label_contains: "Vendor Credit"}
+  - assert_exists: {role: text_input, label: "Credit amount ($)"}
+  - type: {text: Midwest Equip, target: {role: text_input, label: Vendor}}
+  - key: Tab
+  - assert_state: {key: screen.prefill.source, equals: bill}
+  - assert_value: {target: {label: "Account, line 1"}, equals: "6210 · Equipment rental"}
+  - assert_value: {target: {label: "Amount, line 1"}, equals: ""}
+  - assert_value: {target: {label: "Amount, line 2"}, equals: ""}
+  - click: {role: grid_cell, label: "Account, line 2"}
+  - key: Ctrl+Delete
+  - assert_state: {key: screen.expense_lines, equals: 1}
+  - type: {text: "150.00", target: {role: text_input, label: "Credit amount ($)"}}
+  - key: Tab
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - type: {text: "150.00"}
+  - key: Tab
+  - assert_state: {key: screen.totals, equals: balanced}
+  - screenshot: vendor-credit
+  - key: Alt+N
+  - assert_state: {key: screen.saved_count, equals: 2}
+  - assert_state: {key: screen.last_saved.kind, equals: credit}
+  - click: {label: Bill}
+  - assert_state: {key: screen.kind, equals: bill}
+
+  # --- 7. Closed period (demo closing date 09/30/2026) ------------------------
+  - click: {role: text_input, label: Date}
+  - key: Ctrl+A
+  - type: {text: "09/15/2026"}
+  - key: Tab
+  - assert_state: {key: screen.date, equals: "2026-09-15"}
+  # The line first, so no prefill runs; leaving the lines gives the blank
+  # amount due their total. (The cell may still have its editor open from
+  # the save, so it is found by its label alone.)
+  - click: {label: "Account, line 1"}
+  - type: {text: "6210"}
+  - key: Tab
+  - type: {text: "18.25"}
+  - key: Tab
+  - type: {text: Closed-period scenario bill}
+  - key: Enter
+  - type: {text: Stone County, target: {role: text_input, label: Vendor}}
+  - key: Tab
+  - assert_state: {key: screen.has_vendor, equals: true}
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "18.25"}
+  - assert_state: {key: screen.totals, equals: balanced}
+  - key: Alt+N
+  - assert_state: {key: screen.closing, equals: asking}
+  - assert_exists: {role: password_input, label: Closing-date password}
+  - assert_exists: {role: label, label_contains: "closing date (09/30/2026)"}
+  - screenshot: closing-password
+  - click: {role: button, label: Cancel}
+  - assert_state: {key: screen.closing, equals: cancelled}
+  - assert_state: {key: screen.saved_count, equals: 2}
+  - key: Alt+N
+  - assert_state: {key: screen.closing, equals: asking}
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: not-the-password}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.closing, equals: rejected}
+  - assert_not_exists: {label_contains: not-the-password}
+  - assert_state: {key: screen.saved_count, equals: 2}
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: demo-close}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.closing, equals: done}
+  - assert_state: {key: screen.saved_count, equals: 3}
+  - assert_state: {key: screen.dirty, equals: false}
+
+  # --- 8. Back to INV-55871 (Page Up, newest first by date: the sample's
+  # 11/04 bill, then this pass's 11/03 bill): Prev on unsaved changes asks;
+  # then void it (Q-P13w) ------------------------------------------------------
+  - key: PageUp
+  - key: PageUp
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.date, equals: "2026-11-03"}
+  - assert_exists: {role: tab, label_contains: "INV-55871"}
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "1,480.00"}
+  - click: {role: text_input, label: Memo}
+  - key: End
+  - type: {text: " (fall)"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - key: PageUp
+  - assert_state: {key: screen.nav_prompt, equals: true}
+  - assert_exists: {role: button, label: Discard changes}
+  - assert_exists: {role: button, label: Keep editing}
+  - screenshot: nav-prompt
+  - click: {role: button, label: Keep editing}
+  - assert_state: {key: screen.nav_prompt, equals: false}
+  - assert_state: {key: screen.dirty, equals: true}
+  - command: edit.void_transaction
+  - assert_state: {key: screen.void_open, equals: true}
+  - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
+  - click: {role: button, label: Void}
+  - assert_state: {key: screen.last_action, equals: void}
+  - assert_state: {key: screen.save.error, equals: false}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_no_clipping: {}
+  # Minimum window (960 x 640): the side panel goes under the form.
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: text_input, label: "Amount due ($)"}
+  - assert_no_clipping: {}
+  - screenshot: enter-bill-960x640
+  - resize: {width: 1440, height: 940}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Enter Bill"}
+
+# `ui-check bill --compare`: the mockup example typed into a new window and
+# left unsaved, with its invoice attached as the source document.
+compare:
+  - key: Ctrl+B
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - type: {text: Midwest Equip, target: {role: text_input, label: Vendor}}
+  - key: Tab
+  - click: {role: text_input, label: Date}
+  - key: Ctrl+A
+  - type: {text: "11/03/2026"}
+  - key: Tab
+  - type: {text: "INV-55871", target: {role: text_input, label: Ref. no.}}
+  - type: {text: "1480.00", target: {role: text_input, label: "Amount due ($)"}}
+  - key: Tab
+  - click: {role: text_input, label: Memo}
+  - type: {text: "Mini excavator + delivery · Long Creek Marina seawall"}
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - type: {text: "1330.00"}
+  - key: Tab
+  - type: {text: Mini excavator, 2 days}
+  - key: Tab
+  - type: {text: Long Creek}
+  - key: Tab
+  - key: Space
+  - key: Tab
+  - type: {text: Install}
+  - key: Enter
+  - key: Enter
+  - type: {text: "6210"}
+  - key: Tab
+  - type: {text: "150.00"}
+  - key: Tab
+  - type: {text: Delivery and pickup}
+  - key: Tab
+  - type: {text: Long Creek}
+  - key: Tab
+  - key: Space
+  - key: Tab
+  - type: {text: Install}
+  - key: Enter
+  - type: {text: "assets/sample/docs/midwest_inv_55871.pdf", target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.draft_files, equals: 1}
+  - assert_state: {key: screen.totals, equals: balanced}
+  - assert_value: {target: {role: grid_cell, label: "Customer / Job, line 1"}, equals: "Long Creek Marina"}
