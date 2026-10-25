@@ -697,6 +697,58 @@ impl EnterBillScreen {
                 self.inputs.rev = self.header.revision();
                 self.refresh_terms_dates();
             }
+            // P17 WP8: the custom term's early-payment discount
+            // (`bill-terms-v1`); cl-model checks both-or-neither and the days.
+            if self.caps().terms {
+                self.custom_discount_ui(ui, tokens, width);
+            }
+        }
+    }
+
+    /// Discount % and Discount days of a custom term (WP8).
+    fn custom_discount_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
+        let l = above(ui, tokens, &t("bill.discount_percent"));
+        let r = ui
+            .add(
+                egui::TextEdit::singleline(&mut self.inputs.discount_percent)
+                    .desired_width(width - 8.0)
+                    .char_limit(9)
+                    .font(egui::TextStyle::Monospace),
+            )
+            .labelled_by(l.id)
+            .on_hover_text(t("bill.discount_percent.tip"));
+        self.take_focus(Field::Discount, &r);
+        if r.changed() {
+            let p = cl_model::forms::bill::Percent::parse_user(&self.inputs.discount_percent);
+            self.header
+                .edit(field::DISCOUNT, |h| h.discount_percent = p);
+            self.inputs.rev = self.header.revision();
+            self.refresh_terms_dates();
+        }
+        let text = self.inputs.discount_percent.trim();
+        if !text.is_empty() && cl_model::forms::bill::Percent::parse_user(text).is_none() {
+            ui.label(
+                RichText::new(t("bill.discount_percent.invalid"))
+                    .size(12.0)
+                    .color(tokens.warn_text),
+            );
+        }
+        let d = above(ui, tokens, &t("bill.discount_days"));
+        let r = ui
+            .add(
+                egui::TextEdit::singleline(&mut self.inputs.discount_days)
+                    .desired_width(width - 8.0)
+                    .char_limit(3)
+                    .font(egui::TextStyle::Monospace),
+            )
+            .labelled_by(d.id);
+        self.take_focus(Field::DiscountDays, &r);
+        if r.changed() {
+            let days = self.inputs.discount_days.trim().parse::<u16>().ok();
+            self.header
+                .edit(field::DISCOUNT, |h| h.discount_days = days);
+            self.inputs.rev = self.header.revision();
+            self.refresh_terms_dates();
         }
     }
 
@@ -757,7 +809,44 @@ impl EnterBillScreen {
 
     fn discount_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
         let l = above(ui, tokens, &t("bill.discount_date"));
-        // From the engine's terms (bill-terms-v1); "—" without a discount.
+        // With bill-terms-v1 the owner may type it (S3: sent only then);
+        // cleared, the terms decide again (WP8).
+        if self.kind() == BillKind::Bill && self.caps().terms {
+            let before = self.inputs.discount.text.clone();
+            let r = ui
+                .add(
+                    egui::TextEdit::singleline(&mut self.inputs.discount.text)
+                        .desired_width(width - 8.0)
+                        .font(egui::TextStyle::Monospace),
+                )
+                .labelled_by(l.id)
+                .on_hover_text(t("bill.discount_date.owner_tip"));
+            self.take_focus(Field::DiscountDate, &r);
+            if r.changed() {
+                self.inputs.discount.typed(&before, self.today);
+                let value = self.inputs.discount.value;
+                if value.is_some() && value != self.header.current().discount_date {
+                    self.header
+                        .edit(field::DISCOUNT_DATE, |h| h.set_discount_by_owner(value));
+                    self.inputs.rev = self.header.revision();
+                }
+            }
+            if r.lost_focus() {
+                self.inputs.discount.settle();
+                if self.inputs.discount.text.trim().is_empty()
+                    && self.header.current().discount_overridden
+                {
+                    self.header
+                        .edit(field::DISCOUNT_DATE, |h| h.set_discount_by_owner(None));
+                    self.inputs.rev = self.header.revision();
+                    self.terms_dates_for = None;
+                    self.refresh_terms_dates();
+                }
+            }
+            return;
+        }
+        // From the terms (the local preview without bill-terms-v1); "—"
+        // without a discount.
         let mut text = self
             .header
             .current()
@@ -1057,20 +1146,10 @@ impl EnterBillScreen {
     fn side_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         self.source_card_ui(ui, tokens);
         ui.add_space(12.0);
-        let f = self.header.current();
-        let reference = f.reference.clone();
-        let input = super::vendor_panel::PanelInput {
-            link: &self.link,
-            kind: f.kind,
-            vendor: f.vendor,
-            ref_no: &reference,
-            date: f.date,
-            editing: self.editing.as_ref().map(|e| e.id),
-        };
-        if let super::vendor_panel::PanelEvent::OpenRecord(kind, id) =
-            super::vendor_panel::show(ui, &mut self.panel, &input, tokens)
-        {
-            self.open_from_panel(kind, id);
+        match self.with_panel(|panel, input| super::vendor_panel::show(ui, panel, input, tokens)) {
+            super::vendor_panel::PanelEvent::OpenRecord(kind, id) => self.open_from_panel(kind, id),
+            super::vendor_panel::PanelEvent::GoBack => self.focus = Some(Field::Reference),
+            super::vendor_panel::PanelEvent::None => {}
         }
     }
 
@@ -1250,6 +1329,11 @@ impl EnterBillScreen {
             self.void = super::VoidPrompt::default();
             return true;
         }
+        // The duplicate-ref question closes as Go back (WP8).
+        if self.panel.go_back() {
+            self.focus = Some(Field::Reference);
+            return true;
+        }
         if self.vendor_list {
             self.vendor_list = false;
             return true;
@@ -1264,6 +1348,11 @@ impl EnterBillScreen {
             Field::Terms | Field::TermsDays => {
                 now.terms != saved.terms || now.terms_days != saved.terms_days
             }
+            Field::Discount | Field::DiscountDays => {
+                now.discount_percent != saved.discount_percent
+                    || now.discount_days != saved.discount_days
+            }
+            Field::DiscountDate => now.discount_date != saved.discount_date,
             Field::Amount => now.amount_due != saved.amount_due,
             Field::DueDate => now.due_date != saved.due_date,
             Field::Memo => now.memo != saved.memo,
@@ -1278,6 +1367,14 @@ impl EnterBillScreen {
             Field::Terms | Field::TermsDays => {
                 h.terms.clone_from(&saved.terms);
                 h.terms_days = saved.terms_days;
+            }
+            Field::Discount | Field::DiscountDays => {
+                h.discount_percent = saved.discount_percent;
+                h.discount_days = saved.discount_days;
+            }
+            Field::DiscountDate => {
+                h.discount_date = saved.discount_date;
+                h.discount_overridden = saved.discount_overridden;
             }
             Field::Amount => {
                 h.amount_due = saved.amount_due;
