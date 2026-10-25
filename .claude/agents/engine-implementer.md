@@ -1,7 +1,7 @@
 ---
 name: engine-implementer
 description: Implements MyBooks engine changes (TypeScript, in the engine/ submodule) recorded in UPSTREAM.md — endpoints, migrations, adapters, OpenAPI updates — on a clientledger/<feature> branch, with the engine's own tests. Model set per invocation (sonnet for S changes, opus for M/L or anything touching posting, balances, inventory costing, or sales tax math).
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell
 model: opus
 effort: medium
 maxTurns: 150

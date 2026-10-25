@@ -204,7 +204,7 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 | --- | --- | --- | --- | --- |
 | L | M | P13–P15 | rust-implementer (sonnet) | ui-verifier |
 
-**Decisions:** Q-63, Q-71, Q-106, Q-130, Q-149, Q-169, Q-171, Q-217, Q-264, Q-265, Q-266, Q-267, Q-270, Q-272, Q-273, Q-274.
+**Decisions:** Q-63, Q-71, Q-106, Q-130, Q-149, Q-169, Q-171, Q-217, Q-264, Q-265, Q-266, Q-267, Q-270, Q-272, Q-273, Q-274, Q-278.
 
 **Mockup:** `docs/design/mockups/Home.html` and `docs/design/screenshots/Home.png` (Home content).
 
@@ -224,6 +224,7 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 3. Needs attention: bank items waiting, overdue invoices, bills overdue or due within 7 days (Q-169), unposted payroll imports, open to-dos (Q-130), reorder alerts (Q-149), weekly health-check findings (Q-171), backup reminder (Q-217). In-app only (Q-71). — `feat(home): needs attention`
 4. Charts with a permissive egui plotting crate (Q-106), each drilling into its report. — `feat(home): charts`
 5. Setup checklist for new companies (Q-63). — `feat(home): setup checklist`
+6. Ko-fi support button (Q-278): a small "Support ClientLedger on Ko-fi" button on Home that opens `https://ko-fi.com/I3D3227TTP` in the default browser when clicked (tooltip shows the address; no request from the app itself; no Ko-fi logo artwork). Tests: unit test that the URL is the constant and nothing opens without a click; home scenario finds the button by its AccessKit label. — `feat(home): Ko-fi support button`
 
 **Tests:** attention counts equal engine queries; checklist auto-ticks; scenario; Enter-key option in both modes.
 
@@ -238,6 +239,7 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 - [ ] Bulk Entry rows can be multi-selected and given an account, name, tag, date or memo in one undoable action.
 - [ ] Every lane action opens its form or a tracked placeholder.
 - [ ] Needs-attention counts match engine queries.
+- [ ] Home shows a Ko-fi support button that opens the Ko-fi page in the browser only when clicked.
 - [ ] Screen matches its mockup per docs/design/README.md (`ui-check --compare` reviewed by ui-verifier); any deviation is listed in the PR and QUESTIONS.md.
 
 ---

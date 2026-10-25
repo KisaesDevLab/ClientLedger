@@ -1,0 +1,178 @@
+# Home (P16 steps 1-6) against `clientledger --demo`: the four lanes from the
+# command registry, the account balances "In your books", Needs attention,
+# the setup checklist (5 of 6 done), six months of income and expenses from
+# the (demo) engine's Profit & Loss, and the Ko-fi button (hovered, never
+# clicked).
+# The demo stands in for an engine with dashboard-exact-v1 (U-76), so the
+# lane figures show; the bank-file column is a dash until bank-file import
+# (U-77). A lane action opens its form (Write Check) or the placeholder of a
+# later phase (Create Invoice), and a Needs attention link opens its window.
+# Then the minimum window (960 x 640) and 200% zoom on it (480 x 320
+# points): the lanes go two, then one to a row, and the body scrolls under
+# the title. Nothing is saved. Synthetic demo data.
+name: home
+description: Home's lanes, balances and Needs attention; lane actions open their forms or placeholders; 1440 x 940, 960 x 640 and 200%.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Alt+H
+  - assert_state: {key: screen.screen, equals: home}
+  - assert_state: {key: screen.loading, equals: false}
+  - assert_state: {key: screen.dashboard_exact, equals: true}
+  - assert_state: {key: screen.lane_columns, equals: 4}
+  - assert_exists: {role: label, label: Home}
+  - assert_exists: {role: button, label: Refresh}
+
+  # --- Setup checklist: ticks come from the reads (5 of 6; no mail server) ---
+  - assert_exists: {role: button, label: Setup checklist 5 of 6 done}
+  - assert_exists: {role: link, label: Set up email for invoices}
+  - assert_state: {key: screen.checklist.done, equals: 5}
+  - assert_state: {key: screen.checklist.total, equals: 6}
+  - assert_state: {key: screen.checklist.first_open, equals: email}
+  - assert_state: {key: screen.checklist.expanded, equals: false}
+  - click: {role: button, label: Setup checklist 5 of 6 done}
+  - assert_state: {key: screen.checklist.expanded, equals: true}
+  - assert_exists: {role: button, label: Hide checklist}
+  - assert_exists: {role: label, label: Add a bank account (done)}
+  - screenshot: home-checklist
+  - click: {role: button, label: Setup checklist 5 of 6 done}
+  - assert_state: {key: screen.checklist.expanded, equals: false}
+
+  # --- Lanes: each heading and action ---------------------------------------
+  - assert_exists: {role: label, label: MONEY IN}
+  - assert_exists: {role: label, label: MONEY OUT}
+  - assert_exists: {role: label, label: BANKING}
+  - assert_exists: {role: label, label: CLOSE & REPORT}
+  - assert_exists: {role: button, label: Create Invoice}
+  - assert_exists: {role: button, label: Receive Payment}
+  - assert_exists: {role: button, label: Sales Receipt}
+  - assert_exists: {role: button, label: Make Deposit}
+  - assert_exists: {role: button, label: Enter Bill}
+  - assert_exists: {role: button, label: Pay Bills}
+  - assert_exists: {role: button, label: Write Check}
+  - assert_exists: {role: button, label: Record Card Charge}
+  - assert_exists: {role: button, label: Review Bank Feed}
+  - assert_exists: {role: button, label: Open Register}
+  - assert_exists: {role: button, label: Reconcile}
+  - assert_exists: {role: button, label: Transfer Funds}
+  - assert_exists: {role: button, label: Make Journal Entry}
+  - assert_exists: {role: button, label: Profit & Loss}
+  # The rail's Tools list has it too.
+  - assert_count: {target: {role: button, label: Send to My Accountant}, count: 2}
+  - assert_exists: {role: button, label: Set Closing Date}
+  - assert_exists: {role: label, label: Clients owe you}
+  - assert_exists: {role: label, label: "$48,912.40"}
+  - assert_exists: {role: label, label: Bills due in 7 days}
+  - assert_exists: {role: label, label: "$7,471.90"}
+  - assert_exists: {role: label, label: "Operating Checking · 09/30/2026"}
+  - assert_exists: {role: label, label: Sales tax owed}
+  - assert_state: {key: screen.footers.sales_tax_owed, equals: false}
+
+  # --- Account balances -------------------------------------------------------
+  - assert_exists: {role: label, label: Account balances}
+  - assert_exists: {role: label, label: In your books}
+  - assert_exists: {role: label, label: Bank file}
+  - assert_exists: {role: label, label: "1010 · Operating Checking"}
+  - assert_exists: {role: label, label: "84,210.55"}
+  - assert_state: {key: screen.balances_source, equals: cash_position}
+  - assert_state: {key: screen.balances_rows, equals: 3}
+
+  # --- Needs attention: counts equal the (demo) engine's answers -------------
+  - assert_exists: {role: label, label: Needs attention}
+  - assert_state: {key: screen.attention.bank_waiting, equals: 37}
+  - assert_state: {key: screen.attention.bills_due, equals: 3}
+  - assert_state: {key: screen.attention.reconcile_unfinished, equals: 1}
+  - assert_state: {key: screen.attention.invoices_overdue, equals: 2}
+  - assert_state: {key: screen.attention.payroll_unposted, equals: 1}
+  - assert_state: {key: screen.attention.todos, equals: null}
+  - assert_state: {key: screen.attention.reorder, equals: null}
+  - assert_state: {key: screen.attention.health_check, equals: null}
+  - assert_state: {key: screen.backup_due, equals: false}
+  - assert_exists: {role: label, label: 37 bank transactions to review}
+  - assert_exists: {role: label, label: 3 bills overdue or due within 7 days}
+  - assert_exists: {role: label, label_contains: arrive in a later update}
+  - assert_exists: {role: label, label: Backed up today 8:12 AM}
+  - assert_exists: {role: link, label: Review}
+
+  # --- Income and expenses: six months of the engine's Profit & Loss --------
+  - assert_exists: {role: label, label: "Income and expenses · last 6 months"}
+  - assert_state: {key: screen.chart.months, equals: 6}
+  - assert_state: {key: screen.chart.missing, equals: 0}
+  - assert_exists: {role: button, label_contains: "May: income "}
+  - assert_exists: {role: button, label_contains: "October: income "}
+  - assert_exists: {role: label, label: October profit}
+  - assert_exists: {role: label, label: "$13,865.14"}
+  - assert_no_clipping: {}
+  - screenshot: home
+
+  # --- Ko-fi (Q-278): found by its label; hovering shows the address. ------
+  # Never clicked here: a click opens the owner's browser (the control
+  # channel records it instead, but the scenario does not rely on that).
+  # egui puts a tooltip's text in the widget's accessible description (the
+  # popup is not in the tree); the screenshot shows the tooltip itself.
+  - assert_exists: {role: button, label: Support ClientLedger on Ko-fi}
+  - hover: {role: button, label: Support ClientLedger on Ko-fi}
+  - assert_exists: {role: button, label: Support ClientLedger on Ko-fi, description_contains: "ko-fi.com/I3D3227TTP"}
+  - wait: {ms: 800}
+  - screenshot: home-kofi-tooltip
+
+  # --- A built action opens its form ---------------------------------------
+  - click: {role: button, label: Write Check}
+  - assert_state: {key: screen.screen, equals: write_check}
+  - key: Alt+H
+  - assert_state: {key: screen.screen, equals: home}
+  - assert_state: {key: screen.last_opened, equals: vendors.write_check}
+
+  # --- A later phase's action opens its placeholder ------------------------
+  - click: {role: button, label: Create Invoice}
+  - assert_state: {key: active_tab, equals: Create Invoice}
+  - assert_exists: {role: label, label_contains: not available yet}
+  - screenshot: create-invoice-placeholder
+  - command: file.close_window
+  - key: Alt+H
+
+  # --- A Needs attention link opens its window ------------------------------
+  - click: {role: link, label: Pay bills}
+  - assert_state: {key: active_tab, equals: Pay Bills}
+  - command: file.close_window
+  - key: Alt+H
+  - click: {role: button, label: Refresh}
+  - assert_state: {key: screen.loading, equals: false}
+  - assert_state: {key: screen.attention.bills_due, equals: 3}
+
+  # --- A chart month drills into Profit & Loss (a placeholder until P28) ----
+  - click: {role: button, label_contains: "October: income "}
+  - assert_state: {key: active_tab, equals: Profit & Loss}
+  - command: file.close_window
+  - key: Alt+H
+  - assert_state: {key: screen.chart.drill, equals: "2026-10-01..2026-10-31"}
+
+  # --- Minimum window (960 x 640): lanes two to a row -------------------------
+  - resize: {width: 960, height: 640}
+  - assert_state: {key: screen.lane_columns, equals: 2}
+  - assert_no_clipping: &home960
+      ignore:
+        # The rail and the tab strip scroll by design (as in shell.yaml).
+        - {x: 0, y: 100, width: 212, height: 10000}
+        - {x: 212, y: 70, width: 10000, height: 45}
+        # Home's body scrolls under its title: a row cut by the bottom of
+        # the body reports its full bounds past the window's edge.
+        - {x: -4000, y: 560, width: 8480, height: 200}
+  - screenshot: home-960
+
+  # --- 200% zoom on the minimum window (480 x 320 points): one to a row ------
+  - set_zoom: {percent: 200}
+  - assert_state: {key: screen.lane_columns, equals: 1}
+  - assert_exists: {role: label, label: Home}
+  - assert_exists: {role: button, label: Create Invoice}
+  - assert_no_clipping:
+      ignore:
+        # The tab strip scrolls (the » list).
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        # The body scrolls under the title.
+        - {x: -4000, y: 240, width: 8480, height: 200}
+  - screenshot: home-z200
+
+  # --- Back to normal ----------------------------------------------------------
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}

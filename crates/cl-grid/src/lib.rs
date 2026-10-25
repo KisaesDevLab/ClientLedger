@@ -18,6 +18,7 @@ pub use grid::{
 };
 pub use view::style::GridStyle;
 
+pub use crate::core::context::{ContextItem, ContextMenu, ContextMenuSource, ContextTarget};
 pub use crate::core::model::{
     Align, CellInput, CellKind, CellPos, CellProblem, CellValue, Column, ColumnId, EditableModel,
     GridProblem, Line, ListId, LookupResult, Lookups, MarkKind, ModelRef, NoLookups, OptionSpec,

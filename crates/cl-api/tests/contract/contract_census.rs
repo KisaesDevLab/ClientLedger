@@ -281,6 +281,7 @@ pub fn field_census(h: &Harness) {
                 color: None,
                 group_id: None,
                 description: None,
+                tag_number: None,
             },
             key(),
         ))
@@ -348,11 +349,19 @@ pub fn field_census(h: &Harness) {
         strings: &["unitPrice"],
         optional: &[],
     };
+    // U-75: `tagNumber` arrives with `tag-number-v1`; until then the engine
+    // leaves it out.
+    let tag_optional: &'static [&'static str] =
+        if h.require_cap(cl_api::Capabilities::TAG_NUMBER, "U-75") {
+            &[]
+        } else {
+            &["tagNumber"]
+        };
     let tag_shape = |name| Shape {
         name,
         keys: tag_keys.clone(),
-        strings: &[],
-        optional: &[],
+        strings: &["tagNumber"],
+        optional: tag_optional,
     };
 
     let mut r = Report::default();

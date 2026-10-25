@@ -29,7 +29,8 @@ use std::cmp::Ordering;
 pub struct LookupEntry {
     /// The screen's id for the entry (opaque here).
     pub id: u64,
-    /// Account number, when the list has numbers and the entry has one.
+    /// Account or tag number (Q-270), when the list has numbers and the
+    /// entry has one.
     pub number: Option<String>,
     /// Full name, with `:` between hierarchy levels (`Materials:Plants`).
     pub full_name: String,
@@ -429,6 +430,40 @@ mod tests {
             Some("Materials:Mulch & stone")
         );
         assert_eq!(ix.by_id(99), None);
+    }
+
+    /// Tags carry their number in `number` (Q-270), so tiers 1 and 2 find a
+    /// tag by its exact number and by a number prefix.
+    #[test]
+    fn tags_are_found_by_number() {
+        let ix = LookupIndex::new(vec![
+            e(1, Some("10"), "Lake Area"),
+            e(2, Some("100"), "Hill Crew"),
+            e(3, Some("2"), "North"),
+            e(4, None, "10th Street"),
+            e(5, None, "Spring"),
+        ]);
+        assert_eq!(
+            ids(&ix, "10"),
+            [
+                (1, MatchTier::Exact),
+                (2, MatchTier::Number),
+                (4, MatchTier::NamePrefix)
+            ]
+        );
+        assert_eq!(
+            ids(&ix, "1"),
+            [
+                (1, MatchTier::Number),
+                (2, MatchTier::Number),
+                (4, MatchTier::NamePrefix)
+            ],
+            "number prefix, ties by number"
+        );
+        assert_eq!(ix.exact("10").map(|t| t.id), Some(1));
+        assert_eq!(ix.exact("lake area").map(|t| t.id), Some(1));
+        let all: Vec<u64> = ix.rank("", 10).iter().map(|r| r.id).collect();
+        assert_eq!(all, [3, 1, 2, 4, 5], "by number, then the unnumbered");
     }
 
     #[test]

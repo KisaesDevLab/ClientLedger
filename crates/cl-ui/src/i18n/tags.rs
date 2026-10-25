@@ -86,4 +86,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("orphan.tag_delete", "deleting a tag"),
     ("orphan.tag_group_save", "saving a tag group"),
     ("orphan.tag_merge", "merging two tags"),
+    // WP4b (P16): tag numbers (Q-270).
+    ("tags.col.number", "Number"),
+    ("tags.form.number", "Tag number"),
+    ("tags.form.number_hint", "Optional. Up to 20 letters or digits; no two tags can share a number. Tags show as number \u{b7} name and list by number."),
+    ("tags.numbers_later", "Tag numbers arrive with the next engine update."),
+    ("tags.problem.number_too_long", "The number is too long. Use 20 characters or fewer."),
+    ("tags.problem.number_taken", "Another tag already uses number {n}."),
 ];

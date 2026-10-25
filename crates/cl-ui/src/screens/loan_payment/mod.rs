@@ -138,6 +138,8 @@ pub struct LoanPaymentScreen {
     pub(crate) bus: crate::data_bus::Subscription,
     lists_stale: bool,
     after_frame: Option<CommandId>,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
     pub(crate) money_style: MoneyStyle,
     /// Prev/Next and the saved record being read.
     pub(crate) records: Records,
@@ -211,6 +213,7 @@ impl LoanPaymentScreen {
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,
             after_frame: None,
+            layout: crate::layout::FrameReport::default(),
             money_style: MoneyStyle::default(),
             records: Records::default(),
             focused: None,
@@ -981,36 +984,44 @@ impl LoanPaymentScreen {
             form::progress_line(ui, &tokens, &t("helper.loading"));
             return;
         }
-        let idle = self.flow.idle();
-        // "No payment schedules" is said in the side panel: beside the
-        // buttons it ran into the heading at the minimum width.
-        if let Some(cmd) = kit::toolbar(ui, &tokens, idle, self.is_dirty(), |_| {}) {
-            self.after_frame = Some(CommandId::new(cmd));
-        }
-        match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
-            MessageClick::SubmitClosing => self.submit_closing(),
-            MessageClick::Void => self.void_now(None),
-            MessageClick::Reload => self.reload(),
-            MessageClick::None => {}
-        }
-        if self.records.prompt.is_some()
-            && let Some(a) = records::prompt_ui(ui, KIND, &t("cmd.banking.loan_payment"))
-        {
-            self.answer_nav(a);
-        }
-        if self.loans().is_empty() {
-            ui.add_space(8.0);
-            ui.label(RichText::new(t("loan.no_loan")).color(tokens.text_secondary));
-            if ui.button(t("helper.open_chart")).clicked() {
-                self.link.push(CompanyEvent::OpenWindow(CommandId::new(
-                    crate::screens::lists::accounts::KIND,
-                )));
+        let empty = self.loans().is_empty();
+        self.layout = kit::form_frame(ui, "loan_payment", empty, |ui, col| match col {
+            kit::Column::Top => {
+                let idle = self.flow.idle();
+                // "No payment schedules" is said in the side panel: beside
+                // the buttons it ran into the heading at the minimum width.
+                if let Some(cmd) = kit::toolbar(ui, &tokens, idle, self.is_dirty(), |_| {}) {
+                    self.after_frame = Some(CommandId::new(cmd));
+                }
+                match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
+                    MessageClick::SubmitClosing => self.submit_closing(),
+                    MessageClick::Void => self.void_now(None),
+                    MessageClick::Reload => self.reload(),
+                    MessageClick::None => {}
+                }
+                if self.records.prompt.is_some()
+                    && let Some(a) = records::prompt_ui(ui, KIND, &t("cmd.banking.loan_payment"))
+                {
+                    self.answer_nav(a);
+                }
             }
-            return;
-        }
-        kit::two_columns(ui, "loan_payment/scroll", |ui, col| match col {
+            kit::Column::Empty => {
+                ui.add_space(8.0);
+                ui.label(RichText::new(t("loan.no_loan")).color(tokens.text_secondary));
+                if ui.button(t("helper.open_chart")).clicked() {
+                    self.link.push(CompanyEvent::OpenWindow(CommandId::new(
+                        crate::screens::lists::accounts::KIND,
+                    )));
+                }
+            }
             kit::Column::Form => self.form_ui(ui, &tokens),
             kit::Column::Panel => self.panel_ui(ui, &tokens),
+            kit::Column::Actions => {
+                let enabled = self.flow.idle();
+                if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
+                    self.after_frame = Some(CommandId::new(cmd));
+                }
+            }
         });
     }
 
@@ -1021,212 +1032,222 @@ impl LoanPaymentScreen {
         let loans = self.loans();
         let banks = self.pay_from_accounts();
         let interest_accounts = self.interest_accounts();
-        ui.add_enabled_ui(enabled, |ui| {
-            egui::Frame::new()
-                .fill(tokens.surface_form)
-                .stroke(Stroke::new(1.0, tokens.accent_border))
-                .corner_radius(CornerRadius::same(8))
-                .inner_margin(Margin::symmetric(20, 16))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    let width = ui.available_width();
-                    let sp = ui.spacing().item_spacing.x;
-                    let half = ((width - 16.0 - sp) / 2.0).max(160.0);
-                    let third = ((width - 2.0 * (16.0 + sp)) / 3.0).max(120.0);
-                    let f = self.header.current().clone();
-                    ui.horizontal_top(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let (p, r) = kit::account_combo(
-                                ui,
-                                tokens,
-                                "loan_payment/loan",
-                                &t("loan.loan"),
-                                &loans,
-                                f.loan,
-                                half - 8.0,
-                            );
-                            kit::track(&mut self.focused, &r, field::LOAN);
-                            if let Some(id) = p {
-                                self.set_loan(id);
-                            }
+        // The header card (Payment · Interest · Principal) at the condensed
+        // width (Q-267); the extra lines grid keeps the column's width.
+        crate::forms::condensed::capped(ui, |ui| {
+            ui.add_enabled_ui(enabled, |ui| {
+                egui::Frame::new()
+                    .fill(tokens.surface_form)
+                    .stroke(Stroke::new(1.0, tokens.accent_border))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(Margin::symmetric(20, 16))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        let width = ui.available_width();
+                        let sp = ui.spacing().item_spacing.x;
+                        let half = ((width - 16.0 - sp) / 2.0).max(160.0);
+                        let third = ((width - 2.0 * (16.0 + sp)) / 3.0).max(120.0);
+                        let f = self.header.current().clone();
+                        ui.horizontal_top(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let (p, r) = kit::account_combo(
+                                    ui,
+                                    tokens,
+                                    "loan_payment/loan",
+                                    &t("loan.loan"),
+                                    &loans,
+                                    f.loan,
+                                    half - 8.0,
+                                );
+                                kit::track(&mut self.focused, &r, field::LOAN);
+                                if let Some(id) = p {
+                                    self.set_loan(id);
+                                }
+                            });
+                            ui.add_space(16.0);
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let lists = Arc::clone(&self.books.lists);
+                                let (out, r) = kit::name_field(
+                                    ui,
+                                    tokens,
+                                    &t("loan.lender"),
+                                    &mut self.inputs.lender,
+                                    &lists,
+                                    f.lender,
+                                    half,
+                                );
+                                self.pick_lender(out);
+                                kit::track(&mut self.focused, &r, field::LENDER);
+                                if crate::forms::enter::entered(&r).saves() {
+                                    self.after_frame = Some(CommandId::new("form.save_new"));
+                                }
+                            });
                         });
-                        ui.add_space(16.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let lists = Arc::clone(&self.books.lists);
-                            let (out, r) = kit::name_field(
-                                ui,
-                                tokens,
-                                &t("loan.lender"),
-                                &mut self.inputs.lender,
-                                &lists,
-                                f.lender,
-                                half,
-                            );
-                            self.pick_lender(out);
-                            kit::track(&mut self.focused, &r, field::LENDER);
-                            if kit::entered(&r) {
-                                self.after_frame = Some(CommandId::new("form.save_new"));
-                            }
+                        ui.add_space(8.0);
+                        ui.horizontal_top(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let (p, r) = kit::account_combo(
+                                    ui,
+                                    tokens,
+                                    "loan_payment/pay_from",
+                                    &t("loan.pay_from"),
+                                    &banks,
+                                    f.pay_from,
+                                    half - 8.0,
+                                );
+                                kit::track(&mut self.focused, &r, field::PAY_FROM);
+                                if let Some(id) = p {
+                                    self.header.edit(field::PAY_FROM, |h| {
+                                        h.pay_from = Some(id);
+                                    });
+                                }
+                            });
+                            ui.add_space(16.0);
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                self.method_ui(ui, tokens, half);
+                            });
+                        });
+                        ui.add_space(8.0);
+                        ui.horizontal_top(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(third);
+                                let today = self.today;
+                                let (r, d) = kit::date_field(
+                                    ui,
+                                    tokens,
+                                    &t("helper.date"),
+                                    &mut self.inputs.date,
+                                    today,
+                                    third,
+                                );
+                                if let kit::DateChange::Set(d) = d {
+                                    self.header.edit(field::DATE, |h| h.date = d);
+                                    self.inputs.rev = self.header.revision();
+                                }
+                                kit::track(&mut self.focused, &r, field::DATE);
+                                if crate::forms::enter::entered(&r).saves() {
+                                    self.after_frame = Some(CommandId::new("form.save_new"));
+                                }
+                            });
+                            ui.add_space(16.0);
+                            ui.vertical(|ui| {
+                                ui.set_width(third);
+                                let r = kit::amount_field(
+                                    ui,
+                                    tokens,
+                                    &t("loan.payment"),
+                                    &mut self.inputs.payment,
+                                    third,
+                                    true,
+                                );
+                                kit::track(&mut self.focused, &r, field::PAYMENT);
+                                if r.lost_focus() {
+                                    self.amount_left(field::PAYMENT);
+                                }
+                            });
+                            ui.add_space(16.0);
+                            ui.vertical(|ui| {
+                                ui.set_width(third);
+                                let r = kit::amount_field(
+                                    ui,
+                                    tokens,
+                                    &t("loan.interest"),
+                                    &mut self.inputs.interest,
+                                    third,
+                                    true,
+                                )
+                                .on_hover_text(format!(
+                                    "{} {}",
+                                    t("jargon.interest"),
+                                    t("loan.interest.tip")
+                                ));
+                                kit::track(&mut self.focused, &r, field::INTEREST);
+                                if r.lost_focus() {
+                                    self.amount_left(field::INTEREST);
+                                }
+                            });
+                        });
+                        ui.add_space(8.0);
+                        ui.horizontal_top(|ui| {
+                            let r = ui.vertical(|ui| {
+                                ui.set_width(third);
+                                let principal = self
+                                    .compose()
+                                    .principal()
+                                    .map(|m| m.format(self.money_style))
+                                    .unwrap_or_default();
+                                kit::figure_field(
+                                    ui,
+                                    tokens,
+                                    &t("loan.principal"),
+                                    &principal,
+                                    third,
+                                );
+                            });
+                            r.response.on_hover_text(t("jargon.principal"));
+                            ui.add_space(16.0);
+                            ui.vertical(|ui| {
+                                ui.set_width(third * 2.0 + 16.0);
+                                let (p, r) = kit::account_combo(
+                                    ui,
+                                    tokens,
+                                    "loan_payment/interest_account",
+                                    &t("loan.interest_account"),
+                                    &interest_accounts,
+                                    f.interest_account,
+                                    third * 2.0,
+                                );
+                                kit::track(&mut self.focused, &r, field::INTEREST_ACCOUNT);
+                                if let Some(id) = p {
+                                    self.header.edit(field::INTEREST_ACCOUNT, |h| {
+                                        h.interest_account = Some(id);
+                                    });
+                                }
+                            });
+                        });
+                        ui.add_space(8.0);
+                        ui.horizontal_top(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let mut memo = f.memo.clone();
+                                let r = kit::text_field(
+                                    ui,
+                                    tokens,
+                                    &t("helper.memo"),
+                                    &mut memo,
+                                    half,
+                                    cl_api::PRINTED_MEMO_MAX,
+                                );
+                                if r.changed() {
+                                    self.header.edit(field::MEMO, |h| h.memo = memo);
+                                    self.inputs.rev = self.header.revision();
+                                }
+                                kit::track(&mut self.focused, &r, field::MEMO);
+                            });
+                            ui.add_space(16.0);
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let r = kit::amount_field(
+                                    ui,
+                                    tokens,
+                                    &t("loan.lender_balance"),
+                                    &mut self.inputs.lender_balance,
+                                    half,
+                                    true,
+                                )
+                                .on_hover_text(t("loan.lender_balance.tip"));
+                                kit::track(&mut self.focused, &r, field::LENDER_BALANCE);
+                                if r.lost_focus() {
+                                    self.amount_left(field::LENDER_BALANCE);
+                                }
+                            });
                         });
                     });
-                    ui.add_space(8.0);
-                    ui.horizontal_top(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let (p, r) = kit::account_combo(
-                                ui,
-                                tokens,
-                                "loan_payment/pay_from",
-                                &t("loan.pay_from"),
-                                &banks,
-                                f.pay_from,
-                                half - 8.0,
-                            );
-                            kit::track(&mut self.focused, &r, field::PAY_FROM);
-                            if let Some(id) = p {
-                                self.header.edit(field::PAY_FROM, |h| {
-                                    h.pay_from = Some(id);
-                                });
-                            }
-                        });
-                        ui.add_space(16.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            self.method_ui(ui, tokens, half);
-                        });
-                    });
-                    ui.add_space(8.0);
-                    ui.horizontal_top(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width(third);
-                            let today = self.today;
-                            let (r, d) = kit::date_field(
-                                ui,
-                                tokens,
-                                &t("helper.date"),
-                                &mut self.inputs.date,
-                                today,
-                                third,
-                            );
-                            if let kit::DateChange::Set(d) = d {
-                                self.header.edit(field::DATE, |h| h.date = d);
-                                self.inputs.rev = self.header.revision();
-                            }
-                            kit::track(&mut self.focused, &r, field::DATE);
-                            if kit::entered(&r) {
-                                self.after_frame = Some(CommandId::new("form.save_new"));
-                            }
-                        });
-                        ui.add_space(16.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(third);
-                            let r = kit::amount_field(
-                                ui,
-                                tokens,
-                                &t("loan.payment"),
-                                &mut self.inputs.payment,
-                                third,
-                                true,
-                            );
-                            kit::track(&mut self.focused, &r, field::PAYMENT);
-                            if r.lost_focus() {
-                                self.amount_left(field::PAYMENT);
-                            }
-                        });
-                        ui.add_space(16.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(third);
-                            let r = kit::amount_field(
-                                ui,
-                                tokens,
-                                &t("loan.interest"),
-                                &mut self.inputs.interest,
-                                third,
-                                true,
-                            )
-                            .on_hover_text(format!(
-                                "{} {}",
-                                t("jargon.interest"),
-                                t("loan.interest.tip")
-                            ));
-                            kit::track(&mut self.focused, &r, field::INTEREST);
-                            if r.lost_focus() {
-                                self.amount_left(field::INTEREST);
-                            }
-                        });
-                    });
-                    ui.add_space(8.0);
-                    ui.horizontal_top(|ui| {
-                        let r = ui.vertical(|ui| {
-                            ui.set_width(third);
-                            let principal = self
-                                .compose()
-                                .principal()
-                                .map(|m| m.format(self.money_style))
-                                .unwrap_or_default();
-                            kit::figure_field(ui, tokens, &t("loan.principal"), &principal, third);
-                        });
-                        r.response.on_hover_text(t("jargon.principal"));
-                        ui.add_space(16.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(third * 2.0 + 16.0);
-                            let (p, r) = kit::account_combo(
-                                ui,
-                                tokens,
-                                "loan_payment/interest_account",
-                                &t("loan.interest_account"),
-                                &interest_accounts,
-                                f.interest_account,
-                                third * 2.0,
-                            );
-                            kit::track(&mut self.focused, &r, field::INTEREST_ACCOUNT);
-                            if let Some(id) = p {
-                                self.header.edit(field::INTEREST_ACCOUNT, |h| {
-                                    h.interest_account = Some(id);
-                                });
-                            }
-                        });
-                    });
-                    ui.add_space(8.0);
-                    ui.horizontal_top(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let mut memo = f.memo.clone();
-                            let r = kit::text_field(
-                                ui,
-                                tokens,
-                                &t("helper.memo"),
-                                &mut memo,
-                                half,
-                                cl_api::PRINTED_MEMO_MAX,
-                            );
-                            if r.changed() {
-                                self.header.edit(field::MEMO, |h| h.memo = memo);
-                                self.inputs.rev = self.header.revision();
-                            }
-                            kit::track(&mut self.focused, &r, field::MEMO);
-                        });
-                        ui.add_space(16.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let r = kit::amount_field(
-                                ui,
-                                tokens,
-                                &t("loan.lender_balance"),
-                                &mut self.inputs.lender_balance,
-                                half,
-                                true,
-                            )
-                            .on_hover_text(t("loan.lender_balance.tip"));
-                            kit::track(&mut self.focused, &r, field::LENDER_BALANCE);
-                            if r.lost_focus() {
-                                self.amount_left(field::LENDER_BALANCE);
-                            }
-                        });
-                    });
-                });
+            })
         });
         ui.add_space(12.0);
         ui.label(RichText::new(t("loan.extras.heading")).color(tokens.text_primary));
@@ -1236,10 +1257,6 @@ impl LoanPaymentScreen {
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
         kit::status(ui, tokens, &self.flow);
-        ui.add_space(12.0);
-        if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
-            self.after_frame = Some(CommandId::new(cmd));
-        }
     }
 
     fn method_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
@@ -1367,6 +1384,7 @@ impl LoanPaymentScreen {
         let f = self.compose();
         let mut v = json!({
             "screen": "loan_payment",
+            "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.books.loaded,
             "loan_id": f.loan.map(|a| a.to_string()),
@@ -1458,6 +1476,10 @@ impl Screen for LoanPaymentScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }
 

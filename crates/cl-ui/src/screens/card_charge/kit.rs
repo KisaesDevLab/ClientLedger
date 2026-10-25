@@ -25,7 +25,7 @@ use cl_model::amount_entry::{self, AmountRules};
 use cl_model::closing::{is_locked, needs_password};
 use cl_model::forms::SaveIntent;
 use cl_model::forms::owner_money::{Entity, Role};
-use cl_model::lists::tags::{TagEntry, TagList};
+use cl_model::lists::tags::TagList;
 use cl_model::register::AccountClass;
 use eframe::egui::{self, Align, Layout, RichText, Ui, Vec2};
 
@@ -116,17 +116,7 @@ pub(crate) fn demo_roles(
 pub(crate) fn tag_list(tags: &[Tag]) -> TagList {
     TagList::new(
         Vec::new(),
-        tags.iter()
-            .map(|t| TagEntry {
-                id: t.id,
-                name: t.fields.name.clone(),
-                group: t.fields.group_id,
-                color: t.fields.color.clone(),
-                description: t.fields.description.clone(),
-                active: t.is_active,
-                usage: t.usage_count,
-            })
-            .collect(),
+        tags.iter().map(crate::tag_names::entry).collect(),
     )
 }
 
@@ -970,11 +960,6 @@ pub(crate) fn above(ui: &mut Ui, tokens: &Tokens, label: &str) -> egui::Response
     )
 }
 
-/// Enter left a single-line header field: Save & New (Q-190).
-pub(crate) fn entered(r: &egui::Response) -> bool {
-    r.lost_focus() && r.ctx.input(|i| i.key_pressed(egui::Key::Enter))
-}
-
 /// An account picker with its label above. Returns the account picked
 /// this frame.
 pub(crate) fn account_combo(
@@ -1370,7 +1355,7 @@ pub(crate) fn messages(
             form::heading(ui, tokens, &t("helper.void.title"));
             form::hint(ui, tokens, &t("helper.void.explain"));
             let r = form::field(ui, &t("helper.void.reason"), &mut flow.void_reason);
-            send |= entered(&r);
+            send |= crate::forms::enter::submitted(&r);
             ui.horizontal(|ui| {
                 send |= ui.button(t("helper.void.confirm")).clicked();
                 cancel = ui.button(t("helper.void.cancel")).clicked();
@@ -1462,43 +1447,75 @@ pub(crate) fn with_figure(
     job
 }
 
-/// Which column `two_columns` is drawing.
+/// Which part `form_frame` is drawing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Column {
+    /// The toolbar and the messages (fixed at the top).
+    Top,
+    /// What shows instead of the form when it can't be filled in (no
+    /// account of the kind yet); no actions then.
+    Empty,
     /// The form.
     Form,
     /// The side panel.
     Panel,
+    /// Clear · Save & New · Save & Close (fixed at the bottom).
+    Actions,
 }
 
-/// The form's two columns: the form, then the side panel beside it (wide)
-/// or under it (narrow), in one scroll area. `draw` draws one column.
-pub(crate) fn two_columns(ui: &mut Ui, id_salt: &str, mut draw: impl FnMut(&mut Ui, Column)) {
+/// A form window (Q-265): the toolbar and messages stay at the top, the
+/// actions at the bottom, and between them the form and the side panel
+/// (beside it when wide, under it when narrow) scroll. `empty` draws
+/// [`Column::Empty`] as the body instead, with no actions. `draw` draws one
+/// part.
+pub(crate) fn form_frame(
+    ui: &mut Ui,
+    id_salt: &str,
+    empty: bool,
+    mut draw: impl FnMut(&mut Ui, Column),
+) -> crate::layout::FrameReport {
+    use crate::layout::{Body, FixedFrame, FrameOpts};
     let wide = ui.available_width() >= SIDE_BY_SIDE;
-    egui::ScrollArea::vertical()
-        .id_salt(id_salt)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            if wide {
-                ui.horizontal_top(|ui| {
-                    let spacing = 2.0 * ui.spacing().item_spacing.x;
-                    let form_width = ui.available_width() - PANEL_WIDTH - 20.0 - spacing;
-                    ui.vertical(|ui| {
-                        ui.set_width(form_width);
-                        draw(ui, Column::Form);
-                    });
-                    ui.add_space(20.0);
-                    ui.vertical(|ui| {
-                        ui.set_width(PANEL_WIDTH);
-                        draw(ui, Column::Panel);
-                    });
+    let form_width = |ui: &Ui| {
+        let spacing = 2.0 * ui.spacing().item_spacing.x;
+        ui.available_width() - PANEL_WIDTH - 20.0 - spacing
+    };
+    let mut frame = FixedFrame::begin(ui, id_salt, FrameOpts::default());
+    frame.top(|ui| draw(ui, Column::Top));
+    if empty {
+        frame.body(Body::Scroll, |ui| draw(ui, Column::Empty));
+        return frame.end();
+    }
+    frame.body(Body::Scroll, |ui| {
+        if wide {
+            ui.horizontal_top(|ui| {
+                let form_width = form_width(ui);
+                ui.vertical(|ui| {
+                    ui.set_width(form_width);
+                    draw(ui, Column::Form);
                 });
-            } else {
-                draw(ui, Column::Form);
-                ui.add_space(12.0);
-                draw(ui, Column::Panel);
-            }
-        });
+                ui.add_space(20.0);
+                ui.vertical(|ui| {
+                    ui.set_width(PANEL_WIDTH);
+                    draw(ui, Column::Panel);
+                });
+            });
+        } else {
+            draw(ui, Column::Form);
+            ui.add_space(12.0);
+            draw(ui, Column::Panel);
+        }
+    });
+    frame.bottom(|ui| {
+        // Under the form's column, as in the mockups.
+        if wide {
+            let w = form_width(ui);
+            ui.allocate_ui(Vec2::new(w, ACTION_HEIGHT), |ui| draw(ui, Column::Actions));
+        } else {
+            draw(ui, Column::Actions);
+        }
+    });
+    frame.end()
 }
 
 /// The tooltip key that explains the entity type's words for owner money
@@ -1600,11 +1617,7 @@ pub(crate) fn tags_row(
     ui.horizontal_wrapped(|ui| {
         let l = above(ui, tokens, &t("helper.tags"));
         for id in header {
-            let name = tags
-                .iter()
-                .find(|g| g.id == *id)
-                .map(|g| g.fields.name.clone())
-                .unwrap_or_default();
+            let name = crate::tag_names::label_of(tags, *id);
             let r = ui
                 .add(
                     egui::Button::new(
@@ -1620,11 +1633,14 @@ pub(crate) fn tags_row(
         egui::ComboBox::from_id_salt(id_salt)
             .selected_text(t("check.tags.add"))
             .show_ui(ui, |ui| {
-                for g in tags
-                    .iter()
-                    .filter(|g| g.is_active && !header.contains(&g.id))
-                {
-                    if ui.selectable_label(false, &g.fields.name).clicked() {
+                for g in crate::tag_names::sorted(
+                    tags.iter()
+                        .filter(|g| g.is_active && !header.contains(&g.id)),
+                ) {
+                    if ui
+                        .selectable_label(false, crate::tag_names::label(g))
+                        .clicked()
+                    {
                         edit = Some(TagEdit::Add(g.id));
                     }
                 }

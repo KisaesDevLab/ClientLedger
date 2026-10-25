@@ -124,6 +124,8 @@ pub struct PersonalFundsScreen {
     lists_stale: bool,
     in_grid: bool,
     after_frame: Option<CommandId>,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
     pub(crate) money_style: MoneyStyle,
     /// Prev/Next and the saved record being read.
     pub(crate) records: Records,
@@ -201,6 +203,7 @@ impl PersonalFundsScreen {
             lists_stale: false,
             in_grid: false,
             after_frame: None,
+            layout: crate::layout::FrameReport::default(),
             money_style: MoneyStyle::default(),
             records: Records::default(),
             focused: None,
@@ -951,8 +954,26 @@ impl PersonalFundsScreen {
             form::progress_line(ui, &tokens, &t("helper.loading"));
             return;
         }
+        self.layout = kit::form_frame(ui, "personal_funds", false, |ui, col| match col {
+            kit::Column::Top => self.top_ui(ui, &tokens),
+            kit::Column::Empty => {}
+            kit::Column::Form => self.form_ui(ui, &tokens),
+            kit::Column::Panel => Self::panel_ui(ui, &tokens),
+            // The actions stay under the lines grid's right edge: the grid
+            // keeps the column's width (Q-267 condenses the card only).
+            kit::Column::Actions => {
+                let enabled = self.flow.idle();
+                if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
+                    self.after_frame = Some(CommandId::new(cmd));
+                }
+            }
+        });
+    }
+
+    /// The toolbar and the messages.
+    fn top_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let idle = self.flow.idle();
-        let clicked = kit::toolbar(ui, &tokens, idle, self.is_dirty(), |ui| {
+        let clicked = kit::toolbar(ui, tokens, idle, self.is_dirty(), |ui| {
             ui.separator();
             ui.add(
                 egui::Label::new(
@@ -966,7 +987,7 @@ impl PersonalFundsScreen {
         if let Some(cmd) = clicked {
             self.after_frame = Some(CommandId::new(cmd));
         }
-        match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
+        match kit::messages(ui, tokens, &mut self.flow, self.books.closing) {
             MessageClick::SubmitClosing => self.submit_closing(),
             MessageClick::Void => self.void_now(None),
             MessageClick::Reload => self.reload(),
@@ -977,119 +998,119 @@ impl PersonalFundsScreen {
         {
             self.answer_nav(a);
         }
-        kit::two_columns(ui, "personal_funds/scroll", |ui, col| match col {
-            kit::Column::Form => self.form_ui(ui, &tokens),
-            kit::Column::Panel => Self::panel_ui(ui, &tokens),
-        });
     }
 
     #[allow(clippy::too_many_lines)] // One card of fields, top to bottom.
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         kit::title_only(ui, tokens, &t("cmd.vendors.personal_funds"));
         let enabled = self.flow.idle();
-        ui.add_enabled_ui(enabled, |ui| {
-            egui::Frame::new()
-                .fill(tokens.surface_form)
-                .stroke(Stroke::new(1.0, tokens.accent_border))
-                .corner_radius(CornerRadius::same(8))
-                .inner_margin(Margin::symmetric(20, 16))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    let width = ui.available_width();
-                    let sp = ui.spacing().item_spacing.x;
-                    let half = ((width - 16.0 - sp) / 2.0).max(160.0);
-                    let f = self.header.current().clone();
-                    let lists = Arc::clone(&self.books.lists);
-                    ui.horizontal_top(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let (out, r) = kit::name_field(
-                                ui,
-                                tokens,
-                                &t("personal_funds.who"),
-                                &mut self.inputs.who,
-                                &lists,
-                                f.who,
-                                half,
-                            );
-                            self.apply_name(field::WHO, out);
-                            kit::track(&mut self.focused, &r, field::WHO);
+        // The header card at the condensed width (Q-267); the lines grid
+        // below keeps the column's width.
+        crate::forms::condensed::capped(ui, |ui| {
+            ui.add_enabled_ui(enabled, |ui| {
+                egui::Frame::new()
+                    .fill(tokens.surface_form)
+                    .stroke(Stroke::new(1.0, tokens.accent_border))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(Margin::symmetric(20, 16))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        let width = ui.available_width();
+                        let sp = ui.spacing().item_spacing.x;
+                        let half = ((width - 16.0 - sp) / 2.0).max(160.0);
+                        let f = self.header.current().clone();
+                        let lists = Arc::clone(&self.books.lists);
+                        ui.horizontal_top(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let (out, r) = kit::name_field(
+                                    ui,
+                                    tokens,
+                                    &t("personal_funds.who"),
+                                    &mut self.inputs.who,
+                                    &lists,
+                                    f.who,
+                                    half,
+                                );
+                                self.apply_name(field::WHO, out);
+                                kit::track(&mut self.focused, &r, field::WHO);
+                            });
+                            ui.add_space(16.0);
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let (out, r) = kit::name_field(
+                                    ui,
+                                    tokens,
+                                    &t("personal_funds.payee"),
+                                    &mut self.inputs.payee,
+                                    &lists,
+                                    f.payee,
+                                    half,
+                                );
+                                self.apply_name(field::PAYEE, out);
+                                kit::track(&mut self.focused, &r, field::PAYEE);
+                                if crate::forms::enter::entered(&r).saves() {
+                                    self.after_frame = Some(CommandId::new("form.save_new"));
+                                }
+                            });
                         });
-                        ui.add_space(16.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let (out, r) = kit::name_field(
-                                ui,
-                                tokens,
-                                &t("personal_funds.payee"),
-                                &mut self.inputs.payee,
-                                &lists,
-                                f.payee,
-                                half,
-                            );
-                            self.apply_name(field::PAYEE, out);
-                            kit::track(&mut self.focused, &r, field::PAYEE);
-                            if kit::entered(&r) {
-                                self.after_frame = Some(CommandId::new("form.save_new"));
-                            }
+                        ui.add_space(8.0);
+                        ui.horizontal_top(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let today = self.today;
+                                let (r, d) = kit::date_field(
+                                    ui,
+                                    tokens,
+                                    &t("helper.date"),
+                                    &mut self.inputs.date,
+                                    today,
+                                    half,
+                                );
+                                if let kit::DateChange::Set(d) = d {
+                                    self.header.edit(field::DATE, |h| h.date = d);
+                                    self.inputs.rev = self.header.revision();
+                                }
+                                kit::track(&mut self.focused, &r, field::DATE);
+                                if crate::forms::enter::entered(&r).saves() {
+                                    self.after_frame = Some(CommandId::new("form.save_new"));
+                                }
+                            });
+                            ui.add_space(16.0);
+                            ui.vertical(|ui| {
+                                ui.set_width(half);
+                                let r = kit::amount_field(
+                                    ui,
+                                    tokens,
+                                    &t("helper.amount"),
+                                    &mut self.inputs.amount,
+                                    half,
+                                    true,
+                                );
+                                kit::track(&mut self.focused, &r, field::AMOUNT);
+                                if r.lost_focus() {
+                                    self.amount_left();
+                                }
+                            });
                         });
+                        ui.add_space(8.0);
+                        let mut memo = f.memo.clone();
+                        let r = kit::text_field(
+                            ui,
+                            tokens,
+                            &t("helper.memo"),
+                            &mut memo,
+                            width,
+                            cl_api::PRINTED_MEMO_MAX,
+                        );
+                        if r.changed() {
+                            self.header.edit(field::MEMO, |h| h.memo = memo);
+                        }
+                        kit::track(&mut self.focused, &r, field::MEMO);
+                        ui.add_space(8.0);
+                        self.treatment_ui(ui, tokens, half);
                     });
-                    ui.add_space(8.0);
-                    ui.horizontal_top(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let today = self.today;
-                            let (r, d) = kit::date_field(
-                                ui,
-                                tokens,
-                                &t("helper.date"),
-                                &mut self.inputs.date,
-                                today,
-                                half,
-                            );
-                            if let kit::DateChange::Set(d) = d {
-                                self.header.edit(field::DATE, |h| h.date = d);
-                                self.inputs.rev = self.header.revision();
-                            }
-                            kit::track(&mut self.focused, &r, field::DATE);
-                            if kit::entered(&r) {
-                                self.after_frame = Some(CommandId::new("form.save_new"));
-                            }
-                        });
-                        ui.add_space(16.0);
-                        ui.vertical(|ui| {
-                            ui.set_width(half);
-                            let r = kit::amount_field(
-                                ui,
-                                tokens,
-                                &t("helper.amount"),
-                                &mut self.inputs.amount,
-                                half,
-                                true,
-                            );
-                            kit::track(&mut self.focused, &r, field::AMOUNT);
-                            if r.lost_focus() {
-                                self.amount_left();
-                            }
-                        });
-                    });
-                    ui.add_space(8.0);
-                    let mut memo = f.memo.clone();
-                    let r = kit::text_field(
-                        ui,
-                        tokens,
-                        &t("helper.memo"),
-                        &mut memo,
-                        width,
-                        cl_api::PRINTED_MEMO_MAX,
-                    );
-                    if r.changed() {
-                        self.header.edit(field::MEMO, |h| h.memo = memo);
-                    }
-                    kit::track(&mut self.focused, &r, field::MEMO);
-                    ui.add_space(8.0);
-                    self.treatment_ui(ui, tokens, half);
-                });
+            })
         });
         ui.add_space(12.0);
         let total = lines_total(self.lines.value()).unwrap_or(Money::ZERO);
@@ -1131,10 +1152,6 @@ impl PersonalFundsScreen {
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
         kit::status(ui, tokens, &self.flow);
-        ui.add_space(12.0);
-        if let Some(cmd) = kit::actions_row(ui, enabled, enabled) {
-            self.after_frame = Some(CommandId::new(cmd));
-        }
     }
 
     fn treatment_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
@@ -1256,6 +1273,7 @@ impl PersonalFundsScreen {
         });
         let mut v = json!({
             "screen": "personal_funds",
+            "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.books.loaded,
             "entity_type": self.books.entity.map(Entity::name),
@@ -1355,6 +1373,10 @@ impl Screen for PersonalFundsScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }
 

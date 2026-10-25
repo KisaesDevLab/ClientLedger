@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cl_core::CalendarDate;
-use cl_model::{COMMANDS, Command, CommandId, Keymap, Scope, commands};
+use cl_model::{COMMANDS, Command, CommandId, EnterMode, Keymap, Scope, commands};
 use eframe::egui::{self, Color32, Context, Frame, Margin, ViewportBuilder, ViewportCommand};
 
 use crate::about::AboutDialog;
@@ -200,7 +200,8 @@ impl Shell {
         }
         // The table is checked for conflicts by a unit test, so this cannot
         // fail in a shipped build.
-        let keymap = Keymap::new(COMMANDS).expect("the command table has no shortcut conflicts");
+        let keymap = Keymap::with_mode(COMMANDS, EnterMode::from_pref(prefs.enter_moves_fields))
+            .expect("the command table has no shortcut conflicts");
         let company_link = options.company.or_else(|| {
             options.demo.then(|| {
                 let dir =
@@ -214,6 +215,7 @@ impl Shell {
         {
             w.book = store.load_grid_widths();
             w.registers = store.load_register_prefs();
+            w.panels = crate::prefs::PanelPrefsBook::load(store.dir());
         }
         let mut shell = Shell {
             widths,
@@ -399,6 +401,8 @@ impl Shell {
                         self.windows.close_now(id);
                     }
                     self.open_tenant = Some((tenant_id, name.clone()));
+                    // The new company's Home reads its own counts.
+                    self.counts = RailCounts::default();
                     self.set_company(
                         &key,
                         Some(CompanyBanner {
@@ -421,6 +425,7 @@ impl Shell {
                     }
                     self.open_tenant = None;
                     self.company = None;
+                    self.counts = RailCounts::default();
                     self.company_key = "default".into();
                     self.last_saved_layout = Some(self.windows.snapshot());
                     self.dispatch_now(CommandId::new("file.open_company"));
@@ -461,6 +466,13 @@ impl Shell {
                 CompanyEvent::OpenRegister(account) => self.open_register(account),
                 CompanyEvent::OpenRecord(kind, txn) => self.open_record(kind, txn),
                 CompanyEvent::OpenTemplate(t) => self.open_template(*t),
+                CompanyEvent::RailCounts(c) => {
+                    // Only while a company is open (Opened and Closed clear
+                    // them; the new company's Home reads its own).
+                    if self.open_tenant.is_some() || self.demo {
+                        self.counts = c;
+                    }
+                }
             }
         }
     }
@@ -522,11 +534,7 @@ impl Shell {
             self.today = d;
             self.fixed_today = true;
         }
-        self.counts = RailCounts {
-            clients: Some(64),
-            vendors: Some(38),
-            bank_feed: Some(37),
-        };
+        // The rail counts come from Home's reads (P16), as in a real company.
         self.status = StatusInfo {
             user: Some("Kurt \u{b7} Admin".into()),
             mode: Some("Single-user \u{b7} this computer".into()),
@@ -539,10 +547,8 @@ impl Shell {
             self.open_tenant = Some((c.tenant_id, c.name.clone()));
         }
         let mk = |id: &str| commands::find(id).map_or_else(|| CommandId::new("nav.home"), |c| c.id);
-        self.windows.open_new(
-            mk("nav.home"),
-            Box::new(Placeholder::for_command(mk("nav.home"))),
-        );
+        let home = self.make_screen(mk("nav.home"));
+        self.windows.open_new(mk("nav.home"), home);
         // The real Write Check with the mockup's unsaved draft (P13).
         let check: Box<dyn Screen> = match &self.company_link {
             Some(link) => Box::new(crate::screens::write_check::WriteCheckScreen::demo_draft(
@@ -898,19 +904,29 @@ impl Shell {
             return;
         }
         let modal = self.modal_open();
-        let text_focus = ctx.egui_wants_keyboard_input();
-        let scope = target
-            .and_then(|id| self.windows.get(id))
-            .map_or(Scope::Global, |w| w.screen.scope());
+        let window = target.and_then(|id| self.windows.get(id));
+        let scope = window.map_or(Scope::Global, |w| w.screen.scope());
+        // A focused text field keeps its edit keys; the window decides (a
+        // grid lets Ctrl+A through when its cell has nothing to select).
+        let kept: Vec<bool> = pressed
+            .iter()
+            .map(|s| {
+                input::reserved_by_text_fields(*s)
+                    && window.map_or_else(
+                        || ctx.egui_wants_keyboard_input(),
+                        |w| w.screen.keeps_text_key(ctx, *s),
+                    )
+            })
+            .collect();
         let mut handled: Vec<cl_model::Shortcut> = Vec::new();
-        for s in pressed {
+        for (s, kept) in pressed.into_iter().zip(kept) {
             let Some(id) = self.keymap.resolve(scope, s) else {
                 continue;
             };
             if modal && !matches!(id.as_str(), "help.palette" | "help.shortcuts") {
                 continue;
             }
-            if text_focus && input::reserved_by_text_fields(s) {
+            if kept {
                 continue;
             }
             handled.push(s);
@@ -934,7 +950,28 @@ impl Shell {
         }
     }
 
+    /// The Enter preference changed (Q-264): rebuild the keymap so
+    /// Ctrl+Enter is Save & New only when Enter moves between fields.
+    fn sync_keymap(&mut self) {
+        let mode = EnterMode::from_pref(self.prefs.enter_moves_fields);
+        if self.keymap.mode() == mode {
+            return;
+        }
+        match Keymap::with_mode(COMMANDS, mode) {
+            Ok(k) => self.keymap = k,
+            // A unit test rules this out; keep the old keymap if it happens.
+            Err(e) => tracing::warn!(error = %e, "could not rebuild the keymap"),
+        }
+    }
+
+    /// What Enter does now (the preference, Q-264).
+    #[must_use]
+    pub fn enter_mode(&self) -> EnterMode {
+        self.keymap.mode()
+    }
+
     fn begin_frame(&mut self, ctx: &Context) {
+        self.sync_keymap();
         if self.applied_theme != Some(self.prefs.theme) {
             theme::apply(ctx, self.prefs.theme);
             self.applied_theme = Some(self.prefs.theme);
@@ -1052,11 +1089,11 @@ impl Shell {
         self.save_layout();
         let now = ctx.input(|i| i.time);
         self.flush_widths(Some(now));
-        if self
-            .widths
-            .lock()
-            .is_ok_and(|w| w.changed_at.is_some() || w.registers_changed_at.is_some())
-        {
+        if self.widths.lock().is_ok_and(|w| {
+            w.changed_at.is_some()
+                || w.registers_changed_at.is_some()
+                || w.panels_changed_at.is_some()
+        }) {
             ctx.request_repaint_after(Duration::from_millis(1100));
         }
         if self.toast.is_some() {
@@ -1070,6 +1107,8 @@ impl Shell {
         let frame = crate::grid_env::ShellFrame::new(self.today, &self.prefs, self.modal_open());
         crate::grid_env::publish(ctx, viewport, frame);
         crate::grid_env::publish_widths(ctx, &self.widths);
+        // Shift+Enter in a header field last frame: focus moves back now.
+        crate::forms::enter::begin_frame(ctx);
     }
 
     /// Write changed column widths a second after the last change (`now`
@@ -1098,6 +1137,15 @@ impl Shell {
             w.registers_changed_at = None;
             if let Err(e) = store.save_register_prefs(&w.registers) {
                 tracing::warn!(error = %e, "could not save register choices");
+            }
+        }
+        let due = w
+            .panels_changed_at
+            .is_some_and(|at| now.is_none_or(|n| n - at >= 1.0));
+        if due {
+            w.panels_changed_at = None;
+            if let Err(e) = w.panels.save(store.dir()) {
+                tracing::warn!(error = %e, "could not save panel choices");
             }
         }
     }
@@ -1150,9 +1198,7 @@ impl Shell {
                     dock = Some(id);
                 }
             } else {
-                egui::ScrollArea::both()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| w.screen.ui(ui));
+                draw_screen(ui, w.screen.as_mut());
             }
         });
         if let Some(id) = dock {
@@ -1191,7 +1237,7 @@ impl Shell {
                     let screen = &mut w.screen;
                     egui::CentralPanel::default()
                         .frame(Frame::new().fill(fill).inner_margin(Margin::same(16)))
-                        .show(ui, |ui| screen.ui(ui));
+                        .show(ui, |ui| draw_screen(ui, screen.as_mut()));
                 }
                 if vctx.input(|i| i.viewport().close_requested()) {
                     dock.push(wid);
@@ -1337,6 +1383,7 @@ fn make_any(
             .iter()
             .chain(&crate::screens::P15_SCREENS)
             .chain(&crate::screens::P15A_SCREENS)
+            .chain(&crate::screens::P16_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;
@@ -1374,6 +1421,18 @@ pub fn weekday_date(d: CalendarDate) -> String {
 #[must_use]
 pub fn chip_text(s: cl_model::Shortcut) -> String {
     input::shortcut_text(s).replace('+', " ")
+}
+
+/// A window body: a screen with fixed bars (Q-265) gets the rectangle and
+/// scrolls its own body; any other screen scrolls whole.
+fn draw_screen(ui: &mut egui::Ui, screen: &mut dyn crate::windows::Screen) {
+    if screen.fixed_layout() {
+        screen.ui(ui);
+    } else {
+        egui::ScrollArea::both()
+            .auto_shrink([false, false])
+            .show(ui, |ui| screen.ui(ui));
+    }
 }
 
 #[cfg(test)]

@@ -78,6 +78,10 @@ impl Capabilities {
     pub const TAG_MERGE: &'static str = "tag-merge-v1";
     /// U-42 tag groups required for chosen account types.
     pub const TAG_REQUIRED_GROUPS: &'static str = "tag-required-groups-v1";
+    /// U-75 tag numbers (Q-270): `tagNumber` on tags, unique per company
+    /// (409 `TAG_NUMBER_EXISTS`), lists sorted number then name, `search`
+    /// matches the number, carried by tenant archives.
+    pub const TAG_NUMBER: &'static str = "tag-number-v1";
     /// U-43 editable payment terms (with discount terms) and payment
     /// methods.
     pub const TERMS_LISTS: &'static str = "terms-lists-v1";
@@ -176,6 +180,12 @@ impl Capabilities {
     /// P15A: a row's `closingPassword` lets it post on or before the
     /// closing date (audited), with the P12 closed-period errors.
     pub const BATCH_CLOSING: &'static str = "batch-closing-v1";
+
+    // ---- P16 WP6a: Home (engine PR #168) -----------------------------------
+    /// P16 U-76: `/dashboard/*` money as 4-place decimal strings with
+    /// `exact=1`, `asOf` as "today", one overdue-invoice rule, cash-position
+    /// account numbers, payables `dueWithinDays`.
+    pub const DASHBOARD_EXACT: &'static str = "dashboard-exact-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]
@@ -399,9 +409,63 @@ impl<'de> Deserialize<'de> for ReportAmount {
     }
 }
 
+/// `deserialize_with` for a money field that must be a decimal string
+/// (`dashboard-exact-v1`, P16 D9): a JSON number, `null` or any other type
+/// is a decode error, so a float amount can never be read. The text is
+/// parsed exactly by [`cl_core::Money::parse_wire`].
+///
+/// # Errors
+/// The deserializer's error for a non-string or a string outside the
+/// engine money grammar.
+pub fn money_str_strict<'de, D: Deserializer<'de>>(d: D) -> Result<cl_core::Money, D::Error> {
+    struct StrOnly;
+    impl serde::de::Visitor<'_> for StrOnly {
+        type Value = cl_core::Money;
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("a decimal money string")
+        }
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<cl_core::Money, E> {
+            cl_core::Money::parse_wire(v).map_err(E::custom)
+        }
+    }
+    d.deserialize_str(StrOnly)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strict_money_reads_strings_only() {
+        #[derive(Deserialize)]
+        struct Row {
+            #[serde(deserialize_with = "money_str_strict")]
+            amount: cl_core::Money,
+        }
+        let read = |json: &str| serde_json::from_str::<Row>(json).map(|r| r.amount.to_wire());
+        assert_eq!(
+            read(r#"{"amount":"12345.6700"}"#).ok().as_deref(),
+            Some("12345.6700")
+        );
+        assert_eq!(
+            read(r#"{"amount":"-0.0100"}"#).ok().as_deref(),
+            Some("-0.0100")
+        );
+        assert_eq!(read(r#"{"amount":"0"}"#).ok().as_deref(), Some("0.0000"));
+        for bad in [
+            r#"{"amount":12345.67}"#,
+            r#"{"amount":12}"#,
+            r#"{"amount":null}"#,
+            r#"{"amount":true}"#,
+            r#"{"amount":"1e3"}"#,
+            r#"{"amount":"12.34567"}"#,
+            r#"{"amount":" 1.00"}"#,
+            r#"{"amount":""}"#,
+            "{}",
+        ] {
+            assert!(read(bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn desktop_info_tolerates_missing_and_extra_fields() {

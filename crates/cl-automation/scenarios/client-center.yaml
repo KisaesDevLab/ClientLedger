@@ -98,7 +98,11 @@ steps:
   - key: Escape
   - assert_state: {key: screen.dirty, equals: false}
   - assert_state: {key: screen.panel, equals: edit}
-  - assert_no_clipping: {}
+  - assert_no_clipping:
+      # The form scrolls in the details panel (P16): its lower fields
+      # report their full bounds past the window's bottom edge.
+      ignore:
+        - {x: 900, y: 270, width: 10000, height: 10000}
   - screenshot: edit
   - key: Escape
   - assert_state: {key: screen.panel, equals: none}
@@ -116,5 +120,28 @@ steps:
   - assert_state: {key: screen.note, equals: made_inactive}
   - key: Ctrl+Shift+H
   - assert_state: {key: screen.show_inactive, equals: false}
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Customers & Jobs}
+
+  # --- Hide the details panel (Ctrl+Shift+D, Q-266) ---------------------------
+  # Remembered per screen: hidden here, it is hidden when Customers & Jobs
+  # opens again; the edge button shows it (and leaves it shown for the next
+  # run).
+  - command: clients.center
+  - assert_state: {key: screen.details_collapsed, equals: false}
+  - key: Ctrl+Shift+D
+  - assert_state: {key: screen.details_collapsed, equals: true}
+  - assert_exists: {role: button, label: Show details}
+  - assert_not_exists: {label_contains: "From the customer balance report"}
+  - assert_no_clipping: {}
+  - screenshot: details-hidden
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Customers & Jobs}
+  - command: clients.center
+  - assert_state: {key: screen.details_collapsed, equals: true}
+  - assert_exists: {role: button, label: Show details}
+  - click: {role: button, label: Show details}
+  - assert_state: {key: screen.details_collapsed, equals: false}
+  - assert_exists: {role: button, label: Hide details}
   - key: Escape
   - assert_not_exists: {role: tab, label: Customers & Jobs}

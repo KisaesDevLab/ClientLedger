@@ -145,13 +145,23 @@ impl RegisterLists {
         );
     }
 
-    /// Sets the tags.
+    /// Sets the tags. Each shows as `number · name` (Q-270: `10 · Lake
+    /// Area`), is found by its number or its name, and the full list
+    /// (Ctrl+L) runs by number, then name.
     pub fn set_tags(&mut self, tags: &[Tag]) {
         self.tags = List::new(
-            tags.iter()
-                .map(|t| (t.id, None, t.fields.name.clone(), t.is_active))
+            crate::tag_names::sorted(tags)
+                .into_iter()
+                .map(|t| {
+                    (
+                        t.id,
+                        t.fields.tag_number.clone().filter(|n| !n.trim().is_empty()),
+                        t.fields.name.clone(),
+                        t.is_active,
+                    )
+                })
                 .collect(),
-            |name, _| name.to_string(),
+            |name, number| cl_model::tags::label(number, name),
         );
     }
 
@@ -292,6 +302,45 @@ mod tests {
             panic!("ready");
         };
         assert_eq!(none.len(), 0);
+    }
+
+    /// Q-270: the tag picker shows `number · name`, lists by number, then
+    /// name (numbered tags first), and typing a number finds the tag.
+    #[test]
+    fn tag_picker_sorts_and_finds_by_number() {
+        let tags = crate::company::demo::lists::tags();
+        let mut l = RegisterLists::default();
+        l.set_tags(&tags);
+        let LookupResult::Ready(all) = l.all(TAGS) else {
+            panic!("ready");
+        };
+        let shown: Vec<&str> = all.iter().take(4).map(|s| s.label.as_str()).collect();
+        assert_eq!(
+            shown,
+            [
+                "10 \u{b7} Lake Area",
+                "20 \u{b7} North Route",
+                "30 \u{b7} South Route",
+                "Crew 1"
+            ]
+        );
+        let lake = tags
+            .iter()
+            .find(|t| t.fields.name == "Lake Area")
+            .expect("Lake Area");
+        let key = l.tag_key(lake.id).expect("key");
+        assert_eq!(l.tag(key), Some(lake.id));
+        let LookupResult::Ready(found) = l.suggest(TAGS, "10", 5) else {
+            panic!("ready");
+        };
+        assert_eq!(found.first().map(|s| s.id), Some(key));
+        assert_eq!(l.exact(TAGS, "10").map(|s| s.id), Some(key));
+        assert_eq!(l.display(TAGS, key).as_deref(), Some("10 \u{b7} Lake Area"));
+        // The name still finds it.
+        let LookupResult::Ready(by_name) = l.suggest(TAGS, "lake", 5) else {
+            panic!("ready");
+        };
+        assert_eq!(by_name.first().map(|s| s.id), Some(key));
     }
 
     #[test]

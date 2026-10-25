@@ -522,11 +522,25 @@ impl BulkEntryScreen {
             return;
         };
         self.select_section(section);
+        // The cell of the problem, else the row's date. A hidden column
+        // with the problem in it is shown again, so the problem is never
+        // out of sight (Q-273; review P16-part1 #4).
         let kind = self.batch().sections[section].kind;
-        let field = self
-            .first_field(key)
-            .filter(|f| kind.columns().contains(f))
-            .unwrap_or(Field::Date);
+        let field = self.first_field(key).unwrap_or(Field::Date);
+        if self.choice(kind).is_hidden(field) && self.hide_column(field, false).is_ok() {
+            self.bulk_note = Some(t_with(
+                "batch_entry.columns.shown_for_problem",
+                &[(
+                    "column",
+                    &crate::i18n::t(super::grid::header_key(kind, field)),
+                )],
+            ));
+        }
+        let field = if self.choice(kind).visible().contains(&field) {
+            field
+        } else {
+            Field::Date
+        };
         let lists = Arc::clone(&self.books.lists);
         self.grid.focus(
             CellPos {

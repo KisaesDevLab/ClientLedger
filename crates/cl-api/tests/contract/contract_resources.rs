@@ -199,6 +199,7 @@ pub fn tags(h: &Harness) {
         color: Some("#336699".into()),
         group_id: None,
         description: Some("contract".into()),
+        tag_number: None,
     };
     let made = h.run(s.tags().create(&fields, key())).expect("create");
     assert_eq!(made.record.fields, fields);

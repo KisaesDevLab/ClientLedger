@@ -20,12 +20,15 @@
 //! of the owner's own amounts; balances are the engine's, shown in the
 //! register (non-negotiable 7).
 
+mod columns;
 mod draw;
 mod engine;
 mod grid;
+mod ops;
 mod paste;
 mod save;
 mod sections;
+mod selection_bar;
 mod suggest;
 mod summary;
 mod validate;
@@ -40,7 +43,9 @@ use cl_core::ids::{AccountId, TenantId};
 use cl_core::{CalendarDate, MoneyStyle};
 use cl_grid::{Grid, RowKey, RowKeyGen};
 use cl_model::forms::FormState;
-use cl_model::forms::batch::{BulkBatch, EngineChecks, Outgoing, SaveCaps, Section, SectionKind};
+use cl_model::forms::batch::{
+    BulkBatch, ColumnChoice, EngineChecks, Outgoing, SaveCaps, Section, SectionKind,
+};
 use cl_model::{CommandId, Scope};
 use eframe::egui::Ui;
 use serde_json::{Value, json};
@@ -153,12 +158,28 @@ pub struct BulkEntryScreen {
     pub(crate) summary: Option<summary::Summary>,
     pub(crate) summary_open: bool,
     // ---------------------------------------------------------------- layout
-    /// How tall everything under the grid was last frame.
-    pub(crate) below_h: Option<f32>,
-    /// How tall the totals and actions were last frame (tight layout).
-    pub(crate) footer_h: Option<f32>,
-    /// A measured height changed: draw again at once.
-    pub(crate) relayout: bool,
+    /// The fixed bars' sizes last frame (Q-265).
+    pub(crate) layout: crate::layout::FrameReport,
+    // ------------------------------------------- columns and bulk actions (P16)
+    /// The owner's column choice per section type (Q-273), remembered per
+    /// company.
+    pub(crate) columns: BTreeMap<SectionKind, ColumnChoice>,
+    /// "Columns…" is open (in place of the grid).
+    pub(crate) columns_open: bool,
+    /// The open Set picker (Q-274).
+    pub(crate) picker: Option<selection_bar::Picker>,
+    /// Delete rows is asking first.
+    pub(crate) confirm_delete: bool,
+    /// Rows the last Copy down, Set or Delete rows changed.
+    pub(crate) rows_changed: usize,
+    /// Rows the last Copy down or Set left as they were because the change
+    /// would have joined two journal entries.
+    pub(crate) kept_apart: usize,
+    /// Ctrl+A already selected the text of this cell (its position and a
+    /// hash of its text): the next Ctrl+A there selects all rows.
+    pub(crate) select_all_armed: Option<(cl_grid::CellPos, u64)>,
+    /// What the last bulk action did ("Set on 3 rows."), under the grid.
+    pub(crate) bulk_note: Option<String>,
 }
 
 /// Half a second after the last change, the changed rows go to the engine.
@@ -191,10 +212,7 @@ impl BulkEntryScreen {
         let mut batch = BulkBatch::new(Section::new(kind, None));
         grid::ensure_entry(&mut batch, 0, &mut keys, today, &BTreeMap::new());
         let adapter = BulkAdapter::new(Arc::clone(&books.lists), keys, today);
-        // The specs are fixed; `every_section_spec_is_valid_with_its_own_headers`
-        // covers every one.
-        let g =
-            Grid::new(grid::grid_id(kind), grid::spec(kind)).expect("the Bulk Entry spec is valid");
+        let g = grid::new_grid(kind, &ColumnChoice::default_for(kind));
         let form = GridForm::new(
             FormState::new(batch),
             adapter,
@@ -252,10 +270,17 @@ impl BulkEntryScreen {
             closing_prompt: ClosingPrompt::default(),
             summary: None,
             summary_open: false,
-            below_h: None,
-            footer_h: None,
-            relayout: false,
+            layout: crate::layout::FrameReport::default(),
+            columns: BTreeMap::new(),
+            columns_open: false,
+            picker: None,
+            confirm_delete: false,
+            rows_changed: 0,
+            kept_apart: 0,
+            select_all_armed: None,
+            bulk_note: None,
         };
+        s.load_columns();
         s.seen_rev = s.grid.form().revision();
         s.books.start(&s.link, s.group.as_ref());
         s.poll();
@@ -550,6 +575,7 @@ impl BulkEntryScreen {
         });
         let mut v = json!({
             "screen": "batch_entry",
+            "layout": self.layout.json(),
             "loaded": self.books.loaded,
             "sections": b.sections.len(),
             "section": i,
@@ -583,6 +609,13 @@ impl BulkEntryScreen {
             "import_open": self.import_open,
             "pasted_rows": self.pasted_rows,
             "suggest": self.suggest_json(),
+            "columns": self.columns_json(),
+            "columns_open": self.columns_open,
+            "selected": self.selected_rows().len(),
+            "rows_changed": self.rows_changed,
+            "kept_apart": self.kept_apart,
+            "picker": self.picker.as_ref().map(|p| p.field),
+            "confirm_delete": self.confirm_delete,
             "grid": {
                 "focused": self.grid.grid().has_focus(),
                 "row": cursor_index,
@@ -619,6 +652,7 @@ impl Screen for BulkEntryScreen {
         self.sync_shown_section();
         self.refresh_looks();
         self.recheck_refused();
+        self.arm_select_all(ui.ctx());
         self.draw(ui);
         self.after_grid();
         if let Some(cmd) = self.after_frame.take() {
@@ -635,13 +669,16 @@ impl Screen for BulkEntryScreen {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));
         }
-        if std::mem::take(&mut self.relayout) {
-            ui.ctx().request_repaint();
-        }
     }
 
+    /// `Scope::Grid` while the grid has the keyboard, so Ctrl+D copies
+    /// down and Ctrl+A selects the rows (P16 D6); `Scope::Form` elsewhere.
     fn scope(&self) -> Scope {
-        Scope::Form
+        if self.grid.grid().has_focus() && !self.summary_open && !self.columns_open {
+            Scope::Grid
+        } else {
+            Scope::Form
+        }
     }
 
     fn dirty(&self) -> bool {
@@ -662,6 +699,19 @@ impl Screen for BulkEntryScreen {
     fn state(&self) -> Value {
         self.state_json()
     }
+
+    /// Ctrl+A in the grid (review P16-part1 #1): the cell's text first,
+    /// all rows when the cell has nothing (more) to select.
+    fn keeps_text_key(&self, ctx: &eframe::egui::Context, s: cl_model::Shortcut) -> bool {
+        if s != ops::SELECT_ALL_KEY || !self.grid.grid().has_focus() {
+            return ctx.egui_wants_keyboard_input();
+        }
+        self.cell_keeps_ctrl_a()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
@@ -669,3 +719,6 @@ mod tests;
 
 #[cfg(test)]
 mod flow_tests;
+
+#[cfg(test)]
+mod bulk_tests;

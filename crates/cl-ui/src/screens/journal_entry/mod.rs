@@ -194,6 +194,8 @@ pub struct JournalScreen {
     pub(crate) nav_prompt: Option<bool>,
     pub(crate) after_save_nav: Option<bool>,
     pub(crate) after_frame: Option<CommandId>,
+    /// The fixed bars' sizes last frame (Q-265).
+    pub(crate) layout: crate::layout::FrameReport,
     /// The lines as last seen: a line that just got its account and has no
     /// amount takes the balancing amount (Q-P15n).
     pub(crate) seen_lines: FormLines,
@@ -286,6 +288,7 @@ impl JournalScreen {
             nav_prompt: None,
             after_save_nav: None,
             after_frame: None,
+            layout: crate::layout::FrameReport::default(),
             seen_lines,
             template: crate::screens::templates::SaveFlow::default(),
             reading_back: false,
@@ -741,6 +744,7 @@ impl JournalScreen {
         let blocker = cl_model::forms::journal::save_blocker(&f);
         let mut v = json!({
             "screen": "journal_entry",
+            "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.books.loaded,
             "mode": if self.editing.is_some() { "edit" } else { "new" },
@@ -984,6 +988,10 @@ impl Screen for JournalScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }
 

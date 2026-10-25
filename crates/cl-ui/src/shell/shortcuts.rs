@@ -1,7 +1,7 @@
 //! The shortcut overlay (Ctrl+/): the keys that work where the owner is now,
 //! read from the keymap (Q-161).
 
-use cl_model::keymap::{BANK_FEED_KEYS, DATE_KEYS, FIXED_KEYS};
+use cl_model::keymap::{BANK_FEED_KEYS, DATE_KEYS, fixed_keys};
 use cl_model::{COMMANDS, Command, Keymap, Scope};
 use eframe::egui::{self, Align2, Context, RichText};
 
@@ -27,7 +27,7 @@ pub fn rows_for(focus: Scope) -> Vec<(Scope, &'static Command)> {
 
 /// Draw the overlay. Returns true when it should close.
 #[must_use]
-pub fn show(ctx: &Context, focus: Scope, _keymap: &Keymap) -> bool {
+pub fn show(ctx: &Context, focus: Scope, keymap: &Keymap) -> bool {
     let tokens = Tokens::of(ctx);
     let mut close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
     egui::Window::new(t("shortcuts.title"))
@@ -59,7 +59,7 @@ pub fn show(ctx: &Context, focus: Scope, _keymap: &Keymap) -> bool {
                     );
                 }
                 for (title, rows) in [
-                    ("shortcuts.fixed", FIXED_KEYS),
+                    ("shortcuts.fixed", fixed_keys(keymap.mode())),
                     ("shortcuts.dates", DATE_KEYS),
                     ("shortcuts.bank_feed", BANK_FEED_KEYS),
                 ] {
@@ -83,6 +83,7 @@ fn scope_key(s: Scope) -> &'static str {
         Scope::Global => "global",
         Scope::Window => "window",
         Scope::Form => "form",
+        Scope::Grid => "grid",
     }
 }
 
@@ -120,6 +121,23 @@ mod tests {
                 .any(|(s, c)| *s == Scope::Global && c.id.as_str() == "help.palette")
         );
         assert!(rows.iter().any(|(s, _)| *s == Scope::Window));
+    }
+
+    #[test]
+    fn grid_focus_lists_grid_keys_first() {
+        let rows = rows_for(Scope::Grid);
+        assert_eq!(rows.first().map(|(s, _)| *s), Some(Scope::Grid));
+        assert!(
+            rows.iter()
+                .any(|(s, c)| *s == Scope::Grid && c.id.as_str() == "grid.copy_down")
+        );
+        assert!(rows.iter().any(|(s, _)| *s == Scope::Form));
+        assert_eq!(
+            t(&format!("shortcuts.scope.{}", scope_key(Scope::Grid))),
+            "In this grid"
+        );
+        // A form never lists grid-only keys.
+        assert!(rows_for(Scope::Form).iter().all(|(s, _)| *s != Scope::Grid));
     }
 
     #[test]

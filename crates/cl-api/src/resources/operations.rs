@@ -568,6 +568,29 @@ pub(crate) const BATCH_SUGGEST_ACCOUNT: Operation = read("/api/v1/batch/suggest-
 /// Reads a CSV or pasted file (multipart) into rows of text.
 pub(crate) const BATCH_PARSE_CSV: Operation = write(Method::Post, "/api/v1/batch/parse-csv");
 
+// ---- P16 WP6a: Home ----------------------------------------------------------------
+// In the pinned spec; exact money and `asOf` (`dashboard-exact-v1`) arrive with
+// engine PR #168.
+
+/// Bank, cash and card balances the engine stores (`exact=1`, `asOf`).
+pub(crate) const DASHBOARD_CASH: Operation = read("/api/v1/dashboard/cash-position");
+/// Open and overdue invoices.
+pub(crate) const DASHBOARD_RECEIVABLES: Operation = read("/api/v1/dashboard/receivables");
+/// Open, overdue and soon-due bills (`dueWithinDays`).
+pub(crate) const DASHBOARD_PAYABLES: Operation = read("/api/v1/dashboard/payables");
+/// Counts of things waiting on a person.
+pub(crate) const DASHBOARD_ACTIONS: Operation = read("/api/v1/dashboard/action-items");
+/// Every dashboard panel in one request, with the `asOf` it used.
+pub(crate) const DASHBOARD_SUMMARY: Operation = read("/api/v1/dashboard/summary");
+/// Bills by status and due date (Home counts read `total` only).
+pub(crate) const BILLS_LIST: Operation = read("/api/v1/bills");
+/// Payroll imports by status (Home counts the unposted ones).
+pub(crate) const PAYROLL_SESSIONS: Operation = read("/api/v1/payroll-import/sessions");
+/// One account's reconciliations, newest statement first.
+pub(crate) const RECONCILIATIONS: Operation = read("/api/v1/banking/reconciliations");
+/// Imported bank statements.
+pub(crate) const BANK_STATEMENTS: Operation = read("/api/v1/banking/statements");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -580,7 +603,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 158] = [
+pub const OPERATIONS: [Operation; 167] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -744,6 +767,16 @@ pub const OPERATIONS: [Operation; 158] = [
     BATCH_SAVE,
     BATCH_SUGGEST_ACCOUNT,
     BATCH_PARSE_CSV,
+    // P16 WP6a
+    DASHBOARD_CASH,
+    DASHBOARD_RECEIVABLES,
+    DASHBOARD_PAYABLES,
+    DASHBOARD_ACTIONS,
+    DASHBOARD_SUMMARY,
+    BILLS_LIST,
+    PAYROLL_SESSIONS,
+    RECONCILIATIONS,
+    BANK_STATEMENTS,
 ];
 
 /// Looks up a covered operation.

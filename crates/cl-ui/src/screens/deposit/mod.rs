@@ -232,6 +232,8 @@ pub struct DepositScreen {
     pub(crate) focus: Option<Field>,
     pub(crate) focused: Option<Field>,
     pub(crate) after_frame: Option<CommandId>,
+    /// The fixed bars' sizes last frame (Q-265).
+    pub(crate) layout: crate::layout::FrameReport,
     pub(crate) money_style: cl_core::MoneyStyle,
     /// Saves in other windows (Q-262).
     pub(crate) bus: crate::data_bus::Subscription,
@@ -314,6 +316,7 @@ impl DepositScreen {
             focus: Some(Field::Account),
             focused: None,
             after_frame: None,
+            layout: crate::layout::FrameReport::default(),
             money_style: cl_core::MoneyStyle::default(),
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,
@@ -605,6 +608,7 @@ impl DepositScreen {
         let pending = self.panel.pending.as_ref();
         let mut v = json!({
             "screen": "deposit",
+            "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.loaded,
             "mode": if self.editing.is_some() { "edit" } else { "new" },
@@ -742,6 +746,10 @@ impl Screen for DepositScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }
 

@@ -23,6 +23,7 @@ pub mod commands;
 pub mod date_entry;
 pub mod date_rules;
 pub mod forms;
+pub mod home;
 pub mod keymap;
 pub mod lists;
 pub mod lookup;
@@ -34,5 +35,5 @@ pub mod text;
 pub mod undo;
 
 pub use commands::{COMMANDS, Command, CommandId, Menu};
-pub use keymap::{Key, Keymap, KeymapError, Mods, Scope, Shortcut};
+pub use keymap::{EnterMode, Key, Keymap, KeymapError, Mods, Scope, Shortcut};
 pub use text::TextKey;

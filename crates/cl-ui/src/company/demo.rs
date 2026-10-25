@@ -10,6 +10,7 @@ pub mod checks;
 pub mod contacts;
 pub mod daily_sales;
 pub mod deposits;
+pub mod home;
 pub mod journal;
 pub mod lists;
 pub mod money;

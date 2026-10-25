@@ -7,7 +7,7 @@ use cl_core::ids::TenantId;
 use cl_model::CommandId;
 use cl_model::forms::SaveIntent;
 use cl_model::lists::accounts::AccountKind;
-use cl_model::lists::tags::TagProblem;
+use cl_model::lists::tags::{TagField, TagProblem};
 use eframe::egui::{self, Pos2, RawInput, Rect, vec2};
 
 use super::{Panel, TagsScreen};
@@ -102,7 +102,7 @@ fn loads_tags_by_group_with_usage_of_the_selected_tag() {
         r.s.model
             .rows()
             .iter()
-            .map(|x| x.cells[0].clone())
+            .map(|x| x.cells[1].clone())
             .collect();
     assert_eq!(
         names,
@@ -316,4 +316,125 @@ fn warnings_and_other_commands() {
     assert_eq!(r.tag_form().problems, vec![TagProblem::NameTaken]);
     r.tag_form().save_failed(ApiError::NotFound { code: None });
     assert!(r.tag_form().error.is_some());
+}
+
+/// Q-270: the Number column, number-then-name order, type-ahead by number
+/// and the row label `10 · Lake Area`.
+#[test]
+fn numbers_show_first_and_sort_and_find() {
+    let mut r = Rig::new();
+    assert_eq!(r.state("numbers"), true);
+    let numbers: Vec<String> =
+        r.s.model
+            .rows()
+            .iter()
+            .take(4)
+            .map(|x| x.cells[0].clone())
+            .collect();
+    assert_eq!(numbers, ["10", "20", "30", ""]);
+    assert_eq!(r.s.model.rows()[0].label, "10 · Lake Area, Route");
+    let lake = r.s.find_typed("10").expect("found by number");
+    assert_eq!(r.s.model.id_at(lake), Some(tag_id(3)));
+    let south = r.s.find_typed("3").expect("number prefix");
+    assert_eq!(r.s.model.id_at(south), Some(tag_id(2)));
+    let storm = r.s.find_typed("storm").expect("found by name");
+    assert_eq!(r.s.model.id_at(storm), Some(tag_id(7)));
+    assert_eq!(r.s.find_typed(" "), None);
+    r.s.filter.search = "20".into();
+    r.s.refilter();
+    assert_eq!(r.state("rows"), 1);
+    // The compact list (a panel open) keeps the Number column.
+    r.cmd("list.new");
+    assert_eq!(r.s.model.rows()[0].cells.len(), 4);
+}
+
+#[test]
+fn a_number_is_saved_cleared_and_a_used_one_refused() {
+    let mut r = Rig::new();
+    r.select(6);
+    r.cmd("list.new");
+    r.tag_form()
+        .form
+        .edit(super::F_NUMBER, |d| d.number = " 20 ".into());
+    r.tag_form()
+        .form
+        .edit(super::F_NAME, |d| d.name = "Hill Route".into());
+    assert!(!r.s.save_panel(SaveIntent::SaveAndClose));
+    assert_eq!(r.tag_form().problems, vec![TagProblem::NumberTaken]);
+    assert_eq!(r.state("problem"), "number_taken");
+    r.tag_form()
+        .form
+        .edit(super::F_NUMBER, |d| d.number = "15".into());
+    assert!(r.s.save_panel(SaveIntent::SaveAndClose));
+    r.frames(3);
+    assert_eq!(r.state("note"), "saved");
+    assert_eq!(r.state("selected_label"), "15 · Hill Route");
+    let saved = |r: &Rig, name: &str| {
+        r.link
+            .demo_state()
+            .expect("demo")
+            .tags_mut()
+            .iter()
+            .find(|t| t.fields.name == name)
+            .and_then(|t| t.fields.tag_number.clone())
+    };
+    assert_eq!(saved(&r, "Hill Route").as_deref(), Some("15"));
+    // Ungrouped, numbered: first of the ungrouped tags.
+    let ids: Vec<_> = r.s.model.rows().iter().map(|x| x.id).collect();
+    let at = ids.iter().position(|id| Some(*id) == r.s.selected());
+    assert_eq!(at, Some(6), "after the routes and crews");
+    // Clearing the number.
+    r.cmd("edit.edit_transaction");
+    r.tag_form()
+        .form
+        .edit(super::F_NUMBER, |d| d.number = String::new());
+    assert!(r.cmd("form.save_close"));
+    assert_eq!(saved(&r, "Hill Route"), None);
+    assert_eq!(r.state("selected_label"), "Hill Route");
+
+    // Another window took the number first: the engine's 409 reads the same.
+    r.cmd("edit.edit_transaction");
+    r.tag_form()
+        .form
+        .edit(super::F_NUMBER, |d| d.number = "40".into());
+    r.tag_form().save_failed(ApiError::Conflict {
+        reason: ConflictReason::TagNumberTaken,
+        current_version: None,
+        code: None,
+        message: UserText::default(),
+    });
+    assert_eq!(r.tag_form().problems, vec![TagProblem::NumberTaken]);
+    assert_eq!(r.tag_form().focus, Some(TagField::Number));
+    assert!(r.tag_form().error.is_none());
+    assert_eq!(
+        crate::i18n::t_with(TagProblem::NumberTaken.key().as_str(), &[("n", "40")]),
+        "Another tag already uses number 40."
+    );
+}
+
+#[test]
+fn without_tag_numbers_the_column_and_field_are_hidden() {
+    let mut r = Rig::new();
+    r.s.caps.numbers = false;
+    (r.s.grid, r.s.model) = super::new_grid(false, false);
+    r.s.apply();
+    r.frames(2);
+    assert_eq!(r.state("numbers"), false);
+    assert_eq!(r.s.model.rows()[0].cells.len(), 4);
+    assert_eq!(r.s.model.rows()[0].cells[0], "Lake Area");
+    r.select(6);
+    r.cmd("list.new");
+    r.tag_form()
+        .form
+        .edit(super::F_NAME, |d| d.name = "Plain".into());
+    assert!(r.s.save_panel(SaveIntent::SaveAndClose));
+    r.frames(2);
+    let mut d = r.link.demo_state().expect("demo");
+    let plain = d
+        .tags_mut()
+        .iter()
+        .find(|t| t.fields.name == "Plain")
+        .cloned()
+        .expect("saved");
+    assert_eq!(plain.fields.tag_number, None, "no number sent");
 }

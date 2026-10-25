@@ -159,6 +159,26 @@ impl Selection {
         }
     }
 
+    /// Select exactly `keys` (Select all); the anchor stays when it is
+    /// among them. True when the selection changed.
+    pub fn select_only(&mut self, keys: impl IntoIterator<Item = RowKey>) -> bool {
+        let keys: BTreeSet<RowKey> = keys.into_iter().collect();
+        self.range.clear();
+        if self.anchor.is_some_and(|a| !keys.contains(&a)) {
+            self.anchor = None;
+        }
+        let changed = keys != self.keys;
+        self.keys = keys;
+        changed
+    }
+
+    /// Unselect one row (the blank ENTRY row a range ran onto); true when
+    /// it was selected.
+    pub fn remove(&mut self, key: RowKey) -> bool {
+        self.range.remove(&key);
+        self.keys.remove(&key)
+    }
+
     /// Drop keys the model no longer has; true when the selection changed
     /// (the grid then emits `SelectionChanged`).
     pub fn retain_existing(&mut self, model: &dyn RowModel) -> bool {

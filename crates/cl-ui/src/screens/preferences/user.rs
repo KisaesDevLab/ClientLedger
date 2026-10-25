@@ -1,5 +1,6 @@
-//! "Just for me" panels (P09 step 1): look and feel, dates and numbers,
-//! reminders; plus the app-wide Backups and Updates panels (step 5).
+//! "Just for me" panels (P09 step 1): look and feel (with "Enter moves
+//! between fields", Q-264), dates and numbers, reminders; plus the app-wide
+//! Backups and Updates panels (step 5).
 
 use cl_settings::user_prefs::{DateFormat, NegativeStyle, StartScreen, ThemeChoice, ZOOM_STEPS};
 use eframe::egui::{self, Ui};
@@ -60,6 +61,13 @@ pub fn look_and_feel(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
             &StartScreen::ALL,
             |c| t(c.label_key()),
         );
+        ui.add_space(6.0);
+        // Q-264: off by default; Enter is Save & New then (Q-190).
+        ui.checkbox(
+            &mut edits.user.enter_moves_fields,
+            t("prefs.user.enter_moves"),
+        )
+        .on_hover_text(t("prefs.user.enter_moves.tip"));
     });
 }
 

@@ -31,6 +31,8 @@ use crate::text::TextKey;
 pub const NAME_MAX: usize = 100;
 /// Longest description kept.
 pub const DESCRIPTION_MAX: usize = 2000;
+/// Longest tag number the engine takes (Q-270, like account numbers).
+pub const NUMBER_MAX: usize = 20;
 
 /// One tag group as the window shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +56,8 @@ pub struct GroupEntry {
 pub struct TagEntry {
     /// Id.
     pub id: TagId,
+    /// Tag number (Q-270); `None` when it has none.
+    pub number: Option<String>,
     /// Name.
     pub name: String,
     /// Group.
@@ -68,17 +72,30 @@ pub struct TagEntry {
     pub usage: Option<i64>,
 }
 
+impl TagEntry {
+    /// The tag as every screen shows it: `10 · Lake Area` (Q-270).
+    #[must_use]
+    pub fn label(&self) -> String {
+        crate::tags::label(self.number.as_deref(), &self.name)
+    }
+
+    fn sort_key(&self) -> crate::tags::TagSortKey {
+        crate::tags::sort_key(self.number.as_deref(), &self.name)
+    }
+}
+
 /// What the Tags window shows.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TagFilter {
     /// Also list inactive tags.
     pub show_inactive: bool,
-    /// Tag or group name contains (case-insensitive).
+    /// Tag number, tag name or group name contains (case-insensitive).
     pub search: String,
 }
 
 /// The groups and tags, arranged: groups in the engine's order (then by
-/// name), each group's tags by name, ungrouped tags last.
+/// name), each group's tags by number, then name (Q-270, numbered first),
+/// ungrouped tags last.
 #[derive(Debug, Clone, Default)]
 pub struct TagList {
     groups: Vec<GroupEntry>,
@@ -116,7 +133,7 @@ impl TagList {
         tags.sort_by(|a, b| {
             rank(a)
                 .cmp(&rank(b))
-                .then_with(|| by_name(&a.name, &b.name))
+                .then_with(|| a.sort_key().cmp(&b.sort_key()))
         });
         TagList { groups, tags }
     }
@@ -166,7 +183,7 @@ impl TagList {
     }
 
     /// Indexes of the tags shown under `filter` (a search matches the tag's
-    /// name or its group's name).
+    /// number, its name or its group's name).
     #[must_use]
     pub fn visible(&self, filter: &TagFilter) -> Vec<usize> {
         let q = filter.search.trim().to_lowercase();
@@ -177,6 +194,9 @@ impl TagList {
                 (t.active || filter.show_inactive)
                     && (q.is_empty()
                         || t.name.to_lowercase().contains(&q)
+                        || t.number
+                            .as_deref()
+                            .is_some_and(|n| n.to_lowercase().contains(&q))
                         || t.group
                             .and_then(|g| self.group(g))
                             .is_some_and(|g| g.name.to_lowercase().contains(&q)))
@@ -198,6 +218,26 @@ impl TagList {
                     .map(|t| t.id)
             })
             .flatten()
+    }
+
+    /// Another tag already numbered `number` (trimmed, any case, inactive
+    /// tags included, like account numbers, Q-209). A blank number is
+    /// nobody's.
+    #[must_use]
+    pub fn tag_number_owner(&self, number: &str, except: Option<TagId>) -> Option<TagId> {
+        let want = number.trim().to_lowercase();
+        if want.is_empty() {
+            return None;
+        }
+        self.tags
+            .iter()
+            .find(|t| {
+                Some(t.id) != except
+                    && t.number
+                        .as_deref()
+                        .is_some_and(|n| n.trim().to_lowercase() == want)
+            })
+            .map(|t| t.id)
     }
 
     /// Another group already called `name` (any case).
@@ -243,6 +283,8 @@ pub fn is_color(s: &str) -> bool {
 /// The tag form's values as typed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TagDraft {
+    /// Tag number (Q-270), or blank.
+    pub number: String,
     /// Name.
     pub name: String,
     /// Group.
@@ -258,6 +300,7 @@ impl TagDraft {
     #[must_use]
     pub fn from_entry(t: &TagEntry) -> TagDraft {
         TagDraft {
+            number: t.number.clone().unwrap_or_default(),
             name: t.name.clone(),
             group: t.group,
             color: t.color.clone().unwrap_or_default(),
@@ -269,6 +312,8 @@ impl TagDraft {
 /// A tag draft that passed [`check_tag`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckedTag {
+    /// Number, trimmed; empty for none (sent as `""`, which clears it).
+    pub number: String,
     /// Name, trimmed.
     pub name: String,
     /// Group.
@@ -321,6 +366,8 @@ pub struct CheckedGroup {
 /// The form field a problem belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TagField {
+    /// The tag's number (Q-270).
+    Number,
     /// Name (tag or group).
     Name,
     /// The tag's group.
@@ -334,6 +381,10 @@ pub enum TagField {
 /// Why a tag or group draft cannot be saved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TagProblem {
+    /// The number is longer than the engine takes.
+    NumberTooLong,
+    /// Another tag has this number (Q-270).
+    NumberTaken,
     /// No name.
     NameMissing,
     /// Longer than the engine takes.
@@ -355,6 +406,8 @@ impl TagProblem {
     #[must_use]
     pub const fn key(self) -> TextKey {
         TextKey(match self {
+            TagProblem::NumberTooLong => "tags.problem.number_too_long",
+            TagProblem::NumberTaken => "tags.problem.number_taken",
             TagProblem::NameMissing => "tags.problem.name_missing",
             TagProblem::NameTooLong => "tags.problem.name_too_long",
             TagProblem::NameTaken => "tags.problem.name_taken",
@@ -369,6 +422,7 @@ impl TagProblem {
     #[must_use]
     pub const fn field(self) -> TagField {
         match self {
+            TagProblem::NumberTooLong | TagProblem::NumberTaken => TagField::Number,
             TagProblem::NameMissing
             | TagProblem::NameTooLong
             | TagProblem::NameTaken
@@ -405,6 +459,12 @@ pub fn check_tag(
     editing: Option<TagId>,
 ) -> Result<CheckedTag, Vec<TagProblem>> {
     let mut problems = Vec::new();
+    let number = draft.number.trim();
+    if engine_len(number) > NUMBER_MAX {
+        problems.push(TagProblem::NumberTooLong);
+    } else if list.tag_number_owner(number, editing).is_some() {
+        problems.push(TagProblem::NumberTaken);
+    }
     let name = draft.name.trim();
     if let Some(p) = name_problem(name) {
         problems.push(p);
@@ -425,6 +485,7 @@ pub fn check_tag(
         return Err(problems);
     }
     Ok(CheckedTag {
+        number: number.to_string(),
         name: name.to_string(),
         group: draft.group,
         color,

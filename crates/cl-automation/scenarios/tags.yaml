@@ -5,6 +5,9 @@
 # keyboard-only create (a used name refused), edit with Esc revert, make
 # inactive / active again and delete. What the scenario makes is removed
 # again (the tag deleted, the group deleted) so the dark run repeats it.
+# Tag numbers (Q-270, P16): the demo routes are numbered, so the list has a
+# Number column and shows `10 · Lake Area`; typing a number finds the tag;
+# a used number is refused in plain words on the number field.
 # The demo data is synthetic.
 name: tags
 description: Groups, usage, merge rule, keyboard create/edit/inactivate/delete, group rules.
@@ -17,7 +20,9 @@ steps:
   - assert_state: {key: screen.loaded, equals: true}
   - assert_state: {key: screen.groups, equals: 2}
   - assert_state: {key: screen.focused, equals: true}
-  - assert_exists: {role: row, label_contains: "Lake Area, Route"}
+  - assert_exists: {role: row, label_contains: "10 · Lake Area, Route"}
+  - assert_state: {key: screen.numbers, equals: true}
+  - assert_state: {key: screen.selected_label, equals: "10 · Lake Area"}
   - assert_state: {key: screen.usage_loaded, equals: true}
   - assert_state: {key: screen.merge_available, equals: false}
   - assert_exists: {label_contains: "Merging a tag used on transaction lines"}
@@ -25,6 +30,10 @@ steps:
   - assert_exists: {label_contains: "One per line"}
   - assert_no_clipping: {}
   - screenshot: list
+
+  # Typing a number finds the tag (Q-270).
+  - type: {text: "30"}
+  - assert_state: {key: screen.selected_label, equals: "30 · South Route"}
 
   # A tag used on transactions only can be merged; a used tag isn't deleted.
   - type: {text: Storm}
@@ -82,10 +91,22 @@ steps:
   - type: {text: "Hardscape {theme}"}
   - key: Tab
   - type: {text: J}
+  # The number field sits before the name: a used number is refused.
+  - key: Shift+Tab
+  - key: Shift+Tab
+  - type: {text: "20"}
+  - key: Alt+S
+  - assert_state: {key: screen.problem, equals: number_taken}
+  - assert_exists: {label_contains: "Another tag already uses number 20."}
+  - assert_no_clipping: {}
+  - screenshot: number_taken
+  - key: Backspace
+  - key: Backspace
+  - type: {text: "40"}
   - key: Alt+S
   - assert_state: {key: screen.panel, equals: none}
   - assert_state: {key: screen.note, equals: saved}
-  - assert_exists: {role: row, label_contains: "Hardscape"}
+  - assert_exists: {role: row, label_contains: "40 · Hardscape"}
   - assert_state: {key: screen.usage_total, equals: 0}
 
   # --- Keyboard-only edit (Ctrl+E), Esc reverts, then closes -----------------

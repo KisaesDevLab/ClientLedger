@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Independent fresh-eyes code review of a phase's diff before its pull request opens. Has not seen the implementation conversation. Focuses on correctness of money, posting, concurrency, data loss, closed periods, and the acceptance criteria. Required for Tier H and Tier M phases; optional for Tier L.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, PowerShell
 model: opus
 effort: high
 maxTurns: 60

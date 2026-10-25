@@ -1,7 +1,7 @@
 ---
 name: test-writer
 description: Writes tests from acceptance criteria before or alongside implementation — unit, property (proptest), contract tests against the engine, golden-report CSVs, synthetic fixtures, and control-channel YAML scenarios. Use at the start of each phase so implementers work against failing tests.
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell
 model: opus
 effort: medium
 maxTurns: 100

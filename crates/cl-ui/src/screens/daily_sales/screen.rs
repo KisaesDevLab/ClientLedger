@@ -321,6 +321,8 @@ impl DailySalesScreen {
         };
         let mut v = json!({
             "screen": "daily_sales",
+            "layout": self.frame_report.json(),
+            "condensed": self.condensed.state_json(),
             "company_open": self.tenant.is_some(),
             "loaded": self.templates_loaded,
             "books": self.books.is_some() || self.link.session().is_some(),
@@ -438,5 +440,9 @@ impl Screen for DailySalesScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }

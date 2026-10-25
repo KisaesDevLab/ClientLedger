@@ -221,6 +221,12 @@ pub struct UserPrefs {
     pub date_warnings: DateWarnings,
     /// Update checks.
     pub update_check: UpdateCheck,
+    /// "Enter moves between fields" (Q-264): Enter goes to the next field
+    /// or grid cell like Tab, Shift+Enter goes back, and Ctrl+Enter is
+    /// Save & New. Off by default (Enter = Save & New, Q-190). A personal
+    /// keyboard habit, so it stays with the user, not the company (Q-P09c,
+    /// P16 plan D3).
+    pub enter_moves_fields: bool,
 }
 
 impl Default for UserPrefs {
@@ -233,6 +239,7 @@ impl Default for UserPrefs {
             start_screen: StartScreen::default(),
             date_warnings: DateWarnings::default(),
             update_check: UpdateCheck::Manual,
+            enter_moves_fields: false,
         }
     }
 }
@@ -363,6 +370,7 @@ mod tests {
                 future_days: 5,
             },
             update_check: UpdateCheck::Manual,
+            enter_moves_fields: true,
         };
         assert_eq!(UserPrefs::parse(&p.to_text()), p);
         assert_eq!(UserPrefs::parse("garbage"), UserPrefs::default());
@@ -376,6 +384,24 @@ mod tests {
         let wide = UserPrefs::parse(r#"{"date_warnings":{"past_days":65535,"future_days":4000}}"#);
         assert_eq!(wide.date_warnings.past_days, DATE_WARNING_MAX_DAYS);
         assert_eq!(wide.date_warnings.future_days, DATE_WARNING_MAX_DAYS);
+    }
+
+    #[test]
+    fn enter_moves_fields_is_off_in_older_files() {
+        // A P09-era file (every field before P16) still reads, with the
+        // Enter option off (Q-264: off by default).
+        let p09 = UserPrefs::parse(
+            r#"{"theme":"dark","zoom_percent":110,"date_format":"month_day_year",
+                "negatives":"minus","start_screen":"home",
+                "date_warnings":{"past_days":90,"future_days":30},
+                "update_check":"manual"}"#,
+        );
+        assert_eq!(p09.theme, ThemeChoice::Dark);
+        assert!(!p09.enter_moves_fields);
+        assert!(!UserPrefs::default().enter_moves_fields);
+        let on = UserPrefs::parse(r#"{"enter_moves_fields":true}"#);
+        assert!(on.enter_moves_fields);
+        assert!(on.to_text().contains("\"enter_moves_fields\": true"));
     }
 
     #[test]

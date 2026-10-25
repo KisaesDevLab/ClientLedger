@@ -264,6 +264,22 @@ pub const COMMANDS: &[Command] = &[
     cmd("batch.prev_problem", "Previous Row That Needs Attention", None, 4, key(Mods::SHIFT, Key::F(8)), Scope::Form),
     cmd("batch.next_section", "Next Section", None, 4, key(Mods::CMD, Key::PageDown), Scope::Form),
     cmd("batch.prev_section", "Previous Section", None, 4, key(Mods::CMD, Key::PageUp), Scope::Form),
+    // Bulk Entry columns and selection actions (P16, Q-274; one undo step each)
+    cmd("batch.columns", "Columns\u{2026}", None, 4, None, Scope::Form),
+    cmd("batch.set_account", "Set Account", None, 5, None, Scope::Grid),
+    cmd("batch.set_name", "Set Name", None, 5, None, Scope::Grid),
+    cmd("batch.set_tag", "Set Tag", None, 5, None, Scope::Grid),
+    cmd("batch.set_date", "Set Date", None, 5, None, Scope::Grid),
+    cmd("batch.set_memo", "Set Memo", None, 5, None, Scope::Grid),
+    cmd("batch.set_print_later", "Set Print Later", None, 5, None, Scope::Grid),
+    cmd("batch.delete_rows", "Delete Rows", None, 5, None, Scope::Grid),
+    // Grids that opted in to grid commands (P16, Q-272, Q-274). The Grid
+    // scope sits inside Form, so Ctrl+D copies down here and deletes the
+    // transaction in a form.
+    cmd("grid.copy_down", "Copy Down", None, 6, ctrl('D'), Scope::Grid),
+    cmd("grid.copy_down_below", "Copy to Rows Below", None, 6, None, Scope::Grid),
+    cmd("grid.select_all", "Select All Rows", None, 6, ctrl('A'), Scope::Grid),
+    cmd("grid.clear_selection", "Clear Selection", None, 6, None, Scope::Grid),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
@@ -326,10 +342,12 @@ pub const COMMANDS: &[Command] = &[
     screen("company.send_to_accountant", "Send to My Accountant", Some(Menu::Company), 2, None, "P32"),
     screen("company.audit_trail", "Audit Trail", Some(Menu::Company), 2, None, "P29"),
     // Window
-    screen("nav.home", "Home", Some(Menu::Window), 0, alt('H'), "P16"),
+    built("nav.home", "Home", Some(Menu::Window), 0, alt('H')),
     cmd("window.next", "Next Window", Some(Menu::Window), 1, key(Mods::CMD, Key::Tab), Scope::Global),
     cmd("window.prev", "Previous Window", Some(Menu::Window), 1, key(Mods::CMD_SHIFT, Key::Tab), Scope::Global),
     cmd("window.pop_out", "Move Window to Its Own Window", Some(Menu::Window), 1, ctrl_shift('O'), Scope::Window),
+    // Collapse or expand a screen's detail panel (P16, Q-266)
+    cmd("window.toggle_details", "Show or Hide Details", Some(Menu::Window), 1, ctrl_shift('D'), Scope::Window),
     cmd("window.zoom_in", "Zoom In", Some(Menu::Window), 2, key(Mods::CMD, Key::Equals), Scope::Global),
     cmd("window.zoom_out", "Zoom Out", Some(Menu::Window), 2, key(Mods::CMD, Key::Minus), Scope::Global),
     cmd("window.zoom_reset", "Actual Size", Some(Menu::Window), 2, key(Mods::CMD, Key::Digit(0)), Scope::Global),
@@ -453,6 +471,8 @@ mod tests {
             "lists.templates_due",
             // P15A
             "banking.bulk_entry",
+            // P16
+            "nav.home",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -646,6 +666,59 @@ mod tests {
                 km.resolve(Scope::Form, Shortcut::new(mods, k))
                     .map(CommandId::as_str),
                 Some(id)
+            );
+        }
+    }
+
+    #[test]
+    fn p16_commands() {
+        use crate::keymap::Keymap;
+        let details = find("window.toggle_details").unwrap();
+        assert_eq!(details.label, "Show or Hide Details");
+        assert_eq!(
+            (details.menu, details.shortcut, details.scope),
+            (Some(Menu::Window), ctrl_shift('D'), Scope::Window)
+        );
+        assert!(!details.opens && details.palette);
+        for (id, label, shortcut, scope) in [
+            ("grid.copy_down", "Copy Down", ctrl('D'), Scope::Grid),
+            (
+                "grid.copy_down_below",
+                "Copy to Rows Below",
+                None,
+                Scope::Grid,
+            ),
+            ("grid.select_all", "Select All Rows", ctrl('A'), Scope::Grid),
+            ("grid.clear_selection", "Clear Selection", None, Scope::Grid),
+            ("batch.columns", "Columns\u{2026}", None, Scope::Form),
+            ("batch.set_account", "Set Account", None, Scope::Grid),
+            ("batch.set_name", "Set Name", None, Scope::Grid),
+            ("batch.set_tag", "Set Tag", None, Scope::Grid),
+            ("batch.set_date", "Set Date", None, Scope::Grid),
+            ("batch.set_memo", "Set Memo", None, Scope::Grid),
+            (
+                "batch.set_print_later",
+                "Set Print Later",
+                None,
+                Scope::Grid,
+            ),
+            ("batch.delete_rows", "Delete Rows", None, Scope::Grid),
+        ] {
+            let c = find(id).unwrap();
+            assert_eq!(c.label, label, "{id}");
+            assert_eq!(
+                (c.menu, c.shortcut, c.scope),
+                (None, shortcut, scope),
+                "{id}"
+            );
+            assert!(c.palette && !c.opens && c.arrives.is_none(), "{id}");
+        }
+        let km = Keymap::new(COMMANDS).unwrap();
+        for focus in [Scope::Window, Scope::Form, Scope::Grid] {
+            assert_eq!(
+                km.resolve(focus, Shortcut::new(Mods::CMD_SHIFT, Key::Letter('D')))
+                    .map(CommandId::as_str),
+                Some("window.toggle_details")
             );
         }
     }

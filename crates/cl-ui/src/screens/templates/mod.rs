@@ -43,6 +43,7 @@ use crate::company::{CompanyEvent, CompanyLink};
 use crate::forms::closing_prompt::{ClosingClick, ClosingPrompt};
 use crate::forms::template::TemplateOpen;
 use crate::i18n::{t, t_with};
+use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::company::form;
 use crate::theme::Tokens;
 use crate::windows::Screen;
@@ -53,6 +54,17 @@ pub use save_flow::SaveFlow;
 
 /// The command and window kind.
 pub const KIND: &str = "lists.templates";
+
+/// The table's column headings, in order.
+const COLUMNS: [&str; 7] = [
+    "templates.col.name",
+    "templates.col.type",
+    "templates.col.how_often",
+    "templates.col.next_date",
+    "templates.col.mode",
+    "templates.col.amount",
+    "templates.col.account",
+];
 
 /// The Templates window for `kind`, if it is one.
 #[must_use]
@@ -238,6 +250,11 @@ pub struct TemplatesScreen {
     pub(crate) stale: bool,
     pub(crate) last_action: Option<&'static str>,
     bus: crate::data_bus::Subscription,
+    /// Where each column started last frame (screen points), for the fixed
+    /// headings.
+    column_x: Vec<f32>,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
 }
 
 impl TemplatesScreen {
@@ -251,6 +268,8 @@ impl TemplatesScreen {
         let group = link.group().and_then(Result::ok);
         let mut s = TemplatesScreen {
             bus: link.bus().subscribe(),
+            column_x: Vec::new(),
+            layout: crate::layout::FrameReport::default(),
             link,
             tenant,
             group,
@@ -744,20 +763,55 @@ impl TemplatesScreen {
             form::progress_line(ui, &tokens, &t("templates.loading"));
             return;
         }
-        self.toolbar(ui, &tokens);
-        match self.closing_prompt.ui(ui, &tokens) {
-            ClosingClick::Submit => self.submit_closing(),
-            ClosingClick::Cancel => self.closing_prompt.cancel(),
-            ClosingClick::None => {}
+        // The toolbar, the messages and the column headings stay put; the
+        // templates scroll under them (Q-265).
+        let mut frame = FixedFrame::begin(ui, KIND, FrameOpts::default());
+        frame.top(|ui| {
+            self.toolbar(ui, &tokens);
+            match self.closing_prompt.ui(ui, &tokens) {
+                ClosingClick::Submit => self.submit_closing(),
+                ClosingClick::Cancel => self.closing_prompt.cancel(),
+                ClosingClick::None => {}
+            }
+            self.messages(ui, &tokens);
+            if !self.rows.is_empty() {
+                self.headings(ui, &tokens);
+            }
+        });
+        frame.body(Body::Scroll, |ui| {
+            if self.rows.is_empty() {
+                ui.add_space(12.0);
+                form::hint(ui, &tokens, &t("templates.empty"));
+            } else {
+                self.table(ui);
+            }
+        });
+        self.layout = frame.end();
+        if !self.rows.is_empty() {
+            self.windows(ui.ctx());
         }
-        self.messages(ui, &tokens);
-        if self.rows.is_empty() {
-            ui.add_space(12.0);
-            form::hint(ui, &tokens, &t("templates.empty"));
-            return;
+    }
+
+    /// The column headings, placed over the table's columns as they were
+    /// laid out last frame.
+    fn headings(&self, ui: &mut Ui, tokens: &Tokens) {
+        let h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
+        let (row, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::hover());
+        for (i, key) in COLUMNS.iter().enumerate() {
+            let Some(&x) = self.column_x.get(i) else {
+                break;
+            };
+            let right = self.column_x.get(i + 1).copied().unwrap_or(row.right());
+            let rect =
+                egui::Rect::from_min_max(egui::pos2(x, row.top()), egui::pos2(right, row.bottom()));
+            ui.put(
+                rect,
+                egui::Label::new(RichText::new(t(key)).strong().color(tokens.text_secondary))
+                    .selectable(false)
+                    .truncate(),
+            );
         }
-        self.table(ui, &tokens);
-        self.windows(ui.ctx());
     }
 
     fn toolbar(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -911,82 +965,79 @@ impl TemplatesScreen {
         }
     }
 
-    fn table(&mut self, ui: &mut Ui, tokens: &Tokens) {
+    fn table(&mut self, ui: &mut Ui) {
         let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
         let sections = self.sections();
         let mut picked = None;
         let mut used = None;
         let mut toggled = None;
-        egui::ScrollArea::vertical()
-            .id_salt("templates/scroll")
-            .auto_shrink([false, false])
+        let mut column_x = Vec::with_capacity(COLUMNS.len());
+        egui::Grid::new("templates/table")
+            .num_columns(7)
+            .striped(true)
+            .spacing([16.0, 6.0])
             .show(ui, |ui| {
-                egui::Grid::new("templates/table")
-                    .num_columns(7)
-                    .striped(true)
-                    .spacing([16.0, 6.0])
-                    .show(ui, |ui| {
-                        for key in [
-                            "templates.col.name",
-                            "templates.col.type",
-                            "templates.col.how_often",
-                            "templates.col.next_date",
-                            "templates.col.mode",
-                            "templates.col.amount",
-                            "templates.col.account",
-                        ] {
-                            ui.label(RichText::new(t(key)).strong().color(tokens.text_secondary));
+                // The headings' room, so each column is at least
+                // as wide as its heading; the headings themselves
+                // show in the fixed top bar, over these columns.
+                for key in COLUMNS {
+                    let r = ui.add_visible(
+                        false,
+                        egui::Label::new(RichText::new(t(key)).strong()).selectable(false),
+                    );
+                    column_x.push(r.rect.left());
+                }
+                ui.end_row();
+                for (g, ids) in &sections {
+                    let open = !self.collapsed.contains(g);
+                    let name = g
+                        .and_then(|g| self.groups.iter().find(|x| x.id == g))
+                        .map_or_else(|| t("templates.group.none"), |x| x.name.clone());
+                    if group_toggle(ui, open, &name)
+                        .on_hover_text(t("templates.group.toggle"))
+                        .clicked()
+                    {
+                        toggled = Some(*g);
+                    }
+                    ui.end_row();
+                    if !open {
+                        continue;
+                    }
+                    for id in ids {
+                        let Some(r) = self.row(*id) else { continue };
+                        let sel = self.selected == Some(*id);
+                        let resp = ui.selectable_label(sel, format!("    {}", r.name));
+                        if resp.clicked() {
+                            picked = Some(*id);
                         }
+                        if resp.double_clicked() {
+                            used = Some(*id);
+                        }
+                        ui.label(t(kind_key(r)));
+                        let how = r
+                            .schedule
+                            .map(|s| how_often_text(&model_schedule(&s)))
+                            .unwrap_or_default();
+                        ui.label(how);
+                        ui.label(
+                            r.schedule
+                                .map(|s| crate::shell::us_date(s.next_date))
+                                .unwrap_or_default(),
+                        );
+                        ui.label(t(mode_key(r)));
+                        ui.label(
+                            RichText::new(r.total.map(|m| m.format(style)).unwrap_or_default())
+                                .text_style(egui::TextStyle::Monospace),
+                        );
+                        ui.label(self.account_name(r.account));
                         ui.end_row();
-                        for (g, ids) in &sections {
-                            let open = !self.collapsed.contains(g);
-                            let name = g
-                                .and_then(|g| self.groups.iter().find(|x| x.id == g))
-                                .map_or_else(|| t("templates.group.none"), |x| x.name.clone());
-                            if group_toggle(ui, open, &name)
-                                .on_hover_text(t("templates.group.toggle"))
-                                .clicked()
-                            {
-                                toggled = Some(*g);
-                            }
-                            ui.end_row();
-                            if !open {
-                                continue;
-                            }
-                            for id in ids {
-                                let Some(r) = self.row(*id) else { continue };
-                                let sel = self.selected == Some(*id);
-                                let resp = ui.selectable_label(sel, format!("    {}", r.name));
-                                if resp.clicked() {
-                                    picked = Some(*id);
-                                }
-                                if resp.double_clicked() {
-                                    used = Some(*id);
-                                }
-                                ui.label(t(kind_key(r)));
-                                let how = r
-                                    .schedule
-                                    .map(|s| how_often_text(&model_schedule(&s)))
-                                    .unwrap_or_default();
-                                ui.label(how);
-                                ui.label(
-                                    r.schedule
-                                        .map(|s| crate::shell::us_date(s.next_date))
-                                        .unwrap_or_default(),
-                                );
-                                ui.label(t(mode_key(r)));
-                                ui.label(
-                                    RichText::new(
-                                        r.total.map(|m| m.format(style)).unwrap_or_default(),
-                                    )
-                                    .text_style(egui::TextStyle::Monospace),
-                                );
-                                ui.label(self.account_name(r.account));
-                                ui.end_row();
-                            }
-                        }
-                    });
+                    }
+                }
             });
+        if column_x != self.column_x {
+            self.column_x = column_x;
+            ui.ctx().request_repaint();
+        }
         if let Some(g) = toggled
             && !self.collapsed.remove(&g)
         {
@@ -1065,6 +1116,7 @@ impl TemplatesScreen {
             .collect();
         let mut v = json!({
             "screen": "templates",
+            "layout": self.layout.json(),
             "company_open": self.tenant.is_some(),
             "available": templates_on(&self.link),
             "loaded": self.loaded,
@@ -1159,6 +1211,10 @@ impl Screen for TemplatesScreen {
 
     fn state(&self) -> Value {
         self.state_json()
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 }
 

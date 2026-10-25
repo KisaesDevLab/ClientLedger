@@ -364,6 +364,50 @@ fn a_grouped_deposit_is_read_only_and_its_summary_is_the_engines_total() {
     assert_eq!(s.save.last_action, Some("void"));
 }
 
+/// Q-267: the summary is a condensed table on wide windows; the total sits
+/// in the amounts' column.
+#[test]
+fn the_summary_draws_condensed_on_wide_windows() {
+    use crate::forms::condensed::MAX_WIDTH;
+    use eframe::egui::{self, Pos2, RawInput, Rect, vec2};
+    let (mut s, log, _dir) = screen(all_caps());
+    let record = grouped_record();
+    let id = record.id;
+    log.lock().expect("log").record = Some(record);
+    assert!(s.open_record(id));
+    for width in [1440.0, 1920.0] {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        let tokens = crate::theme::Tokens::of(&ctx);
+        let mut report = None;
+        for _ in 0..2 {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 900.0))),
+                ..RawInput::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    report = s.summary_ui(ui, &tokens);
+                });
+            });
+            out.textures_delta.clear();
+        }
+        let r = report.expect("a saved deposit has a summary");
+        assert!(r.width <= MAX_WIDTH, "{width}: {}", r.width);
+        assert!(r.rows.len() >= 2, "lines and the total: {r:?}");
+        assert!(r.widest_gap() <= MAX_WIDTH, "{width}");
+        let total = r.rows.last().expect("total");
+        assert!(total.total);
+        for row in &r.rows {
+            assert!(
+                (row.amount.right() - total.amount.right()).abs() < 1.5,
+                "{row:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn the_draft_total_is_the_checked_total() {
     let (mut s, _log, _dir) = screen(all_caps());
@@ -536,4 +580,33 @@ fn a_lost_refund_reply_resends_under_the_same_key() {
     s.refund_failed(ApiError::Local(cl_api::LocalValidation::InvalidValue));
     assert!(s.refund.key.is_none());
     assert_ne!(s.refund_key(&draft, true), with_password);
+}
+
+/// Q-264: Enter in Date is Save & New by default and moves on to Memo
+/// (Shift+Enter back) when "Enter moves between fields" is on.
+#[test]
+fn header_enter_saves_or_moves_by_the_preference() {
+    use crate::forms::enter::testing::{context, enter, frame, settle};
+    use cl_model::forms::EnterMode;
+    for mode in [EnterMode::SaveAndNew, EnterMode::MoveBetweenFields] {
+        let (mut s, log, _dir) = screen(DepositCaps::default());
+        set_lines(&mut s, &[(4000, "100.00")]);
+        let ctx = context();
+        s.focus = Some(Field::Date);
+        settle(&ctx, mode, &mut |ui| s.ui(ui));
+        assert_eq!(s.focused, Some(Field::Date), "{mode:?}");
+        frame(&ctx, mode, enter(false), &mut |ui| s.ui(ui));
+        settle(&ctx, mode, &mut |ui| s.ui(ui));
+        let saved = log.lock().expect("log").saved.len();
+        match mode {
+            EnterMode::SaveAndNew => assert_eq!(saved, 1, "Enter = Save & New (Q-190)"),
+            EnterMode::MoveBetweenFields => {
+                assert_eq!(saved, 0, "Enter never saves here");
+                assert_eq!(s.focused, Some(Field::Memo));
+                frame(&ctx, mode, enter(true), &mut |ui| s.ui(ui));
+                settle(&ctx, mode, &mut |ui| s.ui(ui));
+                assert_eq!(s.focused, Some(Field::Date), "Shift+Enter goes back");
+            }
+        }
+    }
 }

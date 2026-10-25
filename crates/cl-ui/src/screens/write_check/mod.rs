@@ -42,7 +42,7 @@ use cl_core::{CalendarDate, Money};
 use cl_model::forms::FormState;
 use cl_model::forms::check::{CheckForm, CheckProblem, NumberField, propose_number};
 use cl_model::forms::lines::FormLines;
-use cl_model::lists::tags::{TagEntry, TagList};
+use cl_model::lists::tags::TagList;
 use cl_model::register::AccountClass;
 use cl_model::rowkey::RowKeyGen;
 use cl_model::{CommandId, Scope};
@@ -274,6 +274,8 @@ pub struct WriteCheckScreen {
     /// A command to run once the frame's fields are drawn (Enter in a
     /// header field is Save & New, Q-190).
     pub(crate) after_frame: Option<CommandId>,
+    /// The fixed bars' sizes last frame (Q-265).
+    pub(crate) layout: crate::layout::FrameReport,
     /// The owner's money display style (from the shell each frame).
     pub(crate) money_style: cl_core::MoneyStyle,
     /// Payee prefill (WP7).
@@ -304,17 +306,7 @@ pub struct WriteCheckScreen {
 fn tag_list(tags: &[Tag]) -> TagList {
     TagList::new(
         Vec::new(),
-        tags.iter()
-            .map(|t| TagEntry {
-                id: t.id,
-                name: t.fields.name.clone(),
-                group: t.fields.group_id,
-                color: t.fields.color.clone(),
-                description: t.fields.description.clone(),
-                active: t.is_active,
-                usage: t.usage_count,
-            })
-            .collect(),
+        tags.iter().map(crate::tag_names::entry).collect(),
     )
 }
 
@@ -382,6 +374,7 @@ impl WriteCheckScreen {
             payee_list: false,
             in_grid: false,
             after_frame: None,
+            layout: crate::layout::FrameReport::default(),
             money_style: cl_core::MoneyStyle::default(),
             prefill: prefill::PrefillState::default(),
             panel: panel::PanelState::default(),
@@ -982,6 +975,10 @@ impl Screen for WriteCheckScreen {
         self.state_json()
     }
 
+    fn fixed_layout(&self) -> bool {
+        true
+    }
+
     fn open_template(&mut self, t: crate::forms::template::TemplateOpen) -> bool {
         self.fill_template(&t)
     }
@@ -1072,6 +1069,7 @@ impl WriteCheckScreen {
             "grid": {
                 "focused": self.lines.has_focus(),
             },
+            "layout": self.layout.json(),
         });
         let wp7 = json!({
             "prefill": {

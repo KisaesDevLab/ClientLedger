@@ -147,7 +147,7 @@ impl Category {
     /// Words the search box matches besides the label.
     fn search_terms(self) -> &'static str {
         match self {
-            Category::LookAndFeel => "theme dark light zoom colour color",
+            Category::LookAndFeel => "theme dark light zoom colour color enter keyboard tab",
             Category::DatesNumbers => "date format negative parentheses warning",
             Category::Reminders => "bills due backup remind",
             Category::Accounting => "basis cash accrual fiscal year closing date account numbers",
@@ -315,6 +315,8 @@ pub struct PreferencesScreen {
     error: Option<CompanyError>,
     status: Option<String>,
     close_after_save: bool,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
 }
 
 impl PreferencesScreen {
@@ -372,6 +374,7 @@ impl PreferencesScreen {
             error: None,
             status: None,
             close_after_save: false,
+            layout: crate::layout::FrameReport::default(),
         };
         screen.start_load();
         screen
@@ -976,92 +979,89 @@ impl Screen for PreferencesScreen {
     fn ui(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
         self.poll();
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.heading(t("prefs.title"));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Right to left: the input sits at the edge, its label to
-                // the left of it (the label is the accessible name).
-                let input = ui.add_sized(
-                    [220.0, 24.0],
-                    egui::TextEdit::singleline(&mut self.search).hint_text(t("prefs.search")),
-                );
-                let l = ui.add(egui::Label::new(t("prefs.search")).selectable(false));
-                input.labelled_by(l.id);
-            });
-        });
-        ui.add_space(6.0);
-        // The list and the panel scroll inside the visible part of the
-        // window, so Cancel and Save stay in view at any size: the height
-        // is what is visible below this point minus the footer.
-        // The footer: separator, buttons, and one line of block/error/status
-        // text when there is one.
-        let lines = u8::from(self.block.is_some())
-            + u8::from(self.error.is_some())
-            + u8::from(self.status.is_some());
-        let footer_h = 66.0 + 24.0 * f32::from(lines);
-        let body_h = (ui.clip_rect().bottom() - ui.cursor().top() - footer_h).max(160.0);
-        egui::ScrollArea::vertical()
-            .id_salt("prefs-body")
-            .max_height(body_h)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                ui.horizontal_top(|ui| {
-                    egui::Frame::new()
-                        .fill(tokens.surface_subtle)
-                        .corner_radius(egui::CornerRadius::same(6))
-                        .inner_margin(egui::Margin::symmetric(8, 10))
-                        .show(ui, |ui| {
-                            ui.vertical(|ui| {
-                                ui.set_width(190.0);
-                                self.nav(ui, &tokens);
-                            });
-                        });
-                    ui.add_space(12.0);
-                    ui.vertical(|ui| {
-                        ui.set_width((ui.available_width() - 8.0).max(200.0));
-                        if !self.loaded.done {
-                            form::progress_line(ui, &tokens, &t("prefs.loading"));
-                        }
-                        self.panel(ui, &tokens);
-                    });
+        // The title and Search stay at the top, Cancel and Save at the
+        // bottom; the list and the panel scroll between them (Q-265).
+        let mut frame =
+            crate::layout::FixedFrame::begin(ui, COMMAND, crate::layout::FrameOpts::default());
+        frame.top(|ui| {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.heading(t("prefs.title"));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Right to left: the input sits at the edge, its label
+                    // to the left of it (the label is the accessible name).
+                    let input = ui.add_sized(
+                        [220.0, 24.0],
+                        egui::TextEdit::singleline(&mut self.search).hint_text(t("prefs.search")),
+                    );
+                    let l = ui.add(egui::Label::new(t("prefs.search")).selectable(false));
+                    input.labelled_by(l.id);
                 });
             });
-        ui.add_space(4.0);
-        ui.separator();
-        if let Some(b) = &self.block {
-            form::hint(ui, &tokens, &t(b.message_key()));
-        }
-        if let Some(e) = &self.error {
-            form::inline_error(ui, &tokens, e);
-        }
-        if let Some(s) = &self.status {
-            ui.label(RichText::new(s).color(tokens.text_secondary));
-        }
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if self.save_task.is_some() {
-                    form::progress_line(ui, &tokens, &t("prefs.saving"));
-                } else {
-                    let can_save = self.loaded.done;
-                    if ui
-                        .add_enabled_ui(can_save, |ui| primary_button(ui, &t("prefs.save")))
-                        .inner
-                        .clicked()
-                    {
-                        self.save();
+        });
+        frame.body(crate::layout::Body::Scroll, |ui| {
+            ui.horizontal_top(|ui| {
+                egui::Frame::new()
+                    .fill(tokens.surface_subtle)
+                    .corner_radius(egui::CornerRadius::same(6))
+                    .inner_margin(egui::Margin::symmetric(8, 10))
+                    .show(ui, |ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width(190.0);
+                            self.nav(ui, &tokens);
+                        });
+                    });
+                ui.add_space(12.0);
+                ui.vertical(|ui| {
+                    ui.set_width((ui.available_width() - 8.0).max(200.0));
+                    if !self.loaded.done {
+                        form::progress_line(ui, &tokens, &t("prefs.loading"));
                     }
-                }
-                if ui
-                    .add(egui::Button::new(t("prefs.cancel")).min_size(Vec2::new(0.0, 44.0)))
-                    .clicked()
-                {
-                    self.revert();
-                    self.link
-                        .push(CompanyEvent::CloseWindow(CommandId::new(COMMAND)));
-                }
+                    self.panel(ui, &tokens);
+                });
             });
         });
+        frame.bottom(|ui| {
+            ui.separator();
+            if let Some(b) = &self.block {
+                form::hint(ui, &tokens, &t(b.message_key()));
+            }
+            if let Some(e) = &self.error {
+                form::inline_error(ui, &tokens, e);
+            }
+            if let Some(s) = &self.status {
+                ui.label(RichText::new(s).color(tokens.text_secondary));
+            }
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if self.save_task.is_some() {
+                        form::progress_line(ui, &tokens, &t("prefs.saving"));
+                    } else {
+                        let can_save = self.loaded.done;
+                        if ui
+                            .add_enabled_ui(can_save, |ui| primary_button(ui, &t("prefs.save")))
+                            .inner
+                            .clicked()
+                        {
+                            self.save();
+                        }
+                    }
+                    if ui
+                        .add(egui::Button::new(t("prefs.cancel")).min_size(Vec2::new(0.0, 44.0)))
+                        .clicked()
+                    {
+                        self.revert();
+                        self.link
+                            .push(CompanyEvent::CloseWindow(CommandId::new(COMMAND)));
+                    }
+                });
+            });
+        });
+        self.layout = frame.end();
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 
     fn command(&mut self, id: CommandId) -> bool {
@@ -1089,6 +1089,7 @@ impl Screen for PreferencesScreen {
     fn state(&self) -> Value {
         json!({
             "screen": "preferences",
+            "layout": self.layout.json(),
             "category": self.category.key(),
             "company_open": self.tenant.is_some(),
             "dirty": self.dirty(),
@@ -1105,6 +1106,7 @@ impl Screen for PreferencesScreen {
                 "zoom": self.edits.user.zoom_percent,
                 "date_format": format!("{:?}", self.edits.user.date_format).to_ascii_lowercase(),
                 "negatives": format!("{:?}", self.edits.user.negatives).to_ascii_lowercase(),
+                "enter_moves_fields": self.edits.user.enter_moves_fields,
             },
         })
     }
@@ -1181,6 +1183,7 @@ mod tests {
         }
         assert!(Category::Ai.matches("ollama"));
         assert!(!Category::Backups.matches("ollama"));
+        assert!(Category::LookAndFeel.matches("enter"));
         assert_eq!(Category::LookAndFeel.group(), Group::Me);
         assert_eq!(Category::Email.group(), Group::Company);
     }
@@ -1202,6 +1205,24 @@ mod tests {
         assert_eq!(s.title(), "Preferences");
         assert_eq!(s.state()["category"], "look");
         assert!(!s.dirty());
+    }
+
+    #[test]
+    fn the_enter_option_is_a_just_for_me_preference() {
+        let (_d, mut s) = demo_screen(true);
+        assert_eq!(s.state()["user"]["enter_moves_fields"], false);
+        s.edits_mut().user.enter_moves_fields = true;
+        assert!(s.dirty());
+        assert_eq!(s.state()["user"]["enter_moves_fields"], true);
+        assert!(Screen::save(&mut s));
+        assert!(
+            s.link
+                .drain()
+                .iter()
+                .any(|e| matches!(e, CompanyEvent::UserPrefs(p) if p.enter_moves_fields))
+        );
+        assert!(crate::i18n::has("prefs.user.enter_moves"));
+        assert!(crate::i18n::has("prefs.user.enter_moves.tip"));
     }
 
     #[test]

@@ -1,0 +1,177 @@
+# "Enter moves between fields" (P16 step 0, Q-264) against
+# `clientledger --demo`: the Just-for-me option in Preferences, then Enter
+# and Shift+Enter move between header fields in Write Check and Make
+# Deposit and Transfer Funds and between cells in Make Journal Entry and
+# Bulk Entry, and Ctrl+Enter is Save & New (each form refuses its incomplete
+# entry, so nothing is saved and the scenario repeats). The option is turned
+# off at the end, so the light and dark runs both start from the default
+# (Q-190); then Enter in Transfer Funds is Save & New again. Opening
+# Balances is reached only through the interview: its Enter steps are in
+# opening-balances.yaml.
+# All data is synthetic.
+name: forms-enter
+description: The Enter option on; Enter and Shift+Enter move in Write Check, Make Deposit, Transfer Funds, Make Journal Entry and Bulk Entry; Ctrl+Enter is Save & New; the option off again, and Enter saves in Transfer Funds.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+
+  # --- 1. The preference -------------------------------------------------------
+  - command: edit.preferences
+  - assert_state: {key: screen.screen, equals: preferences}
+  - click: {role: button, label: Look and feel}
+  - assert_exists: {role: check_box, label: Enter moves between fields}
+  - assert_state: {key: screen.user.enter_moves_fields, equals: false}
+  - click: {role: check_box, label: Enter moves between fields}
+  - assert_state: {key: screen.user.enter_moves_fields, equals: true}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_no_clipping: {}
+  - screenshot: preference
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Preferences}
+
+  # --- 2. Write Check: header fields -------------------------------------------
+  - key: Ctrl+W
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Date}
+  - assert_state: {key: screen.focused, equals: date}
+  - key: Enter
+  - assert_state: {key: screen.focused, equals: payee}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - type: {text: Ozark Feed}
+  - key: Enter
+  - assert_value: {target: {role: text_input, label: Pay to the order of}, equals: "Ozark Feed & Seed"}
+  - assert_state: {key: screen.focused, equals: amount}
+  - key: Shift+Enter
+  - assert_state: {key: screen.focused, equals: payee}
+  - key: Enter
+  - assert_state: {key: screen.focused, equals: amount}
+  - type: {text: "10"}
+  - key: Enter
+  - assert_value: {target: {role: text_input, label: "Amount ($)"}, equals: "10.00"}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - screenshot: write-check
+  # Ctrl+Enter = Save & New: the prefilled lines have no amounts, so the
+  # save is refused and nothing is written.
+  - key: Ctrl+Enter
+  - assert_state: {key: screen.save.refused, equals: line_amount_not_positive}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
+  - command: file.close_window
+
+  # --- 3. Make Deposit: header fields ------------------------------------------
+  - key: Ctrl+D
+  - assert_state: {key: screen.screen, equals: deposit}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Date}
+  - assert_state: {key: screen.focused, equals: date}
+  - key: Enter
+  - assert_state: {key: screen.focused, equals: memo}
+  - key: Shift+Enter
+  - assert_state: {key: screen.focused, equals: date}
+  - screenshot: deposit
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+
+  # --- 4. Make Journal Entry: grid cells ---------------------------------------
+  - key: Ctrl+J
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {label_contains: "Account, line 1"}
+  - type: {text: "6100"}
+  - key: Enter
+  - type: {text: "25"}
+  - key: Enter
+  # Enter moved Account -> Debit -> Credit on line 1: the debit landed in
+  # its cell and no line was recorded or saved.
+  - assert_value: {target: {role: grid_cell, label: "Debit, line 1"}, equals: "25.00"}
+  - assert_state: {key: screen.lines, equals: 1}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - key: Shift+Enter
+  - key: Shift+Enter
+  # Back on Account: the typed account replaces line 1's.
+  - type: {text: "1010"}
+  - key: Tab
+  - assert_value: {target: {role: grid_cell, label: "Account, line 1"}, equals: "1010 · Operating Checking"}
+  - screenshot: journal-entry
+  # Ctrl+Enter = Save & New: one line only, so it is refused.
+  - key: Ctrl+Enter
+  - assert_state: {key: screen.save.refused, equals: too_few_lines}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+
+  # --- 5. Bulk Entry: grid cells -----------------------------------------------
+  - command: banking.bulk_entry
+  - assert_state: {key: screen.screen, equals: batch_entry}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {label: "Date, line 1"}
+  - type: {text: "T"}
+  - key: Enter
+  - key: Enter
+  - key: Enter
+  - type: {text: "Galena Gravel"}
+  - key: Enter
+  - assert_value: {target: {label: "Pay to, line 1"}, equals: "Galena Gravel"}
+  - assert_state: {key: screen.grid.row, equals: 0}
+  - assert_state: {key: screen.grid.column, equals: account}
+  - key: Shift+Enter
+  - assert_state: {key: screen.grid.column, equals: contact}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - screenshot: bulk-entry
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.rows, equals: 0}
+  - command: file.close_window
+
+  # --- 5b. Transfer Funds: header fields (review P16-part1 #6) ----------------
+  - key: Ctrl+T
+  - assert_state: {key: screen.screen, equals: transfer}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Date}
+  - assert_state: {key: screen.focused, equals: date}
+  - key: Enter
+  - assert_state: {key: screen.focused, equals: amount}
+  - type: {text: "15"}
+  - key: Enter
+  - assert_state: {key: screen.amount, equals: "15.00"}
+  - assert_state: {key: screen.focused, equals: memo}
+  - key: Shift+Enter
+  - assert_state: {key: screen.focused, equals: amount}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - screenshot: transfer
+  # Ctrl+Enter = Save & New: no To account yet, so it is refused.
+  - key: Ctrl+Enter
+  - assert_state: {key: screen.save.refused, equals: to_missing}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+
+  # --- 6. The option off again (Enter = Save & New, Q-190) --------------------
+  - command: edit.preferences
+  - click: {role: button, label: Look and feel}
+  - click: {role: check_box, label: Enter moves between fields}
+  - assert_state: {key: screen.user.enter_moves_fields, equals: false}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dirty, equals: false}
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Preferences}
+
+  # --- 7. Transfer Funds with the option off: Enter is Save & New ------------
+  - key: Ctrl+T
+  - assert_state: {key: screen.screen, equals: transfer}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - click: {role: text_input, label: Amount}
+  - type: {text: "15"}
+  - key: Enter
+  - assert_state: {key: screen.save.refused, equals: to_missing}
+  - assert_state: {key: screen.saved_count, equals: 0}
+  - click: {role: button, label: Clear}
+  - command: file.close_window

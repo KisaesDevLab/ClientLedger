@@ -123,9 +123,9 @@ pub fn tag_groups() -> Vec<TagGroup> {
     .collect()
 }
 
-/// The demo tags: three routes, two crews, two ungrouped tags and an
-/// inactive promotion, then the sample company's own tags (the Write
-/// Check story's Install and Crew A).
+/// The demo tags: three numbered routes (`10 · Lake Area`), two crews, two
+/// ungrouped tags and an inactive promotion, then the sample company's own
+/// tags (the Write Check story's Install and Crew A).
 #[must_use]
 pub fn tags() -> Vec<Tag> {
     let mut rows: Vec<(u32, String, Option<TagGroupId>, bool)> = [
@@ -150,6 +150,13 @@ pub fn tags() -> Vec<Tag> {
             .map(|x| x.id);
         rows.push((n, t.name, group, true));
     }
+    // A few tag numbers (Q-270): the routes are numbered, the rest not.
+    let number = |n: u32| match n {
+        3 => Some("10".to_string()),
+        1 => Some("20".to_string()),
+        2 => Some("30".to_string()),
+        _ => None,
+    };
     rows.into_iter()
         .map(|(n, name, group, active)| Tag {
             id: tag_id(n),
@@ -158,6 +165,7 @@ pub fn tags() -> Vec<Tag> {
                 color: None,
                 group_id: group,
                 description: None,
+                tag_number: number(n),
             },
             is_active: active,
             usage_count: Some(0),

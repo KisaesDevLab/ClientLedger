@@ -19,7 +19,7 @@ cl-settings = { path = "../cl-settings" }
 # No `default_fonts`: those bundle fonts under licenses outside the cargo-deny
 # allowlist. The UI embeds IBM Plex (OFL, ATTRIBUTION.md) instead.
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
-eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "wgpu", "wayland", "x11", "clipboard"] }
+eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "wgpu", "wayland", "x11", "clipboard", "links"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tokio = { version = "1.53.3", features = ["rt"] }

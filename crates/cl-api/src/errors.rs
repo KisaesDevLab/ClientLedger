@@ -273,6 +273,13 @@ pub enum LocalValidation {
     /// A Bulk Entry CSV or paste is empty or larger than 10 MB; nothing
     /// was sent.
     BatchFileSize,
+    // ---- P16 WP6a: Home ----
+    /// Dashboard money needs `dashboard-exact-v1` (U-76); nothing was
+    /// sent. Home shows a dash instead.
+    DashboardUnavailable,
+    /// The dashboard's bills-due window must be 1 to 90 days; nothing was
+    /// sent (Home counts a longer window with the bills list instead).
+    DueWindow,
 }
 
 /// A save was refused because its date is on or before the closing date.
@@ -319,6 +326,10 @@ pub enum ConflictReason {
     InUse,
     /// The record already exists.
     AlreadyExists,
+    /// Another tag already uses this tag number (409 `TAG_NUMBER_EXISTS`,
+    /// Q-270). The screen names the number it sent; the engine's text is
+    /// never shown.
+    TagNumberTaken,
     /// The engine is busy with this resource; try again shortly.
     Busy,
     /// The transaction is in a finished reconciliation (409
@@ -541,6 +552,7 @@ impl OwnerFacing for ApiError {
                 ConflictReason::Stale => ("error.api.conflict_stale", Some("fix.api.reload")),
                 ConflictReason::InUse => ("error.api.conflict_in_use", None),
                 ConflictReason::AlreadyExists => ("error.api.conflict_exists", None),
+                ConflictReason::TagNumberTaken => ("error.api.tag_number_taken", None),
                 ConflictReason::Busy => ("error.api.busy", Some("fix.api.try_again_soon")),
                 ConflictReason::Reconciled => ("error.api.conflict_reconciled", None),
                 ConflictReason::AlreadyDeleted => {
@@ -732,6 +744,7 @@ fn conflict(body: &EngineErrorBody) -> ApiError {
         Some("STALE") => ConflictReason::Stale,
         Some("TAG_IN_USE") => ConflictReason::InUse,
         Some("EMAIL_EXISTS" | "ACCOUNT_NUMBER_EXISTS") => ConflictReason::AlreadyExists,
+        Some("TAG_NUMBER_EXISTS") => ConflictReason::TagNumberTaken,
         // `BATCH_BUSY` (P15A): another batch save of the company is running,
         // or a row lock was not free in time. Nothing was posted by this
         // request; a retry with the same idempotency key replays a finished
@@ -1353,6 +1366,7 @@ mod tests {
         for (c, want) in [
             ("TAG_IN_USE", ConflictReason::InUse),
             ("EMAIL_EXISTS", ConflictReason::AlreadyExists),
+            ("TAG_NUMBER_EXISTS", ConflictReason::TagNumberTaken),
             ("TENANT_BUSY", ConflictReason::Busy),
             ("IDEMPOTENCY_IN_PROGRESS", ConflictReason::Busy),
             ("BATCH_BUSY", ConflictReason::Busy),
@@ -1375,6 +1389,28 @@ mod tests {
             panic!("conflict")
         };
         assert_eq!((reason, code), (ConflictReason::Unspecified, None));
+    }
+
+    #[test]
+    fn a_used_tag_number_is_typed_and_names_nothing() {
+        let e = err(
+            409,
+            r#"{"error":{"message":"Tag number 10 is used by Lake Area","code":"TAG_NUMBER_EXISTS"}}"#,
+            S,
+        );
+        assert!(matches!(
+            &e,
+            ApiError::Conflict {
+                reason: ConflictReason::TagNumberTaken,
+                current_version: None,
+                ..
+            }
+        ));
+        assert_eq!(e.owner_message().key, "error.api.tag_number_taken");
+        assert_eq!(e.owner_message().suggestion_key, None);
+        let shown = format!("{e} | {}", e.scrubbed_detail());
+        assert!(!shown.contains("Lake"), "{shown}");
+        assert!(shown.contains("TAG_NUMBER_EXISTS"), "{shown}");
     }
 
     fn batch_err(status: u16, body: &str) -> ApiError {

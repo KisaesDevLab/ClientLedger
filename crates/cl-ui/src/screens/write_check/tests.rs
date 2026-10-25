@@ -1426,3 +1426,35 @@ fn a_click_on_the_payee_opens_the_names_list_and_tab_does_not() {
     assert_eq!(s.state_json()["payee_list"], false, "Tab never opens it");
     assert_eq!(s.header.current().payee, payee);
 }
+
+/// Q-264: Enter in a header field is Save & New by default and moves to
+/// the next field (Shift+Enter back) when "Enter moves between fields" is on.
+#[test]
+fn header_enter_saves_or_moves_by_the_preference() {
+    use crate::forms::enter::testing::{context, enter, frame, settle};
+    use cl_model::forms::EnterMode;
+    for mode in [EnterMode::SaveAndNew, EnterMode::MoveBetweenFields] {
+        let (_d, link) = link();
+        let mut s = screen(&link);
+        fill(&mut s, "10.00", &[("5110", "10.00")]);
+        let ctx = context();
+        s.focus = Some(Field::Date);
+        settle(&ctx, mode, &mut |ui| s.ui(ui));
+        assert_eq!(s.focused, Some(Field::Date), "{mode:?}");
+        frame(&ctx, mode, enter(false), &mut |ui| s.ui(ui));
+        settle(&ctx, mode, &mut |ui| s.ui(ui));
+        match mode {
+            EnterMode::SaveAndNew => {
+                assert_eq!(s.state()["saved_count"], 1, "Enter = Save & New (Q-190)");
+            }
+            EnterMode::MoveBetweenFields => {
+                assert_eq!(s.state()["saved_count"], 0, "Enter never saves here");
+                assert_eq!(s.focused, Some(Field::Payee), "the next field");
+                frame(&ctx, mode, enter(true), &mut |ui| s.ui(ui));
+                settle(&ctx, mode, &mut |ui| s.ui(ui));
+                assert_eq!(s.focused, Some(Field::Date), "Shift+Enter goes back");
+                assert_eq!(s.state()["saved_count"], 0);
+            }
+        }
+    }
+}

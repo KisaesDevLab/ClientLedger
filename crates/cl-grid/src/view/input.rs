@@ -37,6 +37,14 @@ pub struct CursorInfo {
     pub multiline: bool,
     /// The memo's text already has a line break.
     pub has_newline: bool,
+    /// The grid offers a context menu: Shift+F10 and the Menu key open it.
+    pub context_menu: bool,
+    /// The context menu is open: the arrows, Enter, Space, Esc and Tab are
+    /// the menu's, and typed text is dropped.
+    pub menu_open: bool,
+    /// Shift+Up/Down extends the row selection in this editable grid (a
+    /// select column, no list or calculator open).
+    pub extend_rows: bool,
 }
 
 /// Exact modifiers (Cmd counts as Ctrl).
@@ -109,6 +117,10 @@ impl Collector {
         buffer: &str,
         out: &mut Vec<GridInput>,
     ) -> Option<Event> {
+        // Typing never reaches the cell under an open context menu.
+        if info.menu_open && matches!(event, Event::Text(_)) {
+            return None;
+        }
         // A block paste (tabs or several lines) goes to the screen whole,
         // whatever the cursor cell is; a single value pastes as usual.
         if let Event::Paste(t) = event
@@ -212,6 +224,26 @@ fn map(
             {
                 return None; // the shell acted on the first press
             }
+            if info.menu_open {
+                let k = match (key, m) {
+                    (Key::ArrowUp, Mods::NONE) => Some(GridKey::Up),
+                    (Key::ArrowDown, Mods::NONE) => Some(GridKey::Down),
+                    (Key::Home, _) => Some(GridKey::Home),
+                    (Key::End, _) => Some(GridKey::End),
+                    (Key::Enter, Mods::NONE) => Some(GridKey::Enter),
+                    (Key::Space, Mods::NONE) => {
+                        *swallow_space_text = true;
+                        Some(GridKey::Space)
+                    }
+                    (Key::Escape, Mods::NONE) => Some(GridKey::Escape),
+                    (Key::Tab, Mods::NONE | Mods::SHIFT) => Some(GridKey::Tab),
+                    (Key::F10, Mods::SHIFT) | (Key::Menu, Mods::NONE) => Some(GridKey::ContextMenu),
+                    _ => None,
+                };
+                let Some(k) = k else { return keep };
+                out.push(GridInput::Key(k, m));
+                return None;
+            }
             let is_dropdown = matches!(info.kind, Some(CellKind::Dropdown { .. }));
             if info.multiline
                 && info.editing
@@ -243,8 +275,15 @@ fn map(
                 (Key::Escape, Mods::NONE) => Some(GridKey::Escape),
                 (Key::ArrowUp, Mods::NONE) => Some(GridKey::Up),
                 (Key::ArrowDown, Mods::NONE) => Some(GridKey::Down),
-                (Key::ArrowUp, Mods::SHIFT) if !info.editable_grid => Some(GridKey::Up),
-                (Key::ArrowDown, Mods::SHIFT) if !info.editable_grid => Some(GridKey::Down),
+                (Key::ArrowUp, Mods::SHIFT) if !info.editable_grid || info.extend_rows => {
+                    Some(GridKey::Up)
+                }
+                (Key::ArrowDown, Mods::SHIFT) if !info.editable_grid || info.extend_rows => {
+                    Some(GridKey::Down)
+                }
+                (Key::F10, Mods::SHIFT) | (Key::Menu, Mods::NONE) if info.context_menu => {
+                    Some(GridKey::ContextMenu)
+                }
                 (Key::ArrowLeft, Mods::NONE) if !info.editing => Some(GridKey::Left),
                 (Key::ArrowRight, Mods::NONE) if !info.editing => Some(GridKey::Right),
                 (Key::Home, Mods::CTRL | Mods::CTRL_SHIFT) => Some(GridKey::Home),
@@ -265,8 +304,9 @@ fn map(
                 _ => None,
             };
             let Some(k) = grid_key else { return keep };
-            // Shift+Enter is a newline only in a multiline memo (step 13a).
-            let m = if k == GridKey::Enter { Mods::NONE } else { m };
+            // Shift+Enter keeps its Shift: it is Enter when Enter records
+            // the row and "previous cell" when Enter moves between fields
+            // (Q-264). In a multiline memo it stayed for the editor above.
             out.push(GridInput::Key(k, m));
             None
         }
@@ -274,6 +314,9 @@ fn map(
             if *swallow_space_text && t == " " {
                 *swallow_space_text = false;
                 return None;
+            }
+            if info.menu_open {
+                return None; // typing never reaches the cell under a menu
             }
             if !info.editable_grid {
                 out.push(GridInput::Text(t.clone()));
@@ -321,6 +364,9 @@ mod tests {
             ime_active: false,
             multiline: false,
             has_newline: false,
+            context_menu: false,
+            menu_open: false,
+            extend_rows: false,
         }
     }
 
@@ -473,6 +519,15 @@ b"
     }
 
     #[test]
+    fn shift_enter_keeps_its_shift_outside_a_memo() {
+        // The core treats it as Enter or as "previous cell" (Q-264).
+        let date = info(Some(CellKind::Date), true);
+        let (out, left, _) = run(vec![press(Key::Enter, Modifiers::SHIFT, false)], date);
+        assert_eq!(out, vec![GridInput::Key(GridKey::Enter, Mods::SHIFT)]);
+        assert_eq!(left, Vec::<Event>::new());
+    }
+
+    #[test]
     fn dropdown_space_and_alt_down() {
         const OPTS: &[crate::core::model::OptionSpec] = &[];
         let dd = info(Some(CellKind::Dropdown { options: OPTS }), false);
@@ -580,6 +635,9 @@ b"
             ime_active: false,
             multiline: false,
             has_newline: false,
+            context_menu: false,
+            menu_open: false,
+            extend_rows: false,
         };
         let (out, left, _) = run(
             vec![
@@ -600,5 +658,65 @@ b"
             ]
         );
         assert_eq!(left, Vec::<Event>::new());
+    }
+
+    /// P16 D6: Shift+F10 and the Menu key open the menu only where it is
+    /// offered; Shift+arrows extend only with a select column.
+    #[test]
+    fn menu_keys_and_shift_arrows_are_opt_in() {
+        let keys = || {
+            vec![
+                press(Key::F10, Modifiers::SHIFT, false),
+                press(Key::Menu, Modifiers::NONE, false),
+                press(Key::ArrowDown, Modifiers::SHIFT, false),
+            ]
+        };
+        let plain = info(Some(CellKind::Date), true);
+        let (out, left, _) = run(keys(), plain);
+        assert!(out.is_empty(), "{out:?}");
+        assert_eq!(left.len(), 3, "the editor and the shell keep them");
+        let mut opted = plain;
+        opted.context_menu = true;
+        opted.extend_rows = true;
+        let (out, left, _) = run(keys(), opted);
+        assert_eq!(
+            out,
+            vec![
+                GridInput::Key(GridKey::ContextMenu, Mods::SHIFT),
+                GridInput::Key(GridKey::ContextMenu, Mods::NONE),
+                GridInput::Key(GridKey::Down, Mods::SHIFT),
+            ]
+        );
+        assert_eq!(left, Vec::<Event>::new());
+    }
+
+    #[test]
+    fn an_open_menu_takes_its_keys_and_drops_typing() {
+        let mut open = info(Some(CellKind::Date), true);
+        open.menu_open = true;
+        let (out, left, _) = run(
+            vec![
+                press(Key::ArrowDown, Modifiers::NONE, false),
+                press(Key::End, Modifiers::NONE, false),
+                press(Key::Space, Modifiers::NONE, false),
+                Event::Text(" ".into()),
+                Event::Text("t".into()),
+                press(Key::Enter, Modifiers::NONE, false),
+                press(Key::Escape, Modifiers::NONE, false),
+                press(Key::ArrowLeft, Modifiers::NONE, false),
+            ],
+            open,
+        );
+        assert_eq!(
+            out,
+            vec![
+                GridInput::Key(GridKey::Down, Mods::NONE),
+                GridInput::Key(GridKey::End, Mods::NONE),
+                GridInput::Key(GridKey::Space, Mods::NONE),
+                GridInput::Key(GridKey::Enter, Mods::NONE),
+                GridInput::Key(GridKey::Escape, Mods::NONE),
+            ]
+        );
+        assert_eq!(left.len(), 1, "only the caret arrow stays; no text");
     }
 }

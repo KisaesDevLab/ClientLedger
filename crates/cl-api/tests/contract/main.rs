@@ -25,6 +25,7 @@ mod contract_daily_sales;
 mod contract_deposits;
 mod contract_errors;
 mod contract_harness;
+mod contract_home;
 mod contract_items;
 mod contract_journal;
 mod contract_journal_entries;
@@ -145,6 +146,12 @@ fn main() -> std::process::ExitCode {
         (
             "tags::several_line_tags_u45",
             contract_tags::several_line_tags_u45,
+        ),
+        // P16 step 0e: tag numbers (PENDING until the pin has U-75).
+        ("tags::numbers_u75", contract_tags::numbers_u75),
+        (
+            "tags::number_archive_round_trip_u75",
+            contract_tags::number_archive_round_trip_u75,
         ),
         (
             "list_csv::exports_and_imports",
@@ -568,6 +575,26 @@ fn main() -> std::process::ExitCode {
         (
             "batch::row_rules_refused",
             contract_batch::row_rules_refused,
+        ),
+        // P16 WP6a: Home reads (the dashboard money test is PENDING(U-76)
+        // until the pin carries dashboard-exact-v1, engine PR #168).
+        (
+            "home::bills_count_matches_the_list",
+            contract_home::bills_count_matches_the_list,
+        ),
+        (
+            "home::counts_match_the_engine",
+            contract_home::counts_match_the_engine,
+        ),
+        (
+            "home::float_dashboard_refused",
+            contract_home::float_dashboard_refused,
+        ),
+        ("home::exact_strings_u76", contract_home::exact_strings_u76),
+        // P16 WP7: the rail counts Home reads.
+        (
+            "home::rail_counts_match_the_lists",
+            contract_home::rail_counts_match_the_lists,
         ),
         (
             "lifecycle::ten_switches_under_two_seconds",

@@ -1,7 +1,7 @@
 ---
 name: security-reviewer
 description: Security review for phases that touch processes, sockets, secrets, authentication, permissions, LAN mode, AI data handling, licensing notices, packaging, or updates (P03, P04, P07, P09, P29, P32, P33, P35, P36, P37). Runs in addition to the reviewer.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, PowerShell
 model: opus
 effort: high
 maxTurns: 60

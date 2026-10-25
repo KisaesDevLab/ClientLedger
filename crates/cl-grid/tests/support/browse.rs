@@ -60,6 +60,8 @@ impl<M: RowModel> Browse<M> {
                 },
                 label: "Register",
                 input_enabled: true,
+                enter_mode: cl_model::forms::EnterMode::SaveAndNew,
+                context: None,
             };
             if outer {
                 let o = egui::ScrollArea::both().id_salt("outer").show(ui, |ui| {

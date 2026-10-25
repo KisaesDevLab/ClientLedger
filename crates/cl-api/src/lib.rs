@@ -184,3 +184,15 @@ pub use resources::batch::{
     ENGINE_MAX_GROUPS, ENGINE_MAX_ROWS, FieldProblem, PARSE_CSV_MAX_BYTES, ParsedRow, ParsedRows,
     ProblemKind, RowCheck, SavedTxn, is_key_reused,
 };
+
+// P16 WP6a: Home reads.
+pub use resources::dashboard::{
+    ActionItems, CashAccount, CashPosition, DUE_WITHIN_DAYS_MAX, Dashboard, DashboardSummary,
+    Payables, Receivables, StaleReconciliation, action_items_from_json, cash_position_from_json,
+    payables_from_json, receivables_from_json, summary_from_json,
+};
+pub use resources::home_queries::{
+    BILLS_PAGE, BILLS_PAGES_MAX, BillQuery, HomeQueries, LastReconciled, OpenBillStatus,
+    PayrollStatus, RECONCILE_ACCOUNTS_MAX, ReconcileState,
+};
+pub use wire::money_str_strict;

@@ -153,6 +153,7 @@ mod tests {
                 negative: NegativeStyle::Parens,
                 symbol: true,
             },
+            enter_mode: cl_model::forms::EnterMode::SaveAndNew,
         }
     }
 

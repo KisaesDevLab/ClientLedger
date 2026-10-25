@@ -66,6 +66,24 @@ pub trait Screen {
     fn state(&self) -> serde_json::Value {
         serde_json::Value::Null
     }
+
+    /// True when the screen lays itself out with [`crate::layout::FixedFrame`]
+    /// (its bars stay put and only its body scrolls, Q-265): the shell then
+    /// gives it the window's rectangle instead of scrolling it whole.
+    fn fixed_layout(&self) -> bool {
+        false
+    }
+
+    /// True when a text field of this window keeps `s` (one of the keys
+    /// [`crate::input::reserved_by_text_fields`] names: Ctrl+A, C, V, X,
+    /// Delete) for itself this frame, so the shell does not run its
+    /// shortcut. The default: whenever any widget has the keyboard. A grid
+    /// screen says false for Ctrl+A when its cell editor has nothing left to
+    /// select, so Select All Rows (`Scope::Grid`) reaches it.
+    fn keeps_text_key(&self, ctx: &eframe::egui::Context, s: cl_model::Shortcut) -> bool {
+        let _ = s;
+        ctx.egui_wants_keyboard_input()
+    }
 }
 
 /// Stand-in for a screen a later phase builds.
@@ -109,6 +127,13 @@ impl Placeholder {
     pub fn kind(&self) -> CommandId {
         self.kind
     }
+
+    /// The phase that builds the real screen (`None` for a built command
+    /// shown without a company).
+    #[must_use]
+    pub fn arrives(&self) -> Option<&'static str> {
+        self.arrives
+    }
 }
 
 impl Screen for Placeholder {
@@ -123,14 +148,10 @@ impl Screen for Placeholder {
             ui.heading(&self.title);
         });
         ui.add_space(6.0);
-        // A built command can still show a placeholder until its screen is
-        // wired in (Write Check during P13), so only Home gets its own text.
-        let message = if self.arrives.is_none() && self.kind.as_str() == "nav.home" {
-            t("window.placeholder.home")
-        } else {
-            t("window.placeholder.coming")
-        };
-        ui.label(eframe::egui::RichText::new(message).color(tokens.text_secondary));
+        ui.label(
+            eframe::egui::RichText::new(t("window.placeholder.coming"))
+                .color(tokens.text_secondary),
+        );
     }
 
     fn dirty(&self) -> bool {

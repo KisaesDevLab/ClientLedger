@@ -43,6 +43,10 @@ pub struct Node {
     /// Current value of an input (hidden for secret fields).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    /// Accessible description: egui puts a widget's tooltip text here (the
+    /// tooltip popup itself is not in the tree).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Where it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<Bounds>,
@@ -214,6 +218,15 @@ impl Node {
                 .label
                 .as_ref()
                 .is_some_and(|l| l.to_lowercase().contains(&part.to_lowercase()));
+            if !hit {
+                return false;
+            }
+        }
+        if let Some(part) = &t.description_contains {
+            let hit = self
+                .description
+                .as_ref()
+                .is_some_and(|d| d.to_lowercase().contains(&part.to_lowercase()));
             if !hit {
                 return false;
             }
@@ -461,6 +474,7 @@ pub(crate) mod fixture {
             role: role.into(),
             label: label.map(Into::into),
             value: None,
+            description: None,
             bounds: b.map(|(x, y, width, height)| Bounds {
                 x,
                 y,

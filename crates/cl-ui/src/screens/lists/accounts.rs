@@ -47,6 +47,7 @@ use self::model::{
 use crate::company::{CompanyLink, Task};
 use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
+use crate::layout::{Body, FixedFrame, LIST_FRAME};
 use crate::screens::company::form;
 use crate::theme::Tokens;
 use crate::windows::Screen;
@@ -185,6 +186,8 @@ pub struct ChartScreen {
     /// A plain warning (i18n key) under the toolbar.
     warn: Option<&'static str>,
     parts: EnvParts,
+    /// The fixed bars' sizes last frame (Q-265).
+    layout: crate::layout::FrameReport,
     snap: GridSnapshot,
     focus_search: bool,
     want_cursor: Option<AccountId>,
@@ -238,6 +241,7 @@ impl ChartScreen {
             note: None,
             warn: None,
             parts: EnvParts::default(),
+            layout: crate::layout::FrameReport::default(),
             snap: GridSnapshot::default(),
             focus_search: false,
             want_cursor: None,
@@ -965,7 +969,7 @@ impl ChartScreen {
             &label,
             GridHeight::Fill {
                 reserve_below: reserve,
-                min_rows: 6,
+                min_rows: 3,
             },
         );
         let out = self.grid.show(ui, ModelRef::Browse(&mut self.model), &env);
@@ -1333,9 +1337,10 @@ pub(crate) fn demo_save(
     }
 }
 
-/// True when Enter was pressed to leave `r`.
-fn enter_left(ui: &Ui, r: &egui::Response) -> bool {
-    r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
+/// Enter left `r` and means Save & New (Q-190); with "Enter moves between
+/// fields" on it moved the focus instead (Q-264).
+fn enter_left(_ui: &Ui, r: &egui::Response) -> bool {
+    crate::forms::enter::entered(r).saves()
 }
 
 /// A labelled single-line field with its own id.
@@ -1443,44 +1448,55 @@ impl Screen for ChartScreen {
         self.hear_changes();
         self.sync_compact();
         let tokens = Tokens::of(ui.ctx());
-        form::heading(ui, &tokens, &t("cmd.lists.chart_of_accounts"));
-        ui.add_space(4.0);
-        self.toolbar(ui);
-        self.messages(ui, &tokens);
-        ui.add_space(4.0);
-        if !self.loaded {
-            form::progress_line(ui, &tokens, &t("lists.accounts.loading"));
-            return;
-        }
-        match self.panel {
-            Panel::Form(_) => {
-                ui.horizontal_top(|ui| {
-                    let left = (ui.available_width() - PANEL_WIDTH - 16.0).max(320.0);
-                    ui.vertical(|ui| {
-                        ui.set_width(left);
-                        self.chart_ui(ui, 28.0);
-                        self.footer(ui, &tokens);
+        // The title, toolbar and messages stay put; the chart keeps its
+        // column headers at the top of its own area (Q-265).
+        let mut frame = FixedFrame::begin(ui, KIND, LIST_FRAME);
+        frame.top(|ui| {
+            form::heading(ui, &tokens, &t("cmd.lists.chart_of_accounts"));
+            ui.add_space(4.0);
+            self.toolbar(ui);
+            self.messages(ui, &tokens);
+        });
+        frame.body(Body::Fill, |ui| {
+            if !self.loaded {
+                form::progress_line(ui, &tokens, &t("lists.accounts.loading"));
+                return;
+            }
+            match self.panel {
+                Panel::Form(_) => {
+                    ui.horizontal_top(|ui| {
+                        let left = (ui.available_width() - PANEL_WIDTH - 16.0).max(320.0);
+                        ui.vertical(|ui| {
+                            ui.set_width(left);
+                            self.chart_ui(ui, 28.0);
+                            self.footer(ui, &tokens);
+                        });
+                        ui.separator();
+                        ui.vertical(|ui| {
+                            ui.set_width(PANEL_WIDTH);
+                            egui::ScrollArea::vertical()
+                                .id_salt("coa-form-scroll")
+                                .show(ui, |ui| self.form_ui(ui, &tokens));
+                        });
                     });
+                }
+                Panel::Report(_) => {
+                    self.chart_ui(ui, REPORT_HEIGHT);
+                    self.footer(ui, &tokens);
                     ui.separator();
-                    ui.vertical(|ui| {
-                        ui.set_width(PANEL_WIDTH);
-                        egui::ScrollArea::vertical()
-                            .id_salt("coa-form-scroll")
-                            .show(ui, |ui| self.form_ui(ui, &tokens));
-                    });
-                });
+                    self.report_ui(ui, &tokens);
+                }
+                Panel::None => {
+                    self.chart_ui(ui, 28.0);
+                    self.footer(ui, &tokens);
+                }
             }
-            Panel::Report(_) => {
-                self.chart_ui(ui, REPORT_HEIGHT);
-                self.footer(ui, &tokens);
-                ui.separator();
-                self.report_ui(ui, &tokens);
-            }
-            Panel::None => {
-                self.chart_ui(ui, 28.0);
-                self.footer(ui, &tokens);
-            }
-        }
+        });
+        self.layout = frame.end();
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
     }
 
     fn dirty(&self) -> bool {
@@ -1598,6 +1614,7 @@ impl Screen for ChartScreen {
         };
         json!({
             "screen": "chart_of_accounts",
+            "layout": self.layout.json(),
             "loaded": self.loaded,
             "load_error": self.load_error.is_some(),
             "rows": self.model.shown(),
