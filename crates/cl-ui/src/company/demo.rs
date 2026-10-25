@@ -12,6 +12,7 @@ pub mod contacts;
 pub mod daily_sales;
 pub mod deposits;
 pub mod home;
+pub mod intake;
 pub mod journal;
 pub mod lists;
 pub mod money;
@@ -104,6 +105,8 @@ pub struct DemoState {
     pub batch: batch::DemoBatches,
     /// Bills and vendor credits entered in the demo (P17).
     pub bills: bills::DemoBills,
+    /// Intake folders as the demo engine keeps them (A01, U-93).
+    pub intake: intake::DemoIntake,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -200,6 +203,7 @@ impl DemoState {
             templates_owner_revoked: std::collections::BTreeSet::new(),
             batch: batch::DemoBatches::default(),
             bills: bills::DemoBills::default(),
+            intake: intake::DemoIntake::default(),
         }
     }
 

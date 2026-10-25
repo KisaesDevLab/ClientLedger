@@ -1,0 +1,558 @@
+//! Document intake panel (A01 WP-A): Admin gating, inline refusals, Test
+//! and the confirmation, Save ordering, the 409, Remove, and no owner data
+//! in the control channel.
+
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use cl_core::ids::TenantId;
+use cl_settings::UserPrefs;
+use eframe::egui;
+
+use super::*;
+use crate::company::CompanyLink;
+use crate::screens::preferences::{Category, PreferencesScreen, SaveBlock};
+use crate::windows::Screen;
+
+const OZARK: &str = "d0000000-0000-4000-8000-000000000001";
+const OTHER: &str = "d0000000-0000-4000-8000-000000000002";
+
+fn ozark() -> TenantId {
+    TenantId::parse(OZARK).expect("id")
+}
+
+fn link(dir: &std::path::Path) -> Arc<CompanyLink> {
+    let link = Arc::new(CompanyLink::demo(dir));
+    link.store()
+        .update(|l| {
+            l.upsert(ozark(), "Ozark");
+        })
+        .expect("store");
+    link
+}
+
+fn screen(link: &Arc<CompanyLink>) -> PreferencesScreen {
+    PreferencesScreen::new(
+        Arc::clone(link),
+        Some((ozark(), "Ozark".to_owned())),
+        UserPrefs::default(),
+        Category::ReceiptInbox,
+    )
+}
+
+/// Waits for every running Test.
+fn settle(s: &mut PreferencesScreen) {
+    let until = Instant::now() + wp_b::PROBE_DEADLINE + Duration::from_secs(5);
+    loop {
+        s.poll();
+        if !s.intake.busy() || Instant::now() > until {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!s.intake.busy(), "the test finished");
+}
+
+fn add(s: &mut PreferencesScreen, name: &str, path: &str) -> Result<IntakeFolderId, IntakeBlock> {
+    s.intake.add = Some(AddRow {
+        name: name.to_owned(),
+        path: path.to_owned(),
+        kind: Some(IntakeKind::Bills),
+        problem: None,
+    });
+    let dirs = s.app_dirs();
+    s.intake.add_folder(&mut s.edits.intake, &dirs)
+}
+
+fn texts(s: &mut PreferencesScreen) -> String {
+    let ctx = egui::Context::default();
+    crate::shell::Shell::install(&ctx);
+    cl_grid::sequencer::install(&ctx);
+    ctx.enable_accesskit();
+    let mut out = Vec::new();
+    for _ in 0..2 {
+        let mut o = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 900.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ui| s.ui(ui),
+        );
+        o.textures_delta.clear();
+        if let Some(tree) = o.platform_output.accesskit_update {
+            for (_, node) in tree.nodes {
+                if let Some(v) = node.value() {
+                    out.push(v.to_string());
+                }
+                if let Some(l) = node.label() {
+                    out.push(l.to_string());
+                }
+            }
+        }
+    }
+    out.join("\n")
+}
+
+fn stored(link: &CompanyLink) -> source::Stored {
+    source::demo_get(link, ozark()).expect("demo").stored
+}
+
+fn here(link: &CompanyLink) -> BTreeMap<IntakeFolderId, HereNote> {
+    link.store()
+        .load()
+        .expect("load")
+        .get(ozark())
+        .expect("rec")
+        .prefs
+        .intake_here
+        .clone()
+}
+
+#[test]
+fn an_admin_sees_the_empty_state_and_add_folder() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let mut s = screen(&link);
+    assert_eq!(s.intake.load, LoadState::Ready, "the demo answers at once");
+    assert!(s.intake.is_admin() && s.intake.editable());
+    let all = texts(&mut s);
+    assert!(all.contains("Document intake"), "{all}");
+    assert!(
+        all.contains("Add a folder where you save bills and receipts."),
+        "{all}"
+    );
+    assert!(all.contains("Add folder"), "{all}");
+    assert!(!all.contains("Ask an Admin"), "{all}");
+    let state = s.state();
+    assert_eq!(state["category"], "inbox");
+    assert_eq!(state["intake"]["load"], "ready");
+    assert_eq!(state["intake"]["admin"], true);
+    assert_eq!(state["intake"]["folders"].as_array().map(Vec::len), Some(0));
+}
+
+#[test]
+fn typed_paths_and_names_are_refused_inline_without_touching_disk() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let mut s = screen(&link);
+    for (path, why) in [
+        ("Scans", IntakeBlock::Path(PathProblem::NotAbsolute)),
+        (r"\\?\C:\x", IntakeBlock::Path(PathProblem::Device)),
+        ("https://x", IntakeBlock::Path(PathProblem::Url)),
+        (r"\\server@SSL\x", IntakeBlock::Path(PathProblem::WebDav)),
+        (
+            r"C:\Scans\..\Windows",
+            IntakeBlock::Path(PathProblem::DotDot),
+        ),
+        (r"C:\", IntakeBlock::Path(PathProblem::DriveRoot)),
+    ] {
+        assert_eq!(add(&mut s, "Bills", path), Err(why), "{path}");
+        assert_eq!(
+            s.intake.add.as_ref().and_then(|a| a.problem),
+            Some(why),
+            "shown on the row"
+        );
+        assert!(crate::i18n::has(why.message_key()));
+    }
+    // ClientLedger's own folders are refused.
+    let backups = link.backup_dir.join("x").display().to_string();
+    assert_eq!(
+        add(&mut s, "Bills", &backups),
+        Err(IntakeBlock::Path(PathProblem::AppFolder))
+    );
+    assert_eq!(add(&mut s, "  ", r"C:\Scans"), Err(IntakeBlock::NameEmpty));
+    assert_eq!(
+        add(&mut s, &"n".repeat(101), r"C:\Scans"),
+        Err(IntakeBlock::NameTooLong)
+    );
+    // A UNC share and a mapped drive are fine (nothing is touched here).
+    let unc = add(&mut s, "Office scans", r"\\fileserver\Scans").expect("unc");
+    assert_eq!(
+        add(&mut s, "office SCANS", r"D:\Other"),
+        Err(IntakeBlock::NameTaken)
+    );
+    assert_eq!(
+        add(&mut s, "Shoebox", "//FILESERVER/scans"),
+        Err(IntakeBlock::PathTaken)
+    );
+    s.intake.remove(&mut s.edits.intake, unc);
+    assert!(s.edits.intake.folders.is_empty());
+    let all = texts(&mut s);
+    assert!(!all.contains("fileserver"), "removed");
+}
+
+#[test]
+fn add_tests_confirms_and_save_writes_the_engine_first_then_this_computer() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let bills = tempfile::tempdir().expect("bills");
+    std::fs::write(bills.path().join("acme-bill.pdf"), b"%PDF-1.4 synthetic").expect("w");
+    let path = bills.path().display().to_string();
+    let mut s = screen(&link);
+    let before = saves();
+    let id = add(&mut s, "Smith Plumbing bills", &path).expect("added");
+    assert!(s.dirty());
+    settle(&mut s);
+    // The passing test confirmed it for this computer, pending Save.
+    let note = s
+        .edits
+        .intake
+        .confirm
+        .get(&id)
+        .cloned()
+        .expect("pending confirmation");
+    assert_eq!(note.path_hash, cl_settings::path_hash(&path));
+    assert!(note.since_ms.is_none());
+    assert!(here(&link).is_empty(), "nothing written before Save");
+    let state = s.state();
+    let f = &state["intake"]["folders"][0];
+    assert_eq!(f["pending"], true);
+    assert_eq!(f["new"], true);
+    assert_eq!(f["probe"], "ok");
+    assert_eq!(f["files"], 1);
+    assert_eq!(f["kind"], "bills");
+    // No owner data in the control channel or Debug.
+    let text = state.to_string();
+    assert!(!text.contains("Smith") && !text.contains(&path), "{text}");
+    assert!(!format!("{:?}", s.edits()).contains("Smith"));
+    assert!(!format!("{:?}", s.intake).contains("Smith"));
+    let all = texts(&mut s);
+    assert!(all.contains("Works. 1 file would come in."), "{all}");
+    assert!(
+        all.contains("Ready on this computer: save to start"),
+        "{all}"
+    );
+
+    assert!(Screen::save(&mut s), "{:?}", s.block);
+    assert!(!s.dirty());
+    let engine = stored(&link);
+    assert_eq!(engine.folders.len(), 1);
+    assert_eq!(engine.folders[0].path, path);
+    assert_eq!(engine.folders[0].default_kind, IntakeKind::Bills);
+    assert_eq!(s.intake.updated_at, engine.updated_at);
+    let local = here(&link);
+    assert_eq!(local.get(&id), Some(&note), "confirmed on this computer");
+    assert!(saves() > before, "the inbox service is told");
+    assert!(s.edits.intake.confirm.is_empty());
+    assert_eq!(s.state()["intake"]["folders"][0]["here"], true);
+    // The file is where it was.
+    assert!(bills.path().join("acme-bill.pdf").exists());
+}
+
+#[test]
+fn a_409_writes_nothing_and_reload_replaces_the_typed_changes() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let saved = link
+        .demo_state()
+        .expect("demo")
+        .intake
+        .put(
+            ozark(),
+            vec![IntakeFolder {
+                id: new_folder_id(),
+                name: "Bills".to_owned(),
+                path: r"C:\Scans\Bills".to_owned(),
+                default_kind: IntakeKind::Bills,
+                auto_read: true,
+                keep_originals: false,
+            }],
+            None,
+        )
+        .expect("seed");
+    let mut s = screen(&link);
+    assert_eq!(s.edits.intake.folders.len(), 1);
+    let id = s.edits.intake.folders[0].id;
+    s.intake
+        .rename(&mut s.edits.intake, id, "Vendor bills")
+        .expect("rename");
+    // Someone else saves first.
+    link.demo_state()
+        .expect("demo")
+        .intake
+        .save_elsewhere(ozark(), saved.folders.clone());
+    assert!(!Screen::save(&mut s));
+    assert!(s.intake.stale);
+    assert!(s.dirty(), "the typed change stays until Reload");
+    assert_eq!(stored(&link).folders[0].name, "Bills", "nothing changed");
+    assert!(here(&link).is_empty());
+    let all = texts(&mut s);
+    assert!(
+        all.contains("Intake folders were changed elsewhere. Reload to see them."),
+        "{all}"
+    );
+    assert!(all.contains("Reload"), "{all}");
+    assert_eq!(s.state()["intake"]["stale"], true);
+    // Reload: the engine's list replaces the typed change.
+    s.reload_intake();
+    assert!(!s.intake.stale);
+    assert_eq!(s.edits.intake.folders[0].name, "Bills");
+    assert!(!s.dirty());
+    // Now a save goes through; auto-read round-trips unchanged (Q-A01j).
+    s.intake
+        .rename(&mut s.edits.intake, id, "Vendor bills")
+        .expect("rename");
+    assert!(Screen::save(&mut s), "{:?}", s.block);
+    let engine = stored(&link);
+    assert_eq!(engine.folders[0].name, "Vendor bills");
+    assert!(engine.folders[0].auto_read);
+    // The demo's own switch (the scenario's 409 path).
+    s.intake
+        .rename(&mut s.edits.intake, id, "Bills again")
+        .expect("rename");
+    link.demo_state().expect("demo").intake.stale_next = true;
+    assert!(!Screen::save(&mut s));
+    assert!(s.intake.stale);
+}
+
+#[test]
+fn remove_drops_the_folder_and_its_confirmation_and_leaves_the_files() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let receipts = tempfile::tempdir().expect("r");
+    std::fs::write(receipts.path().join("r1.jpg"), b"\xff\xd8\xff synthetic").expect("w");
+    let mut s = screen(&link);
+    let id = add(&mut s, "Receipts", &receipts.path().display().to_string()).expect("add");
+    settle(&mut s);
+    assert!(Screen::save(&mut s));
+    assert!(here(&link).contains_key(&id));
+    s.intake.removing = Some(id);
+    let all = texts(&mut s);
+    assert!(
+        all.contains(
+            "Remove this folder from ClientLedger? Files in the folder stay where they are."
+        ),
+        "{all}"
+    );
+    s.intake.remove(&mut s.edits.intake, id);
+    assert!(Screen::save(&mut s), "{:?}", s.block);
+    assert!(stored(&link).folders.is_empty());
+    assert!(here(&link).is_empty(), "its confirmation is dropped");
+    assert!(
+        receipts.path().join("r1.jpg").exists(),
+        "files stay where they are"
+    );
+}
+
+#[test]
+fn other_roles_see_a_read_only_list() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    {
+        let mut demo = link.demo_state().expect("demo");
+        demo.intake.role = Some("bookkeeper".to_owned());
+    }
+    let mut s = screen(&link);
+    assert!(!s.intake.is_admin());
+    assert!(!s.intake.editable());
+    let all = texts(&mut s);
+    assert!(
+        all.contains("Only an Admin can change intake folders. Ask an Admin."),
+        "{all}"
+    );
+    assert!(all.contains("Ask an Admin to add one."), "{all}");
+    assert!(!all.contains("Add folder"), "{all}");
+    // A change can't be saved (the engine would also refuse on P29).
+    s.edits.intake.folders.push(IntakeFolder {
+        id: new_folder_id(),
+        name: "Bills".to_owned(),
+        path: r"C:\Bills".to_owned(),
+        default_kind: IntakeKind::Bills,
+        auto_read: false,
+        keep_originals: false,
+    });
+    assert!(!Screen::save(&mut s));
+    assert_eq!(s.block, Some(SaveBlock::Intake(IntakeBlock::ReadOnly)));
+    assert!(stored(&link).folders.is_empty());
+    assert_eq!(s.state()["intake"]["admin"], false);
+}
+
+#[test]
+fn a_folder_another_company_uses_on_this_computer_is_refused() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let shared = tempfile::tempdir().expect("shared");
+    let key = wp_b::canonical_key(shared.path()).expect("key");
+    link.store()
+        .update(|l| {
+            let other = l.upsert(TenantId::parse(OTHER).expect("id"), "Other");
+            other.prefs.intake_here.insert(
+                new_folder_id(),
+                HereNote {
+                    path_hash: "h".repeat(64),
+                    canonical_key: key.clone(),
+                    since_ms: None,
+                    confirmed_at: None,
+                },
+            );
+        })
+        .expect("store");
+    let mut s = screen(&link);
+    add(&mut s, "Shared", &shared.path().display().to_string()).expect("add");
+    settle(&mut s);
+    assert!(!Screen::save(&mut s));
+    assert_eq!(
+        s.block,
+        Some(SaveBlock::Intake(IntakeBlock::MappedByAnother))
+    );
+    assert!(stored(&link).folders.is_empty());
+}
+
+#[test]
+fn a_full_folder_asks_before_bringing_everything_in() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let full = tempfile::tempdir().expect("full");
+    for n in 0..=BRING_IN_ASK_ABOVE {
+        std::fs::write(full.path().join(format!("scan-{n:03}.pdf")), b"%PDF-1.4").expect("w");
+    }
+    let mut s = screen(&link);
+    let id = add(&mut s, "Old scans", &full.path().display().to_string()).expect("add");
+    settle(&mut s);
+    assert!(s.edits.intake.confirm.is_empty(), "asks first");
+    assert_eq!(s.state()["intake"]["asking_bring_in"], true);
+    let all = texts(&mut s);
+    assert!(all.contains("This folder already holds 51 files."), "{all}");
+    assert!(all.contains("Bring in 51 files now"), "{all}");
+    assert!(all.contains("Only files added from now on"), "{all}");
+    s.intake.confirm(&mut s.edits.intake, id, true);
+    let note = s.edits.intake.confirm.get(&id).expect("confirmed");
+    assert!(note.since_ms.is_some(), "only new files");
+    assert_eq!(s.state()["intake"]["asking_bring_in"], false);
+}
+
+#[test]
+fn test_of_a_missing_folder_reports_it_and_offers_no_confirmation() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let gone = dir.path().join("unplugged-drive");
+    let mut s = screen(&link);
+    let id = add(&mut s, "Scanner", &gone.display().to_string()).expect("add");
+    settle(&mut s);
+    assert!(s.edits.intake.confirm.is_empty());
+    assert_eq!(s.state()["intake"]["folders"][0]["probe"], "missing");
+    let all = texts(&mut s);
+    assert!(
+        all.contains("Can't find the folder (drive unplugged, renamed, or sync paused)"),
+        "{all}"
+    );
+    assert!(!all.contains("Use this folder on this computer"), "{all}");
+    // Saved anyway, it waits unconfirmed: the status says so.
+    assert!(Screen::save(&mut s));
+    assert!(here(&link).is_empty());
+    s.intake.probes.remove(&id);
+    let all = texts(&mut s);
+    assert!(
+        all.contains("Set this company's folder for this computer"),
+        "{all}"
+    );
+}
+
+#[test]
+fn the_switches_round_trip_and_the_auto_read_hint_shows() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let mut s = screen(&link);
+    let id = add(&mut s, "Receipts", r"\\fileserver\Receipts").expect("add");
+    // No test result yet for a share (the test runs in the background);
+    // the switches are just stored.
+    let f = s
+        .edits
+        .intake
+        .folders
+        .iter_mut()
+        .find(|f| f.id == id)
+        .expect("f");
+    f.keep_originals = true;
+    f.auto_read = true;
+    f.default_kind = IntakeKind::Receipts;
+    let all = texts(&mut s);
+    assert!(all.contains("Leave originals where they are"), "{all}");
+    assert!(all.contains("Read new documents automatically"), "{all}");
+    assert!(
+        all.contains(
+            "Reading arrives in a coming update; until then new documents wait in the inbox."
+        ),
+        "{all}"
+    );
+    assert!(Screen::save(&mut s), "{:?}", s.block);
+    let f = &stored(&link).folders[0];
+    assert!(f.keep_originals && f.auto_read);
+    assert_eq!(f.default_kind, IntakeKind::Receipts);
+}
+
+#[test]
+fn an_engine_without_intake_settings_shows_the_notice() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let mut s = screen(&link);
+    s.intake.load = LoadState::NeedsEngine;
+    s.committed.company.receipt_inbox_dir = Some(std::path::PathBuf::from(r"C:\Receipts"));
+    let all = texts(&mut s);
+    assert!(
+        all.contains("Document intake needs the latest engine."),
+        "{all}"
+    );
+    assert!(
+        all.contains("Until then, the receipt inbox keeps watching the folder you chose before."),
+        "{all}"
+    );
+    assert!(!all.contains(r"C:\Receipts"), "{all}");
+    assert_eq!(s.state()["intake"]["load"], "needs_engine");
+    // An untouched panel never blocks a save.
+    s.edits.user.theme = cl_settings::ThemeChoice::Dark;
+    assert!(Screen::save(&mut s));
+}
+
+#[test]
+fn block_and_health_texts_exist() {
+    for b in [
+        IntakeBlock::NameEmpty,
+        IntakeBlock::NameTooLong,
+        IntakeBlock::NameTaken,
+        IntakeBlock::TooMany,
+        IntakeBlock::PathTaken,
+        IntakeBlock::MappedByAnother,
+        IntakeBlock::ReadOnly,
+        IntakeBlock::NotLoaded,
+        IntakeBlock::Refused,
+    ] {
+        assert!(crate::i18n::has(b.message_key()), "{b:?}");
+    }
+    for p in [
+        PathProblem::Empty,
+        PathProblem::TooLong,
+        PathProblem::ControlChars,
+        PathProblem::NotAbsolute,
+        PathProblem::Device,
+        PathProblem::Url,
+        PathProblem::WebDav,
+        PathProblem::DotDot,
+        PathProblem::AppFolder,
+        PathProblem::DriveRoot,
+    ] {
+        assert!(crate::i18n::has(path_problem_key(p)), "{p:?}");
+    }
+    for h in [
+        Health::Ok,
+        Health::NotConfirmed,
+        Health::Missing,
+        Health::Unreachable,
+        Health::NotResponding,
+        Health::PermissionDenied,
+        Health::NotAFolder,
+        Health::CantMove,
+        Health::Moved,
+        Health::MappedByAnother,
+        Health::Slow,
+        Health::TooMany,
+    ] {
+        assert!(crate::i18n::has(health_key(h).0), "{h:?}");
+    }
+    for k in [IntakeKind::Bills, IntakeKind::Receipts, IntakeKind::Auto] {
+        assert!(crate::i18n::has(kind_key(k)));
+    }
+}
