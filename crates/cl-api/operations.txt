@@ -6,8 +6,10 @@
 # "not committed"; keyable = the mutations in the engine's idempotency-v1
 # route set (U-18; x-idempotency in its openapi.json): pre-handler-only
 # without that capability, keyed-once (Idempotency-Key sent, retried like a
-# read with the same key, which the engine replays) with it. Only keyable
-# routes are upgraded; never = auth and company-creation routes.
+# read with the same key, which the engine replays) with it; keyable-ap = the
+# same for the idempotency-ap-v1 route set (U-83 to U-87), keyed only while the
+# engine advertises idempotency-ap-v1. Only keyable and keyable-ap routes are
+# upgraded; never = auth and company-creation routes.
 #
 # Read by the cl-api tests (must match src/resources/operations.rs) and by
 # `cargo xtask api-spec`. Engine Zod sources behind these shapes, hashed into
@@ -210,24 +212,24 @@ GET     /api/v1/bills                           idempotent
 GET     /api/v1/payroll-import/sessions         idempotent
 GET     /api/v1/banking/reconciliations         idempotent
 GET     /api/v1/banking/statements              idempotent
-# P17: Enter Bill, vendor credits, receipt inbox, document reading (vendor credit PUT,
-# terms-dates and payment-terms client-declared until engine PR-A lands)
+# P17: Enter Bill, vendor credits, receipt inbox, document reading (engine PR-A in the pin;
+# keyable-ap = keyed only under idempotency-ap-v1)
 GET     /api/v1/bills/{id}                      idempotent
-PUT     /api/v1/bills/{id}                      pre-handler-only
-POST    /api/v1/bills/{id}/void                 pre-handler-only
+PUT     /api/v1/bills/{id}                      keyable-ap
+POST    /api/v1/bills/{id}/void                 keyable-ap
 GET     /api/v1/bills/terms-dates               idempotent
 GET     /api/v1/payment-terms                   idempotent
 POST    /api/v1/bills/{id}/attach-draft         pre-handler-only
 POST    /api/v1/bills/extract-from-attachment/{attachmentId} pre-handler-only
 GET     /api/v1/vendor-credits                  idempotent
-POST    /api/v1/vendor-credits                  pre-handler-only
+POST    /api/v1/vendor-credits                  keyable-ap
 GET     /api/v1/vendor-credits/{id}             idempotent
-PUT     /api/v1/vendor-credits/{id}             pre-handler-only
-POST    /api/v1/vendor-credits/{id}/void        pre-handler-only
+PUT     /api/v1/vendor-credits/{id}             keyable-ap
+POST    /api/v1/vendor-credits/{id}/void        keyable-ap
 GET     /api/v1/vendor-credits/available/{vendorId} idempotent
 GET     /api/v1/attachments/{id}                idempotent
 DELETE  /api/v1/attachments/{id}                pre-handler-only
 POST    /api/v1/attachments/{id}/link           pre-handler-only
 GET     /api/v1/attachments/unlinked            idempotent
 GET     /api/v1/bill-payments                   idempotent
-POST    /api/v1/bill-payments/{id}/void         pre-handler-only
+POST    /api/v1/bill-payments/{id}/void         keyable-ap

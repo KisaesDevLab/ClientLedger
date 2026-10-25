@@ -493,8 +493,9 @@ pub enum ApiError {
         request_id: RequestId,
         /// The idempotency key the save used.
         idempotency_key: Option<IdempotencyKey>,
-        /// The engine replays this key on this route (`idempotency-v1`,
-        /// U-18): sending the same save again with `idempotency_key` is
+        /// The engine replays this key on this route (its key set's
+        /// capability, `idempotency-v1` or `idempotency-ap-v1`, U-18):
+        /// sending the same save again with `idempotency_key` is
         /// safe (the first result comes back, nothing posts twice). False
         /// otherwise; then a second send could post twice.
         keyed: bool,

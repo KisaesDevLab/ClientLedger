@@ -204,7 +204,7 @@ impl Capabilities {
     pub const MERGE_CLOSING_DATE: &'static str = "merge-closing-date-v1";
 
     // ---- P17: Enter Bill, vendor credits (engine PR-A U-83..U-87, PR-B U-89;
-    // client-declared until the pin moves) ------------------------------------
+    // in the pinned engine f3ce33fd) ------------------------------------------
     /// U-83: bill and vendor credit create, edit, void (and bill-capture
     /// enter) honour the closing date and take `closingPassword` (423
     /// `TB_PERIOD_LOCKED`, 403 `CLOSING_PASSWORD_INVALID`), audited.
@@ -230,6 +230,10 @@ impl Capabilities {
     /// `confidence` strings on `POST /bills/extract-from-attachment/{id}`,
     /// amounts as decimal strings or null.
     pub const BILL_OCR_V2: &'static str = "bill-ocr-v2";
+    /// U-83 to U-87: the engine also replays a repeated `Idempotency-Key` on
+    /// the A/P document mutations (bill edit and void, vendor credit create,
+    /// edit and void, bill-payment void), on top of `idempotency-v1`.
+    pub const IDEMPOTENCY_AP: &'static str = "idempotency-ap-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]
