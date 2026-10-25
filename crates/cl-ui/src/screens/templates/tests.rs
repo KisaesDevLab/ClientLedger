@@ -361,7 +361,10 @@ fn a_lost_enter_now_outlives_its_window() {
     assert!(again.entered.is_none());
     again.selected = Some(made.id);
     again.use_selected();
-    assert!(again.use_job.is_none(), "Use could enter it twice: it waits");
+    assert!(
+        again.use_job.is_none(),
+        "Use could enter it twice: it waits"
+    );
     assert!(link.bus().take(&mut watcher).is_empty(), "nothing posted");
     // Check again here: found; every window hears it.
     let txn = TransactionId::parse("d0000000-0000-4000-8000-b00000000019").expect("t");

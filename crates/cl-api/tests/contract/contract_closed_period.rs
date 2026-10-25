@@ -402,7 +402,7 @@ pub fn moving_out_of_a_closed_period_needs_the_password(h: &Harness) {
     let old = date(2026, 1, 10);
     let new = date(2026, 2, 10);
     let je = post(h, &s, &je2(old, &memo, supplies.id, cash.id, "5.0000"));
-    let bank = h
+    let posting = h
         .run(s.transactions().create_bank_posting(
             &check(&a, old, &memo, ("3.0000", "1.0000")),
             &PostingOptions::default(),
@@ -421,7 +421,7 @@ pub fn moving_out_of_a_closed_period_needs_the_password(h: &Harness) {
     let check_edit = h.require_cap(Capabilities::CHECK_EDIT, "check-edit-v1");
     // Each record still dated in the closed period, as saved.
     let unchanged = |what: &str| {
-        for id in [je.record.id, bank.record.id, chk.record.id] {
+        for id in [je.record.id, posting.record.id, chk.record.id] {
             let back = h.run(s.transactions().get(id)).expect("read back");
             assert_eq!(back.record.txn_date, old, "{what}: nothing moved");
         }
@@ -440,8 +440,8 @@ pub fn moving_out_of_a_closed_period_needs_the_password(h: &Harness) {
         refused(&e);
         let e = h
             .run(s.transactions().update_bank_posting(
-                bank.record.id,
-                &bank.version,
+                posting.record.id,
+                &posting.version,
                 &check(&a, new, &memo, ("3.0000", "1.0000")),
                 opts,
                 key(),
@@ -534,14 +534,14 @@ pub fn moving_out_of_a_closed_period_needs_the_password(h: &Harness) {
         .expect("journal entry out with the password");
         audited(je.record.id, "journal entry");
         h.run(s.transactions().update_bank_posting(
-            bank.record.id,
-            &bank.version,
+            posting.record.id,
+            &posting.version,
             &check(&a, new, &memo, ("3.0000", "1.0000")),
             &with,
             key(),
         ))
         .expect("bank posting out with the password");
-        audited(bank.record.id, "bank posting");
+        audited(posting.record.id, "bank posting");
         if check_edit {
             let read = h.run(s.checks().get(chk.record.id)).expect("check");
             h.run(s.checks().update_check(

@@ -1585,7 +1585,11 @@ fn a_lost_save_outlives_its_window_and_the_close_prompt_says_so() {
     settle(&ctx, mode, &mut |ui| again.ui(ui));
     assert!(again.save.lost.pending(), "picked up by the new window");
     let before = writes(&link);
-    fill(&mut again, "1286.40", &[("5100", "842.15"), ("5110", "444.25")]);
+    fill(
+        &mut again,
+        "1286.40",
+        &[("5100", "842.15"), ("5110", "444.25")],
+    );
     assert!(!again.start_save(SaveIntent::Save, None));
     assert_eq!(writes(&link), before, "the retyped check is not sent");
     // The owner looked and confirms here: every window may save again.

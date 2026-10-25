@@ -283,17 +283,14 @@ impl DailySalesScreen {
     /// The recheck or the owner answered an unknown save (B2).
     pub(crate) fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
         use crate::forms::lost_save::LostEvent;
-        match ev {
-            LostEvent::Saved(_) => {
-                // The stored probe found the day posted: read it again and
-                // show it as saved.
-                self.save.key = None;
-                if let Some(id) = self.saved.as_ref().map(|s| s.id) {
-                    self.save.lost_check = self.run(Call::Entry(id), false);
-                    self.poll_lost();
-                }
+        if let LostEvent::Saved(_) = ev {
+            // The stored probe found the day posted: read it again and
+            // show it as saved.
+            self.save.key = None;
+            if let Some(id) = self.saved.as_ref().map(|s| s.id) {
+                self.save.lost_check = self.run(Call::Entry(id), false);
+                self.poll_lost();
             }
-            _ => {}
         }
     }
 

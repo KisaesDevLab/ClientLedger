@@ -814,7 +814,16 @@ impl TemplatesRunner {
             link,
             self.group.as_ref(),
             Some("orphan.templates_run_due"),
-            move |s| Ok(demo_run(s, today, run_id, today, &demo_confirmed, &demo_held)),
+            move |s| {
+                Ok(demo_run(
+                    s,
+                    today,
+                    run_id,
+                    today,
+                    &demo_confirmed,
+                    &demo_held,
+                ))
+            },
             move |s| async move {
                 // An automatic template with more than three missed dates
                 // asks first (Q-PR1d): the run waits for the answer. The

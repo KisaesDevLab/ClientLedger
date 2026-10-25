@@ -202,17 +202,18 @@ fn a_lost_enter_now_from_another_window_blocks_this_template_here() {
     let today = DemoState::today();
     let id = remind(&link, "Savings", d(2026, 10, 30));
     let _r = caught_up(&link, today);
-    link.lost_saves().remember(
-        LostScope::Template(id),
-        Some(cl_api::IdempotencyKey::new()),
-    );
+    link.lost_saves()
+        .remember(LostScope::Template(id), Some(cl_api::IdempotencyKey::new()));
     let mut s = screen(&link, today);
     assert!(s.lost.pending(), "the banner shows on open");
     let mut watcher = link.bus().subscribe();
     s.selected = s.rows.iter().position(|r| r.template == id);
     assert!(s.selected.is_some());
     s.enter_now(None);
-    assert!(s.entered.is_none() && s.last_action.is_none(), "nothing sent");
+    assert!(
+        s.entered.is_none() && s.last_action.is_none(),
+        "nothing sent"
+    );
     s.open_in_form();
     assert!(
         !link
@@ -225,7 +226,8 @@ fn a_lost_enter_now_from_another_window_blocks_this_template_here() {
     assert_eq!(s.state()["waiting"], 1);
     // The owner looked and confirms: Enter now works again.
     s.lost.ask_owner();
-    s.lost.owner_confirmed(&mut s.lost_gate, "templates_due_enter");
+    s.lost
+        .owner_confirmed(&mut s.lost_gate, "templates_due_enter");
     assert!(!link.lost_saves().is_open(LostScope::Template(id)));
     s.enter_now(None);
     assert_eq!(s.last_action, Some("enter"));
@@ -413,7 +415,10 @@ fn a_refused_link_shows_saved_separately_and_dismiss_settles_it() {
     s.selected = Some(row);
     s.enter_now(None);
     s.open_in_form();
-    assert!(s.enter_job.is_none() && s.open_job.is_none(), "never entered again");
+    assert!(
+        s.enter_job.is_none() && s.open_job.is_none(),
+        "never entered again"
+    );
     // Dismiss (Enter on the row): skipped in the books, off the board.
     s.default_action(None);
     assert_eq!(s.last_action, Some("skip"));

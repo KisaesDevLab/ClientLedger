@@ -774,7 +774,8 @@ impl PendingLinksBook {
     /// Load from `dir` (empty when missing, oversized or unreadable).
     #[must_use]
     pub fn load(dir: &Path) -> PendingLinksBook {
-        read_capped(&dir.join(Self::FILE)).map_or_else(PendingLinksBook::default, |t| Self::parse(&t))
+        read_capped(&dir.join(Self::FILE))
+            .map_or_else(PendingLinksBook::default, |t| Self::parse(&t))
     }
 
     /// Save into `dir`.
@@ -1276,12 +1277,12 @@ mod tests {
         let mut book = PendingLinksBook::default();
         book.set("tenant-a", &[link]);
         assert_eq!(book.get("tenant-a"), vec![link]);
-        assert!(book.get("tenant-b").is_empty());
+        assert_eq!(book.get("tenant-b"), Vec::new());
         let text = book.to_text();
         assert!(!text.contains("tenant-a"), "companies are hashed");
         assert_eq!(PendingLinksBook::parse(&text), book);
         let bad = text.replace("2026-11-02", "not a date");
-        assert!(PendingLinksBook::parse(&bad).get("tenant-a").is_empty());
+        assert_eq!(PendingLinksBook::parse(&bad).get("tenant-a"), Vec::new());
         let dir = tempfile::tempdir().expect("tmp");
         book.save(dir.path()).expect("save");
         assert_eq!(PendingLinksBook::load(dir.path()), book);

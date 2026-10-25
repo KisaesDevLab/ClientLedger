@@ -546,10 +546,15 @@ pub enum Recheck {
 /// record).
 fn committed_id(reply: &EngineReply) -> Option<TransactionId> {
     let v: Value = serde_json::from_slice(&reply.body).ok()?;
-    ["/transaction/id", "/check/id", "/entry/transactionId", "/id"]
-        .iter()
-        .find_map(|p| v.pointer(p).and_then(Value::as_str))
-        .and_then(|s| TransactionId::parse(s).ok())
+    [
+        "/transaction/id",
+        "/check/id",
+        "/entry/transactionId",
+        "/id",
+    ]
+    .iter()
+    .find_map(|p| v.pointer(p).and_then(Value::as_str))
+    .and_then(|s| TransactionId::parse(s).ok())
 }
 
 impl Session {

@@ -72,7 +72,12 @@ enum BookState {
 #[derive(Debug, Default)]
 pub struct LostBook {
     company: Option<TenantId>,
-    entries: Vec<(Option<TenantId>, LostScope, Option<IdempotencyKey>, BookState)>,
+    entries: Vec<(
+        Option<TenantId>,
+        LostScope,
+        Option<IdempotencyKey>,
+        BookState,
+    )>,
 }
 
 /// The most entries kept (oldest answered ones go first).
@@ -291,8 +296,7 @@ impl LostSave {
         if self.shared
             && let Some((link, scope)) = &self.book
         {
-            link.lost_saves()
-                .answer(*scope, self.key.as_ref(), state);
+            link.lost_saves().answer(*scope, self.key.as_ref(), state);
         }
     }
 

@@ -76,8 +76,7 @@ impl SentCheck {
             && t.txn_date == self.date
             && t.contact_id == self.payee
             && amount == Some(self.amount)
-            && t
-                .created_at
+            && t.created_at
                 .is_some_and(|c| c.unix_millis() >= self.at_ms - SENT_SLACK_MS)
     }
 }
@@ -1019,7 +1018,10 @@ impl WriteCheckScreen {
             let mut found = Vec::new();
             for i in 0..PAGES {
                 let page = PageRequest::new(NAV_PAGE, i * u64::from(NAV_PAGE))?;
-                let rows = s.checks().list(Some(bank), Some(day), Some(day), page).await?;
+                let rows = s
+                    .checks()
+                    .list(Some(bank), Some(day), Some(day), page)
+                    .await?;
                 for c in rows.iter().filter(|c| c.number == Some(number)) {
                     let v = s.checks().get(c.id).await?;
                     if sent.matches(&v.record) {

@@ -417,14 +417,14 @@ fn skip_these_dates_and_a_run_never_overlap() {
     assert!(!r.busy() && r.runs == runs, "no run while skipping");
     assert_eq!(posted_for(&link, id), 0);
     link.due().skip_ended(id);
-    assert!(r.tick(&link, today, HOURLY_SECS + 2.0).is_some(), "it runs now");
+    assert!(
+        r.tick(&link, today, HOURLY_SECS + 2.0).is_some(),
+        "it runs now"
+    );
     // A run on its way: the board says so, and Skip these dates waits.
     link.due().running = true;
-    let mut s = crate::screens::templates_due::TemplatesDueScreen::new(
-        Arc::clone(&link),
-        None,
-        today,
-    );
+    let mut s =
+        crate::screens::templates_due::TemplatesDueScreen::new(Arc::clone(&link), None, today);
     s.catch_up_skip(id);
     assert_eq!(s.notice, Some("templates_due.catch_up.wait"));
     assert!(link.due().skipping.is_empty(), "not started");
@@ -439,8 +439,8 @@ fn pending_links_survive_a_restart_and_hold_the_automatic_run() {
     let today = DemoState::today();
     let yesterday = today.add_days(-1).expect("d");
     let id = add_auto(&link, "Daily sweep", yesterday);
-    let txn = cl_core::ids::TransactionId::parse("d0000000-0000-4000-8000-b0000000aa01")
-        .expect("t");
+    let txn =
+        cl_core::ids::TransactionId::parse("d0000000-0000-4000-8000-b0000000aa01").expect("t");
     let mut r = TemplatesRunner::default();
     r.opened(&link, tenant);
     // The form saved yesterday's sweep; its link was refused for good.
@@ -450,7 +450,10 @@ fn pending_links_survive_a_restart_and_hold_the_automatic_run() {
     let link2 = Arc::new(CompanyLink::demo(dir.path()));
     let mut r2 = TemplatesRunner::default();
     r2.opened(&link2, tenant);
-    assert!(link2.due().is_saved_separately(id, yesterday), "kept on disk");
+    assert!(
+        link2.due().is_saved_separately(id, yesterday),
+        "kept on disk"
+    );
     assert!(!link2.due().is_linking(id, yesterday));
     // The automatic template's run waits: yesterday is never posted again.
     assert_eq!(r.tick(&link, today, 0.0), None);
@@ -464,5 +467,8 @@ fn pending_links_survive_a_restart_and_hold_the_automatic_run() {
     assert!(!link.due().links_wait());
     assert_eq!(posted_for(&link, id), 1, "today only");
     let back = crate::prefs::PendingLinksBook::load(&dir.path().join("settings"));
-    assert!(back.get(&tenant.to_string()).is_empty(), "the file forgets it");
+    assert!(
+        back.get(&tenant.to_string()).is_empty(),
+        "the file forgets it"
+    );
 }

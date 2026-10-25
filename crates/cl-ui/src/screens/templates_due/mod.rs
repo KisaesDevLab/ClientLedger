@@ -329,7 +329,10 @@ impl TemplatesDueScreen {
                 }
                 if r.date.is_some_and(|d| board.is_linking(r.template, d)) {
                     r.section = Section::Linking;
-                } else if r.date.is_some_and(|d| board.is_saved_separately(r.template, d)) {
+                } else if r
+                    .date
+                    .is_some_and(|d| board.is_saved_separately(r.template, d))
+                {
                     r.section = Section::SavedSeparately;
                 }
             }
@@ -385,7 +388,11 @@ impl TemplatesDueScreen {
                 // Could not tell: this template waits for the recheck (B2),
                 // here, in Templates and after this window closes (the
                 // link's book, review fix-PR-1 blocking 2).
-                Err(e) if self.lost.lost_as(&e, &self.link, LostScope::Template(occ.0)) => {
+                Err(e)
+                    if self
+                        .lost
+                        .lost_as(&e, &self.link, LostScope::Template(occ.0)) =>
+                {
                     self.lost_gate.mark_unconfirmed();
                     self.lost_for = Some(occ);
                 }
@@ -587,8 +594,11 @@ impl TemplatesDueScreen {
             }
             return;
         }
-        self.lost
-            .bind(&self.link, LostScope::Template(template), &mut self.lost_gate);
+        self.lost.bind(
+            &self.link,
+            LostScope::Template(template),
+            &mut self.lost_gate,
+        );
         self.lost_for = None;
     }
 
@@ -596,15 +606,16 @@ impl TemplatesDueScreen {
     fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
         use crate::forms::lost_save::LostEvent;
         match ev {
-            LostEvent::Saved(txn) => match self.lost_for.take() {
-                Some(occ) => self.entered_ok(occ, txn),
-                // Picked up from elsewhere: the next run shows the date as
-                // entered.
-                None => {
+            LostEvent::Saved(txn) => {
+                if let Some(occ) = self.lost_for.take() {
+                    self.entered_ok(occ, txn);
+                } else {
+                    // Picked up from elsewhere: the next run shows the date
+                    // as entered.
                     self.notice = Some("templates_due.done.entered");
                     self.check_now();
                 }
-            },
+            }
             LostEvent::NotSaved | LostEvent::OwnerConfirmed => self.lost_for = None,
             LostEvent::StillUnknown => {}
         }
