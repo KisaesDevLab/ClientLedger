@@ -278,7 +278,7 @@ pub fn sha256_file(p: &Path) -> Result<String> {
         }
         h.update(&buf[..n]);
     }
-    Ok(crate::pg_fetch::hex(&h.finalize()))
+    Ok(crate::fetch_lock::hex(&h.finalize()))
 }
 
 /// Entry point for `cargo xtask preview`.
@@ -312,6 +312,7 @@ pub fn preview(args: &[String]) -> Result<()> {
     }
     crate::engine::engine(&[]).context("building the engine failed")?;
     crate::pg_fetch::pg_fetch(&[]).context("fetching PostgreSQL failed")?;
+    crate::pdfium_fetch::pdfium_fetch(&[]).context("fetching PDFium failed")?;
 
     let name = folder_name(version, &sha, target.dir);
     let preview_dir = root.join("target").join("preview");
@@ -338,6 +339,14 @@ pub fn preview(args: &[String]) -> Result<()> {
         &root.join("target").join("pg").join(target.dir),
         &folder.join(&lay.pg_dir),
         &["pg-fetch.stamp"],
+    )?;
+    // PDF previews (P17): the app looks in `<exe_dir>/pdfium/`; the license
+    // texts travel with the library.
+    let pdfium = crate::pdfium_fetch::host()?;
+    copy_tree(
+        &crate::pdfium_fetch::out_dir(&pdfium)?,
+        &folder.join("pdfium"),
+        &[crate::pdfium_fetch::STAMP],
     )?;
     for doc in DOCS {
         fs::copy(root.join(doc), folder.join(doc)).with_context(|| format!("copy {doc}"))?;

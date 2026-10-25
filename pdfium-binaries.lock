@@ -1,0 +1,21 @@
+# Pinned PDFium binaries for `cargo xtask pdfium-fetch` (P17, Q-13).
+#
+# Source: bblanchon/pdfium-binaries (https://github.com/bblanchon/pdfium-binaries,
+# MIT packaging of the BSD-3-Clause / Apache-2.0 PDFium library), release
+# `chromium/<version>`, the plain archives: no V8 (JavaScript), no XFA forms
+# (args.gn inside each archive: pdf_enable_v8 = false, pdf_enable_xfa = false).
+# Only the shared library, LICENSE and licenses/*.txt are unpacked.
+#
+# The version must match the `pdfium_<version>` API feature of pdfium-render in
+# crates/cl-ui/Cargo.toml (a test checks it).
+#
+# Line format:  <target triple> <sha256 of the downloaded file> <url>
+# Targets are the directory names under target/pdfium/. Update the version and
+# all four hashes together, and compare each hash with the `digest` GitHub
+# publishes for the release asset (api.github.com/repos/bblanchon/pdfium-binaries/
+# releases/tags/chromium%2F<version>).
+version = 7881
+x86_64-pc-windows-msvc 73cc0de638ac2095e7445bf56a38200a5b7c7ca0e9f4ba144598f2457377ac08 https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7881/pdfium-win-x64.tgz
+aarch64-apple-darwin 52e94ca5aa8847934330daf3f8150c190682c5ca93831468794f8b90d4392e40 https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7881/pdfium-mac-arm64.tgz
+x86_64-apple-darwin 6dedf83990e0e3d6b7c93c9e7589c5a126b0ae14b7464d76120cff7a26afb18b https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7881/pdfium-mac-x64.tgz
+x86_64-unknown-linux-gnu 1470e21b8b4a3b4ad7f85684e2da11d94f3b69a86d81dee11b9b6709d927ac1d https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7881/pdfium-linux-x64.tgz
