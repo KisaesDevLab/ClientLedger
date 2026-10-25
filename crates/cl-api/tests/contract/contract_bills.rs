@@ -859,28 +859,55 @@ pub fn vendor_credit_edit_u84(h: &Harness) {
     assert_eq!(avail[0].balance_due, m("100.0000"));
 }
 
-/// U-85: an item line with quantity × cost posts the rounded amount
-/// exactly and reads back its quantity and cost.
+/// U-85 and AC1 (item half): the mockup's two expense lines plus an item
+/// line of 3 × 0.3333 (posts the rounded 1.00) make a 1,481.00 bill. A/P is
+/// credited exactly the total, the vendor's open balance moves by exactly
+/// the total, and the item line reads back its item, quantity and cost.
 pub fn item_lines_u85(h: &Harness) {
     if !h.require_cap(Capabilities::BILL_LINES, "U-85") {
         return;
     }
     let s = &h.s1;
-    let a = account(h, s, AccountType::Expense, "Item rental");
+    let rental = account(h, s, AccountType::Expense, "Item rental");
+    let delivery = account(h, s, AccountType::Expense, "Item delivery");
+    let parts = account(h, s, AccountType::Expense, "Item parts");
+    let income = account(h, s, AccountType::Revenue, "Item income");
+    let item = h
+        .run(s.items().create(
+            &cl_api::ItemFields {
+                name: unique("Hydraulic filter"),
+                description: None,
+                unit_price: None,
+                income_account_id: income.id,
+                is_taxable: false,
+            },
+            key(),
+        ))
+        .expect("item")
+        .record;
+    let ap = payables_account(h, s);
     let v = vendor(h, s);
-    let d = BillDraft {
-        amount_due: m("1.00"),
-        lines: vec![BillLineDraft {
-            quantity: Some(cl_core::Quantity::parse_wire("3").expect("q")),
-            unit_price: Some(m("0.3333")),
-            ..BillLineDraft::expense(a.id, m("1.00"))
-        }],
-        ..mockup_bill(v, a.id, a.id, &unique("ITEM").replace(' ', "-"))
-    };
+    let before = h.run(s.bills().vendor_summary(v)).expect("summary");
+    let mut d = mockup_bill(v, rental.id, delivery.id, &unique("ITEM").replace(' ', "-"));
+    d.amount_due = m("1481.00");
+    d.lines.push(BillLineDraft {
+        description: Some("Hydraulic filter".into()),
+        item: Some(item.id),
+        quantity: Some(cl_core::Quantity::parse_wire("3").expect("q")),
+        unit_price: Some(m("0.3333")),
+        ..BillLineDraft::expense(parts.id, m("1.00"))
+    });
     let saved = h
         .run(s.bills().create(&d, &PostingOptions::default(), key()))
         .expect("item bill");
-    let line = &saved.record.lines[0];
+    let id = saved.record.txn.id;
+    assert_eq!(saved.record.txn.total, Some(m("1481.0000")));
+    let line = saved
+        .record
+        .lines
+        .iter()
+        .find(|l| l.item == Some(item.id))
+        .expect("the item line");
     assert_eq!(line.amount, m("1.0000"));
     assert_eq!(line.unit_price, Some(m("0.3333")));
     assert_eq!(
@@ -888,6 +915,39 @@ pub fn item_lines_u85(h: &Harness) {
         Some("3.0000")
     );
     assert_eq!(saved.record.fingerprint(), d.fingerprint());
+
+    // A/P's credit for this bill is exactly the total.
+    let txn = h.run(s.transactions().get(id)).expect("txn").record;
+    let ap_lines: Vec<(String, String)> = txn
+        .lines
+        .iter()
+        .filter(|l| l.account_id == ap)
+        .map(|l| (l.debit.to_wire(), l.credit.to_wire()))
+        .collect();
+    assert_eq!(
+        ap_lines,
+        vec![("0.0000".to_string(), "1481.0000".to_string())],
+        "A/P is credited exactly the bill total"
+    );
+    assert_eq!(balance(h, s, parts.id), m("1.0000"), "the item line posts 1.00");
+
+    // The vendor's open balance moves by exactly the total.
+    let after = h.run(s.bills().vendor_summary(v)).expect("summary");
+    assert_eq!(after.unpaid_count, before.unpaid_count + 1);
+    assert_eq!(
+        after
+            .total_owed
+            .checked_sub(before.total_owed)
+            .expect("delta"),
+        m("1481.0000")
+    );
+
+    // Clean up: the shared engine's later tests read A/P too.
+    h.run(
+        s.bills()
+            .void(id, "contract clean-up", &ApWriteOptions::default(), key()),
+    )
+    .expect("void");
 }
 
 /// U-86: the engine's dates with calendar arithmetic across the March DST
