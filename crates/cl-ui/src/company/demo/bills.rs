@@ -817,18 +817,27 @@ pub fn list(state: &mut DemoState, credit: bool) -> Vec<(TransactionId, Calendar
 /// The vendor's newest posted bill (prefill, Q-191).
 #[must_use]
 pub fn newest_for_vendor(state: &mut DemoState, vendor: ContactId) -> Option<BillRecord> {
-    let ids: Vec<TransactionId> = list(state, false).into_iter().map(|(id, _)| id).collect();
-    for id in ids {
-        if state.ledger.is_void(id) {
-            continue;
-        }
-        if let Some(v) = get(state, id)
-            && v.record.txn.contact_id == Some(vendor)
-        {
-            return Some(v.record);
-        }
-    }
-    None
+    // The ledger keeps the vendor by name: look at that vendor's bills only
+    // (reading every bill would read the whole sample once per bill).
+    let mut names: Vec<String> = state
+        .contacts_mut()
+        .iter()
+        .filter(|c| c.id == vendor)
+        .map(|c| c.fields.display_name.clone())
+        .collect();
+    names.extend(state.contact_names.get(&vendor).cloned());
+    let mut txns: Vec<_> = state
+        .ledger
+        .transactions()
+        .into_iter()
+        .filter(|t| t.kind == "bill" && t.contact.as_ref().is_some_and(|c| names.contains(c)))
+        .collect();
+    txns.sort_by(|a, b| b.date.cmp(&a.date).then(b.id.cmp(&a.id)));
+    let id = txns
+        .iter()
+        .map(DemoLedger::id_of)
+        .find(|id| !state.ledger.is_void(*id))?;
+    get(state, id).map(|v| v.record)
 }
 
 /// The vendor's bills in brief, as `GET /bills/vendor-summary` sends it:

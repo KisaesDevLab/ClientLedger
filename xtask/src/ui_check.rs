@@ -90,10 +90,17 @@ fn exe(name: &str) -> PathBuf {
 /// (`Preferences.png`) by dropping its last `-part`.
 #[must_use]
 pub fn find_mockup(dir: &Path, screen: &str) -> Option<PathBuf> {
-    find_mockup_exact(dir, screen).or_else(|| {
-        let (head, _) = screen.rsplit_once('-')?;
-        find_mockup_exact(dir, head)
-    })
+    /// Scenarios named apart from their mockup (P17: `bill` is Enter Bill).
+    const ALIASES: &[(&str, &str)] = &[("bill", "EnterBill")];
+    find_mockup_exact(dir, screen)
+        .or_else(|| {
+            let (head, _) = screen.rsplit_once('-')?;
+            find_mockup_exact(dir, head)
+        })
+        .or_else(|| {
+            let (_, mockup) = ALIASES.iter().find(|(s, _)| *s == screen)?;
+            find_mockup_exact(dir, mockup)
+        })
 }
 
 fn find_mockup_exact(dir: &Path, screen: &str) -> Option<PathBuf> {

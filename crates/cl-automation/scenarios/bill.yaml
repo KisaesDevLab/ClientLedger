@@ -47,7 +47,7 @@ steps:
   - assert_state: {key: screen.terms, equals: net_15}
   - assert_value: {target: {label: "Account, line 1"}, equals: "6210 · Equipment rental"}
   - assert_value: {target: {label: "Amount, line 1"}, equals: ""}
-  - assert_exists: {label_contains: "88 Industrial Pkwy"}
+  - assert_value: {target: {role: multiline_text_input, label: Address}, equals: "Midwest Equipment Rental\n88 Industrial Pkwy\nJoplin, MO 64801"}
 
   # --- 3. Date, ref, amount due, memo ----------------------------------------
   - click: {role: text_input, label: Date}
@@ -140,8 +140,9 @@ steps:
   - key: Tab
   - assert_state: {key: screen.date, equals: "2026-09-15"}
   # The line first, so no prefill runs; leaving the lines gives the blank
-  # amount due their total.
-  - click: {role: grid_cell, label: "Account, line 1"}
+  # amount due their total. (The cell may still have its editor open from
+  # the save, so it is found by its label alone.)
+  - click: {label: "Account, line 1"}
   - type: {text: "6210"}
   - key: Tab
   - type: {text: "18.25"}

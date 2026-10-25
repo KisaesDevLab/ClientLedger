@@ -46,6 +46,8 @@ const VENDOR_SUGGESTIONS: usize = 8;
 const ACTION_HEIGHT: f32 = 44.0;
 /// The gaps of the header card's grid (mockup: 12 px rows, 16 px columns).
 const COL_GAP: f32 = 16.0;
+/// The narrowest a date or terms column gets (a date in mono fits).
+const DATE_WIDTH: f32 = 124.0;
 
 /// The shortcut chip text of a command ("Alt N"), from the keymap.
 fn chip(id: &str) -> String {
@@ -180,22 +182,18 @@ impl EnterBillScreen {
             ui.separator();
             let kind = self.kind();
             let can_switch = !working && self.editing.is_none();
-            ui.add_enabled_ui(can_switch, |ui| {
+            for (k, key) in [
+                (BillKind::Bill, "bill.kind.bill"),
+                (BillKind::Credit, "bill.kind.credit"),
+            ] {
                 if ui
-                    .radio(kind == BillKind::Bill, t("bill.kind.bill"))
+                    .add_enabled(can_switch, egui::RadioButton::new(kind == k, t(key)))
                     .on_disabled_hover_text(t("bill.kind.locked"))
                     .clicked()
                 {
-                    self.set_kind(BillKind::Bill);
+                    self.set_kind(k);
                 }
-                if ui
-                    .radio(kind == BillKind::Credit, t("bill.kind.credit"))
-                    .on_disabled_hover_text(t("bill.kind.locked"))
-                    .clicked()
-                {
-                    self.set_kind(BillKind::Credit);
-                }
-            });
+            }
             if kind == BillKind::Bill {
                 let mut received = self.header.current().bill_received;
                 let enabled = !working && caps.received;
@@ -385,16 +383,21 @@ impl EnterBillScreen {
                 // egui's item spacing).
                 let col = ((width - 5.0 * (COL_GAP + sp)) / 6.0).max(60.0);
                 let span = |n: f32| col * n + (n - 1.0) * (COL_GAP + sp);
+                // A date column never narrower than a date (960 x 640): the
+                // wide left column gives up the difference.
+                let one = span(1.0).max(DATE_WIDTH);
+                let wide = span(3.0) - (one - span(1.0));
+                let right = span(3.0) + (one - span(1.0));
                 // Row 1: Vendor (3) · Date (1) · Ref. no. (2).
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
-                        ui.set_width(span(3.0));
-                        self.vendor_ui(ui, tokens, span(3.0));
+                        ui.set_width(wide);
+                        self.vendor_ui(ui, tokens, wide);
                     });
                     ui.add_space(COL_GAP);
                     ui.vertical(|ui| {
-                        ui.set_width(span(1.0));
-                        self.date_ui(ui, tokens, span(1.0));
+                        ui.set_width(one);
+                        self.date_ui(ui, tokens, one);
                     });
                     ui.add_space(COL_GAP);
                     ui.vertical(|ui| {
@@ -407,16 +410,16 @@ impl EnterBillScreen {
                 // (2) / Discount date (1) · Bill due (2).
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
-                        ui.set_width(span(3.0));
-                        self.address_ui(ui, tokens, span(3.0));
+                        ui.set_width(wide);
+                        self.address_ui(ui, tokens, wide);
                     });
                     ui.add_space(COL_GAP);
                     ui.vertical(|ui| {
-                        ui.set_width(span(3.0));
+                        ui.set_width(right);
                         ui.horizontal_top(|ui| {
                             ui.vertical(|ui| {
-                                ui.set_width(span(1.0));
-                                self.terms_ui(ui, tokens, span(1.0));
+                                ui.set_width(one);
+                                self.terms_ui(ui, tokens, one);
                             });
                             ui.add_space(COL_GAP);
                             ui.vertical(|ui| {
@@ -427,8 +430,8 @@ impl EnterBillScreen {
                         ui.add_space(10.0);
                         ui.horizontal_top(|ui| {
                             ui.vertical(|ui| {
-                                ui.set_width(span(1.0));
-                                self.discount_ui(ui, tokens, span(1.0));
+                                ui.set_width(one);
+                                self.discount_ui(ui, tokens, one);
                             });
                             ui.add_space(COL_GAP);
                             ui.vertical(|ui| {
@@ -627,15 +630,16 @@ impl EnterBillScreen {
         let l = above(ui, tokens, &t("bill.address"));
         // Read-only, from the vendor record (bills store no address,
         // Q-P17f).
+        // Read-only text keeps its normal colour (contrast >= 4.5:1).
         let mut text = self.vendor_address();
-        ui.add_enabled(
-            false,
+        ui.add(
             egui::TextEdit::multiline(&mut text)
+                .interactive(false)
                 .desired_rows(4)
                 .desired_width(width - 8.0),
         )
         .labelled_by(l.id)
-        .on_disabled_hover_text(t("bill.address.tip"));
+        .on_hover_text(t("bill.address.tip"));
     }
 
     fn terms_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
