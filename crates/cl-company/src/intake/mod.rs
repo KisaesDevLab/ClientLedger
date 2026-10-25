@@ -36,6 +36,7 @@ pub mod legacy;
 pub mod path;
 pub mod probe;
 pub mod scan;
+pub mod watch;
 
 pub use fs::{EntryInfo, FakeFs, FolderFs, RawListing, RealFs};
 pub use handled::{DISCARDED_DIR, HandledDir, MoveFailed, PROCESSED_DIR, move_handled};
@@ -46,6 +47,10 @@ pub use probe::{PROBE_DEADLINE, ProbeCounts, ProbeReport, probe, probe_async, pr
 pub use scan::{
     DocKind, IntakeFile, ItemState, Listing, MAX_FILE_BYTES, MAX_LISTED, MAX_SCANNED, STABLE_FOR,
     Stability, doc_kind, read_for_upload, scan, skipped_name,
+};
+pub use watch::{
+    MAX_INTERVAL, MoveDone, MoveJob, POLL, REPIN_EVERY, SCAN_DEADLINE, SETTLE_RECHECK, SLOW_SCAN,
+    Snapshot, WatchConfig, WatchHandle,
 };
 
 /// How a folder is doing (D6). Only the first eight need the owner; `Slow`

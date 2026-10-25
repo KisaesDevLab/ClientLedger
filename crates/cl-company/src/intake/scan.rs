@@ -272,9 +272,15 @@ pub fn scan(
 /// Remembers what each file looked like at earlier looks, so a file is
 /// ready only after its size and time stayed the same for [`STABLE_FOR`]
 /// across at least two looks.
-#[derive(Default)]
 pub struct Stability {
     seen: HashMap<PathBuf, Seen>,
+    stable_for: Duration,
+}
+
+impl Default for Stability {
+    fn default() -> Self {
+        Stability::with_stable_for(STABLE_FOR)
+    }
 }
 
 struct Seen {
@@ -289,11 +295,22 @@ impl fmt::Debug for Stability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Stability")
             .field("tracked", &self.seen.len())
+            .field("stable_for", &self.stable_for)
             .finish()
     }
 }
 
 impl Stability {
+    /// A tracker whose files are ready after `stable_for` (tests shorten
+    /// [`STABLE_FOR`]).
+    #[must_use]
+    pub fn with_stable_for(stable_for: Duration) -> Stability {
+        Stability {
+            seen: HashMap::new(),
+            stable_for,
+        }
+    }
+
     /// Marks the settling `files` that have been unchanged since a look at
     /// least [`STABLE_FOR`] before `now` (and open) as ready, forgets files
     /// that are gone, and returns the listing: zero-byte files left out,
@@ -317,7 +334,7 @@ impl Stability {
             };
             if f.state == ItemState::Settling
                 && f.size > 0
-                && now.duration_since(since) >= STABLE_FOR
+                && now.duration_since(since) >= self.stable_for
             {
                 openable = openable || fs.openable(&f.path);
                 if openable {
@@ -604,7 +621,7 @@ mod tests {
         fs.remove(root(), "r.pdf");
         let l = look(t0 + Duration::from_secs(16));
         assert_eq!(state_of(&l, "r.pdf"), None);
-        assert_eq!(format!("{s:?}"), "Stability { tracked: 1 }");
+        assert!(format!("{s:?}").starts_with("Stability { tracked: 1,"));
     }
 
     #[test]
