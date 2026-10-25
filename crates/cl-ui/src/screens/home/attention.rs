@@ -67,6 +67,9 @@ pub(crate) fn items(
                 None => count_of(counts.map(|c| &c.bills), kind),
             },
             AttentionKind::PayrollUnposted => count_of(counts.map(|c| &c.payroll), kind),
+            // Counted on this computer by the inbox service; the card puts
+            // in its count each frame ([`with_intake`]).
+            AttentionKind::IntakeFolders => AttentionItem::counted(kind, 0),
             AttentionKind::ReconcileUnfinished => match &data.reconcile.value {
                 Some(r) => AttentionItem::counted(
                     kind,
@@ -94,6 +97,21 @@ pub(crate) fn items(
             AttentionKind::Backup => AttentionItem::backup(backup_due),
         })
         .collect()
+}
+
+/// `items` with the intake folders that need attention on this computer
+/// (A01 D6: `receipt_inbox::intake_problems`).
+#[must_use]
+pub(crate) fn with_intake(mut items: Vec<AttentionItem>, problems: usize) -> Vec<AttentionItem> {
+    for item in &mut items {
+        if item.kind == AttentionKind::IntakeFolders {
+            *item = AttentionItem::counted(
+                AttentionKind::IntakeFolders,
+                u64::try_from(problems).unwrap_or(u64::MAX),
+            );
+        }
+    }
+    items
 }
 
 /// `days` as words: "1 day", "14 days".
@@ -192,6 +210,7 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
                 let failed = match kind {
                     AttentionKind::ReconcileUnfinished => home.data.reconcile.error.is_some(),
                     AttentionKind::InvoicesOverdue => home.data.summary.error.is_some(),
+                    AttentionKind::IntakeFolders => false,
                     _ => home.data.counts.value.as_ref().is_some_and(|c| match kind {
                         AttentionKind::BankWaiting => c.feed.is_err(),
                         AttentionKind::BillsDue { .. } => c.bills.is_err(),
@@ -245,6 +264,11 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
                 "home.attention.import",
                 opens,
             )),
+            AttentionKind::IntakeFolders => out.push(Line::task(
+                t_count("home.attention.intake", shown, &[]),
+                "home.attention.intake.open",
+                opens,
+            )),
         }
     }
     if later {
@@ -279,7 +303,10 @@ pub(super) fn show(ui: &mut Ui, home: &HomeScreen, tokens: &Tokens) -> Option<&'
     if let Some(e) = &home.data.counts.error {
         return failed(ui, tokens, "home.attention.failed", e).then_some(RETRY);
     }
-    let items = home.attention();
+    let items = with_intake(
+        home.attention(),
+        crate::screens::receipt_inbox::intake_problems(ui.ctx()),
+    );
     let lines = lines(home, &items);
     let waiting = home.data.counts.value.is_none();
     let mut clicked = None;
@@ -302,6 +329,10 @@ pub(super) fn show(ui: &mut Ui, home: &HomeScreen, tokens: &Tokens) -> Option<&'
         }
         first = false;
         line(ui, tokens, l, &mut clicked);
+    }
+    if clicked == AttentionKind::IntakeFolders.opens() {
+        // Preferences opens on Document intake.
+        crate::screens::preferences::open_at(crate::screens::preferences::Category::ReceiptInbox);
     }
     clicked
 }

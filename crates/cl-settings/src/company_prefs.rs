@@ -4,11 +4,14 @@
 //! engine. Nothing here is a secret or an amount.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use cl_core::Timestamp;
-use cl_core::ids::{AccountId, TagGroupId};
+use cl_core::ids::{AccountId, IntakeFolderId, TagGroupId};
+use cl_core::intake::IntakeFolder;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::ai::{AiLocalPrefs, AiProvider, DEFAULT_MONTHLY_TOKEN_CAP as DEFAULT_LOCAL_CAP};
 use crate::smtp::SmtpSecurity;
@@ -46,8 +49,18 @@ impl Default for AiConsentNote {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CompanyPrefs {
-    /// Folder watched for new receipts and bills (Q-54); `None` = off.
+    /// P17's single folder watched for new receipts and bills (Q-54);
+    /// `None` = off. **Legacy** since A01: intake folders live in the
+    /// engine (U-93); the migration ([`crate::migrate_inbox`]) reads this
+    /// once and then clears it. It keeps its P17 name so P17 records still
+    /// read; the code rename to `legacy_receipt_inbox_dir` waits until the
+    /// inbox service (A01 WP-C) stops reading it.
     pub receipt_inbox_dir: Option<PathBuf>,
+    /// This computer's confirmations of the company's intake folders
+    /// ("Set this company's folder for this computer", Q-A01b), by folder
+    /// id. A folder is watched only while its note's `path_hash` matches
+    /// the folder's current path. Machine-local: never archived.
+    pub intake_here: BTreeMap<IntakeFolderId, HereNote>,
     /// Home shows bills due within this many days (Q-169).
     pub bills_due_days: u16,
     /// Local AI switches, cap and count.
@@ -74,6 +87,7 @@ impl Default for CompanyPrefs {
     fn default() -> Self {
         CompanyPrefs {
             receipt_inbox_dir: None,
+            intake_here: BTreeMap::new(),
             bills_due_days: BILLS_DUE_DAYS_DEFAULT,
             ai: AiLocalPrefs::default(),
             ai_consent: None,
@@ -84,6 +98,50 @@ impl Default for CompanyPrefs {
             setup_checklist_dismissed: false,
         }
     }
+}
+
+/// This computer's confirmation of one intake folder (A01 D1). It holds
+/// hashes only, never the path itself.
+#[derive(Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HereNote {
+    /// [`path_hash`] of the folder path the Admin confirmed. A path edited
+    /// elsewhere, or a restored backup with another path, no longer
+    /// matches, and the folder waits for a new confirmation.
+    pub path_hash: String,
+    /// The folder's pinned root (`canonical_key`, A01 D2 rule 4): the
+    /// watcher pauses the folder when the root resolves elsewhere.
+    pub canonical_key: String,
+    /// "Only files added from now on" (Q-A01h): files older than this
+    /// (Unix ms) are listed with a Bring in button, not copied.
+    pub since_ms: Option<i64>,
+    /// When the Admin confirmed it (UTC).
+    pub confirmed_at: Option<Timestamp>,
+}
+
+impl std::fmt::Debug for HereNote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Even hashes of a path stay out of logs.
+        f.debug_struct("HereNote")
+            .field("path_hash", &"<hash>")
+            .field("canonical_key", &"<hash>")
+            .field("since_ms", &self.since_ms)
+            .field("confirmed_at", &self.confirmed_at)
+            .finish()
+    }
+}
+
+/// The hash a [`HereNote`] keeps of a folder path: SHA-256 (hex) of the
+/// path exactly as the engine stores it, so any edit of the path (even of
+/// letter case or slashes) needs a new confirmation.
+#[must_use]
+pub fn path_hash(path: &str) -> String {
+    Sha256::digest(format!("clientledger-intake-path:{path}").as_bytes())
+        .iter()
+        .fold(String::with_capacity(64), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        })
 }
 
 /// Why a receipt-inbox folder was refused.
@@ -122,12 +180,14 @@ pub fn check_inbox_folder(p: &std::path::Path) -> Result<(), FolderError> {
 impl CompanyPrefs {
     /// What travels in a backup's `manifest.host`: the choices that make
     /// sense on another computer. The receipt-inbox folder (a path on this
-    /// machine), this month's token count and the consent note (recorded
-    /// where the owner agreed) stay out (security M5).
+    /// machine), the intake-folder confirmations (Q-A01b), this month's
+    /// token count and the consent note (recorded where the owner agreed)
+    /// stay out (security M5).
     #[must_use]
     pub fn for_archive(&self) -> CompanyPrefs {
         CompanyPrefs {
             receipt_inbox_dir: None,
+            intake_here: BTreeMap::new(),
             bills_due_days: self.bills_due_days,
             ai: AiLocalPrefs {
                 suggest_rules: self.ai.suggest_rules,
@@ -145,7 +205,8 @@ impl CompanyPrefs {
 
     /// Merges preferences read from an archive over what this computer
     /// already had for the company: machine-local fields (receipt inbox,
-    /// token count, consent note) come from `local`; the cap is the
+    /// intake confirmations, token count, consent note) come from `local`;
+    /// the cap is the
     /// stricter of the two and an archive can never lift a cap to "none".
     #[must_use]
     pub fn merged_from_archive(
@@ -161,6 +222,7 @@ impl CompanyPrefs {
         };
         let mut out = CompanyPrefs {
             receipt_inbox_dir: local.and_then(|l| l.receipt_inbox_dir.clone()),
+            intake_here: local.map(|l| l.intake_here.clone()).unwrap_or_default(),
             bills_due_days: archive.bills_due_days,
             ai: AiLocalPrefs {
                 suggest_rules: archive.ai.suggest_rules,
@@ -190,6 +252,24 @@ impl CompanyPrefs {
         {
             self.receipt_inbox_dir = None;
         }
+        self.intake_here
+            .retain(|_, n| !n.path_hash.is_empty() && !n.canonical_key.is_empty());
+    }
+
+    /// Whether this computer confirmed `folder` at its current path (the
+    /// folder may be touched and watched).
+    #[must_use]
+    pub fn is_confirmed(&self, folder: &IntakeFolder) -> bool {
+        self.intake_here
+            .get(&folder.id)
+            .is_some_and(|n| n.path_hash == path_hash(&folder.path))
+    }
+
+    /// Drops the confirmations of folders no longer in `folders` (removed
+    /// in Preferences or elsewhere).
+    pub fn retain_intake_for(&mut self, folders: &[IntakeFolder]) {
+        self.intake_here
+            .retain(|id, _| folders.iter().any(|f| f.id == *id));
     }
 }
 
@@ -322,5 +402,102 @@ mod tests {
             check_inbox_folder(&dir.path().join("nope")),
             Err(FolderError::Missing)
         );
+    }
+
+    fn folder(id: &str, path: &str) -> IntakeFolder {
+        IntakeFolder {
+            id: IntakeFolderId::parse(id).expect("id"),
+            name: "Receipts".to_owned(),
+            path: path.to_owned(),
+            default_kind: cl_core::intake::IntakeKind::Auto,
+            auto_read: false,
+            keep_originals: false,
+        }
+    }
+
+    fn note(path: &str) -> HereNote {
+        HereNote {
+            path_hash: path_hash(path),
+            canonical_key: "k".repeat(64),
+            since_ms: Some(1_700_000_000_000),
+            confirmed_at: Some(crate::recent::now()),
+        }
+    }
+
+    const A: &str = "7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a6b";
+    const B: &str = "7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a6c";
+
+    #[test]
+    fn intake_confirmations_stay_on_this_computer() {
+        let mut local = CompanyPrefs::default();
+        let f = folder(A, r"\\fileserver\Scans\Smith");
+        local.intake_here.insert(f.id, note(&f.path));
+        assert!(local.is_confirmed(&f));
+        // Never archived (Q-A01b): a backup carries no confirmation.
+        let travelling = local.for_archive();
+        assert!(travelling.intake_here.is_empty());
+        let text = serde_json::to_string(&travelling).expect("json");
+        assert!(!text.contains(&path_hash(&f.path)), "{text}");
+        // Restored on the same computer: the local confirmations stay.
+        let mut archive = travelling.clone();
+        archive.intake_here.insert(f.id, note(r"C:\Elsewhere"));
+        let merged = CompanyPrefs::merged_from_archive(&archive, Some(&local));
+        assert_eq!(merged.intake_here, local.intake_here);
+        assert!(merged.is_confirmed(&f));
+        // Restored on another computer: nothing is confirmed.
+        let fresh = CompanyPrefs::merged_from_archive(&archive, None);
+        assert!(fresh.intake_here.is_empty());
+        assert!(!fresh.is_confirmed(&f));
+    }
+
+    #[test]
+    fn a_changed_path_needs_a_new_confirmation() {
+        let mut p = CompanyPrefs::default();
+        let mut f = folder(A, r"C:\Scans");
+        p.intake_here.insert(f.id, note(&f.path));
+        assert!(p.is_confirmed(&f));
+        for edited in [r"c:\Scans", "C:/Scans", r"C:\Scans\", r"D:\Scans"] {
+            f.path = edited.to_owned();
+            assert!(!p.is_confirmed(&f), "{edited}");
+        }
+        // Another folder id is never confirmed by this note.
+        assert!(!p.is_confirmed(&folder(B, r"C:\Scans")));
+        assert_ne!(path_hash("a"), path_hash("A"));
+        assert_eq!(path_hash("a").len(), 64);
+    }
+
+    #[test]
+    fn removed_folders_lose_their_confirmation_and_empty_notes_drop() {
+        let mut p = CompanyPrefs::default();
+        let a = folder(A, r"C:\A");
+        let b = folder(B, r"C:\B");
+        p.intake_here.insert(a.id, note(&a.path));
+        p.intake_here.insert(b.id, note(&b.path));
+        p.retain_intake_for(std::slice::from_ref(&a));
+        assert_eq!(p.intake_here.len(), 1);
+        assert!(p.is_confirmed(&a));
+        p.intake_here.insert(b.id, HereNote::default());
+        p.normalize();
+        assert_eq!(p.intake_here.len(), 1, "a note without hashes is dropped");
+    }
+
+    #[test]
+    fn intake_notes_round_trip_and_debug_hides_the_hashes() {
+        let mut p = CompanyPrefs::default();
+        let a = folder(A, r"\\fileserver\Scans\Smith");
+        p.intake_here.insert(a.id, note(&a.path));
+        let text = serde_json::to_string(&p).expect("json");
+        assert!(!text.contains("fileserver"), "{text}");
+        assert!(text.contains(A), "{text}");
+        let back: CompanyPrefs = serde_json::from_str(&text).expect("parse");
+        assert_eq!(back, p);
+        let debug = format!("{:?}", p.intake_here);
+        assert!(!debug.contains(&path_hash(&a.path)), "{debug}");
+        assert!(!debug.contains("kkkk"), "{debug}");
+        // P17 records (no intake field) still read.
+        let old: CompanyPrefs =
+            serde_json::from_str(r#"{"receipt_inbox_dir":"C:/Receipts"}"#).expect("old");
+        assert!(old.intake_here.is_empty());
+        assert!(old.receipt_inbox_dir.is_some());
     }
 }

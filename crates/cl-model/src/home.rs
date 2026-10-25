@@ -126,6 +126,9 @@ pub enum AttentionKind {
     },
     /// Payroll imports not posted.
     PayrollUnposted,
+    /// Intake folders that need the owner: not set up on this computer,
+    /// missing, unreachable, not allowed, moved (A01 D6). A count only.
+    IntakeFolders,
     /// Open to-dos (Q-130; U-37).
     ToDos,
     /// Items at or below their reorder point (Q-149; U-78).
@@ -139,7 +142,7 @@ pub enum AttentionKind {
 impl AttentionKind {
     /// Every kind in display order, with the company's bills window.
     #[must_use]
-    pub const fn all(bills_due_days: u16) -> [AttentionKind; 9] {
+    pub const fn all(bills_due_days: u16) -> [AttentionKind; 10] {
         [
             AttentionKind::BankWaiting,
             AttentionKind::ReconcileUnfinished,
@@ -148,6 +151,7 @@ impl AttentionKind {
                 days: bills_due_days,
             },
             AttentionKind::PayrollUnposted,
+            AttentionKind::IntakeFolders,
             AttentionKind::ToDos,
             AttentionKind::Reorder,
             AttentionKind::HealthCheck,
@@ -164,6 +168,7 @@ impl AttentionKind {
             AttentionKind::InvoicesOverdue => "invoices_overdue",
             AttentionKind::BillsDue { .. } => "bills_due",
             AttentionKind::PayrollUnposted => "payroll_unposted",
+            AttentionKind::IntakeFolders => "intake_folders",
             AttentionKind::ToDos => "todos",
             AttentionKind::Reorder => "reorder",
             AttentionKind::HealthCheck => "health_check",
@@ -192,6 +197,8 @@ impl AttentionKind {
             AttentionKind::InvoicesOverdue => Some("reports.center"),
             AttentionKind::BillsDue { .. } => Some("vendors.pay_bills"),
             AttentionKind::PayrollUnposted => Some("payroll.import"),
+            // Preferences, on its Document intake panel.
+            AttentionKind::IntakeFolders => Some("edit.preferences"),
             AttentionKind::Backup => Some("file.backup"),
             AttentionKind::ToDos | AttentionKind::Reorder | AttentionKind::HealthCheck => None,
         }
@@ -437,6 +444,16 @@ mod tests {
             assert_eq!(k.opens().is_none(), !k.supported(), "{k:?}");
         }
         assert_eq!(all[3], AttentionKind::BillsDue { days: 14 });
+        // A01: intake folders that need attention open Preferences.
+        assert_eq!(all[5], AttentionKind::IntakeFolders);
+        assert_eq!(AttentionKind::IntakeFolders.key(), "intake_folders");
+        assert!(AttentionKind::IntakeFolders.supported());
+        assert_eq!(
+            AttentionKind::IntakeFolders.opens(),
+            Some("edit.preferences")
+        );
+        assert!(AttentionItem::counted(AttentionKind::IntakeFolders, 2).needs_attention());
+        assert!(!AttentionItem::counted(AttentionKind::IntakeFolders, 0).needs_attention());
         assert!(!AttentionKind::ToDos.supported());
         assert!(!AttentionKind::Reorder.supported());
         assert!(!AttentionKind::HealthCheck.supported());
