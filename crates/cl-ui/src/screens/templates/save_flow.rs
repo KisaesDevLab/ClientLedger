@@ -312,14 +312,11 @@ impl SaveFlow {
                 }
                 // Another try can't change this: the reminder stays and
                 // can be dismissed (Q-P15p).
-                Err(e)
-                    if matches!(
-                        e,
-                        ApiError::Validation(_)
-                            | ApiError::NotFound { .. }
-                            | ApiError::Forbidden { .. }
-                    ) =>
-                {
+                Err(
+                    ApiError::Validation(_)
+                    | ApiError::NotFound { .. }
+                    | ApiError::Forbidden { .. },
+                ) => {
                     self.resolve_failed = true;
                     if let Some((id, date)) = done {
                         link.due().linked(id, date);

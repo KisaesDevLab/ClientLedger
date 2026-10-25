@@ -293,7 +293,7 @@ impl Probe {
                 }
             }
             OutcomeMatcher::FromTemplate { template, date } => {
-                self.from_template(*template, *date, settled).await
+                self.posted_from_template(*template, *date, settled).await
             }
             OutcomeMatcher::Deleted { get, path } => match self.get(get, path).await {
                 Err(ApiError::NotFound { .. }) => {
@@ -355,7 +355,7 @@ impl Probe {
 
     /// "Enter now" of `template` on `date`: the new postings whose
     /// provenance names the template.
-    async fn from_template(
+    async fn posted_from_template(
         &self,
         template: cl_core::ids::TemplateId,
         date: CalendarDate,

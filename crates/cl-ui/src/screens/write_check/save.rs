@@ -922,6 +922,8 @@ impl WriteCheckScreen {
     /// said check `number` is used on `bank`: find that check and show it
     /// (B2). Not found: the usual "number used" offer.
     pub(crate) fn find_check(&mut self, bank: AccountId, number: u32) {
+        /// Pages of checks searched for the number.
+        const PAGES: u64 = 25;
         let link = Arc::clone(&self.link);
         if let Some(mut demo) = link.demo_state() {
             let found = crate::company::demo::checks::list(&mut demo, bank)
@@ -936,8 +938,6 @@ impl WriteCheckScreen {
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
-        /// Pages of checks searched for the number.
-        const PAGES: u64 = 25;
         if let Ok(p) = group.read(&session, move |s| async move {
             for i in 0..PAGES {
                 let page = PageRequest::new(NAV_PAGE, i * u64::from(NAV_PAGE))?;
@@ -962,24 +962,18 @@ impl WriteCheckScreen {
         };
         self.save.lookup = None;
         let bank = self.header.current().bank;
-        match (r, bank) {
-            (Ok(Some(id)), Some(bank)) => {
-                self.save.lost.after_unknown = false;
-                self.save.key = None;
-                self.save.lost.notice = Some("lost.check_found");
-                self.publish_ledger();
-                self.template
-                    .form_saved(&self.link, self.group.as_ref(), id);
-                self.load_check(id, bank);
-            }
-            _ => {
-                self.save.lost.after_unknown = false;
-                if let Some(n) = self.number_sent() {
-                    self.save.duplicate = Some((n, n.saturating_add(1)));
-                    self.focus = Some(Field::Number);
-                    self.fetch_bank_facts();
-                }
-            }
+        self.save.lost.after_unknown = false;
+        if let (Ok(Some(id)), Some(bank)) = (r, bank) {
+            self.save.key = None;
+            self.save.lost.notice = Some("lost.check_found");
+            self.publish_ledger();
+            self.template
+                .form_saved(&self.link, self.group.as_ref(), id);
+            self.load_check(id, bank);
+        } else if let Some(n) = self.number_sent() {
+            self.save.duplicate = Some((n, n.saturating_add(1)));
+            self.focus = Some(Field::Number);
+            self.fetch_bank_facts();
         }
     }
 

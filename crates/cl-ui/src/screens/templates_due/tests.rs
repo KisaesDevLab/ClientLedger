@@ -407,5 +407,5 @@ fn catch_up_skip_these_sends_each_date_through_the_skip_path() {
             || o.status != crate::company::demo::templates::OccStatus::Posted)
     );
     drop(st);
-    assert!(link.due().questions().is_empty());
+    assert_eq!(link.due().questions().len(), 0);
 }

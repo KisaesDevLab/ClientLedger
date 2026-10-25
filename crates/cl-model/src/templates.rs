@@ -592,7 +592,10 @@ mod tests {
         let three = missed_dates(&monthly, d(2026, 9, 30), 100);
         assert_eq!(three.len(), 3);
         assert!(!catch_up_asks(three.len()), "3 posts as today");
-        assert!(missed_dates(&monthly, d(2026, 6, 30), 100).is_empty());
+        assert_eq!(
+            missed_dates(&monthly, d(2026, 6, 30), 100),
+            Vec::<CalendarDate>::new()
+        );
         let ended = Schedule {
             ends: Ends::On(Some(d(2026, 8, 15))),
             ..monthly

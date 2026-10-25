@@ -353,7 +353,7 @@ fn four_missed_dates_ask_first_and_post_once_after_post_all() {
     assert_eq!(posted_count(&link), 0);
     // Post all: the next run posts the four dates (and the others).
     link.due().confirm(id);
-    assert!(link.due().questions().is_empty());
+    assert_eq!(link.due().questions().len(), 0);
     let f = r.tick(&link, today, 2.0).expect("ran");
     assert!(f.posted);
     assert_eq!(posted_for(&link, id), 4);
@@ -361,7 +361,7 @@ fn four_missed_dates_ask_first_and_post_once_after_post_all() {
     link.due().request_check();
     let _ = r.tick(&link, today, 3.0);
     assert_eq!(posted_for(&link, id), 4);
-    assert!(link.due().questions().is_empty());
+    assert_eq!(link.due().questions().len(), 0);
 }
 
 #[test]
@@ -373,7 +373,7 @@ fn three_missed_dates_post_automatically_as_before() {
     r.opened(&link, tenant);
     let f = r.tick(&link, today, 0.0).expect("ran");
     assert!(f.posted);
-    assert!(link.due().questions().is_empty(), "no question");
+    assert_eq!(link.due().questions().len(), 0, "no question");
     assert_eq!(posted_for(&link, id), 3);
     assert_eq!(
         link.due().run().map(|x| x.posted.len()),

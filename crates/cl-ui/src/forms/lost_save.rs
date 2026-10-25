@@ -153,9 +153,9 @@ impl LostSave {
     pub fn answer<V: Clone + PartialEq>(
         &mut self,
         form: &mut FormState<V>,
-        r: Recheck,
+        r: &Recheck,
     ) -> LostEvent {
-        let ev = match r {
+        let ev = match *r {
             Recheck::Committed { transaction } => LostEvent::Saved(transaction),
             Recheck::NotCommitted => LostEvent::NotSaved,
             Recheck::Unknown => LostEvent::StillUnknown,

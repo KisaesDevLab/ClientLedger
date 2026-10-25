@@ -294,7 +294,7 @@ impl DailySalesScreen {
                         let ev = self
                             .save
                             .lost
-                            .answer(&mut self.header, cl_api::Recheck::Unknown);
+                            .answer(&mut self.header, &cl_api::Recheck::Unknown);
                         self.lost_event(ev);
                     }
                     self.poll_lost();
@@ -319,7 +319,7 @@ impl DailySalesScreen {
             Ok(Reply::Entry(e)) if e.status == EntryStatus::Posted => {
                 let _ = self.save.lost.answer(
                     &mut self.header,
-                    cl_api::Recheck::Committed {
+                    &cl_api::Recheck::Committed {
                         transaction: e.transaction,
                     },
                 );
@@ -329,13 +329,13 @@ impl DailySalesScreen {
                 let _ = self
                     .save
                     .lost
-                    .answer(&mut self.header, cl_api::Recheck::NotCommitted);
+                    .answer(&mut self.header, &cl_api::Recheck::NotCommitted);
             }
             _ => {
                 let _ = self
                     .save
                     .lost
-                    .answer(&mut self.header, cl_api::Recheck::Unknown);
+                    .answer(&mut self.header, &cl_api::Recheck::Unknown);
             }
         }
     }
