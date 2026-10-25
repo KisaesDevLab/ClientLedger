@@ -60,6 +60,9 @@ pub(crate) struct RefundState {
     /// no guard against a second posting: after an unknown outcome the
     /// form blocks sending until the recheck or the owner answers (B2).
     pub key: Option<(VendorRefundDraft, bool, IdempotencyKey)>,
+    /// The save whose outcome is unknown is this refund (not the deposit):
+    /// when Check again finds it in the books, the refund card is done.
+    pub lost: bool,
 }
 
 impl RefundState {
@@ -309,6 +312,17 @@ impl DepositScreen {
 
     fn refund_saved(&mut self, _s: &Saved) {
         self.save.lost.saved();
+        self.refund_done();
+    }
+
+    /// Check again found the lost refund in the books (review fix-PR-1
+    /// should-fix 3): it is done, exactly as if its reply had come; the
+    /// card closes so the same refund is not sent a second time.
+    pub(crate) fn refund_found(&mut self) {
+        self.refund_done();
+    }
+
+    fn refund_done(&mut self) {
         crate::forms::publish_saved(&self.link, &self.bus, &self.save.published);
         self.closing_prompt.saved();
         self.refund = RefundState::default();
@@ -324,6 +338,7 @@ impl DepositScreen {
         }
         if self.save.lost.lost(&e) {
             self.header.mark_unconfirmed();
+            self.refund.lost = true;
             return;
         }
         if self.closing_failed(&e, Pending::Refund) {

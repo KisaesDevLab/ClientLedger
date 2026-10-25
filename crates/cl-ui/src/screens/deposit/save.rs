@@ -428,6 +428,15 @@ impl DepositScreen {
     /// deposit is in the books, so the form shows it.
     pub(crate) fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
         use crate::forms::lost_save::LostEvent;
+        // The lost save was the vendor refund: the deposit form is not it.
+        if std::mem::take(&mut self.refund.lost) {
+            match ev {
+                LostEvent::Saved(_) => self.refund_found(),
+                LostEvent::StillUnknown => self.refund.lost = true,
+                LostEvent::NotSaved | LostEvent::OwnerConfirmed => {}
+            }
+            return;
+        }
         if let LostEvent::Saved(found) = ev {
             crate::forms::publish_saved(&self.link, &self.bus, &self.save.published);
             self.save.key = None;

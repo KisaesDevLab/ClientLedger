@@ -620,6 +620,39 @@ fn header_enter_saves_or_moves_by_the_preference() {
     }
 }
 
+/// Review fix-PR-1 should-fix 3: a lost vendor refund that Check again
+/// finds in the books is done; the card closes and nothing goes again.
+#[test]
+fn a_lost_refund_found_saved_is_never_sent_a_second_time() {
+    let (mut s, log, _dir) = screen(all_caps());
+    s.refund.open = true;
+    s.refund.vendor =
+        Some(cl_core::ids::ContactId::parse("6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"));
+    s.refund.kind = Some(super::refund::RefundKind::VendorCredit);
+    s.refund.credit = Some(txn(7));
+    s.refund.amount = "75.00".into();
+    log.lock().expect("log").lost_next = true;
+    s.send_refund(None);
+    assert_eq!(log.lock().expect("log").saved.len(), 1, "sent once");
+    assert!(s.save.lost.pending());
+    s.save.lost.recheck_answering(
+        &mut s.header,
+        cl_api::Recheck::Committed {
+            transaction: Some(txn(99)),
+        },
+    );
+    s.poll_save();
+    assert!(!s.save.lost.pending());
+    assert!(!s.refund.open && s.refund.vendor.is_none() && s.refund.amount.is_empty());
+    assert_eq!(s.save.notice, Some("deposit.refund.saved"));
+    s.send_refund(None);
+    assert_eq!(
+        log.lock().expect("log").saved.len(),
+        1,
+        "the refund is not sent again"
+    );
+}
+
 #[test]
 fn b2_after_an_unknown_outcome_a_second_save_sends_nothing_until_the_recheck_answers() {
     let (mut s, log, _dir) = screen(all_caps());
