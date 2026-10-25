@@ -2,11 +2,14 @@
 
 pub mod accounts;
 pub mod ai;
+pub mod ap_doc;
 pub mod ap_void;
 pub mod attachments;
 pub mod audit;
 pub mod bank_postings;
 pub mod batch;
+pub mod bill_ocr;
+pub mod bill_payments;
 pub mod bills;
 pub mod checks;
 pub(crate) mod common;
@@ -39,6 +42,7 @@ pub mod tags;
 pub mod templates;
 pub mod tenants;
 pub mod transactions;
+pub mod vendor_credits;
 pub mod versioning;
 
 #[cfg(test)]

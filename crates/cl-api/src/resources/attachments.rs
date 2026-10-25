@@ -1,5 +1,6 @@
-//! Files attached to a check (P13 WP2): upload, list and download
-//! (`/api/v1/attachments`).
+//! Files attached to a check (P13 WP2), a bill, a vendor credit or another
+//! transaction (P17 WP2): upload, list, download, details, link, delete
+//! and the unlinked files (`/api/v1/attachments`).
 //!
 //! - A check is an engine `expense`, so its files use attachable type
 //!   `expense` (the type the engine's own check route links drafts to).
@@ -25,9 +26,14 @@ use uuid::Uuid;
 use crate::client::{Call, Method};
 use crate::errors::{ApiError, LocalValidation};
 use crate::idempotency::IdempotencyKey;
-use crate::resources::operations::{ATTACHMENT_DOWNLOAD, ATTACHMENTS_LIST, ATTACHMENTS_UPLOAD};
+use crate::resources::operations::{
+    ATTACHMENT_DELETE, ATTACHMENT_DOWNLOAD, ATTACHMENT_GET, ATTACHMENT_LINK, ATTACHMENTS_LIST,
+    ATTACHMENTS_UNLINKED, ATTACHMENTS_UPLOAD,
+};
+use crate::resources::reconcile::{OutcomeMatcher, Probe};
+use crate::resources::transactions::TxnType;
 use crate::resources::versioning::saved_unreadable;
-use crate::session::{Session, decode};
+use crate::session::{Session, decode, json_body};
 use crate::wire::{Page, PageRequest};
 
 /// The largest file the engine accepts (its upload limit).
@@ -116,21 +122,63 @@ impl Default for DraftKey {
 pub enum AttachTo {
     /// A saved check (or any other expense).
     Expense(TransactionId),
-    /// A check that is not saved yet.
+    /// A form that is not saved yet.
     Draft(DraftKey),
+    /// A saved bill (attachable type `bill`, as the engine's own
+    /// attach-draft uses).
+    Bill(TransactionId),
+    /// A saved vendor credit (`vendor_credit`).
+    VendorCredit(TransactionId),
+    /// Any other saved transaction, under its transaction type (a deposit,
+    /// a journal entry, …).
+    Txn(TxnType, TransactionId),
 }
 
 impl AttachTo {
-    fn kind(self) -> &'static str {
+    /// The engine's attachable type (`expense`, `draft`, `bill`,
+    /// `vendor_credit`, or the transaction type).
+    #[must_use]
+    pub const fn attachable_type(self) -> &'static str {
         match self {
             AttachTo::Expense(_) => "expense",
             AttachTo::Draft(_) => "draft",
+            AttachTo::Bill(_) => "bill",
+            AttachTo::VendorCredit(_) => "vendor_credit",
+            AttachTo::Txn(t, _) => match t {
+                TxnType::Invoice => "invoice",
+                TxnType::CustomerPayment => "customer_payment",
+                TxnType::CashSale => "cash_sale",
+                TxnType::Expense => "expense",
+                TxnType::Deposit => "deposit",
+                TxnType::Transfer => "transfer",
+                TxnType::JournalEntry => "journal_entry",
+                TxnType::CreditMemo => "credit_memo",
+                TxnType::CustomerRefund => "customer_refund",
+                TxnType::Bill => "bill",
+                TxnType::VendorCredit => "vendor_credit",
+                TxnType::BillPayment => "bill_payment",
+                TxnType::DailySales => "daily_sales",
+                TxnType::Aje => "aje",
+            },
         }
+    }
+
+    /// The record (or draft) id it names.
+    #[must_use]
+    pub fn attachable_id(self) -> String {
+        self.id()
+    }
+
+    fn kind(self) -> String {
+        self.attachable_type().to_string()
     }
 
     fn id(self) -> String {
         match self {
-            AttachTo::Expense(id) => id.to_string(),
+            AttachTo::Expense(id)
+            | AttachTo::Bill(id)
+            | AttachTo::VendorCredit(id)
+            | AttachTo::Txn(_, id) => id.to_string(),
             AttachTo::Draft(d) => d.to_string(),
         }
     }
@@ -253,10 +301,7 @@ fn multipart(to: AttachTo, name: &str, kind: FileKind, bytes: &[u8]) -> (String,
         }
     };
     let mut body = Vec::with_capacity(bytes.len() + 512);
-    for (field, value) in [
-        ("attachableType", to.kind().to_string()),
-        ("attachableId", to.id()),
-    ] {
+    for (field, value) in [("attachableType", to.kind()), ("attachableId", to.id())] {
         body.extend_from_slice(
             format!(
                 "--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"\r\n\r\n{value}\r\n"
@@ -358,7 +403,7 @@ impl Attachments<'_> {
     ) -> Result<Page<Attachment>, ApiError> {
         let mut call = Call::at(Method::Get, ATTACHMENTS_LIST.route());
         call.query = vec![
-            ("attachable_type".into(), of.kind().into()),
+            ("attachable_type".into(), of.kind()),
             ("attachable_id".into(), of.id()),
         ];
         call.query.extend(page.query());
@@ -379,7 +424,85 @@ impl Attachments<'_> {
         let reply = self.0.send(&ATTACHMENT_DOWNLOAD, call, None).await?;
         Ok(reply.body.to_vec())
     }
+
+    /// One file's details.
+    ///
+    /// # Errors
+    /// `NotFound`; any [`ApiError`].
+    pub async fn get(&self, id: AttachmentId) -> Result<Attachment, ApiError> {
+        #[derive(Deserialize)]
+        struct W {
+            attachment: Attachment,
+        }
+        let call = Call::new(Method::Get, ATTACHMENT_GET.route(), format!("{BASE}/{id}"));
+        let reply = self.0.send(&ATTACHMENT_GET, call, None).await?;
+        decode::<W>(&reply, "attachment").map(|w| w.attachment)
+    }
+
+    /// Deletes a file. A lost reply is reconciled by reading the file back
+    /// (gone = deleted).
+    ///
+    /// # Errors
+    /// `NotFound`; `OutcomeUnknown`; any [`ApiError`].
+    pub async fn delete(&self, id: AttachmentId, key: IdempotencyKey) -> Result<(), ApiError> {
+        let s = &self.0.pinned();
+        let path = format!("{BASE}/{id}");
+        let matcher = OutcomeMatcher::Deleted {
+            get: &ATTACHMENT_GET,
+            path: path.clone(),
+        };
+        let probe = Probe::new(s, matcher, false).await;
+        let mut call = Call::new(Method::Delete, ATTACHMENT_DELETE.route(), path);
+        call.idempotency_key = Some(key);
+        s.send(&ATTACHMENT_DELETE, call, Some(&probe)).await?;
+        Ok(())
+    }
+
+    /// Moves a file onto a record or into a draft (`POST
+    /// /attachments/{id}/link`; adopting an unlinked file into a draft, or
+    /// attaching a vendor credit's files before `bill-lines-v1`). Linking
+    /// again to the same place changes nothing.
+    ///
+    /// # Errors
+    /// `NotFound`; any [`ApiError`].
+    pub async fn link(
+        &self,
+        id: AttachmentId,
+        to: AttachTo,
+        key: IdempotencyKey,
+    ) -> Result<(), ApiError> {
+        let body = json_body(&serde_json::json!({
+            "attachableType": to.kind(),
+            "attachableId": to.id(),
+        }))?;
+        let mut call = Call::new(
+            Method::Post,
+            ATTACHMENT_LINK.route(),
+            format!("{BASE}/{id}/link"),
+        )
+        .json_body(body);
+        call.idempotency_key = Some(key);
+        self.0.send(&ATTACHMENT_LINK, call, None).await?;
+        Ok(())
+    }
+
+    /// Files not linked to any record yet (drafts and receipts; the
+    /// engine's newest 50).
+    ///
+    /// # Errors
+    /// `Decode`; any [`ApiError`].
+    pub async fn unlinked(&self) -> Result<Vec<Attachment>, ApiError> {
+        #[derive(Deserialize)]
+        struct W {
+            data: Vec<Attachment>,
+        }
+        let call = Call::at(Method::Get, ATTACHMENTS_UNLINKED.route());
+        let reply = self.0.send(&ATTACHMENTS_UNLINKED, call, None).await?;
+        decode::<W>(&reply, "unlinked attachments").map(|w| w.data)
+    }
 }
+
+const BASE: &str = "/api/v1/attachments";
 
 #[cfg(test)]
 mod tests {
@@ -540,5 +663,84 @@ mod tests {
             .await
             .expect("download");
         assert_eq!(bytes, PDF);
+    }
+
+    #[tokio::test]
+    async fn bills_credits_and_other_records_link_get_delete_and_unlinked() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v1/attachments/{ATT}/link")))
+            .respond_with(json(200, r#"{"linked":true}"#))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/attachments/{ATT}")))
+            .respond_with(json(200, &reply("bill", CHECK)))
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path(format!("/api/v1/attachments/{ATT}")))
+            .respond_with(json(200, r#"{"message":"Attachment deleted"}"#))
+            .mount(&server)
+            .await;
+        let one = reply("draft", CHECK);
+        let row = one
+            .strip_prefix(r#"{"attachment":"#)
+            .and_then(|r| r.strip_suffix('}'))
+            .expect("row");
+        Mock::given(method("GET"))
+            .and(path("/api/v1/attachments/unlinked"))
+            .respond_with(json(200, &format!(r#"{{"data":[{row}]}}"#)))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let id = AttachmentId::parse(ATT).expect("id");
+        let txn = TransactionId::parse(CHECK).expect("id");
+        for to in [
+            AttachTo::Bill(txn),
+            AttachTo::VendorCredit(txn),
+            AttachTo::Txn(TxnType::Deposit, txn),
+            AttachTo::Draft(DraftKey::new()),
+        ] {
+            s.attachments()
+                .link(id, to, IdempotencyKey::new())
+                .await
+                .expect("link");
+        }
+        let kinds: Vec<String> = requests(&server, "POST")
+            .await
+            .iter()
+            .map(|r| {
+                let v: serde_json::Value = serde_json::from_slice(&r.body).expect("json");
+                v["attachableType"].as_str().unwrap_or("").to_string()
+            })
+            .collect();
+        assert_eq!(kinds, ["bill", "vendor_credit", "deposit", "draft"]);
+        for t in [
+            TxnType::Invoice,
+            TxnType::CustomerPayment,
+            TxnType::CashSale,
+            TxnType::Expense,
+            TxnType::Deposit,
+            TxnType::Transfer,
+            TxnType::JournalEntry,
+            TxnType::CreditMemo,
+            TxnType::CustomerRefund,
+            TxnType::Bill,
+            TxnType::VendorCredit,
+            TxnType::BillPayment,
+            TxnType::DailySales,
+            TxnType::Aje,
+        ] {
+            assert_eq!(AttachTo::Txn(t, txn).attachable_type(), t.as_str());
+        }
+        let a = s.attachments().get(id).await.expect("get");
+        assert_eq!(a.attachable_type, "bill");
+        assert_eq!(s.attachments().unlinked().await.expect("unlinked").len(), 1);
+        s.attachments()
+            .delete(id, IdempotencyKey::new())
+            .await
+            .expect("delete");
+        assert_eq!(requests(&server, "DELETE").await.len(), 1);
     }
 }

@@ -13,9 +13,11 @@
 //!   and takes its applications off the bills and credits it paid.
 //!
 //! None of them takes a closing-date password on the pinned engine, so
-//! nothing here sends one; a closed-period date comes back as
-//! `ApiError::ClosedPeriod`. P17 WP2 folds these into its bill and vendor
-//! credit resources.
+//! these wrappers send none; a closed-period date comes back as
+//! `ApiError::ClosedPeriod`. P17 WP2's `Bills::void` and
+//! `VendorCredits::void` use the same path ([`void_with`]) with the A/P
+//! options (closing-date password with `ap-closing-v1`, the stale guard
+//! with `ap-edit-v1`).
 
 use cl_core::ids::TransactionId;
 use serde_json::{Value, json};
@@ -23,12 +25,13 @@ use serde_json::{Value, json};
 use crate::client::{Call, Method};
 use crate::errors::{ApiError, LocalValidation};
 use crate::idempotency::IdempotencyKey;
+use crate::resources::ap_doc::{ApWriteOptions, ap_body};
 use crate::resources::operations::{
     BILL_PAYMENT_VOID, BILL_VOID, Operation, TXN_GET, VENDOR_CREDIT_VOID,
 };
 use crate::resources::reconcile::{OutcomeMatcher, Probe};
 use crate::resources::transactions::SPEC;
-use crate::session::{Session, json_body};
+use crate::session::Session;
 
 /// The A/P document voids of a session (`session.ap_voids()`).
 #[derive(Clone, Copy, Debug)]
@@ -116,13 +119,43 @@ async fn void(
     reason: &str,
     key: IdempotencyKey,
 ) -> Result<(), ApiError> {
+    void_with(
+        session,
+        op,
+        base,
+        id,
+        reason,
+        &ApWriteOptions::default(),
+        key,
+    )
+    .await
+}
+
+/// A void through a document's own route with the A/P options (P17 WP2):
+/// the closing-date password needs `ap-closing-v1` (refused locally
+/// without it), the stale guard goes out with `ap-edit-v1` only. A lost
+/// reply is reconciled by reading the transaction back (D2).
+pub(crate) async fn void_with(
+    session: &Session,
+    op: &'static Operation,
+    base: &str,
+    id: TransactionId,
+    reason: &str,
+    opts: &ApWriteOptions,
+    key: IdempotencyKey,
+) -> Result<(), ApiError> {
     // One company for the stamp read, the probe and the write.
     let s = &session.pinned();
     let reason = reason.trim();
     if reason.is_empty() {
         return Err(ApiError::Local(LocalValidation::MissingReason));
     }
-    let body = json_body(&json!({ "reason": reason }))?;
+    let body = ap_body(
+        s,
+        json!({ "reason": reason }),
+        &opts.posting,
+        opts.expected_updated_at,
+    )?;
     // A lost reply is resolved by reading the transaction back: void means
     // the void went through.
     let matcher = OutcomeMatcher::Field {
