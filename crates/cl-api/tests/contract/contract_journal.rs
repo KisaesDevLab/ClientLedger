@@ -133,10 +133,13 @@ pub fn lost_reply_is_reconciled_to_exactly_one_posting(h: &Harness) {
         )
         .expect("reconciled as committed");
     assert_eq!(h.observer.dropped(), 1, "the reply was not dropped");
+    // With U-18 (`idempotency-v1`) cl-api sends it again with the same key
+    // and the engine replays the first answer; without it, never.
+    let keyed = h.caps.has(cl_api::Capabilities::IDEMPOTENCY);
     assert_eq!(
         h.observer.sent(Method::Post, "/api/v1/transactions") - posts_before,
-        1,
-        "the create must not be re-sent"
+        if keyed { 2 } else { 1 },
+        "the create must not be re-sent unless the engine replays it"
     );
     assert_eq!(made.record.fingerprint(), entry.fingerprint());
     let filter = TransactionFilter {

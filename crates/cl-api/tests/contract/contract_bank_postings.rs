@@ -270,10 +270,16 @@ pub fn lost_replies_are_reconciled_to_one_posting(h: &Harness) {
             dropped + 1,
             "the reply was not dropped"
         );
+        // U-18: re-sent once with the same key (a replay) when the engine
+        // offers `idempotency-v1`; otherwise never.
         assert_eq!(
             h.observer.sent(Method::Post, route) - sent,
-            1,
-            "{:?}: the create must not be re-sent",
+            if h.caps.has(cl_api::Capabilities::IDEMPOTENCY) {
+                2
+            } else {
+                1
+            },
+            "{:?}: the create must not be re-sent unless the engine replays it",
             p.kind()
         );
         assert_eq!(made.record.fingerprint(), p.created_fingerprint());
