@@ -7,9 +7,11 @@
 //! `cl_model::lists::tags`. A group's "one per line" flag is the engine's
 //! (`isSingleSelect`); "required for these account types" (Q-180) is kept
 //! on the company record and checked by the forms until the engine stores
-//! it (U-42). The engine's merge moves header tags only (U-41): merge is
-//! offered only for a tag the engine reports as used on transactions alone,
-//! never on lines or as a default.
+//! it (U-42). Without `merge-closing-date-v1` the engine's merge moves
+//! header tags only (U-41): merge is offered only for a tag the engine
+//! reports as used on transactions alone, never on lines or as a default.
+//! With it (U-47) every use moves, and a merge that re-tags a transaction
+//! dated on or before the closing date asks for the closing-date password.
 //!
 //! Tag numbers (Q-270, `tag-number-v1`): a Number column and form field,
 //! tags listed by number, then name within their group, typed-ahead by
@@ -44,6 +46,7 @@ use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
 use crate::company::{CompanyLink, Task};
+use crate::forms::closing_prompt::{ClosingClick, ClosingPrompt, Verb};
 use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
 use crate::layout::{Body, FixedFrame, LIST_FRAME};
@@ -191,6 +194,9 @@ struct MergePanel {
     task: Option<Task<()>>,
     error: Option<ApiError>,
     focus: bool,
+    /// The closing-date password for a merge that re-tags closed-period
+    /// transactions (U-47, Q-231); the change waiting is the target tag.
+    closing: ClosingPrompt<TagId>,
 }
 
 enum Panel {
@@ -240,7 +246,12 @@ struct Usage {
 /// What the engine can do beyond today's contract.
 #[derive(Clone, Copy, Default)]
 struct Caps {
+    /// The merge moves line tags and defaults too (`tag-merge-v1` or
+    /// `merge-closing-date-v1`, Q-P11t).
     merge_lines: bool,
+    /// The engine applies the closing date to merges and takes the
+    /// closing-date password (`merge-closing-date-v1`, U-47).
+    merge_closing: bool,
     /// Tag numbers (`tag-number-v1`, Q-270); the demo has them.
     numbers: bool,
 }
@@ -294,7 +305,9 @@ impl TagsScreen {
             link.client()
                 .map(cl_api::Client::capabilities)
                 .map_or_else(Caps::default, |c| Caps {
-                    merge_lines: c.has(Capabilities::TAG_MERGE),
+                    merge_lines: c.has(Capabilities::TAG_MERGE)
+                        || c.has(Capabilities::MERGE_CLOSING_DATE),
+                    merge_closing: c.has(Capabilities::MERGE_CLOSING_DATE),
                     numbers: c.has(Capabilities::TAG_NUMBER),
                 });
         caps.numbers |= link.is_demo();
@@ -723,6 +736,7 @@ impl TagsScreen {
             task: None,
             error: None,
             focus: true,
+            closing: ClosingPrompt::default(),
         }));
     }
 
@@ -1149,12 +1163,35 @@ impl TagsScreen {
         let Panel::Merge(m) = &mut self.panel else {
             return;
         };
+        if m.task.is_some() || m.closing.dialog_open() {
+            return;
+        }
+        let Some(target) = m.targets.get(m.pick).copied() else {
+            return;
+        };
+        self.send_merge(target, None);
+    }
+
+    /// The closing-date password dialog's Merge: the same merge again, with
+    /// the password.
+    fn submit_merge_password(&mut self) {
+        let Panel::Merge(m) = &mut self.panel else {
+            return;
+        };
+        if let Some((target, password)) = m.closing.submit() {
+            self.send_merge(target, Some(password));
+        }
+    }
+
+    /// Sends the merge of the panel's source into `target`.
+    fn send_merge(&mut self, target: TagId, password: Option<cl_core::Secret>) {
+        let Panel::Merge(m) = &mut self.panel else {
+            return;
+        };
         if m.task.is_some() {
             return;
         }
-        let (source, Some(target)) = (m.source, m.targets.get(m.pick).copied()) else {
-            return;
-        };
+        let source = m.source;
         m.error = None;
         if let Some(mut d) = self.link.demo_state() {
             d.tags_mut().retain(|x| x.id != source);
@@ -1163,6 +1200,7 @@ impl TagsScreen {
             return;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            m.closing.nothing_sent();
             return;
         };
         let key = IdempotencyKey::new();
@@ -1171,9 +1209,11 @@ impl TagsScreen {
             key: Some(key.clone()),
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
-            s.tags().merge(source, target, key).await
+            s.tags().merge(source, target, password.as_ref(), key).await
         }) {
             m.task = Some(Task::Pending(p));
+        } else {
+            m.closing.nothing_sent();
         }
     }
 
@@ -1282,6 +1322,7 @@ impl TagsScreen {
             m.task = None;
             match result {
                 Ok(()) => {
+                    m.closing.saved();
                     let target = m.targets.get(m.pick).copied();
                     self.panel = Panel::None;
                     self.usage = None;
@@ -1292,8 +1333,27 @@ impl TagsScreen {
                     // read both back.
                     self.start_load();
                 }
-                Err(e) => m.error = Some(e),
+                Err(e) => self.merge_failed(e),
             }
+        }
+    }
+
+    /// The engine refused the merge: a closed-period refusal (423 / 403 /
+    /// 429) goes to the closing-date password dialog; anything else shows.
+    fn merge_failed(&mut self, e: ApiError) {
+        let supported = self.caps.merge_closing;
+        let Panel::Merge(m) = &mut self.panel else {
+            return;
+        };
+        let taken = m
+            .targets
+            .get(m.pick)
+            .copied()
+            .is_some_and(|t| m.closing.failed(&e, t, supported, None));
+        if taken {
+            m.closing.set_verb(Verb::Merge);
+        } else {
+            m.error = Some(e);
         }
     }
 
@@ -1763,43 +1823,60 @@ impl TagsScreen {
             _ => None,
         }
         .unwrap_or_default();
+        // With U-47 the engine asks for the closing-date password itself, so
+        // the panel no longer warns that closed periods change too (Q-P11aa).
+        let explain = if self.caps.merge_closing {
+            "tags.merge.explain_closing"
+        } else {
+            "tags.merge.explain"
+        };
         let Panel::Merge(m) = &mut self.panel else {
             return;
         };
         let mut go = false;
         let mut cancel = false;
+        let asking = m.closing.dialog_open();
         form::heading(ui, tokens, &t_with("tags.merge.title", &[("tag", &source)]));
         ui.add_space(6.0);
-        ui.label(t("tags.merge.explain"));
-        let focus = std::mem::take(&mut m.focus);
-        if let Some(i) = pane::picker(
-            ui,
-            egui::Id::unique("tags-merge-target"),
-            &t("tags.merge.into"),
-            &names,
-            m.pick,
-            focus,
-        ) {
-            m.pick = i;
-        }
+        ui.label(t(explain));
+        ui.add_enabled_ui(!asking, |ui| {
+            let focus = std::mem::take(&mut m.focus);
+            if let Some(i) = pane::picker(
+                ui,
+                egui::Id::unique("tags-merge-target"),
+                &t("tags.merge.into"),
+                &names,
+                m.pick,
+                focus,
+            ) {
+                m.pick = i;
+            }
+        });
         form::hint(ui, tokens, &t("tags.merge.cant_undo"));
         if let Some(e) = &m.error {
             form::inline_error(ui, tokens, e);
         }
-        if m.task.is_some() {
+        if m.task.is_some() && !asking {
             form::progress_line(ui, tokens, &t("tags.merge.working"));
         }
-        ui.horizontal_wrapped(|ui| {
-            if crate::widgets::primary_button(ui, &t("tags.merge.confirm"))
-                .on_hover_text(shortcut_hint("form.save_close"))
-                .clicked()
-            {
-                go = true;
-            }
-            if ui.button(t("tags.form.cancel")).clicked() {
-                cancel = true;
-            }
+        ui.add_enabled_ui(!asking, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                if crate::widgets::primary_button(ui, &t("tags.merge.confirm"))
+                    .on_hover_text(shortcut_hint("form.save_close"))
+                    .clicked()
+                {
+                    go = true;
+                }
+                if ui.button(t("tags.form.cancel")).clicked() {
+                    cancel = true;
+                }
+            });
         });
+        match m.closing.ui(ui, tokens) {
+            ClosingClick::Submit => self.submit_merge_password(),
+            ClosingClick::Cancel => m.closing.cancel(),
+            ClosingClick::None => {}
+        }
         if go {
             self.confirm_merge();
         }
@@ -1965,6 +2042,12 @@ impl Screen for TagsScreen {
     }
 
     fn command(&mut self, id: CommandId) -> bool {
+        // The closing-date password dialog has the keyboard while it is up.
+        if let Panel::Merge(m) = &mut self.panel
+            && let Some(handled) = m.closing.command(id)
+        {
+            return handled;
+        }
         match id.as_str() {
             "list.new" => self.open_new_tag(),
             "edit.edit_transaction" => self.open_edit_tag(self.selected()),
@@ -2095,6 +2178,10 @@ impl Screen for TagsScreen {
             "usage_total": usage.map(|u| u.total),
             "usage_lines": usage.map(|u| u.transaction_lines),
             "merge_available": self.merge_available(),
+            "merge_closing": match &self.panel {
+                Panel::Merge(m) => m.closing.state_json(self.caps.merge_closing),
+                _ => Value::Null,
+            },
             "panel": self.panel.name(),
             "dirty": dirty,
             "problem": problems.first(),

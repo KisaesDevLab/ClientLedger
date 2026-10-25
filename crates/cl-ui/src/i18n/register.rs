@@ -51,8 +51,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // Closing-date password dialog (cl-model closing::ClosingFlow; shared with the forms)
     ("closing.ask", "This transaction is dated on or before your closing date ({date}). Enter the closing-date password to change it."),
     ("closing.ask.delete", "This transaction is dated on or before your closing date ({date}). Enter the closing-date password to delete it."),
+    ("closing.ask.merge", "This merge changes transactions dated on or before your closing date ({date}). Enter the closing-date password to merge."),
     ("closing.ask.void", "This transaction is dated on or before your closing date ({date}). Enter the closing-date password to void it."),
     ("closing.delete", "Delete"),
+    ("closing.merge", "Merge"),
     ("closing.void", "Void"),
     ("closing.wrong_password", "That password isn't right."),
     ("closing.rate_limited", "Too many wrong passwords. You can try again in about {minutes} min."),

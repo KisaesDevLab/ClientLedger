@@ -372,9 +372,9 @@ pub struct TagUsage {
 }
 
 impl TagUsage {
-    /// True when the engine's merge can move every use: header tags only
-    /// (until U-41 the merge leaves line tags and defaults behind and then
-    /// fails on them).
+    /// True when an engine without `merge-closing-date-v1` can move every
+    /// use: header tags only (that merge leaves line tags and defaults
+    /// behind and then fails on them). With the capability every use moves.
     #[must_use]
     pub fn merge_safe(&self) -> bool {
         self.transaction_lines == 0
@@ -477,29 +477,40 @@ impl Tags<'_> {
     }
 
     /// Merges `source` into `target`: header tags move and `source` is
-    /// deleted. Until U-41 check [`TagUsage::merge_safe`] first.
+    /// deleted. With `merge-closing-date-v1` (U-47) line tags and default
+    /// tags move too and a merge that re-tags a transaction dated on or
+    /// before the closing date needs `closing_password`; without it check
+    /// [`TagUsage::merge_safe`] first.
     ///
     /// # Errors
-    /// `Local(InvalidValue)` for a self-merge (nothing sent); any
+    /// Nothing is sent for: `Local(InvalidValue)` (a self-merge);
+    /// `Local(ClosedPeriodOverrideUnavailable)` (a password without
+    /// `merge-closing-date-v1`). From the engine: `ClosedPeriod`,
+    /// `ClosingPasswordRejected`, `ClosingPasswordRateLimited`; any
     /// [`ApiError`].
     pub async fn merge(
         &self,
         source: TagId,
         target: TagId,
+        closing_password: Option<&cl_core::Secret>,
         key: IdempotencyKey,
     ) -> Result<(), ApiError> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
-        struct Body {
+        struct Body<'a> {
             source_tag_id: TagId,
             target_tag_id: TagId,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            closing_password: Option<&'a str>,
         }
         if source == target {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
         }
+        let closing_password = super::contacts::merge_password(self.0, closing_password)?;
         let mut call = Call::at(Method::Post, TAG_MERGE.route()).json_body(json_body(&Body {
             source_tag_id: source,
             target_tag_id: target,
+            closing_password,
         })?);
         call.idempotency_key = Some(key);
         self.0.send(&TAG_MERGE, call, None).await.map(drop)
@@ -892,12 +903,12 @@ pub(crate) mod tests {
         );
         let other = TagId::parse("5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02").expect("id");
         s.tags()
-            .merge(tag.id, other, IdempotencyKey::new())
+            .merge(tag.id, other, None, IdempotencyKey::new())
             .await
             .expect("merge");
         let me = s
             .tags()
-            .merge(tag.id, tag.id, IdempotencyKey::new())
+            .merge(tag.id, tag.id, None, IdempotencyKey::new())
             .await
             .expect_err("self");
         assert_eq!(me, ApiError::Local(LocalValidation::InvalidValue));
@@ -906,5 +917,17 @@ pub(crate) mod tests {
         let merge: Value = serde_json::from_slice(&posts[1].body).expect("json");
         assert_eq!(merge["sourceTagId"], tag.id.to_string());
         assert_eq!(merge["targetTagId"], other.to_string());
+        assert!(merge.get("closingPassword").is_none());
+        let pw = cl_core::Secret::new("pw-canary-123");
+        let gated = s
+            .tags()
+            .merge(tag.id, other, Some(&pw), IdempotencyKey::new())
+            .await
+            .expect_err("no merge-closing-date-v1");
+        assert_eq!(
+            gated,
+            ApiError::Local(LocalValidation::ClosedPeriodOverrideUnavailable)
+        );
+        assert_eq!(requests(&server, "POST").await.len(), 2, "nothing sent");
     }
 }

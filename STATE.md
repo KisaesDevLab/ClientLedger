@@ -1,8 +1,8 @@
 # STATE.md — ClientLedger
 
 **Current phase:** Checkpoint PR-1 (end of M1), then P17 — Enter Bill, vendor credits, receipt inbox, attachment viewer (Next)
-**Status:** P16 built on `phase/P16-home-workspace`; PR open with auto-merge. Engine PR #168 (U-75 tag numbers, U-76 dashboard exact) awaits the owner's merge; then bump the pin (Q-02)
-**Engine commit:** `c217bfd7e1f72b03a5e5ad3aaa21120da3d36246` (`main`, pinned 2026-10-21 after engine PR #163: batch-atomic-v1, batch-check-v1, batch-mixed-v1, batch-exact-v1, batch-idempotent-v1, batch-closing-v1, migration 0226; bump per Q-02)
+**Status:** P16 done; engine pin bumped to `7b267e48` (engine PRs #168, #169, #170) on `chore/engine-pin-7b267e48`
+**Engine commit:** `7b267e48` (`main`, pinned 2026-10-24 after engine PRs #168 (tag-number-v1, dashboard-exact-v1, migration 0228), #169 (ledger-guards-v1) and #170 (merge-closing-date-v1); bump per Q-02)
 **Last updated:** 2026-10-24
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
@@ -27,7 +27,7 @@
 | P14 | Deposits, transfers, sales receipts, card charges, owner and loan helpers | M | Done 2026-10-20 |
 | P15 | Journal entries, templates and recurring | H | Done 2026-10-21 |
 | P15A | Bulk Entry | M | Done 2026-10-21 |
-| P16 | Home workspace | L | Done 2026-10-24 (tag numbers and exact dashboard figures PENDING by U-75/U-76, engine PR #168) |
+| P16 | Home workspace | L | Done 2026-10-24 |
 | PR-1 | Checkpoint: core ledger process review | — | Next |
 | P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | |
 | P18 | Pay Bills (checks) | M | |
@@ -89,14 +89,12 @@ Format: `Pxx — blocked by U-xx/Q-xx — what is pending — workaround in plac
 - P11 recording a paper W-9 — blocked by U-44 — `contacts::w9_on_file_u44` is PENDING — in place: W-9 on file shown read-only, the form says recording it isn't available yet (Q-P11n).
 - P11 item kinds other than service, the purchase side of two-sided items and the unit label (Q-58, Q-96, Q-99) — blocked by U-39 — `items::item_types_u39` is PENDING — in place: service items only, the panel says the rest isn't available yet (Q-P11q).
 - P11 price levels (Q-58) — blocked by U-40 — `items::price_levels_u40` is PENDING — in place: a note under the Item List (Q-P11r).
-- P11 tag merge for tags used on lines or as defaults, one tag per group in the engine, group reorder — blocked by U-41 — `tags::line_tag_merge_u41`, `tags::single_select_u41`, `tags::group_reorder_u41` are PENDING — in place: merge offered only for header-only tags, the forms enforce one per group, groups keep the engine's order (Q-P11t, Q-P11v).
+- P11 one tag per group in the engine, group reorder — blocked by U-41 — `tags::single_select_u41`, `tags::group_reorder_u41` are PENDING — in place: the forms enforce one per group, groups keep the engine's order (Q-P11v). Merging tags used on lines or as defaults works since pin 7b267e48 (U-47, Q-P11t).
 - P11 required tag groups by account type (Q-180) — blocked by U-42 — `tags::required_groups_u42` is PENDING — in place: kept on the company record and enforced by the forms' rule check (Q-P11u).
 - P11/P13 several tags on one line (Q-179, Q-P10t) — blocked by U-45 — `tags::several_line_tags_u45` is PENDING — in place: one tag per line, refused in plain words before saving (Q-P11w).
 - P11 your own terms (including discount terms) and payment methods — blocked by U-43 — `list_csv::terms_lists_u43` is PENDING — in place: the engine's fixed lists, read-only, with a note (Q-P11y).
 - P11 item CSV import in one call and full contact rows — blocked by U-46 — `list_csv::items_import_u46` is PENDING — in place: items created one at a time; contacts import name, company, email and phone only (Q-P11x).
 - P12 toggling cleared marks in the register (R5) — blocked by `register-cleared-v1` — in place: ✓/R read-only (Q-P12k). Also still PENDING for P12: U-17 (server-side version check; fingerprint stopgap) and U-18 (idempotency keys; lost-reply probe).
-- P16 tag numbers — blocked by U-75 (`tag-number-v1`, engine PR #168, owner to merge) — `tags::numbers_u75`, `tags::number_archive_round_trip_u75` are PENDING — in place: the Number field and "number · name" display are built and gated on the capability.
-- P16 exact Home figures (lane footers, overdue invoices, cash position) — blocked by U-76 (`dashboard-exact-v1`, engine PR #168) — `home::exact_strings_u76` is PENDING — in place: "—" for lane figures, balances from each account's exact stored balance, overdue invoices hidden (Q-P16g, Q-P16i). After the pin bump run `CL_API_REQUIRE_CAPS=tag-number-v1,dashboard-exact-v1`; the engine schema hash changes then.
 
 ## Placeholders tracked
 
@@ -210,6 +208,7 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-24 — Engine pin c217bfd → 7b267e48 (engine main with PRs #168 U-75/U-76, #169 U-80/U-81, #170 U-47) on `chore/engine-pin-7b267e48`. Live capabilities: `tag-number-v1`, `dashboard-exact-v1`, `ledger-guards-v1`, `merge-closing-date-v1`. Engine SEA rebuilt; api-spec fixtures refreshed; live contract suite 157 passed with `CL_API_REQUIRE_CAPS=tag-number-v1,dashboard-exact-v1` (`tags::numbers_u75`, `tags::number_archive_round_trip_u75`, `home::exact_strings_u76`, `tags::line_tag_merge_u41` now run for real). Contact and tag merges use the closing-date password flow (U-47, Q-231; new `merges::closed_period_needs_the_password_u47`); tag merge no longer limited to header-only tags (Q-P11t). The engine now accepts several named A/R or A/P lines in one journal entry (`JE_AR_AP_ONE_PER_ENTRY` gone); the client keeps Q-206 locally. Agents: rust-implementer/opus.
 - 2026-10-24 — P16 complete on `phase/P16-home-workspace`; PR with auto-merge. Work moved to a new Windows 11 dev machine (toolchain reinstalled; PowerShell added to the agent definitions). Shipped:
   - Steps 0–0h:
     - "Enter moves between fields" preference (both modes on every form, Bulk Entry and list forms).
