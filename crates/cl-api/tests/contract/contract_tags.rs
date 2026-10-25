@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use cl_api::{
     ApiError, ArchiveRequest, Basis, Capabilities, ConflictReason, ImportRequest, JeLine, JobState,
-    LocalValidation, Method, NewCompany, NewJournalEntry, PageRequest, Side, Tag, TagFields,
-    TagFilter, TagGroupFields, TagUpdate,
+    LocalValidation, Method, NewJournalEntry, PageRequest, Side, Tag, TagFields, TagFilter,
+    TagGroupFields, TagUpdate,
 };
 use cl_core::Secret;
 use serde_json::json;
@@ -141,15 +141,16 @@ pub fn rename_usage_and_header_merge(h: &Harness) {
         .expect("rename");
     assert_eq!(renamed.record.fields.name, fields.name);
 
-    h.run(s.tags().merge(source.id, target.id, key()))
+    h.run(s.tags().merge(source.id, target.id, None, key()))
         .expect("merge");
     assert!(h.run(s.tags().get(source.id)).is_err(), "source deleted");
     let moved = h.run(s.tags().usage(target.id)).expect("usage");
     assert_eq!(moved.transactions, 1);
 }
 
-/// U-41: a tag used on a line can't be merged today (the engine moves
-/// header tags only and then fails on the line's reference).
+/// U-41 / U-47: a tag used on a line. Without `merge-closing-date-v1` the
+/// engine moves header tags only and then fails on the line's reference;
+/// with it (Q-P11t) the line tag moves and the source is deleted.
 pub fn line_tag_merge_u41(h: &Harness) {
     let s = &h.s1;
     let source = tag(h, "Line tag", None);
@@ -158,8 +159,13 @@ pub fn line_tag_merge_u41(h: &Harness) {
     let usage = h.run(s.tags().usage(source.id)).expect("usage");
     assert_eq!(usage.transaction_lines, 1);
     assert!(!usage.merge_safe());
-    let merged = h.run(s.tags().merge(source.id, target.id, key()));
-    if h.require_cap(Capabilities::TAG_MERGE, "U-41") {
+    let merged = h.run(s.tags().merge(source.id, target.id, None, key()));
+    if h.caps.has(Capabilities::MERGE_CLOSING_DATE) {
+        merged.expect("merge moves line tags (merge-closing-date-v1)");
+        assert!(h.run(s.tags().get(source.id)).is_err(), "source deleted");
+        let moved = h.run(s.tags().usage(target.id)).expect("usage");
+        assert_eq!(moved.transaction_lines, 1);
+    } else if h.require_cap(Capabilities::TAG_MERGE, "U-41") {
         merged.expect("merge moves line tags");
         let moved = h.run(s.tags().usage(target.id)).expect("usage");
         assert_eq!(moved.transaction_lines, 1);
@@ -516,17 +522,10 @@ pub fn number_archive_round_trip_u75(h: &Harness) {
     if !(numbers && archives) {
         return;
     }
+    // Tenant B round-trips: a company made here would be one more
+    // rate-limited create-tenant call than the run's budget allows.
     let s = h.s3();
-    let co = h
-        .run(h.s1.create_company(&NewCompany {
-            company_name: unique("Tag number Co"),
-            business_type: Some("default".into()),
-            entity_type: Some("single_member_llc".into()),
-            system_accounts_only: Some(true),
-        }))
-        .expect("company")
-        .tenant_id;
-    h.run(s.open_company(co)).expect("open");
+    let co = h.tenant_b();
     let number = fresh_number();
     let name = unique("Archived");
     h.run(s.tags().create(&numbered(&name, Some(&number)), key()))

@@ -124,7 +124,7 @@ pub fn history_balance_and_merge(h: &Harness) {
     assert!(aging.total_of(kept.id).is_none(), "nothing open yet");
 
     let merged = h
-        .run(s.contacts().merge(dup.id, kept.id, key()))
+        .run(s.contacts().merge(dup.id, kept.id, None, key()))
         .expect("merge");
     assert_eq!(merged.record.id, kept.id);
     let moved = h
@@ -134,7 +134,7 @@ pub fn history_balance_and_merge(h: &Harness) {
     let gone = h.run(s.contacts().get(dup.id)).expect("dup");
     assert!(!gone.record.is_active, "the duplicate is inactive");
     let e = h
-        .run(s.contacts().merge(kept.id, kept.id, key()))
+        .run(s.contacts().merge(kept.id, kept.id, None, key()))
         .expect_err("self merge");
     assert!(matches!(e, ApiError::Local(_)), "{e:?}");
 }

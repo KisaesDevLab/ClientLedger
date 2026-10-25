@@ -10,9 +10,9 @@
 //! - `exact_balance_no_tolerance` (`balance-exact-v1`): off by 0.0001 is
 //!   refused too; balanced exactly it posts.
 //! - `ar_ap_names`: an A/R line without a name → 400
-//!   `JE_AR_AP_NAME_REQUIRED`; two A/R or A/P lines → 400
-//!   `JE_AR_AP_ONE_PER_ENTRY`; with a customer it posts and reads back the
-//!   name (Q-206).
+//!   `JE_AR_AP_NAME_REQUIRED`; two named A/R lines post since engine
+//!   7b267e48 (the client keeps Q-206 and refuses them before sending);
+//!   with a customer it posts and reads back the name.
 //! - `numbering`: the suggested next number, then one more after a post.
 //! - `adjusting_round_trip`: `isAdjusting` reads back and `adjusting=only`
 //!   lists it.
@@ -23,8 +23,8 @@
 
 use cl_api::{
     AccountFilter, AccountRoles, Basis, Capabilities, ContactFields, ContactType,
-    JE_AR_AP_NAME_REQUIRED, JE_AR_AP_ONE_PER_ENTRY, JeLine, JeOptions, Method, NewContact,
-    NewJournalEntry, PostingOptions, Session, Side, TxnStatus, has_code,
+    JE_AR_AP_NAME_REQUIRED, JeLine, JeOptions, Method, NewContact, NewJournalEntry, PostingOptions,
+    Session, Side, TxnStatus, has_code,
 };
 use cl_core::Money;
 use cl_core::ids::{AccountId, ContactId};
@@ -213,8 +213,32 @@ pub fn ar_ap_names(h: &Harness) {
             ],
         }),
     );
-    assert_eq!(two.status, 400, "{}", two.body);
-    assert_eq!(two.body["error"]["code"], JE_AR_AP_ONE_PER_ENTRY);
+    // Engine main 7b267e48 (PR #169, commit 33a973fa) dropped
+    // `JE_AR_AP_ONE_PER_ENTRY`: every A/R or A/P line needs a name, any
+    // number of them may post. Q-206 (one per entry) stays the client's
+    // rule: the typed builder refuses it before sending (`ArApTwoAccounts`).
+    assert_eq!(two.status, 201, "{}", two.body);
+    let two_typed = NewJournalEntry::new_with(
+        date(2026, 7, 31),
+        None,
+        Basis::Both,
+        vec![
+            JeLine {
+                contact: Some(who),
+                ..line(ar, Side::Debit(m("50")))
+            },
+            JeLine {
+                contact: Some(who),
+                ..line(ar, Side::Credit(m("50")))
+            },
+        ],
+        JeOptions::default(),
+        &roles,
+    );
+    assert!(
+        two_typed.is_err(),
+        "Q-206 is refused locally: {two_typed:?}"
+    );
     // Typed path: refused locally, then the engine's code when bypassed.
     let lines = |contact| {
         vec![
