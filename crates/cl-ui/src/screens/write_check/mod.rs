@@ -987,6 +987,13 @@ impl Screen for WriteCheckScreen {
     fn open_template(&mut self, t: crate::forms::template::TemplateOpen) -> bool {
         self.fill_template(&t)
     }
+
+    /// A saved check opened from elsewhere (the register's edit of a
+    /// check, B4): its bank is the account the check credits.
+    fn open_record(&mut self, txn: TransactionId) -> bool {
+        self.read_check(txn, None);
+        self.editing.as_ref().is_some_and(|e| e.id == txn) || self.load_task.is_some()
+    }
 }
 
 impl WriteCheckScreen {

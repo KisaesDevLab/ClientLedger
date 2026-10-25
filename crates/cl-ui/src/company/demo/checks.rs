@@ -50,6 +50,15 @@ pub struct DemoChecks {
     pub line_billable_off: bool,
 }
 
+impl DemoChecks {
+    /// Write Check keeps the details of check `id` (the demo's stand-in
+    /// for a print status).
+    #[must_use]
+    pub fn knows(&self, id: TransactionId) -> bool {
+        self.info.contains_key(&id)
+    }
+}
+
 /// A demo rule: a memo containing `contains` suggests `account`.
 #[derive(Clone, Debug)]
 pub struct DemoRule {

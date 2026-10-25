@@ -878,6 +878,7 @@ fn journal_entries_the_row_cant_show_go_to_make_journal_entry() {
     plain.reverse_on = None;
     plain.reversal_transaction_id = None;
     plain.lines[1].contact_id = None;
+    plain.txn_number = None;
     let seed = |t: &cl_api::Transaction| {
         let v = cl_api::Versioned {
             record: t.clone(),
@@ -902,6 +903,13 @@ fn journal_entries_the_row_cant_show_go_to_make_journal_entry() {
     t.lines[0].contact_id = full.lines[1].contact_id;
     assert!(seed(&t));
     assert!(seed(&full));
+    // A numbered entry: the row sends no number, so Make Journal Entry
+    // edits it and keeps its txnNumber (B3).
+    let mut t = plain.clone();
+    t.txn_number = Some("JE-1042".into());
+    assert!(seed(&t));
+    t.txn_number = Some("  ".into());
+    assert!(!seed(&t), "a blank number is no number");
 }
 
 #[test]
@@ -1717,4 +1725,206 @@ fn busy_keeps_the_key_and_other_conflicts_drop_it() {
         "IDEMPOTENCY_KEY_REUSED"
     )));
     assert!(keeps_key(&cl_api::ApiError::Timeout));
+}
+
+/// The grouped-deposit fixture cut down to the bank line and its first
+/// payment, amounts made to agree.
+fn one_payment_deposit() -> cl_api::Transaction {
+    #[derive(serde::Deserialize)]
+    struct W {
+        transaction: cl_api::Transaction,
+    }
+    let body = include_str!("../../../../../fixtures/engine/deposit-grouped-fees.json");
+    let mut t = serde_json::from_str::<W>(body).expect("txn").transaction;
+    t.lines.truncate(2);
+    t.lines[0].debit = t.lines[1].credit;
+    t.total = Some(t.lines[1].credit);
+    t
+}
+
+fn seeds_read_only(t: &cl_api::Transaction) -> bool {
+    let v = cl_api::Versioned {
+        record: t.clone(),
+        version: cl_api::RecordVersion::Server(1),
+    };
+    let own = t.lines[0].account_id;
+    matches!(
+        edit::seed(&v, own, cl_model::register::AccountClass::Bank),
+        edit::Seed::ReadOnly(_)
+    )
+}
+
+#[test]
+fn b1_a_one_payment_deposit_or_vendor_refund_opens_make_deposit_not_the_row() {
+    use cl_model::register::AccountClass as C;
+    let t = one_payment_deposit();
+    assert!(t.lines[1].source_transaction_id.is_some());
+    // One payment out of Payments Clearing: never edited in the row (the
+    // row would send it without its link and release the payment).
+    assert!(seeds_read_only(&t));
+    let bank = t.lines[0].account_id;
+    let is = |c: C| move |id: AccountId| Some(if id == bank { C::Bank } else { c });
+    assert_eq!(
+        edit::form_for(&t, &is(C::OtherAsset)),
+        Some(crate::screens::deposit::KIND),
+        "Make Deposit edits it"
+    );
+    // A one-line vendor refund: A/P, applied to a vendor credit.
+    let mut refund = t.clone();
+    refund.lines[1].contact_id = None;
+    assert!(seeds_read_only(&refund));
+    assert_eq!(
+        edit::form_for(&refund, &is(C::Payable)),
+        Some(crate::screens::deposit::KIND)
+    );
+    // A cash-back line has an engine role: Make Deposit too.
+    let mut cash = t.clone();
+    cash.lines[1].source_transaction_id = None;
+    cash.lines[1].line_role = Some(cl_api::LINE_ROLE_CASH_BACK.into());
+    assert!(seeds_read_only(&cash));
+    // The same deposit without links stays in the row.
+    let mut plain = t;
+    plain.lines[1].source_transaction_id = None;
+    plain.lines[1].contact_id = None;
+    assert!(!seeds_read_only(&plain));
+}
+
+#[test]
+fn b3_a_numbered_journal_entry_opens_make_journal_entry_and_keeps_its_number() {
+    let (_d, link) = link();
+    let bank = demo_account(&link, "1010");
+    let fuel = demo_account(&link, "6100");
+    let entry = cl_api::NewJournalEntry::new_with(
+        CalendarDate::from_ymd(2026, 11, 3).expect("date"),
+        Some("fuel".into()),
+        cl_api::Basis::Both,
+        vec![
+            cl_api::JeLine {
+                account: fuel,
+                side: cl_api::Side::Debit(money("40.00")),
+                description: None,
+                tag: None,
+                contact: None,
+            },
+            cl_api::JeLine {
+                account: bank,
+                side: cl_api::Side::Credit(money("40.00")),
+                description: None,
+                tag: None,
+                contact: None,
+            },
+        ],
+        cl_api::JeOptions {
+            number: Some("JE-1042".into()),
+            ..cl_api::JeOptions::default()
+        },
+        &cl_api::AccountRoles::default(),
+    )
+    .expect("entry");
+    let id = {
+        let mut demo = link.demo_state().expect("demo");
+        crate::company::demo::journal::save(&mut demo, &entry, None, None)
+            .expect("saved")
+            .0
+    };
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let key = key_of(&mut s, id);
+    let _ = link.drain();
+    s.begin_edit(key, false);
+    assert!(s.entry.editing.is_none(), "not in the row");
+    assert_eq!(
+        opened(&link),
+        Some((crate::screens::journal_entry::KIND.to_string(), id))
+    );
+    let mut demo = link.demo_state().expect("demo");
+    let saved = crate::company::demo::journal::get(&mut demo, id).expect("get");
+    assert_eq!(saved.record.txn_number.as_deref(), Some("JE-1042"));
+}
+
+#[test]
+fn b4_a_check_opens_write_check_with_its_bank() {
+    let (_d, link) = link();
+    let bank = demo_account(&link, "1010");
+    let fuel = demo_account(&link, "6100");
+    let id = {
+        let mut demo = link.demo_state().expect("demo");
+        let chart = demo
+            .chart
+            .get_or_insert_with(crate::company::demo::chart)
+            .clone();
+        let p = crate::company::demo::register::DemoPosting {
+            kind: "check",
+            date: CalendarDate::from_ymd(2026, 11, 3).expect("date"),
+            number: "5120".into(),
+            contact: None,
+            memo: String::new(),
+            own: bank,
+            own_debit: false,
+            lines: vec![(fuel, money("25.00"))],
+        };
+        demo.ledger.save(&chart, &p, None).expect("saved")
+    };
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let key = key_of(&mut s, id);
+    let _ = link.drain();
+    // Enter on the check: Write Check (update_check, the printed-check
+    // question, header tags), never the row's plain expense update.
+    s.begin_edit(key, false);
+    assert!(s.entry.editing.is_none());
+    assert_eq!(
+        opened(&link),
+        Some((crate::screens::write_check::KIND.to_string(), id))
+    );
+    let mut wc = crate::screens::write_check::WriteCheckScreen::new(
+        Arc::clone(&link),
+        None,
+        CalendarDate::from_ymd(2026, 11, 4).expect("date"),
+    );
+    assert!(crate::windows::Screen::open_record(&mut wc, id));
+    assert_eq!(wc.bank(), Some(bank), "the bank the check credits");
+    assert_eq!(wc.header.current().number.text().as_deref(), Some("5120"));
+}
+
+#[test]
+fn b2_the_entry_row_sends_nothing_after_an_unknown_outcome_until_the_recheck_answers() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let before = s.model.total().expect("total");
+    let fuel = demo_account(&link, "6100");
+    let vendor = demo_contact(&link, "Hollister Fuel Stop");
+    s.entry.form.edit_step(|d| {
+        d.payee = Some(vendor);
+        d.account = Some(fuel);
+        d.payment = Some(money("125.50"));
+    });
+    let lists = Arc::clone(&s.lists);
+    let _ = s
+        .entry
+        .form
+        .begin_save(cl_model::forms::SaveIntent::SaveAndNew, &*lists);
+    s.record_failed(cl_api::ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000006")
+            .expect("id"),
+        idempotency_key: Some(cl_api::IdempotencyKey::new()),
+    });
+    assert!(s.entry.error.is_none(), "the banner speaks");
+    assert!(!s.start_record());
+    assert!(!s.start_record());
+    settle(&mut s, None);
+    assert_eq!(s.model.total(), Some(before), "nothing sent");
+    s.entry
+        .lost
+        .recheck_answering(s.entry.form.form_mut(), cl_api::Recheck::Unknown);
+    s.poll_entry();
+    assert!(!s.start_record());
+    s.entry
+        .lost
+        .recheck_answering(s.entry.form.form_mut(), cl_api::Recheck::NotCommitted);
+    s.poll_entry();
+    assert!(s.start_record());
+    settle(&mut s, None);
+    assert_eq!(s.model.total(), Some(before + 1), "sent once");
 }

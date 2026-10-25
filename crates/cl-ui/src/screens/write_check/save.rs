@@ -966,7 +966,7 @@ impl WriteCheckScreen {
             (Ok(Some(id)), Some(bank)) => {
                 self.save.lost.after_unknown = false;
                 self.save.key = None;
-                self.save.notice = Some("lost.check_found");
+                self.save.lost.notice = Some("lost.check_found");
                 self.publish_ledger();
                 self.template
                     .form_saved(&self.link, self.group.as_ref(), id);
@@ -1008,7 +1008,13 @@ impl WriteCheckScreen {
 
     /// Reads a saved check drawn on `bank` into the form.
     pub(crate) fn load_check(&mut self, id: TransactionId, bank: AccountId) {
-        self.load_bank = Some(bank);
+        self.read_check(id, Some(bank));
+    }
+
+    /// Reads a saved check; without `bank` the bank is the account the
+    /// check credits.
+    pub(crate) fn read_check(&mut self, id: TransactionId, bank: Option<AccountId>) {
+        self.load_bank = bank;
         let link = Arc::clone(&self.link);
         if let Some(mut demo) = link.demo_state() {
             let got = crate::company::demo::checks::get(&mut demo, id);
@@ -1029,7 +1035,20 @@ impl WriteCheckScreen {
 
     pub(crate) fn show_record(&mut self, v: &Versioned<CheckRecord>) {
         let r = &v.record;
-        let Some(bank) = self.load_bank.or(self.bank()) else {
+        // The one credited line is the bank a check is drawn on.
+        let credited = || {
+            let mut banks = r
+                .txn
+                .lines
+                .iter()
+                .filter(|l| l.credit.is_positive())
+                .map(|l| l.account_id);
+            match (banks.next(), banks.next()) {
+                (Some(b), None) => Some(b),
+                _ => None,
+            }
+        };
+        let Some(bank) = self.load_bank.or_else(credited).or(self.bank()) else {
             return;
         };
         let lists = Arc::clone(&self.lists);
