@@ -100,8 +100,10 @@ impl ProbeReport {
 
 /// True when a path part names a cloud-sync client's folder.
 fn cloud_hint(canonical: &Path) -> bool {
-    canonical.components().any(|c| {
-        let part = c.as_os_str().to_string_lossy().to_lowercase();
+    // Split on both separators, so a Windows path reads the same on every
+    // system.
+    let text = canonical.to_string_lossy().to_lowercase();
+    text.split(['/', '\\']).any(|part| {
         part.starts_with("onedrive")
             || part.starts_with("dropbox")
             || part.contains("google drive")

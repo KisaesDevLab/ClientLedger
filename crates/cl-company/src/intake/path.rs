@@ -390,7 +390,7 @@ mod tests {
             (r"C:\Scans", PathProblem::NotAbsolute),
             (r"\\server\share", PathProblem::NotAbsolute),
             ("/", PathProblem::DriveRoot),
-            ("//", PathProblem::NotAbsolute),
+            ("//", PathProblem::DriveRoot),
         ] {
             assert_eq!(check(text), Err(problem), "{text}");
         }
