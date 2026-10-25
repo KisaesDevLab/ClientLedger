@@ -157,6 +157,10 @@ typed_id!(
     RunId,
     /// One Bulk Entry save (P15A `batchId`, `batch-atomic-v1`).
     BatchId,
+    /// One intake folder (A01, `intake-settings-v1`). A client-generated
+    /// UUID stored in the engine's `companies.intake_settings`, not an
+    /// engine entity id.
+    IntakeFolderId,
 );
 
 #[cfg(test)]
