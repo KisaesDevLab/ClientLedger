@@ -31,10 +31,10 @@ pub mod templates;
 pub mod year_end;
 mod zipfile;
 
-/// The P17 name of [`intake`], kept until the receipt inbox screen
-/// switches its imports (A01 WP-C).
+/// The P17 receipt inbox ([`intake::legacy`]), kept with its exact types
+/// until the receipt inbox screen switches to [`intake`] (A01 WP-C).
 pub mod inbox {
-    pub use crate::intake::*;
+    pub use crate::intake::legacy::*;
 }
 
 pub use backup::{

@@ -1,127 +1,140 @@
-//! The receipt inbox folder (P17, plan §3 WP5, Q-54, Q-P17p): what is in
-//! the owner's inbox folder, whether each file is ready to attach, reading
-//! one for upload, and filing it away once a record holds it.
+//! What is in an intake folder, and whether each file is ready to copy in
+//! (A01 plan D2, D3).
 //!
-//! Rules this module keeps:
-//! - Plain `std::fs` polling; no watcher crate (`notify` fails the direct
-//!   dependency licence rule).
-//! - Only the folder itself is listed (never sub-folders, so `Filed/` is
-//!   never offered again); links are never followed (`symlink_metadata`).
-//! - `.pdf`, `.png`, `.jpg`, `.jpeg` by name (any case); the bytes are
-//!   checked again when a file is read for upload. Hidden files, Office
-//!   lock files (`~$…`) and partial downloads (`*.part`, `*.crdownload`,
-//!   `*.tmp`) are skipped.
-//! - A file is **ready** only when its size and modified time stayed the
-//!   same across two polls at least [`STABLE_FOR`] apart ([`Stability`]),
-//!   so a scanner or a sync client still writing it is left alone.
-//! - Over 10 MB (the engine's limit) is listed as too large and never read.
-//! - On Windows, files that are online only (`OneDrive` and similar:
-//!   `OFFLINE`, `RECALL_ON_OPEN`, `RECALL_ON_DATA_ACCESS`) are listed and
-//!   never read: reading would download them.
-//! - At most [`MAX_LISTED`] files, oldest first, with a count of the rest.
-//! - Filing away moves the original to `<inbox>/Filed/<YYYY-MM>/<name>`. An
-//!   existing file is never overwritten (` (2)`, ` (3)`, … instead) and the
-//!   original is never deleted unless an identical copy is in `Filed/`.
-//! - File names and paths are owner data: never logged, never in `Debug`.
+//! - The root is looked at **following** links (it may be a link into a
+//!   cloud folder; [`super::canonical_key`] pins it). Entries are looked at
+//!   **without** following links: only plain files count, so a link,
+//!   junction or folder inside never brings in a file from elsewhere.
+//! - Only the folder itself is listed, never sub-folders, so `Processed/`,
+//!   `Discarded/` and P17's `Filed/` are never offered again.
+//! - Skipped without a trace: dot-files, Office lock files (`~$…`,
+//!   `.~lock.…#`), partial downloads (`*.part`, `*.crdownload`,
+//!   `*.download`, `*.tmp`), `Thumbs.db`, `desktop.ini`, hidden or system
+//!   files, names that aren't valid UTF-8, and other kinds of file.
+//! - Zero-byte files are not listed (Q-A01o), but still tracked so a file
+//!   that is being written settles as soon as it has its bytes.
+//! - Listed, never read: over 10 MB (Q-50), HEIC/HEIF (Q-292), cloud
+//!   placeholders (online only), and hard-linked files on Unix (a hard
+//!   link could bring in a file from outside the folder).
+//! - A file is **ready** when its size and modified time stayed the same
+//!   across two looks at least [`STABLE_FOR`] apart **and** it opens while
+//!   refusing writers ([`super::FolderFs::openable`]).
+//! - At most [`MAX_SCANNED`] entries are read per look ([`Listing::truncated`])
+//!   and [`MAX_LISTED`] files listed, oldest first ([`Listing::more`]).
 
 use std::collections::HashMap;
 use std::fmt;
-use std::fs;
-use std::io::{self, Read as _, Write as _};
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
-use sha2::{Digest, Sha256};
+use super::fs::{FolderFs, links, millis, online_only, open_shared_read};
+use super::path::classify;
+use super::{FileError, Health, ReadFile, sha256_hex};
 
-/// The largest file read (the engine's attachment limit).
+/// The largest file read (the engine's attachment limit), inclusive.
 pub const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
 
-/// The most files listed.
+/// The most files listed per folder.
 pub const MAX_LISTED: usize = 500;
 
+/// The most directory entries read per look.
+pub const MAX_SCANNED: usize = 10_000;
+
 /// How long a file's size and time must stay the same before it is ready.
-pub const STABLE_FOR: Duration = Duration::from_secs(2);
+pub const STABLE_FOR: Duration = Duration::from_secs(5);
 
-/// The sub-folder filed originals go to.
-pub const FILED_DIR: &str = "Filed";
-
-/// Windows attributes of files whose content is not on this computer.
-#[cfg(windows)]
-const ONLINE_ONLY_ATTRIBUTES: u32 = 0x0000_1000 // OFFLINE
-    | 0x0004_0000 // RECALL_ON_OPEN
-    | 0x0040_0000; // RECALL_ON_DATA_ACCESS
-
-/// Windows hidden and system attributes.
-#[cfg(windows)]
-const HIDDEN_ATTRIBUTES: u32 = 0x2 | 0x4;
-
-/// What kind of file the name says it is.
+/// What kind of document a file's name says it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum NamedKind {
+pub enum DocKind {
     /// `.pdf`.
     Pdf,
     /// `.png`.
     Png,
     /// `.jpg` or `.jpeg`.
     Jpeg,
+    /// `.tif` or `.tiff` (Q-A01n).
+    Tiff,
+    /// `.heic` or `.heif`: listed, never read (Q-292).
+    Heic,
+}
+
+impl DocKind {
+    /// A short name for the control channel.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DocKind::Pdf => "pdf",
+            DocKind::Png => "png",
+            DocKind::Jpeg => "jpeg",
+            DocKind::Tiff => "tiff",
+            DocKind::Heic => "heic",
+        }
+    }
 }
 
 /// Where a listed file stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum FileState {
-    /// Seen, but not yet unchanged for two polls (still being written).
+pub enum ItemState {
+    /// Seen, but not yet unchanged across two looks (or still held open
+    /// for writing).
     Settling,
-    /// Unchanged across two polls: it can be attached.
+    /// Unchanged and openable: it can be copied in.
     Ready,
-    /// Over 10 MB: never read.
+    /// Over 10 MB: never read ("Too large (10 MB limit)").
     TooLarge,
-    /// Empty (unchanged at zero bytes): nothing to attach.
-    Empty,
-    /// Its content is online only (Windows cloud placeholder): never read.
+    /// HEIC/HEIF: never read ("Save as JPG or PDF instead").
+    NotSupported,
+    /// Its content is online only (a cloud placeholder): never read
+    /// ("Online only — choose Always keep on this device").
     OnlineOnly,
+    /// A file with more than one hard link (Unix): never read ("Linked
+    /// file, not taken").
+    Linked,
 }
 
-impl FileState {
-    /// True when the file may be offered for attaching.
+impl ItemState {
+    /// True when the file may be copied in.
     #[must_use]
     pub fn offerable(self) -> bool {
-        self == FileState::Ready
+        self == ItemState::Ready
     }
 
     /// A short name for the control channel.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
-            FileState::Settling => "settling",
-            FileState::Ready => "ready",
-            FileState::TooLarge => "too_large",
-            FileState::Empty => "empty",
-            FileState::OnlineOnly => "online_only",
+            ItemState::Settling => "settling",
+            ItemState::Ready => "ready",
+            ItemState::TooLarge => "too_large",
+            ItemState::NotSupported => "not_supported",
+            ItemState::OnlineOnly => "online_only",
+            ItemState::Linked => "linked",
         }
     }
 }
 
-/// One file in the inbox folder.
+/// One file in an intake folder.
 #[derive(Clone, PartialEq, Eq)]
-pub struct InboxFile {
+pub struct IntakeFile {
     /// Its full path (owner data).
     pub path: PathBuf,
     /// Its file name (owner data).
     pub name: String,
     /// The kind its name says.
-    pub kind: NamedKind,
+    pub kind: DocKind,
     /// Size in bytes.
     pub size: u64,
     /// Modified time, milliseconds since 1970 (0 when unknown).
     pub modified_ms: i64,
     /// Where it stands.
-    pub state: FileState,
+    pub state: ItemState,
 }
 
-/// Size, kind and state only: names and paths are owner data.
-impl fmt::Debug for InboxFile {
+/// Kind, size and state only: names and paths are owner data.
+impl fmt::Debug for IntakeFile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("InboxFile")
+        f.debug_struct("IntakeFile")
             .field("kind", &self.kind)
             .field("size", &self.size)
             .field("state", &self.state)
@@ -129,154 +142,136 @@ impl fmt::Debug for InboxFile {
     }
 }
 
-/// What a scan found.
+/// What a look at a folder found.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Listing {
     /// The files, oldest first, at most [`MAX_LISTED`].
-    pub files: Vec<InboxFile>,
+    pub files: Vec<IntakeFile>,
     /// Matching files left out over the cap.
     pub more: usize,
+    /// The folder has more than [`MAX_SCANNED`] entries; only the first
+    /// were looked at ([`Health::TooMany`]). Never prune entries from a
+    /// truncated listing.
+    pub truncated: bool,
+    /// Zero-byte files tracked but not listed (still being written, or
+    /// empty).
+    pub waiting: usize,
 }
 
 impl Listing {
-    /// Files that can be attached now.
+    /// Files that can be copied in now.
     #[must_use]
     pub fn ready(&self) -> usize {
         self.files.iter().filter(|f| f.state.offerable()).count()
     }
+
+    /// True while anything is settling (the watcher looks again sooner).
+    #[must_use]
+    pub fn settling(&self) -> bool {
+        self.waiting > 0 || self.files.iter().any(|f| f.state == ItemState::Settling)
+    }
+
+    /// True when every matching file is in [`Listing::files`] (nothing
+    /// capped, nothing truncated): only then may missing files be pruned.
+    #[must_use]
+    pub fn complete(&self) -> bool {
+        self.more == 0 && !self.truncated
+    }
 }
 
-/// Why the folder could not be listed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum ScanError {
-    /// The folder is not there (deleted, renamed, a drive not attached).
-    #[error("the inbox folder is missing")]
-    Missing,
-    /// The path is a file or a link, not a folder.
-    #[error("the inbox path is not a folder")]
-    NotAFolder,
-    /// The folder could not be read (permissions, a device error).
-    #[error("the inbox folder could not be read")]
-    Unreadable,
-}
-
-/// The kind a name says, or `None` when the inbox does not take it.
+/// True for names skipped without a trace (temporary, lock and system
+/// files).
 #[must_use]
-pub fn named_kind(name: &str) -> Option<NamedKind> {
-    if name.starts_with('.') || name.starts_with("~$") {
+pub fn skipped_name(name: &str) -> bool {
+    if name.is_empty() || name.starts_with('.') || name.starts_with("~$") {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
+    lower == "thumbs.db"
+        || lower == "desktop.ini"
+        || [".part", ".crdownload", ".download", ".tmp"]
+            .iter()
+            .any(|s| lower.ends_with(s))
+}
+
+/// The kind a name says, or `None` when intake does not take it (or the
+/// name is skipped).
+#[must_use]
+pub fn doc_kind(name: &str) -> Option<DocKind> {
+    if skipped_name(name) {
         return None;
     }
     let lower = name.to_ascii_lowercase();
-    if [".part", ".crdownload", ".tmp"]
-        .iter()
-        .any(|s| lower.ends_with(s))
-    {
+    let (stem, ext) = lower.rsplit_once('.')?;
+    if stem.is_empty() {
         return None;
     }
-    let (_, ext) = lower.rsplit_once('.')?;
     match ext {
-        "pdf" => Some(NamedKind::Pdf),
-        "png" => Some(NamedKind::Png),
-        "jpg" | "jpeg" => Some(NamedKind::Jpeg),
+        "pdf" => Some(DocKind::Pdf),
+        "png" => Some(DocKind::Png),
+        "jpg" | "jpeg" => Some(DocKind::Jpeg),
+        "tif" | "tiff" => Some(DocKind::Tiff),
+        "heic" | "heif" => Some(DocKind::Heic),
         _ => None,
     }
 }
 
-fn millis(t: io::Result<SystemTime>) -> i64 {
-    t.ok()
-        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-        .and_then(|d| i64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
-}
-
-#[cfg(windows)]
-fn attributes(meta: &fs::Metadata) -> u32 {
-    use std::os::windows::fs::MetadataExt as _;
-    meta.file_attributes()
-}
-
-#[cfg(windows)]
-fn online_only(meta: &fs::Metadata) -> bool {
-    attributes(meta) & ONLINE_ONLY_ATTRIBUTES != 0
-}
-
-#[cfg(not(windows))]
-fn online_only(_meta: &fs::Metadata) -> bool {
-    false
-}
-
-#[cfg(windows)]
-fn hidden(meta: &fs::Metadata) -> bool {
-    attributes(meta) & HIDDEN_ATTRIBUTES != 0
-}
-
-#[cfg(not(windows))]
-fn hidden(_meta: &fs::Metadata) -> bool {
-    false
-}
-
-/// Lists the inbox folder (not its sub-folders; links are not followed).
-/// Every file comes back [`FileState::Settling`], [`FileState::TooLarge`]
-/// or [`FileState::OnlineOnly`]; [`Stability::apply`] decides which
-/// settling files are ready.
+/// Looks at `root` once: every matching file comes back with its state;
+/// `stability` decides which settling files are ready (and must be the
+/// same one across looks at the same folder).
 ///
 /// # Errors
-/// [`ScanError`].
-pub fn scan(dir: &Path) -> Result<Listing, ScanError> {
-    let meta = fs::symlink_metadata(dir).map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => ScanError::Missing,
-        _ => ScanError::Unreadable,
-    })?;
-    if !meta.is_dir() {
-        return Err(ScanError::NotAFolder);
+/// The folder's [`Health`] (`Missing`, `Unreachable`, `PermissionDenied`,
+/// `NotAFolder`).
+pub fn scan(
+    fs: &dyn FolderFs,
+    root: &Path,
+    stability: &mut Stability,
+    now: Instant,
+) -> Result<Listing, Health> {
+    match fs.root_is_dir(root) {
+        Ok(true) => {}
+        Ok(false) => return Err(Health::NotAFolder),
+        Err(e) => return Err(classify(&e, true)),
     }
-    let entries = fs::read_dir(dir).map_err(|_| ScanError::Unreadable)?;
+    let raw = fs.list(root, MAX_SCANNED).map_err(|e| classify(&e, true))?;
     let mut files = Vec::new();
-    for entry in entries.flatten() {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+    for e in raw.entries {
+        let Some(name) = e.name else {
             continue;
         };
-        let Some(kind) = named_kind(&name) else {
-            continue;
-        };
-        let path = entry.path();
-        // Not followed: a link is skipped, whatever it points at.
-        let Ok(meta) = fs::symlink_metadata(&path) else {
-            continue;
-        };
-        if !meta.file_type().is_file() || hidden(&meta) {
+        if !e.is_file || e.hidden {
             continue;
         }
-        let size = meta.len();
-        let state = if online_only(&meta) {
-            FileState::OnlineOnly
-        } else if size > MAX_FILE_BYTES {
-            FileState::TooLarge
-        } else {
-            FileState::Settling
+        let Some(kind) = doc_kind(&name) else {
+            continue;
         };
-        files.push(InboxFile {
-            path,
+        let state = if e.online_only {
+            ItemState::OnlineOnly
+        } else if e.links > 1 {
+            ItemState::Linked
+        } else if kind == DocKind::Heic {
+            ItemState::NotSupported
+        } else if e.size > MAX_FILE_BYTES {
+            ItemState::TooLarge
+        } else {
+            ItemState::Settling
+        };
+        files.push(IntakeFile {
+            path: e.path,
             name,
             kind,
-            size,
-            modified_ms: millis(meta.modified()),
+            size: e.size,
+            modified_ms: e.modified_ms,
             state,
         });
     }
-    files.sort_by(|a, b| {
-        a.modified_ms
-            .cmp(&b.modified_ms)
-            .then_with(|| a.name.cmp(&b.name))
-    });
-    let more = files.len().saturating_sub(MAX_LISTED);
-    files.truncate(MAX_LISTED);
-    Ok(Listing { files, more })
+    Ok(stability.apply(fs, files, raw.truncated, now))
 }
 
-/// Remembers what each file looked like at earlier polls, so a file is
-/// ready only after its size and time stayed the same for
-/// [`STABLE_FOR`] across at least two polls.
+/// Remembers what each file looked like at earlier looks, so a file is
+/// ready only after its size and time stayed the same for [`STABLE_FOR`]
+/// across at least two looks.
 #[derive(Default)]
 pub struct Stability {
     seen: HashMap<PathBuf, Seen>,
@@ -286,6 +281,8 @@ struct Seen {
     size: u64,
     modified_ms: i64,
     since: Instant,
+    /// It opened while refusing writers at this size and time.
+    openable: bool,
 }
 
 impl fmt::Debug for Stability {
@@ -297,22 +294,35 @@ impl fmt::Debug for Stability {
 }
 
 impl Stability {
-    /// Marks the settling files of `listing` that have been unchanged since
-    /// a poll at least [`STABLE_FOR`] before `now` as ready (or empty), and
-    /// forgets files that are gone.
-    pub fn apply(&mut self, listing: &mut Listing, now: Instant) {
-        let mut next = HashMap::with_capacity(listing.files.len());
-        for f in &mut listing.files {
-            let since = match self.seen.remove(&f.path) {
-                Some(s) if s.size == f.size && s.modified_ms == f.modified_ms => s.since,
-                _ => now,
+    /// Marks the settling `files` that have been unchanged since a look at
+    /// least [`STABLE_FOR`] before `now` (and open) as ready, forgets files
+    /// that are gone, and returns the listing: zero-byte files left out,
+    /// oldest first, capped.
+    pub fn apply(
+        &mut self,
+        fs: &dyn FolderFs,
+        files: Vec<IntakeFile>,
+        truncated: bool,
+        now: Instant,
+    ) -> Listing {
+        let mut next = HashMap::with_capacity(files.len());
+        let mut listed = Vec::with_capacity(files.len());
+        let mut waiting = 0;
+        for mut f in files {
+            let (since, mut openable) = match self.seen.remove(&f.path) {
+                Some(s) if s.size == f.size && s.modified_ms == f.modified_ms => {
+                    (s.since, s.openable)
+                }
+                _ => (now, false),
             };
-            if f.state == FileState::Settling && now.duration_since(since) >= STABLE_FOR {
-                f.state = if f.size == 0 {
-                    FileState::Empty
-                } else {
-                    FileState::Ready
-                };
+            if f.state == ItemState::Settling
+                && f.size > 0
+                && now.duration_since(since) >= STABLE_FOR
+            {
+                openable = openable || fs.openable(&f.path);
+                if openable {
+                    f.state = ItemState::Ready;
+                }
             }
             next.insert(
                 f.path.clone(),
@@ -320,92 +330,65 @@ impl Stability {
                     size: f.size,
                     modified_ms: f.modified_ms,
                     since,
+                    openable,
                 },
             );
+            if f.size == 0 {
+                waiting += 1;
+            } else {
+                listed.push(f);
+            }
         }
         self.seen = next;
+        listed.sort_by(|a, b| {
+            a.modified_ms
+                .cmp(&b.modified_ms)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        let more = listed.len().saturating_sub(MAX_LISTED);
+        listed.truncate(MAX_LISTED);
+        Listing {
+            files: listed,
+            more,
+            truncated,
+            waiting,
+        }
     }
 
-    /// Forget everything (another folder was chosen).
+    /// Forget everything (another folder).
     pub fn clear(&mut self) {
         self.seen.clear();
     }
 }
 
-/// A file read for upload.
-#[derive(Clone, PartialEq, Eq)]
-pub struct ReadFile {
-    /// Its bytes (a PDF, PNG or JPEG by its first bytes, at most 10 MB).
-    pub bytes: Vec<u8>,
-    /// Size in bytes.
-    pub size: u64,
-    /// Modified time when read, milliseconds since 1970.
-    pub modified_ms: i64,
-    /// SHA-256 of the bytes, lower-case hex.
-    pub sha256: String,
+/// True for TIFF's first bytes (`II*\0` or `MM\0*`).
+fn is_tiff(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"II*\0") || bytes.starts_with(b"MM\0*")
 }
 
-impl fmt::Debug for ReadFile {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReadFile")
-            .field("size", &self.size)
-            .finish_non_exhaustive()
+/// Checks a file's bytes: not empty, at most 10 MB, a PDF, PNG, JPEG or
+/// TIFF by its first bytes.
+pub(crate) fn check_bytes(bytes: &[u8]) -> Result<(), FileError> {
+    if bytes.is_empty() {
+        return Err(FileError::Empty);
+    }
+    if bytes.len() as u64 > MAX_FILE_BYTES {
+        return Err(FileError::TooLarge);
+    }
+    // TIFF until `cl_api::check_file` takes it (A01 E3).
+    if cl_api::check_file(bytes).is_ok() || is_tiff(bytes) {
+        Ok(())
+    } else {
+        Err(FileError::WrongType)
     }
 }
 
-/// Why a file was not read or filed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum FileError {
-    /// It is gone (moved, deleted).
-    #[error("the file is gone")]
-    Gone,
-    /// A link or not a plain file.
-    #[error("not a plain file")]
-    NotAFile,
-    /// Online only (Windows cloud placeholder).
-    #[error("the file is online only")]
-    OnlineOnly,
-    /// Over 10 MB.
-    #[error("the file is too large")]
-    TooLarge,
-    /// Empty.
-    #[error("the file is empty")]
-    Empty,
-    /// Not a PDF, PNG or JPEG by its bytes.
-    #[error("not a PDF or picture")]
-    WrongType,
-    /// It changed since it was read (different bytes).
-    #[error("the file changed")]
-    Changed,
-    /// It changed while being read.
-    #[error("the file changed while it was read")]
-    Unstable,
-    /// The file system refused.
-    #[error("the file could not be read or moved")]
-    Io,
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use fmt::Write as _;
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        let _ = write!(s, "{b:02x}");
-    }
-    s
-}
-
-/// SHA-256 of `bytes`, lower-case hex.
-#[must_use]
-pub fn sha256_hex(bytes: &[u8]) -> String {
-    hex(&Sha256::digest(bytes))
-}
-
-fn plain_file(path: &Path) -> Result<fs::Metadata, FileError> {
-    let meta = fs::symlink_metadata(path).map_err(|e| match e.kind() {
+fn plain_file(path: &Path) -> Result<std::fs::Metadata, FileError> {
+    let meta = std::fs::symlink_metadata(path).map_err(|e| match e.kind() {
         io::ErrorKind::NotFound => FileError::Gone,
         _ => FileError::Io,
     })?;
-    if !meta.file_type().is_file() {
+    if !meta.file_type().is_file() || links(&meta) > 1 {
         return Err(FileError::NotAFile);
     }
     if online_only(&meta) {
@@ -417,7 +400,10 @@ fn plain_file(path: &Path) -> Result<fs::Metadata, FileError> {
 /// The open handle's metadata `held` against the path's `before` (checked
 /// without following links): a plain file, not online only, the same size
 /// and modification time.
-fn same_file(before: &fs::Metadata, held: &fs::Metadata) -> Result<(), FileError> {
+pub(crate) fn same_file(
+    before: &std::fs::Metadata,
+    held: &std::fs::Metadata,
+) -> Result<(), FileError> {
     if !held.file_type().is_file() {
         return Err(FileError::NotAFile);
     }
@@ -430,9 +416,10 @@ fn same_file(before: &fs::Metadata, held: &fs::Metadata) -> Result<(), FileError
     Ok(())
 }
 
-/// Reads an inbox file for upload, checking again everything the listing
-/// said: a plain file (no link), not online only, at most 10 MB, not
-/// empty, a PDF, PNG or JPEG by its first bytes, and unchanged while read.
+/// Reads a file for upload, checking again everything the listing said: a
+/// plain file (no link, one hard link), not online only, at most 10 MB,
+/// not empty, a PDF, PNG, JPEG or TIFF by its first bytes, not held open
+/// for writing (Windows), and unchanged while read.
 ///
 /// # Errors
 /// [`FileError`].
@@ -441,8 +428,10 @@ pub fn read_for_upload(path: &Path) -> Result<ReadFile, FileError> {
     if before.len() > MAX_FILE_BYTES {
         return Err(FileError::TooLarge);
     }
-    let file = fs::File::open(path).map_err(|e| match e.kind() {
+    let file = open_shared_read(path).map_err(|e| match e.kind() {
         io::ErrorKind::NotFound => FileError::Gone,
+        // A sharing violation (still being written) on Windows.
+        _ if e.raw_os_error() == Some(32) && cfg!(windows) => FileError::Unstable,
         _ => FileError::Io,
     })?;
     // What was opened is checked on the open handle itself, so a file
@@ -467,7 +456,7 @@ pub fn read_for_upload(path: &Path) -> Result<ReadFile, FileError> {
     if after.len() != size || millis(before.modified()) != modified_ms {
         return Err(FileError::Unstable);
     }
-    cl_api::check_file(&bytes).map_err(|_| FileError::WrongType)?;
+    check_bytes(&bytes)?;
     let sha256 = sha256_hex(&bytes);
     Ok(ReadFile {
         bytes,
@@ -477,304 +466,276 @@ pub fn read_for_upload(path: &Path) -> Result<ReadFile, FileError> {
     })
 }
 
-fn file_sha256(path: &Path) -> Result<String, FileError> {
-    let mut file = fs::File::open(path).map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => FileError::Gone,
-        _ => FileError::Io,
-    })?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        let n = file.read(&mut buf).map_err(|_| FileError::Io)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hex(&hasher.finalize()))
-}
-
-/// `name` with ` (n)` before its extension (`n` ≥ 2).
-fn numbered(name: &str, n: u32) -> String {
-    if n < 2 {
-        return name.to_string();
-    }
-    match name.rsplit_once('.') {
-        Some((stem, ext)) if !stem.is_empty() => format!("{stem} ({n}).{ext}"),
-        _ => format!("{name} ({n})"),
-    }
-}
-
-/// Claims a new, empty file in `dir` named `name`, or `name (2)`, … — never
-/// an existing one.
-fn reserve(dir: &Path, name: &str) -> Result<PathBuf, FileError> {
-    for n in 1..10_000 {
-        let path = dir.join(numbered(name, n));
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(_) => return Ok(path),
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(_) => return Err(FileError::Io),
-        }
-    }
-    Err(FileError::Io)
-}
-
-/// The folder a file filed in month `year`-`month` goes to.
-#[must_use]
-pub fn filed_dir(inbox: &Path, year: i32, month: u32) -> PathBuf {
-    inbox.join(FILED_DIR).join(format!("{year:04}-{month:02}"))
-}
-
-/// Moves the inbox file `path` to `<inbox>/Filed/<YYYY-MM>/` once a record
-/// holds its upload. The file must still be the one uploaded (SHA-256
-/// `expected`). The new name is the old one, or ` (2)`, ` (3)`, … when that
-/// is taken: nothing is ever overwritten. A rename is used when it can be;
-/// across volumes the bytes are copied, the copy is checked against
-/// `expected`, and only then is the original removed. Returns where the
-/// file is now.
-///
-/// # Errors
-/// `Gone`, `NotAFile`, `OnlineOnly`, `Changed` (different bytes now; nothing
-/// moved), `Io` (nothing lost: the original stays when the copy failed).
-pub fn file_away(
-    inbox: &Path,
-    path: &Path,
-    expected: &str,
-    year: i32,
-    month: u32,
-) -> Result<PathBuf, FileError> {
-    plain_file(path)?;
-    if file_sha256(path)? != expected {
-        return Err(FileError::Changed);
-    }
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or(FileError::NotAFile)?
-        .to_string();
-    let dir = filed_dir(inbox, year, month);
-    make_filed_dir(inbox, &dir)?;
-    let target = reserve(&dir, &name)?;
-    // The reserved name is ours: the rename replaces only our empty file.
-    if fs::rename(path, &target).is_ok() {
-        return Ok(target);
-    }
-    match copy_verified(path, &target, expected) {
-        Ok(()) => {
-            if fs::remove_file(path).is_err() {
-                // Two copies would be filed again later: keep the original.
-                let _ = fs::remove_file(&target);
-                return Err(FileError::Io);
-            }
-            Ok(target)
-        }
-        Err(e) => {
-            let _ = fs::remove_file(&target);
-            Err(e)
-        }
-    }
-}
-
-/// Creates `<inbox>/Filed` and `dir` (its month folder) without following
-/// a link: a `Filed` or month folder that is a link (or not a folder) is
-/// refused, so a filed bill never lands outside the inbox.
-fn make_filed_dir(inbox: &Path, dir: &Path) -> Result<(), FileError> {
-    for d in [inbox.join(FILED_DIR), dir.to_path_buf()] {
-        match fs::symlink_metadata(&d) {
-            Ok(meta) if meta.file_type().is_dir() => {}
-            Ok(_) => return Err(FileError::NotAFile),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => match fs::create_dir(&d) {
-                Ok(()) => {}
-                // Made by someone else just now: check it again.
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                    let meta = fs::symlink_metadata(&d).map_err(|_| FileError::Io)?;
-                    if !meta.file_type().is_dir() {
-                        return Err(FileError::NotAFile);
-                    }
-                }
-                Err(_) => return Err(FileError::Io),
-            },
-            Err(_) => return Err(FileError::Io),
-        }
-    }
-    Ok(())
-}
-
-fn copy_verified(from: &Path, to: &Path, expected: &str) -> Result<(), FileError> {
-    let mut src = fs::File::open(from).map_err(|_| FileError::Io)?;
-    let mut dst = fs::OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(to)
-        .map_err(|_| FileError::Io)?;
-    io::copy(&mut src, &mut dst).map_err(|_| FileError::Io)?;
-    dst.flush().map_err(|_| FileError::Io)?;
-    dst.sync_all().map_err(|_| FileError::Io)?;
-    drop(dst);
-    if file_sha256(to)? == expected {
-        Ok(())
-    } else {
-        Err(FileError::Changed)
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::fs::{FakeFs, RealFs};
     use super::*;
 
-    const PDF: &[u8] = b"%PDF-1.4\n%inbox test\n";
-    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
+    const PDF: &[u8] = b"%PDF-1.4\n%intake test\n";
+    const TIFF: &[u8] = b"II*\0\x08\0\0\0tiff";
+    const ROOT: &str = "/intake/bills";
 
-    fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
-        let p = dir.join(name);
-        fs::write(&p, bytes).expect("write");
-        p
+    fn root() -> &'static Path {
+        Path::new(ROOT)
+    }
+
+    fn state_of(l: &Listing, name: &str) -> Option<ItemState> {
+        l.files.iter().find(|f| f.name == name).map(|f| f.state)
     }
 
     #[test]
     fn names_are_filtered() {
-        assert_eq!(named_kind("Receipt.PDF"), Some(NamedKind::Pdf));
-        assert_eq!(named_kind("a.png"), Some(NamedKind::Png));
-        assert_eq!(named_kind("a.JPG"), Some(NamedKind::Jpeg));
-        assert_eq!(named_kind("a.jpeg"), Some(NamedKind::Jpeg));
+        assert_eq!(doc_kind("Receipt.PDF"), Some(DocKind::Pdf));
+        assert_eq!(doc_kind("a.png"), Some(DocKind::Png));
+        assert_eq!(doc_kind("a.JPG"), Some(DocKind::Jpeg));
+        assert_eq!(doc_kind("a.jpeg"), Some(DocKind::Jpeg));
+        assert_eq!(doc_kind("scan.TIF"), Some(DocKind::Tiff));
+        assert_eq!(doc_kind("scan.tiff"), Some(DocKind::Tiff));
+        assert_eq!(doc_kind("IMG_1.HEIC"), Some(DocKind::Heic));
+        assert_eq!(doc_kind("IMG_1.heif"), Some(DocKind::Heic));
         for skipped in [
             ".hidden.pdf",
             "~$lock.pdf",
+            ".~lock.bill.pdf#",
             "x.pdf.part",
             "x.pdf.crdownload",
+            "x.pdf.download",
             "x.pdf.tmp",
             "x.TMP",
+            "Thumbs.db",
+            "DESKTOP.INI",
             "notes.txt",
             "pdf",
+            ".pdf",
             "x.gif",
             "x.exe",
+            "",
         ] {
-            assert_eq!(named_kind(skipped), None, "{skipped}");
+            assert_eq!(doc_kind(skipped), None, "{skipped}");
         }
+        assert!(skipped_name("thumbs.DB") && !skipped_name("a.pdf"));
     }
 
     #[test]
-    fn scan_lists_only_this_folder_oldest_first() {
-        let dir = tempfile::tempdir().expect("tmp");
-        write(dir.path(), "b.pdf", PDF);
-        write(dir.path(), "a.png", PNG);
-        write(dir.path(), "skip.txt", b"x");
-        fs::create_dir(dir.path().join("Filed")).expect("dir");
-        write(&dir.path().join("Filed"), "old.pdf", PDF);
-        fs::create_dir(dir.path().join("folder.pdf")).expect("dir");
-        let l = scan(dir.path()).expect("scan");
+    fn what_is_listed_and_what_is_never_read() {
+        let fs = FakeFs::new();
+        fs.put(root(), "bill.pdf", PDF, 10);
+        fs.put(root(), "scan.tif", TIFF, 11);
+        fs.put(root(), "phone.heic", b"ftypheic", 12);
+        fs.put(root(), "empty.pdf", b"", 13);
+        fs.put(root(), "notes.txt", b"x", 14);
+        fs.put_hidden(root(), "hidden.pdf", PDF);
+        fs.put_online_only(root(), "cloud.pdf", 100);
+        fs.put_link(root(), "link.pdf");
+        fs.put_hard_linked(root(), "hard.pdf", PDF, 2);
+        let mut big = PDF.to_vec();
+        big.resize(usize::try_from(MAX_FILE_BYTES).expect("fits") + 1, b' ');
+        fs.put(root(), "big.pdf", &big, 15);
+        let mut s = Stability::default();
+        let l = scan(&fs, root(), &mut s, Instant::now()).expect("scan");
         let mut names: Vec<_> = l.files.iter().map(|f| f.name.as_str()).collect();
         names.sort_unstable();
-        assert_eq!(names, ["a.png", "b.pdf"]);
-        assert!(l.files.iter().all(|f| f.state == FileState::Settling));
-        assert_eq!(l.more, 0);
-        assert_eq!(scan(&dir.path().join("nope")), Err(ScanError::Missing));
         assert_eq!(
-            scan(&dir.path().join("skip.txt")),
-            Err(ScanError::NotAFolder)
+            names,
+            [
+                "big.pdf",
+                "bill.pdf",
+                "cloud.pdf",
+                "hard.pdf",
+                "phone.heic",
+                "scan.tif"
+            ]
         );
+        assert_eq!(state_of(&l, "bill.pdf"), Some(ItemState::Settling));
+        assert_eq!(state_of(&l, "scan.tif"), Some(ItemState::Settling));
+        assert_eq!(state_of(&l, "phone.heic"), Some(ItemState::NotSupported));
+        assert_eq!(state_of(&l, "cloud.pdf"), Some(ItemState::OnlineOnly));
+        assert_eq!(state_of(&l, "hard.pdf"), Some(ItemState::Linked));
+        assert_eq!(state_of(&l, "big.pdf"), Some(ItemState::TooLarge));
+        assert_eq!(l.waiting, 1, "the zero-byte file is tracked, not listed");
+        assert!(l.settling() && l.complete());
         let shown = format!("{:?}", l.files[0]);
-        assert!(!shown.contains(".p"), "no names in Debug: {shown}");
+        assert!(
+            !shown.contains(".pdf") && !shown.contains("bill"),
+            "{shown}"
+        );
     }
 
     #[test]
-    fn the_10_mb_edge() {
+    fn ready_only_after_two_equal_looks_five_seconds_apart_and_openable() {
+        let fs = FakeFs::new();
+        fs.put(root(), "r.pdf", PDF, 1);
+        fs.put(root(), "w.pdf", b"", 1);
+        let t0 = Instant::now();
+        let mut s = Stability::default();
+        let mut look = |at: Instant| scan(&fs, root(), &mut s, at).expect("scan");
+        let l = look(t0);
+        assert_eq!(
+            state_of(&l, "r.pdf"),
+            Some(ItemState::Settling),
+            "first sight"
+        );
+        let l = look(t0 + Duration::from_millis(4900));
+        assert_eq!(state_of(&l, "r.pdf"), Some(ItemState::Settling), "too soon");
+        let l = look(t0 + STABLE_FOR);
+        assert_eq!(state_of(&l, "r.pdf"), Some(ItemState::Ready));
+        assert_eq!(l.ready(), 1);
+        assert_eq!(l.waiting, 1);
+
+        // The zero-byte file gets its bytes (two halves, 3 s apart).
+        fs.put(root(), "w.pdf", &PDF[..8], 2);
+        let l = look(t0 + Duration::from_secs(6));
+        assert_eq!(state_of(&l, "w.pdf"), Some(ItemState::Settling));
+        fs.put(root(), "w.pdf", PDF, 3);
+        let l = look(t0 + Duration::from_secs(9));
+        assert_eq!(state_of(&l, "w.pdf"), Some(ItemState::Settling), "grew");
+        let l = look(t0 + Duration::from_secs(13));
+        assert_eq!(state_of(&l, "w.pdf"), Some(ItemState::Settling), "4 s");
+        // Still held open by the scanner: stays settling.
+        fs.set_locked(&root().join("w.pdf"), true);
+        let l = look(t0 + Duration::from_secs(14));
+        assert_eq!(state_of(&l, "w.pdf"), Some(ItemState::Settling), "locked");
+        fs.set_locked(&root().join("w.pdf"), false);
+        let l = look(t0 + Duration::from_secs(15));
+        assert_eq!(state_of(&l, "w.pdf"), Some(ItemState::Ready));
+        assert!(!l.settling());
+
+        // Gone files are forgotten.
+        fs.remove(root(), "r.pdf");
+        let l = look(t0 + Duration::from_secs(16));
+        assert_eq!(state_of(&l, "r.pdf"), None);
+        assert_eq!(format!("{s:?}"), "Stability { tracked: 1 }");
+    }
+
+    #[test]
+    fn caps_entries_and_listing() {
+        let fs = FakeFs::new();
+        for n in 0..(MAX_LISTED + 3) {
+            fs.put(
+                root(),
+                &format!("r{n:04}.pdf"),
+                PDF,
+                i64::try_from(n).expect("n"),
+            );
+        }
+        let l = scan(&fs, root(), &mut Stability::default(), Instant::now()).expect("scan");
+        assert_eq!(l.files.len(), MAX_LISTED);
+        assert_eq!(l.more, 3);
+        assert_eq!(l.files[0].name, "r0000.pdf", "oldest first");
+        assert!(!l.truncated && !l.complete());
+
+        let many = FakeFs::new();
+        for n in 0..=MAX_SCANNED {
+            many.put(root(), &format!("n{n}.txt"), b"x", 1);
+        }
+        let l = scan(&many, root(), &mut Stability::default(), Instant::now()).expect("scan");
+        assert!(l.truncated && !l.complete());
+    }
+
+    #[test]
+    fn root_errors_are_health() {
+        let fs = FakeFs::new();
+        let mut s = Stability::default();
+        assert_eq!(
+            scan(&fs, Path::new("/none"), &mut s, Instant::now()),
+            Err(Health::Missing)
+        );
+        fs.add_dir(root());
+        fs.fail(root(), if cfg!(windows) { 53 } else { 107 }, 1);
+        let unreachable = scan(&fs, root(), &mut s, Instant::now());
+        assert_eq!(unreachable, Err(Health::Unreachable));
+        fs.fail(root(), if cfg!(windows) { 5 } else { 13 }, 1);
+        assert_eq!(
+            scan(&fs, root(), &mut s, Instant::now()),
+            Err(Health::PermissionDenied)
+        );
+        let dir = tempfile::tempdir().expect("tmp");
+        let file = dir.path().join("a.pdf");
+        std::fs::write(&file, PDF).expect("write");
+        assert_eq!(
+            scan(&RealFs, &file, &mut s, Instant::now()),
+            Err(Health::NotAFolder)
+        );
+        assert_eq!(
+            scan(&RealFs, &dir.path().join("nope"), &mut s, Instant::now()),
+            Err(Health::Missing)
+        );
+    }
+
+    #[test]
+    fn the_10_mb_edge_and_bytes() {
         let dir = tempfile::tempdir().expect("tmp");
         let mut ok = PDF.to_vec();
         ok.resize(usize::try_from(MAX_FILE_BYTES).expect("fits"), b' ');
-        let exact = write(dir.path(), "exact.pdf", &ok);
+        let exact = dir.path().join("exact.pdf");
+        std::fs::write(&exact, &ok).expect("write");
         ok.push(b' ');
-        let over = write(dir.path(), "over.pdf", &ok);
-        let l = scan(dir.path()).expect("scan");
-        let state = |n: &str| l.files.iter().find(|f| f.name == n).map(|f| f.state);
-        assert_eq!(state("exact.pdf"), Some(FileState::Settling));
-        assert_eq!(state("over.pdf"), Some(FileState::TooLarge));
+        let over = dir.path().join("over.pdf");
+        std::fs::write(&over, &ok).expect("write");
         assert_eq!(read_for_upload(&exact).map(|r| r.size), Ok(MAX_FILE_BYTES));
         assert_eq!(read_for_upload(&over), Err(FileError::TooLarge));
-    }
-
-    #[test]
-    fn the_list_is_capped() {
-        let dir = tempfile::tempdir().expect("tmp");
-        for n in 0..(MAX_LISTED + 3) {
-            write(dir.path(), &format!("r{n:04}.pdf"), PDF);
-        }
-        let l = scan(dir.path()).expect("scan");
-        assert_eq!(l.files.len(), MAX_LISTED);
-        assert_eq!(l.more, 3);
-    }
-
-    #[test]
-    fn ready_only_after_two_equal_polls_two_seconds_apart() {
-        let dir = tempfile::tempdir().expect("tmp");
-        let p = write(dir.path(), "r.pdf", PDF);
-        write(dir.path(), "empty.pdf", b"");
-        let t0 = Instant::now();
-        let mut s = Stability::default();
-        let mut poll = |at: Instant| {
-            let mut l = scan(dir.path()).expect("scan");
-            s.apply(&mut l, at);
-            l
-        };
-        let state = |l: &Listing, n: &str| {
-            l.files
-                .iter()
-                .find(|f| f.name == n)
-                .map(|f| f.state)
-                .expect("listed")
-        };
-        let l = poll(t0);
-        assert_eq!(state(&l, "r.pdf"), FileState::Settling, "first sight");
-        let l = poll(t0 + Duration::from_millis(1500));
-        assert_eq!(state(&l, "r.pdf"), FileState::Settling, "too soon");
-        let l = poll(t0 + STABLE_FOR);
-        assert_eq!(state(&l, "r.pdf"), FileState::Ready);
-        assert_eq!(state(&l, "empty.pdf"), FileState::Empty);
-        assert_eq!(l.ready(), 1);
-
-        // It grows: settling again, from the new sight.
-        fs::write(&p, [PDF, b"more"].concat()).expect("grow");
-        let l = poll(t0 + Duration::from_secs(3));
-        assert_eq!(state(&l, "r.pdf"), FileState::Settling);
-        let l = poll(t0 + Duration::from_secs(4));
-        assert_eq!(state(&l, "r.pdf"), FileState::Settling);
-        let l = poll(t0 + Duration::from_secs(5));
-        assert_eq!(state(&l, "r.pdf"), FileState::Ready);
-    }
-
-    #[test]
-    fn read_checks_the_bytes() {
-        let dir = tempfile::tempdir().expect("tmp");
-        let good = write(dir.path(), "good.pdf", PDF);
-        let r = read_for_upload(&good).expect("read");
-        assert_eq!(r.bytes, PDF);
-        assert_eq!(r.sha256, sha256_hex(PDF));
-        let fake = write(dir.path(), "fake.pdf", b"MZ\x90\0not a pdf");
-        assert_eq!(read_for_upload(&fake), Err(FileError::WrongType));
-        let empty = write(dir.path(), "empty.pdf", b"");
+        let tif = dir.path().join("s.tif");
+        std::fs::write(&tif, TIFF).expect("write");
+        assert_eq!(
+            read_for_upload(&tif).map(|r| r.sha256),
+            Ok(sha256_hex(TIFF))
+        );
+        std::fs::write(&tif, b"MM\0*big-endian").expect("write");
+        assert!(read_for_upload(&tif).is_ok());
+        let heic = dir.path().join("p.heic");
+        std::fs::write(&heic, b"\0\0\0\x18ftypheic").expect("write");
+        assert_eq!(read_for_upload(&heic), Err(FileError::WrongType));
+        let empty = dir.path().join("e.pdf");
+        std::fs::write(&empty, b"").expect("write");
         assert_eq!(read_for_upload(&empty), Err(FileError::Empty));
         assert_eq!(
             read_for_upload(&dir.path().join("gone.pdf")),
             Err(FileError::Gone)
         );
         assert_eq!(read_for_upload(dir.path()), Err(FileError::NotAFile));
+        assert_eq!(check_bytes(b""), Err(FileError::Empty));
+    }
+
+    /// Half written (Windows: still held open for writing): not read.
+    #[cfg(windows)]
+    #[test]
+    fn a_file_still_being_written_is_not_read() {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().expect("tmp");
+        let p = dir.path().join("scan.pdf");
+        let mut w = std::fs::File::create(&p).expect("create");
+        w.write_all(&PDF[..6]).expect("half");
+        w.flush().expect("flush");
+        assert_eq!(read_for_upload(&p), Err(FileError::Unstable));
+        w.write_all(&PDF[6..]).expect("rest");
+        drop(w);
+        assert_eq!(read_for_upload(&p).map(|r| r.bytes), Ok(PDF.to_vec()));
     }
 
     #[cfg(unix)]
     #[test]
-    fn links_are_never_followed() {
+    fn links_and_hard_links_are_never_taken() {
         let dir = tempfile::tempdir().expect("tmp");
         let outside = tempfile::tempdir().expect("tmp");
-        let target = write(outside.path(), "secret.pdf", PDF);
+        let target = outside.path().join("secret.pdf");
+        std::fs::write(&target, PDF).expect("write");
         std::os::unix::fs::symlink(&target, dir.path().join("link.pdf")).expect("link");
-        let l = scan(dir.path()).expect("scan");
-        assert!(l.files.is_empty(), "the link is skipped");
+        std::fs::hard_link(&target, dir.path().join("hard.pdf")).expect("hard link");
+        let l = scan(
+            &RealFs,
+            dir.path(),
+            &mut Stability::default(),
+            Instant::now(),
+        )
+        .expect("scan");
+        assert_eq!(l.files.len(), 1, "the symlink is skipped");
+        assert_eq!(l.files[0].state, ItemState::Linked);
         assert_eq!(
             read_for_upload(&dir.path().join("link.pdf")),
+            Err(FileError::NotAFile)
+        );
+        assert_eq!(
+            read_for_upload(&dir.path().join("hard.pdf")),
             Err(FileError::NotAFile)
         );
     }
@@ -784,13 +745,20 @@ mod tests {
     fn links_are_never_followed() {
         let dir = tempfile::tempdir().expect("tmp");
         let outside = tempfile::tempdir().expect("tmp");
-        let target = write(outside.path(), "secret.pdf", PDF);
+        let target = outside.path().join("secret.pdf");
+        std::fs::write(&target, PDF).expect("write");
         // Creating a symlink needs developer mode or admin rights on
         // Windows; without them there is nothing to check here.
         if std::os::windows::fs::symlink_file(&target, dir.path().join("link.pdf")).is_err() {
             return;
         }
-        let l = scan(dir.path()).expect("scan");
+        let l = scan(
+            &RealFs,
+            dir.path(),
+            &mut Stability::default(),
+            Instant::now(),
+        )
+        .expect("scan");
         assert!(l.files.is_empty(), "the link is skipped");
         assert_eq!(
             read_for_upload(&dir.path().join("link.pdf")),
@@ -798,113 +766,35 @@ mod tests {
         );
     }
 
+    /// A linked root is followed (macOS `~/Dropbox` is a link into
+    /// `~/Library/CloudStorage`); its entries still aren't.
+    #[cfg(unix)]
     #[test]
-    fn filing_never_overwrites() {
-        let dir = tempfile::tempdir().expect("tmp");
-        let filed = filed_dir(dir.path(), 2026, 11);
-        fs::create_dir_all(&filed).expect("dir");
-        write(&filed, "r.pdf", b"%PDF-older");
-        write(&filed, "r (2).pdf", b"%PDF-older 2");
-        let p = write(dir.path(), "r.pdf", PDF);
-        let to = file_away(dir.path(), &p, &sha256_hex(PDF), 2026, 11).expect("filed");
-        assert_eq!(to, filed.join("r (3).pdf"));
-        assert!(!p.exists(), "the original moved");
-        assert_eq!(fs::read(&to).expect("read"), PDF);
-        assert_eq!(
-            fs::read(filed.join("r.pdf")).expect("read"),
-            b"%PDF-older",
-            "never overwritten"
-        );
-        // A name without an extension.
-        let q = write(dir.path(), "noext", PDF);
-        write(&filed, "noext", b"x");
-        assert_eq!(
-            file_away(dir.path(), &q, &sha256_hex(PDF), 2026, 11).expect("filed"),
-            filed.join("noext (2)")
-        );
+    fn a_linked_root_is_followed() {
+        let real = tempfile::tempdir().expect("tmp");
+        std::fs::write(real.path().join("a.pdf"), PDF).expect("write");
+        let holder = tempfile::tempdir().expect("tmp");
+        let link = holder.path().join("Dropbox");
+        std::os::unix::fs::symlink(real.path(), &link).expect("link");
+        let l = scan(&RealFs, &link, &mut Stability::default(), Instant::now()).expect("scan");
+        assert_eq!(l.files.len(), 1);
     }
 
-    #[test]
-    fn a_changed_file_is_not_filed() {
-        let dir = tempfile::tempdir().expect("tmp");
-        let p = write(dir.path(), "r.pdf", PDF);
-        assert_eq!(
-            file_away(dir.path(), &p, &sha256_hex(b"other bytes"), 2026, 11),
-            Err(FileError::Changed)
-        );
-        assert!(p.exists(), "left where it is");
-        assert!(!filed_dir(dir.path(), 2026, 11).exists());
-        assert_eq!(
-            file_away(dir.path(), &dir.path().join("gone.pdf"), "x", 2026, 11),
-            Err(FileError::Gone)
-        );
-    }
-
-    /// A `Filed` that is a link is never followed: the bill stays in the
-    /// inbox instead of landing wherever the link points.
-    #[test]
-    fn a_linked_or_odd_filed_folder_is_refused() {
-        let dir = tempfile::tempdir().expect("tmp");
-        let outside = tempfile::tempdir().expect("tmp");
-        let p = write(dir.path(), "r.pdf", PDF);
-        #[cfg(unix)]
-        let linked = std::os::unix::fs::symlink(outside.path(), dir.path().join(FILED_DIR)).is_ok();
-        // Needs developer mode or admin rights on Windows.
-        #[cfg(windows)]
-        let linked =
-            std::os::windows::fs::symlink_dir(outside.path(), dir.path().join(FILED_DIR)).is_ok();
-        if linked {
-            assert_eq!(
-                file_away(dir.path(), &p, &sha256_hex(PDF), 2026, 11),
-                Err(FileError::NotAFile)
-            );
-            assert!(p.exists(), "left where it is");
-            assert_eq!(
-                fs::read_dir(outside.path()).expect("dir").count(),
-                0,
-                "nothing was made through the link"
-            );
-            fs::remove_dir(dir.path().join(FILED_DIR))
-                .or_else(|_| fs::remove_file(dir.path().join(FILED_DIR)))
-                .expect("unlink");
-        }
-        // A plain file named `Filed` (works on every system).
-        write(dir.path(), FILED_DIR, b"not a folder");
-        assert_eq!(
-            file_away(dir.path(), &p, &sha256_hex(PDF), 2026, 11),
-            Err(FileError::NotAFile)
-        );
-        assert!(p.exists());
-    }
-
-    /// The open handle is checked against the path's metadata: a different
-    /// file (size or time) or a folder is refused.
     #[test]
     fn the_open_handle_must_be_the_checked_file() {
         let dir = tempfile::tempdir().expect("tmp");
-        let a = write(dir.path(), "a.pdf", PDF);
-        let b = write(dir.path(), "b.pdf", b"%PDF-1.4 a longer, different file\n");
-        let meta = |p: &Path| fs::File::open(p).and_then(|f| f.metadata()).expect("meta");
+        let a = dir.path().join("a.pdf");
+        std::fs::write(&a, PDF).expect("write");
+        let b = dir.path().join("b.pdf");
+        std::fs::write(&b, b"%PDF-1.4 a longer, different file\n").expect("write");
+        let meta = |p: &Path| {
+            std::fs::File::open(p)
+                .and_then(|f| f.metadata())
+                .expect("meta")
+        };
         assert_eq!(same_file(&meta(&a), &meta(&a)), Ok(()));
         assert_eq!(same_file(&meta(&a), &meta(&b)), Err(FileError::Unstable));
-        let d = fs::metadata(dir.path()).expect("dir");
+        let d = std::fs::metadata(dir.path()).expect("dir");
         assert_eq!(same_file(&meta(&a), &d), Err(FileError::NotAFile));
-    }
-
-    #[test]
-    fn a_copy_is_checked_before_the_original_goes() {
-        let dir = tempfile::tempdir().expect("tmp");
-        let p = write(dir.path(), "r.pdf", PDF);
-        let to = dir.path().join("copy.pdf");
-        fs::write(&to, b"").expect("reserve");
-        assert_eq!(copy_verified(&p, &to, &sha256_hex(PDF)), Ok(()));
-        assert_eq!(fs::read(&to).expect("read"), PDF);
-        assert_eq!(
-            copy_verified(&p, &to, &sha256_hex(b"x")),
-            Err(FileError::Changed)
-        );
-        assert_eq!(numbered("a.b.pdf", 2), "a.b (2).pdf");
-        assert_eq!(numbered(".pdf", 2), ".pdf (2)");
-        assert_eq!(numbered("a.pdf", 1), "a.pdf");
     }
 }

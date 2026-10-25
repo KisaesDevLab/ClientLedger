@@ -1,8 +1,210 @@
-//! Intake folders (A01): the folders a company's bills and receipts are
-//! saved into, watched so each new file is copied into the company.
+//! Intake folders (A01, ADD-01): the folders a company's bills and receipts
+//! are saved into. Each confirmed folder is watched on its own thread; a
+//! file that stopped changing is read, copied into the company as a draft
+//! attachment, and once handled its original moves to `Processed/YYYY-MM/`
+//! or `Discarded/` inside that folder.
 //!
-//! B1 only moves the P17 receipt-inbox code here; the rules of A01 follow.
+//! The folder may be local, a mapped drive, a network share or a
+//! cloud-sync folder, so this module treats it as untrusted and slow:
+//! - **No I/O on the caller's thread.** [`check_path_syntax`] is pure;
+//!   everything else runs on a folder thread ([`WatchHandle`]) or a probe
+//!   thread ([`probe_async`]) with a deadline, so a dead share is a
+//!   [`Health`], never a hang. Threads are never joined by the caller.
+//! - **The root is pinned, entries are never followed.** The root may be a
+//!   link (macOS cloud folders are), so it is resolved once and pinned by
+//!   [`canonical_key`]; a changed key pauses the folder ([`Health::Moved`]).
+//!   Entries are looked at without following links; only plain files count.
+//! - **Cloud placeholders are never read** (Windows offline/recall
+//!   attributes, macOS dataless files).
+//! - **Originals are never overwritten or deleted.** A handled file moves
+//!   (rename, or copy, verify the SHA-256, then remove across volumes), and
+//!   a file whose bytes changed is refused ([`move_handled`]).
+//! - **Owner data stays out.** Paths and file names are never logged and
+//!   never in `Debug`.
+//!
+//! The P17 single-folder receipt inbox keeps working through [`legacy`]
+//! (re-exported as `cl_company::inbox`) until its screen moves to this
+//! module.
 
+use std::fmt;
+
+use sha2::{Digest, Sha256};
+
+pub mod fs;
+pub mod legacy;
+pub mod path;
 pub mod scan;
 
-pub use scan::*;
+pub use fs::{EntryInfo, FakeFs, FolderFs, RawListing, RealFs};
+pub use path::classify;
+pub use scan::{
+    DocKind, IntakeFile, ItemState, Listing, MAX_FILE_BYTES, MAX_LISTED, MAX_SCANNED, STABLE_FOR,
+    Stability, doc_kind, read_for_upload, scan, skipped_name,
+};
+
+/// How a folder is doing (D6). Only the first eight need the owner; `Slow`
+/// and `TooMany` are informational.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Health {
+    /// Listed fine.
+    Ok,
+    /// This computer has not confirmed the folder (a restore elsewhere, or
+    /// the path was edited on another computer).
+    NotConfirmed,
+    /// The folder is not there (drive unplugged, renamed, sync paused).
+    Missing,
+    /// The network folder can't be reached.
+    Unreachable,
+    /// A look at the folder has not come back within the deadline.
+    NotResponding,
+    /// The app isn't allowed to read the folder.
+    PermissionDenied,
+    /// The path is a file, not a folder.
+    NotAFolder,
+    /// Handled files can't be moved to `Processed/` (files stay).
+    CantMove,
+    /// The folder now points somewhere else (its pinned root changed).
+    Moved,
+    /// Another company on this computer already uses this folder.
+    MappedByAnother,
+    /// Looking at the folder takes long; it is looked at less often.
+    Slow,
+    /// More than [`MAX_SCANNED`] entries; only the first are looked at.
+    TooMany,
+}
+
+impl Health {
+    /// A short name for the control channel and tests.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Health::Ok => "ok",
+            Health::NotConfirmed => "not_confirmed",
+            Health::Missing => "missing",
+            Health::Unreachable => "unreachable",
+            Health::NotResponding => "not_responding",
+            Health::PermissionDenied => "permission_denied",
+            Health::NotAFolder => "not_a_folder",
+            Health::CantMove => "cant_move",
+            Health::Moved => "moved",
+            Health::MappedByAnother => "mapped_by_another",
+            Health::Slow => "slow",
+            Health::TooMany => "too_many",
+        }
+    }
+
+    /// True when the owner should be told (Home's Needs attention line):
+    /// everything but `Ok`, `Slow` and `TooMany`.
+    #[must_use]
+    pub fn needs_attention(self) -> bool {
+        !matches!(self, Health::Ok | Health::Slow | Health::TooMany)
+    }
+}
+
+/// A file read for upload.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ReadFile {
+    /// Its bytes (a PDF, PNG, JPEG or TIFF by its first bytes, at most
+    /// 10 MB).
+    pub bytes: Vec<u8>,
+    /// Size in bytes.
+    pub size: u64,
+    /// Modified time when read, milliseconds since 1970.
+    pub modified_ms: i64,
+    /// SHA-256 of the bytes, lower-case hex.
+    pub sha256: String,
+}
+
+impl fmt::Debug for ReadFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReadFile")
+            .field("size", &self.size)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Why a file was not read or moved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum FileError {
+    /// It is gone (moved, deleted).
+    #[error("the file is gone")]
+    Gone,
+    /// A link, a hard-linked file, or not a plain file.
+    #[error("not a plain file")]
+    NotAFile,
+    /// Online only (a cloud placeholder).
+    #[error("the file is online only")]
+    OnlineOnly,
+    /// Over 10 MB.
+    #[error("the file is too large")]
+    TooLarge,
+    /// Empty.
+    #[error("the file is empty")]
+    Empty,
+    /// Not a PDF, PNG, JPEG or TIFF by its bytes.
+    #[error("not a PDF or picture")]
+    WrongType,
+    /// It changed since it was read (different bytes).
+    #[error("the file changed")]
+    Changed,
+    /// It changed (or was still open for writing) while being read.
+    #[error("the file changed while it was read")]
+    Unstable,
+    /// The file system refused.
+    #[error("the file could not be read or moved")]
+    Io,
+}
+
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    use fmt::Write as _;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
+/// SHA-256 of `bytes`, lower-case hex.
+#[must_use]
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    hex(&Sha256::digest(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_names_and_attention() {
+        let all = [
+            Health::Ok,
+            Health::NotConfirmed,
+            Health::Missing,
+            Health::Unreachable,
+            Health::NotResponding,
+            Health::PermissionDenied,
+            Health::NotAFolder,
+            Health::CantMove,
+            Health::Moved,
+            Health::MappedByAnother,
+            Health::Slow,
+            Health::TooMany,
+        ];
+        let names: std::collections::HashSet<_> = all.iter().map(|h| h.as_str()).collect();
+        assert_eq!(names.len(), all.len(), "distinct names");
+        let quiet: Vec<_> = all.iter().filter(|h| !h.needs_attention()).collect();
+        assert_eq!(quiet, [&Health::Ok, &Health::Slow, &Health::TooMany]);
+    }
+
+    #[test]
+    fn read_file_debug_shows_no_bytes() {
+        let r = ReadFile {
+            bytes: b"%PDF-secret vendor".to_vec(),
+            size: 18,
+            modified_ms: 1,
+            sha256: sha256_hex(b"x"),
+        };
+        let s = format!("{r:?}");
+        assert!(!s.contains("secret") && !s.contains(&r.sha256), "{s}");
+    }
+}
