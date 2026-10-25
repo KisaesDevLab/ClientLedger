@@ -105,6 +105,72 @@ fn frames(s: &mut EnterBillScreen, n: usize) {
     }
 }
 
+/// Three frames at `size`, returning every AccessKit node drawn.
+fn nodes(
+    s: &mut EnterBillScreen,
+    size: (f32, f32),
+    theme: crate::theme::ThemeChoice,
+) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+    use eframe::egui::{Pos2, RawInput, Rect, vec2};
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, theme);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut all = Vec::new();
+    for _ in 0..3 {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(size.0, size.1))),
+            ..RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        all.extend(
+            out.platform_output
+                .accesskit_update
+                .map(|u| u.nodes)
+                .unwrap_or_default(),
+        );
+    }
+    all
+}
+
+/// Every interactive widget of Enter Bill has an accessible name: a new
+/// bill, a read document (banner, marks, Accept), the Items tab, and a
+/// vendor credit, at both scenario sizes in light and dark.
+#[test]
+fn every_enter_bill_widget_has_an_accessible_name() {
+    use crate::theme::ThemeChoice;
+    for theme in [ThemeChoice::Light, ThemeChoice::Dark] {
+        for size in [(1440.0, 940.0), (960.0, 640.0)] {
+            let (_d, link) = link();
+            let mut s = screen(&link);
+            let blank = nodes(&mut s, size, theme);
+            assert!(blank.len() > 20, "drawn");
+            let mut s = with_document(&link);
+            read(&mut s);
+            let read_nodes = nodes(&mut s, size, theme);
+            s.tab = crate::screens::bill::Tab::Items;
+            let items = nodes(&mut s, size, theme);
+            s.header.edit_step(|h| h.kind = cl_model::forms::bill::BillKind::Credit);
+            let credit = nodes(&mut s, size, theme);
+            for (what, n) in [
+                ("new", blank),
+                ("read", read_nodes),
+                ("items", items),
+                ("credit", credit),
+            ] {
+                let unnamed = crate::screens::unnamed_widgets(&n);
+                assert!(
+                    unnamed.is_empty(),
+                    "{what} {size:?} {theme:?}: unnamed widgets: {unnamed:?}"
+                );
+            }
+        }
+    }
+}
+
 fn reading(body: &str) -> BillReading {
     cl_api::reading_from_json(body.as_bytes()).expect("reading")
 }
