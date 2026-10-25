@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
+use super::handled::{HandledDir, MoveFailed};
 use super::{FileError, ReadFile, sha256_hex};
 
 /// One directory entry, looked at without following links.
@@ -102,6 +103,19 @@ pub trait FolderFs: Send + Sync {
     /// # Errors
     /// The system's error.
     fn write_probe(&self, root: &Path) -> io::Result<()>;
+
+    /// Moves a handled original ([`super::move_handled`]), telling a
+    /// permission refusal apart.
+    ///
+    /// # Errors
+    /// [`MoveFailed`].
+    fn move_handled(
+        &self,
+        root: &Path,
+        path: &Path,
+        sha256: &str,
+        to: HandledDir,
+    ) -> Result<PathBuf, MoveFailed>;
 }
 
 /// A name no other file has (time, process and a counter).
@@ -282,6 +296,16 @@ impl FolderFs for RealFs {
         }
         Err(io::Error::from(io::ErrorKind::AlreadyExists))
     }
+
+    fn move_handled(
+        &self,
+        root: &Path,
+        path: &Path,
+        sha256: &str,
+        to: HandledDir,
+    ) -> Result<PathBuf, MoveFailed> {
+        super::handled::move_into(root, path, sha256, &to.parts())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +337,7 @@ struct FakeInner {
     dirs: HashMap<PathBuf, FakeDir>,
     locked: HashSet<PathBuf>,
     lists: usize,
+    handled: Vec<PathBuf>,
 }
 
 /// An in-memory [`FolderFs`] for tests: folders of files, with injected
@@ -462,6 +487,12 @@ impl FakeFs {
         }
     }
 
+    /// Where moved files went, in order (they leave the folder).
+    #[must_use]
+    pub fn handled(&self) -> Vec<PathBuf> {
+        self.lock().handled.clone()
+    }
+
     /// How many listings were made.
     #[must_use]
     pub fn lists(&self) -> usize {
@@ -591,6 +622,44 @@ impl FolderFs for FakeFs {
             return Err(io::Error::from(io::ErrorKind::PermissionDenied));
         }
         Ok(())
+    }
+
+    fn move_handled(
+        &self,
+        root: &Path,
+        path: &Path,
+        sha256: &str,
+        to: HandledDir,
+    ) -> Result<PathBuf, MoveFailed> {
+        if path.parent() != Some(root) {
+            return Err(FileError::NotAFile.into());
+        }
+        let f = self.file(path)?;
+        if !f.is_file || f.links > 1 {
+            return Err(FileError::NotAFile.into());
+        }
+        if sha256_hex(&f.bytes) != sha256 {
+            return Err(FileError::Changed.into());
+        }
+        let mut i = self.lock();
+        let Some(d) = i.dirs.get_mut(root) else {
+            return Err(FileError::Gone.into());
+        };
+        if d.read_only {
+            return Err(MoveFailed {
+                error: FileError::Io,
+                denied: true,
+            });
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        d.files.retain(|(n, _)| *n != name);
+        let target = to.dir_in(root).join(&name);
+        i.handled.push(target.clone());
+        Ok(target)
     }
 }
 

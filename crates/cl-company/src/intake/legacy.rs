@@ -32,11 +32,11 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
-use std::io::{self, Write as _};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use super::fs::{file_sha256, hidden, millis, online_only};
+use super::fs::{hidden, millis, online_only};
 pub use super::scan::{MAX_FILE_BYTES, MAX_LISTED, read_for_upload};
 pub use super::{FileError, ReadFile, sha256_hex};
 
@@ -291,49 +291,6 @@ impl Stability {
     }
 }
 
-fn plain_file(path: &Path) -> Result<fs::Metadata, FileError> {
-    let meta = fs::symlink_metadata(path).map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => FileError::Gone,
-        _ => FileError::Io,
-    })?;
-    if !meta.file_type().is_file() {
-        return Err(FileError::NotAFile);
-    }
-    if online_only(&meta) {
-        return Err(FileError::OnlineOnly);
-    }
-    Ok(meta)
-}
-
-/// `name` with ` (n)` before its extension (`n` ≥ 2).
-fn numbered(name: &str, n: u32) -> String {
-    if n < 2 {
-        return name.to_string();
-    }
-    match name.rsplit_once('.') {
-        Some((stem, ext)) if !stem.is_empty() => format!("{stem} ({n}).{ext}"),
-        _ => format!("{name} ({n})"),
-    }
-}
-
-/// Claims a new, empty file in `dir` named `name`, or `name (2)`, … — never
-/// an existing one.
-fn reserve(dir: &Path, name: &str) -> Result<PathBuf, FileError> {
-    for n in 1..10_000 {
-        let path = dir.join(numbered(name, n));
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(_) => return Ok(path),
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(_) => return Err(FileError::Io),
-        }
-    }
-    Err(FileError::Io)
-}
-
 /// The folder a file filed in month `year`-`month` goes to.
 #[must_use]
 pub fn filed_dir(inbox: &Path, year: i32, month: u32) -> PathBuf {
@@ -341,12 +298,11 @@ pub fn filed_dir(inbox: &Path, year: i32, month: u32) -> PathBuf {
 }
 
 /// Moves the inbox file `path` to `<inbox>/Filed/<YYYY-MM>/` once a record
-/// holds its upload. The file must still be the one uploaded (SHA-256
-/// `expected`). The new name is the old one, or ` (2)`, ` (3)`, … when that
-/// is taken: nothing is ever overwritten. A rename is used when it can be;
-/// across volumes the bytes are copied, the copy is checked against
-/// `expected`, and only then is the original removed. Returns where the
-/// file is now.
+/// holds its upload, by the rules of [`super::move_handled`]: the file must
+/// still be the one uploaded (SHA-256 `expected`), nothing is ever
+/// overwritten (` (2)`, ` (3)`, …), a `Filed` that is a link is refused,
+/// and across volumes the copy is checked before the original is removed.
+/// Returns where the file is now.
 ///
 /// # Errors
 /// `Gone`, `NotAFile`, `OnlineOnly`, `Changed` (different bytes now; nothing
@@ -358,79 +314,8 @@ pub fn file_away(
     year: i32,
     month: u32,
 ) -> Result<PathBuf, FileError> {
-    plain_file(path)?;
-    if file_sha256(path)? != expected {
-        return Err(FileError::Changed);
-    }
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or(FileError::NotAFile)?
-        .to_string();
-    let dir = filed_dir(inbox, year, month);
-    make_filed_dir(inbox, &dir)?;
-    let target = reserve(&dir, &name)?;
-    // The reserved name is ours: the rename replaces only our empty file.
-    if fs::rename(path, &target).is_ok() {
-        return Ok(target);
-    }
-    match copy_verified(path, &target, expected) {
-        Ok(()) => {
-            if fs::remove_file(path).is_err() {
-                // Two copies would be filed again later: keep the original.
-                let _ = fs::remove_file(&target);
-                return Err(FileError::Io);
-            }
-            Ok(target)
-        }
-        Err(e) => {
-            let _ = fs::remove_file(&target);
-            Err(e)
-        }
-    }
-}
-
-/// Creates `<inbox>/Filed` and `dir` (its month folder) without following
-/// a link: a `Filed` or month folder that is a link (or not a folder) is
-/// refused, so a filed bill never lands outside the inbox.
-fn make_filed_dir(inbox: &Path, dir: &Path) -> Result<(), FileError> {
-    for d in [inbox.join(FILED_DIR), dir.to_path_buf()] {
-        match fs::symlink_metadata(&d) {
-            Ok(meta) if meta.file_type().is_dir() => {}
-            Ok(_) => return Err(FileError::NotAFile),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => match fs::create_dir(&d) {
-                Ok(()) => {}
-                // Made by someone else just now: check it again.
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                    let meta = fs::symlink_metadata(&d).map_err(|_| FileError::Io)?;
-                    if !meta.file_type().is_dir() {
-                        return Err(FileError::NotAFile);
-                    }
-                }
-                Err(_) => return Err(FileError::Io),
-            },
-            Err(_) => return Err(FileError::Io),
-        }
-    }
-    Ok(())
-}
-
-fn copy_verified(from: &Path, to: &Path, expected: &str) -> Result<(), FileError> {
-    let mut src = fs::File::open(from).map_err(|_| FileError::Io)?;
-    let mut dst = fs::OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(to)
-        .map_err(|_| FileError::Io)?;
-    io::copy(&mut src, &mut dst).map_err(|_| FileError::Io)?;
-    dst.flush().map_err(|_| FileError::Io)?;
-    dst.sync_all().map_err(|_| FileError::Io)?;
-    drop(dst);
-    if file_sha256(to)? == expected {
-        Ok(())
-    } else {
-        Err(FileError::Changed)
-    }
+    let parts = [FILED_DIR.to_string(), format!("{year:04}-{month:02}")];
+    super::handled::move_into(inbox, path, expected, &parts).map_err(|f| f.error)
 }
 
 #[cfg(test)]
@@ -686,22 +571,5 @@ mod tests {
             Err(FileError::NotAFile)
         );
         assert!(p.exists());
-    }
-
-    #[test]
-    fn a_copy_is_checked_before_the_original_goes() {
-        let dir = tempfile::tempdir().expect("tmp");
-        let p = write(dir.path(), "r.pdf", PDF);
-        let to = dir.path().join("copy.pdf");
-        fs::write(&to, b"").expect("reserve");
-        assert_eq!(copy_verified(&p, &to, &sha256_hex(PDF)), Ok(()));
-        assert_eq!(fs::read(&to).expect("read"), PDF);
-        assert_eq!(
-            copy_verified(&p, &to, &sha256_hex(b"x")),
-            Err(FileError::Changed)
-        );
-        assert_eq!(numbered("a.b.pdf", 2), "a.b (2).pdf");
-        assert_eq!(numbered(".pdf", 2), ".pdf (2)");
-        assert_eq!(numbered("a.pdf", 1), "a.pdf");
     }
 }
