@@ -2,6 +2,7 @@
 
 Older STATE.md log entries, newest first. Read only when you need the history of a past phase; `STATE.md` keeps the current board and the last few entries.
 
+- 2026-10-24 — Engine pin c217bfd → 7b267e48 (engine main with PRs #168 U-75/U-76, #169 U-80/U-81, #170 U-47) on `chore/engine-pin-7b267e48`. Live capabilities: `tag-number-v1`, `dashboard-exact-v1`, `ledger-guards-v1`, `merge-closing-date-v1`. Engine SEA rebuilt; api-spec fixtures refreshed; live contract suite 157 passed with `CL_API_REQUIRE_CAPS=tag-number-v1,dashboard-exact-v1` (`tags::numbers_u75`, `tags::number_archive_round_trip_u75`, `home::exact_strings_u76`, `tags::line_tag_merge_u41` now run for real). Contact and tag merges use the closing-date password flow (U-47, Q-231; new `merges::closed_period_needs_the_password_u47`); tag merge no longer limited to header-only tags (Q-P11t). The engine now accepts several named A/R or A/P lines in one journal entry (`JE_AR_AP_ONE_PER_ENTRY` gone); the client keeps Q-206 locally. Agents: rust-implementer/opus.
 - 2026-10-24 — P16 complete on `phase/P16-home-workspace`; PR with auto-merge. Work moved to a new Windows 11 dev machine (toolchain reinstalled; PowerShell added to the agent definitions). Shipped:
   - Steps 0–0h:
     - "Enter moves between fields" preference (both modes on every form, Bulk Entry and list forms).

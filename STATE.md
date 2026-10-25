@@ -1,7 +1,7 @@
 # STATE.md — ClientLedger
 
-**Current phase:** P17 — Enter Bill, vendor credits, receipt inbox, attachment viewer (in progress on `phase/P17-enter-bill`); then ADD-01 A01–A04; then P18
-**Status:** Checkpoint PR-1 fixes on `fix/PR-1`; PR open with auto-merge. M1 complete (summary below). Engine pin bumped to `f3ce33fd` (engine PRs #171–#174) on `chore/engine-pin-main`
+**Current phase:** A01 — Mapped intake folders, a setting of each company (ADD-01; Next, after the P17 PR merges); then A02–A04; then P18
+**Status:** P17 built on `phase/P17-enter-bill`; PR open with auto-merge. M1 complete (summary below). Engine PRs #168–#176 all merged and pinned (b483c02e)
 **Engine commit:** `b483c02e` (`main`, pinned 2026-10-25 after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
 **Last updated:** 2026-10-25
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
@@ -29,7 +29,7 @@
 | P15A | Bulk Entry | M | Done 2026-10-21 |
 | P16 | Home workspace | L | Done 2026-10-24 |
 | PR-1 | Checkpoint: core ledger process review | — | Done 2026-10-25 (fixes on `fix/PR-1`; U-18 and U-82 engine PRs open) |
-| P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | In progress (`phase/P17-enter-bill`) |
+| P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | Done 2026-10-25 |
 | P18 | Pay Bills (checks) | M | |
 | P19 | Form printing | L | |
 | P20 | Create Invoice | M | |
@@ -59,7 +59,7 @@
 
 | Phase | Title | Tier | Status |
 | --- | --- | --- | --- |
-| A01 | Mapped intake folders, a setting of each company | M | Next after P17 |
+| A01 | Mapped intake folders, a setting of each company | M | Next |
 | A02 | Pop-out document viewer | M | |
 | A03 | Local document reading engine | H | |
 | A04 | Review queue and compare tools | M | |
@@ -114,9 +114,9 @@ Screens or actions that link to a later phase. Remove each line when its phase l
 
 - P34/P08 — restore UI must call `Cluster::restore(src, store, allow_unregistered)` with `allow_unregistered = false` by default and set it to `true` only after an explicit owner confirmation that the file came from a trusted source (Q-P03h).
 
-- P06 shell placeholders (Q-P06g): every menu, rail and palette command whose screen is built later opens a placeholder tab. The phase that builds the screen removes its entry: P11 Item List / Tags / Clients & Jobs / Vendors, P12 Open Register, P13 Write Check, P14 Make Deposit / Transfer Funds / Sales Receipt / Record Card Charge, P17 Enter Bill, P18 Pay Bills, P20 Create Invoice, P21 Receive Payment, P22 Credit Memo or Refund / Statements, P25 Import Bank File, P26 Bank Feed, P27 Reconcile, P28 Reports / Profit & Loss / Balance Sheet / Trial Balance, P29 Set Closing Date / Users and Permissions / Audit Trail, P30 Import Payroll, P32 Send to My Accountant, P38 bundled help (F1 says "not available yet").
+- P06 shell placeholders (Q-P06g): every menu, rail and palette command whose screen is built later opens a placeholder tab. The phase that builds the screen removes its entry: P11 Item List / Tags / Clients & Jobs / Vendors, P12 Open Register, P13 Write Check, P14 Make Deposit / Transfer Funds / Sales Receipt / Record Card Charge, P18 Pay Bills, P20 Create Invoice, P21 Receive Payment, P22 Credit Memo or Refund / Statements, P25 Import Bank File, P26 Bank Feed, P27 Reconcile, P28 Reports / Profit & Loss / Balance Sheet / Trial Balance, P29 Set Closing Date / Users and Permissions / Audit Trail, P30 Import Payroll, P32 Send to My Accountant, P38 bundled help (F1 says "not available yet").
 - P06 native macOS menu bar (Q-70, muda) is deferred (Q-P06b): in-window menu on every platform until macOS packaging.
-- P16 Home lane actions open "arrives in Pxx" placeholders (Q-P16k): P17 Enter Bill, P18 Pay Bills, P20 Create Invoice / Sales Receipt, P21 Receive Payment, P26 Review Bank Feed, P27 Reconcile, P28 Profit & Loss, P29 Set Closing Date, P32 Send to My Accountant. Each phase wires its lane action.
+- P16 Home lane actions open "arrives in Pxx" placeholders (Q-P16k): P18 Pay Bills, P20 Create Invoice / Sales Receipt, P21 Receive Payment, P26 Review Bank Feed, P27 Reconcile, P28 Profit & Loss, P29 Set Closing Date, P32 Send to My Accountant. Each phase wires its lane action.
 - P16 Home chart: a month click opens the Profit & Loss placeholder; P28 must open the report for that month's range (Q-P16h).
 - P16 Home "Bank file" balance column — U-77 / P25 (Q-P16d); "ready to accept" count — P26 (Q-P16f); "invoices more than 60 days past due" — P28 aging (Q-P16g); "Send to My Accountant · last sent" — P32 (Q-P16i).
 - P16 Needs attention placeholder line for to-dos, reorder alerts and the weekly health check — U-37, U-78, U-12 (Q-P16e).
@@ -210,6 +210,22 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 7. U-77 bank-file balance and U-78 reorder alerts proposed; U-37 and U-12 amended for Home.
 8. Home's Refresh issues many engine reads per data-bus event (one per reconciled account batch plus lanes); measure before P33 LAN mode.
 
+## Follow-ups from P17
+
+1. Scanned (image-only) PDFs can't be read with AI: no permissive rasterizer, poppler is GPL. The app says so (Q-P17o). ADD-01 A03 (local OCR) is the fix.
+2. "Add as a new vendor?" after a reading opens the vendor list, not a prefilled vendor form (Q-P17u).
+3. `OpenRecord` on a bill-payment row opens Enter Bill empty; Pay Bills (P18) owns bill payments.
+4. No automatic backup is taken before the engine runs its database migrations on an engine upgrade (non-negotiable 9). Build it with the upgrade flow (P36) or sooner; no release before then.
+5. Engine download tokens can be replayed for 60 seconds (stateless signed tokens; U-90 review L1). Revisit before P33 LAN mode.
+6. Bill templates: the engine has no `bill` template kind (Save as Template disabled, Q-P17a). Propose a U-row when bill templates are wanted.
+7. PDFium renders in the desktop process on a worker thread (P17 plan R3); a sandboxed render helper through cl-host is a P37 follow-up. PDFium and its bundled libraries (FreeType under FTL) go into the P39 licensing review with Q-P03e.
+8. Statement match reads at most 20 × 50 bills/credits and 10 × 100 payments and says so when capped; measure on large vendors.
+9. Walkthrough harness: a light run that failed while zoomed left the dark run's window at 2× (fixed in P17: zoom reset before each theme). Watch for other state carried between themes.
+10. Dev machine: Smart App Control is off (2026-10-25); Bitdefender is the active antivirus, so build exclusions belong in Bitdefender. The user-level Cargo config uses sccache, rust-lld and line-tables-only debug info (not in the repo).
+11. Two engine test files also fail locally on Windows on engine main (portal bill-captures email timing, portal tax-estimate options); not caused by ClientLedger PRs.
+12. Write Check, Card Charge and Personal Funds tab their bottom buttons in reverse screen order, and Write Check's Esc leaves nothing focused after putting a field back (fixed on Enter Bill in P17; same fix to apply there).
+13. The shell's "Navigation" button overlaps the tab strip at 200% zoom in a 960×640 window (older shell code; zoom steps skip the tab strip as forms-zoom does).
+
 ## Follow-ups from checkpoint PR-1
 
 1. The unknown-save block lasts for the app session; an app restart forgets it (Q-PR1a). U-18 closes this.
@@ -238,6 +254,22 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-25 — P17 complete on `phase/P17-enter-bill`; PR with auto-merge. Shipped:
+  - Enter Bill / vendor credit (one form): terms with discount and due dates from the engine (owner overrides kept), expense and item lines (qty × cost exact), Customer / Job, Billable, tags, Bill received, prefill and the vendor's default account, attachments with preview, Prev/Next, void and delete with the closing-date password, the unknown-save rule (14th posting form) and keyed A/P routes (`idempotency-ap-v1`).
+  - PDF and image viewer (PDFium via `pdfium-render`, fetched and checksum-pinned by `xtask pdfium-fetch`; worker thread, decode limits) and a full-size document tab.
+  - Receipt inbox: polls the chosen folder, waits for stable files, never reads cloud placeholders, moves a file to `Filed/` only after a saved record holds it, never overwrites or deletes.
+  - Read with AI: only on the owner's click, every read value needs Accept, text PDFs and images (scanned PDFs: "not available yet"); ghost accounts on lines.
+  - Vendor panel (open balance from the engine, open bills, unused credits, recent bills) and the duplicate bill-number warning (18 months; Save anyway / Go back).
+  - Vendor statement match (paste lines; matched / missing each side / needs your choice; Create bill or credit prefilled).
+  - Register guard: Void and Delete on bills, credits and bill payments use their own routes.
+  - Engine PRs #168–#176 merged (U-18, U-47, U-75/U-76, U-80–U-87, U-89–U-91; migrations 0228–0231), each security-reviewed with fixes; pin b483c02e. Found and fixed on the way: vendor summary counted voided bills, DST-early due dates (bills and invoices), cent tolerances in A/P, A/P permission and company-scope gaps, attachments not scoped by company, the engine executable not reading PDFs, and restores failing for companies with checks from several bank accounts (U-91).
+  Acceptance (phases/M2-money-in-out.md P17):
+  - [x] A bill with expense + item lines posts to A/P and the vendor balance updates (live `bills::item_lines_u85`: A/P credit and vendor-summary change both exactly 1481.0000).
+  - [x] A duplicate bill number within 18 months warns (model tests + `bill.yaml` warning and Save anyway / Go back).
+  - [x] AI off or offline leaves manual entry unaffected (`bill.yaml` section 10: no button, nothing sent, manual save; live `reading_refused_while_ai_is_off_live`).
+  - [x] Screen matches its mockup: `ui-check bill --compare` reviewed by ui-verifier, must-fix items fixed, deviations Q-P17a–Q-P17v.
+  Reviews: process review of the plan (3 blocking items folded into PR-A), fresh-eyes review (AC1 live test missing + 3 should-fix, fixed), ui-verifier (4 must-fix, fixed, plus a harness zoom bug). Live contract suite 181/181 three times on b483c02e; scenarios bill (incl. 200%), receipt_inbox, statement_match, document-view, register, write_check pass light and dark. Help pages: enter-bill, receipt-inbox, statement-match, document-viewer. ADD-01 merged into the plan during the phase (A01–A04 next).
+  Agents: scout/opus, architect/opus, process-review/opus, impl/opus (WP0–WP8, integration, fix passes), engine-impl/opus ×10, security-review/opus ×6, review/opus, ui-verifier/opus, docs-writer/sonnet.
 - 2026-10-25 — **ADD-01 added during the build** (between P17 and P26): mapped intake folders as a per-company setting, local document reading with no internet or AI required, review queue with compare tools, pop-out document viewer, Bank Feed matching of receipts. Phases A01–A05, decisions Q-279–Q-293, engine U-92 and U-93, checkpoint PR-A1. Completed phases unchanged; migration for P09/P17 behavior is in the addendum. IDs renumbered on apply (the bundle's Q-230–Q-244 and U-14/U-15 were taken); models per Q-294 (opus, stepping up when needed).
 - 2026-10-25 — Engine pin 7b267e48 → f3ce33fd (engine main with PRs #171 U-18, #172 U-82, #173 U-83–U-87, #174 U-89) on `chore/engine-pin-main`. Live capabilities: `idempotency-v1`, `run-due-filter-v1`, `ap-closing-v1`, `ap-edit-v1`, `bill-lines-v1`, `bill-terms-v1`, `bill-received-v1`, `idempotency-ap-v1`, `bill-ocr-v2`. Engine SEA rebuilt; api-spec fixtures refreshed; the engine's keyed routes are recorded (`idempotency_v1_routes.txt`, new `idempotency_ap_v1_routes.txt`); main keys only the 20 `idempotency-v1` routes, P17 adds the A/P ones gated on `idempotency-ap-v1`. Live contract suite 162 passed with `CL_API_REQUIRE_CAPS=idempotency-v1,run-due-filter-v1,tag-number-v1,dashboard-exact-v1,merge-closing-date-v1` (the U-18 tests run for real), offline binary 6 passed (`restart::engine_dies_after_commit_is_reconciled_as_committed` now expects the keyed re-send the engine replays). Catch-up questions hold only their own templates (U-82, Q-PR1d; new `run_due::filter_holds_only_the_asked_template_u82`). An archive made on 7b267e48 restores on f3ce33fd (verified by hand: content and trial balance equal, bills `billReceived: true`). Agents: rust-implementer/opus.
 - 2026-10-25 — Checkpoint PR-1 (core ledger process review, process-reviewer/opus xhigh) complete on `fix/PR-1`.
@@ -248,4 +280,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   - Q-206 changed (owner 2026-10-25): any number of named A/R or A/P lines per journal entry, following engine 33a973fa.
   - Decisions Q-PR1a–g. Live contract suite 158/158 on 7b267e48.
   - Agents: process-reviewer/opus (xhigh), architect/opus (U-18), engine-impl/opus ×5, security-review/opus, rust-impl/opus ×4, review/opus.
-- 2026-10-24 — Engine pin c217bfd → 7b267e48 (engine main with PRs #168 U-75/U-76, #169 U-80/U-81, #170 U-47) on `chore/engine-pin-7b267e48`. Live capabilities: `tag-number-v1`, `dashboard-exact-v1`, `ledger-guards-v1`, `merge-closing-date-v1`. Engine SEA rebuilt; api-spec fixtures refreshed; live contract suite 157 passed with `CL_API_REQUIRE_CAPS=tag-number-v1,dashboard-exact-v1` (`tags::numbers_u75`, `tags::number_archive_round_trip_u75`, `home::exact_strings_u76`, `tags::line_tag_merge_u41` now run for real). Contact and tag merges use the closing-date password flow (U-47, Q-231; new `merges::closed_period_needs_the_password_u47`); tag merge no longer limited to header-only tags (Q-P11t). The engine now accepts several named A/R or A/P lines in one journal entry (`JE_AR_AP_ONE_PER_ENTRY` gone); the client keeps Q-206 locally. Agents: rust-implementer/opus.
