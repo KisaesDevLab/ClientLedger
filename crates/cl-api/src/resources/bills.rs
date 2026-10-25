@@ -241,13 +241,24 @@ pub struct BillListQuery {
     pub end: Option<CalendarDate>,
     /// Sort.
     pub sort: Option<(BillSort, SortDir)>,
+    /// Only bills with something still owed (`billStatus=unpaid,partial,
+    /// overdue`), received or not: unlike `/bills/payable`, which leaves
+    /// not-received bills out (process review S4). Void rows still come;
+    /// keep `status == Posted`.
+    pub open_only: bool,
 }
+
+/// The bill states that still owe something.
+const OPEN_STATUSES: &str = "unpaid,partial,overdue";
 
 impl BillListQuery {
     pub(crate) fn pairs(&self) -> Vec<(String, String)> {
         let mut q = Query::default();
         if let Some(v) = self.vendor {
             q.put("contactId", v.to_string());
+        }
+        if self.open_only {
+            q.put("billStatus", OPEN_STATUSES.to_string());
         }
         q.opt_str("search", self.search.as_deref());
         if let Some(d) = self.start {

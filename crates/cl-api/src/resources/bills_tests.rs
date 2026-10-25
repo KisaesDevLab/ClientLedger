@@ -90,6 +90,27 @@ async fn body_of(server: &MockServer, m: &str, n: usize) -> Value {
     serde_json::from_slice(&requests(server, m).await[n].body).expect("json")
 }
 
+#[test]
+fn open_only_asks_for_the_states_that_still_owe() {
+    // P17 WP8 (review S4): open bills from `/bills` with a status filter,
+    // received or not, never from `/bills/payable`.
+    let q = BillListQuery {
+        vendor: Some(vendor()),
+        open_only: true,
+        sort: Some((BillSort::DueDate, SortDir::Asc)),
+        ..BillListQuery::default()
+    };
+    let pairs = q.pairs();
+    assert!(pairs.contains(&("billStatus".into(), "unpaid,partial,overdue".into())));
+    assert!(pairs.contains(&("sortBy".into(), "dueDate".into())));
+    assert!(
+        !BillListQuery::default()
+            .pairs()
+            .iter()
+            .any(|(k, _)| k == "billStatus")
+    );
+}
+
 #[tokio::test]
 async fn summary_and_payable_read_exact_strings() {
     let server = MockServer::start().await;
@@ -797,6 +818,7 @@ async fn list_terms_and_attach_draft() {
         start: CalendarDate::from_ymd(2025, 5, 3).ok(),
         end: CalendarDate::from_ymd(2028, 5, 3).ok(),
         sort: Some((BillSort::Date, SortDir::Desc)),
+        open_only: false,
     };
     let page = s
         .bills()
