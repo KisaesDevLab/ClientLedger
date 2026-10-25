@@ -202,7 +202,7 @@ mod tests {
         }
         assert!(md.contains("| `Ctrl+D` | Copy Down | `grid.copy_down` |"));
         assert!(md.contains("| `Ctrl+A` | Select All Rows | `grid.select_all` |"));
-        assert!(md.contains("| `Ctrl+Shift+D` | Show or Hide Details | `window.toggle_details` |"));
+        assert!(md.contains("| `F9` | Show or Hide Details | `window.toggle_details` |"));
         assert!(md.contains("Enter moves between fields"));
         assert!(md.contains("| `Ctrl+Enter` | Save & New |"));
         let sheet = cheatsheet_md();

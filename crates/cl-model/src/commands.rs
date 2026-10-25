@@ -347,7 +347,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("window.prev", "Previous Window", Some(Menu::Window), 1, key(Mods::CMD_SHIFT, Key::Tab), Scope::Global),
     cmd("window.pop_out", "Move Window to Its Own Window", Some(Menu::Window), 1, ctrl_shift('O'), Scope::Window),
     // Collapse or expand a screen's detail panel (P16, Q-266)
-    cmd("window.toggle_details", "Show or Hide Details", Some(Menu::Window), 1, ctrl_shift('D'), Scope::Window),
+    cmd("window.toggle_details", "Show or Hide Details", Some(Menu::Window), 1, key(Mods::NONE, Key::F(9)), Scope::Window),
     cmd("window.zoom_in", "Zoom In", Some(Menu::Window), 2, key(Mods::CMD, Key::Equals), Scope::Global),
     cmd("window.zoom_out", "Zoom Out", Some(Menu::Window), 2, key(Mods::CMD, Key::Minus), Scope::Global),
     cmd("window.zoom_reset", "Actual Size", Some(Menu::Window), 2, key(Mods::CMD, Key::Digit(0)), Scope::Global),
@@ -357,6 +357,8 @@ pub const COMMANDS: &[Command] = &[
     cmd("help.current", "Help for This Screen", Some(Menu::Help), 0, key(Mods::NONE, Key::F(1)), Scope::Global),
     cmd("help.shortcuts", "Keyboard Shortcuts", Some(Menu::Help), 0, key(Mods::CMD, Key::Slash), Scope::Global),
     cmd("help.privacy", "Privacy Notice", Some(Menu::Help), 1, None, Scope::Global),
+    // Opens the owner's Ko-fi page only when chosen (Q-P16a, Q-278)
+    cmd("help.kofi", "Support ClientLedger on Ko-fi", Some(Menu::Help), 2, None, Scope::Global),
     cmd("help.about", "About ClientLedger", Some(Menu::Help), 2, None, Scope::Global),
 ];
 
@@ -677,7 +679,11 @@ mod tests {
         assert_eq!(details.label, "Show or Hide Details");
         assert_eq!(
             (details.menu, details.shortcut, details.scope),
-            (Some(Menu::Window), ctrl_shift('D'), Scope::Window)
+            (
+                Some(Menu::Window),
+                Some(Shortcut::new(Mods::NONE, Key::F(9))),
+                Scope::Window
+            )
         );
         assert!(!details.opens && details.palette);
         for (id, label, shortcut, scope) in [
@@ -716,11 +722,26 @@ mod tests {
         let km = Keymap::new(COMMANDS).unwrap();
         for focus in [Scope::Window, Scope::Form, Scope::Grid] {
             assert_eq!(
+                km.resolve(focus, Shortcut::new(Mods::NONE, Key::F(9)))
+                    .map(CommandId::as_str),
+                Some("window.toggle_details")
+            );
+            // Ctrl+Shift+D is free again (Q-P16n: F9).
+            assert_ne!(
                 km.resolve(focus, Shortcut::new(Mods::CMD_SHIFT, Key::Letter('D')))
                     .map(CommandId::as_str),
                 Some("window.toggle_details")
             );
         }
+        // Ko-fi in the Help menu too (Q-P16a): no shortcut, opens nothing.
+        let kofi = find("help.kofi").unwrap();
+        assert_eq!(kofi.label, "Support ClientLedger on Ko-fi");
+        assert_eq!(
+            (kofi.menu, kofi.shortcut, kofi.scope),
+            (Some(Menu::Help), None, Scope::Global)
+        );
+        assert!(!kofi.opens && kofi.palette && kofi.arrives.is_none());
+        assert!(in_menu(Menu::Help).any(|c| c.id.as_str() == "help.kofi"));
     }
 
     #[test]
