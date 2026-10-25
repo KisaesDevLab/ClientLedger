@@ -578,7 +578,7 @@ impl WriteCheckScreen {
                     tokens,
                     &t_with(
                         "check.attach.saved_to",
-                        &[("path", &p.display().to_string())],
+                        &[("path", &crate::screens::document_view::shown_path(p))],
                     ),
                 );
             }

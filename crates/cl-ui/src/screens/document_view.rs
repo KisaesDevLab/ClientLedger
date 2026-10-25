@@ -59,6 +59,28 @@ fn copy_dir() -> PathBuf {
         .unwrap_or_else(std::env::temp_dir)
 }
 
+/// `path` as shown on screen: the owner's home folder (which carries the
+/// sign-in name) reads `~`, so no user name is on screen or in a
+/// screenshot.
+#[must_use]
+pub(crate) fn shown_path(path: &Path) -> String {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+    shown_path_in(path, home.as_deref().map(Path::new))
+}
+
+/// [`shown_path`] with the home folder given.
+fn shown_path_in(path: &Path, home: Option<&Path>) -> String {
+    let sep = std::path::MAIN_SEPARATOR;
+    match home
+        .filter(|h| !h.as_os_str().is_empty())
+        .map(|h| path.strip_prefix(h))
+    {
+        Some(Ok(rest)) if rest.as_os_str().is_empty() => "~".to_string(),
+        Some(Ok(rest)) => format!("~{sep}{}", rest.display()),
+        _ => path.display().to_string(),
+    }
+}
+
 /// Writes `bytes` (a PDF, PNG or JPEG, checked again here) into `dir` as a
 /// new file named "Document preview" with the detected type's extension,
 /// never overwriting (` (2)`, ` (3)`, … instead). The owner's file name is
@@ -114,10 +136,7 @@ impl Screen for DocumentViewScreen {
                 if let Some(saved) = &self.saved {
                     let (text, color) = match saved {
                         Ok(p) => (
-                            t_with(
-                                "check.attach.saved_to",
-                                &[("path", &p.display().to_string())],
-                            ),
+                            t_with("check.attach.saved_to", &[("path", &shown_path(p))]),
                             tokens.text_secondary,
                         ),
                         Err(key) => (t(key), tokens.warn_text),
@@ -175,6 +194,25 @@ impl Screen for DocumentViewScreen {
 mod tests {
     use super::*;
     use crate::widgets::pdf_viewer::DocSource;
+
+    /// The home folder (with the sign-in name) reads `~`; other paths are
+    /// shown as they are.
+    #[test]
+    fn paths_under_home_hide_the_user_name() {
+        let home = std::env::temp_dir().join("home-of-someone");
+        let file = home.join("Downloads").join("Document preview.pdf");
+        let shown = shown_path_in(&file, Some(&home));
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(shown, format!("~{sep}Downloads{sep}Document preview.pdf"));
+        assert!(!shown.contains("home-of-someone"));
+        assert_eq!(shown_path_in(&home, Some(&home)), "~");
+        let other = std::env::temp_dir().join("elsewhere").join("a.pdf");
+        assert_eq!(
+            shown_path_in(&other, Some(&home)),
+            other.display().to_string()
+        );
+        assert_eq!(shown_path_in(&file, None), file.display().to_string());
+    }
 
     #[test]
     fn takes_a_document_and_nothing_else() {
