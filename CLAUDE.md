@@ -12,7 +12,7 @@ ClientLedger is a free, open-source (MIT), fully offline, native, cross-platform
 Read these before every session, in order. Read only what your task needs (token rules, owner 2026-10-18):
 
 1. `STATE.md` — the phase board, blocked items, follow-ups and the last few log entries (older history: `docs/history/STATE-log.md`, only when needed)
-2. `PHASES.md` (index) and the milestone file in `phases/` that contains the phase you are working on — read only that phase in detail
+2. `PHASES.md` (index) and the milestone file in `phases/` that contains the phase you are working on — read only that phase in detail — plus every **Active** addendum in `addenda/` listed in STATE.md (its scheduling rule and its notes for the phase you're on)
 3. `QUESTIONS.md` — cross-cutting decisions and the current phase's open questions. Phase decisions of completed phases live in `docs/history/phase-decisions.md`: **search for the IDs your phase cites; never read the archive whole**
 4. `docs/ARCHITECTURE.md`, `docs/DESIGN.md` — only the sections the phase touches; for any screen, also `docs/design/README.md` and that screen's mockup
 5. `UPSTREAM.md` — only when the phase has engine work, and only the U-rows it names
@@ -48,7 +48,8 @@ Read these before every session, in order. Read only what your task needs (token
 5. When the phase is done: all acceptance criteria met, `cargo xtask ci` passes, screens verified through the control channel (from P07 on), docs updated. Then update `STATE.md` (mark done, set next phase, add a log entry with date and summary), commit, push, and open a pull request titled `Pxx — <phase title>` with the acceptance checklist and screenshots (Q-113).
 6. Enable auto-merge on the PR; it merges when required CI is green (Q-115). Wait for the merge, update local `main`, and start the next phase. If CI fails, fix it on the same branch.
 7. At the end of each milestone, add a milestone summary to `STATE.md` (what shipped, where screenshots are, questions added, upstream items pending) for the owner's asynchronous review — then continue.
-8. Never mark a phase done with failing tests, skipped criteria, `todo!()` in shipped paths, or `#[ignore]`d tests that were not ignored before.
+8. **Addenda.** Work added during the build lives in `addenda/ADD-xx-*.md`, never as edits to phases already built. Follow each Active addendum's scheduling rule for when its A-phases run, apply its "Notes for later phases" when those phases start, and migrate shipped behavior exactly as its table says. Branches `phase/Axx-…`, PRs `Axx — …`.
+9. Never mark a phase done with failing tests, skipped criteria, `todo!()` in shipped paths, or `#[ignore]`d tests that were not ignored before.
 
 ### Agents and models
 
@@ -90,6 +91,7 @@ Many screens depend on engine features (estimates, sales tax, inventory, reconci
 ClientLedger/
 ├── CLAUDE.md  PHASES.md  STATE.md  QUESTIONS.md  UPSTREAM.md
 ├── phases/                   # detailed phase files, one per milestone (M0–M7)
+├── addenda/                  # work added during the build (ADD-xx), never edits to built phases
 ├── .claude/
 │   ├── agents/               # subagent definitions (models, tools, effort)
 │   └── settings.json         # max 4 concurrent subagents
@@ -114,9 +116,11 @@ ClientLedger/
 │   ├── cl-ui/                # egui app: shell, screens, theme, fonts
 │   ├── cl-automation/        # control channel, widget inspection, screenshot, tool table
 │   ├── cl-print/             # PDF generation for checks/forms/reports + OS print hand-off
+│   ├── cl-docread/           # local bill and receipt reading (A03)
 │   └── cl-lan/               # LAN host/client mode: discovery, TLS pinning, sessions
 ├── apps/
 │   ├── clientledger/         # desktop binary (eframe)
+│   ├── clientledger-docread/ # sandboxed reading worker started by cl-host (A03)
 │   └── clientledger-cli/     # headless CLI: company ops, import, automation `ui` commands
 ├── xtask/                    # build helpers: fetch pg binaries, build engine exe, package
 ├── assets/                   # fonts (IBM Plex, OFL), icons (original), sample company data
@@ -134,7 +138,7 @@ ClientLedger/
 Crate layering rules (enforced by a test in `xtask` from P00):
 
 - `cl-core` depends on nothing internal.
-- `cl-model`, `cl-api`, `cl-pg`, `cl-settings`, `cl-import` may depend only on `cl-core`. `cl-api` may additionally have dev-dependencies on `cl-host` and `cl-pg`, for its contract harness only.
+- `cl-model`, `cl-api`, `cl-pg`, `cl-settings`, `cl-import`, `cl-docread` may depend only on `cl-core`. `cl-api` may additionally have dev-dependencies on `cl-host` and `cl-pg`, for its contract harness only.
 - `cl-grid` depends on `cl-core`, `cl-model`, egui.
 - `cl-ui` may depend on everything except `apps/*`.
 - Nothing below `cl-ui` depends on egui except `cl-grid`.

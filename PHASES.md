@@ -66,6 +66,12 @@ Tier and agent routing: docs/AGENTS.md. Size: S ≈ under a day of agent work, M
 | P39 | Beta release (STOP) | L | S | P35–P38 |
 | P40–P49 | Post-beta | — | — | see M7 |
 
+## Addenda (added during the build)
+
+| Addendum | File | Phases | Status | When it runs |
+| --- | --- | --- | --- | --- |
+| ADD-01 Document intake, local reading, pop-out viewer | [addenda/ADD-01-document-intake.md](addenda/ADD-01-document-intake.md) | A01–A05 | Active, part of the beta | A01–A04 right after P17 merges, before P18; A05 right after P26; checkpoint PR-A1 after A05 |
+
 ## Critical path and parallel lanes
 
 Critical path: P00 → P01 → P02 → P04 → P05 → P06 → P07 → P10 → P11 → P12 → P13 → P17 → P18 → P19 → P20 → P21 → P22 → P28 → P31 → P32 → P33 → P34 → P35 → P36 → P39.
@@ -95,6 +101,7 @@ Phases that may run in parallel with the critical path (rules in docs/AGENTS.md)
 | PR-8 | after P33 | LAN multi-user |
 | PR-9 | after P36 | upgrades and migrations |
 | PR-10 | in P39 | whole-app owner journeys |
+| PR-A1 | after A05 | document to books (ADD-01; opus, xhigh) |
 
 ## Phase template (every detailed phase follows it)
 
