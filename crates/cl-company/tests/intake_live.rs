@@ -228,6 +228,10 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     let has_intake = client
         .capabilities()
         .has(cl_api::Capabilities::INTAKE_SETTINGS);
+    assert!(
+        has_intake || std::env::var("CL_API_REQUIRE_CAPS").as_deref() != Ok("1"),
+        "PENDING(U-93): CL_API_REQUIRE_CAPS=1 but the engine has no intake-settings-v1"
+    );
     eprintln!(
         "PENDING(U-93): backup/restore keeps intake folders and local confirmations \
          (needs intake-settings-v1; the engine has it: {has_intake})"
