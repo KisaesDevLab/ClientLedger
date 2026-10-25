@@ -104,6 +104,10 @@ Derive from light with the same roles; starting values (tune for 4.5:1 text cont
 
 Sample data in screenshots and the seeded sample company: "Ozark Ridge Landscaping LLC" (synthetic).
 
+## Document viewer (ADD-01)
+
+Docked to the right of a form by default (as in the Enter Bill mockup), or popped out to its own window for a second monitor. Toolbar: page thumbnails, previous/next page, zoom (fit page, fit width, %), rotate, highlights on/off, check list, **Pop out / Dock**. Highlight colors use tokens: `accent` outline for confirmed fields, `warn` for "check this", dashed `border.strong` for not found. The popped-out window has the company color stripe and the form's name in its title, so it's clear which form it belongs to.
+
 ---
 
 ## Keyboard map (initial)
@@ -135,6 +139,8 @@ Global
 | Ctrl+L | Open list for the focused field |
 | F1 | Help for current screen |
 | Ctrl+/ | Shortcut overlay for current screen |
+| Ctrl+Shift+D | Pop out / dock the document viewer |
+| F6 | Move focus between a form and its document viewer |
 
 Note: context overrides (Ctrl+D, Ctrl+P) are resolved by the keymap's scope rules (form > window > global). Keep the keymap the single registry; menus and tooltips read from it.
 

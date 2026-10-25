@@ -2,6 +2,55 @@
 
 Older STATE.md log entries, newest first. Read only when you need the history of a past phase; `STATE.md` keeps the current board and the last few entries.
 
+- 2026-10-24 — P16 complete on `phase/P16-home-workspace`; PR with auto-merge. Work moved to a new Windows 11 dev machine (toolchain reinstalled; PowerShell added to the agent definitions). Shipped:
+  - Steps 0–0h:
+    - "Enter moves between fields" preference (both modes on every form, Bulk Entry and list forms).
+    - Fixed top and bottom bars on every screen (`layout::FixedFrame`).
+    - Collapsible detail panel on Customers & Jobs and Vendors.
+    - Condensed entry rows on wide screens.
+    - Tag numbers ("10 · Lake Area", sorted like account numbers).
+    - Bulk Entry Copy down, column chooser, multi-row selection with Set and Delete actions, and a shared cl-grid context menu.
+  - Steps 1–6, the Home workspace:
+    - Four lanes from the command registry.
+    - Account balances.
+    - Needs attention: bills, payroll imports, bank items, reconciliations, backup reminder.
+    - Profit-and-loss chart drawn in-house.
+    - Setup checklist.
+    - Ko-fi support button (Q-278).
+    - Rail counts from engine reads.
+  - Control channel `hover` and `scroll` steps.
+  - Engine and CI:
+    - Engine PR #168 (U-75 `tag-number-v1`, U-76 `dashboard-exact-v1`, migration 0228) is open for the owner; its contract tests are PENDING.
+    - CI fixes merged first: PR #32 (output drain race, cargo-deny advisories) and PR #33 (refused-connect retry race in cl-api).
+  - Reviews: two fresh-eyes reviews (part 1 Bulk Entry and forms; part 2 Home) and a ui-verifier pass. Each was followed by a fresh fix pass, among them:
+    - voided bills counted on Home
+    - Ctrl+A never reaching the grid
+    - Copy down from the blank row
+    - `number_cmp` not being a total order (proptest added)
+    - journal entries merging
+    - a flaky scroll scenario
+  - The card-balance sign on Home now matches Q-241.
+  - Help pages: home, enter-key, tag-numbers, bulk-entry.
+  - Decisions Q-P16a to Q-P16y; U-77, U-78 and U-79 proposed.
+
+  Acceptance (phases/M1-core-ledger.md P16):
+  - [x] Enter-moves option in both modes (unit tests + `forms-enter.yaml`).
+  - [x] Headers stay visible while scrolling, at 960×640 and 200% (`persistent-headers.yaml`, stable 6/6).
+  - [x] Detail panels collapse and stay remembered (`client-center.yaml`).
+  - [x] Condensed striped rows on wide screens (draw tests + daily_sales screenshots).
+  - [x] Unique tag numbers shown and sorted everywhere (unit + tags scenario; live contract PENDING U-75).
+  - [x] Copy down in one undo step (model + UI tests, batch_entry).
+  - [x] Columns shown, hidden and reordered, remembered; required columns locked.
+  - [x] Multi-select with Set actions in one undo step.
+  - [x] Every lane action opens its form or a tracked placeholder (registry test + `home.yaml`).
+  - [x] Needs-attention counts match engine queries (`contract_home.rs` live on the pin with seeded payroll, feed and a voided bill; dashboard part PENDING U-76).
+  - [x] Ko-fi opens only when clicked (unit tests; the scenario hovers only).
+  - [x] `ui-check home --compare` reviewed by ui-verifier, deviations in Q-P16d to Q-P16u.
+
+  Agents: scout/opus, architect/opus, impl/opus (WP0–WP8 and two fix passes; the phase is tier L, but opus was used per Q-277), engine-impl/opus, review/opus ×2, ui-verifier/opus, docs-writer/sonnet.
+- 2026-10-21 — P15A complete on `phase/P15A-bulk-entry`; PR to open. Shipped: the Bulk Entry window (sections per type and account; checks, expenses, card charges, card credits, deposits and journal entries; other types wait for their phases, Q-263); local exact checks (cent rounding, journal entry balance, duplicate check numbers, closed-period marks); engine validate per row with highlights and F8 navigation; paste from a spreadsheet and CSV import with a remembered column mapping; account suggestions with accept; Save all in one atomic call with an idempotency key and one closing-password prompt; a summary with register links; data-bus refresh. Grid block paste and a control-channel paste step. Engine PR #163 (U-67 to U-74, migration 0226) merged after security review and fixes; pin c217bfd. Contract suite 149/149 live; scenario batch_entry 178 steps plus forms-zoom coverage; help page. Decisions Q-P15Aa to Q-P15As.
+  Acceptance (phases/M1-core-ledger.md P15A): [x] a mixed batch of checks and deposits saves and every row shows in the register with the right balance (live contract + scenario); [x] invalid rows cannot save (atomic rollback contract, unit + scenario); [x] control-channel scenario.
+  Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, Opus fallback for money lanes), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.
 - 2026-10-21 — P15 complete on `phase/P15-journal-templates`; PR to open. Shipped (2026-10-20/21): Make Journal Entry (names on lines, A/R-A/P rule, entry numbering, adjusting, reversing, autobalance, closing-password flow, edit/void/delete); Templates (store without posting, groups, remind/auto/never, Save as Template on Write Check, Deposit, Transfer, Card Charge, Journal Entry and Daily Sales, Use, Enter now); the catch-up runner and the Templates Due window. Engine PRs #160 (U-58 to U-61, U-64 to U-66, migration 0224, exact balance for all postings, rounding fixes in invoices, bills, vendor credits and estimates) and #161 (U-62, U-63, migration 0225, per-kind permissions, 31-per-run cap, month-end anchoring) merged after security reviews and fixes; pin 886c6b5; U-19 and U-22 delivered by it. Contract suite 136/136 live; practice company loads with templates and the first catch-up posts once; scenarios journal_entry 169, templates 339, templates_due 235 steps plus forms-zoom coverage; help pages x3. Decisions Q-P15a to Q-P15aa.
   Acceptance (phases/M1-core-ledger.md P15): [x] unbalanced entries cannot save (unit + contract + scenario, nothing sent); [x] missed monthly occurrences post exactly once each (contract run_due across engine restart + practice_live).
   Agents: scout/opus, architect/opus (Fable out of credits, Opus fallback for Tier H), impl/opus, engine-impl/opus, security-review/opus x2, review/opus, ui/opus, bookkeeper/sonnet.
