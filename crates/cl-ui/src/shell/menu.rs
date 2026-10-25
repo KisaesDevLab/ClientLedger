@@ -149,7 +149,19 @@ fn items(ui: &mut Ui, menu: Menu, queued: &mut Vec<CommandId>) {
         if row.separator_before {
             ui.separator();
         }
-        let mut button = egui::Button::new(row.label);
+        // The receipt inbox shows how many files wait (P17, Q-P17t).
+        let label = if row.id.as_str() == crate::screens::receipt_inbox::KIND {
+            match crate::screens::receipt_inbox::badge(ui.ctx()) {
+                0 => row.label,
+                n => crate::i18n::t_with(
+                    "inbox.menu_label",
+                    &[("label", &row.label), ("n", &n.to_string())],
+                ),
+            }
+        } else {
+            row.label
+        };
+        let mut button = egui::Button::new(label);
         if let Some(s) = row.shortcut {
             button = button.shortcut_text(s);
         }

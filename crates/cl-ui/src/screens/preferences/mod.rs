@@ -978,6 +978,9 @@ impl Screen for PreferencesScreen {
 
     fn ui(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
+        if let Some(c) = take_requested_category() {
+            self.select(c);
+        }
         self.poll();
         // The title and Search stay at the top, Cancel and Save at the
         // bottom; the list and the panel scroll between them (Q-265).
@@ -1112,6 +1115,25 @@ impl Screen for PreferencesScreen {
     }
 }
 
+/// The panel another window asked Preferences to show next (P17: the
+/// receipt inbox's "Choose a folder").
+static REQUESTED: std::sync::Mutex<Option<Category>> = std::sync::Mutex::new(None);
+
+/// Show `category` when Preferences opens next, or at once when it is
+/// already open (the caller then opens or brings forward the window).
+pub fn open_at(category: Category) {
+    *REQUESTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(category);
+}
+
+fn take_requested_category() -> Option<Category> {
+    REQUESTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
+}
+
 /// Builds the screen for the Preferences command, or `None`.
 #[must_use]
 pub fn make(
@@ -1123,11 +1145,11 @@ pub fn make(
     if kind.as_str() != COMMAND {
         return None;
     }
-    let category = if open.is_some() {
+    let category = take_requested_category().unwrap_or(if open.is_some() {
         Category::Ai
     } else {
         Category::LookAndFeel
-    };
+    });
     Some(Box::new(PreferencesScreen::new(
         Arc::clone(link),
         open,

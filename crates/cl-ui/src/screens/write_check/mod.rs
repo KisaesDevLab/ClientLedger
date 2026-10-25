@@ -995,6 +995,15 @@ impl Screen for WriteCheckScreen {
         self.fill_template(&t)
     }
 
+    /// "New check" from the receipt inbox (P17): the file is already this
+    /// check's draft (`attach::accept_inbox_draft`).
+    fn open_with(&mut self, payload: crate::windows::OpenPayload) -> bool {
+        match payload {
+            crate::windows::OpenPayload::InboxDraft(d) => self.accept_inbox_draft(d),
+            _ => false,
+        }
+    }
+
     /// A saved check opened from elsewhere (the register's edit of a
     /// check, B4): its bank is the account the check credits.
     fn open_record(&mut self, txn: TransactionId) -> bool {
