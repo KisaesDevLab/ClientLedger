@@ -5,6 +5,7 @@ mod api_spec;
 mod ci;
 mod engine;
 mod engine_test;
+mod fetch_lock;
 mod gen_sample;
 mod grid_bench;
 mod keymap_doc;
@@ -12,6 +13,7 @@ mod layering;
 mod licenses;
 mod meta;
 mod nofloat;
+mod pdfium_fetch;
 mod pg_fetch;
 mod preview;
 mod run;
@@ -35,6 +37,9 @@ usage: cargo xtask <command>
   api-spec [--update | --check]
                      engine OpenAPI / Zod-source fixtures for cl-api (check skips without engine/)
   pg-fetch [--force] download the pinned PostgreSQL binaries into target/pg/<target>
+  pdfium-fetch [--force]
+                     download the pinned PDFium library (document previews) into
+                     target/pdfium/<triple>
   keymap-doc [--check]
                      generate docs/KEYBOARD.md and the shortcut cheat sheet from the cl-model keymap
   grid-bench         ledger grid scroll benchmark (200k rows, real shell), optimised; fails
@@ -42,7 +47,7 @@ usage: cargo xtask <command>
   gen-sample [--check]
                      write fixtures/sample/ozark_ridge (the practice company, Q-219); --check verifies
   run [--no-prepare] [-- <app args>]
-                     build the engine and fetch PostgreSQL if needed, then start the desktop app
+                     build the engine and fetch PostgreSQL and PDFium if needed, then start the desktop app
   ui-check <screen> [--compare] [--no-build]
                      launch the app with a temporary control file, run the screen's scenario
                      (crates/cl-automation/scenarios/<screen>.yaml) in light and dark, save PNGs to
@@ -129,6 +134,7 @@ fn main() -> Result<()> {
         Some("engine-test") => engine_test::engine_test(&args[1..]),
         Some("api-spec") => api_spec::api_spec(&args[1..]),
         Some("pg-fetch") => pg_fetch::pg_fetch(&args[1..]),
+        Some("pdfium-fetch") => pdfium_fetch::pdfium_fetch(&args[1..]),
         Some("preview") => preview::preview(&args[1..]),
         Some("run") => run::run(&args[1..]),
         Some("ui-check") => ui_check::ui_check(&args[1..]),

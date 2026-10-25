@@ -1,0 +1,104 @@
+# The document viewer (P17 WP1, plan §6 "Steps 1, 4") against
+# `clientledger --demo`: Write Check attaches the synthetic two-page PDF
+# (`fixtures/docs/two_pages.pdf`; `cargo xtask ui-check` starts the app in
+# the repository root), Preview opens it in its own tab, the keyboard is in
+# the viewer, PgDn / PgUp turn pages, Ctrl+= / Ctrl+- zoom in steps and
+# Ctrl+0 switches Fit width / Fit page; the toolbar buttons do the same by
+# mouse. Then the minimum window (960 x 640) at 200%: nothing drawn over
+# anything. Needs PDFium (`cargo xtask pdfium-fetch`). Nothing is saved: the
+# check is cleared at the end, so light and dark start the same way.
+name: document-view
+description: Write Check Preview opens the PDF in its own tab; page keys, zoom keys, Fit; minimum window at 200%.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+W
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - type: {text: fixtures/docs/two_pages.pdf, target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_exists: {role: button, label: Preview}
+  - screenshot: write-check-preview-button
+  - click: {role: button, label: Preview}
+
+  # --- The tab: first page, keyboard in the viewer -----------------------------
+  - assert_state: {key: screen.screen, equals: document_view}
+  - assert_state: {key: screen.viewer.status, equals: ready}
+  - assert_state: {key: screen.viewer.pages, equals: 2}
+  - assert_state: {key: screen.viewer.page, equals: 0}
+  - assert_state: {key: screen.viewer.rendered, equals: true}
+  - assert_state: {key: screen.viewer.focused, equals: true}
+  - assert_state: {key: screen.viewer.zoom, equals: fit_width}
+  - assert_exists: {role: image, label: Preview of two_pages.pdf}
+  - assert_exists: {label: Page 1 of 2}
+  - assert_disabled: {role: button, label: Previous page}
+  - assert_enabled: {role: button, label: Next page}
+  - assert_exists: {role: button, label: Zoom in}
+  - assert_exists: {role: button, label: Zoom out}
+  - assert_exists: {role: button, label: Fit}
+  # The tab is already full size.
+  - assert_not_exists: {role: button, label: Open full size}
+  - screenshot: page-1
+
+  # --- Page keys ---------------------------------------------------------------
+  - key: PageDown
+  - assert_state: {key: screen.viewer.page, equals: 1}
+  - assert_exists: {label: Page 2 of 2}
+  - assert_state: {key: screen.viewer.rendered, equals: true}
+  - assert_disabled: {role: button, label: Next page}
+  # The last page stays the last page.
+  - key: PageDown
+  - assert_state: {key: screen.viewer.page, equals: 1}
+  - screenshot: page-2
+  - key: PageUp
+  - assert_state: {key: screen.viewer.page, equals: 0}
+  - assert_state: {key: screen.viewer.rendered, equals: true}
+
+  # --- Zoom keys -----------------------------------------------------------------
+  - key: Ctrl+=
+  - assert_state: {key: screen.viewer.zoom_kind, equals: percent}
+  - assert_state: {key: screen.viewer.rendered, equals: true}
+  - screenshot: zoomed-in
+  - key: Ctrl+-
+  - assert_state: {key: screen.viewer.zoom_kind, equals: percent}
+  - key: Ctrl+0
+  - assert_state: {key: screen.viewer.zoom, equals: fit_width}
+  - key: Ctrl+0
+  - assert_state: {key: screen.viewer.zoom, equals: fit_page}
+  - assert_state: {key: screen.viewer.rendered, equals: true}
+  - screenshot: fit-page
+
+  # --- The same by mouse ---------------------------------------------------------
+  - click: {role: button, label: Next page}
+  - assert_state: {key: screen.viewer.page, equals: 1}
+  - click: {role: button, label: Zoom in}
+  - assert_state: {key: screen.viewer.zoom_kind, equals: percent}
+  - click: {role: button, label: Fit}
+  - assert_state: {key: screen.viewer.zoom, equals: fit_width}
+  - click: {role: button, label: Fit}
+  - assert_state: {key: screen.viewer.zoom, equals: fit_page}
+  - click: {role: button, label: Previous page}
+  - assert_state: {key: screen.viewer.page, equals: 0}
+  # The buttons keep the keyboard in the viewer.
+  - assert_state: {key: screen.viewer.focused, equals: true}
+
+  # --- Minimum window at 200%: nothing drawn over anything ---------------------
+  - resize: {width: 960, height: 640}
+  - set_zoom: {percent: 200}
+  - assert_state: {key: screen.viewer.rendered, equals: true}
+  - screenshot: document-z200
+  - assert_no_clipping:
+      ignore:
+        # The tab strip scrolls, with the » list.
+        - {x: -4000, y: 70, width: 8480, height: 40}
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}
+
+  # --- Close; the check is cleared (nothing saved) ------------------------------
+  - command: file.close_window
+  - click: {role: tab, label_contains: Write Check}
+  - assert_state: {key: screen.screen, equals: write_check}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+  - click: {role: tab, label: Home}

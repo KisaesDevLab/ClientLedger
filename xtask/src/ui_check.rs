@@ -229,6 +229,9 @@ pub fn ui_check(args: &[String]) -> Result<()> {
         .arg("--control")
         .arg(&control)
         .args(["--theme", "light", "--size", &format!("{w}x{h}")])
+        // Scenarios name synthetic fixture files relative to the repository
+        // root (`document-view` attaches `fixtures/docs/two_pages.pdf`).
+        .current_dir(root())
         .stdin(Stdio::null())
         .spawn()
         .context("could not start the app (is a display available?)")?;

@@ -1,6 +1,6 @@
-//! `cargo xtask run [-- <app args>]`: make sure the engine executable and the
-//! `PostgreSQL` binaries exist (both steps are cached, so this is fast when
-//! nothing changed), then start the desktop app. Arguments after `--` go to
+//! `cargo xtask run [-- <app args>]`: make sure the engine executable, the
+//! `PostgreSQL` binaries and the `PDFium` library exist (all cached, so this is
+//! fast when nothing changed), then start the desktop app. Arguments after `--` go to
 //! the app, for example `cargo xtask run -- --demo`.
 
 use anyhow::{Context, Result, bail};
@@ -49,6 +49,13 @@ pub fn run(args: &[String]) -> Result<()> {
     if plan.prepare && !demo {
         crate::engine::engine(&[]).context("building the engine failed")?;
         crate::pg_fetch::pg_fetch(&[]).context("fetching PostgreSQL failed")?;
+    }
+    // PDF previews (P17), the demo's too. Without PDFium only the PDF
+    // preview is missing, so a failed fetch (offline) does not stop the run.
+    if plan.prepare
+        && let Err(e) = crate::pdfium_fetch::pdfium_fetch(&[])
+    {
+        eprintln!("run: PDFium not fetched, PDF previews will be unavailable: {e:#}");
     }
     let mut cmd = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     cmd.args(["run", "-p", "clientledger", "--"])

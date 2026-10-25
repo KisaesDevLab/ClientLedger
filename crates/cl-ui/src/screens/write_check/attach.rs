@@ -37,6 +37,8 @@ pub(crate) struct AttachState {
     pub list_task: Option<Task<Vec<Attachment>>>,
     pub upload: Option<Task<Attachment>>,
     pub download: Option<Task<(String, Vec<u8>)>>,
+    /// "Preview" (P17): the file's bytes on their way to the document tab.
+    pub preview: Option<Task<(String, Vec<u8>)>>,
     /// A plain message (i18n key) about the last attempt.
     pub problem: Option<&'static str>,
     /// Where the last copy was saved.
@@ -47,7 +49,10 @@ pub(crate) struct AttachState {
 
 impl AttachState {
     pub(crate) fn busy(&self) -> bool {
-        self.list_task.is_some() || self.upload.is_some() || self.download.is_some()
+        self.list_task.is_some()
+            || self.upload.is_some()
+            || self.download.is_some()
+            || self.preview.is_some()
     }
 }
 
@@ -299,8 +304,49 @@ impl WriteCheckScreen {
         }
     }
 
+    /// "Preview" (P17): the file in its own document tab
+    /// (`nav.document_view`), read the same way as "Save a copy".
+    pub(crate) fn preview(&mut self, id: AttachmentId, name: String) {
+        self.attach.problem = None;
+        let link = std::sync::Arc::clone(&self.link);
+        if let Some(demo) = link.demo_state() {
+            let r = crate::company::demo::checks::download(&demo, id);
+            drop(demo);
+            match r {
+                Ok(bytes) => self.attach.preview = Some(Task::ready((name, bytes))),
+                Err(_) => self.attach.problem = Some("check.attach.download_failed"),
+            }
+            self.poll_attach();
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        if let Ok(p) = group.read(&session, move |s| async move {
+            Ok((name, s.attachments().download(id).await?))
+        }) {
+            self.attach.preview = Some(Task::Pending(p));
+        }
+    }
+
     /// Polls uploads, the list and downloads.
     pub(crate) fn poll_attach(&mut self) {
+        if let Some(r) = self.attach.preview.as_mut().and_then(Task::try_take) {
+            self.attach.preview = None;
+            match r {
+                Ok((name, bytes)) => {
+                    let source = crate::widgets::pdf_viewer::DocSource {
+                        name,
+                        bytes: std::sync::Arc::from(bytes),
+                    };
+                    self.link.push(crate::company::CompanyEvent::OpenWith(
+                        cl_model::CommandId::new(crate::screens::document_view::KIND),
+                        Box::new(crate::windows::OpenPayload::Document(source)),
+                    ));
+                }
+                Err(_) => self.attach.problem = Some("check.attach.download_failed"),
+            }
+        }
         if let Some(r) = self.attach.upload.as_mut().and_then(Task::try_take) {
             self.attach.upload = None;
             match r {
@@ -363,6 +409,7 @@ impl WriteCheckScreen {
         self.take_dropped(ui);
         let mut attach = false;
         let mut save_copy = None;
+        let mut preview = None;
         form::card_tight(ui, tokens, |ui| {
             ui.label(
                 RichText::new(t("check.panel.attachments"))
@@ -372,6 +419,16 @@ impl WriteCheckScreen {
             for a in &self.attach.list {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(&a.file_name).color(tokens.text_primary));
+                    if ui
+                        .add_enabled(
+                            self.attach.preview.is_none(),
+                            egui::Button::new(t("viewer.preview")),
+                        )
+                        .on_hover_text(t("viewer.preview.tip"))
+                        .clicked()
+                    {
+                        preview = Some((a.id, a.file_name.clone()));
+                    }
                     if ui
                         .button(t("check.attach.save_copy"))
                         .on_hover_text(t("check.attach.save_copy.tip"))
@@ -447,6 +504,9 @@ impl WriteCheckScreen {
         }
         if let Some((id, name)) = save_copy {
             self.download(id, name);
+        }
+        if let Some((id, name)) = preview {
+            self.preview(id, name);
         }
     }
 }

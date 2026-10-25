@@ -37,7 +37,17 @@ jobs:
           key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
       - name: Fetch pinned PostgreSQL (hash-verified, the only networked step)
         run: cargo xtask pg-fetch
+      - uses: actions/cache@v4
+        with:
+          path: target/pdfium/.cache
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
+      # PDF previews (P17): the viewer tests that need PDFium fail instead of
+      # skipping when it is missing (CL_PDFIUM_REQUIRE below).
+      - name: Fetch pinned PDFium (hash-verified)
+        run: cargo xtask pdfium-fetch
       - run: cargo xtask ci
+        env:
+          CL_PDFIUM_REQUIRE: "1"
       # Ledger grid frame time (P10): 200k rows in the real shell, optimised,
       # p95 budget with one retry. Not under llvm-cov.
       - name: Grid scroll benchmark
@@ -67,7 +77,17 @@ jobs:
           key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
       - name: Fetch pinned PostgreSQL (hash-verified, the only networked step)
         run: cargo xtask pg-fetch
+      - uses: actions/cache@v4
+        with:
+          path: target/pdfium/.cache
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
+      # PDF previews (P17): the viewer tests that need PDFium fail instead of
+      # skipping when it is missing (CL_PDFIUM_REQUIRE below).
+      - name: Fetch pinned PDFium (hash-verified)
+        run: cargo xtask pdfium-fetch
       - run: cargo xtask ci
+        env:
+          CL_PDFIUM_REQUIRE: "1"
 
   # Control-channel scenarios (P07, P10): the demo app runs in a real window and
   # the shell and grid_demo scenarios drive it in light and dark. Linux runs on every push under
@@ -85,10 +105,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb mesa-vulkan-drivers libvulkan1 libxkbcommon-x11-0 libgl1
+      - uses: actions/cache@v4
+        with:
+          path: target/pdfium/.cache
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
+      - name: Fetch pinned PDFium (hash-verified)
+        run: cargo xtask pdfium-fetch
       - name: Shell scenario under Xvfb
         run: xvfb-run -a -s "-screen 0 1600x1200x24" cargo xtask ui-check shell
       - name: Ledger grid scenario under Xvfb
         run: xvfb-run -a -s "-screen 0 1600x1200x24" cargo xtask ui-check grid_demo --no-build
+      - name: Document viewer scenario under Xvfb
+        run: xvfb-run -a -s "-screen 0 1600x1200x24" cargo xtask ui-check document-view --no-build
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -110,10 +138,18 @@ jobs:
           persist-credentials: false
           submodules: false
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: target/pdfium/.cache
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
+      - name: Fetch pinned PDFium (hash-verified)
+        run: cargo xtask pdfium-fetch
       - name: Shell scenario
         run: cargo xtask ui-check shell
       - name: Ledger grid scenario
         run: cargo xtask ui-check grid_demo --no-build
+      - name: Document viewer scenario
+        run: cargo xtask ui-check document-view --no-build
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -159,8 +195,16 @@ jobs:
           key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
       - name: Fetch pinned PostgreSQL
         run: cargo xtask pg-fetch
+      - uses: actions/cache@v4
+        with:
+          path: target/pdfium/.cache
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
+      - name: Fetch pinned PDFium
+        run: cargo xtask pdfium-fetch
       - name: Coverage summary
         run: cargo llvm-cov --workspace --exclude xtask --summary-only --fail-under-lines 80
+        env:
+          CL_PDFIUM_REQUIRE: "1"
 
   # Engine single executable (P01): built on every OS we ship, smoke-tested
   # against a temporary PostgreSQL, uploaded for later jobs.

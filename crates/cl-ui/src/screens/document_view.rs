@@ -1,27 +1,30 @@
 //! A document in its own tab (P17, `nav.document_view`, plan §3 WP1,
 //! Q-P17l): "Open full size" from a preview, with zoom and page controls.
 //!
-//! # Handoff (WP0 skeleton, WP1 fills this file)
+//! # Handoff (WP0 skeleton, WP1 filled it)
 //!
 //! A preview's screen pushes `CompanyEvent::OpenWith(nav.document_view,
 //! OpenPayload::Document(source))`; [`DocumentViewScreen::open_with`] takes
-//! it. The tab reports `Scope::Viewer` while the viewer has the keyboard,
-//! so the `viewer.*` keys reach [`ViewerState::command`]. Opened bare (the
-//! palette, a restored layout) it shows the viewer's empty state. WP1 adds
-//! the layout and the empty-state text (`i18n/viewer.rs`).
+//! it and puts the keyboard in the viewer. The tab reports `Scope::Viewer`
+//! while the viewer has the keyboard, so the `viewer.*` keys reach
+//! [`ViewerState::command`]. Opened bare (the palette, a restored layout) it
+//! shows the viewer's empty state. "Save a copy" (a PDF that cannot be
+//! previewed) writes the bytes it was handed to the Downloads folder.
 
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use cl_core::CalendarDate;
 use cl_core::ids::TenantId;
 use cl_model::{CommandId, Scope};
-use eframe::egui::Ui;
+use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
 use crate::company::CompanyLink;
-use crate::i18n::t;
+use crate::i18n::{t, t_with};
 use crate::theme::Tokens;
-use crate::widgets::pdf_viewer::{DocViewer, ViewerState};
+use crate::widgets::pdf_viewer::{DocViewer, ViewerEvent, ViewerState};
 use crate::windows::{OpenPayload, Screen};
 
 /// The command and window kind.
@@ -43,6 +46,58 @@ pub fn make(
 #[derive(Debug, Default)]
 pub struct DocumentViewScreen {
     viewer: ViewerState,
+    /// Where "Save a copy" put the file, or the i18n key of its problem.
+    saved: Option<Result<PathBuf, &'static str>>,
+}
+
+/// Where "Save a copy" puts a file: the Downloads folder, else the
+/// temporary folder.
+fn copy_dir() -> PathBuf {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+    home.map(|h| PathBuf::from(h).join("Downloads"))
+        .filter(|p| p.is_dir())
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// Writes `bytes` (a PDF, PNG or JPEG, checked again here) into `dir` as a
+/// new file named "Document preview" with the detected type's extension,
+/// never overwriting (` (2)`, ` (3)`, … instead). The owner's file name is
+/// not used, so nothing in it can steer the path.
+///
+/// # Errors
+/// An i18n key for the owner.
+pub(crate) fn save_copy(dir: &Path, bytes: &[u8]) -> Result<PathBuf, &'static str> {
+    let ext = match cl_api::check_file(bytes) {
+        Ok(cl_api::FileKind::Pdf) => "pdf",
+        Ok(cl_api::FileKind::Png) => "png",
+        Ok(cl_api::FileKind::Jpeg) => "jpg",
+        Err(_) => return Err("check.attach.download_wrong_type"),
+    };
+    for n in 1..1000 {
+        let file = if n == 1 {
+            format!("Document preview.{ext}")
+        } else {
+            format!("Document preview ({n}).{ext}")
+        };
+        let path = dir.join(file);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut f) => {
+                if f.write_all(bytes).and_then(|()| f.sync_all()).is_err() {
+                    drop(f);
+                    let _ = std::fs::remove_file(&path);
+                    return Err("check.attach.download_failed");
+                }
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return Err("check.attach.download_failed"),
+        }
+    }
+    Err("check.attach.download_failed")
 }
 
 impl Screen for DocumentViewScreen {
@@ -52,7 +107,34 @@ impl Screen for DocumentViewScreen {
 
     fn ui(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
-        let _ = DocViewer::show(ui, &mut self.viewer, &tokens);
+        egui::Frame::new()
+            .inner_margin(egui::Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_min_size(ui.available_size());
+                if let Some(saved) = &self.saved {
+                    let (text, color) = match saved {
+                        Ok(p) => (
+                            t_with(
+                                "check.attach.saved_to",
+                                &[("path", &p.display().to_string())],
+                            ),
+                            tokens.text_secondary,
+                        ),
+                        Err(key) => (t(key), tokens.warn_text),
+                    };
+                    ui.add(egui::Label::new(RichText::new(text).size(12.0).color(color)).wrap());
+                }
+                if DocViewer::show(ui, &mut self.viewer, &tokens) == ViewerEvent::SaveCopy
+                    && let Some(src) = self.viewer.source()
+                {
+                    self.saved = Some(save_copy(&copy_dir(), &src.bytes));
+                }
+            });
+    }
+
+    fn fixed_layout(&self) -> bool {
+        // The viewer scrolls the page itself; the toolbar stays put.
+        true
     }
 
     fn scope(&self) -> Scope {
@@ -71,6 +153,8 @@ impl Screen for DocumentViewScreen {
         match payload {
             OpenPayload::Document(source) => {
                 self.viewer.open(source);
+                self.viewer.focus();
+                self.saved = None;
                 true
             }
             OpenPayload::BillPrefill(_) | OpenPayload::InboxDraft(_) => false,
@@ -78,12 +162,17 @@ impl Screen for DocumentViewScreen {
     }
 
     fn state(&self) -> Value {
-        json!({ "screen": "document_view", "viewer": self.viewer.state_json() })
+        json!({
+            "screen": "document_view",
+            "loaded": true,
+            "viewer": self.viewer.state_json(),
+            "saved_copy": self.saved.as_ref().is_some_and(Result::is_ok),
+        })
     }
 }
 
 #[cfg(test)]
-mod skeleton_tests {
+mod tests {
     use super::*;
     use crate::widgets::pdf_viewer::DocSource;
 
@@ -98,5 +187,22 @@ mod skeleton_tests {
         })));
         assert_eq!(s.state()["viewer"]["open"], true);
         assert_eq!(s.title(), "Document Preview");
+        assert!(s.command(CommandId::new("viewer.fit")));
+        assert!(!s.state().to_string().contains("a.pdf"));
+    }
+
+    #[test]
+    fn save_a_copy_never_overwrites_and_checks_the_type() {
+        let dir = tempfile::tempdir().unwrap();
+        let pdf = b"%PDF-1.7\n%%EOF\n";
+        let a = save_copy(dir.path(), pdf).unwrap();
+        let b = save_copy(dir.path(), pdf).unwrap();
+        assert_eq!(a.file_name().unwrap(), "Document preview.pdf");
+        assert_eq!(b.file_name().unwrap(), "Document preview (2).pdf");
+        assert_eq!(std::fs::read(&a).unwrap(), pdf);
+        assert_eq!(
+            save_copy(dir.path(), b"MZ not a document"),
+            Err("check.attach.download_wrong_type")
+        );
     }
 }
