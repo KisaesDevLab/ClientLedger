@@ -101,23 +101,36 @@ fn the_ar_ap_rule_mirrors_the_contract() {
         save(&mut s, &unnamed, None, None),
         Err(ApiError::Local(LocalValidation::ArApNameMissing))
     );
-    let two = entry(
+    let half_named = entry(
         day(11, 2),
         vec![
-            line(1200, Side::Debit(m("50")), Some(customer)),
-            line(2000, Side::Credit(m("50")), Some(customer)),
+            line(1200, Side::Debit(m("30")), Some(customer)),
+            line(1200, Side::Debit(m("20")), None),
+            line(4000, Side::Credit(m("50")), None),
         ],
         None,
         None,
     );
     assert_eq!(
-        save(&mut s, &two, None, None),
-        Err(ApiError::Local(LocalValidation::ArApTwoAccounts))
+        save(&mut s, &half_named, None, None),
+        Err(ApiError::Local(LocalValidation::ArApNameMissing))
     );
     assert!(
         list(&s).iter().all(|r| r.date != day(11, 2)),
         "nothing posted"
     );
+    // Any number of named A/R lines (Q-206, owner 2026-10-25).
+    let two = entry(
+        day(11, 3),
+        vec![
+            line(1200, Side::Debit(m("30")), Some(customer)),
+            line(1200, Side::Debit(m("20")), Some(customer)),
+            line(4000, Side::Credit(m("50")), None),
+        ],
+        None,
+        None,
+    );
+    assert!(save(&mut s, &two, None, None).is_ok());
     let named = entry(
         day(11, 2),
         vec![

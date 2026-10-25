@@ -192,6 +192,47 @@ fn enter_now_asks_for_the_closing_password_and_skip_moves_on() {
     assert_eq!(next, Some(d(2026, 11, 30)));
 }
 
+/// Review fix-PR-1 blocking 2: an Enter now lost in Templates (or in a
+/// window closed since) blocks Enter now and Open in form of that template
+/// here too, with the banner.
+#[test]
+fn a_lost_enter_now_from_another_window_blocks_this_template_here() {
+    use crate::forms::lost_save::LostScope;
+    let (_dir, link) = demo();
+    let today = DemoState::today();
+    let id = remind(&link, "Savings", d(2026, 10, 30));
+    let _r = caught_up(&link, today);
+    link.lost_saves()
+        .remember(LostScope::Template(id), Some(cl_api::IdempotencyKey::new()));
+    let mut s = screen(&link, today);
+    assert!(s.lost.pending(), "the banner shows on open");
+    let mut watcher = link.bus().subscribe();
+    s.selected = s.rows.iter().position(|r| r.template == id);
+    assert!(s.selected.is_some());
+    s.enter_now(None);
+    assert!(
+        s.entered.is_none() && s.last_action.is_none(),
+        "nothing sent"
+    );
+    s.open_in_form();
+    assert!(
+        !link
+            .drain()
+            .iter()
+            .any(|e| matches!(e, CompanyEvent::OpenTemplate(_))),
+        "no form to enter it a second time"
+    );
+    assert!(link.bus().take(&mut watcher).is_empty());
+    assert_eq!(s.state()["waiting"], 1);
+    // The owner looked and confirms: Enter now works again.
+    s.lost.ask_owner();
+    s.lost
+        .owner_confirmed(&mut s.lost_gate, "templates_due_enter");
+    assert!(!link.lost_saves().is_open(LostScope::Template(id)));
+    s.enter_now(None);
+    assert_eq!(s.last_action, Some("enter"));
+}
+
 #[test]
 fn keys_and_the_state_name_no_owner_text() {
     let (_dir, link) = demo();
@@ -293,4 +334,155 @@ fn a_capped_catch_up_has_no_skip_or_dismiss() {
         assert_ne!(key.as_str(), "templates_due.reason.other");
         assert_ne!(t(key.as_str()), key.as_str(), "has English text");
     }
+}
+
+#[test]
+fn s2_a_failed_link_shows_already_entered_and_is_tried_again_with_the_saved_txn() {
+    let (_dir, link) = demo();
+    let today = DemoState::today();
+    let tid = remind(&link, "Savings", today);
+    let mut r = caught_up(&link, today);
+    let txn = {
+        let mut st = link.demo_state().expect("demo");
+        let chart = st
+            .chart
+            .get_or_insert_with(crate::company::demo::chart)
+            .clone();
+        let p = crate::company::demo::register::DemoPosting {
+            kind: "transfer",
+            date: today,
+            number: String::new(),
+            contact: None,
+            memo: String::new(),
+            own: crate::company::demo::account_id(1010),
+            own_debit: false,
+            lines: vec![(
+                crate::company::demo::account_id(1020),
+                Money::parse_wire("25.00").expect("m"),
+            )],
+        };
+        st.ledger.save(&chart, &p, None).expect("saved")
+    };
+    // The form saved; its link to the date failed (a lost reply, say).
+    link.due().linking(tid, today, txn);
+    link.due().link_failed(tid, today);
+    let mut s = screen(&link, today);
+    let row = s
+        .rows
+        .iter()
+        .position(|r| r.template == tid)
+        .expect("the row");
+    assert_eq!(s.rows[row].section, Section::Linking, "already entered");
+    s.selected = Some(row);
+    s.default_action(None);
+    s.enter_now(None);
+    assert!(
+        s.enter_job.is_none() && s.open_job.is_none(),
+        "never Enter it now"
+    );
+    // The runner tries the link again with the saved transaction.
+    let _ = r.tick(&link, today, 100.0);
+    assert!(!link.due().is_linking(tid, today));
+    let st = link.demo_state().expect("demo");
+    let occ = st.occurrences.get(&(tid, today)).expect("linked");
+    assert_eq!(occ.transaction, Some(txn));
+    drop(st);
+    s.poll();
+    assert!(s.rows.iter().all(|r| r.template != tid), "handled");
+}
+
+/// Review fix-PR-1 should-fix 5: a link the engine refused for good never
+/// brings "Enter it now" back: the date shows "Saved separately" with
+/// Dismiss, which goes through the skip path.
+#[test]
+fn a_refused_link_shows_saved_separately_and_dismiss_settles_it() {
+    let (_dir, link) = demo();
+    let today = DemoState::today();
+    let tid = remind(&link, "Savings", today);
+    let _r = caught_up(&link, today);
+    let txn = TransactionId::parse("d0000000-0000-4000-8000-b0000000aa02").expect("t");
+    link.due().linking(tid, today, txn);
+    link.due().link_refused(tid, today);
+    let mut s = screen(&link, today);
+    let row = s
+        .rows
+        .iter()
+        .position(|r| r.template == tid)
+        .expect("the row");
+    assert_eq!(s.rows[row].section, Section::SavedSeparately);
+    assert_eq!(s.state()["rows"][row]["saved_separately"], true);
+    assert_eq!(s.state()["rows"][row]["can_dismiss"], true);
+    s.selected = Some(row);
+    s.enter_now(None);
+    s.open_in_form();
+    assert!(
+        s.enter_job.is_none() && s.open_job.is_none(),
+        "never entered again"
+    );
+    // Dismiss (Enter on the row): skipped in the books, off the board.
+    s.default_action(None);
+    assert_eq!(s.last_action, Some("skip"));
+    assert!(!link.due().is_saved_separately(tid, today));
+    s.poll();
+    assert!(s.rows.iter().all(|r| r.template != tid), "handled");
+}
+
+#[test]
+fn catch_up_skip_these_sends_each_date_through_the_skip_path() {
+    let (_dir, link) = demo();
+    let today = DemoState::today();
+    let tid = {
+        let mut st = link.demo_state().expect("demo");
+        template_store::create(
+            &mut st,
+            &NewTemplate {
+                name: "Daily sweep".into(),
+                group: None,
+                client_form: None,
+                draft: cl_api::TemplateDraft::Transfer(TransferDraft {
+                    from: crate::company::demo::account_id(1010),
+                    to: crate::company::demo::account_id(1020),
+                    date: today,
+                    amount: Money::parse_wire("25.00").expect("m"),
+                    memo: None,
+                }),
+                schedule: Some(TemplateSchedule {
+                    mode: ScheduleMode::Auto,
+                    frequency: Frequency::Daily,
+                    interval: 1,
+                    next_date: today.add_days(-3).expect("d"),
+                    end: ScheduleEnd::Never,
+                }),
+            },
+        )
+        .expect("template")
+        .id
+    };
+    let mut r = caught_up(&link, today);
+    let mut s = screen(&link, today);
+    assert_eq!(s.questions.len(), 1);
+    assert_eq!(s.questions[0].dates.len(), 4);
+    s.catch_up_skip(tid);
+    s.poll();
+    assert_eq!(s.last_action, Some("catch_up_skip"));
+    {
+        let st = link.demo_state().expect("demo");
+        let skipped = st
+            .occurrences
+            .iter()
+            .filter(|((t, _), o)| {
+                *t == tid && o.status != crate::company::demo::templates::OccStatus::Posted
+            })
+            .count();
+        assert_eq!(skipped, 4, "each date kept as skipped, none lost");
+    }
+    // The run goes on and posts nothing for it.
+    let _ = r.tick(&link, today, 1.0);
+    let st = link.demo_state().expect("demo");
+    assert!(
+        st.occurrences.iter().all(|((t, _), o)| *t != tid
+            || o.status != crate::company::demo::templates::OccStatus::Posted)
+    );
+    drop(st);
+    assert_eq!(link.due().questions().len(), 0);
 }

@@ -13,6 +13,7 @@ pub mod condensed;
 pub mod enter;
 pub mod header;
 pub mod lines_grid;
+pub mod lost_save;
 pub mod nav_prompt;
 pub mod suggest;
 pub mod template;

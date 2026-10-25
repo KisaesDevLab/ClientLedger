@@ -176,7 +176,7 @@ impl GridDemo {
                 self.lines.save_ok(value, &self.lists)
             }
             Ok(SaveStart::Skip(after)) => after,
-            Ok(SaveStart::Busy) | Err(_) => return false,
+            Ok(SaveStart::Busy | SaveStart::Unconfirmed) | Err(_) => return false,
         };
         match after {
             AfterSave::Stay => {}

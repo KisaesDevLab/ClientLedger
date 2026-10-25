@@ -45,7 +45,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.entry.problem.account_gone", "That account is no longer in your chart of accounts. Choose another account."),
     ("register.entry.problem.same_account", "Choose a different account from the one this register is for."),
     ("register.entry.problem.name_required", "Choose a customer or vendor name. Lines on accounts receivable or accounts payable need one."),
-    ("register.entry.problem.two_named_accounts", "Accounts receivable and accounts payable can't both be on one entry. Use one of them."),
     ("register.entry.problem.too_many_tags", "A line can have only one tag for now. Keep one tag on this line."),
     ("register.entry.problem.kind_not_allowed", "This kind of transaction can't be entered in this register. Use its own form instead."),
     // Closing-date password dialog (cl-model closing::ClosingFlow; shared with the forms)

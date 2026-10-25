@@ -238,6 +238,9 @@ impl SaveFlow {
         let Some((id, date)) = self.occurrence.take() else {
             return;
         };
+        // Until the link takes, Templates Due shows the date as already
+        // entered and the runner tries again with this transaction (S2).
+        link.due().linking(id, date, txn);
         self.resolving = Some((id, date));
         self.resolve_job = Some(run(
             link,
@@ -253,7 +256,9 @@ impl SaveFlow {
     /// A marked occurrence leaves Templates Due's lists (P15 lane C).
     fn settle_resolved(&mut self, link: &CompanyLink) {
         if let Some((id, date)) = self.resolved.take() {
-            link.due().handled(id, date);
+            let mut board = link.due();
+            board.linked(id, date);
+            board.handled(id, date);
         }
     }
 
@@ -294,10 +299,38 @@ impl SaveFlow {
             }
         }
         if let Some(r) = finished(&mut self.resolve_job) {
-            self.resolve_failed = r.is_err();
             let done = self.resolving.take();
-            if r.is_ok() {
-                self.resolved = done;
+            match r {
+                Ok(()) => {
+                    self.resolve_failed = false;
+                    self.resolved = done;
+                }
+                // A retry after a lost reply: the date is entered.
+                Err(e) if cl_api::is_occurrence_taken(&e) => {
+                    self.resolve_failed = false;
+                    self.resolved = done;
+                }
+                // Another try can't change this: the saved transaction
+                // stands on its own; Templates Due shows "Saved separately"
+                // with Dismiss, never "Enter it now" (review fix-PR-1
+                // should-fix 5).
+                Err(
+                    ApiError::Validation(_)
+                    | ApiError::NotFound { .. }
+                    | ApiError::Forbidden { .. },
+                ) => {
+                    self.resolve_failed = true;
+                    if let Some((id, date)) = done {
+                        link.due().link_refused(id, date);
+                    }
+                }
+                // Anything else is tried again by the runner (S2).
+                Err(_) => {
+                    self.resolve_failed = false;
+                    if let Some((id, date)) = done {
+                        link.due().link_failed(id, date);
+                    }
+                }
             }
         }
     }

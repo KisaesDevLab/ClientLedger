@@ -155,7 +155,12 @@ impl DailySalesScreen {
     /// Save & New / Save & Close / Save: check, then post (see the module
     /// docs). True when the form is done (nothing was waiting).
     pub(crate) fn start_save(&mut self, intent: SaveIntent, password: Option<Secret>) -> bool {
-        if self.save.task.is_some() || self.setup.is_some() {
+        if self.save.task.is_some() || self.setup.is_some() || self.save.lost_check.is_some() {
+            return false;
+        }
+        // The last save's outcome is unknown: nothing is sent until the
+        // recheck answers or the owner confirms (B2).
+        if self.header.is_unconfirmed() {
             return false;
         }
         self.save.error = None;
@@ -236,6 +241,10 @@ impl DailySalesScreen {
     }
 
     pub(crate) fn poll_save(&mut self) {
+        self.poll_lost();
+        if let Some(ev) = self.save.lost.poll(&mut self.header) {
+            self.lost_event(ev);
+        }
         if let Some(r) = self.save.task.as_mut().and_then(Task::poll_result) {
             self.save.task = None;
             match r {
@@ -268,6 +277,33 @@ impl DailySalesScreen {
                     }
                 }
             }
+        }
+    }
+
+    /// The recheck or the owner answered an unknown save (B2).
+    pub(crate) fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
+        use crate::forms::lost_save::LostEvent;
+        if let LostEvent::Saved(_) = ev {
+            // The stored probe found the day posted: read it again and
+            // show it as saved.
+            self.save.key = None;
+            if let Some(id) = self.saved.as_ref().map(|s| s.id) {
+                self.save.lost_check = self.run(Call::Entry(id), false);
+                self.poll_lost();
+            }
+        }
+    }
+
+    /// The day read again after Check again found it posted.
+    pub(crate) fn poll_lost(&mut self) {
+        let Some(r) = self.save.lost_check.as_mut().and_then(Task::poll_result) else {
+            return;
+        };
+        self.save.lost_check = None;
+        if let Ok(Reply::Entry(e)) = r
+            && e.status == EntryStatus::Posted
+        {
+            self.posted(&e);
         }
     }
 
@@ -324,6 +360,7 @@ impl DailySalesScreen {
 
     /// The engine posted the day.
     fn posted(&mut self, e: &DailyEntry) {
+        self.save.lost.saved();
         let form = self.header.current().clone();
         crate::forms::publish_saved(&self.link, &self.bus, &self.touched(&form));
         if let Some(txn) = e.transaction {
@@ -410,10 +447,19 @@ impl DailySalesScreen {
         if !crate::screens::register::keeps_key(&e) {
             self.save.key = None;
         }
-        self.header.save_failed(SaveFailure {
+        let failure = SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
-        });
+        };
+        if self.save.lost.lost(&e) {
+            // Check again runs the post's stored probe (`Session::recheck`):
+            // posted is saved; still a draft is "not saved" only once the
+            // engine that took the post is gone, because a slow post on the
+            // same engine may still flip it (review fix-PR-1 blocking 1).
+            self.header.save_unknown(failure);
+            return;
+        }
+        self.header.save_failed(failure);
         let supported = self.lock_supported();
         if self
             .closing_prompt

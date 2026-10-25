@@ -84,8 +84,11 @@ struct Shared {
 /// the lock and removes the control endpoint.
 #[derive(Debug)]
 pub struct InstanceGuard {
-    // Held for its lock; closing the handle releases it.
-    _lock: File,
+    // Held for its lock. Dropping the guard unlocks it explicitly: a lock
+    // belongs to the open file, which a process forked meanwhile (any
+    // thread spawning a child) shares until it execs, so closing our handle
+    // alone could leave it held for a moment after stop.
+    lock: File,
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
     control_path: PathBuf,
@@ -142,7 +145,7 @@ pub fn acquire(paths: &AppPaths) -> Result<Acquired> {
             .map_err(|e| HostError::io("start the control endpoint", e))?
     };
     Ok(Acquired::First(InstanceGuard {
-        _lock: lock,
+        lock,
         shared,
         thread: Some(thread),
         control_path: control,
@@ -177,6 +180,8 @@ impl Drop for InstanceGuard {
             let _ = t.join();
         }
         let _ = fs::remove_file(&self.control_path);
+        // Released now, whoever else still has the open file.
+        let _ = self.lock.unlock();
     }
 }
 
@@ -382,6 +387,20 @@ mod tests {
             Acquired::First(g) => g,
             Acquired::Second => panic!("expected to be first"),
         }
+    }
+
+    #[test]
+    fn dropping_the_guard_releases_the_lock_even_while_a_copy_of_the_handle_lives() {
+        let paths = scratch("unlock");
+        let first = guard(acquire(&paths).unwrap());
+        // What a child forked by another thread holds until it execs.
+        let copy = first.lock.try_clone().unwrap();
+        drop(first);
+        assert!(
+            matches!(acquire(&paths).unwrap(), Acquired::First(_)),
+            "the next launch takes over at once"
+        );
+        drop(copy);
     }
 
     #[test]

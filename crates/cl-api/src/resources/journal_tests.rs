@@ -1047,7 +1047,13 @@ mod p15 {
                 .number(),
             None
         );
-        // A/R or A/P: a name on the line, and only one such line (Q-206).
+    }
+
+    #[test]
+    fn ar_ap_lines_need_a_name_any_number_q206() {
+        let mk = |lines, o| NewJournalEntry::new_with(day(), None, Basis::Both, lines, o, &roles());
+        // A/R or A/P: a name on every such line, any number of them
+        // (Q-206, owner 2026-10-25).
         assert_eq!(
             mk(
                 vec![line(A, Side::Debit(m("5"))), line(AP, Side::Credit(m("5")))],
@@ -1062,26 +1068,40 @@ mod p15 {
             ),
             Err(LocalValidation::ArApNameMissing)
         );
-        assert_eq!(
+        assert!(
             mk(
                 vec![
                     named(AR, Side::Debit(m("5"))),
                     named(AP, Side::Credit(m("5")))
                 ],
                 JeOptions::default()
-            ),
-            Err(LocalValidation::ArApTwoAccounts)
+            )
+            .is_ok(),
+            "A/R and A/P in one entry"
+        );
+        assert!(
+            mk(
+                vec![
+                    named(AR, Side::Debit(m("3"))),
+                    named(AR, Side::Debit(m("2"))),
+                    line(B, Side::Credit(m("5")))
+                ],
+                JeOptions::default()
+            )
+            .is_ok(),
+            "two named lines on one A/R account"
         );
         assert_eq!(
             mk(
                 vec![
-                    named(AP, Side::Debit(m("5"))),
-                    named(AP, Side::Credit(m("5")))
+                    named(AR, Side::Debit(m("3"))),
+                    line(AR, Side::Debit(m("2"))),
+                    line(B, Side::Credit(m("5")))
                 ],
                 JeOptions::default()
             ),
-            Err(LocalValidation::ArApTwoAccounts),
-            "two lines on one A/P account"
+            Err(LocalValidation::ArApNameMissing),
+            "the second A/R line still needs a name"
         );
         assert!(
             mk(

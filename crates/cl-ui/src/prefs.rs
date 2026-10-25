@@ -633,6 +633,160 @@ impl BulkEntryMappings {
     }
 }
 
+/// One saved form's link to its Templates Due date that has not taken yet
+/// (review fix-PR-1 should-fix 5): ids and a date only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingLink {
+    /// The template.
+    pub template: cl_core::ids::TemplateId,
+    /// The date the form saved.
+    pub date: cl_core::CalendarDate,
+    /// The transaction the form saved.
+    pub txn: cl_core::ids::TransactionId,
+    /// The engine refused the link for good: "Saved separately".
+    pub refused: bool,
+}
+
+/// The pending links of every company (by [`key_hash`]), in their own
+/// capped file in the settings folder, so a restart never shows a date a
+/// form already saved as "Enter it now" again.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PendingLinksBook {
+    companies: Vec<(String, Vec<PendingLink>)>,
+}
+
+impl PendingLinksBook {
+    /// The file in the settings folder.
+    pub const FILE: &'static str = "template-links.json";
+    /// File format version.
+    pub const VERSION: u64 = 1;
+    /// Most companies kept; one more forgets the oldest.
+    pub const MAX_COMPANIES: usize = 20;
+    /// Most links kept per company.
+    pub const MAX_LINKS: usize = 200;
+
+    /// The pending links of `company`.
+    #[must_use]
+    pub fn get(&self, company: &str) -> Vec<PendingLink> {
+        let k = key_hash(company);
+        self.companies
+            .iter()
+            .find(|(c, _)| *c == k)
+            .map(|(_, l)| l.clone())
+            .unwrap_or_default()
+    }
+
+    /// Replaces the pending links of `company` (none forgets it).
+    pub fn set(&mut self, company: &str, links: &[PendingLink]) {
+        let k = key_hash(company);
+        self.companies.retain(|(c, _)| *c != k);
+        if links.is_empty() {
+            return;
+        }
+        let kept: Vec<PendingLink> = links.iter().take(Self::MAX_LINKS).copied().collect();
+        self.companies.push((k, kept));
+        while self.companies.len() > Self::MAX_COMPANIES {
+            self.companies.remove(0);
+        }
+    }
+
+    fn link_from(v: &serde_json::Value) -> Option<PendingLink> {
+        let o = v.as_object()?;
+        Some(PendingLink {
+            template: cl_core::ids::TemplateId::parse(o.get("template")?.as_str()?).ok()?,
+            date: cl_core::CalendarDate::parse_wire(o.get("date")?.as_str()?).ok()?,
+            txn: cl_core::ids::TransactionId::parse(o.get("txn")?.as_str()?).ok()?,
+            refused: o
+                .get("refused")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        })
+    }
+
+    /// Read the file's text; a malformed entry drops only itself.
+    #[must_use]
+    pub fn parse(text: &str) -> PendingLinksBook {
+        let mut out = PendingLinksBook::default();
+        let Ok(serde_json::Value::Object(root)) = serde_json::from_str::<serde_json::Value>(text)
+        else {
+            return out;
+        };
+        if root.get("version").and_then(serde_json::Value::as_u64) != Some(Self::VERSION) {
+            return out;
+        }
+        let Some(serde_json::Value::Array(list)) = root.get("companies") else {
+            return out;
+        };
+        for pair in list.iter().take(Self::MAX_COMPANIES) {
+            let Some([key, links]) = pair.as_array().map(Vec::as_slice) else {
+                continue;
+            };
+            let Some(key) = key
+                .as_str()
+                .filter(|k| k.len() == 16 && k.chars().all(|c| c.is_ascii_hexdigit()))
+            else {
+                continue;
+            };
+            let links: Vec<PendingLink> = links
+                .as_array()
+                .map(|l| {
+                    l.iter()
+                        .take(Self::MAX_LINKS)
+                        .filter_map(Self::link_from)
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !links.is_empty() && !out.companies.iter().any(|(c, _)| c == key) {
+                out.companies.push((key.to_string(), links));
+            }
+        }
+        out
+    }
+
+    /// The file's text.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let list: Vec<serde_json::Value> = self
+            .companies
+            .iter()
+            .map(|(k, links)| {
+                let l: Vec<serde_json::Value> = links
+                    .iter()
+                    .map(|p| {
+                        serde_json::json!({
+                            "template": p.template.to_string(),
+                            "date": p.date.to_wire(),
+                            "txn": p.txn.to_string(),
+                            "refused": p.refused,
+                        })
+                    })
+                    .collect();
+                serde_json::json!([k, l])
+            })
+            .collect();
+        serde_json::to_string_pretty(&serde_json::json!({
+            "version": Self::VERSION,
+            "companies": list,
+        }))
+        .unwrap_or_default()
+    }
+
+    /// Load from `dir` (empty when missing, oversized or unreadable).
+    #[must_use]
+    pub fn load(dir: &Path) -> PendingLinksBook {
+        read_capped(&dir.join(Self::FILE))
+            .map_or_else(PendingLinksBook::default, |t| Self::parse(&t))
+    }
+
+    /// Save into `dir`.
+    ///
+    /// # Errors
+    /// Any file error.
+    pub fn save(&self, dir: &Path) -> io::Result<()> {
+        write_atomic(&dir.join(Self::FILE), &self.to_text())
+    }
+}
+
 /// Largest preference or layout file that is read.
 pub const MAX_READ: u64 = 64 * 1024;
 
@@ -1108,6 +1262,32 @@ mod tests {
         book.save(&dir).expect("save");
         assert_eq!(SuggestionAccepts::load(&dir), book);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pending_links_round_trip_per_company_and_bad_entries_drop() {
+        let link = PendingLink {
+            template: cl_core::ids::TemplateId::parse("4a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a04")
+                .expect("t"),
+            date: cl_core::CalendarDate::from_ymd(2026, 11, 2).expect("d"),
+            txn: cl_core::ids::TransactionId::parse("7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01")
+                .expect("x"),
+            refused: true,
+        };
+        let mut book = PendingLinksBook::default();
+        book.set("tenant-a", &[link]);
+        assert_eq!(book.get("tenant-a"), vec![link]);
+        assert_eq!(book.get("tenant-b"), Vec::new());
+        let text = book.to_text();
+        assert!(!text.contains("tenant-a"), "companies are hashed");
+        assert_eq!(PendingLinksBook::parse(&text), book);
+        let bad = text.replace("2026-11-02", "not a date");
+        assert_eq!(PendingLinksBook::parse(&bad).get("tenant-a"), Vec::new());
+        let dir = tempfile::tempdir().expect("tmp");
+        book.save(dir.path()).expect("save");
+        assert_eq!(PendingLinksBook::load(dir.path()), book);
+        book.set("tenant-a", &[]);
+        assert!(book.get("tenant-a").is_empty(), "none forgets it");
     }
 
     #[test]

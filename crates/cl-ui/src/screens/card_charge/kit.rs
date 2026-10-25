@@ -504,6 +504,9 @@ pub(crate) struct SaveFlow {
     /// The accounts the record saved last touches (Void without an open
     /// record voids that one).
     pub last_accounts: Vec<AccountId>,
+    /// A save whose outcome is unknown: [`Self::send`] sends nothing until
+    /// the recheck or the owner answers (B2), for every helper form.
+    pub lost: crate::forms::lost_save::LostSave,
 }
 
 /// The engine takes the closing-date password.
@@ -569,7 +572,8 @@ impl SaveFlow {
         password: Option<Secret>,
         closing: Option<CalendarDate>,
     ) -> Sent {
-        if self.busy() {
+        // The last save's outcome is unknown (B2): nothing is sent.
+        if self.busy() || self.lost.pending() {
             return Sent::Failed;
         }
         if let Some(note) = self.read_only() {
@@ -657,6 +661,7 @@ impl SaveFlow {
     /// The saved record is the open one now (a second save changes it,
     /// guarded by its new version; a new form clears it).
     pub(crate) fn saved(&mut self, r: SavedRecord) -> SaveIntent {
+        self.lost.saved();
         self.closing_prompt.saved();
         self.key = None;
         self.count += 1;
@@ -674,6 +679,18 @@ impl SaveFlow {
         self.record_accounts.clone_from(&self.published);
         self.last_accounts.clone_from(&self.published);
         self.intent.take().unwrap_or(SaveIntent::Save)
+    }
+
+    /// The recheck found the unknown save in the books: counted as saved;
+    /// the form opens the record (`RecordForm::open_saved`).
+    pub(crate) fn found(&mut self) {
+        self.closing_prompt.saved();
+        self.key = None;
+        self.count += 1;
+        self.last_action = Some("save");
+        self.error = None;
+        self.stale = false;
+        self.last_accounts.clone_from(&self.published);
     }
 
     /// A new, blank form: no record open.
@@ -727,6 +744,11 @@ impl SaveFlow {
     ) {
         if !crate::screens::register::keeps_key(&e) {
             self.key = None;
+        }
+        // An unknown save: the banner speaks (Check again), not the error.
+        if self.intent.is_some() && self.lost.lost(&e) {
+            self.intent = None;
+            return;
         }
         let pending = match self.intent.take() {
             Some(i) => Pending::Save(i),
@@ -1371,14 +1393,39 @@ pub(crate) fn messages(
     click
 }
 
-/// The error and the saving line under the form.
-pub(crate) fn status(ui: &mut Ui, tokens: &Tokens, flow: &SaveFlow) {
+/// A failed save on the form's header: an unknown outcome keeps Save
+/// blocked until the recheck or the owner answers (B2).
+pub(crate) fn header_failed<V: Clone + PartialEq>(
+    header: &mut cl_model::forms::FormState<V>,
+    e: &ApiError,
+    failure: cl_model::forms::SaveFailure,
+) {
+    if matches!(e, ApiError::OutcomeUnknown { .. }) {
+        header.save_unknown(failure);
+    } else {
+        header.save_failed(failure);
+    }
+}
+
+/// The error, the unknown-save banner (B2) and the saving line under the
+/// form. Returns what the recheck or the owner answered.
+pub(crate) fn status<V: Clone + PartialEq>(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    flow: &mut SaveFlow,
+    header: &mut cl_model::forms::FormState<V>,
+    link: &Arc<CompanyLink>,
+    group: Option<&RequestGroup>,
+    what: &'static str,
+) -> Option<crate::forms::lost_save::LostEvent> {
     if let Some(e) = &flow.error {
         form::inline_error(ui, tokens, e);
     }
+    let ev = flow.lost.ui(ui, header, link, group, what);
     if flow.busy() {
         form::progress_line(ui, tokens, &t("helper.saving"));
     }
+    ev
 }
 
 /// A problem list under the form (plain language, warn colour).

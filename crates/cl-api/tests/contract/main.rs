@@ -359,6 +359,10 @@ fn main() -> std::process::ExitCode {
             contract_closed_period::bank_postings_in_a_closed_period,
         ),
         (
+            "closed_period::moving_out_of_a_closed_period_needs_the_password",
+            contract_closed_period::moving_out_of_a_closed_period_needs_the_password,
+        ),
+        (
             "capabilities::error_codes_u21",
             contract_capabilities::error_codes_u21,
         ),

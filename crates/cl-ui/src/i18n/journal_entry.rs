@@ -64,7 +64,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("journal.problem.ar_ap_name_missing", "A line on Accounts Receivable needs a customer, and a line on Accounts Payable a vendor. Choose one in the Name column."),
     ("journal.problem.ar_needs_customer", "A line on Accounts Receivable needs a customer or job in the Name column."),
     ("journal.problem.ap_needs_vendor", "A line on Accounts Payable needs a vendor in the Name column."),
-    ("journal.problem.ar_ap_two_lines", "A journal entry can have only one line on Accounts Receivable or Accounts Payable."),
+    ("journal.problem.ar_ap_two_lines", "This company's engine allows only one line on Accounts Receivable or Accounts Payable per journal entry. Update ClientLedger, or split the entry into separate entries."),
     ("journal.problem.ar_ap_needs_update", "Accounts Receivable and Accounts Payable lines need an engine update."),
     ("journal.problem.name_needs_update", "Names on journal entry lines need an engine update."),
     ("orphan.journal_save", "saving a journal entry"),

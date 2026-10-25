@@ -47,6 +47,8 @@ pub(super) struct EntryState {
     pub task: Option<Task<TransactionId>>,
     /// The idempotency key of the request being retried.
     pub key: Option<(SaveIdentity, IdempotencyKey)>,
+    /// A save whose outcome is unknown (B2).
+    pub lost: crate::forms::lost_save::LostSave,
     /// The next check number (Q-P12q).
     pub next_check: Option<u32>,
     next_check_task: Option<Task<Option<u32>>>,
@@ -76,6 +78,7 @@ impl EntryState {
             error: None,
             task: None,
             key: None,
+            lost: crate::forms::lost_save::LostSave::default(),
             next_check: None,
             next_check_task: None,
             proposed: None,
@@ -159,8 +162,11 @@ pub(crate) fn keeps_key(e: &ApiError) -> bool {
         | ApiError::RateLimited { .. }
         | ApiError::PayloadTooLarge
         | ApiError::Protocol { .. } => false,
-        // Unknown outcome (and anything newer): keep the key, so a retry
-        // can never record the save twice.
+        // Unknown outcome (and anything newer): keep the key, so the same
+        // save goes again under it. The pinned engine ignores the key on
+        // its posting routes (U-18 is not built), so the key alone never
+        // stops a second posting: after an unknown outcome every form
+        // blocks Save until the recheck or the owner answers (B2, Q-PR1a).
         _ => true,
     }
 }
@@ -324,6 +330,9 @@ impl RegisterScreen {
                 Err(e) => self.record_failed(e),
             }
         }
+        if let Some(ev) = self.entry.lost.poll(self.entry.form.form_mut()) {
+            self.lost_event(ev);
+        }
     }
 
     /// The Number cell: the next check number goes in when the row becomes
@@ -366,6 +375,11 @@ impl RegisterScreen {
     /// in the closed period (it goes with this one save only).
     pub(super) fn record_with(&mut self, password: Option<cl_core::Secret>) -> bool {
         if self.entry.task.is_some() || self.view_only() {
+            return false;
+        }
+        // The last save's outcome is unknown: nothing is sent until the
+        // recheck answers or the owner confirms (B2).
+        if self.entry.form.form().is_unconfirmed() {
             return false;
         }
         let Some(own) = self.account else {
@@ -418,7 +432,7 @@ impl RegisterScreen {
                     return true;
                 }
             }
-            Ok(SaveStart::Busy) | Err(_) => return false,
+            Ok(SaveStart::Busy | SaveStart::Unconfirmed) | Err(_) => return false,
         }
         if self.link.is_demo() {
             let dates: Vec<_> = old_date.into_iter().chain([new_date]).collect();
@@ -625,7 +639,23 @@ impl RegisterScreen {
         }
     }
 
+    /// The recheck or the owner answered an unknown save (B2). Found: it
+    /// is in the books; the row starts over and the register shows it.
+    pub(super) fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
+        if let crate::forms::lost_save::LostEvent::Saved(_) = ev {
+            self.closing_saved();
+            self.entry.saved += 1;
+            self.entry.last_saved = Some("saved");
+            self.entry.key = None;
+            self.entry.lost.notice = Some("lost.saved_register");
+            self.finish_edit();
+            self.after_own_write();
+            self.fetch_next_check();
+        }
+    }
+
     fn record_done(&mut self, _id: TransactionId) {
+        self.entry.lost.saved();
         self.closing_saved();
         let lists = Arc::clone(&self.lists);
         let stored = self.entry.draft().clone();
@@ -652,10 +682,15 @@ impl RegisterScreen {
         if !keeps_key(&e) {
             self.entry.key = None;
         }
-        self.entry.form.save_failed(cl_model::forms::SaveFailure {
+        let failure = cl_model::forms::SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
-        });
+        };
+        if self.entry.lost.lost(&e) {
+            self.entry.form.save_unknown(failure);
+            return;
+        }
+        self.entry.form.save_failed(failure);
         // A closed-period refusal or a wrong password shows in the
         // closing-date dialog, which can send the save again.
         if self.closing_failed(&e, super::dialogs::Pending::Save) {
@@ -785,6 +820,15 @@ impl RegisterScreen {
             }
             if let Some(e) = &self.entry.error {
                 form::inline_error(ui, tokens, e);
+            }
+            if let Some(ev) = self.entry.lost.ui(
+                ui,
+                self.entry.form.form_mut(),
+                &self.link,
+                self.group.as_ref(),
+                "register",
+            ) {
+                self.lost_event(ev);
             }
         });
         ui.painter().hline(

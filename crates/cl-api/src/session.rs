@@ -30,7 +30,7 @@ use crate::client::{
 use crate::endpoint::EndpointSource;
 use crate::errors::{ApiError, AuthFailure};
 use crate::idempotency::{
-    AttemptCreds, AuthHook, BoxFuture, Executor, Reconciler, StaticAuth, unix_now,
+    AttemptCreds, AuthHook, BoxFuture, Executor, IdempotencyKey, Reconciler, StaticAuth, unix_now,
 };
 use crate::resources::operations::{
     AUTH_ME, COMPANY_GET, CREATE_TENANT, DESKTOP_INFO, HEALTH, LOGIN, LOGOUT, Operation, REFRESH,
@@ -426,7 +426,13 @@ struct SessionInner {
     /// Ids of records this session created, newest last (bounded). Outcome
     /// reconciliation never takes one of them for a later identical save.
     created: Mutex<VecDeque<String>>,
+    /// Probes of saves whose outcome stayed unknown, newest last (bounded),
+    /// for the owner's recheck (B2).
+    lost: Mutex<VecDeque<(IdempotencyKey, crate::resources::reconcile::LostProbe)>>,
 }
+
+/// How many unknown saves a session keeps a probe for.
+const LOST_MEMORY: usize = 64;
 
 /// How many created ids a session remembers. Reconciliation only looks at
 /// rows created a few seconds before a save, so older ids never matter.
@@ -558,6 +564,7 @@ impl Session {
                 }),
                 rotate: tokio::sync::Mutex::new(()),
                 created: Mutex::new(VecDeque::new()),
+                lost: Mutex::new(VecDeque::new()),
             }),
             pin: None,
         })
@@ -606,6 +613,44 @@ impl Session {
     /// This session created the record `id`.
     pub(crate) fn created_here(&self, id: &str) -> bool {
         lock(&self.inner.created).iter().any(|c| c == id)
+    }
+
+    /// Keeps the probe of a save whose outcome may stay unknown.
+    pub(crate) fn remember_lost(
+        &self,
+        key: IdempotencyKey,
+        probe: crate::resources::reconcile::LostProbe,
+    ) {
+        let mut lost = lock(&self.inner.lost);
+        lost.retain(|(k, _)| *k != key);
+        if lost.len() >= LOST_MEMORY {
+            lost.pop_front();
+        }
+        lost.push_back((key, probe));
+    }
+
+    /// The stored probe of the unknown save `key`.
+    pub(crate) fn lost_probe(
+        &self,
+        key: &IdempotencyKey,
+    ) -> Option<crate::resources::reconcile::LostProbe> {
+        lock(&self.inner.lost)
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, p)| p.clone())
+    }
+
+    /// Forgets the probe of `key` (the outcome is known now).
+    pub(crate) fn forget_lost(&self, key: &IdempotencyKey) {
+        lock(&self.inner.lost).retain(|(k, _)| k != key);
+    }
+
+    /// A view pinned to `pin` (a stored probe's company).
+    pub(crate) fn pinned_to(&self, pin: ScopePin) -> Session {
+        Session {
+            inner: self.inner.clone(),
+            pin: Some(pin),
+        }
     }
 
     /// The client this session belongs to.
@@ -1156,6 +1201,7 @@ pub fn stub_session(port: u16) -> Session {
             }),
             rotate: tokio::sync::Mutex::new(()),
             created: Mutex::new(VecDeque::new()),
+            lost: Mutex::new(VecDeque::new()),
         }),
         pin: None,
     }
@@ -1255,6 +1301,7 @@ pub(crate) mod tests {
                 }),
                 rotate: tokio::sync::Mutex::new(()),
                 created: Mutex::new(VecDeque::new()),
+                lost: Mutex::new(VecDeque::new()),
             }),
             pin: None,
         }

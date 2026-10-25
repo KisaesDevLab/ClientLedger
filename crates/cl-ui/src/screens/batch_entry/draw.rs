@@ -179,6 +179,17 @@ impl BulkEntryScreen {
         if let Some(k) = self.notice {
             form::hint(ui, tokens, &t(k));
         }
+        // An unknown save: the unchanged batch may go again; changed rows
+        // only after the owner checked the register (follow-up 4).
+        if let Some(crate::forms::lost_save::LostEvent::Saved(_)) = self.lost.ui(
+            ui,
+            &mut self.lost_gate,
+            &self.link,
+            self.group.as_ref(),
+            "batch_entry",
+        ) {
+            self.notice = Some("lost.saved_register");
+        }
         if let Some(note) = &self.bulk_note {
             form::hint(ui, tokens, note);
         }

@@ -15,7 +15,10 @@
 //! reason in the status bar, `check()` refuses it, and
 //! `NewJournalEntry::new_with` refuses it again; nothing is sent.
 //!
-//! The A/R-A/P rule (Q-206) is refused locally in plain words; a closed
+//! The A/R-A/P rule (Q-206: any number of A/R or A/P lines, each with a
+//! customer or vendor) is refused locally in plain words; an older
+//! engine's one-per-entry refusal (`JE_AR_AP_ONE_PER_ENTRY`) is still
+//! shown in plain words; a closed
 //! period (either date, and the reversal's) asks for the closing-date
 //! password; an edit is guarded by the record's version (409 → Reload).
 //! Every save, void and delete publishes the accounts it touched (Q-262).
@@ -205,6 +208,8 @@ pub struct JournalScreen {
     pub(crate) template: crate::screens::templates::SaveFlow,
     /// The record being read is this window's own save (Save and stay).
     pub(crate) reading_back: bool,
+    /// A save whose outcome is unknown (B2).
+    pub(crate) lost: crate::forms::lost_save::LostSave,
 }
 
 impl JournalScreen {
@@ -292,6 +297,7 @@ impl JournalScreen {
             seen_lines,
             template: crate::screens::templates::SaveFlow::default(),
             reading_back: false,
+            lost: crate::forms::lost_save::LostSave::default(),
         };
         s.books.start(&s.link, s.group.as_ref());
         s.fetch_number();
@@ -408,6 +414,9 @@ impl JournalScreen {
                 Ok((id, v)) => self.saved(id, v),
                 Err(e) => self.save_failed(e),
             }
+        }
+        if let Some(ev) = self.lost.poll(&mut self.header) {
+            self.lost_event(ev);
         }
         if let Some((pending, mut task)) = self.action_task.take() {
             match task.try_take() {
@@ -949,6 +958,10 @@ impl Screen for JournalScreen {
 
     fn dirty(&self) -> bool {
         self.is_dirty()
+    }
+
+    fn save_unconfirmed(&self) -> bool {
+        self.lost.pending()
     }
 
     fn save(&mut self) -> bool {

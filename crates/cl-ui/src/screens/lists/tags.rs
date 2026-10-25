@@ -880,7 +880,7 @@ impl TagsScreen {
                 self.after_tag_save(after, id);
                 return true;
             }
-            SaveStart::Busy => return false,
+            SaveStart::Busy | SaveStart::Unconfirmed => return false,
         }
         let fields = TagFields {
             name: checked.name,
@@ -1015,7 +1015,7 @@ impl TagsScreen {
                 self.close_panel(None);
                 return true;
             }
-            SaveStart::Busy => return false,
+            SaveStart::Busy | SaveStart::Unconfirmed => return false,
         }
         let fields = TagGroupFields {
             name: checked.name,

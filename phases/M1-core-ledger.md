@@ -155,7 +155,7 @@ Common to every screen phase: test-writer writes the scenario YAML and unit test
 | --- | --- | --- | --- | --- |
 | H | M | P12 | rust-implementer (opus) | reviewer (opus), ui-verifier |
 
-**Decisions:** Q-52, Q-181, Q-206, Q-207. **Engine:** journal entries (A/R or A/P line with name, one per entry; adjusting flag; reversing), memorized transactions (owner-facing name: Templates, Q-256) with schedules on pg-boss, missed-run catch-up idempotency.
+**Decisions:** Q-52, Q-181, Q-206, Q-207. **Engine:** journal entries (A/R or A/P lines with a name, any number per entry since 2026-10-25, Q-206; adjusting flag; reversing), memorized transactions (owner-facing name: Templates, Q-256) with schedules on pg-boss, missed-run catch-up idempotency.
 
 **Crates and files:** `crates/cl-ui/src/screens/{journal_entry.rs,templates.rs}`, `crates/cl-model/src/forms/journal.rs`, `crates/cl-model/src/templates.rs`.
 

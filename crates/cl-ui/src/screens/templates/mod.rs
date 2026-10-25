@@ -19,7 +19,7 @@
 //! - Without `templates-v1` the window says templates need an engine
 //!   update.
 
-mod dialog;
+pub(crate) mod dialog;
 pub(crate) mod engine;
 mod save_flow;
 
@@ -41,6 +41,7 @@ use serde_json::{Value, json};
 use crate::company::demo::template_store;
 use crate::company::{CompanyEvent, CompanyLink};
 use crate::forms::closing_prompt::{ClosingClick, ClosingPrompt};
+use crate::forms::lost_save::LostScope;
 use crate::forms::template::TemplateOpen;
 use crate::i18n::{t, t_with};
 use crate::layout::{Body, FixedFrame, FrameOpts};
@@ -211,9 +212,11 @@ type Loaded = (Vec<Template>, Vec<TemplateGroup>, Vec<Account>);
 pub(crate) struct EnterNow(TemplateId, CalendarDate);
 
 /// One Enter now: the template and the date it posts on. The idempotency
-/// key is kept per occurrence until a definite answer, so a lost reply's
-/// retry is the same post (a template without a schedule writes no
-/// occurrence row: the key is its only guard).
+/// key is kept per occurrence until a definite answer. The pinned engine
+/// ignores it on `POST /templates/{id}/enter` (U-18 is not built), and a
+/// template without a schedule writes no occurrence row, so after an
+/// unknown outcome Enter now on that template waits for the recheck (the
+/// posting's provenance, B2) or the owner's confirmation.
 type Occurrence = (TemplateId, CalendarDate);
 
 /// The Templates window.
@@ -237,6 +240,11 @@ pub struct TemplatesScreen {
     enter_job: Option<Job<Entered>>,
     enter_for: Option<Occurrence>,
     enter_key: Option<(Occurrence, IdempotencyKey)>,
+    /// An Enter now whose outcome is unknown (B2): the template it was for,
+    /// the banner, and the block it holds.
+    pub(crate) lost: crate::forms::lost_save::LostSave,
+    pub(crate) lost_for: Option<TemplateId>,
+    pub(crate) lost_gate: cl_model::forms::FormState<()>,
     /// Enter now on a template without a schedule: the date to post on.
     pub(crate) enter_date: Option<(TemplateId, form::DateInput)>,
     pub(crate) closing_prompt: ClosingPrompt<EnterNow>,
@@ -289,6 +297,9 @@ impl TemplatesScreen {
             enter_job: None,
             enter_for: None,
             enter_key: None,
+            lost: crate::forms::lost_save::LostSave::for_templates(),
+            lost_for: None,
+            lost_gate: cl_model::forms::FormState::new(()),
             enter_date: None,
             closing_prompt: ClosingPrompt::default(),
             closing: None,
@@ -300,6 +311,12 @@ impl TemplatesScreen {
             stale: false,
             last_action: None,
         };
+        // An "Enter now" still unknown from earlier this session shows its
+        // banner again (review fix-PR-1 blocking 2).
+        let open = s.link.lost_saves().open_templates();
+        if let Some(id) = open.first() {
+            s.adopt_lost(*id);
+        }
         s.reload();
         s.poll();
         s
@@ -408,6 +425,38 @@ impl TemplatesScreen {
         if let Some(r) = finished(&mut self.enter_job) {
             self.enter_done(r);
         }
+        if let Some(ev) = self.lost.poll(&mut self.lost_gate) {
+            self.lost_event(ev);
+        }
+    }
+
+    /// Shows the banner of the still unknown "Enter now" of `id` (made in
+    /// another window, or in one closed before an answer). While another
+    /// template's banner is up, Enter now on `id` only says why it waits.
+    pub(crate) fn adopt_lost(&mut self, id: TemplateId) {
+        if self.lost.pending() {
+            if self.lost_for != Some(id) {
+                self.notice = Some("templates.enter.lost_other");
+            }
+            return;
+        }
+        self.lost
+            .bind(&self.link, LostScope::Template(id), &mut self.lost_gate);
+        self.lost_for = Some(id);
+    }
+
+    /// The recheck or the owner answered a lost Enter now (B2).
+    pub(crate) fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
+        use crate::forms::lost_save::LostEvent;
+        match ev {
+            LostEvent::Saved(txn) => {
+                let id = self.lost_for.take();
+                self.enter_key = None;
+                self.entered_ok(txn, id);
+            }
+            LostEvent::NotSaved | LostEvent::OwnerConfirmed => self.lost_for = None,
+            LostEvent::StillUnknown => {}
+        }
     }
 
     /// Enter now's answer. A definite one (posted, already entered, a
@@ -417,8 +466,24 @@ impl TemplatesScreen {
         let occ = self.enter_for.take();
         match r {
             Ok(e) => {
+                // Another template's unknown Enter now stays unknown.
+                if occ.is_some_and(|(id, _)| self.lost_for == Some(id)) {
+                    self.lost.saved();
+                    self.lost_for = None;
+                }
                 self.enter_key = None;
                 self.entered_ok(Some(e.transaction), occ.map(|(id, _)| id));
+            }
+            // Could not tell: Enter now on this template waits (B2), in
+            // every window and after this one closes (the link's book,
+            // review fix-PR-1 blocking 2).
+            Err(e)
+                if occ.is_some_and(|(id, _)| {
+                    self.lost.lost_as(&e, &self.link, LostScope::Template(id))
+                }) =>
+            {
+                self.lost_gate.mark_unconfirmed();
+                self.lost_for = occ.map(|(id, _)| id);
             }
             // A retry of a lost reply: the date is already entered.
             Err(e) if cl_api::is_occurrence_taken(&e) => {
@@ -536,6 +601,12 @@ impl TemplatesScreen {
             self.notice = Some("templates.online_read_only");
             return;
         };
+        // Its Enter now may already be in the books: the form could enter
+        // it a second time (review fix-PR-1 blocking 2).
+        if self.link.lost_saves().is_open(LostScope::Template(row.id)) {
+            self.adopt_lost(row.id);
+            return;
+        }
         self.error = None;
         let (id, version, today) = (row.id, row.version, self.today);
         let cmd = CommandId::new(kind);
@@ -601,6 +672,17 @@ impl TemplatesScreen {
         date: CalendarDate,
         password: Option<Secret>,
     ) {
+        // A lost Enter now of this template: nothing is sent until the
+        // recheck or the owner answers (B2).
+        if self.lost_gate.is_unconfirmed() && self.lost_for == Some(id) {
+            return;
+        }
+        // One lost here before, or in Templates Due, or in a window closed
+        // since: the same block (review fix-PR-1 blocking 2).
+        if self.link.lost_saves().is_open(LostScope::Template(id)) {
+            self.adopt_lost(id);
+            return;
+        }
         let today = self.today;
         self.enter_for = Some((id, date));
         let key = self.enter_key_for((id, date));
@@ -886,6 +968,15 @@ impl TemplatesScreen {
                 }
                 None => form::inline_error(ui, tokens, e),
             }
+        }
+        if let Some(ev) = self.lost.ui(
+            ui,
+            &mut self.lost_gate,
+            &self.link,
+            self.group.as_ref(),
+            "templates_enter",
+        ) {
+            self.lost_event(ev);
         }
         if let Some(id) = self.confirm_delete {
             let name = self.row(id).map(|r| r.name.clone()).unwrap_or_default();

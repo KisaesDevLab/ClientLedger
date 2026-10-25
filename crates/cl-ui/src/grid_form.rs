@@ -234,6 +234,17 @@ impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
         self.form.save_failed(failure);
     }
 
+    /// The save's outcome is unknown: Save stays blocked until a recheck
+    /// answers or the owner confirms (B2).
+    pub fn save_unknown(&mut self, failure: SaveFailure) {
+        self.form.save_unknown(failure);
+    }
+
+    /// The form state, for the unknown-save rule (B2).
+    pub fn form_mut(&mut self) -> &mut FormState<V> {
+        &mut self.form
+    }
+
     /// Show another record (Prev/Next, Find, Save & New).
     pub fn load(&mut self, record: V, lookups: &dyn Lookups) {
         self.form.load(record);

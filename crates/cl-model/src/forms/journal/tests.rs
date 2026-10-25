@@ -277,13 +277,22 @@ fn ar_ap_rule_q206() {
     );
     p.lines.lines[1].customer = Some(contact(77));
     assert!(check(&p, &ctx).is_ok());
-    // Two A/R-or-A/P lines.
+    // Any number of named A/R and A/P lines (Q-206, owner 2026-10-25).
     let mut two = form(&[(AR, "50", ""), (AP, "", "50")]);
     two.lines.lines[0].customer = Some(contact(1));
     two.lines.lines[1].customer = Some(contact(2));
+    assert!(check(&two, &ctx).is_ok());
+    let mut many = form(&[(AR, "30", ""), (AR, "20", ""), (4000, "", "50")]);
+    many.lines.lines[0].customer = Some(contact(1));
+    many.lines.lines[1].customer = Some(contact(1));
+    let c = check(&many, &ctx).expect("two named A/R lines");
+    assert_eq!(c.lines.len(), 3);
+    // ... but every one of them still needs a name.
+    many.lines.lines[1].customer = None;
+    let k2 = many.lines.lines[1].key;
     assert_eq!(
-        check(&two, &ctx).expect_err("two"),
-        vec![JournalProblem::ArApTwoLines]
+        check(&many, &ctx).expect_err("second unnamed"),
+        vec![JournalProblem::ArApNameMissing(k2)]
     );
     // Without je-names-v1: A/R and A/P lines and names need an update.
     let old = JournalContext {

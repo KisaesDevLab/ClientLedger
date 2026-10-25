@@ -173,14 +173,28 @@ pub fn seed(v: &Versioned<Transaction>, own: AccountId, class: AccountClass) -> 
     if t.status != TxnStatus::Posted || others.is_empty() {
         return read_only(t);
     }
+    // A line that takes in a document (a payment out of Payments Clearing,
+    // a refunded vendor credit) or has an engine role (cash back): an edit
+    // here would send the deposit without its links and release them (B1).
+    // Make Deposit edits it.
+    if t.lines
+        .iter()
+        .any(|l| l.source_transaction_id.is_some() || l.line_role.is_some())
+    {
+        return read_only(t);
+    }
     // A journal entry the register's row can't show whole (adjusting, a
-    // reversing pair, a name on its line) goes to Make Journal Entry.
+    // reversing pair, a name on its line, a number: the row sends none, B3)
+    // goes to Make Journal Entry.
     if t.txn_type == TxnType::JournalEntry
         && (t.is_adjusting
             || t.reverse_on.is_some()
             || t.reverses_transaction_id.is_some()
             || t.reversal_transaction_id.is_some()
-            || mine.contact_id.is_some())
+            || mine.contact_id.is_some()
+            || t.txn_number
+                .as_deref()
+                .is_some_and(|n| !n.trim().is_empty()))
     {
         return read_only(t);
     }
@@ -264,7 +278,8 @@ pub fn seed(v: &Versioned<Transaction>, own: AccountId, class: AccountClass) -> 
 pub(super) struct EditLoad {
     splits: bool,
     route: Route,
-    task: Task<Versioned<Transaction>>,
+    /// The record, and whether it is a check (it has a print status).
+    task: Task<(Versioned<Transaction>, bool)>,
 }
 
 impl RegisterScreen {
@@ -319,19 +334,35 @@ impl RegisterScreen {
                 .clone();
             let contacts = demo.contacts_mut().clone();
             let got = demo.ledger.get(&chart, &contacts, id);
+            // The demo's stand-in for a print status: a check Write Check
+            // keeps details for, or one with a number.
+            let check = got
+                .as_ref()
+                .is_some_and(|v| v.record.txn_type == TxnType::Expense)
+                && (demo.checks.knows(id)
+                    || got
+                        .as_ref()
+                        .is_some_and(|v| v.record.check_number.is_some()));
             drop(demo);
             match got {
-                Some(v) => Task::ready(v),
+                Some(v) => Task::ready((v, check)),
                 None => return,
             }
         } else {
             let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
                 return;
             };
-            match group.read(
-                &session,
-                move |s| async move { s.transactions().get(id).await },
-            ) {
+            match group.read(&session, move |s| async move {
+                let v = s.transactions().get(id).await?;
+                // A check has a print status: only the check read tells.
+                let check = v.record.txn_type == TxnType::Expense
+                    && match s.checks().get(id).await {
+                        Ok(_) => true,
+                        Err(ApiError::Decode { .. }) => false,
+                        Err(e) => return Err(e),
+                    };
+                Ok((v, check))
+            }) {
                 Ok(p) => Task::Pending(p),
                 Err(_) => return,
             }
@@ -367,14 +398,29 @@ impl RegisterScreen {
         let route = load.route;
         self.edit_load = None;
         let Some(own) = self.account else { return };
-        let v = match result {
+        let (v, is_check) = match result {
             Ok(v) => v,
             Err(e) => {
                 self.entry.error = Some(e);
                 return;
             }
         };
-        let form = self.form_kind(&v.record);
+        // A check is changed in Write Check: its printed-check question
+        // (Q-P13i) and its header tags go through `update_check` there; the
+        // row's plain expense update has neither (B4).
+        let form = if is_check && v.record.status == TxnStatus::Posted {
+            Some(crate::screens::write_check::KIND)
+        } else {
+            self.form_kind(&v.record)
+        };
+        if is_check && form.is_some() {
+            self.read_only = None;
+            self.link.push(crate::company::CompanyEvent::OpenRecord(
+                cl_model::CommandId::new(crate::screens::write_check::KIND),
+                v.record.id,
+            ));
+            return;
+        }
         let s = seed(&v, own, self.class);
         let to_form = match route {
             Route::Form | Route::NotEditable => form,

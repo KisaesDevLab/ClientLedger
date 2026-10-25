@@ -182,6 +182,14 @@ pub(crate) struct SaveState {
     /// The owner's answer for a printed check whose printed face changes
     /// (sent with the next save of this check).
     pub printed_choice: Option<cl_api::PrintedCheckChange>,
+    /// A save whose outcome is unknown (B2).
+    pub lost: crate::forms::lost_save::LostSave,
+    /// After an unknown outcome the engine said the number is used: the
+    /// check with that number is being looked up (never n+1, B2).
+    pub lookup: Option<Task<Option<TransactionId>>>,
+    /// The new check sent last before an unknown outcome: what the
+    /// used-number lookup must match (review fix-PR-1 should-fix 4).
+    pub sent: Option<save::SentCheck>,
 }
 
 /// "This check was already printed": Reprint / Keep number / Cancel.
@@ -957,6 +965,10 @@ impl Screen for WriteCheckScreen {
         self.is_dirty()
     }
 
+    fn save_unconfirmed(&self) -> bool {
+        self.save.lost.pending()
+    }
+
     fn save(&mut self) -> bool {
         self.start_save(cl_model::forms::SaveIntent::Save, None)
     }
@@ -981,6 +993,13 @@ impl Screen for WriteCheckScreen {
 
     fn open_template(&mut self, t: crate::forms::template::TemplateOpen) -> bool {
         self.fill_template(&t)
+    }
+
+    /// A saved check opened from elsewhere (the register's edit of a
+    /// check, B4): its bank is the account the check credits.
+    fn open_record(&mut self, txn: TransactionId) -> bool {
+        self.read_check(txn, None);
+        self.editing.as_ref().is_some_and(|e| e.id == txn) || self.load_task.is_some()
     }
 }
 

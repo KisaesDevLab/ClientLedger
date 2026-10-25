@@ -334,3 +334,83 @@ fn draws_light_and_dark() {
     );
     assert_eq!(form_kind(None, &TemplateKind::Legacy), None);
 }
+
+/// Review fix-PR-1 blocking 2: closing the window does not lift the block
+/// of a lost Enter now; the next window shows it again, Use waits too, and
+/// its answer clears it for every window.
+#[test]
+fn a_lost_enter_now_outlives_its_window() {
+    use crate::forms::lost_save::LostScope;
+    let (_dir, link) = demo();
+    let made = add(&link, "Loose", None, None);
+    let mut s = screen(&link);
+    s.enter_for = Some((made.id, d(2026, 11, 2)));
+    s.enter_done(Err(ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000017")
+            .expect("id"),
+        idempotency_key: Some(cl_api::IdempotencyKey::new()),
+    }));
+    assert!(s.lost.pending());
+    drop(s);
+    assert!(link.lost_saves().is_open(LostScope::Template(made.id)));
+    // A new Templates window: the same banner and block.
+    let mut again = screen(&link);
+    assert!(again.lost.pending(), "the block outlives the window");
+    let mut watcher = link.bus().subscribe();
+    again.enter_at(made.id, d(2026, 11, 2), None);
+    assert!(again.entered.is_none());
+    again.selected = Some(made.id);
+    again.use_selected();
+    assert!(
+        again.use_job.is_none(),
+        "Use could enter it twice: it waits"
+    );
+    assert!(link.bus().take(&mut watcher).is_empty(), "nothing posted");
+    // Check again here: found; every window hears it.
+    let txn = TransactionId::parse("d0000000-0000-4000-8000-b00000000019").expect("t");
+    again.lost.recheck_answering(
+        &mut again.lost_gate,
+        cl_api::Recheck::Committed {
+            transaction: Some(txn),
+        },
+    );
+    again.poll();
+    assert_eq!(again.entered.map(|(t, _)| t), Some(txn));
+    assert!(!link.lost_saves().is_open(LostScope::Template(made.id)));
+    assert!(!screen(&link).lost.pending(), "a third window starts clean");
+}
+
+#[test]
+fn b2_a_lost_enter_now_without_a_schedule_sends_nothing_until_the_recheck_answers() {
+    let (_dir, link) = demo();
+    let made = add(&link, "Loose", None, None);
+    let mut s = screen(&link);
+    let occ = (made.id, d(2026, 11, 2));
+    s.enter_for = Some(occ);
+    s.enter_done(Err(ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000007")
+            .expect("id"),
+        idempotency_key: Some(cl_api::IdempotencyKey::new()),
+    }));
+    assert!(s.error.is_none(), "the banner speaks");
+    assert!(s.lost.pending());
+    // Enter now again on the same template: nothing is sent.
+    s.enter_at(made.id, d(2026, 11, 2), None);
+    assert!(s.enter_job.is_none() && s.entered.is_none());
+    s.lost
+        .recheck_answering(&mut s.lost_gate, cl_api::Recheck::Unknown);
+    s.poll();
+    s.enter_at(made.id, d(2026, 11, 2), None);
+    assert!(s.entered.is_none(), "still waiting");
+    // Found by its provenance: shown as entered, never posted again.
+    let txn = TransactionId::parse("d0000000-0000-4000-8000-b00000000009").expect("t");
+    s.lost.recheck_answering(
+        &mut s.lost_gate,
+        cl_api::Recheck::Committed {
+            transaction: Some(txn),
+        },
+    );
+    s.poll();
+    assert_eq!(s.entered.map(|(t, _)| t), Some(txn));
+    assert!(!s.lost.pending());
+}

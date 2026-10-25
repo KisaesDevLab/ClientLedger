@@ -1458,3 +1458,171 @@ fn header_enter_saves_or_moves_by_the_preference() {
         }
     }
 }
+
+fn unknown() -> ApiError {
+    ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000003")
+            .expect("id"),
+        idempotency_key: Some(IdempotencyKey::new()),
+    }
+}
+
+fn checks_numbered(link: &Arc<CompanyLink>, bank: AccountId, n: u32) -> Vec<TransactionId> {
+    let mut demo = link.demo_state().expect("demo");
+    crate::company::demo::checks::list(&mut demo, bank)
+        .into_iter()
+        .filter(|c| c.number == Some(n))
+        .map(|c| c.id)
+        .collect()
+}
+
+#[test]
+fn b2_after_an_unknown_outcome_save_sends_nothing_and_a_used_number_opens_the_first_check() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "1286.40", &[("5100", "842.15"), ("5110", "444.25")]);
+    let bank = s.bank().expect("bank");
+    let header = s.header.current().clone();
+    let lines = s.lines.value().clone();
+    // The first try reached the engine, but its reply was lost.
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.poll();
+    let first = checks_numbered(&link, bank, 4418);
+    assert_eq!(first.len(), 1);
+    s.header.edit_step(|h| *h = header.clone());
+    let lists = Arc::clone(&s.lists);
+    s.lines.form_mut().edit_step(|v| *v = lines.clone());
+    let _ = s.lines.form_mut().begin_save(SaveIntent::Save, &*lists);
+    let _ = s.header.begin_save(SaveIntent::Save);
+    s.save_failed(unknown());
+    assert!(s.save.lost.pending());
+    let before = writes(&link);
+    for intent in [
+        SaveIntent::Save,
+        SaveIntent::SaveAndNew,
+        SaveIntent::SaveAndClose,
+    ] {
+        assert!(!s.start_save(intent, None));
+    }
+    assert_eq!(writes(&link), before, "a second Save sends nothing");
+    // The recheck can't tell (demo); the owner looks and confirms.
+    s.save.lost.recheck(&mut s.header, &link, None);
+    s.poll();
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(writes(&link), before);
+    s.save.lost.ask_owner();
+    s.save.lost.owner_confirmed(&mut s.header, "write_check");
+    s.start_save(SaveIntent::Save, None);
+    s.poll();
+    // The number is used: the first check opens; no 4419 is offered.
+    assert_eq!(s.save.duplicate, None, "never n+1 after an unknown outcome");
+    assert_eq!(s.editing.as_ref().map(|e| e.id), Some(first[0]));
+    assert_eq!(checks_numbered(&link, bank, 4418).len(), 1);
+    assert!(
+        checks_numbered(&link, bank, 4419).is_empty(),
+        "no second check"
+    );
+}
+
+/// Review fix-PR-1 should-fix 4: after an unknown outcome a used number
+/// opens only the first try's check (same day, payee and amount, created
+/// after the send). Another check with that number is never opened as
+/// ours: the next number is offered instead.
+#[test]
+fn a_used_number_on_another_check_is_not_taken_for_the_lost_one() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let bank = s.bank().expect("bank");
+    let other = checks_numbered(&link, bank, 4417);
+    assert_eq!(other.len(), 1, "the sample's check 4417");
+    fill(&mut s, "1286.40", &[("5100", "842.15"), ("5110", "444.25")]);
+    s.header
+        .edit_step(|h| h.number = NumberField::Typed("4417".into()));
+    s.sync_inputs();
+    // The first try: its reply is lost (it never reached the books).
+    assert!(!s.start_save(SaveIntent::Save, None));
+    s.poll();
+    s.save.duplicate = None;
+    assert!(s.save.sent.is_some(), "the first try is remembered");
+    let lists = Arc::clone(&s.lists);
+    let _ = s.lines.form_mut().begin_save(SaveIntent::Save, &*lists);
+    let _ = s.header.begin_save(SaveIntent::Save);
+    s.save_failed(unknown());
+    s.save.lost.ask_owner();
+    s.save.lost.owner_confirmed(&mut s.header, "write_check");
+    s.start_save(SaveIntent::Save, None);
+    s.poll();
+    assert!(s.editing.is_none(), "another check is never opened as ours");
+    assert_eq!(s.save.duplicate, Some((4417, 4418)), "the next number");
+    assert_eq!(checks_numbered(&link, bank, 4417), other);
+}
+
+/// Review fix-PR-1 blocking 2: an unknown save outlives its window. The
+/// close prompt says it may be in the books; a new Write Check window
+/// picks the block up (same key) and sends nothing until it is answered.
+#[test]
+fn a_lost_save_outlives_its_window_and_the_close_prompt_says_so() {
+    use crate::forms::enter::testing::{context, settle};
+    use cl_model::forms::EnterMode;
+    let mode = EnterMode::SaveAndNew;
+    let (_d, link) = link();
+    let ctx = context();
+    let mut s = screen(&link);
+    settle(&ctx, mode, &mut |ui| s.ui(ui));
+    fill(&mut s, "1286.40", &[("5100", "842.15"), ("5110", "444.25")]);
+    let lists = Arc::clone(&s.lists);
+    let _ = s.lines.form_mut().begin_save(SaveIntent::Save, &*lists);
+    let _ = s.header.begin_save(SaveIntent::Save);
+    s.save_failed(unknown());
+    assert!(s.dirty() && s.save_unconfirmed(), "the close prompt warns");
+    assert!(
+        crate::windows::prompt_message_unconfirmed("Write Check")
+            .contains("may already be in the books")
+    );
+    // Discard changes: the window goes, the block stays.
+    drop(s);
+    let mut again = screen(&link);
+    settle(&ctx, mode, &mut |ui| again.ui(ui));
+    assert!(again.save.lost.pending(), "picked up by the new window");
+    let before = writes(&link);
+    fill(
+        &mut again,
+        "1286.40",
+        &[("5100", "842.15"), ("5110", "444.25")],
+    );
+    assert!(!again.start_save(SaveIntent::Save, None));
+    assert_eq!(writes(&link), before, "the retyped check is not sent");
+    // The owner looked and confirms here: every window may save again.
+    again.save.lost.ask_owner();
+    again
+        .save
+        .lost
+        .owner_confirmed(&mut again.header, "write_check");
+    let mut third = screen(&link);
+    settle(&ctx, mode, &mut |ui| third.ui(ui));
+    assert!(!third.save.lost.pending());
+}
+
+#[test]
+fn b2_a_recheck_that_finds_the_check_shows_it() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    fill(&mut s, "1286.40", &[("5100", "842.15"), ("5110", "444.25")]);
+    let bank = s.bank().expect("bank");
+    let lists = Arc::clone(&s.lists);
+    let _ = s.lines.form_mut().begin_save(SaveIntent::Save, &*lists);
+    let _ = s.header.begin_save(SaveIntent::Save);
+    s.save_failed(unknown());
+    // Say the engine had it after all (its id from another check here).
+    let other = checks_numbered(&link, bank, 4417);
+    s.save.lost.recheck_answering(
+        &mut s.header,
+        cl_api::Recheck::Committed {
+            transaction: other.first().copied(),
+        },
+    );
+    s.poll();
+    assert!(!s.header.is_unconfirmed());
+    assert_eq!(s.editing.as_ref().map(|e| e.id), other.first().copied());
+    assert!(!s.is_dirty());
+}

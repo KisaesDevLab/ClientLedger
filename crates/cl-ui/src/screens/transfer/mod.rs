@@ -140,6 +140,8 @@ pub struct TransferScreen {
     pub(crate) key: Option<(SaveIdentity, IdempotencyKey)>,
     pub(crate) problems: Vec<TransferProblem>,
     pub(crate) error: Option<ApiError>,
+    /// A save whose outcome is unknown (B2).
+    pub(crate) lost: crate::forms::lost_save::LostSave,
     pub(crate) notice: Option<&'static str>,
     pub(crate) stale: bool,
     pub(crate) saved_count: u32,
@@ -282,6 +284,7 @@ impl TransferScreen {
             nav_prompt: None,
             after_save_nav: None,
             template: crate::screens::templates::SaveFlow::default(),
+            lost: crate::forms::lost_save::LostSave::default(),
         };
         s.start_load();
         s.poll();
@@ -408,6 +411,9 @@ impl TransferScreen {
                 Err(e) => self.save_failed(e),
             }
         }
+        if let Some(ev) = self.lost.poll(&mut self.form) {
+            self.lost_event(ev);
+        }
         if let Some(r) = self.load_task.as_mut().and_then(Task::try_take) {
             self.load_task = None;
             match r {
@@ -531,6 +537,11 @@ impl TransferScreen {
     /// Checks and saves. Nothing is sent unless the check passes.
     pub(crate) fn start_save(&mut self, intent: SaveIntent, password: Option<Secret>) -> bool {
         if self.save_task.is_some() {
+            return false;
+        }
+        // The last save's outcome is unknown: nothing is sent until the
+        // recheck answers or the owner confirms (B2).
+        if self.form.is_unconfirmed() {
             return false;
         }
         if self.editing.as_ref().is_some_and(|e| e.read_only) {
@@ -661,7 +672,30 @@ impl TransferScreen {
             .failed(e, pending, supported, self.closing)
     }
 
+    /// The recheck or the owner answered an unknown save (B2). Found: the
+    /// transfer is in the books, so the form shows it.
+    pub(crate) fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
+        if let crate::forms::lost_save::LostEvent::Saved(found) = ev {
+            crate::forms::publish_saved(&self.link, &self.bus, &self.published);
+            self.key = None;
+            self.saved_count += 1;
+            self.last_action = Some("save");
+            let f = self.form.current().clone();
+            self.form.load(f);
+            self.nav.clear();
+            self.recent_for = None;
+            self.fetch_balances();
+            if let Some(id) = found {
+                self.template
+                    .form_saved(&self.link, self.group.as_ref(), id);
+                self.last_saved = Some(id);
+                self.load(id);
+            }
+        }
+    }
+
     fn saved(&mut self, id: TransactionId, version: RecordVersion) {
+        self.lost.saved();
         crate::forms::publish_saved(&self.link, &self.bus, &self.published);
         self.template
             .form_saved(&self.link, self.group.as_ref(), id);
@@ -714,10 +748,15 @@ impl TransferScreen {
         if !crate::screens::register::keeps_key(&e) {
             self.key = None;
         }
-        self.form.save_failed(cl_model::forms::SaveFailure {
+        let failure = cl_model::forms::SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
-        });
+        };
+        if self.lost.lost(&e) {
+            self.form.save_unknown(failure);
+            return;
+        }
+        self.form.save_failed(failure);
         if self.closing_failed(&e, Pending::Save(intent)) {
             return;
         }
@@ -1287,6 +1326,15 @@ impl TransferScreen {
         if let Some(e) = &self.error {
             form::inline_error(ui, tokens, e);
         }
+        if let Some(ev) = self.lost.ui(
+            ui,
+            &mut self.form,
+            &self.link,
+            self.group.as_ref(),
+            "transfer",
+        ) {
+            self.lost_event(ev);
+        }
     }
 
     /// Clear · Save & New · Save & Close.
@@ -1444,6 +1492,10 @@ impl Screen for TransferScreen {
 
     fn dirty(&self) -> bool {
         self.is_dirty()
+    }
+
+    fn save_unconfirmed(&self) -> bool {
+        self.lost.pending()
     }
 
     fn save(&mut self) -> bool {

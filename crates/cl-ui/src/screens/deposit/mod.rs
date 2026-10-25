@@ -150,6 +150,8 @@ pub(crate) struct SaveState {
     pub clearing_warning: bool,
     /// The accounts the last save or void published (Q-262).
     pub published: Vec<AccountId>,
+    /// A save whose outcome is unknown (B2).
+    pub lost: crate::forms::lost_save::LostSave,
 }
 
 /// Prev/Next over the account's deposits (newest first).
@@ -710,6 +712,10 @@ impl Screen for DepositScreen {
 
     fn dirty(&self) -> bool {
         self.is_dirty()
+    }
+
+    fn save_unconfirmed(&self) -> bool {
+        self.save.lost.pending()
     }
 
     fn save(&mut self) -> bool {

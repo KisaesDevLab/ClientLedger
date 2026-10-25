@@ -31,6 +31,56 @@ use crate::forms::lines_grid::{L_ACCOUNT, L_AMOUNT, L_CUSTOMER};
 /// Checks are listed 50 at a time for Prev/Next.
 const NAV_PAGE: u16 = 50;
 
+/// A check created at most this long before its first try was sent is
+/// still that try's (clock rounding between the app and the engine).
+const SENT_SLACK_MS: i64 = 2_000;
+
+/// The new check of a first try whose outcome may be unknown: what the
+/// used-number lookup must match (review fix-PR-1 should-fix 4). Never
+/// logged.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct SentCheck {
+    pub date: CalendarDate,
+    pub payee: Option<cl_core::ids::ContactId>,
+    pub amount: cl_core::Money,
+    /// When it was sent (Unix ms; the demo's own clock in the demo).
+    pub at_ms: i64,
+}
+
+impl SentCheck {
+    fn of(d: &CheckDraft, demo: bool) -> SentCheck {
+        let at_ms = if demo {
+            crate::company::demo::DemoState::now().unix_millis()
+        } else {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |t| i64::try_from(t.as_millis()).unwrap_or(i64::MAX))
+        };
+        SentCheck {
+            date: d.date,
+            payee: d.payee,
+            amount: d.amount,
+            at_ms,
+        }
+    }
+
+    /// `rec` is the check that try wrote: posted, the same date, payee and
+    /// amount, and created after the try was sent. Anything else is not
+    /// ours (another check that happens to carry the number).
+    pub(crate) fn matches(&self, rec: &CheckRecord) -> bool {
+        let t = &rec.txn;
+        let amount = t
+            .total
+            .or_else(|| cl_core::Money::sum(t.lines.iter().map(|l| l.debit)).ok());
+        t.status == TxnStatus::Posted
+            && t.txn_date == self.date
+            && t.contact_id == self.payee
+            && amount == Some(self.amount)
+            && t.created_at
+                .is_some_and(|c| c.unix_millis() >= self.at_ms - SENT_SLACK_MS)
+    }
+}
+
 /// What a save sends, for its idempotency key: the posting, the record and
 /// version it edits, and whether a closing-date password goes with it
 /// (never the password itself).
@@ -279,7 +329,12 @@ impl WriteCheckScreen {
     /// above all when the lines and the amount disagree by any amount.
     /// Returns true when there was nothing to save or it saved at once.
     pub(crate) fn start_save(&mut self, intent: SaveIntent, password: Option<Secret>) -> bool {
-        if self.save.task.is_some() {
+        if self.save.task.is_some() || self.save.lookup.is_some() {
+            return false;
+        }
+        // The last save's outcome is unknown: nothing is sent until the
+        // recheck answers or the owner confirms (B2).
+        if self.header.is_unconfirmed() {
             return false;
         }
         if let Some(e) = self.editing.as_ref().filter(|e| e.read_only) {
@@ -377,6 +432,11 @@ impl WriteCheckScreen {
             (e.id, version)
         });
         let printed = self.save.printed_choice.filter(|_| edit.is_some());
+        // The first try of a new check: what a later "number used" lookup
+        // must match. The owner's resend after an unknown outcome keeps it.
+        if edit.is_none() && !self.save.lost.after_unknown {
+            self.save.sent = Some(SentCheck::of(&draft, self.link.is_demo()));
+        }
         if self.link.is_demo() {
             let saved = self.demo_save(&draft, edit, password.as_ref(), printed, check_edit);
             return match saved {
@@ -516,6 +576,10 @@ impl WriteCheckScreen {
                 Err(e) => self.save_failed(e),
             }
         }
+        if let Some(ev) = self.save.lost.poll(&mut self.header) {
+            self.lost_event(ev);
+        }
+        self.poll_lookup();
         if let Some(r) = self.load_task.as_mut().and_then(Task::try_take) {
             self.load_task = None;
             match r {
@@ -568,6 +632,7 @@ impl WriteCheckScreen {
 
     /// The engine took the save.
     fn saved(&mut self, s: Saved) {
+        self.save.lost.saved();
         self.publish_ledger();
         self.template
             .form_saved(&self.link, self.group.as_ref(), s.id);
@@ -686,6 +751,11 @@ impl WriteCheckScreen {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
         };
+        if self.save.lost.lost(&e) {
+            self.header.save_unknown(failure.clone());
+            self.lines.form_mut().save_failed(failure);
+            return;
+        }
         self.header.save_failed(failure.clone());
         self.lines.form_mut().save_failed(failure);
         // A closed-period refusal or a wrong password shows in the
@@ -717,6 +787,15 @@ impl WriteCheckScreen {
             // A line already billed to a customer can't change.
             _ if is_line_billed(&e) => self.save.notice = Some("check.line_billed"),
             // Only the engine's code-less 409 is a used check number.
+            // Saved again after an unknown outcome: the used number is most
+            // likely the first try's check. Look it up; never offer n+1
+            // (that would write a second check, B2).
+            _ if is_number_used(&e) && self.save.lost.after_unknown && self.editing.is_none() => {
+                match (self.number_sent(), self.header.current().bank) {
+                    (Some(n), Some(bank)) => self.find_check(bank, n),
+                    _ => self.save.error = Some(e),
+                }
+            }
             _ if is_number_used(&e) => {
                 if let Some(n) = self.number_sent() {
                     // A re-proposal for the owner to take, never a silent
@@ -894,9 +973,129 @@ impl WriteCheckScreen {
         }
     }
 
+    /// After an unknown outcome and the owner's "save again", the engine
+    /// said check `number` is used on `bank`: find the first try's check
+    /// and show it (B2). Only a check of that date with the number, the
+    /// same payee and amount, created after the first try was sent counts
+    /// (review fix-PR-1 should-fix 4); none, or more than one: the usual
+    /// "number used" offer.
+    pub(crate) fn find_check(&mut self, bank: AccountId, number: u32) {
+        /// Pages of that day's checks searched for the number.
+        const PAGES: u64 = 25;
+        let Some(sent) = self.save.sent.clone() else {
+            self.save.lookup = Some(Task::ready(None));
+            self.poll_lookup();
+            return;
+        };
+        let link = Arc::clone(&self.link);
+        if let Some(mut demo) = link.demo_state() {
+            let ids: Vec<TransactionId> = crate::company::demo::checks::list(&mut demo, bank)
+                .into_iter()
+                .filter(|c| c.number == Some(number))
+                .map(|c| c.id)
+                .collect();
+            let found: Vec<TransactionId> = ids
+                .into_iter()
+                .filter(|id| {
+                    crate::company::demo::checks::get(&mut demo, *id)
+                        .is_some_and(|v| sent.matches(&v.record))
+                })
+                .collect();
+            drop(demo);
+            let one = match found.as_slice() {
+                [id] => Some(*id),
+                _ => None,
+            };
+            self.save.lookup = Some(Task::ready(one));
+            self.poll_lookup();
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        let day = sent.date;
+        if let Ok(p) = group.read(&session, move |s| async move {
+            let mut found = Vec::new();
+            for i in 0..PAGES {
+                let page = PageRequest::new(NAV_PAGE, i * u64::from(NAV_PAGE))?;
+                let rows = s
+                    .checks()
+                    .list(Some(bank), Some(day), Some(day), page)
+                    .await?;
+                for c in rows.iter().filter(|c| c.number == Some(number)) {
+                    let v = s.checks().get(c.id).await?;
+                    if sent.matches(&v.record) {
+                        found.push(c.id);
+                    }
+                }
+                if rows.len() < usize::from(NAV_PAGE) {
+                    break;
+                }
+            }
+            // Two that fit: never guess.
+            Ok(match found.as_slice() {
+                [id] => Some(*id),
+                _ => None,
+            })
+        }) {
+            self.save.lookup = Some(Task::Pending(p));
+        }
+    }
+
+    /// The looked-up check: shown; else the next-number offer.
+    pub(crate) fn poll_lookup(&mut self) {
+        let Some(r) = self.save.lookup.as_mut().and_then(Task::try_take) else {
+            return;
+        };
+        self.save.lookup = None;
+        let bank = self.header.current().bank;
+        self.save.lost.after_unknown = false;
+        if let (Ok(Some(id)), Some(bank)) = (r, bank) {
+            self.save.key = None;
+            self.save.lost.notice = Some("lost.check_found");
+            self.publish_ledger();
+            self.template
+                .form_saved(&self.link, self.group.as_ref(), id);
+            self.load_check(id, bank);
+        } else if let Some(n) = self.number_sent() {
+            self.save.duplicate = Some((n, n.saturating_add(1)));
+            self.focus = Some(Field::Number);
+            self.fetch_bank_facts();
+        }
+    }
+
+    /// The recheck or the owner answered an unknown save (B2).
+    pub(crate) fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
+        use crate::forms::lost_save::LostEvent;
+        if let LostEvent::Saved(found) = ev {
+            self.publish_ledger();
+            self.save.key = None;
+            self.save.count += 1;
+            self.save.last_action = Some("save");
+            let lists = Arc::clone(&self.lists);
+            let header = self.header.current().clone();
+            self.header.load(header);
+            let lines = self.lines.value().clone();
+            self.lines.form_mut().load(lines, &*lists);
+            if let (Some(id), Some(bank)) = (found, self.header.current().bank) {
+                self.template
+                    .form_saved(&self.link, self.group.as_ref(), id);
+                self.nav = super::Nav::default();
+                self.load_check(id, bank);
+            }
+            self.fetch_bank_facts();
+        }
+    }
+
     /// Reads a saved check drawn on `bank` into the form.
     pub(crate) fn load_check(&mut self, id: TransactionId, bank: AccountId) {
-        self.load_bank = Some(bank);
+        self.read_check(id, Some(bank));
+    }
+
+    /// Reads a saved check; without `bank` the bank is the account the
+    /// check credits.
+    pub(crate) fn read_check(&mut self, id: TransactionId, bank: Option<AccountId>) {
+        self.load_bank = bank;
         let link = Arc::clone(&self.link);
         if let Some(mut demo) = link.demo_state() {
             let got = crate::company::demo::checks::get(&mut demo, id);
@@ -917,7 +1116,20 @@ impl WriteCheckScreen {
 
     pub(crate) fn show_record(&mut self, v: &Versioned<CheckRecord>) {
         let r = &v.record;
-        let Some(bank) = self.load_bank.or(self.bank()) else {
+        // The one credited line is the bank a check is drawn on.
+        let credited = || {
+            let mut banks = r
+                .txn
+                .lines
+                .iter()
+                .filter(|l| l.credit.is_positive())
+                .map(|l| l.account_id);
+            match (banks.next(), banks.next()) {
+                (Some(b), None) => Some(b),
+                _ => None,
+            }
+        };
+        let Some(bank) = self.load_bank.or_else(credited).or(self.bank()) else {
             return;
         };
         let lists = Arc::clone(&self.lists);

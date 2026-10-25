@@ -33,6 +33,7 @@ use crate::resources::operations::{
     DAILY_TEMPLATES_CREATE,
 };
 use crate::resources::posting::{ClosedPeriodAuthorization, PostingOptions, posting_body};
+use crate::resources::reconcile::{OutcomeMatcher, Probe};
 use crate::resources::versioning::saved_unreadable;
 use crate::session::{Session, decode, json_body};
 use crate::wire::Capabilities;
@@ -1036,6 +1037,8 @@ impl DailySales<'_> {
         key: IdempotencyKey,
     ) -> Result<DailyEntry, ApiError> {
         let body = self.options_body(opts)?;
+        // One company for the probe and the post (pinned view).
+        let s = &self.0.pinned();
         let mut call = Call::new(
             Method::Post,
             DAILY_ENTRY_POST.route(),
@@ -1043,7 +1046,20 @@ impl DailySales<'_> {
         )
         .json_body(body);
         call.idempotency_key = Some(key);
-        let reply = self.0.send(&DAILY_ENTRY_POST, call, None).await?;
+        // A lost reply is settled by the day's status: posted is saved; a
+        // draft is "not saved" only once the engine that took the post is
+        // gone (a slow post on the same engine may still flip it; the
+        // engine's post has no status condition on its update). The probe
+        // is kept for the owner's Check again ([`Session::recheck`]).
+        let matcher = OutcomeMatcher::Field {
+            get: &DAILY_ENTRY_GET,
+            path: format!("/api/v1/daily-sales/entries/{id}"),
+            key: "entry",
+            field: "status",
+            value: serde_json::Value::String("posted".into()),
+        };
+        let probe = Probe::new(s, matcher, false).await;
+        let reply = s.send(&DAILY_ENTRY_POST, call, Some(&probe)).await?;
         entry_from_json(&reply.body).map_err(saved_unreadable)
     }
 

@@ -295,3 +295,271 @@ pub fn bank_postings_in_a_closed_period(h: &Harness) {
     ))
     .expect("clear the closing date");
 }
+
+/// A check on `a.bank` with `number`, dated `on` (one supplies line).
+fn numbered_check(
+    a: &crate::contract_bank_postings::Accounts,
+    on: cl_core::CalendarDate,
+    memo: &str,
+    number: u32,
+) -> cl_api::BankPosting {
+    let amount = cl_core::Money::parse_wire("7.5000").expect("money");
+    cl_api::BankPosting::check(cl_api::CheckDraft {
+        bank: a.bank,
+        date: on,
+        payee: None,
+        payee_name: "Sample Payee".into(),
+        check_number: Some(number),
+        print_later: false,
+        payee_address: None,
+        memo: Some(memo.to_string()),
+        printed_memo: None,
+        tag_ids: Vec::new(),
+        draft_attachment: None,
+        amount,
+        lines: vec![cl_api::SplitLine {
+            account: a.supplies,
+            amount,
+            memo: None,
+            contact: None,
+            billable: false,
+            tag: None,
+        }],
+    })
+    .expect("check")
+}
+
+/// Clears the closing password and the closing date when the test ends,
+/// passed or failed, so tenant B is never left locked for the next run.
+struct Unlock<'a> {
+    h: &'a Harness,
+    s: &'a cl_api::Session,
+    password: Option<Secret>,
+}
+
+impl Drop for Unlock<'_> {
+    fn drop(&mut self) {
+        if let Some(pw) = self.password.take() {
+            let clear = || {
+                self.h
+                    .run(self.s.set_closing_password(Some(&pw), None, key()))
+            };
+            // Rate limited after wrong tries: wait it out once.
+            if let Err(ApiError::ClosingPasswordRateLimited { retry_after }) = clear() {
+                std::thread::sleep(
+                    retry_after.unwrap_or(std::time::Duration::from_secs(60))
+                        + std::time::Duration::from_secs(1),
+                );
+                let _ = clear();
+            }
+        }
+        let _ = self.h.run(self.s.raw_mapped(
+            Method::Put,
+            "/api/v1/company/settings",
+            Some(&json!({ "lockDate": null })),
+        ));
+    }
+}
+
+/// A check number no earlier run on a reused database has taken (eight
+/// digits from a fresh random id).
+fn fresh_check_number() -> u32 {
+    let hex = cl_api::IdempotencyKey::new().as_header().replace('-', "");
+    let n = u32::from_str_radix(&hex[..7], 16).expect("hex");
+    10_000_000 + n % 90_000_000
+}
+
+/// STATE follow-up AC5 (PR-1 missing test): moving a transaction *out of*
+/// the closed period (old date closed, new date open) is refused for a
+/// journal entry, a bank posting and `update_check`: before a closing
+/// password exists, and with one set (no password; a wrong one on the
+/// journal entry: `ClosingPasswordRejected`); every refused record reads
+/// back unchanged.
+/// With the right password it saves and the override audit row names the
+/// old and the new date.
+pub fn moving_out_of_a_closed_period_needs_the_password(h: &Harness) {
+    use crate::contract_bank_postings::{accounts, check};
+    use cl_api::{AuditAction, AuditEntity};
+
+    let s = h.s3();
+    let settings = |v: serde_json::Value| {
+        h.run(s.raw_mapped(
+            Method::Put,
+            "/api/v1/company/settings",
+            Some(&json!({ "lockDate": v })),
+        ))
+        .expect("closing date");
+    };
+    settings(serde_json::Value::Null);
+    let mut unlock = Unlock {
+        h,
+        s: &s,
+        password: None,
+    };
+    let (cash, supplies) = pair(h, &s);
+    let a = accounts(h, &s);
+    let memo = unique("move out");
+    let old = date(2026, 1, 10);
+    let new = date(2026, 2, 10);
+    let je = post(h, &s, &je2(old, &memo, supplies.id, cash.id, "5.0000"));
+    let posting = h
+        .run(s.transactions().create_bank_posting(
+            &check(&a, old, &memo, ("3.0000", "1.0000")),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect("bank posting");
+    let number = fresh_check_number();
+    let chk = h
+        .run(s.transactions().create_bank_posting(
+            &numbered_check(&a, old, &memo, number),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect("check");
+    settings(json!("2026-01-31"));
+    let check_edit = h.require_cap(Capabilities::CHECK_EDIT, "check-edit-v1");
+    // Each record still dated in the closed period, as saved.
+    let unchanged = |what: &str| {
+        for id in [je.record.id, posting.record.id, chk.record.id] {
+            let back = h.run(s.transactions().get(id)).expect("read back");
+            assert_eq!(back.record.txn_date, old, "{what}: nothing moved");
+        }
+    };
+    // Every move out, with `opts`; each must be refused as `refused` says.
+    let try_all = |opts: &PostingOptions, refused: &dyn Fn(&ApiError)| {
+        let e = h
+            .run(s.transactions().update_journal_entry(
+                je.record.id,
+                &je.version,
+                &je2(new, &memo, supplies.id, cash.id, "5.0000"),
+                opts,
+                key(),
+            ))
+            .expect_err("journal entry out");
+        refused(&e);
+        let e = h
+            .run(s.transactions().update_bank_posting(
+                posting.record.id,
+                &posting.version,
+                &check(&a, new, &memo, ("3.0000", "1.0000")),
+                opts,
+                key(),
+            ))
+            .expect_err("bank posting out");
+        refused(&e);
+        if check_edit {
+            let read = h.run(s.checks().get(chk.record.id)).expect("check");
+            let e = h
+                .run(s.checks().update_check(
+                    chk.record.id,
+                    &read.version,
+                    &numbered_check(&a, new, &memo, number),
+                    opts,
+                    key(),
+                ))
+                .expect_err("update_check out");
+            refused(&e);
+        }
+    };
+
+    // No closing password yet: each move out is refused.
+    try_all(&PostingOptions::default(), &|e| {
+        assert!(matches!(e, ApiError::ClosedPeriod(_)), "{e:?}");
+    });
+    unchanged("no password set");
+
+    if h.require_cap(Capabilities::CLOSING_PASSWORD, "U-15") {
+        let pw = Secret::new("closing-pass-out");
+        assert!(
+            h.run(s.set_closing_password(None, Some(&pw), key()))
+                .expect("set password")
+        );
+        unlock.password = Some(pw);
+        // With a password set: none sent is refused as needing it...
+        try_all(&PostingOptions::default(), &|e| {
+            assert!(
+                matches!(e, ApiError::ClosedPeriod(c) if c.password_required == Some(true)),
+                "{e:?}"
+            );
+        });
+        unchanged("password set, none sent");
+        // ...and a wrong one is rejected. One try only: the engine allows
+        // 10 wrong passwords in 15 minutes per user across the suite.
+        let wrong = PostingOptions {
+            closed_period: Some(ClosedPeriodAuthorization::with_password(Secret::new(
+                "not-the-password",
+            ))),
+        };
+        let e = h
+            .run(s.transactions().update_journal_entry(
+                je.record.id,
+                &je.version,
+                &je2(new, &memo, supplies.id, cash.id, "5.0000"),
+                &wrong,
+                key(),
+            ))
+            .expect_err("wrong password");
+        assert_eq!(e, ApiError::ClosingPasswordRejected);
+        unchanged("wrong password");
+
+        let with = PostingOptions {
+            closed_period: Some(ClosedPeriodAuthorization::with_password(Secret::new(
+                "closing-pass-out",
+            ))),
+        };
+        let audited = |id: cl_core::ids::TransactionId, what: &str| {
+            let rows = h
+                .run(
+                    s.audit()
+                        .for_record(AuditEntity::ClosingDateOverride, *id.as_uuid()),
+                )
+                .expect("audit");
+            let found = rows.iter().any(|r| {
+                r.action == AuditAction::Override
+                    && r.after.as_ref().is_some_and(|img| {
+                        img.raw()["oldDate"] == old.to_wire()
+                            && img.raw()["newDate"] == new.to_wire()
+                    })
+            });
+            assert!(found, "{what}: an override row with the old and new date");
+        };
+        h.run(s.transactions().update_journal_entry(
+            je.record.id,
+            &je.version,
+            &je2(new, &memo, supplies.id, cash.id, "5.0000"),
+            &with,
+            key(),
+        ))
+        .expect("journal entry out with the password");
+        audited(je.record.id, "journal entry");
+        h.run(s.transactions().update_bank_posting(
+            posting.record.id,
+            &posting.version,
+            &check(&a, new, &memo, ("3.0000", "1.0000")),
+            &with,
+            key(),
+        ))
+        .expect("bank posting out with the password");
+        audited(posting.record.id, "bank posting");
+        if check_edit {
+            let read = h.run(s.checks().get(chk.record.id)).expect("check");
+            h.run(s.checks().update_check(
+                chk.record.id,
+                &read.version,
+                &numbered_check(&a, new, &memo, number),
+                &with,
+                key(),
+            ))
+            .expect("update_check out with the password");
+            audited(chk.record.id, "update_check");
+        }
+        // Cleared here on the way out; the guard does it on a failure.
+        let pw = unlock.password.take().expect("set above");
+        assert!(
+            !h.run(s.set_closing_password(Some(&pw), None, key()))
+                .expect("clear password")
+        );
+    }
+    settings(serde_json::Value::Null);
+}

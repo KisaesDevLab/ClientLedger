@@ -205,6 +205,15 @@ impl JournalScreen {
         if let Some(e) = &self.error {
             form::inline_error(ui, tokens, e);
         }
+        if let Some(ev) = self.lost.ui(
+            ui,
+            &mut self.header,
+            &self.link,
+            self.group.as_ref(),
+            "journal_entry",
+        ) {
+            self.lost_event(ev);
+        }
         if self.busy() {
             form::progress_line(ui, tokens, &t("helper.saving"));
         }

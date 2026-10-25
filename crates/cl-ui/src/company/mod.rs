@@ -99,6 +99,9 @@ pub struct CompanyLink {
     /// The last catch-up run's answer, shared by the runner and the
     /// Templates Due window (P15).
     due: Mutex<crate::templates_runner::DueBoard>,
+    /// Saves whose outcome is unknown, for the whole app session, so the
+    /// block outlives the window that made them (review fix-PR-1 B2).
+    lost_saves: Mutex<crate::forms::lost_save::LostBook>,
 }
 
 impl std::fmt::Debug for CompanyLink {
@@ -138,6 +141,7 @@ impl CompanyLink {
             demo: None,
             bus: crate::data_bus::DataBus::new(),
             due: Mutex::new(crate::templates_runner::DueBoard::default()),
+            lost_saves: Mutex::new(crate::forms::lost_save::LostBook::default()),
         }
     }
 
@@ -158,6 +162,7 @@ impl CompanyLink {
             demo: Some(Mutex::new(demo::DemoState::new())),
             bus: crate::data_bus::DataBus::new(),
             due: Mutex::new(crate::templates_runner::DueBoard::default()),
+            lost_saves: Mutex::new(crate::forms::lost_save::LostBook::default()),
         }
     }
 
@@ -299,6 +304,14 @@ impl CompanyLink {
     /// The catch-up board (the last run's answer, "Check now"; P15).
     pub fn due(&self) -> std::sync::MutexGuard<'_, crate::templates_runner::DueBoard> {
         self.due.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The unknown saves of this app session (see
+    /// [crate::forms::lost_save::LostBook]).
+    pub fn lost_saves(&self) -> std::sync::MutexGuard<'_, crate::forms::lost_save::LostBook> {
+        self.lost_saves
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Queue an event for the shell.

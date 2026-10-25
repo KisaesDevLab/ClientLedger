@@ -55,9 +55,14 @@ pub(crate) struct RefundState {
     pub problem: Option<&'static str>,
     /// The idempotency key of the refund being retried: the draft and
     /// whether a password went with it (never the password itself). A
-    /// lost reply resent unchanged reuses it, so the engine can't post the
-    /// refund twice.
+    /// lost reply resent unchanged reuses it. The pinned engine ignores
+    /// the key on `POST /transactions` (U-18 is not built), so the key is
+    /// no guard against a second posting: after an unknown outcome the
+    /// form blocks sending until the recheck or the owner answers (B2).
     pub key: Option<(VendorRefundDraft, bool, IdempotencyKey)>,
+    /// The save whose outcome is unknown is this refund (not the deposit):
+    /// when Check again finds it in the books, the refund card is done.
+    pub lost: bool,
 }
 
 impl RefundState {
@@ -201,6 +206,10 @@ impl DepositScreen {
 
     /// Option 2: the refund against a vendor credit, saved on its own.
     pub(crate) fn send_refund(&mut self, password: Option<Secret>) {
+        // An unknown save in this window blocks every posting from it (B2).
+        if self.header.is_unconfirmed() || self.refund.task.is_some() {
+            return;
+        }
         self.refund.problem = None;
         let (Some(vendor), Some(credit)) = (self.refund.vendor, self.refund.credit) else {
             self.refund.problem = Some("deposit.refund.credit_needed");
@@ -302,6 +311,18 @@ impl DepositScreen {
     }
 
     fn refund_saved(&mut self, _s: &Saved) {
+        self.save.lost.saved();
+        self.refund_done();
+    }
+
+    /// Check again found the lost refund in the books (review fix-PR-1
+    /// should-fix 3): it is done, exactly as if its reply had come; the
+    /// card closes so the same refund is not sent a second time.
+    pub(crate) fn refund_found(&mut self) {
+        self.refund_done();
+    }
+
+    fn refund_done(&mut self) {
         crate::forms::publish_saved(&self.link, &self.bus, &self.save.published);
         self.closing_prompt.saved();
         self.refund = RefundState::default();
@@ -314,6 +335,11 @@ impl DepositScreen {
     pub(crate) fn refund_failed(&mut self, e: ApiError) {
         if !crate::screens::register::keeps_key(&e) {
             self.refund.key = None;
+        }
+        if self.save.lost.lost(&e) {
+            self.header.mark_unconfirmed();
+            self.refund.lost = true;
+            return;
         }
         if self.closing_failed(&e, Pending::Refund) {
             return;

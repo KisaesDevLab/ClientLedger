@@ -107,7 +107,7 @@ steps:
   - assert_count: {target: {role: tab, label_contains: "Make Journal Entry"}, count: 1}
   - assert_state: {key: screen.screen, equals: journal_entry}
 
-  # --- 5. A/R needs a name; one A/R-or-A/P line; Adjusting; Reverse on --------
+  # --- 5. A/R needs a name; every A/R-or-A/P line too; Adjusting; Reverse on -
   # Dated 09/15 (closed through 09/30): every save, edit and delete asks for
   # the closing-date password ("demo-close", synthetic).
   - click: {role: button, label: Clear}
@@ -138,7 +138,8 @@ steps:
   - key: Tab
   - assert_value: {target: {label: "Name, line 1"}, equals: "Hollister Family Trust"}
   - assert_state: {key: screen.save.problems, equals: 0}
-  # A second A/R-or-A/P line (Accounts Payable) is refused.
+  # A second A/R-or-A/P line (Accounts Payable) is fine (Q-206, any number),
+  # but it needs its own name.
   - click: {label: "Account, line 3"}
   - type: {text: "2000"}
   - key: Tab
@@ -152,10 +153,16 @@ steps:
   - key: Tab
   - assert_state: {key: screen.difference, equals: "0.00"}
   - key: Alt+N
-  - assert_state: {key: screen.save.problems, equals: 2}
-  - assert_exists: {role: label, label: "A journal entry can have only one line on Accounts Receivable or Accounts Payable."}
+  - assert_state: {key: screen.save.refused, equals: ar_ap_name_missing}
+  - assert_state: {key: screen.save.problems, equals: 1}
+  - assert_exists: {role: label, label: "A line on Accounts Receivable needs a customer, and a line on Accounts Payable a vendor. Choose one in the Name column."}
   - assert_state: {key: screen.closing, equals: idle}
   - screenshot: ar-ap-refused
+  - click: {label: "Name, line 3"}
+  - type: {text: "Galena"}
+  - key: Tab
+  - assert_value: {target: {label: "Name, line 3"}, equals: "Galena Gravel"}
+  - assert_state: {key: screen.save.problems, equals: 0}
   - click: {label: "Debit, line 3"}
   - key: Ctrl+Delete
   - click: {label: "Debit, line 3"}

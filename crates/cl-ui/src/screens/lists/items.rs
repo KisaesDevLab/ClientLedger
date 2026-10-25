@@ -608,7 +608,7 @@ impl ItemsScreen {
                 self.after_save(after, None);
                 return true;
             }
-            SaveStart::Busy => return false,
+            SaveStart::Busy | SaveStart::Unconfirmed => return false,
         }
         let fields = ItemFields {
             name: checked.name,

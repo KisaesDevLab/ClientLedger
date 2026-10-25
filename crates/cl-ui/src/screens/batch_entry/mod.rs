@@ -154,6 +154,11 @@ pub struct BulkEntryScreen {
     pub(crate) save_task: Option<save::Saving>,
     /// The idempotency key for a batch content hash (kept for retries).
     pub(crate) key: Option<(u64, cl_api::IdempotencyKey)>,
+    /// A save whose outcome is unknown (follow-up 4): only the unchanged
+    /// batch (this content hash) may go again until the owner confirms.
+    pub(crate) lost: crate::forms::lost_save::LostSave,
+    pub(crate) resend_only: Option<u64>,
+    pub(crate) lost_gate: cl_model::forms::FormState<()>,
     pub(crate) closing_prompt: ClosingPrompt<cl_model::forms::SaveIntent>,
     pub(crate) summary: Option<summary::Summary>,
     pub(crate) summary_open: bool,
@@ -267,6 +272,9 @@ impl BulkEntryScreen {
             save_after_check: None,
             save_task: None,
             key: None,
+            lost: crate::forms::lost_save::LostSave::default(),
+            resend_only: None,
+            lost_gate: cl_model::forms::FormState::new(()),
             closing_prompt: ClosingPrompt::default(),
             summary: None,
             summary_open: false,
@@ -683,6 +691,10 @@ impl Screen for BulkEntryScreen {
 
     fn dirty(&self) -> bool {
         self.is_dirty()
+    }
+
+    fn save_unconfirmed(&self) -> bool {
+        self.lost.pending()
     }
 
     fn save(&mut self) -> bool {

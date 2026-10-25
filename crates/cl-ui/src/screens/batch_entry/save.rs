@@ -109,10 +109,21 @@ impl BulkEntryScreen {
             }
             return false;
         }
+        // After an unknown outcome only the unchanged batch goes again: its
+        // key makes the engine replay a save that did go through. Changed
+        // rows would get a new key and could post twice (follow-up 4).
+        if let Some(h) = self.resend_only
+            && self.lost.pending()
+            && self.batch().content_hash() != h
+        {
+            self.closing_prompt.nothing_sent();
+            self.notice = Some("lost.batch_resend");
+            return false;
+        }
         let lists = Arc::clone(&self.books.lists);
         let batch = match self.grid.begin_save(intent, &*lists) {
             Ok(SaveStart::Send(v)) => v,
-            Ok(SaveStart::Skip(_) | SaveStart::Busy) | Err(_) => {
+            Ok(SaveStart::Skip(_) | SaveStart::Busy | SaveStart::Unconfirmed) | Err(_) => {
                 self.closing_prompt.nothing_sent();
                 return false;
             }
@@ -187,6 +198,9 @@ impl BulkEntryScreen {
         saved: &cl_api::BatchSaved,
     ) {
         self.closing_prompt.saved();
+        self.lost.saved();
+        self.resend_only = None;
+        self.lost_gate.owner_confirms();
         let checks = &self.checks;
         match out.touched_accounts(|k| checks.resolved_account(batch, k)) {
             Some(set) => {
@@ -245,6 +259,11 @@ impl BulkEntryScreen {
         // retry of the same rows replays a save that did go through.
         if !crate::screens::register::keeps_key(&e) {
             self.key = None;
+        }
+        // Unknown: only the same rows may go again (follow-up 4).
+        if self.lost.lost(&e) {
+            self.resend_only = self.key.as_ref().map(|(h, _)| *h);
+            self.lost_gate.mark_unconfirmed();
         }
         match e {
             e @ ApiError::Conflict {

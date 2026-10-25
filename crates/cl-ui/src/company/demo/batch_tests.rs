@@ -436,7 +436,8 @@ fn je_group_unbalanced_refused() {
 }
 
 /// The journal entry rules beyond the balance: two lines at least, one
-/// side per line, one A/R-A/P line and it has a name.
+/// side per line, a name on every A/R-A/P line (any number of them,
+/// Q-206).
 #[test]
 fn journal_entry_rules() {
     let s = DemoState::new();
@@ -445,11 +446,18 @@ fn journal_entry_rules() {
     both.credit = Some(amt("1.00"));
     let other = je_row(3, "E", "1010", None, Some("1.00"));
     let ar = je_row(4, "AR", "Accounts Receivable", Some("5.00"), None);
-    let ap = je_row(5, "AR", "Accounts Payable", None, Some("5.00"));
+    let mut ap = je_row(5, "AR", "Accounts Payable", None, Some("5.00"));
+    ap.contact_name = Some("Galena Gravel".into());
+    // Two named A/R lines in one entry pass.
+    let mut ar1 = je_row(6, "AR2", "1200", Some("3.00"), None);
+    ar1.contact_name = Some("Riverbend HOA".into());
+    let mut ar2 = je_row(7, "AR2", "1200", Some("2.00"), None);
+    ar2.contact_name = Some("Riverbend HOA".into());
+    let income = je_row(8, "AR2", "Service Income", None, Some("5.00"));
     let groups = vec![group(
         BatchKind::JournalEntry,
         None,
-        vec![lone, both, other, ar, ap],
+        vec![lone, both, other, ar, ap, ar1, ar2, income],
     )];
     let v = validate(&s, &groups).expect("v");
     let kinds = |i: usize| -> Vec<(BatchField, ProblemKind)> {
@@ -461,9 +469,9 @@ fn journal_entry_rules() {
     };
     assert_eq!(kinds(0), vec![(BatchField::Number, ProblemKind::Invalid)]);
     assert!(kinds(1).contains(&(BatchField::Debit, ProblemKind::Required)));
-    assert!(kinds(3).contains(&(BatchField::Account, ProblemKind::Other)));
-    assert!(kinds(3).contains(&(BatchField::Contact, ProblemKind::Required)));
-    assert!(kinds(4).contains(&(BatchField::Account, ProblemKind::Other)));
+    assert_eq!(kinds(3), vec![(BatchField::Contact, ProblemKind::Required)]);
+    assert_eq!(kinds(4), vec![], "a named A/P line beside an A/R line");
+    assert!(v.rows[5..8].iter().all(|r| r.ok), "{:?}", &v.rows[5..8]);
 }
 
 /// `suggest_account_offline`: the vendor's default, then its most recent

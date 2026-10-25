@@ -37,7 +37,7 @@ use zeroize::Zeroizing;
 
 use crate::client::{Call, EngineReply, Method};
 use crate::errors::ApiError;
-use crate::idempotency::{Ambiguity, BoxFuture, Reconciled, Reconciler};
+use crate::idempotency::{Ambiguity, BoxFuture, IdempotencyKey, Reconciled, Reconciler};
 use crate::resources::common::{Query, Spec};
 use crate::resources::operations::{LEDGER_VERSION, Operation, TXN_GET, TXNS_LIST};
 use crate::resources::transactions::TxnType;
@@ -61,6 +61,7 @@ pub(crate) fn row_fp<T: DeserializeOwned + EditableFields>(v: Value) -> Option<[
 }
 
 /// Where a create's candidates are searched.
+#[derive(Clone)]
 pub(crate) enum Search {
     /// Transactions of `kind` dated `date`, touching `account` when given
     /// (listed, then each candidate read by id).
@@ -79,7 +80,19 @@ pub(crate) enum Search {
 }
 
 /// How to recognise our own write.
+#[derive(Clone)]
 pub(crate) enum OutcomeMatcher {
+    /// A template posted now ("Enter now", `POST /templates/{id}/enter`):
+    /// exactly one new transaction dated `date` whose provenance names the
+    /// template (`source` `template` without a schedule, `recurring` with
+    /// one; `sourceId` the template). The engine marks the provenance in
+    /// the same database transaction as the posting, and a template without
+    /// a schedule writes no occurrence row, so this is the safest signal the
+    /// pinned engine gives (B2, Q-PR1c).
+    FromTemplate {
+        template: cl_core::ids::TemplateId,
+        date: CalendarDate,
+    },
     /// A create: exactly one new row with our fingerprint.
     Created {
         search: Search,
@@ -279,6 +292,9 @@ impl Probe {
                     _ => Check::Wait,
                 }
             }
+            OutcomeMatcher::FromTemplate { template, date } => {
+                self.posted_from_template(*template, *date, settled).await
+            }
             OutcomeMatcher::Deleted { get, path } => match self.get(get, path).await {
                 Err(ApiError::NotFound { .. }) => {
                     Check::Final(Reconciled::Committed(synth(b"{}".to_vec(), generation)))
@@ -335,6 +351,54 @@ impl Probe {
         row.get("id")
             .and_then(Value::as_str)
             .is_none_or(|id| !self.session.created_here(id))
+    }
+
+    /// "Enter now" of `template` on `date`: the new postings whose
+    /// provenance names the template.
+    async fn posted_from_template(
+        &self,
+        template: cl_core::ids::TemplateId,
+        date: CalendarDate,
+        settled: bool,
+    ) -> Check {
+        let want = template.to_string();
+        let mut ids = Vec::new();
+        for source in ["template", "recurring"] {
+            let mut q = Query::default();
+            q.put("source", source);
+            q.put("startDate", date.to_wire());
+            q.put("endDate", date.to_wire());
+            let Some(rows) = self.search_rows(&TXNS_LIST, "data", &q).await else {
+                return Check::Wait;
+            };
+            for r in rows
+                .iter()
+                .filter(|r| r.get("sourceId").and_then(Value::as_str) == Some(want.as_str()))
+                .filter(|r| self.recent(r) && self.not_ours_before(r))
+            {
+                match r
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|s| TransactionId::parse(s).ok())
+                {
+                    Some(id) if ids.contains(&id) => {}
+                    Some(id) => ids.push(id),
+                    None => return Check::Final(Reconciled::Unresolved),
+                }
+            }
+        }
+        match ids.as_slice() {
+            [id] => {
+                let path = format!("/api/v1/transactions/{id}");
+                match self.get(&TXN_GET, &path).await {
+                    Ok(reply) => Check::Final(Reconciled::Committed(reply)),
+                    Err(_) => Check::Wait,
+                }
+            }
+            [] if settled => Check::Final(Reconciled::NotCommitted),
+            [] => Check::Wait,
+            _ => Check::Final(Reconciled::Unresolved),
+        }
     }
 
     async fn created(
@@ -445,10 +509,130 @@ impl Probe {
     }
 }
 
+/// A probe kept after its save ended with an unknown outcome, so the
+/// owner's "Check again" can run it later ([`Session::recheck`]). It holds
+/// no session (no reference cycle): the recheck rebuilds the pinned view.
+#[derive(Clone)]
+pub(crate) struct LostProbe {
+    pin: crate::session::ScopePin,
+    stamp_before: Option<u64>,
+    sent_at_ms: i64,
+    matcher: OutcomeMatcher,
+    /// The engine generation the lost attempt used.
+    generation: u64,
+    cause: crate::idempotency::AmbiguityCause,
+}
+
+/// What the owner's recheck of an unknown save found (B2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Recheck {
+    /// The save is in the books; `transaction` is the record when the
+    /// answer names one (a transaction save).
+    Committed {
+        /// The saved transaction.
+        transaction: Option<TransactionId>,
+    },
+    /// It provably did not commit (the engine that took it is gone and
+    /// nothing of ours is there): the same save may go again.
+    NotCommitted,
+    /// Still cannot tell: no stored probe for this key, the company was
+    /// switched, the engine could not be reached, or two identical
+    /// candidates. Save stays blocked until the owner confirms.
+    Unknown,
+}
+
+/// The transaction a committed answer names (`{transaction}`, `{check}`,
+/// a daily-sales day's journal entry `{entry: {transactionId}}`, or a bare
+/// record).
+fn committed_id(reply: &EngineReply) -> Option<TransactionId> {
+    let v: Value = serde_json::from_slice(&reply.body).ok()?;
+    [
+        "/transaction/id",
+        "/check/id",
+        "/entry/transactionId",
+        "/id",
+    ]
+    .iter()
+    .find_map(|p| v.pointer(p).and_then(Value::as_str))
+    .and_then(|s| TransactionId::parse(s).ok())
+}
+
+impl Session {
+    /// Re-runs the stored probe of the save whose outcome was unknown
+    /// (`key` from `OutcomeUnknown`). Read-only: it never sends the save.
+    /// `Committed` and `NotCommitted` forget the probe; `Unknown` keeps it
+    /// for the next try.
+    ///
+    /// # Errors
+    /// None today (a failed read is `Unknown`); typed for later engines.
+    pub async fn recheck(&self, key: &IdempotencyKey) -> Result<Recheck, ApiError> {
+        let Some(lost) = self.lost_probe(key) else {
+            return Ok(Recheck::Unknown);
+        };
+        let session = self.pinned_to(lost.pin);
+        if session.pin_moved() {
+            return Ok(Recheck::Unknown);
+        }
+        let probe = Probe {
+            session,
+            stamp_before: lost.stamp_before,
+            sent_at_ms: lost.sent_at_ms,
+            matcher: lost.matcher.clone(),
+        };
+        let amb = Ambiguity {
+            request_id: cl_core::ids::RequestId::from_uuid(uuid::Uuid::new_v4()),
+            generation: lost.generation,
+            cause: lost.cause,
+            key: Some(key.clone()),
+        };
+        let answer = match probe.run(&amb).await {
+            Reconciled::Committed(reply) => Recheck::Committed {
+                transaction: committed_id(&reply),
+            },
+            Reconciled::NotCommitted => Recheck::NotCommitted,
+            Reconciled::Unresolved => Recheck::Unknown,
+        };
+        if answer != Recheck::Unknown {
+            self.forget_lost(key);
+        }
+        tracing::info!(
+            outcome = match answer {
+                Recheck::Committed { .. } => "committed",
+                Recheck::NotCommitted => "not_committed",
+                Recheck::Unknown => "unknown",
+            },
+            "recheck of an unknown save"
+        );
+        Ok(answer)
+    }
+}
+
+#[cfg(test)]
+#[path = "recheck_tests.rs"]
+mod recheck_tests;
+
 impl Reconciler for Probe {
     fn reconcile<'a>(&'a self, ambiguity: &'a Ambiguity) -> BoxFuture<'a, Reconciled<EngineReply>> {
         Box::pin(async move {
             let r = self.run(ambiguity).await;
+            // Kept for the owner's recheck unless it committed.
+            if let Some(key) = &ambiguity.key {
+                if matches!(r, Reconciled::Committed(_)) {
+                    self.session.forget_lost(key);
+                } else {
+                    self.session.remember_lost(
+                        key.clone(),
+                        LostProbe {
+                            pin: self.session.pin_now(),
+                            stamp_before: self.stamp_before,
+                            sent_at_ms: self.sent_at_ms,
+                            matcher: self.matcher.clone(),
+                            generation: ambiguity.generation,
+                            cause: ambiguity.cause,
+                        },
+                    );
+                }
+            }
             let class = match &r {
                 Reconciled::Committed(_) => "committed",
                 Reconciled::NotCommitted => "not_committed",

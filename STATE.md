@@ -1,9 +1,9 @@
 # STATE.md — ClientLedger
 
-**Current phase:** Checkpoint PR-1 (end of M1), then P17 — Enter Bill, vendor credits, receipt inbox, attachment viewer (Next)
-**Status:** P16 done; engine pin bumped to `7b267e48` (engine PRs #168, #169, #170) on `chore/engine-pin-7b267e48`
+**Current phase:** P17 — Enter Bill, vendor credits, receipt inbox, attachment viewer (Next, after the `fix/PR-1` PR merges)
+**Status:** Checkpoint PR-1 fixes on `fix/PR-1`; PR open with auto-merge. M1 complete (summary below). Engine PRs #171 (U-18) and #172 (U-82) await the owner
 **Engine commit:** `7b267e48` (`main`, pinned 2026-10-24 after engine PRs #168 (tag-number-v1, dashboard-exact-v1, migration 0228), #169 (ledger-guards-v1) and #170 (merge-closing-date-v1); bump per Q-02)
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-25
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
 ## Phase board — beta track
@@ -28,8 +28,8 @@
 | P15 | Journal entries, templates and recurring | H | Done 2026-10-21 |
 | P15A | Bulk Entry | M | Done 2026-10-21 |
 | P16 | Home workspace | L | Done 2026-10-24 |
-| PR-1 | Checkpoint: core ledger process review | — | Next |
-| P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | |
+| PR-1 | Checkpoint: core ledger process review | — | Done 2026-10-25 (fixes on `fix/PR-1`; U-18 and U-82 engine PRs open) |
+| P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | Next |
 | P18 | Pay Bills (checks) | M | |
 | P19 | Form printing | L | |
 | P20 | Create Invoice | M | |
@@ -198,6 +198,26 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 7. U-77 bank-file balance and U-78 reorder alerts proposed; U-37 and U-12 amended for Home.
 8. Home's Refresh issues many engine reads per data-bus event (one per reconciled account batch plus lanes); measure before P33 LAN mode.
 
+## Follow-ups from checkpoint PR-1
+
+1. U-18 (engine PR #171): before the pin includes it, cl-api needs a per-route `keyable` class (send `Idempotency-Key` only where the engine covers the route; never blind-retry others). Then the unknown-save block (Q-PR1a) can relax on covered routes.
+2. U-82 (engine PR #172): once pinned, catch-up runs the other templates with `excludeTemplateIds` while one template's question is open (Q-PR1d).
+3. The unknown-save block lasts for the app session; an app restart forgets it (Q-PR1a). U-18 closes this.
+4. Security note from the review: `GET /transactions/:id` and `POST /transactions/:id/void` don't scope by company (moot while one tenant is one company); security-review before P33 LAN mode.
+5. With a menu open, Escape closed the Register tab instead of only the menu (seen while writing the shell scenario for PR #35). Check and fix.
+6. Not covered by the PR-1 review (cover in a later checkpoint): Daily Sales end to end, LAN concurrency (U-17), Undeposited Funds and A/P subledger tie-out, template CRUD audit rows, Bulk Entry engine validate/plan, printed-form rounding (P19).
+7. Contact merge in closed periods (review S1) is fixed by U-47 (engine PR #170, pinned).
+
+## Milestone summaries
+
+### M1 — Core ledger (P10–P16, checkpoint PR-1), completed 2026-10-25
+
+- **Shipped:** ledger grid (P10); lists, centers and tags (P11); bank and account register (P12); Write Check (P13); deposits, transfers, card charges, daily sales, owner and loan helpers (P14); journal entries, templates and catch-up (P15); Bulk Entry (P15A); Home workspace with the Enter option, fixed headers, condensed rows, tag numbers, Bulk Entry copy down / columns / bulk set, and the Ko-fi button (P16); checkpoint PR-1 fixes (unknown-save block on every posting form, register edits routed to their forms, catch-up confirmation above 3 dates, template link retry, closed-period move-out contract test).
+- **Screenshots:** `target/ui-check/<screen>/` (light and dark) for every screen, plus the CI `ui-check` artifacts on each phase PR; Home `--compare` in `target/ui-check/home/compare.html`.
+- **Questions added:** Q-P10a–x, Q-P11a–aa, Q-P12a–w, Q-P13a–x, Q-P14a–ad, Q-P15a–aa, Q-P15Aa–As, Q-P16a–y, Q-PR1a–g; owner answers 2026-10-24/25 recorded on Q-P16 rows, Q-PR1b/d and Q-206 (any number of named A/R or A/P lines).
+- **Engine:** pin 7b267e48 (PRs #153, #156, #159–#161, #163, #168–#170 merged). Pending owner merge: #171 (U-18 request idempotency, security-reviewed) and #172 (U-82 run-due filter). Proposed: U-77, U-78, U-79.
+- **Reviews:** opus fresh-eyes reviews and fix passes on every phase; process review PR-1 (opus, xhigh) with two fix passes and a fresh-eyes review of the fixes.
+
 ## Owner-requested checkpoints
 
 - **After P13 merges, before P14 starts (owner, 2026-10-20):** Intuit compliance check — trademarks/names, copied text, icons and assets, layouts and colors vs QuickBooks, feature names, help text, fixtures, non-affiliation notice (non-negotiable 5). Report to the owner; fix findings on a `fix/` branch.
@@ -208,6 +228,14 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-25 — Checkpoint PR-1 (core ledger process review, process-reviewer/opus xhigh) complete on `fix/PR-1`.
+  - Findings: B1 register edit of a linked deposit un-deposited its payments; B2 a second Save after an unknown outcome could post twice (the engine had idempotency only on `/batch/save`); B3 register edit of a numbered journal entry erased its number; B4 register edit of a printed check skipped the printed-check question. Plus S1–S3 and four follow-ups (`target/reviews/PR-1.md`).
+  - Client fixes: linked deposits, numbered journal entries and checks open their own forms; an unknown save blocks Save on all 13 posting forms until "Check again" answers or the owner confirms an override (logged without amounts or names; owner 2026-10-24), kept per company for the session across windows; Write Check's used-number lookup matches the first try only; Daily Sales recheck waits for an engine restart before "not saved"; vendor refund cleared after a found save; template links retried and persisted ("Saved separately" after a final refusal); catch-up asks first above 3 missed dates (owner 2026-10-24); Bulk Entry resends an unchanged batch only; cl-host instance lock released explicitly on drop (macOS flake); live contract test for moving a transaction out of a closed period (journal entry, bank posting, check; no password, wrong password, override audit with old and new dates).
+  - Fresh-eyes review of the fixes (`target/reviews/fix-PR-1-review.md`) found two more double-post paths (Daily Sales recheck, Templates window close); fixed in a second pass.
+  - Engine: PR #169 (U-80/U-81 ledger guards) and #170 (U-47 merges respect the closing date) merged and pinned; #171 (U-18 request idempotency, architect plan + security review H1/M1/L1–L5 fixed) and #172 (U-82 run-due filter) open for the owner.
+  - Q-206 changed (owner 2026-10-25): any number of named A/R or A/P lines per journal entry, following engine 33a973fa.
+  - Decisions Q-PR1a–g. Live contract suite 158/158 on 7b267e48.
+  - Agents: process-reviewer/opus (xhigh), architect/opus (U-18), engine-impl/opus ×5, security-review/opus, rust-impl/opus ×4, review/opus.
 - 2026-10-24 — Engine pin c217bfd → 7b267e48 (engine main with PRs #168 U-75/U-76, #169 U-80/U-81, #170 U-47) on `chore/engine-pin-7b267e48`. Live capabilities: `tag-number-v1`, `dashboard-exact-v1`, `ledger-guards-v1`, `merge-closing-date-v1`. Engine SEA rebuilt; api-spec fixtures refreshed; live contract suite 157 passed with `CL_API_REQUIRE_CAPS=tag-number-v1,dashboard-exact-v1` (`tags::numbers_u75`, `tags::number_archive_round_trip_u75`, `home::exact_strings_u76`, `tags::line_tag_merge_u41` now run for real). Contact and tag merges use the closing-date password flow (U-47, Q-231; new `merges::closed_period_needs_the_password_u47`); tag merge no longer limited to header-only tags (Q-P11t). The engine now accepts several named A/R or A/P lines in one journal entry (`JE_AR_AP_ONE_PER_ENTRY` gone); the client keeps Q-206 locally. Agents: rust-implementer/opus.
 - 2026-10-24 — P16 complete on `phase/P16-home-workspace`; PR with auto-merge. Work moved to a new Windows 11 dev machine (toolchain reinstalled; PowerShell added to the agent definitions). Shipped:
   - Steps 0–0h:
@@ -257,10 +285,4 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   Agents: scout/opus, architect/opus, impl/opus (WP0–WP8 and two fix passes; the phase is tier L, but opus was used per Q-277), engine-impl/opus, review/opus ×2, ui-verifier/opus, docs-writer/sonnet.
 - 2026-10-21 — P15A complete on `phase/P15A-bulk-entry`; PR to open. Shipped: the Bulk Entry window (sections per type and account; checks, expenses, card charges, card credits, deposits and journal entries; other types wait for their phases, Q-263); local exact checks (cent rounding, journal entry balance, duplicate check numbers, closed-period marks); engine validate per row with highlights and F8 navigation; paste from a spreadsheet and CSV import with a remembered column mapping; account suggestions with accept; Save all in one atomic call with an idempotency key and one closing-password prompt; a summary with register links; data-bus refresh. Grid block paste and a control-channel paste step. Engine PR #163 (U-67 to U-74, migration 0226) merged after security review and fixes; pin c217bfd. Contract suite 149/149 live; scenario batch_entry 178 steps plus forms-zoom coverage; help page. Decisions Q-P15Aa to Q-P15As.
   Acceptance (phases/M1-core-ledger.md P15A): [x] a mixed batch of checks and deposits saves and every row shows in the register with the right balance (live contract + scenario); [x] invalid rows cannot save (atomic rollback contract, unit + scenario); [x] control-channel scenario.
-  Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, Opus fallback for money lanes), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.
-- 2026-10-21 — P15 complete on `phase/P15-journal-templates`; PR to open. Shipped (2026-10-20/21): Make Journal Entry (names on lines, A/R-A/P rule, entry numbering, adjusting, reversing, autobalance, closing-password flow, edit/void/delete); Templates (store without posting, groups, remind/auto/never, Save as Template on Write Check, Deposit, Transfer, Card Charge, Journal Entry and Daily Sales, Use, Enter now); the catch-up runner and the Templates Due window. Engine PRs #160 (U-58 to U-61, U-64 to U-66, migration 0224, exact balance for all postings, rounding fixes in invoices, bills, vendor credits and estimates) and #161 (U-62, U-63, migration 0225, per-kind permissions, 31-per-run cap, month-end anchoring) merged after security reviews and fixes; pin 886c6b5; U-19 and U-22 delivered by it. Contract suite 136/136 live; practice company loads with templates and the first catch-up posts once; scenarios journal_entry 169, templates 339, templates_due 235 steps plus forms-zoom coverage; help pages x3. Decisions Q-P15a to Q-P15aa.
-  Acceptance (phases/M1-core-ledger.md P15): [x] unbalanced entries cannot save (unit + contract + scenario, nothing sent); [x] missed monthly occurrences post exactly once each (contract run_due across engine restart + practice_live).
-  Agents: scout/opus, architect/opus (Fable out of credits, Opus fallback for Tier H), impl/opus, engine-impl/opus, security-review/opus x2, review/opus, ui/opus, bookkeeper/sonnet.
-- 2026-10-20 — P14 complete on `phase/P14-money-forms`; PR to open. Shipped: Make Deposit (grouping clears Undeposited Funds exactly, fee lines, cash back, vendor refunds, bank-deposit suggestions, on-screen summary), Transfer Funds, Daily Sales Summary (engine templates, over/short exact against the engine, manual tax line), Card Charge/Credit (header tags, payee panel, prefill), Pay Yourself/Put Money In and Paid with Personal Funds by entity type (equity roles), Loan Payment helper (lender fixture exact), cross-window refresh bus (Q-262), shared form header with navigation prompt, tab strip overflow, Undeposited Funds naming, jargon tooltips. Engine PR #159 (U-52 to U-57, migration 0223) merged after security review and fixes; pin f78583e. Contract suite 116/116 live; scenarios deposit 190, transfer 152, daily_sales 126, card_charge 141, owner_money 126, personal_funds 101, loan_payment 108 steps, plus forms-zoom; help pages x7. The preview build workflow (Q-253) and the Intuit compliance fixes (Q-254 to Q-258) merged between P13 and P14. Decisions Q-P14a to Q-P14ad.
-  Acceptance (phases/M1-core-ledger.md P14): [x] two grouped payments equal the bank deposit and clear Undeposited Funds (contract `deposits::grouping_clears_payments_clearing` + scenario); [x] transfers match in both registers (contract + scenario); [x] loan payment splits exactly and the balance matches the lender fixture (contract + model proptest).
   Agents: scout/opus, architect/opus, impl/opus (Fable out of credits, Opus fallback for money lanes), engine-impl/opus, security-review/opus, review/opus, ui/opus, bookkeeper/sonnet.
