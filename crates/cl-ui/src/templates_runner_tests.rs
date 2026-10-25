@@ -266,6 +266,7 @@ fn a_failed_later_round_keeps_what_was_gathered_and_the_run_id() {
         Ok(Gathered {
             run: Some(answer(false, false, 0)),
             error: None,
+            questions: Vec::new(),
         }),
     );
     assert_eq!(r.retry, None);
@@ -279,4 +280,104 @@ fn a_failed_later_round_keeps_what_was_gathered_and_the_run_id() {
     // A capped row is no chip and opens nothing.
     link.due().set(answer(false, true, 0));
     assert_eq!(link.due().needs_you(), 0);
+}
+
+/// An automatic daily transfer from `next` (owner answer 2026-10-24).
+fn add_auto(link: &CompanyLink, name: &str, next: CalendarDate) -> TemplateId {
+    let mut s = link.demo_state().expect("demo");
+    let draft = cl_api::TemplateDraft::Transfer(cl_api::TransferDraft {
+        from: crate::company::demo::account_id(1010),
+        to: crate::company::demo::account_id(1020),
+        date: next,
+        amount: cl_core::Money::parse_wire("25.00").expect("m"),
+        memo: None,
+    });
+    crate::company::demo::template_store::create(
+        &mut s,
+        &cl_api::NewTemplate {
+            name: name.into(),
+            group: None,
+            client_form: None,
+            draft,
+            schedule: Some(cl_api::TemplateSchedule {
+                mode: cl_api::ScheduleMode::Auto,
+                frequency: cl_api::Frequency::Daily,
+                interval: 1,
+                next_date: next,
+                end: cl_api::ScheduleEnd::Never,
+            }),
+        },
+    )
+    .expect("template")
+    .id
+}
+
+fn posted_for(link: &CompanyLink, template: TemplateId) -> usize {
+    link.demo_state()
+        .map(|s| {
+            s.occurrences
+                .iter()
+                .filter(|((t, _), o)| *t == template && o.status == demo::OccStatus::Posted)
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn four_missed_dates_ask_first_and_post_once_after_post_all() {
+    let (_dir, link, tenant) = demo();
+    let today = DemoState::today();
+    let id = add_auto(&link, "Daily sweep", today.add_days(-3).expect("d"));
+    let mut r = TemplatesRunner::default();
+    r.opened(&link, tenant);
+    let f = r.tick(&link, today, 0.0).expect("asked");
+    assert_eq!(
+        f,
+        Finished {
+            posted: false,
+            open_window: true
+        },
+        "Templates Due opens with the question"
+    );
+    assert_eq!(posted_count(&link), 0, "nothing posted before the answer");
+    {
+        let board = link.due();
+        let q = board.questions();
+        assert_eq!(q.len(), 1);
+        assert_eq!(q[0].template, id);
+        assert_eq!(q[0].dates.len(), 4);
+    }
+    // Asking again (the hour, Check now) still posts nothing.
+    link.due().request_check();
+    let _ = r.tick(&link, today, 1.0);
+    assert_eq!(posted_count(&link), 0);
+    // Post all: the next run posts the four dates (and the others).
+    link.due().confirm(id);
+    assert!(link.due().questions().is_empty());
+    let f = r.tick(&link, today, 2.0).expect("ran");
+    assert!(f.posted);
+    assert_eq!(posted_for(&link, id), 4);
+    // Nothing posts twice.
+    link.due().request_check();
+    let _ = r.tick(&link, today, 3.0);
+    assert_eq!(posted_for(&link, id), 4);
+    assert!(link.due().questions().is_empty());
+}
+
+#[test]
+fn three_missed_dates_post_automatically_as_before() {
+    let (_dir, link, tenant) = demo();
+    let today = DemoState::today();
+    let id = add_auto(&link, "Daily sweep", today.add_days(-2).expect("d"));
+    let mut r = TemplatesRunner::default();
+    r.opened(&link, tenant);
+    let f = r.tick(&link, today, 0.0).expect("ran");
+    assert!(f.posted);
+    assert!(link.due().questions().is_empty(), "no question");
+    assert_eq!(posted_for(&link, id), 3);
+    assert_eq!(
+        link.due().run().map(|x| x.posted.len()),
+        Some(4),
+        "the summary: the three and the sample's one"
+    );
 }

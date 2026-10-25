@@ -70,12 +70,15 @@ pub(crate) enum Section {
     Skipped(SkipReason),
     /// A template the run could not check.
     Failed(String),
+    /// A form saved this date and its link to the date is still being
+    /// made (S2): already entered, nothing to do.
+    Linking,
 }
 
 impl Section {
     fn word(&self) -> &'static str {
         match self {
-            Section::Entered(_) => "entered",
+            Section::Entered(_) | Section::Linking => "entered",
             Section::Waiting => "waiting",
             Section::Skipped(_) => "skipped",
             Section::Failed(_) => "failed",
@@ -196,6 +199,14 @@ pub struct TemplatesDueScreen {
     pub(crate) error: Option<ApiError>,
     pub(crate) last_action: Option<&'static str>,
     pub(crate) checking: bool,
+    /// Automatic templates whose catch-up asks first (Q-PR1d).
+    pub(crate) questions: Vec<crate::templates_runner::CatchUpQuestion>,
+    /// "Skip these" on its way: the template and its skips.
+    catch_up_job: Option<(TemplateId, Job<()>)>,
+    /// An Enter now whose outcome is unknown (B2).
+    pub(crate) lost: crate::forms::lost_save::LostSave,
+    lost_for: Option<Occurrence>,
+    lost_gate: cl_model::forms::FormState<()>,
     /// The fixed bars' sizes last frame (Q-265).
     layout: crate::layout::FrameReport,
 }
@@ -238,6 +249,11 @@ impl TemplatesDueScreen {
             error: None,
             last_action: None,
             checking: false,
+            questions: Vec::new(),
+            catch_up_job: None,
+            lost: crate::forms::lost_save::LostSave::default(),
+            lost_for: None,
+            lost_gate: cl_model::forms::FormState::new(()),
             layout: crate::layout::FrameReport::default(),
         };
         s.load_info();
@@ -275,18 +291,35 @@ impl TemplatesDueScreen {
 
     /// Rebuilds the rows when the board has a new answer.
     fn refresh(&mut self) {
-        let (generation, run) = {
+        let (generation, run, questions) = {
             let board = self.link.due();
-            (board.generation(), board.run().cloned())
+            (
+                board.generation(),
+                board.run().cloned(),
+                board.questions().to_vec(),
+            )
         };
         if generation == self.generation {
             return;
         }
+        self.questions = questions;
         self.generation = generation;
         self.checking = false;
         let selected = self.selected_row().map(|r| (r.template, r.date));
         self.as_of = run.as_ref().map(|r| r.as_of);
         self.rows = run.map(|r| rows_of(&r, &self.info)).unwrap_or_default();
+        {
+            // A saved form's date whose link is still being made: already
+            // entered (S2), never "Enter it now".
+            let board = self.link.due();
+            for r in &mut self.rows {
+                if matches!(r.section, Section::Waiting | Section::Skipped(_))
+                    && r.date.is_some_and(|d| board.is_linking(r.template, d))
+                {
+                    r.section = Section::Linking;
+                }
+            }
+        }
         self.selected = selected
             .and_then(|k| self.rows.iter().position(|r| (r.template, r.date) == k))
             .or_else(|| (!self.rows.is_empty()).then_some(0))
@@ -305,7 +338,10 @@ impl TemplatesDueScreen {
     }
 
     fn busy(&self) -> bool {
-        self.enter_job.is_some() || self.skip_job.is_some() || self.open_job.is_some()
+        self.enter_job.is_some()
+            || self.skip_job.is_some()
+            || self.open_job.is_some()
+            || self.catch_up_job.is_some()
     }
 
     pub(crate) fn poll(&mut self) {
@@ -324,7 +360,16 @@ impl TemplatesDueScreen {
             let occ = *occ;
             self.enter_job = None;
             match r {
-                Ok(e) => self.entered_ok(occ, Some(e.transaction)),
+                Ok(e) => {
+                    self.lost.saved();
+                    self.lost_for = None;
+                    self.entered_ok(occ, Some(e.transaction));
+                }
+                // Could not tell: this date waits for the recheck (B2).
+                Err(e) if self.lost.lost(&e) => {
+                    self.lost_gate.mark_unconfirmed();
+                    self.lost_for = Some(occ);
+                }
                 // A retry of a lost reply: the date is already entered.
                 Err(e) if cl_api::is_occurrence_taken(&e) => self.entered_ok(occ, None),
                 Err(e) => {
@@ -356,6 +401,23 @@ impl TemplatesDueScreen {
                 }
                 Err(e) => self.error = Some(e),
             }
+        }
+        if let Some((id, job)) = self.catch_up_job.as_mut()
+            && let Some(r) = job.take()
+        {
+            let id = *id;
+            self.catch_up_job = None;
+            match r {
+                Ok(()) => {
+                    self.notice = Some("templates_due.catch_up.skipped");
+                    self.last_action = Some("catch_up_skip");
+                    self.link.due().skipped_all(id);
+                }
+                Err(e) => self.error = Some(e),
+            }
+        }
+        if let Some(ev) = self.lost.poll(&mut self.lost_gate) {
+            self.lost_event(ev);
         }
         if let Some(r) = finished(&mut self.open_job) {
             match r {
@@ -404,6 +466,15 @@ impl TemplatesDueScreen {
             return;
         };
         let Some(date) = row.date else { return };
+        if row.section == Section::Linking {
+            return;
+        }
+        // A lost Enter now of this date: nothing is sent until the recheck
+        // or the owner answers (B2).
+        if self.lost_gate.is_unconfirmed() && self.lost_for == Some(Occurrence(row.template, date))
+        {
+            return;
+        }
         if row.section != Section::Waiting || !enters_directly(&row.kind) {
             self.open_in_form();
             return;
@@ -459,6 +530,66 @@ impl TemplatesDueScreen {
             move |s| template_store::draft(s, id, date).map(open),
             move |s| async move { s.templates().draft(id, date).await.map(open) },
         ));
+        self.poll();
+    }
+
+    /// The recheck or the owner answered a lost Enter now (B2).
+    fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
+        use crate::forms::lost_save::LostEvent;
+        match ev {
+            LostEvent::Saved(txn) => {
+                if let Some(occ) = self.lost_for.take() {
+                    self.entered_ok(occ, txn);
+                }
+            }
+            LostEvent::NotSaved | LostEvent::OwnerConfirmed => self.lost_for = None,
+            LostEvent::StillUnknown | LostEvent::CheckRequested => {}
+        }
+    }
+
+    /// "Post all" on a catch-up question: the next run posts its dates.
+    pub(crate) fn catch_up_post_all(&mut self, template: TemplateId) {
+        self.link.due().confirm(template);
+        self.notice = Some("templates_due.catch_up.posting");
+        self.last_action = Some("catch_up_post");
+        self.checking = true;
+    }
+
+    /// "Skip these": every missed date goes through the skip path, oldest
+    /// first (each is the schedule's next date then), so none is lost
+    /// silently; then the next run goes on.
+    pub(crate) fn catch_up_skip(&mut self, template: TemplateId) {
+        if self.busy() {
+            return;
+        }
+        let Some(q) = self.questions.iter().find(|q| q.template == template) else {
+            return;
+        };
+        let dates = q.dates.clone();
+        let demo_dates = dates.clone();
+        self.error = None;
+        let job = run(
+            &self.link,
+            self.group.as_ref(),
+            Some("orphan.template_skip"),
+            move |s| {
+                for d in demo_dates {
+                    demo::skip(s, template, d)?;
+                }
+                Ok(())
+            },
+            move |s| async move {
+                for d in dates {
+                    match s.templates().skip(template, d).await {
+                        // Already handled (another window): go on.
+                        Err(e) if cl_api::is_occurrence_taken(&e) => {}
+                        r => r?,
+                    }
+                }
+                Ok(())
+            },
+        );
+        self.catch_up_job = Some((template, job));
         self.poll();
     }
 
@@ -540,7 +671,7 @@ impl TemplatesDueScreen {
                     self.copy_details(ctx);
                 }
             }
-            None => {}
+            Some(Section::Linking) | None => {}
         }
     }
 
@@ -675,6 +806,77 @@ impl TemplatesDueScreen {
         if let Some(e) = &self.error {
             form::inline_error(ui, tokens, e);
         }
+        if let Some(ev) = self.lost.ui(
+            ui,
+            &mut self.lost_gate,
+            &self.link,
+            self.group.as_ref(),
+            "templates_due_enter",
+        ) {
+            self.lost_event(ev);
+        }
+        self.questions_ui(ui, tokens);
+    }
+
+    /// The catch-up questions (Q-PR1d): each template's missed dates with
+    /// Post all and Skip these.
+    fn questions_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        if self.questions.is_empty() {
+            return;
+        }
+        let idle = !self.busy();
+        let mut answer = None;
+        form::card(ui, tokens, |ui| {
+            ui.label(
+                RichText::new(t("templates_due.catch_up.title"))
+                    .strong()
+                    .color(tokens.text_primary),
+            );
+            ui.add(egui::Label::new(t("templates_due.catch_up.body")).wrap());
+            for q in &self.questions {
+                let name = self
+                    .info
+                    .get(&q.template)
+                    .map(|t| t.name.clone())
+                    .unwrap_or_default();
+                let dates: Vec<String> =
+                    q.dates.iter().map(|d| crate::shell::us_date(*d)).collect();
+                ui.add_space(4.0);
+                ui.label(RichText::new(t_with(
+                    "templates_due.catch_up.row",
+                    &[("name", &name), ("n", &q.dates.len().to_string())],
+                )));
+                ui.add(
+                    egui::Label::new(RichText::new(dates.join(", ")).color(tokens.text_secondary))
+                        .wrap(),
+                );
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            idle,
+                            egui::Button::new(t("templates_due.catch_up.post_all")),
+                        )
+                        .clicked()
+                    {
+                        answer = Some((q.template, true));
+                    }
+                    if ui
+                        .add_enabled(
+                            idle,
+                            egui::Button::new(t("templates_due.catch_up.skip_all")),
+                        )
+                        .clicked()
+                    {
+                        answer = Some((q.template, false));
+                    }
+                });
+            }
+        });
+        match answer {
+            Some((id, true)) => self.catch_up_post_all(id),
+            Some((id, false)) => self.catch_up_skip(id),
+            None => {}
+        }
     }
 
     /// The four lists; the clicked row and action, if any.
@@ -756,6 +958,9 @@ impl TemplatesDueScreen {
                                 }
                             };
                             match r.section {
+                                Section::Linking => {
+                                    form::hint(ui, tokens, &t("templates_due.linking"));
+                                }
                                 Section::Entered(_) => {
                                     b(
                                         "templates_due.open",

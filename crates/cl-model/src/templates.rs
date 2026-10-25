@@ -443,6 +443,44 @@ pub fn next_dates(s: &Schedule, n: usize) -> Vec<CalendarDate> {
     out
 }
 
+/// An automatic template with more missed dates than this asks before the
+/// catch-up posts them (owner answer 2026-10-24, Q-PR1d).
+pub const CATCH_UP_ASK_ABOVE: usize = 3;
+
+/// The dates of `s` on or before `as_of`, from its next date (at most
+/// `max`): the missed dates a catch-up run would post. Decision only; the
+/// engine's run is the truth.
+#[must_use]
+pub fn missed_dates(s: &Schedule, as_of: CalendarDate, max: usize) -> Vec<CalendarDate> {
+    let mut out = Vec::new();
+    let mut k = 0u32;
+    while out.len() < max {
+        if let Ends::After(Some(c)) = s.ends
+            && k >= c
+        {
+            break;
+        }
+        let Some(d) = step(s, k) else { break };
+        if d > as_of {
+            break;
+        }
+        if let Ends::On(Some(end)) = s.ends
+            && d > end
+        {
+            break;
+        }
+        out.push(d);
+        k += 1;
+    }
+    out
+}
+
+/// True when a catch-up of `missed` dates asks the owner first.
+#[must_use]
+pub fn catch_up_asks(missed: usize) -> bool {
+    missed > CATCH_UP_ASK_ABOVE
+}
+
 /// The plain-language "how often" text: a key and its `{n}` / `{day}`
 /// values ("Every 2 weeks", "Monthly on the 31st (or last day)").
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -535,6 +573,38 @@ pub fn should_open_due(posted: usize, reminders: usize, new_skips: usize) -> boo
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn missed_dates_stop_at_today_the_end_and_the_count() {
+        let d = |y, m, day| CalendarDate::from_ymd(y, m, day).expect("date");
+        let monthly = Schedule {
+            frequency: Frequency::Monthly,
+            interval: 1,
+            next_date: d(2026, 7, 1),
+            ends: Ends::Never,
+        };
+        let four = missed_dates(&monthly, d(2026, 10, 24), 100);
+        assert_eq!(
+            four,
+            vec![d(2026, 7, 1), d(2026, 8, 1), d(2026, 9, 1), d(2026, 10, 1)]
+        );
+        assert!(catch_up_asks(four.len()), "4 asks first");
+        let three = missed_dates(&monthly, d(2026, 9, 30), 100);
+        assert_eq!(three.len(), 3);
+        assert!(!catch_up_asks(three.len()), "3 posts as today");
+        assert!(missed_dates(&monthly, d(2026, 6, 30), 100).is_empty());
+        let ended = Schedule {
+            ends: Ends::On(Some(d(2026, 8, 15))),
+            ..monthly
+        };
+        assert_eq!(missed_dates(&ended, d(2026, 10, 24), 100).len(), 2);
+        let counted = Schedule {
+            ends: Ends::After(Some(1)),
+            ..monthly
+        };
+        assert_eq!(missed_dates(&counted, d(2026, 10, 24), 100).len(), 1);
+        assert_eq!(missed_dates(&monthly, d(2027, 10, 24), 5).len(), 5);
+    }
 
     fn d(y: i32, m: u32, day: u32) -> CalendarDate {
         CalendarDate::from_ymd(y, m, day).expect("date")

@@ -44,4 +44,12 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("templates_due.done.already", "That date was already entered."),
     ("templates_due.done.skipped", "Skipped."),
     ("templates_due.more_dates", "and {n} more"),
+    ("templates_due.linking", "Already entered"),
+    ("templates_due.catch_up.title", "Some automatic entries missed several dates"),
+    ("templates_due.catch_up.body", "Before entering more than three missed dates of one template, ClientLedger asks. Nothing is entered until you choose."),
+    ("templates_due.catch_up.row", "{name}: {n} missed dates"),
+    ("templates_due.catch_up.post_all", "Enter all of them"),
+    ("templates_due.catch_up.skip_all", "Skip these dates"),
+    ("templates_due.catch_up.posting", "Entering the missed dates…"),
+    ("templates_due.catch_up.skipped", "Skipped. Those dates won't be entered."),
 ];

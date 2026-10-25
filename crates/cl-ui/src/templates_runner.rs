@@ -27,12 +27,12 @@
 //!   session, or a date was skipped by this run. Older open skips only show
 //!   the status-bar chip.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use cl_api::{ApiError, LocalValidation, RUN_LIMIT_DEFAULT, RequestGroup, RunDue};
 use cl_core::CalendarDate;
-use cl_core::ids::{RunId, TemplateId, TenantId};
+use cl_core::ids::{RunId, TemplateId, TenantId, TransactionId};
 
 use crate::company::CompanyLink;
 use crate::company::demo::templates as demo;
@@ -54,9 +54,151 @@ pub struct DueBoard {
     generation: u64,
     run: Option<RunDue>,
     check_now: bool,
+    /// Automatic templates whose catch-up waits for the owner (more than
+    /// three missed dates, Q-PR1d).
+    questions: Vec<CatchUpQuestion>,
+    /// "Post all" answers: the template and its first missed date then.
+    confirmed: BTreeSet<(TemplateId, CalendarDate)>,
+    /// Occurrences a form saved whose link to the date is still being
+    /// made (S2): the saved transaction and the tries so far. Templates Due
+    /// shows them as already entered; the runner tries again.
+    linking: BTreeMap<(TemplateId, CalendarDate), Linking>,
+}
+
+/// One pending link of a saved form to its date (S2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Linking {
+    txn: TransactionId,
+    tries: u32,
+    /// The last try failed and may go again (none is on its way).
+    ready: bool,
+}
+
+/// How often a failed link of a saved form to its date is tried (S2).
+pub const LINK_TRIES: u32 = 6;
+/// Seconds between the tries.
+pub const LINK_RETRY_SECS: f64 = 5.0;
+
+/// One automatic template the catch-up asks about before it posts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CatchUpQuestion {
+    /// The template.
+    pub template: TemplateId,
+    /// The missed dates the run would post, oldest first.
+    pub dates: Vec<CalendarDate>,
+}
+
+/// The most missed dates the question lists (the engine posts at most
+/// 403 per schedule per run, Q-P15i).
+const QUESTION_DATES_MAX: usize = 403;
+
+/// The automatic templates in `rows` whose catch-up as of `today` would
+/// post more than three dates and that the owner has not confirmed.
+pub(crate) fn questions_of(
+    rows: &[cl_api::Template],
+    today: CalendarDate,
+    confirmed: &BTreeSet<(TemplateId, CalendarDate)>,
+) -> Vec<CatchUpQuestion> {
+    rows.iter()
+        .filter_map(|t| {
+            let s = t.schedule.as_ref()?;
+            if s.mode != cl_api::ScheduleMode::Auto {
+                return None;
+            }
+            let model = crate::screens::templates::dialog::model_schedule(s);
+            let dates = cl_model::templates::missed_dates(&model, today, QUESTION_DATES_MAX);
+            let first = *dates.first()?;
+            (cl_model::templates::catch_up_asks(dates.len()) && !confirmed.contains(&(t.id, first)))
+                .then_some(CatchUpQuestion {
+                    template: t.id,
+                    dates,
+                })
+        })
+        .collect()
 }
 
 impl DueBoard {
+    /// The catch-up questions waiting for the owner.
+    #[must_use]
+    pub fn questions(&self) -> &[CatchUpQuestion] {
+        &self.questions
+    }
+
+    fn set_questions(&mut self, q: Vec<CatchUpQuestion>) {
+        self.questions = q;
+        self.generation += 1;
+    }
+
+    /// The "Post all" answers so far.
+    #[must_use]
+    pub fn confirmed(&self) -> BTreeSet<(TemplateId, CalendarDate)> {
+        self.confirmed.clone()
+    }
+
+    /// "Post all" for `template`: the next run posts its missed dates.
+    pub fn confirm(&mut self, template: TemplateId) {
+        if let Some(at) = self.questions.iter().position(|q| q.template == template) {
+            let q = self.questions.remove(at);
+            if let Some(first) = q.dates.first() {
+                self.confirmed.insert((template, *first));
+            }
+            self.generation += 1;
+            self.check_now = true;
+        }
+    }
+
+    /// "Skip these" for `template` finished (each date went through the
+    /// skip path): the next run goes on.
+    pub fn skipped_all(&mut self, template: TemplateId) {
+        self.questions.retain(|q| q.template != template);
+        self.generation += 1;
+        self.check_now = true;
+    }
+
+    /// A form saved `txn` for `(template, date)`; the link to the date is
+    /// on its way (and is tried again until it takes, S2).
+    pub fn linking(&mut self, template: TemplateId, date: CalendarDate, txn: TransactionId) {
+        let l = self.linking.entry((template, date)).or_insert(Linking {
+            txn,
+            tries: 0,
+            ready: false,
+        });
+        l.tries += 1;
+        l.ready = false;
+        self.generation += 1;
+    }
+
+    /// The link of `(template, date)` is done (or no longer tried).
+    pub fn linked(&mut self, template: TemplateId, date: CalendarDate) {
+        if self.linking.remove(&(template, date)).is_some() {
+            self.generation += 1;
+        }
+    }
+
+    /// A saved form's link to `(template, date)` is still being made.
+    #[must_use]
+    pub fn is_linking(&self, template: TemplateId, date: CalendarDate) -> bool {
+        self.linking.contains_key(&(template, date))
+    }
+
+    /// A try of the link of `(template, date)` failed and may go again.
+    pub fn link_failed(&mut self, template: TemplateId, date: CalendarDate) {
+        if let Some(l) = self.linking.get_mut(&(template, date)) {
+            l.ready = true;
+        }
+    }
+
+    /// The next link to try again (failed, fewer than [`LINK_TRIES`] tries
+    /// so far); the try is counted and marked on its way.
+    pub(crate) fn next_link(&mut self) -> Option<(TemplateId, CalendarDate, TransactionId)> {
+        let (key, l) = self
+            .linking
+            .iter_mut()
+            .find(|(_, l)| l.ready && l.tries < LINK_TRIES)?;
+        l.tries += 1;
+        l.ready = false;
+        Some((key.0, key.1, l.txn))
+    }
     /// A new answer.
     pub fn set(&mut self, run: RunDue) {
         self.run = Some(run);
@@ -128,6 +270,9 @@ impl DueBoard {
     pub fn clear(&mut self) {
         self.run = None;
         self.check_now = false;
+        self.questions.clear();
+        self.confirmed.clear();
+        self.linking.clear();
         self.generation += 1;
     }
 }
@@ -191,6 +336,8 @@ pub(crate) struct Gathered {
     pub run: Option<RunDue>,
     /// Why the run stopped early.
     pub error: Option<ApiError>,
+    /// The run did not start: these templates ask first (Q-PR1d).
+    pub questions: Vec<CatchUpQuestion>,
 }
 
 /// The rounds of one run (one run id).
@@ -227,6 +374,7 @@ impl Rounds {
         Gathered {
             run: self.acc,
             error,
+            questions: Vec::new(),
         }
     }
 }
@@ -262,11 +410,23 @@ fn demo_run(
     as_of: CalendarDate,
     run_id: RunId,
     today: CalendarDate,
+    confirmed: &BTreeSet<(TemplateId, CalendarDate)>,
 ) -> Gathered {
     // The practice company's templates arrive with its first open (WP-D).
     let first = state.companies.first().map(|c| c.tenant_id);
     if first.is_some() && state.open == first {
         demo::seed_sample(state);
+    }
+    let questions = questions_of(
+        &crate::company::demo::template_store::list(state),
+        as_of,
+        confirmed,
+    );
+    if !questions.is_empty() {
+        return Gathered {
+            questions,
+            ..Gathered::default()
+        };
     }
     let mut rounds = Rounds::default();
     loop {
@@ -303,6 +463,20 @@ pub struct TemplatesRunner {
     seen: BTreeSet<(TemplateId, CalendarDate)>,
     /// Runs answered since the company opened.
     pub(crate) runs: u32,
+    /// A saved form's link to its date being tried again (S2).
+    link_job: Option<((TemplateId, CalendarDate), Job<()>)>,
+    /// When the next link try may start (`egui` seconds).
+    next_link_at: f64,
+}
+
+/// A refusal that another try of the same link can't change: the date or
+/// the transaction no longer fit (`OCCURRENCE_RESOLVE_INVALID`), the date
+/// was dismissed, the template is gone.
+fn link_final(e: &ApiError) -> bool {
+    matches!(
+        e,
+        ApiError::Validation(_) | ApiError::NotFound { .. } | ApiError::Forbidden { .. }
+    ) || matches!(e, ApiError::Conflict { .. } if !cl_api::is_occurrence_taken(e))
 }
 
 impl std::fmt::Debug for TemplatesRunner {
@@ -370,6 +544,7 @@ impl TemplatesRunner {
         if self.last_day.is_some_and(|d| d != today) || self.next_hour.is_some_and(|h| now >= h) {
             self.pending = true;
         }
+        self.tick_links(link, now);
         let mut out = finished(&mut self.job).and_then(|r| self.finish(link, r));
         if self.pending && self.job.is_none() {
             self.pending = false;
@@ -383,6 +558,52 @@ impl TemplatesRunner {
         out
     }
 
+    /// Tries again the links of saved forms to their dates that failed
+    /// (S2): one at a time, every [`LINK_RETRY_SECS`], at most
+    /// [`LINK_TRIES`] tries each, always with the saved transaction.
+    pub(crate) fn tick_links(&mut self, link: &Arc<CompanyLink>, now: f64) {
+        if let Some((key, job)) = self.link_job.as_mut()
+            && let Some(r) = job.take()
+        {
+            let (template, date) = *key;
+            self.link_job = None;
+            let mut board = link.due();
+            match r {
+                Ok(()) => {
+                    board.linked(template, date);
+                    board.handled(template, date);
+                }
+                Err(e) if cl_api::is_occurrence_taken(&e) => {
+                    board.linked(template, date);
+                    board.handled(template, date);
+                }
+                // The reminder stays and can be dismissed (Q-P15p).
+                Err(e) if link_final(&e) => board.linked(template, date),
+                Err(_) => board.link_failed(template, date),
+            }
+        }
+        if self.link_job.is_some() || now < self.next_link_at {
+            return;
+        }
+        let Some((template, date, txn)) = link.due().next_link() else {
+            return;
+        };
+        self.next_link_at = now + LINK_RETRY_SECS;
+        let job = run(
+            link,
+            self.group.as_ref(),
+            Some("orphan.template_resolve"),
+            move |s| demo::resolve(s, template, date, txn),
+            move |s| async move { s.templates().resolve(template, date, txn).await },
+        );
+        let done = matches!(job, Job::Done(_));
+        self.link_job = Some(((template, date), job));
+        // The demo answers at once.
+        if done {
+            self.tick_links(link, now);
+        }
+    }
+
     /// The run id for a run today: the stopped run's (same day), else new.
     fn run_id_for(&mut self, today: CalendarDate) -> RunId {
         match self.retry.take() {
@@ -394,12 +615,37 @@ impl TemplatesRunner {
     fn start(&mut self, link: &Arc<CompanyLink>, today: CalendarDate) {
         let run_id = self.run_id_for(today);
         self.current = Some((today, run_id));
+        let confirmed = link.due().confirmed();
+        let demo_confirmed = confirmed.clone();
         self.job = Some(run(
             link,
             self.group.as_ref(),
             Some("orphan.templates_run_due"),
-            move |s| Ok(demo_run(s, today, run_id, today)),
+            move |s| Ok(demo_run(s, today, run_id, today, &demo_confirmed)),
             move |s| async move {
+                // An automatic template with more than three missed dates
+                // asks first (Q-PR1d): the run waits for the answer. The
+                // engine's run takes no template filter, so nothing is
+                // sent until then.
+                match s.templates().list_all().await {
+                    Ok(rows) => {
+                        let questions = questions_of(&rows, today, &confirmed);
+                        if !questions.is_empty() {
+                            return Ok(Gathered {
+                                questions,
+                                ..Gathered::default()
+                            });
+                        }
+                    }
+                    // No templates here: nothing to ask about.
+                    Err(ApiError::Local(LocalValidation::TemplatesUnavailable)) => {}
+                    Err(e) => {
+                        return Ok(Gathered {
+                            error: Some(e),
+                            ..Gathered::default()
+                        });
+                    }
+                }
                 let s = &s;
                 Ok(gather(move || async move {
                     s.recurring()
@@ -417,10 +663,25 @@ impl TemplatesRunner {
         r: Result<Gathered, ApiError>,
     ) -> Option<Finished> {
         let current = self.current.take();
-        let (run, error) = match r {
-            Ok(g) => (g.run, g.error),
-            Err(e) => (None, Some(e)),
+        let (run, error, questions) = match r {
+            Ok(g) => (g.run, g.error, g.questions),
+            Err(e) => (None, Some(e), Vec::new()),
         };
+        if !questions.is_empty() {
+            // Nothing was sent; the run id stays for the run after the
+            // answer. Templates Due opens with the question.
+            tracing::info!(
+                templates = questions.len(),
+                "templates catch-up waits for the owner"
+            );
+            self.retry = current;
+            link.due().set_questions(questions);
+            return Some(Finished {
+                posted: false,
+                open_window: true,
+            });
+        }
+        link.due().set_questions(Vec::new());
         // A run stopped by anything but "no permission" or "no catch-up"
         // keeps its id: the retry gets its posts back, never twice.
         self.retry = match &error {

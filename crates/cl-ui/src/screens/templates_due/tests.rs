@@ -294,3 +294,118 @@ fn a_capped_catch_up_has_no_skip_or_dismiss() {
         assert_ne!(t(key.as_str()), key.as_str(), "has English text");
     }
 }
+
+#[test]
+fn s2_a_failed_link_shows_already_entered_and_is_tried_again_with_the_saved_txn() {
+    let (_dir, link) = demo();
+    let today = DemoState::today();
+    let tid = remind(&link, "Savings", today);
+    let mut r = caught_up(&link, today);
+    let txn = {
+        let mut st = link.demo_state().expect("demo");
+        let chart = st
+            .chart
+            .get_or_insert_with(crate::company::demo::chart)
+            .clone();
+        let p = crate::company::demo::register::DemoPosting {
+            kind: "transfer",
+            date: today,
+            number: String::new(),
+            contact: None,
+            memo: String::new(),
+            own: crate::company::demo::account_id(1010),
+            own_debit: false,
+            lines: vec![(
+                crate::company::demo::account_id(1020),
+                Money::parse_wire("25.00").expect("m"),
+            )],
+        };
+        st.ledger.save(&chart, &p, None).expect("saved")
+    };
+    // The form saved; its link to the date failed (a lost reply, say).
+    link.due().linking(tid, today, txn);
+    link.due().link_failed(tid, today);
+    let mut s = screen(&link, today);
+    let row = s
+        .rows
+        .iter()
+        .position(|r| r.template == tid)
+        .expect("the row");
+    assert_eq!(s.rows[row].section, Section::Linking, "already entered");
+    s.selected = Some(row);
+    s.default_action(None);
+    s.enter_now(None);
+    assert!(
+        s.enter_job.is_none() && s.open_job.is_none(),
+        "never Enter it now"
+    );
+    // The runner tries the link again with the saved transaction.
+    let _ = r.tick(&link, today, 100.0);
+    assert!(!link.due().is_linking(tid, today));
+    let st = link.demo_state().expect("demo");
+    let occ = st.occurrences.get(&(tid, today)).expect("linked");
+    assert_eq!(occ.transaction, Some(txn));
+    drop(st);
+    s.poll();
+    assert!(s.rows.iter().all(|r| r.template != tid), "handled");
+}
+
+#[test]
+fn catch_up_skip_these_sends_each_date_through_the_skip_path() {
+    let (_dir, link) = demo();
+    let today = DemoState::today();
+    let tid = {
+        let mut st = link.demo_state().expect("demo");
+        template_store::create(
+            &mut st,
+            &NewTemplate {
+                name: "Daily sweep".into(),
+                group: None,
+                client_form: None,
+                draft: cl_api::TemplateDraft::Transfer(TransferDraft {
+                    from: crate::company::demo::account_id(1010),
+                    to: crate::company::demo::account_id(1020),
+                    date: today,
+                    amount: Money::parse_wire("25.00").expect("m"),
+                    memo: None,
+                }),
+                schedule: Some(TemplateSchedule {
+                    mode: ScheduleMode::Auto,
+                    frequency: Frequency::Daily,
+                    interval: 1,
+                    next_date: today.add_days(-3).expect("d"),
+                    end: ScheduleEnd::Never,
+                }),
+            },
+        )
+        .expect("template")
+        .id
+    };
+    let mut r = caught_up(&link, today);
+    let mut s = screen(&link, today);
+    assert_eq!(s.questions.len(), 1);
+    assert_eq!(s.questions[0].dates.len(), 4);
+    s.catch_up_skip(tid);
+    s.poll();
+    assert_eq!(s.last_action, Some("catch_up_skip"));
+    {
+        let st = link.demo_state().expect("demo");
+        let skipped = st
+            .occurrences
+            .iter()
+            .filter(|((t, _), o)| {
+                *t == tid && o.status != crate::company::demo::templates::OccStatus::Posted
+            })
+            .count();
+        assert_eq!(skipped, 4, "each date kept as skipped, none lost");
+    }
+    // The run goes on and posts nothing for it.
+    let _ = r.tick(&link, today, 1.0);
+    let st = link.demo_state().expect("demo");
+    assert!(
+        st.occurrences.iter().all(|((t, _), o)| *t != tid
+            || o.status != crate::company::demo::templates::OccStatus::Posted)
+    );
+    drop(st);
+    assert!(link.due().questions().is_empty());
+}
