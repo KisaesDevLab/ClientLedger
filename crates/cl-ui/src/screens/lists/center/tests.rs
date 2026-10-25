@@ -409,6 +409,64 @@ fn merge_moves_history_and_makes_the_duplicate_inactive() {
     assert!(!gone.is_active);
 }
 
+fn closed(required: bool) -> cl_api::ApiError {
+    cl_api::ApiError::ClosedPeriod(cl_api::ClosedPeriod {
+        lock_date: CalendarDate::from_ymd(2026, 3, 31).ok(),
+        can_override: true,
+        password_required: Some(required),
+        message: cl_api::UserText::default(),
+    })
+}
+
+/// U-47: with `merge-closing-date-v1` the confirmation drops the
+/// closed-period warning, a 423 opens the closing-date password dialog
+/// (Esc closes only the dialog), and the password sends the same merge.
+#[test]
+fn closed_period_merge_asks_for_the_closing_password() {
+    let mut r = Rig::new(Role::Vendor);
+    r.s.merge_closing = true;
+    let source = r.id("Galena Gravel");
+    r.select("Galena Gravel");
+    r.cmd("list.merge");
+    assert_eq!(r.s.state()["panel"], "merge");
+    assert_eq!(r.s.state()["merge_closing"]["closing"], "idle");
+    r.s.merge_failed(closed(true));
+    r.frames(2);
+    let st = r.s.state();
+    assert_eq!(st["merge_closing"]["closing"], "asking");
+    assert_eq!(st["merge_closing"]["closing_verb"], "merge");
+    assert_eq!(st["merge_closing"]["closing_supported"], true);
+    assert_eq!(st["error"], false, "the dialog takes the refusal");
+    // Esc cancels the dialog, not the merge panel.
+    assert!(r.cmd("form.revert"));
+    assert_eq!(r.s.state()["panel"], "merge");
+    assert_eq!(r.s.state()["merge_closing"]["closing"], "cancelled");
+    // Again, now with the password: the demo merges.
+    r.s.merge_failed(closed(true));
+    let Panel::Merge(m) = &mut r.s.panel else {
+        panic!("merge panel");
+    };
+    m.closing.password = crate::screens::company::form::SecretText::from("pw");
+    r.s.submit_merge_password();
+    r.frames(3);
+    assert_eq!(r.s.state()["panel"], "none");
+    assert_eq!(r.s.state()["note"], "done");
+    assert!(r.s.contacts.iter().any(|c| c.id == source && !c.is_active));
+}
+
+/// Without the capability the engine's refusal is only explained (the
+/// password can't be sent) and the confirmation keeps its warning.
+#[test]
+fn closed_period_merge_without_the_capability_explains() {
+    let mut r = Rig::new(Role::Vendor);
+    r.select("Galena Gravel");
+    r.cmd("list.merge");
+    r.s.merge_failed(closed(true));
+    r.frames(2);
+    assert_eq!(r.s.state()["merge_closing"]["closing"], "unavailable");
+    assert_eq!(r.s.state()["merge_closing"]["closing_supported"], false);
+}
+
 /// B2: merging a 1099 vendor says so, and a client-and-vendor contact is
 /// offered only client-and-vendor targets.
 #[test]
