@@ -76,6 +76,11 @@ steps:
   - assert_state: {key: screen.last_handoff, equals: bill}
 
   # --- Minimum window at 200%: nothing drawn over anything ---------------------
+  # The `missing` step scrolled the window body to the results, and coming
+  # back from Enter Bill can leave it there. Start the 200% check from the
+  # top of the body whatever was left: the ignore band below only covers its
+  # bottom edge. The wheel goes over a label on screen at either position.
+  - scroll: {target: {role: label, label: Matched (5)}, to: start}
   - resize: {width: 960, height: 640}
   - set_zoom: {percent: 200}
   - screenshot: statement-z200
