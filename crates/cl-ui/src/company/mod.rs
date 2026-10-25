@@ -62,6 +62,11 @@ pub enum CompanyEvent {
     /// Open a fresh form filled from a template (P15: Templates "Use",
     /// Templates Due "Open in form").
     OpenTemplate(Box<crate::forms::template::TemplateOpen>),
+    /// Open a fresh window of this kind with what another screen handed
+    /// over (P17: a document's full-size tab, a bill prefilled from a
+    /// statement line, a receipt-inbox file). A screen that does not take
+    /// the payload just opens (or comes to the front) as usual.
+    OpenWith(cl_model::CommandId, Box<crate::windows::OpenPayload>),
     /// The owner saved new user preferences (theme, zoom, dates): the
     /// shell applies and persists them.
     UserPrefs(cl_settings::UserPrefs),

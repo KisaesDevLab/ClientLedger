@@ -30,10 +30,14 @@ use crate::undo::UndoStack;
 
 pub mod amount_words;
 pub mod batch;
+// P17: Enter Bill and vendor credits (WP3).
+pub mod bill;
 pub mod card;
 pub mod check;
 pub mod daily_sales;
 pub mod deposit;
+pub mod doc_read;
+pub mod item_lines;
 pub mod journal;
 pub mod lines;
 pub mod loan_payment;

@@ -20,6 +20,13 @@ cl-settings = { path = "../cl-settings" }
 # allowlist. The UI embeds IBM Plex (OFL, ATTRIBUTION.md) instead.
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "wgpu", "wayland", "x11", "clipboard", "links"] }
+# P17 document viewer: PNG and JPEG previews (decoded with size limits).
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+# P17 document viewer: PDF pages through PDFium, loaded at run time from a
+# checksum-pinned library (Q-13). MIT OR Apache-2.0. `pdfium_7881` is the
+# PDFium API the pinned bblanchon/pdfium-binaries `chromium/7881` build
+# offers; no `image` feature (the viewer reads raw RGBA), no V8 or XFA.
+pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_7881", "thread_safe"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tokio = { version = "1.53.3", features = ["rt"] }

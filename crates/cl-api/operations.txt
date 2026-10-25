@@ -207,3 +207,23 @@ GET     /api/v1/bills                           idempotent
 GET     /api/v1/payroll-import/sessions         idempotent
 GET     /api/v1/banking/reconciliations         idempotent
 GET     /api/v1/banking/statements              idempotent
+# P17: Enter Bill, vendor credits, receipt inbox, document reading (vendor credit PUT,
+# terms-dates and payment-terms client-declared until engine PR-A lands)
+GET     /api/v1/bills/{id}                      idempotent
+PUT     /api/v1/bills/{id}                      pre-handler-only
+POST    /api/v1/bills/{id}/void                 pre-handler-only
+GET     /api/v1/bills/terms-dates               idempotent
+GET     /api/v1/payment-terms                   idempotent
+POST    /api/v1/bills/{id}/attach-draft         pre-handler-only
+POST    /api/v1/bills/extract-from-attachment/{attachmentId} pre-handler-only
+GET     /api/v1/vendor-credits                  idempotent
+POST    /api/v1/vendor-credits                  pre-handler-only
+GET     /api/v1/vendor-credits/{id}             idempotent
+PUT     /api/v1/vendor-credits/{id}             pre-handler-only
+POST    /api/v1/vendor-credits/{id}/void        pre-handler-only
+GET     /api/v1/vendor-credits/available/{vendorId} idempotent
+GET     /api/v1/attachments/{id}                idempotent
+DELETE  /api/v1/attachments/{id}                pre-handler-only
+POST    /api/v1/attachments/{id}/link           pre-handler-only
+GET     /api/v1/attachments/unlinked            idempotent
+GET     /api/v1/bill-payments                   idempotent

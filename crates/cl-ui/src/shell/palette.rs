@@ -100,8 +100,13 @@ pub fn matches_in(query: &str, include_dev: bool) -> Vec<&'static Command> {
         .chain(dev)
         .filter(|c| c.palette)
         .filter_map(|c| {
-            score(&t(&format!("cmd.{}", c.id)), query)
-                .map(|s| (s, matches!(c.scope, Scope::Form | Scope::Grid), c))
+            score(&t(&format!("cmd.{}", c.id)), query).map(|s| {
+                (
+                    s,
+                    matches!(c.scope, Scope::Form | Scope::Grid | Scope::Viewer),
+                    c,
+                )
+            })
         })
         .collect();
     if query.trim().is_empty() {

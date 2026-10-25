@@ -10,6 +10,9 @@ use eframe::egui::{
 use crate::theme::{Tokens, styles};
 
 pub mod bar_chart;
+// P17 (WP1): the PDF and image viewer and its worker thread.
+pub mod doc_worker;
+pub mod pdf_viewer;
 
 /// A keyboard chip such as `Ctrl K`.
 pub fn kbd(ui: &mut Ui, text: &str) -> Response {

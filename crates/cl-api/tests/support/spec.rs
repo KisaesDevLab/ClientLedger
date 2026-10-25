@@ -24,8 +24,10 @@ use sha2::{Digest, Sha256};
 /// PR #156) the P13 check edit and rules evaluate call are too; since pin
 /// f78583e (engine PR #159) the P14 feed deposit groupings and equity
 /// roles are. The P15 journal entry number, templates and run-due routes
-/// are listed until their engine PRs land and the pin moves.
-pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
+/// are listed until their engine PRs land and the pin moves. The P17
+/// vendor credit edit (U-84a), bill terms dates (U-86d) and payment terms
+/// list (U-86e) are client-declared until engine PR-A is pinned.
+pub const OUTSIDE_SPEC: [(&str, &str); 11] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -35,6 +37,10 @@ pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
+    // P17 engine PR-A (U-84, U-86).
+    ("PUT", "/api/v1/vendor-credits/{id}"),
+    ("GET", "/api/v1/bills/terms-dates"),
+    ("GET", "/api/v1/payment-terms"),
 ];
 
 /// Lowercase hex of a SHA-256.

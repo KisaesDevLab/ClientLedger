@@ -30,6 +30,12 @@ pub mod batch_entry;
 // P16: Home.
 pub mod home;
 
+// P17: Enter Bill (with the vendor statement match), the receipt inbox and
+// the full-size document tab (each work package owns its own files).
+pub mod bill;
+pub mod document_view;
+pub mod receipt_inbox;
+
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
     deposit::make,
@@ -51,6 +57,14 @@ pub(crate) const P15A_SCREENS: [crate::shell::MakeScreen; 1] = [batch_entry::mak
 /// Every P16 screen's `make` (the shell tries each after P15A's).
 pub(crate) const P16_SCREENS: [crate::shell::MakeScreen; 1] = [home::make];
 
+/// Every P17 screen's `make` (the shell tries each after P16's).
+pub(crate) const P17_SCREENS: [crate::shell::MakeScreen; 4] = [
+    bill::make,
+    bill::statement_match::make,
+    receipt_inbox::make,
+    document_view::make,
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,6 +79,31 @@ mod tests {
             let cmd = cl_model::commands::find(kind).expect("a command").id;
             let s = make(cmd, &link, None, today).expect("its screen");
             assert_eq!(s.title(), crate::i18n::t(&format!("cmd.{kind}")));
+            let other = cl_model::commands::find("vendors.write_check")
+                .expect("write check")
+                .id;
+            assert!(make(other, &link, None, today).is_none(), "{kind}");
+        }
+    }
+
+    #[test]
+    fn each_p17_screen_opens_its_own_kind_only() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = std::sync::Arc::new(crate::company::CompanyLink::demo(dir.path()));
+        let today = cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("date");
+        let kinds = [
+            bill::KIND,
+            bill::statement_match::KIND,
+            receipt_inbox::KIND,
+            document_view::KIND,
+        ];
+        for (make, kind) in P17_SCREENS.iter().zip(kinds) {
+            let cmd = cl_model::commands::find(kind).expect("a command");
+            assert!(cmd.opens && cmd.arrives.is_none(), "{kind} is built");
+            let s = make(cmd.id, &link, None, today).expect("its screen");
+            assert_eq!(s.title(), crate::i18n::t(&format!("cmd.{kind}")));
+            // A built screen reports its state (never the placeholder's null).
+            assert!(!s.state().is_null(), "{kind}");
             let other = cl_model::commands::find("vendors.write_check")
                 .expect("write check")
                 .id;

@@ -83,6 +83,7 @@
 - `Shift+F8` Previous Row That Needs Attention
 - `Ctrl+Page Down` Next Section
 - `Ctrl+Page Up` Previous Section
+- `Alt+A` Accept These Values
 - `Ctrl+N` New List Entry
 - `Ctrl+Shift+I` Make Inactive or Active Again
 - `Ctrl+Shift+H` Include Inactive Entries
@@ -93,5 +94,13 @@
 
 - `Ctrl+D` Copy Down
 - `Ctrl+A` Select All Rows
+
+**In a document preview**
+
+- `Ctrl++` Zoom In on the Document
+- `Ctrl+-` Zoom Out on the Document
+- `Ctrl+0` Fit the Document
+- `Page Down` Next Page
+- `Page Up` Previous Page
 
 **Dates**: `+ / -` Next / previous day; `T` Today; `M / H` First / last day of the month; `Y / R` First / last day of the year; `W / K` First / last day of the week

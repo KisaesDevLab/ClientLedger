@@ -280,6 +280,16 @@ pub const COMMANDS: &[Command] = &[
     cmd("grid.copy_down_below", "Copy to Rows Below", None, 6, None, Scope::Grid),
     cmd("grid.select_all", "Select All Rows", None, 6, ctrl('A'), Scope::Grid),
     cmd("grid.clear_selection", "Clear Selection", None, 6, None, Scope::Grid),
+    // Enter Bill (P17; Page Up/Down, Alt+N, Alt+S, Ctrl+M and Attach above apply too)
+    cmd("bill.kind_toggle", "Switch Bill or Vendor Credit", None, 7, None, Scope::Form),
+    cmd("bill.read_document", "Read with AI", None, 7, None, Scope::Form),
+    cmd("bill.accept_read", "Accept These Values", None, 7, alt('A'), Scope::Form),
+    // Document preview (P17): the source-document card and its full-size tab
+    cmd("viewer.zoom_in", "Zoom In on the Document", None, 8, key(Mods::CMD, Key::Equals), Scope::Viewer),
+    cmd("viewer.zoom_out", "Zoom Out on the Document", None, 8, key(Mods::CMD, Key::Minus), Scope::Viewer),
+    cmd("viewer.fit", "Fit the Document", None, 8, key(Mods::CMD, Key::Digit(0)), Scope::Viewer),
+    cmd("viewer.page_next", "Next Page", None, 8, key(Mods::NONE, Key::PageDown), Scope::Viewer),
+    cmd("viewer.page_prev", "Previous Page", None, 8, key(Mods::NONE, Key::PageUp), Scope::Viewer),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
@@ -312,11 +322,17 @@ pub const COMMANDS: &[Command] = &[
     screen("clients.statements", "Statements", Some(Menu::Clients), 2, None, "P22"),
     // Vendors
     built("vendors.center", "Vendors", Some(Menu::Vendors), 0, None),
-    screen("vendors.enter_bill", "Enter Bill", Some(Menu::Vendors), 1, ctrl('B'), "P17"),
+    built("vendors.enter_bill", "Enter Bill", Some(Menu::Vendors), 1, ctrl('B')),
     screen("vendors.pay_bills", "Pay Bills", Some(Menu::Vendors), 1, ctrl_shift('B'), "P18"),
     built("vendors.write_check", "Write Check", Some(Menu::Vendors), 1, ctrl('W')),
     built("vendors.card_charge", "Record Card Charge", Some(Menu::Vendors), 1, ctrl_shift('C')),
     built("vendors.personal_funds", "Paid with Personal Funds", Some(Menu::Vendors), 1, None),
+    // P17: the receipt inbox (the menu shows its count, Q-P17t) and the
+    // vendor statement match; no shortcut
+    built("nav.receipt_inbox", "Receipt Inbox", Some(Menu::Vendors), 2, None),
+    built("nav.statement_match", "Match Vendor Statement\u{2026}", Some(Menu::Vendors), 2, None),
+    // P17: a document in its own tab ("Open full size"); no menu entry
+    built("nav.document_view", "Document Preview", None, 2, None),
     // Banking
     built("banking.register", "Open Register", Some(Menu::Banking), 0, ctrl('G')),
     built("banking.deposit", "Make Deposit", Some(Menu::Banking), 0, ctrl('D')),
@@ -475,6 +491,11 @@ mod tests {
             "banking.bulk_entry",
             // P16
             "nav.home",
+            // P17
+            "vendors.enter_bill",
+            "nav.receipt_inbox",
+            "nav.statement_match",
+            "nav.document_view",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -742,6 +763,63 @@ mod tests {
         );
         assert!(!kofi.opens && kofi.palette && kofi.arrives.is_none());
         assert!(in_menu(Menu::Help).any(|c| c.id.as_str() == "help.kofi"));
+    }
+
+    #[test]
+    fn p17_commands() {
+        use crate::keymap::Keymap;
+        // Enter Bill is built (the placeholder is gone, Q-P06g, Q-P16k).
+        let bill = find("vendors.enter_bill").unwrap();
+        assert_eq!(
+            (bill.menu, bill.shortcut, bill.scope),
+            (Some(Menu::Vendors), ctrl('B'), Scope::Global)
+        );
+        assert!(bill.opens && bill.arrives.is_none() && bill.palette);
+        for id in ["nav.receipt_inbox", "nav.statement_match"] {
+            let c = find(id).unwrap();
+            assert_eq!((c.menu, c.shortcut), (Some(Menu::Vendors), None), "{id}");
+            assert!(c.opens && c.arrives.is_none() && c.palette, "{id}");
+        }
+        let doc = find("nav.document_view").unwrap();
+        assert_eq!((doc.menu, doc.shortcut), (None, None));
+        assert!(doc.opens && doc.arrives.is_none());
+        for (id, shortcut, scope) in [
+            ("bill.kind_toggle", None, Scope::Form),
+            ("bill.read_document", None, Scope::Form),
+            ("bill.accept_read", alt('A'), Scope::Form),
+            ("viewer.zoom_in", key(Mods::CMD, Key::Equals), Scope::Viewer),
+            ("viewer.zoom_out", key(Mods::CMD, Key::Minus), Scope::Viewer),
+            ("viewer.fit", key(Mods::CMD, Key::Digit(0)), Scope::Viewer),
+            (
+                "viewer.page_next",
+                key(Mods::NONE, Key::PageDown),
+                Scope::Viewer,
+            ),
+            (
+                "viewer.page_prev",
+                key(Mods::NONE, Key::PageUp),
+                Scope::Viewer,
+            ),
+        ] {
+            let c = find(id).unwrap();
+            assert_eq!(
+                (c.menu, c.shortcut, c.scope),
+                (None, shortcut, scope),
+                "{id}"
+            );
+            assert!(c.palette && !c.opens && c.arrives.is_none(), "{id}");
+        }
+        // Alt+A was free in a form before P17.
+        let km = Keymap::new(COMMANDS).unwrap();
+        assert_eq!(
+            km.resolve(Scope::Form, Shortcut::new(Mods::ALT, Key::Letter('A')))
+                .map(CommandId::as_str),
+            Some("bill.accept_read")
+        );
+        assert_eq!(
+            km.resolve(Scope::Global, Shortcut::new(Mods::ALT, Key::Letter('A'))),
+            None
+        );
     }
 
     #[test]

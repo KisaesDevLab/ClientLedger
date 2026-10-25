@@ -84,6 +84,7 @@ fn scope_key(s: Scope) -> &'static str {
         Scope::Window => "window",
         Scope::Form => "form",
         Scope::Grid => "grid",
+        Scope::Viewer => "viewer",
     }
 }
 
