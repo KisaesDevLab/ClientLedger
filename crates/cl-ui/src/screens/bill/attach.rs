@@ -255,14 +255,13 @@ impl EnterBillScreen {
             what: "orphan.bill_attach",
             key: Some(key.clone()),
         };
-        match group.write(&session, label, move |s| async move {
+        if let Ok(p) = group.write(&session, label, move |s| async move {
             s.attachments().upload(to, &name, &bytes, key).await
         }) {
-            Ok(p) => self.attach.upload = Some(Task::Pending(p)),
-            Err(_) => {
-                self.attach.uploading = None;
-                self.attach.problem = Some("check.attach.failed");
-            }
+            self.attach.upload = Some(Task::Pending(p));
+        } else {
+            self.attach.uploading = None;
+            self.attach.problem = Some("check.attach.failed");
         }
     }
 

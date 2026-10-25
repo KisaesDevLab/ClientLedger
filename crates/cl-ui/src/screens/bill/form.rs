@@ -66,16 +66,14 @@ fn above(ui: &mut Ui, tokens: &Tokens, label: &str) -> egui::Response {
 
 /// The label of a payment term (`Net 15`, `2% 10 Net 30`).
 pub(crate) fn term_label(code: &str) -> String {
-    match cl_model::lists::terms::term(code) {
-        Some(term) => t(term.label.0),
-        None => {
-            let key = format!("bill.terms.{code}");
-            if crate::i18n::has(&key) {
-                t(&key)
-            } else {
-                code.to_string()
-            }
-        }
+    if let Some(term) = cl_model::lists::terms::term(code) {
+        return t(term.label.0);
+    }
+    let key = format!("bill.terms.{code}");
+    if crate::i18n::has(&key) {
+        t(&key)
+    } else {
+        code.to_string()
     }
 }
 

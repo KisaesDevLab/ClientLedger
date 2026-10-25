@@ -1399,16 +1399,16 @@ fn text_pdf(lines: &[(u32, u32, u32, &str)]) -> String {
     let mut offsets = Vec::new();
     for (i, body) in objects.iter().enumerate() {
         offsets.push(out.len());
-        let _ = write!(out, "{} 0 obj\n{body}\nendobj\n", i + 1);
+        let _ = writeln!(out, "{} 0 obj\n{body}\nendobj", i + 1);
     }
     let xref = out.len();
-    let _ = write!(out, "xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1);
+    let _ = writeln!(out, "xref\n0 {}\n0000000000 65535 f ", objects.len() + 1);
     for o in offsets {
-        let _ = write!(out, "{o:010} 00000 n \n");
+        let _ = writeln!(out, "{o:010} 00000 n ");
     }
-    let _ = write!(
+    let _ = writeln!(
         out,
-        "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+        "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF",
         objects.len() + 1
     );
     out

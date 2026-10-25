@@ -195,7 +195,7 @@ pub(crate) fn form_of(
     let mut f = blank(kind, r.txn.txn_date);
     f.vendor = r.txn.contact_id;
     f.reference = r.vendor_invoice_number.clone().unwrap_or_default();
-    f.terms = r.payment_terms.clone();
+    f.terms.clone_from(&r.payment_terms);
     f.terms_days = r.terms_days.and_then(|d| u16::try_from(d).ok());
     f.amount_due = r.txn.total;
     f.due_date = r.due_date;
@@ -473,7 +473,7 @@ impl EnterBillScreen {
         }
         let key = self.key_for(&SaveIdentity {
             draft: draft.clone(),
-            edit: edit.as_ref().map(|(id, v)| (*id, v.version.clone())),
+            edit: edit.as_ref().map(|(id, v)| (*id, v.version)),
             password: password.is_some(),
         });
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
@@ -1050,7 +1050,7 @@ impl EnterBillScreen {
         };
         self.header.load(form);
         self.load_lines(expenses, items);
-        if !self.items.value().used().next().is_none() && caps.lines {
+        if self.items.value().used().next().is_some() && caps.lines {
             self.tab = Tab::Items;
         } else {
             self.tab = Tab::Expenses;

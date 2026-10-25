@@ -368,21 +368,20 @@ fn save(
         credit: if doc.credit { Money::ZERO } else { doc.amount },
         memo: None,
     });
-    let number = match existing {
-        Some(id) => state
+    let number = if let Some(id) = existing {
+        state
             .ledger
             .transactions()
             .into_iter()
             .find(|t| DemoLedger::id_of(t) == id)
             .map(|t| t.number)
-            .unwrap_or_default(),
-        None => {
-            let n = state.bills.info.len() + 1;
-            if doc.credit {
-                format!("VC-{n:05}")
-            } else {
-                format!("BILL-{n:05}")
-            }
+            .unwrap_or_default()
+    } else {
+        let n = state.bills.info.len() + 1;
+        if doc.credit {
+            format!("VC-{n:05}")
+        } else {
+            format!("BILL-{n:05}")
         }
     };
     let journal = DemoJournal {
@@ -754,14 +753,15 @@ pub fn get(state: &mut DemoState, id: TransactionId) -> Option<Versioned<BillRec
             l.tag = x.tag.or(l.tag);
         }
         // The ledger line carries the customer as the engine stores it.
-        let mut n = 0;
-        for l in txn.lines.iter_mut().filter(|l| Some(l.account_id) != ap) {
-            if let Some(x) = i.lines.get(n) {
-                l.contact_id = x.customer;
-                l.is_billable = x.billable;
-                l.tag_id = x.tag.or(l.tag_id);
-            }
-            n += 1;
+        for (l, x) in txn
+            .lines
+            .iter_mut()
+            .filter(|l| Some(l.account_id) != ap)
+            .zip(&i.lines)
+        {
+            l.contact_id = x.customer;
+            l.is_billable = x.billable;
+            l.tag_id = x.tag.or(l.tag_id);
         }
     }
     let total = Money::sum(lines.iter().map(|l| l.amount)).ok();
@@ -1091,12 +1091,12 @@ mod tests {
         let id = create_bill(&mut s, &d, Some(&pw)).expect("saved");
         let v = get(&mut s, id).expect("get");
         // A version from before a write is stale.
-        let old = v.version.clone();
-        let mut e = d.clone();
-        e.memo = Some("changed".into());
-        update_bill(&mut s, id, &old, &e, Some(&pw)).expect("edit");
+        let old = v.version;
+        let mut edit = d.clone();
+        edit.memo = Some("changed".into());
+        update_bill(&mut s, id, &old, &edit, Some(&pw)).expect("edit");
         assert!(matches!(
-            update_bill(&mut s, id, &old, &e, Some(&pw)),
+            update_bill(&mut s, id, &old, &edit, Some(&pw)),
             Err(ApiError::Conflict {
                 reason: ConflictReason::Stale,
                 ..
@@ -1140,7 +1140,7 @@ mod tests {
         let mut d = draft(&mut s);
         d.draft_attachment = Some(key);
         let id = create_bill(&mut s, &d, None).expect("saved");
-        assert!(attachments(&s, AttachTo::Draft(key)).is_empty());
+        assert_eq!(attachments(&s, AttachTo::Draft(key)), Vec::new());
         assert_eq!(attachments(&s, AttachTo::Bill(id)).len(), 1);
         assert_eq!(download(&s, a.id).expect("bytes"), STORY_PDF);
         assert_eq!(attach_draft(&mut s, id, key, false), Ok(0), "nothing more");

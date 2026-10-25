@@ -460,7 +460,7 @@ impl EditableModel for View<'_> {
         let Some(l) = self.lines().get(index) else {
             return false;
         };
-        !self.a.locked.contains(&col) && !(col == I_AMOUNT && l.amount_is_computed())
+        !self.a.locked.contains(&col) && (col != I_AMOUNT || !l.amount_is_computed())
     }
     fn row_entered(&mut self, key: RowKey) {
         self.a.snapshot = self.lines().iter().find(|l| l.key == key).cloned();

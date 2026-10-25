@@ -385,7 +385,7 @@ impl EnterBillScreen {
         };
         from.header_tags
             .clone_from(&self.header.current().header_tags);
-        from.terms = self.header.current().terms.clone();
+        from.terms.clone_from(&self.header.current().terms);
         from.terms_days = self.header.current().terms_days;
         let dropped = self.keep_active(&mut from);
         let mut f = self.compose();

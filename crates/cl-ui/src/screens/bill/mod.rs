@@ -262,6 +262,9 @@ pub(crate) struct HistoryView {
     pub error: bool,
 }
 
+/// What a terms-dates request is for: date, terms, custom days, vendor.
+pub(crate) type TermsKey = (CalendarDate, Option<String>, Option<u16>, Option<ContactId>);
+
 /// The Enter Bill window.
 pub struct EnterBillScreen {
     pub(crate) link: Arc<CompanyLink>,
@@ -289,8 +292,7 @@ pub struct EnterBillScreen {
     /// (`bill-terms-v1`).
     pub(crate) terms_dates_task: Option<Task<TermsDates>>,
     /// What the last terms-dates request was for.
-    pub(crate) terms_dates_for:
-        Option<(CalendarDate, Option<String>, Option<u16>, Option<ContactId>)>,
+    pub(crate) terms_dates_for: Option<TermsKey>,
     /// The header (its lines stay empty: the grids hold them).
     pub(crate) header: FormState<BillForm>,
     pub(crate) expenses: LinesGrid<RegisterLists>,
@@ -525,17 +527,15 @@ impl EnterBillScreen {
 
     /// What the engine can take (plan §2).
     pub(crate) fn caps(&self) -> BillCaps {
-        match self.link.demo_state() {
-            Some(d) => crate::company::demo::bills::caps(&d),
-            None => {
-                let c = self.link.capabilities();
-                BillCaps {
-                    closing: c.has(Capabilities::AP_CLOSING),
-                    lines: c.has(Capabilities::BILL_LINES),
-                    terms: c.has(Capabilities::BILL_TERMS),
-                    received: c.has(Capabilities::BILL_RECEIVED),
-                }
-            }
+        if let Some(d) = self.link.demo_state() {
+            return crate::company::demo::bills::caps(&d);
+        }
+        let c = self.link.capabilities();
+        BillCaps {
+            closing: c.has(Capabilities::AP_CLOSING),
+            lines: c.has(Capabilities::BILL_LINES),
+            terms: c.has(Capabilities::BILL_TERMS),
+            received: c.has(Capabilities::BILL_RECEIVED),
         }
     }
 
