@@ -27,7 +27,7 @@ use crate::support::{Harness, unique};
 /// A layout with: Plant sales (mapped to a fresh income account), Dept 2
 /// (unmapped), Sales Tax Collected, Cash and Cards (the engine's own
 /// accounts from the retail preset).
-struct Layout {
+pub(crate) struct Layout {
     t: DailyTemplate,
     income: AccountId,
     tax_account: AccountId,
@@ -39,7 +39,7 @@ struct Layout {
     cards: DailyLineId,
 }
 
-fn layout(h: &Harness, s: &Session) -> Layout {
+pub(crate) fn layout(h: &Harness, s: &Session) -> Layout {
     let ds = s.daily_sales();
     let made = h
         .run(ds.create_template(&unique("Plant sale counter"), Some(Preset::Retail)))
@@ -118,7 +118,7 @@ fn v(line: DailyLineId, amount: &str) -> DailyValue {
     }
 }
 
-fn day(l: &Layout, on: CalendarDate, cash: &str) -> DailyEntryDraft {
+pub(crate) fn day(l: &Layout, on: CalendarDate, cash: &str) -> DailyEntryDraft {
     DailyEntryDraft {
         template: l.t.id,
         date: on,

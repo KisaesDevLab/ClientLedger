@@ -1,9 +1,15 @@
 //! "We could not confirm the save" (B2, Q-PR1a): the one component every
 //! posting form uses after a save whose outcome is unknown.
 //!
-//! The engine has no request idempotency on its posting routes until U-18
-//! (only `/batch/save` honours `Idempotency-Key`), so sending the same save
-//! again could post it twice. The rule itself lives in
+//! An engine without `idempotency-v1` (U-18) honours `Idempotency-Key` only
+//! on `/batch/save`, so sending the same save again could post it twice.
+//! With it, the engine replays the key on its route set: such an unknown
+//! outcome comes back `keyed` ([`ApiError::needs_recheck`] is false), and
+//! the form does not block at all. Save stays enabled and sends the same
+//! save under the same key (the form keeps it), which the engine answers
+//! with the first result, never a second posting. Everything below is for
+//! the unkeyed case (a route outside the set, an engine without the
+//! capability, or a key too old to rely on). The rule itself lives in
 //! `cl_model::forms::FormState` (Save answers `Unconfirmed` while the mark
 //! is set); this component runs the owner's **Check again**
 //! (`Session::recheck`, the stored lost-reply probe, read-only) and the
@@ -224,7 +230,7 @@ impl LostSave {
     /// template): an unknown outcome is written in `link`'s book there, and
     /// this window's banner is for it now.
     pub fn lost_as(&mut self, e: &ApiError, link: &Arc<CompanyLink>, scope: LostScope) -> bool {
-        if !matches!(e, ApiError::OutcomeUnknown { .. }) {
+        if !e.needs_recheck() {
             return false;
         }
         self.book = Some((Arc::clone(link), scope));
@@ -269,14 +275,17 @@ impl LostSave {
         Some(LostEvent::StillUnknown)
     }
 
-    /// Takes note of a failed save. True when its outcome is unknown: the
+    /// Takes note of a failed save. True when its outcome is unknown and
+    /// a second send could post twice ([`ApiError::needs_recheck`]): the
     /// form then calls `save_unknown` instead of `save_failed` and shows
-    /// this banner instead of the error.
+    /// this banner instead of the error. A `keyed` unknown outcome is
+    /// false: the form shows the error ("save again, it is not entered
+    /// twice") and Save sends the same key again (U-18, Q-PR1a).
     pub fn lost(&mut self, e: &ApiError) -> bool {
         match e {
             ApiError::OutcomeUnknown {
                 idempotency_key, ..
-            } => {
+            } if e.needs_recheck() => {
                 self.pending = true;
                 self.key.clone_from(idempotency_key);
                 self.notice = None;
@@ -553,6 +562,7 @@ mod tests {
             request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000001")
                 .expect("id"),
             idempotency_key: Some(IdempotencyKey::new()),
+            keyed: false,
         }
     }
 
@@ -605,6 +615,38 @@ mod tests {
         assert_eq!(second.sync(&mut two), Some(LostEvent::NotSaved));
         assert_eq!(second.notice, Some("lost.answered_elsewhere"));
         assert!(!two.is_unconfirmed());
+    }
+
+    /// U-18 (Q-PR1a): a keyed unknown outcome never blocks Save; the same
+    /// key goes again and the engine replays it.
+    #[test]
+    fn a_keyed_unknown_outcome_does_not_block() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(CompanyLink::demo(dir.path()));
+        let scope = LostScope::Form("deposit");
+        let mut form = FormState::new(String::new());
+        let mut lost = LostSave::default();
+        assert_eq!(lost.bind(&link, scope, &mut form), None);
+        form.edit(1, |v| v.push('x'));
+        let _ = form.begin_save(SaveIntent::Save);
+        let keyed = ApiError::OutcomeUnknown {
+            request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000002")
+                .expect("id"),
+            idempotency_key: Some(IdempotencyKey::new()),
+            keyed: true,
+        };
+        assert!(!keyed.needs_recheck());
+        assert!(!lost.lost(&keyed));
+        assert!(!lost.lost_as(&keyed, &link, scope));
+        assert!(!lost.pending());
+        assert!(!link.lost_saves().is_open(scope));
+        form.save_failed(failure());
+        assert!(matches!(
+            form.begin_save(SaveIntent::Save),
+            SaveStart::Send(_)
+        ));
+        // An unkeyed one still blocks.
+        assert!(unknown().needs_recheck());
     }
 
     #[test]

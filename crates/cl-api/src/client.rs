@@ -208,6 +208,11 @@ pub(crate) struct Call {
     pub request_id: RequestId,
     pub company: Option<CompanyId>,
     pub idempotency_key: Option<IdempotencyKey>,
+    /// Send `idempotency_key` as the `Idempotency-Key` header. The key stays
+    /// on the call either way (an unknown outcome names it, and the owner's
+    /// recheck finds its probe by it); with `idempotency-v1` the executor
+    /// sends it only where the engine replays it (U-18).
+    pub send_key: bool,
     pub if_match: Option<String>,
     /// The body carries a password or similar secret (set by `json_body`):
     /// the endpoint must be verified afresh for this call.
@@ -244,6 +249,7 @@ impl Call {
             request_id: RequestId::from_uuid(uuid::Uuid::new_v4()),
             company: None,
             idempotency_key: None,
+            send_key: true,
             if_match: None,
             sensitive: false,
             content_type: None,
@@ -325,11 +331,8 @@ pub(crate) struct EngineReply {
     pub set_cookies: Vec<Secret>,
     /// From `Retry-After` or `RateLimit-Reset` (whole seconds).
     pub retry_after: Option<Duration>,
-    /// `Idempotent-Replayed: true` (U-18).
-    #[allow(
-        dead_code,
-        reason = "read by the keyed-once write path once U-18 lands"
-    )]
+    /// `Idempotent-Replayed: true` (U-18): the engine answered with the
+    /// first result of this key.
     pub replayed: bool,
     /// Generation of the endpoint this attempt used.
     pub generation: u64,
@@ -656,7 +659,7 @@ fn build_headers(
             plain(&company.to_string())?,
         );
     }
-    if let Some(key) = &call.idempotency_key {
+    if let Some(key) = call.idempotency_key.as_ref().filter(|_| call.send_key) {
         h.insert(
             HeaderName::from_static("idempotency-key"),
             plain(&key.as_header())?,

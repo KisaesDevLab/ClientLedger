@@ -31,7 +31,7 @@ use serde_json::{Map, Value, json};
 
 use crate::client::{Call, Method};
 use crate::errors::{ApiError, LocalValidation};
-use crate::idempotency::IdempotencyKey;
+use crate::idempotency::{IdempotencyKey, unkeyed};
 use crate::resources::bank_postings::{
     BankPosting, CardChargeDraft, CashBack, CheckDraft, DepositCaps, DepositDraft, SplitLine,
     TransferDraft,
@@ -1158,7 +1158,12 @@ impl Templates<'_> {
             TEMPLATES_CREATE.route().to_string(),
             json_body(&body)?,
         );
-        let reply = self.0.send(&TEMPLATES_CREATE, call, None).await?;
+        // The key is made per call: the caller cannot re-send under it.
+        let reply = self
+            .0
+            .send(&TEMPLATES_CREATE, call, None)
+            .await
+            .map_err(unkeyed)?;
         template_of(&reply.body).map_err(saved_unreadable)
     }
 
@@ -1191,7 +1196,11 @@ impl Templates<'_> {
             TEMPLATES_FROM_TXN.route().to_string(),
             json_body(&body)?,
         );
-        let reply = self.0.send(&TEMPLATES_FROM_TXN, call, None).await?;
+        let reply = self
+            .0
+            .send(&TEMPLATES_FROM_TXN, call, None)
+            .await
+            .map_err(unkeyed)?;
         template_of(&reply.body).map_err(saved_unreadable)
     }
 
@@ -1414,7 +1423,10 @@ impl Templates<'_> {
             format!("/api/v1/templates/{id}/occurrences/{}/skip", date.to_wire()),
             json_body(&json!({}))?,
         );
-        self.0.send(&TEMPLATE_SKIP, call, None).await?;
+        self.0
+            .send(&TEMPLATE_SKIP, call, None)
+            .await
+            .map_err(unkeyed)?;
         Ok(())
     }
 
@@ -1440,7 +1452,10 @@ impl Templates<'_> {
             ),
             json_body(&json!({ "transactionId": txn }))?,
         );
-        self.0.send(&TEMPLATE_RESOLVE, call, None).await?;
+        self.0
+            .send(&TEMPLATE_RESOLVE, call, None)
+            .await
+            .map_err(unkeyed)?;
         Ok(())
     }
 }

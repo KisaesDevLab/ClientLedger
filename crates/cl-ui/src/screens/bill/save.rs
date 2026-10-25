@@ -637,6 +637,12 @@ impl EnterBillScreen {
             match r {
                 Ok(()) => self.voided(),
                 Err(e) => {
+                    // An unknown outcome keeps the key: the same void goes
+                    // again under it (a replay where the engine keys the
+                    // route). A refusal gets a fresh one.
+                    if !crate::screens::register::keeps_key(&e) {
+                        self.void.key = None;
+                    }
                     let reason = self.void.reason.clone();
                     let pending = if self.void.delete {
                         Pending::Delete(reason)
@@ -1190,7 +1196,20 @@ impl EnterBillScreen {
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
-        let key = IdempotencyKey::new();
+        let identity = super::VoidIdentity {
+            id: e.id,
+            delete,
+            reason: reason.clone(),
+            password: password.is_some(),
+        };
+        let key = match &self.void.key {
+            Some((same, k)) if *same == identity => k.clone(),
+            _ => {
+                let k = IdempotencyKey::new();
+                self.void.key = Some((identity, k.clone()));
+                k
+            }
+        };
         let label = OrphanLabel {
             what: if delete {
                 "orphan.bill_delete"

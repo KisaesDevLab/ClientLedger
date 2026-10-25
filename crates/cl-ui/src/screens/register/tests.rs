@@ -1911,6 +1911,7 @@ fn b2_the_entry_row_sends_nothing_after_an_unknown_outcome_until_the_recheck_ans
         request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000006")
             .expect("id"),
         idempotency_key: Some(cl_api::IdempotencyKey::new()),
+        keyed: false,
     });
     assert!(s.entry.error.is_none(), "the banner speaks");
     assert!(!s.start_record());

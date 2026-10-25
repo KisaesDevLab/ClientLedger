@@ -42,7 +42,7 @@ pub use client::{Budget, ClientConfig, LOOPBACK_HOST, Method, Timeouts};
 pub use endpoint::{EndpointSource, EndpointState, EngineEndpoint, FixedEndpoint, Purpose};
 pub use errors::{
     ApiError, AuthFailure, ClosedPeriod, ConflictReason, DEPOSIT_LINKS_DROPPED, ErrorCode,
-    FieldPath, LocalValidation, UserText, ValidationError, ValidationIssue,
+    FieldPath, LocalValidation, SavedEntity, UserText, ValidationError, ValidationIssue,
     is_deposit_links_dropped,
 };
 pub use idempotency::IdempotencyKey;
@@ -85,7 +85,7 @@ pub use resources::form1099::{Form1099, TinType, Vendor1099Profile, Vendor1099Up
 pub use resources::items::{Item, ItemFields, ItemFilter, ItemSort, ItemUpdate, Items};
 pub use resources::ledger::LedgerStamp;
 pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, ContactImportRow};
-pub use resources::operations::{OPERATIONS, Operation, RetryClass};
+pub use resources::operations::{KeySet, OPERATIONS, Operation, RetryClass};
 pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
 pub use resources::reconcile::Recheck;
 pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};
@@ -188,9 +188,9 @@ pub use resources::daily_sales::{
 
 // P15 lane T: templates and the catch-up run.
 pub use resources::recurring::{
-    Attention, DueReminder, FailedTemplate, PostedOccurrence, RUN_LIMIT_DEFAULT, RUN_LIMIT_MAX,
-    Recurring, RunDue, SkipReason, SkippedOccurrence, attention_from_json, new_run_id,
-    run_due_from_json,
+    Attention, DueReminder, FailedTemplate, PostedOccurrence, RUN_FILTER_MAX, RUN_LIMIT_DEFAULT,
+    RUN_LIMIT_MAX, Recurring, RunDue, RunDueFilter, SkipReason, SkippedOccurrence,
+    attention_from_json, new_run_id, run_due_from_json,
 };
 pub use resources::templates::{
     AUTO_START_FIELD, COUNT_MAX, DraftWarning, DraftWarningCode, Entered, Frequency, INTERVAL_MAX,

@@ -16,8 +16,15 @@ pub enum RetryClass {
     /// or once with the same key when outcome reconciliation proves the first
     /// attempt did not commit.
     PreHandlerOnly,
-    /// Mutations once the engine advertises `idempotency-v1` (U-18): retried
-    /// like reads, always with the same key.
+    /// A mutation in one of the engine's keyed route sets (U-18, engine
+    /// `docs/DESKTOP.md` "Request idempotency"; `x-idempotency: true` in its
+    /// `openapi.json`): `PreHandlerOnly` unless the engine advertises that
+    /// set's capability ([`KeySet::capability`]), `KeyedOnce` when it does.
+    /// Only these routes ever get `KeyedOnce`.
+    Keyable(KeySet),
+    /// A keyable mutation while the engine advertises its set's capability
+    /// (never written in the table; see [`RetryClass::effective`]): retried
+    /// like reads, always with the same key, which the engine replays.
     KeyedOnce,
     /// Auth and company creation: never retried (rate limits, token
     /// rotation, duplicate companies).
@@ -31,18 +38,49 @@ impl RetryClass {
         match self {
             RetryClass::Idempotent => "idempotent",
             RetryClass::PreHandlerOnly => "pre-handler-only",
+            RetryClass::Keyable(KeySet::V1) => "keyable",
+            RetryClass::Keyable(KeySet::ApV1) => "keyable-ap",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
     }
 
-    /// The class in effect, given whether the engine offers request
-    /// idempotency (U-18).
+    /// The class in effect, given whether the engine replays this request's
+    /// key (U-18: it advertises the route's set capability and the key is
+    /// young enough, see [`crate::IdempotencyKey`]). Only
+    /// [`RetryClass::Keyable`] routes are upgraded; every other mutation
+    /// keeps its class, so it is never blind-retried (the engine does not
+    /// replay it).
     #[must_use]
-    pub const fn effective(self, idempotency_v1: bool) -> RetryClass {
+    pub const fn effective(self, keyed: bool) -> RetryClass {
         match self {
-            RetryClass::PreHandlerOnly if idempotency_v1 => RetryClass::KeyedOnce,
+            RetryClass::Keyable(_) if keyed => RetryClass::KeyedOnce,
+            RetryClass::Keyable(_) => RetryClass::PreHandlerOnly,
             other => other,
+        }
+    }
+}
+
+/// The engine's keyed route sets. Each capability name fixes its routes
+/// (routes added later get a new name), so a route replays its key only
+/// while the engine advertises the capability of the set it is in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum KeySet {
+    /// `idempotency-v1` (U-18): transactions, checks, invoices, bill
+    /// create, daily sales, templates and the list creates.
+    V1,
+    /// `idempotency-ap-v1` (U-83 to U-87): bill edit and void, vendor credit
+    /// create, edit and void, bill-payment void.
+    ApV1,
+}
+
+impl KeySet {
+    /// The capability the engine advertises while it replays this set.
+    #[must_use]
+    pub const fn capability(self) -> &'static str {
+        match self {
+            KeySet::V1 => crate::wire::Capabilities::IDEMPOTENCY,
+            KeySet::ApV1 => crate::wire::Capabilities::IDEMPOTENCY_AP,
         }
     }
 }
@@ -81,6 +119,21 @@ impl Operation {
     #[must_use]
     pub const fn company_scoped(&self) -> bool {
         self.company_scoped
+    }
+
+    /// In one of the engine's keyed route sets (U-18).
+    #[must_use]
+    pub const fn is_keyable(&self) -> bool {
+        matches!(self.retry, RetryClass::Keyable(_))
+    }
+
+    /// The engine's keyed route set this route is in, if any.
+    #[must_use]
+    pub const fn key_set(&self) -> Option<KeySet> {
+        match self.retry {
+            RetryClass::Keyable(set) => Some(set),
+            _ => None,
+        }
     }
 
     /// Which failures the route reads beyond the §2.4 table: refused rows
@@ -128,6 +181,34 @@ const fn write(method: Method, route: &'static str) -> Operation {
         method,
         route,
         RetryClass::PreHandlerOnly,
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+/// A mutation in the engine's `idempotency-v1` route set (U-18). The set is
+/// fixed for that capability name (routes added later get a new name), and
+/// `tests/spec_fixtures.rs` ties these rows to the engine's `x-idempotency`.
+const fn keyable(method: Method, route: &'static str) -> Operation {
+    op(
+        method,
+        route,
+        RetryClass::Keyable(KeySet::V1),
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+/// A mutation in the engine's `idempotency-ap-v1` route set (U-83 to U-87):
+/// keyed only while the engine advertises that capability (an engine with
+/// only `idempotency-v1` does not replay these).
+const fn keyable_ap(method: Method, route: &'static str) -> Operation {
+    op(
+        method,
+        route,
+        RetryClass::Keyable(KeySet::ApV1),
         RouteKind::Session,
         TimeoutClass::Write,
         true,
@@ -193,30 +274,30 @@ pub(crate) const COMPANY_GET: Operation = session_read("/api/v1/company");
 pub(crate) const COMPANY_PUT: Operation = write(Method::Put, "/api/v1/company");
 pub(crate) const COMPANY_SETTINGS: Operation = read("/api/v1/company/settings");
 pub(crate) const ACCOUNTS_LIST: Operation = read("/api/v1/accounts");
-pub(crate) const ACCOUNTS_CREATE: Operation = write(Method::Post, "/api/v1/accounts");
+pub(crate) const ACCOUNTS_CREATE: Operation = keyable(Method::Post, "/api/v1/accounts");
 pub(crate) const ACCOUNT_GET: Operation = read("/api/v1/accounts/{id}");
 pub(crate) const ACCOUNT_PUT: Operation = write(Method::Put, "/api/v1/accounts/{id}");
 pub(crate) const ACCOUNT_DELETE: Operation = write(Method::Delete, "/api/v1/accounts/{id}");
 pub(crate) const CONTACTS_LIST: Operation = read("/api/v1/contacts");
-pub(crate) const CONTACTS_CREATE: Operation = write(Method::Post, "/api/v1/contacts");
+pub(crate) const CONTACTS_CREATE: Operation = keyable(Method::Post, "/api/v1/contacts");
 pub(crate) const CONTACT_GET: Operation = read("/api/v1/contacts/{id}");
 pub(crate) const CONTACT_PUT: Operation = write(Method::Put, "/api/v1/contacts/{id}");
 pub(crate) const CONTACT_DELETE: Operation = write(Method::Delete, "/api/v1/contacts/{id}");
 pub(crate) const ITEMS_LIST: Operation = read("/api/v1/items");
-pub(crate) const ITEMS_CREATE: Operation = write(Method::Post, "/api/v1/items");
+pub(crate) const ITEMS_CREATE: Operation = keyable(Method::Post, "/api/v1/items");
 pub(crate) const ITEM_GET: Operation = read("/api/v1/items/{id}");
 pub(crate) const ITEM_PUT: Operation = write(Method::Put, "/api/v1/items/{id}");
 pub(crate) const ITEM_DELETE: Operation = write(Method::Delete, "/api/v1/items/{id}");
 pub(crate) const TAGS_LIST: Operation = read("/api/v1/tags");
-pub(crate) const TAGS_CREATE: Operation = write(Method::Post, "/api/v1/tags");
+pub(crate) const TAGS_CREATE: Operation = keyable(Method::Post, "/api/v1/tags");
 pub(crate) const TAG_GET: Operation = read("/api/v1/tags/{id}");
 pub(crate) const TAG_PUT: Operation = write(Method::Put, "/api/v1/tags/{id}");
 pub(crate) const TAG_DELETE: Operation = write(Method::Delete, "/api/v1/tags/{id}");
 pub(crate) const TXNS_LIST: Operation = read("/api/v1/transactions");
-pub(crate) const TXNS_CREATE: Operation = write(Method::Post, "/api/v1/transactions");
+pub(crate) const TXNS_CREATE: Operation = keyable(Method::Post, "/api/v1/transactions");
 pub(crate) const TXN_GET: Operation = read("/api/v1/transactions/{id}");
-pub(crate) const TXN_PUT: Operation = write(Method::Put, "/api/v1/transactions/{id}");
-pub(crate) const TXN_VOID: Operation = write(Method::Post, "/api/v1/transactions/{id}/void");
+pub(crate) const TXN_PUT: Operation = keyable(Method::Put, "/api/v1/transactions/{id}");
+pub(crate) const TXN_VOID: Operation = keyable(Method::Post, "/api/v1/transactions/{id}/void");
 pub(crate) const LEDGER_VERSION: Operation = read("/api/v1/ledger-version");
 
 // ---- P08 company lifecycle ------------------------------------------------
@@ -246,8 +327,8 @@ pub(crate) const COA_TEMPLATE_OPTIONS: Operation =
 pub(crate) const ACCOUNTS_IMPORT: Operation = write(Method::Post, "/api/v1/accounts/import");
 pub(crate) const OPENING_BALANCES: Operation =
     write(Method::Post, "/api/v1/export/opening-balances");
-pub(crate) const INVOICES_CREATE: Operation = write(Method::Post, "/api/v1/invoices");
-pub(crate) const BILLS_CREATE: Operation = write(Method::Post, "/api/v1/bills");
+pub(crate) const INVOICES_CREATE: Operation = keyable(Method::Post, "/api/v1/invoices");
+pub(crate) const BILLS_CREATE: Operation = keyable(Method::Post, "/api/v1/bills");
 pub(crate) const REPORT_BALANCE_SHEET: Operation = read("/api/v1/reports/balance-sheet");
 pub(crate) const REPORT_TRIAL_BALANCE: Operation = read("/api/v1/reports/trial-balance");
 pub(crate) const REPORT_PROFIT_LOSS: Operation = read("/api/v1/reports/profit-loss");
@@ -390,7 +471,7 @@ pub(crate) const REGISTER: Operation = read("/api/v1/accounts/{id}/register");
 /// The register footer.
 pub(crate) const REGISTER_SUMMARY: Operation = read("/api/v1/accounts/{id}/register/summary");
 /// Write a check (posts an `expense` with a check number).
-pub(crate) const CHECKS_CREATE: Operation = write(Method::Post, "/api/v1/checks");
+pub(crate) const CHECKS_CREATE: Operation = keyable(Method::Post, "/api/v1/checks");
 /// The audit trail (filtered by entity type and text).
 pub(crate) const AUDIT_LOG: Operation = read("/api/v1/audit-log");
 /// The closing date and whether a closing-date password is set (U-15).
@@ -406,7 +487,7 @@ pub(crate) const CLOSING_PASSWORD_PUT: Operation = op(
     true,
 );
 /// Soft-deletes a transaction (R7, `txn-delete-v1`).
-pub(crate) const TXN_DELETE: Operation = write(Method::Delete, "/api/v1/transactions/{id}");
+pub(crate) const TXN_DELETE: Operation = keyable(Method::Delete, "/api/v1/transactions/{id}");
 /// The owner resets a forgotten closing-date password after re-entering
 /// their sign-in password (U-15, Q-239): a credential change, never retried.
 pub(crate) const CLOSING_PASSWORD_RESET: Operation = op(
@@ -448,7 +529,7 @@ pub(crate) const CHECKS_LIST: Operation = read("/api/v1/checks");
 pub(crate) const CHECK_SETTINGS: Operation = read("/api/v1/checks/settings");
 /// Edit a saved check, its number, printed name, address and Print later
 /// included (`check-edit-v1`).
-pub(crate) const CHECK_PUT: Operation = write(Method::Put, "/api/v1/checks/{id}");
+pub(crate) const CHECK_PUT: Operation = keyable(Method::Put, "/api/v1/checks/{id}");
 
 // ---- P14: deposits, daily sales, owner helpers ---------------------------------
 
@@ -485,7 +566,7 @@ pub(crate) const DAILY_TEMPLATE_LINES: Operation =
 pub(crate) const DAILY_ENTRIES: Operation = read("/api/v1/daily-sales/entries");
 /// Saves a day as a draft.
 pub(crate) const DAILY_ENTRIES_CREATE: Operation =
-    write(Method::Post, "/api/v1/daily-sales/entries");
+    keyable(Method::Post, "/api/v1/daily-sales/entries");
 /// The posting a day would make, with its over/short (nothing is stored;
 /// a POST, so classed as a write).
 pub(crate) const DAILY_ENTRY_PREVIEW: Operation =
@@ -500,10 +581,10 @@ pub(crate) const DAILY_ENTRY_DELETE: Operation =
     write(Method::Delete, "/api/v1/daily-sales/entries/{id}");
 /// Posts a day (`closingPassword` with `daily-sales-lock-v1`).
 pub(crate) const DAILY_ENTRY_POST: Operation =
-    write(Method::Post, "/api/v1/daily-sales/entries/{id}/post");
+    keyable(Method::Post, "/api/v1/daily-sales/entries/{id}/post");
 /// Voids a posted day (`closingPassword` with `daily-sales-lock-v1`).
 pub(crate) const DAILY_ENTRY_VOID: Operation =
-    write(Method::Post, "/api/v1/daily-sales/entries/{id}/void");
+    keyable(Method::Post, "/api/v1/daily-sales/entries/{id}/void");
 
 // ---- P15: journal entries, templates, catch-up ----------------------------------
 // Client-declared (outside the pinned spec) until the P15 engine PRs land.
@@ -513,10 +594,10 @@ pub(crate) const JE_NEXT_NUMBER: Operation = read("/api/v1/journal-entries/next-
 /// Templates, by group and kind (`templates-v1`).
 pub(crate) const TEMPLATES_LIST: Operation = read("/api/v1/templates");
 /// Stores a template (a form's create body minus the date and numbers).
-pub(crate) const TEMPLATES_CREATE: Operation = write(Method::Post, "/api/v1/templates");
+pub(crate) const TEMPLATES_CREATE: Operation = keyable(Method::Post, "/api/v1/templates");
 /// Stores a template from a posted transaction.
 pub(crate) const TEMPLATES_FROM_TXN: Operation =
-    write(Method::Post, "/api/v1/templates/from-transaction");
+    keyable(Method::Post, "/api/v1/templates/from-transaction");
 /// Template groups.
 pub(crate) const TEMPLATE_GROUPS: Operation = read("/api/v1/templates/groups");
 /// Creates a template group.
@@ -537,14 +618,14 @@ pub(crate) const TEMPLATE_DELETE: Operation = write(Method::Delete, "/api/v1/tem
 /// A template's draft for a date, with warnings (posts nothing).
 pub(crate) const TEMPLATE_DRAFT: Operation = read("/api/v1/templates/{id}/draft");
 /// Posts one occurrence now (`closingPassword` in a closed period).
-pub(crate) const TEMPLATE_ENTER: Operation = write(Method::Post, "/api/v1/templates/{id}/enter");
+pub(crate) const TEMPLATE_ENTER: Operation = keyable(Method::Post, "/api/v1/templates/{id}/enter");
 /// Dismisses one occurrence.
-pub(crate) const TEMPLATE_SKIP: Operation = write(
+pub(crate) const TEMPLATE_SKIP: Operation = keyable(
     Method::Post,
     "/api/v1/templates/{id}/occurrences/{date}/skip",
 );
 /// Links an occurrence to a transaction the owner saved in a form.
-pub(crate) const TEMPLATE_RESOLVE: Operation = write(
+pub(crate) const TEMPLATE_RESOLVE: Operation = keyable(
     Method::Post,
     "/api/v1/templates/{id}/occurrences/{date}/resolve",
 );
@@ -592,18 +673,19 @@ pub(crate) const RECONCILIATIONS: Operation = read("/api/v1/banking/reconciliati
 pub(crate) const BANK_STATEMENTS: Operation = read("/api/v1/banking/statements");
 
 // ---- P17: Enter Bill, vendor credits, receipt inbox, document reading ---------
-// `BILLS_LIST` (P16) and `BILLS_CREATE` (P08) are above. The vendor credit
-// edit, the terms dates and the payment terms list are client-declared
-// (engine PR-A, U-84/U-86) until the pin moves; bill and credit delete use
-// `TXN_DELETE` (U-84b).
+// `BILLS_LIST` (P16) and `BILLS_CREATE` (P08) are above. Engine PR-A
+// (U-83 to U-87) is in the pin: the vendor credit edit, the terms dates and
+// the payment terms list are in its spec, and the A/P document mutations are
+// keyed under `idempotency-ap-v1`. Bill and credit delete use `TXN_DELETE`
+// (U-84b).
 
 /// One bill with its lines.
 pub(crate) const BILL_GET: Operation = read("/api/v1/bills/{id}");
 /// Changes a bill (`expectedUpdatedAt` and `closingPassword` with
 /// `ap-edit-v1` / `ap-closing-v1`).
-pub(crate) const BILL_PUT: Operation = write(Method::Put, "/api/v1/bills/{id}");
+pub(crate) const BILL_PUT: Operation = keyable_ap(Method::Put, "/api/v1/bills/{id}");
 /// Voids an unpaid bill.
-pub(crate) const BILL_VOID: Operation = write(Method::Post, "/api/v1/bills/{id}/void");
+pub(crate) const BILL_VOID: Operation = keyable_ap(Method::Post, "/api/v1/bills/{id}/void");
 /// The due and discount dates a bill would get (`bill-terms-v1`, U-86d).
 pub(crate) const BILL_TERMS_DATES: Operation = read("/api/v1/bills/terms-dates");
 /// The fixed payment terms list (`bill-terms-v1`, U-86e).
@@ -620,14 +702,16 @@ pub(crate) const BILL_EXTRACT: Operation = write(
 /// Vendor credits by vendor, date and text.
 pub(crate) const VENDOR_CREDITS_LIST: Operation = read("/api/v1/vendor-credits");
 /// Records a vendor credit.
-pub(crate) const VENDOR_CREDITS_CREATE: Operation = write(Method::Post, "/api/v1/vendor-credits");
+pub(crate) const VENDOR_CREDITS_CREATE: Operation =
+    keyable_ap(Method::Post, "/api/v1/vendor-credits");
 /// One vendor credit with its lines.
 pub(crate) const VENDOR_CREDIT_GET: Operation = read("/api/v1/vendor-credits/{id}");
 /// Changes an unapplied vendor credit (`ap-edit-v1`, U-84a).
-pub(crate) const VENDOR_CREDIT_PUT: Operation = write(Method::Put, "/api/v1/vendor-credits/{id}");
+pub(crate) const VENDOR_CREDIT_PUT: Operation =
+    keyable_ap(Method::Put, "/api/v1/vendor-credits/{id}");
 /// Voids a vendor credit.
 pub(crate) const VENDOR_CREDIT_VOID: Operation =
-    write(Method::Post, "/api/v1/vendor-credits/{id}/void");
+    keyable_ap(Method::Post, "/api/v1/vendor-credits/{id}/void");
 /// A vendor's credits with an unused balance.
 pub(crate) const VENDOR_CREDITS_AVAILABLE: Operation =
     read("/api/v1/vendor-credits/available/{vendorId}");
@@ -644,7 +728,7 @@ pub(crate) const BILL_PAYMENTS_LIST: Operation = read("/api/v1/bill-payments");
 /// Voids a bill payment and takes its applications off the bills and
 /// credits it paid (the register's A/P void guard, review B1).
 pub(crate) const BILL_PAYMENT_VOID: Operation =
-    write(Method::Post, "/api/v1/bill-payments/{id}/void");
+    keyable_ap(Method::Post, "/api/v1/bill-payments/{id}/void");
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
@@ -927,15 +1011,35 @@ mod tests {
             assert!(seen.insert((o.method(), o.route())), "duplicate {o:?}");
             let never = (o.route().starts_with("/api/v1/auth/") && !o.method().is_read())
                 || NEVER_RETRIED.contains(&(o.method().as_str(), o.route()));
-            match (o.method().is_read(), never) {
-                (true, _) => assert_eq!(o.retry(), RetryClass::Idempotent, "{o:?}"),
-                (false, true) => assert_eq!(o.retry(), RetryClass::Never, "{o:?}"),
-                (false, false) => assert_eq!(o.retry(), RetryClass::PreHandlerOnly, "{o:?}"),
+            let route = (o.method().as_str(), o.route());
+            let set = if KEYABLE.contains(&route) {
+                Some(KeySet::V1)
+            } else if KEYABLE_AP.contains(&route) {
+                Some(KeySet::ApV1)
+            } else {
+                None
+            };
+            match (o.method().is_read(), never, set) {
+                (true, _, _) => assert_eq!(o.retry(), RetryClass::Idempotent, "{o:?}"),
+                (false, true, _) => assert_eq!(o.retry(), RetryClass::Never, "{o:?}"),
+                (false, false, Some(set)) => {
+                    assert_eq!(o.retry(), RetryClass::Keyable(set), "{o:?}");
+                    assert_eq!(o.key_set(), Some(set), "{o:?}");
+                }
+                (false, false, None) => {
+                    assert_eq!(o.retry(), RetryClass::PreHandlerOnly, "{o:?}");
+                }
             }
+            assert_ne!(o.retry(), RetryClass::KeyedOnce, "never in the table");
             if o.company_scoped() {
                 assert_eq!(o.kind, RouteKind::Session);
             }
         }
+        assert_eq!(
+            OPERATIONS.iter().filter(|o| o.is_keyable()).count(),
+            KEYABLE.len() + KEYABLE_AP.len(),
+            "every idempotency-v1 and idempotency-ap-v1 route is covered"
+        );
         assert_eq!(
             find(Method::Post, "/api/v1/auth/create-tenant").map(|o| o.timeout),
             Some(TimeoutClass::CreateTenant)
@@ -943,14 +1047,71 @@ mod tests {
         assert!(find(Method::Get, "/nope").is_none());
     }
 
+    /// The engine's `idempotency-v1` route set, as `docs/DESKTOP.md`
+    /// ("Request idempotency") lists it. `tests/spec_fixtures.rs` checks the
+    /// same rows against the `x-idempotency` marks of its `openapi.json`.
+    const KEYABLE: [(&str, &str); 20] = [
+        ("POST", "/api/v1/transactions"),
+        ("PUT", "/api/v1/transactions/{id}"),
+        ("POST", "/api/v1/transactions/{id}/void"),
+        ("DELETE", "/api/v1/transactions/{id}"),
+        ("POST", "/api/v1/checks"),
+        ("PUT", "/api/v1/checks/{id}"),
+        ("POST", "/api/v1/invoices"),
+        ("POST", "/api/v1/bills"),
+        ("POST", "/api/v1/daily-sales/entries"),
+        ("POST", "/api/v1/daily-sales/entries/{id}/post"),
+        ("POST", "/api/v1/daily-sales/entries/{id}/void"),
+        ("POST", "/api/v1/templates"),
+        ("POST", "/api/v1/templates/from-transaction"),
+        ("POST", "/api/v1/templates/{id}/enter"),
+        ("POST", "/api/v1/templates/{id}/occurrences/{date}/skip"),
+        ("POST", "/api/v1/templates/{id}/occurrences/{date}/resolve"),
+        ("POST", "/api/v1/accounts"),
+        ("POST", "/api/v1/contacts"),
+        ("POST", "/api/v1/items"),
+        ("POST", "/api/v1/tags"),
+    ];
+
+    /// The engine's `idempotency-ap-v1` route set (U-83 to U-87), as
+    /// `tests/fixtures/idempotency_ap_v1_routes.txt` records it.
+    const KEYABLE_AP: [(&str, &str); 6] = [
+        ("PUT", "/api/v1/bills/{id}"),
+        ("POST", "/api/v1/bills/{id}/void"),
+        ("POST", "/api/v1/vendor-credits"),
+        ("PUT", "/api/v1/vendor-credits/{id}"),
+        ("POST", "/api/v1/vendor-credits/{id}/void"),
+        ("POST", "/api/v1/bill-payments/{id}/void"),
+    ];
+
     #[test]
-    fn idempotency_capability_upgrades_only_mutations() {
+    fn key_sets_name_their_capabilities() {
+        assert_eq!(KeySet::V1.capability(), "idempotency-v1");
+        assert_eq!(KeySet::ApV1.capability(), "idempotency-ap-v1");
+        assert_eq!(RetryClass::Keyable(KeySet::V1).as_str(), "keyable");
+        assert_eq!(RetryClass::Keyable(KeySet::ApV1).as_str(), "keyable-ap");
+        assert_eq!(BILLS_CREATE.key_set(), Some(KeySet::V1));
+        assert_eq!(BILL_PUT.key_set(), Some(KeySet::ApV1));
+        assert_eq!(BILL_GET.key_set(), None);
+    }
+
+    /// C1 (U-18 plan §10.1): `idempotency-v1` upgrades only `keyable`
+    /// routes. Every other mutation keeps its class: never blind-retried,
+    /// reconciled after a lost reply.
+    #[test]
+    fn idempotency_capability_upgrades_only_keyable_routes() {
+        for set in [KeySet::V1, KeySet::ApV1] {
+            assert_eq!(
+                RetryClass::Keyable(set).effective(true),
+                RetryClass::KeyedOnce
+            );
+            assert_eq!(
+                RetryClass::Keyable(set).effective(false),
+                RetryClass::PreHandlerOnly
+            );
+        }
         assert_eq!(
             RetryClass::PreHandlerOnly.effective(true),
-            RetryClass::KeyedOnce
-        );
-        assert_eq!(
-            RetryClass::PreHandlerOnly.effective(false),
             RetryClass::PreHandlerOnly
         );
         assert_eq!(RetryClass::Never.effective(true), RetryClass::Never);
@@ -958,5 +1119,24 @@ mod tests {
             RetryClass::Idempotent.effective(true),
             RetryClass::Idempotent
         );
+        // Routes the engine does not cover stay unkeyed under the capability.
+        for (m, r) in [
+            (Method::Post, "/api/v1/attachments"),
+            (Method::Post, "/api/v1/contacts/merge"),
+            (Method::Post, "/api/v1/daily-sales/templates"),
+            (Method::Put, "/api/v1/contacts/{id}"),
+            (Method::Post, "/api/v1/batch/save"),
+            (Method::Post, "/api/v1/recurring/run-due"),
+        ] {
+            let o = find(m, r).expect("covered");
+            assert_eq!(o.retry().effective(true), RetryClass::PreHandlerOnly, "{r}");
+        }
+        for (m, r) in [
+            (Method::Post, "/api/v1/auth/create-tenant"),
+            (Method::Post, "/api/v1/tenants"),
+        ] {
+            let o = find(m, r).expect("covered");
+            assert_eq!(o.retry().effective(true), RetryClass::Never, "{r}");
+        }
     }
 }

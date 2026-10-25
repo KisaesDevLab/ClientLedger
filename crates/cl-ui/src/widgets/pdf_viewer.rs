@@ -407,7 +407,28 @@ impl ViewerState {
         if p.rgba.len() != w * h * 4 {
             return;
         }
-        let image = ColorImage::from_rgba_unmultiplied([w, h], &p.rgba);
+        // The page may be drawn larger than this graphics card takes in one
+        // texture (egui refuses it with a panic): scale it down to fit.
+        let max = ctx.input(|i| i.max_texture_side).max(1);
+        let image = if w > max || h > max {
+            let long = w.max(h);
+            let (fw, fh) = ((w * max / long).max(1), (h * max / long).max(1));
+            let (Ok(sw), Ok(sh), Ok(tw), Ok(th)) = (
+                u32::try_from(w),
+                u32::try_from(h),
+                u32::try_from(fw),
+                u32::try_from(fh),
+            ) else {
+                return;
+            };
+            let Some(full) = image::RgbaImage::from_raw(sw, sh, p.rgba.clone()) else {
+                return;
+            };
+            let small = image::imageops::thumbnail(&full, tw, th);
+            ColorImage::from_rgba_unmultiplied([fw, fh], small.as_raw())
+        } else {
+            ColorImage::from_rgba_unmultiplied([w, h], &p.rgba)
+        };
         // The texture name carries numbers only, never the file name.
         let texture = ctx.load_texture(
             format!("doc-viewer-{}-{}", self.doc, p.page),
@@ -836,6 +857,34 @@ mod tests {
         assert!(v.command(CommandId::new("viewer.fit")));
         assert_eq!(v.zoom(), Zoom::FitPage);
         assert!(!v.command(CommandId::new("form.save_new")));
+    }
+
+    /// A page drawn larger than the graphics card's texture limit is scaled
+    /// down to fit, not refused by egui with a panic; the asked width is
+    /// kept so it is not asked for again.
+    #[test]
+    fn a_page_over_the_texture_limit_is_scaled_to_fit() {
+        let ctx = egui::Context::default();
+        let max = ctx.input(|i| i.max_texture_side);
+        let (w, h) = (u32::try_from(max).expect("side") + 100, 10);
+        let mut v = ViewerState::default();
+        v.take_page(
+            &ctx,
+            &RenderedPage {
+                doc: v.doc,
+                page: 0,
+                width: w,
+                height: h,
+                rgba: vec![255; (w * h * 4) as usize],
+                natural_width: 612,
+                natural_height: 792,
+            },
+        );
+        let shown = v.shown.as_ref().expect("shown");
+        assert_eq!(shown.width, w, "the asked width");
+        let [tw, th] = shown.texture.size();
+        assert_eq!(tw, max);
+        assert!((1..=10).contains(&th), "{th}");
     }
 
     /// Draw `v` until `done` (bounded), returning the accessible (role,

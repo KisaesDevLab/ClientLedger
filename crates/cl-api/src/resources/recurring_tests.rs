@@ -142,3 +142,90 @@ async fn a_run_sends_a_date_and_its_run_id_only() {
     );
     assert_ne!(new_run_id(), new_run_id());
 }
+
+/// U-82: a filter goes out only with `run-due-filter-v1`; without it (or
+/// with an empty "only" list, or too many ids) nothing is sent, so an
+/// unfiltered run never posts a template the owner was asked about.
+#[tokio::test]
+async fn a_filter_needs_its_capability_and_goes_in_the_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/recurring/run-due"))
+        .respond_with(reply(200, &answer()))
+        .mount(&server)
+        .await;
+    let tpl = TemplateId::parse(TPL).expect("tpl");
+    let run = RunId::parse(RUN).expect("run");
+    let s = session_with_caps(&server, &[Capabilities::RECURRING_RUN_DUE]).await;
+    let before = server.received_requests().await.expect("r").len();
+    for f in [
+        RunDueFilter::Only(vec![tpl]),
+        RunDueFilter::Except(vec![tpl]),
+    ] {
+        assert_eq!(
+            s.recurring()
+                .run_due_filtered(d(2026, 11, 4), run, 200, &f)
+                .await
+                .expect_err("gated"),
+            ApiError::Local(LocalValidation::RunDueFilterUnavailable)
+        );
+    }
+    assert_eq!(server.received_requests().await.expect("r").len(), before);
+    // An empty exclusion is the plain run, capability or not.
+    s.recurring()
+        .run_due_filtered(d(2026, 11, 4), run, 200, &RunDueFilter::Except(vec![]))
+        .await
+        .expect("plain");
+    let plain: Value =
+        serde_json::from_slice(&requests(&server, "POST").await[0].body).expect("json");
+    assert_eq!(plain, json!({"asOf":"2026-11-04","runId":RUN,"limit":200}));
+    // A second engine that offers the filter (wiremock answers with the
+    // first matching mock, so the capabilities need their own server).
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/recurring/run-due"))
+        .respond_with(reply(200, &answer()))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(
+        &server,
+        &[
+            Capabilities::RECURRING_RUN_DUE,
+            Capabilities::RUN_DUE_FILTER,
+        ],
+    )
+    .await;
+    for f in [
+        RunDueFilter::Only(vec![]),
+        RunDueFilter::Except(vec![tpl; RUN_FILTER_MAX + 1]),
+    ] {
+        assert_eq!(
+            s.recurring()
+                .run_due_filtered(d(2026, 11, 4), run, 200, &f)
+                .await
+                .expect_err("bad filter"),
+            ApiError::Local(LocalValidation::RunDueFilterUnavailable)
+        );
+    }
+    s.recurring()
+        .run_due_filtered(d(2026, 11, 4), run, 200, &RunDueFilter::Except(vec![tpl]))
+        .await
+        .expect("except");
+    s.recurring()
+        .run_due_filtered(d(2026, 11, 4), run, 200, &RunDueFilter::Only(vec![tpl]))
+        .await
+        .expect("only");
+    let bodies: Vec<Value> = requests(&server, "POST")
+        .await
+        .iter()
+        .map(|r| serde_json::from_slice(&r.body).expect("json"))
+        .collect();
+    assert_eq!(
+        bodies,
+        vec![
+            json!({"asOf":"2026-11-04","runId":RUN,"limit":200,"excludeTemplateIds":[TPL]}),
+            json!({"asOf":"2026-11-04","runId":RUN,"limit":200,"templateIds":[TPL]}),
+        ],
+        "nothing sent for the refused filters"
+    );
+}

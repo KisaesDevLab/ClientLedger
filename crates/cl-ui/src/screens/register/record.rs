@@ -163,10 +163,13 @@ pub(crate) fn keeps_key(e: &ApiError) -> bool {
         | ApiError::PayloadTooLarge
         | ApiError::Protocol { .. } => false,
         // Unknown outcome (and anything newer): keep the key, so the same
-        // save goes again under it. The pinned engine ignores the key on
-        // its posting routes (U-18 is not built), so the key alone never
-        // stops a second posting: after an unknown outcome every form
-        // blocks Save until the recheck or the owner answers (B2, Q-PR1a).
+        // save goes again under it. An engine with `idempotency-v1` replays
+        // it on its route set (a `keyed` outcome: Save is not blocked).
+        // Elsewhere the engine ignores the key, so after an unknown outcome
+        // the form blocks Save until the recheck or the owner answers (B2,
+        // Q-PR1a). A reused key (422 `IDEMPOTENCY_KEY_REUSED`: the first
+        // save went through) keeps it too, so Save can never post the
+        // changed form a second time.
         _ => true,
     }
 }

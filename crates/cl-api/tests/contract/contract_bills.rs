@@ -1,6 +1,7 @@
 //! Enter Bill and vendor credits against the live engine (P17 WP2, plan Â§6
 //! AC1 and the phase tests). Tests that need engine PR-A (U-83..U-87) or
-//! PR-B (U-89) are PENDING by capability until the pin moves.
+//! PR-B (U-89) run for real from pin f3ce33fd; against an older engine they
+//! are PENDING by capability.
 //!
 //! Money is checked as exact strings; each test uses its own vendor so the
 //! engine's figures can be compared exactly.
@@ -247,7 +248,16 @@ pub fn void_refused_when_paid_live(h: &Harness) {
                 .void(id, "wrong vendor", &ApWriteOptions::default(), key()),
         )
         .expect_err("a paid bill is not voided");
-    assert!(matches!(e, ApiError::Validation(_)), "{e:?}");
+    if h.require_cap(Capabilities::AP_EDIT, "U-84") {
+        // `ap-edit-v1`: 409 `BILL_HAS_PAYMENTS`.
+        assert_eq!(
+            cl_api::ap_refusal(&e),
+            Some(cl_api::ApRefusal::BillHasPayments),
+            "{e:?}"
+        );
+    } else {
+        assert!(matches!(e, ApiError::Validation(_)), "{e:?}");
+    }
     let after = h.run(s.bills().get(id)).expect("get").record;
     assert_eq!(after.txn.status, TxnStatus::Posted);
     assert!(after.has_payments());
@@ -373,6 +383,43 @@ pub fn attach_draft_live(h: &Harness) {
     );
     let got = h.run(s.attachments().get(up.id)).expect("get");
     assert_eq!(got.attachable_id, id.to_string());
+}
+
+/// U-90 (`attachments-company-v1`): an upload is stamped with the open
+/// company (cl-api sends `X-Company-Id` on every attachment route), reads
+/// and the download work in that company, and another company's session
+/// does not see the file.
+pub fn attachments_company_u90_live(h: &Harness) {
+    if !h.require_cap(Capabilities::ATTACHMENTS_COMPANY, "U-90") {
+        return;
+    }
+    let s = &h.s1;
+    let cl_api::Scope::Company { company_id, .. } = s.scope() else {
+        panic!("Contract Co is open");
+    };
+    let up = h
+        .run(
+            s.attachments()
+                .upload_draft(DraftKey::new(), "u90.pdf", PDF, key()),
+        )
+        .expect("upload");
+    let path = format!("/api/v1/attachments/{}", up.id);
+    let got = h
+        .run(s.raw(Method::Get, &path, &[], None))
+        .expect("get raw");
+    assert_eq!(got.status, 200, "{}", got.body);
+    assert_eq!(
+        got.body["attachment"]["companyId"].as_str(),
+        Some(company_id.to_string().as_str()),
+        "the upload carries the open company"
+    );
+    assert_eq!(h.run(s.attachments().download(up.id)).expect("bytes"), PDF);
+    let other = h.s3();
+    let e = h
+        .run(other.attachments().get(up.id))
+        .expect_err("another company's file");
+    assert!(matches!(e, ApiError::NotFound { .. }), "{e:?}");
+    h.run(s.attachments().delete(up.id, key())).expect("delete");
 }
 
 /// Exactly 10 MB is accepted; 10 MB + 1 is refused by cl-api with nothing
@@ -508,6 +555,22 @@ pub fn backup_restore_keeps_the_bill_file_live(h: &Harness) {
         }))
         .expect("import job");
     let st = finish_job(h, &s, &job.job_id);
+    // U-91 (engine bug): the import's content check compares
+    // `companies.check_settings` as text after mapping the new ids back, but
+    // jsonb re-sorts `nextCheckNumbers` by the new account ids, so a company
+    // with checks from two or more bank accounts (tenant B by now) fails the
+    // restore at random. Only that exact refusal is pending.
+    if st.status == JobState::Failed
+        && st.error.as_ref().is_some_and(|e| {
+            e.code == "ARCHIVE_VERIFY_FAILED" && e.message.contains("(content(companies))")
+        })
+    {
+        h.pending(
+            "U-91",
+            "restore refused: check_settings.nextCheckNumbers key order changes when ids are remapped",
+        );
+        return;
+    }
     assert_eq!(st.status, JobState::Succeeded, "{:?}", st.error);
     let restored = st.import_result().expect("import result").tenant_id;
     h.run(s.open_company(restored)).expect("open restored");
@@ -543,21 +606,27 @@ pub fn backup_restore_keeps_the_bill_file_live(h: &Harness) {
 }
 
 /// U-83: a bill dated on or before the closing date is refused by the
-/// engine (pinned engine: the ledger's own check); a closing-date password
-/// is refused locally with nothing sent until the pin has `ap-closing-v1`.
-/// Runs on tenant B, whose closing date the write-check test set.
+/// engine; with `ap-closing-v1` and a closing-date password set on tenant B
+/// the save without it asks for it, a wrong one is refused, the right one
+/// saves and the override is audited. Without `ap-closing-v1` a password is
+/// refused locally with nothing sent. Runs on tenant B; the test sets (and
+/// afterwards clears) its own closing date and password.
 pub fn closed_period_u83(h: &Harness) {
     let s = h.s3();
-    let lock = if let Some(d) = h.run(s.company_settings()).expect("settings").lock_date {
-        d
-    } else {
+    let settings = |lock: serde_json::Value| {
         h.run(s.raw_mapped(
             Method::Put,
             "/api/v1/company/settings",
-            Some(&json!({ "lockDate": "2026-09-30" })),
+            Some(&json!({ "lockDate": lock })),
         ))
         .expect("closing date");
-        date(2026, 9, 30)
+    };
+    let (lock, set_here) = if let Some(d) = h.run(s.company_settings()).expect("settings").lock_date
+    {
+        (d, false)
+    } else {
+        settings(json!("2026-09-30"));
+        (date(2026, 9, 30), true)
     };
     let a = account(h, &s, AccountType::Expense, "Closed rental");
     let b = account(h, &s, AccountType::Expense, "Closed freight");
@@ -576,10 +645,46 @@ pub fn closed_period_u83(h: &Harness) {
             Secret::new("not-sent"),
         )),
     };
-    if h.require_cap(Capabilities::AP_CLOSING, "U-83") {
-        h.pending(
-            "U-83",
-            "the right-password save needs tenant B's closing password: wire it at the pin bump",
+    if h.require_cap(Capabilities::AP_CLOSING, "U-83")
+        && h.require_cap(Capabilities::CLOSING_PASSWORD, "U-15")
+    {
+        let pw = Secret::new(unique("closing-bill"));
+        assert!(
+            h.run(s.set_closing_password(None, Some(&pw), key()))
+                .expect("set password")
+        );
+        let e = h
+            .run(s.bills().create(&closed, &PostingOptions::default(), key()))
+            .expect_err("password required");
+        assert!(
+            matches!(&e, ApiError::ClosedPeriod(c) if c.password_required == Some(true)),
+            "{e:?}"
+        );
+        let e = h
+            .run(s.bills().create(&closed, &with_password, key()))
+            .expect_err("wrong password");
+        assert_eq!(e, ApiError::ClosingPasswordRejected);
+        let right = PostingOptions {
+            closed_period: Some(cl_api::ClosedPeriodAuthorization::with_password(pw.clone())),
+        };
+        let saved = h
+            .run(s.bills().create(&closed, &right, key()))
+            .expect("right password");
+        assert_eq!(saved.record.txn.txn_date, lock);
+        let rows = h
+            .run(s.audit().for_record(
+                cl_api::AuditEntity::ClosingDateOverride,
+                *saved.record.txn.id.as_uuid(),
+            ))
+            .expect("audit");
+        assert!(
+            rows.iter()
+                .any(|r| r.action == cl_api::AuditAction::Override),
+            "the closed-period bill is audited"
+        );
+        assert!(
+            !h.run(s.set_closing_password(Some(&pw), None, key()))
+                .expect("clear password")
         );
     } else {
         let before = h.observer.total();
@@ -588,6 +693,9 @@ pub fn closed_period_u83(h: &Harness) {
             .expect_err("gated");
         assert_eq!(e, ApiError::Local(LocalValidation::Unsupported));
         assert_eq!(h.observer.total(), before, "nothing may be sent");
+    }
+    if set_here {
+        settings(serde_json::Value::Null);
     }
 }
 
@@ -839,10 +947,108 @@ pub fn received_u87(h: &Harness) {
     assert_eq!(sum.total_owed, m("1480.0000"));
 }
 
+/// A 1x1 PNG (synthetic): an image goes to the vision model as it is.
+const PNG: &[u8] = &[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+    0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+    0x42, 0x60, 0x82,
+];
+
+/// What the canned model answers for the bill (synthetic): one amount
+/// with a sign and commas, one in a European spelling (unreadable), a JSON
+/// number total, an impossible due date, and per-field scores.
+const CANNED_BILL: &str = r#"{"vendor":"Midwest Equipment Rental","vendor_invoice_number":"INV-1001","bill_date":"2026-11-03","due_date":"2026-02-30","payment_terms":"Net 15","subtotal":"1,330.00","tax":null,"total":1480,"line_items":[{"description":"Excavator, 1 day","amount":"$1,330.00","quantity":1,"confidence":0.95},{"description":"Delivery","amount":"12,50","quantity":null,"confidence":0.7}],"confidence":0.9,"field_confidence":{"vendor":0.95,"bill_date":0.7,"vendor_invoice_number":0.4}}"#;
+
+/// U-89 (`bill-ocr-v2`): a bill read through a canned Ollama reply (a
+/// loopback stub; nothing leaves the computer). Amounts are exact decimal
+/// strings or absent, an impossible date is absent, and each field and
+/// line carries `high`, `medium` or `low`. AI is switched off again after.
+fn ocr_confidence_u89(h: &Harness, s: &Session) {
+    use cl_api::{AiConfigUpdate, AiTaskToggles, Confidence, OllamaTarget, SessionSecrets};
+    let stub = crate::support::OllamaStub::shared(h);
+    stub.serve_chat(h, CANNED_BILL);
+    h.run(s.accept_ai_disclosure(key())).expect("disclosure");
+    h.run(s.update_ai_config(
+        &AiConfigUpdate {
+            ollama_base_url: Some(stub.base_url.clone()),
+            categorization_model: Some("llama3.1:8b".into()),
+            ocr_model: Some("llama3.1:8b".into()),
+            ..AiConfigUpdate::for_provider("ollama", true)
+        },
+        key(),
+    ))
+    .expect("AI on");
+    h.run(s.put_session_secrets(&SessionSecrets {
+        ollama: Some(OllamaTarget {
+            base_url: stub.base_url.clone(),
+            model: None,
+        }),
+        ..SessionSecrets::default()
+    }))
+    .expect("session ollama");
+    h.run(s.accept_company_ai_consent(key())).expect("consent");
+    h.run(s.set_ai_tasks(
+        &AiTaskToggles {
+            receipt_ocr: Some(true),
+            ..AiTaskToggles::default()
+        },
+        key(),
+    ))
+    .expect("bill reading on");
+    let up = h
+        .run(
+            s.attachments()
+                .upload_draft(DraftKey::new(), "invoice.png", PNG, key()),
+        )
+        .expect("upload");
+    let hits = stub.hits(h);
+    let open = cl_api::BillReadGate {
+        ai_enabled: true,
+        bill_reading_on: true,
+        provider_set: true,
+    };
+    let read = h.run(s.bill_reading().extract(open, up.id, key()));
+    // Switch AI off before asserting, so a failure leaves the product default.
+    h.run(s.update_ai_config(
+        &AiConfigUpdate {
+            is_enabled: Some(false),
+            ..AiConfigUpdate::default()
+        },
+        key(),
+    ))
+    .expect("AI off");
+    let read = read.expect("read");
+    assert!(stub.hits(h) > hits, "the reading asked the loopback model");
+    assert_eq!(
+        read.vendor_name.as_deref(),
+        Some("Midwest Equipment Rental")
+    );
+    assert_eq!(read.bill_date, Some(date(2026, 11, 3)));
+    assert_eq!(read.due_date, None, "an impossible date is not read");
+    assert_eq!(read.total, Some(m("1480")));
+    assert_eq!(read.subtotal, Some(m("1330.00")));
+    assert_eq!(read.lines.len(), 2);
+    assert_eq!(read.lines[0].amount, Some(m("1330.00")));
+    assert_eq!(read.lines[0].confidence, Some(Confidence::High));
+    assert_eq!(read.lines[1].amount, None, "12,50 is not guessed");
+    assert_eq!(read.lines[1].confidence, Some(Confidence::Low));
+    let field = |k: &str| read.field_confidence.get(k).copied();
+    assert_eq!(field("vendor"), Some(Confidence::High));
+    assert_eq!(field("billDate"), Some(Confidence::Medium));
+    assert_eq!(field("vendorInvoiceNumber"), Some(Confidence::Low));
+    assert_eq!(field("dueDate"), Some(Confidence::Low));
+    assert_eq!(field("tax"), Some(Confidence::Low));
+    assert_eq!(field("total"), Some(Confidence::High), "the document score");
+    h.run(s.attachments().delete(up.id, key()))
+        .expect("clean up");
+}
+
 /// Reading a bill while AI is off: the owner-side gate sends nothing; with
 /// the gate claimed open, the engine's AI gate refuses before any provider
-/// (no network) and that is `AiUnavailable`. U-89's confidence levels need
-/// a canned provider and stay PENDING until the pin has `bill-ocr-v2`.
+/// (no network) and that is `AiUnavailable`. With `bill-ocr-v2` a canned
+/// provider then reads one (U-89).
 pub fn reading_refused_while_ai_is_off_live(h: &Harness) {
     let s = &h.s1;
     let up = h
@@ -869,12 +1075,11 @@ pub fn reading_refused_while_ai_is_off_live(h: &Harness) {
         .run(s.bill_reading().extract(open, up.id, key()))
         .expect_err("engine gate");
     assert_eq!(e, ApiError::AiUnavailable, "{e:?}");
-    if h.require_cap(Capabilities::BILL_OCR_V2, "U-89") {
-        h.pending(
-            "U-89",
-            "bills::ocr_confidence_u89 needs a canned provider (engine PR-B vitest covers it)",
-        );
-    }
     h.run(s.attachments().delete(up.id, key()))
         .expect("clean up");
+    if h.require_cap(Capabilities::BILL_OCR_V2, "U-89")
+        && h.require_cap(Capabilities::AI_DESKTOP, "U-09")
+    {
+        ocr_confidence_u89(h, s);
+    }
 }

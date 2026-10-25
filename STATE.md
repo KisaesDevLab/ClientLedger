@@ -1,8 +1,8 @@
 # STATE.md — ClientLedger
 
 **Current phase:** P17 — Enter Bill, vendor credits, receipt inbox, attachment viewer (Next, after the `fix/PR-1` PR merges)
-**Status:** Checkpoint PR-1 fixes on `fix/PR-1`; PR open with auto-merge. M1 complete (summary below). Engine PRs #171 (U-18) and #172 (U-82) await the owner
-**Engine commit:** `7b267e48` (`main`, pinned 2026-10-24 after engine PRs #168 (tag-number-v1, dashboard-exact-v1, migration 0228), #169 (ledger-guards-v1) and #170 (merge-closing-date-v1); bump per Q-02)
+**Status:** Checkpoint PR-1 fixes on `fix/PR-1`; PR open with auto-merge. M1 complete (summary below). Engine pin bumped to `f3ce33fd` (engine PRs #171–#174) on `chore/engine-pin-main`
+**Engine commit:** `16aff64b` (`main`, pinned 2026-10-25 after engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
 **Last updated:** 2026-10-25
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
@@ -94,7 +94,7 @@ Format: `Pxx — blocked by U-xx/Q-xx — what is pending — workaround in plac
 - P11/P13 several tags on one line (Q-179, Q-P10t) — blocked by U-45 — `tags::several_line_tags_u45` is PENDING — in place: one tag per line, refused in plain words before saving (Q-P11w).
 - P11 your own terms (including discount terms) and payment methods — blocked by U-43 — `list_csv::terms_lists_u43` is PENDING — in place: the engine's fixed lists, read-only, with a note (Q-P11y).
 - P11 item CSV import in one call and full contact rows — blocked by U-46 — `list_csv::items_import_u46` is PENDING — in place: items created one at a time; contacts import name, company, email and phone only (Q-P11x).
-- P12 toggling cleared marks in the register (R5) — blocked by `register-cleared-v1` — in place: ✓/R read-only (Q-P12k). Also still PENDING for P12: U-17 (server-side version check; fingerprint stopgap) and U-18 (idempotency keys; lost-reply probe).
+- P12 toggling cleared marks in the register (R5) — blocked by `register-cleared-v1` — in place: ✓/R read-only (Q-P12k). Also still PENDING for P12: U-17 (server-side version check; fingerprint stopgap); U-18 (idempotency keys) is live since pin f3ce33fd.
 
 ## Placeholders tracked
 
@@ -200,13 +200,11 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 
 ## Follow-ups from checkpoint PR-1
 
-1. U-18 (engine PR #171): before the pin includes it, cl-api needs a per-route `keyable` class (send `Idempotency-Key` only where the engine covers the route; never blind-retry others). Then the unknown-save block (Q-PR1a) can relax on covered routes.
-2. U-82 (engine PR #172): once pinned, catch-up runs the other templates with `excludeTemplateIds` while one template's question is open (Q-PR1d).
-3. The unknown-save block lasts for the app session; an app restart forgets it (Q-PR1a). U-18 closes this.
-4. Security note from the review: `GET /transactions/:id` and `POST /transactions/:id/void` don't scope by company (moot while one tenant is one company); security-review before P33 LAN mode.
-5. With a menu open, Escape closed the Register tab instead of only the menu (seen while writing the shell scenario for PR #35). Check and fix.
-6. Not covered by the PR-1 review (cover in a later checkpoint): Daily Sales end to end, LAN concurrency (U-17), Undeposited Funds and A/P subledger tie-out, template CRUD audit rows, Bulk Entry engine validate/plan, printed-form rounding (P19).
-7. Contact merge in closed periods (review S1) is fixed by U-47 (engine PR #170, pinned).
+1. The unknown-save block lasts for the app session; an app restart forgets it (Q-PR1a). U-18 closes this.
+2. Security note from the review: `GET /transactions/:id` and `POST /transactions/:id/void` don't scope by company (moot while one tenant is one company); security-review before P33 LAN mode.
+3. With a menu open, Escape closed the Register tab instead of only the menu (seen while writing the shell scenario for PR #35). Check and fix.
+4. Not covered by the PR-1 review (cover in a later checkpoint): Daily Sales end to end, LAN concurrency (U-17), Undeposited Funds and A/P subledger tie-out, template CRUD audit rows, Bulk Entry engine validate/plan, printed-form rounding (P19).
+5. Contact merge in closed periods (review S1) is fixed by U-47 (engine PR #170, pinned).
 
 ## Milestone summaries
 
@@ -228,6 +226,7 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-25 — Engine pin 7b267e48 → f3ce33fd (engine main with PRs #171 U-18, #172 U-82, #173 U-83–U-87, #174 U-89) on `chore/engine-pin-main`. Live capabilities: `idempotency-v1`, `run-due-filter-v1`, `ap-closing-v1`, `ap-edit-v1`, `bill-lines-v1`, `bill-terms-v1`, `bill-received-v1`, `idempotency-ap-v1`, `bill-ocr-v2`. Engine SEA rebuilt; api-spec fixtures refreshed; the engine's keyed routes are recorded (`idempotency_v1_routes.txt`, new `idempotency_ap_v1_routes.txt`); main keys only the 20 `idempotency-v1` routes, P17 adds the A/P ones gated on `idempotency-ap-v1`. Live contract suite 162 passed with `CL_API_REQUIRE_CAPS=idempotency-v1,run-due-filter-v1,tag-number-v1,dashboard-exact-v1,merge-closing-date-v1` (the U-18 tests run for real), offline binary 6 passed (`restart::engine_dies_after_commit_is_reconciled_as_committed` now expects the keyed re-send the engine replays). Catch-up questions hold only their own templates (U-82, Q-PR1d; new `run_due::filter_holds_only_the_asked_template_u82`). An archive made on 7b267e48 restores on f3ce33fd (verified by hand: content and trial balance equal, bills `billReceived: true`). Agents: rust-implementer/opus.
 - 2026-10-25 — Checkpoint PR-1 (core ledger process review, process-reviewer/opus xhigh) complete on `fix/PR-1`.
   - Findings: B1 register edit of a linked deposit un-deposited its payments; B2 a second Save after an unknown outcome could post twice (the engine had idempotency only on `/batch/save`); B3 register edit of a numbered journal entry erased its number; B4 register edit of a printed check skipped the printed-check question. Plus S1–S3 and four follow-ups (`target/reviews/PR-1.md`).
   - Client fixes: linked deposits, numbered journal entries and checks open their own forms; an unknown save blocks Save on all 13 posting forms until "Check again" answers or the owner confirms an override (logged without amounts or names; owner 2026-10-24), kept per company for the session across windows; Write Check's used-number lookup matches the first try only; Daily Sales recheck waits for an engine restart before "not saved"; vendor refund cleared after a found save; template links retried and persisted ("Saved separately" after a final refusal); catch-up asks first above 3 missed dates (owner 2026-10-24); Bulk Entry resends an unchanged batch only; cl-host instance lock released explicitly on drop (macOS flake); live contract test for moving a transaction out of a closed period (journal entry, bank posting, check; no password, wrong password, override audit with old and new dates).

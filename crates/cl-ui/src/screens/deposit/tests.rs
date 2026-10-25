@@ -145,6 +145,7 @@ impl LocalDeposits for Fake {
                 request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000004")
                     .expect("id"),
                 idempotency_key: Some(cl_api::IdempotencyKey::new()),
+                keyed: false,
             });
         }
         let picked: Vec<_> = draft.payments.iter().map(|p| p.source).collect();

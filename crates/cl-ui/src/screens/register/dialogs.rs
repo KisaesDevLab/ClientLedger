@@ -249,6 +249,16 @@ pub(super) enum Panel {
     Notice(&'static str),
 }
 
+/// What a row action's key belongs to: void or delete, the row, the
+/// reason and whether the closing-date password went with it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RowKeyFor {
+    kind: ActionKind,
+    id: TransactionId,
+    reason: String,
+    password: bool,
+}
+
 /// The register's closing-date flow and row actions.
 pub(super) struct RowActions {
     pub(super) panel: Panel,
@@ -264,6 +274,10 @@ pub(super) struct RowActions {
     done: Option<&'static str>,
     /// The route of the last row action sent (P17 `WP2b`).
     route: Option<VoidRoute>,
+    /// The key of the last void or delete sent and what it was for, kept
+    /// after an unknown outcome so the same action goes again under it (a
+    /// replay on a keyed route, Q-PR1a), dropped after an answer.
+    key: Option<(RowKeyFor, IdempotencyKey)>,
     count: u32,
     /// Tests: `(closing-password-v1, txn-delete-v1)` instead of the link's.
     #[cfg(test)]
@@ -283,6 +297,7 @@ impl Default for RowActions {
             reload: None,
             done: None,
             route: None,
+            key: None,
             count: 0,
             #[cfg(test)]
             caps: None,
@@ -530,8 +545,16 @@ impl RegisterScreen {
                 return;
             };
             match result {
-                Ok(()) => self.row_action_done(&pending),
-                Err(e) => self.row_action_failed(&pending, e),
+                Ok(()) => {
+                    self.actions.key = None;
+                    self.row_action_done(&pending);
+                }
+                Err(e) => {
+                    if !super::record::keeps_key(&e) {
+                        self.actions.key = None;
+                    }
+                    self.row_action_failed(&pending, e);
+                }
             }
         }
     }
@@ -608,7 +631,23 @@ impl RegisterScreen {
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
-        let key = IdempotencyKey::new();
+        let void_reason = reason
+            .clone()
+            .unwrap_or_else(|| t("register.void.default_reason"));
+        let key_for = RowKeyFor {
+            kind,
+            id,
+            reason: void_reason.clone(),
+            password: password.is_some(),
+        };
+        let key = match &self.actions.key {
+            Some((same, k)) if *same == key_for => k.clone(),
+            _ => {
+                let k = IdempotencyKey::new();
+                self.actions.key = Some((key_for, k.clone()));
+                k
+            }
+        };
         let label = OrphanLabel {
             what: match kind {
                 ActionKind::Void => "orphan.register_void",
@@ -616,9 +655,6 @@ impl RegisterScreen {
             },
             key: Some(key.clone()),
         };
-        let void_reason = reason
-            .clone()
-            .unwrap_or_else(|| t("register.void.default_reason"));
         let w = RowWrite {
             kind,
             route,
@@ -678,6 +714,21 @@ impl RegisterScreen {
             let notice = match &e {
                 ApiError::ClosedPeriod(_) => Some("register.ap.closed"),
                 ApiError::Validation(_) => route.refused(),
+                // `ap-edit-v1` answers a paid bill or an applied or
+                // deposited credit with 409 (`BILL_HAS_PAYMENTS`,
+                // `CREDIT_APPLIED`, `TXN_DEPOSITED`) rather than 400.
+                ApiError::Conflict { .. }
+                    if matches!(
+                        cl_api::ap_refusal(&e),
+                        Some(
+                            cl_api::ApRefusal::BillHasPayments
+                                | cl_api::ApRefusal::CreditApplied
+                                | cl_api::ApRefusal::Deposited
+                        )
+                    ) =>
+                {
+                    route.refused()
+                }
                 _ => None,
             };
             if let Some(key) = notice {

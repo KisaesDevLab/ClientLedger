@@ -340,6 +340,34 @@ pub fn attention_from_json(body: &[u8]) -> Result<Attention, ApiError> {
     })
 }
 
+/// The most template ids one run filter carries (the engine's limit).
+pub const RUN_FILTER_MAX: usize = 500;
+
+/// Which automatic templates one catch-up run handles (U-82,
+/// `run-due-filter-v1`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum RunDueFilter {
+    /// Every due template (the plain run; no capability needed).
+    #[default]
+    All,
+    /// Only these (`templateIds`, 1 to 500).
+    Only(Vec<TemplateId>),
+    /// All but these (`excludeTemplateIds`, up to 500; empty is `All`).
+    Except(Vec<TemplateId>),
+}
+
+impl RunDueFilter {
+    /// The body field and its ids, `None` for the plain run.
+    fn wire(&self) -> Option<(&'static str, &[TemplateId])> {
+        match self {
+            RunDueFilter::All => None,
+            RunDueFilter::Except(ids) if ids.is_empty() => None,
+            RunDueFilter::Only(ids) => Some(("templateIds", ids)),
+            RunDueFilter::Except(ids) => Some(("excludeTemplateIds", ids)),
+        }
+    }
+}
+
 /// Catch-up calls of a session (`session.recurring()`).
 #[derive(Clone, Copy, Debug)]
 pub struct Recurring<'a>(pub(crate) &'a Session);
@@ -380,15 +408,45 @@ impl Recurring<'_> {
         run_id: RunId,
         limit: u32,
     ) -> Result<RunDue, ApiError> {
+        self.run_due_filtered(as_of, run_id, limit, &RunDueFilter::All)
+            .await
+    }
+
+    /// [`Self::run_due`] for some templates only (U-82,
+    /// `run-due-filter-v1`): the templates the filter leaves out are not
+    /// touched and stay due. [`RunDueFilter::All`] is the plain run.
+    ///
+    /// # Errors
+    /// As [`Self::run_due`], and `Local(RunDueFilterUnavailable)` (nothing
+    /// sent) for a filter without `run-due-filter-v1`, an empty "only"
+    /// list, or more than 500 ids.
+    pub async fn run_due_filtered(
+        &self,
+        as_of: CalendarDate,
+        run_id: RunId,
+        limit: u32,
+        filter: &RunDueFilter,
+    ) -> Result<RunDue, ApiError> {
         self.gate()?;
         if !(1..=RUN_LIMIT_MAX).contains(&limit) {
             return Err(ApiError::Local(LocalValidation::PageLimit));
         }
-        let body = json!({
+        let mut body = json!({
             "asOf": as_of.to_wire(),
             "runId": run_id,
             "limit": limit,
         });
+        if let Some((key, ids)) = filter.wire() {
+            let filtered = self
+                .0
+                .client()
+                .capabilities()
+                .has(Capabilities::RUN_DUE_FILTER);
+            if !filtered || ids.len() > RUN_FILTER_MAX || (key == "templateIds" && ids.is_empty()) {
+                return Err(ApiError::Local(LocalValidation::RunDueFilterUnavailable));
+            }
+            body[key] = json!(ids);
+        }
         let mut call =
             Call::at(Method::Post, RECURRING_RUN_DUE.route()).json_body(json_body(&body)?);
         // The run id is the real guard; the key lets the engine's

@@ -123,7 +123,8 @@ fn write_during_restart_waits_and_is_sent_to_the_new_engine(h: &Harness) {
 /// the client sees the answer. The generation moves (the old request is
 /// settled), the ledger stamp moved, and the fingerprint search finds the
 /// entry: the save is reported as done, with exactly one posting and no
-/// second POST.
+/// second POST. With `idempotency-v1` (U-18) the create is re-sent once
+/// with the same key and the engine replays it: still one posting.
 fn engine_dies_after_commit_is_reconciled_as_committed(h: &Harness) {
     let s = &h.s1;
     let (cash, supplies) = pair(h, s);
@@ -146,11 +147,15 @@ fn engine_dies_after_commit_is_reconciled_as_committed(h: &Harness) {
         h.sup.status().generation > g0,
         "the engine was not restarted"
     );
-    assert_eq!(
-        h.observer.sent(Method::Post, "/api/v1/transactions") - posts,
-        1,
-        "the create must not be re-sent"
-    );
+    // With U-18 (`idempotency-v1`) cl-api sends it again with the same key
+    // (once more per try that finds the engine still restarting) and the
+    // new engine replays the stored answer; without it, never.
+    let sent = h.observer.sent(Method::Post, "/api/v1/transactions") - posts;
+    if h.caps.has(Capabilities::IDEMPOTENCY) {
+        assert!(sent >= 2, "the keyed create is re-sent: {sent}");
+    } else {
+        assert_eq!(sent, 1, "the create must not be re-sent");
+    }
     assert_eq!(made.record.status, TxnStatus::Posted);
     let page = h
         .run(s.transactions().list(

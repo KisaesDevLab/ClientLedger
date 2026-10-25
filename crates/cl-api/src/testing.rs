@@ -36,6 +36,11 @@ pub trait RequestObserver: Send + Sync {
         let _ = (method, route, status);
         ObserverAction::Pass
     }
+    /// Called for a delivered reply that carries `Idempotent-Replayed:
+    /// true` (U-18): the engine answered with an earlier request's result.
+    fn on_replayed(&self, method: Method, route: &str) {
+        let _ = (method, route);
+    }
 }
 
 /// Holder for the optional observer inside the transport.
@@ -71,8 +76,17 @@ impl ObserverSlot {
     ) -> Answer {
         let Some(o) = self.get() else { return answer };
         match &answer {
-            Ok((status, ..)) => match o.on_reply(method, route, *status) {
-                ObserverAction::Pass => answer,
+            Ok((status, headers, _)) => match o.on_reply(method, route, *status) {
+                ObserverAction::Pass => {
+                    let replayed = headers
+                        .get("idempotent-replayed")
+                        .and_then(|v| v.to_str().ok())
+                        .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+                    if replayed {
+                        o.on_replayed(method, route);
+                    }
+                    answer
+                }
                 ObserverAction::DropReply => Err(TransportError::Ambiguous { generation }),
             },
             Err(_) => answer,

@@ -7,8 +7,8 @@
 //! in P18).
 
 use cl_api::{
-    AccountType, ApiError, BillLine, ContactFields, ContactType, Method, NewBill, NewContact,
-    Session,
+    AccountType, ApiError, BillLine, Capabilities, ContactFields, ContactType, Method, NewBill,
+    NewContact, Session,
 };
 use cl_core::Money;
 use cl_core::ids::TransactionId;
@@ -85,7 +85,16 @@ pub fn paid_bill_void_is_refused_and_links_remain(h: &Harness) {
     let e = h
         .run(s.ap_voids().bill(bill, "Voided in the register", key()))
         .expect_err("a paid bill is not voided");
-    assert!(matches!(e, ApiError::Validation(_)), "{e:?}");
+    if h.require_cap(Capabilities::AP_EDIT, "U-84") {
+        // `ap-edit-v1`: 409 `BILL_HAS_PAYMENTS`.
+        assert_eq!(
+            cl_api::ap_refusal(&e),
+            Some(cl_api::ApRefusal::BillHasPayments),
+            "{e:?}"
+        );
+    } else {
+        assert!(matches!(e, ApiError::Validation(_)), "{e:?}");
+    }
     let after = bill_state(h, s, bill);
     assert_eq!(after["status"], "posted", "{after}");
     assert_eq!(after["billStatus"], "paid", "{after}");

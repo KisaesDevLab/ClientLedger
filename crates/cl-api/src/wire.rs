@@ -160,6 +160,10 @@ impl Capabilities {
     pub const TEMPLATES: &'static str = "templates-v1";
     /// P15 U-63: `POST /recurring/run-due` and `GET /recurring/attention`.
     pub const RECURRING_RUN_DUE: &'static str = "recurring-run-due-v1";
+    /// U-82: `POST /recurring/run-due` takes `templateIds` (only these) and
+    /// `excludeTemplateIds` (all but these); a filtered-out template is not
+    /// touched and stays due (Q-PR1d).
+    pub const RUN_DUE_FILTER: &'static str = "run-due-filter-v1";
 
     // ---- P15A: Bulk Entry (`/batch/*`; client-declared capabilities) ------
     /// P15A: `POST /batch/save` posts every row in one database
@@ -200,7 +204,7 @@ impl Capabilities {
     pub const MERGE_CLOSING_DATE: &'static str = "merge-closing-date-v1";
 
     // ---- P17: Enter Bill, vendor credits (engine PR-A U-83..U-87, PR-B U-89;
-    // client-declared until the pin moves) ------------------------------------
+    // in the pinned engine f3ce33fd) ------------------------------------------
     /// U-83: bill and vendor credit create, edit, void (and bill-capture
     /// enter) honour the closing date and take `closingPassword` (423
     /// `TB_PERIOD_LOCKED`, 403 `CLOSING_PASSWORD_INVALID`), audited.
@@ -226,6 +230,15 @@ impl Capabilities {
     /// `confidence` strings on `POST /bills/extract-from-attachment/{id}`,
     /// amounts as decimal strings or null.
     pub const BILL_OCR_V2: &'static str = "bill-ocr-v2";
+    /// U-83 to U-87: the engine also replays a repeated `Idempotency-Key` on
+    /// the A/P document mutations (bill edit and void, vendor credit create,
+    /// edit and void, bill-payment void), on top of `idempotency-v1`.
+    pub const IDEMPOTENCY_AP: &'static str = "idempotency-ap-v1";
+    /// U-90 (engine PR #175, pin 16aff64b): attachment routes work in the
+    /// request's company (`X-Company-Id`): uploads are stamped with it, and
+    /// reads, downloads, links and deletes see only that company's files and
+    /// tenant-wide ones.
+    pub const ATTACHMENTS_COMPANY: &'static str = "attachments-company-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

@@ -115,6 +115,8 @@ pub struct Observer {
     drop_next: Mutex<Option<(Method, String)>>,
     dropped: Mutex<u64>,
     on_drop: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// Replies per route that carried `Idempotent-Replayed: true` (U-18).
+    replayed: Mutex<BTreeMap<String, u64>>,
 }
 
 fn key(method: Method, route: &str) -> String {
@@ -160,6 +162,16 @@ impl Observer {
     ) {
         *self.on_drop.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(then));
         self.drop_next_reply(method, route);
+    }
+
+    /// Replies to `method route` the engine marked as replays (U-18).
+    pub fn replays(&self, method: Method, route: &str) -> u64 {
+        self.replayed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&key(method, route))
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Replies lost so far.
@@ -223,6 +235,15 @@ impl RequestObserver for Observer {
             return ObserverAction::DropReply;
         }
         ObserverAction::Pass
+    }
+
+    fn on_replayed(&self, method: Method, route: &str) {
+        *self
+            .replayed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(key(method, route))
+            .or_default() += 1;
     }
 }
 
@@ -905,6 +926,31 @@ impl OllamaStub {
             base_url: server.uri(),
             server,
         }
+    }
+
+    /// Also answers `POST /api/chat` (a non-streaming chat reply) with
+    /// `content` as the model's message: a canned provider for the engine's
+    /// AI paths, on loopback only.
+    pub fn serve_chat(&self, h: &Harness, content: &str) {
+        use wiremock::matchers::{method, path};
+        let body = serde_json::json!({
+            "model": "llama3.1:8b",
+            "message": { "role": "assistant", "content": content },
+            "done": true,
+            "done_reason": "stop",
+            "prompt_eval_count": 1,
+            "eval_count": 1,
+        })
+        .to_string();
+        h.run(async {
+            wiremock::Mock::given(method("POST"))
+                .and(path("/api/chat"))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(200).set_body_raw(body, "application/json"),
+                )
+                .mount(&self.server)
+                .await;
+        });
     }
 
     /// Requests served so far.
