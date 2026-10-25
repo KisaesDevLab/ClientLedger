@@ -277,8 +277,22 @@ fn editing_a_read_field_accepts_that_field_only() {
         Some(ReadField::Edited)
     );
     assert_eq!(s.read.unaccepted, 6);
-    // A read line's amount typed over: that line is accepted.
+    // A read line's description edited: its AI-read amount is NOT accepted
+    // (non-negotiable 4); only the amount (or Accept) accepts it.
     let key = s.expenses.value().lines[0].key;
+    s.expenses
+        .form_mut()
+        .edit_step(|v| v.lines[0].memo = "Excavator, two days".into());
+    s.track_read();
+    assert!(
+        matches!(
+            s.read_state_of(ReadTarget::Line(key)),
+            Some(ReadField::Read { .. })
+        ),
+        "a description edit leaves the read amount unaccepted"
+    );
+    assert_eq!(s.read.unaccepted, 6);
+    // A read line's amount typed over: that line is accepted.
     s.expenses
         .form_mut()
         .edit_step(|v| v.lines[0].amount = Some(money("1331.00")));

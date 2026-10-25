@@ -153,6 +153,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("orphan.bill_void", "voiding a bill"),
     ("orphan.bill_delete", "deleting a bill"),
     ("orphan.bill_attach", "attaching a file to a bill"),
+    ("orphan.bill_read", "reading a bill with AI"),
     // P17 WP8: the custom term's early-payment discount.
     ("bill.discount_percent", "Discount %"),
     ("bill.discount_percent.tip", "The early-payment discount, for example 2 for 2%."),

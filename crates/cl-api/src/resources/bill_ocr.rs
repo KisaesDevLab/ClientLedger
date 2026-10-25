@@ -285,7 +285,11 @@ fn money_field(
     if text.trim().is_empty() {
         return None;
     }
-    let m = exact_decimal(&text).and_then(|d| Money::try_from(d).ok());
+    // A document amount is in whole cents; anything finer is a misread,
+    // never rounded and never posted (non-negotiable 4).
+    let m = exact_decimal(&text)
+        .and_then(|d| Money::try_from(d).ok())
+        .filter(|m| m.to_ten_thousandths() % 100 == 0);
     if m.is_none() {
         bad.push(field);
     }
@@ -545,6 +549,19 @@ mod tests {
         // Five decimals are never rounded: unreadable instead.
         let r = reading_from_json(br#"{"extraction":{"total":"1.00001"}}"#).expect("r");
         assert_eq!((r.total, r.unreadable), (None, vec![ReadField::Total]));
+        // Sub-cent amounts (even within 4 decimals) are unreadable too: an
+        // amount that is not whole cents is never filled or posted.
+        let r = reading_from_json(
+            br#"{"extraction":{"total":"1480.005","tax":0.125,"subtotal":"1,330.0000",
+            "lineItems":[{"description":"x","amount":"$12.3456"}]}}"#,
+        )
+        .expect("r");
+        assert_eq!((r.total, r.tax, r.lines[0].amount), (None, None, None));
+        assert_eq!(r.subtotal.map(Money::to_wire).as_deref(), Some("1330.0000"));
+        assert_eq!(
+            r.unreadable,
+            vec![ReadField::Total, ReadField::Tax, ReadField::LineAmount(0)]
+        );
     }
 
     #[tokio::test]
