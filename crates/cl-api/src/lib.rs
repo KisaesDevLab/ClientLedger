@@ -151,8 +151,8 @@ pub use resources::ap_doc::{
 };
 pub use resources::bill_ocr::{
     AI_ALL_PROVIDERS_FAILED, AI_OCR_FAILED, AI_PARSE_FAILED, BillOcr, BillReadGate, BillReading,
-    Confidence, DocConfidence, OCR_UNREADABLE_AT_PII_LEVEL, ReadField, ReadLine, ReadStatus,
-    reading_from_json,
+    Confidence, DocConfidence, OCR_UNREADABLE_AT_PII_LEVEL, PDF_RENDER_EMPTY, PDF_RENDER_FAILED,
+    ReadField, ReadLine, ReadStatus, reading_from_json,
 };
 pub use resources::bill_payments::{BillPaymentSummary, BillPayments};
 pub use resources::bills::{

@@ -50,8 +50,8 @@ use std::time::Instant;
 
 use cl_api::{
     AI_ALL_PROVIDERS_FAILED, AI_OCR_FAILED, AI_PARSE_FAILED, AiPreviewRow, ApiError, AttachmentId,
-    BillReadGate, BillReading, OCR_UNREADABLE_AT_PII_LEVEL, ReadStatus, RequestGroup,
-    SuggestSource,
+    BillReadGate, BillReading, OCR_UNREADABLE_AT_PII_LEVEL, PDF_RENDER_EMPTY, PDF_RENDER_FAILED,
+    ReadStatus, RequestGroup, SuggestSource,
 };
 use cl_core::ids::{AccountId, ContactId, TenantId};
 use cl_core::{CalendarDate, Money, MoneyStyle};
@@ -304,6 +304,11 @@ pub(crate) fn problem_of(e: &ApiError) -> &'static str {
         ApiError::RateLimited { .. } => "bill.read.problem.busy",
         e if cl_api::has_code(e, AI_ALL_PROVIDERS_FAILED) => "bill.read.problem.unreachable",
         e if cl_api::has_code(e, OCR_UNREADABLE_AT_PII_LEVEL) => "bill.read.problem.private",
+        // A scanned PDF needs page pictures, which ClientLedger can't make
+        // yet (no GPL poppler): say so plainly, never the engine's code.
+        e if cl_api::has_code(e, PDF_RENDER_FAILED) || cl_api::has_code(e, PDF_RENDER_EMPTY) => {
+            "bill.read.problem.scanned_pdf"
+        }
         e if cl_api::has_code(e, AI_OCR_FAILED) || cl_api::has_code(e, AI_PARSE_FAILED) => {
             "bill.read.problem.unreadable"
         }

@@ -65,6 +65,27 @@ const p = { launch: unavailable, executablePath: unavailable };
 module.exports = p; module.exports.default = p; module.exports.__esModule = true;
 `);
 
+// pdf.js (pdfjs-dist, Apache-2.0) reads the text layer of PDFs (bill and
+// statement reading). In Node it runs its worker in-process and loads it with
+// `import("./pdf.worker.mjs")` next to pdf.mjs, a file the single executable
+// does not have. pdf.js uses `globalThis.pdfjsWorker` first when it is set,
+// so the entry below bundles the worker and sets that global before the
+// engine starts. Scanned PDFs still need poppler's `pdftoppm` (GPL), which
+// ClientLedger does not ship; the app says so instead of failing.
+const pdfWorker = join(nm, 'pdfjs-dist', 'legacy', 'build', 'pdf.worker.mjs');
+if (!existsSync(pdfWorker)) throw new Error(`pdf.js worker missing: ${pdfWorker}`);
+const fwd = (p) => JSON.stringify(p.split(sep).join('/'));
+writeFileSync(join(shimDir, 'pdfjs-worker.mjs'), `
+import * as worker from ${fwd(pdfWorker)};
+globalThis.pdfjsWorker = worker;
+`);
+// ESM evaluates imports in order: the worker global is set before bootstrap.
+const entry = join(shimDir, 'entry.mjs');
+writeFileSync(entry, `
+import './pdfjs-worker.mjs';
+import ${fwd(join(api, 'dist', 'bootstrap.js'))};
+`);
+
 const banner = `
 process.env['ENGINE_COMMIT'] = ${JSON.stringify(engineCommit)};
 var __cl_boot = (function () {
@@ -105,7 +126,7 @@ const noNative = {
 
 const bundlePath = join(outDir, 'bundle.cjs');
 const result = await build({
-  entryPoints: [join(api, 'dist', 'bootstrap.js')],
+  entryPoints: [entry],
   outfile: bundlePath,
   bundle: true,
   platform: 'node',

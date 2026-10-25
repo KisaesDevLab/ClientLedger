@@ -102,12 +102,14 @@ pub fn node_major(version: &str) -> Option<u32> {
         .ok()
 }
 
-/// Cache key: engine commit + Node version + target.
+/// Cache key: engine commit + Node version + target + the bundler script's
+/// hash (`tools`), so a change to `bundle.mjs` rebuilds the executable.
 #[must_use]
-pub fn cache_key(commit: &str, node_version: &str, target: &Target) -> String {
+pub fn cache_key(commit: &str, node_version: &str, target: &Target, tools: &str) -> String {
     let short: String = commit.chars().take(12).collect();
+    let tools: String = tools.chars().take(8).collect();
     format!(
-        "{short}-node{}-{}",
+        "{short}-node{}-{}-b{tools}",
         node_version.trim_start_matches('v'),
         target.dir
     )
@@ -292,7 +294,9 @@ fn build(root: &Path, target: &Target, force: bool) -> Result<PathBuf> {
     let exe = out.join(target.exe_name);
     let (commit, dirty) = engine_commit(&engine)?;
     let node_version = check_node(&engine)?;
-    let key = cache_key(&commit, &node_version, target);
+    let tools = root.join("xtask").join("engine-tools");
+    let bundler = crate::fetch_lock::sha256_file(&tools.join("bundle.mjs"))?;
+    let key = cache_key(&commit, &node_version, target, &bundler);
     let cache = root.join("target").join("engine").join(".cache").join(&key);
 
     if !force
@@ -308,7 +312,6 @@ fn build(root: &Path, target: &Target, force: bool) -> Result<PathBuf> {
     }
 
     // Tooling (esbuild, postject), pinned by xtask/engine-tools/package-lock.json.
-    let tools = root.join("xtask").join("engine-tools");
     let mut c = npm();
     c.args(["ci", "--no-audit", "--no-fund"])
         .current_dir(&tools);
@@ -920,8 +923,13 @@ mod tests {
     #[test]
     fn cache_key_has_commit_node_and_target() {
         let t = target_for("linux", "x86_64").unwrap();
-        let k = cache_key("13ebd2ba50db0e3e68dd473329caf96d1f039e4e", "v24.15.0", &t);
-        assert_eq!(k, "13ebd2ba50db-node24.15.0-linux-x64");
+        let k = cache_key(
+            "13ebd2ba50db0e3e68dd473329caf96d1f039e4e",
+            "v24.15.0",
+            &t,
+            "0a1b2c3d4e5f",
+        );
+        assert_eq!(k, "13ebd2ba50db-node24.15.0-linux-x64-b0a1b2c3d");
     }
 
     #[test]
