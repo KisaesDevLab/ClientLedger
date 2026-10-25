@@ -141,8 +141,29 @@ pub use resources::attachments::{
     check_file,
 };
 pub use resources::bills::{Bills, OpenBill, VendorSummary};
+
+// P17 WP2: bills, vendor credits, bill payments, document reading.
+pub use resources::ap_doc::{
+    ApKind, ApRefusal, ApWriteOptions, BILL_HAS_PAYMENTS, BillLineDraft, BillRecord,
+    BillRecordLine, BillStatus, BillTerms, CREDIT_APPLIED, Capped, LINE_AMOUNT_MISMATCH,
+    LINE_QTY_RATE_INCOMPLETE, PIN_TERMS_CODES, Percent, STALE, TERMS_CUSTOM, TERMS_DAYS_MAX,
+    TXN_DEPOSITED, VENDOR_REF_MAX, ap_refusal,
+};
+pub use resources::bill_ocr::{
+    AI_ALL_PROVIDERS_FAILED, AI_OCR_FAILED, AI_PARSE_FAILED, BillOcr, BillReadGate, BillReading,
+    Confidence, DocConfidence, OCR_UNREADABLE_AT_PII_LEVEL, ReadField, ReadLine, ReadStatus,
+    reading_from_json,
+};
+pub use resources::bill_payments::{BillPaymentSummary, BillPayments};
+pub use resources::bills::{
+    BillDraft, BillListQuery, BillSort, BillSummary, PaymentTerm, TermsDates, TermsDatesQuery,
+    TermsSource,
+};
 pub use resources::contacts::{SuggestSource, SuggestedAccount};
 pub use resources::rules::{RULE_DESCRIPTION_MAX_CHARS, RuleMatch, RuleQuery, Rules};
+pub use resources::vendor_credits::{
+    AvailableCredit, CreditListQuery, CreditSort, CreditSummary, VendorCreditDraft, VendorCredits,
+};
 
 // P14 lane A: pending deposits and bank-file groupings.
 pub use resources::payments::{

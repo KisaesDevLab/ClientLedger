@@ -863,10 +863,7 @@ pub fn upload(
     let n = state.checks.files.len() + 1;
     let id = cl_api::AttachmentId::parse(&format!("d0000000-0000-4000-8000-a{n:011}"))
         .map_err(|_| invalid())?;
-    let (kind, to) = match to {
-        cl_api::AttachTo::Draft(d) => ("draft", d.to_string()),
-        cl_api::AttachTo::Expense(t) => ("expense", t.to_string()),
-    };
+    let (kind, to) = (to.attachable_type(), to.attachable_id());
     let f = DemoFile {
         id,
         kind,
@@ -882,10 +879,7 @@ pub fn upload(
 /// `GET /attachments` for a check or a draft.
 #[must_use]
 pub fn attachments(state: &DemoState, of: cl_api::AttachTo) -> Vec<cl_api::Attachment> {
-    let (kind, to) = match of {
-        cl_api::AttachTo::Draft(d) => ("draft", d.to_string()),
-        cl_api::AttachTo::Expense(t) => ("expense", t.to_string()),
-    };
+    let (kind, to) = (of.attachable_type(), of.attachable_id());
     state
         .checks
         .files

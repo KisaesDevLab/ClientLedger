@@ -208,8 +208,9 @@ impl Capabilities {
     /// U-84: `PUT /vendor-credits/{id}` (409 `CREDIT_APPLIED`), bill and
     /// credit delete through `DELETE /transactions/{id}` when unpaid and
     /// unapplied (409 `BILL_HAS_PAYMENTS`), `expectedUpdatedAt` on edit, void
-    /// and delete (409 `STALE_DOCUMENT`), vendor summary counts posted bills
-    /// only.
+    /// and delete (409 `STALE`, the U-17 shape; plan review B3), vendor
+    /// credit rows carry `vendorInvoiceNumber` (S6), vendor summary counts
+    /// posted bills only.
     pub const AP_EDIT: &'static str = "ap-edit-v1";
     /// U-85: bill and credit lines with `itemId`, `quantity`, `unitPrice`
     /// (amount = qty × price rounded half away from zero, 400
