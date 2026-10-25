@@ -639,6 +639,7 @@ impl super::engine::JournalEngine for LostReply {
                 request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000002")
                     .expect("id"),
                 idempotency_key: Some(IdempotencyKey::new()),
+                keyed: false,
             });
         }
         Ok(r)

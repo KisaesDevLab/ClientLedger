@@ -43,7 +43,7 @@ use crate::resources::operations::{LEDGER_VERSION, Operation, TXN_GET, TXNS_LIST
 use crate::resources::transactions::TxnType;
 use crate::resources::versioning::EditableFields;
 use crate::session::Session;
-use crate::wire::{Capabilities, Page, PageRequest};
+use crate::wire::{Page, PageRequest};
 
 /// Candidates must have been created at most this long before sending.
 const CREATED_SLACK_MS: i64 = 2_000;
@@ -181,19 +181,17 @@ pub(crate) async fn read_stamp(session: &Session) -> Result<u64, ApiError> {
 impl Probe {
     /// Builds the probe just before sending. Postings (`stamp_covered`)
     /// read the ledger-version stamp first; if that read fails the write
-    /// still proceeds and only the matcher can resolve it. With engine
-    /// idempotency (U-18) nothing is read: reconciliation never runs.
+    /// still proceeds and only the matcher can resolve it. The stamp is read
+    /// with engine idempotency (U-18) too: a keyed save never reaches the
+    /// probe, but a route outside the engine's set, or a key too old to
+    /// rely on, is reconciled as before, and the probe cannot tell which.
     pub(crate) async fn new(
         session: &Session,
         matcher: OutcomeMatcher,
         stamp_covered: bool,
     ) -> Probe {
         let session = session.pinned();
-        let keyed = session
-            .client()
-            .capabilities()
-            .has(Capabilities::IDEMPOTENCY);
-        let stamp_before = if stamp_covered && !keyed {
+        let stamp_before = if stamp_covered {
             read_stamp(&session).await.ok()
         } else {
             None

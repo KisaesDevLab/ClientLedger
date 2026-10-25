@@ -1,0 +1,27 @@
+# The engine's `idempotency-v1` route set (U-18): the operations its
+# openapi.json marks `x-idempotency: true`, recorded from engine main
+# 4dfedc47 (PR #171) and listed in its docs/DESKTOP.md "Request
+# idempotency". Append-only for this capability name: routes added later
+# get a new capability name. tests/spec_fixtures.rs checks that the
+# `keyable` rows of operations.txt are exactly these, and that the pinned
+# engine's openapi.json marks exactly these once it advertises them.
+DELETE /api/v1/transactions/{id}
+POST /api/v1/accounts
+POST /api/v1/bills
+POST /api/v1/checks
+POST /api/v1/contacts
+POST /api/v1/daily-sales/entries
+POST /api/v1/daily-sales/entries/{id}/post
+POST /api/v1/daily-sales/entries/{id}/void
+POST /api/v1/invoices
+POST /api/v1/items
+POST /api/v1/tags
+POST /api/v1/templates
+POST /api/v1/templates/from-transaction
+POST /api/v1/templates/{id}/enter
+POST /api/v1/templates/{id}/occurrences/{date}/resolve
+POST /api/v1/templates/{id}/occurrences/{date}/skip
+POST /api/v1/transactions
+POST /api/v1/transactions/{id}/void
+PUT /api/v1/checks/{id}
+PUT /api/v1/transactions/{id}
