@@ -356,6 +356,10 @@ pub struct EnterBillScreen {
     pub(crate) after_frame: Option<CommandId>,
     /// The fixed bars' sizes last frame (Q-265).
     pub(crate) layout: crate::layout::FrameReport,
+    /// The window is narrow (200% zoom on the smallest window): the Bill /
+    /// Vendor credit choice moves from the toolbar to under the title and
+    /// the header card's fields stack.
+    pub(crate) compact: bool,
     /// The owner's money display style (from the shell each frame).
     pub(crate) money_style: cl_core::MoneyStyle,
     /// Vendor prefill (Q-191/Q-192).
@@ -466,6 +470,7 @@ impl EnterBillScreen {
             in_grid: false,
             after_frame: None,
             layout: crate::layout::FrameReport::default(),
+            compact: false,
             money_style: cl_core::MoneyStyle::default(),
             prefill: prefill::PrefillState::default(),
             attach: attach::AttachState::default(),

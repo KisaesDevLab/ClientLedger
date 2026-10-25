@@ -102,7 +102,13 @@ pub fn popup<'a>(
                     .max_height(240.0)
                     .show(ui, |ui| {
                         for (i, label) in labels.into_iter().enumerate() {
-                            let r = ui.selectable_label(current == Some(i), label);
+                            // Clickable, never focusable: Tab from the
+                            // field goes on to the next field, not into
+                            // the list (which closes as the field is left).
+                            let r = ui.add(
+                                egui::Button::selectable(current == Some(i), label)
+                                    .sense(egui::Sense::CLICK),
+                            );
                             if current == Some(i) && field.has_focus() {
                                 r.scroll_to_me(None);
                             }
@@ -224,5 +230,81 @@ mod tests {
             "typed text filters"
         );
         assert!(f.focused, "focus stays in the field");
+    }
+
+    /// Tab with the list open goes to the next field, never into the list
+    /// (which closes as the field is left, taking the focus with it).
+    #[test]
+    fn tab_with_the_list_open_goes_to_the_next_field() {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        let mut text = "Mid".to_string();
+        let mut open = true;
+        let mut focus_field = true;
+        let mut next_focused = false;
+        let run = |events: Vec<Event>,
+                   text: &mut String,
+                   open: &mut bool,
+                   focus_field: &mut bool,
+                   next_focused: &mut bool| {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(600.0, 400.0))),
+                events,
+                ..RawInput::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let r = ui.add(
+                        egui::TextEdit::singleline(text)
+                            .id_salt("vendor")
+                            .margin(super::margin()),
+                    );
+                    if std::mem::take(focus_field) {
+                        r.request_focus();
+                    }
+                    if *open && (r.has_focus() || r.lost_focus()) {
+                        let _ = super::popup(ui, &r, ["Midwest Equipment", "Midland Co"], None);
+                    }
+                    if r.lost_focus() {
+                        *open = false;
+                    }
+                    let next =
+                        ui.add(egui::TextEdit::singleline(&mut String::new()).id_salt("date"));
+                    *next_focused = next.has_focus();
+                });
+            });
+            out.textures_delta.clear();
+        };
+        run(
+            vec![],
+            &mut text,
+            &mut open,
+            &mut focus_field,
+            &mut next_focused,
+        );
+        run(
+            vec![],
+            &mut text,
+            &mut open,
+            &mut focus_field,
+            &mut next_focused,
+        );
+        run(
+            key(Key::Tab),
+            &mut text,
+            &mut open,
+            &mut focus_field,
+            &mut next_focused,
+        );
+        run(
+            vec![],
+            &mut text,
+            &mut open,
+            &mut focus_field,
+            &mut next_focused,
+        );
+        assert!(!open, "leaving the field closes the list");
+        assert!(next_focused, "Tab went on to the next field");
     }
 }

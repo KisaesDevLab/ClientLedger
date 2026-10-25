@@ -63,6 +63,7 @@ const TEMPLATES_DUE_HINTS: [(&str, &str); 2] = [
 fn form_hints(kind: &str) -> Option<&'static [(&'static str, &'static str)]> {
     match kind {
         "vendors.write_check"
+        | "vendors.enter_bill"
         | "vendors.card_charge"
         | "vendors.personal_funds"
         | "banking.deposit"
