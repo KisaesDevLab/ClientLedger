@@ -45,6 +45,9 @@ pub(crate) struct AttachState {
     pub saved_to: Option<PathBuf>,
     /// The Attach button asked for the keyboard in the file field.
     pub focus: bool,
+    /// The receipt-inbox file this new check started from (its name, for
+    /// "Attached from … in your receipt inbox.", P17).
+    pub from_inbox: Option<String>,
 }
 
 impl AttachState {
@@ -186,6 +189,33 @@ pub(crate) fn save_copy(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf,
 }
 
 impl WriteCheckScreen {
+    /// A fresh check that starts from a receipt-inbox file the inbox
+    /// already uploaded as this check's draft (P17 "New check"). The draft
+    /// rides on the first save as `draftAttachmentId`, exactly like a file
+    /// attached here; the inbox files the original away once the saved
+    /// check holds it. Returns false for a check already saved or one that
+    /// has a draft file already.
+    pub(crate) fn accept_inbox_draft(
+        &mut self,
+        draft: crate::screens::receipt_inbox::InboxDraft,
+    ) -> bool {
+        if self.editing.is_some()
+            || self.attach.draft.is_some()
+            || self.header.current().draft_attachment.is_some()
+        {
+            return false;
+        }
+        self.attach.draft = Some(draft.draft);
+        let file = AttachmentRef {
+            id: draft.draft.to_string(),
+            name: draft.file.name.clone(),
+        };
+        self.header.edit_step(|h| h.draft_attachment = Some(file));
+        self.attach.from_inbox = Some(draft.file.name);
+        self.load_attachments();
+        true
+    }
+
     /// Where new files go: the saved check, else the draft (made on first
     /// use).
     fn attach_target(&mut self) -> AttachTo {
@@ -416,6 +446,13 @@ impl WriteCheckScreen {
                     .strong()
                     .color(tokens.text_primary),
             );
+            if let Some(name) = &self.attach.from_inbox {
+                form::hint(
+                    ui,
+                    tokens,
+                    &t_with("inbox.attached_from", &[("name", name)]),
+                );
+            }
             for a in &self.attach.list {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(&a.file_name).color(tokens.text_primary));

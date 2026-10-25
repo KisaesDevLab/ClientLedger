@@ -1,6 +1,6 @@
 //! The Receipt inbox panel (P09 step 5, Q-54): the folder the app watches
 //! for new photos and PDFs to attach to bills, checks and bank items
-//! (the watcher itself arrives with P17).
+//! (the inbox itself is `screens::receipt_inbox`, P17).
 
 use eframe::egui::{self, Ui};
 
@@ -50,6 +50,7 @@ pub fn receipt_inbox(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
         {
             form::hint(ui, tokens, &t(folder_error_key(e)));
         }
-        ui.add(egui::Label::new(t("prefs.inbox.later")).selectable(false));
+        // P17: the inbox itself is Vendors › Receipt Inbox.
+        ui.add(egui::Label::new(t("inbox.prefs.where")).selectable(false));
     });
 }
