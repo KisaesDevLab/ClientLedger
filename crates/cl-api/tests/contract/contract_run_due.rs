@@ -10,8 +10,8 @@
 use cl_api::{
     AccountRoles, AccountType, ApiError, Basis, Capabilities, CardChargeDraft,
     ClosedPeriodAuthorization, Frequency, IdempotencyKey, JeLine, JeOptions, Method,
-    NewJournalEntry, NewTemplate, PageRequest, PostingOptions, RunDue, ScheduleEnd, ScheduleMode,
-    Session, Side, SkipReason, SplitLine, Template, TemplateDraft, TemplateSchedule,
+    NewJournalEntry, NewTemplate, PageRequest, PostingOptions, RunDue, RunDueFilter, ScheduleEnd,
+    ScheduleMode, Session, Side, SkipReason, SplitLine, Template, TemplateDraft, TemplateSchedule,
     TransactionFilter, new_run_id,
 };
 use cl_core::ids::{AccountId, TransactionId};
@@ -601,6 +601,96 @@ pub fn owner_without_permission_skipped(h: &Harness) {
     );
     assert_eq!(card_txns(h, s, c.card).len(), 1);
     h.run(s.templates().skip(t.id, first)).expect("dismiss");
+}
+
+/// U-82 (`run-due-filter-v1`, Q-PR1d): while the owner is asked about one
+/// template (more than three missed dates), the run posts the others with
+/// `excludeTemplateIds: [it]` and leaves it untouched and still due; once
+/// the owner answers, `templateIds: [it]` posts its dates and nothing else,
+/// each date once.
+pub fn filter_holds_only_the_asked_template_u82(h: &Harness) {
+    if !ready(h) || !h.require_cap(Capabilities::RUN_DUE_FILTER, "U-82 run-due-filter-v1") {
+        return;
+    }
+    let s = &h.s1;
+    let (ca, cb) = (card(h, s), card(h, s));
+    let asked = auto(
+        h,
+        s,
+        &ca,
+        ScheduleMode::Auto,
+        day_back(6, 5),
+        ScheduleEnd::Never,
+    );
+    let other = auto(
+        h,
+        s,
+        &cb,
+        ScheduleMode::Auto,
+        day_back(3, 5),
+        ScheduleEnd::Never,
+    );
+    let as_of = day_back(2, 5);
+    let id = new_run_id();
+    let rest = h
+        .run(
+            s.recurring()
+                .run_due_filtered(as_of, id, 200, &RunDueFilter::Except(vec![asked.id])),
+        )
+        .unwrap_or_else(|e| panic!("run-due except: {e}"));
+    assert!(!rest.more);
+    assert_eq!(mine(&rest, &other), vec![day_back(3, 5), day_back(2, 5)]);
+    assert!(mine(&rest, &asked).is_empty(), "the asked one waits");
+    assert!(card_txns(h, s, ca.card).is_empty(), "nothing posted for it");
+    assert!(
+        !rest.skipped.iter().any(|k| k.template == asked.id),
+        "not touched: no skip recorded"
+    );
+    let stored = h.run(s.templates().get(asked.id)).expect("template");
+    assert_eq!(
+        stored.schedule.as_ref().map(|s| s.next_date),
+        Some(day_back(6, 5)),
+        "still due from its first missed date"
+    );
+    // The owner said "Post all": that template alone, a fresh run id.
+    let one = h
+        .run(s.recurring().run_due_filtered(
+            as_of,
+            new_run_id(),
+            200,
+            &RunDueFilter::Only(vec![asked.id]),
+        ))
+        .unwrap_or_else(|e| panic!("run-due only: {e}"));
+    assert_eq!(
+        mine(&one, &asked),
+        (2..=6).rev().map(|n| day_back(n, 5)).collect::<Vec<_>>()
+    );
+    assert!(mine(&one, &other).is_empty(), "only the asked one");
+    assert_eq!(card_txns(h, s, ca.card).len(), 5);
+    assert_eq!(card_txns(h, s, cb.card).len(), 2);
+    // A plain run now posts nothing more for either; the first run id
+    // replayed with "only" posts nothing twice.
+    let again = h
+        .run(
+            s.recurring()
+                .run_due_filtered(as_of, id, 200, &RunDueFilter::Only(vec![asked.id])),
+        )
+        .expect("replay");
+    assert!(mine(&again, &asked).is_empty(), "nothing new for it");
+    assert_eq!(
+        mine(&again, &other),
+        vec![day_back(3, 5), day_back(2, 5)],
+        "the run id's earlier posts come back"
+    );
+    assert!(mine(&run(h, s, as_of), &asked).is_empty(), "nothing left");
+    assert_eq!(
+        (
+            card_txns(h, s, ca.card).len(),
+            card_txns(h, s, cb.card).len()
+        ),
+        (5, 2),
+        "each date once"
+    );
 }
 
 /// A journal entry template (adjusting, a name on its A/P line) posted by

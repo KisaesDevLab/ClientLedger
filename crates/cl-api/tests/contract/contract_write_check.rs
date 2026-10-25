@@ -32,8 +32,8 @@ use crate::common::{account, date, key, m, wire_lines};
 use crate::contract_bank_postings::detail_account;
 use crate::support::{Harness, unique};
 
-struct Books {
-    bank: AccountId,
+pub(crate) struct Books {
+    pub(crate) bank: AccountId,
     plants: AccountId,
     mulch: AccountId,
     vendor: ContactId,
@@ -54,7 +54,7 @@ fn contact(h: &Harness, s: &Session, t: ContactType, name: &str) -> ContactId {
     .id
 }
 
-fn books(h: &Harness, s: &Session) -> Books {
+pub(crate) fn books(h: &Harness, s: &Session) -> Books {
     Books {
         bank: detail_account(h, s, AccountType::Asset, "bank"),
         plants: account(h, s, AccountType::Expense, "Materials:Plants").id,
@@ -77,7 +77,12 @@ fn split(account: AccountId, amount: &str) -> SplitLine {
 
 /// The mockup check; the first line is billable to the job when the engine
 /// takes line customers.
-fn story(b: &Books, on: CalendarDate, number: Option<u32>, billable: bool) -> CheckDraft {
+pub(crate) fn story(
+    b: &Books,
+    on: CalendarDate,
+    number: Option<u32>,
+    billable: bool,
+) -> CheckDraft {
     let memo = unique("Acct 7712 · perennials and mulch");
     CheckDraft {
         bank: b.bank,
@@ -312,7 +317,16 @@ pub fn edges(h: &Harness) {
     let found = h
         .run(s.transactions().create_bank_posting(&lost, &opts, key()))
         .unwrap_or_else(|e| panic!("reconciled: {e}"));
-    assert_eq!(h.observer.sent(Method::Post, "/api/v1/checks") - sent, 1);
+    // U-18: re-sent once with the same key (a replay) under `idempotency-v1`.
+    let resent = if h.caps.has(Capabilities::IDEMPOTENCY) {
+        2
+    } else {
+        1
+    };
+    assert_eq!(
+        h.observer.sent(Method::Post, "/api/v1/checks") - sent,
+        resent
+    );
     assert_eq!(found.record.fingerprint(), lost.created_fingerprint());
     let numbered: Vec<_> = h
         .run(s.checks().list(

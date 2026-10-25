@@ -553,6 +553,7 @@ fn a_lost_post_still_a_draft_stays_blocked_until_it_shows_up_posted() {
         request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000009")
             .expect("id"),
         idempotency_key: Some(cl_api::IdempotencyKey::new()),
+        keyed: false,
     });
     r.plan_day("500.00");
     r.s.command(CommandId::new("form.save_new"));

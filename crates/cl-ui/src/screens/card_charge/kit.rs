@@ -1394,13 +1394,14 @@ pub(crate) fn messages(
 }
 
 /// A failed save on the form's header: an unknown outcome keeps Save
-/// blocked until the recheck or the owner answers (B2).
+/// blocked until the recheck or the owner answers (B2), unless the engine
+/// replays its key (U-18, Q-PR1a).
 pub(crate) fn header_failed<V: Clone + PartialEq>(
     header: &mut cl_model::forms::FormState<V>,
     e: &ApiError,
     failure: cl_model::forms::SaveFailure,
 ) {
-    if matches!(e, ApiError::OutcomeUnknown { .. }) {
+    if e.needs_recheck() {
         header.save_unknown(failure);
     } else {
         header.save_failed(failure);

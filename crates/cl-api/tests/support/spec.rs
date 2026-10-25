@@ -199,6 +199,55 @@ pub fn covered_text(spec: &Value, ops: &[(String, String)]) -> String {
     text
 }
 
+/// The operations the engine marks `x-idempotency: true` (U-18,
+/// `idempotency-v1`): `(METHOD, route)`, sorted.
+pub fn idempotent_operations(spec: &Value) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Some(paths) = spec.get("paths").and_then(Value::as_object) {
+        for (route, item) in paths {
+            let Some(item) = item.as_object() else {
+                continue;
+            };
+            for (method, op) in item {
+                if op.get("x-idempotency").and_then(Value::as_bool) == Some(true) {
+                    out.push((method.to_ascii_uppercase(), route.clone()));
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The `keyable` rows of `operations.txt`: `(METHOD, route)`, sorted.
+pub fn keyable_operations(txt: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = txt
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            let (m, r, c) = (it.next()?, it.next()?, it.next()?);
+            (c == "keyable").then(|| (m.to_string(), r.to_string()))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// `METHOD route` lines (no comments) of a recorded route list.
+pub fn route_lines(txt: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = txt
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            Some((it.next()?.to_string(), it.next()?.to_string()))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
 /// Text of `openapi.sha256`.
 pub fn openapi_text(spec: &Value) -> String {
     format!("{}\n", spec_hash(spec))

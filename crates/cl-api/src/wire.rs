@@ -160,6 +160,10 @@ impl Capabilities {
     pub const TEMPLATES: &'static str = "templates-v1";
     /// P15 U-63: `POST /recurring/run-due` and `GET /recurring/attention`.
     pub const RECURRING_RUN_DUE: &'static str = "recurring-run-due-v1";
+    /// U-82: `POST /recurring/run-due` takes `templateIds` (only these) and
+    /// `excludeTemplateIds` (all but these); a filtered-out template is not
+    /// touched and stays due (Q-PR1d).
+    pub const RUN_DUE_FILTER: &'static str = "run-due-filter-v1";
 
     // ---- P15A: Bulk Entry (`/batch/*`; client-declared capabilities) ------
     /// P15A: `POST /batch/save` posts every row in one database

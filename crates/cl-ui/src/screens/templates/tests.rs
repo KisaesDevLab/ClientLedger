@@ -349,6 +349,7 @@ fn a_lost_enter_now_outlives_its_window() {
         request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000017")
             .expect("id"),
         idempotency_key: Some(cl_api::IdempotencyKey::new()),
+        keyed: false,
     }));
     assert!(s.lost.pending());
     drop(s);
@@ -391,6 +392,7 @@ fn b2_a_lost_enter_now_without_a_schedule_sends_nothing_until_the_recheck_answer
         request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000007")
             .expect("id"),
         idempotency_key: Some(cl_api::IdempotencyKey::new()),
+        keyed: false,
     }));
     assert!(s.error.is_none(), "the banner speaks");
     assert!(s.lost.pending());

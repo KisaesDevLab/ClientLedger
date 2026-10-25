@@ -28,6 +28,7 @@ mod contract_deposits;
 mod contract_errors;
 mod contract_harness;
 mod contract_home;
+mod contract_idempotency;
 mod contract_items;
 mod contract_journal;
 mod contract_journal_entries;
@@ -373,6 +374,18 @@ fn main() -> std::process::ExitCode {
             contract_capabilities::idempotency_u18,
         ),
         (
+            "idempotency::lost_reply_replays_one_posting",
+            contract_idempotency::lost_reply_replays_one_posting,
+        ),
+        (
+            "idempotency::reused_key_is_refused",
+            contract_idempotency::reused_key_is_refused,
+        ),
+        (
+            "idempotency::keyed_routes_replay",
+            contract_idempotency::keyed_routes_replay,
+        ),
+        (
             "capabilities::je_line_contact_u22",
             contract_capabilities::je_line_contact_u22,
         ),
@@ -541,6 +554,10 @@ fn main() -> std::process::ExitCode {
         (
             "run_due::journal_template_keeps_names_and_adjusting",
             contract_run_due::journal_template_keeps_names_and_adjusting,
+        ),
+        (
+            "run_due::filter_holds_only_the_asked_template_u82",
+            contract_run_due::filter_holds_only_the_asked_template_u82,
         ),
         // P15A lane A: Bulk Entry (PENDING by the batch-*-v1 capabilities;
         // all live from pin c217bfd, engine PR #163).

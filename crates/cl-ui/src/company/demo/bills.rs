@@ -452,6 +452,8 @@ fn save(
             request_id: cl_core::ids::RequestId::parse("d0000000-0000-4000-8000-f00000000001")
                 .map_err(|_| invalid())?,
             idempotency_key: None,
+            // The demo keeps no key: its lost reply takes the recheck path.
+            keyed: false,
         });
     }
     Ok(id)
