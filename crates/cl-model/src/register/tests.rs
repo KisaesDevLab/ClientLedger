@@ -740,7 +740,7 @@ fn entry_problems() {
 }
 
 #[test]
-fn receivables_and_payables_need_one_name() {
+fn receivables_and_payables_need_a_name() {
     // A bank line against A/R needs a name and becomes a journal entry.
     let mut x = check_draft();
     x.payee = None;
@@ -768,14 +768,20 @@ fn receivables_and_payables_need_one_name() {
         Ok(EntryKind::JournalEntry)
     );
 
-    // A/R against A/P: one per entry.
+    // A/R against A/P: both lines on named accounts is allowed (Q-206,
+    // owner 2026-10-25); the name is still required.
     let both = EntryContext {
         other_class: Some(AccountClass::Receivable),
         ..ap_ctx
     };
     assert_eq!(
+        check(&x, &both).map(|c| c.kind),
+        Ok(EntryKind::JournalEntry)
+    );
+    x.payee = None;
+    assert_eq!(
         check(&x, &both).err(),
-        Some(vec![EntryProblem::TwoNamedAccounts])
+        Some(vec![EntryProblem::NameRequired])
     );
 }
 
@@ -790,7 +796,6 @@ fn problems_name_their_fields() {
         (EntryProblem::AccountGone, EntryField::Account),
         (EntryProblem::SameAccount, EntryField::Account),
         (EntryProblem::NameRequired, EntryField::Payee),
-        (EntryProblem::TwoNamedAccounts, EntryField::Account),
         (EntryProblem::TooManyTags, EntryField::Tag),
         (EntryProblem::KindNotAllowed, EntryField::Account),
     ];

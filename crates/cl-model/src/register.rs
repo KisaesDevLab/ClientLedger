@@ -549,8 +549,8 @@ impl AccountClass {
         )
     }
 
-    /// True for A/R and A/P: an entry on them needs a customer or vendor
-    /// name (Q-206).
+    /// True for A/R and A/P: every entry line on them needs a customer or
+    /// vendor name, any number of such lines per entry (Q-206).
     #[must_use]
     pub const fn needs_name(self) -> bool {
         matches!(self, AccountClass::Receivable | AccountClass::Payable)

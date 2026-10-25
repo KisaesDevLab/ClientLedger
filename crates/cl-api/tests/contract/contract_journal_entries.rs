@@ -11,7 +11,7 @@
 //!   refused too; balanced exactly it posts.
 //! - `ar_ap_names`: an A/R line without a name → 400
 //!   `JE_AR_AP_NAME_REQUIRED`; two named A/R lines post since engine
-//!   7b267e48 (the client keeps Q-206 and refuses them before sending);
+//!   7b267e48, raw and through the typed builder (Q-206, any number);
 //!   with a customer it posts and reads back the name.
 //! - `numbering`: the suggested next number, then one more after a post.
 //! - `adjusting_round_trip`: `isAdjusting` reads back and `adjusting=only`
@@ -215,30 +215,39 @@ pub fn ar_ap_names(h: &Harness) {
     );
     // Engine main 7b267e48 (PR #169, commit 33a973fa) dropped
     // `JE_AR_AP_ONE_PER_ENTRY`: every A/R or A/P line needs a name, any
-    // number of them may post. Q-206 (one per entry) stays the client's
-    // rule: the typed builder refuses it before sending (`ArApTwoAccounts`).
+    // number of them may post. Q-206 follows (owner 2026-10-25): the typed
+    // builder takes them too.
     assert_eq!(two.status, 201, "{}", two.body);
     let two_typed = NewJournalEntry::new_with(
         date(2026, 7, 31),
-        None,
+        Some(unique("JE two A/R")),
         Basis::Both,
         vec![
             JeLine {
                 contact: Some(who),
-                ..line(ar, Side::Debit(m("50")))
+                ..line(ar, Side::Debit(m("30")))
             },
             JeLine {
                 contact: Some(who),
-                ..line(ar, Side::Credit(m("50")))
+                ..line(ar, Side::Debit(m("20")))
             },
+            line(income.id, Side::Credit(m("50"))),
         ],
         JeOptions::default(),
         &roles,
-    );
-    assert!(
-        two_typed.is_err(),
-        "Q-206 is refused locally: {two_typed:?}"
-    );
+    )
+    .expect("two named A/R lines build (Q-206)");
+    let made_two = post(h, s, &two_typed);
+    let got_two = h
+        .run(s.transactions().get(made_two.record.id))
+        .expect("get");
+    let named_ar = got_two
+        .record
+        .lines
+        .iter()
+        .filter(|l| l.account_id == ar && l.contact_id == Some(who))
+        .count();
+    assert_eq!(named_ar, 2, "both A/R lines read back with the name");
     // Typed path: refused locally, then the engine's code when bypassed.
     let lines = |contact| {
         vec![

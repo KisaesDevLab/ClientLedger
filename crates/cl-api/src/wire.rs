@@ -134,8 +134,9 @@ impl Capabilities {
     // ---- P15: journal entries, templates, catch-up (client-declared) ------
     /// P15 part A: a name (`contactId`) on journal entry lines; an A/R line
     /// needs a customer and an A/P line a vendor
-    /// (400 `JE_AR_AP_NAME_REQUIRED`), one A/R-or-A/P account per entry
-    /// (400 `JE_AR_AP_ONE_PER_ENTRY`).
+    /// (400 `JE_AR_AP_NAME_REQUIRED`), any number of such lines per entry
+    /// since engine 33a973fa (older engines refused a second one with 400
+    /// `JE_AR_AP_ONE_PER_ENTRY`, Q-206).
     pub const JE_NAMES: &'static str = "je-names-v1";
     /// P15 part A: `txnNumber` on journal entries and
     /// `GET /journal-entries/next-number`.

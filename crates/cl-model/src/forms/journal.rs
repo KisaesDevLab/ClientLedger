@@ -16,10 +16,12 @@
 //! that balances on the opposite side (Q-P15n). Like Write Check's
 //! "remaining", it is input arithmetic; the owner accepts it.
 //!
-//! The A/R-A/P rule (Q-206, Q-P15s): an entry may have one line on an
-//! Accounts Receivable or Accounts Payable account, and that line needs a
-//! customer (A/R) or a vendor (A/P). Without `je-names-v1` such lines are
-//! refused with "needs an engine update".
+//! The A/R-A/P rule (Q-206, Q-P15s): an entry may have any number of lines
+//! on Accounts Receivable or Accounts Payable accounts, and each such line
+//! needs a customer (A/R) or a vendor (A/P). Without `je-names-v1` such
+//! lines are refused with "needs an engine update". (Before engine
+//! 33a973fa the engine allowed only one such line; its refusal is still
+//! shown as [`JournalProblem::ArApTwoLines`], never raised here.)
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -351,7 +353,8 @@ pub enum JournalProblem {
     ArNeedsCustomer(RowKey),
     /// An A/P line whose name is not a vendor.
     ApNeedsVendor(RowKey),
-    /// More than one A/R or A/P line.
+    /// An older engine (before 33a973fa) refused more than one A/R or A/P
+    /// line (`JE_AR_AP_ONE_PER_ENTRY`). [`check`] never raises it (Q-206).
     ArApTwoLines,
     /// A/R and A/P lines need an engine update (`je-names-v1`).
     ArApNeedsUpdate(RowKey),
@@ -519,7 +522,7 @@ pub fn save_blocker(form: &JournalForm) -> Option<JournalProblem> {
 /// # Errors
 /// Every problem found, in field order: date, number, adjusting, reverse
 /// on, then the lines (each line's account, amount and name), then the
-/// lines as a whole (count, A/R-A/P, balance).
+/// lines as a whole (count, balance).
 #[allow(
     clippy::too_many_lines,
     reason = "one rule after another, in field order"
@@ -552,13 +555,11 @@ pub fn check(
     }
     let used: Vec<&FormLine> = form.lines.used().collect();
     let mut lines = Vec::with_capacity(used.len());
-    let mut ar_ap_lines = 0_usize;
     for l in &used {
         let side = side_of(l.amount);
         match l.account {
             None => problems.push(JournalProblem::LineAccountMissing(l.key)),
             Some(a) if ctx.is_ar_ap(a) => {
-                ar_ap_lines += 1;
                 if ctx.names_supported {
                     match l.customer {
                         None => problems.push(JournalProblem::ArApNameMissing(l.key)),
@@ -604,9 +605,6 @@ pub fn check(
     }
     if used.len() > MAX_LINES {
         problems.push(JournalProblem::TooManyLines);
-    }
-    if ar_ap_lines > 1 {
-        problems.push(JournalProblem::ArApTwoLines);
     }
     match totals(&form.lines) {
         None => problems.push(JournalProblem::TooLarge),

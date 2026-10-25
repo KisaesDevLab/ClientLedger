@@ -15,7 +15,10 @@
 //! reason in the status bar, `check()` refuses it, and
 //! `NewJournalEntry::new_with` refuses it again; nothing is sent.
 //!
-//! The A/R-A/P rule (Q-206) is refused locally in plain words; a closed
+//! The A/R-A/P rule (Q-206: any number of A/R or A/P lines, each with a
+//! customer or vendor) is refused locally in plain words; an older
+//! engine's one-per-entry refusal (`JE_AR_AP_ONE_PER_ENTRY`) is still
+//! shown in plain words; a closed
 //! period (either date, and the reversal's) asks for the closing-date
 //! password; an edit is guarded by the record's version (409 → Reload).
 //! Every save, void and delete publishes the accounts it touched (Q-262).

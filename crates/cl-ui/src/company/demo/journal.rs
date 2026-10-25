@@ -103,19 +103,14 @@ fn invalid() -> ApiError {
 }
 
 /// The contract's own checks, again (the builder refused them already):
-/// one A/R-or-A/P line with a name, Reverse on after the date, debits equal
-/// credits exactly.
+/// a name on every A/R-or-A/P line (any number of them, Q-206), Reverse on
+/// after the date, debits equal credits exactly.
 fn contract_checks(chart: &[Account], e: &NewJournalEntry) -> Result<(), ApiError> {
     let (ar, ap) = ar_ap(chart);
-    let ar_ap: Vec<_> = e
-        .lines()
+    if e.lines()
         .iter()
-        .filter(|l| ar.contains(&l.account) || ap.contains(&l.account))
-        .collect();
-    if ar_ap.len() > 1 {
-        return Err(ApiError::Local(LocalValidation::ArApTwoAccounts));
-    }
-    if ar_ap.iter().any(|l| l.contact.is_none()) {
+        .any(|l| (ar.contains(&l.account) || ap.contains(&l.account)) && l.contact.is_none())
+    {
         return Err(ApiError::Local(LocalValidation::ArApNameMissing));
     }
     if e.reverse_on().is_some_and(|r| r <= e.txn_date()) {

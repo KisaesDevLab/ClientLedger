@@ -269,8 +269,6 @@ pub enum EntryProblem {
     SameAccount,
     /// A/R or A/P needs a customer or vendor name (Q-206).
     NameRequired,
-    /// A/R or A/P on both lines; one per entry (Q-206).
-    TwoNamedAccounts,
     /// More than one tag on the line (Q-233).
     TooManyTags,
     /// The engine does not take this kind in this register.
@@ -292,7 +290,6 @@ impl EntryProblem {
             EntryProblem::AccountGone => TextKey("register.entry.problem.account_gone"),
             EntryProblem::SameAccount => TextKey("register.entry.problem.same_account"),
             EntryProblem::NameRequired => TextKey("register.entry.problem.name_required"),
-            EntryProblem::TwoNamedAccounts => TextKey("register.entry.problem.two_named_accounts"),
             EntryProblem::TooManyTags => TextKey("register.entry.problem.too_many_tags"),
             EntryProblem::KindNotAllowed => TextKey("register.entry.problem.kind_not_allowed"),
         }
@@ -309,7 +306,6 @@ impl EntryProblem {
             EntryProblem::AccountMissing
             | EntryProblem::AccountGone
             | EntryProblem::SameAccount
-            | EntryProblem::TwoNamedAccounts
             | EntryProblem::KindNotAllowed => EntryField::Account,
             EntryProblem::NameRequired => EntryField::Payee,
             EntryProblem::TooManyTags => EntryField::Tag,
@@ -371,9 +367,9 @@ pub fn check(
     }
     let named =
         ctx.this_class.needs_name() || ctx.other_class.is_some_and(AccountClass::needs_name);
-    if ctx.this_class.needs_name() && ctx.other_class.is_some_and(AccountClass::needs_name) {
-        problems.push(EntryProblem::TwoNamedAccounts);
-    } else if named && draft.payee.is_none() {
+    // Q-206 (owner 2026-10-25): any number of A/R or A/P lines; each
+    // still needs a name.
+    if named && draft.payee.is_none() {
         problems.push(EntryProblem::NameRequired);
     }
     match draft.account {

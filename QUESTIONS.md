@@ -214,7 +214,7 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 | Q-203 | **Deposit summary printout only**; no bank slip alignment. | P14 |
 | Q-204 | **Cash over/short line** on daily sales summaries. | P14 |
 | Q-205 | **Cash back on deposits allowed.** | P14 |
-| Q-206 | Journal entries may use **A/R or A/P with a name, one per entry**. | P15 |
+| Q-206 | Journal entries may use A/R or A/P lines with a name, any number per entry (owner 2026-10-25, following engine 33a973fa; was one per entry). | P15 |
 | Q-207 | **Adjusting-entry flag** with report filter. | P15, P28 |
 | Q-208 | Sub-account depth **matches the MyBooks engine**. | P11 |
 | Q-209 | **Account numbers must be unique.** | P11 |
@@ -441,7 +441,7 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P15p | "Open in form" for a due occurrence | P15 | The form saves normally, then the app marks the occurrence entered (a second call); if that fails, the reminder stays and can be dismissed. | Default in force |
 | Q-P15q | Helpers (owner money, personal funds, loan) | P15 | No Save as Template in P15; their postings can be saved from the base form when opened from the register. | Default in force |
 | Q-P15r | Sample templates | P15 | Three templates; the README notes the first-open catch-up of two 49.00 charges. | Default in force |
-| Q-P15s | A/R-A/P rule | P15 | One A/R or A/P account per entry; every line on it needs the right kind of name (Q-206). | Default in force |
+| Q-P15s | A/R-A/P rule | P15 | Any number of A/R or A/P lines per entry; every such line needs the right kind of name, a customer on A/R and a vendor on A/P (Q-206, owner 2026-10-25; was one per entry). Journal entries, Bulk Entry journal rows, templates and the A/R-A/P register entry row follow it. | Default in force |
 | Q-P15t | P15 look | P15 | Write Check pattern, no mockup; screenshots in the PR. | Default in force |
 | Q-P15u | Use date | P15 | Today, or the occurrence date when opened from Templates Due. | Default in force |
 | Q-P15v | Enter now on an unscheduled template | P15 | Asks for the date, default today. | Default in force |

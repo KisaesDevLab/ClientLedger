@@ -501,7 +501,7 @@ fn entries(g: &BatchGroup) -> Vec<Vec<usize>> {
 }
 
 /// The entry rules: at least two lines, debits equal credits exactly
-/// (`TXN_UNBALANCED`), one A/R or A/P line with a name.
+/// (`TXN_UNBALANCED`), a name on every A/R or A/P line.
 fn journal_rules(lists: &Lists, g: &BatchGroup, out: &mut [Checked]) {
     for rows in entries(g) {
         if rows.len() < 2 {
@@ -531,22 +531,13 @@ fn journal_rules(lists: &Lists, g: &BatchGroup, out: &mut [Checked]) {
                 ));
             }
         }
-        let ar_ap: Vec<usize> = rows
-            .iter()
-            .copied()
-            .filter(|&i| out[i].account.is_some_and(|a| lists.ar_ap.contains(&a)))
-            .collect();
-        if ar_ap.len() > 1 {
-            for &i in &ar_ap {
-                out[i].problems.push(problem(
-                    BatchField::Account,
-                    ProblemKind::Other,
-                    "One Accounts Receivable or Accounts Payable line per entry",
-                ));
-            }
-        }
-        for &i in &ar_ap {
-            if out[i].contact.is_none() && out[i].new_contact.is_none() {
+        // Any number of A/R or A/P lines, each with a name (Q-206, engine
+        // 33a973fa).
+        for &i in &rows {
+            if out[i].account.is_some_and(|a| lists.ar_ap.contains(&a))
+                && out[i].contact.is_none()
+                && out[i].new_contact.is_none()
+            {
                 out[i].problems.push(problem(
                     BatchField::Contact,
                     ProblemKind::Required,

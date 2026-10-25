@@ -176,7 +176,8 @@ pub struct JeLine {
     /// Line tag.
     pub tag: Option<TagId>,
     /// The line's name (customer, vendor or other name; `je-names-v1`).
-    /// An Accounts Receivable or Accounts Payable line needs one (Q-206).
+    /// Every Accounts Receivable or Accounts Payable line needs one; an
+    /// entry may have any number of them (Q-206).
     pub contact: Option<ContactId>,
 }
 
@@ -197,7 +198,8 @@ pub struct JeOptions {
 
 /// The Accounts Receivable and Accounts Payable accounts of the chart (the
 /// caller reads them from each account's system tag or detail type). The
-/// A/R-A/P rule (Q-206) is checked against them before anything is sent.
+/// A/R-A/P name rule (Q-206) is checked against them before anything is
+/// sent.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AccountRoles {
     /// Accounts Receivable accounts.
@@ -240,7 +242,9 @@ pub struct NewJournalEntry {
 
 /// Engine code: an A/R or A/P line without a name (400, `je-names-v1`).
 pub const JE_AR_AP_NAME_REQUIRED: &str = "JE_AR_AP_NAME_REQUIRED";
-/// Engine code: more than one A/R or A/P line in one entry (400).
+/// Engine code: more than one A/R or A/P line in one entry (400). Only
+/// engines before 33a973fa send it; the client no longer refuses such
+/// entries itself (Q-206).
 pub const JE_AR_AP_ONE_PER_ENTRY: &str = "JE_AR_AP_ONE_PER_ENTRY";
 /// Engine code: a void, delete or edit of an entry whose reversal was
 /// changed since it was made (409; void or delete the reversal first).
@@ -316,9 +320,9 @@ impl NewJournalEntry {
     /// `TooFewLines` (< 2), `TooManyLines` (> 500), `NonPositiveAmount`,
     /// `Unbalanced` (debits ≠ credits exactly), `InvalidValue` when a total
     /// overflows the money range or the number is over 20 characters,
-    /// `ReverseNotAfter` (Reverse on not after the date), `ArApTwoAccounts`
-    /// (more than one line on an A/R or A/P account, Q-206) and
-    /// `ArApNameMissing` (an A/R or A/P line without a name).
+    /// `ReverseNotAfter` (Reverse on not after the date) and
+    /// `ArApNameMissing` (an A/R or A/P line without a name; any number of
+    /// named A/R or A/P lines is fine, Q-206).
     pub fn new_with(
         txn_date: CalendarDate,
         memo: Option<String>,
@@ -359,11 +363,12 @@ impl NewJournalEntry {
         if opts.reverse_on.is_some_and(|r| r <= txn_date) {
             return Err(LocalValidation::ReverseNotAfter);
         }
-        let ar_ap: Vec<&JeLine> = lines.iter().filter(|l| roles.is_ar_ap(l.account)).collect();
-        if ar_ap.len() > 1 {
-            return Err(LocalValidation::ArApTwoAccounts);
-        }
-        if ar_ap.iter().any(|l| l.contact.is_none()) {
+        // Q-206 (owner 2026-10-25, engine 33a973fa): any number of A/R or
+        // A/P lines, each with a name.
+        if lines
+            .iter()
+            .any(|l| roles.is_ar_ap(l.account) && l.contact.is_none())
+        {
             return Err(LocalValidation::ArApNameMissing);
         }
         let lines = lines

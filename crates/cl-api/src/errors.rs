@@ -254,9 +254,6 @@ pub enum LocalValidation {
     /// A journal entry line on Accounts Receivable needs a customer, and
     /// one on Accounts Payable a vendor; nothing was sent.
     ArApNameMissing,
-    /// A journal entry may use only one Accounts Receivable or Accounts
-    /// Payable account; nothing was sent.
-    ArApTwoAccounts,
     /// Templates need `templates-v1`; nothing was sent.
     TemplatesUnavailable,
     /// A deposit that groups customer payments cannot be a template;

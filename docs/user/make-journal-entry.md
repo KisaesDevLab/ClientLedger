@@ -20,7 +20,7 @@ For example, paying 50.00 for fuel straight from checking is a debit of 50.00 to
 
 ## Names on Accounts Receivable and Accounts Payable lines
 
-A line on **Accounts Receivable** needs a customer in the **Name** column, and a line on **Accounts Payable** needs a vendor, so the amount shows up on the right customer or vendor balance. An entry can have only one line on Accounts Receivable or Accounts Payable.
+A line on **Accounts Receivable** needs a customer in the **Name** column, and a line on **Accounts Payable** needs a vendor, so the amount shows up on the right customer or vendor balance. An entry can have as many Accounts Receivable and Accounts Payable lines as you need; each one needs its own name.
 
 ## Adjusting entries
 

@@ -293,7 +293,6 @@ impl JournalScreen {
             LocalValidation::TooFewLines => Some(JournalProblem::TooFewLines),
             LocalValidation::TooManyLines => Some(JournalProblem::TooManyLines),
             LocalValidation::ReverseNotAfter => Some(JournalProblem::ReverseNotAfter),
-            LocalValidation::ArApTwoAccounts => Some(JournalProblem::ArApTwoLines),
             LocalValidation::ArApNameMissing => {
                 self.notice = Some("journal.problem.ar_ap_name_missing");
                 None

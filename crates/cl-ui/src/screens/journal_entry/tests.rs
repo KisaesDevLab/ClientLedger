@@ -227,28 +227,33 @@ fn ar_and_ap_lines_need_the_right_name_q206() {
     );
     assert!(!s.start_save(SaveIntent::Save, None));
     assert_eq!(s.state_json()["save"]["refused"], "ar_needs_customer");
+    // Every A/R or A/P line needs its name, however many there are.
     set_lines(
         &mut s,
         &[
-            (1200, "50.00", "", Some(customer)),
-            (2000, "", "50.00", Some(vendor)),
+            (1200, "30.00", "", Some(customer)),
+            (1200, "20.00", "", None),
+            (4000, "", "50.00", None),
         ],
     );
     assert!(!s.start_save(SaveIntent::Save, None));
-    assert_eq!(s.state_json()["save"]["refused"], "ar_ap_two_lines");
+    assert_eq!(s.state_json()["save"]["refused"], "ar_ap_name_missing");
     assert_eq!(s.saved_count, 0);
+    // Any number of named A/R and A/P lines save (Q-206, owner 2026-10-25).
     set_lines(
         &mut s,
         &[
-            (1200, "50.00", "", Some(customer)),
-            (4000, "", "50.00", None),
+            (1200, "30.00", "", Some(customer)),
+            (1200, "20.00", "", Some(customer)),
+            (2000, "", "50.00", Some(vendor)),
         ],
     );
     assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.problems);
     let v = s.state_json();
     assert_eq!(v["saved_count"], 1);
     assert_eq!(v["mode"], "edit");
-    assert_eq!(s.lines.value().lines[0].customer, Some(customer));
+    let names: Vec<_> = s.lines.value().lines.iter().map(|l| l.customer).collect();
+    assert_eq!(names[..3], [Some(customer), Some(customer), Some(vendor)]);
 }
 
 #[test]
