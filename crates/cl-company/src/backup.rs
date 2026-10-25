@@ -333,6 +333,7 @@ pub async fn backup(
             &ArchiveRequest {
                 include_attachments: true,
                 include_audit: true,
+                omit_intake_settings: false,
                 host: serde_json::to_value(&host).map_err(|_| CompanyError::Metadata)?,
                 passphrase,
             },
