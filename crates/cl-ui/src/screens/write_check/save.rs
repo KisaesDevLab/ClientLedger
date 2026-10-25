@@ -31,6 +31,57 @@ use crate::forms::lines_grid::{L_ACCOUNT, L_AMOUNT, L_CUSTOMER};
 /// Checks are listed 50 at a time for Prev/Next.
 const NAV_PAGE: u16 = 50;
 
+/// A check created at most this long before its first try was sent is
+/// still that try's (clock rounding between the app and the engine).
+const SENT_SLACK_MS: i64 = 2_000;
+
+/// The new check of a first try whose outcome may be unknown: what the
+/// used-number lookup must match (review fix-PR-1 should-fix 4). Never
+/// logged.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct SentCheck {
+    pub date: CalendarDate,
+    pub payee: Option<cl_core::ids::ContactId>,
+    pub amount: cl_core::Money,
+    /// When it was sent (Unix ms; the demo's own clock in the demo).
+    pub at_ms: i64,
+}
+
+impl SentCheck {
+    fn of(d: &CheckDraft, demo: bool) -> SentCheck {
+        let at_ms = if demo {
+            crate::company::demo::DemoState::now().unix_millis()
+        } else {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |t| i64::try_from(t.as_millis()).unwrap_or(i64::MAX))
+        };
+        SentCheck {
+            date: d.date,
+            payee: d.payee,
+            amount: d.amount,
+            at_ms,
+        }
+    }
+
+    /// `rec` is the check that try wrote: posted, the same date, payee and
+    /// amount, and created after the try was sent. Anything else is not
+    /// ours (another check that happens to carry the number).
+    pub(crate) fn matches(&self, rec: &CheckRecord) -> bool {
+        let t = &rec.txn;
+        let amount = t
+            .total
+            .or_else(|| cl_core::Money::sum(t.lines.iter().map(|l| l.debit)).ok());
+        t.status == TxnStatus::Posted
+            && t.txn_date == self.date
+            && t.contact_id == self.payee
+            && amount == Some(self.amount)
+            && t
+                .created_at
+                .is_some_and(|c| c.unix_millis() >= self.at_ms - SENT_SLACK_MS)
+    }
+}
+
 /// What a save sends, for its idempotency key: the posting, the record and
 /// version it edits, and whether a closing-date password goes with it
 /// (never the password itself).
@@ -382,6 +433,11 @@ impl WriteCheckScreen {
             (e.id, version)
         });
         let printed = self.save.printed_choice.filter(|_| edit.is_some());
+        // The first try of a new check: what a later "number used" lookup
+        // must match. The owner's resend after an unknown outcome keeps it.
+        if edit.is_none() && !self.save.lost.after_unknown {
+            self.save.sent = Some(SentCheck::of(&draft, self.link.is_demo()));
+        }
         if self.link.is_demo() {
             let saved = self.demo_save(&draft, edit, password.as_ref(), printed, check_edit);
             return match saved {
@@ -919,37 +975,66 @@ impl WriteCheckScreen {
     }
 
     /// After an unknown outcome and the owner's "save again", the engine
-    /// said check `number` is used on `bank`: find that check and show it
-    /// (B2). Not found: the usual "number used" offer.
+    /// said check `number` is used on `bank`: find the first try's check
+    /// and show it (B2). Only a check of that date with the number, the
+    /// same payee and amount, created after the first try was sent counts
+    /// (review fix-PR-1 should-fix 4); none, or more than one: the usual
+    /// "number used" offer.
     pub(crate) fn find_check(&mut self, bank: AccountId, number: u32) {
-        /// Pages of checks searched for the number.
+        /// Pages of that day's checks searched for the number.
         const PAGES: u64 = 25;
+        let Some(sent) = self.save.sent.clone() else {
+            self.save.lookup = Some(Task::ready(None));
+            self.poll_lookup();
+            return;
+        };
         let link = Arc::clone(&self.link);
         if let Some(mut demo) = link.demo_state() {
-            let found = crate::company::demo::checks::list(&mut demo, bank)
+            let ids: Vec<TransactionId> = crate::company::demo::checks::list(&mut demo, bank)
                 .into_iter()
-                .find(|c| c.number == Some(number))
-                .map(|c| c.id);
+                .filter(|c| c.number == Some(number))
+                .map(|c| c.id)
+                .collect();
+            let found: Vec<TransactionId> = ids
+                .into_iter()
+                .filter(|id| {
+                    crate::company::demo::checks::get(&mut demo, *id)
+                        .is_some_and(|v| sent.matches(&v.record))
+                })
+                .collect();
             drop(demo);
-            self.save.lookup = Some(Task::ready(found));
+            let one = match found.as_slice() {
+                [id] => Some(*id),
+                _ => None,
+            };
+            self.save.lookup = Some(Task::ready(one));
             self.poll_lookup();
             return;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
+        let day = sent.date;
         if let Ok(p) = group.read(&session, move |s| async move {
+            let mut found = Vec::new();
             for i in 0..PAGES {
                 let page = PageRequest::new(NAV_PAGE, i * u64::from(NAV_PAGE))?;
-                let rows = s.checks().list(Some(bank), None, None, page).await?;
-                if let Some(c) = rows.iter().find(|c| c.number == Some(number)) {
-                    return Ok(Some(c.id));
+                let rows = s.checks().list(Some(bank), Some(day), Some(day), page).await?;
+                for c in rows.iter().filter(|c| c.number == Some(number)) {
+                    let v = s.checks().get(c.id).await?;
+                    if sent.matches(&v.record) {
+                        found.push(c.id);
+                    }
                 }
                 if rows.len() < usize::from(NAV_PAGE) {
                     break;
                 }
             }
-            Ok(None)
+            // Two that fit: never guess.
+            Ok(match found.as_slice() {
+                [id] => Some(*id),
+                _ => None,
+            })
         }) {
             self.save.lookup = Some(Task::Pending(p));
         }

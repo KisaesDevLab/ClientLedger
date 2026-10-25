@@ -187,6 +187,9 @@ pub(crate) struct SaveState {
     /// After an unknown outcome the engine said the number is used: the
     /// check with that number is being looked up (never n+1, B2).
     pub lookup: Option<Task<Option<TransactionId>>>,
+    /// The new check sent last before an unknown outcome: what the
+    /// used-number lookup must match (review fix-PR-1 should-fix 4).
+    pub sent: Option<save::SentCheck>,
 }
 
 /// "This check was already printed": Reprint / Keep number / Cancel.
@@ -960,6 +963,10 @@ impl Screen for WriteCheckScreen {
 
     fn dirty(&self) -> bool {
         self.is_dirty()
+    }
+
+    fn save_unconfirmed(&self) -> bool {
+        self.save.lost.pending()
     }
 
     fn save(&mut self) -> bool {
