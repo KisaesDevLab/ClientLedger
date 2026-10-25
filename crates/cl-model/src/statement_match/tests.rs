@@ -147,7 +147,7 @@ fn pass_one_pairs_by_reference_and_exact_amount() {
 }
 
 #[test]
-fn duplicates_in_the_books_pair_once_closest_date_first() {
+fn duplicates_in_the_books_are_listed_never_picked_by_date() {
     let stmt = vec![line(10, "INV-1", Charge, "100")];
     let books = vec![
         item(9, 12, "INV-1", Charge, "100"),
@@ -155,13 +155,36 @@ fn duplicates_in_the_books_pair_once_closest_date_first() {
         item(2, 11, "INV-1", Charge, "100"),
     ];
     let r = match_lines(&stmt, &books, 7);
-    // 9th and 11th are both one day away: the earlier date wins.
-    assert_eq!(r.pairs[0].books, txn(3));
+    assert!(r.pairs.is_empty(), "no closest-date guess");
     assert_eq!(
-        r.missing_on_statement,
-        vec![txn(2), txn(9)],
-        "never many-to-one"
+        r.ambiguous,
+        vec![Ambiguous {
+            statement: 0,
+            candidates: vec![txn(3), txn(2), txn(9)],
+        }],
+        "every tie listed, by date"
     );
+    assert!(r.missing_on_statement.is_empty() && r.missing_in_books.is_empty());
+
+    // Two statement lines for two equal books entries: both listed.
+    let stmt = vec![
+        line(10, "INV-1", Charge, "100"),
+        line(11, "INV-1", Charge, "100"),
+    ];
+    let books = vec![
+        item(1, 10, "INV-1", Charge, "100"),
+        item(2, 11, "INV-1", Charge, "100"),
+    ];
+    let r = match_lines(&stmt, &books, 7);
+    assert!(r.pairs.is_empty());
+    assert_eq!(r.ambiguous.len(), 2);
+
+    // One books entry for a repeated statement line: it pairs once; the
+    // other line is left for pass 2 (nothing near: missing).
+    let books = vec![item(1, 10, "INV-1", Charge, "100")];
+    let r = match_lines(&stmt, &books, 0);
+    assert_eq!(r.pairs.len(), 1);
+    assert_eq!(r.missing_in_books.len(), 1);
 }
 
 #[test]
