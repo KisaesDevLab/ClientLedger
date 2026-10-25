@@ -678,6 +678,21 @@ impl RegisterScreen {
             let notice = match &e {
                 ApiError::ClosedPeriod(_) => Some("register.ap.closed"),
                 ApiError::Validation(_) => route.refused(),
+                // `ap-edit-v1` answers a paid bill or an applied or
+                // deposited credit with 409 (`BILL_HAS_PAYMENTS`,
+                // `CREDIT_APPLIED`, `TXN_DEPOSITED`) rather than 400.
+                ApiError::Conflict { .. }
+                    if matches!(
+                        cl_api::ap_refusal(&e),
+                        Some(
+                            cl_api::ApRefusal::BillHasPayments
+                                | cl_api::ApRefusal::CreditApplied
+                                | cl_api::ApRefusal::Deposited
+                        )
+                    ) =>
+                {
+                    route.refused()
+                }
                 _ => None,
             };
             if let Some(key) = notice {
