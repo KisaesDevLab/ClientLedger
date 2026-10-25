@@ -953,6 +953,20 @@ impl OllamaStub {
         });
     }
 
+    /// The bodies of the `POST /api/chat` requests served so far.
+    pub fn chat_bodies(&self, h: &Harness) -> Vec<String> {
+        h.run(async {
+            self.server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.url.path() == "/api/chat")
+                .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+                .collect()
+        })
+    }
+
     /// Requests served so far.
     pub fn hits(&self, h: &Harness) -> u64 {
         h.run(async {

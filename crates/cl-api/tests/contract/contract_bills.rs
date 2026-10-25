@@ -1028,5 +1028,83 @@ pub fn reading_refused_while_ai_is_off_live(h: &Harness) {
         && h.require_cap(Capabilities::AI_DESKTOP, "U-09")
     {
         ocr_confidence_u89(h, s);
+        ocr_text_pdf_reads(h, s);
     }
+}
+
+/// A synthetic two-page PDF with a text layer (`fixtures/docs/two_pages.pdf`).
+const TEXT_PDF: &[u8] = include_bytes!("../../../../fixtures/docs/two_pages.pdf");
+
+/// A PDF is read, not `PDF_RENDER_FAILED`: the engine executable carries
+/// pdf.js and its worker, so the text layer is read inside the engine and
+/// only that text goes to the (canned, loopback) model. No page pictures
+/// are made (that would need poppler, which is not shipped).
+fn ocr_text_pdf_reads(h: &Harness, s: &Session) {
+    use cl_api::{AiConfigUpdate, AiTaskToggles, OllamaTarget, SessionSecrets};
+    let stub = crate::support::OllamaStub::shared(h);
+    stub.serve_chat(h, CANNED_BILL);
+    h.run(s.update_ai_config(
+        &AiConfigUpdate {
+            ollama_base_url: Some(stub.base_url.clone()),
+            categorization_model: Some("llama3.1:8b".into()),
+            ocr_model: Some("llama3.1:8b".into()),
+            ..AiConfigUpdate::for_provider("ollama", true)
+        },
+        key(),
+    ))
+    .expect("AI on");
+    h.run(s.put_session_secrets(&SessionSecrets {
+        ollama: Some(OllamaTarget {
+            base_url: stub.base_url.clone(),
+            model: None,
+        }),
+        ..SessionSecrets::default()
+    }))
+    .expect("session ollama");
+    h.run(s.accept_company_ai_consent(key())).expect("consent");
+    h.run(s.set_ai_tasks(
+        &AiTaskToggles {
+            receipt_ocr: Some(true),
+            ..AiTaskToggles::default()
+        },
+        key(),
+    ))
+    .expect("bill reading on");
+    let up = h
+        .run(
+            s.attachments()
+                .upload_draft(DraftKey::new(), "invoice.pdf", TEXT_PDF, key()),
+        )
+        .expect("upload");
+    let asked = stub.chat_bodies(h).len();
+    let open = cl_api::BillReadGate {
+        ai_enabled: true,
+        bill_reading_on: true,
+        provider_set: true,
+    };
+    let read = h.run(s.bill_reading().extract(open, up.id, key()));
+    h.run(s.update_ai_config(
+        &AiConfigUpdate {
+            is_enabled: Some(false),
+            ..AiConfigUpdate::default()
+        },
+        key(),
+    ))
+    .expect("AI off");
+    let read = read.expect("a PDF is read (not PDF_RENDER_FAILED)");
+    let bodies = stub.chat_bodies(h);
+    assert_eq!(bodies.len(), asked + 1, "one model call");
+    let sent = bodies.last().map(String::as_str).unwrap_or_default();
+    assert!(
+        sent.contains("Synthetic test document") && sent.contains("Second page"),
+        "the PDF's text layer (both pages) went to the model"
+    );
+    assert!(!sent.contains("\"images\""), "no page pictures were sent");
+    assert_eq!(
+        read.vendor_name.as_deref(),
+        Some("Midwest Equipment Rental")
+    );
+    assert_eq!(read.total, Some(m("1480")));
+    h.run(s.attachments().delete(up.id, key()))
+        .expect("clean up");
 }
