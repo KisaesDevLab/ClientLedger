@@ -32,6 +32,7 @@ mod contract_journal_entries;
 mod contract_lifecycle;
 mod contract_list_csv;
 mod contract_logging;
+mod contract_merges;
 mod contract_money;
 mod contract_money_helpers;
 mod contract_preferences;
@@ -139,6 +140,10 @@ fn main() -> std::process::ExitCode {
         ),
         ("tags::group_reorder_u41", contract_tags::group_reorder_u41),
         ("tags::single_select_u41", contract_tags::single_select_u41),
+        (
+            "merges::closed_period_needs_the_password_u47",
+            contract_merges::closed_period_needs_the_password_u47,
+        ),
         (
             "tags::required_groups_u42",
             contract_tags::required_groups_u42,

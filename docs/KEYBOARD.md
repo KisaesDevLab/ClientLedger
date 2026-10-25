@@ -52,7 +52,7 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Ctrl+Shift+Q` | Account or Transaction Report | `list.quick_report` |
 | `Delete` | Delete List Entry | `list.delete` |
 | `Ctrl+Shift+O` | Move Window to Its Own Window | `window.pop_out` |
-| `Ctrl+Shift+D` | Show or Hide Details | `window.toggle_details` |
+| `F9` | Show or Hide Details | `window.toggle_details` |
 
 ## In a form or grid
 
@@ -149,4 +149,4 @@ Find these from the menus or with `Ctrl+K`.
 - **Payroll:** Import Payroll
 - **Reports:** Reports, Profit & Loss, Balance Sheet
 - **Company:** Set Closing Date, Users and Permissions, Send to My Accountant, Audit Trail
-- **Help:** Privacy Notice, About ClientLedger
+- **Help:** Privacy Notice, Support ClientLedger on Ko-fi, About ClientLedger

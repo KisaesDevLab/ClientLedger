@@ -221,6 +221,47 @@ fn merge_only_for_header_only_tags() {
     );
 }
 
+/// U-47 (Q-P11t): with `merge-closing-date-v1` a tag used on lines can be
+/// merged, and a closed-period refusal asks for the closing-date password.
+#[test]
+fn line_tags_merge_with_the_closing_password() {
+    let mut r = Rig::new();
+    r.s.caps.merge_lines = true;
+    r.s.caps.merge_closing = true;
+    r.select(3);
+    assert_eq!(r.state("merge_available"), true, "lines move too");
+    r.cmd("list.merge");
+    assert_eq!(r.state("panel"), "merge");
+    r.s.merge_failed(ApiError::ClosedPeriod(cl_api::ClosedPeriod {
+        lock_date: cl_core::CalendarDate::from_ymd(2026, 3, 31).ok(),
+        can_override: true,
+        password_required: Some(true),
+        message: UserText::default(),
+    }));
+    r.frames(2);
+    assert_eq!(r.state("merge_closing")["closing"], "asking");
+    assert_eq!(r.state("merge_closing")["closing_verb"], "merge");
+    assert_eq!(r.state("error"), false);
+    // Alt+S waits under the dialog.
+    assert!(r.cmd("form.save_close"));
+    assert_eq!(r.state("panel"), "merge");
+    let Panel::Merge(m) = &mut r.s.panel else {
+        panic!("merge panel");
+    };
+    m.closing.password = crate::screens::company::form::SecretText::from("pw");
+    r.s.submit_merge_password();
+    r.frames(3);
+    assert_eq!(r.state("note"), "merged");
+    assert_eq!(r.state("panel"), "none");
+    assert!(
+        r.link
+            .demo_state()
+            .expect("demo")
+            .tags_gone
+            .contains(&tag_id(3))
+    );
+}
+
 #[test]
 fn groups_with_one_per_line_and_required_account_types() {
     let mut r = Rig::new();

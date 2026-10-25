@@ -364,6 +364,31 @@ pub struct SuggestedAccount {
 #[derive(Clone, Copy, Debug)]
 pub struct Contacts<'a>(pub(crate) &'a Session);
 
+/// The closing-date password a contact or tag merge may carry: only an
+/// engine with `merge-closing-date-v1` (U-47) takes one.
+///
+/// # Errors
+/// `Local(ClosedPeriodOverrideUnavailable)` for a password without the
+/// capability (nothing is sent).
+pub(crate) fn merge_password<'p>(
+    s: &Session,
+    password: Option<&'p cl_core::Secret>,
+) -> Result<Option<&'p str>, ApiError> {
+    let Some(p) = password else {
+        return Ok(None);
+    };
+    if !s
+        .client()
+        .capabilities()
+        .has(crate::wire::Capabilities::MERGE_CLOSING_DATE)
+    {
+        return Err(ApiError::Local(
+            crate::errors::LocalValidation::ClosedPeriodOverrideUnavailable,
+        ));
+    }
+    Ok(Some(p.expose()))
+}
+
 impl Session {
     /// Customers and vendors of the open company.
     #[must_use]
@@ -465,30 +490,42 @@ impl Contacts<'_> {
     /// Repeating a merge that already happened moves nothing and only
     /// deactivates `source` again, so the write may be resent safely.
     ///
+    /// With `merge-closing-date-v1` (U-47) a merge that moves a transaction
+    /// dated on or before the closing date needs `closing_password`
+    /// (sent only then; never logged).
+    ///
     /// # Errors
-    /// `Local(InvalidValue)` when both are the same contact (nothing sent);
-    /// `NotFound`; any [`ApiError`].
+    /// Nothing is sent for: `Local(InvalidValue)` (both the same contact);
+    /// `Local(ClosedPeriodOverrideUnavailable)` (a password without
+    /// `merge-closing-date-v1`). From the engine: `ClosedPeriod`,
+    /// `ClosingPasswordRejected`, `ClosingPasswordRateLimited`, `NotFound`;
+    /// any [`ApiError`].
     pub async fn merge(
         &self,
         source: ContactId,
         target: ContactId,
+        closing_password: Option<&cl_core::Secret>,
         key: IdempotencyKey,
     ) -> Result<Versioned<Contact>, ApiError> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
-        struct Body {
+        struct Body<'a> {
             source_id: ContactId,
             target_id: ContactId,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            closing_password: Option<&'a str>,
         }
         if source == target {
             return Err(ApiError::Local(
                 crate::errors::LocalValidation::InvalidValue,
             ));
         }
+        let closing_password = merge_password(self.0, closing_password)?;
         let mut call =
             Call::at(Method::Post, CONTACTS_MERGE.route()).json_body(json_body(&Body {
                 source_id: source,
                 target_id: target,
+                closing_password,
             })?);
         call.idempotency_key = Some(key);
         let reply = self.0.send(&CONTACTS_MERGE, call, None).await?;
@@ -556,7 +593,7 @@ impl Contacts<'_> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::resources::testkit::{company_session, json, query, requests};
+    use crate::resources::testkit::{company_session, json, query, requests, session_with_caps};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer};
 
@@ -714,6 +751,68 @@ pub(crate) mod tests {
         );
     }
 
+    /// U-47: the closing-date password goes out only with
+    /// `merge-closing-date-v1`; the engine's refusals arrive typed.
+    #[tokio::test]
+    async fn merge_closing_password_needs_the_capability() {
+        let other = ContactId::parse("3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a09").expect("id");
+        let pw = cl_core::Secret::new("pw-canary-123");
+
+        let server = MockServer::start().await;
+        let s = session_with_caps(&server, &[]).await;
+        let e = s
+            .contacts()
+            .merge(other, id(), Some(&pw), IdempotencyKey::new())
+            .await
+            .expect_err("gated");
+        assert_eq!(
+            e,
+            ApiError::Local(crate::errors::LocalValidation::ClosedPeriodOverrideUnavailable)
+        );
+        assert!(requests(&server, "POST").await.is_empty(), "nothing sent");
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/contacts/merge"))
+            .respond_with(json(
+                423,
+                r#"{"error":{"message":"locked","code":"TB_PERIOD_LOCKED",
+                "details":{"canOverride":true,"closingPasswordRequired":true}}}"#,
+            ))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/contacts/merge"))
+            .respond_with(json(
+                403,
+                r#"{"error":{"message":"wrong","code":"CLOSING_PASSWORD_INVALID"}}"#,
+            ))
+            .mount(&server)
+            .await;
+        let s = session_with_caps(&server, &[crate::wire::Capabilities::MERGE_CLOSING_DATE]).await;
+        let locked = s
+            .contacts()
+            .merge(other, id(), None, IdempotencyKey::new())
+            .await
+            .expect_err("locked");
+        let ApiError::ClosedPeriod(c) = &locked else {
+            panic!("{locked:?}");
+        };
+        assert_eq!(c.password_required, Some(true));
+        let wrong = s
+            .contacts()
+            .merge(other, id(), Some(&pw), IdempotencyKey::new())
+            .await
+            .expect_err("wrong");
+        assert_eq!(wrong, ApiError::ClosingPasswordRejected);
+        let posts = requests(&server, "POST").await;
+        assert_eq!(posts.len(), 2, "a refused password is not retried");
+        let body: Value = serde_json::from_slice(&posts[1].body).expect("json");
+        assert_eq!(body["closingPassword"], "pw-canary-123");
+        assert!(!format!("{wrong} {wrong:?} {locked:?}").contains("canary"));
+    }
+
     #[tokio::test]
     async fn merge_sends_both_ids_and_history_pages() {
         let server = MockServer::start().await;
@@ -736,7 +835,7 @@ pub(crate) mod tests {
         let other = ContactId::parse("3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a09").expect("id");
         let kept = s
             .contacts()
-            .merge(other, id(), IdempotencyKey::new())
+            .merge(other, id(), None, IdempotencyKey::new())
             .await
             .expect("merge");
         assert_eq!(kept.record.id, id());
@@ -744,9 +843,10 @@ pub(crate) mod tests {
             serde_json::from_slice(&requests(&server, "POST").await[0].body).expect("json");
         assert_eq!(post["sourceId"], other.to_string());
         assert_eq!(post["targetId"], id().to_string());
+        assert!(post.get("closingPassword").is_none());
         let same = s
             .contacts()
-            .merge(id(), id(), IdempotencyKey::new())
+            .merge(id(), id(), None, IdempotencyKey::new())
             .await
             .expect_err("self merge");
         assert!(matches!(same, ApiError::Local(_)), "{same:?}");

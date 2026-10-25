@@ -1,6 +1,6 @@
 //! The collapsible detail panel (Q-266): a panel at the right of a list that
 //! the owner can hide (the list takes the freed width) and show again, with
-//! the control on the panel's edge and Ctrl+Shift+D (`window.toggle_details`).
+//! the control on the panel's edge and F9 (`window.toggle_details`, Q-P16n).
 //! The choice is remembered per screen kind in
 //! [`crate::prefs::PanelPrefsBook`].
 //!
@@ -58,7 +58,7 @@ pub enum PanelEvent {
     Toggled,
 }
 
-/// The shortcut text of the toggle ("Ctrl+Shift+D").
+/// The shortcut text of the toggle ("F9").
 fn keys() -> String {
     cl_model::commands::find(TOGGLE)
         .and_then(|c| c.shortcut)

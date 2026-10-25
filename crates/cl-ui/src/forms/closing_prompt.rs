@@ -51,6 +51,9 @@ pub enum Verb {
     Void,
     /// Delete (Delete, destructive).
     Delete,
+    /// A contact or tag merge that moves closed-period transactions
+    /// (Merge, U-47).
+    Merge,
 }
 
 impl Verb {
@@ -59,6 +62,7 @@ impl Verb {
             Verb::Change => "closing.ask",
             Verb::Void => "closing.ask.void",
             Verb::Delete => "closing.ask.delete",
+            Verb::Merge => "closing.ask.merge",
         }
     }
 
@@ -67,6 +71,7 @@ impl Verb {
             Verb::Change => "closing.change",
             Verb::Void => "closing.void",
             Verb::Delete => "closing.delete",
+            Verb::Merge => "closing.merge",
         }
     }
 }
@@ -530,7 +535,7 @@ mod tests {
         assert_eq!(p.verb(), Verb::Delete);
         assert_eq!(p.state_json(true)["closing_verb"], "delete");
         assert_eq!(Verb::Delete.button_key(), "closing.delete");
-        for v in [Verb::Change, Verb::Void, Verb::Delete] {
+        for v in [Verb::Change, Verb::Void, Verb::Delete, Verb::Merge] {
             assert!(crate::i18n::has(v.ask_key()));
             assert!(crate::i18n::has(v.button_key()));
         }

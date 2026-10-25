@@ -187,6 +187,17 @@ impl Capabilities {
     /// account numbers, payables `dueWithinDays`.
     pub const DASHBOARD_EXACT: &'static str = "dashboard-exact-v1";
 
+    // ---- Checkpoint PR-1 and U-47 (engine PRs #169, #170) ------------------
+    /// U-80/U-81: `PUT /transactions/:id` refuses a deposit edit that drops
+    /// its links (409 `DEPOSIT_LINKS_DROPPED`) and a printed check's face
+    /// change (409 `CHECK_PRINTED`); the check print routes honour the
+    /// closing date.
+    pub const LEDGER_GUARDS: &'static str = "ledger-guards-v1";
+    /// U-47: `POST /contacts/merge` and `/tags/merge` honour the closing
+    /// date and take `closingPassword` (423 / 403 / 429); the tag merge
+    /// also moves line tags and default-tag references.
+    pub const MERGE_CLOSING_DATE: &'static str = "merge-closing-date-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {

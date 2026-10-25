@@ -44,6 +44,7 @@ use self::model::{
     Balance, COL_NAME, HistoryModel, ListModel, history_spec, list_spec, report_is_zero,
 };
 use crate::company::{CompanyLink, Task};
+use crate::forms::closing_prompt::{ClosingClick, ClosingPrompt, Verb};
 use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
 use crate::layout::side_panel::{PanelEvent, Part, SidePanel, with_side_panel};
@@ -62,7 +63,7 @@ pub const VENDORS_KIND: &str = "vendors.center";
 const PANEL_WIDTH: f32 = 500.0;
 
 /// The details panel's hide/show choice: read once from the shared book,
-/// written back when Ctrl+Shift+D changes it.
+/// written back when F9 changes it.
 #[derive(Debug, Clone, Copy, Default)]
 struct DetailsChoice {
     /// Hidden by the owner.
@@ -141,6 +142,18 @@ struct MergePanel {
     focus: bool,
     task: Option<Task<Versioned<Contact>>>,
     error: Option<ApiError>,
+    /// The closing-date password for a merge that moves closed-period
+    /// transactions (U-47, Q-231); the change waiting is the kept contact.
+    closing: ClosingPrompt<ContactId>,
+}
+
+/// The engine applies the closing date to merges and takes the closing-date
+/// password for them (`merge-closing-date-v1`, U-47).
+fn merge_closing_supported(link: &CompanyLink) -> bool {
+    link.client().is_some_and(|c| {
+        c.capabilities()
+            .has(cl_api::Capabilities::MERGE_CLOSING_DATE)
+    })
 }
 
 enum Panel {
@@ -206,6 +219,9 @@ pub struct CenterScreen {
     /// The contacts being read again after a save elsewhere: the cursor
     /// stays where it was and the keyboard is not moved.
     refreshing: bool,
+    /// The engine applies the closing date to merges and takes the
+    /// closing-date password for them (`merge-closing-date-v1`, U-47).
+    merge_closing: bool,
 }
 
 fn new_grid(salt: &str, spec: cl_grid::GridSpec) -> Grid {
@@ -279,7 +295,9 @@ impl CenterScreen {
             just_hidden: None,
             bus: crate::data_bus::Subscription::detached(),
             refreshing: false,
+            merge_closing: false,
         };
+        s.merge_closing = merge_closing_supported(&s.link);
         s.bus = s.link.bus().subscribe();
         s.start_load();
         s
@@ -739,6 +757,7 @@ impl CenterScreen {
             focus: true,
             task: None,
             error: None,
+            closing: ClosingPrompt::default(),
         }));
     }
 
@@ -747,12 +766,50 @@ impl CenterScreen {
         let Panel::Merge(m) = &mut self.panel else {
             return;
         };
-        if m.task.is_some() {
+        if m.task.is_some() || m.closing.dialog_open() {
             return;
         }
         let Some(&(target, _)) = m.targets.get(m.choice) else {
             return;
         };
+        self.send_merge(target, None);
+    }
+
+    /// The engine refused the merge: a closed-period refusal (423 / 403 /
+    /// 429) goes to the closing-date password dialog; anything else shows.
+    fn merge_failed(&mut self, e: ApiError) {
+        let supported = self.merge_closing;
+        let Panel::Merge(m) = &mut self.panel else {
+            return;
+        };
+        let target = m.targets.get(m.choice).map(|(id, _)| *id);
+        let taken = target.is_some_and(|t| m.closing.failed(&e, t, supported, None));
+        if taken {
+            m.closing.set_verb(Verb::Merge);
+        } else {
+            m.error = Some(e);
+        }
+    }
+
+    /// The closing-date password dialog's Merge: the same merge again,
+    /// with the password.
+    fn submit_merge_password(&mut self) {
+        let Panel::Merge(m) = &mut self.panel else {
+            return;
+        };
+        if let Some((target, password)) = m.closing.submit() {
+            self.send_merge(target, Some(password));
+        }
+    }
+
+    /// Sends the merge of the confirmation's source into `target`.
+    fn send_merge(&mut self, target: ContactId, password: Option<cl_core::Secret>) {
+        let Panel::Merge(m) = &mut self.panel else {
+            return;
+        };
+        if m.task.is_some() {
+            return;
+        }
         let source = m.source;
         m.error = None;
         if self.link.is_demo() {
@@ -772,6 +829,7 @@ impl CenterScreen {
             return;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            m.closing.nothing_sent();
             return;
         };
         let key = IdempotencyKey::new();
@@ -780,9 +838,13 @@ impl CenterScreen {
             key: Some(key.clone()),
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
-            s.contacts().merge(source, target, key).await
+            s.contacts()
+                .merge(source, target, password.as_ref(), key)
+                .await
         }) {
             m.task = Some(Task::Pending(p));
+        } else {
+            m.closing.nothing_sent();
         }
     }
 
@@ -927,6 +989,7 @@ impl CenterScreen {
             m.task = None;
             match result {
                 Ok(kept) => {
+                    m.closing.saved();
                     self.panel = Panel::None;
                     self.detail = None;
                     self.want_cursor = Some(kept.record.id);
@@ -934,7 +997,7 @@ impl CenterScreen {
                     self.publish(true);
                     self.start_load();
                 }
-                Err(e) => m.error = Some(e),
+                Err(e) => self.merge_failed(e),
             }
         }
         if let Some(d) = self.detail.as_mut() {
@@ -1350,6 +1413,14 @@ impl CenterScreen {
         });
         let mut confirm = false;
         let mut cancel = false;
+        // With U-47 the engine asks for the closing-date password itself, so
+        // the confirmation no longer warns that closed periods change too
+        // (Q-P11aa).
+        let explain = if self.merge_closing {
+            "center.merge.explain_closing"
+        } else {
+            "center.merge.explain"
+        };
         let Panel::Merge(m) = &mut self.panel else {
             return;
         };
@@ -1359,7 +1430,7 @@ impl CenterScreen {
             &t_with("center.merge.title", &[("name", &m.source_name)]),
         );
         ui.add_space(6.0);
-        let busy = m.task.is_some();
+        let busy = m.task.is_some() || m.closing.dialog_open();
         ui.add_enabled_ui(!busy, |ui| {
             let names: Vec<String> = m.targets.iter().map(|(_, n)| n.clone()).collect();
             let focus = std::mem::take(&mut m.focus);
@@ -1378,7 +1449,7 @@ impl CenterScreen {
             ui.add(
                 egui::Label::new(
                     RichText::new(t_with(
-                        "center.merge.explain",
+                        explain,
                         &[("source", &m.source_name), ("target", &target)],
                     ))
                     .color(tokens.warn_text),
@@ -1410,8 +1481,14 @@ impl CenterScreen {
         if let Some(e) = &m.error {
             cform::inline_error(ui, tokens, e);
         }
-        if busy {
+        if m.task.is_some() && !m.closing.dialog_open() {
             cform::progress_line(ui, tokens, &t("center.merge.working"));
+        }
+        let click = m.closing.ui(ui, tokens);
+        match click {
+            ClosingClick::Submit => self.submit_merge_password(),
+            ClosingClick::Cancel => m.closing.cancel(),
+            ClosingClick::None => {}
         }
         if confirm {
             self.confirm_merge();
@@ -1527,6 +1604,12 @@ impl Screen for CenterScreen {
     }
 
     fn command(&mut self, id: CommandId) -> bool {
+        // The closing-date password dialog has the keyboard while it is up.
+        if let Panel::Merge(m) = &mut self.panel
+            && let Some(handled) = m.closing.command(id)
+        {
+            return handled;
+        }
         match id.as_str() {
             "list.new" => self.open_new(),
             "edit.edit_transaction" => self.open_edit(self.selected()),
@@ -1535,7 +1618,7 @@ impl Screen for CenterScreen {
             "list.quick_report" => self.open_report(),
             "list.merge" => self.open_merge(),
             "edit.find" => self.focus_search = true,
-            // Ctrl+Shift+D: hide or show the details panel (Q-266); it
+            // F9 (Q-P16n): hide or show the details panel (Q-266); it
             // stays open while a form is in it.
             crate::layout::side_panel::TOGGLE => {
                 if !self.panel_forced_open() {
@@ -1656,6 +1739,10 @@ impl Screen for CenterScreen {
             "merge_available": true,
             "merging": matches!(&self.panel, Panel::Merge(m) if m.task.is_some()),
             "merge_source_1099": matches!(&self.panel, Panel::Merge(m) if m.source_1099),
+            "merge_closing": match &self.panel {
+                Panel::Merge(m) => m.closing.state_json(self.merge_closing),
+                _ => Value::Null,
+            },
             "jobs_available": false,
             "attachments_available": false,
             "details_collapsed": self.details.collapsed && !self.panel_forced_open(),

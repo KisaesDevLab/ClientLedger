@@ -125,6 +125,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("center.merge.keep", "Into {role}"),
     ("center.merge.explain", "Everything recorded for {source} moves to {target}: invoices, bills, payments, checks and bank rules. {source} is then made inactive. This includes transactions dated on or before your closing date. A merge can't be undone."),
     ("center.merge.explain_1099", "{source} is tracked for 1099s. Its payments move to {target}; make sure {target} is tracked for 1099s too, or those payments won't be on a 1099."),
+    ("center.merge.explain_closing", "Everything recorded for {source} moves to {target}: invoices, bills, payments, checks and bank rules. {source} is then made inactive. If any of it is dated on or before your closing date, you'll be asked for the closing-date password. A merge can't be undone."),
     ("center.merge.confirm", "Merge"),
     ("center.merge.cancel", "Cancel"),
     ("center.merge.working", "Merging\u{2026}"),

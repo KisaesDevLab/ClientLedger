@@ -410,6 +410,8 @@ pub fn exact_strings_u76(h: &Harness) {
     }
     let r0 = h.run(dash.receivables(today)).expect("receivables");
     let p0 = h.run(dash.payables(today, 7)).expect("payables");
+    // Other tests' bills are due in the same window: compare movements.
+    let p4_0 = h.run(dash.payables(today, 4)).expect("payables");
     let client = contact(h, s, ContactType::Customer, "Home client");
     let income = account(h, s, AccountType::Revenue, "Home sales").id;
     h.run(s.create_invoice(
@@ -448,7 +450,12 @@ pub fn exact_strings_u76(h: &Harness) {
     // Four days ahead leaves the bill due in five days out.
     let p4 = h.run(dash.payables(today, 4)).expect("payables");
     assert_eq!(p4.due_within_days, 4);
-    assert_eq!(diff(p1.due_soon_amount, p4.due_soon_amount), "7471.9000");
+    assert_eq!(
+        diff(p4.due_soon_amount, p4_0.due_soon_amount),
+        "0.0000",
+        "the five-day bill is outside a four-day window"
+    );
+    assert_eq!(p4.due_soon_count, p4_0.due_soon_count);
     // One overdue rule: the action items agree with the receivables.
     let a = h.run(dash.action_items(today)).expect("actions");
     assert_eq!(a.overdue_invoice_count, r1.overdue_count);
