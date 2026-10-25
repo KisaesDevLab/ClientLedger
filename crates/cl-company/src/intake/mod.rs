@@ -33,6 +33,7 @@ use sha2::{Digest, Sha256};
 pub mod fs;
 pub mod handled;
 pub mod legacy;
+pub mod migrate;
 pub mod path;
 pub mod probe;
 pub mod scan;
@@ -40,6 +41,9 @@ pub mod watch;
 
 pub use fs::{EntryInfo, FakeFs, FolderFs, RawListing, RealFs};
 pub use handled::{DISCARDED_DIR, HandledDir, MoveFailed, PROCESSED_DIR, move_handled};
+pub use migrate::{
+    IntakeEngine, LocalIntake, MigrateError, MigrationOutcome, PlannedMigration, run_migration,
+};
 pub use path::{
     MAX_PATH_CHARS, PathProblem, canonical_key, canonical_key_with, check_path_syntax, classify,
 };
