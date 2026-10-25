@@ -490,6 +490,21 @@ pub struct DemoJournal {
     pub lines: Vec<DemoLine>,
 }
 
+/// The fixture's Accounts Payable number (its `systemAccounts`).
+const FIXTURE_AP: &str = "20100";
+/// The demo chart's Accounts Payable (the engine's system account).
+const DEMO_AP: &str = "2000";
+
+/// A fixture transaction on the demo chart: its payables lines move from
+/// the fixture's A/P number to the chart's Accounts Payable, so the sample
+/// bills and bill payments show in the A/P register (P17).
+fn on_demo_chart(mut t: SampleTransaction) -> SampleTransaction {
+    for l in t.lines.iter_mut().filter(|l| l.account == FIXTURE_AP) {
+        l.account = DEMO_AP.to_string();
+    }
+    t
+}
+
 fn sample_id(id: TransactionId) -> Option<u32> {
     let s = id.to_string();
     let tail = s.rsplit('-').next()?;
@@ -504,7 +519,12 @@ impl DemoLedger {
         let mut v: Vec<SampleTransaction> = Sample::load()
             .transactions
             .into_iter()
-            .map(|t| self.changed.get(&t.id).cloned().unwrap_or(t))
+            .map(|t| {
+                self.changed
+                    .get(&t.id)
+                    .cloned()
+                    .unwrap_or_else(|| on_demo_chart(t))
+            })
             .collect();
         v.extend(self.changed.range(NEW_BASE..).map(|(_, t)| t.clone()));
         v.retain(|t| !self.deleted.contains(&t.id));
@@ -515,10 +535,13 @@ impl DemoLedger {
         if self.deleted.contains(&id) {
             return None;
         }
-        self.changed
-            .get(&id)
-            .cloned()
-            .or_else(|| Sample::load().transactions.into_iter().find(|t| t.id == id))
+        self.changed.get(&id).cloned().or_else(|| {
+            Sample::load()
+                .transactions
+                .into_iter()
+                .find(|t| t.id == id)
+                .map(on_demo_chart)
+        })
     }
 
     /// The date of a transaction (for the closed-period rule).

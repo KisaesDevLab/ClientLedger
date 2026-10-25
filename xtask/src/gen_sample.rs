@@ -1367,15 +1367,108 @@ fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/sample/ozark_ridge")
 }
 
+fn docs_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/sample/docs")
+}
+
+/// A one-page PDF with `lines` of Helvetica text (x, y in points, size,
+/// text in plain ASCII), built by hand so the bytes never change between
+/// runs. Text is escaped for PDF string literals.
+fn text_pdf(lines: &[(u32, u32, u32, &str)]) -> String {
+    let mut content = String::new();
+    for (x, y, size, text) in lines {
+        let esc = text
+            .replace('\\', "\\\\")
+            .replace('(', "\\(")
+            .replace(')', "\\)");
+        let _ = writeln!(content, "BT /F1 {size} Tf {x} {y} Td ({esc}) Tj ET");
+    }
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] \
+         /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
+            .to_string(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        format!(
+            "<< /Length {} >>\nstream\n{content}endstream",
+            content.len()
+        ),
+    ];
+    let mut out = String::from("%PDF-1.4\n");
+    let mut offsets = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offsets.push(out.len());
+        let _ = write!(out, "{} 0 obj\n{body}\nendobj\n", i + 1);
+    }
+    let xref = out.len();
+    let _ = write!(out, "xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1);
+    for o in offsets {
+        let _ = write!(out, "{o:010} 00000 n \n");
+    }
+    let _ = write!(
+        out,
+        "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+        objects.len() + 1
+    );
+    out
+}
+
+/// The Enter Bill mockup's source document (P17): Midwest Equipment
+/// Rental's invoice INV-55871 for 1,330.00 + 150.00 = 1,480.00. Synthetic.
+fn sample_docs() -> BTreeMap<&'static str, String> {
+    let invoice = text_pdf(&[
+        (56, 730, 20, "Midwest Equipment Rental"),
+        (56, 708, 10, "88 Industrial Pkwy, Joplin, MO 64801"),
+        (420, 730, 16, "INVOICE"),
+        (420, 708, 10, "Invoice no. INV-55871"),
+        (420, 694, 10, "Date 11/03/2026"),
+        (420, 680, 10, "Terms Net 15"),
+        (56, 650, 10, "Bill to: Ozark Ridge Landscaping LLC"),
+        (56, 636, 10, "410 Ridge Rd, Monett, MO 65708"),
+        (56, 600, 10, "Description"),
+        (480, 600, 10, "Amount"),
+        (
+            56,
+            580,
+            10,
+            "Mini excavator, 2 days - Long Creek Marina seawall",
+        ),
+        (480, 580, 10, "1,330.00"),
+        (56, 564, 10, "Delivery and pickup"),
+        (480, 564, 10, "150.00"),
+        (400, 530, 12, "TOTAL"),
+        (480, 530, 12, "1,480.00"),
+        (
+            56,
+            90,
+            8,
+            "Synthetic sample document for the ClientLedger demo. Not a real invoice.",
+        ),
+    ]);
+    let mut out = BTreeMap::new();
+    out.insert("midwest_inv_55871.pdf", invoice);
+    out
+}
+
+/// The files `gen-sample` writes: (folder, name, text).
+fn outputs() -> Vec<(PathBuf, &'static str, String)> {
+    let mut v: Vec<(PathBuf, &'static str, String)> = render(&generate())
+        .into_iter()
+        .map(|(n, t)| (fixture_dir(), n, t))
+        .collect();
+    v.extend(sample_docs().into_iter().map(|(n, t)| (docs_dir(), n, t)));
+    v
+}
+
 /// Generates the fixture files; `--check` fails when they differ from
 /// what is committed.
 pub fn gen_sample(args: &[String]) -> Result<()> {
     let check = args.first().map(String::as_str) == Some("--check");
-    let files = render(&generate());
-    let dir = fixture_dir();
+    let files = outputs();
     if check {
         let mut stale = Vec::new();
-        for (name, text) in &files {
+        for (dir, name, text) in &files {
             let path = dir.join(name);
             let old = std::fs::read_to_string(&path).unwrap_or_default();
             if old.replace("\r\n", "\n") != *text {
@@ -1388,9 +1481,9 @@ pub fn gen_sample(args: &[String]) -> Result<()> {
         println!("gen-sample: fixtures are current");
         return Ok(());
     }
-    std::fs::create_dir_all(&dir).context("fixture folder")?;
     let mut report = String::new();
-    for (name, text) in &files {
+    for (dir, name, text) in &files {
+        std::fs::create_dir_all(dir).context("fixture folder")?;
         std::fs::write(dir.join(name), text).with_context(|| name.to_string())?;
         let _ = writeln!(report, "gen-sample: wrote {name} ({} bytes)", text.len());
     }
@@ -1485,10 +1578,26 @@ mod tests {
     }
 
     #[test]
+    fn the_sample_invoice_is_a_well_formed_pdf() {
+        let docs = sample_docs();
+        let pdf = docs.get("midwest_inv_55871.pdf").expect("invoice");
+        assert!(pdf.starts_with("%PDF-1.4\n") && pdf.ends_with("%%EOF\n"));
+        assert!(pdf.is_ascii());
+        // The xref offset points at the xref table.
+        let at: usize = pdf
+            .rsplit("startxref\n")
+            .next()
+            .and_then(|t| t.lines().next())
+            .and_then(|n| n.parse().ok())
+            .expect("startxref");
+        assert!(pdf[at..].starts_with("xref\n"));
+        assert!(pdf.contains("(TOTAL) Tj") && pdf.contains("(1,480.00) Tj"));
+    }
+
+    #[test]
     fn committed_fixtures_are_current() {
-        let files = render(&generate());
-        for (name, text) in &files {
-            let old = std::fs::read_to_string(fixture_dir().join(name)).unwrap_or_default();
+        for (dir, name, text) in &outputs() {
+            let old = std::fs::read_to_string(dir.join(name)).unwrap_or_default();
             assert_eq!(
                 old.replace("\r\n", "\n"),
                 *text,
