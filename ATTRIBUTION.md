@@ -46,6 +46,26 @@ Notices the licenses ask for in the documentation:
 - This software is based in part on the work of the Independent JPEG Group.
 - PDFium, Copyright 2014 The PDFium Authors.
 
+## pdf.js inside the engine executable (reading PDF bills, P17)
+
+The engine reads the text layer of a PDF (a vendor's bill, a bank statement) with pdf.js. `cargo xtask engine`
+bundles pdf.js and its worker (`legacy/build/pdf.mjs` and `legacy/build/pdf.worker.mjs`) into the engine
+executable's JavaScript, from the version the engine's `package-lock.json` pins. The worker runs inside the engine
+process; nothing is downloaded. pdf.js's fonts (`standard_fonts/`) and character maps (`cmaps/`) are not shipped:
+reading text does not need them for the Latin-script PDFs the app reads. The Apache-2.0 license text must ship
+with the installer (P35).
+
+| Item | Version | License | Source |
+| --- | --- | --- | --- |
+| pdf.js (`pdfjs-dist`, legacy build: `pdf.mjs`, `pdf.worker.mjs`) | 4.10.38 | Apache-2.0 (Copyright 2024 Mozilla Foundation; `node_modules/pdfjs-dist/LICENSE`) | https://github.com/mozilla/pdf.js, npm `pdfjs-dist` |
+| core-js polyfills (inside the pdf.js legacy build) | as bundled in pdfjs-dist 4.10.38 | MIT (© 2014-2024 Denis Pushkarev) | https://github.com/zloirock/core-js |
+
+**Not shipped:** poppler (`pdftoppm`, `pdftotext`, `pdfimages`) is GPL and is not part of ClientLedger. The engine
+uses `pdftotext` only as a fallback after pdf.js, and `pdftoppm` only to turn a scanned PDF (no text layer) into
+page pictures. In ClientLedger neither is needed for a text PDF; a scanned PDF is not read yet, and the app says so
+in plain words ("Reading scanned PDFs isn't available yet"). If an owner has installed poppler themselves, the
+engine may find it on their PATH; ClientLedger never installs or bundles it.
+
 ## PostgreSQL notice
 
 PostgreSQL Database Management System, portions Copyright (c) 1996-2026 The
