@@ -21,6 +21,7 @@ use cl_model::CommandId;
 use cl_model::amount_entry::{self, AmountRules};
 use cl_model::forms::SaveIntent;
 use cl_model::forms::bill::{BillKind, CUSTOM_TERMS};
+use cl_model::forms::doc_read::ReadTarget;
 use cl_model::forms::item_lines::items_total;
 use cl_model::forms::lines::{TotalsStatus, lines_total};
 use eframe::egui::{self, Align, CornerRadius, Layout, Margin, RichText, Stroke, Ui, Vec2};
@@ -255,15 +256,13 @@ impl EnterBillScreen {
             file_name: name.as_deref(),
             attachment: self.attach.shown,
             from_inbox: self.attach.from_inbox,
+            tenant: self.tenant.as_ref().map(|(t, _)| *t),
+            money_style: self.money_style,
         };
         match super::doc_read::banner(ui, &mut self.read, &input, tokens) {
             super::doc_read::BannerEvent::None => {}
             super::doc_read::BannerEvent::Accepted => self.accept_read(),
-            super::doc_read::BannerEvent::Cleared => {
-                let mut form = self.compose();
-                self.read.clear(&mut form);
-                self.take_form(form);
-            }
+            super::doc_read::BannerEvent::Cleared => self.clear_read(),
             super::doc_read::BannerEvent::AddVendor => {
                 self.link
                     .push(CompanyEvent::OpenWindow(CommandId::new("vendors.center")));
@@ -463,6 +462,7 @@ impl EnterBillScreen {
     fn vendor_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
         let l = above(ui, tokens, &t("bill.vendor"));
         let locked = self.paid_locked();
+        let slot = super::doc_read::mark_slot(ui);
         let r = ui
             .add_enabled(
                 !locked,
@@ -474,6 +474,8 @@ impl EnterBillScreen {
             .labelled_by(l.id)
             .on_disabled_hover_text(t("bill.paid.locked"));
         self.take_focus(Field::Vendor, &r);
+        let read = self.read_state_of(ReadTarget::Vendor);
+        super::doc_read::field_mark(ui, tokens, read, slot, &r);
         if r.changed() {
             self.vendor_list = !self.inputs.vendor.trim().is_empty();
             self.inputs.vendor_problem = false;
@@ -574,6 +576,7 @@ impl EnterBillScreen {
     fn date_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
         let l = above(ui, tokens, &t("bill.date"));
         let before = self.inputs.date.text.clone();
+        let slot = super::doc_read::mark_slot(ui);
         let r = ui
             .add_enabled(
                 !self.paid_locked(),
@@ -584,6 +587,8 @@ impl EnterBillScreen {
             .labelled_by(l.id)
             .on_disabled_hover_text(t("bill.paid.locked"));
         self.take_focus(Field::Date, &r);
+        let read = self.read_state_of(ReadTarget::BillDate);
+        super::doc_read::field_mark(ui, tokens, read, slot, &r);
         if r.changed() {
             self.inputs.date.typed(&before, self.today);
             let value = self.inputs.date.value;
@@ -608,6 +613,7 @@ impl EnterBillScreen {
     fn reference_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
         let l = above(ui, tokens, &t("bill.ref"));
         let mut text = self.header.current().reference.clone();
+        let slot = super::doc_read::mark_slot(ui);
         let r = ui
             .add(
                 egui::TextEdit::singleline(&mut text)
@@ -617,6 +623,8 @@ impl EnterBillScreen {
             )
             .labelled_by(l.id);
         self.take_focus(Field::Reference, &r);
+        let read = self.read_state_of(ReadTarget::Reference);
+        super::doc_read::field_mark(ui, tokens, read, slot, &r);
         if r.changed() {
             self.header.edit(field::REFERENCE, |h| h.reference = text);
             self.inputs.rev = self.header.revision();
@@ -706,6 +714,7 @@ impl EnterBillScreen {
             BillKind::Credit => "bill.credit_amount",
         };
         let l = above(ui, tokens, &t(key));
+        let slot = super::doc_read::mark_slot(ui);
         let r = ui
             .add_enabled(
                 !self.paid_locked(),
@@ -717,6 +726,8 @@ impl EnterBillScreen {
             .labelled_by(l.id)
             .on_disabled_hover_text(t("bill.paid.locked"));
         self.take_focus(Field::Amount, &r);
+        let read = self.read_state_of(ReadTarget::AmountDue);
+        super::doc_read::field_mark(ui, tokens, read, slot, &r);
         if r.changed() {
             self.inputs.amount_problem = None;
         }
@@ -787,6 +798,7 @@ impl EnterBillScreen {
             return;
         }
         let before = self.inputs.due.text.clone();
+        let slot = super::doc_read::mark_slot(ui);
         let r = ui
             .add(
                 egui::TextEdit::singleline(&mut self.inputs.due.text)
@@ -796,6 +808,8 @@ impl EnterBillScreen {
             .labelled_by(l.id)
             .on_hover_text(t("bill.due.tip"));
         self.take_focus(Field::DueDate, &r);
+        let read = self.read_state_of(ReadTarget::DueDate);
+        super::doc_read::field_mark(ui, tokens, read, slot, &r);
         if r.changed() {
             self.inputs.due.typed(&before, self.today);
             let value = self.inputs.due.value;
@@ -974,6 +988,11 @@ impl EnterBillScreen {
         });
         if !caps.lines {
             form::hint(ui, tokens, &t("bill.lines.detail_later"));
+        }
+        // Lines read from the document, and ghost accounts (WP7).
+        if self.tab == Tab::Expenses {
+            self.read_lines_ui(ui, tokens);
+            self.line_suggestions_ui(ui, tokens);
         }
     }
 
@@ -1207,6 +1226,8 @@ impl EnterBillScreen {
                     file_name: name.as_deref(),
                     attachment: self.attach.shown,
                     from_inbox: self.attach.from_inbox,
+                    tenant: self.tenant.as_ref().map(|(t, _)| *t),
+                    money_style: self.money_style,
                 };
                 self.read.start(&input);
                 true

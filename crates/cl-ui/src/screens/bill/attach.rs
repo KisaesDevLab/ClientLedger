@@ -459,6 +459,8 @@ impl EnterBillScreen {
                 file_name: name.as_deref(),
                 attachment: self.attach.shown,
                 from_inbox: self.attach.from_inbox,
+                tenant: self.tenant.as_ref().map(|(t, _)| *t),
+                money_style: self.money_style,
             };
             let _ = super::doc_read::read_button(ui, &mut self.read, &input, tokens);
             for a in &self.attach.list {
