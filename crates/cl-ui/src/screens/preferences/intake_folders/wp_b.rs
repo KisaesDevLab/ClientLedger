@@ -296,7 +296,10 @@ fn probe_now(root: &Path, check_write: bool) -> ProbeReport {
         let lower = name.to_lowercase();
         if m.len() > MAX_FILE_BYTES {
             report.too_large += 1;
-        } else if lower.ends_with(".heic") || lower.ends_with(".heif") {
+        } else if matches!(
+            Path::new(&lower).extension().and_then(|e| e.to_str()),
+            Some("heic" | "heif")
+        ) {
             report.heic += 1;
         }
     }

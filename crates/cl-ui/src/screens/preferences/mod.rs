@@ -958,7 +958,7 @@ impl PreferencesScreen {
                 let action = intake_folders::show(
                     ui,
                     tokens,
-                    intake_folders::View {
+                    &mut intake_folders::View {
                         panel: &mut self.intake,
                         edits: &mut self.edits.intake,
                         committed: &self.committed.intake,

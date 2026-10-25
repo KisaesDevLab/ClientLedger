@@ -26,9 +26,6 @@
 pub mod source;
 pub mod wp_b;
 
-#[cfg(test)]
-mod tests;
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -216,8 +213,8 @@ fn now_ms() -> i64 {
     cl_settings::recent::now().unix_millis()
 }
 
-/// The Add folder row as typed.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// The Add folder row as typed (`Debug` hides the name and path).
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct AddRow {
     /// Name.
     pub name: String,
@@ -227,6 +224,15 @@ pub struct AddRow {
     pub kind: Option<IntakeKind>,
     /// The last refusal.
     pub problem: Option<IntakeBlock>,
+}
+
+impl std::fmt::Debug for AddRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AddRow")
+            .field("kind", &self.kind)
+            .field("problem", &self.problem)
+            .finish_non_exhaustive()
+    }
 }
 
 /// One Test, running or answered.
@@ -346,13 +352,11 @@ impl IntakePanel {
             return None;
         }
         if link.is_demo() {
-            return match source::demo_get(link, tenant) {
-                Some(f) => Some(f),
-                None => {
-                    self.load = LoadState::Failed;
-                    None
-                }
-            };
+            let fetched = source::demo_get(link, tenant);
+            if fetched.is_none() {
+                self.load = LoadState::Failed;
+            }
+            return fetched;
         }
         let (Some(session), Some(group)) = (link.session(), group) else {
             self.load = LoadState::Failed;
@@ -468,9 +472,8 @@ impl IntakePanel {
             return;
         }
         let dirs: Vec<&Path> = app_dirs.iter().map(PathBuf::as_path).collect();
-        let root = match wp_b::check_path_syntax(&f.path, &dirs) {
-            Ok(r) => r,
-            Err(_) => return,
+        let Ok(root) = wp_b::check_path_syntax(&f.path, &dirs) else {
+            return;
         };
         self.probes.insert(
             id,
@@ -684,7 +687,7 @@ impl IntakePanel {
             "editable": self.editable(),
             "stale": self.stale,
             "adding": self.add.is_some(),
-            "add_problem": self.add.as_ref().and_then(|a| a.problem).map(|b| b.message_key()),
+            "add_problem": self.add.as_ref().and_then(|a| a.problem).map(IntakeBlock::message_key),
             "renaming": self.renaming.is_some(),
             "removing": self.removing.is_some(),
             "asking_bring_in": self.ask_bring_in.is_some(),
@@ -835,7 +838,7 @@ fn kind_combo(ui: &mut Ui, salt: egui::IdSalt, kind: &mut IntakeKind) {
 }
 
 /// Draws the Document intake panel.
-pub fn show(ui: &mut Ui, tokens: &Tokens, v: View<'_>) -> PanelAction {
+pub fn show(ui: &mut Ui, tokens: &Tokens, v: &mut View<'_>) -> PanelAction {
     let mut action = PanelAction::None;
     form::heading(ui, tokens, &t("prefs.cat.intake"));
     form::hint(ui, tokens, &t("prefs.intake.intro"));
@@ -888,7 +891,7 @@ pub fn show(ui: &mut Ui, tokens: &Tokens, v: View<'_>) -> PanelAction {
                 form::hint(ui, tokens, &t("prefs.intake.ask_admin"));
             }
         } else {
-            folder_table(ui, tokens, &v, editable);
+            folder_table(ui, tokens, v);
             folder_rows(
                 ui,
                 tokens,
@@ -913,7 +916,7 @@ pub fn show(ui: &mut Ui, tokens: &Tokens, v: View<'_>) -> PanelAction {
 }
 
 /// The Name · Folder · Kind · Status table.
-fn folder_table(ui: &mut Ui, tokens: &Tokens, v: &View<'_>, _editable: bool) {
+fn folder_table(ui: &mut Ui, tokens: &Tokens, v: &View<'_>) {
     egui::Grid::new("prefs-intake-table")
         .num_columns(4)
         .striped(true)
@@ -1122,3 +1125,7 @@ fn add_row(
         let _ = panel.add_folder(edits, app_dirs);
     }
 }
+
+// Last, so the i18n catalog check reads the whole module above.
+#[cfg(test)]
+mod tests;

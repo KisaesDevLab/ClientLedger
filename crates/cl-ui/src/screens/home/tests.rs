@@ -394,15 +394,15 @@ fn intake_folders_needing_attention_show_one_line() {
     ] {
         let items = attention::with_intake(h.attention(), n);
         assert_eq!(counted(&items, "intake_folders"), Some(n as u64));
-        let line = attention::lines(&h, &items)
+        let found = attention::lines(&h, &items)
             .into_iter()
             .find(|l| l.text == text)
             .unwrap_or_else(|| panic!("{text}"));
         assert_eq!(
-            line.link,
+            found.link,
             Some(("Open settings".to_owned(), "edit.preferences"))
         );
-        assert!(line.link_tip.is_some());
+        assert!(found.link_tip.is_some());
     }
 }
 

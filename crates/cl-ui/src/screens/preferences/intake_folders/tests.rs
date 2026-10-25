@@ -64,6 +64,17 @@ fn add(s: &mut PreferencesScreen, name: &str, path: &str) -> Result<IntakeFolder
     s.intake.add_folder(&mut s.edits.intake, &dirs)
 }
 
+fn unc_folder(id: IntakeFolderId, name: &str, path: &str) -> IntakeFolder {
+    IntakeFolder {
+        id,
+        name: name.to_owned(),
+        path: path.to_owned(),
+        default_kind: IntakeKind::Bills,
+        auto_read: false,
+        keep_originals: false,
+    }
+}
+
 fn texts(s: &mut PreferencesScreen) -> String {
     let ctx = egui::Context::default();
     crate::shell::Shell::install(&ctx);
@@ -168,8 +179,24 @@ fn typed_paths_and_names_are_refused_inline_without_touching_disk() {
         add(&mut s, &"n".repeat(101), r"C:\Scans"),
         Err(IntakeBlock::NameTooLong)
     );
-    // A UNC share and a mapped drive are fine (nothing is touched here).
-    let unc = add(&mut s, "Office scans", r"\\fileserver\Scans").expect("unc");
+    // A UNC share passes the syntax rules. It is put in the list directly:
+    // Add would test it, and no test resolves a UNC hostname.
+    let dirs = s.app_dirs();
+    assert!(
+        check_new(
+            &s.edits.intake,
+            None,
+            "Office scans",
+            r"\\fileserver\Scans",
+            &dirs
+        )
+        .is_ok()
+    );
+    let unc = new_folder_id();
+    s.edits
+        .intake
+        .folders
+        .push(unc_folder(unc, "Office scans", r"\\fileserver\Scans"));
     assert_eq!(
         add(&mut s, "office SCANS", r"D:\Other"),
         Err(IntakeBlock::NameTaken)
@@ -179,7 +206,7 @@ fn typed_paths_and_names_are_refused_inline_without_touching_disk() {
         Err(IntakeBlock::PathTaken)
     );
     s.intake.remove(&mut s.edits.intake, unc);
-    assert!(s.edits.intake.folders.is_empty());
+    assert_eq!(s.edits.intake.folders, Vec::<IntakeFolder>::new());
     let all = texts(&mut s);
     assert!(!all.contains("fileserver"), "removed");
 }
@@ -329,7 +356,7 @@ fn remove_drops_the_folder_and_its_confirmation_and_leaves_the_files() {
     );
     s.intake.remove(&mut s.edits.intake, id);
     assert!(Screen::save(&mut s), "{:?}", s.block);
-    assert!(stored(&link).folders.is_empty());
+    assert_eq!(stored(&link).folders, Vec::<IntakeFolder>::new());
     assert!(here(&link).is_empty(), "its confirmation is dropped");
     assert!(
         receipts.path().join("r1.jpg").exists(),
@@ -366,7 +393,7 @@ fn other_roles_see_a_read_only_list() {
     });
     assert!(!Screen::save(&mut s));
     assert_eq!(s.block, Some(SaveBlock::Intake(IntakeBlock::ReadOnly)));
-    assert!(stored(&link).folders.is_empty());
+    assert_eq!(stored(&link).folders, Vec::<IntakeFolder>::new());
     assert_eq!(s.state()["intake"]["admin"], false);
 }
 
@@ -398,7 +425,7 @@ fn a_folder_another_company_uses_on_this_computer_is_refused() {
         s.block,
         Some(SaveBlock::Intake(IntakeBlock::MappedByAnother))
     );
-    assert!(stored(&link).folders.is_empty());
+    assert_eq!(stored(&link).folders, Vec::<IntakeFolder>::new());
 }
 
 #[test]
@@ -456,9 +483,13 @@ fn the_switches_round_trip_and_the_auto_read_hint_shows() {
     let dir = tempfile::tempdir().expect("tmp");
     let link = link(dir.path());
     let mut s = screen(&link);
-    let id = add(&mut s, "Receipts", r"\\fileserver\Receipts").expect("add");
-    // No test result yet for a share (the test runs in the background);
-    // the switches are just stored.
+    // Put in directly: no test resolves a UNC hostname. The switches are
+    // just stored.
+    let id = new_folder_id();
+    s.edits
+        .intake
+        .folders
+        .push(unc_folder(id, "Receipts", r"\\fileserver\Receipts"));
     let f = s
         .edits
         .intake
