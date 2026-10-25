@@ -863,10 +863,7 @@ pub fn upload(
     let n = state.checks.files.len() + 1;
     let id = cl_api::AttachmentId::parse(&format!("d0000000-0000-4000-8000-a{n:011}"))
         .map_err(|_| invalid())?;
-    let (kind, to) = match to {
-        cl_api::AttachTo::Draft(d) => ("draft", d.to_string()),
-        cl_api::AttachTo::Expense(t) => ("expense", t.to_string()),
-    };
+    let (kind, to) = (to.attachable_type(), to.attachable_id());
     let f = DemoFile {
         id,
         kind,
@@ -882,10 +879,7 @@ pub fn upload(
 /// `GET /attachments` for a check or a draft.
 #[must_use]
 pub fn attachments(state: &DemoState, of: cl_api::AttachTo) -> Vec<cl_api::Attachment> {
-    let (kind, to) = match of {
-        cl_api::AttachTo::Draft(d) => ("draft", d.to_string()),
-        cl_api::AttachTo::Expense(t) => ("expense", t.to_string()),
-    };
+    let (kind, to) = (of.attachable_type(), of.attachable_id());
     state
         .checks
         .files
@@ -893,6 +887,37 @@ pub fn attachments(state: &DemoState, of: cl_api::AttachTo) -> Vec<cl_api::Attac
         .filter(|f| f.kind == kind && f.to == to)
         .filter_map(attachment)
         .collect()
+}
+
+/// What a save with `draftAttachmentId` (or `POST /bills/{id}/attach-draft`)
+/// does to a draft's files: they move onto the saved record `to`. Returns
+/// how many moved.
+pub fn link_draft(state: &mut DemoState, draft: cl_api::DraftKey, to: cl_api::AttachTo) -> usize {
+    let key = draft.to_string();
+    let (kind, id) = (to.attachable_type(), to.attachable_id());
+    let mut n = 0;
+    for f in state
+        .checks
+        .files
+        .iter_mut()
+        .filter(|f| f.kind == "draft" && f.to == key)
+    {
+        f.kind = kind;
+        f.to.clone_from(&id);
+        n += 1;
+    }
+    n
+}
+
+/// `GET /attachments/{id}`: one file's details (P17 receipt inbox).
+#[must_use]
+pub fn find_attachment(state: &DemoState, id: cl_api::AttachmentId) -> Option<cl_api::Attachment> {
+    state
+        .checks
+        .files
+        .iter()
+        .find(|f| f.id == id)
+        .and_then(attachment)
 }
 
 /// `GET /attachments/{id}/download`.

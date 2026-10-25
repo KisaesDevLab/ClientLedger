@@ -928,6 +928,45 @@ impl OllamaStub {
         }
     }
 
+    /// Also answers `POST /api/chat` (a non-streaming chat reply) with
+    /// `content` as the model's message: a canned provider for the engine's
+    /// AI paths, on loopback only.
+    pub fn serve_chat(&self, h: &Harness, content: &str) {
+        use wiremock::matchers::{method, path};
+        let body = serde_json::json!({
+            "model": "llama3.1:8b",
+            "message": { "role": "assistant", "content": content },
+            "done": true,
+            "done_reason": "stop",
+            "prompt_eval_count": 1,
+            "eval_count": 1,
+        })
+        .to_string();
+        h.run(async {
+            wiremock::Mock::given(method("POST"))
+                .and(path("/api/chat"))
+                .respond_with(
+                    wiremock::ResponseTemplate::new(200).set_body_raw(body, "application/json"),
+                )
+                .mount(&self.server)
+                .await;
+        });
+    }
+
+    /// The bodies of the `POST /api/chat` requests served so far.
+    pub fn chat_bodies(&self, h: &Harness) -> Vec<String> {
+        h.run(async {
+            self.server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.url.path() == "/api/chat")
+                .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+                .collect()
+        })
+    }
+
     /// Requests served so far.
     pub fn hits(&self, h: &Harness) -> u64 {
         h.run(async {

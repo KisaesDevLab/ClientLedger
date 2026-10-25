@@ -10,6 +10,9 @@ use eframe::egui::{
 use crate::theme::{Tokens, styles};
 
 pub mod bar_chart;
+// P17 (WP1): the PDF and image viewer and its worker thread.
+pub mod doc_worker;
+pub mod pdf_viewer;
 
 /// A keyboard chip such as `Ctrl K`.
 pub fn kbd(ui: &mut Ui, text: &str) -> Response {
@@ -40,6 +43,82 @@ pub fn button_with_chip(ui: &mut Ui, label: &str, chip: &str) -> Response {
         return ui.button(label);
     }
     chip_button(ui, RichText::new(label), chip, false, |b| b)
+}
+
+/// The check mark that ends "Lines total = amount due ✓" and similar lines.
+const CHECK: char = '\u{2713}';
+
+/// `text` without its ending check mark (and the space before it), or
+/// `None` when it has none.
+fn without_check(job: &egui::text::LayoutJob) -> Option<egui::text::LayoutJob> {
+    let body = job.text.strip_suffix(CHECK)?.trim_end();
+    let len = egui::epaint::text::ByteIndex(body.len());
+    let mut out = job.clone();
+    body.clone_into(&mut out.text);
+    out.sections.retain_mut(|s| {
+        s.byte_range.end = s.byte_range.end.min(len);
+        s.byte_range.start < s.byte_range.end
+    });
+    Some(out)
+}
+
+/// A label; one ending in a check mark ("Lines total = amount due ✓") gets
+/// the mark painted, because the bundled font draws U+2713 like a square
+/// root. Its accessible name is the whole text, mark included. Wraps when
+/// `wrap` is set.
+pub fn label_with_check(ui: &mut Ui, text: impl Into<egui::WidgetText>, wrap: bool) -> Response {
+    let text = text.into();
+    let job = text.clone().into_layout_job(
+        ui.style(),
+        egui::FontSelection::Default,
+        egui::Align::Center,
+    );
+    let Some(mut body) = without_check(&job) else {
+        let label = egui::Label::new(text);
+        return ui.add(if wrap { label.wrap() } else { label });
+    };
+    let full = job.text.clone();
+    let format = job
+        .sections
+        .last()
+        .map(|s| s.format.clone())
+        .unwrap_or_default();
+    let size = format.font_id.size;
+    let mark = (size * 0.8).round();
+    let gap = (size * 0.3).round();
+    if wrap {
+        body.wrap.max_width = (ui.available_width() - gap - mark).max(mark);
+    }
+    let galley = ui.painter().layout_job(body);
+    let last = galley
+        .rows
+        .last()
+        .map_or(egui::Rect::ZERO, egui::epaint::text::PlacedRow::rect);
+    let width = galley.size().x.max(last.right() + gap + mark);
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(width, galley.size().y), Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, ui.is_enabled(), &full));
+    if ui.is_rect_visible(rect) {
+        let color = if format.color == Color32::PLACEHOLDER {
+            ui.visuals().text_color()
+        } else {
+            format.color
+        };
+        let left = rect.left() + last.right() + gap;
+        let mid = rect.top() + last.center().y;
+        let m = egui::Rect::from_center_size(egui::pos2(left + mark / 2.0, mid), Vec2::splat(mark));
+        let points = vec![
+            egui::pos2(m.left() + 0.08 * mark, m.center().y + 0.02 * mark),
+            egui::pos2(m.left() + 0.38 * mark, m.bottom() - 0.18 * mark),
+            egui::pos2(m.right() - 0.04 * mark, m.top() + 0.16 * mark),
+        ];
+        ui.painter().galley(rect.left_top(), galley, color);
+        ui.painter().add(egui::Shape::line(
+            points,
+            Stroke::new((size / 9.0).max(1.4), color),
+        ));
+    }
+    response
 }
 
 /// A form action button with its shortcut chip inside ("Save & New
@@ -333,5 +412,65 @@ mod tests {
             .filter_map(|(_, n)| n.label().map(str::to_string))
             .collect();
         assert_eq!(names, ["Go To", "Go To"]);
+    }
+
+    /// "… ✓" is laid out without the glyph (the font draws it like √) and
+    /// keeps the whole text as its accessible name; other text is a label.
+    #[test]
+    fn the_check_mark_is_painted_and_named() {
+        let job = egui::text::LayoutJob::simple_singleline(
+            "Lines total = amount due \u{2713}".into(),
+            egui::FontId::proportional(12.0),
+            egui::Color32::RED,
+        );
+        let body = super::without_check(&job).expect("ends with a check");
+        assert_eq!(body.text, "Lines total = amount due");
+        assert!(
+            body.sections
+                .iter()
+                .all(|s| s.byte_range.end.0 <= body.text.len())
+        );
+        let plain = egui::text::LayoutJob::simple_singleline(
+            "Lines total".into(),
+            egui::FontId::proportional(12.0),
+            egui::Color32::RED,
+        );
+        assert!(super::without_check(&plain).is_none());
+
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        ctx.enable_accesskit();
+        let mut widths = (0.0, 0.0);
+        let mut out = None;
+        for _ in 0..2 {
+            let mut o = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    widths.0 =
+                        super::label_with_check(ui, "Lines total = amount due \u{2713}", false)
+                            .rect
+                            .width();
+                    widths.1 = super::label_with_check(ui, "Lines total = amount due", false)
+                        .rect
+                        .width();
+                });
+            });
+            o.textures_delta.clear();
+            out = Some(o);
+        }
+        assert!(widths.0 > widths.1 + 8.0, "room for the mark: {widths:?}");
+        let update = out
+            .and_then(|o| o.platform_output.accesskit_update)
+            .expect("accesskit is on");
+        let names: Vec<String> = update
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.role() == Role::Label)
+            .filter_map(|(_, n)| n.label().or(n.value()).map(str::to_string))
+            .collect();
+        assert!(
+            names.contains(&"Lines total = amount due \u{2713}".to_string()),
+            "{names:?}"
+        );
     }
 }

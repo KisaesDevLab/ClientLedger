@@ -7,8 +7,11 @@
 //! commit.
 //!
 //! With `idempotency-v1` the engine replays a repeated key on exactly its
-//! route set (the `keyable` rows of `operations.txt`). Those routes, and only
-//! those, send the key and are retried like reads with it (`KeyedOnce`): a
+//! route set (the `keyable` rows of `operations.txt`), and with
+//! `idempotency-ap-v1` also on the A/P route set (the `keyable-ap` rows); a
+//! route is keyed only under its own set's capability ([`KeySet`]). Those
+//! routes, and only those, send the key and are retried like reads with it
+//! (`KeyedOnce`): a
 //! repeat gets the first result (`Idempotent-Replayed: true`), a key still
 //! running gets 409 `IDEMPOTENCY_IN_PROGRESS` (waited for, `Retry-After`).
 //! Every other mutation keeps the rules above.
@@ -27,7 +30,7 @@ use tracing::Instrument;
 use crate::client::{AttemptAuth, Call, EngineReply, Transport, TransportError};
 use crate::endpoint::EndpointState;
 use crate::errors::{ApiError, AuthFailure, Mapped, RouteKind, map_failure};
-use crate::resources::operations::{BATCH_SAVE, Operation, RetryClass};
+use crate::resources::operations::{BATCH_SAVE, KeySet, Operation, RetryClass};
 
 /// The engine forgets a key after 24 hours (U-18, Q-U18c); cl-api relies on
 /// a key for a replay only while it is younger than this, so clock and
@@ -252,6 +255,8 @@ const MAX_IN_PROGRESS_WAIT: Duration = Duration::from_secs(5);
 pub(crate) struct Executor {
     transport: Transport,
     idempotency_v1: AtomicBool,
+    /// The engine replays keys on the A/P route set (`idempotency-ap-v1`).
+    idempotency_ap_v1: AtomicBool,
 }
 
 /// Per-request bookkeeping of the retry loop.
@@ -298,6 +303,7 @@ impl Executor {
         Executor {
             transport,
             idempotency_v1: AtomicBool::new(false),
+            idempotency_ap_v1: AtomicBool::new(false),
         }
     }
 
@@ -308,6 +314,21 @@ impl Executor {
     /// Record whether the engine advertises `idempotency-v1` (U-18).
     pub(crate) fn set_idempotency_v1(&self, on: bool) {
         self.idempotency_v1.store(on, Ordering::Relaxed);
+    }
+
+    /// Record whether the engine advertises `idempotency-ap-v1` (U-83 to
+    /// U-87): it replays keys on the A/P route set too.
+    pub(crate) fn set_idempotency_ap_v1(&self, on: bool) {
+        self.idempotency_ap_v1.store(on, Ordering::Relaxed);
+    }
+
+    /// The engine replays a key on routes of `set` (it advertises that
+    /// set's capability).
+    fn replays(&self, set: KeySet) -> bool {
+        match set {
+            KeySet::V1 => self.idempotency_v1.load(Ordering::Relaxed),
+            KeySet::ApV1 => self.idempotency_ap_v1.load(Ordering::Relaxed),
+        }
     }
 
     /// Runs one logical request. Returns the 2xx answer or a typed error.
@@ -322,18 +343,21 @@ impl Executor {
             call.idempotency_key = Some(IdempotencyKey::new());
         }
         let idempotency_v1 = self.idempotency_v1.load(Ordering::Relaxed);
+        // Each keyed route set replays only under its own capability: an
+        // engine with `idempotency-v1` alone does not replay the A/P routes.
+        let replayed_route = op.key_set().is_some_and(|set| self.replays(set));
         let class = op.retry().effective(
-            idempotency_v1
+            replayed_route
                 && call
                     .idempotency_key
                     .as_ref()
                     .is_some_and(IdempotencyKey::replayable),
         );
         // With `idempotency-v1` the key goes only where the engine replays
-        // it: its route set, and `/batch/save` (its own
-        // `batch-idempotent-v1`). Without it every mutation sends the key as
-        // before (the engine ignores it there).
-        call.send_key = !idempotency_v1 || op.is_keyable() || *op == BATCH_SAVE;
+        // it: its route sets under their capabilities, and `/batch/save`
+        // (its own `batch-idempotent-v1`). Without it every mutation sends
+        // the key as before (the engine ignores it there).
+        call.send_key = !idempotency_v1 || replayed_route || *op == BATCH_SAVE;
         let span = tracing::debug_span!(
             "engine_request",
             method = call.method.as_str(),
@@ -445,7 +469,7 @@ impl Executor {
                     RetryClass::Never => Step::Done(Err(give_up(e))),
                     // `Keyable` is never in effect (`effective` maps it);
                     // were it, the unkeyed rule is the safe one.
-                    RetryClass::PreHandlerOnly | RetryClass::Keyable => {
+                    RetryClass::PreHandlerOnly | RetryClass::Keyable(_) => {
                         let cause = if matches!(e, TransportError::Timeout { .. }) {
                             AmbiguityCause::Timeout
                         } else {
@@ -1858,6 +1882,69 @@ pub(crate) mod tests {
                 .iter()
                 .all(|r| r.headers.get("idempotency-key").is_some())
         );
+    }
+
+    /// The A/P route set is keyed only under `idempotency-ap-v1`: an engine
+    /// with `idempotency-v1` alone does not replay it, so there the route
+    /// sends no key and is never blind-retried.
+    #[tokio::test]
+    async fn the_ap_route_set_is_keyed_only_under_its_own_capability() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(json(503, r#"{"error":{"message":"x"}}"#))
+            .mount(&server)
+            .await;
+        let route = "/api/v1/bills/{id}/void";
+        let op = *find(Method::Post, route).expect("covered");
+        let void = || {
+            Call::new(
+                Method::Post,
+                route,
+                "/api/v1/bills/5f6e3c1a-8d2b-4c7e-9a10-2b3c4d5e6f70/void",
+            )
+            .json_body(b"{}".to_vec())
+        };
+        let ex = exec_at(server.address().port());
+        ex.set_idempotency_v1(true);
+        let e = ex.run(&op, void(), &none(), None).await.expect_err("5xx");
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { keyed: false, .. }),
+            "{e:?}"
+        );
+        let reqs = server.received_requests().await.expect("r");
+        assert_eq!(reqs.len(), 1, "never blind-retried");
+        assert!(reqs[0].headers.get("idempotency-key").is_none());
+        // `POST /bills` is in the `idempotency-v1` set: keyed already.
+        let (op_create, call) = post_to("/api/v1/bills");
+        let e = ex
+            .run(&op_create, call, &none(), None)
+            .await
+            .expect_err("5xx");
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { keyed: true, .. }),
+            "{e:?}"
+        );
+        let before = server.received_requests().await.expect("r").len();
+        // With `idempotency-ap-v1`: the key, retried with it, keyed.
+        ex.set_idempotency_ap_v1(true);
+        let key = IdempotencyKey::new();
+        let mut call = void();
+        call.idempotency_key = Some(key.clone());
+        let e = ex.run(&op, call, &none(), None).await.expect_err("5xx");
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { keyed: true, idempotency_key: Some(ref k), .. } if *k == key),
+            "{e:?}"
+        );
+        let reqs = server.received_requests().await.expect("r");
+        let sent: Vec<_> = reqs[before..]
+            .iter()
+            .map(|r| r.headers.get("idempotency-key").cloned())
+            .collect();
+        assert_eq!(sent.len(), 3, "retried with the key");
+        assert!(sent.iter().all(|k| {
+            k.as_ref()
+                .is_some_and(|k| k.to_str().ok() == Some(key.as_header().as_str()))
+        }));
     }
 
     /// C3: 409 `IDEMPOTENCY_IN_PROGRESS` on a keyed route is waited for

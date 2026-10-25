@@ -203,6 +203,43 @@ impl Capabilities {
     /// also moves line tags and default-tag references.
     pub const MERGE_CLOSING_DATE: &'static str = "merge-closing-date-v1";
 
+    // ---- P17: Enter Bill, vendor credits (engine PR-A U-83..U-87, PR-B U-89;
+    // in the pinned engine f3ce33fd) ------------------------------------------
+    /// U-83: bill and vendor credit create, edit, void (and bill-capture
+    /// enter) honour the closing date and take `closingPassword` (423
+    /// `TB_PERIOD_LOCKED`, 403 `CLOSING_PASSWORD_INVALID`), audited.
+    pub const AP_CLOSING: &'static str = "ap-closing-v1";
+    /// U-84: `PUT /vendor-credits/{id}` (409 `CREDIT_APPLIED`), bill and
+    /// credit delete through `DELETE /transactions/{id}` when unpaid and
+    /// unapplied (409 `BILL_HAS_PAYMENTS`), `expectedUpdatedAt` on edit, void
+    /// and delete (409 `STALE`, the U-17 shape; plan review B3), vendor
+    /// credit rows carry `vendorInvoiceNumber` (S6), vendor summary counts
+    /// posted bills only.
+    pub const AP_EDIT: &'static str = "ap-edit-v1";
+    /// U-85: bill and credit lines with `itemId`, `quantity`, `unitPrice`
+    /// (amount = qty × price rounded half away from zero, 400
+    /// `LINE_AMOUNT_MISMATCH`), `contactId`, `isBillable`, `tagId`, and
+    /// `draftAttachmentId` on create.
+    pub const BILL_LINES: &'static str = "bill-lines-v1";
+    /// U-86: the shared payment terms (with discount terms), `GET
+    /// /bills/terms-dates`, `GET /payment-terms`, calendar-exact due dates.
+    pub const BILL_TERMS: &'static str = "bill-terms-v1";
+    /// U-87: `billReceived` on bills (false = left out of `/bills/payable`).
+    pub const BILL_RECEIVED: &'static str = "bill-received-v1";
+    /// U-89: no OCR on upload in desktop mode; `fieldConfidence` and line
+    /// `confidence` strings on `POST /bills/extract-from-attachment/{id}`,
+    /// amounts as decimal strings or null.
+    pub const BILL_OCR_V2: &'static str = "bill-ocr-v2";
+    /// U-83 to U-87: the engine also replays a repeated `Idempotency-Key` on
+    /// the A/P document mutations (bill edit and void, vendor credit create,
+    /// edit and void, bill-payment void), on top of `idempotency-v1`.
+    pub const IDEMPOTENCY_AP: &'static str = "idempotency-ap-v1";
+    /// U-90 (engine PR #175, pin 16aff64b): attachment routes work in the
+    /// request's company (`X-Company-Id`): uploads are stamped with it, and
+    /// reads, downloads, links and deletes see only that company's files and
+    /// tenant-wide ones.
+    pub const ATTACHMENTS_COMPANY: &'static str = "attachments-company-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {

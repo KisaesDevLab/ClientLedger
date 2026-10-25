@@ -23,7 +23,7 @@
 //! Every engine call runs on the request queue and is polled each frame;
 //! `--demo` answers from `company::demo::checks`.
 
-mod attach;
+pub(crate) mod attach;
 mod form;
 mod panel;
 pub(crate) mod prefill;
@@ -993,6 +993,15 @@ impl Screen for WriteCheckScreen {
 
     fn open_template(&mut self, t: crate::forms::template::TemplateOpen) -> bool {
         self.fill_template(&t)
+    }
+
+    /// "New check" from the receipt inbox (P17): the file is already this
+    /// check's draft (`attach::accept_inbox_draft`).
+    fn open_with(&mut self, payload: crate::windows::OpenPayload) -> bool {
+        match payload {
+            crate::windows::OpenPayload::InboxDraft(d) => self.accept_inbox_draft(d),
+            _ => false,
+        }
     }
 
     /// A saved check opened from elsewhere (the register's edit of a

@@ -1,0 +1,11 @@
+{
+  "description": "Synthetic books side for vendor_oct.tsv: posted bills, vendor credits and bill payments for the demo vendor Midwest Equipment Rental, October 2026. Amounts are the engine's string totals; kind is bill | credit | payment.",
+  "items": [
+    { "id": "00000000-0000-0000-0000-000000000101", "kind": "bill", "date": "2026-10-02", "ref": "INV-55790", "amount": "1330.0000" },
+    { "id": "00000000-0000-0000-0000-000000000102", "kind": "bill", "date": "2026-10-10", "ref": "INV-55811", "amount": "480.0000" },
+    { "id": "00000000-0000-0000-0000-000000000103", "kind": "credit", "date": "2026-10-12", "ref": "CM-2041", "amount": "75.0000" },
+    { "id": "00000000-0000-0000-0000-000000000104", "kind": "payment", "date": "2026-10-14", "ref": "1043", "amount": "1810.0000" },
+    { "id": "00000000-0000-0000-0000-000000000105", "kind": "bill", "date": "2026-10-27", "ref": "INV-55852", "amount": "912.4000" },
+    { "id": "00000000-0000-0000-0000-000000000106", "kind": "bill", "date": "2026-10-29", "ref": "INV-55866", "amount": "640.0000" }
+  ]
+}

@@ -89,9 +89,16 @@ mod templates;
 mod templates_due;
 // P15A.
 mod batch_entry;
+// P17 (one module per work package; plan section 3 conflict rules).
+mod bill;
+mod bill_panel;
+mod bill_read;
+mod inbox;
+mod statement;
+mod viewer;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 20] = [
+const TABLES: [&[(&str, &str)]; 26] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -112,6 +119,12 @@ const TABLES: [&[(&str, &str)]; 20] = [
     templates::ENGLISH,
     templates_due::ENGLISH,
     batch_entry::ENGLISH,
+    bill::ENGLISH,
+    bill_panel::ENGLISH,
+    bill_read::ENGLISH,
+    inbox::ENGLISH,
+    statement::ENGLISH,
+    viewer::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -907,6 +920,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // WP0 (P16): keymap registry. Command labels (`cmd.*`) resolve from the
     // cl-model command table; only the new overlay heading lives here.
     ("shortcuts.scope.grid", "In this grid"),
+    ("shortcuts.scope.viewer", "In this document preview"),
     // WP4a (P16): tag numbers (Q-270). The generic error, and the wording
     // the tag form shows with the number it sent (`t_with`, `{n}`).
     ("error.api.tag_number_taken", "Another tag already uses that number. Tag numbers must be unique; pick a different number."),

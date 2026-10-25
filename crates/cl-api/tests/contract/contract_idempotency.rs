@@ -1,7 +1,6 @@
 //! Request idempotency against the real engine (U-18 `idempotency-v1`,
-//! engine PR #171). PENDING until the engine pin carries the capability
-//! (pin 7b267e48 does not); `CL_ENGINE_EXE` pointed at an engine main build
-//! runs them today.
+//! engine PR #171; `idempotency-ap-v1`, U-83 to U-87). The pin f3ce33fd
+//! carries both; against an older engine they are PENDING by capability.
 //!
 //! - `lost_reply_replays_one_posting`: a `POST /transactions` whose reply
 //!   is lost is sent again by cl-api with the same key; the engine answers
@@ -13,6 +12,8 @@
 //! - `keyed_routes_replay`: one keyable route of each kind (Write Check,
 //!   Enter Bill, a template's Enter now, a daily-sales post) loses its
 //!   reply and is replayed to exactly one effect.
+//! - `ap_routes_replay`: the A/P set (vendor credit create, bill edit, bill
+//!   void) under `idempotency-ap-v1`, the same way.
 
 use cl_api::{
     AccountType, ApiError, BankPosting, BillLine, Capabilities, CardChargeDraft, ContactFields,
@@ -260,4 +261,89 @@ pub fn keyed_routes_replay(h: &Harness) {
     let again = h.run(ds.entry(draft.id)).expect("day");
     assert_eq!(again.status, EntryStatus::Posted);
     assert_eq!(again.transaction, posted.transaction, "one posting");
+}
+
+/// `idempotency-ap-v1` (U-83 to U-87): the A/P document routes are keyed
+/// too. A vendor credit create, a bill edit and a bill void each lose their
+/// reply and are replayed to exactly one effect.
+pub fn ap_routes_replay(h: &Harness) {
+    if !(ready(h) && h.require_cap(Capabilities::IDEMPOTENCY_AP, "U-83 idempotency-ap-v1")) {
+        return;
+    }
+    let s = &h.s1;
+    let opts = PostingOptions::default();
+    let vendor = h
+        .run(s.contacts().create(
+            &NewContact {
+                fields: ContactFields::named(ContactType::Vendor, unique("Keyed A/P vendor")),
+                opening_balance: Money::ZERO,
+                opening_balance_date: None,
+            },
+            key(),
+        ))
+        .expect("vendor")
+        .record
+        .id;
+    let a = account(h, s, AccountType::Expense, "Keyed A/P rental").id;
+
+    // Vendor credit create (`POST /vendor-credits`): one credit available.
+    let credit = cl_api::VendorCreditDraft {
+        vendor,
+        date: date(2026, 11, 4),
+        vendor_invoice_number: Some(unique("KCM").replace(' ', "-")),
+        memo: None,
+        amount: m("40.00"),
+        lines: vec![cl_api::BillLineDraft::expense(a, m("40.00"))],
+        draft_attachment: None,
+    };
+    lost_then_replayed(h, Method::Post, "/api/v1/vendor-credits", || {
+        h.run(s.vendor_credits().create(&credit, &opts, key()))
+            .unwrap_or_else(|e| panic!("credit replayed: {e}"))
+    });
+    let avail = h
+        .run(s.vendor_credits().available(vendor))
+        .expect("available");
+    assert_eq!(avail.len(), 1, "one credit");
+    assert_eq!(avail[0].balance_due.to_wire(), "40.0000");
+
+    // Bill edit (`PUT /bills/{id}`) and void (`POST /bills/{id}/void`).
+    let draft = cl_api::BillDraft {
+        vendor,
+        date: date(2026, 11, 3),
+        vendor_invoice_number: Some(unique("KB").replace(' ', "-")),
+        terms: None,
+        due_date: Some(date(2026, 12, 3)),
+        memo: None,
+        amount_due: m("75.00"),
+        lines: vec![cl_api::BillLineDraft::expense(a, m("75.00"))],
+        received: true,
+        draft_attachment: None,
+    };
+    let saved = h.run(s.bills().create(&draft, &opts, key())).expect("bill");
+    let mut edited = draft.clone();
+    edited.memo = Some("keyed edit".into());
+    let after = lost_then_replayed(h, Method::Put, "/api/v1/bills/{id}", || {
+        h.run(
+            s.bills()
+                .update(saved.record.txn.id, &saved, &edited, &opts, key()),
+        )
+        .unwrap_or_else(|e| panic!("edit replayed: {e}"))
+    });
+    assert_eq!(after.record.txn.memo.as_deref(), Some("keyed edit"));
+    lost_then_replayed(h, Method::Post, "/api/v1/bills/{id}/void", || {
+        h.run(s.bills().void(
+            saved.record.txn.id,
+            "keyed void",
+            &cl_api::ApWriteOptions {
+                posting: PostingOptions::default(),
+                expected_updated_at: after.record.txn.updated_at,
+            },
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("void replayed: {e}"));
+    });
+    let t = h
+        .run(s.transactions().get(saved.record.txn.id))
+        .expect("txn");
+    assert_eq!(t.record.status, cl_api::TxnStatus::Void);
 }

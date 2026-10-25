@@ -6,6 +6,7 @@ use cl_core::{CalendarDate, Timestamp};
 use cl_settings::{ACCENT_PALETTE, Accent};
 
 pub mod batch;
+pub mod bills;
 pub mod checks;
 pub mod contacts;
 pub mod daily_sales;
@@ -101,6 +102,8 @@ pub struct DemoState {
     pub templates_owner_revoked: std::collections::BTreeSet<cl_core::ids::TemplateId>,
     /// Bulk Entry saves (P15A): the idempotency replay map.
     pub batch: batch::DemoBatches,
+    /// Bills and vendor credits entered in the demo (P17).
+    pub bills: bills::DemoBills,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -112,6 +115,8 @@ pub struct DemoAi {
     pub enabled: bool,
     /// The account-suggestion task (`categorization`) is on.
     pub categorization: bool,
+    /// Reading bills and receipts (`receipt_ocr`) is on (P17 Read with AI).
+    pub reading: bool,
 }
 
 impl Default for DemoAi {
@@ -119,6 +124,7 @@ impl Default for DemoAi {
         DemoAi {
             enabled: true,
             categorization: true,
+            reading: true,
         }
     }
 }
@@ -193,6 +199,7 @@ impl DemoState {
             templates_seeded: false,
             templates_owner_revoked: std::collections::BTreeSet::new(),
             batch: batch::DemoBatches::default(),
+            bills: bills::DemoBills::default(),
         }
     }
 
@@ -213,7 +220,8 @@ impl DemoState {
     /// The demo contacts, built from the sample on first use.
     pub fn contacts_mut(&mut self) -> &mut Vec<cl_api::Contact> {
         if self.contacts.is_none() {
-            let cs = contacts::contacts();
+            let mut cs = contacts::contacts();
+            bills::add_story_contacts(&mut cs);
             self.contact_names = contacts::original_names(&cs);
             self.contacts = Some(cs);
         }
@@ -292,7 +300,7 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
         "acceptedAt": "2026-10-01T08:05:00.000Z",
         "aiEnabled": switches.enabled,
         "enabledTasks": {
-            "categorization": switches.categorization, "receipt_ocr": true, "report_summary": true,
+            "categorization": switches.categorization, "receipt_ocr": switches.reading, "report_summary": true,
         },
         "isStale": false,
     }))
@@ -441,6 +449,8 @@ pub fn chart() -> Vec<cl_api::Account> {
         ("6720", "Trailer Registration", 6700, true),
         ("6721", "Plates and Permits", 6720, true),
         ("6450", "Answering Service", 0, false),
+        // The Enter Bill story vendor's default account (P17).
+        ("6210", "Equipment rental", 0, true),
     ] {
         rows.push(DemoRow {
             number: number.into(),
@@ -468,7 +478,14 @@ pub fn chart() -> Vec<cl_api::Account> {
             let n: u32 = number.parse().unwrap_or(0);
             // Debits minus credits for every type, like the engine's
             // stored `accounts.balance`; screens flip it for display.
-            let balance = Some(sample.balance(&number, story));
+            // The fixture posts payables to its own A/P number; the demo
+            // ledger keeps them on the chart's Accounts Payable (P17).
+            let posted_to = if tag == Some("accounts_payable") {
+                sample.company.system_accounts.accounts_payable.as_str()
+            } else {
+                number.as_str()
+            };
+            let balance = Some(sample.balance(posted_to, story));
             Account {
                 id: account_id(n),
                 fields: AccountFields {

@@ -340,6 +340,18 @@ impl Shell {
         }
     }
 
+    /// Open a fresh window of `kind` with what another screen handed over
+    /// (P17). A screen that takes the payload opens as a new window; any
+    /// other kind just opens (or comes to the front) as usual.
+    fn open_with(&mut self, kind: CommandId, payload: crate::windows::OpenPayload) {
+        let mut screen = self.make_screen(kind);
+        if screen.open_with(payload) {
+            self.windows.open_new(kind, screen);
+        } else {
+            self.open_screen(kind);
+        }
+    }
+
     /// Bring the register tab of `account` to the front, or open one (one
     /// tab per account, P12).
     fn open_register(&mut self, account: cl_core::ids::AccountId) {
@@ -469,6 +481,7 @@ impl Shell {
                 CompanyEvent::OpenRegister(account) => self.open_register(account),
                 CompanyEvent::OpenRecord(kind, txn) => self.open_record(kind, txn),
                 CompanyEvent::OpenTemplate(t) => self.open_template(*t),
+                CompanyEvent::OpenWith(kind, payload) => self.open_with(kind, *payload),
                 CompanyEvent::RailCounts(c) => {
                     // Only while a company is open (Opened and Closed clear
                     // them; the new company's Home reads its own).
@@ -1034,6 +1047,26 @@ impl Shell {
         }
     }
 
+    /// The receipt inbox (P17): listed in the background while a company
+    /// is open, often while the inbox or Enter Bill is in front; its count
+    /// shows in the Vendors menu.
+    fn tick_receipt_inbox(&self, ctx: &Context) {
+        let Some(link) = &self.company_link else {
+            return;
+        };
+        let fast = self
+            .windows
+            .active()
+            .is_some_and(|w| crate::screens::receipt_inbox::FAST_KINDS.contains(&w.kind.as_str()));
+        crate::screens::receipt_inbox::tick(
+            ctx,
+            link,
+            self.open_tenant.as_ref().map(|t| t.0),
+            self.today,
+            fast,
+        );
+    }
+
     /// How many templates wait for the owner (the status-bar chip).
     #[must_use]
     pub fn templates_need_you(&self) -> usize {
@@ -1096,6 +1129,7 @@ impl Shell {
         }
         self.apply_company_events(Some(&ctx));
         self.run_templates(&ctx);
+        self.tick_receipt_inbox(&ctx);
         self.save_layout();
         let now = ctx.input(|i| i.time);
         self.flush_widths(Some(now));
@@ -1403,6 +1437,7 @@ fn make_any(
             .chain(&crate::screens::P15_SCREENS)
             .chain(&crate::screens::P15A_SCREENS)
             .chain(&crate::screens::P16_SCREENS)
+            .chain(&crate::screens::P17_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;

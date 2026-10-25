@@ -281,6 +281,16 @@ pub enum LocalValidation {
     /// The dashboard's bills-due window must be 1 to 90 days; nothing was
     /// sent (Home counts a longer window with the bills list instead).
     DueWindow,
+    // ---- P17 WP2: bills, vendor credits, document reading ----
+    /// The engine does not advertise the capability a field or route of
+    /// this request needs (for bills and vendor credits: `ap-closing-v1`,
+    /// `ap-edit-v1`, `bill-lines-v1`, `bill-terms-v1`, `bill-received-v1`);
+    /// nothing was sent.
+    Unsupported,
+    /// An item line's amount is not its quantity × cost rounded half away
+    /// from zero to cents, or it has a cost without a quantity; nothing
+    /// was sent.
+    LineAmountMismatch,
 }
 
 /// A save was refused because its date is on or before the closing date.
@@ -483,8 +493,9 @@ pub enum ApiError {
         request_id: RequestId,
         /// The idempotency key the save used.
         idempotency_key: Option<IdempotencyKey>,
-        /// The engine replays this key on this route (`idempotency-v1`,
-        /// U-18): sending the same save again with `idempotency_key` is
+        /// The engine replays this key on this route (its key set's
+        /// capability, `idempotency-v1` or `idempotency-ap-v1`, U-18):
+        /// sending the same save again with `idempotency_key` is
         /// safe (the first result comes back, nothing posts twice). False
         /// otherwise; then a second send could post twice.
         keyed: bool,
@@ -799,6 +810,26 @@ pub(crate) enum Mapped {
     SessionRejected,
 }
 
+/// The engine's lower-case AI and document-reading codes (P17 WP2), kept
+/// upper-cased so they survive [`ErrorCode`]'s rule. Only these exact
+/// texts: any other lower-case code is still "no code".
+const KNOWN_LOWERCASE: [&str; 8] = [
+    "ai_disabled",
+    "ai_disabled_globally",
+    "ai_function_disabled",
+    "ai_consent_blocked",
+    "ai_all_providers_failed",
+    "ai_ocr_failed",
+    "ai_parse_failed",
+    "ocr_unreadable_at_pii_level",
+];
+
+fn known_lowercase(c: &str) -> Option<ErrorCode> {
+    KNOWN_LOWERCASE
+        .contains(&c)
+        .then(|| ErrorCode(c.to_ascii_uppercase()))
+}
+
 /// The parsed `{error: {...}}` body. `None` when the body is not that shape.
 struct EngineErrorBody {
     message: String,
@@ -814,7 +845,7 @@ impl EngineErrorBody {
         let code = err
             .get("code")
             .and_then(Value::as_str)
-            .and_then(ErrorCode::parse);
+            .and_then(|c| ErrorCode::parse(c).or_else(|| known_lowercase(c)));
         Some(EngineErrorBody {
             message,
             code,

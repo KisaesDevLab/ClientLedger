@@ -105,37 +105,41 @@ fn recorded_idempotency_sets() -> (Routes, Routes) {
     (v1, ap)
 }
 
-/// The keyable rows `operations.txt` must have: every `idempotency-v1`
-/// route, plus the `idempotency-ap-v1` routes the registry already covers
-/// (none on main; P17 adds the bill PUT and void routes).
-fn expected_keyable() -> Routes {
-    let (v1, ap) = recorded_idempotency_sets();
-    let mut out = v1;
-    out.extend(ap.into_iter().filter(|(m, r)| {
-        cl_api::OPERATIONS
-            .iter()
-            .any(|o| o.method().as_str() == m && o.route() == r)
-    }));
-    out.sort();
-    out
+/// The rows `operations.txt` must class `keyable` (every `idempotency-v1`
+/// route) and `keyable-ap` (every `idempotency-ap-v1` route; P17 covers all
+/// six). A route is keyed only under its own set's capability.
+fn expected_keyable() -> (Routes, Routes) {
+    recorded_idempotency_sets()
 }
 
-/// C2 (U-18 plan §10.1): the `keyable` rows of `operations.txt` are exactly
-/// the engine's `idempotency-v1` route set, as its `openapi.json` marks it
-/// (`x-idempotency: true`, recorded in `idempotency_v1_routes.txt`), plus the
-/// `idempotency-ap-v1` routes the registry covers, and the typed table
-/// agrees. No engine checkout needed.
-#[test]
-fn keyable_rows_are_the_engines_idempotency_routes() {
-    let recorded = expected_keyable();
-    assert_eq!(spec::keyable_operations(OPERATIONS_TXT), recorded);
-    let mut typed: Vec<(String, String)> = cl_api::OPERATIONS
+/// The typed table's routes in `set`, sorted.
+fn typed_keyable(set: cl_api::KeySet) -> Routes {
+    let mut typed: Routes = cl_api::OPERATIONS
         .iter()
-        .filter(|o| o.is_keyable())
+        .filter(|o| o.key_set() == Some(set))
         .map(|o| (o.method().as_str().to_string(), o.route().to_string()))
         .collect();
     typed.sort();
-    assert_eq!(typed, recorded);
+    typed
+}
+
+/// C2 (U-18 plan §10.1): the `keyable` rows of `operations.txt` are exactly
+/// the engine's `idempotency-v1` route set and the `keyable-ap` rows exactly
+/// its `idempotency-ap-v1` set, as its `openapi.json` marks them
+/// (`x-idempotency: true`, recorded in `idempotency_v1_routes.txt` and
+/// `idempotency_ap_v1_routes.txt`), and the typed table agrees set by set.
+/// No engine checkout needed.
+#[test]
+fn keyable_rows_are_the_engines_idempotency_routes() {
+    let (v1, ap) = expected_keyable();
+    assert_eq!(spec::keyable_operations(OPERATIONS_TXT), v1);
+    assert_eq!(spec::keyable_ap_operations(OPERATIONS_TXT), ap);
+    assert_eq!(typed_keyable(cl_api::KeySet::V1), v1);
+    assert_eq!(typed_keyable(cl_api::KeySet::ApV1), ap);
+    assert_eq!(
+        cl_api::OPERATIONS.iter().filter(|o| o.is_keyable()).count(),
+        v1.len() + ap.len()
+    );
 }
 
 /// The engine spec's `x-idempotency` marks are exactly the recorded
@@ -175,16 +179,21 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         return;
     }
     let (v1, ap) = recorded_idempotency_sets();
-    let mut sets = v1;
-    sets.extend(ap);
+    let mut sets = v1.clone();
+    sets.extend(ap.iter().cloned());
     sets.sort();
     assert_eq!(marked, sets, "the engine's keyed routes changed");
     let keyable = spec::keyable_operations(OPERATIONS_TXT);
+    let keyable_ap = spec::keyable_ap_operations(OPERATIONS_TXT);
     assert!(
-        keyable.iter().all(|r| marked.contains(r)),
+        keyable
+            .iter()
+            .chain(&keyable_ap)
+            .all(|r| marked.contains(r)),
         "every keyable row is marked by the engine"
     );
-    assert_eq!(keyable, expected_keyable());
+    assert_eq!(keyable, v1, "keyable = the idempotency-v1 set");
+    assert_eq!(keyable_ap, ap, "keyable-ap = the idempotency-ap-v1 set");
 }
 
 #[test]

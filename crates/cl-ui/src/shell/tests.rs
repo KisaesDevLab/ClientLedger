@@ -361,8 +361,10 @@ fn status_bar_hints_follow_the_window_in_front() {
     assert_eq!(check[1].chips, vec![chip("form.insert_line")]);
     assert_eq!(check[2].chips, vec![chip("edit.open_list")]);
     assert_eq!(check[3].chips, vec![chip("form.revert")]);
-    // The P14 forms: the same with a lines grid, fewer without one.
+    // The P14 forms and Enter Bill (mockup EnterBill.html): the same with a
+    // lines grid, fewer without one.
     for kind in [
+        "vendors.enter_bill",
         "vendors.card_charge",
         "vendors.personal_funds",
         "banking.deposit",

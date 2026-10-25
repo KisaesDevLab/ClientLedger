@@ -23,8 +23,8 @@ use sha2::{Digest, Sha256};
 /// `DELETE /transactions/{id}` are in the spec; since pin 454fd23 (engine
 /// PR #156) the P13 check edit and rules evaluate call are too; since pin
 /// f78583e (engine PR #159) the P14 feed deposit groupings and equity
-/// roles are. The P15 journal entry number, templates and run-due routes
-/// are listed until their engine PRs land and the pin moves.
+/// roles are; since pin f3ce33fd (engine PR-A) the P17 vendor credit edit
+/// (U-84a), bill terms dates (U-86d) and payment terms list (U-86e) are.
 pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
@@ -213,15 +213,26 @@ pub fn idempotent_operations(spec: &Value) -> Vec<(String, String)> {
     out
 }
 
-/// The `keyable` rows of `operations.txt`: `(METHOD, route)`, sorted.
+/// The `keyable` (`idempotency-v1`) rows of `operations.txt`:
+/// `(METHOD, route)`, sorted.
 pub fn keyable_operations(txt: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, "keyable")
+}
+
+/// The `keyable-ap` (`idempotency-ap-v1`) rows of `operations.txt`:
+/// `(METHOD, route)`, sorted.
+pub fn keyable_ap_operations(txt: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, "keyable-ap")
+}
+
+fn rows_of_class(txt: &str, class: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = txt
         .lines()
         .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
         .filter_map(|l| {
             let mut it = l.split_whitespace();
             let (m, r, c) = (it.next()?, it.next()?, it.next()?);
-            (c == "keyable").then(|| (m.to_string(), r.to_string()))
+            (c == class).then(|| (m.to_string(), r.to_string()))
         })
         .collect();
     out.sort();

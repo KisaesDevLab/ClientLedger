@@ -7,11 +7,12 @@
 //! the app use the unpacked result.
 
 use anyhow::{Context, Result, anyhow, bail};
-use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::io::Write;
+use std::path::Path;
+
+pub use crate::fetch_lock::Entry;
+use crate::fetch_lock::{fetch_verified, key_value, parse_entry};
 
 /// Name of the pin file at the repository root.
 const LOCK_FILE: &str = "pg-binaries.lock";
@@ -21,14 +22,6 @@ const STAMP: &str = "pg-fetch.stamp";
 
 /// Executables kept from the server archive (`.exe` is added on Windows).
 const KEEP_BIN: [&str; 3] = ["postgres", "initdb", "pg_ctl"];
-
-/// One pinned download.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Entry {
-    pub target: String,
-    pub sha256: String,
-    pub url: String,
-}
 
 /// Parsed `pg-binaries.lock`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,39 +44,14 @@ impl Lock {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            if let Some(v) = line.strip_prefix("version") {
-                let v = v.trim_start().strip_prefix('=').map(str::trim);
-                version = Some(
-                    v.filter(|v| !v.is_empty())
-                        .ok_or_else(|| anyhow!("{LOCK_FILE}:{}: bad version line", n + 1))?
-                        .to_string(),
-                );
+            if line.starts_with("version") {
+                version = key_value(LOCK_FILE, n + 1, line, "version")?;
+                if version.is_none() {
+                    bail!("{LOCK_FILE}:{}: bad version line", n + 1);
+                }
                 continue;
             }
-            let mut parts = line.split_whitespace();
-            let (Some(target), Some(sha), Some(url), None) =
-                (parts.next(), parts.next(), parts.next(), parts.next())
-            else {
-                bail!("{LOCK_FILE}:{}: expected `<target> <sha256> <url>`", n + 1);
-            };
-            if sha.len() != 64
-                || !sha
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            {
-                bail!(
-                    "{LOCK_FILE}:{}: sha256 must be 64 lowercase hex digits",
-                    n + 1
-                );
-            }
-            if !url.starts_with("https://") {
-                bail!("{LOCK_FILE}:{}: url must be https", n + 1);
-            }
-            entries.push(Entry {
-                target: target.to_string(),
-                sha256: sha.to_string(),
-                url: url.to_string(),
-            });
+            entries.push(parse_entry(LOCK_FILE, n + 1, line)?);
         }
         let version = version.ok_or_else(|| anyhow!("{LOCK_FILE}: missing `version = ...`"))?;
         if !version.starts_with("16.") {
@@ -97,29 +65,6 @@ impl Lock {
     pub fn entry(&self, target: &str) -> Option<&Entry> {
         self.entries.iter().find(|e| e.target == target)
     }
-}
-
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut acc, b| {
-        let _ = write!(acc, "{b:02x}");
-        acc
-    })
-}
-
-/// SHA-256 of a file as lowercase hex.
-fn sha256_file(path: &Path) -> Result<String> {
-    let mut f = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
-    let mut h = Sha256::new();
-    let mut buf = vec![0u8; 1 << 16];
-    loop {
-        let n = f.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        h.update(&buf[..n]);
-    }
-    Ok(hex(&h.finalize()))
 }
 
 /// Should this path (relative to the unpacked root) be deleted by the trim?
@@ -190,45 +135,6 @@ fn exe_name(base: &str) -> String {
     }
 }
 
-/// Download `url` to `dest` with curl (present on Windows 10+, macOS, Linux).
-fn download(url: &str, dest: &Path) -> Result<()> {
-    println!("==> download {url}");
-    let status = Command::new("curl")
-        .args(["--fail", "--silent", "--show-error", "--location"])
-        .args(["--retry", "3", "--proto", "=https", "--output"])
-        .arg(dest)
-        .arg(url)
-        .status()
-        .context("could not start `curl`")?;
-    if !status.success() {
-        bail!("download failed ({status})");
-    }
-    Ok(())
-}
-
-/// Fetch (or reuse from cache) the archive and verify its hash.
-fn fetch_verified(entry: &Entry, cache: &Path) -> Result<PathBuf> {
-    fs::create_dir_all(cache)?;
-    let file = cache.join(format!("{}.jar", entry.sha256));
-    if file.exists() && sha256_file(&file)? == entry.sha256 {
-        println!("pg-fetch: cache hit {}", entry.sha256);
-        return Ok(file);
-    }
-    let part = cache.join(format!("{}.part", entry.sha256));
-    download(&entry.url, &part)?;
-    let actual = sha256_file(&part)?;
-    if actual != entry.sha256 {
-        let _ = fs::remove_file(&part);
-        bail!(
-            "SHA-256 mismatch for {}\n  expected {}\n  actual   {actual}\nthe download was deleted; check pg-binaries.lock",
-            entry.url,
-            entry.sha256
-        );
-    }
-    fs::rename(&part, &file)?;
-    Ok(file)
-}
-
 /// Unpack the `.txz` inside the Maven jar into `dest`.
 fn unpack_jar(jar: &Path, dest: &Path) -> Result<()> {
     let mut zip = zip::ZipArchive::new(fs::File::open(jar)?).context("read jar")?;
@@ -295,7 +201,7 @@ pub fn pg_fetch(args: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    let jar = fetch_verified(entry, &pg.join(".cache"))?;
+    let jar = fetch_verified("pg-fetch", LOCK_FILE, entry, &pg.join(".cache"), "jar")?;
     let work = pg.join(".work").join(target.dir);
     let _ = fs::remove_dir_all(&work);
     fs::create_dir_all(&work)?;
@@ -366,18 +272,5 @@ mod tests {
         assert!(t("lib/libssl.lib"));
         assert!(t("lib/pkgconfig"));
         assert!(t("include"));
-    }
-
-    #[test]
-    fn hashes_a_file() {
-        let dir = std::env::temp_dir().join(format!("cl-xtask-sha-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        let f = dir.join("abc.txt");
-        fs::write(&f, b"abc").unwrap();
-        assert_eq!(
-            sha256_file(&f).unwrap(),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
-        let _ = fs::remove_dir_all(dir);
     }
 }

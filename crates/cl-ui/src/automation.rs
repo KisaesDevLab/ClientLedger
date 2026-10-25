@@ -233,6 +233,9 @@ enum JobKind {
         path: PathBuf,
         slot: Arc<Mutex<Option<Arc<ColorImage>>>>,
     },
+    /// A resize waits for the chosen zoom to be in effect: the size is in
+    /// points, which the window multiplies by the zoom.
+    Resize(egui::Vec2),
 }
 
 /// A `scroll` under way: waits for the tree to hold still.
@@ -384,6 +387,21 @@ impl Bridge {
             };
         }
         match &job.kind {
+            JobKind::Resize(size) => {
+                if (ctx.zoom_factor() - shell.prefs.zoom_factor()).abs() > 1e-3 {
+                    return Some(job);
+                }
+                ctx.send_viewport_cmd(ViewportCommand::InnerSize(*size));
+                Some(Job {
+                    pending: job.pending,
+                    kind: JobKind::AfterFrame {
+                        // Window managers resize asynchronously.
+                        until: self.frame() + self.queued() + SETTLE_FRAMES + 5,
+                        finish: Finish::Window,
+                    },
+                    deadline: job.deadline,
+                })
+            }
             JobKind::AfterFrame { until, finish } => {
                 if self.frame() < *until || self.queued() > 0 || sequencer_busy(ctx) {
                     return Some(job);
@@ -495,13 +513,7 @@ impl Bridge {
                         "width and height must be 100 to 10000",
                     );
                 }
-                ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(p.width, p.height)));
-                let mut started = self.after(Finish::Window);
-                if let Started::Job(JobKind::AfterFrame { until, .. }) = &mut started {
-                    // Window managers resize asynchronously.
-                    *until += 4;
-                }
-                started
+                Started::Job(JobKind::Resize(egui::vec2(p.width, p.height)))
             }
             "set_theme" => {
                 let p = parse!(ThemeParams);
@@ -1205,6 +1217,23 @@ mod bridge_tests {
         assert_eq!(v["shortcuts_open"], true);
         assert_eq!(v["theme"], "dark");
         assert_eq!(v["zoom_percent"], 200);
+    }
+
+    #[test]
+    fn resize_answers_once_the_zoom_is_in_effect() {
+        let mut rig = Rig::new();
+        let (before, after) = rig.run(|c| {
+            let before = call(c, "resize", json!({"width": 960, "height": 640})).unwrap();
+            call(c, "set_zoom", json!({"percent": 200})).unwrap();
+            let after = call(c, "resize", json!({"width": 960, "height": 640})).unwrap();
+            call(c, "set_zoom", json!({"percent": 100})).unwrap();
+            (before, after)
+        });
+        let ppp = |v: &Value| v["pixels_per_point"].as_f64().unwrap();
+        assert!(
+            (ppp(&after) - 2.0 * ppp(&before)).abs() < 1e-3,
+            "{before} / {after}"
+        );
     }
 
     #[test]

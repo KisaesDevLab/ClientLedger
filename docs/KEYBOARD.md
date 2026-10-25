@@ -74,6 +74,7 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Shift+F8` | Previous Row That Needs Attention | `batch.prev_problem` |
 | `Ctrl+Page Down` | Next Section | `batch.next_section` |
 | `Ctrl+Page Up` | Previous Section | `batch.prev_section` |
+| `Alt+A` | Accept These Values | `bill.accept_read` |
 
 ## In a grid
 
@@ -81,6 +82,16 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | --- | --- | --- |
 | `Ctrl+D` | Copy Down | `grid.copy_down` |
 | `Ctrl+A` | Select All Rows | `grid.select_all` |
+
+## In a document preview
+
+| Keys | Command | Id |
+| --- | --- | --- |
+| `Ctrl++` | Zoom In on the Document | `viewer.zoom_in` |
+| `Ctrl+-` | Zoom Out on the Document | `viewer.zoom_out` |
+| `Ctrl+0` | Fit the Document | `viewer.fit` |
+| `Page Down` | Next Page | `viewer.page_next` |
+| `Page Up` | Previous Page | `viewer.page_prev` |
 
 ## Always the same in forms and grids
 
@@ -144,7 +155,7 @@ Find these from the menus or with `Ctrl+K`.
 - **Edit:** Void Transaction
 - **Lists:** Item List, Tags, Terms, Payment Methods, Templates, Import or Export a List
 - **Customers:** Customers & Jobs, Daily Sales Summary, Credit Memo or Refund, Statements
-- **Vendors:** Vendors, Paid with Personal Funds
+- **Vendors:** Vendors, Paid with Personal Funds, Receipt Inbox, Match Vendor Statement…
 - **Banking:** Pay Yourself or Put Money In, Loan Payment, Bulk Entry, Import Bank File, Bank Feed
 - **Payroll:** Import Payroll
 - **Reports:** Reports, Profit & Loss, Balance Sheet

@@ -1,4 +1,4 @@
-//! Contract tests against the real engine (P05 plan §2.10, §7). One binary,
+//! Contract tests against the real engine (P05 plan Â§2.10, Â§7). One binary,
 //! one engine, one fresh cluster; tests run in the order listed below.
 //!
 //! Run: `cargo xtask engine && cargo xtask pg-fetch`, then
@@ -11,9 +11,11 @@ mod support;
 
 mod common;
 mod contract_accounts;
+mod contract_ap_void;
 mod contract_audit;
 mod contract_bank_postings;
 mod contract_batch;
+mod contract_bills;
 mod contract_capabilities;
 mod contract_census;
 mod contract_check_panel;
@@ -384,6 +386,10 @@ fn main() -> std::process::ExitCode {
             contract_idempotency::keyed_routes_replay,
         ),
         (
+            "idempotency::ap_routes_replay",
+            contract_idempotency::ap_routes_replay,
+        ),
+        (
             "capabilities::je_line_contact_u22",
             contract_capabilities::je_line_contact_u22,
         ),
@@ -621,6 +627,66 @@ fn main() -> std::process::ExitCode {
         (
             "home::rail_counts_match_the_lists",
             contract_home::rail_counts_match_the_lists,
+        ),
+        // P17 WP2b: the register's A/P void guard (review B1).
+        (
+            "ap_void::paid_bill_void_is_refused_and_links_remain",
+            contract_ap_void::paid_bill_void_is_refused_and_links_remain,
+        ),
+        // P17 WP2: Enter Bill and vendor credits (PR-A/PR-B parts PENDING
+        // by capability until the pin moves).
+        (
+            "bills::expense_bill_posts_to_ap_live",
+            contract_bills::expense_bill_posts_to_ap_live,
+        ),
+        (
+            "bills::vendor_summary_moves_by_the_total_live",
+            contract_bills::vendor_summary_moves_by_the_total_live,
+        ),
+        (
+            "bills::void_refused_when_paid_live",
+            contract_bills::void_refused_when_paid_live,
+        ),
+        (
+            "bills::void_bill_drops_from_summary_u84",
+            contract_bills::void_bill_drops_from_summary_u84,
+        ),
+        (
+            "vendor_credits::create_and_available_live",
+            contract_bills::vendor_credit_create_and_available_live,
+        ),
+        (
+            "bills::attach_draft_live",
+            contract_bills::attach_draft_live,
+        ),
+        (
+            "bills::attachments_company_u90_live",
+            contract_bills::attachments_company_u90_live,
+        ),
+        (
+            "bills::attachment_10mb_edge_live",
+            contract_bills::attachment_10mb_edge_live,
+        ),
+        (
+            "bills::reading_refused_while_ai_is_off_live",
+            contract_bills::reading_refused_while_ai_is_off_live,
+        ),
+        (
+            "bills::closed_period_u83",
+            contract_bills::closed_period_u83,
+        ),
+        ("bills::stale_u84", contract_bills::stale_u84),
+        ("bills::delete_u84", contract_bills::delete_u84),
+        (
+            "vendor_credits::edit_u84",
+            contract_bills::vendor_credit_edit_u84,
+        ),
+        ("bills::item_lines_u85", contract_bills::item_lines_u85),
+        ("bills::terms_dates_u86", contract_bills::terms_dates_u86),
+        ("bills::received_u87", contract_bills::received_u87),
+        (
+            "bills::backup_restore_keeps_the_bill_file_live",
+            contract_bills::backup_restore_keeps_the_bill_file_live,
         ),
         (
             "lifecycle::ten_switches_under_two_seconds",

@@ -3,6 +3,8 @@
 //! - [`user_prefs`]: per-user look-and-feel and entry choices (P09).
 //! - [`company_prefs`]: company-local choices the engine has no column for
 //!   (receipt inbox, bills-due window, AI switches and cap, consent note).
+//! - [`inbox_state`]: which receipt-inbox files were uploaded (by hash,
+//!   never by name), so a file is not offered twice (P17).
 //! - [`ai`] and [`smtp`]: provider names, keychain entry names, the token
 //!   cap, the Ollama address check, and SMTP field checks.
 //! - [`recent`]: the recent-companies store, a JSON file in the app data
@@ -20,6 +22,7 @@
 
 pub mod ai;
 pub mod company_prefs;
+pub mod inbox_state;
 pub mod recent;
 pub mod secrets;
 pub mod smtp;

@@ -1345,7 +1345,11 @@ impl LoanPaymentScreen {
             kit::balance_line(ui, tokens, &t("loan.panel.balance"), owed);
             match self.lender_result {
                 Some(LenderMatch::Matches) => {
-                    ui.label(RichText::new(t("loan.lender.matches")).color(tokens.text_primary));
+                    crate::widgets::label_with_check(
+                        ui,
+                        RichText::new(t("loan.lender.matches")).color(tokens.text_primary),
+                        false,
+                    );
                 }
                 Some(LenderMatch::Differs(d)) => {
                     ui.label(

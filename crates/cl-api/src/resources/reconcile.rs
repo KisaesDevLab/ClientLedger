@@ -77,6 +77,18 @@ pub(crate) enum Search {
         /// Owner data: never logged.
         name: String,
     },
+    /// Rows of a document list (`list` with `query`, rows under
+    /// `list_key`) recognised by the row fingerprint alone; a single match
+    /// is read back by id at `{base}/{id}` (P17 D2: bills and vendor
+    /// credits by vendor, date, reference and total).
+    Rows {
+        list: &'static Operation,
+        list_key: &'static str,
+        /// Filters (owner data such as a reference: never logged).
+        query: Vec<(String, String)>,
+        get: &'static Operation,
+        base: &'static str,
+    },
 }
 
 /// How to recognise our own write.
@@ -399,6 +411,52 @@ impl Probe {
         }
     }
 
+    /// [`Search::Rows`]: the candidate count and the matching replies (a
+    /// single match read back by id), or the check to end with.
+    #[allow(clippy::too_many_arguments, reason = "the parts of Search::Rows")]
+    async fn document_rows(
+        &self,
+        list: &'static Operation,
+        list_key: &str,
+        query: &[(String, String)],
+        get: &'static Operation,
+        base: &str,
+        fp: RowFp,
+        fingerprint: &[u8; 32],
+        generation: u64,
+    ) -> Result<(usize, Vec<EngineReply>), Check> {
+        let q = Query(query.to_vec());
+        let Some(rows) = self.search_rows(list, list_key, &q).await else {
+            return Err(Check::Wait);
+        };
+        let cands: Vec<Value> = rows
+            .into_iter()
+            .filter(|r| self.recent(r) && self.not_ours_before(r))
+            .collect();
+        let n = cands.len();
+        let ids: Vec<Option<TransactionId>> = cands
+            .into_iter()
+            .filter(|r| fp(r.clone()).as_ref() == Some(fingerprint))
+            .map(|r| {
+                r.get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|s| TransactionId::parse(s).ok())
+            })
+            .collect();
+        match ids.as_slice() {
+            [Some(id)] => match self.get(get, &format!("{base}/{id}")).await {
+                Ok(reply) => Ok((n, vec![reply])),
+                Err(_) => Err(Check::Wait),
+            },
+            [None] => Err(Check::Final(Reconciled::Unresolved)),
+            _ => Ok((
+                n,
+                ids.iter().map(|_| synth(Vec::new(), generation)).collect(),
+            )),
+        }
+    }
+
+    #[allow(clippy::too_many_lines, reason = "one arm per search kind")]
     async fn created(
         &self,
         search: &Search,
@@ -495,6 +553,30 @@ impl Probe {
                 }
                 (n, found)
             }
+            Search::Rows {
+                list,
+                list_key,
+                query,
+                get,
+                base,
+            } => {
+                match self
+                    .document_rows(
+                        list,
+                        list_key,
+                        query,
+                        get,
+                        base,
+                        fp,
+                        fingerprint,
+                        generation,
+                    )
+                    .await
+                {
+                    Ok(found) => found,
+                    Err(check) => return check,
+                }
+            }
         };
         match (matches.len(), candidates) {
             (1, _) => Check::Final(Reconciled::Committed(matches.remove(0))),
@@ -540,13 +622,16 @@ pub enum Recheck {
 }
 
 /// The transaction a committed answer names (`{transaction}`, `{check}`,
-/// a daily-sales day's journal entry `{entry: {transactionId}}`, or a bare
+/// `{bill}`, `{credit}`, a daily-sales day's journal entry
+/// `{entry: {transactionId}}`, or a bare
 /// record).
 fn committed_id(reply: &EngineReply) -> Option<TransactionId> {
     let v: Value = serde_json::from_slice(&reply.body).ok()?;
     [
         "/transaction/id",
         "/check/id",
+        "/bill/id",
+        "/credit/id",
         "/entry/transactionId",
         "/id",
     ]

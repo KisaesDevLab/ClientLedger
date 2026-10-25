@@ -1195,7 +1195,7 @@ impl CardChargeScreen {
             tokens.text_secondary
         };
         let job = kit::with_figure(ui, key, var, &figure.format(self.money_style), 12.0, color);
-        ui.label(job);
+        crate::widgets::label_with_check(ui, job, false);
     }
 
     fn panel_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {

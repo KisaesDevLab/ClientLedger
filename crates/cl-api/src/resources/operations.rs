@@ -16,12 +16,13 @@ pub enum RetryClass {
     /// or once with the same key when outcome reconciliation proves the first
     /// attempt did not commit.
     PreHandlerOnly,
-    /// A mutation in the engine's `idempotency-v1` route set (U-18, engine
+    /// A mutation in one of the engine's keyed route sets (U-18, engine
     /// `docs/DESKTOP.md` "Request idempotency"; `x-idempotency: true` in its
-    /// `openapi.json`): `PreHandlerOnly` without the capability, `KeyedOnce`
-    /// with it. Only these routes ever get `KeyedOnce`.
-    Keyable,
-    /// A keyable mutation while the engine advertises `idempotency-v1`
+    /// `openapi.json`): `PreHandlerOnly` unless the engine advertises that
+    /// set's capability ([`KeySet::capability`]), `KeyedOnce` when it does.
+    /// Only these routes ever get `KeyedOnce`.
+    Keyable(KeySet),
+    /// A keyable mutation while the engine advertises its set's capability
     /// (never written in the table; see [`RetryClass::effective`]): retried
     /// like reads, always with the same key, which the engine replays.
     KeyedOnce,
@@ -37,23 +38,49 @@ impl RetryClass {
         match self {
             RetryClass::Idempotent => "idempotent",
             RetryClass::PreHandlerOnly => "pre-handler-only",
-            RetryClass::Keyable => "keyable",
+            RetryClass::Keyable(KeySet::V1) => "keyable",
+            RetryClass::Keyable(KeySet::ApV1) => "keyable-ap",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
     }
 
     /// The class in effect, given whether the engine replays this request's
-    /// key (U-18: it advertises `idempotency-v1` and the key is young enough,
-    /// see [`crate::IdempotencyKey`]). Only [`RetryClass::Keyable`] routes
-    /// are upgraded; every other mutation keeps its class, so it is never
-    /// blind-retried (the engine does not replay it).
+    /// key (U-18: it advertises the route's set capability and the key is
+    /// young enough, see [`crate::IdempotencyKey`]). Only
+    /// [`RetryClass::Keyable`] routes are upgraded; every other mutation
+    /// keeps its class, so it is never blind-retried (the engine does not
+    /// replay it).
     #[must_use]
     pub const fn effective(self, keyed: bool) -> RetryClass {
         match self {
-            RetryClass::Keyable if keyed => RetryClass::KeyedOnce,
-            RetryClass::Keyable => RetryClass::PreHandlerOnly,
+            RetryClass::Keyable(_) if keyed => RetryClass::KeyedOnce,
+            RetryClass::Keyable(_) => RetryClass::PreHandlerOnly,
             other => other,
+        }
+    }
+}
+
+/// The engine's keyed route sets. Each capability name fixes its routes
+/// (routes added later get a new name), so a route replays its key only
+/// while the engine advertises the capability of the set it is in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum KeySet {
+    /// `idempotency-v1` (U-18): transactions, checks, invoices, bill
+    /// create, daily sales, templates and the list creates.
+    V1,
+    /// `idempotency-ap-v1` (U-83 to U-87): bill edit and void, vendor credit
+    /// create, edit and void, bill-payment void.
+    ApV1,
+}
+
+impl KeySet {
+    /// The capability the engine advertises while it replays this set.
+    #[must_use]
+    pub const fn capability(self) -> &'static str {
+        match self {
+            KeySet::V1 => crate::wire::Capabilities::IDEMPOTENCY,
+            KeySet::ApV1 => crate::wire::Capabilities::IDEMPOTENCY_AP,
         }
     }
 }
@@ -94,10 +121,19 @@ impl Operation {
         self.company_scoped
     }
 
-    /// In the engine's `idempotency-v1` route set (U-18).
+    /// In one of the engine's keyed route sets (U-18).
     #[must_use]
     pub const fn is_keyable(&self) -> bool {
-        matches!(self.retry, RetryClass::Keyable)
+        matches!(self.retry, RetryClass::Keyable(_))
+    }
+
+    /// The engine's keyed route set this route is in, if any.
+    #[must_use]
+    pub const fn key_set(&self) -> Option<KeySet> {
+        match self.retry {
+            RetryClass::Keyable(set) => Some(set),
+            _ => None,
+        }
     }
 
     /// Which failures the route reads beyond the §2.4 table: refused rows
@@ -158,7 +194,21 @@ const fn keyable(method: Method, route: &'static str) -> Operation {
     op(
         method,
         route,
-        RetryClass::Keyable,
+        RetryClass::Keyable(KeySet::V1),
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+/// A mutation in the engine's `idempotency-ap-v1` route set (U-83 to U-87):
+/// keyed only while the engine advertises that capability (an engine with
+/// only `idempotency-v1` does not replay these).
+const fn keyable_ap(method: Method, route: &'static str) -> Operation {
+    op(
+        method,
+        route,
+        RetryClass::Keyable(KeySet::ApV1),
         RouteKind::Session,
         TimeoutClass::Write,
         true,
@@ -622,6 +672,64 @@ pub(crate) const RECONCILIATIONS: Operation = read("/api/v1/banking/reconciliati
 /// Imported bank statements.
 pub(crate) const BANK_STATEMENTS: Operation = read("/api/v1/banking/statements");
 
+// ---- P17: Enter Bill, vendor credits, receipt inbox, document reading ---------
+// `BILLS_LIST` (P16) and `BILLS_CREATE` (P08) are above. Engine PR-A
+// (U-83 to U-87) is in the pin: the vendor credit edit, the terms dates and
+// the payment terms list are in its spec, and the A/P document mutations are
+// keyed under `idempotency-ap-v1`. Bill and credit delete use `TXN_DELETE`
+// (U-84b).
+
+/// One bill with its lines.
+pub(crate) const BILL_GET: Operation = read("/api/v1/bills/{id}");
+/// Changes a bill (`expectedUpdatedAt` and `closingPassword` with
+/// `ap-edit-v1` / `ap-closing-v1`).
+pub(crate) const BILL_PUT: Operation = keyable_ap(Method::Put, "/api/v1/bills/{id}");
+/// Voids an unpaid bill.
+pub(crate) const BILL_VOID: Operation = keyable_ap(Method::Post, "/api/v1/bills/{id}/void");
+/// The due and discount dates a bill would get (`bill-terms-v1`, U-86d).
+pub(crate) const BILL_TERMS_DATES: Operation = read("/api/v1/bills/terms-dates");
+/// The fixed payment terms list (`bill-terms-v1`, U-86e).
+pub(crate) const PAYMENT_TERMS: Operation = read("/api/v1/payment-terms");
+/// Links the files of a draft to a saved bill.
+pub(crate) const BILL_ATTACH_DRAFT: Operation =
+    write(Method::Post, "/api/v1/bills/{id}/attach-draft");
+/// Reads a bill out of an uploaded file with the owner's AI provider (only
+/// on the owner's click, Q-73; a POST, so classed as a write).
+pub(crate) const BILL_EXTRACT: Operation = write(
+    Method::Post,
+    "/api/v1/bills/extract-from-attachment/{attachmentId}",
+);
+/// Vendor credits by vendor, date and text.
+pub(crate) const VENDOR_CREDITS_LIST: Operation = read("/api/v1/vendor-credits");
+/// Records a vendor credit.
+pub(crate) const VENDOR_CREDITS_CREATE: Operation =
+    keyable_ap(Method::Post, "/api/v1/vendor-credits");
+/// One vendor credit with its lines.
+pub(crate) const VENDOR_CREDIT_GET: Operation = read("/api/v1/vendor-credits/{id}");
+/// Changes an unapplied vendor credit (`ap-edit-v1`, U-84a).
+pub(crate) const VENDOR_CREDIT_PUT: Operation =
+    keyable_ap(Method::Put, "/api/v1/vendor-credits/{id}");
+/// Voids a vendor credit.
+pub(crate) const VENDOR_CREDIT_VOID: Operation =
+    keyable_ap(Method::Post, "/api/v1/vendor-credits/{id}/void");
+/// A vendor's credits with an unused balance.
+pub(crate) const VENDOR_CREDITS_AVAILABLE: Operation =
+    read("/api/v1/vendor-credits/available/{vendorId}");
+/// One file's details.
+pub(crate) const ATTACHMENT_GET: Operation = read("/api/v1/attachments/{id}");
+/// Deletes a file.
+pub(crate) const ATTACHMENT_DELETE: Operation = write(Method::Delete, "/api/v1/attachments/{id}");
+/// Links a file to a record.
+pub(crate) const ATTACHMENT_LINK: Operation = write(Method::Post, "/api/v1/attachments/{id}/link");
+/// Files not linked to any record.
+pub(crate) const ATTACHMENTS_UNLINKED: Operation = read("/api/v1/attachments/unlinked");
+/// Bill payments by vendor and date (statement match).
+pub(crate) const BILL_PAYMENTS_LIST: Operation = read("/api/v1/bill-payments");
+/// Voids a bill payment and takes its applications off the bills and
+/// credits it paid (the register's A/P void guard, review B1).
+pub(crate) const BILL_PAYMENT_VOID: Operation =
+    keyable_ap(Method::Post, "/api/v1/bill-payments/{id}/void");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -634,7 +742,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 167] = [
+pub const OPERATIONS: [Operation; 186] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -808,6 +916,26 @@ pub const OPERATIONS: [Operation; 167] = [
     PAYROLL_SESSIONS,
     RECONCILIATIONS,
     BANK_STATEMENTS,
+    // P17
+    BILL_GET,
+    BILL_PUT,
+    BILL_VOID,
+    BILL_TERMS_DATES,
+    PAYMENT_TERMS,
+    BILL_ATTACH_DRAFT,
+    BILL_EXTRACT,
+    VENDOR_CREDITS_LIST,
+    VENDOR_CREDITS_CREATE,
+    VENDOR_CREDIT_GET,
+    VENDOR_CREDIT_PUT,
+    VENDOR_CREDIT_VOID,
+    VENDOR_CREDITS_AVAILABLE,
+    ATTACHMENT_GET,
+    ATTACHMENT_DELETE,
+    ATTACHMENT_LINK,
+    ATTACHMENTS_UNLINKED,
+    BILL_PAYMENTS_LIST,
+    BILL_PAYMENT_VOID,
 ];
 
 /// Looks up a covered operation.
@@ -883,12 +1011,22 @@ mod tests {
             assert!(seen.insert((o.method(), o.route())), "duplicate {o:?}");
             let never = (o.route().starts_with("/api/v1/auth/") && !o.method().is_read())
                 || NEVER_RETRIED.contains(&(o.method().as_str(), o.route()));
-            let keyable = KEYABLE.contains(&(o.method().as_str(), o.route()));
-            match (o.method().is_read(), never, keyable) {
+            let route = (o.method().as_str(), o.route());
+            let set = if KEYABLE.contains(&route) {
+                Some(KeySet::V1)
+            } else if KEYABLE_AP.contains(&route) {
+                Some(KeySet::ApV1)
+            } else {
+                None
+            };
+            match (o.method().is_read(), never, set) {
                 (true, _, _) => assert_eq!(o.retry(), RetryClass::Idempotent, "{o:?}"),
                 (false, true, _) => assert_eq!(o.retry(), RetryClass::Never, "{o:?}"),
-                (false, false, true) => assert_eq!(o.retry(), RetryClass::Keyable, "{o:?}"),
-                (false, false, false) => {
+                (false, false, Some(set)) => {
+                    assert_eq!(o.retry(), RetryClass::Keyable(set), "{o:?}");
+                    assert_eq!(o.key_set(), Some(set), "{o:?}");
+                }
+                (false, false, None) => {
                     assert_eq!(o.retry(), RetryClass::PreHandlerOnly, "{o:?}");
                 }
             }
@@ -899,8 +1037,8 @@ mod tests {
         }
         assert_eq!(
             OPERATIONS.iter().filter(|o| o.is_keyable()).count(),
-            KEYABLE.len(),
-            "every idempotency-v1 route is covered"
+            KEYABLE.len() + KEYABLE_AP.len(),
+            "every idempotency-v1 and idempotency-ap-v1 route is covered"
         );
         assert_eq!(
             find(Method::Post, "/api/v1/auth/create-tenant").map(|o| o.timeout),
@@ -935,16 +1073,43 @@ mod tests {
         ("POST", "/api/v1/tags"),
     ];
 
+    /// The engine's `idempotency-ap-v1` route set (U-83 to U-87), as
+    /// `tests/fixtures/idempotency_ap_v1_routes.txt` records it.
+    const KEYABLE_AP: [(&str, &str); 6] = [
+        ("PUT", "/api/v1/bills/{id}"),
+        ("POST", "/api/v1/bills/{id}/void"),
+        ("POST", "/api/v1/vendor-credits"),
+        ("PUT", "/api/v1/vendor-credits/{id}"),
+        ("POST", "/api/v1/vendor-credits/{id}/void"),
+        ("POST", "/api/v1/bill-payments/{id}/void"),
+    ];
+
+    #[test]
+    fn key_sets_name_their_capabilities() {
+        assert_eq!(KeySet::V1.capability(), "idempotency-v1");
+        assert_eq!(KeySet::ApV1.capability(), "idempotency-ap-v1");
+        assert_eq!(RetryClass::Keyable(KeySet::V1).as_str(), "keyable");
+        assert_eq!(RetryClass::Keyable(KeySet::ApV1).as_str(), "keyable-ap");
+        assert_eq!(BILLS_CREATE.key_set(), Some(KeySet::V1));
+        assert_eq!(BILL_PUT.key_set(), Some(KeySet::ApV1));
+        assert_eq!(BILL_GET.key_set(), None);
+    }
+
     /// C1 (U-18 plan §10.1): `idempotency-v1` upgrades only `keyable`
     /// routes. Every other mutation keeps its class: never blind-retried,
     /// reconciled after a lost reply.
     #[test]
     fn idempotency_capability_upgrades_only_keyable_routes() {
-        assert_eq!(RetryClass::Keyable.effective(true), RetryClass::KeyedOnce);
-        assert_eq!(
-            RetryClass::Keyable.effective(false),
-            RetryClass::PreHandlerOnly
-        );
+        for set in [KeySet::V1, KeySet::ApV1] {
+            assert_eq!(
+                RetryClass::Keyable(set).effective(true),
+                RetryClass::KeyedOnce
+            );
+            assert_eq!(
+                RetryClass::Keyable(set).effective(false),
+                RetryClass::PreHandlerOnly
+            );
+        }
         assert_eq!(
             RetryClass::PreHandlerOnly.effective(true),
             RetryClass::PreHandlerOnly

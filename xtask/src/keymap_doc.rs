@@ -104,14 +104,19 @@ pub fn cheatsheet_md() -> String {
         }
         out.push('\n');
     }
-    for (title, grid) in [
-        ("**Forms and grids**\n\n", false),
-        ("\n**In a grid**\n\n", true),
+    for (title, scopes) in [
+        (
+            "**Forms and grids**\n\n",
+            &[Scope::Global, Scope::Window, Scope::Form][..],
+        ),
+        ("\n**In a grid**\n\n", &[Scope::Grid][..]),
+        ("\n**In a document preview**\n\n", &[Scope::Viewer][..]),
     ] {
         out.push_str(title);
-        for c in COMMANDS.iter().filter(|c| {
-            c.menu.is_none() && c.shortcut.is_some() && (c.scope == Scope::Grid) == grid
-        }) {
+        for c in COMMANDS
+            .iter()
+            .filter(|c| c.menu.is_none() && c.shortcut.is_some() && scopes.contains(&c.scope))
+        {
             if let Some(s) = c.shortcut {
                 let _ = writeln!(out, "- `{s}` {}", c.label);
             }

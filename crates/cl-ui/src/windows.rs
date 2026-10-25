@@ -68,6 +68,14 @@ pub trait Screen {
         false
     }
 
+    /// Start a fresh window from what another screen hands over
+    /// (`CompanyEvent::OpenWith`, P17): a document for the full-size tab, a
+    /// prefilled bill, a receipt-inbox file. Returns true when this screen
+    /// takes it; the shell then opens it as a new window.
+    fn open_with(&mut self, _payload: OpenPayload) -> bool {
+        false
+    }
+
     /// Screen state for the control channel (`state.screen`); no amounts,
     /// names or secrets.
     fn state(&self) -> serde_json::Value {
@@ -91,6 +99,22 @@ pub trait Screen {
         let _ = s;
         ctx.egui_wants_keyboard_input()
     }
+}
+
+/// What one screen hands another to open with (P17, [`Screen::open_with`]).
+/// Each payload's `Debug` is redacted: file names, refs and amounts are
+/// owner data.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OpenPayload {
+    /// A document in its own tab ("Open full size", `nav.document_view`).
+    Document(crate::widgets::pdf_viewer::DocSource),
+    /// A fresh Enter Bill or vendor credit filled from a vendor statement
+    /// line ("Create bill" / "Create credit", `vendors.enter_bill`).
+    BillPrefill(crate::screens::bill::BillPrefill),
+    /// A receipt-inbox file already uploaded as the new form's draft
+    /// ("New bill" on `vendors.enter_bill`, "New check" on
+    /// `vendors.write_check`).
+    InboxDraft(crate::screens::receipt_inbox::InboxDraft),
 }
 
 /// Stand-in for a screen a later phase builds.

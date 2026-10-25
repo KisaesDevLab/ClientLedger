@@ -37,17 +37,28 @@ pub(crate) struct AttachState {
     pub list_task: Option<Task<Vec<Attachment>>>,
     pub upload: Option<Task<Attachment>>,
     pub download: Option<Task<(String, Vec<u8>)>>,
+    /// "Preview" (P17): the file's bytes on their way to the document tab.
+    pub preview: Option<Task<(String, Vec<u8>)>>,
     /// A plain message (i18n key) about the last attempt.
     pub problem: Option<&'static str>,
     /// Where the last copy was saved.
     pub saved_to: Option<PathBuf>,
     /// The Attach button asked for the keyboard in the file field.
     pub focus: bool,
+    /// The receipt-inbox file this new check started from (its name, for
+    /// "Attached from … in your receipt inbox.", P17).
+    pub from_inbox: Option<String>,
+    /// A chosen file being read off the egui thread.
+    pub reading: Option<std::sync::mpsc::Receiver<FileRead>>,
 }
 
 impl AttachState {
     pub(crate) fn busy(&self) -> bool {
-        self.list_task.is_some() || self.upload.is_some() || self.download.is_some()
+        self.reading.is_some()
+            || self.list_task.is_some()
+            || self.upload.is_some()
+            || self.download.is_some()
+            || self.preview.is_some()
     }
 }
 
@@ -71,6 +82,44 @@ pub(crate) fn read_file(path: &Path) -> Result<(String, Vec<u8>), &'static str> 
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
     Ok((name, bytes))
+}
+
+/// A file read on its way to an upload: the name and bytes, or an i18n key.
+pub(crate) type FileRead = Result<(String, Vec<u8>), &'static str>;
+
+/// Reads the file at `path` with `read` on a background thread (up to 10 MB
+/// from a possibly slow disk or network share), so the egui thread never
+/// waits on it. Poll the answer with [`poll_file_read`].
+///
+/// # Errors
+/// `check.attach.failed` when no thread could be started.
+pub(crate) fn read_in_background(
+    path: &Path,
+    read: fn(&Path) -> FileRead,
+) -> Result<std::sync::mpsc::Receiver<FileRead>, &'static str> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let path = path.to_path_buf();
+    std::thread::Builder::new()
+        .name("cl-attach-read".into())
+        .spawn(move || {
+            let _ = tx.send(read(&path));
+        })
+        .map(|_| rx)
+        .map_err(|_| "check.attach.failed")
+}
+
+/// The background read's answer once it is there (taking it out of `slot`).
+pub(crate) fn poll_file_read(
+    slot: &mut Option<std::sync::mpsc::Receiver<FileRead>>,
+) -> Option<FileRead> {
+    let rx = slot.as_ref()?;
+    let r = match rx.try_recv() {
+        Ok(r) => r,
+        Err(std::sync::mpsc::TryRecvError::Empty) => return None,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("check.attach.failed"),
+    };
+    *slot = None;
+    Some(r)
 }
 
 /// The local checks on a file's bytes.
@@ -181,6 +230,33 @@ pub(crate) fn save_copy(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf,
 }
 
 impl WriteCheckScreen {
+    /// A fresh check that starts from a receipt-inbox file the inbox
+    /// already uploaded as this check's draft (P17 "New check"). The draft
+    /// rides on the first save as `draftAttachmentId`, exactly like a file
+    /// attached here; the inbox files the original away once the saved
+    /// check holds it. Returns false for a check already saved or one that
+    /// has a draft file already.
+    pub(crate) fn accept_inbox_draft(
+        &mut self,
+        draft: crate::screens::receipt_inbox::InboxDraft,
+    ) -> bool {
+        if self.editing.is_some()
+            || self.attach.draft.is_some()
+            || self.header.current().draft_attachment.is_some()
+        {
+            return false;
+        }
+        self.attach.draft = Some(draft.draft);
+        let file = AttachmentRef {
+            id: draft.draft.to_string(),
+            name: draft.file.name.clone(),
+        };
+        self.header.edit_step(|h| h.draft_attachment = Some(file));
+        self.attach.from_inbox = Some(draft.file.name);
+        self.load_attachments();
+        true
+    }
+
     /// Where new files go: the saved check, else the draft (made on first
     /// use).
     fn attach_target(&mut self) -> AttachTo {
@@ -194,7 +270,7 @@ impl WriteCheckScreen {
     pub(crate) fn attach_path(&mut self, path: &Path) {
         self.attach.problem = None;
         self.attach.saved_to = None;
-        if self.attach.upload.is_some() {
+        if self.attach.upload.is_some() || self.attach.reading.is_some() {
             return;
         }
         if self.editing.is_none() && self.header.current().draft_attachment.is_some() {
@@ -202,8 +278,9 @@ impl WriteCheckScreen {
             self.attach.problem = Some("check.attach.one_before_save");
             return;
         }
-        match read_file(path) {
-            Ok((name, bytes)) => self.upload_bytes(&name, bytes),
+        // Read off the egui thread; `poll_attach` uploads it.
+        match read_in_background(path, read_file) {
+            Ok(rx) => self.attach.reading = Some(rx),
             Err(key) => self.attach.problem = Some(key),
         }
     }
@@ -299,8 +376,55 @@ impl WriteCheckScreen {
         }
     }
 
+    /// "Preview" (P17): the file in its own document tab
+    /// (`nav.document_view`), read the same way as "Save a copy".
+    pub(crate) fn preview(&mut self, id: AttachmentId, name: String) {
+        self.attach.problem = None;
+        let link = std::sync::Arc::clone(&self.link);
+        if let Some(demo) = link.demo_state() {
+            let r = crate::company::demo::checks::download(&demo, id);
+            drop(demo);
+            match r {
+                Ok(bytes) => self.attach.preview = Some(Task::ready((name, bytes))),
+                Err(_) => self.attach.problem = Some("check.attach.download_failed"),
+            }
+            self.poll_attach();
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        if let Ok(p) = group.read(&session, move |s| async move {
+            Ok((name, s.attachments().download(id).await?))
+        }) {
+            self.attach.preview = Some(Task::Pending(p));
+        }
+    }
+
     /// Polls uploads, the list and downloads.
     pub(crate) fn poll_attach(&mut self) {
+        if let Some(r) = poll_file_read(&mut self.attach.reading) {
+            match r {
+                Ok((name, bytes)) => self.upload_bytes(&name, bytes),
+                Err(key) => self.attach.problem = Some(key),
+            }
+        }
+        if let Some(r) = self.attach.preview.as_mut().and_then(Task::try_take) {
+            self.attach.preview = None;
+            match r {
+                Ok((name, bytes)) => {
+                    let source = crate::widgets::pdf_viewer::DocSource {
+                        name,
+                        bytes: std::sync::Arc::from(bytes),
+                    };
+                    self.link.push(crate::company::CompanyEvent::OpenWith(
+                        cl_model::CommandId::new(crate::screens::document_view::KIND),
+                        Box::new(crate::windows::OpenPayload::Document(source)),
+                    ));
+                }
+                Err(_) => self.attach.problem = Some("check.attach.download_failed"),
+            }
+        }
         if let Some(r) = self.attach.upload.as_mut().and_then(Task::try_take) {
             self.attach.upload = None;
             match r {
@@ -363,15 +487,33 @@ impl WriteCheckScreen {
         self.take_dropped(ui);
         let mut attach = false;
         let mut save_copy = None;
+        let mut preview = None;
         form::card_tight(ui, tokens, |ui| {
             ui.label(
                 RichText::new(t("check.panel.attachments"))
                     .strong()
                     .color(tokens.text_primary),
             );
+            if let Some(name) = &self.attach.from_inbox {
+                form::hint(
+                    ui,
+                    tokens,
+                    &t_with("inbox.attached_from", &[("name", name)]),
+                );
+            }
             for a in &self.attach.list {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(&a.file_name).color(tokens.text_primary));
+                    if ui
+                        .add_enabled(
+                            self.attach.preview.is_none(),
+                            egui::Button::new(t("viewer.preview")),
+                        )
+                        .on_hover_text(t("viewer.preview.tip"))
+                        .clicked()
+                    {
+                        preview = Some((a.id, a.file_name.clone()));
+                    }
                     if ui
                         .button(t("check.attach.save_copy"))
                         .on_hover_text(t("check.attach.save_copy.tip"))
@@ -436,7 +578,7 @@ impl WriteCheckScreen {
                     tokens,
                     &t_with(
                         "check.attach.saved_to",
-                        &[("path", &p.display().to_string())],
+                        &[("path", &crate::screens::document_view::shown_path(p))],
                     ),
                 );
             }
@@ -447,6 +589,9 @@ impl WriteCheckScreen {
         }
         if let Some((id, name)) = save_copy {
             self.download(id, name);
+        }
+        if let Some((id, name)) = preview {
+            self.preview(id, name);
         }
     }
 }

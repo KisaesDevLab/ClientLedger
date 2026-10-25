@@ -29,6 +29,7 @@ pub mod lists;
 pub mod lookup;
 pub mod register;
 pub mod rowkey;
+pub mod statement_match;
 pub mod tags;
 pub mod templates;
 pub mod text;
