@@ -852,3 +852,34 @@ fn new_batch_on_the_summary_drops_the_saved_line() {
     assert!(s.save_all(SaveIntent::SaveAndNew));
     assert!(!s.summary_open && s.summary.is_some());
 }
+
+#[test]
+fn after_a_lost_reply_a_changed_batch_is_not_sent_under_a_new_key() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let keys = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let engine = Scripted {
+        steps: [SaveStep::LoseReply, SaveStep::Answer].into(),
+        keys: Arc::clone(&keys),
+        ..Scripted::default()
+    };
+    let mut s =
+        BulkEntryScreen::with_local(Arc::clone(&link), None, day(11, 4), Some(Box::new(engine)));
+    fill(&mut s, 0, &[(day(11, 2), "6100", "12.35")]);
+    assert!(!s.save_all(SaveIntent::Save));
+    assert_eq!(saves(&link).1, 1, "it did post");
+    // An edit after the lost reply: nothing is sent; resend unchanged first.
+    fill(&mut s, 0, &[(day(11, 2), "6100", "12.40")]);
+    assert!(!s.save_all(SaveIntent::Save));
+    assert_eq!(s.state_json()["notice"], "lost.batch_resend");
+    assert_eq!(keys.lock().expect("keys").len(), 1, "nothing sent");
+    assert_eq!(saves(&link).1, 1);
+    // Back to the rows as sent: they go again under the same key and the
+    // engine replays the first save.
+    assert!(s.grid.form_mut().undo(), "the edit undone");
+    assert!(s.save_all(SaveIntent::Save), "{:?}", s.state_json());
+    assert_eq!(saves(&link).1, 1, "posted once");
+    let keys = keys.lock().expect("keys");
+    assert_eq!(keys.len(), 2);
+    assert_eq!(keys[0], keys[1], "the same key");
+}
