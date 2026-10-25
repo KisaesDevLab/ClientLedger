@@ -378,11 +378,6 @@ impl Stability {
     }
 }
 
-/// True for TIFF's first bytes (`II*\0` or `MM\0*`).
-fn is_tiff(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"II*\0") || bytes.starts_with(b"MM\0*")
-}
-
 /// Checks a file's bytes: not empty, at most 10 MB, a PDF, PNG, JPEG or
 /// TIFF by its first bytes.
 pub(crate) fn check_bytes(bytes: &[u8]) -> Result<(), FileError> {
@@ -392,12 +387,9 @@ pub(crate) fn check_bytes(bytes: &[u8]) -> Result<(), FileError> {
     if bytes.len() as u64 > MAX_FILE_BYTES {
         return Err(FileError::TooLarge);
     }
-    // TIFF until `cl_api::check_file` takes it (A01 E3).
-    if cl_api::check_file(bytes).is_ok() || is_tiff(bytes) {
-        Ok(())
-    } else {
-        Err(FileError::WrongType)
-    }
+    cl_api::check_file(bytes)
+        .map(|_| ())
+        .map_err(|_| FileError::WrongType)
 }
 
 fn plain_file(path: &Path) -> Result<std::fs::Metadata, FileError> {
