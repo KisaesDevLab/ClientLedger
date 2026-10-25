@@ -28,7 +28,7 @@ mod balances;
 pub(crate) mod charts;
 pub(crate) mod checklist;
 mod lanes;
-mod support;
+pub(crate) mod support;
 
 use std::sync::Arc;
 

@@ -564,7 +564,7 @@ fn fastest_of<T>(runs: usize, mut f: impl FnMut() -> T) -> (T, std::time::Durati
 }
 
 #[test]
-fn ctrl_shift_d_hides_the_details_and_a_new_window_remembers() {
+fn toggle_details_hides_the_details_and_a_new_window_remembers() {
     let mut r = Rig::new(Role::Vendor);
     let handle = crate::grid_env::WidthsHandle::default();
     crate::grid_env::publish_widths(&r.ctx, &handle);

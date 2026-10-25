@@ -811,6 +811,13 @@ impl Shell {
             "help.shortcuts" => self.shortcuts_open = !self.shortcuts_open,
             "help.about" => self.about.open_about(),
             "help.privacy" => self.about.open_privacy(),
+            // Only ever run from an explicit menu, palette or keyboard
+            // choice; it opens the browser and makes no request itself.
+            "help.kofi" => {
+                if let Some(ctx) = ctx {
+                    crate::links::open_external(ctx, crate::screens::home::support::KOFI_URL);
+                }
+            }
             "help.current" => {
                 if let Some(ctx) = ctx {
                     self.toast(ctx, "toast.help_later");

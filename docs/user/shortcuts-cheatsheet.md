@@ -56,7 +56,7 @@
 - `Ctrl+Tab` Next Window
 - `Ctrl+Shift+Tab` Previous Window
 - `Ctrl+Shift+O` Move Window to Its Own Window
-- `Ctrl+Shift+D` Show or Hide Details
+- `F9` Show or Hide Details
 - `Ctrl++` Zoom In
 - `Ctrl+-` Zoom Out
 - `Ctrl+0` Actual Size

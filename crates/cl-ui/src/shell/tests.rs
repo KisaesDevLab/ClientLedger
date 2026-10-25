@@ -591,6 +591,79 @@ fn about_and_privacy_open_from_help() {
     assert!(shell.about_open());
 }
 
+/// Ko-fi in the Help menu (Q-P16a): the item is in the menu, opening and
+/// drawing the menu opens nothing, and running the command records exactly
+/// one URL (the test sink stands in for the browser).
+#[test]
+fn kofi_opens_from_the_help_menu_only_when_chosen() {
+    use egui::{PointerButton, Pos2};
+    let rows = super::menu::rows(Menu::Help);
+    let row = rows
+        .iter()
+        .find(|r| r.id.as_str() == "help.kofi")
+        .expect("Ko-fi is in the Help menu");
+    assert_eq!(row.label, "Support ClientLedger on Ko-fi");
+    assert_eq!(row.shortcut, None);
+
+    let ctx = context();
+    ctx.enable_accesskit();
+    let sink = crate::links::LinkSink::install(&ctx);
+    let mut shell = demo();
+    let find = |out: egui::FullOutput, label: &str| {
+        out.platform_output.accesskit_update.and_then(|u| {
+            u.nodes
+                .into_iter()
+                .find(|(_, n)| n.label() == Some(label))
+                .and_then(|(_, n)| n.bounds())
+        })
+    };
+    let mut help = None;
+    for _ in 0..3 {
+        help = find(frame(&ctx, &mut shell, WIDE, vec![]), "Help").or(help);
+    }
+    let b = help.expect("the Help menu title is drawn");
+    #[allow(clippy::cast_possible_truncation)]
+    let at = Pos2::new(
+        f64::midpoint(b.x0, b.x1) as f32,
+        f64::midpoint(b.y0, b.y1) as f32,
+    );
+    let press = |pressed| Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    frame(&ctx, &mut shell, WIDE, vec![Event::PointerMoved(at)]);
+    frame(&ctx, &mut shell, WIDE, vec![press(true)]);
+    frame(&ctx, &mut shell, WIDE, vec![press(false)]);
+    let mut item = None;
+    for _ in 0..3 {
+        item = find(
+            frame(&ctx, &mut shell, WIDE, vec![]),
+            "Support ClientLedger on Ko-fi",
+        )
+        .or(item);
+    }
+    assert!(item.is_some(), "the open Help menu shows the Ko-fi item");
+    assert!(sink.opened().is_empty(), "drawing the menu opens nothing");
+
+    shell.queue(CommandId::new("help.kofi"));
+    let out = frame(&ctx, &mut shell, WIDE, vec![]);
+    assert!(
+        !out.platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))),
+        "the sink, not the browser"
+    );
+    settle(&ctx, &mut shell, WIDE);
+    assert_eq!(
+        sink.opened(),
+        [crate::screens::home::support::KOFI_URL],
+        "exactly one"
+    );
+}
+
 /// Accessible names: every button, tab, and text box in a frame has a label
 /// (AccessKit), so screen readers and the control channel can find it.
 #[test]

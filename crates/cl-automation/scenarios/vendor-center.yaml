@@ -84,7 +84,7 @@ steps:
   - key: Escape
   - assert_not_exists: {role: tab, label: Vendors}
 
-  # --- Hide the details panel (Ctrl+Shift+D, Q-266) ---------------------------
+  # --- Hide the details panel (F9, Q-P16n, Q-266) ----------------------------
   # The list takes the freed width and the edge keeps "Show details". The
   # choice is remembered when the window opens again; New shows the panel
   # for its form (its hide control off) without changing the choice; Show
@@ -92,7 +92,7 @@ steps:
   - command: vendors.center
   - assert_state: {key: screen.details_collapsed, equals: false}
   - assert_exists: {role: button, label: Hide details}
-  - key: Ctrl+Shift+D
+  - key: F9
   - assert_state: {key: screen.details_collapsed, equals: true}
   - assert_exists: {role: button, label: Show details}
   - assert_not_exists: {role: button, label: Hide details}
@@ -109,7 +109,7 @@ steps:
   - assert_state: {key: screen.details_collapsed, equals: false}
   - assert_state: {key: screen.details_remembered, equals: true}
   - assert_disabled: {role: button, label: Hide details}
-  - key: Ctrl+Shift+D
+  - key: F9
   - assert_state: {key: screen.details_remembered, equals: true}
   - key: Escape
   - assert_state: {key: screen.panel, equals: none}

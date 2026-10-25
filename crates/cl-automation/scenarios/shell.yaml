@@ -26,6 +26,15 @@ steps:
   # --- Tabs ----------------------------------------------------------------
   - click: {role: tab, label: Register · Operating Checking}
   - assert_exists: {role: label, label: 1010 · Operating Checking}
+  # Ko-fi is in the Help menu too (Q-P16a). Away from Home (which has its
+  # own Ko-fi button) the item can only come from the menu. Never clicked:
+  # it would open the browser.
+  - assert_not_exists: {role: button, label: Support ClientLedger on Ko-fi}
+  - click: {role: button, label: Help}
+  - assert_exists: {role: button, label: Support ClientLedger on Ko-fi}
+  # Clicking the title again closes the menu (Escape would close the tab).
+  - click: {role: button, label: Help}
+  - assert_not_exists: {role: button, label: Support ClientLedger on Ko-fi}
   - click: {role: tab, label: Home}
   - assert_exists: {role: label, label: Home}
 

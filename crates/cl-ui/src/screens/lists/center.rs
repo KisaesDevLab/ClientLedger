@@ -62,7 +62,7 @@ pub const VENDORS_KIND: &str = "vendors.center";
 const PANEL_WIDTH: f32 = 500.0;
 
 /// The details panel's hide/show choice: read once from the shared book,
-/// written back when Ctrl+Shift+D changes it.
+/// written back when F9 changes it.
 #[derive(Debug, Clone, Copy, Default)]
 struct DetailsChoice {
     /// Hidden by the owner.
@@ -1535,7 +1535,7 @@ impl Screen for CenterScreen {
             "list.quick_report" => self.open_report(),
             "list.merge" => self.open_merge(),
             "edit.find" => self.focus_search = true,
-            // Ctrl+Shift+D: hide or show the details panel (Q-266); it
+            // F9 (Q-P16n): hide or show the details panel (Q-266); it
             // stays open while a form is in it.
             crate::layout::side_panel::TOGGLE => {
                 if !self.panel_forced_open() {
