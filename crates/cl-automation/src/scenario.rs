@@ -668,6 +668,18 @@ pub fn run(t: &mut dyn Transport, scenario: &Scenario, out_dir: &Path) -> Report
             report.outcomes.push(outcome);
             continue;
         }
+        // Every theme starts at 100% zoom: a theme that stopped mid-zoom
+        // would otherwise leave the next theme's `resize` (sent in points,
+        // which the window multiplies by the zoom) at twice the size.
+        if let Err(message) = call(t, "set_zoom", json!({"percent": 100})) {
+            outcome.failure = Some(StepFailure {
+                step: 0,
+                what: "reset zoom".into(),
+                message,
+            });
+            report.outcomes.push(outcome);
+            continue;
+        }
         for (i, step) in scenario.steps.iter().enumerate() {
             match run_step(t, step, theme, out_dir, &mut report.screenshots) {
                 Ok(()) => outcome.steps_passed += 1,
@@ -824,6 +836,15 @@ mod tests {
             .map(|(_, p)| p["theme"].as_str().unwrap().to_string())
             .collect();
         assert_eq!(themes, vec!["light", "dark"]);
+        // Each theme resets the zoom to 100% right after its theme, before
+        // any step (a resize is in points, so it follows the zoom).
+        for (i, (m, _)) in fake.calls.iter().enumerate() {
+            if m == "set_theme" {
+                let next = &fake.calls[i + 1];
+                assert_eq!(next.0, "set_zoom");
+                assert_eq!(next.1["percent"], 100);
+            }
+        }
     }
 
     #[test]

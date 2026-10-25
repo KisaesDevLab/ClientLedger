@@ -909,7 +909,7 @@ impl WriteCheckScreen {
                 tokens.text_secondary
             };
             let job = with_figure(ui, key, var, &figure.format(style), 12.0, color);
-            ui.label(job);
+            crate::widgets::label_with_check(ui, job, false);
             ui.label(
                 RichText::new(t("check.totals.ai_note"))
                     .size(12.0)

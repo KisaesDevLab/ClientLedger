@@ -40,10 +40,27 @@ steps:
   - assert_exists: {label: Vendor credit}
   - assert_exists: {label_contains: "Items"}
   - assert_exists: {label: Source document}
+  # Match Vendor Statement is in the toolbar's More menu (and Vendors).
+  - assert_exists: {role: button, label: More}
+  - assert_not_exists: {role: button, label_contains: Match Vendor Statement}
+  # The form's keys in the status bar (mockup): Tab, Ctrl Ins, Ctrl L, Esc.
+  - assert_exists: {role: label, label: next field}
+  - assert_exists: {role: label, label: insert line}
+  - assert_exists: {role: label, label: list}
+  - assert_exists: {role: label, label: revert}
+  # The actions take Tab in the order shown: Clear, Save & New, Save & Close.
+  - focus: {role: button, label: Clear}
+  - key: Tab
+  - assert_focused: {role: button, label: Save & New}
+  - key: Tab
+  - assert_focused: {role: button, label: Save & Close}
 
   # --- 2. Vendor: the default account and terms (no earlier bill) ------------
+  # Tab with the vendor list open takes the name and goes on to the Date.
   - type: {text: Midwest Equip, target: {role: text_input, label: Vendor}}
+  - assert_state: {key: screen.vendor_list, equals: true}
   - key: Tab
+  - assert_focused: {role: text_input, label: Date}
   - assert_value: {target: {role: text_input, label: Vendor}, equals: "Midwest Equipment Rental"}
   - assert_state: {key: screen.has_vendor, equals: true}
   - assert_state: {key: screen.prefill.source, equals: default}
@@ -61,6 +78,9 @@ steps:
   # Net 15 from 11/03.
   - assert_state: {key: screen.due_date, equals: "2026-11-18"}
   - assert_value: {target: {role: text_input, label: Bill due}, equals: "11/18/2026"}
+  # Net 15 has no early-payment discount: "—", not a field (Q-P17g).
+  - assert_value: {target: {role: text_input, label: Discount date}, equals: "—"}
+  - assert_disabled: {role: text_input, label: Discount date}
   - type: {text: "INV-55871", target: {role: text_input, label: Ref. no.}}
   - type: {text: "1480.00", target: {role: text_input, label: "Amount due ($)"}}
   - key: Tab
@@ -254,6 +274,13 @@ steps:
   - click: {role: button, label: Keep editing}
   - assert_state: {key: screen.nav_prompt, equals: false}
   - assert_state: {key: screen.dirty, equals: true}
+  # Esc puts the memo back, and the keyboard stays in it.
+  - click: {role: text_input, label: Memo}
+  - key: Escape
+  - assert_value: {target: {role: text_input, label: Memo}, equals: "Mini excavator + delivery · Long Creek Marina seawall"}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_focused: {role: text_input, label: Memo}
+  - assert_state: {key: screen.focused, equals: memo}
   - command: edit.void_transaction
   - assert_state: {key: screen.void_open, equals: true}
   - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
@@ -405,6 +432,31 @@ steps:
   - assert_exists: {role: text_input, label: "Amount due ($)"}
   - assert_no_clipping: {}
   - screenshot: enter-bill-960x640
+  # 200% zoom on the minimum window (480 x 320 points): Bill / Vendor
+  # credit moves under the title, the header card's fields stack inside the
+  # card, nothing is drawn over anything. Ignored, as in forms-zoom: the tab
+  # strip (it scrolls, with the » list, so a tab may sit left of the window)
+  # and the bottom band, where the scrolled form runs under the actions and
+  # the status bar.
+  - set_zoom: {percent: 200}
+  - assert_exists: {role: text_input, label: "Amount due ($)"}
+  - assert_exists: {role: radio_button, label: Vendor credit}
+  - assert_not_exists: {label_contains: "no longer here"}
+  - screenshot: enter-bill-z200
+  - assert_no_clipping: &zoomed
+      ignore:
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        - {x: 0, y: 230, width: 480, height: 110}
+  # A taller window at 200% (600 x 500 points; resize is in points) shows
+  # the stacked card whole: its fields stay inside it.
+  - resize: {width: 600, height: 500}
+  - assert_exists: {role: radio_button, label: Vendor credit}
+  - screenshot: enter-bill-z200-card
+  - assert_no_clipping:
+      ignore:
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        - {x: 0, y: 400, width: 600, height: 110}
+  - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}
   - command: file.close_window
   - assert_not_exists: {role: tab, label_contains: "Enter Bill"}

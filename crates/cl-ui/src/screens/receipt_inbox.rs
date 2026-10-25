@@ -432,12 +432,13 @@ impl ReceiptInboxScreen {
                 egui::Label::new(
                     RichText::new(t_with(
                         "inbox.folder",
-                        &[("path", &dir.display().to_string())],
+                        &[("path", &crate::screens::document_view::shown_path(dir))],
                     ))
                     .color(tokens.text_secondary),
                 )
                 .wrap(),
-            );
+            )
+            .on_hover_text(dir.display().to_string());
         }
         ui.horizontal_wrapped(|ui| {
             if ui
@@ -628,7 +629,7 @@ impl ReceiptInboxScreen {
                 let text = match saved {
                     Ok(p) => t_with(
                         "check.attach.saved_to",
-                        &[("path", &p.display().to_string())],
+                        &[("path", &crate::screens::document_view::shown_path(p))],
                     ),
                     Err(k) => t(k),
                 };

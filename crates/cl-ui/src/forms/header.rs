@@ -237,6 +237,45 @@ pub fn title_only(ui: &mut Ui, tokens: &Tokens, title: &str) {
     });
 }
 
+/// The title alone at the left, above the card (mockup EnterBill.html); it
+/// wraps when the window is narrower than the title.
+pub fn title_left(ui: &mut Ui, tokens: &Tokens, title: &str) {
+    ui.with_layout(Layout::top_down(Align::Min), |ui| {
+        ui.add(title_label(tokens, title).wrap());
+    });
+}
+
+/// A row of `height` whose items sit at its right end but are added left to
+/// right, so Tab goes through them in the order they are shown (Clear, Save
+/// & New, Save & Close). The items' width is last frame's; a change lays the
+/// frame out again.
+pub fn right_row<R>(
+    ui: &mut Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    height: f32,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let id = ui.scope_id().with(("form-right-row", salt));
+    let last: Option<f32> = ui.data(|d| d.get_temp(id));
+    let room = ui.available_width();
+    let width = last.unwrap_or(room).min(room);
+    let row = Vec2::new(room, height);
+    ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
+        let r = ui.allocate_ui_with_layout(
+            Vec2::new(width, height),
+            Layout::left_to_right(Align::Center),
+            add,
+        );
+        let got = r.response.rect.width();
+        if last.is_none_or(|l| (l - got).abs() > 0.5) {
+            ui.data_mut(|d| d.insert_temp(id, got));
+            ui.ctx().request_discard("form right row");
+        }
+        r.inner
+    })
+    .inner
+}
+
 /// One group of a wrapping row (a label above its input, a balance line):
 /// laid out at its natural size, so the row moves the whole group to the
 /// next line when it doesn't fit instead of squeezing it (egui wraps only

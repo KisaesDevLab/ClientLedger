@@ -19,7 +19,7 @@ use cl_model::forms::item_lines::{ItemLine, ItemLines};
 use cl_model::forms::lines::{FormLine, FormLines};
 use cl_model::rowkey::RowKeyGen;
 
-use super::{EnterBillScreen, Field, field};
+use super::{EnterBillScreen, field};
 use crate::company::Task;
 use crate::screens::write_check::prefill::{LastTxn, copyable, last_of};
 
@@ -342,7 +342,8 @@ impl EnterBillScreen {
         self.prefill.applied = true;
         self.prefill.source = Some(source);
         self.prefill.dropped = dropped;
-        self.focus = Some(Field::Amount);
+        // The keyboard stays where the owner is (Tab from the vendor went
+        // on to the Date): prefill can arrive later and never moves it.
         self.refresh_terms_dates();
         self.inputs.rev = u64::MAX;
     }

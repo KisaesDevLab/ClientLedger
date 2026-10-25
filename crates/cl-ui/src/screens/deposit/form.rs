@@ -560,12 +560,14 @@ impl DepositScreen {
             match self.bank_match() {
                 Some(BankMatch::Matches) => {
                     let bank = self.panel.chosen.as_ref().map(|c| c.amount.format(style));
-                    ui.label(
+                    crate::widgets::label_with_check(
+                        ui,
                         RichText::new(t_with(
                             "deposit.totals.bank_matches",
                             &[("amount", &bank.unwrap_or_default())],
                         ))
                         .color(tokens.text_secondary),
+                        false,
                     );
                 }
                 Some(BankMatch::Differs(d)) => {

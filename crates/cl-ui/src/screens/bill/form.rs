@@ -49,6 +49,10 @@ const ACTION_HEIGHT: f32 = 44.0;
 const COL_GAP: f32 = 16.0;
 /// The narrowest a date or terms column gets (a date in mono fits).
 const DATE_WIDTH: f32 = 124.0;
+/// Below this width (200% zoom on the 960 x 640 window) the Bill / Vendor
+/// credit choice sits under the title, not at the end of a toolbar that
+/// scrolls, and the header card's fields stack.
+const COMPACT: f32 = 600.0;
 
 /// The shortcut chip text of a command ("Alt N"), from the keymap.
 fn chip(id: &str) -> String {
@@ -89,6 +93,7 @@ impl EnterBillScreen {
             return;
         }
         let wide = ui.available_width() >= SIDE_BY_SIDE;
+        self.compact = ui.available_width() < COMPACT;
         let mut frame = FixedFrame::begin(ui, "enter_bill", FrameOpts::default());
         frame.top(|ui| {
             self.toolbar(ui, &tokens);
@@ -170,46 +175,60 @@ impl EnterBillScreen {
             {
                 self.toggle_history();
             }
-            // Vendor statement match (WP6) opens in its own tab.
-            if ui
-                .button(t("cmd.nav.statement_match"))
-                .on_hover_text(t("bill.statement_match.tip"))
-                .clicked()
-            {
-                self.link.push(CompanyEvent::OpenWindow(CommandId::new(
-                    crate::screens::bill::statement_match::KIND,
-                )));
-            }
-            ui.separator();
-            let kind = self.kind();
-            let can_switch = !working && self.editing.is_none();
-            for (k, key) in [
-                (BillKind::Bill, "bill.kind.bill"),
-                (BillKind::Credit, "bill.kind.credit"),
-            ] {
+            // The toolbar overflow: Vendor statement match (WP6) opens in
+            // its own tab (also in the Vendors menu). Kept off the row so
+            // Bill / Vendor credit stays on it at 960 x 640.
+            let more = ui.menu_button(t("bill.more"), |ui| {
                 if ui
-                    .add_enabled(can_switch, egui::RadioButton::new(kind == k, t(key)))
-                    .on_disabled_hover_text(t("bill.kind.locked"))
+                    .button(t("cmd.nav.statement_match"))
+                    .on_hover_text(t("bill.statement_match.tip"))
                     .clicked()
                 {
-                    self.set_kind(k);
+                    self.link.push(CompanyEvent::OpenWindow(CommandId::new(
+                        crate::screens::bill::statement_match::KIND,
+                    )));
+                    ui.close();
                 }
-            }
-            if kind == BillKind::Bill {
-                let mut received = self.header.current().bill_received;
-                let enabled = !working && caps.received;
-                let r = ui
-                    .add_enabled(
-                        enabled,
-                        egui::Checkbox::new(&mut received, t("bill.received")),
-                    )
-                    .on_hover_text(t("bill.received.tip"))
-                    .on_disabled_hover_text(t("bill.received.needs_update"));
-                if r.changed() {
-                    self.header.edit_step(|h| h.bill_received = received);
-                }
+            });
+            more.response.on_hover_text(t("bill.more.tip"));
+            if !self.compact {
+                ui.separator();
+                self.kind_row(ui, working, caps.received);
             }
         });
+    }
+
+    /// Bill / Vendor credit and Bill received: in the toolbar, or under the
+    /// title in a narrow window.
+    fn kind_row(&mut self, ui: &mut Ui, working: bool, received_cap: bool) {
+        let kind = self.kind();
+        let can_switch = !working && self.editing.is_none();
+        for (k, key) in [
+            (BillKind::Bill, "bill.kind.bill"),
+            (BillKind::Credit, "bill.kind.credit"),
+        ] {
+            if ui
+                .add_enabled(can_switch, egui::RadioButton::new(kind == k, t(key)))
+                .on_disabled_hover_text(t("bill.kind.locked"))
+                .clicked()
+            {
+                self.set_kind(k);
+            }
+        }
+        if kind == BillKind::Bill {
+            let mut received = self.header.current().bill_received;
+            let enabled = !working && received_cap;
+            let r = ui
+                .add_enabled(
+                    enabled,
+                    egui::Checkbox::new(&mut received, t("bill.received")),
+                )
+                .on_hover_text(t("bill.received.tip"))
+                .on_disabled_hover_text(t("bill.received.needs_update"));
+            if r.changed() {
+                self.header.edit_step(|h| h.bill_received = received);
+            }
+        }
     }
 
     fn messages(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -345,7 +364,12 @@ impl EnterBillScreen {
             BillKind::Bill => t("cmd.vendors.enter_bill"),
             BillKind::Credit => t("bill.title.credit"),
         };
-        header::title_only(ui, tokens, &title);
+        header::title_left(ui, tokens, &title);
+        if self.compact {
+            let working = self.save.task.is_some();
+            let received = self.caps().received;
+            ui.horizontal_wrapped(|ui| self.kind_row(ui, working, received));
+        }
         ui.add_space(6.0);
         if let Some(e) = self.editing.as_ref().filter(|e| e.read_only) {
             form::hint(ui, tokens, &t(e.read_only_note));
@@ -378,6 +402,10 @@ impl EnterBillScreen {
                 ui.set_width(ui.available_width());
                 let width = ui.available_width();
                 let sp = ui.spacing().item_spacing.x;
+                if self.compact {
+                    self.card_stacked(ui, tokens, width);
+                    return;
+                }
                 // Six columns with five gaps (each gap is the space plus
                 // egui's item spacing).
                 let col = ((width - 5.0 * (COL_GAP + sp)) / 6.0).max(60.0);
@@ -447,6 +475,64 @@ impl EnterBillScreen {
             });
     }
 
+    /// The header card in a narrow window: Vendor, Address and Memo across
+    /// the card; Date and Ref. no., Terms and Amount due, Discount date and
+    /// Bill due in pairs (the mockup's order), each pair stacking when even
+    /// that is too wide.
+    fn card_stacked(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
+        let sp = ui.spacing().item_spacing.x;
+        let rest = width - DATE_WIDTH - COL_GAP - sp;
+        let pairs = rest >= DATE_WIDTH;
+        let pair = |ui: &mut Ui,
+                    s: &mut Self,
+                    left: &dyn Fn(&mut Self, &mut Ui, f32),
+                    right: &dyn Fn(&mut Self, &mut Ui, f32)| {
+            if pairs {
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(DATE_WIDTH);
+                        left(s, ui, DATE_WIDTH);
+                    });
+                    ui.add_space(COL_GAP);
+                    ui.vertical(|ui| {
+                        ui.set_width(rest);
+                        right(s, ui, rest);
+                    });
+                });
+            } else {
+                left(s, ui, width);
+                ui.add_space(10.0);
+                right(s, ui, width);
+            }
+            ui.add_space(10.0);
+        };
+        self.vendor_ui(ui, tokens, width);
+        ui.add_space(10.0);
+        pair(
+            ui,
+            self,
+            &|s, ui, w| s.date_ui(ui, tokens, w),
+            &|s, ui, w| s.reference_ui(ui, tokens, w),
+        );
+        self.address_ui(ui, tokens, width);
+        ui.add_space(10.0);
+        pair(
+            ui,
+            self,
+            &|s, ui, w| s.terms_ui(ui, tokens, w),
+            &|s, ui, w| s.amount_ui(ui, tokens, w),
+        );
+        pair(
+            ui,
+            self,
+            &|s, ui, w| s.discount_ui(ui, tokens, w),
+            &|s, ui, w| s.due_ui(ui, tokens, w),
+        );
+        self.memo_ui(ui, tokens, width);
+        ui.add_space(6.0);
+        self.tags_ui(ui, tokens);
+    }
+
     fn take_focus(&mut self, f: Field, r: &egui::Response) {
         if self.focus == Some(f) {
             self.focus = None;
@@ -486,6 +572,13 @@ impl EnterBillScreen {
         let mut picked = None;
         if self.vendor_list && (r.has_focus() || r.lost_focus()) {
             picked = self.vendor_popup(ui, &r);
+        }
+        // Tab out of the vendor (list open or not) goes on to the Date, as
+        // the next field in the card's order.
+        let tabbed =
+            r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Tab) && !i.modifiers.shift);
+        if tabbed && !self.paid_locked() {
+            self.focus = Some(Field::Date);
         }
         if let Some(id) = picked {
             self.pick_vendor(id);
@@ -820,9 +913,11 @@ impl EnterBillScreen {
 
     fn discount_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
         let l = above(ui, tokens, &t("bill.discount_date"));
-        // With bill-terms-v1 the owner may type it (S3: sent only then);
-        // cleared, the terms decide again (WP8).
-        if self.kind() == BillKind::Bill && self.caps().terms {
+        // With bill-terms-v1 and a discount in the terms the owner may type
+        // it (S3: sent only then); cleared, the terms decide again (WP8).
+        // Terms without a discount show "—" (Q-P17g).
+        let discount = self.terms_have_discount();
+        if self.kind() == BillKind::Bill && self.caps().terms && discount {
             let before = self.inputs.discount.text.clone();
             let r = ui
                 .add(
@@ -862,8 +957,13 @@ impl EnterBillScreen {
             .header
             .current()
             .discount_date
-            .filter(|_| self.kind() == BillKind::Bill)
+            .filter(|_| self.kind() == BillKind::Bill && discount)
             .map_or_else(|| "\u{2014}".to_string(), crate::shell::us_date);
+        let tip = if self.caps().terms {
+            "bill.discount_date.none"
+        } else {
+            "bill.discount_date.tip"
+        };
         ui.add_enabled(
             false,
             egui::TextEdit::singleline(&mut text)
@@ -871,7 +971,27 @@ impl EnterBillScreen {
                 .font(egui::TextStyle::Monospace),
         )
         .labelled_by(l.id)
-        .on_disabled_hover_text(t("bill.discount_date.tip"));
+        .on_disabled_hover_text(t(tip));
+    }
+
+    /// The terms in effect give an early-payment discount (a fixed discount
+    /// term, or a custom term with its percentage and days), or the owner
+    /// typed a discount date: only then is the discount date a field.
+    pub(crate) fn terms_have_discount(&self) -> bool {
+        let f = self.header.current();
+        if f.discount_overridden {
+            return true;
+        }
+        let Some(code) = self.effective_terms() else {
+            return false;
+        };
+        if code == CUSTOM_TERMS {
+            return f.discount_percent.is_some() && f.discount_days.is_some();
+        }
+        self.terms
+            .iter()
+            .find(|t| t.code == code)
+            .is_some_and(|t| t.discount_percent.is_some() && t.discount_days.is_some())
     }
 
     fn due_ui(&mut self, ui: &mut Ui, tokens: &Tokens, width: f32) {
@@ -1058,10 +1178,12 @@ impl EnterBillScreen {
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if self.compose().totals_status() == Some(TotalsStatus::Balanced) {
-                    ui.label(
+                    crate::widgets::label_with_check(
+                        ui,
                         RichText::new(t("bill.totals.balanced"))
                             .size(12.0)
                             .color(tokens.accent),
+                        false,
                     );
                 }
             });
@@ -1187,22 +1309,18 @@ impl EnterBillScreen {
         let idle = self.save.task.is_none() && !self.closing_prompt.dialog_open();
         let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
         let mut clicked = None;
-        let row = Vec2::new(ui.available_width(), ACTION_HEIGHT);
-        ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
+        // At the right, in the order shown (and so for Tab): Clear, Save &
+        // New, Save & Close (mockup).
+        header::right_row(ui, "enter_bill/actions", ACTION_HEIGHT, |ui| {
             let can_save = idle && !read_only;
-            let close = ui
-                .add_enabled_ui(can_save, |ui| {
-                    crate::widgets::action_button_with_chip(
-                        ui,
-                        &t("bill.save_close"),
-                        &chip("form.save_close"),
-                        true,
-                        ACTION_HEIGHT,
-                    )
-                })
-                .inner;
-            if close.clicked() {
-                clicked = Some("form.save_close");
+            if ui
+                .add_enabled(
+                    idle,
+                    egui::Button::new(t("bill.clear")).min_size(Vec2::new(0.0, ACTION_HEIGHT)),
+                )
+                .clicked()
+            {
+                self.clear();
             }
             let new = ui
                 .add_enabled_ui(can_save, |ui| {
@@ -1218,14 +1336,19 @@ impl EnterBillScreen {
             if new.clicked() {
                 clicked = Some("form.save_new");
             }
-            if ui
-                .add_enabled(
-                    idle,
-                    egui::Button::new(t("bill.clear")).min_size(Vec2::new(0.0, ACTION_HEIGHT)),
-                )
-                .clicked()
-            {
-                self.clear();
+            let close = ui
+                .add_enabled_ui(can_save, |ui| {
+                    crate::widgets::action_button_with_chip(
+                        ui,
+                        &t("bill.save_close"),
+                        &chip("form.save_close"),
+                        true,
+                        ACTION_HEIGHT,
+                    )
+                })
+                .inner;
+            if close.clicked() {
+                clicked = Some("form.save_close");
             }
         });
         if let Some(cmd) = clicked {
@@ -1408,6 +1531,9 @@ impl EnterBillScreen {
             Field::Memo => h.memo.clone_from(&saved.memo),
         });
         self.sync_inputs();
+        // The keyboard stays in the field that went back (egui lets go of
+        // a text field on Esc).
+        self.focus = Some(f);
         true
     }
 }
