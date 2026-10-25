@@ -261,6 +261,10 @@ pub enum LocalValidation {
     TemplateGrouping,
     /// The catch-up run needs `recurring-run-due-v1`; nothing was sent.
     RunDueUnavailable,
+    /// A catch-up run for some templates only needs `run-due-filter-v1`
+    /// (U-82), or the filter lists more than 500 templates; nothing was
+    /// sent (an unfiltered run would post the templates left out).
+    RunDueFilterUnavailable,
     /// Bulk Entry needs a `batch-*-v1` capability the engine does not
     /// advertise (P15A §2); nothing was sent.
     BatchUnavailable,

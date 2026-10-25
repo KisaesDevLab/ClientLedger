@@ -553,6 +553,10 @@ fn main() -> std::process::ExitCode {
             "run_due::journal_template_keeps_names_and_adjusting",
             contract_run_due::journal_template_keeps_names_and_adjusting,
         ),
+        (
+            "run_due::filter_holds_only_the_asked_template_u82",
+            contract_run_due::filter_holds_only_the_asked_template_u82,
+        ),
         // P15A lane A: Bulk Entry (PENDING by the batch-*-v1 capabilities;
         // all live from pin c217bfd, engine PR #163).
         (

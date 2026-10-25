@@ -166,9 +166,9 @@ pub use resources::daily_sales::{
 
 // P15 lane T: templates and the catch-up run.
 pub use resources::recurring::{
-    Attention, DueReminder, FailedTemplate, PostedOccurrence, RUN_LIMIT_DEFAULT, RUN_LIMIT_MAX,
-    Recurring, RunDue, SkipReason, SkippedOccurrence, attention_from_json, new_run_id,
-    run_due_from_json,
+    Attention, DueReminder, FailedTemplate, PostedOccurrence, RUN_FILTER_MAX, RUN_LIMIT_DEFAULT,
+    RUN_LIMIT_MAX, Recurring, RunDue, RunDueFilter, SkipReason, SkippedOccurrence,
+    attention_from_json, new_run_id, run_due_from_json,
 };
 pub use resources::templates::{
     AUTO_START_FIELD, COUNT_MAX, DraftWarning, DraftWarningCode, Entered, Frequency, INTERVAL_MAX,
