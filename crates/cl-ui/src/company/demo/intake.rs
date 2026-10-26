@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use cl_core::ids::TenantId;
 use cl_core::intake::IntakeFolder;
 
-
 /// Most folders per company (U-93).
 pub const MAX_FOLDERS: usize = 20;
 

@@ -32,6 +32,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 
 use cl_company::CompanyError;
+use cl_company::intake::{Health, PathProblem, ProbeReport, check_path_syntax, probe_async};
 use cl_core::ids::{IntakeFolderId, TenantId};
 use cl_core::intake::{IntakeFolder, IntakeKind};
 use cl_settings::HereNote;
@@ -40,7 +41,6 @@ use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
 use self::source::{Fetched, Stored};
-use cl_company::intake::{Health, PathProblem, ProbeReport, check_path_syntax, probe_async};
 use crate::company::{CompanyLink, Task};
 use crate::i18n::{t, t_count};
 use crate::screens::company::form;
@@ -777,13 +777,25 @@ fn report_lines(r: &ProbeReport) -> Vec<String> {
     }
     out.push(t_count("prefs.intake.test.ok", r.counts.incoming, &[]));
     if r.counts.too_large > 0 {
-        out.push(t_count("prefs.intake.test.too_large", r.counts.too_large, &[]));
+        out.push(t_count(
+            "prefs.intake.test.too_large",
+            r.counts.too_large,
+            &[],
+        ));
     }
     if r.counts.not_supported > 0 {
-        out.push(t_count("prefs.intake.test.heic", r.counts.not_supported, &[]));
+        out.push(t_count(
+            "prefs.intake.test.heic",
+            r.counts.not_supported,
+            &[],
+        ));
     }
     if r.counts.online_only > 0 {
-        out.push(t_count("prefs.intake.test.online_only", r.counts.online_only, &[]));
+        out.push(t_count(
+            "prefs.intake.test.online_only",
+            r.counts.online_only,
+            &[],
+        ));
     }
     if r.writable == Some(false) {
         out.push(t("prefs.intake.test.not_writable"));

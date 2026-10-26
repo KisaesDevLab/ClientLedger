@@ -1,5 +1,8 @@
-//! Receipt inbox window tests (no engine): the demo stand-in takes the
-//! uploads; the folder is a temporary one (or the demo's own).
+//! Receipt inbox window tests (no engine) for P17's single folder: the
+//! demo stand-in acts as an engine **without** `intake-settings-v1`
+//! (Q-A01q: on the current pin the P17 inbox must keep working exactly as
+//! before) and takes the uploads; the folder is a temporary one (or the
+//! demo's own). The intake-folder inbox is tested in `intake_tests`.
 
 use std::time::{Duration, Instant};
 
@@ -13,7 +16,22 @@ fn today() -> CalendarDate {
 fn link() -> (tempfile::TempDir, Arc<CompanyLink>) {
     let dir = tempfile::tempdir().expect("tmp");
     let link = Arc::new(CompanyLink::demo(dir.path()));
+    link.demo_state().expect("demo").intake.needs_engine = true;
     (dir, link)
+}
+
+/// Without intake settings the window is P17's: its state says so, and
+/// the shell's tick runs P17's service (no intake service is made).
+#[test]
+fn without_intake_settings_the_p17_inbox_runs() {
+    let (_dir, link) = link();
+    let ctx = context();
+    let mut s = screen(&link);
+    frame(&ctx, &mut s);
+    assert!(!s.intake_mode);
+    assert_eq!(s.state()["mode"], Value::Null, "P17 state: {}", s.state());
+    assert!(super::intake::existing(&ctx).is_none());
+    assert!(!intake_active(&ctx, &link));
 }
 
 fn tenant(link: &CompanyLink) -> (TenantId, String) {

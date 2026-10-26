@@ -36,6 +36,8 @@ pub struct DemoChecks {
     pub writes: u32,
     /// Files attached in the demo (kept in memory only).
     files: Vec<DemoFile>,
+    /// Files deleted so far (ids are never reused).
+    deleted: usize,
     /// The owner's rules (none match the story by default).
     pub rules: Vec<DemoRule>,
     /// AI preview requests that reached the demo engine (tests prove that
@@ -860,7 +862,7 @@ pub fn upload(
     bytes: &[u8],
 ) -> Result<cl_api::Attachment, ApiError> {
     cl_api::check_file(bytes).map_err(ApiError::Local)?;
-    let n = state.checks.files.len() + 1;
+    let n = state.checks.files.len() + state.checks.deleted + 1;
     let id = cl_api::AttachmentId::parse(&format!("d0000000-0000-4000-8000-a{n:011}"))
         .map_err(|_| invalid())?;
     let (kind, to) = (to.attachable_type(), to.attachable_id());
@@ -918,6 +920,16 @@ pub fn find_attachment(state: &DemoState, id: cl_api::AttachmentId) -> Option<cl
         .iter()
         .find(|f| f.id == id)
         .and_then(attachment)
+}
+
+/// `DELETE /attachments/{id}` (A01: the engine's copy of a discarded
+/// intake file). False when there is no such file.
+pub fn delete_attachment(state: &mut DemoState, id: cl_api::AttachmentId) -> bool {
+    let before = state.checks.files.len();
+    state.checks.files.retain(|f| f.id != id);
+    let gone = before - state.checks.files.len();
+    state.checks.deleted += gone;
+    gone > 0
 }
 
 /// `GET /attachments/{id}/download`.

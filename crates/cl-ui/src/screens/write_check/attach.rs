@@ -48,6 +48,9 @@ pub(crate) struct AttachState {
     /// The receipt-inbox file this new check started from (its name, for
     /// "Attached from … in your receipt inbox.", P17).
     pub from_inbox: Option<String>,
+    /// The inbox's claim on that file while this form is open (A01: the
+    /// inbox offers it to no other form until this one closes).
+    pub inbox_claim: Option<std::sync::Arc<()>>,
     /// A chosen file being read off the egui thread.
     pub reading: Option<std::sync::mpsc::Receiver<FileRead>>,
 }
@@ -248,6 +251,7 @@ impl WriteCheckScreen {
             name: draft.file.name.clone(),
         };
         self.header.edit_step(|h| h.draft_attachment = Some(file));
+        self.attach.inbox_claim = draft.claim;
         self.attach.from_inbox = Some(draft.file.name);
         self.load_attachments();
         true

@@ -525,6 +525,7 @@ fn an_inbox_file_rides_on_the_save_and_is_filed_onto_the_bill() {
                 name: demo_bills::STORY_PDF_NAME.into(),
                 bytes: Arc::from(demo_bills::STORY_PDF.to_vec()),
             },
+            claim: None,
         }
     )));
     assert_eq!(s.state()["attachments"]["from_inbox"], true);
