@@ -639,6 +639,61 @@ fn the_read_runs_on_the_write_lane_and_a_lost_reply_is_labelled() {
     drop(server);
 }
 
+/// #179 review: with `document-assist-v1` the P17 extract path is never
+/// used, even when every P17 switch is on.
+#[test]
+fn with_the_assist_the_extract_sends_nothing() {
+    use std::time::Duration;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let server = rt.block_on(async {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/desktop/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "mode": "desktop", "initialized": true,
+                "capabilities": [cl_api::Capabilities::DOCUMENT_ASSIST],
+            })))
+            .mount(&server)
+            .await;
+        server
+    });
+    let session = cl_api::testing::stub_session(server.address().port());
+    rt.block_on(session.client().desktop_info()).expect("info");
+    let q =
+        cl_api::ApiQueue::start(Arc::new(|| {}), cl_api::QueueConfig::default()).expect("queue");
+    let g = q.group().expect("group");
+    let att = AttachmentId::parse("5c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
+    let open = cl_api::BillReadGate {
+        ai_enabled: true,
+        bill_reading_on: true,
+        provider_set: true,
+    };
+    let mut p = send_extract(&g, &session, open, att).expect("queued");
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    let r = loop {
+        if let Some(r) = p.try_take() {
+            break r;
+        }
+        assert!(std::time::Instant::now() < end, "an answer");
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(
+        r.expect("queue").expect_err("refused"),
+        ApiError::AiUnavailable
+    );
+    let sent = rt.block_on(server.received_requests()).expect("r");
+    assert!(
+        sent.iter().all(|r| r.url.path() == "/api/v1/desktop/info"),
+        "nothing but the info read"
+    );
+    let _ = q.shutdown(Duration::from_secs(1), None);
+}
+
 #[test]
 fn a_line_without_an_account_gets_a_ghost_that_only_tab_or_accept_sets() {
     let (_d, link) = link();

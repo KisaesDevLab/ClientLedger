@@ -258,6 +258,11 @@ impl Capabilities {
     /// U-92a: the engine replays a repeated `Idempotency-Key` on exactly
     /// `POST /document-drafts` and `POST /document-drafts/{id}/convert`.
     pub const IDEMPOTENCY_DOCS: &'static str = "idempotency-docs-v1";
+    /// U-92d: `POST /document-reading/assist` (a second reading of the page
+    /// text, and page images, by the company's AI provider; nothing stored)
+    /// and the company task switches `document_text_cloud` and
+    /// `document_images_cloud` (off for every company).
+    pub const DOCUMENT_ASSIST: &'static str = "document-assist-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]

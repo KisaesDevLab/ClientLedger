@@ -17,6 +17,7 @@ pub mod company;
 pub mod contacts;
 pub mod daily_sales;
 pub mod dashboard;
+pub mod document_assist;
 pub mod document_drafts;
 pub mod export;
 pub mod feed;

@@ -1,0 +1,84 @@
+# Preferences > Reading documents online (A03 step 21, plan D5, Q-A03k,
+# Q-284) against `clientledger --demo`: the company's own consent to send a
+# document to an online AI service when the owner asks AI to help read it.
+# Both switches are off by default (also for a company that reads bills
+# with AI, `receipt_ocr`); the disclosure says a picture can't have anything
+# hidden; turning the text switch on and saving stores the consent (it is
+# still on after the window is closed and opened again); pictures need the
+# text switch; turning text off turns pictures off. It ends with both off,
+# so light and dark start alike. The non-owner and older-engine views need
+# demo switches a scenario can't reach; unit tests cover them
+# (`preferences/ai_cloud_reading.rs`).
+name: docread-consent
+description: Reading documents online - both switches off by default, plain disclosure, text on stores consent, pictures need text, reopen keeps it, back off; 1440 and 960 px, 200%.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: edit.preferences
+  - assert_state: {key: screen.screen, equals: preferences}
+  - assert_state: {key: screen.loaded, equals: true}
+  - assert_exists: {role: button, label: Reading documents online}
+  - click: {role: button, label: Reading documents online}
+  - assert_state: {key: screen.category, equals: ai_cloud_reading}
+  - assert_state: {key: screen.cloud_reading.available, equals: ready}
+  # Off by default, though this company reads bills with AI.
+  - assert_state: {key: screen.ai.read_documents, equals: true}
+  - assert_state: {key: screen.cloud_reading.text, equals: false}
+  - assert_state: {key: screen.cloud_reading.images, equals: false}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_exists: {role: label, label: Reading documents with an online service}
+  - assert_exists: {role: label, label_contains: "nothing leaves it and these switches aren't needed"}
+  - assert_exists: {role: label, label: What may be sent}
+  - assert_exists: {role: check_box, label: "Send the document's text"}
+  - assert_exists: {role: check_box, label: Also send pictures of the page}
+  - assert_exists: {role: label, label_contains: "A picture can't have anything hidden"}
+  - assert_exists: {role: label, label_contains: "recorded in the company's audit trail"}
+  - assert_exists: {role: label, label_contains: "AI never sets an amount on its own"}
+  - assert_no_clipping: {}
+  - screenshot: consent-off
+
+  # --- Text on, saved: the consent is stored --------------------------------
+  - click: {role: check_box, label: "Send the document's text"}
+  - assert_state: {key: screen.cloud_reading.text, equals: true}
+  - assert_state: {key: screen.dirty, equals: true}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.cloud_reading.text, equals: true}
+  - assert_exists: {role: label, label: Saved.}
+  - screenshot: consent-text-on
+  # Closed and opened again: still on (the engine's stored value).
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Preferences}
+  - command: edit.preferences
+  - click: {role: button, label: Reading documents online}
+  - assert_state: {key: screen.category, equals: ai_cloud_reading}
+  - assert_state: {key: screen.cloud_reading.text, equals: true}
+  - assert_state: {key: screen.cloud_reading.images, equals: false}
+
+  # --- Pictures on: the engine's privacy setting still keeps them back ----
+  - click: {role: check_box, label: Also send pictures of the page}
+  - assert_state: {key: screen.cloud_reading.images, equals: true}
+  - assert_state: {key: screen.cloud_reading.cloud_vision, equals: false}
+  - assert_exists: {role: label, label_contains: "only the text is sent for now"}
+  - screenshot: consent-pictures
+
+  # --- Text off turns pictures off; saved back to the default --------------
+  - click: {role: check_box, label: "Send the document's text"}
+  - assert_state: {key: screen.cloud_reading.text, equals: false}
+  - assert_state: {key: screen.cloud_reading.images, equals: false}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.dirty, equals: false}
+
+  # --- 200% zoom and the minimum window: the footer stays reachable --------
+  - set_zoom: {percent: 200}
+  - assert_exists: {role: button, label: Save}
+  - assert_exists: {role: check_box, label: "Send the document's text"}
+  - screenshot: consent-zoom-200
+  - set_zoom: {percent: 100}
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: button, label: Save}
+  - assert_exists: {role: button, label: Cancel}
+  - screenshot: consent-minimum
+  - resize: {width: 1440, height: 940}
+  - key: Escape
+  - assert_not_exists: {role: tab, label: Preferences}

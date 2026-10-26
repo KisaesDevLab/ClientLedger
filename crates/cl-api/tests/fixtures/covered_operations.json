@@ -196,5 +196,6 @@
   {"method":"POST","path":"/api/v1/document-drafts/{id}/convert","inSpec":false,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/vendor-layout-templates","inSpec":false,"fragmentHash":null},
   {"method":"PUT","path":"/api/v1/vendor-layout-templates","inSpec":false,"fragmentHash":null},
-  {"method":"DELETE","path":"/api/v1/vendor-layout-templates/{id}","inSpec":false,"fragmentHash":null}
+  {"method":"DELETE","path":"/api/v1/vendor-layout-templates/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/document-reading/assist","inSpec":false,"fragmentHash":null}
 ]
