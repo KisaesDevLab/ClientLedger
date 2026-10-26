@@ -1,77 +1,144 @@
-# The receipt inbox (P17 WP5, plan §6 "Steps 1, 4") against
-# `clientledger --demo`: the demo's own inbox folder (beside its settings,
-# filled with synthetic fixture files each time the window opens) lists a
-# PDF, a PNG and a scan over 10 MB; a text file is left out. Files are
-# offered only once they stayed the same for two listings 2 s apart. The
-# too-large scan is greyed and never read. Add to a check… attaches the PNG
-# to a demo check and files the original away (it leaves the list). New
-# check opens Write Check with the PDF as its draft; the check is cleared,
-# so the PDF stays in the inbox, marked as on an unsaved form (plan
-# amendment S8: originals move only once a saved record holds them). Then
-# the minimum window at 200%. Nothing is saved, so light and dark start
-# the same way.
+# The receipt inbox over intake folders (A01 C5, plan §5) against
+# `clientledger --demo`. Opening the window lays the demo's folders out
+# afresh beside its settings (a new numbered folder each time, so light and
+# dark start alike): "Bills" (set up on this computer, leaves originals
+# where they are) with a PDF, a TIFF, a HEIC photo and an 11 MB scan;
+# "Scanner" (not set up on this computer); and P17's receipt-inbox folder,
+# which the migration turns into "Receipts", with a PNG, the same PNG again
+# and a late PDF written in two halves 3 s apart. Files are copied in once
+# they stayed the same for two looks 5 s apart (the watcher looks every
+# 10 s, and after 5 s while something settles), so the late file shows as
+# settling first. All data is synthetic.
 name: receipt_inbox
-description: Inbox list with a too-large file greyed, preview, Add to a check files the original away, New check keeps it until saved, minimum window at 200%.
+description: Intake inbox - migrated folder, settling then copied, HEIC, 11 MB and duplicate rows, filter, TIFF note, Discard, New check with the arrival draft, Add to a check (Processed) and to a bill in a keep-originals folder, Set up chip, Home line, 200%.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
   - command: nav.receipt_inbox
   - assert_state: {key: screen.screen, equals: receipt_inbox}
+  - assert_state: {key: screen.mode, equals: intake}
+  # P17's folder became the intake folder "Receipts" (Q-A01q).
+  - assert_state: {key: screen.migration, equals: migrated}
   - assert_state: {key: screen.folder, equals: ok}
-  # The text file is not listed; the large scan is, as too large.
-  - assert_state: {key: screen.listed, equals: 3}
-  - assert_state: {key: screen.too_large, equals: 1}
-  # Ready only after two equal listings at least 2 s apart.
-  - wait: {ms: 2600}
-  - assert_state: {key: screen.ready, equals: 2}
-  - assert_exists: {label: 2 files ready}
-  - assert_disabled: {role: button, label: Scanned statement.pdf}
-  - assert_enabled: {role: button, label: Ozark Feed receipt.png}
-  - assert_exists: {role: button, label: Choose a folder…}
+  - assert_state: {key: screen.folders.0.health, equals: ok}
+  - assert_state: {key: screen.folders.0.keep_originals, equals: true}
+  - assert_state: {key: screen.folders.1.health, equals: not_confirmed}
+  - assert_state: {key: screen.folders.1.watched, equals: false}
+  - assert_state: {key: screen.folders.2.health, equals: ok}
+  - assert_state: {key: screen.problems, equals: 1}
+  # The folder not set up here: a chip with Set up….
+  - assert_exists: {label_contains: "Scanner: Set this company's folder for this computer"}
+  - assert_exists: {role: button, label: Set up…}
   - assert_exists: {role: button, label: Check now}
-  - screenshot: inbox
+  - assert_exists: {role: button, label: Set up folders…}
 
-  # --- Preview and Add to a check… -------------------------------------------
+  # --- Arrival: copied in once settled; the late file still settling ----------
+  - wait: {ms: 7000}
+  - assert_state: {key: screen.arrived, equals: 3}
+  - assert_state: {key: screen.duplicate, equals: 1}
+  - assert_state: {key: screen.too_large, equals: 1}
+  - assert_state: {key: screen.not_supported, equals: 1}
+  - assert_state: {key: screen.settling, equals: 1}
+  - assert_exists: {label: 4 files waiting}
+  - assert_exists: {label_contains: Save as JPG or PDF instead}
+  - assert_exists: {label_contains: Too large (10 MB limit)}
+  - assert_exists: {label_contains: Same as a file copied before}
+  - assert_exists: {label_contains: Still arriving}
+  - assert_disabled: {role: button, label: Scanned statement.pdf}
+  - assert_disabled: {role: button, label: Hollister Fuel photo.heic}
+  - assert_enabled: {role: button, label: Midwest Equipment INV-55871.pdf}
+  - screenshot: inbox
+  # Ready within 15 s of its last write, then copied in.
+  - wait: {ms: 9000}
+  - assert_state: {key: screen.settling, equals: 0}
+  - assert_state: {key: screen.arrived, equals: 4}
+  - assert_enabled: {role: button, label: Crane Creek delivery.pdf}
+  - screenshot: arrived
+
+  # --- Folder filter -------------------------------------------------------------
+  - click: {role: combo_box, label: Folder}
+  - click: {role: button, label: Bills}
+  - assert_state: {key: screen.filter, equals: 0}
+  - assert_not_exists: {role: button, label: Ozark Feed receipt.png}
+  - assert_exists: {role: button, label: Galena Gravel fax.tif}
+  - screenshot: filter-bills
+  - click: {role: combo_box, label: Folder}
+  - click: {role: button, label: All folders}
+  - assert_state: {key: screen.filter, equals: null}
+
+  # --- TIFF: taken in, its preview waits for the new viewer --------------------
+  - click: {role: button, label: Galena Gravel fax.tif}
+  - assert_state: {key: screen.selected_kind, equals: tiff}
+  - assert_state: {key: screen.tiff_note, equals: true}
+  - assert_exists: {label: Preview comes with the new viewer.}
+  - assert_exists: {role: button, label: New bill}
+
+  # --- Duplicate: Discard moves it to Discarded/ (never deleted) ----------------
+  - click: {role: button, label: Ozark Feed receipt (copy).png}
+  - assert_state: {key: screen.selected_state, equals: duplicate}
+  - assert_exists: {label_contains: "Discard it, or copy it in anyway."}
+  - assert_exists: {role: button, label: Copy anyway}
+  - screenshot: duplicate
+  - click: {role: button, label: Discard}
+  - assert_state: {key: screen.confirm_discard, equals: true}
+  - assert_exists: {label_contains: moves to the Discarded folder}
+  - screenshot: discard-confirm
+  - click: {role: button, label: Discard file}
+  - assert_state: {key: screen.discarded, equals: 1}
+  - assert_not_exists: {role: button, label: Ozark Feed receipt (copy).png}
+
+  # --- New check takes the arrival's own draft ---------------------------------
   - click: {role: button, label: Ozark Feed receipt.png}
+  - assert_state: {key: screen.selected_state, equals: arrived}
   - assert_state: {key: screen.loaded, equals: true}
-  - assert_state: {key: screen.selected_kind, equals: png}
   - assert_state: {key: screen.preview.status, equals: ready}
   - assert_exists: {role: image, label: Preview of Ozark Feed receipt.png}
-  - assert_enabled: {role: button, label: New bill}
-  - assert_enabled: {role: button, label: Add to a bill…}
-  - assert_enabled: {role: button, label: New check}
-  - assert_enabled: {role: button, label: Add to a bank transaction…}
   - screenshot: preview
-  - click: {role: button, label: Add to a check…}
-  - assert_state: {key: screen.picker.kind, equals: check}
-  - assert_state: {key: screen.picker.loaded, equals: true}
-  - assert_exists: {role: button, label: Attach, index: 0}
-  - screenshot: picker
-  - click: {role: button, label: Attach, index: 0}
-  - assert_state: {key: screen.problem, equals: null}
-  - assert_state: {key: screen.notice, equals: true}
-  # Filed away: gone from the list, the other file still ready.
-  - assert_not_exists: {role: button, label: Ozark Feed receipt.png}
-  - assert_state: {key: screen.ready, equals: 1}
-  - assert_state: {key: screen.selected, equals: false}
-  - screenshot: attached
-
-  # --- New check: the file stays until a saved check holds it ---------------
-  - click: {role: button, label: Midwest Equipment INV-55871.pdf}
-  - assert_state: {key: screen.loaded, equals: true}
   - click: {role: button, label: New check}
   - assert_state: {key: screen.screen, equals: write_check}
-  - assert_exists: {label: Attached from Midwest Equipment INV-55871.pdf in your receipt inbox.}
-  - assert_state: {key: screen.dirty, equals: true}
+  - assert_exists: {label: Attached from Ozark Feed receipt.png in your receipt inbox.}
   - screenshot: new-check
+  # Abandoned: the file is free again.
   - click: {role: button, label: Clear}
   - command: file.close_window
   - click: {role: tab, label_contains: Receipt Inbox}
   - assert_state: {key: screen.screen, equals: receipt_inbox}
-  - assert_exists: {role: button, label: Midwest Equipment INV-55871.pdf}
-  - assert_state: {key: screen.selected_mark, equals: uploaded}
-  - assert_exists: {label_contains: on a form that isn't saved yet}
+  - assert_state: {key: screen.on_form, equals: 0}
+
+  # --- Add to a check: the original moves to Processed/YYYY-MM ------------------
+  - click: {role: button, label: Ozark Feed receipt.png}
+  - assert_state: {key: screen.selected_state, equals: arrived}
+  - click: {role: button, label: Add to a check…}
+  - assert_state: {key: screen.picker.kind, equals: check}
+  - assert_state: {key: screen.picker.loaded, equals: true}
+  - screenshot: picker
+  - click: {role: button, label: Attach, index: 0}
+  - assert_state: {key: screen.processed, equals: 1}
+  - assert_not_exists: {role: button, label: Ozark Feed receipt.png}
+  - assert_state: {key: screen.problem, equals: null}
+
+  # --- A folder that keeps its originals: handled, hidden, left in place --------
+  - click: {role: button, label: Midwest Equipment INV-55871.pdf}
+  - assert_state: {key: screen.selected_state, equals: arrived}
+  - click: {role: button, label: Add to a bill…}
+  - assert_state: {key: screen.picker.kind, equals: bill}
+  - assert_state: {key: screen.picker.loaded, equals: true}
+  - click: {role: button, label: Attach, index: 0}
+  - assert_not_exists: {role: button, label: Midwest Equipment INV-55871.pdf}
+  - assert_exists: {label_contains: The original stays in the folder.}
+  - assert_state: {key: screen.processed, equals: 1}
   - screenshot: kept
+
+  # --- Set up… opens Document intake; Home has the Needs attention line --------
+  - click: {role: button, label: Set up…}
+  - assert_state: {key: screen.screen, equals: preferences}
+  - assert_state: {key: screen.category, equals: inbox}
+  - command: file.close_window
+  - click: {role: tab, label: Home}
+  - assert_exists: {label_contains: 1 intake folder needs attention}
+  - screenshot: home-attention
+  - click: {role: tab, label_contains: Receipt Inbox}
+  - assert_state: {key: screen.screen, equals: receipt_inbox}
 
   # --- Minimum window at 200%: nothing drawn over anything ---------------------
   - resize: {width: 960, height: 640}
@@ -83,9 +150,7 @@ steps:
         - {x: -4000, y: 70, width: 8480, height: 40}
         # The inbox body scrolls: the row running under the status bar.
         - {x: -4000, y: 285, width: 8480, height: 60}
-  # The actions are reached by scrolling.
-  - scroll: {target: {label: 1 file ready}, to: end}
-  - assert_exists: {role: button, label: Add to a bank transaction…}
+  - scroll: {target: {label: Check now}, to: end}
   - screenshot: inbox-z200-end
   - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}

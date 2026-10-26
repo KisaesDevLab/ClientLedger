@@ -61,6 +61,9 @@ pub(crate) struct AttachState {
     pub viewer: ViewerState,
     /// The shown file came from the receipt inbox (the banner says so).
     pub from_inbox: bool,
+    /// The inbox's claim on that file while this form is open (A01: the
+    /// inbox offers it to no other form until this one closes).
+    pub inbox_claim: Option<std::sync::Arc<()>>,
     /// A plain message (i18n key) about the last attempt.
     pub problem: Option<&'static str>,
     /// Where the last copy was saved.
@@ -277,6 +280,7 @@ impl EnterBillScreen {
         };
         self.header.edit_step(|h| h.attachments.push(file));
         self.attach.from_inbox = true;
+        self.attach.inbox_claim.clone_from(&d.claim);
         self.attach.shown = Some(d.attachment);
         self.attach.viewer.set_full_size_button(true);
         self.attach.viewer.open(d.file);

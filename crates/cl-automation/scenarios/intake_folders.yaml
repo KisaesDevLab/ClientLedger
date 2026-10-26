@@ -1,0 +1,104 @@
+# Preferences › Document intake (A01 C5, plan §5) against `clientledger
+# --demo`: the empty state, the inline refusals of a typed path (relative,
+# a device path, a web address) and of a taken name, Add (tested at once:
+# "Works") for two synthetic folders kept next to the scenarios (empty but
+# for a hidden `.gitkeep`, which intake skips), the kind, "Leave originals
+# where they are" and the auto-read hint, Save, and Remove with its
+# confirm. It ends with both folders removed and saved, so light and dark
+# start alike. The 409 "changed elsewhere" path and the read-only view of a
+# non-Admin need demo switches a scenario can't reach; unit tests cover
+# them (`intake_folders/tests.rs`).
+name: intake_folders
+description: Document intake - empty, refusals, Add and Test, kind and switches, Save, Remove; 100% and 200%.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: edit.preferences
+  - assert_state: {key: screen.screen, equals: preferences}
+  - click: {role: button, label: Document intake}
+  - assert_state: {key: screen.category, equals: inbox}
+  - assert_state: {key: screen.intake.load, equals: ready}
+  - assert_state: {key: screen.intake.admin, equals: true}
+  - assert_state: {key: screen.intake.folders, equals: []}
+  - assert_exists: {label: Add a folder where you save bills and receipts.}
+  - assert_exists: {role: button, label: Add folder}
+  - screenshot: intake-empty
+  - set_zoom: {percent: 200}
+  - screenshot: intake-empty-z200
+  - set_zoom: {percent: 100}
+
+  # --- Add: the path is checked as typed (no disk access) --------------------
+  - click: {role: button, label: Add folder}
+  - assert_state: {key: screen.intake.adding, equals: true}
+  - type: {text: Bills, target: {role: text_input, label: Name}}
+  - type: {text: Receipts, target: {role: text_input, label: Folder}}
+  - assert_exists: {label_contains: "Enter the full path, starting with a drive letter"}
+  - screenshot: intake-refused
+  - key: Ctrl+A
+  - type: {text: '\\?\C:\x'}
+  - assert_exists: {label_contains: "isn't supported. Use the normal folder path."}
+  - key: Ctrl+A
+  - type: {text: "https://x"}
+  - assert_exists: {label_contains: "A web address can't be used."}
+  - key: Ctrl+A
+  - type: {text: "{scenario_dir}/intake/Bills"}
+  - assert_not_exists: {label_contains: "A web address can't be used."}
+  - click: {role: button, label: Add}
+  - assert_state: {key: screen.intake.adding, equals: false}
+  # Tested at once; a passing test marks it for this computer.
+  - assert_state: {key: screen.intake.folders.0.probe, equals: ok}
+  - assert_state: {key: screen.intake.folders.0.pending, equals: true}
+  - assert_state: {key: screen.intake.folders.0.files, equals: 0}
+  - assert_exists: {label: Works. 0 files would come in.}
+  - assert_exists: {label: "Ready on this computer: save to start"}
+  - screenshot: intake-test-ok
+
+  # --- A taken name is refused; the second folder ------------------------------
+  - click: {role: button, label: Add folder}
+  - type: {text: bills, target: {role: text_input, label: Name}}
+  - type: {text: "{scenario_dir}/intake/Receipts", target: {role: text_input, label: Folder}}
+  - click: {role: button, label: Add}
+  - assert_state: {key: screen.intake.add_problem, equals: prefs.intake.err.name_taken}
+  - assert_exists: {label: Another intake folder already has that name.}
+  - focus: {role: text_input, label: Name}
+  - key: Ctrl+A
+  - type: {text: Receipts}
+  - click: {role: button, label: Add}
+  - assert_state: {key: screen.intake.folders.1.probe, equals: ok}
+
+  # --- Kind, Leave originals, Auto-read ------------------------------------------
+  - click: {role: combo_box, label: Kind, index: 0}
+  - click: {role: button, label: Bills}
+  - assert_state: {key: screen.intake.folders.0.kind, equals: bills}
+  - click: {role: check_box, label: Leave originals where they are, index: 1}
+  - assert_state: {key: screen.intake.folders.1.keep_originals, equals: true}
+  - assert_exists: {role: check_box, label: Read new documents automatically, index: 0}
+  - assert_exists: {label: "Reading arrives in a coming update; until then new documents wait in the inbox.", index: 0}
+
+  # --- Save: the engine takes the list, this computer its confirmations ----------
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.intake.dirty, equals: false}
+  - assert_state: {key: screen.intake.folders.0.here, equals: true}
+  - assert_state: {key: screen.intake.folders.1.here, equals: true}
+  - assert_exists: {label: Set up on this computer, index: 0}
+  - screenshot: intake-two-folders
+  - set_zoom: {percent: 200}
+  - screenshot: intake-two-folders-z200
+  - set_zoom: {percent: 100}
+
+  # --- Remove, with its confirm; the files stay ----------------------------------
+  - click: {role: button, label: Remove, index: 0}
+  - assert_state: {key: screen.intake.removing, equals: true}
+  - assert_exists: {label_contains: Files in the folder stay where they are.}
+  - screenshot: intake-remove
+  - click: {role: button, label: Remove folder}
+  - click: {role: button, label: Remove, index: 0}
+  - click: {role: button, label: Remove folder}
+  - assert_state: {key: screen.intake.folders, equals: []}
+  - click: {role: button, label: Save}
+  - assert_state: {key: screen.intake.dirty, equals: false}
+  - assert_exists: {label: Add a folder where you save bills and receipts.}
+
+  # --- Close ---------------------------------------------------------------------
+  - command: file.close_window
+  - click: {role: tab, label: Home}

@@ -7,8 +7,6 @@ use std::collections::BTreeMap;
 use cl_core::ids::TenantId;
 use cl_core::intake::IntakeFolder;
 
-use crate::screens::preferences::intake_folders::wp_b;
-
 /// Most folders per company (U-93).
 pub const MAX_FOLDERS: usize = 20;
 
@@ -42,6 +40,9 @@ pub struct DemoIntake {
     /// Admin until P29). Tests and scenarios set another role to see the
     /// read-only panel.
     pub role: Option<String>,
+    /// The demo engine acts as one without `intake-settings-v1` (tests:
+    /// the P17 single receipt-inbox folder, Q-A01q).
+    pub needs_engine: bool,
 }
 
 impl DemoIntake {
@@ -112,7 +113,7 @@ fn validate(folders: &[IntakeFolder]) -> Result<(), DemoIntakeError> {
         if !names.insert(name.to_lowercase()) {
             return Err(DemoIntakeError::Invalid("name"));
         }
-        if wp_b::check_path_syntax(&f.path, &[]).is_err()
+        if cl_company::intake::check_path_syntax(&f.path, &[]).is_err()
             || !paths.insert(cl_settings::migrate_inbox::same_path_key(&f.path))
         {
             return Err(DemoIntakeError::Invalid("path"));

@@ -265,6 +265,9 @@ pub enum SaveBlock {
     OllamaUrl(cl_settings::OllamaUrlError),
     /// The intake folders can't be saved as they are.
     Intake(intake_folders::IntakeBlock),
+    /// The P17 receipt-inbox folder is not usable (an engine without
+    /// intake folders, Q-A01q).
+    Folder(cl_settings::FolderError),
     /// The engine's settings have not been read yet.
     NotLoaded,
 }
@@ -282,6 +285,7 @@ impl SaveBlock {
             SaveBlock::BadRate => "prefs.err.rate",
             SaveBlock::OllamaUrl(_) => "prefs.ai.err_ollama_url",
             SaveBlock::Intake(b) => b.message_key(),
+            SaveBlock::Folder(e) => intake_folders::legacy::folder_error_key(*e),
             SaveBlock::NotLoaded => "prefs.err.not_loaded",
         }
     }
@@ -416,6 +420,12 @@ impl PreferencesScreen {
 
     /// ClientLedger's own folders, refused as intake folders: the app data
     /// folder and the backup folders.
+    /// The engine keeps no intake folders: the P17 single receipt-inbox
+    /// folder is still chosen here (Q-A01q).
+    fn legacy_folder(&self) -> bool {
+        self.intake.load == intake_folders::LoadState::NeedsEngine
+    }
+
     fn app_dirs(&self) -> Vec<std::path::PathBuf> {
         let mut dirs = Vec::new();
         if let Some(settings) = self.link.store().path().parent() {
@@ -540,6 +550,17 @@ impl PreferencesScreen {
         self.intake
             .validate(&e.intake, &self.committed.intake, &self.app_dirs())
             .map_err(SaveBlock::Intake)?;
+        // An engine without intake folders keeps P17's single folder
+        // (Q-A01q), checked as P17 checked it.
+        if self.legacy_folder()
+            && let Some(p) = e
+                .company
+                .receipt_inbox_dir
+                .as_ref()
+                .filter(|p| !p.as_os_str().is_empty())
+        {
+            cl_settings::check_inbox_folder(p).map_err(SaveBlock::Folder)?;
+        }
         e.accounting.validate()?;
         // A save that leaves the AI panel alone is never blocked by a
         // stale or unknown consent read; a changed panel is checked, and
@@ -600,12 +621,13 @@ impl PreferencesScreen {
         if let Some((id, _)) = self.tenant {
             let flags = edits.flags;
             let prefs = company_prefs.clone();
+            let legacy = self.legacy_folder();
             if let Err(e) = self.link.store().update(|l| {
                 if let Some(rec) = l.get_mut(id) {
                     // Only the fields this screen edits: lists, the AI
                     // usage count and the consent note write theirs while
                     // Preferences is open (B3).
-                    write_owned_prefs(&prefs, &mut rec.prefs);
+                    write_owned_prefs(&prefs, &mut rec.prefs, legacy);
                     rec.flags = flags;
                 }
             }) {
@@ -963,7 +985,7 @@ impl PreferencesScreen {
                         edits: &mut self.edits.intake,
                         committed: &self.committed.intake,
                         here: &self.committed.company.intake_here,
-                        legacy: self.committed.company.receipt_inbox_dir.is_some(),
+                        legacy_dir: &mut self.edits.company.receipt_inbox_dir,
                         app_dirs: &app_dirs,
                     },
                 );
@@ -1312,10 +1334,20 @@ pub fn make(
 /// `to`, leaving every other field (sensitive accounts, required tag
 /// groups, the AI usage count, the consent note) as `to` has it.
 ///
-/// Neither the P17 folder (the migration owns it now) nor this computer's
-/// intake confirmations are written here: those are written only after the
-/// engine accepted the intake list ([`PreferencesScreen::finish_save`]).
-fn write_owned_prefs(from: &cl_settings::CompanyPrefs, to: &mut cl_settings::CompanyPrefs) {
+/// This computer's intake confirmations are not written here: they are
+/// written only after the engine accepted the intake list
+/// ([`PreferencesScreen::finish_save`]). The P17 folder is written only
+/// when `legacy` (an engine without intake folders, where it is still the
+/// inbox's folder, Q-A01q); otherwise the migration owns it, and a window
+/// left open across the migration must not bring it back.
+fn write_owned_prefs(
+    from: &cl_settings::CompanyPrefs,
+    to: &mut cl_settings::CompanyPrefs,
+    legacy: bool,
+) {
+    if legacy {
+        to.receipt_inbox_dir.clone_from(&from.receipt_inbox_dir);
+    }
     to.bills_due_days = from.bills_due_days;
     to.ai.suggest_rules = from.ai.suggest_rules;
     to.ai.monthly_token_cap = from.ai.monthly_token_cap;

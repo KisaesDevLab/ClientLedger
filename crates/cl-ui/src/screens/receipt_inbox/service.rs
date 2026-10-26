@@ -1,6 +1,8 @@
-//! The receipt inbox behind the window (P17 WP5): one per app (kept in the
-//! egui context), alive while a company is open, whether or not the inbox
-//! window is.
+//! P17's single-folder receipt inbox behind the window (P17 WP5), kept as
+//! it was for an engine without intake folders (A01 Q-A01q: the legacy
+//! mode; the multi-folder inbox is [`super::intake`]). One per app (kept in
+//! the egui context), alive while a company is open, whether or not the
+//! inbox window is.
 //!
 //! - A background thread lists the folder with `std::fs` (no watcher
 //!   crate): every 5 s while the inbox or Enter Bill is in front (2 s while
@@ -653,7 +655,7 @@ impl Service {
     }
 }
 
-fn upload_of(attachable_type: &str) -> Upload {
+pub(crate) fn upload_of(attachable_type: &str) -> Upload {
     if attachable_type == "draft" {
         Upload::Draft
     } else {
@@ -761,11 +763,4 @@ pub(crate) fn tick_service(
 pub(crate) fn badge(ctx: &Context) -> usize {
     ctx.data(|d| d.get_temp::<Handle>(handle_id()))
         .map_or(0, |h| h.lock().badge())
-}
-
-/// Intake folders that need the owner (Home's Needs attention line, A01 D6).
-/// A01 WP-A stub: 0 until WP-C's multi-folder service counts them.
-#[must_use]
-pub(crate) fn intake_problems(_ctx: &Context) -> usize {
-    0
 }

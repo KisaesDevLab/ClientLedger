@@ -23,8 +23,8 @@
 //! Folder names and paths are owner data: they appear on screen only,
 //! never in `state()`, `Debug` or a log line.
 
+pub mod legacy;
 pub mod source;
-pub mod wp_b;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -32,6 +32,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 
 use cl_company::CompanyError;
+use cl_company::intake::{Health, PathProblem, ProbeReport, check_path_syntax, probe_async};
 use cl_core::ids::{IntakeFolderId, TenantId};
 use cl_core::intake::{IntakeFolder, IntakeKind};
 use cl_settings::HereNote;
@@ -40,7 +41,6 @@ use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
 use self::source::{Fetched, Stored};
-use self::wp_b::{Health, PathProblem, ProbeReport};
 use crate::company::{CompanyLink, Task};
 use crate::i18n::{t, t_count};
 use crate::screens::company::form;
@@ -150,7 +150,7 @@ pub fn path_problem_key(p: PathProblem) -> &'static str {
     match p {
         PathProblem::Empty => "prefs.intake.path.empty",
         PathProblem::TooLong => "prefs.intake.path.too_long",
-        PathProblem::ControlChars => "prefs.intake.path.control",
+        PathProblem::ControlCharacter => "prefs.intake.path.control",
         PathProblem::NotAbsolute => "prefs.intake.path.not_absolute",
         PathProblem::Device => "prefs.intake.path.device",
         PathProblem::Url => "prefs.intake.path.url",
@@ -440,16 +440,7 @@ impl IntakePanel {
                         answered.push(*id);
                     }
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        p.report = Some(ProbeReport {
-                            health: Health::NotResponding,
-                            files: 0,
-                            too_large: 0,
-                            heic: 0,
-                            online_only: 0,
-                            writable: None,
-                            cloud: false,
-                            canonical_key: None,
-                        });
+                        p.report = Some(ProbeReport::not_responding());
                         p.rx = None;
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -472,13 +463,13 @@ impl IntakePanel {
             return;
         }
         let dirs: Vec<&Path> = app_dirs.iter().map(PathBuf::as_path).collect();
-        let Ok(root) = wp_b::check_path_syntax(&f.path, &dirs) else {
+        let Ok(root) = check_path_syntax(&f.path, &dirs) else {
             return;
         };
         self.probes.insert(
             id,
             Probe {
-                rx: Some(wp_b::probe_async(root, !f.keep_originals)),
+                rx: Some(probe_async(root, !f.keep_originals)),
                 report: None,
                 path: f.path.clone(),
             },
@@ -506,7 +497,7 @@ impl IntakePanel {
         if !usable(r) {
             return;
         }
-        if r.files > BRING_IN_ASK_ABOVE {
+        if r.counts.incoming > BRING_IN_ASK_ABOVE {
             self.ask_bring_in = Some(id);
         } else {
             self.confirm(edits, id, false);
@@ -639,7 +630,7 @@ impl IntakePanel {
             if !names.insert(name.to_lowercase()) {
                 return Err(IntakeBlock::NameTaken);
             }
-            wp_b::check_path_syntax(&f.path, &dirs).map_err(IntakeBlock::Path)?;
+            check_path_syntax(&f.path, &dirs).map_err(IntakeBlock::Path)?;
             if !paths.insert(same_path_key(&f.path)) {
                 return Err(IntakeBlock::PathTaken);
             }
@@ -677,7 +668,7 @@ impl IntakePanel {
                     "pending": edits.confirm.contains_key(&f.id),
                     "testing": self.testing(f.id),
                     "probe": self.report(f).map(|r| health_key(r.health).1),
-                    "files": self.report(f).map(|r| r.files),
+                    "files": self.report(f).map(|r| r.counts.incoming),
                 })
             })
             .collect();
@@ -738,7 +729,7 @@ fn check_new(
     }
     check_name(edits, except, name)?;
     let dirs: Vec<&Path> = app_dirs.iter().map(PathBuf::as_path).collect();
-    wp_b::check_path_syntax(path, &dirs).map_err(IntakeBlock::Path)?;
+    check_path_syntax(path, &dirs).map_err(IntakeBlock::Path)?;
     let key = same_path_key(path);
     if edits
         .folders
@@ -784,15 +775,27 @@ fn report_lines(r: &ProbeReport) -> Vec<String> {
     if !usable(r) {
         return out;
     }
-    out.push(t_count("prefs.intake.test.ok", r.files, &[]));
-    if r.too_large > 0 {
-        out.push(t_count("prefs.intake.test.too_large", r.too_large, &[]));
+    out.push(t_count("prefs.intake.test.ok", r.counts.incoming, &[]));
+    if r.counts.too_large > 0 {
+        out.push(t_count(
+            "prefs.intake.test.too_large",
+            r.counts.too_large,
+            &[],
+        ));
     }
-    if r.heic > 0 {
-        out.push(t_count("prefs.intake.test.heic", r.heic, &[]));
+    if r.counts.not_supported > 0 {
+        out.push(t_count(
+            "prefs.intake.test.heic",
+            r.counts.not_supported,
+            &[],
+        ));
     }
-    if r.online_only > 0 {
-        out.push(t_count("prefs.intake.test.online_only", r.online_only, &[]));
+    if r.counts.online_only > 0 {
+        out.push(t_count(
+            "prefs.intake.test.online_only",
+            r.counts.online_only,
+            &[],
+        ));
     }
     if r.writable == Some(false) {
         out.push(t("prefs.intake.test.not_writable"));
@@ -816,9 +819,9 @@ pub struct View<'a> {
     pub committed: &'a IntakeEdits,
     /// This computer's confirmations (the company record).
     pub here: &'a BTreeMap<IntakeFolderId, HereNote>,
-    /// A P17 folder is still set (shown while the engine can't keep
-    /// intake folders).
-    pub legacy: bool,
+    /// P17's single receipt-inbox folder (the company record's edit),
+    /// chosen here while the engine can't keep intake folders (Q-A01q).
+    pub legacy_dir: &'a mut Option<PathBuf>,
     /// ClientLedger's own folders (refused as intake folders).
     pub app_dirs: &'a [PathBuf],
 }
@@ -850,13 +853,10 @@ pub fn show(ui: &mut Ui, tokens: &Tokens, v: &mut View<'_>) -> PanelAction {
             return action;
         }
         LoadState::NeedsEngine => {
-            form::card(ui, tokens, |ui| {
-                form::inline_warning(ui, tokens, &t("prefs.intake.needs_engine"));
-                if v.legacy {
-                    form::hint(ui, tokens, &t("prefs.intake.legacy"));
-                }
-                ui.add(egui::Label::new(t("prefs.intake.where")).selectable(false));
-            });
+            // P17's single folder keeps working (Q-A01q).
+            form::hint(ui, tokens, &t("prefs.intake.needs_engine"));
+            ui.add_space(4.0);
+            legacy::chooser(ui, tokens, v.legacy_dir);
             return action;
         }
         LoadState::Failed => {
@@ -897,6 +897,7 @@ pub fn show(ui: &mut Ui, tokens: &Tokens, v: &mut View<'_>) -> PanelAction {
                 tokens,
                 &mut *v.panel,
                 &mut *v.edits,
+                v.here,
                 v.app_dirs,
                 editable,
             );
@@ -936,7 +937,16 @@ fn folder_table(ui: &mut Ui, tokens: &Tokens, v: &View<'_>) {
             ui.end_row();
             for f in &v.edits.folders {
                 ui.add(egui::Label::new(&f.name).selectable(false));
-                ui.add(egui::Label::new(&f.path).truncate().selectable(false));
+                // A path under the owner's profile shows as `~` (as P17
+                // did); the whole path is on hover.
+                ui.add(
+                    egui::Label::new(crate::screens::document_view::shown_path(Path::new(
+                        &f.path,
+                    )))
+                    .truncate()
+                    .selectable(false),
+                )
+                .on_hover_text(&f.path);
                 ui.add(egui::Label::new(t(kind_key(f.default_kind))).selectable(false));
                 let status = status_text(v.panel, v.edits, v.committed, v.here, f);
                 ui.add(
@@ -954,6 +964,7 @@ fn folder_rows(
     tokens: &Tokens,
     panel: &mut IntakePanel,
     edits: &mut IntakeEdits,
+    here: &BTreeMap<IntakeFolderId, HereNote>,
     app_dirs: &[PathBuf],
     editable: bool,
 ) {
@@ -1020,7 +1031,7 @@ fn folder_rows(
         }
         // Many files already there: ask first (Q-A01h).
         if panel.ask_bring_in == Some(id) {
-            let n = panel.report(&f).map_or(0, |r| r.files);
+            let n = panel.report(&f).map_or(0, |r| r.counts.incoming);
             ui.add(egui::Label::new(t_count("prefs.intake.bring_in.ask", n, &[])).wrap());
             ui.horizontal(|ui| {
                 if ui
@@ -1063,6 +1074,7 @@ fn folder_rows(
                 panel.test(edits, id, app_dirs);
             }
             let can_use = !edits.confirm.contains_key(&id)
+                && !confirmed(here, &f)
                 && panel.ask_bring_in != Some(id)
                 && panel.report(&f).is_some_and(usable);
             if can_use
@@ -1101,7 +1113,7 @@ fn add_row(
     let dirs: Vec<&Path> = app_dirs.iter().map(PathBuf::as_path).collect();
     let typed = row.path.trim();
     if !typed.is_empty()
-        && let Err(p) = wp_b::check_path_syntax(typed, &dirs)
+        && let Err(p) = check_path_syntax(typed, &dirs)
     {
         form::hint(ui, tokens, &t(path_problem_key(p)));
     } else if let Some(b) = row.problem {

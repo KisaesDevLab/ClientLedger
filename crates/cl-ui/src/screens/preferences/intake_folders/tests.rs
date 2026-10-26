@@ -42,7 +42,7 @@ fn screen(link: &Arc<CompanyLink>) -> PreferencesScreen {
 
 /// Waits for every running Test.
 fn settle(s: &mut PreferencesScreen) {
-    let until = Instant::now() + wp_b::PROBE_DEADLINE + Duration::from_secs(5);
+    let until = Instant::now() + cl_company::intake::PROBE_DEADLINE + Duration::from_secs(5);
     loop {
         s.poll();
         if !s.intake.busy() || Instant::now() > until {
@@ -402,7 +402,7 @@ fn a_folder_another_company_uses_on_this_computer_is_refused() {
     let dir = tempfile::tempdir().expect("tmp");
     let link = link(dir.path());
     let shared = tempfile::tempdir().expect("shared");
-    let key = wp_b::canonical_key(shared.path()).expect("key");
+    let key = cl_company::intake::canonical_key(shared.path()).expect("key");
     link.store()
         .update(|l| {
             let other = l.upsert(TenantId::parse(OTHER).expect("id"), "Other");
@@ -515,27 +515,73 @@ fn the_switches_round_trip_and_the_auto_read_hint_shows() {
     assert_eq!(f.default_kind, IntakeKind::Receipts);
 }
 
+fn legacy_dir(link: &CompanyLink) -> Option<std::path::PathBuf> {
+    link.store()
+        .load()
+        .expect("load")
+        .get(ozark())
+        .expect("rec")
+        .prefs
+        .receipt_inbox_dir
+        .clone()
+}
+
+/// Q-A01q regression: on an engine without `intake-settings-v1` the P17
+/// single folder is still chosen here, checked as P17 checked it, and
+/// saved on the company record.
 #[test]
-fn an_engine_without_intake_settings_shows_the_notice() {
+fn an_engine_without_intake_settings_keeps_the_p17_folder_chooser() {
     let dir = tempfile::tempdir().expect("tmp");
     let link = link(dir.path());
+    link.demo_state().expect("demo").intake.needs_engine = true;
     let mut s = screen(&link);
-    s.intake.load = LoadState::NeedsEngine;
-    s.committed.company.receipt_inbox_dir = Some(std::path::PathBuf::from(r"C:\Receipts"));
+    assert_eq!(s.intake.load, LoadState::NeedsEngine);
+    assert_eq!(s.state()["intake"]["load"], "needs_engine");
     let all = texts(&mut s);
     assert!(
         all.contains("Document intake needs the latest engine."),
         "{all}"
     );
-    assert!(
-        all.contains("Until then, the receipt inbox keeps watching the folder you chose before."),
-        "{all}"
-    );
-    assert!(!all.contains(r"C:\Receipts"), "{all}");
-    assert_eq!(s.state()["intake"]["load"], "needs_engine");
-    // An untouched panel never blocks a save.
+    assert!(all.contains("Watch a folder for receipts"), "{all}");
+    assert!(!all.contains("Add folder"), "{all}");
+    // An untouched panel never blocks a save, and writes no folder.
     s.edits.user.theme = cl_settings::ThemeChoice::Dark;
-    assert!(Screen::save(&mut s));
+    assert!(Screen::save(&mut s), "{:?}", s.block);
+    assert_eq!(legacy_dir(&link), None);
+    // A network folder is refused as in P17 …
+    s.edits.company.receipt_inbox_dir = Some(std::path::PathBuf::from(r"\\server\share\Receipts"));
+    assert!(!Screen::save(&mut s));
+    assert!(matches!(
+        s.block,
+        Some(SaveBlock::Folder(cl_settings::FolderError::Network))
+    ));
+    // … a folder on this computer is saved on the company record.
+    let inbox = dir.path().join("Receipts");
+    std::fs::create_dir(&inbox).expect("dir");
+    s.edits.company.receipt_inbox_dir = Some(inbox.clone());
+    assert!(Screen::save(&mut s), "{:?}", s.block);
+    assert_eq!(legacy_dir(&link), Some(inbox.clone()));
+    let all = texts(&mut s);
+    assert!(all.contains(&*inbox.to_string_lossy()), "{all}");
+    // Turned off again.
+    s.edits.company.receipt_inbox_dir = None;
+    assert!(Screen::save(&mut s), "{:?}", s.block);
+    assert_eq!(legacy_dir(&link), None);
+}
+
+/// With intake folders in the engine the P17 field belongs to the
+/// migration: a Preferences save never writes it back.
+#[test]
+fn with_intake_settings_a_save_leaves_the_p17_folder_alone() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let mut s = screen(&link);
+    assert_eq!(s.intake.load, LoadState::Ready);
+    // The migration cleared the field while the window was open.
+    s.edits.company.receipt_inbox_dir = Some(std::path::PathBuf::from(r"C:\Receipts"));
+    s.edits.user.theme = cl_settings::ThemeChoice::Dark;
+    assert!(Screen::save(&mut s), "{:?}", s.block);
+    assert_eq!(legacy_dir(&link), None);
 }
 
 #[test]
@@ -556,7 +602,7 @@ fn block_and_health_texts_exist() {
     for p in [
         PathProblem::Empty,
         PathProblem::TooLong,
-        PathProblem::ControlChars,
+        PathProblem::ControlCharacter,
         PathProblem::NotAbsolute,
         PathProblem::Device,
         PathProblem::Url,
