@@ -15,7 +15,9 @@ use cl_core::intake::IntakeKind;
 #[must_use]
 pub fn classify(header: &Header, signals: &Signals, hint: JobHint) -> (DocKind, Confidence) {
     let card = signals.card.is_some() || signals.card_brand;
-    let check = signals.check.is_some();
+    // With the card's digits printed, a "Check #" is a restaurant's bill
+    // number, not a payment by check.
+    let check = signals.check.is_some() && signals.card.is_none();
     let cash = signals.cash.is_some();
     let methods = usize::from(card) + usize::from(check) + usize::from(cash);
     let paid_equals_total = matches!(
@@ -114,6 +116,15 @@ mod tests {
             ..card.clone()
         };
         assert_eq!(kind(&h, &both), DocKind::Unknown, "conflict");
+        let restaurant = Signals {
+            check: Some(found("1629".to_string())),
+            ..card.clone()
+        };
+        assert_eq!(
+            kind(&h, &restaurant),
+            DocKind::CardCharge,
+            "a check number beside card digits is the bill's"
+        );
         let mut paid = Header::default();
         paid.total = Some(found(Money::parse_wire("12.40").unwrap()));
         paid.amount_paid = Some(found(Money::parse_wire("12.40").unwrap()));

@@ -67,8 +67,9 @@ pub fn normalize_reference(reference: &str) -> String {
             run.push(c);
         } else {
             flush(&mut out, &mut run);
-            if c.is_alphanumeric() {
-                out.extend(c.to_lowercase());
+            // ASCII only, as the engine's U-92b check compares.
+            if c.is_ascii_alphanumeric() {
+                out.push(c.to_ascii_lowercase());
             }
         }
     }
@@ -113,6 +114,9 @@ mod tests {
         assert_eq!(key(&h), DupeKey::default());
         h.reference = Some(found("--"));
         assert_eq!(key(&h).reference, None, "nothing left after normalizing");
+        // ASCII letters and digits only, as the engine keeps them.
+        assert_eq!(normalize_reference("Réf-0012"), "rf12");
+        assert_eq!(normalize_reference("№ 7"), "7");
         h.reference = Some(found("INV-0042"));
         assert_eq!(key(&h).reference.as_deref(), Some("inv42"));
         assert_eq!(

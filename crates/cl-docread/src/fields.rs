@@ -60,6 +60,9 @@ pub struct Signals {
     pub change: bool,
     /// "Invoice", "Bill" or "Statement" as a title, or terms/due date.
     pub looks_like_bill: bool,
+    /// "Statement" (of account) as a title: it lists several invoices, so
+    /// it has no one reference.
+    pub statement: bool,
 }
 
 impl fmt::Debug for Signals {
@@ -72,6 +75,7 @@ impl fmt::Debug for Signals {
             .field("paid_stamp", &self.paid_stamp.is_some())
             .field("change", &self.change)
             .field("looks_like_bill", &self.looks_like_bill)
+            .field("statement", &self.statement)
             .finish()
     }
 }
@@ -92,6 +96,8 @@ const VENDOR_DETAIL: u16 = 7_000;
 const TERMS_PATTERN: u16 = 7_000;
 /// The only unlabelled amount below the table.
 const LONE_UNLABELLED: u16 = 5_000;
+/// A date printed without a label.
+const UNLABELLED_DATE: u16 = 6_500;
 /// An unlabelled amount picked by the totals (M7).
 const PICKED: u16 = 6_000;
 /// A value from a template region.
@@ -257,6 +263,9 @@ pub fn extract(
     let mut header = choose(&ctx, cands, &mut checks);
     vendor(&ctx, &mut header);
     header.payment = payment(&signals);
+    if signals.statement {
+        header.reference = None;
+    }
     signals.looks_like_bill |= header.terms.is_some() || header.due_date.is_some();
     let mut out = Extracted {
         header,
@@ -300,9 +309,16 @@ fn scan_line(ctx: &Ctx<'_>, li: usize, cands: &mut Cands, signals: &mut Signals)
                 continue;
             }
             let last = h + 1 == hits.len();
+            // A bare "Invoice" or "#" takes a value beside or under it only
+            // when that is a lone number, not an address line or a title's
+            // neighbour ("PARTS INVOICE" → "915 W Walnut St").
+            let lone = |seg: usize| {
+                hit.label != Label::Reference(1) || ctx.layout.segments[seg].words.len() <= 2
+            };
             if last
                 && hit.label.value_may_be_next_segment()
                 && let Some(&next) = line.segments.get(k + 1)
+                && lone(next)
                 && !labels::starts_with_label(&ctx.seg_tokens(next))
                 && candidate(
                     ctx,
@@ -320,6 +336,7 @@ fn scan_line(ctx: &Ctx<'_>, li: usize, cands: &mut Cands, signals: &mut Signals)
                 && last
                 && hit.label.value_may_be_below()
                 && let Some(below) = below_segment(ctx, seg, hit.label.is_amount())
+                && lone(below)
             {
                 candidate(
                     ctx,
@@ -380,8 +397,9 @@ fn candidate(
     signals: &mut Signals,
 ) -> bool {
     let before = (cands.count(), signals.change, signals.check.is_some());
-    // After a card brand, four bare digits are the card, not an amount.
-    let need_point = label == Label::Card;
+    // After a card brand or "paid", four bare digits are the card ("Paid
+    // with Visa ending in 1172"), not an amount.
+    let need_point = matches!(label, Label::Card | Label::Paid);
     let money_field = |field: FieldName| -> Option<Cand<Money>> {
         let (w, m) = value.iter().rev().find_map(|&w| {
             let text = &ctx.word(pi, w).text;
@@ -422,9 +440,11 @@ fn candidate(
         Label::Date(p) => cands.date.extend(
             date_value(ctx, pi, value, FieldName::Date, place).map(|(c, f)| (prio(c, p), f)),
         ),
-        Label::Due => cands
-            .due
-            .extend(date_value(ctx, pi, value, FieldName::DueDate, place)),
+        Label::Due => match date_value(ctx, pi, value, FieldName::DueDate, place) {
+            Some(d) => cands.due.push(d),
+            // "Payment due $84.10": an amount due, not a date.
+            None => cands.amount_due.extend(money_field(FieldName::Total)),
+        },
         Label::Reference(p) => cands
             .reference
             .extend(id_value(ctx, pi, value, FieldName::Reference, place).map(|c| prio(c, p))),
@@ -451,6 +471,11 @@ fn candidate(
             }
         }
         Label::CheckNumber => {
+            // A restaurant's "Check #" is the bill's number: a reference
+            // candidate too (the kind decides whether it was a payment).
+            cands
+                .reference
+                .extend(id_value(ctx, pi, value, FieldName::Reference, place).map(|c| prio(c, 1)));
             if place == Place::Same
                 && let Some(&w) = value.first()
             {
@@ -523,7 +548,7 @@ fn id_value(
 ) -> Option<Cand<String>> {
     let (w, text) = value.iter().find_map(|&w| {
         let t = clean_id(&ctx.word(pi, w).text);
-        (t.chars().any(|c| c.is_ascii_digit()) && !t.contains('$')).then_some((w, t))
+        is_id(&t, ctx.today).then_some((w, t))
     })?;
     let spot = ctx.spot(pi, &[w]);
     Some(Cand {
@@ -536,6 +561,20 @@ fn id_value(
         prio: 0,
         at: (pi, spot.bbox.top(), spot.bbox.left()),
     })
+}
+
+/// Whether 	 can be an invoice or account number: it has a digit and is
+/// not a date or a printed amount (`12.50`, `$` anything).
+fn is_id(t: &str, today: CalendarDate) -> bool {
+    let money_like = t.split_once('.').is_some_and(|(i, f)| {
+        !i.is_empty()
+            && f.len() == 2
+            && (i.bytes().chain(f.bytes())).all(|b| b.is_ascii_digit() || b == b',')
+    });
+    t.chars().any(|c| c.is_ascii_digit())
+        && !t.contains('$')
+        && !money_like
+        && dates::parse(t, today).is_none()
 }
 
 /// An id as printed, without a leading `#`/`:` or trailing punctuation.
@@ -711,6 +750,9 @@ fn scan_signals(ctx: &Ctx<'_>, pi: usize, seg: usize, tokens: &[Token], signals:
     {
         signals.looks_like_bill = true;
     }
+    if texts == ["statement"] || texts == ["statement", "of", "account"] {
+        signals.statement = true;
+    }
 }
 
 fn is_mask(t: &str) -> bool {
@@ -832,9 +874,66 @@ fn choose(ctx: &Ctx<'_>, mut c: Cands, checks: &mut Vec<Check>) -> Header {
     h.terms = pick_first(&c.terms).or_else(|| terms_pattern(ctx));
     h.vendor_phone = pick_first(&c.phone);
     if h.total.is_none() {
+        // No total printed: a statement's balance due, else what a
+        // receipt says was paid ("Amount paid").
+        h.total = h
+            .balance_due
+            .clone()
+            .map(|f| relabel(f, "fields.total.balance"))
+            .or_else(|| {
+                h.amount_paid
+                    .clone()
+                    .map(|f| relabel(f, "fields.total.amount-paid"))
+            });
+    }
+    if h.total.is_none() {
         unlabelled_total(ctx, &mut h, checks);
     }
+    if h.date.is_none() {
+        h.date = unlabelled_date(ctx);
+    }
     h
+}
+
+fn relabel<T>(mut f: Found<T>, id: &'static str) -> Found<T> {
+    f.rule = RuleId::new(id);
+    f
+}
+
+/// No labelled date (a register receipt prints it bare at the top): the
+/// first date in reading order on the first page, outside line tables,
+/// at medium confidence at most.
+fn unlabelled_date(ctx: &Ctx<'_>) -> Option<Found<CalendarDate>> {
+    let first_pi = ctx.layout.lines.first()?.page_index;
+    for line in ctx
+        .layout
+        .lines
+        .iter()
+        .enumerate()
+        .filter_map(|(li, l)| (l.page_index == first_pi && !ctx.in_table[li]).then_some(l))
+    {
+        // A due date is not the document's date.
+        let due = line.segments.iter().any(|&s| {
+            find_labels(&ctx.seg_tokens(s))
+                .iter()
+                .any(|h| h.label == Label::Due)
+        });
+        if due {
+            continue;
+        }
+        for &seg in &line.segments {
+            let words = &ctx.layout.segments[seg].words;
+            if let Some((c, _)) = date_value(ctx, first_pi, words, FieldName::Date, Place::Below) {
+                let mut f = c.found;
+                f.rule = RuleId::new("fields.date.unlabelled");
+                f.confidence = f
+                    .confidence
+                    .min(Confidence::saturating(u32::from(UNLABELLED_DATE)));
+                return Some(f);
+            }
+        }
+    }
+    None
 }
 
 pub(crate) fn day_first_check(field: FieldName, found: &Found<CalendarDate>) -> Check {

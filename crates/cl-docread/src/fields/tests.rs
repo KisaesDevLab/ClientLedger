@@ -295,3 +295,126 @@ fn ocr_word_confidence_caps_the_field() {
     let h = run(&low).header;
     assert_eq!(h.total.unwrap().confidence.bp(), 5_000);
 }
+
+fn ymd(y: i32, mo: u32, d: u32) -> CalendarDate {
+    CalendarDate::from_ymd(y, mo, d).unwrap()
+}
+
+/// A register receipt prints its date bare; "MAR 04 2026" style too.
+#[test]
+fn unlabelled_receipt_dates() {
+    let mut d = Doc::new();
+    d.text(3000, 300, "FreshWay Market");
+    d.text(500, 1800, "09/26/2025 12:52 AM");
+    d.text(500, 2100, "TRANS # 9007");
+    d.text(1800, 6500, "TOTAL");
+    d.amount(9500, 6500, "104.23");
+    let h = run(&d).header;
+    let date = h.date.unwrap();
+    assert_eq!(date.value, ymd(2025, 9, 26));
+    assert_eq!(date.rule.as_str(), "fields.date.unlabelled");
+    assert!(date.confidence < Confidence::HIGH);
+    assert_eq!(h.reference.unwrap().value, "9007");
+
+    let mut d = Doc::new();
+    d.text(3000, 300, "BLUEBIRD CAFE");
+    d.text(500, 2200, "MAR 04 2026 05:43 PM");
+    d.text(500, 2600, "INVOICE 755249");
+    let h = run(&d).header;
+    assert_eq!(h.date.unwrap().value, ymd(2026, 3, 4));
+    assert_eq!(h.reference.unwrap().value, "755249");
+
+    // A due date alone is not the document's date.
+    let mut d = Doc::new();
+    d.text(500, 300, "Acme Supply");
+    d.text(500, 1200, "Due Date 11/30/2026");
+    assert!(run(&d).header.date.is_none());
+}
+
+#[test]
+fn reference_labels() {
+    for (label, value) in [
+        ("Invoice ID", "CN-2026-15498"),
+        ("No.:", "578"),
+        ("Check #", "1629"),
+    ] {
+        let mut d = Doc::new();
+        d.text(500, 300, "Some Vendor LLC");
+        d.text(500, 1600, &format!("{label} {value}"));
+        let h = run(&d).header;
+        assert_eq!(h.reference.unwrap().value, value, "{label}");
+    }
+    // "Invoice" with its value across the line, and in a grid below.
+    let mut d = Doc::new();
+    d.text(500, 300, "Tri-County Auto Parts");
+    d.text(5400, 1600, "Invoice");
+    d.text(8400, 1600, "L3-99240");
+    assert_eq!(run(&d).header.reference.unwrap().value, "L3-99240");
+    let mut d = Doc::new();
+    d.text(500, 300, "Paperwise Office Supply");
+    d.text(1300, 1600, "Invoice");
+    d.text(8000, 1600, "Order No.");
+    d.text(1300, 1800, "6697176");
+    d.text(8000, 1800, "1024418");
+    assert_eq!(run(&d).header.reference.unwrap().value, "6697176");
+    // A title "PARTS INVOICE" does not take an address beside it.
+    let mut d = Doc::new();
+    d.text(500, 600, "PARTS INVOICE");
+    d.text(7000, 600, "915 W Walnut St");
+    assert!(run(&d).header.reference.is_none());
+}
+
+#[test]
+fn statements_have_a_balance_and_no_reference() {
+    let mut d = Doc::new();
+    d.text(500, 400, "Prairie Lumber & Hardware");
+    d.text(7000, 400, "STATEMENT");
+    d.text(5400, 1600, "Statement Date");
+    d.text(8300, 1600, "09/16/2025");
+    d.text(2200, 2400, "Reference");
+    d.text(2200, 2600, "INV A95423");
+    d.text(5400, 3500, "Balance Due");
+    d.amount(9500, 3500, "$617.90");
+    let e = run(&d);
+    assert!(e.signals.statement);
+    let h = e.header;
+    assert!(h.reference.is_none());
+    assert_eq!(h.date.unwrap().value, ymd(2025, 9, 16));
+    let total = h.total.unwrap();
+    assert_eq!(total.value, m("617.90"));
+    assert_eq!(total.rule.as_str(), "fields.total.balance");
+}
+
+#[test]
+fn amount_paid_is_the_total_when_none_is_printed() {
+    let mut d = Doc::new();
+    d.text(500, 650, "Receipt");
+    d.text(6500, 650, "Cloudnest Software, Inc.");
+    d.text(5400, 1600, "Invoice ID");
+    d.text(8000, 1600, "CN-2026-15498");
+    d.text(5400, 1750, "Date paid");
+    d.text(7700, 1750, "September 27, 2025");
+    d.text(5400, 3100, "Subtotal");
+    d.amount(9500, 3100, "$43.02");
+    d.text(5400, 3350, "Amount paid");
+    d.amount(9500, 3350, "$43.02");
+    d.text(5400, 3650, "Paid with Discover ending in 1172");
+    let e = run(&d);
+    let h = &e.header;
+    assert_eq!(h.date.as_ref().unwrap().value, ymd(2025, 9, 27));
+    assert_eq!(h.reference.as_ref().unwrap().value, "CN-2026-15498");
+    let total = h.total.as_ref().unwrap();
+    assert_eq!(total.value, m("43.02"));
+    assert_eq!(total.rule.as_str(), "fields.total.amount-paid");
+    // The card's last four digits are never an amount.
+    assert_eq!(h.amount_paid.as_ref().unwrap().value, m("43.02"));
+}
+
+#[test]
+fn an_amount_after_payment_due_is_the_amount_due() {
+    let mut d = Doc::new();
+    d.text(500, 400, "Ozark Mutual");
+    d.text(5400, 3000, "Payment Due");
+    d.amount(9500, 3000, "$84.10");
+    assert_eq!(run(&d).header.total.unwrap().value, m("84.10"));
+}

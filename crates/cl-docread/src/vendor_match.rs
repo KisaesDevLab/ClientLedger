@@ -12,11 +12,8 @@
 //! the first row in list order, this module takes a unique match only, so
 //! list order never decides (the plan's "ambiguous → none").
 //!
-//! The engine normalizes names with Unicode NFKC. This crate has no
-//! normalization tables, so [`fold_compat`] applies the compatibility
-//! mappings vendor names actually meet (full-width forms, ligatures,
-//! no-break and other spaces, superscript digits, `™`/`℠`, `…`); other
-//! characters are left as they are.
+//! Names are normalized with Unicode NFKC ([`fold_compat`], through
+//! `unicode-normalization`), as the engine does.
 //!
 //! **Consumer:** the desktop reading service (WP-G); the signatures here
 //! are fixed.
@@ -26,6 +23,7 @@ use crate::model::{Confidence, Fingerprint, Header};
 use crate::templates;
 use cl_core::ids::ContactId;
 use std::fmt;
+use unicode_normalization::UnicodeNormalization;
 
 /// One vendor the document could be from. Built by the desktop from
 /// `GET /contacts` and the company's templates.
@@ -329,40 +327,10 @@ pub fn strip_leading_numeric_token(s: &str) -> String {
     js_trim(stripped.unwrap_or(s)).to_string()
 }
 
-/// The compatibility mappings of NFKC that vendor names meet; everything
-/// else unchanged.
+/// Unicode NFKC, as the engine's `normalizeForMatch` applies it.
 #[must_use]
 pub fn fold_compat(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        let code = u32::from(c);
-        match c {
-            // Full-width ASCII.
-            '\u{FF01}'..='\u{FF5E}' => {
-                if let Some(a) = char::from_u32(code - 0xFEE0) {
-                    out.push(a);
-                }
-            }
-            '\u{00A0}' | '\u{2000}'..='\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}' => {
-                out.push(' ');
-            }
-            '\u{FB00}' => out.push_str("ff"),
-            '\u{FB01}' => out.push_str("fi"),
-            '\u{FB02}' => out.push_str("fl"),
-            '\u{FB03}' => out.push_str("ffi"),
-            '\u{FB04}' => out.push_str("ffl"),
-            '\u{FB05}' | '\u{FB06}' => out.push_str("st"),
-            '\u{00B9}' => out.push('1'),
-            '\u{00B2}' => out.push('2'),
-            '\u{00B3}' => out.push('3'),
-            '\u{2122}' => out.push_str("TM"),
-            '\u{2120}' => out.push_str("SM"),
-            '\u{2026}' => out.push_str("..."),
-            '\u{2024}' => out.push('.'),
-            _ => out.push(c),
-        }
-    }
-    out
+    s.nfkc().collect()
 }
 
 fn alnum_lower(s: &str) -> String {
@@ -472,6 +440,10 @@ mod tests {
             normalize_for_match("\u{FF32}iverbend \u{FB01}eld"),
             "riverbend field"
         );
+        // Full NFKC: composition and compatibility forms beyond the few
+        // a hand-made table had.
+        assert_eq!(normalize_for_match("Cafe\u{301} \u{2167}"), "café viii");
+        assert_eq!(normalize_for_match("\u{3392} Labs"), "mhz labs");
     }
 
     #[test]

@@ -260,6 +260,13 @@ mod tests {
         }
     }
 
+    #[test]
+    fn upper_case_receipt_dates() {
+        assert_eq!(read("MAR 04 2026").map(|r| r.0), Some(ymd(2026, 3, 4)));
+        assert_eq!(read("MAY 22 2026").map(|r| r.0), Some(ymd(2026, 5, 22)));
+        assert_eq!(read("06/06/26").map(|r| r.0), Some(ymd(2026, 6, 6)));
+    }
+
     /// T12: both numbers 12 or less → US reading at medium confidence and
     /// a "could be day-first" flag.
     #[test]
