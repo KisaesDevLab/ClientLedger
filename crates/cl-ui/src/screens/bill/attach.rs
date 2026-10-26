@@ -600,7 +600,8 @@ impl EnterBillScreen {
                     }
                 }
             }
-            ViewerEvent::None => {}
+            // A02: Pop out and Dock reach the screens through widgets::doc_pane.
+            ViewerEvent::None | ViewerEvent::PopOut | ViewerEvent::Dock => {}
         }
         if attach {
             let path = PathBuf::from(self.attach.path.trim().trim_matches('"'));
