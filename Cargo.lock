@@ -824,6 +824,7 @@ dependencies = [
  "cl-host",
  "cl-pg",
  "cl-settings",
+ "libc",
  "proptest",
  "serde",
  "serde_json",

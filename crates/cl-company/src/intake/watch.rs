@@ -349,6 +349,8 @@ struct Watcher {
     paused: bool,
     /// The last move was refused for lack of permission.
     cant_move: bool,
+    /// Moves waiting for the root to resolve again.
+    held: Vec<MoveJob>,
 }
 
 /// What a wake-up brought.
@@ -376,6 +378,7 @@ impl Watcher {
             repinned: None,
             paused: false,
             cant_move: false,
+            held: Vec::new(),
             config,
         }
     }
@@ -387,10 +390,13 @@ impl Watcher {
     fn run(mut self) {
         let mut wait = None;
         loop {
-            let Some(work) = self.wait_for_work(wait) else {
+            let Some(mut work) = self.wait_for_work(wait) else {
                 return;
             };
-            self.check_pin();
+            work.moves.splice(0..0, std::mem::take(&mut self.held));
+            // Moves act on the typed path: the root is resolved again
+            // right before any of them (security review L3).
+            let pinned = self.check_pin(!work.moves.is_empty());
             if self.stopped() {
                 return;
             }
@@ -406,6 +412,11 @@ impl Watcher {
                 drop(i);
                 wait = Some(self.config.repin_every.min(self.config.max_interval));
                 continue;
+            }
+            if !pinned {
+                // The root couldn't be resolved just now: the moves wait
+                // for the next look.
+                self.held = std::mem::take(&mut work.moves);
             }
             if !self.do_work(work) {
                 return;
@@ -446,35 +457,37 @@ impl Watcher {
         })
     }
 
-    /// Resolves the root again when due; a different pin pauses the
-    /// folder, the right one resumes it.
-    fn check_pin(&mut self) {
-        if self
-            .repinned
-            .is_some_and(|t| t.elapsed() < self.config.repin_every)
+    /// Resolves the root again when due (`now`: at once); a different pin
+    /// pauses the folder, the right one resumes it. True when the root was
+    /// resolved (now, or within `repin_every` unless `now`) to the pin.
+    fn check_pin(&mut self, now: bool) -> bool {
+        if !now
+            && self
+                .repinned
+                .is_some_and(|t| t.elapsed() < self.config.repin_every)
         {
-            return;
+            return !self.paused;
         }
-        match self
+        let Ok(key) = self
             .shared
             .busy(|| canonical_key_with(&*self.fs, &self.root))
-        {
-            Ok(key) => {
-                self.repinned = Some(Instant::now());
-                let elsewhere = key != self.pin;
-                if elsewhere != self.paused {
-                    self.paused = elsewhere;
-                    if elsewhere {
-                        self.stability.clear();
-                        tracing::warn!("an intake folder now points elsewhere; paused");
-                        self.shared.publish(Err(Health::Moved), Health::Moved);
-                    }
-                }
-            }
+        else {
             // Unreachable or missing: the look says so; the pin is checked
             // again next time.
-            Err(_) => self.repinned = None,
+            self.repinned = None;
+            return false;
+        };
+        self.repinned = Some(Instant::now());
+        let elsewhere = key != self.pin;
+        if elsewhere != self.paused {
+            self.paused = elsewhere;
+            if elsewhere {
+                self.stability.clear();
+                tracing::warn!("an intake folder now points elsewhere; paused");
+                self.shared.publish(Err(Health::Moved), Health::Moved);
+            }
         }
+        !elsewhere
     }
 
     /// Runs the queued reads and moves; false once stopped.
@@ -790,6 +803,54 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(done.len(), 1, "the queued move ran once resumed");
+    }
+
+    /// The root is resolved again right before a move, not only once a
+    /// `repin_every`: a root that now points elsewhere moves nothing.
+    #[test]
+    fn the_root_is_checked_again_before_moves() {
+        let (fs, root, pin) = setup("/Users/o/Box");
+        fs.put(&root, "a.pdf", PDF, 1);
+        let config = WatchConfig {
+            repin_every: Duration::from_secs(600),
+            ..fast()
+        };
+        let h = WatchHandle::spawn_with(id(9), root.clone(), pin, fs.clone(), config);
+        wait_for(&h, Duration::from_secs(2), |s| s.health == Health::Ok).expect("ok");
+        fs.set_canonical(&root, Path::new("/Volumes/Other"));
+        h.push_move(MoveJob {
+            path: root.join("a.pdf"),
+            sha256: sha256_hex(PDF),
+            to: HandledDir::Discarded,
+            file: identity(9),
+        });
+        let s = wait_for(&h, Duration::from_secs(2), |s| s.health == Health::Moved).expect("moved");
+        assert_eq!(s.listing, Err(Health::Moved));
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(h.take_moved().is_empty(), "nothing moved");
+        assert_eq!(fs.handled(), Vec::<PathBuf>::new());
+        assert_eq!(fs.names(&root), ["a.pdf"]);
+        drop(h);
+        // Unreachable when the move comes: it waits instead.
+        fs.set_canonical(&root, &root);
+        let pin = pin_of(&fs, &root);
+        let h = WatchHandle::spawn_with(id(9), root.clone(), pin, fs.clone(), config);
+        wait_for(&h, Duration::from_secs(2), |s| s.health == Health::Ok).expect("ok");
+        fs.fail(&root, 53, 1);
+        h.push_move(MoveJob {
+            path: root.join("a.pdf"),
+            sha256: sha256_hex(PDF),
+            to: HandledDir::Discarded,
+            file: identity(9),
+        });
+        let until = Instant::now() + Duration::from_secs(3);
+        let mut done = Vec::new();
+        while done.is_empty() && Instant::now() < until {
+            done.extend(h.take_moved());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(done.len(), 1, "moved once the root resolved");
+        assert!(done.iter().all(|d| d.result.is_ok()));
     }
 
     #[test]

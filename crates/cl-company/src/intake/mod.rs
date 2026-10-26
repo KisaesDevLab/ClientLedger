@@ -16,9 +16,13 @@
 //!   Entries are looked at without following links; only plain files count.
 //! - **Cloud placeholders are never read** (Windows offline/recall
 //!   attributes, macOS dataless files).
+//! - **Entries are opened without following links** (Unix `O_NOFOLLOW`
+//!   plus a device/inode check, Windows `FILE_FLAG_OPEN_REPARSE_POINT`), so
+//!   a link swapped in after a look is never read or moved.
 //! - **Originals are never overwritten or deleted.** A handled file moves
-//!   (rename, or copy, verify the SHA-256, then remove across volumes), and
-//!   a file whose bytes changed is refused ([`move_handled`]).
+//!   (taken under a reserved name, then a hard link that never replaces,
+//!   or a copy written through its own handle and verified by SHA-256),
+//!   and a file whose bytes changed is refused ([`move_handled`]).
 //! - **Owner data stays out.** Paths and file names are never logged and
 //!   never in `Debug`.
 //!
@@ -183,6 +187,59 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
 #[must_use]
 pub fn sha256_hex(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
+}
+
+/// A named point inside a file operation where a test may change the
+/// folder (swap a file for a link, write a new file) to check a race
+/// deterministically. Does nothing outside this crate's unit tests.
+#[cfg(not(test))]
+#[inline]
+pub(crate) fn test_point(_stage: &'static str) {}
+
+#[cfg(test)]
+pub(crate) use race::test_point;
+
+/// The test side of [`test_point`]: one hook per thread.
+#[cfg(test)]
+pub(crate) mod race {
+    use std::cell::RefCell;
+
+    type Hook = Box<dyn FnMut(&'static str)>;
+
+    thread_local! {
+        static HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
+        static NO_HARD_LINKS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// Runs the hook (once taken out, so it can't re-enter).
+    pub(crate) fn test_point(stage: &'static str) {
+        let hook = HOOK.with(|h| h.borrow_mut().take());
+        if let Some(mut f) = hook {
+            f(stage);
+            HOOK.with(|h| *h.borrow_mut() = Some(f));
+        }
+    }
+
+    /// Calls `f` at every [`test_point`] on this thread until [`clear`].
+    pub(crate) fn set(f: impl FnMut(&'static str) + 'static) {
+        HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f)));
+    }
+
+    /// No hook, hard links work again.
+    pub(crate) fn clear() {
+        HOOK.with(|h| *h.borrow_mut() = None);
+        NO_HARD_LINKS.with(|c| c.set(false));
+    }
+
+    /// Hard links fail as on a file system without them (FAT, some
+    /// shares), so the copy path runs.
+    pub(crate) fn no_hard_links() {
+        NO_HARD_LINKS.with(|c| c.set(true));
+    }
+
+    pub(crate) fn hard_links_off() -> bool {
+        NO_HARD_LINKS.with(std::cell::Cell::get)
+    }
 }
 
 #[cfg(test)]

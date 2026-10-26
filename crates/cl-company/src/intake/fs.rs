@@ -119,7 +119,7 @@ pub trait FolderFs: Send + Sync {
 }
 
 /// A name no other file has (time, process and a counter).
-fn unique_suffix() -> String {
+pub(crate) fn unique_suffix() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let nanos = SystemTime::now()
@@ -210,11 +210,18 @@ pub(crate) fn links(_meta: &fs::Metadata) -> u64 {
     1
 }
 
-/// Opens `path` for reading. On Windows other processes may keep reading
-/// it but not writing (`FILE_SHARE_READ`), so a file still held open for
-/// writing fails with a sharing violation instead of being read half
-/// written.
-pub(crate) fn open_shared_read(path: &Path) -> io::Result<fs::File> {
+/// Opens `path` for reading **without following a link** at its last part
+/// (security review M2): on Unix `O_NOFOLLOW` (a link fails to open; with
+/// `O_NONBLOCK`, so a FIFO swapped in never blocks the folder thread), on
+/// Windows `FILE_FLAG_OPEN_REPARSE_POINT` (a symlink or junction opens as
+/// itself, which [`check_held`] then refuses; a cloud file opens as the
+/// file it is).
+///
+/// `refuse_writers`: other processes may keep reading but not writing
+/// (Windows `FILE_SHARE_READ`), so a file still held open for writing fails
+/// with a sharing violation instead of being read half written. Without
+/// it the file may be renamed or removed while open (a move).
+pub(crate) fn open_no_follow(path: &Path, refuse_writers: bool) -> io::Result<fs::File> {
     let mut o = fs::OpenOptions::new();
     o.read(true);
     #[cfg(windows)]
@@ -222,9 +229,102 @@ pub(crate) fn open_shared_read(path: &Path) -> io::Result<fs::File> {
         use std::os::windows::fs::OpenOptionsExt as _;
         /// `FILE_SHARE_READ`.
         const FILE_SHARE_READ: u32 = 0x1;
-        o.share_mode(FILE_SHARE_READ);
+        /// `FILE_FLAG_OPEN_REPARSE_POINT`.
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        if refuse_writers {
+            o.share_mode(FILE_SHARE_READ);
+        }
+        o.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let _ = refuse_writers;
+        o.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     o.open(path)
+}
+
+/// What a failed no-follow open means.
+pub(crate) fn open_error(e: &io::Error) -> FileError {
+    match e.kind() {
+        io::ErrorKind::NotFound => FileError::Gone,
+        // A sharing violation (still being written) on Windows.
+        _ if cfg!(windows) && e.raw_os_error() == Some(32) => FileError::Unstable,
+        // `O_NOFOLLOW` on a link (`ELOOP`).
+        _ if cfg!(unix) && e.raw_os_error() == Some(ELOOP) => FileError::NotAFile,
+        _ => FileError::Io,
+    }
+}
+
+#[cfg(unix)]
+const ELOOP: i32 = libc::ELOOP;
+#[cfg(not(unix))]
+const ELOOP: i32 = -1;
+
+/// The metadata of `path` itself (never following a link), checked to be
+/// a plain file with one link that is on this computer.
+///
+/// # Errors
+/// `Gone`, `NotAFile`, `OnlineOnly`, `Io`.
+pub(crate) fn plain_file(path: &Path) -> Result<fs::Metadata, FileError> {
+    let meta = fs::symlink_metadata(path).map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound => FileError::Gone,
+        _ => FileError::Io,
+    })?;
+    if !meta.file_type().is_file() || links(&meta) > 1 {
+        return Err(FileError::NotAFile);
+    }
+    if online_only(&meta) {
+        return Err(FileError::OnlineOnly);
+    }
+    Ok(meta)
+}
+
+/// The open handle's metadata `held` against the path's `before` (looked
+/// at without following links): a plain file (on Windows not a symlink or
+/// junction opened as itself), one link, not online only, the same file
+/// (Unix: device and inode), the same size and modification time.
+///
+/// # Errors
+/// `NotAFile` (a link, another file swapped in, hard-linked), `OnlineOnly`,
+/// `Unstable` (it changed).
+pub(crate) fn check_held(before: &fs::Metadata, held: &fs::Metadata) -> Result<(), FileError> {
+    if !held.file_type().is_file() || links(held) > 1 {
+        return Err(FileError::NotAFile);
+    }
+    if online_only(held) {
+        return Err(FileError::OnlineOnly);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        if (held.dev(), held.ino()) != (before.dev(), before.ino()) {
+            return Err(FileError::NotAFile);
+        }
+    }
+    if held.len() != before.len() || millis(held.modified()) != millis(before.modified()) {
+        return Err(FileError::Unstable);
+    }
+    Ok(())
+}
+
+/// Opens the plain file `path` without following links and checks that
+/// the handle is the file looked at ([`plain_file`], [`check_held`]).
+/// Returns the handle and the path's metadata.
+///
+/// # Errors
+/// [`FileError`].
+pub(crate) fn open_plain(
+    path: &Path,
+    refuse_writers: bool,
+) -> Result<(fs::File, fs::Metadata), FileError> {
+    let before = plain_file(path)?;
+    super::test_point("opening");
+    let file = open_no_follow(path, refuse_writers).map_err(|e| open_error(&e))?;
+    let held = file.metadata().map_err(|_| FileError::Io)?;
+    check_held(&before, &held)?;
+    Ok((file, before))
 }
 
 /// The real file system.
@@ -270,7 +370,7 @@ impl FolderFs for RealFs {
     }
 
     fn openable(&self, path: &Path) -> bool {
-        open_shared_read(path).is_ok()
+        open_no_follow(path, true).is_ok()
     }
 
     fn read(&self, path: &Path) -> Result<ReadFile, FileError> {
@@ -663,13 +763,9 @@ impl FolderFs for FakeFs {
     }
 }
 
-/// SHA-256 of a file's bytes, read in 64 KiB pieces.
-pub(crate) fn file_sha256(path: &Path) -> Result<String, FileError> {
+/// SHA-256 of what is left to read through `file`, in 64 KiB pieces.
+pub(crate) fn handle_sha256(mut file: &fs::File) -> Result<String, FileError> {
     use sha2::{Digest as _, Sha256};
-    let mut file = fs::File::open(path).map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => FileError::Gone,
-        _ => FileError::Io,
-    })?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 64 * 1024];
     loop {
