@@ -70,6 +70,17 @@ pub struct WindowInfo {
     pub pixels_per_point: f32,
 }
 
+/// A part of the window drawn wider than the room it was given (a toolbar
+/// that ran out of a side panel, A02 review F4). The window edge never
+/// shows it: the panel's own clip cuts it, so the app reports it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Overflow {
+    /// Which part ("document viewer").
+    pub what: String,
+    /// Where it was drawn (wider than its room).
+    pub bounds: Bounds,
+}
+
 /// A whole tree.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -80,6 +91,9 @@ pub struct Snapshot {
     pub focused: Option<String>,
     /// Root element.
     pub tree: Node,
+    /// Parts drawn wider than their room this frame.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overflow: Vec<Overflow>,
 }
 
 /// Why a target did not resolve.
@@ -329,6 +343,21 @@ impl Snapshot {
         out
     }
 
+    /// The parts drawn wider than their room, skipping those whose centre
+    /// lies inside one of `ignore`.
+    #[must_use]
+    pub fn overflowing(&self, ignore: &[Bounds]) -> Vec<&Overflow> {
+        self.overflow
+            .iter()
+            .filter(|o| {
+                let (cx, cy) = o.bounds.center();
+                !ignore
+                    .iter()
+                    .any(|r| cx >= r.x && cx <= r.x + r.width && cy >= r.y && cy <= r.y + r.height)
+            })
+            .collect()
+    }
+
     /// Text inputs inside the window whose text runs past their own box
     /// by more than `tolerance` points (left or right): a field too narrow
     /// for what it shows, such as a name cut to "Plai". egui gives each
@@ -513,6 +542,7 @@ pub(crate) mod fixture {
             },
             focused: None,
             tree: root,
+            overflow: Vec::new(),
         }
     }
 }

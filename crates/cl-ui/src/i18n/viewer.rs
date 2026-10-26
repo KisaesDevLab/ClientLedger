@@ -35,4 +35,15 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("viewer.empty", "No document is open here. Use Preview on an attachment, or Open full size on a preview."),
     ("viewer.preview", "Preview"),
     ("viewer.preview.tip", "Show this file in its own tab"),
+    // A02 WP-A
+    ("viewer.pop_out", "Pop out"),
+    ("viewer.pop_out.tip", "Show the document in its own window ({keys})"),
+    ("viewer.pop_out.tip_plain", "Show the document in its own window"),
+    ("viewer.rotate_left", "Rotate left"),
+    ("viewer.rotate_left.tip", "Turn the page a quarter turn to the left, for viewing only"),
+    ("viewer.rotate_right", "Rotate right"),
+    ("viewer.rotate_right.tip", "Turn the page a quarter turn to the right, for viewing only"),
+    ("viewer.thumb", "Page {n}"),
+    ("viewer.zoom.tip", "Choose a zoom: fit the page, fit the width, or a size"),
+    ("viewer.page_unreadable", "This page can't be shown. It may be damaged or in a format the viewer doesn't read. Save a copy to open it in another program."),
 ];

@@ -1062,6 +1062,25 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.days", "{n} days"),
     ("home.days.one", "1 day"),
     ("home.attention.open_aging.tip", "See your unpaid invoices grouped by how many days they are past due (the A/R aging report)."),
+    // A02 WP-B: the pop-out document viewer window and the docked pane.
+    ("docviewer.title", "{form} \u{2014} Document - ClientLedger"),
+    ("docviewer.title_empty", "Document - ClientLedger"),
+    ("docviewer.eyebrow", "Document"),
+    ("docviewer.empty", "This window has no document"),
+    ("docviewer.empty.hint", "Open a form with an attached document and it shows here."),
+    ("docviewer.dock", "Dock"),
+    ("docviewer.dock.tip", "Put the document back in the form ({keys})"),
+    ("docpane.popped", "This document is open in its own window."),
+    // A02 WP-D: attachments on card charges and register items.
+    ("orphan.card_attach", "attaching a file to a card charge"),
+    ("card.attach.move_failed", "The charge is saved, but its files didn't attach to it."),
+    ("card.attach.try_again", "Attach them again"),
+    ("register.doc.show", "Show document"),
+    ("register.doc.show.tip", "Open the selected transaction's first attached document in its own window"),
+    ("register.doc.count", "Documents: {n}"),
+    // A02 fix pass: review findings.
+    ("card.attach.wait_save", "A file is still attaching. Save again once it shows in Attachments."),
+    ("register.doc.list_failed", "Couldn't look up this transaction's documents. Move to another row and back to try again."),
 ];
 
 #[cfg(test)]

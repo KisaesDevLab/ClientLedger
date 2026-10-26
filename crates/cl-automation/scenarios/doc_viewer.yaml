@@ -1,0 +1,188 @@
+# The pop-out document viewer (A02, plan §6 "Scenario") against
+# `clientledger --demo`: Enter Bill attaches the synthetic two-page PDF
+# (docked in the source card), Ctrl+Shift+D moves it into its own window
+# (a deferred viewport, Q-A02a) titled by the form, the window is moved and
+# resized (its placement follows within the session; the restart check is
+# the shell test, Q-A02j), F6 moves the keyboard into the window and back,
+# Write Check's three-page TIFF follows with thumbnails and Rotate right,
+# the Enter Bill tab takes the window back, a PNG and a JPEG follow, and
+# docking leaves the form as it was. Then the main window at its minimum
+# size and 200% with the viewer out. Screenshots of both windows, light
+# and dark. Needs PDFium (`cargo xtask pdfium-fetch`). Nothing is saved:
+# both forms are cleared and the viewer docked at the end, so light and
+# dark start the same way. All files are synthetic.
+name: doc_viewer
+description: Pop out, follow the active form, move and resize, F6 there and back, TIFF thumbnails and rotate, PNG and JPEG, dock, minimum window at 200%.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+
+  # --- 1. Enter Bill with the PDF, docked -----------------------------------------
+  - key: Ctrl+B
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - type: {text: fixtures/docs/two_pages.pdf, target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.viewer.status, equals: ready}
+  - assert_state: {key: screen.attachments.viewer.pages, equals: 2}
+  - assert_state: {key: screen.attachments.viewer.rendered, equals: true}
+  - assert_exists: {role: button, label: Pop out}
+  - assert_state: {key: doc_viewer.popped, equals: false}
+  - assert_state: {key: doc_viewer.class, equals: none}
+  # The toolbar fits the 300 pt source card (review F1/F2).
+  - assert_state: {key: screen.attachments.viewer.fits, equals: true}
+  - screenshot: bill-docked
+
+  # --- 2. Ctrl+Shift+D: its own window, following Enter Bill -----------------------
+  - key: Ctrl+Shift+D
+  - assert_state: {key: doc_viewer.popped, equals: true}
+  - assert_state: {key: doc_viewer.class, equals: deferred}
+  - assert_state: {key: doc_viewer.follows, equals: vendors.enter_bill}
+  - assert_state: {key: doc_viewer.has_doc, equals: true}
+  - assert_state: {key: doc_viewer.pages, equals: 2}
+  - assert_state: {key: doc_viewer.viewer.status, equals: ready}
+  - assert_state: {key: doc_viewer.viewer.rendered, equals: true}
+  # The form keeps one line with Dock; the window has the viewer and Dock.
+  - assert_not_exists: {role: button, label: Pop out}
+  - assert_exists: {label: This document is open in its own window.}
+  - assert_exists: {role: button, label: Dock}
+  - assert_exists: {role: button, label: Dock, viewport: doc_viewer}
+  - assert_exists: {label: Enter Bill, viewport: doc_viewer}
+  - assert_exists: {role: image, label: Preview of two_pages.pdf, viewport: doc_viewer}
+  - assert_exists: {role: button, label: Next page, viewport: doc_viewer}
+  - screenshot: bill-popped
+  - screenshot: {name: pdf, viewport: doc_viewer}
+
+  # --- 3. Move and resize: the placement follows -----------------------------------
+  - move: {x: 120, y: 80, viewport: doc_viewer}
+  - resize: {width: 820, height: 760, viewport: doc_viewer}
+  - wait: {ms: 300}
+  - assert_state: {key: viewports.doc_viewer.width, equals: 820.0}
+  - assert_state: {key: viewports.doc_viewer.height, equals: 760.0}
+  - assert_state: {key: doc_viewer.placement.x, equals: 120.0}
+  - assert_state: {key: doc_viewer.placement.y, equals: 80.0}
+  - assert_state: {key: doc_viewer.placement.w, equals: 820.0}
+  - assert_state: {key: doc_viewer.placement.h, equals: 760.0}
+  - assert_state: {key: doc_viewer.viewer.rendered, equals: true}
+
+  # --- 4. F6: the keyboard to the window and back ----------------------------------
+  - key: F6
+  - assert_state: {key: doc_viewer.viewer.focused, equals: true}
+  - key: {key: PageDown, viewport: doc_viewer}
+  - assert_state: {key: doc_viewer.page, equals: 1}
+  - assert_state: {key: doc_viewer.viewer.rendered, equals: true}
+  - assert_exists: {label: Page 2 of 2, viewport: doc_viewer}
+  - key: {key: PageUp, viewport: doc_viewer}
+  - assert_state: {key: doc_viewer.page, equals: 0}
+  - key: {key: F6, viewport: doc_viewer}
+  - assert_state: {key: doc_viewer.viewer.focused, equals: false}
+  - assert_state: {key: doc_viewer.popped, equals: true}
+
+  # --- 5. Write Check: the TIFF follows, with thumbnails and rotate ----------------
+  - key: Ctrl+W
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: doc_viewer.follows, equals: vendors.write_check}
+  - assert_state: {key: doc_viewer.has_doc, equals: false}
+  - assert_exists: {label: This window has no document, viewport: doc_viewer}
+  - screenshot: {name: empty, viewport: doc_viewer}
+  - type: {text: fixtures/docs/three_pages.tif, target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.count, equals: 1}
+  - assert_state: {key: doc_viewer.has_doc, equals: true}
+  - assert_state: {key: doc_viewer.pages, equals: 3}
+  - assert_state: {key: doc_viewer.viewer.status, equals: ready}
+  - assert_state: {key: doc_viewer.viewer.rendered, equals: true}
+  - assert_state: {key: doc_viewer.viewer.thumbnails.shown, equals: true}
+  - assert_state: {key: doc_viewer.viewer.thumbnails.loaded, equals: 3}
+  - assert_exists: {label: Write Check, viewport: doc_viewer}
+  - assert_exists: {role: button, label: Page 3, viewport: doc_viewer}
+  - assert_exists: {label: This document is open in its own window.}
+  - click: {role: button, label: Page 2, viewport: doc_viewer}
+  - assert_state: {key: doc_viewer.page, equals: 1}
+  - click: {role: button, label: Rotate right, viewport: doc_viewer}
+  - assert_state: {key: doc_viewer.viewer.rotation, equals: 90}
+  - assert_state: {key: doc_viewer.viewer.rendered, equals: true}
+  - screenshot: {name: tiff-rotated, viewport: doc_viewer}
+  - screenshot: check-popped
+
+  # --- 6. Back to Enter Bill: the window follows; a PNG, then a JPEG ---------------
+  - click: {role: tab, label_contains: Enter Bill}
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - assert_state: {key: doc_viewer.follows, equals: vendors.enter_bill}
+  - assert_state: {key: doc_viewer.pages, equals: 2}
+  - assert_state: {key: doc_viewer.viewer.rotation, equals: 0}
+  - type: {text: fixtures/docs/receipt.png, target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.count, equals: 2}
+  - assert_exists: {role: image, label: Preview of receipt.png, viewport: doc_viewer}
+  - assert_state: {key: doc_viewer.viewer.status, equals: ready}
+  - assert_state: {key: doc_viewer.viewer.rendered, equals: true}
+  - screenshot: {name: png, viewport: doc_viewer}
+  - type: {text: fixtures/docs/receipt.jpg, target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.count, equals: 3}
+  - assert_exists: {role: image, label: Preview of receipt.jpg, viewport: doc_viewer}
+  - assert_state: {key: doc_viewer.viewer.status, equals: ready}
+  - assert_state: {key: doc_viewer.viewer.rendered, equals: true}
+  - screenshot: {name: jpg, viewport: doc_viewer}
+
+  # --- 7. Minimum window at 200% with the viewer out ------------------------------
+  - resize: {width: 960, height: 640}
+  - set_zoom: {percent: 200}
+  - assert_state: {key: doc_viewer.popped, equals: true}
+  - screenshot: bill-popped-z200
+  - screenshot: {name: z200, viewport: doc_viewer}
+  - assert_no_clipping:
+      ignore:
+        # The tab strip scrolls, with the » list.
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        # The form's body scrolls under the action row (as bill.yaml).
+        - {x: 0, y: 230, width: 480, height: 110}
+  # The viewer window at 200% (review F3, F4).
+  - assert_state: {key: doc_viewer.viewer.fits, equals: true}
+  - assert_no_clipping: {viewport: doc_viewer}
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}
+
+  # --- 8. Dock: the form is as it was ----------------------------------------------
+  - assert_state: {key: screen.dirty, equals: true}
+  - command: view.toggle_doc_viewer
+  - assert_state: {key: doc_viewer.popped, equals: false}
+  - assert_state: {key: doc_viewer.class, equals: none}
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - assert_state: {key: screen.attachments.count, equals: 3}
+  - assert_state: {key: screen.attachments.viewer.status, equals: ready}
+  - assert_state: {key: screen.attachments.viewer.rendered, equals: true}
+  - assert_exists: {role: button, label: Pop out}
+  - assert_not_exists: {label: This document is open in its own window.}
+  # Docking never touches the form (review S5).
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_state: {key: screen.attachments.viewer.fits, equals: true}
+  - screenshot: bill-docked-again
+  # Write Check's narrower side panel: the docked pane fits it.
+  - click: {role: tab, label_contains: Write Check}
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.attachments.viewer.status, equals: ready}
+  - assert_state: {key: screen.attachments.viewer.rendered, equals: true}
+  - assert_exists: {role: button, label: Pop out}
+  # Fails on a toolbar wider than the panel, too (review F4).
+  - assert_state: {key: screen.attachments.viewer.fits, equals: true}
+  - assert_no_clipping: {}
+  - screenshot: check-docked
+
+  # --- 9. Clear both forms (nothing saved) -----------------------------------------
+  - click: {role: tab, label_contains: Enter Bill}
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
+  - command: file.close_window
+  - click_if_present: {role: button, label: Discard}
+  - click: {role: tab, label_contains: Write Check}
+  - assert_state: {key: screen.screen, equals: write_check}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+  - click_if_present: {role: button, label: Discard}
+  - click: {role: tab, label: Home}

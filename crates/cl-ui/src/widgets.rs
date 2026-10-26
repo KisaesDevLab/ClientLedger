@@ -10,6 +10,8 @@ use eframe::egui::{
 use crate::theme::{Tokens, styles};
 
 pub mod bar_chart;
+// A02 WP-B: the docked document pane every attachment site draws.
+pub mod doc_pane;
 // P17 (WP1): the PDF and image viewer and its worker thread.
 pub mod doc_worker;
 // A01 WP-D: the native Browse dialogs (folders and files).

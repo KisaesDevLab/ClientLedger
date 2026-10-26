@@ -1,6 +1,7 @@
 //! The document worker (P17, plan §1 "Documents", §3 WP1): one thread that
-//! owns PDFium (`pdfium-render`, loaded at run time) and decodes PNG and
-//! JPEG with the `image` crate, so the egui thread never blocks.
+//! owns PDFium (`pdfium-render`, loaded at run time), decodes PNG and JPEG with
+//! the `image` crate and (A02) multi-page TIFF with the `tiff` crate, one page
+//! at a time (`tiff_doc`), so the egui thread never blocks.
 //!
 //! # Handoff (WP0 skeleton, WP1 filled it)
 //!
@@ -32,7 +33,7 @@
 //! never used: either would let a stray library from the working folder or
 //! the system path load. Without the library PDFs answer `Unavailable`.
 //!
-//! Limits: PDFs show at most [`MAX_PAGES`] pages; a drawn page is at most
+//! Limits: PDFs and TIFFs show at most [`MAX_PAGES`] pages; a drawn page is at most
 //! [`MAX_SIDE`] px on its long side and [`MAX_PIXELS`]; images are refused
 //! over [`MAX_IMAGE_SIDE`] px a side or [`MAX_IMAGE_ALLOC`] bytes to decode
 //! (the decoder checks the header first, so a decompression bomb never
@@ -47,8 +48,12 @@ use std::sync::{Arc, OnceLock};
 
 use image::{ImageReader, Limits, RgbaImage};
 use pdfium_render::prelude::{
-    PdfDocument, PdfRenderConfig, Pdfium, PdfiumError, PdfiumInternalError,
+    PdfDocument, PdfPageRenderRotation, PdfRenderConfig, Pdfium, PdfiumError, PdfiumInternalError,
 };
+
+mod tiff_doc;
+#[cfg(test)]
+pub(crate) mod tiff_fixtures;
 
 /// Pages shown of a longer PDF.
 pub const MAX_PAGES: u32 = 500;
@@ -63,6 +68,56 @@ pub const MAX_IMAGE_ALLOC: u64 = 256 * 1024 * 1024;
 /// Documents kept open across all viewers (the oldest closes first).
 const MAX_OPEN: usize = 16;
 
+/// How far a page is turned clockwise, for viewing only (A02, Q-A02b).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Rotation {
+    /// As stored.
+    #[default]
+    None,
+    /// A quarter turn clockwise.
+    Right,
+    /// Upside down.
+    Half,
+    /// A quarter turn anticlockwise.
+    Left,
+}
+
+impl Rotation {
+    /// A quarter turn further clockwise ("Rotate right").
+    #[must_use]
+    pub fn cw(self) -> Rotation {
+        match self {
+            Rotation::None => Rotation::Right,
+            Rotation::Right => Rotation::Half,
+            Rotation::Half => Rotation::Left,
+            Rotation::Left => Rotation::None,
+        }
+    }
+
+    /// A quarter turn back ("Rotate left").
+    #[must_use]
+    pub fn ccw(self) -> Rotation {
+        self.cw().cw().cw()
+    }
+
+    /// Clockwise degrees: 0, 90, 180 or 270.
+    #[must_use]
+    pub fn degrees(self) -> u16 {
+        match self {
+            Rotation::None => 0,
+            Rotation::Right => 90,
+            Rotation::Half => 180,
+            Rotation::Left => 270,
+        }
+    }
+
+    /// True when the page's width and height trade places.
+    #[must_use]
+    pub fn swaps(self) -> bool {
+        matches!(self, Rotation::Right | Rotation::Left)
+    }
+}
+
 /// A request to the worker.
 #[derive(Clone, PartialEq, Eq)]
 pub enum DocRequest {
@@ -73,19 +128,34 @@ pub enum DocRequest {
         /// The file's bytes (a PDF, PNG or JPEG by its first bytes).
         bytes: Arc<[u8]>,
     },
-    /// Draw one page `px_width` pixels wide.
+    /// Draw one page `px_width` pixels wide, turned by `rotation`.
     Render {
         /// The document, as opened.
         doc: u64,
         /// Page number, from 0.
         page: u32,
-        /// Wanted width in physical pixels (clamped by the worker).
+        /// Wanted width in physical pixels of the turned page (clamped by
+        /// the worker).
         px_width: u32,
+        /// The view's turn (A02; never saved).
+        rotation: Rotation,
     },
     /// Forget a document (no reply).
     Close {
         /// The document.
         doc: u64,
+    },
+    /// A02: draw a page small for the thumbnail strip, upright. Served after
+    /// everything else that is waiting, one at a time; a newer request for
+    /// the same page supersedes a queued one. Answers `Thumb`, or `NoThumb`
+    /// when the page can't be drawn.
+    Thumb {
+        /// The document, as opened.
+        doc: u64,
+        /// Page number, from 0.
+        page: u32,
+        /// Wanted width in physical pixels.
+        px_width: u32,
     },
 }
 
@@ -102,13 +172,25 @@ impl std::fmt::Debug for DocRequest {
                 doc,
                 page,
                 px_width,
+                rotation,
             } => f
                 .debug_struct("Render")
                 .field("doc", doc)
                 .field("page", page)
                 .field("px_width", px_width)
+                .field("rotation", &rotation.degrees())
                 .finish(),
             DocRequest::Close { doc } => f.debug_struct("Close").field("doc", doc).finish(),
+            DocRequest::Thumb {
+                doc,
+                page,
+                px_width,
+            } => f
+                .debug_struct("Thumb")
+                .field("doc", doc)
+                .field("page", page)
+                .field("px_width", px_width)
+                .finish(),
         }
     }
 }
@@ -118,7 +200,8 @@ impl DocRequest {
         match self {
             DocRequest::Open { doc, .. }
             | DocRequest::Render { doc, .. }
-            | DocRequest::Close { doc } => *doc,
+            | DocRequest::Close { doc }
+            | DocRequest::Thumb { doc, .. } => *doc,
         }
     }
 }
@@ -141,6 +224,9 @@ pub struct RenderedPage {
     pub natural_width: u32,
     /// The page's own height at 100 %.
     pub natural_height: u32,
+    /// The turn it was drawn with (A02); the natural size is the turned
+    /// page's.
+    pub rotation: Rotation,
 }
 
 /// Sizes only.
@@ -172,10 +258,14 @@ pub enum DocReply {
         /// The document.
         doc: u64,
     },
-    /// Not a readable PDF or image (or over the decode limits).
+    /// Not a readable PDF or image (or over the decode limits), or (A02,
+    /// review S6) one page of it can't be drawn.
     Unreadable {
         /// The document.
         doc: u64,
+        /// The page asked for; `None` when the document itself can't be
+        /// opened.
+        page: Option<u32>,
     },
     /// PDFium is not on this computer: PDFs cannot be previewed.
     Unavailable {
@@ -184,6 +274,16 @@ pub enum DocReply {
     },
     /// A page was drawn.
     Rendered(RenderedPage),
+    /// A02: a thumbnail was drawn.
+    Thumb(RenderedPage),
+    /// A02: a thumbnail can't be drawn (the page is unreadable, or the
+    /// document is no longer open).
+    NoThumb {
+        /// The document.
+        doc: u64,
+        /// The page.
+        page: u32,
+    },
 }
 
 /// What the thread is asked: a handle's request, or a handle closing.
@@ -263,6 +363,12 @@ impl DocWorker {
     pub fn try_recv(&self) -> Option<DocReply> {
         self.rx.try_recv().ok()
     }
+
+    /// Tests: an answer as if the worker had sent it.
+    #[cfg(test)]
+    pub(crate) fn inject_reply(&self, r: DocReply) {
+        let _ = self.tx.send(r);
+    }
 }
 
 impl Drop for DocWorker {
@@ -300,12 +406,18 @@ fn bind(lib: &Path) -> Option<Pdfium> {
 fn serve(lib: Option<&Path>, rx: &Receiver<Job>) {
     let pdfium = lib.and_then(bind);
     let mut docs = Docs::default();
-    while let Ok(first) = rx.recv() {
-        let mut batch = vec![first];
-        while let Ok(more) = rx.try_recv() {
-            batch.push(more);
+    let mut queue: Vec<Job> = Vec::new();
+    loop {
+        if queue.is_empty() {
+            match rx.recv() {
+                Ok(first) => queue.push(first),
+                Err(_) => return,
+            }
         }
-        for job in coalesce(batch) {
+        while let Ok(more) = rx.try_recv() {
+            queue.push(more);
+        }
+        for job in next_round(&mut queue) {
             match job {
                 Job::CloseHandle(h) => docs.close_handle(h),
                 Job::Req { handle, req, reply } => {
@@ -319,11 +431,35 @@ fn serve(lib: Option<&Path>, rx: &Receiver<Job>) {
     }
 }
 
+/// The jobs to run now from `queue` (coalesced), leaving the rest in it:
+/// everything but thumbnails (they are last after [`coalesce`]), else one
+/// thumbnail; the thread then looks for new requests again, so a page asked
+/// for never waits behind a strip of thumbnails.
+fn next_round(queue: &mut Vec<Job>) -> Vec<Job> {
+    *queue = coalesce(std::mem::take(queue));
+    let thumbs = queue.iter().position(is_thumb).unwrap_or(queue.len());
+    let rest = queue.split_off(thumbs.max(1).min(queue.len()));
+    std::mem::replace(queue, rest)
+}
+
+fn is_thumb(job: &Job) -> bool {
+    matches!(
+        job,
+        Job::Req {
+            req: DocRequest::Thumb { .. },
+            ..
+        }
+    )
+}
+
 /// Drop what a later job in the batch supersedes: an earlier render of the
-/// same document, anything before a re-open or a close of that document,
-/// and everything of a handle that closed.
+/// same document, an earlier thumbnail of the same page, anything before a
+/// re-open or a close of that document, and everything of a handle that
+/// closed. Thumbnails go last, in the order asked.
 fn coalesce(batch: Vec<Job>) -> Vec<Job> {
     let mut rendered = std::collections::HashSet::new();
+    let mut thumbed = std::collections::HashSet::new();
+    let mut thumbs = Vec::new();
     let mut reset = std::collections::HashSet::new();
     let mut gone = std::collections::HashSet::new();
     let mut keep = Vec::with_capacity(batch.len());
@@ -348,11 +484,18 @@ fn coalesce(batch: Vec<Job>) -> Vec<Job> {
                         reset.insert(key);
                         keep.push(job);
                     }
+                    DocRequest::Thumb { page, .. } => {
+                        if thumbed.insert((key, *page)) {
+                            thumbs.push(job);
+                        }
+                    }
                 }
             }
         }
     }
     keep.reverse();
+    thumbs.reverse();
+    keep.extend(thumbs);
     keep
 }
 
@@ -360,6 +503,8 @@ fn coalesce(batch: Vec<Job>) -> Vec<Job> {
 enum Doc<'a> {
     Pdf(PdfDocument<'a>, u32),
     Image(RgbaImage),
+    /// A TIFF (A02): pages decoded one at a time.
+    Tiff(Box<tiff_doc::TiffDoc>),
 }
 
 /// Open documents by (handle, doc), oldest first.
@@ -369,8 +514,11 @@ struct Docs<'a> {
 }
 
 impl<'a> Docs<'a> {
-    fn get(&self, key: (u64, u64)) -> Option<&Doc<'a>> {
-        self.open.iter().find(|(k, _)| *k == key).map(|(_, d)| d)
+    fn get_mut(&mut self, key: (u64, u64)) -> Option<&mut Doc<'a>> {
+        self.open
+            .iter_mut()
+            .find(|(k, _)| *k == key)
+            .map(|(_, d)| d)
     }
 
     fn insert(&mut self, key: (u64, u64), doc: Doc<'a>) {
@@ -413,15 +561,35 @@ fn handle_request<'a>(
             doc,
             page,
             px_width,
+            rotation,
         } => Some(
-            docs.get((handle, doc))
-                .and_then(|d| render(d, doc, page, px_width))
-                .map_or(DocReply::Unreadable { doc }, DocReply::Rendered),
+            docs.get_mut((handle, doc))
+                .and_then(|d| render(d, doc, page, px_width, rotation, true))
+                .map_or(
+                    DocReply::Unreadable {
+                        doc,
+                        page: Some(page),
+                    },
+                    DocReply::Rendered,
+                ),
+        ),
+        DocRequest::Thumb {
+            doc,
+            page,
+            px_width,
+        } => Some(
+            docs.get_mut((handle, doc))
+                .and_then(|d| render(d, doc, page, px_width, Rotation::None, false))
+                .map_or(DocReply::NoThumb { doc, page }, DocReply::Thumb),
         ),
     }
 }
 
-fn open<'a>(pdfium: Option<&'a Pdfium>, doc: u64, bytes: &[u8]) -> (DocReply, Option<Doc<'a>>) {
+fn open<'a>(
+    pdfium: Option<&'a Pdfium>,
+    doc: u64,
+    bytes: &Arc<[u8]>,
+) -> (DocReply, Option<Doc<'a>>) {
     match cl_api::FileKind::sniff(bytes) {
         Some(cl_api::FileKind::Pdf) => {
             let Some(pdfium) = pdfium else {
@@ -431,7 +599,7 @@ fn open<'a>(pdfium: Option<&'a Pdfium>, doc: u64, bytes: &[u8]) -> (DocReply, Op
                 Ok(pdf) => {
                     let all = u32::try_from(pdf.pages().len()).unwrap_or(0);
                     if all == 0 {
-                        return (DocReply::Unreadable { doc }, None);
+                        return (DocReply::Unreadable { doc, page: None }, None);
                     }
                     let pages = all.min(MAX_PAGES);
                     (
@@ -446,7 +614,7 @@ fn open<'a>(pdfium: Option<&'a Pdfium>, doc: u64, bytes: &[u8]) -> (DocReply, Op
                 Err(PdfiumError::PdfiumLibraryInternalError(
                     PdfiumInternalError::PasswordError,
                 )) => (DocReply::Protected { doc }, None),
-                Err(_) => (DocReply::Unreadable { doc }, None),
+                Err(_) => (DocReply::Unreadable { doc, page: None }, None),
             }
         }
         Some(cl_api::FileKind::Png | cl_api::FileKind::Jpeg) => match decode_image(bytes) {
@@ -458,11 +626,20 @@ fn open<'a>(pdfium: Option<&'a Pdfium>, doc: u64, bytes: &[u8]) -> (DocReply, Op
                 },
                 Some(Doc::Image(img)),
             ),
-            None => (DocReply::Unreadable { doc }, None),
+            None => (DocReply::Unreadable { doc, page: None }, None),
         },
-        // A TIFF is taken in (Q-A01n) but not shown until the new viewer
-        // (A02).
-        Some(cl_api::FileKind::Tiff) | None => (DocReply::Unreadable { doc }, None),
+        Some(cl_api::FileKind::Tiff) => match tiff_doc::TiffDoc::open(bytes) {
+            Some((t, truncated)) => (
+                DocReply::Opened {
+                    doc,
+                    pages: t.pages(),
+                    truncated,
+                },
+                Some(Doc::Tiff(Box::new(t))),
+            ),
+            None => (DocReply::Unreadable { doc, page: None }, None),
+        },
+        None => (DocReply::Unreadable { doc, page: None }, None),
     }
 }
 
@@ -482,16 +659,21 @@ pub(crate) fn decode_image(bytes: &[u8]) -> Option<RgbaImage> {
         .with_guessed_format()
         .ok()?;
     reader.limits(limits());
-    let img = reader.decode().ok()?;
-    let (w, h) = (img.width(), img.height());
+    shrink(reader.decode().ok()?.into_rgba8())
+}
+
+/// Keep a decoded picture at most [`MAX_SIDE`] on its long side and
+/// [`MAX_PIXELS`]. `None` for an empty one.
+fn shrink(img: RgbaImage) -> Option<RgbaImage> {
+    let (w, h) = img.dimensions();
     if w == 0 || h == 0 {
         return None;
     }
     let (tw, th) = fit_pixels(w, w, h)?;
     if (tw, th) == (w, h) {
-        Some(img.into_rgba8())
+        Some(img)
     } else {
-        Some(image::imageops::thumbnail(&img.into_rgba8(), tw, th))
+        Some(image::imageops::thumbnail(&img, tw, th))
     }
 }
 
@@ -530,17 +712,30 @@ fn fit_pixels(want_w: u32, w: u32, h: u32) -> Option<(u32, u32)> {
     clamp_size(want_w, w as f32, h as f32)
 }
 
-fn render(d: &Doc<'_>, doc: u64, page: u32, px_width: u32) -> Option<RenderedPage> {
+/// Draw `page` turned by `rotation`, `px_width` pixels wide once turned.
+/// `keep`: a TIFF keeps the decoded page for the next request (drawn pages
+/// do; thumbnails don't, so they never push out the page on screen).
+fn render(
+    d: &mut Doc<'_>,
+    doc: u64,
+    page: u32,
+    px_width: u32,
+    rotation: Rotation,
+    keep: bool,
+) -> Option<RenderedPage> {
     match d {
         Doc::Pdf(pdf, pages) => {
             if page >= *pages {
                 return None;
             }
             let p = pdf.pages().get(i32::try_from(page).ok()?).ok()?;
-            let (nw, nh) = (p.width().value, p.height().value);
+            let (nw, nh) = turned(p.width().value, p.height().value, rotation);
+            // The bitmap has the turned page's size; PDFium turns the page
+            // into it.
             let (w, h) = clamp_size(px_width, nw, nh)?;
             let config = PdfRenderConfig::new()
                 .set_target_size(i32::try_from(w).ok()?, i32::try_from(h).ok()?)
+                .rotate(pdf_rotation(rotation), false)
                 .render_form_data(true);
             let bitmap = p.render_with_config(&config).ok()?;
             let width = u32::try_from(bitmap.width()).ok()?;
@@ -560,29 +755,70 @@ fn render(d: &Doc<'_>, doc: u64, page: u32, px_width: u32) -> Option<RenderedPag
                 rgba,
                 natural_width,
                 natural_height,
+                rotation,
             })
         }
         Doc::Image(img) => {
             if page != 0 {
                 return None;
             }
-            let (w, h) = fit_pixels(px_width, img.width(), img.height())?;
-            let scaled = if (w, h) == img.dimensions() {
-                img.clone()
-            } else {
-                image::imageops::thumbnail(img, w, h)
-            };
-            Some(RenderedPage {
-                doc,
-                page,
-                width: scaled.width(),
-                height: scaled.height(),
-                rgba: scaled.into_raw(),
-                natural_width: img.width(),
-                natural_height: img.height(),
-            })
+            scale_picture(img, doc, page, px_width, rotation)
         }
+        Doc::Tiff(t) => t
+            .with_page(page, keep, |img| {
+                scale_picture(img, doc, page, px_width, rotation)
+            })
+            .flatten(),
     }
+}
+
+/// A `w × h` page's size once turned.
+fn turned<T>(w: T, h: T, rotation: Rotation) -> (T, T) {
+    if rotation.swaps() { (h, w) } else { (w, h) }
+}
+
+fn pdf_rotation(rotation: Rotation) -> PdfPageRenderRotation {
+    match rotation {
+        Rotation::None => PdfPageRenderRotation::None,
+        Rotation::Right => PdfPageRenderRotation::Degrees90,
+        Rotation::Half => PdfPageRenderRotation::Degrees180,
+        Rotation::Left => PdfPageRenderRotation::Degrees270,
+    }
+}
+
+/// A decoded picture turned by `rotation`, `px_width` pixels wide once
+/// turned (within the limits). It is scaled first, then turned.
+fn scale_picture(
+    img: &RgbaImage,
+    doc: u64,
+    page: u32,
+    px_width: u32,
+    rotation: Rotation,
+) -> Option<RenderedPage> {
+    let (nw, nh) = turned(img.width(), img.height(), rotation);
+    let (w, h) = fit_pixels(px_width, nw, nh)?;
+    let (sw, sh) = turned(w, h, rotation);
+    let scaled = if (sw, sh) == img.dimensions() {
+        img.clone()
+    } else {
+        image::imageops::thumbnail(img, sw, sh)
+    };
+    let out = match rotation {
+        Rotation::None => scaled,
+        Rotation::Right => image::imageops::rotate90(&scaled),
+        Rotation::Half => image::imageops::rotate180(&scaled),
+        Rotation::Left => image::imageops::rotate270(&scaled),
+    };
+    Some(RenderedPage {
+        doc,
+        page,
+        width: out.width(),
+        height: out.height(),
+        rgba: out.into_raw(),
+        natural_width: nw,
+        natural_height: nh,
+        rotation,
+    })
 }
 
 /// The library's file name on this platform.
@@ -812,6 +1048,7 @@ mod tests {
             doc: 2,
             page: 0,
             px_width: 160,
+            rotation: Rotation::None,
         });
         let DocReply::Rendered(p) = reply(&w) else {
             panic!("not rendered")
@@ -823,15 +1060,29 @@ mod tests {
             doc: 2,
             page: 1,
             px_width: 160,
+            rotation: Rotation::None,
         });
-        assert_eq!(reply(&w), DocReply::Unreadable { doc: 2 });
+        assert_eq!(
+            reply(&w),
+            DocReply::Unreadable {
+                doc: 2,
+                page: Some(1)
+            }
+        );
         w.send(DocRequest::Close { doc: 2 });
         w.send(DocRequest::Render {
             doc: 2,
             page: 0,
             px_width: 160,
+            rotation: Rotation::None,
         });
-        assert_eq!(reply(&w), DocReply::Unreadable { doc: 2 });
+        assert_eq!(
+            reply(&w),
+            DocReply::Unreadable {
+                doc: 2,
+                page: Some(0)
+            }
+        );
         let dbg = format!(
             "{:?}",
             DocRequest::Open {
@@ -864,7 +1115,397 @@ mod tests {
             doc: 9,
             bytes: bomb,
         });
-        assert_eq!(reply(&w), DocReply::Unreadable { doc: 9 });
+        assert_eq!(reply(&w), DocReply::Unreadable { doc: 9, page: None });
+    }
+
+    /// Open `bytes` on a worker without PDFium (TIFFs don't need it).
+    fn open_on(w: &DocWorker, doc: u64, bytes: Vec<u8>) -> DocReply {
+        w.send(DocRequest::Open {
+            doc,
+            bytes: Arc::from(bytes),
+        });
+        reply(w)
+    }
+
+    fn render_on(w: &DocWorker, doc: u64, page: u32, px_width: u32) -> DocReply {
+        w.send(DocRequest::Render {
+            doc,
+            page,
+            px_width,
+            rotation: Rotation::None,
+        });
+        reply(w)
+    }
+
+    fn opened(doc: u64, pages: u32) -> DocReply {
+        DocReply::Opened {
+            doc,
+            pages,
+            truncated: false,
+        }
+    }
+
+    /// The share of pixels with ink (any colour channel under half).
+    fn dark_share(p: &RenderedPage) -> f64 {
+        let px = p.rgba.as_chunks::<4>().0;
+        let dark = px.iter().filter(|c| c[0].min(c[1]).min(c[2]) < 128).count();
+        #[allow(clippy::cast_precision_loss)]
+        let share = dark as f64 / px.len() as f64;
+        share
+    }
+
+    #[test]
+    fn a_three_page_tiff_opens_and_each_page_renders_differently() {
+        let w = without_pdfium();
+        assert_eq!(
+            open_on(&w, 1, fixture("three_pages.tif").to_vec()),
+            opened(1, 3)
+        );
+        let mut seen = Vec::new();
+        for page in 0..3 {
+            let DocReply::Rendered(p) = render_on(&w, 1, page, 120) else {
+                panic!("page {page} not rendered")
+            };
+            assert_eq!((p.page, p.width, p.height), (page, 120, 160));
+            assert_eq!((p.natural_width, p.natural_height), (120, 160));
+            assert_eq!(p.rgba.len(), 120 * 160 * 4);
+            assert!(dark_share(&p) > 0.01, "page {page} looks blank");
+            seen.push(p.rgba);
+        }
+        assert!(seen[0] != seen[1] && seen[1] != seen[2] && seen[0] != seen[2]);
+        // Page 1's band is at the top, page 3's black at the bottom; page 2
+        // is red in the middle.
+        let at = |rgba: &[u8], x: usize, y: usize| {
+            let i = (y * 120 + x) * 4;
+            [rgba[i], rgba[i + 1], rgba[i + 2]]
+        };
+        assert_eq!(at(&seen[0], 60, 20), [40, 40, 40]);
+        assert_eq!(at(&seen[0], 60, 140), [255, 255, 255]);
+        assert_eq!(at(&seen[1], 60, 80), [200, 30, 30]);
+        assert_eq!(at(&seen[2], 60, 130), [0, 0, 0]);
+        assert_eq!(at(&seen[2], 60, 20), [255, 255, 255]);
+        // Past the last page.
+        assert_eq!(
+            render_on(&w, 1, 3, 120),
+            DocReply::Unreadable {
+                doc: 1,
+                page: Some(3)
+            }
+        );
+    }
+
+    #[test]
+    fn a_g4_fax_page_renders_black_on_white() {
+        let w = without_pdfium();
+        assert_eq!(open_on(&w, 2, fixture("g4_fax.tif").to_vec()), opened(2, 1));
+        let DocReply::Rendered(p) = render_on(&w, 2, 0, 200) else {
+            panic!("not rendered")
+        };
+        assert_eq!((p.width, p.height), (200, 100));
+        let share = dark_share(&p);
+        // Mostly white paper with some black: the right way round.
+        assert!((0.03..0.5).contains(&share), "dark share {share}");
+        let px = |x: usize, y: usize| p.rgba[(y * 200 + x) * 4];
+        assert_eq!(px(100, 10), 0, "the box edge is black");
+        assert_eq!(px(5, 5), 255, "the margin is white");
+    }
+
+    #[test]
+    fn hostile_tiffs_end_as_unreadable() {
+        let bomb = fixture("bomb_tiff.tif");
+        assert!(bomb.len() < 400, "the fixture is a header, not pixels");
+        let w = without_pdfium();
+        assert_eq!(
+            open_on(&w, 1, bomb.to_vec()),
+            DocReply::Unreadable { doc: 1, page: None }
+        );
+        assert_eq!(
+            open_on(&w, 2, tiff_fixtures::truncated_strip()),
+            DocReply::Unreadable { doc: 2, page: None }
+        );
+        assert_eq!(
+            open_on(&w, 3, tiff_fixtures::lab_only()),
+            DocReply::Unreadable { doc: 3, page: None }
+        );
+        assert_eq!(
+            open_on(&w, 4, b"II*\0\xff\xff\xff\x7f".to_vec()),
+            DocReply::Unreadable { doc: 4, page: None }
+        );
+        // BigTIFF is not taken.
+        assert_eq!(
+            open_on(&w, 5, b"II+\0\x08\0\0\0\x10\0\0\0\0\0\0\0".to_vec()),
+            DocReply::Unreadable { doc: 5, page: None }
+        );
+    }
+
+    /// Review B1: a JPEG-in-TIFF page whose JPEG header claims 16384² is
+    /// refused by its compression before any pixel is read (no decoder is
+    /// sized from it), and the file is unreadable.
+    #[test]
+    fn a_jpeg_in_tiff_bomb_is_unreadable_without_decoding() {
+        let bomb = fixture("bomb_jpeg_tiff.tif");
+        assert!(bomb.len() < 400, "the fixture is a header, not pixels");
+        // The page passes the size check: only its compression stops it.
+        let mut d =
+            ::tiff::decoder::Decoder::new(std::io::Cursor::new(bomb.to_vec())).expect("a TIFF");
+        assert_eq!(d.dimensions().expect("size"), (16, 16));
+        let method = d
+            .find_tag_unsigned::<u16>(::tiff::tags::Tag::Compression)
+            .expect("tag");
+        assert_eq!(method, Some(7));
+        assert!(!tiff_doc::compression_taken(7) && !tiff_doc::compression_taken(6));
+        for taken in [1, 3, 4, 5, 8, 0x80B2, 0x8005] {
+            assert!(tiff_doc::compression_taken(taken), "{taken}");
+        }
+        let started = Instant::now();
+        assert!(tiff_doc::TiffDoc::open(&bomb).is_none());
+        let w = without_pdfium();
+        assert_eq!(
+            open_on(&w, 1, bomb.to_vec()),
+            DocReply::Unreadable { doc: 1, page: None }
+        );
+        // Refused at once: 768 MiB was never allocated and filled.
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_looping_page_list_ends() {
+        let w = without_pdfium();
+        // The page that points back is where the walk stops (the tiff
+        // crate refuses it); the first page still shows.
+        let r = open_on(&w, 1, tiff_fixtures::ifd_loop());
+        assert_eq!(r, opened(1, 1));
+        assert!(matches!(render_on(&w, 1, 0, 60), DocReply::Rendered(_)));
+    }
+
+    #[test]
+    fn an_unsupported_later_page_is_unreadable_alone() {
+        let w = without_pdfium();
+        assert_eq!(open_on(&w, 1, tiff_fixtures::gray_then_lab()), opened(1, 2));
+        assert_eq!(
+            render_on(&w, 1, 1, 60),
+            DocReply::Unreadable {
+                doc: 1,
+                page: Some(1)
+            }
+        );
+        assert!(matches!(render_on(&w, 1, 0, 60), DocReply::Rendered(_)));
+    }
+
+    #[test]
+    fn cmyk_converts_and_long_tiffs_stop_at_the_limit() {
+        let w = without_pdfium();
+        assert_eq!(open_on(&w, 1, tiff_fixtures::cmyk()), opened(1, 1));
+        let DocReply::Rendered(p) = render_on(&w, 1, 0, 8) else {
+            panic!("not rendered")
+        };
+        assert_eq!(&p.rgba[..4], &[0, 255, 255, 255], "cyan");
+        let n = MAX_PAGES as usize + 3;
+        assert_eq!(
+            open_on(&w, 2, tiff_fixtures::many_pages(n)),
+            DocReply::Opened {
+                doc: 2,
+                pages: MAX_PAGES,
+                truncated: true
+            }
+        );
+        assert_eq!(
+            open_on(&w, 3, tiff_fixtures::many_pages(MAX_PAGES as usize)),
+            DocReply::Opened {
+                doc: 3,
+                pages: MAX_PAGES,
+                truncated: false
+            }
+        );
+    }
+
+    fn render_turned(w: &DocWorker, doc: u64, page: u32, px: u32, r: Rotation) -> RenderedPage {
+        w.send(DocRequest::Render {
+            doc,
+            page,
+            px_width: px,
+            rotation: r,
+        });
+        match reply(w) {
+            DocReply::Rendered(p) => p,
+            other => panic!("not rendered: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rotation_turns_quarter_by_quarter() {
+        assert_eq!(Rotation::None.cw(), Rotation::Right);
+        assert_eq!(Rotation::None.ccw(), Rotation::Left);
+        assert_eq!(Rotation::Left.cw(), Rotation::None);
+        let mut r = Rotation::None;
+        for _ in 0..4 {
+            r = r.cw();
+        }
+        assert_eq!(r, Rotation::None);
+        assert_eq!(
+            [
+                Rotation::None,
+                Rotation::Right,
+                Rotation::Half,
+                Rotation::Left
+            ]
+            .map(Rotation::degrees),
+            [0, 90, 180, 270]
+        );
+        assert!(Rotation::Right.swaps() && Rotation::Left.swaps());
+        assert!(!Rotation::Half.swaps() && !Rotation::None.swaps());
+    }
+
+    #[test]
+    fn a_turned_picture_swaps_its_sides() {
+        let w = without_pdfium();
+        assert_eq!(
+            open_on(&w, 1, fixture("receipt.png").to_vec()),
+            opened(1, 1)
+        );
+        let upright = render_turned(&w, 1, 0, 160, Rotation::None);
+        assert_eq!((upright.width, upright.height), (160, 100));
+        let right = render_turned(&w, 1, 0, 100, Rotation::Right);
+        assert_eq!((right.width, right.height), (100, 160));
+        assert_eq!((right.natural_width, right.natural_height), (200, 320));
+        let left = render_turned(&w, 1, 0, 100, Rotation::Left);
+        assert_eq!((left.width, left.height), (100, 160));
+        assert_ne!(left.rgba, right.rgba);
+        let half = render_turned(&w, 1, 0, 160, Rotation::Half);
+        assert_eq!((half.width, half.height), (160, 100));
+        assert!(half.rgba != upright.rgba, "upside down differs");
+        // Upside down twice is upright: the first pixel is the last.
+        let px = |p: &RenderedPage, i: usize| p.rgba[i * 4..i * 4 + 4].to_vec();
+        assert_eq!(px(&half, 0), px(&upright, 160 * 100 - 1));
+        // A TIFF page turns the same way.
+        assert_eq!(
+            open_on(&w, 2, fixture("three_pages.tif").to_vec()),
+            opened(2, 3)
+        );
+        let t = render_turned(&w, 2, 1, 160, Rotation::Right);
+        assert_eq!((t.width, t.height), (160, 120));
+        assert_eq!((t.natural_width, t.natural_height), (160, 120));
+    }
+
+    #[test]
+    fn a_turned_pdf_page_swaps_its_sides_with_pdfium() {
+        let Some(w) = with_pdfium() else { return };
+        w.send(DocRequest::Open {
+            doc: 1,
+            bytes: fixture("two_pages.pdf"),
+        });
+        assert_eq!(reply(&w), opened(1, 2));
+        let upright = render_turned(&w, 1, 1, 400, Rotation::None);
+        let right = render_turned(&w, 1, 1, 400, Rotation::Right);
+        assert_eq!(right.width, 400);
+        assert!((308..=310).contains(&right.height), "{}", right.height);
+        assert_eq!((right.natural_width, right.natural_height), (792, 612));
+        assert_eq!(right.rgba.len(), 400 * right.height as usize * 4);
+        let half = render_turned(&w, 1, 1, 400, Rotation::Half);
+        assert_eq!((half.width, half.height), (upright.width, upright.height));
+        assert!(half.rgba != upright.rgba, "upside down differs");
+    }
+
+    fn names(jobs: Vec<Job>) -> Vec<String> {
+        jobs.into_iter()
+            .map(|j| match j {
+                Job::CloseHandle(h) => format!("close-handle {h}"),
+                Job::Req { handle, req, .. } => format!("{handle} {req:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn thumbnails_are_coalesced_and_served_after_the_page() {
+        let (tx, _rx) = channel();
+        let r = |req| Job::Req {
+            handle: 1,
+            req,
+            reply: tx.clone(),
+        };
+        let thumb = |doc, page| DocRequest::Thumb {
+            doc,
+            page,
+            px_width: 96,
+        };
+        let render = DocRequest::Render {
+            doc: 1,
+            page: 2,
+            px_width: 300,
+            rotation: Rotation::Right,
+        };
+        let mut queue = vec![
+            r(thumb(1, 0)),
+            r(thumb(1, 1)),
+            r(render),
+            r(thumb(1, 0)),
+            r(thumb(2, 0)),
+            r(DocRequest::Close { doc: 2 }),
+        ];
+        // The page first; the thumbnail of the closed document is gone and
+        // page 0's is asked once.
+        assert_eq!(
+            names(next_round(&mut queue)),
+            vec![
+                "1 Render { doc: 1, page: 2, px_width: 300, rotation: 90 }",
+                "1 Close { doc: 2 }",
+            ]
+        );
+        // Then one thumbnail a round, in the order last asked.
+        assert_eq!(
+            names(next_round(&mut queue)),
+            vec!["1 Thumb { doc: 1, page: 1, px_width: 96 }"]
+        );
+        // A page asked for meanwhile goes before the next thumbnail.
+        queue.push(r(DocRequest::Render {
+            doc: 1,
+            page: 0,
+            px_width: 300,
+            rotation: Rotation::None,
+        }));
+        assert_eq!(
+            names(next_round(&mut queue)),
+            vec!["1 Render { doc: 1, page: 0, px_width: 300, rotation: 0 }"]
+        );
+        assert_eq!(
+            names(next_round(&mut queue)),
+            vec!["1 Thumb { doc: 1, page: 0, px_width: 96 }"]
+        );
+        assert!(queue.is_empty());
+        assert!(next_round(&mut queue).is_empty());
+    }
+
+    #[test]
+    fn a_thumbnail_is_small_upright_and_keeps_the_page_cached() {
+        let w = without_pdfium();
+        assert_eq!(
+            open_on(&w, 1, fixture("three_pages.tif").to_vec()),
+            opened(1, 3)
+        );
+        let page = render_turned(&w, 1, 2, 120, Rotation::Right);
+        for p in 0..3 {
+            w.send(DocRequest::Thumb {
+                doc: 1,
+                page: p,
+                px_width: 96,
+            });
+            let DocReply::Thumb(t) = reply(&w) else {
+                panic!("no thumbnail")
+            };
+            assert_eq!((t.page, t.width, t.height), (p, 96, 128));
+            assert_eq!(t.rotation, Rotation::None);
+        }
+        // The drawn page is still the same after the thumbnails.
+        assert_eq!(render_turned(&w, 1, 2, 120, Rotation::Right), page);
+        // A page that isn't there, a document that isn't open.
+        for (doc, page) in [(1, 9), (7, 0)] {
+            w.send(DocRequest::Thumb {
+                doc,
+                page,
+                px_width: 96,
+            });
+            assert_eq!(reply(&w), DocReply::NoThumb { doc, page });
+        }
     }
 
     #[test]
@@ -879,6 +1520,7 @@ mod tests {
             doc,
             page: 0,
             px_width,
+            rotation: Rotation::None,
         };
         let open = |doc| DocRequest::Open {
             doc,
@@ -904,8 +1546,8 @@ mod tests {
             kept,
             vec![
                 "1 Open { doc: 1, len: 1 }",
-                "1 Render { doc: 1, page: 0, px_width: 300 }",
-                "1 Render { doc: 2, page: 0, px_width: 50 }",
+                "1 Render { doc: 1, page: 0, px_width: 300, rotation: 0 }",
+                "1 Render { doc: 2, page: 0, px_width: 50, rotation: 0 }",
                 "close-handle 2",
                 "1 Close { doc: 3 }",
             ]
@@ -931,6 +1573,7 @@ mod tests {
             doc: 1,
             page: 1,
             px_width: 400,
+            rotation: Rotation::None,
         });
         let DocReply::Rendered(p) = reply(&w) else {
             panic!("not rendered")
@@ -953,6 +1596,7 @@ mod tests {
             doc: 1,
             page: 0,
             px_width: 50_000,
+            rotation: Rotation::None,
         });
         let DocReply::Rendered(p) = reply(&w) else {
             panic!("not rendered")
@@ -972,6 +1616,6 @@ mod tests {
             doc: 6,
             bytes: Arc::from(&b"%PDF-1.7 not a real file"[..]),
         });
-        assert_eq!(reply(&w), DocReply::Unreadable { doc: 6 });
+        assert_eq!(reply(&w), DocReply::Unreadable { doc: 6, page: None });
     }
 }

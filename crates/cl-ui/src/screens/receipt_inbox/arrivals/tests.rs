@@ -142,16 +142,22 @@ fn the_demo_window_lays_out_its_folders_and_copies_files_in() {
 }
 
 #[test]
-fn new_check_opens_with_the_arrival_draft_and_tiff_waits_for_the_viewer() {
+fn new_check_opens_with_the_arrival_draft_and_a_tiff_shows() {
     let (_dir, link, ctx, mut s) = setup();
     until(&ctx, &mut s, "the demo files in", |st| st["arrived"] == 3);
-    // TIFF: no preview yet, actions still there.
+    // TIFF (A02): it shows in the viewer like any other file.
     let tif = row(&ctx, "Galena Gravel fax.tif");
     s.select_row(&ctx, &tif);
-    until(&ctx, &mut s, "the TIFF read", |st| st["loaded"] == true);
+    until(&ctx, &mut s, "the TIFF shown", |st| {
+        st["loaded"] == true && st["preview"]["status"] == "ready"
+    });
     let st = s.state();
-    assert_eq!(st["tiff_note"], true);
-    assert_eq!(st["preview"]["open"], false, "{st}");
+    assert_eq!(st["preview"]["open"], true, "{st}");
+    assert!(st.get("tiff_note").is_none(), "{st}");
+    assert!(
+        s.document().is_some(),
+        "the pop-out viewer follows the selection"
+    );
     // The PNG: preview, then New check.
     let png = row(&ctx, "Ozark Feed receipt.png");
     s.select_row(&ctx, &png);

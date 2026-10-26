@@ -2325,3 +2325,146 @@ fn the_ap_write_never_reaches_the_generic_routes() {
     assert_eq!(st["notice"], "register.ap.closed");
     assert_eq!(st["closing"], "idle");
 }
+
+/// A02 (Q-A02f): the selected transaction's files. A check with a file
+/// turns Show document on; it fetches the first file and asks the shell to
+/// pop the viewer out, which then follows the cursor. A row without files
+/// leaves it off. No file name in the state.
+#[test]
+fn show_document_opens_the_selected_transactions_first_file() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let fuel = demo_account(&link, "6100");
+    let vendor = demo_contact(&link, "Hollister Fuel Stop");
+    s.entry.form.edit_step(|d| {
+        d.payee = Some(vendor);
+        d.account = Some(fuel);
+        d.payment = Some(money("12.00"));
+    });
+    assert!(s.start_record());
+    settle(&mut s, None);
+    let key = last_key(&mut s);
+    let id = s.model.row_for_key(key).expect("row").txn_id;
+    {
+        let mut demo = link.demo_state().expect("demo");
+        crate::company::demo::checks::upload(
+            &mut demo,
+            cl_api::AttachTo::Expense(id),
+            "secret-receipt.pdf",
+            b"%PDF-1.4\n%synthetic\n",
+        )
+        .expect("upload");
+    }
+    let ctx = egui::Context::default();
+    s.actions.cursor = Some(key);
+    s.sync_docs(&ctx);
+    assert_eq!(s.state()["docs"]["listed"], false, "the cursor rests first");
+    at_time(&ctx, 1.0);
+    s.sync_docs(&ctx);
+    assert_eq!(s.state()["docs"]["count"], 1);
+    assert!(s.document().is_none(), "nothing fetched until asked");
+    s.show_document(&ctx);
+    assert!(s.document().is_some());
+    assert!(!s.state().to_string().contains("secret"));
+    // The pop-out request is waiting for the shell.
+    let doc_viewer_state = ctx.data(|d| {
+        d.get_temp::<crate::windows::doc_viewer::PaneRequest>(egui::Id::unique(
+            "cl-doc-viewer-request",
+        ))
+    });
+    assert_eq!(
+        doc_viewer_state,
+        Some(crate::windows::doc_viewer::PaneRequest::PopOut)
+    );
+    // Another row without files: nothing to show.
+    let total = s.model.total().expect("total");
+    settle(&mut s, Some(&(0..total)));
+    let other = s.model.row_key(0).expect("first row");
+    s.actions.cursor = Some(other);
+    s.sync_docs(&ctx);
+    at_time(&ctx, 2.0);
+    s.sync_docs(&ctx);
+    assert_eq!(s.state()["docs"]["listed"], true);
+    assert_eq!(s.state()["docs"]["count"], 0);
+    assert!(s.document().is_none());
+}
+
+/// Run one empty frame at `time` (egui seconds), for the rest delay.
+fn at_time(ctx: &egui::Context, time: f64) {
+    let raw = egui::RawInput {
+        time: Some(time),
+        ..egui::RawInput::default()
+    };
+    let mut out = ctx.run_ui(raw, |_| {});
+    out.textures_delta.clear();
+}
+
+/// Review S3: moving the cursor over rows asks for nothing until it
+/// rests; an answer for a row the cursor left is dropped; a list that
+/// failed says so and is never taken for "no documents".
+#[test]
+fn row_documents_wait_for_the_cursor_and_say_when_the_list_failed() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let total = s.model.total().expect("total");
+    settle(&mut s, Some(&(0..total)));
+    let a = s.model.row_key(0).expect("row");
+    let b = s.model.row_key(1).expect("row");
+    let id_a = s.model.row_for_key(a).expect("row").txn_id;
+    let id_b = s.model.row_for_key(b).expect("row").txn_id;
+    let ctx = egui::Context::default();
+    at_time(&ctx, 10.0);
+    // Down the register quickly: nothing is asked for on the way.
+    s.actions.cursor = Some(a);
+    s.sync_docs(&ctx);
+    at_time(&ctx, 10.1);
+    s.actions.cursor = Some(b);
+    s.sync_docs(&ctx);
+    assert_eq!(s.state()["docs"]["listed"], false);
+    // A's answer arrives after the cursor left it: dropped.
+    let queue =
+        cl_api::ApiQueue::start(Arc::new(|| {}), cl_api::QueueConfig::default()).expect("queue");
+    let group = queue.group().expect("group");
+    let session = cl_api::testing::stub_session(9);
+    let one = crate::company::demo::checks::attachments(
+        &link.demo_state().expect("demo"),
+        cl_api::AttachTo::Expense(id_a),
+    );
+    let late = group
+        .read(&session, move |_s| async move { Ok(one) })
+        .expect("read");
+    s.docs_list_in_flight(id_a, crate::company::Task::Pending(late));
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while s.docs.busy() {
+        assert!(std::time::Instant::now() < end, "no answer");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        s.sync_docs(&ctx);
+    }
+    assert_eq!(s.state()["docs"]["listed"], false, "not B's list");
+    // B's own list fails: it says so.
+    let failed = group
+        .read(&session, |_s| async move {
+            Err::<Vec<cl_api::Attachment>, _>(ApiError::Internal)
+        })
+        .expect("read");
+    s.docs_list_in_flight(id_b, crate::company::Task::Pending(failed));
+    while s.docs.busy() {
+        assert!(std::time::Instant::now() < end, "no answer");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        s.sync_docs(&ctx);
+    }
+    assert_eq!(s.state()["docs"]["list_failed"], true);
+    assert_eq!(s.state()["docs"]["listed"], false);
+    assert!(crate::i18n::has("register.doc.list_failed"));
+    // Resting on B again later asks once more (the demo answers).
+    s.actions.cursor = Some(a);
+    s.sync_docs(&ctx);
+    s.actions.cursor = Some(b);
+    s.sync_docs(&ctx);
+    at_time(&ctx, 11.0);
+    s.sync_docs(&ctx);
+    assert_eq!(s.state()["docs"]["listed"], true);
+    assert_eq!(s.state()["docs"]["list_failed"], false);
+}

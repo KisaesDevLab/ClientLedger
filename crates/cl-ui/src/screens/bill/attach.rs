@@ -9,8 +9,8 @@
 //! bytes; at most 10 MB) and a refused one is never sent. A failed upload
 //! never blocks saving the bill.
 //!
-//! The card shows the file through the document viewer (WP1) with "Open
-//! full size", and "Read with AI" (WP7's button). An incoming receipt-inbox
+//! The card shows the file through the document pane (A02: the viewer
+//! with "Open full size" and "Pop out") and "Read with AI" (WP7's button). An incoming receipt-inbox
 //! file ([`crate::screens::receipt_inbox::InboxDraft`], WP5) is already
 //! uploaded as the draft: the card shows it at once.
 
@@ -35,7 +35,8 @@ use crate::screens::write_check::attach::{
     FileRead, browse_button, browse_for_file, poll_file_read, read_in_background,
 };
 use crate::theme::Tokens;
-use crate::widgets::pdf_viewer::{DocSource, DocViewer, ViewerEvent, ViewerState};
+use crate::widgets::doc_pane::DocPane;
+use crate::widgets::pdf_viewer::{DocSource, ViewerEvent, ViewerState};
 
 /// The preview's height on the card (mockup: 230 px of page, plus the
 /// viewer's own bar).
@@ -478,10 +479,15 @@ impl EnterBillScreen {
                     .color(tokens.text_primary),
             );
             if self.attach.viewer.source().is_some() {
-                let w = ui.available_width();
-                ui.allocate_ui(egui::vec2(w, PREVIEW_HEIGHT), |ui| {
-                    event = DocViewer::show(ui, &mut self.attach.viewer, tokens);
-                });
+                if crate::windows::doc_viewer::is_popped(ui.ctx()) {
+                    // Popped out: the pane is one line with Dock.
+                    event = DocPane::show(ui, &mut self.attach.viewer, tokens);
+                } else {
+                    let w = ui.available_width();
+                    ui.allocate_ui(egui::vec2(w, PREVIEW_HEIGHT), |ui| {
+                        event = DocPane::show(ui, &mut self.attach.viewer, tokens);
+                    });
+                }
             } else if self.attach.preview.is_some() {
                 form::progress_line(ui, tokens, &t("bill.source.loading"));
             } else {
@@ -600,7 +606,8 @@ impl EnterBillScreen {
                     }
                 }
             }
-            ViewerEvent::None => {}
+            // Pop out and Dock went to the shell through the pane.
+            ViewerEvent::None | ViewerEvent::PopOut | ViewerEvent::Dock => {}
         }
         if attach {
             let path = PathBuf::from(self.attach.path.trim().trim_matches('"'));

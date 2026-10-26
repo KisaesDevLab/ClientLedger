@@ -120,7 +120,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("inbox.state.heic", "Save as JPG or PDF instead"),
     ("inbox.state.linked_file", "Linked file, not taken"),
     ("inbox.state.refused", "Not a PDF or picture"),
-    ("inbox.tiff_preview", "Preview comes with the new viewer."),
     ("inbox.duplicate.detail", "Same as a file copied on {date}. Discard it, or copy it in anyway."),
     ("inbox.on_form.hint", "This file is on a form you opened. Save that form to file it, or close it to use the file here again."),
     ("inbox.bring_in.hint", "This file was in the folder before it was set up for new files only."),

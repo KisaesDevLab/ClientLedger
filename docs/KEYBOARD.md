@@ -33,6 +33,7 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Alt+H` | Home | `nav.home` |
 | `Ctrl+Tab` | Next Window | `window.next` |
 | `Ctrl+Shift+Tab` | Previous Window | `window.prev` |
+| `Ctrl+Shift+D` | Pop Out or Dock the Document | `view.toggle_doc_viewer` |
 | `Ctrl++` | Zoom In | `window.zoom_in` |
 | `Ctrl+-` | Zoom Out | `window.zoom_out` |
 | `Ctrl+0` | Actual Size | `window.zoom_reset` |
@@ -53,6 +54,7 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Delete` | Delete List Entry | `list.delete` |
 | `Ctrl+Shift+O` | Move Window to Its Own Window | `window.pop_out` |
 | `F9` | Show or Hide Details | `window.toggle_details` |
+| `F6` | Move Between the Form and Its Document | `view.focus_doc` |
 
 ## In a form or grid
 

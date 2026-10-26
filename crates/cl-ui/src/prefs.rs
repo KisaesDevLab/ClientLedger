@@ -1531,3 +1531,446 @@ mod bulk_columns_tests {
         );
     }
 }
+
+/// Where the pop-out document viewer sits (A02, Q-A02c): kept per OS user
+/// in its own file, `doc-viewer.json`, like [`PanelPrefsBook`], so a
+/// Preferences save can't race it. Geometry only (egui points): no file
+/// names, no form names.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DocViewerPlacement {
+    /// The window's outer top-left corner, when the OS reported one.
+    pub outer_pos: Option<eframe::egui::Pos2>,
+    /// The window's inner (content) size.
+    pub inner_size: eframe::egui::Vec2,
+    /// The size of the monitor the window was on, when known.
+    pub monitor_size: Option<eframe::egui::Vec2>,
+    /// The viewer was in its own window when last seen; it comes back that
+    /// way once a company opens.
+    pub popped: bool,
+    /// The window's zoom when last changed; `None` keeps the viewer's
+    /// default (Fit width).
+    pub zoom: Option<crate::widgets::pdf_viewer::Zoom>,
+}
+
+impl Default for DocViewerPlacement {
+    fn default() -> Self {
+        DocViewerPlacement {
+            outer_pos: None,
+            inner_size: DocViewerPlacement::DEFAULT_SIZE,
+            monitor_size: None,
+            popped: false,
+            zoom: None,
+        }
+    }
+}
+
+impl DocViewerPlacement {
+    /// The file under the UI store folder.
+    pub const FILE: &'static str = "doc-viewer.json";
+    /// File format version.
+    pub const VERSION: u64 = 1;
+    /// The smallest window the viewer opens at.
+    pub const MIN_SIZE: eframe::egui::Vec2 = eframe::egui::vec2(360.0, 300.0);
+    /// The size of a viewer opened for the first time.
+    pub const DEFAULT_SIZE: eframe::egui::Vec2 = eframe::egui::vec2(640.0, 780.0);
+    /// How much of the title bar always stays on screen, in points.
+    pub const VISIBLE_TITLE: f32 = 64.0;
+    /// The title bar's height (what must stay on screen vertically).
+    pub const TITLE_BAR: f32 = 32.0;
+    /// Coordinates beyond this are treated as unreadable.
+    const LIMIT: f32 = 100_000.0;
+
+    /// Read the file's text; anything unreadable gives the defaults.
+    #[must_use]
+    pub fn parse(text: &str) -> DocViewerPlacement {
+        use serde_json::Value;
+        let mut out = DocViewerPlacement::default();
+        let Ok(Value::Object(root)) = serde_json::from_str::<Value>(text) else {
+            return out;
+        };
+        if root.get("version").and_then(Value::as_u64) != Some(Self::VERSION) {
+            return out;
+        }
+        let pair = |key: &str| -> Option<[f32; 2]> {
+            let list = root.get(key)?.as_array()?;
+            let [a, b] = list.as_slice() else {
+                return None;
+            };
+            // Geometry: points fit an f32 (checked against LIMIT below).
+            #[allow(clippy::cast_possible_truncation)]
+            let (a, b) = (a.as_f64()? as f32, b.as_f64()? as f32);
+            (a.is_finite() && b.is_finite() && a.abs() < Self::LIMIT && b.abs() < Self::LIMIT)
+                .then_some([a, b])
+        };
+        out.outer_pos = pair("outer_pos").map(eframe::egui::Pos2::from);
+        if let Some([w, h]) = pair("inner_size")
+            && w > 0.0
+            && h > 0.0
+        {
+            out.inner_size = eframe::egui::vec2(w, h);
+        }
+        out.monitor_size = pair("monitor_size")
+            .filter(|[w, h]| *w > 0.0 && *h > 0.0)
+            .map(eframe::egui::Vec2::from);
+        out.popped = root.get("popped").and_then(Value::as_bool) == Some(true);
+        out.zoom = root.get("zoom").and_then(zoom_from_json);
+        out
+    }
+
+    /// The file's text.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let pos = self.outer_pos.map(|p| [p.x, p.y]);
+        let monitor = self.monitor_size.map(|m| [m.x, m.y]);
+        serde_json::to_string_pretty(&serde_json::json!({
+            "version": Self::VERSION,
+            "outer_pos": pos,
+            "inner_size": [self.inner_size.x, self.inner_size.y],
+            "monitor_size": monitor,
+            "popped": self.popped,
+            "zoom": self.zoom.map(zoom_to_json),
+        }))
+        .unwrap_or_default()
+    }
+
+    /// Load from `dir` (the defaults when missing, oversized or unreadable).
+    #[must_use]
+    pub fn load(dir: &Path) -> DocViewerPlacement {
+        read_capped(&dir.join(Self::FILE))
+            .map_or_else(DocViewerPlacement::default, |t| Self::parse(&t))
+    }
+
+    /// Save into `dir`.
+    ///
+    /// # Errors
+    /// Any file error.
+    pub fn save(&self, dir: &Path) -> io::Result<()> {
+        write_atomic(&dir.join(Self::FILE), &self.to_text())
+    }
+
+    /// The monitor the window was on, as best known: egui reports a
+    /// monitor's size but not its origin, so the origin is the saved
+    /// position rounded down to whole monitors (right for side-by-side
+    /// monitors of one size, and for the primary monitor). `None` without a
+    /// saved position and monitor.
+    #[must_use]
+    pub fn saved_screen(&self) -> Option<eframe::egui::Rect> {
+        Some(monitor_box(self.outer_pos?, self.monitor_size?))
+    }
+}
+
+/// A zoom as `doc-viewer.json` keeps it: `"fit_width"`, `"fit_page"` or a
+/// percent.
+fn zoom_to_json(z: crate::widgets::pdf_viewer::Zoom) -> serde_json::Value {
+    use crate::widgets::pdf_viewer::Zoom;
+    match z {
+        Zoom::FitWidth => serde_json::Value::from("fit_width"),
+        Zoom::FitPage => serde_json::Value::from("fit_page"),
+        Zoom::Percent(p) => serde_json::Value::from(p),
+    }
+}
+
+/// The zoom in `doc-viewer.json`; anything else (a percent outside
+/// 25-400 %) is ignored.
+fn zoom_from_json(v: &serde_json::Value) -> Option<crate::widgets::pdf_viewer::Zoom> {
+    use crate::widgets::pdf_viewer::Zoom;
+    match v {
+        serde_json::Value::String(s) if s == "fit_width" => Some(Zoom::FitWidth),
+        serde_json::Value::String(s) if s == "fit_page" => Some(Zoom::FitPage),
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .filter(|p| (25..=400).contains(p))
+            .and_then(|p| u16::try_from(p).ok())
+            .map(Zoom::Percent),
+        _ => None,
+    }
+}
+
+/// The monitor-sized box that holds `at`, with monitors laid out in a grid
+/// from the origin (see [`DocViewerPlacement::saved_screen`]).
+#[must_use]
+pub fn monitor_box(at: eframe::egui::Pos2, monitor: eframe::egui::Vec2) -> eframe::egui::Rect {
+    let w = monitor.x.max(1.0);
+    let h = monitor.y.max(1.0);
+    let origin = eframe::egui::pos2((at.x / w).floor() * w, (at.y / h).floor() * h);
+    eframe::egui::Rect::from_min_size(origin, eframe::egui::vec2(w, h))
+}
+
+/// A placement after [`clamp_placement`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClampedPlacement {
+    /// Where the window's outer corner goes; `None` lets the OS choose.
+    pub pos: Option<eframe::egui::Pos2>,
+    /// The window's inner size.
+    pub size: eframe::egui::Vec2,
+}
+
+/// Fit `saved` to `screen`: the size stays between
+/// [`DocViewerPlacement::MIN_SIZE`] and the screen's size (the screen wins
+/// when it is smaller), and at least [`DocViewerPlacement::VISIBLE_TITLE`]
+/// points of the title bar stay on the screen. Pure (property-tested).
+#[must_use]
+pub fn clamp_placement(saved: &DocViewerPlacement, screen: eframe::egui::Rect) -> ClampedPlacement {
+    let max = screen.size().max(eframe::egui::vec2(1.0, 1.0));
+    let min = DocViewerPlacement::MIN_SIZE.min(max);
+    let want = if saved.inner_size.x.is_finite() && saved.inner_size.y.is_finite() {
+        saved.inner_size
+    } else {
+        DocViewerPlacement::DEFAULT_SIZE
+    };
+    let size = want.clamp(min, max);
+    let pos = saved
+        .outer_pos
+        .filter(|p| p.x.is_finite() && p.y.is_finite())
+        .map(|p| {
+            let keep = DocViewerPlacement::VISIBLE_TITLE.min(size.x).min(max.x);
+            let x = p.x.clamp(screen.min.x - size.x + keep, screen.max.x - keep);
+            let bar = DocViewerPlacement::TITLE_BAR.min(max.y);
+            let y = p.y.clamp(screen.min.y, screen.max.y - bar);
+            eframe::egui::pos2(x, y)
+        });
+    ClampedPlacement { pos, size }
+}
+
+/// Where the viewer goes beside the main window (`root`, its outer rect)
+/// on a monitor of `monitor` size: to its right, else its left, else over
+/// its top-left corner; always clamped to that monitor.
+#[must_use]
+pub fn beside_main(
+    root: eframe::egui::Rect,
+    size: eframe::egui::Vec2,
+    monitor: eframe::egui::Vec2,
+) -> eframe::egui::Pos2 {
+    let screen = monitor_box(root.min, monitor);
+    let gap = 8.0;
+    let pos = if root.max.x + gap + size.x <= screen.max.x {
+        eframe::egui::pos2(root.max.x + gap, root.min.y)
+    } else if root.min.x - gap - size.x >= screen.min.x {
+        eframe::egui::pos2(root.min.x - gap - size.x, root.min.y)
+    } else {
+        root.min + eframe::egui::vec2(40.0, 40.0)
+    };
+    let placed = DocViewerPlacement {
+        outer_pos: Some(pos),
+        inner_size: size,
+        monitor_size: Some(monitor),
+        popped: true,
+        zoom: None,
+    };
+    clamp_placement(&placed, screen).pos.unwrap_or(pos)
+}
+
+/// The gone-monitor check, run once two frames after the viewer opens:
+/// when its title bar is not on the main window's monitor (`root`) and
+/// either the window's monitor is not the size saved, or the owner asked
+/// for the window (`recall`: Pop out or Ctrl+Shift+D with a place nobody
+/// has seen this session), the window moves beside the main window. eframe
+/// reports the nearest monitor for a window on a monitor that was
+/// unplugged, so an identical second monitor that is gone looks the same
+/// as one that is there; `recall` is the way back (review S1). `None`
+/// leaves it where it is.
+#[must_use]
+pub fn gone_monitor_fix(
+    saved: &DocViewerPlacement,
+    outer_now: eframe::egui::Rect,
+    monitor_now: eframe::egui::Vec2,
+    root: eframe::egui::Rect,
+    recall: bool,
+) -> Option<eframe::egui::Pos2> {
+    if !recall && saved.monitor_size == Some(monitor_now) {
+        return None;
+    }
+    let screen = monitor_box(root.min, monitor_now);
+    let bar = eframe::egui::Rect::from_min_size(
+        outer_now.min,
+        eframe::egui::vec2(outer_now.width(), DocViewerPlacement::TITLE_BAR),
+    );
+    let seen = bar.intersect(screen);
+    if seen.width() >= DocViewerPlacement::VISIBLE_TITLE.min(outer_now.width())
+        && seen.height() > 0.0
+    {
+        return None;
+    }
+    Some(beside_main(root, outer_now.size(), monitor_now))
+}
+
+#[cfg(test)]
+mod doc_viewer_placement_tests {
+    use eframe::egui::{Rect, pos2, vec2};
+
+    use super::*;
+
+    /// A small deterministic generator (no proptest in cl-ui).
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next(&mut self) -> f32 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            // 24 random bits as a fraction in [0, 1).
+            #[allow(clippy::cast_precision_loss)]
+            let f = (self.0 >> 40) as f32 / (1u64 << 24) as f32;
+            f
+        }
+        fn range(&mut self, lo: f32, hi: f32) -> f32 {
+            lo + (hi - lo) * self.next()
+        }
+    }
+
+    #[test]
+    fn placement_round_trips_and_bad_files_give_defaults() {
+        let dir = std::env::temp_dir().join(format!("cl-ui-docviewer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            DocViewerPlacement::load(&dir),
+            DocViewerPlacement::default()
+        );
+        let p = DocViewerPlacement {
+            outer_pos: Some(pos2(2000.0, 40.0)),
+            inner_size: vec2(700.0, 900.0),
+            monitor_size: Some(vec2(1920.0, 1080.0)),
+            popped: true,
+            zoom: Some(crate::widgets::pdf_viewer::Zoom::Percent(150)),
+        };
+        p.save(&dir).unwrap();
+        assert_eq!(DocViewerPlacement::load(&dir), p);
+        for z in [
+            crate::widgets::pdf_viewer::Zoom::FitWidth,
+            crate::widgets::pdf_viewer::Zoom::FitPage,
+        ] {
+            let q = DocViewerPlacement { zoom: Some(z), ..p };
+            assert_eq!(DocViewerPlacement::parse(&q.to_text()), q);
+        }
+        let text = std::fs::read_to_string(dir.join(DocViewerPlacement::FILE)).unwrap();
+        for key in [
+            "outer_pos",
+            "inner_size",
+            "monitor_size",
+            "popped",
+            "zoom",
+            "version",
+        ] {
+            assert!(text.contains(key), "{key}");
+        }
+        assert_eq!(
+            DocViewerPlacement::parse("nope"),
+            DocViewerPlacement::default()
+        );
+        assert_eq!(
+            DocViewerPlacement::parse(r#"{"version":2,"popped":true}"#),
+            DocViewerPlacement::default()
+        );
+        let odd = DocViewerPlacement::parse(
+            r#"{"version":1,"outer_pos":[1e9,0],"inner_size":[-5,10],"monitor_size":"x","popped":1,"zoom":9000}"#,
+        );
+        assert_eq!(odd, DocViewerPlacement::default(), "{odd:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clamp_keeps_the_title_bar_on_screen_and_the_size_within_it() {
+        let mut rng = Lcg(0x00A0_2B00);
+        for _ in 0..20_000 {
+            let screen = Rect::from_min_size(
+                pos2(rng.range(-4000.0, 4000.0), rng.range(-2000.0, 2000.0)),
+                vec2(rng.range(200.0, 6000.0), rng.range(150.0, 3000.0)),
+            );
+            let saved = DocViewerPlacement {
+                outer_pos: Some(pos2(
+                    rng.range(-20_000.0, 20_000.0),
+                    rng.range(-20_000.0, 20_000.0),
+                )),
+                inner_size: vec2(rng.range(1.0, 9000.0), rng.range(1.0, 9000.0)),
+                monitor_size: None,
+                popped: true,
+                zoom: None,
+            };
+            let c = clamp_placement(&saved, screen);
+            let pos = c.pos.expect("a saved position stays");
+            assert!(c.size.x <= screen.width() + 0.01 && c.size.y <= screen.height() + 0.01);
+            assert!(c.size.x >= DocViewerPlacement::MIN_SIZE.x.min(screen.width()) - 0.01);
+            assert!(c.size.y >= DocViewerPlacement::MIN_SIZE.y.min(screen.height()) - 0.01);
+            let bar = Rect::from_min_size(pos, vec2(c.size.x, DocViewerPlacement::TITLE_BAR));
+            let seen = bar.intersect(screen);
+            assert!(
+                seen.width() >= DocViewerPlacement::VISIBLE_TITLE - 0.01 && seen.height() > 0.0,
+                "{screen:?} {saved:?} -> {c:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn clamp_leaves_a_window_on_its_own_monitor_alone() {
+        let saved = DocViewerPlacement {
+            outer_pos: Some(pos2(2100.0, 80.0)),
+            inner_size: vec2(700.0, 900.0),
+            monitor_size: Some(vec2(1920.0, 1080.0)),
+            popped: true,
+            zoom: None,
+        };
+        let screen = saved.saved_screen().unwrap();
+        assert_eq!(screen.min, pos2(1920.0, 0.0), "the second monitor");
+        let c = clamp_placement(&saved, screen);
+        assert_eq!(c.pos, saved.outer_pos);
+        assert_eq!(c.size, saved.inner_size);
+        // Too big for the monitor: it shrinks to fit.
+        let big = DocViewerPlacement {
+            inner_size: vec2(5000.0, 5000.0),
+            ..saved
+        };
+        assert_eq!(clamp_placement(&big, screen).size, vec2(1920.0, 1080.0));
+        // No saved position: the OS chooses.
+        let fresh = DocViewerPlacement::default();
+        assert_eq!(clamp_placement(&fresh, screen).pos, None);
+    }
+
+    #[test]
+    fn a_gone_monitor_puts_the_window_beside_the_main_one() {
+        let root = Rect::from_min_size(pos2(100.0, 50.0), vec2(1000.0, 800.0));
+        let saved = DocViewerPlacement {
+            outer_pos: Some(pos2(3000.0, 100.0)),
+            inner_size: vec2(600.0, 800.0),
+            monitor_size: Some(vec2(2560.0, 1440.0)),
+            popped: true,
+            zoom: None,
+        };
+        // The 2560 monitor is gone; the window still sits out at x 3000.
+        let outer = Rect::from_min_size(pos2(3000.0, 100.0), vec2(616.0, 839.0));
+        let fix =
+            gone_monitor_fix(&saved, outer, vec2(1920.0, 1080.0), root, false).expect("moved back");
+        assert_eq!(fix, pos2(1108.0, 50.0), "to the right of the main window");
+        // A monitor of the saved size: left alone when it opens by itself
+        // (the second monitor may well be there)...
+        assert_eq!(
+            gone_monitor_fix(&saved, outer, vec2(2560.0, 1440.0), root, false),
+            None
+        );
+        // ...but brought back when the owner asks for the window (S1).
+        assert_eq!(
+            gone_monitor_fix(&saved, outer, vec2(2560.0, 1440.0), root, true),
+            Some(beside_main(root, outer.size(), vec2(2560.0, 1440.0)))
+        );
+        // A different monitor, but the window is on the main one: left alone,
+        // asked for or not.
+        let on_main = Rect::from_min_size(pos2(500.0, 100.0), vec2(616.0, 839.0));
+        for recall in [false, true] {
+            assert_eq!(
+                gone_monitor_fix(&saved, on_main, vec2(1920.0, 1080.0), root, recall),
+                None
+            );
+        }
+        // No room to the right: it goes to the left, else over the corner.
+        let wide = Rect::from_min_size(pos2(700.0, 0.0), vec2(1200.0, 900.0));
+        assert_eq!(
+            beside_main(wide, vec2(600.0, 800.0), vec2(1920.0, 1080.0)),
+            pos2(92.0, 0.0)
+        );
+        let full = Rect::from_min_size(pos2(0.0, 0.0), vec2(1920.0, 1040.0));
+        assert_eq!(
+            beside_main(full, vec2(600.0, 800.0), vec2(1920.0, 1080.0)),
+            pos2(40.0, 40.0)
+        );
+    }
+}

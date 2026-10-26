@@ -52,13 +52,13 @@ pub(crate) fn lines_of(
     )
 }
 
-fn screen(link: &Arc<CompanyLink>) -> CardChargeScreen {
+pub(super) fn screen(link: &Arc<CompanyLink>) -> CardChargeScreen {
     let mut s = CardChargeScreen::new(Arc::clone(link), None, today());
     s.poll();
     s
 }
 
-fn fill(s: &mut CardChargeScreen, amount: &str, lines: &[(&str, &str)]) {
+pub(super) fn fill(s: &mut CardChargeScreen, amount: &str, lines: &[(&str, &str)]) {
     let amount = money(amount);
     s.header.edit_step(|h| h.amount = Some(amount));
     let seeds: Vec<FormLine> = lines
@@ -665,4 +665,76 @@ fn b2_a_found_charge_opens_and_nothing_is_sent() {
     assert_eq!(s.flow.editing.map(|e| e.id), Some(id), "the saved charge");
     assert!(!s.is_dirty());
     assert_eq!(posted(&link), before);
+}
+
+/// Attach a file by path and wait for the background read and upload.
+fn attach_and_wait(s: &mut CardChargeScreen, path: &std::path::Path) {
+    s.attach_path(path);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while s.attach.busy() {
+        assert!(std::time::Instant::now() < until, "the attach never ended");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        s.poll_attach();
+    }
+}
+
+/// A02 (Q-A02e): a file attached before the first save goes to a draft,
+/// shows in the pane at once, and moves onto the charge (an `expense`)
+/// once it is saved; the saved charge opens with it. A credit's files are
+/// the deposit's. No file name in the state.
+#[test]
+fn files_ride_onto_a_saved_charge_and_its_credit_counterpart() {
+    let (dir, link) = link();
+    let mut s = screen(&link);
+    assert!(s.document().is_none());
+    let pdf = dir.path().join("secret-vendor.pdf");
+    std::fs::write(&pdf, b"%PDF-1.4\n%synthetic\n").expect("write");
+    attach_and_wait(&mut s, &pdf);
+    assert_eq!(s.attach.problem, None);
+    assert_eq!(s.state()["attachments"]["count"], 1);
+    assert_eq!(s.state()["attachments"]["draft"], true);
+    let doc = s.document().expect("the pane shows it");
+    assert!(!format!("{doc:?}").contains("secret"));
+    assert!(!s.state().to_string().contains("secret"));
+    // A refused file is never sent.
+    let text = dir.path().join("notes.txt");
+    std::fs::write(&text, b"hello").expect("write");
+    attach_and_wait(&mut s, &text);
+    assert_eq!(s.attach.problem, Some("check.attach.wrong_type"));
+    assert_eq!(s.state()["attachments"]["count"], 1);
+    // Save & New: the file moves onto the charge; the new form has none.
+    let id = save_charge(&mut s, "12.00");
+    s.poll();
+    assert_eq!(s.state()["attachments"]["count"], 0);
+    assert_eq!(s.state()["attachments"]["move_failed"], false);
+    assert!(s.document().is_none());
+    {
+        let demo = link.demo_state().expect("demo");
+        let on = crate::company::demo::checks::attachments(&demo, cl_api::AttachTo::Expense(id));
+        assert_eq!(on.len(), 1, "the file is the charge's");
+    }
+    // Opened again: its file shows.
+    assert!(s.open_record(id));
+    s.poll();
+    s.poll_attach();
+    assert_eq!(s.state()["attachments"]["count"], 1);
+    assert_eq!(s.state()["attachments"]["saved_record"], true);
+    assert!(s.document().is_some());
+    // More files attach to the saved charge directly.
+    attach_and_wait(&mut s, &pdf);
+    assert_eq!(s.state()["attachments"]["count"], 2);
+    // A credit keeps its files as the deposit's.
+    let mut c = screen(&link);
+    c.set_mode(CardMode::Credit);
+    attach_and_wait(&mut c, &pdf);
+    fill(&mut c, "5.00", &[("6250", "5.00")]);
+    assert!(c.start_save(SaveIntent::Save, None), "{}", c.state());
+    c.poll();
+    let credit = c.flow.last.expect("saved").id;
+    let demo = link.demo_state().expect("demo");
+    let on = crate::company::demo::checks::attachments(
+        &demo,
+        cl_api::AttachTo::Txn(TxnType::Deposit, credit),
+    );
+    assert_eq!(on.len(), 1, "the file is the credit's");
 }

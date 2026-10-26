@@ -166,6 +166,15 @@ impl Screen for DocumentViewScreen {
         self.viewer.command(id)
     }
 
+    /// The tab's document (A02): the pop-out viewer follows it. The tab
+    /// is already full size, so it draws the viewer without Pop out.
+    fn document(&self) -> Option<crate::windows::doc_viewer::DocRef> {
+        self.viewer
+            .source()
+            .cloned()
+            .map(crate::windows::doc_viewer::DocRef::new)
+    }
+
     fn open_with(&mut self, payload: OpenPayload) -> bool {
         match payload {
             OpenPayload::Document(source) => {
@@ -225,6 +234,8 @@ mod tests {
         assert_eq!(s.title(), "Document Preview");
         assert!(s.command(CommandId::new("viewer.fit")));
         assert!(!s.state().to_string().contains("a.pdf"));
+        let doc = s.document().expect("the window follows the tab");
+        assert!(!format!("{doc:?}").contains("a.pdf"));
     }
 
     #[test]

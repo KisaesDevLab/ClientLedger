@@ -408,6 +408,7 @@ impl RegisterScreen {
             if del.clicked() {
                 self.command_from_toolbar("form.delete_item");
             }
+            self.docs_button(ui);
         });
         if self.custom.open {
             self.custom_ui(ui, tokens);

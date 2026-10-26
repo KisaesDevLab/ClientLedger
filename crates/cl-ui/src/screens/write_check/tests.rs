@@ -686,6 +686,31 @@ fn a_receipt_rides_on_the_first_save_and_bad_files_are_never_sent() {
     assert_eq!(s.state()["attachments"]["count"], 2);
 }
 
+/// The document pane (A02): the file just attached shows at once and the
+/// pop-out viewer follows it; a saved check opened again shows its first
+/// file; a new check shows nothing. No file name in the state.
+#[test]
+fn the_pane_shows_the_attached_file_and_the_saved_checks_first() {
+    let (dir, link) = link();
+    let mut s = screen(&link);
+    assert!(s.document().is_none());
+    let pdf = dir.path().join("secret-vendor.pdf");
+    std::fs::write(&pdf, b"%PDF-1.4\n%synthetic\n").expect("write");
+    attach_and_wait(&mut s, &pdf);
+    let doc = s.document().expect("the attached file");
+    assert!(!format!("{doc:?}").contains("secret"));
+    assert_eq!(s.state()["attachments"]["viewer"]["open"], true);
+    assert!(!s.state().to_string().contains("secret"));
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    assert!(s.document().is_none(), "a new check shows nothing");
+    s.navigate(true);
+    s.poll();
+    s.poll_attach();
+    assert_eq!(s.state()["mode"], "edit");
+    assert!(s.document().is_some(), "the saved check's first file");
+}
+
 /// Browse (A01 WP-D, Q-P13k): a cancel attaches nothing; a chosen file is
 /// read off the egui thread and attached like a typed one, and a refused
 /// one is never sent.

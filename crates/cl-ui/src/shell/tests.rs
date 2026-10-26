@@ -1033,3 +1033,449 @@ fn make_portable_copy_is_removed_q268() {
         "palette still finds Back Up"
     );
 }
+
+/// The pop-out document viewer (A02, AC1). A bare `Context` embeds
+/// viewports, so the window draws inside the main one and no OS window is
+/// needed.
+mod doc_viewer {
+    use std::sync::Arc;
+
+    use cl_model::{Key as K, Mods as M, Shortcut};
+    use eframe::egui::{self, Modifiers, vec2};
+
+    use super::{CTRL, WIDE, context, demo, frame, settle, tap};
+    use crate::shell::{Shell, ShellOptions};
+    use crate::widgets::doc_pane::DocPane;
+    use crate::widgets::pdf_viewer::{DocSource, ViewerState};
+    use crate::windows::Screen;
+    use crate::windows::doc_viewer::{DocRef, PaneRequest};
+
+    /// A form with a document, like Enter Bill's source card.
+    struct DocForm {
+        title: &'static str,
+        viewer: ViewerState,
+        source: DocSource,
+        dirty: bool,
+    }
+
+    impl Screen for DocForm {
+        fn title(&self) -> String {
+            self.title.into()
+        }
+        fn ui(&mut self, ui: &mut egui::Ui) {
+            let tokens = crate::theme::Tokens::of(ui.ctx());
+            ui.allocate_ui(vec2(ui.available_width(), 300.0), |ui| {
+                let _ = DocPane::show(ui, &mut self.viewer, &tokens);
+            });
+        }
+        fn dirty(&self) -> bool {
+            self.dirty
+        }
+        fn scope(&self) -> cl_model::Scope {
+            if self.viewer.has_focus() {
+                cl_model::Scope::Viewer
+            } else {
+                cl_model::Scope::Form
+            }
+        }
+        fn document(&self) -> Option<DocRef> {
+            Some(DocRef::new(self.source.clone()))
+        }
+    }
+
+    fn fixture(name: &str) -> DocSource {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/docs")
+            .join(name);
+        DocSource {
+            name: name.into(),
+            bytes: Arc::from(std::fs::read(path).expect("fixture")),
+        }
+    }
+
+    fn open_form(shell: &mut Shell, kind: &'static str, file: &str) -> crate::windows::WindowId {
+        let mut viewer = ViewerState::default();
+        let source = fixture(file);
+        viewer.open(source.clone());
+        shell.windows.open_new(
+            cl_model::CommandId::new(kind),
+            Box::new(DocForm {
+                title: "form",
+                viewer,
+                source,
+                dirty: false,
+            }),
+        )
+    }
+
+    const CTRL_SHIFT: Modifiers = Modifiers {
+        shift: true,
+        ..CTRL
+    };
+
+    fn labels(ctx: &egui::Context, shell: &mut Shell) -> Vec<String> {
+        let out = frame(ctx, shell, WIDE, vec![]);
+        out.platform_output
+            .accesskit_update
+            .map(|u| {
+                u.nodes
+                    .iter()
+                    .filter_map(|(_, n)| n.label().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn pops_out_follows_the_tab_in_front_and_docks_without_touching_the_form() {
+        let ctx = context();
+        ctx.enable_accesskit();
+        let mut shell = demo();
+        let bill = open_form(&mut shell, "vendors.enter_bill", "receipt.png");
+        let check = open_form(&mut shell, "vendors.write_check", "receipt.jpg");
+        settle(&ctx, &mut shell, WIDE);
+        assert!(!shell.doc_viewer().popped());
+        assert!(labels(&ctx, &mut shell).iter().any(|l| l == "Pop out"));
+
+        frame(&ctx, &mut shell, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+        settle(&ctx, &mut shell, WIDE);
+        let state = shell.doc_viewer_state(&ctx);
+        assert!(state.popped);
+        assert_eq!(state.class, "embedded");
+        assert_eq!(state.follows, Some("vendors.write_check"));
+        assert!(state.has_doc);
+        let names = labels(&ctx, &mut shell);
+        assert!(
+            names.iter().filter(|l| *l == "Dock").count() >= 2,
+            "the form's placeholder and the window: {names:?}"
+        );
+        assert!(!names.iter().any(|l| l == "Pop out"), "{names:?}");
+
+        shell.windows.activate(bill);
+        settle(&ctx, &mut shell, WIDE);
+        assert_eq!(
+            shell.doc_viewer_state(&ctx).follows,
+            Some("vendors.enter_bill")
+        );
+
+        // A Dock click on the form's placeholder docks; Ctrl+Shift+D too.
+        crate::windows::doc_viewer::request(&ctx, PaneRequest::Dock);
+        frame(&ctx, &mut shell, WIDE, vec![]);
+        assert!(!shell.doc_viewer().popped());
+        frame(&ctx, &mut shell, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+        assert!(shell.doc_viewer().popped());
+        // Closing the window (Ctrl+Shift+D pressed in it) docks it.
+        shell
+            .doc_viewer_mut()
+            .press_in_window(&ctx, Shortcut::new(M::CMD_SHIFT, K::Letter('D')));
+        settle(&ctx, &mut shell, WIDE);
+        assert!(!shell.doc_viewer().popped());
+        for id in [bill, check] {
+            assert!(!shell.windows.get(id).unwrap().dirty(), "never dirty");
+        }
+        assert!(shell.windows.prompt().is_none(), "never prompts");
+        assert_eq!(shell.doc_viewer_state(&ctx).class, "none");
+    }
+
+    #[test]
+    fn with_no_document_the_window_says_so() {
+        let ctx = context();
+        ctx.enable_accesskit();
+        let mut shell = demo();
+        shell.dispatch_now(cl_model::CommandId::new("view.toggle_doc_viewer"));
+        settle(&ctx, &mut shell, WIDE);
+        let state = shell.doc_viewer_state(&ctx);
+        assert!(state.popped && !state.has_doc);
+        let out = frame(&ctx, &mut shell, WIDE, vec![]);
+        let text = format!("{:?}", out.platform_output.accesskit_update);
+        assert!(text.contains("This window has no document"));
+        // The smallest window at 200 % still fits.
+        shell.prefs.zoom_percent = 200;
+        let size = vec2(
+            super::super::MIN_WINDOW[0] / 2.0,
+            super::super::MIN_WINDOW[1] / 2.0,
+        );
+        settle(&ctx, &mut shell, size);
+        let used = ctx.globally_used_rect();
+        assert!(
+            used.max.x <= size.x + 0.5 && used.max.y <= size.y + 0.5,
+            "{used:?}"
+        );
+    }
+
+    #[test]
+    fn a_key_pressed_in_the_window_runs_in_the_main_window() {
+        let ctx = context();
+        let mut shell = demo();
+        open_form(&mut shell, "vendors.enter_bill", "two_pages.pdf");
+        settle(&ctx, &mut shell, WIDE);
+        shell.dispatch_now(cl_model::CommandId::new("view.toggle_doc_viewer"));
+        settle(&ctx, &mut shell, WIDE);
+        // Alt+H in the viewer window: Home opens in the main window.
+        shell
+            .doc_viewer_mut()
+            .press_in_window(&ctx, Shortcut::new(M::ALT, K::Letter('H')));
+        settle(&ctx, &mut shell, WIDE);
+        assert_eq!(
+            shell.windows.active().map(|w| w.kind.as_str()),
+            Some("nav.home")
+        );
+        assert!(shell.doc_viewer().popped(), "the viewer stays out");
+    }
+
+    #[test]
+    fn f6_moves_between_the_form_and_the_popped_viewer() {
+        let ctx = context();
+        let mut shell = demo();
+        open_form(&mut shell, "vendors.enter_bill", "receipt.png");
+        settle(&ctx, &mut shell, WIDE);
+        shell.dispatch_now(cl_model::CommandId::new("view.toggle_doc_viewer"));
+        settle(&ctx, &mut shell, WIDE);
+        // The page is drawn before it can take the keyboard.
+        for _ in 0..400 {
+            if shell.doc_viewer_state(&ctx).viewer["rendered"] == true {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            frame(&ctx, &mut shell, WIDE, vec![]);
+        }
+        frame(&ctx, &mut shell, WIDE, tap(egui::Key::F6, Modifiers::NONE));
+        settle(&ctx, &mut shell, WIDE);
+        assert_eq!(
+            shell.doc_viewer_state(&ctx).viewer["focused"],
+            true,
+            "{:?}",
+            shell.doc_viewer_state(&ctx)
+        );
+        // While the viewer has the keys, Page Down is its own.
+        assert!(shell.doc_viewer().embedded_has_focus(&ctx));
+        frame(&ctx, &mut shell, WIDE, tap(egui::Key::F6, Modifiers::NONE));
+        settle(&ctx, &mut shell, WIDE);
+        assert_eq!(shell.doc_viewer_state(&ctx).viewer["focused"], false);
+        // Esc in the embedded viewer leaves the form alone and keeps the
+        // window out (nit: it used to run the form's revert).
+        frame(&ctx, &mut shell, WIDE, tap(egui::Key::F6, Modifiers::NONE));
+        settle(&ctx, &mut shell, WIDE);
+        assert!(shell.doc_viewer().embedded_has_focus(&ctx));
+        frame(
+            &ctx,
+            &mut shell,
+            WIDE,
+            tap(egui::Key::Escape, Modifiers::NONE),
+        );
+        settle(&ctx, &mut shell, WIDE);
+        assert!(shell.doc_viewer().popped());
+        assert!(shell.windows.prompt().is_none());
+    }
+
+    #[test]
+    fn f6_moves_into_the_docked_pane() {
+        let ctx = context();
+        let mut shell = demo();
+        let id = open_form(&mut shell, "vendors.enter_bill", "receipt.png");
+        // Give the worker time to draw the page (it takes the keyboard then).
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            frame(&ctx, &mut shell, WIDE, vec![]);
+        }
+        frame(&ctx, &mut shell, WIDE, tap(egui::Key::F6, Modifiers::NONE));
+        settle(&ctx, &mut shell, WIDE);
+        assert_eq!(shell.active_window(), Some(id));
+        assert_eq!(shell.focus_scope(), cl_model::Scope::Viewer, "in the pane");
+        assert!(!shell.doc_viewer().popped());
+        frame(&ctx, &mut shell, WIDE, tap(egui::Key::F6, Modifiers::NONE));
+        settle(&ctx, &mut shell, WIDE);
+        assert_eq!(
+            shell.focus_scope(),
+            cl_model::Scope::Form,
+            "back in the form"
+        );
+    }
+
+    #[test]
+    fn placement_and_popped_come_back_after_a_restart_but_never_when_controlled() {
+        for controlled in [false, true] {
+            let dir = std::env::temp_dir().join(format!(
+                "cl-ui-docviewer-restart-{controlled}-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            let store = crate::prefs::UiStore::new(&dir);
+            {
+                let mut shell = Shell::new(ShellOptions {
+                    store: Some(store.clone()),
+                    demo: true,
+                    ..ShellOptions::default()
+                });
+                shell.set_run_only(controlled);
+                let ctx = context();
+                settle(&ctx, &mut shell, WIDE);
+                shell.dispatch_now(cl_model::CommandId::new("view.toggle_doc_viewer"));
+                shell.doc_viewer_mut().note_moved(
+                    Some(egui::pos2(2100.0, 60.0)),
+                    Some(vec2(700.0, 900.0)),
+                    Some(vec2(1920.0, 1080.0)),
+                    0.0,
+                );
+                let mut raw = super::input(WIDE, vec![]);
+                raw.time = Some(2.0);
+                let mut out = ctx.run_ui(raw, |ui| shell.ui(ui));
+                out.textures_delta.clear();
+            }
+            let file = dir.join(crate::prefs::DocViewerPlacement::FILE);
+            assert_eq!(file.exists(), !controlled, "controlled = {controlled}");
+            if !controlled {
+                let text = std::fs::read_to_string(&file).unwrap();
+                assert!(!text.contains("receipt") && !text.contains(".pdf"));
+                let again = Shell::new(ShellOptions {
+                    store: Some(store),
+                    demo: true,
+                    ..ShellOptions::default()
+                });
+                assert!(again.doc_viewer().popped(), "comes back popped out");
+                let b = again.doc_viewer().builder("t");
+                assert_eq!(b.position, Some(egui::pos2(2100.0, 60.0)));
+                assert_eq!(b.inner_size, Some(vec2(700.0, 900.0)));
+                // That monitor is gone at the next start: beside the main window.
+                let root = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(1000.0, 700.0));
+                let outer = egui::Rect::from_min_size(egui::pos2(2100.0, 60.0), vec2(716.0, 939.0));
+                assert_eq!(
+                    again
+                        .doc_viewer()
+                        .gone_monitor_fix(outer, vec2(1366.0, 768.0), root),
+                    Some(egui::pos2(40.0, 40.0)),
+                    "no room beside it on a small screen: over its corner"
+                );
+                assert_eq!(
+                    again
+                        .doc_viewer()
+                        .gone_monitor_fix(outer, vec2(1920.0, 1080.0), root),
+                    None,
+                    "a monitor of the saved size: it may be there, left alone"
+                );
+                // S1: an identical second monitor that is gone looks the
+                // same. Ctrl+Shift+D twice (dock, pop out) brings the
+                // window beside the main one.
+                let mut again = again;
+                let ctx = context();
+                frame(&ctx, &mut again, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+                assert!(!again.doc_viewer().popped());
+                frame(&ctx, &mut again, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+                assert!(again.doc_viewer().popped());
+                let monitor = vec2(1920.0, 1080.0);
+                assert_eq!(
+                    again.doc_viewer().gone_monitor_fix(outer, monitor, root),
+                    Some(crate::prefs::beside_main(root, outer.size(), monitor)),
+                    "asked for: beside the main window"
+                );
+                // Once the owner has moved it this session, popping out
+                // again keeps their place.
+                again.doc_viewer_mut().owner_moved();
+                frame(&ctx, &mut again, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+                frame(&ctx, &mut again, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+                assert!(again.doc_viewer().popped());
+                assert_eq!(
+                    again.doc_viewer().gone_monitor_fix(outer, monitor, root),
+                    None
+                );
+            }
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    /// Plan §5: switching company forgets the old company's document (the
+    /// window stays out, empty); closing the company closes the window and
+    /// remembers it was out.
+    #[test]
+    fn switching_or_closing_the_company_clears_the_viewer() {
+        let ctx = context();
+        let mut shell = demo();
+        open_form(&mut shell, "vendors.enter_bill", "receipt.png");
+        settle(&ctx, &mut shell, WIDE);
+        shell.dispatch_now(cl_model::CommandId::new("view.toggle_doc_viewer"));
+        settle(&ctx, &mut shell, WIDE);
+        assert!(shell.doc_viewer_state(&ctx).has_doc);
+        let other =
+            cl_core::ids::TenantId::parse("00000000-0000-4000-8000-0000000000c2").expect("tenant");
+        shell
+            .company_link()
+            .expect("demo link")
+            .push(crate::company::CompanyEvent::Opened {
+                tenant_id: other,
+                name: "Other Books".into(),
+                accent: cl_settings::Accent([10, 120, 90]),
+                closed_through: None,
+            });
+        settle(&ctx, &mut shell, WIDE);
+        let state = shell.doc_viewer_state(&ctx);
+        assert!(state.popped, "still out");
+        assert!(!state.has_doc, "nothing of the old company's: {state:?}");
+        assert_ne!(state.follows, Some("vendors.enter_bill"));
+        shell
+            .company_link()
+            .expect("demo link")
+            .push(crate::company::CompanyEvent::Closed);
+        settle(&ctx, &mut shell, WIDE);
+        let state = shell.doc_viewer_state(&ctx);
+        assert!(!state.popped && !state.has_doc);
+        assert!(
+            shell.doc_viewer().placement().popped,
+            "it comes back out with the next company"
+        );
+    }
+
+    /// Plan §5: closing the tab the window follows: it follows the tab in
+    /// front now, and shows nothing when that one has no document.
+    #[test]
+    fn closing_the_followed_tab_moves_the_window_on() {
+        let ctx = context();
+        let mut shell = demo();
+        let bill = open_form(&mut shell, "vendors.enter_bill", "receipt.png");
+        let check = open_form(&mut shell, "vendors.write_check", "receipt.jpg");
+        settle(&ctx, &mut shell, WIDE);
+        shell.dispatch_now(cl_model::CommandId::new("view.toggle_doc_viewer"));
+        settle(&ctx, &mut shell, WIDE);
+        assert_eq!(
+            shell.doc_viewer_state(&ctx).follows,
+            Some("vendors.write_check")
+        );
+        assert_eq!(
+            shell.close_window(check),
+            crate::windows::CloseOutcome::Closed
+        );
+        settle(&ctx, &mut shell, WIDE);
+        let state = shell.doc_viewer_state(&ctx);
+        assert_eq!(state.follows, Some("vendors.enter_bill"));
+        assert!(state.popped && state.has_doc);
+        assert_eq!(
+            shell.close_window(bill),
+            crate::windows::CloseOutcome::Closed
+        );
+        settle(&ctx, &mut shell, WIDE);
+        let state = shell.doc_viewer_state(&ctx);
+        assert!(state.popped && !state.has_doc, "{state:?}");
+    }
+
+    #[test]
+    fn the_window_follows_a_new_document_and_keeps_zoom() {
+        let ctx = context();
+        let mut shell = demo();
+        open_form(&mut shell, "vendors.enter_bill", "receipt.png");
+        settle(&ctx, &mut shell, WIDE);
+        shell.dispatch_now(cl_model::CommandId::new("view.toggle_doc_viewer"));
+        settle(&ctx, &mut shell, WIDE);
+        assert!(
+            shell
+                .doc_viewer_mut()
+                .viewer_command(cl_model::CommandId::new("viewer.zoom_in"))
+        );
+        let zoom = shell.doc_viewer_state(&ctx).viewer["zoom"].clone();
+        open_form(&mut shell, "vendors.write_check", "receipt.jpg");
+        settle(&ctx, &mut shell, WIDE);
+        let state = shell.doc_viewer_state(&ctx);
+        assert_eq!(state.follows, Some("vendors.write_check"));
+        assert_eq!(state.viewer["zoom"], zoom, "the zoom stays");
+        let json = state.to_json().to_string();
+        assert!(!json.contains("receipt"), "{json}");
+    }
+}

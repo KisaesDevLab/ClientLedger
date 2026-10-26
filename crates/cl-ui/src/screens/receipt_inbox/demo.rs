@@ -67,8 +67,8 @@ pub(crate) fn seed(dir: &Path) {
 /// A synthetic one-page invoice.
 const INVOICE_PDF: &[u8] =
     include_bytes!("../../../../../assets/sample/docs/midwest_inv_55871.pdf");
-/// A synthetic TIFF (the little-endian signature and an empty directory).
-const FAX_TIFF: &[u8] = b"II*\0\x08\0\0\0\0\0\0\0synthetic fax";
+/// A synthetic one-page CCITT G4 fax (A02: TIFFs show in the viewer).
+const FAX_TIFF: &[u8] = include_bytes!("../../../../../fixtures/docs/g4_fax.tif");
 /// A synthetic iPhone photo header (never read: HEIC isn't taken).
 const PHOTO_HEIC: &[u8] = b"\0\0\0\x18ftypheic\0\0\0\0mif1heicsynthetic";
 

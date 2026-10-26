@@ -176,6 +176,9 @@ pub struct InspectParams {
     /// Return only matching elements (flat list) when given.
     #[serde(default)]
     pub target: Option<Target>,
+    /// Which window (`main`, the default, or `doc_viewer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<String>,
 }
 
 /// `click`.
@@ -184,6 +187,9 @@ pub struct InspectParams {
 pub struct ClickParams {
     /// What to click (its centre).
     pub target: Target,
+    /// Which window (`main`, the default, or `doc_viewer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<String>,
 }
 
 /// `type`: text typed into the focused element.
@@ -195,6 +201,9 @@ pub struct TypeParams {
     /// Focus this element first.
     #[serde(default)]
     pub target: Option<Target>,
+    /// Which window (`main`, the default, or `doc_viewer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<String>,
 }
 
 /// `paste`: text pasted into the focused element as one clipboard paste,
@@ -208,6 +217,9 @@ pub struct PasteParams {
     /// Focus this element first.
     #[serde(default)]
     pub target: Option<Target>,
+    /// Which window (`main`, the default, or `doc_viewer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<String>,
 }
 
 impl std::fmt::Debug for PasteParams {
@@ -215,6 +227,7 @@ impl std::fmt::Debug for PasteParams {
         f.debug_struct("PasteParams")
             .field("text", &format_args!("<{} bytes>", self.text.len()))
             .field("target", &self.target)
+            .field("viewport", &self.viewport)
             .finish()
     }
 }
@@ -225,6 +238,9 @@ impl std::fmt::Debug for PasteParams {
 pub struct KeyParams {
     /// The key and modifiers, joined by `+`.
     pub key: String,
+    /// Which window (`main`, the default, or `doc_viewer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<String>,
 }
 
 /// `focus`.
@@ -233,6 +249,9 @@ pub struct KeyParams {
 pub struct FocusParams {
     /// What to focus.
     pub target: Target,
+    /// Which window (`main`, the default, or `doc_viewer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<String>,
 }
 
 /// `scroll`: the mouse wheel over an element, to one end of whatever
@@ -244,6 +263,9 @@ pub struct ScrollParams {
     pub target: Target,
     /// Which end.
     pub to: ScrollTo,
+    /// Which window (`main`, the default, or `doc_viewer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<String>,
 }
 
 /// Which end `scroll` goes to.
@@ -270,16 +292,49 @@ pub struct CommandParams {
 pub struct ScreenshotParams {
     /// Where to write the PNG (must end in `.png`).
     pub path: String,
+    /// Which window (`main`, the default, or `doc_viewer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<String>,
 }
 
 /// `resize`: set the window's inner size in points.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResizeParams {
     /// Width in points.
     pub width: f32,
     /// Height in points.
     pub height: f32,
+    /// Which window (`main`, the default, or `doc_viewer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<String>,
+}
+
+/// `move`: put the window's outer top-left corner at this desktop
+/// position, in points.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveParams {
+    /// Left edge.
+    pub x: f32,
+    /// Top edge.
+    pub y: f32,
+    /// Which window (`main`, the default, or `doc_viewer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<String>,
+}
+
+/// The window every method acts on when no `viewport` is given.
+pub const MAIN_VIEWPORT: &str = "main";
+/// The pop-out document viewer (A02).
+pub const DOC_VIEWER_VIEWPORT: &str = "doc_viewer";
+/// Every window name the `viewport` parameter takes.
+pub const VIEWPORTS: &[&str] = &[MAIN_VIEWPORT, DOC_VIEWER_VIEWPORT];
+
+/// True when `name` is a window the `viewport` parameter takes.
+#[must_use]
+pub fn is_viewport(name: &str) -> bool {
+    VIEWPORTS.contains(&name)
 }
 
 /// `set_theme`.
@@ -408,5 +463,70 @@ mod tests {
         assert!(bad.is_err());
         let bad: Result<Target, _> = serde_json::from_value(serde_json::json!({"nope": 1}));
         assert!(bad.is_err());
+    }
+
+    fn round_trip<T>(v: &serde_json::Value) -> serde_json::Value
+    where
+        T: Serialize + for<'de> Deserialize<'de>,
+    {
+        let p: T = serde_json::from_value(v.clone()).unwrap();
+        serde_json::to_value(&p).unwrap()
+    }
+
+    /// The `viewport` parameter (A02 D5) round-trips on every method that
+    /// takes it, and is left out of the wire form when not given, so
+    /// requests written before A02 are unchanged.
+    #[test]
+    fn viewport_round_trips_and_defaults_to_absent() {
+        use serde_json::json;
+        let t = json!({"label": "Dock"});
+        let with = [
+            ("inspect", json!({"target": t, "viewport": "doc_viewer"})),
+            ("click", json!({"target": t, "viewport": "doc_viewer"})),
+            ("type", json!({"text": "x", "viewport": "doc_viewer"})),
+            ("paste", json!({"text": "x", "viewport": "doc_viewer"})),
+            ("key", json!({"key": "F6", "viewport": "doc_viewer"})),
+            ("focus", json!({"target": t, "viewport": "main"})),
+            (
+                "scroll",
+                json!({"target": t, "to": "end", "viewport": "doc_viewer"}),
+            ),
+            (
+                "screenshot",
+                json!({"path": "a.png", "viewport": "doc_viewer"}),
+            ),
+            (
+                "resize",
+                json!({"width": 400.0, "height": 300.0, "viewport": "doc_viewer"}),
+            ),
+            (
+                "move",
+                json!({"x": 10.0, "y": 20.0, "viewport": "doc_viewer"}),
+            ),
+        ];
+        for (name, v) in &with {
+            let back = match *name {
+                "inspect" => round_trip::<InspectParams>(v),
+                "click" => round_trip::<ClickParams>(v),
+                "type" => round_trip::<TypeParams>(v),
+                "paste" => round_trip::<PasteParams>(v),
+                "key" => round_trip::<KeyParams>(v),
+                "focus" => round_trip::<FocusParams>(v),
+                "scroll" => round_trip::<ScrollParams>(v),
+                "screenshot" => round_trip::<ScreenshotParams>(v),
+                "resize" => round_trip::<ResizeParams>(v),
+                "move" => round_trip::<MoveParams>(v),
+                _ => unreachable!(),
+            };
+            assert_eq!(back["viewport"], v["viewport"], "{name}");
+        }
+        let plain: ClickParams = serde_json::from_value(json!({"target": t})).unwrap();
+        assert_eq!(plain.viewport, None);
+        let wire = serde_json::to_value(&plain).unwrap();
+        assert!(wire.get("viewport").is_none(), "{wire}");
+        let bad: Result<KeyParams, _> =
+            serde_json::from_value(json!({"key": "A", "window": "doc_viewer"}));
+        assert!(bad.is_err());
+        assert!(is_viewport("main") && is_viewport("doc_viewer") && !is_viewport("Main"));
     }
 }

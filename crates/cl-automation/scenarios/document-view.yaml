@@ -102,3 +102,68 @@ steps:
   - click: {role: button, label: Clear}
   - command: file.close_window
   - click: {role: tab, label: Home}
+
+  # --- A02 WP-A: a multi-page TIFF, thumbnails, rotate and the zoom menu --------
+  # (`fixtures/docs/three_pages.tif` is synthetic: grey, colour and 1-bit
+  # pages.) The steps above are P17's, unchanged.
+  - key: Ctrl+W
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - type: {text: fixtures/docs/three_pages.tif, target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - click: {role: button, label: Preview}
+  - assert_state: {key: screen.screen, equals: document_view}
+  - assert_state: {key: screen.viewer.status, equals: ready}
+  - assert_state: {key: screen.viewer.pages, equals: 3}
+  - assert_state: {key: screen.viewer.rendered, equals: true}
+  - assert_state: {key: screen.viewer.thumbnails.shown, equals: true}
+  - assert_state: {key: screen.viewer.thumbnails.loaded, equals: 3}
+  - assert_exists: {role: button, label: Page 1}
+  - assert_exists: {role: button, label: Page 2}
+  - assert_exists: {role: button, label: Page 3}
+  - assert_exists: {role: button, label: Rotate right}
+  - assert_exists: {role: button, label: Rotate left}
+  - assert_exists: {role: button, label: Zoom}
+  - assert_exists: {label: Page 1 of 3}
+  - screenshot: tiff-page-1
+
+  # A thumbnail goes to its page.
+  - click: {role: button, label: Page 2}
+  - assert_state: {key: screen.viewer.page, equals: 1}
+  - assert_state: {key: screen.viewer.rendered, equals: true}
+  - assert_exists: {label: Page 2 of 3}
+  - assert_state: {key: screen.viewer.focused, equals: true}
+
+  # Rotate is view only, per page.
+  - click: {role: button, label: Rotate right}
+  - assert_state: {key: screen.viewer.rotation, equals: 90}
+  - assert_state: {key: screen.viewer.rendered, equals: true}
+  - screenshot: tiff-rotated
+  - key: PageDown
+  - assert_state: {key: screen.viewer.page, equals: 2}
+  - assert_state: {key: screen.viewer.rotation, equals: 0}
+  - key: PageUp
+  - assert_state: {key: screen.viewer.rotation, equals: 90}
+  - click: {role: button, label: Rotate left}
+  - assert_state: {key: screen.viewer.rotation, equals: 0}
+
+  # The zoom menu.
+  - click: {role: button, label: Zoom}
+  - click: {role: button, label: 200%}
+  - assert_state: {key: screen.viewer.zoom, equals: 200}
+  - assert_state: {key: screen.viewer.rendered, equals: true}
+  - screenshot: tiff-200
+  - click: {role: button, label: Zoom}
+  - click: {role: button, label: Fit page}
+  - assert_state: {key: screen.viewer.zoom, equals: fit_page}
+  - assert_state: {key: screen.viewer.rendered, equals: true}
+  - screenshot: tiff-fit-page
+
+  # Close; the check is cleared (nothing saved).
+  - command: file.close_window
+  - click: {role: tab, label_contains: Write Check}
+  - assert_state: {key: screen.screen, equals: write_check}
+  - click: {role: button, label: Clear}
+  - command: file.close_window
+  - click: {role: tab, label: Home}
