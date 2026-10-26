@@ -245,6 +245,12 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 | Q-290 | **Pop-out document viewer**: docked beside the form by default, poppable to its own OS window that follows the active form or queue item and remembers monitor, position, size, and zoom per user. | A02, A04 |
 | Q-291 | **Compare tools**: field ↔ page highlights both ways with confidence colors, click-to-fill from the page, and a check-list view with source snippets. | A04 |
 | Q-294 | **ADD-01 models**: Opus for all A-phase work and PR-A1, stepping up when needed (owner 2026-10-25; the kit's Fable checkpoints and Sonnet implementers don't apply, Q-277 stands). | ADD-01, docs/AGENTS.md |
+| Q-295 | **ADD-02** where A06 runs. | A06 | Right after A04, before the beta track resumes; P18 stays on hold until the owner says go. | Default in force |
+| Q-296 | Statement lines left out. | A06 | "Balance forward", page subtotals, totals and aging summaries are read as header values, never as lines. | Default in force |
+| Q-297 | Statement balance comparison. | A06 | Show the statement's closing balance against the books' balance on the statement date when the engine can report it; display only. Changes Q-P17q's "no balance comparison". | Default in force |
+| Q-298 | Keep the statement. | A06 | "Save this statement with the vendor" after Match, default on; needs engine support (A06 step 0 / U-94), otherwise hidden. | Default in force |
+| Q-299 | Statement layouts. | A06 | Learned per vendor on accept, separate from the bill layout; in backups, not in transfer files (Q-A03g). | Default in force |
+| Q-300 | Statement page limit. | A06 | Up to 20 pages per statement (bills read 10); same per-page time limits. | Default in force |
 
 ## Owner Q&A 2026-10-19
 

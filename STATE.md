@@ -65,6 +65,12 @@
 | A04 | Review queue and compare tools | M | |
 | A05 | Match document drafts in the Bank Feed | M | After P26 |
 
+**ADD-02 — Read a vendor statement into Match Vendor Statement** (`addenda/ADD-02-statement-reading.md`; part of the beta; owner request 2026-10-26). Scheduling: A06 runs right after A04 merges; P18 stays on hold until the owner says go.
+
+| Phase | Title | Tier | Status |
+| --- | --- | --- | --- |
+| A06 | Read a vendor statement | M | After A04 |
+
 ## Post-beta (owner may reorder, Q-39)
 
 | Phase | Title | Tier | Status |
