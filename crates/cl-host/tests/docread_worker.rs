@@ -262,6 +262,17 @@ fn workers_are_recycled_by_job_count_and_by_memory() {
     let st = host.stats();
     assert_eq!((st.workers_started, st.recycles, st.kills), (3, 2, 0));
 
+    // A zero setting still lets each worker read one job.
+    let s = Scratch::new("docread-recycle-zero");
+    let mut c = config(&s);
+    c.limits.recycle_jobs = 0;
+    let mut host = DocreadHost::new(c);
+    assert_eq!(
+        host.read(&[junk(), junk()], today()),
+        [UNSUPPORTED, UNSUPPORTED]
+    );
+    assert_eq!(host.stats().workers_started, 2);
+
     let s = Scratch::new("docread-recycle-mem");
     let mut c = config(&s);
     c.limits.recycle_memory = 64 * 1024 * 1024;

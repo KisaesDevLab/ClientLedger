@@ -745,7 +745,8 @@ impl DocreadHost {
                 continue;
             };
             start_failures = 0;
-            let batch = take_batch(&queue, jobs, self.config.limits.recycle_jobs - w.served);
+            let room = self.config.limits.recycle_jobs.saturating_sub(w.served);
+            let batch = take_batch(&queue, jobs, room);
             let end = run_batch(
                 w,
                 &batch,
@@ -801,7 +802,8 @@ impl DocreadHost {
     fn ready_worker<'w>(&mut self, worker: &'w mut Option<Worker>) -> Option<&'w mut Worker> {
         if worker
             .as_ref()
-            .is_some_and(|w| w.served >= self.config.limits.recycle_jobs)
+            // At least one job per worker, whatever the setting.
+            .is_some_and(|w| w.served >= self.config.limits.recycle_jobs.max(1))
         {
             if let Some(w) = worker.take() {
                 w.stop();
