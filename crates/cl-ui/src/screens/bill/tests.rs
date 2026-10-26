@@ -381,6 +381,36 @@ fn a_file_by_path_is_read_off_the_egui_thread() {
     assert_eq!(s.attach.problem, Some("check.attach.not_found"));
 }
 
+/// Browse (A01 WP-D, Q-P13k): the chosen file goes the typed path's way
+/// (read off the egui thread, checked, uploaded); a cancel attaches nothing.
+#[test]
+fn a_file_chosen_with_browse_is_attached_like_a_typed_one() {
+    use crate::widgets::file_picker::{Answer, PickerHook};
+    let (dir, link) = link();
+    let mut s = screen(&link);
+    let ctx = egui::Context::default();
+    let hook = PickerHook::install(&ctx);
+    hook.answer(Answer::Cancel);
+    s.browse_attach(&ctx);
+    s.poll_attach();
+    assert!(s.attach.browsing.is_none() && s.attach.reading.is_none());
+    assert!(s.attach.shown.is_none(), "nothing attached");
+    let pdf = dir.path().join("invoice.pdf");
+    std::fs::write(&pdf, demo_bills::STORY_PDF).expect("write");
+    hook.answer(Answer::Paths(vec![pdf]));
+    s.browse_attach(&ctx);
+    assert!(s.attach.busy());
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while s.attach.browsing.is_some() || s.attach.reading.is_some() {
+        assert!(std::time::Instant::now() < until, "the read never ended");
+        s.poll_attach();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(hook.asked(), 2);
+    assert_eq!(s.attach.problem, None);
+    assert!(s.attach.shown.is_some(), "uploaded and shown");
+}
+
 /// Before `bill-lines-v1` the draft's files move in a second call after the
 /// create. A lost reply cuts that off; when Check again finds the bill, the
 /// move runs then (the review's should-fix 4).

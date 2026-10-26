@@ -686,6 +686,43 @@ fn a_receipt_rides_on_the_first_save_and_bad_files_are_never_sent() {
     assert_eq!(s.state()["attachments"]["count"], 2);
 }
 
+/// Browse (A01 WP-D, Q-P13k): a cancel attaches nothing; a chosen file is
+/// read off the egui thread and attached like a typed one, and a refused
+/// one is never sent.
+#[test]
+fn browse_attaches_the_chosen_file_and_a_cancel_nothing() {
+    use crate::widgets::file_picker::{Answer, PickerHook};
+    let (dir, link) = link();
+    let mut s = screen(&link);
+    let ctx = eframe::egui::Context::default();
+    let hook = PickerHook::install(&ctx);
+    let mut browse = |s: &mut WriteCheckScreen, a: Answer| {
+        hook.answer(a);
+        s.browse_attach(&ctx);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while s.attach.browsing.is_some() || s.attach.reading.is_some() {
+            assert!(std::time::Instant::now() < until, "the read never ended");
+            s.poll_attach();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    };
+    browse(&mut s, Answer::Cancel);
+    assert_eq!(s.attach.problem, None);
+    assert!(s.header.current().draft_attachment.is_none());
+    let text = dir.path().join("notes.txt");
+    std::fs::write(&text, b"hello").expect("write");
+    browse(&mut s, Answer::Paths(vec![text]));
+    assert_eq!(s.attach.problem, Some("check.attach.wrong_type"));
+    assert!(s.header.current().draft_attachment.is_none());
+    let tiff = dir.path().join("receipt.tif");
+    std::fs::write(&tiff, b"II*\0\x08\0\0\0synthetic").expect("write");
+    browse(&mut s, Answer::Paths(vec![tiff]));
+    assert_eq!(s.attach.problem, None);
+    assert!(s.header.current().draft_attachment.is_some());
+    assert_eq!(s.state()["attachments"]["count"], 1);
+    assert_eq!(hook.asked(), 3);
+}
+
 #[test]
 fn a_printed_check_edit_asks_reprint_or_keep_the_number() {
     let (_d, link) = link();
