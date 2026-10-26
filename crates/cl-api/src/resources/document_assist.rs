@@ -63,10 +63,39 @@ pub const AI_RATE_LIMIT: &str = "AI_RATE_LIMIT";
 /// The first bytes of every PNG file.
 const PNG_MAGIC: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
 
+/// A page picture is at most this many pixels wide and high (the engine
+/// refuses larger ones with `IMAGE_TOO_LARGE`, engine #179).
+pub const ASSIST_MAX_IMAGE_SIDE_PX: u32 = 4096;
+
 /// True when `bytes` start like a PNG file.
 #[must_use]
 pub fn is_png(bytes: &[u8]) -> bool {
     bytes.starts_with(&PNG_MAGIC)
+}
+
+/// A PNG's width and height from its header (`IHDR`, the first chunk),
+/// as the engine reads them. Only those eight bytes are looked at: nothing
+/// is decoded (pictures are decoded only in the reading worker, A03 D5).
+/// `None` when `bytes` is not a PNG with a whole `IHDR` first or a side is
+/// zero.
+#[must_use]
+pub fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    if !is_png(bytes) || bytes.get(12..16)? != b"IHDR" {
+        return None;
+    }
+    let side = |at: usize| -> Option<u32> {
+        let b: [u8; 4] = bytes.get(at..at + 4)?.try_into().ok()?;
+        Some(u32::from_be_bytes(b)).filter(|v| *v > 0)
+    };
+    Some((side(16)?, side(20)?))
+}
+
+/// True when `bytes` is a PNG the engine takes as a page picture: a whole
+/// header and no side over [`ASSIST_MAX_IMAGE_SIDE_PX`].
+#[must_use]
+pub fn png_fits(bytes: &[u8]) -> bool {
+    png_dimensions(bytes)
+        .is_some_and(|(w, h)| w <= ASSIST_MAX_IMAGE_SIDE_PX && h <= ASSIST_MAX_IMAGE_SIDE_PX)
 }
 
 /// What to read. `Debug` shows sizes only.
@@ -97,14 +126,14 @@ impl AssistRequest {
     /// # Errors
     /// `Local(InvalidValue)` for text over [`ASSIST_MAX_TEXT_CHARS`], more
     /// than [`ASSIST_MAX_IMAGES`] pictures, pictures over
-    /// [`ASSIST_MAX_IMAGE_BYTES`] together, a picture that is not a PNG, or
-    /// nothing to read.
+    /// [`ASSIST_MAX_IMAGE_BYTES`] together, a picture that is not a PNG or
+    /// is over [`ASSIST_MAX_IMAGE_SIDE_PX`] on a side, or nothing to read.
     pub fn check(&self) -> Result<(), ApiError> {
         let bad = Err(ApiError::Local(LocalValidation::InvalidValue));
         if self.text.chars().count() > ASSIST_MAX_TEXT_CHARS
             || self.page_images.len() > ASSIST_MAX_IMAGES
             || self.page_images.iter().map(Vec::len).sum::<usize>() > ASSIST_MAX_IMAGE_BYTES
-            || self.page_images.iter().any(|p| !is_png(p))
+            || self.page_images.iter().any(|p| !png_fits(p))
             || (self.text.trim().is_empty() && self.page_images.is_empty())
         {
             return bad;

@@ -237,8 +237,9 @@ pub use resources::vendor_templates::{
 };
 // A03: document reading assist (U-92d).
 pub use resources::document_assist::{
-    AI_RATE_LIMIT, ASSIST_MAX_IMAGE_BYTES, ASSIST_MAX_IMAGES, ASSIST_MAX_TEXT_CHARS, AssistLine,
-    AssistReader, AssistRequest, AssistSuggestion, CLOUD_VISION_DISABLED, CONSENT_REQUIRED, is_png,
+    AI_RATE_LIMIT, ASSIST_MAX_IMAGE_BYTES, ASSIST_MAX_IMAGE_SIDE_PX, ASSIST_MAX_IMAGES,
+    ASSIST_MAX_TEXT_CHARS, AssistLine, AssistReader, AssistRequest, AssistSuggestion,
+    CLOUD_VISION_DISABLED, CONSENT_REQUIRED, is_png, png_dimensions, png_fits,
     suggestion_from_json,
 };
 pub use wire::money_str_strict;

@@ -119,6 +119,17 @@ pub(crate) struct LocalRead {
     pub assist_sent: u32,
     /// The class of the last assist outcome (control channel).
     pub assist_outcome: Option<&'static str>,
+    /// Whether the last assist took the document's picture (a PNG over the
+    /// engine's limits goes as text only, and the banner says so).
+    pub picture: Option<assist::Picture>,
+    /// The keyboard was on Read document when the reading started: it
+    /// moves to Cancel reading (the button it was on is disabled while
+    /// reading), and back to Read document when the reading ends.
+    pub focus_cancel: bool,
+    /// Cancel reading had the keyboard last frame.
+    pub cancel_focused: bool,
+    /// Give Read document the keyboard next frame.
+    pub focus_read: bool,
 }
 
 /// A new bill or a closed window stops a reading still running (review
@@ -169,6 +180,7 @@ impl LocalRead {
         self.needs_help = false;
         self.helped = false;
         self.assist = None;
+        self.picture = None;
     }
 
     pub(crate) fn assist_json(&self, switches: Option<ReadSwitches>) -> Value {
@@ -179,6 +191,7 @@ impl LocalRead {
             "busy": self.assist.is_some(),
             "requests": self.assist_sent,
             "outcome": self.assist_outcome,
+            "picture": self.picture.map(assist::Picture::key),
         })
     }
 
@@ -397,6 +410,7 @@ impl EnterBillScreen {
             .clone()
             .unwrap_or_else(|| Arc::from([]));
         let request = assist::request(&last, route, &bytes);
+        self.read.local.picture = Some(assist::picture(route, &bytes));
         self.read.job_no += 1;
         tracing::info!(job = self.read.job_no, "document assist started");
         if self.link.is_demo() {

@@ -25,10 +25,48 @@ fn request() -> AssistRequest {
     }
 }
 
-fn png() -> Vec<u8> {
+/// A PNG header saying `w` × `h` (nothing after it is ever decoded).
+fn png_of(w: u32, h: u32) -> Vec<u8> {
     let mut p = PNG_MAGIC.to_vec();
+    p.extend_from_slice(&13u32.to_be_bytes());
+    p.extend_from_slice(b"IHDR");
+    p.extend_from_slice(&w.to_be_bytes());
+    p.extend_from_slice(&h.to_be_bytes());
     p.extend_from_slice(b"rest");
     p
+}
+
+fn png() -> Vec<u8> {
+    png_of(1, 1)
+}
+
+/// Engine #179: a page over 4096 px on a side is refused, so it is never
+/// sent; the size comes from the header alone.
+#[test]
+fn pictures_over_4096_px_on_a_side_are_refused_before_sending() {
+    assert_eq!(png_dimensions(&png_of(4096, 4096)), Some((4096, 4096)));
+    assert!(png_fits(&png_of(4096, 4096)));
+    assert!(png_fits(&png_of(1, 4096)));
+    assert!(!png_fits(&png_of(4097, 10)));
+    assert!(!png_fits(&png_of(10, 4097)));
+    assert!(!png_fits(&png_of(u32::MAX, u32::MAX)));
+    // A broken header is not a picture the engine takes.
+    assert!(!png_fits(&png_of(0, 10)));
+    assert_eq!(png_dimensions(&PNG_MAGIC), None);
+    assert_eq!(png_dimensions(&png_of(5, 5)[..20]), None);
+    let mut wrong_chunk = png_of(5, 5);
+    wrong_chunk[12..16].copy_from_slice(b"tEXt");
+    assert_eq!(png_dimensions(&wrong_chunk), None);
+    assert_eq!(png_dimensions(b"GIF89a"), None);
+    let with = |p: Vec<u8>| AssistRequest {
+        page_images: vec![p],
+        ..request()
+    };
+    assert_eq!(with(png_of(4096, 3000)).check(), Ok(()));
+    assert_eq!(
+        with(png_of(4097, 3000)).check(),
+        Err(ApiError::Local(LocalValidation::InvalidValue))
+    );
 }
 
 #[test]

@@ -16,7 +16,10 @@
 //! - **What is sent.** The words the local reader found, line by line, at
 //!   most [`cl_api::ASSIST_MAX_TEXT_CHARS`] characters; a picture only to
 //!   an online provider when allowed and the document itself is one PNG of
-//!   at most 2 MiB (A03 renders no pages, Q-A03u). Never logged.
+//!   at most 2 MiB and 4096 px on a side (A03 renders no pages, Q-A03u). A
+//!   larger PNG is not shrunk here (only the worker decodes pictures): its
+//!   text goes alone and the owner is told ([`Picture::TooLarge`]). Never
+//!   logged.
 //! - **What comes back** goes through the same checks as the local
 //!   reading: `cl_docread::ai_gate::merge` runs **before** any form value
 //!   exists, so an AI amount is kept only when a word on the page equals it
@@ -148,15 +151,53 @@ pub fn page_text(reading: &Reading) -> String {
     out.chars().take(cl_api::ASSIST_MAX_TEXT_CHARS).collect()
 }
 
-/// What to send: the page text and, when pictures may go and the document
-/// is one small PNG, that picture.
+/// Whether the document's picture goes with a second reading.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Picture {
+    /// No picture may go here, or the document isn't a PNG.
+    NotSent,
+    /// The PNG goes with the text.
+    Sent,
+    /// Pictures may go, but this PNG is over the engine's limits (2 MiB, or
+    /// [`cl_api::ASSIST_MAX_IMAGE_SIDE_PX`] on a side): only the text goes,
+    /// and the owner is told. The desktop never decodes or shrinks it (A03
+    /// D5: pictures are decoded only in the reading worker).
+    TooLarge,
+}
+
+impl Picture {
+    /// The control channel's name.
+    #[must_use]
+    pub fn key(self) -> &'static str {
+        match self {
+            Picture::NotSent => "not_sent",
+            Picture::Sent => "sent",
+            Picture::TooLarge => "too_large",
+        }
+    }
+}
+
+/// Whether the document's picture goes, on this route.
 #[must_use]
-pub fn request(local: &LocalReading, route: Route, document: &[u8]) -> AssistRequest {
+pub fn picture(route: Route, document: &[u8]) -> Picture {
     // A local model reads the text only (an Ollama text model can't take
     // pictures, and the words are already this computer's own reading).
-    let picture = matches!(route, Route::Cloud { images: true })
-        && cl_api::is_png(document)
-        && document.len() <= cl_api::ASSIST_MAX_IMAGE_BYTES;
+    if !matches!(route, Route::Cloud { images: true }) || !cl_api::is_png(document) {
+        return Picture::NotSent;
+    }
+    // The size is read from the PNG's header; nothing is decoded here.
+    if document.len() <= cl_api::ASSIST_MAX_IMAGE_BYTES && cl_api::png_fits(document) {
+        Picture::Sent
+    } else {
+        Picture::TooLarge
+    }
+}
+
+/// What to send: the page text and, when pictures may go and the document
+/// is one PNG within the engine's limits, that picture.
+#[must_use]
+pub fn request(local: &LocalReading, route: Route, document: &[u8]) -> AssistRequest {
+    let picture = picture(route, document) == Picture::Sent;
     AssistRequest {
         text: page_text(&local.reading),
         page_images: if picture {
