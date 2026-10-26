@@ -43,7 +43,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 
 use cl_company::CompanyError;
-use cl_company::intake::{Health, PathProblem, ProbeReport, check_path_syntax, probe_async};
+use cl_company::intake::{
+    Health, PathProblem, ProbeReport, check_path_syntax, engine_accepts_path, probe_async,
+};
 use cl_core::ids::{IntakeFolderId, TenantId};
 use cl_core::intake::{IntakeFolder, IntakeKind};
 use cl_settings::HereNote;
@@ -737,7 +739,20 @@ impl IntakePanel {
             if !names.insert(name.to_lowercase()) {
                 return Err(IntakeBlock::NameTaken);
             }
-            check_path_syntax(&f.path, &dirs).map_err(IntakeBlock::Path)?;
+            // A path the engine already holds unchanged may have been set on
+            // another kind of computer (a Windows drive path seen on a Mac),
+            // so only new or changed paths take this computer's rules; they
+            // must also pass the engine's, so nothing is refused after Save.
+            let unchanged = committed
+                .folders
+                .iter()
+                .any(|c| c.id == f.id && c.path == f.path);
+            if !unchanged {
+                check_path_syntax(&f.path, &dirs).map_err(IntakeBlock::Path)?;
+                if !engine_accepts_path(&f.path) {
+                    return Err(IntakeBlock::Path(PathProblem::NotAbsolute));
+                }
+            }
             if !paths.insert(same_path_key(&f.path)) {
                 return Err(IntakeBlock::PathTaken);
             }

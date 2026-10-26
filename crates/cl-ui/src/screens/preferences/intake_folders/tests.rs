@@ -885,3 +885,67 @@ fn the_engine_limits_and_the_stale_answer_match_the_client() {
     ));
     assert!(!source::is_stale(&unsupported));
 }
+
+/// A folder saved from another kind of computer (a Windows drive path seen
+/// on a Mac, or the reverse) doesn't block Save here when it is unchanged;
+/// a new path still takes this computer's rules and the engine's.
+#[test]
+fn a_path_set_on_another_kind_of_computer_doesnt_block_save() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let other = pick("/srv/Scans/Bills", r"C:\Scans\Bills");
+    link.demo_state()
+        .expect("demo")
+        .intake
+        .put(
+            ozark(),
+            vec![IntakeFolder {
+                id: new_folder_id(),
+                name: "Bills".to_owned(),
+                path: other.to_owned(),
+                default_kind: IntakeKind::Bills,
+                auto_read: false,
+                keep_originals: false,
+            }],
+            None,
+        )
+        .expect("seed");
+    let mut s = screen(&link);
+    let id = s.edits.intake.folders[0].id;
+    s.intake
+        .rename(&mut s.edits.intake, id, "Vendor bills")
+        .expect("rename");
+    assert!(Screen::save(&mut s), "an unchanged foreign path saves");
+    settle(&mut s);
+    assert_eq!(stored(&link).folders[0].name, "Vendor bills");
+    assert_eq!(stored(&link).folders[0].path, other, "path kept as stored");
+    // A changed path to the foreign form is refused by this computer's rules.
+    let committed = s.edits.intake.clone();
+    let mut changed = committed.clone();
+    changed.folders[0].path = pick("/srv/Elsewhere", r"C:\Elsewhere").to_owned();
+    let dirs = s.app_dirs();
+    assert_eq!(
+        s.intake.validate(&changed, &committed, &dirs),
+        Err(IntakeBlock::Path(PathProblem::NotAbsolute))
+    );
+}
+
+/// `//fileserver/Scans` (forward-slash UNC) is refused before Save, as the
+/// engine refuses it.
+#[cfg(windows)]
+#[test]
+fn a_forward_slash_share_is_refused_like_the_engine() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let s = screen(&link);
+    let committed = s.edits.intake.clone();
+    let mut edits = committed.clone();
+    edits
+        .folders
+        .push(unc_folder(new_folder_id(), "Share", "//fileserver/Scans"));
+    let dirs = s.app_dirs();
+    assert_eq!(
+        s.intake.validate(&edits, &committed, &dirs),
+        Err(IntakeBlock::Path(PathProblem::NotAbsolute))
+    );
+}
