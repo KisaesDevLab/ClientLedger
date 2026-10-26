@@ -163,5 +163,21 @@ steps:
   - assert_no_clipping: {}
   - screenshot: card-charge-960x640
   - resize: {width: 1440, height: 940}
+  # --- A02: Attachments with the document pane (Q-A02e). Before the first
+  # save the file waits in a draft; Clear leaves it unattached. -----------
+  - type: {text: fixtures/docs/receipt.png, target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.count, equals: 1}
+  - assert_state: {key: screen.attachments.draft, equals: true}
+  - assert_state: {key: screen.attachments.saved_record, equals: false}
+  - assert_state: {key: screen.attachments.viewer.status, equals: ready}
+  - assert_state: {key: screen.attachments.viewer.rendered, equals: true}
+  - assert_exists: {role: image, label: Preview of receipt.png}
+  - assert_exists: {role: button, label: Pop out}
+  - assert_no_clipping: {}
+  - screenshot: card-charge-attachment
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.attachments.count, equals: 0}
+  - assert_state: {key: screen.attachments.viewer.open, equals: false}
   - command: file.close_window
   - assert_not_exists: {role: tab, label_contains: "Record Card"}

@@ -32,6 +32,10 @@ steps:
   - assert_exists: {role: label, label: Ending balance}
   - assert_exists: {role: label, label: Cleared balance}
   - assert_exists: {role: label, label_contains: uncleared}
+  # A02 (Q-A02f): the selected row's documents; the demo's rows have none.
+  - assert_state: {key: screen.docs.listed, equals: true}
+  - assert_state: {key: screen.docs.count, equals: 0}
+  - assert_disabled: {role: button, label: Show document}
   - assert_no_clipping: {}
   - screenshot: register
   # Minimum window (960 x 640): the toolbar wraps, every column fits, and
