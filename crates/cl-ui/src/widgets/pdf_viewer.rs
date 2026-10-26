@@ -27,6 +27,16 @@
 //! - [`DocSource`]: the file name (owner data: never logged, `Debug`
 //!   redacted) and its bytes.
 //!
+//! A02 WP-A added (A02 plan D1): [`ViewerState::open_keep_zoom`],
+//! [`ViewerState::release_pixels`], [`ViewerState::set_pop_out_button`]
+//! ("Pop out" answers [`ViewerEvent::PopOut`]; `Dock` is drawn by
+//! `doc_pane`), [`ViewerState::set_zoom`], [`ViewerState::rotation`]; the
+//! `viewer.rotate_cw` / `viewer.rotate_ccw` commands (per page, view only,
+//! reset by a new document); a zoom menu (Fit page, Fit width, 50–400 %);
+//! dragging or the arrow keys pan the page; multi-page TIFF; a page the
+//! worker can't draw says so with Save a copy while the others show.
+//! `state_json` gained `rotation` and `page_unreadable`.
+//!
 //! The pages come from [`super::doc_worker`] (a background thread): the
 //! viewer asks for the page at the pixel width it shows, keeps one texture
 //! (freed when the page, the document or the state goes) and polls replies
@@ -34,6 +44,7 @@
 //! money. Without PDFium a PDF shows "Preview isn't available on this
 //! computer" with Save a copy; pictures still preview.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -44,7 +55,7 @@ use eframe::egui::{
 };
 use serde_json::{Value, json};
 
-use super::doc_worker::{DocReply, DocRequest, DocWorker, RenderedPage};
+use super::doc_worker::{DocReply, DocRequest, DocWorker, RenderedPage, Rotation};
 use crate::i18n::{t, t_with};
 use crate::theme::Tokens;
 
@@ -175,6 +186,7 @@ impl Status {
 struct Shown {
     page: u32,
     width: u32,
+    rotation: Rotation,
     texture: TextureHandle,
     natural: Vec2,
 }
@@ -194,9 +206,13 @@ pub struct ViewerState {
     worker: Option<DocWorker>,
     /// The worker's number for the open document (new on every open).
     doc: u64,
-    /// The last (page, px width) asked for.
-    asked: Option<(u32, u32)>,
+    /// The last (page, px width, turn) asked for.
+    asked: Option<(u32, u32, Rotation)>,
     shown: Option<Shown>,
+    /// Each page's turn (A02: view only, never saved; Q-A02b).
+    rotations: HashMap<u32, Rotation>,
+    /// A page the worker could not draw (the rest of the document shows).
+    failed_page: Option<u32>,
     /// The page's size at 100 % (known after the first render).
     natural: Option<Vec2>,
     /// The page area last frame (for zoom steps from a fit).
@@ -269,6 +285,8 @@ impl ViewerState {
         self.asked = None;
         self.shown = None;
         self.natural = None;
+        self.rotations.clear();
+        self.failed_page = None;
     }
 
     /// The document shown.
@@ -293,6 +311,46 @@ impl ViewerState {
     #[must_use]
     pub fn zoom(&self) -> Zoom {
         self.zoom
+    }
+
+    /// Set the zoom (A02: the zoom menu; a percent is kept within 25–400).
+    pub fn set_zoom(&mut self, zoom: Zoom) {
+        self.zoom = match zoom {
+            Zoom::Percent(p) => Zoom::Percent(p.clamp(25, 400)),
+            z => z,
+        };
+    }
+
+    /// The shown page's turn (view only).
+    #[must_use]
+    pub fn rotation(&self) -> Rotation {
+        self.rotations.get(&self.page).copied().unwrap_or_default()
+    }
+
+    /// Turn the shown page a quarter turn. The page size at 100 % swaps
+    /// at once so the layout doesn't wait for the worker.
+    fn turn(&mut self, to: Rotation) {
+        let from = self.rotation();
+        if from == to {
+            return;
+        }
+        if from.swaps() != to.swaps()
+            && let Some(n) = &mut self.natural
+        {
+            *n = Vec2::new(n.y, n.x);
+        }
+        if to == Rotation::None {
+            self.rotations.remove(&self.page);
+        } else {
+            self.rotations.insert(self.page, to);
+        }
+    }
+
+    /// True when the page on screen is the shown page at its turn.
+    fn page_drawn(&self) -> bool {
+        self.shown
+            .as_ref()
+            .is_some_and(|s| s.page == self.page && s.rotation == self.rotation())
     }
 
     /// Where the document is (loading, ready, protected …).
@@ -361,6 +419,9 @@ impl ViewerState {
             "viewer.page_prev" => {
                 self.page = self.page.saturating_sub(1);
             }
+            // A02: view only, no shortcut (Q-A02m); the toolbar buttons.
+            "viewer.rotate_cw" => self.turn(self.rotation().cw()),
+            "viewer.rotate_ccw" => self.turn(self.rotation().ccw()),
             _ => return false,
         }
         true
@@ -386,8 +447,10 @@ impl ViewerState {
             "zoom": zoom,
             "zoom_kind": if matches!(self.zoom, Zoom::Percent(_)) { "percent" } else { "fit" },
             "zoom_percent": percent,
-            "rendered": self.shown.as_ref().is_some_and(|s| s.page == self.page),
+            "rendered": self.page_drawn(),
             "focused": self.focused,
+            "rotation": self.rotation().degrees(),
+            "page_unreadable": self.failed_page == Some(self.page),
         })
     }
 
@@ -411,8 +474,12 @@ impl ViewerState {
                 }
                 DocReply::Protected { doc } if doc == self.doc => self.status = Status::Protected,
                 DocReply::Unreadable { doc } if doc == self.doc => {
-                    // A failed render keeps a page that is already showing.
-                    if self.shown.is_none() {
+                    if self.status == Status::Ready && (self.shown.is_some() || self.pages > 1) {
+                        // One page of a readable document: that page says
+                        // so, the rest still show (A02, a TIFF page in a
+                        // colour this can't read).
+                        self.failed_page = self.asked.map(|(page, ..)| page);
+                    } else if self.shown.is_none() {
                         self.status = Status::Unreadable;
                     }
                 }
@@ -466,11 +533,22 @@ impl ViewerState {
         );
         #[allow(clippy::cast_precision_loss)] // Page sizes are small.
         let natural = Vec2::new(p.natural_width as f32, p.natural_height as f32);
-        self.natural = Some(natural);
+        // A page drawn before its latest turn: the layout uses the turned
+        // size.
+        let now = self.rotations.get(&p.page).copied().unwrap_or_default();
+        self.natural = Some(if now.swaps() == p.rotation.swaps() {
+            natural
+        } else {
+            Vec2::new(natural.y, natural.x)
+        });
+        if self.failed_page == Some(p.page) {
+            self.failed_page = None;
+        }
         // The old texture drops here, which frees it.
         self.shown = Some(Shown {
             page: p.page,
             width: p.width,
+            rotation: p.rotation,
             texture,
             natural,
         });
@@ -480,14 +558,17 @@ impl ViewerState {
     /// shows or was asked for (within 3 %).
     fn ask(&mut self, px: u32) {
         let close = |a: u32, b: u32| a.abs_diff(b) <= (b / 33).max(2);
+        let rotation = self.rotation();
         if let Some(s) = &self.shown
             && s.page == self.page
+            && s.rotation == rotation
             && close(px, s.width)
         {
             return;
         }
-        if let Some((page, w)) = self.asked
+        if let Some((page, w, r)) = self.asked
             && page == self.page
+            && r == rotation
             && close(px, w)
         {
             return;
@@ -497,8 +578,9 @@ impl ViewerState {
                 doc: self.doc,
                 page: self.page,
                 px_width: px,
+                rotation,
             });
-            self.asked = Some((self.page, px));
+            self.asked = Some((self.page, px, rotation));
         }
     }
 }
@@ -569,6 +651,100 @@ fn paint_plus(p: &egui::Painter, rect: Rect, stroke: Stroke) {
     );
 }
 
+/// A rotate arrow: three quarters of a circle and an arrow head, clockwise
+/// for "Rotate right".
+fn paint_rotate(p: &egui::Painter, rect: Rect, stroke: Stroke, clockwise: bool) {
+    let c = rect.center();
+    let radius = 6.0;
+    // From the top, round three quarters; mirrored for anticlockwise.
+    let side = if clockwise { 1.0 } else { -1.0 };
+    let points: Vec<egui::Pos2> = (0..=18u8)
+        .map(|i| {
+            let a = std::f32::consts::FRAC_PI_2 * 3.0 * f32::from(i) / 18.0;
+            egui::pos2(c.x + side * radius * a.sin(), c.y - radius * a.cos())
+        })
+        .collect();
+    p.add(egui::Shape::line(points, stroke));
+    // The head at the end (pointing up, at the left for clockwise).
+    let end = egui::pos2(c.x - side * radius, c.y);
+    p.line_segment([end, egui::pos2(end.x - 3.0, end.y - 3.0)], stroke);
+    p.line_segment([end, egui::pos2(end.x + 3.0, end.y - 3.0)], stroke);
+}
+
+/// The zoom choices of the zoom menu (A02 plan D1).
+const ZOOM_MENU: [Zoom; 10] = [
+    Zoom::FitPage,
+    Zoom::FitWidth,
+    Zoom::Percent(50),
+    Zoom::Percent(75),
+    Zoom::Percent(100),
+    Zoom::Percent(125),
+    Zoom::Percent(150),
+    Zoom::Percent(200),
+    Zoom::Percent(300),
+    Zoom::Percent(400),
+];
+
+/// A zoom setting as the owner reads it.
+fn zoom_text(zoom: Zoom) -> String {
+    match zoom {
+        Zoom::FitWidth => t("viewer.zoom.fit_width"),
+        Zoom::FitPage => t("viewer.zoom.fit_page"),
+        Zoom::Percent(p) => t_with("viewer.zoom.percent", &[("percent", &p.to_string())]),
+    }
+}
+
+/// The zoom menu: the button shows the zoom in force; its accessible name
+/// is "Zoom". A pick puts the keyboard back on the page.
+fn zoom_menu(ui: &mut Ui, state: &mut ViewerState, ready: bool) -> egui::Response {
+    let mut picked = None;
+    let r = ui
+        .add_enabled_ui(ready, |ui| {
+            egui::containers::menu::MenuButton::from_button(egui::Button::new(zoom_text(
+                state.zoom,
+            )))
+            .ui(ui, |ui| {
+                for z in ZOOM_MENU {
+                    if ui
+                        .add(egui::Button::selectable(state.zoom == z, zoom_text(z)))
+                        .clicked()
+                    {
+                        picked = Some(z);
+                    }
+                }
+            })
+            .0
+        })
+        .inner;
+    r.widget_info(|| WidgetInfo::labeled(Role::Button, ready, t("viewer.zoom.label")));
+    if let Some(z) = picked {
+        state.set_zoom(z);
+        state.want_focus = true;
+    }
+    r.on_hover_text(t("viewer.zoom.tip"))
+}
+
+/// The arrow keys pressed this frame as a pan, in points (the content
+/// moves the other way: Down shows more of the page below).
+fn arrow_pan(ui: &Ui) -> Vec2 {
+    const STEP: f32 = 40.0;
+    ui.input_mut(|i| {
+        let mut d = Vec2::ZERO;
+        let none = egui::Modifiers::NONE;
+        for (key, v) in [
+            (egui::Key::ArrowDown, Vec2::new(0.0, -STEP)),
+            (egui::Key::ArrowUp, Vec2::new(0.0, STEP)),
+            (egui::Key::ArrowRight, Vec2::new(-STEP, 0.0)),
+            (egui::Key::ArrowLeft, Vec2::new(STEP, 0.0)),
+        ] {
+            while i.consume_key(none, key) {
+                d += v;
+            }
+        }
+        d
+    })
+}
+
 /// The shortcut text of a command, for tooltips.
 fn keys(id: &str) -> String {
     cl_model::commands::find(id)
@@ -596,6 +772,7 @@ impl DocViewer {
             return event;
         }
         let ready = state.status == Status::Ready;
+        let mut zoom_focused = false;
         // The toolbar wraps on a narrow card instead of running out.
         ui.horizontal_wrapped(|ui| {
             let mut run = |state: &mut ViewerState, r: &egui::Response, id: &'static str| {
@@ -643,12 +820,8 @@ impl DocViewer {
                 paint_minus,
             );
             run(state, &r, "viewer.zoom_out");
-            let zoom_text = match state.zoom {
-                Zoom::FitWidth => t("viewer.zoom.fit_width"),
-                Zoom::FitPage => t("viewer.zoom.fit_page"),
-                Zoom::Percent(p) => t_with("viewer.zoom.percent", &[("percent", &p.to_string())]),
-            };
-            ui.label(RichText::new(zoom_text).color(tokens.text_secondary));
+            // A02: the zoom shown is a menu of fits and sizes.
+            zoom_focused = zoom_menu(ui, state, ready).has_focus();
             let r = icon_button(
                 ui,
                 &t("viewer.zoom_in"),
@@ -661,6 +834,24 @@ impl DocViewer {
                 .add_enabled(ready, egui::Button::new(t("viewer.fit")))
                 .on_hover_text(t_with("viewer.fit.tip", &[("keys", &keys("viewer.fit"))]));
             run(state, &r, "viewer.fit");
+            ui.separator();
+            // A02: view only; buttons, no shortcut (Q-A02m).
+            let r = icon_button(
+                ui,
+                &t("viewer.rotate_left"),
+                &t("viewer.rotate_left.tip"),
+                ready,
+                |p, r, s| paint_rotate(p, r, s, false),
+            );
+            run(state, &r, "viewer.rotate_ccw");
+            let r = icon_button(
+                ui,
+                &t("viewer.rotate_right"),
+                &t("viewer.rotate_right.tip"),
+                ready,
+                |p, r, s| paint_rotate(p, r, s, true),
+            );
+            run(state, &r, "viewer.rotate_cw");
             if state.full_size_button {
                 let r = ui
                     .button(t("viewer.full_size"))
@@ -684,6 +875,7 @@ impl DocViewer {
                 }
             }
         });
+        focused |= zoom_focused;
         if state.truncated {
             ui.label(
                 RichText::new(t_with(
@@ -693,6 +885,22 @@ impl DocViewer {
                 .size(12.0)
                 .color(tokens.text_tertiary),
             );
+        }
+        if state.status == Status::Ready && state.failed_page == Some(state.page) {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(t("viewer.page_unreadable")).color(tokens.text_secondary),
+                )
+                .wrap(),
+            );
+            // Plan R4: an unreadable page offers Save a copy.
+            let r = ui
+                .button(t("viewer.save_copy"))
+                .on_hover_text(t("viewer.save_copy.tip"));
+            focused |= r.has_focus();
+            if r.clicked() {
+                event = ViewerEvent::SaveCopy;
+            }
         }
         match state.status {
             Status::Ready => focused |= Self::page_area(ui, state, tokens),
@@ -726,13 +934,18 @@ impl DocViewer {
                 }
             }
         }
-        // Replies arrive on another thread: look again soon while waiting.
+        // Replies arrive on another thread: look again soon while waiting
+        // (not for a page the worker said it can't draw).
+        let failed = state.failed_page == Some(state.page);
         if state.status == Status::Loading
-            || (state.status == Status::Ready
-                && state.shown.as_ref().is_none_or(|s| s.page != state.page))
-            || state
-                .asked
-                .is_some_and(|(_, w)| state.shown.as_ref().is_none_or(|s| s.width != w))
+            || (state.status == Status::Ready && !failed && !state.page_drawn())
+            || (!failed
+                && state.asked.is_some_and(|(_, w, r)| {
+                    state
+                        .shown
+                        .as_ref()
+                        .is_none_or(|s| s.width != w || s.rotation != r)
+                }))
         {
             ctx.request_repaint_after(Duration::from_millis(30));
         }
@@ -771,16 +984,20 @@ impl DocViewer {
         let label = t_with("viewer.image", &[("name", &name)]);
         let mut focused = false;
         let want_focus = std::mem::take(&mut state.want_focus);
+        // A page the worker can't draw shows blank, not the last page.
+        let failed = state.failed_page == Some(state.page);
         egui::ScrollArea::both()
             .id_salt(("doc-viewer", state.doc))
             .auto_shrink([false, false])
+            // A02: dragging the page pans it, with a mouse too.
+            .scroll_source(egui::scroll_area::ScrollSource::ALL)
             .show(ui, |ui| {
                 let (size, texture) = match &state.shown {
-                    Some(s) => {
+                    Some(s) if !failed => {
                         let aspect = s.natural.y / s.natural.x.max(1.0);
                         (Vec2::new(shown_w, shown_w * aspect), Some(s.texture.id()))
                     }
-                    None => (
+                    _ => (
                         Vec2::new(shown_w, shown_w * natural.y / natural.x.max(1.0)),
                         None,
                     ),
@@ -793,6 +1010,27 @@ impl DocViewer {
                     let (rect, r) = ui.allocate_exact_size(size, Sense::click());
                     if want_focus || r.clicked() {
                         r.request_focus();
+                    }
+                    if r.has_focus() {
+                        // A02: the arrow keys pan the page (they don't move
+                        // the keyboard to another control).
+                        ui.memory_mut(|m| {
+                            m.set_focus_lock_filter(
+                                r.id,
+                                egui::EventFilter {
+                                    horizontal_arrows: true,
+                                    vertical_arrows: true,
+                                    ..Default::default()
+                                },
+                            );
+                        });
+                        let pan = arrow_pan(ui);
+                        if pan != Vec2::ZERO {
+                            ui.scroll_with_delta(pan);
+                        }
+                    }
+                    if r.hovered() && (size.x > area.x + 1.0 || size.y > area.y + 1.0) {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                     }
                     let painter = ui.painter_at(rect);
                     painter.rect_filled(rect, 0.0, Color32::WHITE);
@@ -940,6 +1178,7 @@ mod tests {
                 rgba: vec![255; (w * h * 4) as usize],
                 natural_width: 612,
                 natural_height: 792,
+                rotation: Rotation::None,
             },
         );
         let shown = v.shown.as_ref().expect("shown");
@@ -1082,5 +1321,247 @@ mod tests {
                 .iter()
                 .any(|(r, n)| *r == Role::Button && n == "Save a copy")
         );
+    }
+
+    /// One egui context driven frame by frame, with clicks found by
+    /// accessible name (A02 widget tests).
+    struct Harness {
+        ctx: egui::Context,
+        /// The last frame's accessible nodes: (role, name, centre).
+        nodes: Vec<(Role, String, Pos2)>,
+        size: Vec2,
+    }
+
+    impl Harness {
+        fn new(size: Vec2) -> Harness {
+            let ctx = egui::Context::default();
+            crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+            crate::fonts::install(&ctx);
+            ctx.enable_accesskit();
+            Harness {
+                ctx,
+                nodes: Vec::new(),
+                size,
+            }
+        }
+
+        fn frame(&mut self, v: &mut ViewerState, events: Vec<egui::Event>) -> ViewerEvent {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
+                events,
+                ..RawInput::default()
+            };
+            let mut event = ViewerEvent::None;
+            let tokens = Tokens::LIGHT;
+            let mut out = self.ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    event = DocViewer::show(ui, v, &tokens);
+                });
+            });
+            out.textures_delta.clear();
+            if let Some(t) = out.platform_output.accesskit_update {
+                self.nodes = t
+                    .nodes
+                    .into_iter()
+                    .filter_map(|(_, n)| {
+                        let b = n.bounds()?;
+                        let name = n.label().or(n.value()).unwrap_or_default().to_string();
+                        #[allow(clippy::cast_possible_truncation)]
+                        let centre = Pos2::new(
+                            f64::midpoint(b.x0, b.x1) as f32,
+                            f64::midpoint(b.y0, b.y1) as f32,
+                        );
+                        Some((n.role(), name, centre))
+                    })
+                    .collect();
+            }
+            event
+        }
+
+        /// Draw until `done` (bounded), then a few frames more.
+        fn until(&mut self, v: &mut ViewerState, done: impl Fn(&ViewerState) -> bool) {
+            let end = std::time::Instant::now() + Duration::from_secs(30);
+            let mut extra = 3;
+            loop {
+                let _ = self.frame(v, Vec::new());
+                if done(v) {
+                    extra -= 1;
+                    if extra == 0 {
+                        return;
+                    }
+                }
+                assert!(std::time::Instant::now() < end, "never got there: {v:?}");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+
+        fn has(&self, role: Role, name: &str) -> bool {
+            self.nodes.iter().any(|(r, n, _)| *r == role && n == name)
+        }
+
+        /// Click the control named `name`; the viewer's event of the click.
+        fn click(&mut self, v: &mut ViewerState, role: Role, name: &str) -> ViewerEvent {
+            let at = self
+                .nodes
+                .iter()
+                .find(|(r, n, _)| *r == role && n == name)
+                .map_or_else(
+                    || panic!("no {role:?} {name}: {:?}", self.nodes),
+                    |(.., p)| *p,
+                );
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let _ = self.frame(v, vec![egui::Event::PointerMoved(at)]);
+            let _ = self.frame(v, vec![button(true)]);
+            let event = self.frame(v, vec![button(false)]);
+            let _ = self.frame(v, Vec::new());
+            event
+        }
+    }
+
+    #[test]
+    fn rotate_turns_the_page_for_viewing_only() {
+        let mut h = Harness::new(vec2(700.0, 560.0));
+        let mut v = ViewerState::default();
+        v.open(fixture("receipt.png"));
+        h.until(&mut v, |v| v.state_json()["rendered"] == true);
+        assert!(h.has(Role::Button, "Rotate right") && h.has(Role::Button, "Rotate left"));
+        let before = v.shown.as_ref().map(|s| s.texture.size()).expect("shown");
+        assert!(before[0] > before[1], "a landscape receipt");
+        let _ = h.click(&mut v, Role::Button, "Rotate right");
+        assert_eq!(v.rotation(), Rotation::Right);
+        assert_eq!(v.state_json()["rotation"], 90);
+        // Turned a quarter: the size at 100 % swaps at once.
+        assert_eq!(v.natural, Some(vec2(200.0, 320.0)));
+        h.until(&mut v, |v| v.state_json()["rendered"] == true);
+        let [tw, th] = v.shown.as_ref().map(|s| s.texture.size()).expect("shown");
+        assert!(th > tw, "drawn upright now: {tw} x {th}");
+        // The keyboard is back on the page after a click.
+        assert_eq!(v.state_json()["focused"], true);
+        let _ = h.click(&mut v, Role::Button, "Rotate left");
+        let _ = h.click(&mut v, Role::Button, "Rotate left");
+        assert_eq!(v.state_json()["rotation"], 270);
+        assert!(v.command(CommandId::new("viewer.rotate_cw")));
+        assert_eq!(v.rotation(), Rotation::None);
+        assert!(v.command(CommandId::new("viewer.rotate_ccw")));
+        // A new document starts upright (rotation is never kept).
+        v.open(fixture("receipt.jpg"));
+        assert_eq!(v.rotation(), Rotation::None);
+        assert!(!v.state_json().to_string().contains("receipt"));
+    }
+
+    #[test]
+    fn rotation_is_per_page() {
+        let mut v = ViewerState::default();
+        v.open(fixture("three_pages.tif"));
+        v.pages = 3;
+        assert!(v.command(CommandId::new("viewer.rotate_cw")));
+        assert!(v.command(CommandId::new("viewer.page_next")));
+        assert_eq!(v.rotation(), Rotation::None);
+        assert!(v.command(CommandId::new("viewer.page_prev")));
+        assert_eq!(v.rotation(), Rotation::Right);
+    }
+
+    #[test]
+    fn the_zoom_menu_sets_each_fit_and_size() {
+        let mut h = Harness::new(vec2(760.0, 560.0));
+        let mut v = ViewerState::default();
+        v.open(fixture("receipt.png"));
+        h.until(&mut v, |v| v.state_json()["rendered"] == true);
+        assert!(h.has(Role::Button, "Zoom"), "{:?}", h.nodes);
+        for (choice, want) in [
+            ("Fit page", json!("fit_page")),
+            ("50%", json!(50)),
+            ("75%", json!(75)),
+            ("100%", json!(100)),
+            ("125%", json!(125)),
+            ("150%", json!(150)),
+            ("200%", json!(200)),
+            ("300%", json!(300)),
+            ("400%", json!(400)),
+            ("Fit width", json!("fit_width")),
+        ] {
+            let _ = h.click(&mut v, Role::Button, "Zoom");
+            let _ = h.click(&mut v, Role::Button, choice);
+            assert_eq!(v.state_json()["zoom"], want, "{choice}");
+            assert!(
+                !h.has(Role::Button, choice) || choice.starts_with("Fit"),
+                "menu closed"
+            );
+        }
+        v.set_zoom(Zoom::Percent(1000));
+        assert_eq!(v.zoom(), Zoom::Percent(400));
+    }
+
+    #[test]
+    fn arrow_keys_pan_a_zoomed_page() {
+        let mut h = Harness::new(vec2(500.0, 400.0));
+        let mut v = ViewerState::default();
+        v.open(fixture("receipt.png"));
+        v.set_zoom(Zoom::Percent(400));
+        v.focus();
+        h.until(&mut v, |v| v.state_json()["rendered"] == true);
+        assert_eq!(v.state_json()["focused"], true);
+        let image_at = |h: &Harness| {
+            h.nodes
+                .iter()
+                .find(|(r, ..)| *r == Role::Image)
+                .map(|(.., p)| *p)
+                .expect("the page")
+        };
+        let start = image_at(&h);
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let _ = h.frame(
+            &mut v,
+            vec![key(egui::Key::ArrowDown), key(egui::Key::ArrowRight)],
+        );
+        for _ in 0..3 {
+            let _ = h.frame(&mut v, Vec::new());
+        }
+        let moved = image_at(&h);
+        assert!(
+            moved.y < start.y && moved.x < start.x,
+            "{start:?} -> {moved:?}"
+        );
+        // The keyboard stayed on the page.
+        assert_eq!(v.state_json()["focused"], true);
+    }
+
+    #[test]
+    fn an_unreadable_page_says_so_and_the_others_show() {
+        let mut h = Harness::new(vec2(640.0, 520.0));
+        let mut v = ViewerState::default();
+        v.open(DocSource {
+            name: "mixed.tif".into(),
+            bytes: Arc::from(super::super::doc_worker::tiff_fixtures::gray_then_lab()),
+        });
+        h.until(&mut v, |v| v.state_json()["rendered"] == true);
+        assert_eq!(v.page_count(), 2);
+        assert!(v.command(CommandId::new("viewer.page_next")));
+        h.until(&mut v, |v| v.state_json()["page_unreadable"] == true);
+        let s = v.state_json();
+        assert_eq!(
+            (s["status"].as_str(), s["rendered"].as_bool()),
+            (Some("ready"), Some(false))
+        );
+        assert!(h.has(Role::Button, "Save a copy"));
+        assert_eq!(
+            h.click(&mut v, Role::Button, "Save a copy"),
+            ViewerEvent::SaveCopy
+        );
+        // Back to page 1: it shows again.
+        assert!(v.command(CommandId::new("viewer.page_prev")));
+        h.until(&mut v, |v| v.state_json()["rendered"] == true);
+        assert_eq!(v.state_json()["page_unreadable"], false);
     }
 }

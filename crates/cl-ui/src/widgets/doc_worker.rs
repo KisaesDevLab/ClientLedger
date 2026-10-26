@@ -48,12 +48,12 @@ use std::sync::{Arc, OnceLock};
 
 use image::{ImageReader, Limits, RgbaImage};
 use pdfium_render::prelude::{
-    PdfDocument, PdfRenderConfig, Pdfium, PdfiumError, PdfiumInternalError,
+    PdfDocument, PdfPageRenderRotation, PdfRenderConfig, Pdfium, PdfiumError, PdfiumInternalError,
 };
 
 mod tiff_doc;
 #[cfg(test)]
-mod tiff_fixtures;
+pub(crate) mod tiff_fixtures;
 
 /// Pages shown of a longer PDF.
 pub const MAX_PAGES: u32 = 500;
@@ -68,6 +68,56 @@ pub const MAX_IMAGE_ALLOC: u64 = 256 * 1024 * 1024;
 /// Documents kept open across all viewers (the oldest closes first).
 const MAX_OPEN: usize = 16;
 
+/// How far a page is turned clockwise, for viewing only (A02, Q-A02b).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Rotation {
+    /// As stored.
+    #[default]
+    None,
+    /// A quarter turn clockwise.
+    Right,
+    /// Upside down.
+    Half,
+    /// A quarter turn anticlockwise.
+    Left,
+}
+
+impl Rotation {
+    /// A quarter turn further clockwise ("Rotate right").
+    #[must_use]
+    pub fn cw(self) -> Rotation {
+        match self {
+            Rotation::None => Rotation::Right,
+            Rotation::Right => Rotation::Half,
+            Rotation::Half => Rotation::Left,
+            Rotation::Left => Rotation::None,
+        }
+    }
+
+    /// A quarter turn back ("Rotate left").
+    #[must_use]
+    pub fn ccw(self) -> Rotation {
+        self.cw().cw().cw()
+    }
+
+    /// Clockwise degrees: 0, 90, 180 or 270.
+    #[must_use]
+    pub fn degrees(self) -> u16 {
+        match self {
+            Rotation::None => 0,
+            Rotation::Right => 90,
+            Rotation::Half => 180,
+            Rotation::Left => 270,
+        }
+    }
+
+    /// True when the page's width and height trade places.
+    #[must_use]
+    pub fn swaps(self) -> bool {
+        matches!(self, Rotation::Right | Rotation::Left)
+    }
+}
+
 /// A request to the worker.
 #[derive(Clone, PartialEq, Eq)]
 pub enum DocRequest {
@@ -78,14 +128,17 @@ pub enum DocRequest {
         /// The file's bytes (a PDF, PNG or JPEG by its first bytes).
         bytes: Arc<[u8]>,
     },
-    /// Draw one page `px_width` pixels wide.
+    /// Draw one page `px_width` pixels wide, turned by `rotation`.
     Render {
         /// The document, as opened.
         doc: u64,
         /// Page number, from 0.
         page: u32,
-        /// Wanted width in physical pixels (clamped by the worker).
+        /// Wanted width in physical pixels of the turned page (clamped by
+        /// the worker).
         px_width: u32,
+        /// The view's turn (A02; never saved).
+        rotation: Rotation,
     },
     /// Forget a document (no reply).
     Close {
@@ -107,11 +160,13 @@ impl std::fmt::Debug for DocRequest {
                 doc,
                 page,
                 px_width,
+                rotation,
             } => f
                 .debug_struct("Render")
                 .field("doc", doc)
                 .field("page", page)
                 .field("px_width", px_width)
+                .field("rotation", &rotation.degrees())
                 .finish(),
             DocRequest::Close { doc } => f.debug_struct("Close").field("doc", doc).finish(),
         }
@@ -146,6 +201,9 @@ pub struct RenderedPage {
     pub natural_width: u32,
     /// The page's own height at 100 %.
     pub natural_height: u32,
+    /// The turn it was drawn with (A02); the natural size is the turned
+    /// page's.
+    pub rotation: Rotation,
 }
 
 /// Sizes only.
@@ -423,9 +481,10 @@ fn handle_request<'a>(
             doc,
             page,
             px_width,
+            rotation,
         } => Some(
             docs.get_mut((handle, doc))
-                .and_then(|d| render(d, doc, page, px_width))
+                .and_then(|d| render(d, doc, page, px_width, rotation, true))
                 .map_or(DocReply::Unreadable { doc }, DocReply::Rendered),
         ),
     }
@@ -558,17 +617,30 @@ fn fit_pixels(want_w: u32, w: u32, h: u32) -> Option<(u32, u32)> {
     clamp_size(want_w, w as f32, h as f32)
 }
 
-fn render(d: &mut Doc<'_>, doc: u64, page: u32, px_width: u32) -> Option<RenderedPage> {
+/// Draw `page` turned by `rotation`, `px_width` pixels wide once turned.
+/// `keep`: a TIFF keeps the decoded page for the next request (drawn pages
+/// do; thumbnails don't, so they never push out the page on screen).
+fn render(
+    d: &mut Doc<'_>,
+    doc: u64,
+    page: u32,
+    px_width: u32,
+    rotation: Rotation,
+    keep: bool,
+) -> Option<RenderedPage> {
     match d {
         Doc::Pdf(pdf, pages) => {
             if page >= *pages {
                 return None;
             }
             let p = pdf.pages().get(i32::try_from(page).ok()?).ok()?;
-            let (nw, nh) = (p.width().value, p.height().value);
+            let (nw, nh) = turned(p.width().value, p.height().value, rotation);
+            // The bitmap has the turned page's size; PDFium turns the page
+            // into it.
             let (w, h) = clamp_size(px_width, nw, nh)?;
             let config = PdfRenderConfig::new()
                 .set_target_size(i32::try_from(w).ok()?, i32::try_from(h).ok()?)
+                .rotate(pdf_rotation(rotation), false)
                 .render_form_data(true);
             let bitmap = p.render_with_config(&config).ok()?;
             let width = u32::try_from(bitmap.width()).ok()?;
@@ -588,36 +660,69 @@ fn render(d: &mut Doc<'_>, doc: u64, page: u32, px_width: u32) -> Option<Rendere
                 rgba,
                 natural_width,
                 natural_height,
+                rotation,
             })
         }
         Doc::Image(img) => {
             if page != 0 {
                 return None;
             }
-            scale_picture(img, doc, page, px_width)
+            scale_picture(img, doc, page, px_width, rotation)
         }
         Doc::Tiff(t) => t
-            .with_page(page, true, |img| scale_picture(img, doc, page, px_width))
+            .with_page(page, keep, |img| {
+                scale_picture(img, doc, page, px_width, rotation)
+            })
             .flatten(),
     }
 }
 
-/// A decoded picture drawn `px_width` pixels wide (within the limits).
-fn scale_picture(img: &RgbaImage, doc: u64, page: u32, px_width: u32) -> Option<RenderedPage> {
-    let (w, h) = fit_pixels(px_width, img.width(), img.height())?;
-    let scaled = if (w, h) == img.dimensions() {
+/// A `w × h` page's size once turned.
+fn turned<T>(w: T, h: T, rotation: Rotation) -> (T, T) {
+    if rotation.swaps() { (h, w) } else { (w, h) }
+}
+
+fn pdf_rotation(rotation: Rotation) -> PdfPageRenderRotation {
+    match rotation {
+        Rotation::None => PdfPageRenderRotation::None,
+        Rotation::Right => PdfPageRenderRotation::Degrees90,
+        Rotation::Half => PdfPageRenderRotation::Degrees180,
+        Rotation::Left => PdfPageRenderRotation::Degrees270,
+    }
+}
+
+/// A decoded picture turned by `rotation`, `px_width` pixels wide once
+/// turned (within the limits). It is scaled first, then turned.
+fn scale_picture(
+    img: &RgbaImage,
+    doc: u64,
+    page: u32,
+    px_width: u32,
+    rotation: Rotation,
+) -> Option<RenderedPage> {
+    let (nw, nh) = turned(img.width(), img.height(), rotation);
+    let (w, h) = fit_pixels(px_width, nw, nh)?;
+    let (sw, sh) = turned(w, h, rotation);
+    let scaled = if (sw, sh) == img.dimensions() {
         img.clone()
     } else {
-        image::imageops::thumbnail(img, w, h)
+        image::imageops::thumbnail(img, sw, sh)
+    };
+    let out = match rotation {
+        Rotation::None => scaled,
+        Rotation::Right => image::imageops::rotate90(&scaled),
+        Rotation::Half => image::imageops::rotate180(&scaled),
+        Rotation::Left => image::imageops::rotate270(&scaled),
     };
     Some(RenderedPage {
         doc,
         page,
-        width: scaled.width(),
-        height: scaled.height(),
-        rgba: scaled.into_raw(),
-        natural_width: img.width(),
-        natural_height: img.height(),
+        width: out.width(),
+        height: out.height(),
+        rgba: out.into_raw(),
+        natural_width: nw,
+        natural_height: nh,
+        rotation,
     })
 }
 
@@ -848,6 +953,7 @@ mod tests {
             doc: 2,
             page: 0,
             px_width: 160,
+            rotation: Rotation::None,
         });
         let DocReply::Rendered(p) = reply(&w) else {
             panic!("not rendered")
@@ -859,6 +965,7 @@ mod tests {
             doc: 2,
             page: 1,
             px_width: 160,
+            rotation: Rotation::None,
         });
         assert_eq!(reply(&w), DocReply::Unreadable { doc: 2 });
         w.send(DocRequest::Close { doc: 2 });
@@ -866,6 +973,7 @@ mod tests {
             doc: 2,
             page: 0,
             px_width: 160,
+            rotation: Rotation::None,
         });
         assert_eq!(reply(&w), DocReply::Unreadable { doc: 2 });
         let dbg = format!(
@@ -917,6 +1025,7 @@ mod tests {
             doc,
             page,
             px_width,
+            rotation: Rotation::None,
         });
         reply(w)
     }
@@ -1061,6 +1170,93 @@ mod tests {
         );
     }
 
+    fn render_turned(w: &DocWorker, doc: u64, page: u32, px: u32, r: Rotation) -> RenderedPage {
+        w.send(DocRequest::Render {
+            doc,
+            page,
+            px_width: px,
+            rotation: r,
+        });
+        match reply(w) {
+            DocReply::Rendered(p) => p,
+            other => panic!("not rendered: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rotation_turns_quarter_by_quarter() {
+        assert_eq!(Rotation::None.cw(), Rotation::Right);
+        assert_eq!(Rotation::None.ccw(), Rotation::Left);
+        assert_eq!(Rotation::Left.cw(), Rotation::None);
+        let mut r = Rotation::None;
+        for _ in 0..4 {
+            r = r.cw();
+        }
+        assert_eq!(r, Rotation::None);
+        assert_eq!(
+            [
+                Rotation::None,
+                Rotation::Right,
+                Rotation::Half,
+                Rotation::Left
+            ]
+            .map(Rotation::degrees),
+            [0, 90, 180, 270]
+        );
+        assert!(Rotation::Right.swaps() && Rotation::Left.swaps());
+        assert!(!Rotation::Half.swaps() && !Rotation::None.swaps());
+    }
+
+    #[test]
+    fn a_turned_picture_swaps_its_sides() {
+        let w = without_pdfium();
+        assert_eq!(
+            open_on(&w, 1, fixture("receipt.png").to_vec()),
+            opened(1, 1)
+        );
+        let upright = render_turned(&w, 1, 0, 160, Rotation::None);
+        assert_eq!((upright.width, upright.height), (160, 100));
+        let right = render_turned(&w, 1, 0, 100, Rotation::Right);
+        assert_eq!((right.width, right.height), (100, 160));
+        assert_eq!((right.natural_width, right.natural_height), (200, 320));
+        let left = render_turned(&w, 1, 0, 100, Rotation::Left);
+        assert_eq!((left.width, left.height), (100, 160));
+        assert_ne!(left.rgba, right.rgba);
+        let half = render_turned(&w, 1, 0, 160, Rotation::Half);
+        assert_eq!((half.width, half.height), (160, 100));
+        assert!(half.rgba != upright.rgba, "upside down differs");
+        // Upside down twice is upright: the first pixel is the last.
+        let px = |p: &RenderedPage, i: usize| p.rgba[i * 4..i * 4 + 4].to_vec();
+        assert_eq!(px(&half, 0), px(&upright, 160 * 100 - 1));
+        // A TIFF page turns the same way.
+        assert_eq!(
+            open_on(&w, 2, fixture("three_pages.tif").to_vec()),
+            opened(2, 3)
+        );
+        let t = render_turned(&w, 2, 1, 160, Rotation::Right);
+        assert_eq!((t.width, t.height), (160, 120));
+        assert_eq!((t.natural_width, t.natural_height), (160, 120));
+    }
+
+    #[test]
+    fn a_turned_pdf_page_swaps_its_sides_with_pdfium() {
+        let Some(w) = with_pdfium() else { return };
+        w.send(DocRequest::Open {
+            doc: 1,
+            bytes: fixture("two_pages.pdf"),
+        });
+        assert_eq!(reply(&w), opened(1, 2));
+        let upright = render_turned(&w, 1, 1, 400, Rotation::None);
+        let right = render_turned(&w, 1, 1, 400, Rotation::Right);
+        assert_eq!(right.width, 400);
+        assert!((308..=310).contains(&right.height), "{}", right.height);
+        assert_eq!((right.natural_width, right.natural_height), (792, 612));
+        assert_eq!(right.rgba.len(), 400 * right.height as usize * 4);
+        let half = render_turned(&w, 1, 1, 400, Rotation::Half);
+        assert_eq!((half.width, half.height), (upright.width, upright.height));
+        assert!(half.rgba != upright.rgba, "upside down differs");
+    }
+
     #[test]
     fn newer_requests_supersede_queued_ones() {
         let (tx, _rx) = channel();
@@ -1073,6 +1269,7 @@ mod tests {
             doc,
             page: 0,
             px_width,
+            rotation: Rotation::None,
         };
         let open = |doc| DocRequest::Open {
             doc,
@@ -1098,8 +1295,8 @@ mod tests {
             kept,
             vec![
                 "1 Open { doc: 1, len: 1 }",
-                "1 Render { doc: 1, page: 0, px_width: 300 }",
-                "1 Render { doc: 2, page: 0, px_width: 50 }",
+                "1 Render { doc: 1, page: 0, px_width: 300, rotation: 0 }",
+                "1 Render { doc: 2, page: 0, px_width: 50, rotation: 0 }",
                 "close-handle 2",
                 "1 Close { doc: 3 }",
             ]
@@ -1125,6 +1322,7 @@ mod tests {
             doc: 1,
             page: 1,
             px_width: 400,
+            rotation: Rotation::None,
         });
         let DocReply::Rendered(p) = reply(&w) else {
             panic!("not rendered")
@@ -1147,6 +1345,7 @@ mod tests {
             doc: 1,
             page: 0,
             px_width: 50_000,
+            rotation: Rotation::None,
         });
         let DocReply::Rendered(p) = reply(&w) else {
             panic!("not rendered")
