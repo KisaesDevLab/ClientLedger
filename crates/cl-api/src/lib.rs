@@ -45,6 +45,8 @@ pub use errors::{
     FieldPath, LocalValidation, SavedEntity, UserText, ValidationError, ValidationIssue,
     is_deposit_links_dropped,
 };
+// A04 WP-D: the demo engine's refusals read as the engine's.
+pub use errors::engine_refusal;
 pub use idempotency::IdempotencyKey;
 pub use queue::{
     ApiQueue, OrphanLabel, OrphanOutcome, OrphanResult, Pending, QueueConfig, QueueError,

@@ -23,11 +23,261 @@
     "refs": "args may name an earlier step's result by its label: \"$file1\" (an attachment id), \"$draft1.id\", \"$draft1.updatedAt\", \"$txn1.id\". Amounts are decimal strings; dates are YYYY-MM-DD.",
     "sections": "claim (D1 claim answers), store (readings and stale tokens), discard, convert (D2 convert answers), attach (U-95 a, T9), guard (U-95 b, T7), amount_filter (U-95 c)"
   },
-  "claim": [],
-  "store": [],
-  "discard": [],
-  "convert": [],
-  "attach": [],
-  "guard": [],
-  "amount_filter": []
+  "claim": [
+    {"name": "d_claim_new_draft", "owner": "WP-D", "why": "a draft file is claimed as a new draft", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "claim-a"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "bill", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "get", "args": {"draft": "$d1.id"}, "expect": {"status": 200, "code": null, "draft_status": "new"}}
+    ]},
+    {"name": "d_claim_same_bytes_refused", "owner": "WP-D", "why": "the same bytes under another draft key are already claimed (Q-289)", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "claim-b"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "claim-b"}, "as": "f2", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "claim", "args": {"file": "$f2", "kindHint": "card_charge", "key": "k2"}, "expect": {"status": 409, "code": "DOCUMENT_ALREADY_CLAIMED", "draft_status": null}}
+    ]},
+    {"name": "d_claim_after_discard_is_free", "owner": "WP-D", "why": "discarding frees the claim on the bytes", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "claim-c"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "bill", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "discard", "args": {"draft": "$d1.id"}, "expect": {"status": 200, "code": null, "draft_status": "discarded"}},
+      {"op": "upload_draft_file", "args": {"content": "claim-c"}, "as": "f2", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f2", "kindHint": "bill", "key": "k2"}, "expect": {"status": 201, "code": null, "draft_status": "new"}}
+    ]},
+    {"name": "d_claim_filed_file_refused", "owner": "WP-D", "why": "a file already on a record is not a draft file", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "18.40", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "claim-d"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "link_attachment", "args": {"file": "$f1", "transaction": "$t1.id"}, "expect": {"status": 200, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "expect": {"status": 422, "code": "ATTACHMENT_NOT_DRAFT", "draft_status": null}}
+    ]},
+    {"name": "d_claim_key_replay_and_reuse", "owner": "WP-D", "why": "the same key replays the claim; another claim under it is refused", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "claim-e"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "claim-f"}, "as": "f2", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "bill", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "bill", "key": "k1"}, "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "claim", "args": {"file": "$f2", "kindHint": "bill", "key": "k1"}, "expect": {"status": 422, "code": "IDEMPOTENCY_KEY_REUSED", "draft_status": null}}
+    ]},
+    {"name": "d_claim_converted_keeps_claim", "owner": "WP-D", "why": "a converted draft keeps its claim (N2)", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "claim-g"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "41.17", "key": "k2"}, "expect": {"status": 201, "code": null, "draft_status": "converted"}},
+      {"op": "upload_draft_file", "args": {"content": "claim-g"}, "as": "f2", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f2", "kindHint": "card_charge", "key": "k3"}, "expect": {"status": 409, "code": "DOCUMENT_ALREADY_CLAIMED", "draft_status": null}}
+    ]},
+    {"name": "d_claim_unknown_file", "owner": "WP-D", "why": "a file the company does not have is 404", "steps": [
+      {"op": "claim", "args": {"file": "00000000-0000-4000-8000-0000000000aa", "kindHint": "bill", "key": "k1"}, "expect": {"status": 404, "code": null, "draft_status": null}}
+    ]}
+  ],
+  "store": [
+    {"name": "d_store_reading_then_stale", "owner": "WP-D", "why": "a reading stores once per token; the old token is stale", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "store-a"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "unknown", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "store_reading", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "docTotal": "12.50", "docDate": "2026-11-01", "docReference": "R-1", "vendor": "story"}, "as": "d1r", "expect": {"status": 200, "code": null, "draft_status": "ready"}},
+      {"op": "store_reading", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "docTotal": "12.50"}, "expect": {"status": 409, "code": "STALE", "draft_status": null}},
+      {"op": "store_reading", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1r.updatedAt", "kind": "bill", "docTotal": "12.50"}, "expect": {"status": 200, "code": null, "draft_status": "ready"}}
+    ]},
+    {"name": "d_store_failure_then_reading", "owner": "WP-D", "why": "a failed draft stays live and takes a reading", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "store-b"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "bill", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "store_failure", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "reason": "unreadable"}, "as": "d1f", "expect": {"status": 200, "code": null, "draft_status": "failed"}},
+      {"op": "store_reading", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1f.updatedAt", "kind": "bill"}, "expect": {"status": 200, "code": null, "draft_status": "ready"}}
+    ]},
+    {"name": "d_store_on_discarded_is_closed", "owner": "WP-D", "why": "a discarded draft takes no reading", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "store-c"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "bill", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "discard", "args": {"draft": "$d1.id"}, "as": "d1x", "expect": {"status": 200, "code": null, "draft_status": "discarded"}},
+      {"op": "store_reading", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1x.updatedAt", "kind": "bill"}, "expect": {"status": 409, "code": "DOCUMENT_DRAFT_CLOSED", "draft_status": null}}
+    ]},
+    {"name": "d_get_unknown_draft", "owner": "WP-D", "why": "an unknown draft is 404", "steps": [
+      {"op": "get", "args": {"draft": "00000000-0000-4000-8000-0000000000ab"}, "expect": {"status": 404, "code": null, "draft_status": null}}
+    ]},
+    {"name": "d_list_counts_live_drafts", "owner": "WP-D", "why": "the queue's total counts live drafts only (Home count)", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "list-a"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "list-b"}, "as": "f2", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "bill", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "claim", "args": {"file": "$f2", "kindHint": "bill", "key": "k2"}, "as": "d2", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "discard", "args": {"draft": "$d2.id"}, "expect": {"status": 200, "code": null, "draft_status": "discarded"}},
+      {"op": "list", "args": {"status": "new,ready,failed", "limit": 1}, "expect": {"status": 200, "code": null, "draft_status": null, "total": 1}}
+    ]}
+  ],
+  "discard": [
+    {"name": "d_discard_twice", "owner": "WP-D", "why": "discarding a discarded draft changes nothing", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "discard-a"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "bill", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "discard", "args": {"draft": "$d1.id"}, "expect": {"status": 200, "code": null, "draft_status": "discarded"}},
+      {"op": "discard", "args": {"draft": "$d1.id"}, "expect": {"status": 200, "code": null, "draft_status": "discarded"}}
+    ]},
+    {"name": "d_discard_converted_refused", "owner": "WP-D", "why": "a converted draft can't be discarded", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "discard-b"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "19.99", "key": "k2"}, "expect": {"status": 201, "code": null, "draft_status": "converted"}},
+      {"op": "discard", "args": {"draft": "$d1.id"}, "expect": {"status": 409, "code": "DOCUMENT_DRAFT_CLOSED", "draft_status": null}}
+    ]}
+  ],
+  "convert": [
+    {"name": "d_convert_card_charge_moves_file", "owner": "WP-D", "why": "convert posts and moves the draft's file onto the record", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "convert-a"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "27.35", "vendor": "story", "reference": "RC-9001", "key": "k2"}, "expect": {"status": 201, "code": null, "draft_status": "converted", "file": "moved"}},
+      {"op": "get", "args": {"draft": "$d1.id"}, "expect": {"status": 200, "code": null, "draft_status": "converted"}}
+    ]},
+    {"name": "d_convert_stale_token", "owner": "WP-D", "why": "convert with an old token is stale; the new token posts", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "convert-b"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "store_reading", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge"}, "as": "d1r", "expect": {"status": 200, "code": null, "draft_status": "ready"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "15.05", "key": "k2"}, "expect": {"status": 409, "code": "STALE", "draft_status": null, "file": "draft"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1r.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "15.05", "key": "k3"}, "expect": {"status": 201, "code": null, "draft_status": "converted", "file": "moved"}}
+    ]},
+    {"name": "d_convert_closed_period_password", "owner": "WP-D", "why": "423 first, a wrong password is refused, the right one posts under the same key", "steps": [
+      {"op": "set_closing_date", "args": {"date": "2026-10-31"}, "expect": {"status": 200, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "convert-c"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-10-15", "amount": "73.40", "key": "kc"}, "expect": {"status": 423, "code": "TB_PERIOD_LOCKED", "draft_status": null, "file": "draft"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-10-15", "amount": "73.40", "closingPassword": "wrong", "key": "kc"}, "expect": {"status": 403, "code": "CLOSING_PASSWORD_INVALID", "draft_status": null}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-10-15", "amount": "73.40", "closingPassword": "right", "key": "kc"}, "expect": {"status": 201, "code": null, "draft_status": "converted", "file": "moved"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-10-15", "amount": "73.40", "closingPassword": "right", "key": "kc"}, "expect": {"status": 201, "code": null, "draft_status": "converted"}}
+    ]},
+    {"name": "d_convert_possible_duplicate_acknowledged", "owner": "WP-D", "why": "a posted expense of the vendor with the same total blocks until acknowledged", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-11-01", "amount": "63.18", "vendor": "story", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "convert-d"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-02", "amount": "63.18", "vendor": "story", "key": "k2"}, "expect": {"status": 409, "code": "POSSIBLE_DUPLICATE", "draft_status": null, "file": "draft"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-02", "amount": "63.18", "vendor": "story", "acknowledge": ["$t1.id"], "key": "k3"}, "expect": {"status": 201, "code": null, "draft_status": "converted"}}
+    ]},
+    {"name": "d_convert_reference_duplicate", "owner": "WP-D", "why": "the same normalized reference blocks whatever the total (INV-00123 = inv123)", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "convert-e1"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "convert-e2"}, "as": "f2", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "bill", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "claim", "args": {"file": "$f2", "kindHint": "bill", "key": "k2"}, "as": "d2", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "bill", "date": "2026-11-02", "amount": "210.00", "vendor": "story", "reference": "INV-00123", "key": "k3"}, "expect": {"status": 201, "code": null, "draft_status": "converted"}},
+      {"op": "convert", "args": {"draft": "$d2.id", "expectedUpdatedAt": "$d2.updatedAt", "kind": "bill", "date": "2026-11-03", "amount": "999.00", "vendor": "story", "reference": "inv123", "key": "k4"}, "expect": {"status": 409, "code": "POSSIBLE_DUPLICATE", "draft_status": null}}
+    ]},
+    {"name": "d_convert_outside_window", "owner": "WP-D", "why": "the same total more than 60 days apart is not a duplicate", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-10-01", "amount": "88.21", "vendor": "story", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "convert-f"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-12-05", "amount": "88.21", "vendor": "story", "key": "k2"}, "expect": {"status": 201, "code": null, "draft_status": "converted"}}
+    ]},
+    {"name": "d_convert_vendorless_unchecked", "owner": "WP-D", "why": "without a vendor the engine checks nothing (the desktop match on Accept covers it, Q-A04d)", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-11-01", "amount": "52.40", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "convert-g"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-02", "amount": "52.40", "key": "k2"}, "expect": {"status": 201, "code": null, "draft_status": "converted"}}
+    ]},
+    {"name": "d_convert_key_replay_and_reuse", "owner": "WP-D", "why": "the same key replays (S3); another body under it is refused; a new key after the convert is closed (T1)", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "convert-h1"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "convert-h2"}, "as": "f2", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "claim", "args": {"file": "$f2", "kindHint": "card_charge", "key": "k2"}, "as": "d2", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "36.90", "key": "kx"}, "expect": {"status": 201, "code": null, "draft_status": "converted"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "36.90", "key": "kx"}, "expect": {"status": 201, "code": null, "draft_status": "converted"}},
+      {"op": "convert", "args": {"draft": "$d2.id", "expectedUpdatedAt": "$d2.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "36.90", "key": "kx"}, "expect": {"status": 422, "code": "IDEMPOTENCY_KEY_REUSED", "draft_status": null}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "36.90", "key": "ky"}, "expect": {"status": 409, "code": "DOCUMENT_DRAFT_CLOSED", "draft_status": null}}
+    ]},
+    {"name": "d_convert_check", "owner": "WP-D", "why": "a check posts as an expense and takes the file", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "convert-i"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "check", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "check", "date": "2026-11-03", "amount": "140.00", "vendor": "story", "key": "k2"}, "expect": {"status": 201, "code": null, "draft_status": "converted", "file": "moved"}}
+    ]},
+    {"name": "d_convert_discarded_is_closed", "owner": "WP-D", "why": "a draft discarded on another computer posts nothing", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "convert-j"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "discard", "args": {"draft": "$d1.id"}, "expect": {"status": 200, "code": null, "draft_status": "discarded"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "11.11", "key": "k2"}, "expect": {"status": 409, "code": "DOCUMENT_DRAFT_CLOSED", "draft_status": null}}
+    ]}
+  ],
+  "attach": [
+    {"name": "d_attach_to_posted_expense", "owner": "WP-D", "why": "attach files the document on a posted expense and replays under its key", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "33.33", "vendor": "story", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "attach-a"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "attach", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "transaction": "$t1.id", "key": "k2"}, "expect": {"status": 200, "code": null, "draft_status": "converted", "file": "moved"}},
+      {"op": "attach", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "transaction": "$t1.id", "key": "k2"}, "expect": {"status": 200, "code": null, "draft_status": "converted"}}
+    ]},
+    {"name": "d_attach_twice_new_key_closed", "owner": "WP-D", "why": "an attached draft is closed (no undo, Q-A04e)", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "44.44", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "attach-b"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "attach", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "transaction": "$t1.id", "key": "k2"}, "expect": {"status": 200, "code": null, "draft_status": "converted"}},
+      {"op": "attach", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "transaction": "$t1.id", "key": "k3"}, "expect": {"status": 409, "code": "DOCUMENT_DRAFT_CLOSED", "draft_status": null}}
+    ]},
+    {"name": "d_attach_void_target_refused", "owner": "WP-D", "why": "a void record is not posted", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "55.55", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "void", "args": {"transaction": "$t1.id"}, "expect": {"status": 200, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "attach-c"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "attach", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "transaction": "$t1.id", "key": "k2"}, "expect": {"status": 409, "code": "TRANSACTION_NOT_POSTED", "draft_status": null, "file": "draft"}}
+    ]},
+    {"name": "d_attach_unknown_target", "owner": "WP-D", "why": "a record that is gone is 404", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "attach-d"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "attach", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "transaction": "00000000-0000-4000-8000-0000000000ac", "key": "k2"}, "expect": {"status": 404, "code": null, "draft_status": null, "file": "draft"}}
+    ]},
+    {"name": "d_attach_stale", "owner": "WP-D", "why": "attach names the token it last read", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "66.66", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "attach-e"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "store_reading", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge"}, "expect": {"status": 200, "code": null, "draft_status": "ready"}},
+      {"op": "attach", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "transaction": "$t1.id", "key": "k2"}, "expect": {"status": 409, "code": "STALE", "draft_status": null}}
+    ]},
+    {"name": "d_attach_closed_period_no_password", "owner": "WP-D", "why": "attach posts nothing, so the closing date asks for no password (Q-A04f)", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-10-20", "amount": "77.77", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "set_closing_date", "args": {"date": "2026-10-31"}, "expect": {"status": 200, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "attach-f"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "attach", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "transaction": "$t1.id", "key": "k2"}, "expect": {"status": 200, "code": null, "draft_status": "converted", "file": "moved"}}
+    ]}
+  ],
+  "guard": [
+    {"name": "d_guard_plain_relink_leaves_live_file", "owner": "WP-D", "why": "a plain save leaves a live draft's file on its key; convert later takes it (T7)", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "guard-a", "draftKey": "K1"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "21.21", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "plain_relink", "args": {"file": "$f1", "transaction": "$t1.id"}, "expect": {"status": 200, "code": null, "draft_status": null, "file": "draft"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "21.22", "key": "k2"}, "expect": {"status": 201, "code": null, "draft_status": "converted", "file": "moved"}}
+    ]},
+    {"name": "d_guard_other_files_on_the_key_move", "owner": "WP-D", "why": "only the live draft's file stays; the key's other files move", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "guard-b1", "draftKey": "K1"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "guard-b2", "draftKey": "K1"}, "as": "f2", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "22.22", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "plain_relink", "args": {"file": "$f2", "transaction": "$t1.id"}, "expect": {"status": 200, "code": null, "draft_status": null, "file": "moved"}},
+      {"op": "plain_relink", "args": {"file": "$f1", "transaction": "$t1.id"}, "expect": {"status": 200, "code": null, "draft_status": null, "file": "draft"}}
+    ]},
+    {"name": "d_guard_link_refused_while_live", "owner": "WP-D", "why": "linking a live draft's file is refused until the draft is discarded", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "guard-c"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "23.23", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "link_attachment", "args": {"file": "$f1", "transaction": "$t1.id"}, "expect": {"status": 409, "code": "ATTACHMENT_IN_USE", "draft_status": null, "file": "draft"}},
+      {"op": "discard", "args": {"draft": "$d1.id"}, "expect": {"status": 200, "code": null, "draft_status": "discarded"}},
+      {"op": "link_attachment", "args": {"file": "$f1", "transaction": "$t1.id"}, "expect": {"status": 200, "code": null, "draft_status": null, "file": "moved"}}
+    ]},
+    {"name": "d_guard_convert_leaves_the_other_drafts_file", "owner": "WP-D", "why": "two drafts on one key: converting one leaves the other's file", "steps": [
+      {"op": "upload_draft_file", "args": {"content": "guard-d1", "draftKey": "K2"}, "as": "f1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "upload_draft_file", "args": {"content": "guard-d2", "draftKey": "K2"}, "as": "f2", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "claim", "args": {"file": "$f1", "kindHint": "card_charge", "key": "k1"}, "as": "d1", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "claim", "args": {"file": "$f2", "kindHint": "card_charge", "key": "k2"}, "as": "d2", "expect": {"status": 201, "code": null, "draft_status": "new"}},
+      {"op": "convert", "args": {"draft": "$d1.id", "expectedUpdatedAt": "$d1.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "24.24", "key": "k3"}, "expect": {"status": 201, "code": null, "draft_status": "converted", "file": "moved"}},
+      {"op": "get", "args": {"draft": "$d2.id"}, "expect": {"status": 200, "code": null, "draft_status": "new", "file": "draft"}},
+      {"op": "convert", "args": {"draft": "$d2.id", "expectedUpdatedAt": "$d2.updatedAt", "kind": "card_charge", "date": "2026-11-03", "amount": "24.25", "key": "k4"}, "expect": {"status": 201, "code": null, "draft_status": "converted", "file": "moved"}}
+    ]}
+  ],
+  "amount_filter": [
+    {"name": "d_amount_exact_cents", "owner": "WP-D", "why": "exact numeric match: 4321.1 = 4321.10, never 4321.01", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "4321.09", "payFrom": "card"}, "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "4321.90", "payFrom": "card"}, "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "4321.10", "payFrom": "card"}, "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "search_amount", "args": {"amount": "4321.09", "start": "2026-10-26", "end": "2026-11-09"}, "expect": {"status": 200, "code": null, "draft_status": null, "count": 1}},
+      {"op": "search_amount", "args": {"amount": "4321.1", "start": "2026-10-26", "end": "2026-11-09"}, "expect": {"status": 200, "code": null, "draft_status": null, "count": 1}},
+      {"op": "search_amount", "args": {"amount": "4321.01", "start": "2026-10-26", "end": "2026-11-09"}, "expect": {"status": 200, "code": null, "draft_status": null, "count": 0}}
+    ]},
+    {"name": "d_amount_void_left_out", "owner": "WP-D", "why": "posted only: a void record is no candidate", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "5432.10", "payFrom": "card"}, "as": "t1", "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "void", "args": {"transaction": "$t1.id"}, "expect": {"status": 200, "code": null, "draft_status": null}},
+      {"op": "search_amount", "args": {"amount": "5432.10", "start": "2026-10-26", "end": "2026-11-09", "status": "posted"}, "expect": {"status": 200, "code": null, "draft_status": null, "count": 0}}
+    ]},
+    {"name": "d_amount_date_range", "owner": "WP-D", "why": "the date range bounds the search", "steps": [
+      {"op": "post_expense", "args": {"date": "2026-11-02", "amount": "6543.21", "payFrom": "card"}, "expect": {"status": 201, "code": null, "draft_status": null}},
+      {"op": "search_amount", "args": {"amount": "6543.21", "start": "2026-11-03", "end": "2026-11-10"}, "expect": {"status": 200, "code": null, "draft_status": null, "count": 0}},
+      {"op": "search_amount", "args": {"amount": "6543.21", "start": "2026-10-26", "end": "2026-11-09"}, "expect": {"status": 200, "code": null, "draft_status": null, "count": 1}}
+    ]}
+  ]
 }
