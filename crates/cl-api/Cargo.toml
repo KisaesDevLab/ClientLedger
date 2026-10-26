@@ -76,3 +76,8 @@ harness = false
 name = "contract_document_assist"
 path = "tests/contract_document_assist.rs"
 harness = false
+
+[[test]]
+name = "archive_across_pins"
+path = "tests/archive_across_pins.rs"
+harness = false

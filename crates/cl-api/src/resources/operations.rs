@@ -748,7 +748,7 @@ pub(crate) const BILL_PAYMENT_VOID: Operation =
     keyable_ap(Method::Post, "/api/v1/bill-payments/{id}/void");
 
 // ---- A01: intake folders (engine U-93, `intake-settings-v1`) ---------------
-// Client-declared (`OUTSIDE_SPEC`) until the engine PR lands and the pin moves.
+// In the engine spec since pin a88337e3 (engine PR #177).
 
 /// The company's intake folders and their change token.
 pub(crate) const INTAKE_SETTINGS_GET: Operation = read("/api/v1/company/intake-settings");
@@ -758,7 +758,7 @@ pub(crate) const INTAKE_SETTINGS_PUT: Operation =
     write(Method::Put, "/api/v1/company/intake-settings");
 
 // ---- A03: document drafts and vendor layouts (engine U-92, `document-drafts-v1`)
-// Client-declared (`OUTSIDE_SPEC`) until the engine PR lands and the pin moves.
+// In the engine spec since pin 38cf97eb (engine PR #178).
 
 /// Claims an uploaded draft file as a document draft (keyed under
 /// `idempotency-docs-v1`; 409 `DOCUMENT_ALREADY_CLAIMED`).
@@ -791,7 +791,7 @@ pub(crate) const VENDOR_TEMPLATE_DELETE: Operation =
     write(Method::Delete, "/api/v1/vendor-layout-templates/{id}");
 
 // ---- A03: document reading assist (engine U-92d, `document-assist-v1`)
-// Client-declared (`OUTSIDE_SPEC`) until the engine PR lands and the pin moves.
+// In the engine spec since pin 38cf97eb (engine PR #179).
 
 /// A second reading of a document's page text (and page images) by the
 /// company's AI provider. Nothing is stored, but it spends tokens: never

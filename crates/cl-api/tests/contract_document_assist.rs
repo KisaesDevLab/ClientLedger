@@ -36,8 +36,11 @@ use support::{EngineMode, Harness, TestFn, run_suite};
 const ROUTE: &str = "/api/v1/document-reading/assist";
 const U92D: &str = "U-92d";
 
-/// The PNG signature and a few bytes: the engine checks the signature only.
-const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR synthetic";
+/// The PNG signature and a 13-byte IHDR for a 1x1 picture: the engine
+/// checks the signature and reads the size from the IHDR (engine #179
+/// review: `IMAGE_NOT_PNG` without one); it decodes nothing else.
+const PNG: &[u8] =
+    b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89";
 
 fn key() -> IdempotencyKey {
     IdempotencyKey::new()
