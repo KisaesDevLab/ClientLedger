@@ -30,7 +30,6 @@ use std::fmt;
 use base64::Engine as _;
 use cl_core::{CalendarDate, Money, Quantity};
 use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
@@ -248,7 +247,7 @@ fn basis_points(raw: Option<&RawValue>) -> Option<u16> {
         .trunc()
         .max(Decimal::ZERO)
         .min(Decimal::from(10_000));
-    bp.to_u16()
+    i64::try_from(bp).ok().and_then(|v| u16::try_from(v).ok())
 }
 
 /// Parses the assist answer `{suggestion: {...}}`.
