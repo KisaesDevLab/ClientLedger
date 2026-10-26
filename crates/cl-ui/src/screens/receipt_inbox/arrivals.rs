@@ -236,6 +236,15 @@ impl super::ReceiptInboxScreen {
 
     /// The control channel's view in intake mode.
     pub(super) fn intake_state_json(&self) -> Value {
+        if self.arrivals.view.is_null() {
+            // Not drawn yet.
+            return json!({
+                "screen": "receipt_inbox",
+                "mode": "intake",
+                "date": self.today.to_string(),
+                "folder": "loading",
+            });
+        }
         self.arrivals.view.clone()
     }
 

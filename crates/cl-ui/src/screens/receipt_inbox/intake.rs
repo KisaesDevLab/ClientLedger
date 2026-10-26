@@ -659,6 +659,10 @@ impl Intake {
             self.stage = Stage::Seeding(super::demo::seed_intake(base));
             return;
         }
+        if !link.is_demo() && link.session().is_none() {
+            // The migration runs once the session is up.
+            return;
+        }
         let legacy = link.store().load().ok().and_then(|l| {
             l.get(tenant)
                 .and_then(|r| r.prefs.receipt_inbox_dir.clone())
