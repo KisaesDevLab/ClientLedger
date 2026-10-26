@@ -16,6 +16,7 @@
 //! The service is installed once by the desktop app ([`install`]); tests
 //! build their own with a stand-in reader.
 
+pub mod assist;
 pub mod map;
 pub mod service;
 

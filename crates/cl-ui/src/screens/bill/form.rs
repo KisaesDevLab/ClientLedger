@@ -282,6 +282,7 @@ impl EnterBillScreen {
             super::doc_read::BannerEvent::None => {}
             super::doc_read::BannerEvent::Accepted => self.accept_read(),
             super::doc_read::BannerEvent::Cleared => self.clear_read(),
+            super::doc_read::BannerEvent::AskAi => self.start_assist(),
             super::doc_read::BannerEvent::AddVendor => {
                 self.link
                     .push(CompanyEvent::OpenWindow(CommandId::new("vendors.center")));
@@ -1419,6 +1420,12 @@ impl EnterBillScreen {
                     BillKind::Credit => BillKind::Bill,
                 };
                 self.set_kind(other);
+                true
+            }
+            // With the engine's document reading assist there is one Read
+            // document entry (plan D7): the P17 command reads here too.
+            "bill.read_document" if self.read.assist_capable() => {
+                self.start_local_read();
                 true
             }
             "bill.read_document" => {

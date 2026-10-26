@@ -659,6 +659,8 @@ pub enum PanelAction {
     RemoveKey(AiProvider),
     /// Test the chosen provider.
     Test,
+    /// Show Reading documents online (A03).
+    OpenCloudReading,
 }
 
 /// A labelled on/off switch row (title, description, checkbox).
@@ -841,6 +843,17 @@ pub fn panel(
             form::hint(ui, tokens, &text);
             form::hint(ui, tokens, &t("prefs.ai.notice_images"));
             agree_row(ui, tokens, e, loaded);
+            // A03: documents go online only with their own consent.
+            ui.horizontal_wrapped(|ui| {
+                form::hint(ui, tokens, &t("prefs.cloud_reading.link_hint"));
+                if ui
+                    .link(t("prefs.cloud_reading.link"))
+                    .on_hover_text(t("prefs.cloud_reading.link_tip"))
+                    .clicked()
+                {
+                    action = PanelAction::OpenCloudReading;
+                }
+            });
         });
     }
 

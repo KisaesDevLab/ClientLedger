@@ -99,9 +99,11 @@ mod viewer;
 // A01 (one module per work package).
 mod intake;
 mod picker;
+// A03 (one module per work package).
+mod cloud_reading;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 28] = [
+const TABLES: [&[(&str, &str)]; 29] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -130,6 +132,7 @@ const TABLES: [&[(&str, &str)]; 28] = [
     viewer::ENGLISH,
     intake::ENGLISH,
     picker::ENGLISH,
+    cloud_reading::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
