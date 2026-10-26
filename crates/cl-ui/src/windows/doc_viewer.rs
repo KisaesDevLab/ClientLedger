@@ -13,6 +13,11 @@
 //! platforms without windows) the viewer is an egui window inside the main
 //! one and the main window's keys reach it.
 //!
+//! Never call `ctx.request_repaint()` (without a delay) from code the
+//! window draws: in the spike a deferred child repainting every pass
+//! starved the main window, which stopped drawing. `request_repaint_after`
+//! with a delay (the viewer polls its worker every 30 ms) is fine.
+//!
 //! Keys (Q-A02g): in its own window the viewer resolves keys in
 //! [`Scope::Viewer`]; `viewer.*`, F6 and Ctrl+Shift+D act there and every
 //! other command runs in the main window, which comes forward.
