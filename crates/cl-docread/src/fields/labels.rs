@@ -185,11 +185,21 @@ const TABLE: &[(&[&str], Label)] = &[
 ];
 
 /// One canonical token and the position of the word it came from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Token {
     pub text: String,
     /// Index into the word list the tokens were made from.
     pub word: usize,
+}
+
+/// Document text: `Debug` shows the word index and length only.
+impl std::fmt::Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Token")
+            .field("word", &self.word)
+            .field("chars", &self.text.chars().count())
+            .finish()
+    }
 }
 
 /// A label found in a token list: `tokens[start..end]`.
@@ -315,5 +325,7 @@ mod tests {
             [Label::Date(1), Label::Reference(0)]
         );
         assert_eq!(labels("Canvas tarp").len(), 0);
+        let t = tokens(words("Riverbend").iter());
+        assert!(!format!("{t:?}").contains("riverbend"));
     }
 }
