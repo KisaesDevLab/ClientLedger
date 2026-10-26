@@ -41,6 +41,9 @@ pub struct DemoIntake {
     /// Admin until P29). Tests and scenarios set another role to see the
     /// read-only panel.
     pub role: Option<String>,
+    /// The demo engine acts as one without `intake-settings-v1` (tests:
+    /// the P17 single receipt-inbox folder, Q-A01q).
+    pub needs_engine: bool,
 }
 
 impl DemoIntake {

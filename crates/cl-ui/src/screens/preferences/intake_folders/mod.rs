@@ -23,6 +23,7 @@
 //! Folder names and paths are owner data: they appear on screen only,
 //! never in `state()`, `Debug` or a log line.
 
+pub mod legacy;
 pub mod source;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -806,9 +807,9 @@ pub struct View<'a> {
     pub committed: &'a IntakeEdits,
     /// This computer's confirmations (the company record).
     pub here: &'a BTreeMap<IntakeFolderId, HereNote>,
-    /// A P17 folder is still set (shown while the engine can't keep
-    /// intake folders).
-    pub legacy: bool,
+    /// P17's single receipt-inbox folder (the company record's edit),
+    /// chosen here while the engine can't keep intake folders (Q-A01q).
+    pub legacy_dir: &'a mut Option<PathBuf>,
     /// ClientLedger's own folders (refused as intake folders).
     pub app_dirs: &'a [PathBuf],
 }
@@ -840,13 +841,10 @@ pub fn show(ui: &mut Ui, tokens: &Tokens, v: &mut View<'_>) -> PanelAction {
             return action;
         }
         LoadState::NeedsEngine => {
-            form::card(ui, tokens, |ui| {
-                form::inline_warning(ui, tokens, &t("prefs.intake.needs_engine"));
-                if v.legacy {
-                    form::hint(ui, tokens, &t("prefs.intake.legacy"));
-                }
-                ui.add(egui::Label::new(t("prefs.intake.where")).selectable(false));
-            });
+            // P17's single folder keeps working (Q-A01q).
+            form::hint(ui, tokens, &t("prefs.intake.needs_engine"));
+            ui.add_space(4.0);
+            legacy::chooser(ui, tokens, v.legacy_dir);
             return action;
         }
         LoadState::Failed => {

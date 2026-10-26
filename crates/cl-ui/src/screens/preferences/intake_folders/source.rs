@@ -44,10 +44,14 @@ pub struct Fetched {
     pub role: Option<String>,
 }
 
-/// Whether this company can keep intake folders at all.
+/// Whether this company can keep intake folders at all (the demo can,
+/// unless a test turned its stand-in capability off).
 #[must_use]
 pub fn supported(link: &CompanyLink) -> bool {
-    link.is_demo() || link.capabilities().has(CAPABILITY)
+    match link.demo_state() {
+        Some(demo) => !demo.intake.needs_engine,
+        None => link.capabilities().has(CAPABILITY),
+    }
 }
 
 /// The engine's folders (`GET /company/intake-settings`).
