@@ -113,7 +113,9 @@ fn validate(folders: &[IntakeFolder]) -> Result<(), DemoIntakeError> {
         if !names.insert(name.to_lowercase()) {
             return Err(DemoIntakeError::Invalid("name"));
         }
-        if cl_company::intake::check_path_syntax(&f.path, &[]).is_err()
+        // The engine's rule, the same on every system: not this computer's
+        // (Preferences checks that before a save).
+        if !cl_company::intake::engine_accepts_path(&f.path)
             || !paths.insert(cl_settings::migrate_inbox::same_path_key(&f.path))
         {
             return Err(DemoIntakeError::Invalid("path"));
@@ -197,5 +199,25 @@ mod tests {
         );
         let again = d.put(tenant(1), vec![], Some(&stamp)).expect("ok");
         assert_ne!(again.updated_at.as_deref(), Some(stamp.as_str()));
+        // The engine's rule, not this computer's: every form on every
+        // system, a drive root too; a doubled slash never.
+        let every_form = vec![
+            folder(1, "A", r"C:\Bills"),
+            folder(2, "B", r"\\nas\Scans"),
+            folder(3, "C", "/srv/receipts"),
+            folder(4, "D", r"D:\"),
+        ];
+        let saved = d
+            .put(tenant(1), every_form, again.updated_at.as_deref())
+            .expect("every form");
+        assert_eq!(saved.folders.len(), 4);
+        assert_eq!(
+            d.put(
+                tenant(1),
+                vec![folder(1, "A", "//nas/scans")],
+                saved.updated_at.as_deref()
+            ),
+            Err(DemoIntakeError::Invalid("path"))
+        );
     }
 }

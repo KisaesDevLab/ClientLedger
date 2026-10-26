@@ -50,6 +50,7 @@ pub use migrate::{
 };
 pub use path::{
     MAX_PATH_CHARS, PathProblem, canonical_key, canonical_key_with, check_path_syntax, classify,
+    engine_accepts_path,
 };
 pub use probe::{PROBE_DEADLINE, ProbeCounts, ProbeReport, probe, probe_async, probe_async_with};
 pub use scan::{

@@ -207,6 +207,130 @@ pub fn check_path_syntax(text: &str, app_dirs: &[&Path]) -> Result<PathBuf, Path
     Ok(PathBuf::from(t))
 }
 
+/// Format (`Cf`), line and paragraph separator characters the engine
+/// refuses beside the control characters: zero-width, bidirectional
+/// overrides and isolates, BOM, soft hyphen and the like.
+fn is_invisible(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{AD}'
+                | '\u{600}'..='\u{605}'
+                | '\u{61C}'
+                | '\u{6DD}'
+                | '\u{70F}'
+                | '\u{890}'..='\u{891}'
+                | '\u{8E2}'
+                | '\u{180E}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{2028}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{206F}'
+                | '\u{FEFF}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{110BD}'
+                | '\u{110CD}'
+                | '\u{13430}'..='\u{1343F}'
+                | '\u{1BCA0}'..='\u{1BCA3}'
+                | '\u{1D173}'..='\u{1D17A}'
+                | '\u{E0001}'
+                | '\u{E0020}'..='\u{E007F}'
+        )
+}
+
+/// A Win32 reserved device name, with or without an extension and with
+/// the trailing dots and spaces Windows strips (`NUL.txt`, `con .`).
+fn is_reserved_segment(segment: &str) -> bool {
+    let s = segment.to_lowercase();
+    let mut bases: Vec<String> = ["con", "prn", "aux", "nul", "conin$", "conout$"]
+        .iter()
+        .map(|b| (*b).to_owned())
+        .collect();
+    for stem in ["com", "lpt"] {
+        for d in "0123456789\u{B9}\u{B2}\u{B3}".chars() {
+            bases.push(format!("{stem}{d}"));
+        }
+    }
+    bases.iter().any(|base| {
+        s.strip_prefix(base.as_str()).is_some_and(|rest| {
+            rest.is_empty() || rest.starts_with('.') || rest.chars().all(|c| c == ' ' || c == '.')
+        })
+    })
+}
+
+/// A UNC host the engine accepts: a plain name or IPv4 address, or a
+/// bracketed IPv6 address.
+fn is_plain_host(host: &str) -> bool {
+    let plain = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-');
+    if !host.is_empty() && host.chars().all(plain) {
+        return true;
+    }
+    host.strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .and_then(|h| h.split_once(':'))
+        .is_some_and(|(before, after)| {
+            before.chars().all(|c| c.is_ascii_hexdigit())
+                && after
+                    .chars()
+                    .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.')
+        })
+}
+
+/// The engine's own folder path rule (U-93 `intakePathProblem`): the same
+/// on every system, so it accepts `C:\…`, `\\host\share…` and `/…`
+/// wherever it runs. The demo engine checks with it; Preferences checks
+/// with [`check_path_syntax`] instead, the rules of the computer that will
+/// watch the folder. Nothing here is about this computer: a drive root
+/// (`D:\`) is accepted, the app's folders are not looked at, and the text
+/// is not trimmed.
+#[must_use]
+pub fn engine_accepts_path(path: &str) -> bool {
+    let units = path.encode_utf16().count();
+    if !(1..=MAX_PATH_CHARS).contains(&units) || path.chars().any(is_invisible) {
+        return false;
+    }
+    if path.contains("://") {
+        return false;
+    }
+    let b = backslashed(path);
+    if b.starts_with(r"\\?\") || b.starts_with(r"\\.\") || b.starts_with(r"\??\") {
+        return false;
+    }
+    let p = path.as_bytes();
+    let drive =
+        p.len() >= 3 && p[0].is_ascii_alphabetic() && p[1] == b':' && matches!(p[2], b'\\' | b'/');
+    let unc = b
+        .strip_prefix(r"\\")
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(|c| !matches!(c, '\\' | '?' | '.'))
+        && !path.starts_with("//");
+    let unix = path.starts_with('/') && !path.starts_with("//");
+    if !drive && !unc && !unix {
+        return false;
+    }
+    let segments: Vec<&str> = b.split('\\').collect();
+    if b.to_lowercase().contains("@ssl")
+        || segments.iter().any(|s| s.to_lowercase() == "davwwwroot")
+    {
+        return false;
+    }
+    if unc
+        && (!is_plain_host(segments.get(2).copied().unwrap_or(""))
+            || segments.iter().skip(3).any(|s| s.contains(':')))
+    {
+        return false;
+    }
+    if drive && path[2..].contains(':') {
+        return false;
+    }
+    let skip = if unc { 3 } else { 1 };
+    !segments
+        .iter()
+        .skip(skip)
+        .filter(|s| !s.is_empty())
+        .any(|s| *s == ".." || is_reserved_segment(s) || s.ends_with(['.', ' ']))
+}
+
 /// The pin of a resolved root: a hash of its canonical path (verbatim
 /// prefixes removed, case folded on Windows), so a re-mapped drive letter
 /// or a swapped junction is noticed without keeping the path.
@@ -438,6 +562,117 @@ mod tests {
             Err(PathProblem::AppFolder)
         );
         assert!(check_path_syntax("/home/owner/.local/share/clientledger-x", &[app]).is_ok());
+    }
+
+    /// The engine's validation table (`intake-settings.test.ts`), the same
+    /// answer on every system.
+    #[test]
+    fn engine_rule_is_the_same_on_every_system() {
+        let long_ok = format!(r"C:\{}", "a".repeat(1021));
+        let too_long = format!(r"C:\{}", "a".repeat(1022));
+        for ok in [
+            r"C:\Scans\Bills",
+            "c:/Users/owner/Documents/Receipts",
+            r"D:\",
+            r"\\nas\scans\bills",
+            r"\\nas.local\share",
+            r"\\192.168.1.20\scans",
+            "/Users/owner/Dropbox/Receipts",
+            "/home/owner/Scans",
+            "/mnt/nas/scans",
+            "/",
+            r"C:\Scans\Bills (2026)\März",
+            r"C:\Scans\..hidden\x",
+            r"C:\Scans\a.b\c",
+            "/srv/scans@home",
+            r"\\[fe80::1]\scans",
+            r"\\nas-01_b.example.com\scans",
+            "/tmp/a:b",
+            r"C:\Scans\CONSOLE",
+            r"C:\Scans\COM10",
+            r"C:\Scans\nul-files",
+            r"C:\Scans\.hidden",
+            r"C:\Scans\Bills\",
+            "C:\\Scans\\Caf\u{e9} \u{4e2d}\u{6587} \u{1f4c4}",
+            long_ok.as_str(),
+        ] {
+            assert!(engine_accepts_path(ok), "{ok:?}");
+        }
+        for bad in [
+            "",
+            too_long.as_str(),
+            r"Scans\Bills",
+            "C:Scans",
+            r"\Scans",
+            "~/Scans",
+            r"\\?\C:\Scans",
+            r"\\.\PhysicalDrive0",
+            "//?/C:/Scans",
+            "//./COM1",
+            r"\??\C:\Scans",
+            "/??/C:/Scans",
+            "//nas/scans",
+            "file:///C:/Scans",
+            "https://example.com/dav",
+            r"C:\Scans\smb://x",
+            r"\\server@SSL\DavWWWRoot\scans",
+            r"\\server@SSL@443\scans",
+            r"\\server@8080\scans",
+            r"\\server\DavWWWRoot\scans",
+            r"\\server\davwwwroot",
+            r"C:\Scans\..\Windows",
+            "/home/owner/../root",
+            "C:/Scans/..",
+            r"\\nas\..\x",
+            "C:\\Scans\u{0}",
+            "C:\\Scans\nBills",
+            "C:\\Scans\u{7f}",
+            "C:\\Scans\u{85}",
+            r"\\",
+            r"\\\server",
+            r"C:\Scans\CON",
+            r"C:\Scans\nul\x",
+            r"C:\Scans\NUL.txt",
+            r"C:\Scans\aux.tar.gz",
+            r"C:\prn .",
+            r"C:\Scans\COM1",
+            r"C:\Scans\com0",
+            r"C:\Scans\LPT9.log",
+            "C:\\Scans\\COM\u{b9}",
+            "C:\\Scans\\lpt\u{b3}",
+            r"C:\Scans\CONIN$",
+            r"C:\Scans\conout$.x",
+            r"\\nas\scans\CON",
+            "/mnt/scans/aux",
+            "C:\\Scans\\\u{202e}slib",
+            "C:\\Scans\\a\u{2066}b\u{2069}",
+            "C:\\Scans\\a\u{200b}b",
+            "C:\\Scans\\a\u{200d}b",
+            "C:\\Scans\\\u{feff}Bills",
+            "C:\\Scans\\a\u{ad}b",
+            "C:\\Scans\\a\u{2028}b",
+            "C:\\Scans\\a\u{2029}b",
+            r"C:\Scans:stream",
+            r"C:\Scans\Bills:$DATA",
+            "C:/Scans/x:y",
+            r"\\nas\scans:stream",
+            r"\\nas\scans\x:y",
+            r"\\user:pw@nas\scans",
+            r"\\user@nas\scans",
+            r"\\nas:445\scans",
+            r"\\[fe80::1\scans",
+            r"\\[nas]\scans",
+            "\\\\n\u{e4}s\\scans",
+            r"\\nas%20x\scans",
+            r"C:\Scans\Bills.",
+            r"C:\Scans\Bills \x",
+            r"C:\Scans\.",
+            r"C:\Scans\...",
+            "/home/owner/Scans ",
+            r"\\nas\scans.",
+        ] {
+            assert!(!engine_accepts_path(bad), "{bad:?}");
+        }
     }
 
     #[test]

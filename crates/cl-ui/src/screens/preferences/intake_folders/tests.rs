@@ -65,6 +65,13 @@ fn add(s: &mut PreferencesScreen, name: &str, path: &str) -> Result<IntakeFolder
     s.intake.add_folder(&mut s.edits.intake, &dirs)
 }
 
+/// This computer's form of a path: the Windows one (a drive or a network
+/// share) on Windows, the `/` one elsewhere. The panel checks with this
+/// computer's rules: a folder must be valid where it is watched.
+fn pick(windows: &'static str, unix: &'static str) -> &'static str {
+    if cfg!(windows) { windows } else { unix }
+}
+
 fn unc_folder(id: IntakeFolderId, name: &str, path: &str) -> IntakeFolder {
     IntakeFolder {
         id,
@@ -159,7 +166,8 @@ fn typed_paths_and_names_are_refused_inline_without_touching_disk() {
             r"C:\Scans\..\Windows",
             IntakeBlock::Path(PathProblem::DotDot),
         ),
-        (r"C:\", IntakeBlock::Path(PathProblem::DriveRoot)),
+        // The root of the system drive: `C:\` on Windows, `/` elsewhere.
+        (pick(r"C:\", "/"), IntakeBlock::Path(PathProblem::DriveRoot)),
     ] {
         assert_eq!(add(&mut s, "Bills", path), Err(why), "{path}");
         assert_eq!(
@@ -175,12 +183,15 @@ fn typed_paths_and_names_are_refused_inline_without_touching_disk() {
         add(&mut s, "Bills", &backups),
         Err(IntakeBlock::Path(PathProblem::AppFolder))
     );
-    assert_eq!(add(&mut s, "  ", r"C:\Scans"), Err(IntakeBlock::NameEmpty));
     assert_eq!(
-        add(&mut s, &"n".repeat(101), r"C:\Scans"),
+        add(&mut s, "  ", pick(r"C:\Scans", "/srv/Scans")),
+        Err(IntakeBlock::NameEmpty)
+    );
+    assert_eq!(
+        add(&mut s, &"n".repeat(101), pick(r"C:\Scans", "/srv/Scans")),
         Err(IntakeBlock::NameTooLong)
     );
-    // A UNC share passes the syntax rules. It is put in the list directly:
+    // A UNC share (a mounted share elsewhere) passes the syntax rules. It is put in the list directly:
     // Add would test it, and no test resolves a UNC hostname.
     let dirs = s.app_dirs();
     assert!(
@@ -188,22 +199,27 @@ fn typed_paths_and_names_are_refused_inline_without_touching_disk() {
             &s.edits.intake,
             None,
             "Office scans",
-            r"\\fileserver\Scans",
+            pick(r"\\fileserver\Scans", "/mnt/fileserver/Scans"),
             &dirs
         )
         .is_ok()
     );
     let unc = new_folder_id();
-    s.edits
-        .intake
-        .folders
-        .push(unc_folder(unc, "Office scans", r"\\fileserver\Scans"));
+    s.edits.intake.folders.push(unc_folder(
+        unc,
+        "Office scans",
+        pick(r"\\fileserver\Scans", "/mnt/fileserver/Scans"),
+    ));
     assert_eq!(
-        add(&mut s, "office SCANS", r"D:\Other"),
+        add(&mut s, "office SCANS", pick(r"D:\Other", "/srv/Other")),
         Err(IntakeBlock::NameTaken)
     );
     assert_eq!(
-        add(&mut s, "Shoebox", "//FILESERVER/scans"),
+        add(
+            &mut s,
+            "Shoebox",
+            pick("//FILESERVER/scans", "/mnt/FILESERVER/scans")
+        ),
         Err(IntakeBlock::PathTaken)
     );
     s.intake.remove(&mut s.edits.intake, unc);
@@ -283,7 +299,7 @@ fn a_409_writes_nothing_and_reload_replaces_the_typed_changes() {
             vec![IntakeFolder {
                 id: new_folder_id(),
                 name: "Bills".to_owned(),
-                path: r"C:\Scans\Bills".to_owned(),
+                path: pick(r"C:\Scans\Bills", "/srv/Scans/Bills").to_owned(),
                 default_kind: IntakeKind::Bills,
                 auto_read: true,
                 keep_originals: false,
@@ -700,10 +716,11 @@ fn the_switches_round_trip_and_the_auto_read_hint_shows() {
     // Put in directly: no test resolves a UNC hostname. The switches are
     // just stored.
     let id = new_folder_id();
-    s.edits
-        .intake
-        .folders
-        .push(unc_folder(id, "Receipts", r"\\fileserver\Receipts"));
+    s.edits.intake.folders.push(unc_folder(
+        id,
+        "Receipts",
+        pick(r"\\fileserver\Receipts", "/mnt/fileserver/Receipts"),
+    ));
     let f = s
         .edits
         .intake
