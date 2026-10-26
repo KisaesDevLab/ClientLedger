@@ -3,6 +3,7 @@
 
 mod api_spec;
 mod ci;
+mod docread_accuracy;
 mod engine;
 mod engine_test;
 mod fetch_lock;
@@ -57,6 +58,9 @@ usage: cargo xtask <command>
   gen-invoices [--holdout] [--no-scans] [--samples] [--out DIR] [--layouts id,id]
                      synthetic bills and receipts with ground truth for the reading harness into
                      target/docread-synth (A03); --samples refreshes fixtures/docs/read
+  docread-accuracy [--gate] [--regen] [--stress] [--tessdata DIR] [--routes text,scan,photo]
+                     reading accuracy per field and path, measured memory and time, into
+                     target/docread-accuracy; --gate fails below the Q-285 minimums
   gen-sample [--check]
                      write fixtures/sample/ozark_ridge (the practice company, Q-219); --check verifies
   run [--no-prepare] [-- <app args>]
@@ -168,6 +172,7 @@ fn main() -> Result<()> {
         Some("keymap-doc") => keymap_doc::keymap_doc(&args[1..]),
         Some("gen-sample") => gen_sample::gen_sample(&args[1..]),
         Some("gen-invoices") => gen_invoices::gen_invoices(&args[1..]),
+        Some("docread-accuracy") => docread_accuracy::docread_accuracy(&args[1..]),
         Some("grid-bench") => grid_bench::grid_bench(&args[1..]),
         Some(cmd) => {
             if let Some((_, phase)) = STUBS.iter().find(|(name, _)| *name == cmd) {

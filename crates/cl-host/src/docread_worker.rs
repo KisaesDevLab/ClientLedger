@@ -235,6 +235,12 @@ pub struct DocreadStats {
     pub ocr_pages: u32,
     pub ocr_failures: u32,
     pub bad_images: u32,
+    /// Highest worker memory seen (commit on Windows, resident elsewhere),
+    /// in bytes: the process's own peak on Windows, the watchdog's samples
+    /// elsewhere (step 12a measures limits with it).
+    pub worker_peak_memory: u64,
+    /// Highest tesseract memory seen, counted the same way.
+    pub tesseract_peak_memory: u64,
 }
 
 /// Runs reading jobs (see the module comment).
@@ -314,6 +320,23 @@ fn memory_of(sys: &mut System, pid: u32) -> Option<u64> {
     })
 }
 
+/// The process's own peak commit (`PeakPagefileUsage`), exact where the
+/// watchdog's samples could miss a short spike. Windows only.
+fn exact_peak(child: &Child) -> Option<u64> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        win32job::utils::get_process_memory_info(child.as_raw_handle() as isize)
+            .ok()
+            .and_then(|c| u64::try_from(c.peak_pagefile_usage).ok())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = child;
+        None
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The worker process
 // ---------------------------------------------------------------------------
@@ -384,6 +407,8 @@ struct Worker {
     rx: Receiver<Incoming>,
     served: u32,
     sys: System,
+    /// Highest memory sampled.
+    peak: u64,
     _dir: ScratchDir,
 }
 
@@ -433,6 +458,7 @@ impl Worker {
             rx,
             served: 0,
             sys: System::new(),
+            peak: 0,
             _dir: dir,
         };
         match w.rx.recv_timeout(config.limits.ready) {
@@ -459,7 +485,14 @@ impl Worker {
     }
 
     fn memory(&mut self) -> Option<u64> {
-        memory_of(&mut self.sys, self.pid)
+        let m = memory_of(&mut self.sys, self.pid);
+        self.peak = self.peak.max(m.unwrap_or(0));
+        m
+    }
+
+    /// The highest memory this worker used so far.
+    fn peak(&self) -> u64 {
+        self.peak.max(exact_peak(&self.child).unwrap_or(0))
     }
 
     fn kill(&mut self) {
@@ -579,6 +612,7 @@ fn run_tesseract(
     scratch: &Path,
     limits: &DocreadLimits,
     cancel: &AtomicBool,
+    peak: &mut u64,
 ) -> Result<String, OcrFailure> {
     let dir = ScratchDir::new(scratch, "t").map_err(|_| OcrFailure::Unavailable)?;
     let mut cmd = Command::new(&tools.exe);
@@ -633,6 +667,7 @@ fn run_tesseract(
     let fail = loop {
         match child.try_wait() {
             Ok(Some(status)) => {
+                *peak = (*peak).max(exact_peak(&child).unwrap_or(0));
                 if !status.success() {
                     break Some(OcrFailure::Crashed);
                 }
@@ -644,7 +679,9 @@ fn run_tesseract(
         if started.elapsed() > limits.ocr_page || cancel.load(Ordering::Relaxed) {
             break Some(OcrFailure::TimedOut);
         }
-        if memory_of(&mut sys, pid).is_some_and(|m| m > limits.tesseract_memory) {
+        let m = memory_of(&mut sys, pid);
+        *peak = (*peak).max(m.unwrap_or(0));
+        if m.is_some_and(|m| m > limits.tesseract_memory) {
             break Some(OcrFailure::Crashed);
         }
         std::thread::sleep(limits.poll.min(Duration::from_millis(20)));
@@ -951,6 +988,7 @@ fn run_batch(
         };
         outcomes[i] = Some(outcome);
         w.served += 1;
+        stats.worker_peak_memory = stats.worker_peak_memory.max(w.peak());
         let more = k + 1 < batch.len();
         if more && w.memory().is_some_and(|m| m > limits.recycle_memory) {
             return BatchEnd::Recycle(k);
@@ -981,7 +1019,17 @@ fn ocr_answer(
         return failed(OcrFailure::Unavailable);
     };
     stats.ocr_pages += 1;
-    match run_tesseract(tools, pgm, &config.scratch, &config.limits, cancel) {
+    let mut peak = 0;
+    let result = run_tesseract(
+        tools,
+        pgm,
+        &config.scratch,
+        &config.limits,
+        cancel,
+        &mut peak,
+    );
+    stats.tesseract_peak_memory = stats.tesseract_peak_memory.max(peak);
+    match result {
         Ok(tsv) => ToWorker::OcrResult {
             job,
             page,
@@ -1047,6 +1095,21 @@ mod tests {
             templates: Vec::new(),
         };
         assert!(!format!("{j:?}").contains("Riverbend"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn the_exact_peak_is_read_from_the_process() {
+        let mut child = Command::new("cmd")
+            .args(["/c", "exit"])
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let live = exact_peak(&child);
+        let _ = child.wait();
+        let after = exact_peak(&child);
+        assert!(live.is_some_and(|b| b > 0), "{live:?}");
+        assert!(after.is_some_and(|b| b > 0), "{after:?}");
     }
 
     #[test]
