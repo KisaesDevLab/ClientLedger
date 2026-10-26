@@ -12,6 +12,7 @@ use eframe::egui;
 use super::*;
 use crate::company::CompanyLink;
 use crate::screens::preferences::{Category, PreferencesScreen, SaveBlock};
+use crate::widgets::file_picker::{Answer, PickerHook};
 use crate::windows::Screen;
 
 const OZARK: &str = "d0000000-0000-4000-8000-000000000001";
@@ -411,6 +412,81 @@ fn other_roles_see_a_read_only_list() {
         Err(IntakeBlock::ReadOnly)
     );
     assert_eq!(s.edits.intake.folders.len(), 1);
+    // Nor does Browse open a window (WP-D).
+    let ctx = egui::Context::default();
+    let hook = PickerHook::install(&ctx);
+    s.intake.browse(&ctx, &dirs);
+    assert!(!s.intake.browsing());
+    assert_eq!(hook.asked(), 0);
+}
+
+/// Browse (WP-D, Q-A01m): the chosen folder fills the Add row's Folder
+/// field and is then checked and tested like a typed one; a cancel keeps
+/// what was typed; no path reaches the control channel.
+#[test]
+fn browse_fills_the_folder_field_and_a_cancel_keeps_the_typed_path() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let bills = tempfile::tempdir().expect("bills");
+    let mut s = screen(&link);
+    let ctx = egui::Context::default();
+    let hook = PickerHook::install(&ctx);
+    let dirs = s.app_dirs();
+    // Without the Add row open there is nothing to fill.
+    s.intake.browse(&ctx, &dirs);
+    assert_eq!(hook.asked(), 0);
+
+    s.intake.add = Some(AddRow {
+        name: "Bills".to_owned(),
+        ..AddRow::default()
+    });
+    hook.answer(Answer::Paths(vec![bills.path().to_path_buf()]));
+    s.intake.browse(&ctx, &dirs);
+    assert_eq!(hook.asked(), 1);
+    assert_eq!(s.state()["intake"]["browsing"], true);
+    s.poll();
+    assert!(!s.intake.browsing());
+    let shown = bills.path().display().to_string();
+    assert_eq!(
+        s.intake.add.as_ref().map(|a| a.path.as_str()),
+        Some(shown.as_str())
+    );
+    let state = s.state().to_string();
+    assert!(!state.contains(&shown), "no path in the control channel");
+    // Add: tested at once, as for a typed path.
+    let id = s
+        .intake
+        .add_folder(&mut s.edits.intake, &dirs)
+        .expect("added");
+    settle(&mut s);
+    let f = s.edits.intake.folders.iter().find(|f| f.id == id).cloned();
+    assert_eq!(f.map(|f| f.path), Some(shown.clone()));
+    assert_eq!(s.state()["intake"]["folders"][0]["probe"], "ok");
+
+    // A cancel leaves the typed path alone; a refused pick is shown inline.
+    s.intake.add = Some(AddRow {
+        name: "Receipts".to_owned(),
+        path: r"C:\Typed\Receipts".to_owned(),
+        ..AddRow::default()
+    });
+    hook.answer(Answer::Cancel);
+    s.intake.browse(&ctx, &dirs);
+    s.poll();
+    assert_eq!(
+        s.intake.add.as_ref().map(|a| a.path.as_str()),
+        Some(r"C:\Typed\Receipts")
+    );
+    // The same folder again is refused on Add like a typed duplicate.
+    hook.answer(Answer::Paths(vec![bills.path().to_path_buf()]));
+    s.intake.browse(&ctx, &dirs);
+    s.poll();
+    assert_eq!(
+        s.intake.add_folder(&mut s.edits.intake, &dirs),
+        Err(IntakeBlock::PathTaken)
+    );
+    // The Browse button names the Add row.
+    let all = texts(&mut s);
+    assert!(all.contains("Browse for the new folder"), "{all}");
 }
 
 /// A folder another computer (or user) set up on a network computer names
