@@ -9,7 +9,9 @@ use cl_model::forms::SaveIntent;
 use cl_model::lists::accounts::{AccountKind, DraftProblem};
 use eframe::egui::{self, Pos2, RawInput, Rect, vec2};
 
-use super::{ChartScreen, F_NAME, F_NUMBER, F_PARENT, F_SENSITIVE, FormPanel, Panel};
+use super::{
+    ChartScreen, F_CARD, F_DETAIL, F_NAME, F_NUMBER, F_PARENT, F_SENSITIVE, FormPanel, Panel,
+};
 use crate::company::CompanyLink;
 use crate::company::demo::account_id;
 use crate::shell::Shell;
@@ -470,4 +472,135 @@ fn demo_chart_shows_the_payments_clearing_balance_from_the_ledger() {
     r.s = ChartScreen::new(Arc::clone(&r.link), Some((id, "Ozark".into())), date);
     r.frames(3);
     assert_eq!(clearing_balance(&r.s), Some(cl_core::Money::ZERO));
+}
+
+/// A new credit card account (2050 is selected, so the form is a
+/// Liability) with `digits` in "Card ends in".
+fn new_card(r: &mut Rig, name: &str, digits: &str) {
+    use cl_model::lists::accounts::CardEnding;
+    r.select(2050);
+    r.s.command(cl_model::CommandId::new("list.new"));
+    r.frames(1);
+    assert_eq!(r.form().form.current().kind, AccountKind::Liability);
+    r.form()
+        .form
+        .edit(F_DETAIL, |d| d.detail = "credit_card".into());
+    r.form().form.edit(F_NAME, |d| d.name = name.into());
+    let digits = digits.to_string();
+    r.form()
+        .form
+        .edit(F_CARD, |d| d.card_last4 = CardEnding(digits));
+    r.frames(1);
+}
+
+fn card_of(r: &Rig, id: cl_core::ids::AccountId) -> Option<String> {
+    r.link
+        .demo_state()
+        .expect("demo")
+        .chart
+        .as_ref()
+        .and_then(|c| c.iter().find(|a| a.id == id))
+        .and_then(|a| a.card_last4)
+        .map(|c| c.as_str().to_string())
+}
+
+/// A03: "Card ends in" shows on a credit card account only while the engine
+/// stores the digits (the demo's stand-in for `document-drafts-v1`).
+#[test]
+fn card_ends_in_shows_only_on_credit_cards_with_the_capability() {
+    let mut r = Rig::new(true);
+    new_card(&mut r, "Fuel Card", "");
+    assert_eq!(r.s.state()["card_digits_on"], false);
+    assert_eq!(r.s.state()["card_field"], false, "the demo engine lacks it");
+    assert!(r.s.command(cl_model::CommandId::new("dev.demo_card_digits")));
+    r.frames(1);
+    assert_eq!(r.s.state()["card_digits_on"], true);
+    assert_eq!(r.s.state()["card_field"], true);
+    // Not on another liability.
+    r.form()
+        .form
+        .edit(F_DETAIL, |d| d.detail = "long_term_liability".into());
+    r.frames(1);
+    assert_eq!(r.s.state()["card_field"], false);
+    // Off again.
+    assert!(r.s.command(cl_model::CommandId::new("dev.demo_card_digits")));
+    assert_eq!(r.s.state()["card_digits_on"], false);
+}
+
+/// A03: the digits save with the account, are refused unless four digits,
+/// clear when emptied or when the account stops being a credit card, and
+/// never reach the control-channel state.
+#[test]
+fn card_ends_in_saves_refuses_and_clears() {
+    let mut r = Rig::new(true);
+    r.s.command(cl_model::CommandId::new("dev.demo_card_digits"));
+    new_card(&mut r, "Fuel Card", "48a1");
+    assert!(!r.s.save_form(SaveIntent::SaveAndClose));
+    assert_eq!(r.s.state()["panel"], "new");
+    assert_eq!(r.s.state()["problem"], "card_digits");
+    assert_eq!(
+        r.form().focus,
+        Some(cl_model::lists::accounts::DraftField::Card)
+    );
+    r.form()
+        .form
+        .edit(F_CARD, |d| d.card_last4.0 = "4821".into());
+    assert!(r.s.save_form(SaveIntent::SaveAndClose));
+    r.frames(2);
+    let st = r.s.state();
+    assert_eq!(st["panel"], "none");
+    assert_eq!(st["selected_card_set"], true);
+    assert!(st["warning"].is_null(), "{st}");
+    assert!(!st.to_string().contains("4821"), "{st}");
+    let id = r.s.selected().expect("selected");
+    assert_eq!(card_of(&r, id).as_deref(), Some("4821"));
+
+    // Edit: the digits load into the form; emptied, they clear.
+    r.s.open_edit(Some(id));
+    r.frames(1);
+    assert_eq!(r.form().form.current().card_last4.as_str(), "4821");
+    r.form()
+        .form
+        .edit(F_CARD, |d| d.card_last4.0 = "1234".into());
+    assert!(r.s.save_form(SaveIntent::SaveAndClose));
+    r.frames(1);
+    assert_eq!(card_of(&r, id).as_deref(), Some("1234"));
+    r.s.open_edit(Some(id));
+    r.frames(1);
+    r.form().form.edit(F_CARD, |d| d.card_last4.0.clear());
+    assert!(r.s.save_form(SaveIntent::SaveAndClose));
+    r.frames(1);
+    assert_eq!(card_of(&r, id), None);
+    assert_eq!(r.s.state()["selected_card_set"], false);
+
+    // No longer a credit card: the engine (and the demo) drop the digits.
+    r.s.open_edit(Some(id));
+    r.frames(1);
+    r.form()
+        .form
+        .edit(F_CARD, |d| d.card_last4.0 = "5555".into());
+    assert!(r.s.save_form(SaveIntent::SaveAndClose));
+    r.frames(1);
+    assert_eq!(card_of(&r, id).as_deref(), Some("5555"));
+    r.s.open_edit(Some(id));
+    r.frames(1);
+    r.form()
+        .form
+        .edit(F_DETAIL, |d| d.detail = "other_current_liability".into());
+    assert!(r.s.save_form(SaveIntent::SaveAndClose));
+    r.frames(1);
+    assert_eq!(card_of(&r, id), None);
+}
+
+/// A03: without the capability nothing about the digits is sent or kept,
+/// even if a form somehow carries them.
+#[test]
+fn without_the_capability_card_digits_are_not_saved() {
+    let mut r = Rig::new(true);
+    new_card(&mut r, "Fuel Card", "4821");
+    assert!(r.s.save_form(SaveIntent::SaveAndClose));
+    r.frames(1);
+    let id = r.s.selected().expect("selected");
+    assert_eq!(card_of(&r, id), None);
+    assert_eq!(r.s.state()["selected_card_set"], false);
 }

@@ -107,6 +107,11 @@ pub struct DemoState {
     pub bills: bills::DemoBills,
     /// Intake folders as the demo engine keeps them (A01, U-93).
     pub intake: intake::DemoIntake,
+    /// A03: the demo engine stores "Card ends in" on credit card accounts
+    /// (`document-drafts-v1`). Off like every demo capability; the
+    /// developer command `dev.demo_card_digits` turns it on and off for
+    /// the Chart of Accounts scenario.
+    pub card_digits: bool,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -217,6 +222,7 @@ impl DemoState {
             batch: batch::DemoBatches::default(),
             bills: bills::DemoBills::default(),
             intake: intake::DemoIntake::default(),
+            card_digits: false,
         }
     }
 

@@ -107,6 +107,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lists.accounts.form.save_new", "Save & New"),
     ("lists.accounts.form.cancel", "Cancel"),
     ("orphan.account_save", "saving an account"),
+    // A03 card
+    ("lists.accounts.form.card_last4", "Card ends in"),
+    ("lists.accounts.form.card_last4_tip", "The last 4 digits of this card. ClientLedger uses them to pick this card when reading receipts."),
+    ("lists.accounts.problem.card_digits", "Enter exactly 4 digits for \"Card ends in\", or leave it empty."),
+    ("lists.accounts.card_not_saved", "The account was saved, but its card digits were not. Open it again and save the digits."),
     // Quick report
     ("lists.qr.title", "Account Report: {account}"),
     ("lists.qr.this_year", "This year to date"),
