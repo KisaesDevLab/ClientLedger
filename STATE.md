@@ -1,7 +1,7 @@
 # STATE.md — ClientLedger
 
-**Current phase:** A01 — Mapped intake folders, a setting of each company (ADD-01; Next, after the P17 PR merges); then A02–A04; then P18
-**Status:** P17 built on `phase/P17-enter-bill`; PR open with auto-merge. M1 complete (summary below). Engine PRs #168–#176 all merged and pinned (b483c02e)
+**Current phase:** A02 — Pop-out document viewer (ADD-01; Next, after the A01 PR merges); then A03–A04; then P18
+**Status:** A01 built on `phase/A01-intake-folders`; PR open with auto-merge. P17 merged (PR #41). Engine PRs #168–#177 all merged; pin a88337e3
 **Engine commit:** `a88337e3` (`main`, pinned 2026-10-25 after engine PR #177 (U-93, intake-settings-v1, migration 0232); before that `b483c02e` after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
 **Last updated:** 2026-10-25
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
@@ -59,8 +59,8 @@
 
 | Phase | Title | Tier | Status |
 | --- | --- | --- | --- |
-| A01 | Mapped intake folders, a setting of each company | M | Next |
-| A02 | Pop-out document viewer | M | |
+| A01 | Mapped intake folders, a setting of each company | M | Done 2026-10-26 (manual mapped-drive / UNC share check pending the owner) |
+| A02 | Pop-out document viewer | M | Next |
 | A03 | Local document reading engine | H | |
 | A04 | Review queue and compare tools | M | |
 | A05 | Match document drafts in the Bank Feed | M | After P26 |
@@ -173,7 +173,7 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 ## Follow-ups from P13
 
 1. ~~A register tab left open shows stale rows after another window saves.~~ Fixed in P14 by the cross-window refresh bus (Q-262).
-2. Native file picker for attachments (Q-P13k).
+2. ~~Native file picker for attachments (Q-P13k).~~ Done in A01 (Browse on Enter Bill and Write Check, `rfd`).
 3. The `cl-host` cold-start budget test exceeds the 15 s local limit under load (CI uses `CL_HOST_BUDGET_SECS=30`).
 4. Engine issues #157 (duplicate check numbers under concurrency) and #158 (float compare in the rules engine).
 
@@ -209,6 +209,19 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 6. U-79 (proposed): `/bills` status filter / leave voided bills out; Home counts posted bills client-side until then (Q-P16r).
 7. U-77 bank-file balance and U-78 reorder alerts proposed; U-37 and U-12 amended for Home.
 8. Home's Refresh issues many engine reads per data-bus event (one per reconciled account batch plus lanes); measure before P33 LAN mode.
+
+## Follow-ups from A01
+
+1. **Owner manual check pending:** add a real mapped drive and a real UNC share (`\\server\share`) as intake folders, copy a PDF into each (appears within 15 s), New bill → original in `Processed\<year-month>\`, Discard → `Discarded\`, disconnect → "unreachable" without freezing, reconnect → recovers. Automated tests cover local folders live and shares through a simulated file system only.
+2. LAN mode (P33): each workstation watches its own confirmed folders (owner, Q-289). Duplicate prevention must become engine-wide (an attachment content hash and a claim on arrival) before P33; plan it with A03/A04 (U-92) or a separate U-row.
+3. Transfer files: P32 must set `omitIntakeSettings` on export and `resetIntakeSettings` on import (Q-A01l).
+4. Polling every 8 s (no license-clean watcher crate) lists network shares about 25% more often than the planned 10 s (Q-A01d); measure on slow shares.
+5. The inbox list is rebuilt from files × entries each frame; fine at demo size, revisit at 20 folders × 500 files.
+6. The engine's attachment delete audit row includes the file name in `before` (pre-existing); Discard now creates such rows. Engine follow-up.
+7. On Linux the Browse dialog uses the desktop portal over the system `libdbus-1` and falls back to `zenity`; check on the AppImage/deb targets (P35).
+8. HEIC: research a permissive decoder in A02 (Q-292).
+9. Restore had refused every real engine backup since P08 (manifest past the first 64 archive entries); fixed in A01 (c9f77a5). Only mocked archives had been tested before; the live intake test now restores a real backup.
+10. Disk: each parallel worktree keeps its own Cargo target (130–300 GB each); four filled the 932 GB drive on 2026-10-26 (CI failed with os error 112). Delete idle worktree target folders after each phase; sccache keeps rebuilds cheaper.
 
 ## Follow-ups from P17
 
@@ -254,6 +267,20 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-26 — A01 (ADD-01) complete on `phase/A01-intake-folders`; PR with auto-merge. Shipped:
+  - Intake folders as a setting of each company, stored in the engine (U-93, engine PR #177, migration 0232, security-reviewed with 10 fixes) and carried by backups; transfer files drop them (`omitIntakeSettings` / `resetIntakeSettings`).
+  - Preferences › Document intake (owner-only until P29): add with **Browse…** or a typed path, rename, remove, Test, kind, "Leave originals where they are", auto-read stored for A03/A04; each computer confirms a folder before it is watched (never archived).
+  - Watching every 8 s, one thread per folder, never blocking the screen; local, mapped-drive, UNC and cloud-sync folders; links never followed (moves by hard link, reads refuse reparse points), cloud placeholders never read, 10 MB and HEIC rows, zero-byte files hidden.
+  - Arrival copies each file into attachments (local SHA-256 duplicates), the inbox lists all folders, New bill / Add to / Discard / Copy anyway; originals move to `Processed/YYYY-MM/` or `Discarded/`, never deleted; P17 `Filed/` untouched.
+  - Folder health on the inbox and Home; migration of the P17 single folder (kept until the new folder is confirmed); engines without U-93 keep the P17 inbox.
+  - Browse for attachments on Enter Bill and Write Check (`rfd`, MIT; xdg-portal on Linux, no GTK). Restore fix for real engine backups (c9f77a5).
+  Acceptance (addenda/ADD-01-document-intake.md A01):
+  - [x] A file saved into a mapped folder appears in that company's inbox within 15 s and is copied into attachments (live `intake_live` through the `Intake` service: ready 10.1 s, attachment 10.2 s). Mapped drive and UNC share covered by simulated-file-system tests; the manual check on a real share is pending the owner (follow-up 1).
+  - [x] Originals move to `Processed/` or `Discarded/` and are never deleted (`handled.rs` tests incl. swapped-in links; scenario).
+  - [x] Folders are per company, carried by backups and excluded from transfer files (live backup/restore in `intake_live`; contract `intake_settings` 7/7 incl. `omitIntakeSettings`).
+  - [x] The old single-folder setting migrates without losing or moving any file (migration golden; legacy fallback tests).
+  Reviews: fresh-eyes review (Discard could delete a saved record's attachment + 8 should-fix, all fixed), security review (2 Medium: link-swap on move and on read, + Lows, fixed), ui-verifier (2 must-fix + 6 should-fix, fixed). Scenarios intake_folders, receipt_inbox, home, preferences-ai, preferences-user, bill, write_check pass light and dark. Help: document-intake, receipt-inbox. Decisions Q-A01a–Q-A01r; ADD-01 open questions answered by the owner (Q-283–Q-286, Q-288, Q-289, Q-292, Q-293).
+  Agents: scout/opus, architect/opus, impl/opus (C0, WP-A, WP-B, WP-C, WP-D, WP-E, pin, fix pass), engine-impl/opus ×2, security-review/opus ×2, review/opus, ui-verifier/opus, docs-writer/sonnet.
 - 2026-10-25 — P17 complete on `phase/P17-enter-bill`; PR with auto-merge. Shipped:
   - Enter Bill / vendor credit (one form): terms with discount and due dates from the engine (owner overrides kept), expense and item lines (qty × cost exact), Customer / Job, Billable, tags, Bill received, prefill and the vendor's default account, attachments with preview, Prev/Next, void and delete with the closing-date password, the unknown-save rule (14th posting form) and keyed A/P routes (`idempotency-ap-v1`).
   - PDF and image viewer (PDFium via `pdfium-render`, fetched and checksum-pinned by `xtask pdfium-fetch`; worker thread, decode limits) and a full-size document tab.
@@ -272,11 +299,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   Agents: scout/opus, architect/opus, process-review/opus, impl/opus (WP0–WP8, integration, fix passes), engine-impl/opus ×10, security-review/opus ×6, review/opus, ui-verifier/opus, docs-writer/sonnet.
 - 2026-10-25 — **ADD-01 added during the build** (between P17 and P26): mapped intake folders as a per-company setting, local document reading with no internet or AI required, review queue with compare tools, pop-out document viewer, Bank Feed matching of receipts. Phases A01–A05, decisions Q-279–Q-293, engine U-92 and U-93, checkpoint PR-A1. Completed phases unchanged; migration for P09/P17 behavior is in the addendum. IDs renumbered on apply (the bundle's Q-230–Q-244 and U-14/U-15 were taken); models per Q-294 (opus, stepping up when needed).
 - 2026-10-25 — Engine pin 7b267e48 → f3ce33fd (engine main with PRs #171 U-18, #172 U-82, #173 U-83–U-87, #174 U-89) on `chore/engine-pin-main`. Live capabilities: `idempotency-v1`, `run-due-filter-v1`, `ap-closing-v1`, `ap-edit-v1`, `bill-lines-v1`, `bill-terms-v1`, `bill-received-v1`, `idempotency-ap-v1`, `bill-ocr-v2`. Engine SEA rebuilt; api-spec fixtures refreshed; the engine's keyed routes are recorded (`idempotency_v1_routes.txt`, new `idempotency_ap_v1_routes.txt`); main keys only the 20 `idempotency-v1` routes, P17 adds the A/P ones gated on `idempotency-ap-v1`. Live contract suite 162 passed with `CL_API_REQUIRE_CAPS=idempotency-v1,run-due-filter-v1,tag-number-v1,dashboard-exact-v1,merge-closing-date-v1` (the U-18 tests run for real), offline binary 6 passed (`restart::engine_dies_after_commit_is_reconciled_as_committed` now expects the keyed re-send the engine replays). Catch-up questions hold only their own templates (U-82, Q-PR1d; new `run_due::filter_holds_only_the_asked_template_u82`). An archive made on 7b267e48 restores on f3ce33fd (verified by hand: content and trial balance equal, bills `billReceived: true`). Agents: rust-implementer/opus.
-- 2026-10-25 — Checkpoint PR-1 (core ledger process review, process-reviewer/opus xhigh) complete on `fix/PR-1`.
-  - Findings: B1 register edit of a linked deposit un-deposited its payments; B2 a second Save after an unknown outcome could post twice (the engine had idempotency only on `/batch/save`); B3 register edit of a numbered journal entry erased its number; B4 register edit of a printed check skipped the printed-check question. Plus S1–S3 and four follow-ups (`target/reviews/PR-1.md`).
-  - Client fixes: linked deposits, numbered journal entries and checks open their own forms; an unknown save blocks Save on all 13 posting forms until "Check again" answers or the owner confirms an override (logged without amounts or names; owner 2026-10-24), kept per company for the session across windows; Write Check's used-number lookup matches the first try only; Daily Sales recheck waits for an engine restart before "not saved"; vendor refund cleared after a found save; template links retried and persisted ("Saved separately" after a final refusal); catch-up asks first above 3 missed dates (owner 2026-10-24); Bulk Entry resends an unchanged batch only; cl-host instance lock released explicitly on drop (macOS flake); live contract test for moving a transaction out of a closed period (journal entry, bank posting, check; no password, wrong password, override audit with old and new dates).
-  - Fresh-eyes review of the fixes (`target/reviews/fix-PR-1-review.md`) found two more double-post paths (Daily Sales recheck, Templates window close); fixed in a second pass.
-  - Engine: PR #169 (U-80/U-81 ledger guards) and #170 (U-47 merges respect the closing date) merged and pinned; #171 (U-18 request idempotency, architect plan + security review H1/M1/L1–L5 fixed) and #172 (U-82 run-due filter) open for the owner.
-  - Q-206 changed (owner 2026-10-25): any number of named A/R or A/P lines per journal entry, following engine 33a973fa.
-  - Decisions Q-PR1a–g. Live contract suite 158/158 on 7b267e48.
-  - Agents: process-reviewer/opus (xhigh), architect/opus (U-18), engine-impl/opus ×5, security-review/opus, rust-impl/opus ×4, review/opus.
