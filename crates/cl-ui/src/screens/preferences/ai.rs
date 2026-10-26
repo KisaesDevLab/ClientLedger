@@ -570,6 +570,7 @@ impl AiSavePlan {
             cap_reached: self.cap_reached,
             consent,
             intake: None,
+            cloud_reading: None,
         })
     }
 }

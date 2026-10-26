@@ -32,7 +32,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.cloud_reading.needs_engine", "This needs a newer version of the bookkeeping engine. Until then, nothing is sent online."),
     ("prefs.cloud_reading.not_owner", "Only the company's owner can change these switches."),
     ("prefs.cloud_reading.ai_off", "AI suggestions are off for this company. Turn them on first in AI suggestions."),
-    ("prefs.cloud_reading.reset", "Saved. Because AI was agreed to again (or turned off), sending documents online is off again. Turn it back on here if you want it."),
+    ("prefs.cloud_reading.reset", "Saved. Sending documents online is off again because AI was turned off or a new AI notice was agreed to. Turn it back on here if you want it."),
     ("prefs.cloud_reading.link_hint", "Bills and receipts go to this service only if you allow it in"),
     ("prefs.cloud_reading.link", "Reading documents online"),
     ("prefs.cloud_reading.link_tip", "Choose whether documents may go to your AI service when you ask AI to help read them."),
