@@ -257,6 +257,8 @@ pub struct ViewerState {
     want_focus: bool,
     /// The worker's copy was closed by [`ViewerState::release_pixels`].
     released: bool,
+    /// Last frame the viewer was drawn wider than its room.
+    overflowed: bool,
 }
 
 /// No file name, no pixels.
@@ -528,6 +530,7 @@ impl ViewerState {
             "rotation": self.rotation().degrees(),
             "page_unreadable": self.failed_page == Some(self.page),
             "thumbnails": {"shown": self.strip_shown, "loaded": self.thumbs.len()},
+            "fits": !self.overflowed,
         })
     }
 
@@ -714,7 +717,37 @@ impl ViewerState {
     }
 }
 
-/// A small painted toolbar button with an accessible name and a tooltip.
+/// A small painted toolbar button (28 × 24) with an accessible name.
+struct IconButton<'a> {
+    name: &'a str,
+    paint: fn(&egui::Painter, Rect, Stroke),
+}
+
+impl egui::Widget for IconButton<'_> {
+    fn ui(self, ui: &mut Ui) -> egui::Response {
+        let (rect, r) = ui.allocate_exact_size(Vec2::new(28.0, 24.0), Sense::click());
+        let visuals = ui.style().interact(&r);
+        ui.painter().rect(
+            rect,
+            visuals.corner_radius,
+            visuals.weak_bg_fill,
+            visuals.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        (self.paint)(
+            ui.painter(),
+            rect,
+            Stroke::new(1.5, visuals.fg_stroke.color),
+        );
+        let on = ui.is_enabled();
+        r.widget_info(|| WidgetInfo::labeled(Role::Button, on, self.name));
+        r
+    }
+}
+
+/// A painted toolbar button with a tooltip. Added straight into the
+/// toolbar's wrapping row (review F1): a child `Ui` per button would start
+/// from what is left of the row and never move to the next one.
 fn icon_button(
     ui: &mut Ui,
     name: &str,
@@ -722,27 +755,7 @@ fn icon_button(
     enabled: bool,
     paint: fn(&egui::Painter, Rect, Stroke),
 ) -> egui::Response {
-    let r = ui
-        .add_enabled_ui(enabled, |ui| {
-            let (rect, r) = ui.allocate_exact_size(Vec2::new(28.0, 24.0), Sense::click());
-            let visuals = ui.style().interact(&r);
-            ui.painter().rect(
-                rect,
-                visuals.corner_radius,
-                visuals.weak_bg_fill,
-                visuals.bg_stroke,
-                egui::StrokeKind::Inside,
-            );
-            paint(
-                ui.painter(),
-                rect,
-                Stroke::new(1.5, visuals.fg_stroke.color),
-            );
-            let on = ui.is_enabled();
-            r.widget_info(|| WidgetInfo::labeled(Role::Button, on, name));
-            r
-        })
-        .inner;
+    let r = ui.add_enabled(enabled, IconButton { name, paint });
     if enabled {
         r.on_hover_text(tip)
     } else {
@@ -827,11 +840,10 @@ fn zoom_text(zoom: Zoom) -> String {
 /// is "Zoom". A pick puts the keyboard back on the page.
 fn zoom_menu(ui: &mut Ui, state: &mut ViewerState, ready: bool) -> egui::Response {
     let mut picked = None;
-    let r = ui
-        .add_enabled_ui(ready, |ui| {
-            egui::containers::menu::MenuButton::from_button(egui::Button::new(zoom_text(
-                state.zoom,
-            )))
+    // In the toolbar's own row (review F1), never wrapped inside itself.
+    let button = egui::Button::new(zoom_text(state.zoom)).wrap_mode(egui::TextWrapMode::Extend);
+    let r = if ready {
+        egui::containers::menu::MenuButton::from_button(button)
             .ui(ui, |ui| {
                 for z in ZOOM_MENU {
                     if ui
@@ -843,8 +855,9 @@ fn zoom_menu(ui: &mut Ui, state: &mut ViewerState, ready: bool) -> egui::Respons
                 }
             })
             .0
-        })
-        .inner;
+    } else {
+        ui.add_enabled(false, button)
+    };
     r.widget_info(|| WidgetInfo::labeled(Role::Button, ready, t("viewer.zoom.label")));
     if let Some(z) = picked {
         state.set_zoom(z);
@@ -903,8 +916,13 @@ impl DocViewer {
         }
         let ready = state.status == Status::Ready;
         let mut zoom_focused = false;
-        // The toolbar wraps on a narrow card instead of running out.
+        // The room the viewer was given (review F4: running past it is
+        // reported to the control channel's clipping check).
+        let room = ui.max_rect();
+        // The toolbar wraps on a narrow card instead of running out: whole
+        // controls move to the next row; none wraps inside itself.
         ui.horizontal_wrapped(|ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
             let mut run = |state: &mut ViewerState, r: &egui::Response, id: &'static str| {
                 focused |= r.has_focus();
                 if r.clicked() {
@@ -1094,6 +1112,13 @@ impl DocViewer {
                 }))
         {
             ctx.request_repaint_after(Duration::from_millis(30));
+        }
+        // Wider than the room (a toolbar control or the page run out of a
+        // narrow panel): the panel would cut it off.
+        let used = ui.min_rect();
+        state.overflowed = used.right() > room.right() + 0.5;
+        if state.overflowed {
+            crate::automation::report_overflow(&ctx, "document viewer", used);
         }
         state.focused = focused;
         event
@@ -1968,6 +1993,53 @@ mod tests {
         assert_eq!(v.state_json()["page_unreadable"], false);
     }
 
+    /// Review F1/F2: in a side panel's width (Write Check, Card Charge,
+    /// the Bill source card) the toolbar wraps whole controls onto more
+    /// rows and nothing runs past the room, with both extra buttons and a
+    /// zoom label as long as "Fit width"; disabled controls (loading) too.
+    #[test]
+    fn the_toolbar_fits_a_narrow_panel() {
+        for width in [230.0, 272.0, 300.0] {
+            let mut h = Harness::new(vec2(width + 16.0, 520.0));
+            let mut v = ViewerState::default();
+            v.open(DocSource {
+                name: "three.tif".into(),
+                bytes: Arc::from(super::super::doc_worker::tiff_fixtures::three_pages()),
+            });
+            v.set_full_size_button(true);
+            v.set_pop_out_button(true);
+            // Loading: every control greyed out, still in the room.
+            let _ = h.frame(&mut v, vec![]);
+            assert_eq!(v.state_json()["fits"], true, "{width} loading");
+            h.until(&mut v, |v| v.state_json()["rendered"] == true);
+            v.set_zoom(Zoom::FitWidth);
+            let _ = h.frame(&mut v, vec![]);
+            let _ = h.frame(&mut v, vec![]);
+            assert_eq!(v.state_json()["fits"], true, "{width}");
+            for name in [
+                "Next page",
+                "Zoom in",
+                "Rotate right",
+                "Open full size",
+                "Pop out",
+            ] {
+                let (_, _, at) = h
+                    .nodes
+                    .iter()
+                    .find(|(_, n, _)| n == name)
+                    .unwrap_or_else(|| panic!("{name} at {width}"));
+                assert!(at.x < width + 16.0, "{name} at {width}: {at:?}");
+            }
+        }
+        // Narrower than one control ("Open full size"): it says so.
+        let mut h = Harness::new(vec2(70.0, 520.0));
+        let mut v = ViewerState::default();
+        v.open(fixture("receipt.png"));
+        v.set_full_size_button(true);
+        h.until(&mut v, |v| v.status() == Status::Ready);
+        assert_eq!(v.state_json()["fits"], false);
+    }
+
     /// Review S6: a late "unreadable" for page 2 arriving while page 1 is
     /// asked for marks page 2, never the page on screen.
     #[test]
@@ -1987,7 +2059,11 @@ mod tests {
         });
         let _ = h.frame(&mut v, vec![]);
         assert_eq!(v.failed_page, Some(1));
-        assert_eq!(v.state_json()["page_unreadable"], false, "page 1 still shows");
+        assert_eq!(
+            v.state_json()["page_unreadable"],
+            false,
+            "page 1 still shows"
+        );
         assert_eq!(v.state_json()["rendered"], true);
     }
 }

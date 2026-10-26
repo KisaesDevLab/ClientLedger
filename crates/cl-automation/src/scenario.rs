@@ -737,6 +737,27 @@ fn shot_path(out_dir: &Path, name: &str, viewport: Option<&String>, theme: &str)
 }
 
 fn clipping(s: &Snapshot, tol: f32, ignore: &[Bounds]) -> Result<(), String> {
+    // Parts wider than their room: cut by a panel, not the window edge.
+    let wide = s.overflowing(ignore);
+    if !wide.is_empty() {
+        let names: Vec<String> = wide
+            .iter()
+            .take(5)
+            .map(|o| {
+                format!(
+                    "{} (x {:.0} to {:.0})",
+                    o.what,
+                    o.bounds.x,
+                    o.bounds.x + o.bounds.width
+                )
+            })
+            .collect();
+        return Err(format!(
+            "{} part(s) are wider than the room they were given: {}",
+            wide.len(),
+            names.join(", ")
+        ));
+    }
     let clipped = s.clipped_excluding(tol, ignore);
     let overlaps = s.overlapping(tol, ignore);
     let truncated = s.truncated_inputs(tol, ignore);
@@ -1233,6 +1254,36 @@ mod tests {
         let report = run(&mut fake, &s, out.path());
         let f = report.outcomes[0].failure.as_ref().unwrap();
         assert!(f.message.contains("Cut off"), "{}", f.message);
+    }
+
+    /// A02 review F4: a part the app reports wider than its room fails the
+    /// check even though the window edge cuts nothing; an ignored region
+    /// lets it pass.
+    #[test]
+    fn clipping_assertion_fails_on_a_part_wider_than_its_room() {
+        let out = dir();
+        let s = Scenario::parse("name: x\nthemes: [light]\nsteps:\n  - assert_no_clipping: {}\n")
+            .unwrap();
+        let mut fake = Fake::new();
+        fake.snapshot.overflow.push(crate::inspect::Overflow {
+            what: "document viewer".into(),
+            bounds: Bounds {
+                x: 500.0,
+                y: 100.0,
+                width: 290.0,
+                height: 300.0,
+            },
+        });
+        let report = run(&mut fake, &s, out.path());
+        let f = report.outcomes[0].failure.as_ref().unwrap();
+        assert!(f.message.contains("document viewer"), "{}", f.message);
+        assert!(f.message.contains("wider than the room"), "{}", f.message);
+        let s = Scenario::parse(
+            "name: x\nthemes: [light]\nsteps:\n  - assert_no_clipping: {ignore: [{x: 400, y: 0, width: 400, height: 600}]}\n",
+        )
+        .unwrap();
+        let report = run(&mut fake, &s, out.path());
+        assert!(report.passed(), "{}", report.summary());
     }
 
     #[test]
