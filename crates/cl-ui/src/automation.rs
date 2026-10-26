@@ -2,7 +2,9 @@
 //!
 //! `cl-automation` receives requests on a loopback socket; this module answers
 //! them on the UI thread, between frames. It exists only when the app was
-//! started with `--control`. Nothing here runs otherwise.
+//! started with `--control`. Nothing here runs otherwise, except
+//! [`report_overflow`], which widgets call every frame: it keeps one pass's
+//! notes and nothing reads them without the control channel.
 //!
 //! How it works: an egui plugin sees every frame's raw input and output. It
 //! feeds scheduled events (clicks, keys, text) into the input and keeps the
@@ -67,6 +69,52 @@ pub fn hide_secrets_id() -> egui::Id {
 #[must_use]
 pub fn doc_viewer_viewport_id() -> ViewportId {
     ViewportId::from_hash_of("cl-doc-viewer")
+}
+
+/// The parts drawn wider than their room in one pass of one viewport.
+#[derive(Clone, Default)]
+struct Overflows {
+    pass: u64,
+    parts: Vec<(&'static str, egui::Rect)>,
+}
+
+fn overflow_id(vp: ViewportId) -> egui::Id {
+    egui::Id::unique("cl-overflow").with(vp)
+}
+
+/// A part drawn wider than the room it was given this frame (A02 review
+/// F4: a panel's clip hides it from the window-edge check). The control
+/// channel's `assert_no_clipping` fails on it. Kept for one pass only, so
+/// it costs nothing without the control channel.
+pub fn report_overflow(ctx: &Context, what: &'static str, rect: egui::Rect) {
+    let pass = ctx.cumulative_pass_nr();
+    let id = overflow_id(ctx.viewport_id());
+    ctx.data_mut(|d| {
+        let o = d.get_temp_mut_or_default::<Overflows>(id);
+        if o.pass != pass {
+            o.pass = pass;
+            o.parts.clear();
+        }
+        o.parts.push((what, rect));
+    });
+}
+
+/// The parts reported in `vp`'s pass that just ended (taken).
+fn take_overflow(ctx: &Context, vp: ViewportId) -> Vec<cl_automation::inspect::Overflow> {
+    let o = ctx.data_mut(|d| d.remove_temp::<Overflows>(overflow_id(vp)));
+    o.map(|o| o.parts)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(what, r)| cl_automation::inspect::Overflow {
+            what: what.to_string(),
+            bounds: Bounds {
+                x: r.min.x,
+                y: r.min.y,
+                width: r.width(),
+                height: r.height(),
+            },
+        })
+        .collect()
 }
 
 /// Frames to wait after an input before answering, so the result is drawn and
@@ -161,7 +209,11 @@ impl egui::Plugin for Hooks {
             height: rect.height(),
             pixels_per_point,
         };
-        let snapshot = snapshot_from(update, window);
+        let overflow = take_overflow(ctx, id);
+        let snapshot = snapshot_from(update, window).map(|mut s| {
+            s.overflow = overflow;
+            s
+        });
         if let (Some(snapshot), Ok(mut s)) = (snapshot, self.0.lock()) {
             s.view(id).snapshot = Some(snapshot);
         }
@@ -317,6 +369,7 @@ fn snapshot_from(update: &accesskit::TreeUpdate, window: WindowInfo) -> Option<S
         window,
         focused,
         tree,
+        overflow: Vec::new(),
     })
 }
 

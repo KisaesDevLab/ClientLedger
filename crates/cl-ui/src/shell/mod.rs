@@ -988,6 +988,12 @@ impl Shell {
             if kept {
                 continue;
             }
+            // The viewer drawn inside the main window has no form field to
+            // revert: Esc there never reaches the form (as in its own window).
+            if doc_focus && id.as_str() == "form.revert" {
+                handled.push(s);
+                continue;
+            }
             handled.push(s);
             if doc_focus && id.as_str().starts_with("viewer.") {
                 let _ = self.doc_viewer.viewer_command(id);

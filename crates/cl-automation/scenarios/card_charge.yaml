@@ -174,8 +174,22 @@ steps:
   - assert_state: {key: screen.attachments.viewer.rendered, equals: true}
   - assert_exists: {role: image, label: Preview of receipt.png}
   - assert_exists: {role: button, label: Pop out}
+  # The docked toolbar fits the side panel (review F1).
+  - assert_state: {key: screen.attachments.viewer.fits, equals: true}
   - assert_no_clipping: {}
   - screenshot: card-charge-attachment
+  # The pop-out viewer follows the card charge (review S5), then docks.
+  - key: Ctrl+Shift+D
+  - assert_state: {key: doc_viewer.popped, equals: true}
+  - assert_state: {key: doc_viewer.follows, equals: vendors.card_charge}
+  - assert_state: {key: doc_viewer.has_doc, equals: true}
+  - assert_state: {key: doc_viewer.viewer.rendered, equals: true}
+  - assert_exists: {role: image, label: Preview of receipt.png, viewport: doc_viewer}
+  - assert_exists: {label: This document is open in its own window.}
+  - screenshot: {name: card-charge-popped, viewport: doc_viewer}
+  - key: Ctrl+Shift+D
+  - assert_state: {key: doc_viewer.popped, equals: false}
+  - assert_state: {key: screen.attachments.viewer.rendered, equals: true}
   - click: {role: button, label: Clear}
   - assert_state: {key: screen.attachments.count, equals: 0}
   - assert_state: {key: screen.attachments.viewer.open, equals: false}

@@ -255,6 +255,10 @@ pub struct ViewerState {
     /// The page area last frame (for zoom steps from a fit).
     last_area: Vec2,
     want_focus: bool,
+    /// The worker's copy was closed by [`ViewerState::release_pixels`].
+    released: bool,
+    /// Last frame the viewer was drawn wider than its room.
+    overflowed: bool,
 }
 
 /// No file name, no pixels.
@@ -296,13 +300,39 @@ impl ViewerState {
         self.reset();
     }
 
-    /// Drop the drawn page's texture (A02: the docked form while its
-    /// document shows in the pop-out window). The document stays open; the
-    /// page is asked for again the next time the viewer is drawn.
+    /// Drop the drawn page's texture and the worker's decoded copy (A02:
+    /// the docked form while its document shows in the pop-out window;
+    /// review S2). The document, its page, zoom and turns stay; the worker
+    /// opens it again the next time the viewer is drawn. Called every
+    /// frame while popped: the worker hears once.
     pub fn release_pixels(&mut self) {
+        if !self.released
+            && self.source.is_some()
+            && let Some(w) = &self.worker
+        {
+            w.send(DocRequest::Close { doc: self.doc });
+            self.released = true;
+        }
         self.shown = None;
         self.asked = None;
         self.drop_thumbs();
+    }
+
+    /// Open the document in the worker again after [`Self::release_pixels`]
+    /// (a new number, so a late answer about the old copy is ignored).
+    fn reopen_if_released(&mut self) {
+        if !std::mem::take(&mut self.released) {
+            return;
+        }
+        let (Some(source), Some(worker)) = (&self.source, &self.worker) else {
+            return;
+        };
+        self.doc += 1;
+        self.status = Status::Loading;
+        worker.send(DocRequest::Open {
+            doc: self.doc,
+            bytes: Arc::clone(&source.bytes),
+        });
     }
 
     /// Forget the open document (the worker too), keeping the worker, the
@@ -314,6 +344,7 @@ impl ViewerState {
             w.send(DocRequest::Close { doc: self.doc });
         }
         self.doc += 1;
+        self.released = false;
         self.source = None;
         self.page = 0;
         self.pages = 0;
@@ -499,6 +530,7 @@ impl ViewerState {
             "rotation": self.rotation().degrees(),
             "page_unreadable": self.failed_page == Some(self.page),
             "thumbnails": {"shown": self.strip_shown, "loaded": self.thumbs.len()},
+            "fits": !self.overflowed,
         })
     }
 
@@ -522,12 +554,15 @@ impl ViewerState {
                     self.page = self.page.min(pages.saturating_sub(1));
                 }
                 DocReply::Protected { doc } if doc == self.doc => self.status = Status::Protected,
-                DocReply::Unreadable { doc } if doc == self.doc => {
+                DocReply::Unreadable { doc, page } if doc == self.doc => {
                     if self.status == Status::Ready && (self.shown.is_some() || self.pages > 1) {
                         // One page of a readable document: that page says
                         // so, the rest still show (A02, a TIFF page in a
-                        // colour this can't read).
-                        self.failed_page = self.asked.map(|(page, ..)| page);
+                        // colour this can't read). The reply names the page
+                        // (review S6): fast paging never marks another.
+                        if let Some(p) = page {
+                            self.failed_page = Some(p);
+                        }
                     } else if self.shown.is_none() {
                         self.status = Status::Unreadable;
                     }
@@ -682,7 +717,37 @@ impl ViewerState {
     }
 }
 
-/// A small painted toolbar button with an accessible name and a tooltip.
+/// A small painted toolbar button (28 × 24) with an accessible name.
+struct IconButton<'a> {
+    name: &'a str,
+    paint: fn(&egui::Painter, Rect, Stroke),
+}
+
+impl egui::Widget for IconButton<'_> {
+    fn ui(self, ui: &mut Ui) -> egui::Response {
+        let (rect, r) = ui.allocate_exact_size(Vec2::new(28.0, 24.0), Sense::click());
+        let visuals = ui.style().interact(&r);
+        ui.painter().rect(
+            rect,
+            visuals.corner_radius,
+            visuals.weak_bg_fill,
+            visuals.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        (self.paint)(
+            ui.painter(),
+            rect,
+            Stroke::new(1.5, visuals.fg_stroke.color),
+        );
+        let on = ui.is_enabled();
+        r.widget_info(|| WidgetInfo::labeled(Role::Button, on, self.name));
+        r
+    }
+}
+
+/// A painted toolbar button with a tooltip. Added straight into the
+/// toolbar's wrapping row (review F1): a child `Ui` per button would start
+/// from what is left of the row and never move to the next one.
 fn icon_button(
     ui: &mut Ui,
     name: &str,
@@ -690,27 +755,7 @@ fn icon_button(
     enabled: bool,
     paint: fn(&egui::Painter, Rect, Stroke),
 ) -> egui::Response {
-    let r = ui
-        .add_enabled_ui(enabled, |ui| {
-            let (rect, r) = ui.allocate_exact_size(Vec2::new(28.0, 24.0), Sense::click());
-            let visuals = ui.style().interact(&r);
-            ui.painter().rect(
-                rect,
-                visuals.corner_radius,
-                visuals.weak_bg_fill,
-                visuals.bg_stroke,
-                egui::StrokeKind::Inside,
-            );
-            paint(
-                ui.painter(),
-                rect,
-                Stroke::new(1.5, visuals.fg_stroke.color),
-            );
-            let on = ui.is_enabled();
-            r.widget_info(|| WidgetInfo::labeled(Role::Button, on, name));
-            r
-        })
-        .inner;
+    let r = ui.add_enabled(enabled, IconButton { name, paint });
     if enabled {
         r.on_hover_text(tip)
     } else {
@@ -795,11 +840,10 @@ fn zoom_text(zoom: Zoom) -> String {
 /// is "Zoom". A pick puts the keyboard back on the page.
 fn zoom_menu(ui: &mut Ui, state: &mut ViewerState, ready: bool) -> egui::Response {
     let mut picked = None;
-    let r = ui
-        .add_enabled_ui(ready, |ui| {
-            egui::containers::menu::MenuButton::from_button(egui::Button::new(zoom_text(
-                state.zoom,
-            )))
+    // In the toolbar's own row (review F1), never wrapped inside itself.
+    let button = egui::Button::new(zoom_text(state.zoom)).wrap_mode(egui::TextWrapMode::Extend);
+    let r = if ready {
+        egui::containers::menu::MenuButton::from_button(button)
             .ui(ui, |ui| {
                 for z in ZOOM_MENU {
                     if ui
@@ -811,8 +855,9 @@ fn zoom_menu(ui: &mut Ui, state: &mut ViewerState, ready: bool) -> egui::Respons
                 }
             })
             .0
-        })
-        .inner;
+    } else {
+        ui.add_enabled(false, button)
+    };
     r.widget_info(|| WidgetInfo::labeled(Role::Button, ready, t("viewer.zoom.label")));
     if let Some(z) = picked {
         state.set_zoom(z);
@@ -857,6 +902,7 @@ impl DocViewer {
     /// Draw the viewer for `state`.
     pub fn show(ui: &mut Ui, state: &mut ViewerState, tokens: &Tokens) -> ViewerEvent {
         let ctx = ui.ctx().clone();
+        state.reopen_if_released();
         state.poll(&ctx);
         let mut event = ViewerEvent::None;
         let mut focused = false;
@@ -870,8 +916,13 @@ impl DocViewer {
         }
         let ready = state.status == Status::Ready;
         let mut zoom_focused = false;
-        // The toolbar wraps on a narrow card instead of running out.
+        // The room the viewer was given (review F4: running past it is
+        // reported to the control channel's clipping check).
+        let room = ui.max_rect();
+        // The toolbar wraps on a narrow card instead of running out: whole
+        // controls move to the next row; none wraps inside itself.
         ui.horizontal_wrapped(|ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
             let mut run = |state: &mut ViewerState, r: &egui::Response, id: &'static str| {
                 focused |= r.has_focus();
                 if r.clicked() {
@@ -1061,6 +1112,13 @@ impl DocViewer {
                 }))
         {
             ctx.request_repaint_after(Duration::from_millis(30));
+        }
+        // Wider than the room (a toolbar control or the page run out of a
+        // narrow panel): the panel would cut it off.
+        let used = ui.min_rect();
+        state.overflowed = used.right() > room.right() + 0.5;
+        if state.overflowed {
+            crate::automation::report_overflow(&ctx, "document viewer", used);
         }
         state.focused = focused;
         event
@@ -1337,12 +1395,40 @@ mod tests {
         v.open(fixture("receipt.png"));
         assert_eq!(v.zoom(), Zoom::default());
         let _ = draw_until(&mut v, false, |v| v.state_json()["rendered"] == true);
+        assert!(v.command(CommandId::new("viewer.zoom_in")));
+        assert!(v.command(CommandId::new("viewer.rotate_cw")));
+        let (zoom, old) = (v.zoom(), v.doc);
+        // Every frame while popped: the worker hears once (S2).
+        v.release_pixels();
         v.release_pixels();
         assert!(v.shown.is_none() && v.asked.is_none());
         assert_eq!(v.state_json()["rendered"], false);
         assert!(v.source().is_some(), "the document stays open");
-        // Drawn again, the page comes back.
+        // The worker's decoded copy is gone: a page of it is unreadable.
+        let w = v.worker.as_ref().expect("worker");
+        w.send(DocRequest::Render {
+            doc: old,
+            page: 0,
+            px_width: 50,
+            rotation: Rotation::None,
+        });
+        let end = std::time::Instant::now() + Duration::from_secs(10);
+        let reply = loop {
+            if let Some(r) = w.try_recv() {
+                break r;
+            }
+            assert!(std::time::Instant::now() < end, "no reply");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert!(
+            matches!(reply, DocReply::Unreadable { doc, .. } if doc == old),
+            "{reply:?}"
+        );
+        // Drawn again, it opens again and the page comes back as it was.
         let _ = draw_until(&mut v, false, |v| v.state_json()["rendered"] == true);
+        assert!(v.doc > old, "a new number");
+        assert_eq!(v.zoom(), zoom);
+        assert_eq!(v.rotation(), Rotation::Right);
     }
 
     #[test]
@@ -1905,5 +1991,79 @@ mod tests {
         assert!(v.command(CommandId::new("viewer.page_prev")));
         h.until(&mut v, |v| v.state_json()["rendered"] == true);
         assert_eq!(v.state_json()["page_unreadable"], false);
+    }
+
+    /// Review F1/F2: in a side panel's width (Write Check, Card Charge,
+    /// the Bill source card) the toolbar wraps whole controls onto more
+    /// rows and nothing runs past the room, with both extra buttons and a
+    /// zoom label as long as "Fit width"; disabled controls (loading) too.
+    #[test]
+    fn the_toolbar_fits_a_narrow_panel() {
+        for width in [230.0, 272.0, 300.0] {
+            let mut h = Harness::new(vec2(width + 16.0, 520.0));
+            let mut v = ViewerState::default();
+            v.open(DocSource {
+                name: "three.tif".into(),
+                bytes: Arc::from(super::super::doc_worker::tiff_fixtures::three_pages()),
+            });
+            v.set_full_size_button(true);
+            v.set_pop_out_button(true);
+            // Loading: every control greyed out, still in the room.
+            let _ = h.frame(&mut v, vec![]);
+            assert_eq!(v.state_json()["fits"], true, "{width} loading");
+            h.until(&mut v, |v| v.state_json()["rendered"] == true);
+            v.set_zoom(Zoom::FitWidth);
+            let _ = h.frame(&mut v, vec![]);
+            let _ = h.frame(&mut v, vec![]);
+            assert_eq!(v.state_json()["fits"], true, "{width}");
+            for name in [
+                "Next page",
+                "Zoom in",
+                "Rotate right",
+                "Open full size",
+                "Pop out",
+            ] {
+                let (_, _, at) = h
+                    .nodes
+                    .iter()
+                    .find(|(_, n, _)| n == name)
+                    .unwrap_or_else(|| panic!("{name} at {width}"));
+                assert!(at.x < width + 16.0, "{name} at {width}: {at:?}");
+            }
+        }
+        // Narrower than one control ("Open full size"): it says so.
+        let mut h = Harness::new(vec2(70.0, 520.0));
+        let mut v = ViewerState::default();
+        v.open(fixture("receipt.png"));
+        v.set_full_size_button(true);
+        h.until(&mut v, |v| v.status() == Status::Ready);
+        assert_eq!(v.state_json()["fits"], false);
+    }
+
+    /// Review S6: a late "unreadable" for page 2 arriving while page 1 is
+    /// asked for marks page 2, never the page on screen.
+    #[test]
+    fn an_unreadable_reply_marks_the_page_it_names() {
+        let mut h = Harness::new(vec2(640.0, 520.0));
+        let mut v = ViewerState::default();
+        v.open(DocSource {
+            name: "three.tif".into(),
+            bytes: Arc::from(super::super::doc_worker::tiff_fixtures::three_pages()),
+        });
+        h.until(&mut v, |v| v.state_json()["rendered"] == true);
+        assert_eq!(v.page(), 0);
+        let worker = v.worker.as_ref().expect("worker");
+        worker.inject_reply(DocReply::Unreadable {
+            doc: v.doc,
+            page: Some(1),
+        });
+        let _ = h.frame(&mut v, vec![]);
+        assert_eq!(v.failed_page, Some(1));
+        assert_eq!(
+            v.state_json()["page_unreadable"],
+            false,
+            "page 1 still shows"
+        );
+        assert_eq!(v.state_json()["rendered"], true);
     }
 }

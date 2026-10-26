@@ -1761,18 +1761,23 @@ pub fn beside_main(
 }
 
 /// The gone-monitor check, run once two frames after the viewer opens:
-/// when the window's monitor is not the size saved and its title bar is
-/// not on the main window's monitor (`root`), the saved monitor is taken
-/// to be gone and the window moves beside the main window. `None` leaves
-/// it where it is.
+/// when its title bar is not on the main window's monitor (`root`) and
+/// either the window's monitor is not the size saved, or the owner asked
+/// for the window (`recall`: Pop out or Ctrl+Shift+D with a place nobody
+/// has seen this session), the window moves beside the main window. eframe
+/// reports the nearest monitor for a window on a monitor that was
+/// unplugged, so an identical second monitor that is gone looks the same
+/// as one that is there; `recall` is the way back (review S1). `None`
+/// leaves it where it is.
 #[must_use]
 pub fn gone_monitor_fix(
     saved: &DocViewerPlacement,
     outer_now: eframe::egui::Rect,
     monitor_now: eframe::egui::Vec2,
     root: eframe::egui::Rect,
+    recall: bool,
 ) -> Option<eframe::egui::Pos2> {
-    if saved.monitor_size == Some(monitor_now) {
+    if !recall && saved.monitor_size == Some(monitor_now) {
         return None;
     }
     let screen = monitor_box(root.min, monitor_now);
@@ -1933,19 +1938,29 @@ mod doc_viewer_placement_tests {
         };
         // The 2560 monitor is gone; the window still sits out at x 3000.
         let outer = Rect::from_min_size(pos2(3000.0, 100.0), vec2(616.0, 839.0));
-        let fix = gone_monitor_fix(&saved, outer, vec2(1920.0, 1080.0), root).expect("moved back");
+        let fix =
+            gone_monitor_fix(&saved, outer, vec2(1920.0, 1080.0), root, false).expect("moved back");
         assert_eq!(fix, pos2(1108.0, 50.0), "to the right of the main window");
-        // The same monitor is still there: left alone.
+        // A monitor of the saved size: left alone when it opens by itself
+        // (the second monitor may well be there)...
         assert_eq!(
-            gone_monitor_fix(&saved, outer, vec2(2560.0, 1440.0), root),
+            gone_monitor_fix(&saved, outer, vec2(2560.0, 1440.0), root, false),
             None
         );
-        // A different monitor, but the window is on the main one: left alone.
+        // ...but brought back when the owner asks for the window (S1).
+        assert_eq!(
+            gone_monitor_fix(&saved, outer, vec2(2560.0, 1440.0), root, true),
+            Some(beside_main(root, outer.size(), vec2(2560.0, 1440.0)))
+        );
+        // A different monitor, but the window is on the main one: left alone,
+        // asked for or not.
         let on_main = Rect::from_min_size(pos2(500.0, 100.0), vec2(616.0, 839.0));
-        assert_eq!(
-            gone_monitor_fix(&saved, on_main, vec2(1920.0, 1080.0), root),
-            None
-        );
+        for recall in [false, true] {
+            assert_eq!(
+                gone_monitor_fix(&saved, on_main, vec2(1920.0, 1080.0), root, recall),
+                None
+            );
+        }
         // No room to the right: it goes to the left, else over the corner.
         let wide = Rect::from_min_size(pos2(700.0, 0.0), vec2(1200.0, 900.0));
         assert_eq!(

@@ -1252,6 +1252,20 @@ mod doc_viewer {
         frame(&ctx, &mut shell, WIDE, tap(egui::Key::F6, Modifiers::NONE));
         settle(&ctx, &mut shell, WIDE);
         assert_eq!(shell.doc_viewer_state(&ctx).viewer["focused"], false);
+        // Esc in the embedded viewer leaves the form alone and keeps the
+        // window out (nit: it used to run the form's revert).
+        frame(&ctx, &mut shell, WIDE, tap(egui::Key::F6, Modifiers::NONE));
+        settle(&ctx, &mut shell, WIDE);
+        assert!(shell.doc_viewer().embedded_has_focus(&ctx));
+        frame(
+            &ctx,
+            &mut shell,
+            WIDE,
+            tap(egui::Key::Escape, Modifiers::NONE),
+        );
+        settle(&ctx, &mut shell, WIDE);
+        assert!(shell.doc_viewer().popped());
+        assert!(shell.windows.prompt().is_none());
     }
 
     #[test]
@@ -1337,11 +1351,109 @@ mod doc_viewer {
                         .doc_viewer()
                         .gone_monitor_fix(outer, vec2(1920.0, 1080.0), root),
                     None,
-                    "the same monitor is still there"
+                    "a monitor of the saved size: it may be there, left alone"
+                );
+                // S1: an identical second monitor that is gone looks the
+                // same. Ctrl+Shift+D twice (dock, pop out) brings the
+                // window beside the main one.
+                let mut again = again;
+                let ctx = context();
+                frame(&ctx, &mut again, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+                assert!(!again.doc_viewer().popped());
+                frame(&ctx, &mut again, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+                assert!(again.doc_viewer().popped());
+                let monitor = vec2(1920.0, 1080.0);
+                assert_eq!(
+                    again.doc_viewer().gone_monitor_fix(outer, monitor, root),
+                    Some(crate::prefs::beside_main(root, outer.size(), monitor)),
+                    "asked for: beside the main window"
+                );
+                // Once the owner has moved it this session, popping out
+                // again keeps their place.
+                again.doc_viewer_mut().owner_moved();
+                frame(&ctx, &mut again, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+                frame(&ctx, &mut again, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+                assert!(again.doc_viewer().popped());
+                assert_eq!(
+                    again.doc_viewer().gone_monitor_fix(outer, monitor, root),
+                    None
                 );
             }
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    /// Plan §5: switching company forgets the old company's document (the
+    /// window stays out, empty); closing the company closes the window and
+    /// remembers it was out.
+    #[test]
+    fn switching_or_closing_the_company_clears_the_viewer() {
+        let ctx = context();
+        let mut shell = demo();
+        open_form(&mut shell, "vendors.enter_bill", "receipt.png");
+        settle(&ctx, &mut shell, WIDE);
+        shell.dispatch_now(cl_model::CommandId::new("view.toggle_doc_viewer"));
+        settle(&ctx, &mut shell, WIDE);
+        assert!(shell.doc_viewer_state(&ctx).has_doc);
+        let other =
+            cl_core::ids::TenantId::parse("00000000-0000-4000-8000-0000000000c2").expect("tenant");
+        shell
+            .company_link()
+            .expect("demo link")
+            .push(crate::company::CompanyEvent::Opened {
+                tenant_id: other,
+                name: "Other Books".into(),
+                accent: cl_settings::Accent([10, 120, 90]),
+                closed_through: None,
+            });
+        settle(&ctx, &mut shell, WIDE);
+        let state = shell.doc_viewer_state(&ctx);
+        assert!(state.popped, "still out");
+        assert!(!state.has_doc, "nothing of the old company's: {state:?}");
+        assert_ne!(state.follows, Some("vendors.enter_bill"));
+        shell
+            .company_link()
+            .expect("demo link")
+            .push(crate::company::CompanyEvent::Closed);
+        settle(&ctx, &mut shell, WIDE);
+        let state = shell.doc_viewer_state(&ctx);
+        assert!(!state.popped && !state.has_doc);
+        assert!(
+            shell.doc_viewer().placement().popped,
+            "it comes back out with the next company"
+        );
+    }
+
+    /// Plan §5: closing the tab the window follows: it follows the tab in
+    /// front now, and shows nothing when that one has no document.
+    #[test]
+    fn closing_the_followed_tab_moves_the_window_on() {
+        let ctx = context();
+        let mut shell = demo();
+        let bill = open_form(&mut shell, "vendors.enter_bill", "receipt.png");
+        let check = open_form(&mut shell, "vendors.write_check", "receipt.jpg");
+        settle(&ctx, &mut shell, WIDE);
+        shell.dispatch_now(cl_model::CommandId::new("view.toggle_doc_viewer"));
+        settle(&ctx, &mut shell, WIDE);
+        assert_eq!(
+            shell.doc_viewer_state(&ctx).follows,
+            Some("vendors.write_check")
+        );
+        assert_eq!(
+            shell.close_window(check),
+            crate::windows::CloseOutcome::Closed
+        );
+        settle(&ctx, &mut shell, WIDE);
+        let state = shell.doc_viewer_state(&ctx);
+        assert_eq!(state.follows, Some("vendors.enter_bill"));
+        assert!(state.popped && state.has_doc);
+        assert_eq!(
+            shell.close_window(bill),
+            crate::windows::CloseOutcome::Closed
+        );
+        settle(&ctx, &mut shell, WIDE);
+        let state = shell.doc_viewer_state(&ctx);
+        assert!(state.popped && !state.has_doc, "{state:?}");
     }
 
     #[test]

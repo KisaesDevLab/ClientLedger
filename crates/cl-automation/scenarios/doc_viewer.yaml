@@ -30,6 +30,8 @@ steps:
   - assert_exists: {role: button, label: Pop out}
   - assert_state: {key: doc_viewer.popped, equals: false}
   - assert_state: {key: doc_viewer.class, equals: none}
+  # The toolbar fits the 300 pt source card (review F1/F2).
+  - assert_state: {key: screen.attachments.viewer.fits, equals: true}
   - screenshot: bill-docked
 
   # --- 2. Ctrl+Shift+D: its own window, following Enter Bill -----------------------
@@ -74,6 +76,7 @@ steps:
   - key: {key: PageUp, viewport: doc_viewer}
   - assert_state: {key: doc_viewer.page, equals: 0}
   - key: {key: F6, viewport: doc_viewer}
+  - assert_state: {key: doc_viewer.viewer.focused, equals: false}
   - assert_state: {key: doc_viewer.popped, equals: true}
 
   # --- 5. Write Check: the TIFF follows, with thumbnails and rotate ----------------
@@ -138,10 +141,14 @@ steps:
         - {x: -4000, y: 70, width: 8480, height: 40}
         # The form's body scrolls under the action row (as bill.yaml).
         - {x: 0, y: 230, width: 480, height: 110}
+  # The viewer window at 200% (review F3, F4).
+  - assert_state: {key: doc_viewer.viewer.fits, equals: true}
+  - assert_no_clipping: {viewport: doc_viewer}
   - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}
 
   # --- 8. Dock: the form is as it was ----------------------------------------------
+  - assert_state: {key: screen.dirty, equals: true}
   - command: view.toggle_doc_viewer
   - assert_state: {key: doc_viewer.popped, equals: false}
   - assert_state: {key: doc_viewer.class, equals: none}
@@ -151,6 +158,9 @@ steps:
   - assert_state: {key: screen.attachments.viewer.rendered, equals: true}
   - assert_exists: {role: button, label: Pop out}
   - assert_not_exists: {label: This document is open in its own window.}
+  # Docking never touches the form (review S5).
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_state: {key: screen.attachments.viewer.fits, equals: true}
   - screenshot: bill-docked-again
   # Write Check's narrower side panel: the docked pane fits it.
   - click: {role: tab, label_contains: Write Check}
@@ -158,6 +168,8 @@ steps:
   - assert_state: {key: screen.attachments.viewer.status, equals: ready}
   - assert_state: {key: screen.attachments.viewer.rendered, equals: true}
   - assert_exists: {role: button, label: Pop out}
+  # Fails on a toolbar wider than the panel, too (review F4).
+  - assert_state: {key: screen.attachments.viewer.fits, equals: true}
   - assert_no_clipping: {}
   - screenshot: check-docked
 

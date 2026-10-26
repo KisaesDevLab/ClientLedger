@@ -52,13 +52,13 @@ pub(crate) fn lines_of(
     )
 }
 
-fn screen(link: &Arc<CompanyLink>) -> CardChargeScreen {
+pub(super) fn screen(link: &Arc<CompanyLink>) -> CardChargeScreen {
     let mut s = CardChargeScreen::new(Arc::clone(link), None, today());
     s.poll();
     s
 }
 
-fn fill(s: &mut CardChargeScreen, amount: &str, lines: &[(&str, &str)]) {
+pub(super) fn fill(s: &mut CardChargeScreen, amount: &str, lines: &[(&str, &str)]) {
     let amount = money(amount);
     s.header.edit_step(|h| h.amount = Some(amount));
     let seeds: Vec<FormLine> = lines

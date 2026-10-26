@@ -14,12 +14,20 @@
 //! convert to RGBA; CCITT G4 fax pages come through the `fax` crate as 1-bit
 //! grey. Anything else (palette, Lab, YCbCr, planar, BigTIFF images over the
 //! limits, a damaged strip) makes that page unreadable.
+//!
+//! Only the compressions in [`compression_taken`] are read. JPEG-in-TIFF is
+//! not (review B1): its decoder sizes its buffer from the JPEG header inside
+//! the strip, which the page-size check above never sees, so a few hundred
+//! bytes could ask for gigabytes. The `tiff` crate is built without its
+//! `jpeg` feature as well; the check here keeps such a page out even if that
+//! feature comes back.
 
 use std::io::Cursor;
 use std::sync::Arc;
 
 use ::tiff::ColorType;
 use ::tiff::decoder::{Decoder, DecodingResult, Limits};
+use ::tiff::tags::Tag;
 use image::RgbaImage;
 
 use super::{MAX_IMAGE_ALLOC, MAX_IMAGE_SIDE, MAX_PAGES, shrink};
@@ -122,6 +130,14 @@ impl TiffDoc {
         if w == 0 || h == 0 || w > MAX_IMAGE_SIDE || h > MAX_IMAGE_SIDE {
             return None;
         }
+        // No tag means uncompressed (TIFF 6.0).
+        let method = d
+            .find_tag_unsigned::<u16>(Tag::Compression)
+            .ok()?
+            .unwrap_or(1);
+        if !compression_taken(method) {
+            return None;
+        }
         let colour = d.colortype().ok()?;
         // The decoded samples and the RGBA copy each stay within the limit
         // (checked before any pixel is read).
@@ -134,6 +150,14 @@ impl TiffDoc {
         let data = d.read_image().ok()?;
         shrink(to_rgba(colour, w, h, &data)?)
     }
+}
+
+/// The TIFF compressions read: none, CCITT fax, LZW, Deflate (both tag
+/// values) and PackBits. Each one's output is bounded by the page size
+/// checked first. JPEG (6 and 7) is not among them.
+#[must_use]
+pub(super) fn compression_taken(method: u16) -> bool {
+    matches!(method, 1 | 3 | 4 | 5 | 8 | 0x80B2 | 0x8005)
 }
 
 /// Convert decoded samples to RGBA8. The decoder has already turned

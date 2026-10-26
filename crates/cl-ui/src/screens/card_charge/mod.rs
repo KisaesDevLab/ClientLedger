@@ -503,6 +503,13 @@ impl CardChargeScreen {
         self.left_lines();
         self.problems.clear();
         self.flow.reset_messages();
+        // A file still being read, sent or listed would be left in its
+        // draft (review B2): the owner saves once it is attached. Checked
+        // before "nothing to save", so Save & Close never closes on it.
+        if self.attach.save_waits() {
+            self.flow.notice = Some("card.attach.wait_save");
+            return false;
+        }
         if !self.is_dirty() {
             self.follow_up(intent);
             return true;
@@ -1364,15 +1371,23 @@ impl Screen for CardChargeScreen {
         }
     }
 
+    /// Unsaved edits, or files of the saved charge not on it yet (a failed
+    /// move, review B2): the window asks before it closes.
     fn dirty(&self) -> bool {
-        self.is_dirty()
+        self.is_dirty() || self.attach.unsettled()
     }
 
     fn save_unconfirmed(&self) -> bool {
         self.flow.lost.pending()
     }
 
+    /// The close prompt's Save. With only files left to move, it tries the
+    /// move again and keeps the window open.
     fn save(&mut self) -> bool {
+        if !self.is_dirty() && self.attach.unsettled() {
+            self.retry_move();
+            return false;
+        }
         self.start_save(SaveIntent::Save, None)
     }
 

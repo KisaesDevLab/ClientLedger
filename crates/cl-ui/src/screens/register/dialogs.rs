@@ -342,7 +342,7 @@ impl RegisterScreen {
     }
 
     /// The register row under the cursor.
-    fn cursor_row(&self) -> Option<super::view::RegRow> {
+    pub(super) fn cursor_row(&self) -> Option<super::view::RegRow> {
         #[cfg(test)]
         if let Some(key) = self.actions.cursor {
             return self.model.row_for_key(key).cloned();
