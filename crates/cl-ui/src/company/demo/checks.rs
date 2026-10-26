@@ -282,20 +282,12 @@ fn save(
             lines: d.lines.iter().map(|l| (l.contact, l.billable)).collect(),
         },
     );
-    // A receipt uploaded before the first save moves onto the check.
+    // A receipt uploaded before the first save moves onto the check (not
+    // a file a live document draft reads: A04, U-95 guard).
     if existing.is_none()
         && let Some(draft) = d.draft_attachment
     {
-        let key = draft.to_string();
-        for f in state
-            .checks
-            .files
-            .iter_mut()
-            .filter(|f| f.kind == "draft" && f.to == key)
-        {
-            f.kind = "expense";
-            f.to = id.to_string();
-        }
+        link_draft(state, draft, cl_api::AttachTo::Expense(id));
     }
     let action = if existing.is_some() {
         "update"
@@ -892,23 +884,74 @@ pub fn attachments(state: &DemoState, of: cl_api::AttachTo) -> Vec<cl_api::Attac
 }
 
 /// What a save with `draftAttachmentId` (or `POST /bills/{id}/attach-draft`)
-/// does to a draft's files: they move onto the saved record `to`. Returns
-/// how many moved.
+/// does to a draft's files: they move onto the saved record `to`, except
+/// files a live document draft reads (A04, the engine's U-95 guard: they
+/// stay on the key). Returns how many moved.
 pub fn link_draft(state: &mut DemoState, draft: cl_api::DraftKey, to: cl_api::AttachTo) -> usize {
-    let key = draft.to_string();
-    let (kind, id) = (to.attachable_type(), to.attachable_id());
-    let mut n = 0;
+    move_draft_key(state, &draft.to_string(), to, None).len()
+}
+
+/// The engine's guarded relink (U-95 b): every file on draft key `key`
+/// moves onto `to` (the attachable type `to` names; an adjusting entry's
+/// files as `journal_entry`), except files a live document draft other
+/// than `except` reads. Returns the moved files.
+pub(crate) fn move_draft_key(
+    state: &mut DemoState,
+    key: &str,
+    to: cl_api::AttachTo,
+    except: Option<cl_api::DocumentDraftId>,
+) -> Vec<cl_api::AttachmentId> {
+    let held = state.drafts.live_files(except);
+    let (kind, id) = (super::drafts::file_type(to), to.attachable_id());
+    let mut moved = Vec::new();
     for f in state
         .checks
         .files
         .iter_mut()
-        .filter(|f| f.kind == "draft" && f.to == key)
+        .filter(|f| f.kind == "draft" && f.to == key && !held.contains(&f.id))
     {
         f.kind = kind;
         f.to.clone_from(&id);
-        n += 1;
+        moved.push(f.id);
     }
-    n
+    moved
+}
+
+/// `POST /attachments/{id}/link`: files one attachment on `to`. A file a
+/// live document draft reads is refused (409 `ATTACHMENT_IN_USE`,
+/// `details.draftId`; A04, U-95 guard): attach the draft or discard it
+/// first.
+///
+/// # Errors
+/// `NotFound`; `Conflict { InUse }`.
+pub fn link_attachment(
+    state: &mut DemoState,
+    id: cl_api::AttachmentId,
+    to: cl_api::AttachTo,
+) -> Result<cl_api::Attachment, ApiError> {
+    if !state.checks.files.iter().any(|f| f.id == id) {
+        return Err(ApiError::NotFound { code: None });
+    }
+    if let Some(draft) = state.drafts.reader_of(id) {
+        return Err(cl_api::engine_refusal(
+            409,
+            &serde_json::json!({"error": {
+                "message": "This file is being read as a document.",
+                "code": cl_api::ATTACHMENT_IN_USE,
+                "details": {"draftId": draft},
+            }}),
+        ));
+    }
+    let kind = super::drafts::file_type(to);
+    let file = state
+        .checks
+        .files
+        .iter_mut()
+        .find(|f| f.id == id)
+        .ok_or(ApiError::NotFound { code: None })?;
+    file.kind = kind;
+    file.to = to.attachable_id();
+    attachment(file).ok_or_else(invalid)
 }
 
 /// `GET /attachments/{id}`: one file's details (P17 receipt inbox).

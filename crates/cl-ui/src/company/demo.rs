@@ -226,7 +226,8 @@ impl DemoState {
             batch: batch::DemoBatches::default(),
             bills: bills::DemoBills::default(),
             intake: intake::DemoIntake::default(),
-            drafts: drafts::DemoDrafts::default(),
+            // The demo engine has document drafts and attach (A04).
+            drafts: drafts::DemoDrafts::on(),
             card_digits: false,
         }
     }

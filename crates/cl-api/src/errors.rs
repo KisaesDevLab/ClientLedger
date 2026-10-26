@@ -1111,6 +1111,26 @@ pub(crate) fn map_failure(
     map_status(status, body, retry_after, route)
 }
 
+/// The error cl-api gives for an engine refusal: HTTP `status` with the
+/// engine's JSON error `body` (`{"error": {"code", "message", "details"}}`),
+/// read exactly as a reply on a signed-in route. For the demo engine and
+/// tests, which answer as the engine does without HTTP (A04): the same
+/// codes become the same [`ApiError`]s, document draft refusals included.
+#[must_use]
+pub fn engine_refusal(status: u16, body: &Value) -> ApiError {
+    let bytes = serde_json::to_vec(body).unwrap_or_default();
+    match map_failure(
+        status,
+        &bytes,
+        None,
+        RouteKind::Session,
+        FailureShape::Plain,
+    ) {
+        Mapped::Final(e) => e,
+        _ => ApiError::Protocol { status, code: None },
+    }
+}
+
 /// The §2.4 table.
 fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: RouteKind) -> Mapped {
     let parsed = EngineErrorBody::parse(body);
@@ -2079,5 +2099,50 @@ mod tests {
                 retry_after: Some(Duration::from_secs(3))
             }
         );
+    }
+
+    #[test]
+    fn an_engine_refusal_body_reads_as_a_reply() {
+        let body = |code: &str, details: Value| serde_json::json!({"error": {"message": "x", "code": code, "details": details}});
+        assert!(matches!(
+            engine_refusal(409, &body("STALE", Value::Null)),
+            ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                ..
+            }
+        ));
+        assert!(matches!(
+            engine_refusal(
+                409,
+                &body(
+                    "DOCUMENT_ALREADY_CLAIMED",
+                    serde_json::json!({"draftId": "00000000-0000-4000-8000-000000000001"})
+                )
+            ),
+            ApiError::DocumentDraft(
+                crate::resources::document_drafts::DraftRefusal::AlreadyClaimed { draft: Some(_) }
+            )
+        ));
+        let ApiError::Validation(v) =
+            engine_refusal(422, &body("TARGET_NOT_ATTACHABLE", Value::Null))
+        else {
+            panic!("validation")
+        };
+        assert_eq!(
+            v.code().map(ErrorCode::as_str),
+            Some("TARGET_NOT_ATTACHABLE")
+        );
+        assert!(matches!(
+            engine_refusal(423, &body("TB_PERIOD_LOCKED", Value::Null)),
+            ApiError::ClosedPeriod(_)
+        ));
+        assert!(matches!(
+            engine_refusal(422, &body("IDEMPOTENCY_KEY_REUSED", Value::Null)),
+            ApiError::IdempotencyKeyReused { entity: None }
+        ));
+        assert!(matches!(
+            engine_refusal(404, &Value::Null),
+            ApiError::NotFound { code: None }
+        ));
     }
 }
