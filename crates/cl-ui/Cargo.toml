@@ -27,6 +27,12 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 # PDFium API the pinned bblanchon/pdfium-binaries `chromium/7881` build
 # offers; no `image` feature (the viewer reads raw RGBA), no V8 or XFA.
 pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_7881", "thread_safe"] }
+# A01 WP-D (Q-A01m, Q-P13k): native Browse dialogs. MIT. No `gtk3`, so no
+# GTK library is linked: on Linux the dialog is the xdg-desktop-portal's,
+# reached through the system libdbus-1 loaded at run time (rfd's own FFI),
+# with the system `zenity` as rfd's fallback. Windows: IFileDialog
+# (windows-sys); macOS: NSOpenPanel (objc2).
+rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tokio = { version = "1.53.3", features = ["rt"] }

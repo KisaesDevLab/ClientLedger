@@ -112,6 +112,16 @@ pub enum Step {
     Key(String),
     /// Run a command id.
     Command(String),
+    /// Answer the next file or folder window the app opens (none is shown
+    /// in a controlled run): `paths` chosen, or `cancel: true`.
+    DialogAnswer {
+        /// The chosen paths (`{scenario_dir}` works here).
+        #[serde(default)]
+        paths: Vec<String>,
+        /// Cancel instead.
+        #[serde(default)]
+        cancel: bool,
+    },
     /// Pause.
     Wait {
         /// Milliseconds.
@@ -193,6 +203,14 @@ impl Step {
             }
             Step::Key(k) => format!("key {k}"),
             Step::Command(c) => format!("command {c}"),
+            Step::DialogAnswer { paths, cancel } => {
+                if *cancel || paths.is_empty() {
+                    "answer the next file window: cancel".into()
+                } else {
+                    // Paths can be owner data: only how many.
+                    format!("answer the next file window with {} path(s)", paths.len())
+                }
+            }
             Step::Wait { ms } => format!("wait {ms} ms"),
             Step::AssertExists(t) => format!("expect {} to exist", t.describe()),
             Step::AssertNotExists(t) => format!("expect {} not to exist", t.describe()),
@@ -480,6 +498,12 @@ fn run_step(
         }
         Step::Key(k) => call(t, "key", json!({"key": k})).map(drop),
         Step::Command(c) => call(t, "command", json!({"id": c})).map(drop),
+        Step::DialogAnswer { paths, cancel } => call(
+            t,
+            "dialog_answer",
+            json!({"paths": paths, "cancel": cancel}),
+        )
+        .map(drop),
         Step::Wait { ms } => {
             std::thread::sleep(Duration::from_millis(*ms));
             Ok(())
@@ -748,6 +772,24 @@ mod tests {
         .unwrap();
         assert_eq!(s.themes, vec!["light", "dark"]);
         assert_eq!(s.steps.len(), 7);
+    }
+
+    #[test]
+    fn dialog_answers_parse_and_describe_no_path() {
+        let s = Scenario::parse(
+            "name: x\nsteps:\n  - dialog_answer: {paths: ['C:/Owner/Scans']}\n  - dialog_answer: {cancel: true}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            s.steps[0],
+            Step::DialogAnswer {
+                paths: vec!["C:/Owner/Scans".into()],
+                cancel: false,
+            }
+        );
+        assert!(!s.steps[0].describe().contains("Owner"));
+        assert!(s.steps[1].describe().contains("cancel"));
+        assert!(crate::tools::is_method("dialog_answer"));
     }
 
     #[test]
