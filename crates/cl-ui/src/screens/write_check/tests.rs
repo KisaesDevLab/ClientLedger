@@ -696,7 +696,7 @@ fn browse_attaches_the_chosen_file_and_a_cancel_nothing() {
     let mut s = screen(&link);
     let ctx = eframe::egui::Context::default();
     let hook = PickerHook::install(&ctx);
-    let mut browse = |s: &mut WriteCheckScreen, a: Answer| {
+    let browse = |s: &mut WriteCheckScreen, a: Answer| {
         hook.answer(a);
         s.browse_attach(&ctx);
         let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
