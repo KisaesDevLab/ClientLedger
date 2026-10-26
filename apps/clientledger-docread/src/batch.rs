@@ -554,18 +554,20 @@ pub(crate) mod tests {
 
     /// TSV of `n` confident words across the image.
     fn words(n: u32, w: u32, h: u32) -> OcrAnswer {
+        use std::fmt::Write as _;
         let mut s = String::from(
             "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n",
         );
         for i in 0..n {
-            s.push_str(&format!(
-                "5\t1\t1\t1\t{}\t1\t{}\t{}\t{}\t{}\t95\tWord{i}\n",
+            let _ = writeln!(
+                s,
+                "5\t1\t1\t1\t{}\t1\t{}\t{}\t{}\t{}\t95\tWord{i}",
                 i + 1,
                 w / 10,
                 (h / 40) * (i + 1),
                 w / 5,
                 h / 60
-            ));
+            );
         }
         OcrAnswer::Tsv(Tsv(s))
     }

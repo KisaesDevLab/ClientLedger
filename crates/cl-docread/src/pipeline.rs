@@ -76,11 +76,11 @@ pub fn read(input: &ReadInput<'_>) -> Reading {
     let slopes: Vec<i32> = input.pages.iter().map(layout::page_slope).collect();
     let turned = slopes.iter().any(|&s| s != 0);
     let straight;
-    let pages: &[PageWords] = if !turned {
-        input.pages
-    } else {
+    let pages: &[PageWords] = if turned {
         straight = layout::levelled(input.pages, &slopes);
         &straight
+    } else {
+        input.pages
     };
     let layout = layout::analyze(pages);
     let fingerprint = templates::fingerprint(pages);

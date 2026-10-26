@@ -22,7 +22,8 @@
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::cast_possible_wrap
+    clippy::cast_possible_wrap,
+    clippy::many_single_char_names
 )]
 
 use crate::ocr_geom::Transform;
@@ -364,7 +365,7 @@ pub fn skew_mdeg(image: &GrayImage) -> i32 {
     let off = rows as f64 / 2.0;
     let mut hist = vec![0u32; rows];
     let mut sharpness = |mdeg: i32| -> f64 {
-        hist.iter_mut().for_each(|v| *v = 0);
+        hist.fill(0);
         let (s, c) = (f64::from(mdeg) / 1000.0).to_radians().sin_cos();
         for &(dx, dy) in &pts {
             let ry = dx * s + dy * c + off;

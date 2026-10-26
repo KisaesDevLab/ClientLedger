@@ -44,6 +44,10 @@ pub struct Extracted {
 }
 
 /// Payment and receipt signs on the page (plan D3 `kind.rs`).
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent signs the kind table weighs together"
+)]
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct Signals {
     /// Masked card digits ("****4821", "ending in 4821").
@@ -312,13 +316,13 @@ fn scan_line(ctx: &Ctx<'_>, li: usize, cands: &mut Cands, signals: &mut Signals)
             // A bare "Invoice" or "#" takes a value beside or under it only
             // when that is a lone number, not an address line or a title's
             // neighbour ("PARTS INVOICE" → "915 W Walnut St").
-            let lone = |seg: usize| {
+            let lone_value = |seg: usize| {
                 hit.label != Label::Reference(1) || ctx.layout.segments[seg].words.len() <= 2
             };
             if last
                 && hit.label.value_may_be_next_segment()
                 && let Some(&next) = line.segments.get(k + 1)
-                && lone(next)
+                && lone_value(next)
                 && !labels::starts_with_label(&ctx.seg_tokens(next))
                 && candidate(
                     ctx,
@@ -336,7 +340,7 @@ fn scan_line(ctx: &Ctx<'_>, li: usize, cands: &mut Cands, signals: &mut Signals)
                 && last
                 && hit.label.value_may_be_below()
                 && let Some(below) = below_segment(ctx, seg, hit.label.is_amount())
-                && lone(below)
+                && lone_value(below)
             {
                 candidate(
                     ctx,
@@ -563,7 +567,7 @@ fn id_value(
     })
 }
 
-/// Whether 	 can be an invoice or account number: it has a digit and is
+/// Whether `t` can be an invoice or account number: it has a digit and is
 /// not a date or a printed amount (`12.50`, `$` anything).
 fn is_id(t: &str, today: CalendarDate) -> bool {
     let money_like = t.split_once('.').is_some_and(|(i, f)| {

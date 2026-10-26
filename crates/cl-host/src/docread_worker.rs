@@ -838,6 +838,24 @@ fn log_line(line: &[u8], who: &'static str, other: &mut u32) {
 // Tesseract
 // ---------------------------------------------------------------------------
 
+/// Tesseract's arguments after the input, output and model folder.
+fn tesseract_args(mode: OcrMode) -> &'static [&'static str] {
+    match mode {
+        OcrMode::Read => &[
+            "-l",
+            "eng",
+            "--oem",
+            "1",
+            "--psm",
+            "3",
+            "-c",
+            "tessedit_create_tsv=1",
+        ],
+        // The orientation report (osd.traineddata), plain text.
+        OcrMode::Orient => &["-l", "osd", "--psm", "0"],
+    }
+}
+
 /// OCR one validated PGM page with tesseract: TSV text, or why not.
 fn run_tesseract(
     tools: &OcrTools,
@@ -853,20 +871,7 @@ fn run_tesseract(
         .arg("stdout")
         .arg("--tessdata-dir")
         .arg(&tools.tessdata)
-        .args(match mode {
-            OcrMode::Read => &[
-                "-l",
-                "eng",
-                "--oem",
-                "1",
-                "--psm",
-                "3",
-                "-c",
-                "tessedit_create_tsv=1",
-            ][..],
-            // The orientation report (osd.traineddata), plain text.
-            OcrMode::Orient => &["-l", "osd", "--psm", "0"][..],
-        })
+        .args(tesseract_args(mode))
         .env_clear()
         .envs(scrubbed_env(&dir.0))
         .env("OMP_THREAD_LIMIT", "1")

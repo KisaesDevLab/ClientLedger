@@ -426,12 +426,12 @@ pub fn levelled(pages: &[PageWords], slopes: &[i32]) -> Vec<PageWords> {
 /// (page number, box) — words are left alone.
 pub fn map_spots(r: &mut crate::model::Reading, f: impl Fn(u16, Bbox) -> Bbox) {
     use crate::model::{Found, Spot};
-    let fix = |s: &mut Spot| s.bbox = f(s.page, s.bbox);
     fn opt<T>(x: &mut Option<Found<T>>, fix: &impl Fn(&mut Spot)) {
         if let Some(found) = x {
             fix(&mut found.spot);
         }
     }
+    let fix = |s: &mut Spot| s.bbox = f(s.page, s.bbox);
     let h = &mut r.header;
     opt(&mut h.vendor, &fix);
     opt(&mut h.vendor_address, &fix);

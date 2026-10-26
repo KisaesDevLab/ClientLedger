@@ -667,15 +667,15 @@ fn read_set(host: &mut DocreadHost, set: &Path) -> Vec<Doc> {
                         continue;
                     };
                     let cached = cache_path(part, &dir, &file);
-                    let (reading, elapsed) = match cached.as_ref().and_then(|p| reuse(p)) {
-                        Some(r) => (Some(r), Duration::ZERO),
-                        None => {
-                            let (reading, elapsed) = read_one(host, bytes);
-                            if let (Some(p), Some(r)) = (&cached, &reading) {
-                                store(p, r);
-                            }
-                            (reading, elapsed)
+                    let (reading, elapsed) = if let Some(r) = cached.as_ref().and_then(|p| reuse(p))
+                    {
+                        (Some(r), Duration::ZERO)
+                    } else {
+                        let (reading, elapsed) = read_one(host, bytes);
+                        if let (Some(p), Some(r)) = (&cached, &reading) {
+                            store(p, r);
                         }
+                        (reading, elapsed)
                     };
                     out.push(Doc {
                         truth: truth.clone(),
