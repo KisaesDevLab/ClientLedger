@@ -216,6 +216,25 @@ fn checks_are_listed_and_nothing_is_fixed() {
     );
 }
 
+/// Review S6: lines + tax checked against the total says "lines", not
+/// "subtotal".
+#[test]
+fn lines_and_tax_against_total_names_the_lines() {
+    let c = Check {
+        code: CheckCode::SubtotalTaxVsTotal,
+        rule: RuleId::new("validate.lines-total"),
+        field: None,
+        line: None,
+        expected: Some(CheckValue::Money(money("12.00"))),
+        found: Some(CheckValue::Money(money("13.00"))),
+        difference: Some(money("1.00")),
+        spot: None,
+    };
+    let text = super::check_text(&c, cl_core::MoneyStyle::default());
+    assert!(text.starts_with("The lines, tax and fees"), "{text}");
+    assert!(text.contains("12.00") && text.contains("13.00"), "{text}");
+}
+
 #[test]
 fn a_failure_says_enter_by_hand_and_the_form_still_works() {
     for (outcome, key) in [

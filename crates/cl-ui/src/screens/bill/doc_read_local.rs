@@ -230,6 +230,11 @@ pub(crate) fn check_text(c: &Check, style: MoneyStyle) -> String {
             "bill.read.check.lines_subtotal",
             "bill.read.check.lines_subtotal.plain",
         ),
+        // No subtotal printed: the lines stood in for it (review S6).
+        CheckCode::SubtotalTaxVsTotal if c.rule.as_str() == "validate.lines-total" => money_pair(
+            "bill.read.check.lines_total",
+            "bill.read.check.lines_total.plain",
+        ),
         CheckCode::SubtotalTaxVsTotal => money_pair(
             "bill.read.check.subtotal_total",
             "bill.read.check.subtotal_total.plain",

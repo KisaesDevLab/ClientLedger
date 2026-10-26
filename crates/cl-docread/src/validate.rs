@@ -5,7 +5,7 @@
 //! a value (AC3): the signature takes the reading by shared reference.
 //!
 //! With lines but no subtotal, and no tax or fees, the lines are checked
-//! against the total. A missing "amount paid" counts as zero when a balance
+//! against the total; with tax or fees, lines + tax + fees are (review S6). A missing "amount paid" counts as zero when a balance
 //! is printed. Arithmetic that would overflow skips the check.
 //!
 //! Internal to the rules.
@@ -38,6 +38,26 @@ pub fn check(header: &Header, lines: &[Line]) -> Vec<Check> {
                 f,
             ));
         }
+    }
+    // No subtotal but tax or fees: lines + tax + fees = total.
+    if header.subtotal.is_none()
+        && (header.tax.is_some() || !header.fees.is_empty())
+        && !lines.is_empty()
+        && let Some(total) = &header.total
+        && let Some(sum) = lines::sum(lines)
+        && let Ok(expected) = Money::sum(
+            std::iter::once(sum)
+                .chain(header.tax.iter().map(|t| t.value))
+                .chain(header.fees.iter().map(|f| f.value)),
+        )
+    {
+        out.extend(money_check(
+            CheckCode::SubtotalTaxVsTotal,
+            "validate.lines-total",
+            FieldName::Total,
+            expected,
+            total,
+        ));
     }
     // Subtotal + tax + fees = total.
     if let (Some(sub), Some(total)) = (&header.subtotal, &header.total) {
@@ -200,6 +220,25 @@ mod tests {
         assert_eq!(codes(&h, &[line("10")]), [CheckCode::LinesVsSubtotal]);
         h.tax = Some(found(m("2")));
         assert_eq!(codes(&h, &[line("10")]), []);
+    }
+
+    /// Review S6: lines and tax with no subtotal are still reconciled.
+    #[test]
+    fn lines_tax_and_fees_against_total_without_subtotal() {
+        let mut h = Header::default();
+        h.total = Some(found(m("13")));
+        h.tax = Some(found(m("2")));
+        let c = check(&h, &[line("10")]);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].code, CheckCode::SubtotalTaxVsTotal);
+        assert!(matches!(c[0].expected, Some(CheckValue::Money(v)) if v == m("12")));
+        assert_eq!(c[0].difference, Some(m("1")));
+        h.fees = vec![found(m("1"))];
+        assert_eq!(codes(&h, &[line("10")]), []);
+        h.tax = None;
+        assert_eq!(codes(&h, &[line("10")]), [CheckCode::SubtotalTaxVsTotal]);
+        // No lines: nothing to add up.
+        assert_eq!(codes(&h, &[]), []);
     }
 
     proptest! {

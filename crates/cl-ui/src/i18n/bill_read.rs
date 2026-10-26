@@ -69,4 +69,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bill.read.check.page_not_read", "A page couldn't be read. Check the document."),
     ("bill.read.check.pages_skipped", "Only the first 10 pages were read."),
     ("bill.read.check.kind", "It isn't clear this is a bill. Check the document."),
+    // A03 fix pass (review findings).
+    ("bill.read.check.lines_total", "The lines, tax and fees add up to {expected}, but the document's total is {found}."),
+    ("bill.read.check.lines_total.plain", "The lines, tax and fees don't add up to the document's total."),
 ];
