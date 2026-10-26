@@ -170,6 +170,10 @@ pub fn to_doc(local: &LocalReading) -> Mapped {
             tax: h.tax.as_ref().map(|f| f.value),
             total: total.map(|f| f.value),
             lines,
+            // A04 WP-F2 maps the matched card (`local.card`) and a printed
+            // check number for the card and check forms.
+            paid_from: None,
+            check_number: None,
             confidence: FieldConfidence {
                 vendor: local.vendor.map(|v| level(v.confidence)),
                 bill_date: level_of(h.date.as_ref()),
@@ -179,6 +183,7 @@ pub fn to_doc(local: &LocalReading) -> Mapped {
                 terms: level_of(h.terms.as_ref()),
                 amount_paid: level_of(h.amount_paid.as_ref()),
                 payment: level_of(h.payment.as_ref()),
+                check_number: None,
             },
         },
         unknown_vendor,

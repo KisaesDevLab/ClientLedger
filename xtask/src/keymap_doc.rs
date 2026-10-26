@@ -111,6 +111,7 @@ pub fn cheatsheet_md() -> String {
         ),
         ("\n**In a grid**\n\n", &[Scope::Grid][..]),
         ("\n**In a document preview**\n\n", &[Scope::Viewer][..]),
+        ("\n**In a work list**\n\n", &[Scope::List][..]),
     ] {
         out.push_str(title);
         for c in COMMANDS

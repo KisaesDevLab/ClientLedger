@@ -1,0 +1,33 @@
+{
+  "_comment": "A04 shared document-draft cases (plan section 6 T16, review S14). The demo engine (cl-ui company/demo/drafts.rs, WP-D) and the live engine (cl-api tests/contract_document_drafts.rs, WP-E; PENDING(U-95) until the pin bump) run the same cases and must give the same answers. WP-M froze the shape; later work packages only append cases to their own sections. Synthetic values only: no real names, files or amounts.",
+  "_schema": {
+    "case": "{ \"name\": unique snake_case, \"owner\": \"WP-D\" | \"WP-E\", \"why\": one line, \"steps\": [step, ...] }",
+    "step": "{ \"op\": one of ops, \"args\": object, \"as\": optional label for later steps, \"expect\": { \"status\": HTTP status the engine answers, \"code\": engine error code or null, \"draft_status\": \"new\" | \"ready\" | \"failed\" | \"converted\" | \"discarded\" | null } }",
+    "ops": [
+      "upload_draft_file",
+      "claim",
+      "get",
+      "list",
+      "store_reading",
+      "store_failure",
+      "discard",
+      "convert",
+      "attach",
+      "link_attachment",
+      "plain_relink",
+      "post_expense",
+      "void",
+      "set_closing_date",
+      "search_amount"
+    ],
+    "refs": "args may name an earlier step's result by its label: \"$file1\" (an attachment id), \"$draft1.id\", \"$draft1.updatedAt\", \"$txn1.id\". Amounts are decimal strings; dates are YYYY-MM-DD.",
+    "sections": "claim (D1 claim answers), store (readings and stale tokens), discard, convert (D2 convert answers), attach (U-95 a, T9), guard (U-95 b, T7), amount_filter (U-95 c)"
+  },
+  "claim": [],
+  "store": [],
+  "discard": [],
+  "convert": [],
+  "attach": [],
+  "guard": [],
+  "amount_filter": []
+}

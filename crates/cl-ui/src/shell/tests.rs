@@ -1479,3 +1479,131 @@ mod doc_viewer {
         assert!(!json.contains("receipt"), "{json}");
     }
 }
+
+/// A04 S8, T18: J/K/Enter run the work list's commands only while no text
+/// field has the keyboard; typed into the queue's filter they are text.
+mod list_keys {
+    use std::sync::{Arc, Mutex};
+
+    use eframe::egui::{self, Event, Modifiers};
+
+    use super::{WIDE, context, demo, frame, settle, tap};
+    use crate::windows::Screen;
+
+    /// What the test sees of the window.
+    #[derive(Default)]
+    struct Seen {
+        commands: Vec<&'static str>,
+        filter: String,
+        focus_filter: bool,
+        focus_row: bool,
+    }
+
+    /// A list window: a filter field and one focusable row.
+    struct ListWindow {
+        filter: String,
+        seen: Arc<Mutex<Seen>>,
+    }
+
+    impl Screen for ListWindow {
+        fn title(&self) -> String {
+            "list".into()
+        }
+        fn ui(&mut self, ui: &mut egui::Ui) {
+            let filter = ui.add(egui::TextEdit::singleline(&mut self.filter));
+            let row = ui.button("row");
+            let mut seen = self.seen.lock().expect("lock");
+            if std::mem::take(&mut seen.focus_filter) {
+                filter.request_focus();
+            }
+            if std::mem::take(&mut seen.focus_row) {
+                row.request_focus();
+            }
+            seen.filter.clone_from(&self.filter);
+        }
+        fn scope(&self) -> cl_model::Scope {
+            cl_model::Scope::List
+        }
+        fn command(&mut self, id: cl_model::CommandId) -> bool {
+            self.seen.lock().expect("lock").commands.push(id.as_str());
+            true
+        }
+        fn keeps_text_key(&self, ctx: &egui::Context, _s: cl_model::Shortcut) -> bool {
+            ctx.text_edit_focused()
+        }
+    }
+
+    /// A key as a keyboard sends it: the press, its text, the release.
+    fn typed(k: egui::Key, text: &str) -> Vec<Event> {
+        let mut v = tap(k, Modifiers::NONE);
+        v.insert(1, Event::Text(text.into()));
+        v
+    }
+
+    #[test]
+    fn letters_type_in_the_filter_and_move_in_the_list() {
+        let ctx = context();
+        let mut shell = demo();
+        let seen = Arc::new(Mutex::new(Seen {
+            focus_filter: true,
+            ..Seen::default()
+        }));
+        shell.windows.open_new(
+            cl_model::CommandId::new("vendors.review_documents"),
+            Box::new(ListWindow {
+                filter: String::new(),
+                seen: Arc::clone(&seen),
+            }),
+        );
+        settle(&ctx, &mut shell, WIDE);
+        assert!(ctx.text_edit_focused());
+        frame(&ctx, &mut shell, WIDE, typed(egui::Key::J, "j"));
+        frame(&ctx, &mut shell, WIDE, typed(egui::Key::K, "k"));
+        frame(
+            &ctx,
+            &mut shell,
+            WIDE,
+            tap(egui::Key::Enter, Modifiers::NONE),
+        );
+        settle(&ctx, &mut shell, WIDE);
+        {
+            let s = seen.lock().expect("lock");
+            assert_eq!(
+                s.commands,
+                Vec::<&str>::new(),
+                "typing runs no list command"
+            );
+            assert_eq!(s.filter, "jk");
+        }
+
+        // A row has the keyboard (any focused widget, not a text field):
+        // the same keys are the list's.
+        seen.lock().expect("lock").focus_row = true;
+        settle(&ctx, &mut shell, WIDE);
+        assert!(!ctx.text_edit_focused());
+        assert!(ctx.egui_wants_keyboard_input());
+        frame(&ctx, &mut shell, WIDE, typed(egui::Key::J, "j"));
+        frame(&ctx, &mut shell, WIDE, typed(egui::Key::K, "k"));
+        frame(
+            &ctx,
+            &mut shell,
+            WIDE,
+            tap(egui::Key::Delete, Modifiers::NONE),
+        );
+        // Alt+S is not bound in the list (Q-A04b).
+        frame(&ctx, &mut shell, WIDE, tap(egui::Key::S, Modifiers::ALT));
+        frame(
+            &ctx,
+            &mut shell,
+            WIDE,
+            tap(egui::Key::Enter, Modifiers::NONE),
+        );
+        settle(&ctx, &mut shell, WIDE);
+        let s = seen.lock().expect("lock");
+        assert_eq!(
+            s.commands,
+            vec!["queue.next", "queue.prev", "queue.discard", "queue.open"]
+        );
+        assert_eq!(s.filter, "jk", "nothing typed while the row has focus");
+    }
+}

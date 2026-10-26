@@ -1445,7 +1445,7 @@ impl EnterBillScreen {
                 self.start_local_read();
                 true
             }
-            "bill.accept_read" => {
+            "form.accept_read" => {
                 self.accept_read();
                 true
             }

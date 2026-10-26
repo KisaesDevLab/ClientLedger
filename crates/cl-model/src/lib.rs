@@ -22,6 +22,7 @@ pub mod closing;
 pub mod commands;
 pub mod date_entry;
 pub mod date_rules;
+pub mod doc_draft;
 pub mod forms;
 pub mod home;
 pub mod keymap;

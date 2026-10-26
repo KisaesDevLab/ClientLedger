@@ -18,6 +18,8 @@
 
 pub mod assist;
 pub mod map;
+// A04: the reading queue's two lanes (interactive before batch).
+pub mod queue;
 pub mod service;
 
 use std::sync::{Arc, OnceLock};

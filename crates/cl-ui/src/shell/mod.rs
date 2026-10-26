@@ -967,14 +967,20 @@ impl Shell {
         };
         // A focused text field keeps its edit keys; the window decides (a
         // grid lets Ctrl+A through when its cell has nothing to select).
+        // A plain letter or Enter is typing while a text field has focus,
+        // whatever the scope binds (A04 S8: J/K in the queue's filter).
+        // `text_edit_focused`, not `egui_wants_keyboard_input`: the latter
+        // is true for any focused widget, such as a list row.
+        let text_focus = ctx.text_edit_focused();
         let kept: Vec<bool> = pressed
             .iter()
             .map(|s| {
-                input::reserved_by_text_fields(*s)
-                    && window.map_or_else(
-                        || ctx.egui_wants_keyboard_input(),
-                        |w| w.screen.keeps_text_key(ctx, *s),
-                    )
+                (input::typed_by_text_fields(*s) && text_focus)
+                    || (input::reserved_by_text_fields(*s)
+                        && window.map_or_else(
+                            || ctx.egui_wants_keyboard_input(),
+                            |w| w.screen.keeps_text_key(ctx, *s),
+                        ))
             })
             .collect();
         let mut handled: Vec<cl_model::Shortcut> = Vec::new();
@@ -1566,6 +1572,7 @@ fn make_any(
             .chain(&crate::screens::P15A_SCREENS)
             .chain(&crate::screens::P16_SCREENS)
             .chain(&crate::screens::P17_SCREENS)
+            .chain(&crate::screens::A04_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;

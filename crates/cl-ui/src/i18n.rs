@@ -101,9 +101,13 @@ mod intake;
 mod picker;
 // A03 (one module per work package).
 mod cloud_reading;
+// A04 (one module per area; each work package adds its own block).
+mod compare;
+mod doc_form;
+mod doc_review;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 29] = [
+const TABLES: [&[(&str, &str)]; 32] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -133,6 +137,9 @@ const TABLES: [&[(&str, &str)]; 29] = [
     intake::ENGLISH,
     picker::ENGLISH,
     cloud_reading::ENGLISH,
+    doc_review::ENGLISH,
+    doc_form::ENGLISH,
+    compare::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {

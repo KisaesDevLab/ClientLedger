@@ -67,9 +67,14 @@ pub(crate) fn items(
                 None => count_of(counts.map(|c| &c.bills), kind),
             },
             AttentionKind::PayrollUnposted => count_of(counts.map(|c| &c.payroll), kind),
-            // Counted on this computer by the inbox service; the card puts
-            // in its count each frame ([`with_intake`]).
-            AttentionKind::IntakeFolders => AttentionItem::counted(kind, 0),
+            // Intake folders: counted on this computer by the inbox
+            // service; the card puts in its count each frame
+            // ([`with_intake`]). Documents to review: A04 WP-F1 (step 11)
+            // reads the engine's draft count; until then the line is not
+            // shown.
+            AttentionKind::IntakeFolders | AttentionKind::DocumentsToReview => {
+                AttentionItem::counted(kind, 0)
+            }
             AttentionKind::ReconcileUnfinished => match &data.reconcile.value {
                 Some(r) => AttentionItem::counted(
                     kind,
@@ -210,7 +215,7 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
                 let failed = match kind {
                     AttentionKind::ReconcileUnfinished => home.data.reconcile.error.is_some(),
                     AttentionKind::InvoicesOverdue => home.data.summary.error.is_some(),
-                    AttentionKind::IntakeFolders => false,
+                    AttentionKind::IntakeFolders | AttentionKind::DocumentsToReview => false,
                     _ => home.data.counts.value.as_ref().is_some_and(|c| match kind {
                         AttentionKind::BankWaiting => c.feed.is_err(),
                         AttentionKind::BillsDue { .. } => c.bills.is_err(),
@@ -267,6 +272,11 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
             AttentionKind::IntakeFolders => out.push(Line::task(
                 t_count("home.attention.intake", shown, &[]),
                 "home.attention.intake.open",
+                opens,
+            )),
+            AttentionKind::DocumentsToReview => out.push(Line::task(
+                t_count("home.attention.documents", shown, &[]),
+                "home.attention.review",
                 opens,
             )),
         }

@@ -225,7 +225,7 @@ fn read_document_fills_as_read_with_ai_off_and_creates_no_draft() {
     assert!(!s.start_save(SaveIntent::SaveAndClose, None));
     assert!(s.save.problems.contains(&BillProblem::ReadNotAccepted));
     assert_eq!(writes(&link), before);
-    assert!(s.form_command(cl_model::CommandId::new("bill.accept_read")));
+    assert!(s.form_command(cl_model::CommandId::new("form.accept_read")));
     s.track_read();
     assert_eq!(s.state()["read"]["unaccepted"], 0);
     let keys: Vec<_> = s.expenses.value().used().map(|l| l.key).collect();

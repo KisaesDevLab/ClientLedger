@@ -522,6 +522,10 @@ pub(crate) fn doc_reading(r: &BillReading) -> DocReading {
                 }
             })
             .collect(),
+        // The engine's AI reading of a bill has neither (A04 adds them for
+        // the card and check forms' local readings).
+        paid_from: None,
+        check_number: None,
         confidence: FieldConfidence {
             vendor: field("vendor"),
             bill_date: field("billDate"),
@@ -532,6 +536,7 @@ pub(crate) fn doc_reading(r: &BillReading) -> DocReading {
             terms: None,
             amount_paid: None,
             payment: None,
+            check_number: None,
         },
     }
 }
@@ -768,6 +773,13 @@ impl ReadState {
                     form.amount_from_lines = false;
                 }
                 ReadTarget::Line(k) => form.expenses.lines.retain(|l| l.key != k),
+                // The card and check forms' targets (A04); a bill never
+                // marks them.
+                ReadTarget::Payee
+                | ReadTarget::Date
+                | ReadTarget::Total
+                | ReadTarget::CheckNumber
+                | ReadTarget::PaidFrom => {}
             }
         }
         form.read.clear();
@@ -1108,7 +1120,7 @@ pub fn banner(
                             RichText::new(t("bill.read.accept")).strong(),
                         ))
                         .on_hover_text(t("bill.read.accept.tip"));
-                    crate::widgets::kbd(ui, &chip("bill.accept_read"));
+                    crate::widgets::kbd(ui, &chip("form.accept_read"));
                     if std::mem::take(&mut state.focus_accept) {
                         accept.request_focus();
                     }
@@ -1423,6 +1435,12 @@ impl EnterBillScreen {
                     // 4); Accept or typing the amount accepts it.
                     Some(l) => snap.lines.get(&k).is_none_or(|amount| l.amount != *amount),
                 },
+                // Not a bill's (A04 card and check targets).
+                ReadTarget::Payee
+                | ReadTarget::Date
+                | ReadTarget::Total
+                | ReadTarget::CheckNumber
+                | ReadTarget::PaidFrom => false,
             };
             if changed {
                 edited.push(target);
@@ -1435,7 +1453,12 @@ impl EnterBillScreen {
                 ReadTarget::DueDate => field::DUE,
                 ReadTarget::Reference => field::REFERENCE,
                 ReadTarget::AmountDue => field::AMOUNT,
-                ReadTarget::Line(_) => LINE_MARKS,
+                ReadTarget::Line(_)
+                | ReadTarget::Payee
+                | ReadTarget::Date
+                | ReadTarget::Total
+                | ReadTarget::CheckNumber
+                | ReadTarget::PaidFrom => LINE_MARKS,
             };
             self.header.edit(key, |h| h.read.edited(target));
         }
