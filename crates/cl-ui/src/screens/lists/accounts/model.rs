@@ -169,6 +169,11 @@ pub(crate) fn chart_entry(a: &Account, sensitive: bool) -> ChartEntry {
                 .apply(b)
                 .ok()
         }),
+        card_last4: cl_model::lists::accounts::CardEnding(
+            a.card_last4
+                .map(|c| c.as_str().to_string())
+                .unwrap_or_default(),
+        ),
     }
 }
 

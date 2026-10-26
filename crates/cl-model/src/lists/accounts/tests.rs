@@ -17,6 +17,7 @@ fn entry(n: u32, kind: AccountKind, number: Option<&str>, name: &str) -> ChartEn
         system: false,
         sensitive: false,
         balance: None,
+        card_last4: CardEnding::default(),
     }
 }
 
@@ -317,6 +318,60 @@ fn check_trims_and_reports_each_problem() {
         check(&bad, &chart, None).expect_err("long"),
         [DraftProblem::NameTooLong]
     );
+}
+
+/// A new credit card account (Liability, detail `credit_card`) with
+/// `digits` typed in "Card ends in".
+fn card_draft(digits: &str) -> AccountDraft {
+    let mut d = AccountDraft::new(AccountKind::Liability);
+    d.detail = CREDIT_CARD_DETAIL.into();
+    d.name = "Fuel Card".into();
+    d.card_last4 = CardEnding(digits.into());
+    d
+}
+
+#[test]
+fn card_digits_are_four_digits_or_empty_on_credit_cards_only() {
+    let chart = Chart::new(sample(), true);
+    // Four digits, trimmed.
+    let ok = check(&card_draft(" 4821 "), &chart, None).expect("valid");
+    assert_eq!(ok.card_last4, Some(CardEnding("4821".into())));
+    // Empty clears.
+    let ok = check(&card_draft("  "), &chart, None).expect("empty");
+    assert_eq!(ok.card_last4, None);
+    // Anything else is refused on the card field.
+    for bad in ["482", "48211", "48a1", "4 21", "\u{0664}821", "-482"] {
+        let p = check(&card_draft(bad), &chart, None).expect_err("bad digits");
+        assert_eq!(p, [DraftProblem::CardDigits], "{bad:?}");
+        assert_eq!(p[0].field(), DraftField::Card);
+        assert_eq!(p[0].key().as_str(), "lists.accounts.problem.card_digits");
+    }
+    // Not a credit card: the digits are dropped, never sent or refused.
+    let mut bank = card_draft("48a1");
+    bank.kind = AccountKind::Asset;
+    bank.detail = "bank".into();
+    assert_eq!(
+        check(&bank, &chart, None).expect("dropped").card_last4,
+        None
+    );
+    assert!(takes_card_digits("credit_card"));
+    assert!(!takes_card_digits("bank"));
+    assert!(!takes_card_digits(""));
+}
+
+#[test]
+fn card_digits_follow_the_entry_clear_on_type_change_and_never_debug_print() {
+    let mut e = entry(9, AccountKind::Liability, Some("2050"), "Card");
+    e.detail = Some(CREDIT_CARD_DETAIL.into());
+    e.card_last4 = CardEnding("4821".into());
+    let mut d = AccountDraft::from_entry(&e);
+    assert_eq!(d.card_last4.as_str(), "4821");
+    let shown = format!("{d:?} {e:?}");
+    assert!(!shown.contains("4821"), "{shown}");
+    d.set_kind(AccountKind::Asset);
+    assert!(d.card_last4.is_empty());
+    assert!(CardEnding("0007".into()).is_valid());
+    assert!(!CardEnding(String::new()).is_valid());
 }
 
 #[test]

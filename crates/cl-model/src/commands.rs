@@ -402,6 +402,12 @@ pub const DEV_COMMANDS: &[Command] = &[
     // control-channel scenario marks the demo check in front as printed to
     // reach the printed-check question.
     dev_action("dev.check_mark_printed", "Mark Check Printed (developer)"),
+    // A03: the demo engine has no `document-drafts-v1`; the Chart of
+    // Accounts scenario turns its "Card ends in" storage on and off.
+    dev_action(
+        "dev.demo_card_digits",
+        "Demo Card Digits On/Off (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).
@@ -439,6 +445,10 @@ mod tests {
         assert_eq!(find_dev("dev.grid_demo").map(|c| c.opens), Some(true));
         assert_eq!(
             find_dev("dev.check_mark_printed").map(|c| (c.opens, c.scope)),
+            Some((false, Scope::Form))
+        );
+        assert_eq!(
+            find_dev("dev.demo_card_digits").map(|c| (c.opens, c.scope)),
             Some((false, Scope::Form))
         );
         assert!(find_dev("nav.home").is_none());
