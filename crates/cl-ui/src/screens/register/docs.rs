@@ -27,6 +27,9 @@ use crate::windows::doc_viewer::{self, DocRef, PaneRequest};
 /// How long the cursor rests on a row before its files are listed.
 pub(super) const REST: f64 = 0.25;
 
+/// A downloaded file: its id, name and bytes.
+type Download = (AttachmentId, String, Vec<u8>);
+
 /// What the register knows about the cursor row's files.
 #[derive(Default)]
 pub(super) struct RowDocs {
@@ -41,7 +44,7 @@ pub(super) struct RowDocs {
     /// The list failed: shown, never taken for "no documents".
     pub list_failed: bool,
     /// The download in flight, and the row it is for.
-    bytes_task: Option<(TransactionId, Task<(AttachmentId, String, Vec<u8>)>)>,
+    bytes_task: Option<(TransactionId, Task<Download>)>,
     /// The first file's bytes (what the viewer shows).
     source: Option<DocSource>,
     /// "Show document" was clicked: pop out once the bytes are here.
