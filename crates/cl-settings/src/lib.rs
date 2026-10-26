@@ -33,7 +33,9 @@ pub mod smtp;
 mod store;
 pub mod user_prefs;
 
-pub use ai::{AiLocalPrefs, AiProvider, CapCheck, OllamaUrlError, validate_ollama_url};
+pub use ai::{
+    AiLocalPrefs, AiProvider, CapCheck, OllamaUrlError, is_ollama_cloud_model, validate_ollama_url,
+};
 pub use company_prefs::{
     AiConsentNote, CompanyPrefs, FolderError, HereNote, check_inbox_folder, path_hash,
 };

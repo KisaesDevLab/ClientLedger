@@ -12,7 +12,8 @@
 //!   change in the audit trail (`PATCH /ai/consent/{company}/tasks`). Saved
 //!   with the window's Save, after the AI panel's own changes.
 //! - A local Ollama model needs neither switch: nothing leaves the
-//!   computer or network.
+//!   computer or network. An Ollama cloud model (`…:cloud`, `…-cloud`)
+//!   runs online and needs them like any online service (review S5).
 //! - The engine's cloud-vision setting is shown, never changed (the
 //!   desktop keeps the strict privacy level, Q-139, Q-A03v).
 

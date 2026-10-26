@@ -99,7 +99,42 @@ fn switches() -> AssistSwitches {
         text_cloud: false,
         images_cloud: false,
         cloud_vision: false,
+        ollama_cloud: false,
     }
+}
+
+/// Review S5: an Ollama cloud model goes online, so it needs the consent
+/// like any online provider; switches read from the engine say so.
+#[test]
+fn an_ollama_cloud_model_is_an_online_provider() {
+    let cloud_model = AssistSwitches {
+        ollama_cloud: true,
+        ..switches()
+    };
+    assert_eq!(route(cloud_model), Err(NoRoute::NeedsConsent));
+    assert_eq!(
+        route(AssistSwitches {
+            text_cloud: true,
+            ..cloud_model
+        }),
+        Ok(Route::Cloud { images: false })
+    );
+    let config = |model: &str| -> cl_api::AiConfig {
+        serde_json::from_value(serde_json::json!({
+            "isEnabled": true, "ocrProvider": "ollama", "ocrModel": model,
+        }))
+        .unwrap()
+    };
+    let s = crate::screens::bill::doc_read::ReadSwitches::from_engine(
+        Some(&config("gpt-oss:120b-cloud")),
+        None,
+    );
+    assert!(s.ollama_cloud && s.assist_switches().ollama_cloud);
+    let s = crate::screens::bill::doc_read::ReadSwitches::from_engine(
+        Some(&config("llama3.1:8b")),
+        None,
+    );
+    assert!(!s.ollama_cloud);
 }
 
 #[test]

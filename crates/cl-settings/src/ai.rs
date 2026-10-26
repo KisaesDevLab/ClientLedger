@@ -61,6 +61,15 @@ impl AiProvider {
         !matches!(self, AiProvider::Ollama)
     }
 
+    /// True when `model` on this provider runs online: every model of an
+    /// online provider, and an Ollama model whose name ends in `cloud`
+    /// after `:` or `-` (`gpt-oss:120b-cloud`, `kimi-k2:cloud`), which
+    /// Ollama runs on its own servers (A03 review S5, engine #179 M2).
+    #[must_use]
+    pub fn runs_online(self, model: Option<&str>) -> bool {
+        self.is_cloud() || model.is_some_and(is_ollama_cloud_model)
+    }
+
     /// The keychain entry holding this provider's key (none for Ollama).
     #[must_use]
     pub fn key_name(self) -> Option<&'static str> {
@@ -80,6 +89,14 @@ impl AiProvider {
             AiProvider::OpenAi => "prefs.ai.provider_openai",
         }
     }
+}
+
+/// An Ollama model name matching `(^|[:-])cloud$`, any case.
+#[must_use]
+pub fn is_ollama_cloud_model(model: &str) -> bool {
+    let m = model.trim().to_ascii_lowercase();
+    m.strip_suffix("cloud")
+        .is_some_and(|rest| rest.is_empty() || rest.ends_with(':') || rest.ends_with('-'))
 }
 
 /// Default Ollama address.
@@ -324,6 +341,33 @@ mod tests {
         assert_eq!(AiProvider::from_wire("gemini"), None);
         assert_eq!(AiProvider::Anthropic.key_name(), Some(ANTHROPIC_KEY));
         assert_eq!(AiProvider::default(), AiProvider::Ollama);
+    }
+
+    /// Review S5: Ollama's cloud models run online.
+    #[test]
+    fn ollama_cloud_models_run_online() {
+        for m in [
+            "cloud",
+            "kimi-k2:cloud",
+            "gpt-oss:120b-cloud",
+            "Qwen3-Coder:480B-CLOUD",
+        ] {
+            assert!(is_ollama_cloud_model(m), "{m}");
+            assert!(AiProvider::Ollama.runs_online(Some(m)), "{m}");
+        }
+        for m in [
+            "llama3.1:8b",
+            "soundcloud",
+            "cloudy:7b",
+            "mycloud",
+            "cloud:7b",
+            "",
+        ] {
+            assert!(!is_ollama_cloud_model(m), "{m}");
+        }
+        assert!(!AiProvider::Ollama.runs_online(Some("llama3.1:8b")));
+        assert!(!AiProvider::Ollama.runs_online(None));
+        assert!(AiProvider::Anthropic.runs_online(None));
     }
 
     #[test]

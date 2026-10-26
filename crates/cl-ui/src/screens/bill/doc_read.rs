@@ -134,6 +134,9 @@ pub struct ReadSwitches {
     pub images_cloud: bool,
     /// The engine sends pictures to an online provider at all.
     pub cloud_vision: bool,
+    /// The provider is Ollama but its model runs online (`…:cloud`,
+    /// `…-cloud`): treated as an online provider (review S5).
+    pub ollama_cloud: bool,
 }
 
 impl ReadSwitches {
@@ -172,6 +175,7 @@ impl ReadSwitches {
             text_cloud: self.text_cloud,
             images_cloud: self.images_cloud,
             cloud_vision: self.cloud_vision,
+            ollama_cloud: self.ollama_cloud,
         }
     }
 
@@ -214,10 +218,19 @@ impl ReadSwitches {
                 .or_else(|| c.fallback_chain.first().map(String::as_str))
                 .and_then(AiProvider::from_wire)
         });
+        // Either model named online is enough (the reading may use either).
+        let ollama_cloud = provider == Some(AiProvider::Ollama)
+            && config.is_some_and(|c| {
+                [&c.ocr_model, &c.categorization_model]
+                    .into_iter()
+                    .flatten()
+                    .any(|m| cl_settings::is_ollama_cloud_model(m))
+            });
         ReadSwitches {
             ai: config.is_some_and(|c| c.is_enabled) && current,
             reading: consent.is_some_and(|c| c.enabled_tasks.receipt_ocr == Some(true)),
             provider,
+            ollama_cloud,
             ..ReadSwitches::default()
         }
     }
@@ -234,6 +247,7 @@ impl ReadSwitches {
             text_cloud: ai.text_cloud,
             images_cloud: ai.text_cloud && ai.images_cloud,
             cloud_vision: false,
+            ollama_cloud: false,
         })
     }
 }
