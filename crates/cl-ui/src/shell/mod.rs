@@ -177,6 +177,10 @@ pub struct Shell {
     demo: bool,
     /// The open company's templates catch-up (P15).
     runner: crate::templates_runner::TemplatesRunner,
+    /// The pop-out document viewer window (A02).
+    doc_viewer: crate::windows::doc_viewer::DocViewerWindow,
+    /// The window the document viewer followed last.
+    doc_follow: Option<WindowId>,
 }
 
 impl Shell {
@@ -217,7 +221,15 @@ impl Shell {
             w.registers = store.load_register_prefs();
             w.panels = crate::prefs::PanelPrefsBook::load(store.dir());
         }
+        let placement = options
+            .store
+            .as_ref()
+            .map(|s| crate::prefs::DocViewerPlacement::load(s.dir()))
+            .unwrap_or_default();
+        let doc_viewer = crate::windows::doc_viewer::DocViewerWindow::new(placement, &keymap);
         let mut shell = Shell {
+            doc_viewer,
+            doc_follow: None,
             widths,
             prompt_focused: None,
             demo: options.demo,
@@ -413,6 +425,10 @@ impl Shell {
                         self.windows.close_now(id);
                     }
                     self.open_tenant = Some((tenant_id, name.clone()));
+                    // Another company's document never shows in the viewer;
+                    // it comes back popped out if it was (A02).
+                    self.doc_viewer.clear_doc();
+                    self.doc_viewer.restore_popped();
                     // The new company's Home reads its own counts.
                     self.counts = RailCounts::default();
                     self.set_company(
@@ -433,6 +449,7 @@ impl Shell {
                 }
                 CompanyEvent::Closed => {
                     self.runner.closed(&link);
+                    self.doc_viewer.close_window();
                     link.lost_saves().set_company(None);
                     self.save_layout();
                     for id in self.windows.all().iter().map(|w| w.id).collect::<Vec<_>>() {
@@ -589,6 +606,7 @@ impl Shell {
         if let Some(first) = self.windows.all().first().map(|w| w.id) {
             self.windows.activate(first);
         }
+        self.doc_viewer.restore_popped();
     }
 
     fn restore_layout_or_home(&mut self) {
@@ -817,6 +835,15 @@ impl Shell {
             }
             "window.zoom_reset" => self.prefs.zoom_percent = prefs::ZOOM_DEFAULT,
             "window.theme" => self.prefs.theme = self.prefs.theme.next(),
+            "view.toggle_doc_viewer" => {
+                let now = ctx.map_or(0.0, |c| c.input(|i| i.time));
+                self.doc_viewer.toggle(now);
+            }
+            "view.focus_doc" => {
+                if let Some(ctx) = ctx {
+                    self.doc_viewer.focus_toggle(ctx);
+                }
+            }
             "file.close_window" => {
                 if let Some(w) = target {
                     self.windows.request_close(w);
@@ -886,6 +913,7 @@ impl Shell {
     fn finish_quit(&mut self, ctx: Option<&Context>) {
         self.save_layout();
         self.flush_widths(None);
+        self.flush_doc_viewer(None);
         self.allow_close = true;
         if let Some(ctx) = ctx {
             // Quit may come from a popped-out window's keys: close the app.
@@ -928,7 +956,15 @@ impl Shell {
         }
         let modal = self.modal_open();
         let window = target.and_then(|id| self.windows.get(id));
-        let scope = window.map_or(Scope::Global, |w| w.screen.scope());
+        // The viewer drawn inside the main window (embedded viewports) has
+        // the keyboard: its keys act on it (A02).
+        let doc_focus =
+            ctx.viewport_id() == egui::ViewportId::ROOT && self.doc_viewer.embedded_has_focus(ctx);
+        let scope = if doc_focus {
+            Scope::Viewer
+        } else {
+            window.map_or(Scope::Global, |w| w.screen.scope())
+        };
         // A focused text field keeps its edit keys; the window decides (a
         // grid lets Ctrl+A through when its cell has nothing to select).
         let kept: Vec<bool> = pressed
@@ -953,6 +989,10 @@ impl Shell {
                 continue;
             }
             handled.push(s);
+            if doc_focus && id.as_str().starts_with("viewer.") {
+                let _ = self.doc_viewer.viewer_command(id);
+                continue;
+            }
             self.run_for(Some(ctx), id, target);
         }
         if !handled.is_empty() {
@@ -1105,6 +1145,7 @@ impl Shell {
         let tokens = Tokens::of(&ctx);
 
         self.apply_company_events(Some(&ctx));
+        self.doc_viewer.publish(&ctx);
         self.publish_grid_facts(&ctx, egui::ViewportId::ROOT);
         title_bar::show(ui, self, narrow, &tokens);
         menu::show(ui, self, narrow, &tokens);
@@ -1122,6 +1163,9 @@ impl Shell {
         }
         self.body(ui, &tokens);
         self.show_popped_out(&ctx, &tokens);
+        for id in self.show_doc_viewer(&ctx, &tokens) {
+            self.run(Some(&ctx), id);
+        }
         self.show_overlays(&ctx);
 
         for id in std::mem::take(&mut self.pending) {
@@ -1133,6 +1177,10 @@ impl Shell {
         self.save_layout();
         let now = ctx.input(|i| i.time);
         self.flush_widths(Some(now));
+        self.flush_doc_viewer(Some(now));
+        if self.doc_viewer.unsaved() {
+            ctx.request_repaint_after(Duration::from_millis(1100));
+        }
         if self.widths.lock().is_ok_and(|w| {
             w.changed_at.is_some()
                 || w.registers_changed_at.is_some()
@@ -1192,6 +1240,80 @@ impl Shell {
                 tracing::warn!(error = %e, "could not save panel choices");
             }
         }
+    }
+
+    /// Write the document window's place a second after it moved, or at
+    /// once with `None`. Never during a controlled run.
+    fn flush_doc_viewer(&mut self, now: Option<f64>) {
+        if let Some(store) = self.store.as_ref().filter(|_| !self.run_only) {
+            self.doc_viewer.flush(store.dir(), now);
+        }
+    }
+
+    /// The window the document viewer follows: a popped-out tab whose own
+    /// window has the focus, else (while the viewer window itself has it)
+    /// the one followed last, else the tab in front.
+    fn followed_window(&mut self, ctx: &Context) -> Option<WindowId> {
+        let focused = |vp: egui::ViewportId| {
+            ctx.input(|i| i.raw.viewports.get(&vp).and_then(|v| v.focused)) == Some(true)
+        };
+        let popped = self
+            .windows
+            .all()
+            .iter()
+            .filter(|w| w.popped_out)
+            .find(|w| focused(egui::ViewportId::from_hash_of(("cl-window", w.id.raw()))))
+            .map(|w| w.id);
+        let pick = if popped.is_some() {
+            popped
+        } else if focused(crate::windows::doc_viewer::viewport_id())
+            && self
+                .doc_follow
+                .is_some_and(|id| self.windows.get(id).is_some())
+        {
+            self.doc_follow
+        } else {
+            self.windows.active_id()
+        };
+        self.doc_follow = pick;
+        pick
+    }
+
+    /// The pop-out document viewer's frame (A02). Returns the commands
+    /// pressed in its window, for the main window to run.
+    fn show_doc_viewer(&mut self, ctx: &Context, tokens: &Tokens) -> Vec<CommandId> {
+        let followed = self.followed_window(ctx);
+        let (doc, kind) = followed
+            .and_then(|id| self.windows.get(id))
+            .map_or((None, None), |w| (w.screen.document(), Some(w.kind)));
+        let accent = self.accent(tokens);
+        self.doc_viewer.frame(
+            ctx,
+            crate::windows::doc_viewer::Follow {
+                doc,
+                kind,
+                accent,
+                keymap: &self.keymap,
+            },
+        )
+    }
+
+    /// The pop-out document viewer's state for the control channel
+    /// (geometry and command ids only).
+    #[must_use]
+    pub fn doc_viewer_state(&self, ctx: &Context) -> crate::windows::doc_viewer::DocViewerState {
+        self.doc_viewer.state(ctx)
+    }
+
+    /// The pop-out document viewer (tests and the control channel).
+    #[must_use]
+    pub fn doc_viewer(&self) -> &crate::windows::doc_viewer::DocViewerWindow {
+        &self.doc_viewer
+    }
+
+    /// The pop-out document viewer, mutable (tests).
+    pub fn doc_viewer_mut(&mut self) -> &mut crate::windows::doc_viewer::DocViewerWindow {
+        &mut self.doc_viewer
     }
 
     /// Show or hide the rail when the window is narrow.
