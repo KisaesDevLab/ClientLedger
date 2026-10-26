@@ -41,12 +41,31 @@ fn object(properties: &Value, required: &[&str]) -> Value {
     })
 }
 
-/// A method whose only input is the element it acts on.
+/// The optional `viewport` parameter (A02 D5): which window the method acts
+/// on.
+fn viewport_schema() -> Value {
+    json!({
+        "type": "string",
+        "enum": crate::actions::VIEWPORTS,
+        "description": "Which window: main (the default) or doc_viewer (the pop-out document viewer)."
+    })
+}
+
+/// `object` whose properties also take `viewport`.
+fn in_viewport(properties: Value, required: &[&str]) -> Value {
+    let mut properties = properties;
+    if let Some(map) = properties.as_object_mut() {
+        map.insert("viewport".into(), viewport_schema());
+    }
+    object(&properties, required)
+}
+
+/// A method whose only input is the element it acts on (in a window).
 fn target_only(name: &'static str, description: &'static str) -> Tool {
     Tool {
         name,
         description,
-        input_schema: object(&json!({"target": target_schema()}), &["target"]),
+        input_schema: in_viewport(json!({"target": target_schema()}), &["target"]),
     }
 }
 
@@ -61,43 +80,44 @@ fn dialog_answer_schema() -> Value {
     )
 }
 
-/// All methods, in a stable order.
+/// All methods, in a stable order. One flat table, read top to bottom.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn tools() -> Vec<Tool> {
     vec![
         Tool {
             name: "inspect",
-            description: "Return the accessibility tree (id, role, label, bounds, focus, enabled), or the elements matching a target. Secret field values are hidden.",
-            input_schema: object(&json!({"target": target_schema()}), &[]),
+            description: "Return the accessibility tree (id, role, label, bounds, focus, enabled) of one window, or the elements matching a target, plus the open windows. Secret field values are hidden.",
+            input_schema: in_viewport(json!({"target": target_schema()}), &[]),
         },
         target_only("click", "Click the centre of an element."),
         Tool {
             name: "type",
             description: "Type text into the focused element, optionally focusing a target first.",
-            input_schema: object(
-                &json!({"text": {"type": "string"}, "target": target_schema()}),
+            input_schema: in_viewport(
+                json!({"text": {"type": "string"}, "target": target_schema()}),
                 &["text"],
             ),
         },
         Tool {
             name: "paste",
             description: "Paste text into the focused element as one clipboard paste (tabs and line breaks kept), optionally focusing a target first.",
-            input_schema: object(
-                &json!({"text": {"type": "string"}, "target": target_schema()}),
+            input_schema: in_viewport(
+                json!({"text": {"type": "string"}, "target": target_schema()}),
                 &["text"],
             ),
         },
         Tool {
             name: "key",
             description: "Press one key chord such as Ctrl+K, Enter, Escape, Shift+Tab, F1.",
-            input_schema: object(&json!({"key": {"type": "string"}}), &["key"]),
+            input_schema: in_viewport(json!({"key": {"type": "string"}}), &["key"]),
         },
         target_only("focus", "Move keyboard focus to an element."),
         Tool {
             name: "scroll",
             description: "Turn the mouse wheel over an element until what scrolls there reaches its start or end.",
-            input_schema: object(
-                &json!({
+            input_schema: in_viewport(
+                json!({
                     "target": target_schema(),
                     "to": {"type": "string", "enum": ["start", "end"]}
                 }),
@@ -115,21 +135,32 @@ pub fn tools() -> Vec<Tool> {
         },
         Tool {
             name: "screenshot",
-            description: "Save the window as a PNG file.",
-            input_schema: object(
-                &json!({"path": {"type": "string", "description": "Output file, must end in .png."}}),
+            description: "Save a window as a PNG file.",
+            input_schema: in_viewport(
+                json!({"path": {"type": "string", "description": "Output file, must end in .png."}}),
                 &["path"],
             ),
         },
         Tool {
             name: "resize",
-            description: "Set the window's inner size in points.",
-            input_schema: object(
-                &json!({
+            description: "Set a window's inner size in points.",
+            input_schema: in_viewport(
+                json!({
                     "width": {"type": "number", "exclusiveMinimum": 0},
                     "height": {"type": "number", "exclusiveMinimum": 0}
                 }),
                 &["width", "height"],
+            ),
+        },
+        Tool {
+            name: "move",
+            description: "Move a window's outer top-left corner to a desktop position in points.",
+            input_schema: in_viewport(
+                json!({
+                    "x": {"type": "number"},
+                    "y": {"type": "number"}
+                }),
+                &["x", "y"],
             ),
         },
         Tool {
@@ -184,12 +215,41 @@ mod tests {
         let n = names.len();
         names.dedup();
         assert_eq!(n, names.len());
-        assert_eq!(n, 16);
+        assert_eq!(n, 17);
         for tool in &t {
             assert_eq!(tool.input_schema["type"], "object", "{}", tool.name);
             assert_ne!(tool.description.len(), 0);
         }
-        assert!(is_method("click") && !is_method("rm"));
+        assert!(is_method("click") && is_method("move") && !is_method("rm"));
+    }
+
+    /// Every method that acts on a window takes `viewport` (A02 D5); the
+    /// others do not.
+    #[test]
+    fn window_methods_take_a_viewport() {
+        let takes = [
+            "inspect",
+            "click",
+            "type",
+            "paste",
+            "key",
+            "focus",
+            "scroll",
+            "hover",
+            "screenshot",
+            "resize",
+            "move",
+        ];
+        for tool in tools() {
+            let has = tool.input_schema["properties"].get("viewport").is_some();
+            assert_eq!(has, takes.contains(&tool.name), "{}", tool.name);
+            if has {
+                assert_eq!(
+                    tool.input_schema["properties"]["viewport"]["enum"],
+                    json!(["main", "doc_viewer"])
+                );
+            }
+        }
     }
 
     #[test]
