@@ -29,9 +29,28 @@
 //!   when its memory between jobs is over [`DocreadLimits::recycle_memory`];
 //! * re-validates every `Reading` (sizes, boxes, spots, template index).
 //!
+//! Confinement (security review M1-M5):
+//!
+//! * Windows: the worker and each tesseract run in their own job:
+//!   kill-on-close, a hard commit cap, one active process (they can start
+//!   nothing) and no Windows Error Reporting (`procs/win_job_memory.rs`).
+//!   If the job can't be set up the child is stopped at once and the
+//!   document is "Couldn't read" (fail closed).
+//! * Linux: the worker limits itself (`clientledger-docread` `limits.rs`:
+//!   CPU, no core file, not dumpable, `SIGKILL` when the host dies); the
+//!   host sets tesseract's CPU, data and core limits with `prlimit` before
+//!   giving it its page.
+//! * macOS: the worker's own CPU and core limits and the watchdog;
+//!   tesseract has the watchdog only (P37).
+//! * Everywhere: each running child is recorded under
+//!   `<scratch>/.pids`; the next host start ([`sweep_docread_leftovers`])
+//!   stops any that outlived a crashed host and removes its scratch
+//!   folders.
+//!
 //! Logs carry outcome classes and counts only: never a file name, a path
 //! inside a document, text or an amount. Worker stderr lines are logged
-//! only when they are the worker's fixed `docread: ` lines.
+//! only when they are exactly one of the worker's fixed lines
+//! ([`WORKER_LINES`]).
 
 use crate::paths::create_private_dir;
 use crate::procs::{self, TreeKiller};
@@ -41,7 +60,7 @@ use cl_docread::protocol::{
     BatchOptions, Bytes, FrameError, FromWorker, Job, JobFailure, JobHint,
     MAX_BATCH_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES, MAX_FROM_WORKER_FRAME, MAX_JOB_DONE_FRAME,
     MAX_JOBS_PER_BATCH, MAX_TEMPLATES, MAX_TO_WORKER_FRAME, MAX_TSV_BYTES, OcrFailure,
-    PROTOCOL_VERSION, ToWorker, Tsv, read_frame, validate_pgm, write_frame,
+    PROTOCOL_VERSION, ToWorker, Tsv, validate_pgm, write_frame,
 };
 use std::collections::{BTreeSet, VecDeque};
 use std::ffi::OsString;
@@ -248,7 +267,10 @@ pub struct DocreadHost {
 /// A distinct number for each scratch folder in this process.
 static SCRATCH_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// A fresh owner-only folder below `root`, removed on drop.
+/// A fresh folder below `root`, removed on drop. Owner-only on Unix
+/// (mode 0700); on Windows it inherits the app data folder's access list
+/// (`%LOCALAPPDATA%`: the owner, SYSTEM and administrators; an explicit
+/// list is P37).
 #[derive(Debug)]
 struct ScratchDir(PathBuf);
 
@@ -274,6 +296,130 @@ impl Drop for ScratchDir {
         }
         tracing::warn!("docread: a scratch folder could not be removed");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Leftovers of a host that crashed (security review M1, L10)
+// ---------------------------------------------------------------------------
+
+/// Where running children are recorded:
+/// `<scratch>/.pids/<host pid>-<child pid>`.
+fn records_dir(scratch: &Path) -> PathBuf {
+    scratch.join(".pids")
+}
+
+/// A record of a running worker or tesseract (pid, start time, program),
+/// removed on drop, so a later host can stop it if this one crashes.
+#[derive(Debug)]
+struct ChildRecord(PathBuf);
+
+impl ChildRecord {
+    fn new(scratch: &Path, exe: &Path, pid: u32) -> Option<ChildRecord> {
+        let dir = records_dir(scratch);
+        create_private_dir(&dir).ok()?;
+        let (_, start) = procs::process_identity(pid)?;
+        let path = dir.join(format!("{}-{pid}", std::process::id()));
+        std::fs::write(&path, format!("{pid}\n{start}\n{}\n", exe.display())).ok()?;
+        Some(ChildRecord(path))
+    }
+}
+
+impl Drop for ChildRecord {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// What [`sweep_docread_leftovers`] cleaned up.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DocreadSwept {
+    /// Workers or tesseract runs stopped.
+    pub stopped: u32,
+    /// Scratch folders removed.
+    pub folders: u32,
+}
+
+/// Clean up after a host that crashed while reading: stop every recorded
+/// worker or tesseract still running (same program and start time, so a
+/// recycled pid is never touched) and remove the scratch folders other
+/// processes left. Call once at host start, after the single-instance
+/// lock is held (the supervisor does). Records and folders of this
+/// process are kept.
+#[must_use]
+pub fn sweep_docread_leftovers(paths: &crate::AppPaths) -> DocreadSwept {
+    sweep(&paths.docread_dir())
+}
+
+fn sweep(scratch: &Path) -> DocreadSwept {
+    let me = std::process::id();
+    let mut swept = DocreadSwept::default();
+    if let Ok(entries) = std::fs::read_dir(records_dir(scratch)) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let host = name.split('-').next().and_then(|h| h.parse::<u32>().ok());
+            if host == Some(me) {
+                continue;
+            }
+            if reap_record(&e.path()) {
+                swept.stopped += 1;
+            }
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir(scratch) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if is_leftover_scratch(&name, me)
+                && e.file_type().is_ok_and(|t| t.is_dir())
+                && std::fs::remove_dir_all(e.path()).is_ok()
+            {
+                swept.folders += 1;
+            }
+        }
+    }
+    swept
+}
+
+/// A scratch folder name (`{w|t}-{pid}-{n}`) made by another process.
+fn is_leftover_scratch(name: &str, me: u32) -> bool {
+    let mut parts = name.split('-');
+    matches!(parts.next(), Some("w" | "t"))
+        && parts
+            .next()
+            .and_then(|p| p.parse::<u32>().ok())
+            .is_some_and(|p| p != me)
+        && parts.next().is_some_and(|n| n.parse::<u64>().is_ok())
+        && parts.next().is_none()
+}
+
+/// Stop the process in one record when it is still the reader it names.
+fn reap_record(path: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let mut lines = text.lines();
+    let (Some(pid), Some(start), Some(exe)) = (
+        lines.next().and_then(|l| l.parse::<u32>().ok()),
+        lines.next().and_then(|l| l.parse::<u64>().ok()),
+        lines.next().map(PathBuf::from),
+    ) else {
+        return false;
+    };
+    if pid == std::process::id() {
+        return false;
+    }
+    // Only ever one of the two reading programs.
+    let name = exe.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if name != crate::paths::docread_exe_name() && name != crate::paths::tesseract_exe_name() {
+        return false;
+    }
+    let Some((live, started)) = procs::process_identity(pid) else {
+        return false;
+    };
+    if started != start || !procs::same_file(&live, &exe) {
+        return false;
+    }
+    procs::kill_process(pid)
 }
 
 /// The minimal environment for a child: system folders only, a private
@@ -328,19 +474,64 @@ enum Incoming {
     Closed,
 }
 
-/// Counts bytes read, so a frame's body length is known after
-/// `read_frame` (the `JobDone` cap is smaller than the frame cap).
-struct Counting<R> {
-    inner: R,
-    count: usize,
+/// Worker frames other than `JobDone` and `NeedOcr` are tiny (the worker's
+/// own `frame_max` uses the same cap).
+const MAX_SMALL_FRAME: usize = 4 * 1024;
+
+/// How every worker frame starts: serde writes an internally tagged
+/// enum's tag first.
+const TAG_PREFIX: &[u8] = br#"{"type":""#;
+
+/// The cap for a worker frame of type `tag`; `None` for an unknown type.
+fn frame_cap(tag: &[u8]) -> Option<usize> {
+    match tag {
+        b"jobDone" => Some(MAX_JOB_DONE_FRAME),
+        b"needOcr" => Some(MAX_FROM_WORKER_FRAME),
+        b"ready" | b"pageStarted" | b"jobFailed" | b"unsupported" => Some(MAX_SMALL_FRAME),
+        _ => None,
+    }
 }
 
-impl<R: Read> Read for Counting<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let n = self.inner.read(buf)?;
-        self.count += n;
-        Ok(n)
+/// Read one worker frame, checking its length against the cap **for its
+/// type** before the rest of the body is read or parsed (review L1): only
+/// a `NeedOcr` page may be large, so a compromised worker can't make the
+/// desktop buffer and parse 40 MiB as a `JobDone` or a small frame.
+fn read_worker_frame(r: &mut impl Read) -> Result<FromWorker, FrameError> {
+    let mut len = [0u8; 4];
+    let mut got = 0;
+    while got < len.len() {
+        let n = r.read(&mut len[got..])?;
+        if n == 0 {
+            return if got == 0 {
+                Err(FrameError::Closed)
+            } else {
+                Err(FrameError::Io(std::io::ErrorKind::UnexpectedEof.into()))
+            };
+        }
+        got += n;
     }
+    let len = usize::try_from(u32::from_be_bytes(len)).unwrap_or(usize::MAX);
+    if len > MAX_FROM_WORKER_FRAME {
+        return Err(FrameError::TooLarge {
+            len,
+            max: MAX_FROM_WORKER_FRAME,
+        });
+    }
+    // Enough for the prefix and the longest tag.
+    let head = len.min(TAG_PREFIX.len() + 16);
+    let mut body = vec![0u8; head];
+    r.read_exact(&mut body)?;
+    let cap = body
+        .strip_prefix(TAG_PREFIX)
+        .and_then(|rest| rest.iter().position(|&b| b == b'"').map(|end| &rest[..end]))
+        .and_then(frame_cap)
+        .ok_or(FrameError::Garbled)?;
+    if len > cap {
+        return Err(FrameError::TooLarge { len, max: cap });
+    }
+    body.resize(len, 0);
+    r.read_exact(&mut body[head..])?;
+    serde_json::from_slice(&body).map_err(|_| FrameError::Garbled)
 }
 
 /// Why a worker was stopped in the middle of a job.
@@ -385,13 +576,26 @@ struct Worker {
     served: u32,
     sys: System,
     _dir: ScratchDir,
+    _record: Option<ChildRecord>,
 }
 
 impl Worker {
     /// Start a worker and wait for `Ready`.
+    ///
+    /// On Linux the worker asks for `SIGKILL` when the thread that started
+    /// it ends (`PR_SET_PDEATHSIG` follows the spawning *thread*, not the
+    /// process). [`DocreadHost::read`] starts and stops its workers on the
+    /// one thread it runs on; keep it that way: starting a worker on a
+    /// short-lived helper thread would kill it when that thread ends.
     fn start(config: &DocreadConfig) -> Result<Worker, &'static str> {
         let dir = ScratchDir::new(&config.scratch, "w").map_err(|_| "no scratch folder")?;
         let mut env = scrubbed_env(&dir.0);
+        // The worker exits at once when its parent is not this process
+        // (a host that died before the worker set its death signal).
+        env.push((
+            "CL_DOCREAD_PARENT".into(),
+            std::process::id().to_string().into(),
+        ));
         if let Some(p) = std::env::var_os("CL_PDFIUM_PATH").filter(|p| Path::new(p).is_absolute()) {
             env.push(("CL_PDFIUM_PATH".into(), p));
         }
@@ -411,10 +615,16 @@ impl Worker {
             .stderr(Stdio::piped());
         procs::prepare(&mut cmd);
         let mut child = cmd.spawn().map_err(|_| "could not start")?;
-        let killer = TreeKiller::adopt(&child);
+        let mut killer = TreeKiller::adopt(&child);
         let hard = config.limits.hard_cap(config.limits.worker_memory);
-        killer.limit_memory(hard);
+        // Fail closed (review M5): never a worker without its job. It has
+        // not been given a document yet.
+        if cfg!(windows) && !killer.confine(hard) {
+            killer.terminate(&mut child, Duration::ZERO);
+            return Err("not confined");
+        }
         let pid = child.id();
+        let record = ChildRecord::new(&config.scratch, &config.worker_exe, pid);
         let (Some(stdin), Some(stdout), Some(stderr)) =
             (child.stdin.take(), child.stdout.take(), child.stderr.take())
         else {
@@ -434,6 +644,7 @@ impl Worker {
             served: 0,
             sys: System::new(),
             _dir: dir,
+            _record: record,
         };
         match w.rx.recv_timeout(config.limits.ready) {
             Ok(Incoming::Frame(FromWorker::Ready { version })) if version == PROTOCOL_VERSION => {
@@ -453,6 +664,9 @@ impl Worker {
     fn send(&self, msg: &ToWorker) -> bool {
         let mut buf = Vec::new();
         if write_frame(&mut buf, msg, MAX_TO_WORKER_FRAME).is_err() {
+            // `take_batch` and `templates_that_fit` keep batches within the
+            // cap, so this is a host error, never the document's.
+            tracing::warn!("docread: a message to the worker was over the frame limit");
             return false;
         }
         self.tx.as_ref().is_some_and(|tx| tx.send(buf).is_ok())
@@ -498,21 +712,10 @@ fn write_loop(mut stdin: impl Write, rx: &Receiver<Vec<u8>>) {
 }
 
 fn read_loop(stdout: impl Read, tx: &Sender<Incoming>) {
-    let mut r = Counting {
-        inner: std::io::BufReader::new(stdout),
-        count: 0,
-    };
+    let mut r = std::io::BufReader::new(stdout);
     loop {
-        let before = r.count;
-        let msg = match read_frame::<_, FromWorker>(&mut r, MAX_FROM_WORKER_FRAME) {
-            Ok(m) => {
-                let body = (r.count - before).saturating_sub(4);
-                if matches!(m, FromWorker::JobDone { .. }) && body > MAX_JOB_DONE_FRAME {
-                    Incoming::Breach
-                } else {
-                    Incoming::Frame(m)
-                }
-            }
+        let msg = match read_worker_frame(&mut r) {
+            Ok(m) => Incoming::Frame(m),
             Err(FrameError::TooLarge { .. } | FrameError::Garbled) => Incoming::Breach,
             Err(FrameError::Closed | FrameError::Io(_)) => Incoming::Closed,
         };
@@ -551,20 +754,45 @@ fn drain_stderr(stderr: impl Read, who: &'static str) {
     }
 }
 
+/// Every fixed line the worker writes to stderr (`clientledger-docread`;
+/// a test checks its sources against this list). Nothing else a worker
+/// writes is logged (review L7): a compromised one could otherwise copy
+/// document words into the log.
+const WORKER_LINES: &[&str] = &[
+    "docread: limits: network namespace refused",
+    "docread: limits: data limit refused",
+    "docread: limits: cpu limit refused",
+    "docread: limits: core limit refused",
+    "docread: limits: dump protection refused",
+    "docread: limits: parent watch refused",
+    "docread: limits: host gone",
+    "docread: outcome: pdf reader unavailable",
+    "docread: outcome: reading over the frame limit",
+    "docread: outcome: reading over a limit",
+    "docread: outcome: ocr failed (unavailable)",
+    "docread: outcome: ocr failed (timed out)",
+    "docread: outcome: ocr failed (crashed)",
+    "docread: outcome: ocr failed (bad image)",
+    "docread: outcome: ocr failed (too much output)",
+    "docread: protocol: unexpected frame during ocr",
+    "docread: protocol: batch over a limit",
+    "docread: protocol: ocr answer outside a job",
+    "docread: protocol: bad frame",
+];
+
+/// Log a stderr line when it is one of [`WORKER_LINES`]: a refused limit
+/// at warn (isolation is weaker on this machine, and the owner and CI can
+/// see it), the rest at debug. Anything else is only counted.
 fn log_line(line: &[u8], who: &'static str, other: &mut u32) {
     let text = String::from_utf8_lossy(line);
     let text = text.trim();
     if text.is_empty() {
         return;
     }
-    let fixed = text.starts_with("docread: ")
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b" :-()".contains(&b));
-    if fixed {
-        tracing::debug!(who, "{text}");
-    } else {
-        *other += 1;
+    match WORKER_LINES.iter().find(|l| **l == text) {
+        Some(l) if l.starts_with("docread: limits: ") => tracing::warn!(who, "{l}"),
+        Some(l) => tracing::debug!(who, "{l}"),
+        None => *other += 1,
     }
 }
 
@@ -578,7 +806,7 @@ fn run_tesseract(
     pgm: Vec<u8>,
     scratch: &Path,
     limits: &DocreadLimits,
-    cancel: &AtomicBool,
+    stop: [&AtomicBool; 2],
 ) -> Result<String, OcrFailure> {
     let dir = ScratchDir::new(scratch, "t").map_err(|_| OcrFailure::Unavailable)?;
     let mut cmd = Command::new(&tools.exe);
@@ -606,7 +834,22 @@ fn run_tesseract(
     procs::prepare(&mut cmd);
     let mut child = cmd.spawn().map_err(|_| OcrFailure::Unavailable)?;
     let mut killer = TreeKiller::adopt(&child);
-    killer.limit_memory(limits.hard_cap(limits.tesseract_memory));
+    let hard = limits.hard_cap(limits.tesseract_memory);
+    // Before tesseract gets its page (it waits on stdin until then).
+    if cfg!(windows) && !killer.confine(hard) {
+        // Fail closed (review M5): never an unconfined tesseract.
+        killer.terminate(&mut child, Duration::ZERO);
+        tracing::warn!("docread: tesseract could not be confined");
+        return Err(OcrFailure::Unavailable);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let cpu = limits.ocr_page.as_secs() + 1;
+        if !procs::limit_child(child.id(), cpu, hard) {
+            tracing::warn!("docread: tesseract limits refused");
+        }
+    }
+    let _record = ChildRecord::new(scratch, &tools.exe, child.id());
     let (Some(mut stdin), Some(stdout), Some(stderr)) =
         (child.stdin.take(), child.stdout.take(), child.stderr.take())
     else {
@@ -641,7 +884,7 @@ fn run_tesseract(
             Ok(None) => {}
             Err(_) => break Some(OcrFailure::Crashed),
         }
-        if started.elapsed() > limits.ocr_page || cancel.load(Ordering::Relaxed) {
+        if started.elapsed() > limits.ocr_page || stop.iter().any(|s| s.load(Ordering::Relaxed)) {
             break Some(OcrFailure::TimedOut);
         }
         if memory_of(&mut sys, pid).is_some_and(|m| m > limits.tesseract_memory) {
@@ -728,6 +971,7 @@ impl DocreadHost {
             ocr: self.config.ocr.is_some(),
             today,
         };
+        let sending: Vec<Sending> = jobs.iter().map(plan_sending).collect();
         let mut kills = vec![0u8; n];
         let mut worker: Option<Worker> = None;
         let mut start_failures = 0u8;
@@ -746,11 +990,11 @@ impl DocreadHost {
             };
             start_failures = 0;
             let room = self.config.limits.recycle_jobs.saturating_sub(w.served);
-            let batch = take_batch(&queue, jobs, room);
+            let batch = take_batch(&queue, jobs, &sending, room);
             let end = run_batch(
                 w,
                 &batch,
-                jobs,
+                (jobs, &sending),
                 options,
                 &self.config,
                 &mut self.stats,
@@ -835,19 +1079,78 @@ fn host_refusal(job: &DocJob) -> Option<JobFailure> {
     }
 }
 
+/// Room in a batch frame for its jobs: the frame cap less the batch's own
+/// JSON (type, options, brackets).
+const BATCH_FRAME_BUDGET: usize = MAX_TO_WORKER_FRAME - 4 * 1024;
+
+/// How one job goes into a batch frame (review L6): its templates that fit
+/// one frame, and its encoded size with them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Sending {
+    /// The first this many of the job's templates are sent.
+    templates: usize,
+    /// The job's bytes in the batch frame (exact JSON).
+    frame_bytes: usize,
+}
+
+/// Size each job once, before any batch is serialized: its JSON without
+/// document or templates, the document in base64, then templates in order
+/// (at most `MAX_TEMPLATES`) while the job still fits a frame on its own.
+/// So a job always fits one batch, whatever its templates hold (A04
+/// learns them from documents); the rest are left out with a warning.
+fn plan_sending(job: &DocJob) -> Sending {
+    let bare = serde_json::to_vec(&Job {
+        job: u32::MAX,
+        bytes: Bytes(Vec::new()),
+        hint: job.hint,
+        templates: Vec::new(),
+    })
+    .map_or(1024, |v| v.len());
+    let mut size = bare + job.bytes.len().div_ceil(3) * 4 + 1;
+    let mut templates = 0;
+    for t in job.templates.iter().take(MAX_TEMPLATES) {
+        // A comma between templates.
+        let len = serde_json::to_vec(t).map_or(usize::MAX, |v| v.len() + 1);
+        if size.saturating_add(len) > BATCH_FRAME_BUDGET {
+            tracing::warn!(
+                sent = templates,
+                "docread: layout templates over the frame limit were left out"
+            );
+            break;
+        }
+        size += len;
+        templates += 1;
+    }
+    Sending {
+        templates,
+        frame_bytes: size,
+    }
+}
+
 /// The next jobs from the front of `queue` that fit one batch: at most
-/// `room` (and the protocol's job cap), within the batch byte cap (always
-/// at least one).
-fn take_batch(queue: &VecDeque<usize>, jobs: &[DocJob], room: u32) -> Vec<usize> {
+/// `room` (and the protocol's job cap), within the batch byte cap and the
+/// frame cap (always at least one).
+fn take_batch(
+    queue: &VecDeque<usize>,
+    jobs: &[DocJob],
+    sending: &[Sending],
+    room: u32,
+) -> Vec<usize> {
     let max = MAX_JOBS_PER_BATCH.min(usize::try_from(room.max(1)).unwrap_or(1));
     let mut bytes = 0usize;
+    let mut frame = 0usize;
     let mut out = Vec::new();
     for &i in queue {
         let len = jobs[i].bytes.len();
-        if out.len() == max || (!out.is_empty() && bytes + len > MAX_BATCH_DOCUMENT_BYTES) {
+        let size = sending[i].frame_bytes;
+        if out.len() == max
+            || (!out.is_empty()
+                && (bytes + len > MAX_BATCH_DOCUMENT_BYTES || frame + size > BATCH_FRAME_BUDGET))
+        {
             break;
         }
         bytes += len;
+        frame += size;
         out.push(i);
     }
     out
@@ -865,7 +1168,7 @@ struct JobClock {
 fn run_batch(
     w: &mut Worker,
     batch: &[usize],
-    jobs: &[DocJob],
+    (jobs, sending): (&[DocJob], &[Sending]),
     options: BatchOptions,
     config: &DocreadConfig,
     stats: &mut DocreadStats,
@@ -882,7 +1185,7 @@ fn run_batch(
             templates: jobs[i]
                 .templates
                 .iter()
-                .take(MAX_TEMPLATES)
+                .take(sending[i].templates)
                 .cloned()
                 .collect(),
         })
@@ -931,7 +1234,10 @@ fn run_batch(
                 FromWorker::NeedOcr { job, page, pgm }
                     if job == id && clock.pages.contains(&page) =>
                 {
-                    let answer = ocr_answer(id, page, pgm.0, config, stats, cancel);
+                    let answer = match ocr_watching(w, (id, page), pgm.0, config, stats, cancel) {
+                        Ok(a) => a,
+                        Err(why) => return BatchEnd::Killed(k, why),
+                    };
                     if !w.send(&answer) {
                         return BatchEnd::Killed(k, Kill::Crashed);
                     }
@@ -963,6 +1269,40 @@ fn run_batch(
     BatchEnd::Done
 }
 
+/// [`ocr_answer`] on a helper thread while this one keeps watching the
+/// worker's memory (review L2): the worker waits for the answer, so an
+/// honest one can't grow, but a compromised one could, and on macOS the
+/// watchdog is its only memory limit. A breach stops tesseract and kills
+/// the worker; cancelling stops tesseract (the caller then sees it).
+fn ocr_watching(
+    w: &mut Worker,
+    (job, page): (u32, u16),
+    pgm: Vec<u8>,
+    config: &DocreadConfig,
+    stats: &mut DocreadStats,
+    cancel: &AtomicBool,
+) -> Result<ToWorker, Kill> {
+    let stop = AtomicBool::new(false);
+    let stop = &stop;
+    std::thread::scope(|s| {
+        let ocr = s.spawn(move || ocr_answer(job, page, pgm, config, stats, [cancel, stop]));
+        let mut breach = None;
+        while !ocr.is_finished() {
+            if breach.is_none() && w.memory().is_some_and(|m| m > config.limits.worker_memory) {
+                breach = Some(Kill::Memory);
+                stop.store(true, Ordering::Relaxed);
+            }
+            std::thread::sleep(config.limits.poll.min(Duration::from_millis(20)));
+        }
+        let answer = ocr.join().unwrap_or(ToWorker::OcrFailed {
+            job,
+            page,
+            reason: OcrFailure::Crashed,
+        });
+        breach.map_or(Ok(answer), Err)
+    })
+}
+
 /// The host's answer to a `NeedOcr`.
 fn ocr_answer(
     job: u32,
@@ -970,7 +1310,7 @@ fn ocr_answer(
     pgm: Vec<u8>,
     config: &DocreadConfig,
     stats: &mut DocreadStats,
-    cancel: &AtomicBool,
+    stop: [&AtomicBool; 2],
 ) -> ToWorker {
     let failed = |reason| ToWorker::OcrFailed { job, page, reason };
     if validate_pgm(&pgm).is_err() {
@@ -981,7 +1321,7 @@ fn ocr_answer(
         return failed(OcrFailure::Unavailable);
     };
     stats.ocr_pages += 1;
-    match run_tesseract(tools, pgm, &config.scratch, &config.limits, cancel) {
+    match run_tesseract(tools, pgm, &config.scratch, &config.limits, stop) {
         Ok(tsv) => ToWorker::OcrResult {
             job,
             page,
@@ -1007,17 +1347,325 @@ mod tests {
         }
     }
 
+    fn plans(jobs: &[DocJob]) -> Vec<Sending> {
+        jobs.iter().map(plan_sending).collect()
+    }
+
     #[test]
     fn batches_keep_within_the_protocol_caps() {
         let jobs: Vec<DocJob> = (0..45).map(|_| job(10)).collect();
         let q: VecDeque<usize> = (0..45).collect();
-        assert_eq!(take_batch(&q, &jobs, 20).len(), MAX_JOBS_PER_BATCH);
-        assert_eq!(take_batch(&q, &jobs, 3), [0, 1, 2]);
+        let s = plans(&jobs);
+        assert_eq!(take_batch(&q, &jobs, &s, 20).len(), MAX_JOBS_PER_BATCH);
+        assert_eq!(take_batch(&q, &jobs, &s, 3), [0, 1, 2]);
         let big: Vec<DocJob> = (0..6).map(|_| job(MAX_DOCUMENT_BYTES)).collect();
         let q: VecDeque<usize> = (0..6).collect();
-        assert_eq!(take_batch(&q, &big, 20).len(), 4);
+        let s = plans(&big);
+        assert_eq!(take_batch(&q, &big, &s, 20).len(), 4);
         // A worker with no room left still gets one job (it is replaced first).
-        assert_eq!(take_batch(&q, &big, 0).len(), 1);
+        assert_eq!(take_batch(&q, &big, &s, 0).len(), 1);
+    }
+
+    /// A template far over the protocol's own caps (about 600 KB): the
+    /// host must cope with whatever the company's templates hold.
+    fn huge_template() -> Template {
+        Template {
+            fingerprint: cl_docread::model::Fingerprint {
+                tokens: (0..300).map(|i| format!("{i:0>2000}")).collect(),
+                aspect: 12_941,
+            },
+            fields: Vec::new(),
+            line_table: None,
+            samples: 1,
+        }
+    }
+
+    #[test]
+    fn big_templates_never_overflow_a_batch_frame() {
+        // Review L6: a 10 MB document whose templates alone are over the
+        // frame cap, then a 1 MB one.
+        let doc = DocJob {
+            bytes: vec![7; MAX_DOCUMENT_BYTES],
+            hint: JobHint::default(),
+            templates: vec![huge_template(); 120],
+        };
+        let jobs = vec![doc, job(1024 * 1024)];
+        let s = plans(&jobs);
+        assert!(s[0].templates < 120, "{:?}", s[0]);
+        assert!(s[0].templates > 0);
+        assert!(s[0].frame_bytes <= BATCH_FRAME_BUDGET);
+        assert_eq!(s[1].templates, 0);
+        // The second job goes in the next batch, and the first batch
+        // really fits a frame.
+        let q: VecDeque<usize> = (0..2).collect();
+        assert_eq!(take_batch(&q, &jobs, &s, 20), [0]);
+        assert_eq!(
+            take_batch(&q.range(1..).copied().collect(), &jobs, &s, 20),
+            [1]
+        );
+        let batch = ToWorker::Batch {
+            jobs: vec![Job {
+                job: 0,
+                bytes: Bytes(jobs[0].bytes.clone()),
+                hint: jobs[0].hint,
+                templates: jobs[0].templates[..s[0].templates].to_vec(),
+            }],
+            options: BatchOptions {
+                ocr: true,
+                today: CalendarDate::from_ymd(2026, 10, 26).unwrap(),
+            },
+        };
+        let mut buf = Vec::new();
+        write_frame(&mut buf, &batch, MAX_TO_WORKER_FRAME).unwrap();
+        // The estimate is exact to within the batch's own JSON.
+        let body = buf.len() - 4;
+        assert!(body <= MAX_TO_WORKER_FRAME);
+        assert!(
+            body.abs_diff(s[0].frame_bytes) < 4 * 1024,
+            "{body} vs {:?}",
+            s[0]
+        );
+    }
+
+    fn frame(body: &[u8]) -> Vec<u8> {
+        let mut v = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
+        v.extend_from_slice(body);
+        v
+    }
+
+    #[test]
+    fn each_worker_frame_type_has_its_own_cap_checked_before_parsing() {
+        // Review L1.
+        let ok = |m: &FromWorker| {
+            let mut buf = Vec::new();
+            write_frame(&mut buf, m, MAX_FROM_WORKER_FRAME).unwrap();
+            read_worker_frame(&mut buf.as_slice()).unwrap()
+        };
+        let ready = FromWorker::Ready { version: 1 };
+        assert_eq!(ok(&ready), ready);
+        let failed = FromWorker::JobFailed {
+            job: 3,
+            reason: JobFailure::Unreadable,
+        };
+        assert_eq!(ok(&failed), failed);
+        // A small type padded past 4 KiB is refused before the body is read.
+        let mut padded = br#"{"type":"ready","version":1"#.to_vec();
+        padded.extend(std::iter::repeat_n(b' ', 5000));
+        padded.push(b'}');
+        let only_head = &frame(&padded)[..4 + 40];
+        assert!(matches!(
+            read_worker_frame(&mut &only_head[..]),
+            Err(FrameError::TooLarge { max: 4096, .. })
+        ));
+        // A `JobDone` over 4 MiB likewise (only its head is sent here).
+        let len = u32::try_from(MAX_JOB_DONE_FRAME + 1).unwrap();
+        let mut big = len.to_be_bytes().to_vec();
+        big.extend_from_slice(br#"{"type":"jobDone","job":1,"#);
+        assert!(matches!(
+            read_worker_frame(&mut big.as_slice()),
+            Err(FrameError::TooLarge { .. })
+        ));
+        // Over the frame cap, an unknown type, or not our JSON at all.
+        let len = u32::try_from(MAX_FROM_WORKER_FRAME + 1).unwrap();
+        assert!(matches!(
+            read_worker_frame(&mut len.to_be_bytes().as_slice()),
+            Err(FrameError::TooLarge { .. })
+        ));
+        for body in [
+            &br#"{"type":"render","job":1}"#[..],
+            b"nope!",
+            br#"{ "type":"ready","version":1}"#,
+        ] {
+            assert!(matches!(
+                read_worker_frame(&mut frame(body).as_slice()),
+                Err(FrameError::Garbled)
+            ));
+        }
+        // A clean end, and an end inside a frame.
+        assert!(matches!(
+            read_worker_frame(&mut &b""[..]),
+            Err(FrameError::Closed)
+        ));
+        assert!(matches!(
+            read_worker_frame(&mut &frame(b"{\"type\":\"ready\"}")[..10]),
+            Err(FrameError::Io(_))
+        ));
+    }
+
+    #[test]
+    fn leftover_scratch_folders_are_recognised_by_name() {
+        let me = std::process::id();
+        let other = me.wrapping_add(1);
+        assert!(is_leftover_scratch(&format!("w-{other}-0"), me));
+        assert!(is_leftover_scratch(&format!("t-{other}-17"), me));
+        assert!(!is_leftover_scratch(&format!("w-{me}-0"), me), "ours");
+        assert!(!is_leftover_scratch(".pids", me));
+        assert!(!is_leftover_scratch(&format!("x-{other}-0"), me));
+        assert!(!is_leftover_scratch(&format!("w-{other}-0-1"), me));
+        assert!(!is_leftover_scratch(&format!("w-{other}"), me));
+    }
+
+    /// A long-lived stand-in named like tesseract (a copy of `ping` or
+    /// `sleep`), so the sweep's name check accepts it.
+    fn fake_tesseract(dir: &Path) -> (PathBuf, std::process::Child) {
+        let exe = dir.join(crate::paths::tesseract_exe_name());
+        let mut cmd = if cfg!(windows) {
+            let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+            std::fs::copy(Path::new(&root).join(r"System32\PING.EXE"), &exe).unwrap();
+            let mut c = Command::new(&exe);
+            c.args(["-n", "60", "127.0.0.1"]);
+            c
+        } else {
+            std::fs::copy("/bin/sleep", &exe).unwrap();
+            let mut c = Command::new(&exe);
+            c.arg("60");
+            c
+        };
+        cmd.stdout(Stdio::null());
+        (exe.clone(), cmd.spawn().unwrap())
+    }
+
+    #[test]
+    fn a_crashed_hosts_readers_and_folders_are_swept() {
+        let root =
+            std::env::temp_dir().join(format!("cl-host-docread-sweep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let scratch = root.join("docread");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let me = std::process::id();
+        let other = me.wrapping_add(1);
+        for d in [
+            format!("w-{other}-0"),
+            format!("t-{other}-3"),
+            format!("w-{me}-9"),
+            "keep".to_string(),
+        ] {
+            std::fs::create_dir_all(scratch.join(d)).unwrap();
+        }
+        let (exe, mut child) = fake_tesseract(&bin);
+        std::thread::sleep(Duration::from_millis(300));
+        // Recorded by "another host": rename our record to its pid.
+        let record = ChildRecord::new(&scratch, &exe, child.id()).unwrap();
+        let theirs = records_dir(&scratch).join(format!("{other}-{}", child.id()));
+        std::fs::rename(&record.0, &theirs).unwrap();
+        drop(record);
+        // One of ours (kept), one for a program that is not a reader, and
+        // one whose start time does not match (a recycled pid): never killed.
+        let ours = ChildRecord::new(&scratch, &exe, child.id()).unwrap();
+        let wrong_name = records_dir(&scratch).join(format!("{other}-1"));
+        std::fs::write(
+            &wrong_name,
+            format!("{}\n0\n{}\n", child.id(), bin.join("other").display()),
+        )
+        .unwrap();
+        let swept = sweep(&scratch);
+        let ended = (0..60).any(|_| {
+            std::thread::sleep(Duration::from_millis(50));
+            matches!(child.try_wait(), Ok(Some(_)))
+        });
+        if !ended {
+            let _ = child.kill();
+        }
+        assert!(ended, "the leftover reader should have been stopped");
+        assert_eq!(
+            swept,
+            DocreadSwept {
+                stopped: 1,
+                folders: 2
+            }
+        );
+        assert!(!theirs.exists() && !wrong_name.exists());
+        assert!(ours.0.exists(), "this process's records are kept");
+        assert!(scratch.join(format!("w-{me}-9")).exists());
+        assert!(scratch.join("keep").exists());
+        drop(ours);
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_record_for_a_recycled_pid_kills_nothing() {
+        let root =
+            std::env::temp_dir().join(format!("cl-host-docread-recycled-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let scratch = root.join("docread");
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let (exe, mut child) = fake_tesseract(&bin);
+        std::thread::sleep(Duration::from_millis(300));
+        let dir = records_dir(&scratch);
+        create_private_dir(&dir).unwrap();
+        let other = std::process::id().wrapping_add(1);
+        std::fs::write(
+            dir.join(format!("{other}-{}", child.id())),
+            format!("{}\n1\n{}\n", child.id(), exe.display()),
+        )
+        .unwrap();
+        assert_eq!(sweep(&scratch).stopped, 0);
+        assert!(matches!(child.try_wait(), Ok(None)), "still running");
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Review M5: on Windows a worker whose job can't be set up is stopped
+    /// before it is given anything.
+    #[cfg(windows)]
+    #[test]
+    fn a_worker_that_cannot_be_confined_is_not_run() {
+        let root =
+            std::env::temp_dir().join(format!("cl-host-docread-confine-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let root_os = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        let config = DocreadConfig {
+            worker_exe: Path::new(&root_os).join(r"System32\PING.EXE"),
+            ocr: None,
+            scratch: root.join("docread"),
+            limits: DocreadLimits::default(),
+            test_env: Vec::new(),
+        };
+        procs::FAIL_CONFINE.with(|f| f.set(true));
+        let started = Worker::start(&config);
+        procs::FAIL_CONFINE.with(|f| f.set(false));
+        assert_eq!(started.err(), Some("not confined"));
+        // Its scratch folder and record are gone with it.
+        let left = std::fs::read_dir(root.join("docread")).map_or(0, |d| {
+            d.flatten().filter(|e| e.file_name() != ".pids").count()
+        });
+        assert_eq!(left, 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn every_line_the_worker_writes_is_in_the_fixed_list() {
+        // Review L7: the host logs only exact lines; this keeps the list in
+        // step with the worker's sources.
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/clientledger-docread/src");
+        let mut found = 0;
+        for e in std::fs::read_dir(&src).unwrap().flatten() {
+            let text = std::fs::read_to_string(e.path()).unwrap();
+            // The shipped code, not its tests.
+            let text = text.split("#[cfg(test)]\nmod tests").next().unwrap_or("");
+            for part in text.split("\"docread: ").skip(1) {
+                let line = format!("docread: {}", part.split('"').next().unwrap());
+                found += 1;
+                if let Some((head, _)) = line.split_once("{}") {
+                    assert!(
+                        WORKER_LINES.iter().any(|l| l.starts_with(head)),
+                        "{line} (in {:?})",
+                        e.file_name()
+                    );
+                } else {
+                    assert!(
+                        WORKER_LINES.contains(&line.as_str()),
+                        "{line} (in {:?})",
+                        e.file_name()
+                    );
+                }
+            }
+        }
+        assert!(found >= 10, "{found}");
     }
 
     #[test]
@@ -1033,10 +1681,13 @@ mod tests {
     fn only_the_workers_fixed_lines_are_logged() {
         let mut other = 0;
         log_line(b"docread: limits: data limit refused", "w", &mut other);
+        log_line(b"docread: protocol: bad frame\r", "w", &mut other);
         log_line(b"docread: Riverbend 544.82", "w", &mut other);
+        // Lowercase words in the old pattern's shape are no longer enough.
+        log_line(b"docread: outcome: riverbend paving", "w", &mut other);
         log_line(b"thread 'main' panicked at C:\\x\\y.rs", "w", &mut other);
         log_line(b"   ", "w", &mut other);
-        assert_eq!(other, 2);
+        assert_eq!(other, 3);
     }
 
     #[test]

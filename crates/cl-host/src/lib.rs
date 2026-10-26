@@ -42,8 +42,8 @@ pub use database::{
 };
 pub use desktop::{AdminAccount, CompanySeed, DesktopError, DesktopInfo, Initialized};
 pub use docread_worker::{
-    CouldNotRead, DocJob, DocreadConfig, DocreadHost, DocreadLimits, DocreadStats, JobOutcome,
-    OcrTools,
+    CouldNotRead, DocJob, DocreadConfig, DocreadHost, DocreadLimits, DocreadStats, DocreadSwept,
+    JobOutcome, OcrTools, sweep_docread_leftovers,
 };
 pub use engine::OfflineSetting;
 pub use error::{HostError, Result};
