@@ -1007,7 +1007,9 @@ impl DocViewer {
             Status::Ready if state.strip_shown => {
                 ui.horizontal_top(|ui| {
                     let h = ui.available_height();
-                    ui.allocate_ui(Vec2::new(STRIP_W, h), |ui| {
+                    // A column, whatever the surrounding layout.
+                    let column = egui::Layout::top_down(egui::Align::Min);
+                    ui.allocate_ui_with_layout(Vec2::new(STRIP_W, h), column, |ui| {
                         ui.set_min_size(Vec2::new(STRIP_W, h));
                         focused |= Self::thumb_strip(ui, state, tokens);
                     });
@@ -1539,9 +1541,9 @@ mod tests {
             v.state_json()["rendered"] == true && v.shown.as_ref().is_some_and(|s| s.page == 1)
         });
         assert!(nodes.iter().any(|(_, n)| n == "Page 2 of 2"), "{nodes:?}");
-        // Fit width beside the thumbnail strip (A02) is about 70 %: the next
+        // Fit width beside the thumbnail strip (A02) is about 85 %: the next
         // step up.
-        assert_eq!(v.zoom(), Zoom::Percent(75));
+        assert_eq!(v.zoom(), Zoom::Percent(90));
         assert_eq!(v.state_json()["thumbnails"]["shown"], true);
         assert_eq!(v.state_json()["status"], "ready");
     }
@@ -1794,6 +1796,29 @@ mod tests {
         ] {
             assert!(h.has(Role::Button, name), "{name}: {:?}", h.nodes);
         }
+        // A column down the left of the page.
+        let at = |name: &str| {
+            h.nodes
+                .iter()
+                .find(|(r, n, _)| *r == Role::Button && n == name)
+                .map(|(.., p)| *p)
+                .expect("thumbnail")
+        };
+        let (one, two) = (at("Page 1"), at("Page 2"));
+        assert!(
+            (one.x - two.x).abs() < 1.0 && two.y > one.y,
+            "{one:?} {two:?}"
+        );
+        let page = h
+            .nodes
+            .iter()
+            .find(|(r, ..)| *r == Role::Image)
+            .map(|(.., p)| *p)
+            .expect("the page");
+        assert!(
+            page.x > one.x + STRIP_W / 2.0,
+            "the page is right of the strip"
+        );
         assert_eq!(h.click(&mut v, Role::Button, "Page 2"), ViewerEvent::None);
         assert_eq!(v.page(), 1);
         h.until(&mut v, |v| v.state_json()["rendered"] == true);
