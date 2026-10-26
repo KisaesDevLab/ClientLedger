@@ -320,6 +320,14 @@ pub struct DocViewerWindow {
     follows: Option<CommandId>,
     /// The form widget that had the keyboard before F6 moved it here.
     form_focus: Option<Id>,
+    /// The window's place was seen this session: it opened there and the
+    /// owner moved it since (S1). A place from `doc-viewer.json` alone may
+    /// be on a monitor that is gone.
+    place_seen: bool,
+    /// The owner asked for the window (Pop out, Ctrl+Shift+D) with a place
+    /// not seen this session: the gone-monitor check brings it beside the
+    /// main window even when the monitor sizes match.
+    recall: bool,
 }
 
 impl DocViewerWindow {
@@ -352,6 +360,8 @@ impl DocViewerWindow {
             frames_open: 0,
             follows: None,
             form_focus: None,
+            place_seen: false,
+            recall: false,
         }
     }
 
@@ -378,7 +388,9 @@ impl DocViewerWindow {
         self.changed_at = Some(now);
     }
 
-    /// Move the document into its own window.
+    /// Move the document into its own window (the owner asked: a window
+    /// whose place nobody saw this session comes beside the main one when
+    /// it is off the main window's monitor).
     pub fn pop_out(&mut self, now: f64) {
         if self.popped {
             return;
@@ -388,6 +400,7 @@ impl DocViewerWindow {
         self.opened_from = self.placement;
         self.builder = None;
         self.frames_open = 0;
+        self.recall = !self.place_seen;
         self.mark(now);
     }
 
@@ -441,6 +454,7 @@ impl DocViewerWindow {
             self.opened_from = self.placement;
             self.builder = None;
             self.frames_open = 0;
+            self.recall = false;
         }
     }
 
@@ -637,12 +651,23 @@ impl DocViewerWindow {
         if self.frames_open < 3 {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
+        let before = self.placement.outer_pos;
         self.note_moved(
             info.outer_rect.map(|r| r.min),
             info.inner_rect.map(|r| r.size()),
             info.monitor_size,
             now,
         );
+        if self.frames_open > 3 && self.placement.outer_pos != before {
+            self.owner_moved();
+        }
+    }
+
+    /// The window moved after it settled: the owner put it where they can
+    /// see it, so a later Pop out keeps that place.
+    pub fn owner_moved(&mut self) {
+        self.place_seen = true;
+        self.recall = false;
     }
 
     /// Where the window must move when the monitor it was saved on is gone
@@ -655,7 +680,7 @@ impl DocViewerWindow {
         monitor: egui::Vec2,
         root: egui::Rect,
     ) -> Option<egui::Pos2> {
-        prefs::gone_monitor_fix(&self.opened_from, outer, monitor, root)
+        prefs::gone_monitor_fix(&self.opened_from, outer, monitor, root, self.recall)
     }
 
     /// The OS reported the window's place (`now` in egui seconds): remember

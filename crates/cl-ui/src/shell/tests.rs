@@ -1337,7 +1337,32 @@ mod doc_viewer {
                         .doc_viewer()
                         .gone_monitor_fix(outer, vec2(1920.0, 1080.0), root),
                     None,
-                    "the same monitor is still there"
+                    "a monitor of the saved size: it may be there, left alone"
+                );
+                // S1: an identical second monitor that is gone looks the
+                // same. Ctrl+Shift+D twice (dock, pop out) brings the
+                // window beside the main one.
+                let mut again = again;
+                let ctx = context();
+                frame(&ctx, &mut again, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+                assert!(!again.doc_viewer().popped());
+                frame(&ctx, &mut again, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+                assert!(again.doc_viewer().popped());
+                let monitor = vec2(1920.0, 1080.0);
+                assert_eq!(
+                    again.doc_viewer().gone_monitor_fix(outer, monitor, root),
+                    Some(crate::prefs::beside_main(root, outer.size(), monitor)),
+                    "asked for: beside the main window"
+                );
+                // Once the owner has moved it this session, popping out
+                // again keeps their place.
+                again.doc_viewer_mut().owner_moved();
+                frame(&ctx, &mut again, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+                frame(&ctx, &mut again, WIDE, tap(egui::Key::D, CTRL_SHIFT));
+                assert!(again.doc_viewer().popped());
+                assert_eq!(
+                    again.doc_viewer().gone_monitor_fix(outer, monitor, root),
+                    None
                 );
             }
             let _ = std::fs::remove_dir_all(dir);
