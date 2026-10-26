@@ -59,6 +59,11 @@ impl DocKey {
 
     /// A key for the bytes `source` holds: the same shared bytes give the
     /// same key, and a reloaded document (new bytes) a new one.
+    ///
+    /// It is the allocation's address and length. An address can be reused
+    /// only after its bytes are freed, and the window keeps a clone of the
+    /// shown document's `Arc` for as long as it shows it, so a document
+    /// it shows is never confused with a new one at the same address.
     #[must_use]
     pub fn of(source: &DocSource) -> DocKey {
         let addr = Arc::as_ptr(&source.bytes).cast::<u8>().addr();
@@ -786,7 +791,8 @@ impl DocViewerWindow {
 
     /// Feed a shortcut as if pressed in the window's own OS window (tests;
     /// with embedded viewports the callback never sees its own keys).
-    pub fn press_in_window(&mut self, ctx: &Context, s: Shortcut) {
+    #[cfg(test)]
+    pub(crate) fn press_in_window(&mut self, ctx: &Context, s: Shortcut) {
         if let Some(mut p) = self.lock() {
             match p.route(s) {
                 Route::Viewer(id) => {
@@ -961,6 +967,51 @@ mod tests {
         );
         assert_eq!(at(Mods::NONE, Key::Escape), Route::Ignore);
         assert_eq!(at(Mods::NONE, Key::F(12)), Route::Ignore);
+    }
+
+    /// Plan §5: the key path the window's own OS window runs
+    /// (`handle_keys`, not the test-only `press_in_window`): a main-window
+    /// command is queued and its key taken out of the input, F6 and
+    /// Ctrl+Shift+D are noted, Esc is left alone.
+    #[test]
+    fn the_window_own_key_path_routes_and_consumes() {
+        let w = window();
+        let ctx = egui::Context::default();
+        let press = |k: egui::Key, modifiers: egui::Modifiers| egui::Event::Key {
+            key: k,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let ctrl = egui::Modifiers::COMMAND;
+        let raw = egui::RawInput {
+            events: vec![
+                press(egui::Key::B, ctrl),
+                press(egui::Key::F6, egui::Modifiers::NONE),
+                press(egui::Key::D, ctrl | egui::Modifiers::SHIFT),
+                press(egui::Key::Escape, egui::Modifiers::NONE),
+            ],
+            ..egui::RawInput::default()
+        };
+        let mut left = Vec::new();
+        let mut out = ctx.run_ui(raw, |ui| {
+            let mut s = w.shared.lock().expect("lock");
+            s.handle_keys(ui.ctx());
+            left = ui.input(|i| i.events.clone());
+        });
+        out.textures_delta.clear();
+        let s = w.shared.lock().expect("lock");
+        assert_eq!(s.pending, vec![CommandId::new("vendors.enter_bill")]);
+        assert!(s.back_to_form && s.dock_req);
+        let keys: Vec<_> = left
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::Key { key, .. } => Some(*key),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(keys, vec![egui::Key::Escape], "only Esc is left");
     }
 
     #[test]
