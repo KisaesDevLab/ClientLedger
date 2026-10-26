@@ -48,6 +48,16 @@ fn junk() -> DocJob {
 
 const UNSUPPORTED: JobOutcome = JobOutcome::Failed(JobFailure::UnsupportedType);
 
+/// Held by the timing-sensitive hard-cap test and by the tesseract region
+/// tests (A04), so the OCR load doesn't run beside the hard cap's clock.
+static HEAVY: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn heavy() -> std::sync::MutexGuard<'static, ()> {
+    HEAVY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Scratch folders and child records left in the docread folder (the
 /// empty `.pids` folder itself stays).
 fn leftovers(s: &Scratch) -> usize {
@@ -188,6 +198,7 @@ fn the_memory_watchdog_stops_a_worker_over_its_limit() {
 /// read and the next one is.
 #[test]
 fn a_huge_allocation_is_stopped_by_the_hard_cap() {
+    let _heavy = heavy();
     let s = Scratch::new("docread-hard-cap");
     let mut c = config(&s);
     // A slow watchdog: the cap must act on its own.
@@ -626,6 +637,7 @@ fn ocr_region(
         eprintln!("tesseract or PDFium missing: skipped");
         return None;
     };
+    let _heavy = heavy();
     let s = Scratch::new(name);
     let mut c = config(&s);
     c.ocr = Some(tools);
