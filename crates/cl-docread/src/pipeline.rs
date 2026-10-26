@@ -71,14 +71,34 @@ pub fn read(input: &ReadInput<'_>) -> Reading {
         checks.push(page_check(CheckCode::PagesSkipped, None));
     }
 
-    let layout = layout::analyze(input.pages);
-    let fingerprint = templates::fingerprint(input.pages);
+    // A picture of a turned page: the rules read its words levelled, and
+    // every spot is put back where the page shows it at the end.
+    let slopes: Vec<i32> = input.pages.iter().map(layout::page_slope).collect();
+    let turned = slopes.iter().any(|&s| s != 0);
+    let straight;
+    let pages: &[PageWords] = if !turned {
+        input.pages
+    } else {
+        straight = layout::levelled(input.pages, &slopes);
+        &straight
+    };
+    let layout = layout::analyze(pages);
+    let fingerprint = templates::fingerprint(pages);
     let matched = fingerprint
         .as_ref()
         .and_then(|f| templates::best_match(f, input.templates));
+    // Templates never read receipts (plan D3, WP-A2): a register receipt's
+    // length and lines change with every sale, so a saved region would
+    // win over the rules with a stale value. The rules decide the kind.
+    let rules = fields::extract(&layout, pages, None, input.today);
+    let receipt = kind::classify(&rules.header, &rules.signals, input.hint).0 != DocKind::Bill;
+    let matched = matched.filter(|_| !receipt);
     let template = matched.map(|i| &input.templates[i]);
 
-    let extracted = fields::extract(&layout, input.pages, template, input.today);
+    let extracted = match template {
+        Some(t) => fields::extract(&layout, pages, Some(t), input.today),
+        None => rules,
+    };
     checks.extend(extracted.checks);
     let (kind, kind_confidence) = kind::classify(&extracted.header, &extracted.signals, input.hint);
     if kind == DocKind::Unknown {
@@ -93,11 +113,8 @@ pub fn read(input: &ReadInput<'_>) -> Reading {
             spot: None,
         });
     }
-    let (items, line_checks) = lines::extract(
-        &layout,
-        input.pages,
-        template.and_then(|t| t.line_table.as_ref()),
-    );
+    let (items, line_checks) =
+        lines::extract(&layout, pages, template.and_then(|t| t.line_table.as_ref()));
     checks.extend(validate::check(&extracted.header, &items));
     checks.extend(line_checks);
     checks.truncate(MAX_CHECKS);
@@ -111,6 +128,16 @@ pub fn read(input: &ReadInput<'_>) -> Reading {
     if extracted.template_used {
         r.reader = Reader::Template;
         r.template = matched.and_then(|i| u16::try_from(i).ok());
+    }
+    if turned {
+        let slope_of = |page: u16| {
+            input
+                .pages
+                .iter()
+                .position(|p| p.page == page)
+                .map_or(0, |i| slopes[i])
+        };
+        layout::map_spots(&mut r, |page, b| layout::unlevel(b, slope_of(page)));
     }
     r
 }

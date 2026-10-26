@@ -286,6 +286,182 @@ fn numeric_columns(layout: &mut Layout, pi: usize, segs: &[usize], page: &PageWo
         .extend(cols.into_iter().filter(|c| c.segments.len() >= 2));
 }
 
+// ---------------------------------------------------------------------------
+// Straightening (WP-A2): words of a turned page, levelled for the rules
+// ---------------------------------------------------------------------------
+
+/// Slopes searched, y units per 10,000 x units, either way (about 9° on a
+/// letter page).
+const MAX_SLOPE: i32 = 1_200;
+const SLOPE_STEP: i32 = 20;
+/// Words used to measure a page's slope.
+const SLOPE_WORDS: usize = 3_000;
+
+/// How far a box at `cx2` (twice its centre x) moves up when levelled.
+fn shear_dy(cx2: u32, slope: i32) -> i32 {
+    let from_middle = i64::from(cx2) - i64::from(Bbox::SCALE);
+    i32::try_from(from_middle * i64::from(slope) / 20_000).unwrap_or(0)
+}
+
+/// `b` moved vertically by `-dy` (levelled) or `+dy` (back), clamped to
+/// the page.
+fn shift(b: Bbox, dy: i32) -> Bbox {
+    let move_y =
+        |v: u16| u16::try_from((i32::from(v) - dy).clamp(0, i32::from(Bbox::SCALE))).unwrap_or(0);
+    Bbox::new(b.left(), move_y(b.top()), b.right(), move_y(b.bottom())).unwrap_or(b)
+}
+
+/// A box on a page of `slope` levelled (the rules' view).
+#[must_use]
+pub fn level(b: Bbox, slope: i32) -> Bbox {
+    if slope == 0 {
+        return b;
+    }
+    shift(b, shear_dy(center2_x(b), slope))
+}
+
+/// A levelled box back where the page shows it.
+#[must_use]
+pub fn unlevel(b: Bbox, slope: i32) -> Bbox {
+    if slope == 0 {
+        return b;
+    }
+    shift(b, -shear_dy(center2_x(b), slope))
+}
+
+/// The slope of a page's text lines (y units per 10,000 x units; positive
+/// when lines fall to the right): the vertical shear that brings the most
+/// word centres onto shared lines. 0 for a level page, or one with too
+/// few words to tell. Integer only: a picture turned a few degrees reads
+/// with its lines levelled, while every box still maps to the page as
+/// shown.
+#[must_use]
+pub fn page_slope(page: &PageWords) -> i32 {
+    let words: Vec<(u32, u32)> = page
+        .words
+        .iter()
+        .filter(|w| w.text.chars().count() >= 2 && w.bbox.height() > 0)
+        .take(SLOPE_WORDS)
+        .map(|w| (center2_x(w.bbox), center2_y(w.bbox)))
+        .collect();
+    if words.len() < 8 {
+        return 0;
+    }
+    let mut heights: Vec<u16> = page
+        .words
+        .iter()
+        .take(SLOPE_WORDS)
+        .map(|w| w.bbox.height())
+        .filter(|&h| h > 0)
+        .collect();
+    heights.sort_unstable();
+    // Centres within a quarter of a line height (doubled units) share a
+    // line.
+    let reach = i32::from(heights[heights.len() / 2].max(8)) / 2;
+    let mut ys: Vec<i32> = Vec::with_capacity(words.len());
+    let mut score = |slope: i32| -> u64 {
+        ys.clear();
+        ys.extend(
+            words
+                .iter()
+                .map(|&(cx2, cy2)| i32::try_from(cy2).unwrap_or(0) - 2 * shear_dy(cx2, slope)),
+        );
+        ys.sort_unstable();
+        // For each centre, how many others sit within `reach` of it.
+        let (mut lo, mut total) = (0usize, 0u64);
+        let mut hi = 0usize;
+        for i in 0..ys.len() {
+            while ys[i] - ys[lo] > reach {
+                lo += 1;
+            }
+            while hi + 1 < ys.len() && ys[hi + 1] - ys[i] <= reach {
+                hi += 1;
+            }
+            total += u64::try_from(hi.max(i) - lo).unwrap_or(0);
+        }
+        total
+    };
+    let level_score = score(0);
+    let (mut best, mut best_score) = (0_i32, level_score);
+    let mut s = -MAX_SLOPE;
+    while s <= MAX_SLOPE {
+        let v = score(s);
+        if v > best_score || (v == best_score && s.abs() < best.abs()) {
+            best = s;
+            best_score = v;
+        }
+        s += SLOPE_STEP;
+    }
+    // A clear gain only: a level page stays exactly as read.
+    if best_score * 100 < level_score * 115 + 100 {
+        return 0;
+    }
+    best
+}
+
+/// The pages with every word levelled by its page's slope.
+#[must_use]
+pub fn levelled(pages: &[PageWords], slopes: &[i32]) -> Vec<PageWords> {
+    pages
+        .iter()
+        .zip(slopes)
+        .map(|(p, &s)| PageWords {
+            page: p.page,
+            aspect: p.aspect,
+            source: p.source,
+            words: p
+                .words
+                .iter()
+                .map(|w| crate::model::Word {
+                    text: w.text.clone(),
+                    bbox: level(w.bbox, s),
+                    confidence: w.confidence,
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// Every spot of a reading's fields, lines and checks passed through `f`
+/// (page number, box) — words are left alone.
+pub fn map_spots(r: &mut crate::model::Reading, f: impl Fn(u16, Bbox) -> Bbox) {
+    use crate::model::{Found, Spot};
+    let fix = |s: &mut Spot| s.bbox = f(s.page, s.bbox);
+    fn opt<T>(x: &mut Option<Found<T>>, fix: &impl Fn(&mut Spot)) {
+        if let Some(found) = x {
+            fix(&mut found.spot);
+        }
+    }
+    let h = &mut r.header;
+    opt(&mut h.vendor, &fix);
+    opt(&mut h.vendor_address, &fix);
+    opt(&mut h.vendor_phone, &fix);
+    opt(&mut h.account_number, &fix);
+    opt(&mut h.date, &fix);
+    opt(&mut h.reference, &fix);
+    opt(&mut h.terms, &fix);
+    opt(&mut h.due_date, &fix);
+    opt(&mut h.subtotal, &fix);
+    opt(&mut h.tax, &fix);
+    for fee in &mut h.fees {
+        fix(&mut fee.spot);
+    }
+    opt(&mut h.total, &fix);
+    opt(&mut h.amount_paid, &fix);
+    opt(&mut h.balance_due, &fix);
+    opt(&mut h.payment, &fix);
+    for l in &mut r.lines {
+        opt(&mut l.description, &fix);
+        opt(&mut l.quantity, &fix);
+        opt(&mut l.unit_price, &fix);
+        fix(&mut l.amount.spot);
+    }
+    for c in &mut r.checks {
+        if let Some(s) = &mut c.spot {
+            fix(s);
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,6 +513,80 @@ mod tests {
         assert_eq!(l.numeric_columns[0].segments.len(), 3);
     }
 
+    /// The test invoice with every word moved down by its distance from
+    /// the page's middle times `slope` per 10,000 (a turned picture).
+    fn turned(slope: i32) -> Vec<PageWords> {
+        let d = crate::pipeline::testdoc::invoice(
+            "INV-99476",
+            "12/11/2025",
+            &[
+                ("LED fixture install", "5.25", "70.34", "369.29"),
+                ("GFCI receptacles", "4", "72.17", "288.68"),
+            ],
+            "657.97",
+            "42.77",
+            "700.74",
+        );
+        let mut pages = d.pages();
+        for w in &mut pages[0].words {
+            w.bbox = unlevel(w.bbox, slope);
+        }
+        pages
+    }
+
+    #[test]
+    fn a_turned_page_is_levelled_for_the_rules_and_spots_map_back() {
+        let level_pages = turned(0);
+        assert_eq!(page_slope(&level_pages[0]), 0);
+        let input = |pages: &[PageWords]| {
+            crate::pipeline::read(&crate::pipeline::ReadInput {
+                pages,
+                page_count: 1,
+                unread_pages: &[],
+                templates: &[],
+                hint: crate::protocol::JobHint::default(),
+                today: cl_core::CalendarDate::from_ymd(2026, 10, 26).unwrap(),
+            })
+        };
+        let flat = input(&level_pages);
+        for slope in [-700, 450, 900] {
+            let pages = turned(slope);
+            let got = page_slope(&pages[0]);
+            assert!((got - slope).abs() <= 40, "{slope}: {got}");
+            let r = input(&pages);
+            let (h, f) = (&r.header, &flat.header);
+            assert_eq!(
+                h.total.as_ref().map(|x| x.value),
+                f.total.as_ref().map(|x| x.value)
+            );
+            assert_eq!(
+                h.reference.as_ref().map(|x| x.value.clone()),
+                f.reference.as_ref().map(|x| x.value.clone())
+            );
+            assert_eq!(
+                h.date.as_ref().map(|x| x.value),
+                f.date.as_ref().map(|x| x.value)
+            );
+            assert_eq!(r.lines.len(), flat.lines.len());
+            // The total's spot is the turned word's box.
+            let word = pages[0].words.iter().find(|w| w.text == "700.74").unwrap();
+            let spot = h.total.as_ref().unwrap().spot.bbox;
+            assert!(
+                spot.top().abs_diff(word.bbox.top()) <= 2,
+                "{slope}: {spot:?} {:?}",
+                word.bbox
+            );
+        }
+    }
+
+    #[test]
+    fn level_and_unlevel_are_inverse() {
+        let b = Bbox::new(8_000, 4_000, 9_000, 4_120).unwrap();
+        for s in [-1_200, -35, 0, 600] {
+            assert_eq!(unlevel(level(b, s), s), b);
+        }
+        assert_eq!(level(b, 1_000).top(), 4_000 - 350);
+    }
     proptest! {
         /// Every word lands in exactly one line and one segment.
         #[test]
