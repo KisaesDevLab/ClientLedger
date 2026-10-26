@@ -1162,36 +1162,36 @@ impl Screen for PreferencesScreen {
             crate::layout::FixedFrame::begin(ui, COMMAND, crate::layout::FrameOpts::default());
         frame.top(|ui| {
             ui.add_space(6.0);
-            // Narrow (960 px at 200%): Search goes under the title instead
-            // of being cut off beside it (UI check M1).
+            // Narrow (960 px at 200%): the search box takes what is left of
+            // the title row, without its visible label (its accessible name
+            // stays "Find a setting"), so it isn't cut off and the body keeps
+            // its room (UI check M1).
             let narrow = ui.available_width() < 560.0;
             ui.horizontal(|ui| {
                 ui.heading(t("prefs.title"));
-                if narrow {
-                    return;
-                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let w = if narrow {
+                        (ui.available_width() - 4.0).clamp(80.0, 220.0)
+                    } else {
+                        220.0
+                    };
                     // Right to left: the input sits at the edge, its label
                     // to the left of it (the label is the accessible name).
                     let input = ui.add_sized(
-                        [220.0, 24.0],
-                        egui::TextEdit::singleline(&mut self.search).hint_text(t("prefs.search")),
-                    );
-                    let l = ui.add(egui::Label::new(t("prefs.search")).selectable(false));
-                    input.labelled_by(l.id);
-                });
-            });
-            if narrow {
-                ui.horizontal(|ui| {
-                    let l = ui.add(egui::Label::new(t("prefs.search")).selectable(false));
-                    let w = (ui.available_width() - 4.0).clamp(80.0, 220.0);
-                    ui.add_sized(
                         [w, 24.0],
                         egui::TextEdit::singleline(&mut self.search).hint_text(t("prefs.search")),
-                    )
-                    .labelled_by(l.id);
+                    );
+                    if narrow {
+                        let name = t("prefs.search");
+                        input.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::Role::TextInput, true, name.clone())
+                        });
+                    } else {
+                        let l = ui.add(egui::Label::new(t("prefs.search")).selectable(false));
+                        input.labelled_by(l.id);
+                    }
                 });
-            }
+            });
         });
         frame.body(crate::layout::Body::Scroll, |ui| {
             // The category list gives way on a narrow window so the panel
@@ -1226,13 +1226,16 @@ impl Screen for PreferencesScreen {
             if let Some(e) = &self.error {
                 form::inline_error(ui, &tokens, e);
             }
-            if let Some(s) = &self.status {
-                ui.label(RichText::new(s).color(tokens.text_secondary));
-            }
             // Right-aligned, but laid out left to right so Tab goes Cancel
             // then Save, as they read on screen (UI check): the pair's
-            // width from the last frame places them.
+            // width from the last frame places them. "Saved." sits on the
+            // same line, at the left, so the bar stays one row.
             ui.horizontal(|ui| {
+                if let Some(s) = &self.status {
+                    ui.add(
+                        egui::Label::new(RichText::new(s).color(tokens.text_secondary)).truncate(),
+                    );
+                }
                 ui.add_space((ui.available_width() - self.footer_w).max(0.0));
                 let cancel =
                     ui.add(egui::Button::new(t("prefs.cancel")).min_size(Vec2::new(0.0, 44.0)));
