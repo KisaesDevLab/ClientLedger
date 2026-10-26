@@ -13,7 +13,11 @@
 //! The host's watchdog is the operative limit everywhere; these are the
 //! backstop for a spike faster than its poll.
 //!
-//! **Provisional values** until step 12a measures the worker (Q-A03c).
+//! Values from step 12a (Q-A03c): the worker's worst legitimate peak was
+//! 759 MiB of commit (the largest picture it accepts) under a 1 GiB watchdog;
+//! the data limit is the watchdog × 1.25. Linux `RLIMIT_DATA` also counts
+//! allocator arenas, so the `docread-accuracy` CI job's Linux run is the
+//! check that legitimate documents stay under it.
 
 /// The worker's own data limit: the host's 1 GiB watchdog × 1.25 (Unix;
 /// on Windows the host's job carries the same cap).

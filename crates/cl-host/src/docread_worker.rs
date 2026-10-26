@@ -83,8 +83,13 @@ impl OcrTools {
     }
 }
 
-/// Time and memory limits (plan D2, Q-A03c). **Provisional** until step
-/// 12a measures the worker and tesseract; WP-C sets the final values here.
+/// Time and memory limits (plan D2, Q-A03c), set from step 12a's
+/// measurements (`cargo xtask docread-accuracy`, Windows commit, 2026-10-26):
+/// the worker peaked at 78 MiB on 720 synthetic documents and at 759 MiB on
+/// the largest picture it accepts (256 MiB decoded); tesseract at 56 MiB,
+/// 110 MiB on a ten-page scanned PDF. An OCR page took 0.9 s at p95 (cold
+/// start included), a ten-page scanned PDF 9 s. Linux and macOS resident
+/// figures come from the `docread-accuracy` CI job.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocreadLimits {
     /// Start → `Ready`.
@@ -125,7 +130,7 @@ impl Default for DocreadLimits {
             job_base: Duration::from_secs(30),
             ocr_page: Duration::from_secs(30),
             worker_memory: 1024 * MIB,
-            tesseract_memory: 512 * MIB,
+            tesseract_memory: 384 * MIB,
             hard_cap_percent: 125,
             poll: Duration::from_millis(200),
             recycle_jobs: 20,
