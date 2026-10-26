@@ -29,8 +29,10 @@
 //!
 //! Gates (Q-285, applied to seen and held-out separately, with
 //! `CL_DOCREAD_GATE=1`): vendor, date, reference and total each ≥ 95 % on
-//! `text`, ≥ 85 % on `scan`, `photo` and `text-no-unicode`, ≥ 98 % on the
-//! template paths. Held-out results are reported as aggregates only.
+//! `text`, ≥ 85 % on `scan`, `photo`, `text-no-unicode` and the scan and
+//! photo template paths, ≥ 98 % on `template-text` (owner, 2026-10-26: the
+//! 98 % template target is for text PDFs). Held-out results are reported
+//! as aggregates only.
 //!
 //! `private-fixtures/docread/` (git-ignored, Q-72) is scored too when
 //! present: `<name>.<pdf|jpg|png|tif>` with `<name>.json` truth in the same
@@ -124,12 +126,18 @@ impl Route {
         }
     }
 
-    /// Q-285 minimum in percent.
+    /// Q-285 minimum in percent. The 98 % template target applies to text
+    /// PDFs; scans and photos read with a template are held to the scan
+    /// and photo target (owner, 2026-10-26).
     fn gate(self) -> u32 {
         match self {
             Route::Text => 95,
-            Route::TextNoUnicode | Route::Scan | Route::Photo => 85,
-            Route::TemplateText | Route::TemplateScan | Route::TemplatePhoto => 98,
+            Route::TextNoUnicode
+            | Route::Scan
+            | Route::Photo
+            | Route::TemplateScan
+            | Route::TemplatePhoto => 85,
+            Route::TemplateText => 98,
         }
     }
 
@@ -1062,6 +1070,8 @@ fn reading_accuracy_against_q285() {
         "kills": stats.kills,
         "ocr_pages": stats.ocr_pages,
         "ocr_failures": stats.ocr_failures,
+        "ocr_best_pages": stats.ocr_best_pages,
+        "ocr_rereads": stats.ocr_rereads,
         "timing": timing,
         "stress": stress,
         "gate_failures": failures,
