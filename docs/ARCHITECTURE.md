@@ -15,7 +15,8 @@
 │        ├────────► clientledger-engine  (MyBooks engine, single executable, Node SEA)       │
 │        │              │  pg-boss job queue (replaces Redis/BullMQ)                         │
 │        │              ▼                                                                    │
-│        └────────► postgres 16 (bundled binaries, data dir in app data, port <random>)      │
+│        ├────────► postgres 16 (bundled binaries, data dir in app data, port <random>)      │
+│        └─ per read ─► clientledger-docread (sandboxed worker) ─► tesseract (one per page)  │
 │                                                                                            │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 
@@ -324,6 +325,79 @@ One widget shows bills, receipts and other attachments everywhere: the Enter Bil
 - **Risk kept open (R3).** PDFium parses untrusted vendor PDFs in-process. Mitigations now: a current pinned build without JavaScript or XFA, the size clamps, and a worker thread. The follow-up is a sandboxed render helper started by `cl-host` (P37), because `cl-ui` may not spawn processes.
 - **Checks.** Unit tests for the clamp and zoom math, the search order, the superseding queue, PNG/JPEG decode, the bomb refusal and the no-PDFium path; with PDFium, the two-page fixture's page count, a non-blank render and the encrypted fixture's refusal (`fixtures/docs/`, all synthetic). `cargo xtask ui-check document-view` drives Write Check → Preview → the tab, page and zoom keys and the 200 % minimum window.
 
+## Document reading (cl-docread, A03)
+
+Bills and receipts are read on the owner's computer, with AI off and no network (ADD-01, plan `A03`). Decisions are Q-283 to Q-285 and Q-A03a-v. The desktop never parses a vendor file **to read it**; the docked viewer still draws it in-process (R3 above, Q-A03u).
+
+**Pieces.**
+
+| Piece | What it does |
+| --- | --- |
+| `cl-docread` (lib, depends on `cl-core` only) | The rules: words, layout, fields (`fields/labels.rs`), dates, amounts (`amount::parse` is the only document-amount parser, an exact port of the engine's `normalizeBillMoney`), line tables, kind, checks (`validate`), templates, vendor and card matching, duplicate keys, the AI amount gate (`ai_gate`) and the protocol. No I/O, no clock, no process or socket. Amounts are `cl_core::Money`; bounding boxes are `u16` ten-thousandths of the page and confidence `u16` basis points. Only `pdf_text.rs`, `preprocess.rs` and `ocr_geom.rs` may use floats, for page geometry, and may not name a money type (`cargo xtask nofloat`). |
+| `apps/clientledger-docread` (the worker) | Reads one batch from stdin and answers on stdout. PDF text through PDFium (no V8/XFA build); PNG, JPEG and TIFF in Rust (`image`, `tiff`, the A02 limits: 12,000 px a side, 256 MiB decoded, no JPEG-in-TIFF). Pages that need OCR are cleaned, levelled and turned upright, then sent to the host as 8-bit PGM. Runs the `cl-docread` pipeline and returns a `Reading`. Spawns nothing; no network code. Sits next to the desktop executable. |
+| `tesseract` | The Tesseract 5.5.3 command-line program, built from pinned source by `cargo xtask ocr-build` with Leptonica 1.87.0 static and every optional dependency off (no curl, codecs, zlib, OpenMP, libarchive, training tools). A linkage allowlist fails the build on any non-OS library (Windows: KERNEL32/ADVAPI32 only, delay loads and imports included; Linux: libc, libm, ld, with libstdc++ and libgcc static; macOS: libSystem, libc++). Models from `cargo xtask ocr-models`: `tessdata_fast` eng + osd and `tessdata_best` eng (installed as `engbest`), SHA-256 pinned in `ocr.lock`, bundled, never fetched at run time. |
+| `cl-host::docread_worker` | `DocreadHost`: the only code that starts the worker or tesseract. Batching, `NeedOcr` brokering, deadlines, memory watchdog, output caps, recycling, re-validation of every `Reading`. |
+| `cl-ui::reading` | `ReadingService` on its own thread (the egui thread never waits): sends the shown document's bytes, the company's saved layouts and card accounts (with `document-drafts-v1`), runs the AI gate and the vendor and card match, and returns a `ReadOutcome`. `reading/assist.rs` is Ask AI to help. |
+| `clientledger-cli read <file> [--json]` | The same reading from the command line; needs no engine. |
+
+Search order for the programs (never `PATH`): `CL_DOCREAD_EXE` / `CL_OCR_PATH` (absolute only), then next to the running program (`ocr/` beside it), then `target/ocr/<triple>/` and the build's worker in debug builds. Without tesseract a text PDF still reads; a scan says "the scan reader isn't installed on this computer".
+
+**Why a per-page CLI, not a binding.** A binding needs bindgen and libclang on four CI images, links C++ into the desktop and needs `unsafe`. A separate program keeps a Leptonica crash inside one page's process; the cost is a process start per page (about 0.2-0.5 s on CI).
+
+**Protocol** (`cl_docread::protocol`, `PROTOCOL_VERSION = 3`): frames are a `u32` big-endian length and JSON, every message `deny_unknown_fields`, the length checked against the cap before any allocation.
+
+- Host → worker: `Batch` (at most 20 jobs, 10 MB a document, 500 templates); `OcrResult` / `OcrFailed` for a page; `Render`, reserved for the P37 viewer and answered `Unsupported`.
+- Worker → host: `Ready` (carries the version), `PageStarted`, `NeedOcr { mode, pgm }`, `JobDone { reading }`, `JobFailed`.
+- v2 added the OCR mode (clean-up, orientation, OCR fallback for PDFs without a usable text layer); v3 added the second read: a page whose number words average under 93 % confidence is read again with `tessdata_best`, and a date that did not read is re-read alone. A second read never changes an amount the first read found; a difference becomes a check ("could also be…").
+- Caps: PGM 32 MiB and at most 3400 × 4400 (`P5`, maxval 255, exact length; checked by the host before tesseract sees it), TSV 4 MiB, `JobDone` 4 MiB (checked before parsing). File names, contacts and accounts never cross; templates do. Only the first 10 pages are read.
+- Test hooks (`%CL-TEST-HOOK:` documents) exist only in a worker built with its `test-support` feature, which refuses to compile without debug assertions (Q-A03t).
+
+**Limits** (`DocreadLimits::default()`, Q-A03c):
+
+| | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| Tree kill | job object, kill-on-close | process group; worker `PR_SET_PDEATHSIG` | process group |
+| Worker memory | watchdog on commit (`PrivateUsage`) 1 GiB, polled every 200 ms; hard cap 1.25 × in the job | watchdog on resident memory 1 GiB; worker `RLIMIT_DATA` 1280 MiB | watchdog 1 GiB; `RLIMIT_DATA` tried (the kernel may not apply it) |
+| Tesseract memory | watchdog 384 MiB; hard cap 480 MiB in its own job | watchdog 384 MiB; CPU, data and core limits set with `prlimit` | watchdog only |
+| CPU | (job ceiling below) | worker `RLIMIT_CPU` per job and per worker | worker `RLIMIT_CPU` |
+| Child processes | job `ActiveProcessLimit = 1` (nothing can be started) | worker spawns nothing (code property) | same |
+| Crash reports | die on unhandled exception (no WER report or dump) | `RLIMIT_CORE` 0, not dumpable | `RLIMIT_CORE` 0 |
+
+- Time: 10 s from start to `Ready`; 30 s from dispatch to the first `PageStarted`; 30 s per page; a job ceiling of 30 s + 30 s per page started, at most 330 s; 30 s per tesseract run.
+- A breach (time, memory, oversized or garbled frame, out-of-order message) kills the worker and retries the job in a new one; a job that kills two workers is "Couldn't read" (`JobOutcome::CouldNotRead`). The worker is replaced after 20 jobs, or when it holds more than 512 MiB between jobs.
+- The worker sets its own limits first in `main` (`limits.rs`), before PDFium, threads or stdin. A limit the OS refuses is logged as one of the worker's fixed stderr lines; the host logs only lines that match that list exactly.
+- Scratch: each worker and each tesseract run gets an empty owner-only folder as working folder and `TEMP`/`TMP`/`TMPDIR` (Leptonica writes a temp file from stdin on MSVC), a scrubbed environment and system-only `PATH`. Every running child is recorded under `<scratch>/.pids`; the next start (`sweep_docread_leftovers`, after the single-instance lock) stops any that outlived a crashed host and removes the folders.
+
+**The one `unsafe` module.** `crates/cl-host/src/procs/win_job_memory.rs` is the only `unsafe` code in ClientLedger's own crates (Q-A03s). `win32job` sets kill-on-close but not `JOB_OBJECT_LIMIT_PROCESS_MEMORY`, and its working-set limit is the wrong tool (commit keeps growing into the page file). So this module makes one `SetInformationJobObject` call through `windows-sys` on the job's handle. That call sets every limit at once: kill-on-close, the per-process commit cap (watchdog × 1.25, so a spike faster than the 200 ms poll fails an allocation instead of thrashing the machine), one active process, and die-on-unhandled-exception. The boundary: the workspace forbids `unsafe`; cl-host alone uses `unsafe_code = "deny"` with `#![allow(unsafe_code)]` only in that file; `cargo xtask unsafe-check` (in `ci`) fails on `unsafe` anywhere else, on a second block there, or on a block without `// SAFETY:`. If the job can't be created or limited, the child is stopped at once and the document is "Couldn't read" (fail closed).
+
+**No network.** What holds it, and what doesn't yet:
+
+- `cargo xtask docread-check` (in `ci`, every OS) fails if `cargo tree -p clientledger-docread -e normal` contains a socket-capable crate (mio, socket2, tokio, hyper, reqwest, ureq, curl, rustls, native-tls, h2), or if `std::net` or `process::Command` appears in the worker or `cl-docread` sources outside the test hooks.
+- The tesseract build has curl off, and the linkage check denies socket imports (`socket`, `connect`, `getaddrinfo`, `WSAStartup`).
+- On Linux the worker also tries `unshare(CLONE_NEWUSER | CLONE_NEWNET)`. Most current distributions refuse it (Ubuntu 24.04's AppArmor rule); the refusal is logged, not fatal.
+- The Linux `docread-netcheck` CI job runs the worker tests under `strace` and `cargo xtask docread-netcheck` fails on any socket call.
+- **Not enforced on Windows and macOS:** the worker could open a socket if PDFium were exploited. Enforced OS sandboxes (and moving the viewer into the worker) are P37.
+
+**Reading flow (Enter Bill).** The owner clicks **Read document** (command `bill.read_local`); nothing reads on its own in A03 (the queue and auto-read are A04).
+
+1. `ReadingService` sends the preview's bytes (nothing is fetched again) and, with `document-drafts-v1`, the company's saved layouts. No draft is created and nothing is written to the engine (Q-A03l).
+2. The worker reads text or asks for OCR, then fields (template first, then rules), lines, kind and checks. After field extraction no step writes an amount; checks only point at problems (lines vs subtotal, subtotal + tax + fees vs total, total − paid vs balance, terms vs due date, qty × price per line, day-first dates, second-read differences). Lines that can't be read become one total line to the vendor's default account (Q-A03m).
+3. In the desktop, the vendor is matched on the extracted strings (Q-A03o): vendor account number, phone, past layout, then the engine's name tiers (ambiguous → none); when the printed name matches a different vendor than the layout, the name wins and a check asks the owner to confirm; unknown → "Add as a new vendor?". A card's last 4 digits pick a credit card account by `accounts.card_last4`; none or two → "Pick the card".
+4. Values fill **empty** fields only, as suggestions marked read, through `cl_model::forms::doc_read::apply`; save waits for Accept (non-negotiable 4). A failure of any kind says "Couldn't read this document…, enter the bill by hand"; the form keeps working. **Cancel reading** stops the worker through `DocreadHost::cancel_handle`; closing the window or starting a new bill cancels too.
+5. Logs carry the job number and outcome class only; `Debug` of documents, words, readings and checks shows no content.
+
+**The AI gate** (`cl_docread::ai_gate::merge`, Q-A03j). AI help is merged in the desktop before anything reaches the form. An AI amount (header total, subtotal, tax, a line's amount, qty or price) is kept only when a word on the page parses to the same value, and then takes that word's position; otherwise it is shown as a disagreement and the form gets nothing. After the merge `validate::check` runs again, so AI-filled values face the same sum checks. Other AI values are suggestions that need Accept.
+
+**Optional readers** (D5; engine U-92d, capability `document-assist-v1`).
+
+- With the capability, Enter Bill has one **Read document** entry. When the local reading left a main field empty or unsure, the banner offers **Ask AI to help**: the page text (and, at most, a PNG document itself, ≤ 2 MiB) goes to `POST /api/v1/document-reading/assist`. The engine parses no file, stores nothing and posts nothing. P17's Read with AI and its extract call are not offered; they remain only for engines without the capability.
+- Local Ollama models need no consent beyond company AI being on. Online services (Anthropic, OpenAI, and Ollama models named `-cloud`/`:cloud`) need the company's consent: two switches, `document_text_cloud` and `document_images_cloud`, off for every company. `receipt_ocr` and accepting the AI notice never turn them on. They are set only by the company owner in Preferences › Reading documents online, recorded in the audit trail, and reset by the engine when AI is turned off or a newer AI notice is accepted. After each Preferences save the desktop reads them back from the engine and shows what it stores (Q-A03k, Q-A03v).
+- Pictures can't be redacted. They go online only when the owner's picture switch is on and the engine already has cloud vision allowed; the desktop keeps the privacy level at `strict` and never relaxes it (Q-A03v). Text is redacted by the engine first.
+
+**Engine side (U-92, capability `document-drafts-v1`).** `document_drafts`, `vendor_layout_templates` and `accounts.card_last4` (editable as "Card ends in" on a credit card account). A03 uses templates and card digits for reading; `cl-api` has the drafts client (claim, store, duplicates, keyed convert) for A04's queue. Transfer files leave out live drafts, their files and vendor templates; converted drafts travel with their transactions; backups keep everything (Q-A03g).
+
+**Checks.** `cl-docread` unit and property tests (rules, money and reference tables in `fixtures/docs/rule-cases.json`, also run against the engine); `cl-host/tests` fault tests with the hook worker (crash, hang, memory, garbled frames, hard cap); `cargo xtask docread-accuracy` on the synthetic set from `cargo xtask gen-invoices` (750 documents, seen and held-out layouts gated separately against Q-285; reports in `target/docread-accuracy/`, never committed); the `docread-netcheck` job; `ui-check bill` (Read document with AI off and zero AI requests, the checks banner, a hostile PDF), `docread-consent` and `preferences-ai`.
+
 ## Online-only features and offline behavior
 
 | Feature | Offline behavior |
@@ -351,11 +425,12 @@ The engine reports connectivity on `/health` (`online: bool`, last check). The a
 | --- | --- | --- |
 | cl-core | `Money`/`Quantity`/`Rate`, typed ids, dates, fiscal calendars (incl. 4-4-5), `Secret`, shared error vocabulary | do I/O, read a clock, generate random numbers, or convert to floating point |
 | cl-pg | pg binaries, initdb, start/stop, whole-database pg_dump/pg_restore for disaster recovery and upgrades | know about accounting |
-| cl-host | process supervision, single-instance lock, logs | render UI |
+| cl-host | process supervision, single-instance lock, logs; the document reading worker and tesseract (`docread_worker`: sandbox limits, deadlines, watchdog), and the one confined `unsafe` module (`procs/win_job_memory.rs`, Q-A03s) | render UI, parse an untrusted document itself, use `unsafe` outside that module |
 | cl-company | company lifecycle, backup/restore packaging, retention | call egui |
 | cl-api | engine HTTP client, sessions and token refresh, typed errors, retry policy and outcome reconciliation, conflict detection, the UI request queue | cache balances beyond a screen's lifetime, depend on cl-host at runtime (the host implements `EndpointSource`), reach any host but `127.0.0.1` |
 | cl-settings | local user preferences; keychain-backed secrets (AI keys, SMTP password) | write secrets to disk in plain text or into backups |
 | cl-import | OFX/QFX/QIF/CSV parsing, CSV mapping profiles, dedupe keys, preview | post transactions (engine does) |
+| cl-docread | document reading rules: words, layout, fields, dates, amounts, lines, checks, templates, vendor and card matching, duplicate keys, the AI amount gate, the worker protocol (A03) | do I/O, read a clock, spawn processes, open sockets, or use floats outside the three geometry files |
 | cl-model | form state machines, validation, keymap, undo | depend on egui |
 | cl-grid | ledger grid widget: row model, viewport, editing state machine, input sequencer, AccessKit nodes | know resource types (generic over row model), sum or round money |
 | cl-ui | screens, navigation, theme, i18n | talk to Postgres |
@@ -372,6 +447,10 @@ The engine reports connectivity on `/health` (`online: bool`, last check). The a
 | Node.js runtime inside the engine executable | MIT (plus bundled third-party notices) | yes |
 | PostgreSQL 16 binaries | PostgreSQL License | yes |
 | PDFium binaries | BSD-3-Clause / Apache-2.0 | yes |
+| Tesseract 5.5.3 (`tesseract` program, built from source) | Apache-2.0 | yes, in `ocr/` |
+| Leptonica 1.87.0 (linked into `tesseract`) | BSD-2-Clause style | yes, in `ocr/` |
+| `tessdata_fast` eng + osd, `tessdata_best` eng | Apache-2.0 | yes, in `ocr/tessdata/` |
+| libstdc++ / libgcc (static in Linux `tesseract`) | GPL-3.0 with the GCC Runtime Library Exception 3.1 | yes, inside the Linux program |
 | IBM Plex fonts | SIL OFL 1.1 | yes |
 | Rust crates | MIT / Apache-2.0 direct; permissive transitive per Q-07 | yes |
 
