@@ -188,41 +188,48 @@ pub fn run(
                 reason,
             })
         }
-        Hook::RegionLie => {
-            let page = job.region.map_or(0, |r| r.page);
-            io.send(&FromWorker::PageStarted { job: job.job, page })?;
-            let mut reading = Reading::empty(Reader::Ocr, page + 1);
-            reading.words = vec![PageWords {
-                page,
-                aspect: 12_941,
-                source: WordSource::Ocr,
-                words: vec![Word {
-                    text: "999.99".into(),
-                    bbox: Bbox::PAGE,
-                    confidence: Confidence::CERTAIN,
-                }],
-            }];
-            Ok(FromWorker::JobDone {
-                job: job.job,
-                reading: Box::new(reading),
-            })
-        }
-        Hook::ForceOcr => {
-            let forced = Ctx {
-                pdfium: ctx.pdfium,
-                options: ctx.options,
-                force_ocr: true,
-            };
-            let inner = Job {
-                job: job.job,
-                bytes: Bytes(Vec::new()),
-                hint: job.hint,
-                templates: job.templates.clone(),
-                region: job.region,
-            };
-            run_bytes(&forced, io, &inner, rest)
-        }
+        Hook::RegionLie => region_lie(io, job),
+
+        Hook::ForceOcr => force_ocr(rest, ctx, io, job),
     }
+}
+
+/// `force-ocr`: the rest of the file with every page sent to OCR.
+fn force_ocr(rest: &[u8], ctx: &Ctx<'_>, io: &mut dyn Io, job: &Job) -> Result<FromWorker, Fatal> {
+    let forced = Ctx {
+        pdfium: ctx.pdfium,
+        options: ctx.options,
+        force_ocr: true,
+    };
+    let inner = Job {
+        job: job.job,
+        bytes: Bytes(Vec::new()),
+        hint: job.hint,
+        templates: job.templates.clone(),
+        region: job.region,
+    };
+    run_bytes(&forced, io, &inner, rest)
+}
+
+/// `region-lie`: a reading whose one word covers the whole page.
+fn region_lie(io: &mut dyn Io, job: &Job) -> Result<FromWorker, Fatal> {
+    let page = job.region.map_or(0, |r| r.page);
+    io.send(&FromWorker::PageStarted { job: job.job, page })?;
+    let mut reading = Reading::empty(Reader::Ocr, page + 1);
+    reading.words = vec![PageWords {
+        page,
+        aspect: 12_941,
+        source: WordSource::Ocr,
+        words: vec![Word {
+            text: "999.99".into(),
+            bbox: Bbox::PAGE,
+            confidence: Confidence::CERTAIN,
+        }],
+    }];
+    Ok(FromWorker::JobDone {
+        job: job.job,
+        reading: Box::new(reading),
+    })
 }
 
 /// The start-up hook (`CL_DOCREAD_TEST_READY`).
