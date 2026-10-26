@@ -9,23 +9,44 @@
 //! latest AccessKit tree, which is what `inspect` returns. The [`Bridge`]
 //! turns each request into events or a shell action and answers once the
 //! effect has had a few frames to show.
+//!
+//! **More than one window (A02 D5).** Every pass of every viewport runs the
+//! plugin, so frames, trees and scheduled events are kept per viewport (keyed
+//! by `RawInput::viewport_id`). Methods that act on a window take an
+//! optional `viewport`: `main` (the default, the root window: everything
+//! written before A02 is unchanged) or `doc_viewer` (the pop-out document
+//! viewer, [`doc_viewer_viewport_id`]). Events for a window are injected
+//! only into that window's passes, and its repaint is requested so its pass
+//! runs.
+//!
+//! Screenshots differ by viewport kind. A **deferred** viewport (the A02
+//! default, Q-A02a) is painted on its own, and eframe 0.37 answers a
+//! `ViewportCommand::Screenshot` sent to it. An **immediate** viewport is
+//! painted from inside its parent's pass with no screenshot commands
+//! (`eframe` `wgpu_integration.rs` `render_immediate_viewport`), so the
+//! request would never be answered: `screenshot` refuses it at once with a
+//! plain message instead of timing out. Inspect, input, `resize` and `move`
+//! work for both kinds. When viewports are embedded (`embed_viewports()`,
+//! a bare `Context` in tests or a platform without multiple windows), the
+//! viewer is drawn inside the main window, so `doc_viewer` means the main
+//! window there.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use cl_automation::actions::{
-    ClickParams, CommandParams, DialogAnswerParams, FocusParams, InspectParams, KeyParams, KeySpec,
-    PasteParams, ResizeParams, ScreenshotParams, ScrollParams, ScrollTo, Target, ThemeParams,
-    TypeParams, ZoomParams,
+    ClickParams, CommandParams, DOC_VIEWER_VIEWPORT, DialogAnswerParams, FocusParams,
+    InspectParams, KeyParams, KeySpec, MAIN_VIEWPORT, MoveParams, PasteParams, ResizeParams,
+    ScreenshotParams, ScrollParams, ScrollTo, Target, ThemeParams, TypeParams, ZoomParams,
 };
 use cl_automation::inspect::{Bounds, Node, Snapshot, WindowInfo};
 use cl_automation::screenshot::{encode_png, write_png};
 use cl_automation::{ControlServer, ErrorCode, Pending, Response};
 use eframe::egui::{
     self, ColorImage, Context, Event, FullOutput, Key, Modifiers, PointerButton, Pos2, RawInput,
-    ViewportCommand, accesskit,
+    ScreenshotCallback, ViewportClass, ViewportCommand, ViewportId, accesskit,
 };
 use serde_json::{Value, json};
 
@@ -38,6 +59,14 @@ use crate::theme::ThemeChoice;
 #[must_use]
 pub fn hide_secrets_id() -> egui::Id {
     egui::Id::unique("cl.hide_secrets_until")
+}
+
+/// The pop-out document viewer's viewport id (A02 plan §1:
+/// `ViewportId::from_hash_of("cl-doc-viewer")`). The shell's viewer window
+/// must use this same id for `viewport: doc_viewer` to reach it.
+#[must_use]
+pub fn doc_viewer_viewport_id() -> ViewportId {
+    ViewportId::from_hash_of("cl-doc-viewer")
 }
 
 /// Frames to wait after an input before answering, so the result is drawn and
@@ -54,6 +83,8 @@ const SCROLL_STILL_FRAMES: u64 = 3;
 const SCROLL_STILL: Duration = Duration::from_millis(150);
 /// A `scroll` whose tree never holds still answers after this long.
 const SCROLL_WAIT_MAX: Duration = Duration::from_secs(3);
+/// Desktop coordinates `move` accepts (points), either way from the origin.
+const MOVE_LIMIT: f32 = 100_000.0;
 
 /// Events to inject into one coming frame.
 #[derive(Clone, Default)]
@@ -61,13 +92,30 @@ struct Scheduled {
     events: Vec<Event>,
 }
 
+/// What the bridge keeps for one viewport.
+#[derive(Default)]
+struct View {
+    /// Passes of this viewport begun so far.
+    frame: u64,
+    /// Tree from its last finished pass.
+    snapshot: Option<Snapshot>,
+    /// Events waiting for its coming passes.
+    scheduled: VecDeque<Scheduled>,
+}
+
 #[derive(Default)]
 struct Shared {
-    /// Frames begun so far.
-    frame: u64,
-    /// Tree from the last finished frame.
-    snapshot: Option<Snapshot>,
-    scheduled: VecDeque<Scheduled>,
+    views: HashMap<ViewportId, View>,
+    /// Viewports whose pass is running, innermost last: an immediate
+    /// viewport's pass runs inside its parent's, and `output_hook` runs
+    /// after egui has already left the pass, so the id is remembered here.
+    passes: Vec<ViewportId>,
+}
+
+impl Shared {
+    fn view(&mut self, id: ViewportId) -> &mut View {
+        self.views.entry(id).or_default()
+    }
 }
 
 /// The egui plugin: input injection and tree capture.
@@ -85,33 +133,96 @@ impl egui::Plugin for Hooks {
         // focus rings in screenshots) depend on what else was on screen.
         input.focused = true;
         let Ok(mut s) = self.0.lock() else { return };
-        s.frame += 1;
-        if let Some(next) = s.scheduled.pop_front() {
+        let id = input.viewport_id;
+        s.passes.push(id);
+        let view = s.view(id);
+        view.frame += 1;
+        if let Some(next) = view.scheduled.pop_front() {
             input.events.extend(next.events);
         }
     }
 
     fn output_hook(&mut self, ctx: &Context, output: &mut FullOutput) {
+        // `ctx.viewport_id()` already names the parent here (egui pops its
+        // viewport stack before the output hooks run).
+        let id = self
+            .0
+            .lock()
+            .ok()
+            .and_then(|mut s| s.passes.pop())
+            .unwrap_or(ViewportId::ROOT);
         let Some(update) = &output.platform_output.accesskit_update else {
             return;
         };
-        let rect = ctx.content_rect();
+        let (rect, pixels_per_point) =
+            ctx.input_for(id, |i| (i.content_rect(), i.pixels_per_point));
         let window = WindowInfo {
             width: rect.width(),
             height: rect.height(),
-            pixels_per_point: ctx.pixels_per_point(),
+            pixels_per_point,
         };
         let snapshot = snapshot_from(update, window);
         if let (Some(snapshot), Ok(mut s)) = (snapshot, self.0.lock()) {
-            s.snapshot = Some(snapshot);
+            s.view(id).snapshot = Some(snapshot);
         }
     }
 }
 
-/// Events split by the input sequencer are still waiting for a frame: a job
-/// is not done until they have been delivered (P10 plan Rev 2 §2.4.2).
-fn sequencer_busy(ctx: &Context) -> bool {
-    cl_grid::sequencer::pending(ctx, eframe::egui::ViewportId::ROOT)
+/// Events split by the input sequencer are still waiting for a frame of this
+/// viewport: a job is not done until they have been delivered (P10 plan
+/// Rev 2 §2.4.2).
+fn sequencer_busy(ctx: &Context, vp: ViewportId) -> bool {
+    cl_grid::sequencer::pending(ctx, vp)
+}
+
+/// The viewports open as windows of their own, as the root's input lists
+/// them (the root always).
+fn open_viewports(ctx: &Context) -> Vec<ViewportId> {
+    let mut ids: Vec<ViewportId> = ctx.input_for(ViewportId::ROOT, |i| {
+        i.raw.viewports.keys().copied().collect()
+    });
+    if !ids.contains(&ViewportId::ROOT) {
+        ids.push(ViewportId::ROOT);
+    }
+    ids
+}
+
+fn is_open(ctx: &Context, vp: ViewportId) -> bool {
+    vp == ViewportId::ROOT || ctx.input_for(ViewportId::ROOT, |i| i.raw.viewports.contains_key(&vp))
+}
+
+/// The control-channel names of the windows open now.
+fn viewport_names(ctx: &Context) -> Vec<&'static str> {
+    let mut names = vec![MAIN_VIEWPORT];
+    if is_open(ctx, doc_viewer_viewport_id()) {
+        names.push(DOC_VIEWER_VIEWPORT);
+    }
+    names
+}
+
+/// The viewport a request's `viewport` names.
+fn viewport_of(ctx: &Context, name: Option<&str>) -> Result<ViewportId, Started> {
+    match name.unwrap_or(MAIN_VIEWPORT) {
+        MAIN_VIEWPORT => Ok(ViewportId::ROOT),
+        DOC_VIEWER_VIEWPORT => {
+            let id = doc_viewer_viewport_id();
+            if is_open(ctx, id) {
+                Ok(id)
+            } else if ctx.embed_viewports() {
+                // Drawn inside the main window.
+                Ok(ViewportId::ROOT)
+            } else {
+                Err(fail(
+                    ErrorCode::NotFound,
+                    "the document window is not open (pop it out first)",
+                ))
+            }
+        }
+        other => Err(fail(
+            ErrorCode::BadRequest,
+            format!("unknown viewport `{other}`; use main or doc_viewer"),
+        )),
+    }
 }
 
 /// `TextInput` becomes `text_input`.
@@ -217,6 +328,8 @@ const MAX_DEPTH: usize = 50;
 enum Finish {
     Empty,
     Window,
+    /// The window's size and its outer rectangle on the desktop.
+    Placement,
     Quit,
 }
 
@@ -273,13 +386,16 @@ fn layout_signature(snapshot: Option<&Snapshot>) -> u64 {
 
 struct Job {
     pending: Pending,
+    /// The window the job acts on and counts frames in.
+    vp: ViewportId,
     kind: JobKind,
     deadline: Instant,
 }
 
 enum Started {
     Done(Response),
-    Job(JobKind),
+    /// Wait in this viewport.
+    Job(ViewportId, JobKind),
 }
 
 fn fail(code: ErrorCode, message: impl Into<String>) -> Started {
@@ -317,23 +433,41 @@ impl Bridge {
         }
     }
 
-    fn frame(&self) -> u64 {
-        self.shared.lock().map_or(0, |s| s.frame)
+    fn frame(&self, vp: ViewportId) -> u64 {
+        self.shared
+            .lock()
+            .map_or(0, |s| s.views.get(&vp).map_or(0, |v| v.frame))
     }
 
-    fn snapshot(&self) -> Option<Snapshot> {
-        self.shared.lock().ok().and_then(|s| s.snapshot.clone())
+    fn snapshot(&self, vp: ViewportId) -> Option<Snapshot> {
+        self.shared
+            .lock()
+            .ok()
+            .and_then(|s| s.views.get(&vp).and_then(|v| v.snapshot.clone()))
     }
 
-    fn schedule(&self, frames: Vec<Scheduled>) {
+    /// Queue `frames` for `vp`'s coming passes, and ask for them.
+    fn schedule(&self, ctx: &Context, vp: ViewportId, frames: Vec<Scheduled>) {
         if let Ok(mut s) = self.shared.lock() {
-            s.scheduled.extend(frames);
+            s.view(vp).scheduled.extend(frames);
         }
+        ctx.request_repaint_of(vp);
     }
 
-    /// Frames still queued for injection.
-    fn queued(&self) -> u64 {
-        self.shared.lock().map_or(0, |s| s.scheduled.len() as u64)
+    /// Frames still queued for injection into `vp`.
+    fn queued(&self, vp: ViewportId) -> u64 {
+        self.shared.lock().map_or(0, |s| {
+            s.views.get(&vp).map_or(0, |v| v.scheduled.len() as u64)
+        })
+    }
+
+    /// Forget windows that have closed: their trees are stale, and their
+    /// queued events must not reach a window opened later.
+    fn prune(&self, ctx: &Context) {
+        let open = open_viewports(ctx);
+        if let Ok(mut s) = self.shared.lock() {
+            s.views.retain(|id, _| open.contains(id));
+        }
     }
 
     /// Run once per frame, from `App::logic`.
@@ -342,12 +476,16 @@ impl Bridge {
         ctx.enable_accesskit();
         // A controlled run never rewrites the owner's saved preferences.
         shell.set_run_only(true);
+        self.prune(ctx);
         loop {
             if let Some(job) = self.job.take() {
                 match self.finish(ctx, shell, job) {
                     Some(job) => {
-                        self.job = Some(job);
                         ctx.request_repaint();
+                        if job.vp != ViewportId::ROOT {
+                            ctx.request_repaint_of(job.vp);
+                        }
+                        self.job = Some(job);
                         return;
                     }
                     None => continue,
@@ -358,16 +496,23 @@ impl Bridge {
             };
             match self.start(ctx, shell, &pending.request.method, &pending.request.params) {
                 Started::Done(r) => pending.respond(r),
-                Started::Job(kind) => {
+                Started::Job(vp, kind) => {
                     self.job = Some(Job {
                         pending,
+                        vp,
                         kind,
                         deadline: Instant::now() + JOB_TIMEOUT,
                     });
                     ctx.request_repaint();
+                    ctx.request_repaint_of(vp);
                 }
             }
         }
+    }
+
+    /// The job's frames have arrived and nothing is waiting to be delivered.
+    fn settled(&self, ctx: &Context, vp: ViewportId, until: u64) -> bool {
+        self.frame(vp) >= until && self.queued(vp) == 0 && !sequencer_busy(ctx, vp)
     }
 
     /// Complete the job if it is ready; hand it back if it is not.
@@ -379,8 +524,16 @@ impl Bridge {
             ));
             return None;
         }
+        if !is_open(ctx, job.vp) {
+            job.pending.respond(Response::failure(
+                ErrorCode::Failed,
+                "the document window closed before this finished",
+            ));
+            return None;
+        }
+        let vp = job.vp;
         if let JobKind::Scroll(s) = &mut job.kind {
-            return match self.scroll_step(ctx, s) {
+            return match self.scroll_step(ctx, vp, s) {
                 Some(value) => {
                     job.pending.respond(Response::success(value));
                     None
@@ -393,24 +546,26 @@ impl Bridge {
                 if (ctx.zoom_factor() - shell.prefs.zoom_factor()).abs() > 1e-3 {
                     return Some(job);
                 }
-                ctx.send_viewport_cmd(ViewportCommand::InnerSize(*size));
+                ctx.send_viewport_cmd_to(vp, ViewportCommand::InnerSize(*size));
                 Some(Job {
                     pending: job.pending,
+                    vp,
                     kind: JobKind::AfterFrame {
                         // Window managers resize asynchronously.
-                        until: self.frame() + self.queued() + SETTLE_FRAMES + 5,
+                        until: self.frame(vp) + self.queued(vp) + SETTLE_FRAMES + 5,
                         finish: Finish::Window,
                     },
                     deadline: job.deadline,
                 })
             }
             JobKind::AfterFrame { until, finish } => {
-                if self.frame() < *until || self.queued() > 0 || sequencer_busy(ctx) {
+                if !self.settled(ctx, vp, *until) {
                     return Some(job);
                 }
                 let value = match finish {
                     Finish::Empty => json!({}),
-                    Finish::Window => window_json(ctx),
+                    Finish::Window => window_json(ctx, vp),
+                    Finish::Placement => placement_json(ctx, vp),
                     Finish::Quit => json!({
                         "quit": shell.quit_approved(),
                         "prompt_open": shell.windows.prompt().is_some(),
@@ -420,15 +575,16 @@ impl Bridge {
                 None
             }
             JobKind::ClickAfterScroll { target, until } => {
-                if self.frame() < *until || self.queued() > 0 || sequencer_busy(ctx) {
+                if !self.settled(ctx, vp, *until) {
                     return Some(job);
                 }
                 let target = target.clone();
-                match self.click_now(&target) {
+                match self.click_now(ctx, vp, &target) {
                     Ok(()) => Some(Job {
                         pending: job.pending,
+                        vp,
                         kind: JobKind::AfterFrame {
-                            until: self.frame() + self.queued() + SETTLE_FRAMES + 1,
+                            until: self.frame(vp) + self.queued(vp) + SETTLE_FRAMES + 1,
                             finish: Finish::Empty,
                         },
                         deadline: job.deadline,
@@ -437,7 +593,7 @@ impl Bridge {
                         job.pending.respond(response);
                         None
                     }
-                    Err(Started::Job(_)) => None,
+                    Err(Started::Job(..)) => None,
                 }
             }
             JobKind::Scroll(_) => Some(job),
@@ -453,13 +609,17 @@ impl Bridge {
         }
     }
 
-    fn after(&self, finish: Finish) -> Started {
-        Started::Job(JobKind::AfterFrame {
-            until: self.frame() + self.queued() + SETTLE_FRAMES + 1,
-            finish,
-        })
+    fn after(&self, vp: ViewportId, finish: Finish) -> Started {
+        Started::Job(
+            vp,
+            JobKind::AfterFrame {
+                until: self.frame(vp) + self.queued(vp) + SETTLE_FRAMES + 1,
+                finish,
+            },
+        )
     }
 
+    #[allow(clippy::too_many_lines)]
     fn start(&self, ctx: &Context, shell: &mut Shell, method: &str, params: &Value) -> Started {
         // A missing params object means "no parameters".
         let params = if params.is_null() {
@@ -484,27 +644,59 @@ impl Bridge {
                 }
             };
         }
+        macro_rules! viewport {
+            ($p:expr) => {
+                match viewport_of(ctx, $p.viewport.as_deref()) {
+                    Ok(vp) => vp,
+                    Err(e) => return e,
+                }
+            };
+        }
         match method {
-            "inspect" => self.inspect(&parse!(InspectParams)),
-            "click" => self.click(ctx, &parse!(ClickParams).target),
+            "inspect" => {
+                let p = parse!(InspectParams);
+                self.inspect(ctx, viewport!(p), &p)
+            }
+            "click" => {
+                let p = parse!(ClickParams);
+                self.click(ctx, viewport!(p), &p.target)
+            }
             "type" => {
                 let p = parse!(TypeParams);
-                self.send_text(p.target.as_ref(), Event::Text(p.text))
+                let vp = viewport!(p);
+                self.send_text(ctx, vp, p.target.as_ref(), Event::Text(p.text))
             }
             "paste" => {
                 // One paste event, as from the clipboard: a spreadsheet
                 // block keeps its tabs and line breaks (P15A).
                 let p = parse!(PasteParams);
-                self.send_text(p.target.as_ref(), Event::Paste(p.text))
+                let vp = viewport!(p);
+                self.send_text(ctx, vp, p.target.as_ref(), Event::Paste(p.text))
             }
-            "key" => self.key(&parse!(KeyParams).key),
-            "focus" => self.focus(&parse!(FocusParams).target),
-            "scroll" => self.scroll(ctx, &parse!(ScrollParams)),
-            "hover" => self.hover(ctx, &parse!(FocusParams).target),
+            "key" => {
+                let p = parse!(KeyParams);
+                self.key(ctx, viewport!(p), &p.key)
+            }
+            "focus" => {
+                let p = parse!(FocusParams);
+                self.focus(ctx, viewport!(p), &p.target)
+            }
+            "scroll" => {
+                let p = parse!(ScrollParams);
+                self.scroll(ctx, viewport!(p), &p)
+            }
+            "hover" => {
+                let p = parse!(FocusParams);
+                self.hover(ctx, viewport!(p), &p.target)
+            }
             "command" => Self::command(shell, &parse!(CommandParams).id, self),
-            "screenshot" => Self::screenshot(ctx, &parse!(ScreenshotParams)),
+            "screenshot" => {
+                let p = parse!(ScreenshotParams);
+                Self::screenshot(ctx, viewport!(p), &p)
+            }
             "resize" => {
                 let p = parse!(ResizeParams);
+                let vp = viewport!(p);
                 if !(p.width >= 100.0
                     && p.height >= 100.0
                     && p.width <= 10_000.0
@@ -515,7 +707,26 @@ impl Bridge {
                         "width and height must be 100 to 10000",
                     );
                 }
-                Started::Job(JobKind::Resize(egui::vec2(p.width, p.height)))
+                Started::Job(vp, JobKind::Resize(egui::vec2(p.width, p.height)))
+            }
+            "move" => {
+                let p = parse!(MoveParams);
+                let vp = viewport!(p);
+                if !(p.x.abs() <= MOVE_LIMIT && p.y.abs() <= MOVE_LIMIT) {
+                    return fail(
+                        ErrorCode::BadRequest,
+                        "x and y must be between -100000 and 100000",
+                    );
+                }
+                ctx.send_viewport_cmd_to(vp, ViewportCommand::OuterPosition(Pos2::new(p.x, p.y)));
+                Started::Job(
+                    vp,
+                    JobKind::AfterFrame {
+                        // Window managers move windows asynchronously.
+                        until: self.frame(vp) + self.queued(vp) + SETTLE_FRAMES + 5,
+                        finish: Finish::Placement,
+                    },
+                )
             }
             "set_theme" => {
                 let p = parse!(ThemeParams);
@@ -527,7 +738,7 @@ impl Bridge {
                         return fail(ErrorCode::BadRequest, format!("unknown theme `{other}`"));
                     }
                 };
-                self.after(Finish::Empty)
+                self.after(ViewportId::ROOT, Finish::Empty)
             }
             "set_zoom" => {
                 let p = parse!(ZoomParams);
@@ -535,7 +746,7 @@ impl Bridge {
                     return fail(ErrorCode::BadRequest, "zoom must be between 80 and 200");
                 }
                 shell.prefs.zoom_percent = prefs::nearest_step(p.percent);
-                self.after(Finish::Window)
+                self.after(ViewportId::ROOT, Finish::Window)
             }
             "dialog_answer" => {
                 use crate::widgets::file_picker::{Answer, PickerHook};
@@ -551,7 +762,7 @@ impl Bridge {
             "state" => ok(state_json(ctx, shell)),
             "quit" => {
                 shell.queue(cl_model::CommandId::new("file.quit"));
-                self.after(Finish::Quit)
+                self.after(ViewportId::ROOT, Finish::Quit)
             }
             other => fail(
                 ErrorCode::UnknownMethod,
@@ -560,12 +771,19 @@ impl Bridge {
         }
     }
 
-    fn inspect(&self, p: &InspectParams) -> Started {
-        let Some(snapshot) = self.snapshot() else {
+    fn inspect(&self, ctx: &Context, vp: ViewportId, p: &InspectParams) -> Started {
+        let Some(snapshot) = self.snapshot(vp) else {
             return fail(ErrorCode::Failed, "no frame has been drawn yet");
         };
+        let viewports = viewport_names(ctx);
         match &p.target {
-            None => ok(serde_json::to_value(&snapshot).unwrap_or(Value::Null)),
+            None => {
+                let mut v = serde_json::to_value(&snapshot).unwrap_or(Value::Null);
+                if let Some(map) = v.as_object_mut() {
+                    map.insert("viewports".into(), json!(viewports));
+                }
+                ok(v)
+            }
             Some(t) => {
                 let matches: Vec<Node> = snapshot
                     .find_all(t)
@@ -575,13 +793,17 @@ impl Bridge {
                         ..n.clone()
                     })
                     .collect();
-                ok(json!({ "window": snapshot.window, "matches": matches }))
+                ok(json!({
+                    "window": snapshot.window,
+                    "matches": matches,
+                    "viewports": viewports,
+                }))
             }
         }
     }
 
-    fn resolve(&self, target: &Target) -> Result<Node, Started> {
-        let Some(snapshot) = self.snapshot() else {
+    fn resolve(&self, vp: ViewportId, target: &Target) -> Result<Node, Started> {
+        let Some(snapshot) = self.snapshot(vp) else {
             return Err(fail(ErrorCode::Failed, "no frame has been drawn yet"));
         };
         snapshot.resolve(target).cloned().map_err(|e| {
@@ -593,8 +815,8 @@ impl Bridge {
         })
     }
 
-    fn click(&self, ctx: &Context, target: &Target) -> Started {
-        let node = match self.resolve(target) {
+    fn click(&self, ctx: &Context, vp: ViewportId, target: &Target) -> Started {
+        let node = match self.resolve(vp, target) {
             Ok(n) => n,
             Err(e) => return e,
         };
@@ -606,31 +828,30 @@ impl Bridge {
         };
         // Below the fold (or above it): ask egui to scroll it into view,
         // then click where it lands.
-        let window = ctx.content_rect();
+        let window = ctx.input_for(vp, egui::InputState::content_rect);
         let (cx, cy) = b.center();
         if !window.contains(Pos2::new(cx, cy))
             && let Some(scroll) = Self::scroll_events(&node.id)
         {
-            self.schedule(vec![scroll]);
-            ctx.request_repaint();
-            return Started::Job(JobKind::ClickAfterScroll {
-                target: Box::new(target.clone()),
-                until: self.frame() + self.queued() + SETTLE_FRAMES + 1,
-            });
+            self.schedule(ctx, vp, vec![scroll]);
+            return Started::Job(
+                vp,
+                JobKind::ClickAfterScroll {
+                    target: Box::new(target.clone()),
+                    until: self.frame(vp) + self.queued(vp) + SETTLE_FRAMES + 1,
+                },
+            );
         }
-        match self.click_now(target) {
-            Ok(()) => {
-                ctx.request_repaint();
-                self.after(Finish::Empty)
-            }
+        match self.click_now(ctx, vp, target) {
+            Ok(()) => self.after(vp, Finish::Empty),
             Err(e) => e,
         }
     }
 
     /// Schedules the pointer events for a click at the target's current
     /// position.
-    fn click_now(&self, target: &Target) -> Result<(), Started> {
-        let node = self.resolve(target)?;
+    fn click_now(&self, ctx: &Context, vp: ViewportId, target: &Target) -> Result<(), Started> {
+        let node = self.resolve(vp, target)?;
         if !node.enabled {
             return Err(fail(ErrorCode::Failed, "that element is disabled"));
         }
@@ -648,17 +869,21 @@ impl Bridge {
             pressed,
             modifiers: Modifiers::NONE,
         };
-        self.schedule(vec![
-            Scheduled {
-                events: vec![Event::PointerMoved(pos)],
-            },
-            Scheduled {
-                events: vec![button(true)],
-            },
-            Scheduled {
-                events: vec![button(false)],
-            },
-        ]);
+        self.schedule(
+            ctx,
+            vp,
+            vec![
+                Scheduled {
+                    events: vec![Event::PointerMoved(pos)],
+                },
+                Scheduled {
+                    events: vec![button(true)],
+                },
+                Scheduled {
+                    events: vec![button(false)],
+                },
+            ],
+        );
         Ok(())
     }
 
@@ -687,8 +912,8 @@ impl Bridge {
 
     /// Moves the pointer over the target (no button), so its hover state
     /// and tooltip show. Nothing is clicked.
-    fn hover(&self, ctx: &Context, target: &Target) -> Started {
-        let node = match self.resolve(target) {
+    fn hover(&self, ctx: &Context, vp: ViewportId, target: &Target) -> Started {
+        let node = match self.resolve(vp, target) {
             Ok(n) => n,
             Err(e) => return e,
         };
@@ -696,11 +921,14 @@ impl Bridge {
             return fail(ErrorCode::Failed, "that element has no position on screen");
         };
         let (x, y) = b.center();
-        self.schedule(vec![Scheduled {
-            events: vec![Event::PointerMoved(Pos2::new(x, y))],
-        }]);
-        ctx.request_repaint();
-        self.after(Finish::Empty)
+        self.schedule(
+            ctx,
+            vp,
+            vec![Scheduled {
+                events: vec![Event::PointerMoved(Pos2::new(x, y))],
+            }],
+        );
+        self.after(vp, Finish::Empty)
     }
 
     /// The mouse wheel over the target, far enough that what scrolls there
@@ -710,8 +938,8 @@ impl Bridge {
     /// rest landed on whatever came under the pointer (a grid's own scroll
     /// area), so the end was reached only some of the time. The answer
     /// waits until the tree holds still.
-    fn scroll(&self, ctx: &Context, p: &ScrollParams) -> Started {
-        let node = match self.resolve(&p.target) {
+    fn scroll(&self, ctx: &Context, vp: ViewportId, p: &ScrollParams) -> Started {
+        let node = match self.resolve(vp, &p.target) {
             Ok(n) => n,
             Err(e) => return e,
         };
@@ -731,78 +959,90 @@ impl Bridge {
             phase,
             source: egui::MouseWheelSource::Wheel,
         };
-        let now = self.layout();
-        self.schedule(vec![
-            Scheduled {
-                events: vec![Event::PointerMoved(pos)],
-            },
-            Scheduled {
-                events: vec![
-                    Event::PointerMoved(pos),
-                    wheel(egui::TouchPhase::Start, 0.0),
-                    wheel(egui::TouchPhase::Move, dy),
-                ],
-            },
-            Scheduled {
-                events: vec![wheel(egui::TouchPhase::End, 0.0)],
-            },
-        ]);
-        ctx.request_repaint();
-        Started::Job(JobKind::Scroll(Box::new(ScrollJob {
-            last: now,
-            still_since: (self.frame(), Instant::now()),
-            started: Instant::now(),
-            until: self.frame() + self.queued() + 1,
-        })))
+        let now = self.layout(vp);
+        self.schedule(
+            ctx,
+            vp,
+            vec![
+                Scheduled {
+                    events: vec![Event::PointerMoved(pos)],
+                },
+                Scheduled {
+                    events: vec![
+                        Event::PointerMoved(pos),
+                        wheel(egui::TouchPhase::Start, 0.0),
+                        wheel(egui::TouchPhase::Move, dy),
+                    ],
+                },
+                Scheduled {
+                    events: vec![wheel(egui::TouchPhase::End, 0.0)],
+                },
+            ],
+        );
+        Started::Job(
+            vp,
+            JobKind::Scroll(Box::new(ScrollJob {
+                last: now,
+                still_since: (self.frame(vp), Instant::now()),
+                started: Instant::now(),
+                until: self.frame(vp) + self.queued(vp) + 1,
+            })),
+        )
     }
 
-    fn layout(&self) -> u64 {
-        layout_signature(self.snapshot().as_ref())
+    fn layout(&self, vp: ViewportId) -> u64 {
+        layout_signature(self.snapshot(vp).as_ref())
     }
 
     /// One poll of a scroll: `Some(answer)` once the turn arrived and the
     /// tree held still for [`SCROLL_STILL_FRAMES`] frames and
     /// [`SCROLL_STILL`].
-    fn scroll_step(&self, ctx: &Context, s: &mut ScrollJob) -> Option<Value> {
-        if self.frame() < s.until || self.queued() > 0 || sequencer_busy(ctx) {
+    fn scroll_step(&self, ctx: &Context, vp: ViewportId, s: &mut ScrollJob) -> Option<Value> {
+        if !self.settled(ctx, vp, s.until) {
             return None;
         }
         if s.started.elapsed() > SCROLL_WAIT_MAX {
             // Something on screen keeps moving: answer anyway.
             return Some(json!({ "settled": false }));
         }
-        let now = self.layout();
+        let now = self.layout(vp);
         if now != s.last {
             s.last = now;
-            s.still_since = (self.frame(), Instant::now());
-            ctx.request_repaint();
+            s.still_since = (self.frame(vp), Instant::now());
+            ctx.request_repaint_of(vp);
             return None;
         }
         let (frame, at) = s.still_since;
-        if self.frame() < frame + SCROLL_STILL_FRAMES || at.elapsed() < SCROLL_STILL {
-            ctx.request_repaint();
+        if self.frame(vp) < frame + SCROLL_STILL_FRAMES || at.elapsed() < SCROLL_STILL {
+            ctx.request_repaint_of(vp);
             return None;
         }
         Some(json!({ "settled": true }))
     }
 
-    fn focus(&self, target: &Target) -> Started {
-        let node = match self.resolve(target) {
+    fn focus(&self, ctx: &Context, vp: ViewportId, target: &Target) -> Started {
+        let node = match self.resolve(vp, target) {
             Ok(n) => n,
             Err(e) => return e,
         };
         let Some(ev) = Self::focus_events(&node.id) else {
             return fail(ErrorCode::Failed, "that element cannot take focus");
         };
-        self.schedule(vec![ev]);
-        self.after(Finish::Empty)
+        self.schedule(ctx, vp, vec![ev]);
+        self.after(vp, Finish::Empty)
     }
 
     /// `type` and `paste`: focus the target if any, then deliver `event`.
-    fn send_text(&self, target: Option<&Target>, event: Event) -> Started {
+    fn send_text(
+        &self,
+        ctx: &Context,
+        vp: ViewportId,
+        target: Option<&Target>,
+        event: Event,
+    ) -> Started {
         let mut frames = Vec::new();
         if let Some(t) = target {
-            let node = match self.resolve(t) {
+            let node = match self.resolve(vp, t) {
                 Ok(n) => n,
                 Err(e) => return e,
             };
@@ -815,11 +1055,11 @@ impl Bridge {
         frames.push(Scheduled {
             events: vec![event],
         });
-        self.schedule(frames);
-        self.after(Finish::Empty)
+        self.schedule(ctx, vp, frames);
+        self.after(vp, Finish::Empty)
     }
 
-    fn key(&self, chord: &str) -> Started {
+    fn key(&self, ctx: &Context, vp: ViewportId, chord: &str) -> Started {
         let spec = match KeySpec::parse(chord) {
             Ok(s) => s,
             Err(m) => return fail(ErrorCode::BadRequest, m),
@@ -835,10 +1075,14 @@ impl Bridge {
             repeat: false,
             modifiers: mods,
         };
-        self.schedule(vec![Scheduled {
-            events: vec![event(true), event(false)],
-        }]);
-        self.after(Finish::Empty)
+        self.schedule(
+            ctx,
+            vp,
+            vec![Scheduled {
+                events: vec![event(true), event(false)],
+            }],
+        );
+        self.after(vp, Finish::Empty)
     }
 
     fn command(shell: &mut Shell, id: &str, bridge: &Bridge) -> Started {
@@ -846,17 +1090,29 @@ impl Bridge {
             return fail(ErrorCode::NotFound, format!("no command `{id}`"));
         };
         shell.queue(cmd.id);
-        bridge.after(if id == "file.quit" {
-            Finish::Quit
-        } else {
-            Finish::Empty
-        })
+        bridge.after(
+            ViewportId::ROOT,
+            if id == "file.quit" {
+                Finish::Quit
+            } else {
+                Finish::Empty
+            },
+        )
     }
 
-    fn screenshot(ctx: &Context, p: &ScreenshotParams) -> Started {
+    fn screenshot(ctx: &Context, vp: ViewportId, p: &ScreenshotParams) -> Started {
         let path = PathBuf::from(&p.path);
         if let Err(e) = cl_automation::screenshot::check_destination(&path) {
             return fail(ErrorCode::BadRequest, e.to_string());
+        }
+        // eframe 0.37 never answers a screenshot of an immediate child
+        // viewport (see the module notes): say so now. The viewport is open
+        // (`viewport_of` checked), so reading its class creates nothing.
+        if vp != ViewportId::ROOT && ctx.viewport_for(vp, |v| v.class) == ViewportClass::Immediate {
+            return fail(
+                ErrorCode::Failed,
+                "this window cannot be captured: it is an immediate viewport, which eframe does not screenshot",
+            );
         }
         // Screens that can show a secret (the recovery key) mask it while
         // the pixels are captured.
@@ -869,14 +1125,18 @@ impl Bridge {
         let slot: Arc<Mutex<Option<Arc<ColorImage>>>> = Arc::new(Mutex::new(None));
         let cb_slot = Arc::clone(&slot);
         let cb_ctx = ctx.clone();
-        ctx.request_screenshot(move |image| {
-            if let Ok(mut s) = cb_slot.lock() {
-                *s = Some(image);
-            }
-            cb_ctx.request_repaint();
-        });
+        ctx.send_viewport_cmd_to(
+            vp,
+            ViewportCommand::Screenshot(ScreenshotCallback::new(move |image| {
+                if let Ok(mut s) = cb_slot.lock() {
+                    *s = Some(image);
+                }
+                // The bridge polls from the main window's frames.
+                cb_ctx.request_repaint_of(ViewportId::ROOT);
+            })),
+        );
         ctx.request_repaint();
-        Started::Job(JobKind::Screenshot { path, slot })
+        Started::Job(vp, JobKind::Screenshot { path, slot })
     }
 }
 
@@ -939,13 +1199,31 @@ fn key_from(name: &str) -> Option<Key> {
         })
 }
 
-fn window_json(ctx: &Context) -> Value {
-    let rect = ctx.content_rect();
+/// One window's size in points and its scale.
+fn window_json(ctx: &Context, vp: ViewportId) -> Value {
+    let (rect, pixels_per_point) = ctx.input_for(vp, |i| (i.content_rect(), i.pixels_per_point));
     json!({
         "width": rect.width(),
         "height": rect.height(),
-        "pixels_per_point": ctx.pixels_per_point(),
+        "pixels_per_point": pixels_per_point,
     })
+}
+
+/// [`window_json`] plus the window's outer rectangle on the desktop
+/// (`outer: {x, y, width, height}`, points), when the platform reports it.
+/// Geometry only: never a title or a file name.
+fn placement_json(ctx: &Context, vp: ViewportId) -> Value {
+    let mut v = window_json(ctx, vp);
+    let outer = ctx.input_for(ViewportId::ROOT, |i| {
+        i.raw.viewports.get(&vp).and_then(|info| info.outer_rect)
+    });
+    if let (Some(r), Some(map)) = (outer, v.as_object_mut()) {
+        map.insert(
+            "outer".into(),
+            json!({"x": r.min.x, "y": r.min.y, "width": r.width(), "height": r.height()}),
+        );
+    }
+    v
 }
 
 fn state_json(ctx: &Context, shell: &Shell) -> Value {
@@ -969,8 +1247,19 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
         crate::shell::HostView::Failed(_) => "failed",
         crate::shell::HostView::Stopped => "stopped",
     };
+    // Each open window's geometry, by its control-channel name.
+    let mut viewports = serde_json::Map::new();
+    for name in viewport_names(ctx) {
+        let vp = if name == MAIN_VIEWPORT {
+            ViewportId::ROOT
+        } else {
+            doc_viewer_viewport_id()
+        };
+        viewports.insert(name.into(), placement_json(ctx, vp));
+    }
     json!({
-        "window": window_json(ctx),
+        "window": window_json(ctx, ViewportId::ROOT),
+        "viewports": viewports,
         "theme": format!("{:?}", shell.prefs.theme).to_ascii_lowercase(),
         "zoom_percent": shell.prefs.zoom_percent,
         "tabs": tabs,
@@ -1051,6 +1340,15 @@ mod bridge_tests {
         pub control: PathBuf,
         _dir: tempfile::TempDir,
         pub size: egui::Vec2,
+        /// A second window standing in for the pop-out viewer (A02 D5):
+        /// its size while open. Shared so a script can close it.
+        pub child: Arc<Mutex<Option<egui::Vec2>>>,
+        /// Key presses each window's pass saw.
+        pub keys: Arc<Mutex<Vec<(ViewportId, Key)>>>,
+        /// Clicks on the child's "Dock" button.
+        pub clicks: Arc<Mutex<u32>>,
+        /// Viewport commands the integration would have carried out.
+        pub commands: Vec<(ViewportId, &'static str)>,
     }
 
     impl Rig {
@@ -1078,6 +1376,10 @@ mod bridge_tests {
                 control,
                 _dir: dir,
                 size: vec2(1280.0, 820.0),
+                child: Arc::new(Mutex::new(None)),
+                keys: Arc::default(),
+                clicks: Arc::default(),
+                commands: Vec::new(),
             };
             for _ in 0..4 {
                 rig.frame();
@@ -1085,17 +1387,91 @@ mod bridge_tests {
             rig
         }
 
+        /// A rig with a second, separate window open (viewports not
+        /// embedded), the way eframe runs the pop-out viewer.
+        pub fn with_child() -> Rig {
+            let rig = Rig::new();
+            rig.ctx.set_embed_viewports(false);
+            *rig.child.lock().unwrap() = Some(vec2(400.0, 300.0));
+            rig
+        }
+
         pub fn frame(&mut self) {
+            let doc = doc_viewer_viewport_id();
+            let child = *self.child.lock().unwrap();
+            // The default input lists the root window; the child joins it.
+            let mut viewports = RawInput::default().viewports;
+            if let Some(size) = child {
+                viewports.insert(
+                    doc,
+                    egui::ViewportInfo {
+                        outer_rect: Some(Rect::from_min_size(egui::pos2(300.0, 200.0), size)),
+                        ..egui::ViewportInfo::default()
+                    },
+                );
+            }
             let input = RawInput {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, self.size)),
+                viewports: viewports.clone(),
                 ..RawInput::default()
             };
             let (ctx, shell, bridge) = (&self.ctx, &mut self.shell, &mut self.bridge);
+            let keys = Arc::clone(&self.keys);
             let mut out = ctx.run_ui(input, |ui| {
+                record_keys(ui, ViewportId::ROOT, &keys);
                 bridge.poll(ui.ctx(), shell);
                 shell.ui(ui);
+                if child.is_some() {
+                    ui.ctx().show_viewport_deferred(
+                        doc,
+                        egui::ViewportBuilder::default(),
+                        |_, _| {},
+                    );
+                }
             });
             out.textures_delta.clear();
+            self.carry_out(out);
+            let Some(size) = child else { return };
+            let input = RawInput {
+                viewport_id: doc,
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+                viewports,
+                ..RawInput::default()
+            };
+            let clicks = Arc::clone(&self.clicks);
+            let mut out = self.ctx.run_ui(input, |ui| {
+                record_keys(ui, doc, &keys);
+                if ui.button("Dock").clicked() {
+                    *clicks.lock().unwrap() += 1;
+                }
+            });
+            out.textures_delta.clear();
+            self.carry_out(out);
+        }
+
+        /// Play the integration: answer screenshots (a 8x8 main window, a
+        /// 4x3 child, so a test can tell which was captured) and note the
+        /// window commands.
+        fn carry_out(&mut self, out: egui::FullOutput) {
+            for (id, vo) in out.viewport_output {
+                for cmd in vo.commands {
+                    let name = match cmd {
+                        ViewportCommand::Screenshot(cb) => {
+                            let size = if id == ViewportId::ROOT {
+                                [8, 8]
+                            } else {
+                                [4, 3]
+                            };
+                            cb.complete(Arc::new(ColorImage::filled(size, egui::Color32::RED)));
+                            "screenshot"
+                        }
+                        ViewportCommand::InnerSize(_) => "inner_size",
+                        ViewportCommand::OuterPosition(_) => "outer_position",
+                        _ => continue,
+                    };
+                    self.commands.push((id, name));
+                }
+            }
         }
 
         /// Run `script` against the server on another thread while this
@@ -1121,6 +1497,19 @@ mod bridge_tests {
 
     pub fn call(c: &mut Client, m: &str, p: Value) -> Result<Value, ClientError> {
         c.call(m, p)
+    }
+
+    fn record_keys(ui: &egui::Ui, vp: ViewportId, keys: &Mutex<Vec<(ViewportId, Key)>>) {
+        ui.input(|i| {
+            for e in &i.events {
+                if let Event::Key {
+                    key, pressed: true, ..
+                } = e
+                {
+                    keys.lock().unwrap().push((vp, *key));
+                }
+            }
+        });
     }
 
     fn err_code(r: Result<Value, ClientError>) -> ErrorCode {
@@ -1405,5 +1794,179 @@ mod bridge_tests {
             "{text}"
         );
         assert!(text.contains("lunch"));
+    }
+
+    fn in_doc(mut p: Value) -> Value {
+        p["viewport"] = json!("doc_viewer");
+        p
+    }
+
+    fn labels(v: &Value) -> Vec<String> {
+        v["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["label"].as_str().map(str::to_owned))
+            .collect()
+    }
+
+    /// A02 D5: each window keeps its own tree; one never overwrites the
+    /// other, and `inspect` lists the open windows.
+    #[test]
+    fn each_window_keeps_its_own_tree() {
+        let mut rig = Rig::with_child();
+        let (main_dock, doc_dock, doc_tabs, main_tabs, full, doc_full) = rig.run(|c| {
+            let dock = json!({"target": {"role": "button", "label": "Dock"}});
+            let tabs = json!({"target": {"role": "tab"}});
+            (
+                call(c, "inspect", dock.clone()).unwrap(),
+                call(c, "inspect", in_doc(dock)).unwrap(),
+                call(c, "inspect", in_doc(tabs.clone())).unwrap(),
+                call(c, "inspect", tabs).unwrap(),
+                call(c, "inspect", json!({})).unwrap(),
+                call(c, "inspect", in_doc(json!({}))).unwrap(),
+            )
+        });
+        assert_eq!(labels(&main_dock), Vec::<String>::new(), "{main_dock}");
+        assert_eq!(labels(&doc_dock), vec!["Dock"]);
+        assert_eq!(labels(&doc_tabs), Vec::<String>::new());
+        assert_eq!(labels(&main_tabs).len(), 4);
+        assert_eq!(full["viewports"], json!(["main", "doc_viewer"]));
+        assert!(full["window"]["width"].as_f64().unwrap() > 1000.0);
+        assert_eq!(doc_full["window"]["width"], 400.0);
+        assert_eq!(doc_full["window"]["height"], 300.0);
+    }
+
+    /// Scheduled input reaches only the window it was aimed at.
+    #[test]
+    fn scheduled_events_reach_only_their_window() {
+        let mut rig = Rig::with_child();
+        rig.run(|c| {
+            call(c, "key", in_doc(json!({"key": "F20"}))).unwrap();
+            call(c, "key", json!({"key": "F19"})).unwrap();
+            call(
+                c,
+                "click",
+                in_doc(json!({"target": {"role": "button", "label": "Dock"}})),
+            )
+            .unwrap();
+        });
+        let keys = rig.keys.lock().unwrap().clone();
+        let doc = doc_viewer_viewport_id();
+        assert!(keys.contains(&(doc, Key::F20)), "{keys:?}");
+        assert!(!keys.contains(&(ViewportId::ROOT, Key::F20)), "{keys:?}");
+        assert!(keys.contains(&(ViewportId::ROOT, Key::F19)), "{keys:?}");
+        assert!(!keys.contains(&(doc, Key::F19)), "{keys:?}");
+        assert_eq!(*rig.clicks.lock().unwrap(), 1);
+    }
+
+    /// Screenshots, resizes and moves are sent to the named window; `move`
+    /// answers with its place on the desktop, and `state` reports both
+    /// windows' geometry (no titles, no file names).
+    #[test]
+    fn window_commands_go_to_the_named_window() {
+        let mut rig = Rig::with_child();
+        let shots = tempfile::tempdir().unwrap();
+        let doc_png = shots.path().join("doc.png").display().to_string();
+        let main_png = shots.path().join("main.png").display().to_string();
+        let (doc_shot, main_shot, moved, state) = rig.run(move |c| {
+            let doc_shot = call(c, "screenshot", in_doc(json!({"path": doc_png}))).unwrap();
+            let main_shot = call(c, "screenshot", json!({"path": main_png})).unwrap();
+            call(c, "resize", in_doc(json!({"width": 500, "height": 400}))).unwrap();
+            let moved = call(c, "move", in_doc(json!({"x": 40, "y": 50}))).unwrap();
+            (
+                doc_shot,
+                main_shot,
+                moved,
+                call(c, "state", json!({})).unwrap(),
+            )
+        });
+        assert_eq!(
+            (doc_shot["width"].clone(), doc_shot["height"].clone()),
+            (json!(4), json!(3))
+        );
+        assert_eq!(
+            (main_shot["width"].clone(), main_shot["height"].clone()),
+            (json!(8), json!(8))
+        );
+        let doc = doc_viewer_viewport_id();
+        assert_eq!(
+            rig.commands,
+            vec![
+                (doc, "screenshot"),
+                (ViewportId::ROOT, "screenshot"),
+                (doc, "inner_size"),
+                (doc, "outer_position"),
+            ]
+        );
+        // The rig's integration reports the child at (300, 200), 400 x 300.
+        assert_eq!(
+            moved["outer"],
+            json!({"x": 300.0, "y": 200.0, "width": 400.0, "height": 300.0})
+        );
+        assert_eq!(state["viewports"]["doc_viewer"]["width"], 400.0);
+        assert!(state["viewports"]["main"]["width"].as_f64().unwrap() > 1000.0);
+        assert_eq!(state["window"], state["viewports"]["main"]);
+    }
+
+    /// An unknown window name is a bad request; a known window that is not
+    /// open is not found; with embedded viewports the viewer is drawn in
+    /// the main window, so `doc_viewer` reads the main tree.
+    #[test]
+    fn unknown_and_closed_windows_are_errors() {
+        let mut rig = Rig::new();
+        let embedded =
+            rig.run(|c| call(c, "inspect", in_doc(json!({"target": {"role": "tab"}}))).unwrap());
+        assert_eq!(labels(&embedded).len(), 4);
+        assert_eq!(embedded["viewports"], json!(["main"]));
+        rig.ctx.set_embed_viewports(false);
+        let codes = rig.run(|c| {
+            let popup = |mut p: Value| {
+                p["viewport"] = json!("popup");
+                p
+            };
+            vec![
+                err_code(call(c, "inspect", in_doc(json!({})))),
+                err_code(call(c, "key", in_doc(json!({"key": "A"})))),
+                err_code(call(c, "screenshot", in_doc(json!({"path": "a.png"})))),
+                err_code(call(c, "inspect", popup(json!({})))),
+                err_code(call(
+                    c,
+                    "click",
+                    popup(json!({"target": {"label": "Home"}})),
+                )),
+                err_code(call(c, "move", json!({"x": 1.0e9, "y": 0}))),
+            ]
+        });
+        assert_eq!(
+            codes,
+            vec![
+                ErrorCode::NotFound,
+                ErrorCode::NotFound,
+                ErrorCode::NotFound,
+                ErrorCode::BadRequest,
+                ErrorCode::BadRequest,
+                ErrorCode::BadRequest,
+            ]
+        );
+    }
+
+    /// A window that closes is forgotten: its old tree is not served, and
+    /// asking for it says it is not open.
+    #[test]
+    fn a_closed_window_is_forgotten() {
+        let mut rig = Rig::with_child();
+        let child = Arc::clone(&rig.child);
+        let (before, after) = rig.run(move |c| {
+            let before = call(c, "inspect", in_doc(json!({}))).map(|_| ());
+            *child.lock().unwrap() = None;
+            // Let a main-window frame see the window gone.
+            std::thread::sleep(Duration::from_millis(100));
+            (before, err_code(call(c, "inspect", in_doc(json!({})))))
+        });
+        assert!(before.is_ok());
+        assert_eq!(after, ErrorCode::NotFound);
+        let views = rig.bridge.shared.lock().unwrap().views.len();
+        assert_eq!(views, 1, "only the main window is kept");
     }
 }

@@ -35,6 +35,7 @@ methods:
   command <id>                   run a command by id, for example help.shortcuts
   screenshot <file.png>          save the window as a PNG
   resize <width> <height>        set the window size in points
+  move <x> <y>                   move the window to a desktop position (points)
   theme <light|dark|auto>        switch the colour theme
   zoom <80..200>                 set the app zoom in percent
   quit                           ask the app to quit (unsaved work prompts)
@@ -51,6 +52,11 @@ if a test must type something private.
 target flags: --id <id> --role <role> --label <exact text>
               --contains <text> --index <n>
 
+--viewport <main|doc_viewer>   which window inspect, click, focus, hover,
+                               type, key, screenshot, resize and move act on
+                               (default main; doc_viewer is the pop-out
+                               document viewer)
+
 exit status: 0 done, 1 failed or a scenario step failed, 2 usage error";
 
 /// Exit status when the call or scenario failed.
@@ -60,6 +66,19 @@ fn usage_error(message: &str) -> ExitCode {
     eprintln!("error: {message}\n\n{USAGE}");
     ExitCode::from(EXIT_USAGE)
 }
+
+/// Subcommands that act on one window and take `--viewport`.
+const WINDOW_METHODS: &[&str] = &[
+    "inspect",
+    "click",
+    "focus",
+    "hover",
+    "type",
+    "key",
+    "screenshot",
+    "resize",
+    "move",
+];
 
 /// Split the target flags out of `args`; returns the rest.
 fn take_target(args: &[String]) -> Result<(Target, Vec<String>), String> {
@@ -99,8 +118,42 @@ fn read_text(reader: &mut dyn std::io::Read) -> Result<String, String> {
     Ok(text)
 }
 
-/// Build the method and parameters for a subcommand.
+/// Split `--viewport <name>` out of `args`.
+fn take_viewport(args: &[String]) -> Result<(Option<String>, Vec<String>), String> {
+    let mut viewport = None;
+    let mut rest = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--viewport" {
+            let v = it.next().ok_or("--viewport needs main or doc_viewer")?;
+            if !cl_automation::actions::is_viewport(v) {
+                return Err(format!("unknown viewport `{v}`; use main or doc_viewer"));
+            }
+            viewport = Some(v.clone());
+        } else {
+            rest.push(a.clone());
+        }
+    }
+    Ok((viewport, rest))
+}
+
+/// Build the method and parameters for a subcommand. `--viewport` is added
+/// to the parameters of the methods that act on one window.
 fn request(sub: &str, args: &[String]) -> Result<(String, Value), String> {
+    let (viewport, args) = take_viewport(args)?;
+    let (method, mut params) = request_in(sub, &args)?;
+    if let Some(v) = viewport {
+        if !WINDOW_METHODS.contains(&sub) {
+            return Err(format!("`{sub}` does not take --viewport"));
+        }
+        if let Some(map) = params.as_object_mut() {
+            map.insert("viewport".into(), Value::String(v));
+        }
+    }
+    Ok((method, params))
+}
+
+fn request_in(sub: &str, args: &[String]) -> Result<(String, Value), String> {
     let (target, rest) = take_target(args)?;
     let need = |n: usize, what: &str| {
         if rest.len() == n {
@@ -160,16 +213,18 @@ fn request(sub: &str, args: &[String]) -> Result<(String, Value), String> {
             need(1, "a .png file name")?;
             Ok(("screenshot".into(), json!({"path": rest[0]})))
         }
-        "resize" => {
-            need(2, "width and height")?;
+        "resize" | "move" => {
+            let (a, b) = if sub == "resize" {
+                ("width", "height")
+            } else {
+                ("x", "y")
+            };
+            need(2, &format!("{a} and {b}"))?;
             let n = |s: &String| {
                 s.parse::<f32>()
                     .map_err(|_| format!("`{s}` is not a number"))
             };
-            Ok((
-                "resize".into(),
-                json!({"width": n(&rest[0])?, "height": n(&rest[1])?}),
-            ))
+            Ok((sub.to_string(), json!({a: n(&rest[0])?, b: n(&rest[1])?})))
         }
         "theme" => {
             need(1, "light, dark, or auto")?;
@@ -399,5 +454,27 @@ mod tests {
         assert_eq!(p["text"], "hello");
         assert_eq!(p["target"]["role"], "text_input");
         assert_eq!(request("inspect", &s(&[])).unwrap().1, json!({}));
+    }
+
+    /// A02 D5: `--viewport` aims a window method at the pop-out viewer.
+    #[test]
+    fn viewport_flag() {
+        let (m, p) = request(
+            "click",
+            &s(&["--label", "Dock", "--viewport", "doc_viewer"]),
+        )
+        .unwrap();
+        assert_eq!(m, "click");
+        assert_eq!(p["viewport"], "doc_viewer");
+        assert_eq!(p["target"]["label"], "Dock");
+        let (m, p) = request("move", &s(&["--viewport", "doc_viewer", "40", "-50"])).unwrap();
+        assert_eq!(m, "move");
+        assert_eq!(p, json!({"x": 40.0, "y": -50.0, "viewport": "doc_viewer"}));
+        let (_, p) = request("key", &s(&["F6"])).unwrap();
+        assert!(p.get("viewport").is_none());
+        assert!(request("key", &s(&["F6", "--viewport", "popup"])).is_err());
+        assert!(request("key", &s(&["F6", "--viewport"])).is_err());
+        assert!(request("theme", &s(&["dark", "--viewport", "doc_viewer"])).is_err());
+        assert!(request("move", &s(&["1"])).is_err());
     }
 }
