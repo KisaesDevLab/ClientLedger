@@ -41,6 +41,10 @@ pub const LOCK_FILE: &str = "ocr.lock";
 /// Marker written inside a finished `target/ocr/<triple>/` directory.
 pub const STAMP: &str = "ocr-build.stamp";
 
+/// Bumped whenever the build options or the output layout change, so an
+/// older build (local or a CI cache) is rebuilt rather than reused.
+const BUILD_REVISION: u32 = 2;
+
 /// Parsed `ocr.lock`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lock {
@@ -48,17 +52,23 @@ pub struct Lock {
     pub leptonica_version: String,
     pub tesseract: Entry,
     pub leptonica: Entry,
+    /// The `tessdata_fast` commit the model lines name (`ocr-models`).
+    pub tessdata_commit: Option<String>,
+    /// Model data and its license (`<file name> <sha256> <url>`).
+    pub tessdata: Vec<Entry>,
 }
 
 impl Lock {
     /// Parse the lock file text.
     ///
     /// # Errors
-    /// A missing version or source line, a malformed line, or a url that does
-    /// not name the pinned version.
+    /// A missing version or source line, a malformed line, a url that does
+    /// not name the pinned version, or a model line whose url does not name
+    /// the pinned `tessdata` commit.
     pub fn parse(text: &str) -> Result<Lock> {
         let mut tv = None;
         let mut lv = None;
+        let mut commit = None;
         let mut entries = Vec::new();
         for (n, raw) in text.lines().enumerate() {
             let line = raw.trim();
@@ -73,7 +83,39 @@ impl Lock {
                 lv = Some(v);
                 continue;
             }
+            if let Some(v) = key_value(LOCK_FILE, n + 1, line, "tessdata")? {
+                if v.len() != 40 || !v.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    bail!("{LOCK_FILE}:{}: tessdata must be a full commit hash", n + 1);
+                }
+                commit = Some(v);
+                continue;
+            }
             entries.push(parse_entry(LOCK_FILE, n + 1, line)?);
+        }
+        let tessdata: Vec<Entry> = entries
+            .iter()
+            .filter(|e| e.target != "tesseract" && e.target != "leptonica")
+            .cloned()
+            .collect();
+        if !tessdata.is_empty() {
+            let Some(c) = &commit else {
+                bail!("{LOCK_FILE}: model lines need `tessdata = <commit>`");
+            };
+            for e in &tessdata {
+                if !e
+                    .url
+                    .starts_with("https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/")
+                    || !e.url.contains(&format!("/{c}/"))
+                {
+                    bail!(
+                        "{LOCK_FILE}: the {} url is not tessdata_fast at commit {c}",
+                        e.target
+                    );
+                }
+                if crate::ocr_models::install_name(&e.target).is_none() {
+                    bail!("{LOCK_FILE}: unexpected model line `{}`", e.target);
+                }
+            }
         }
         let tesseract_version =
             tv.ok_or_else(|| anyhow!("{LOCK_FILE}: missing `tesseract = ...`"))?;
@@ -104,6 +146,8 @@ impl Lock {
             leptonica: take("leptonica", &leptonica_version)?,
             tesseract_version,
             leptonica_version,
+            tessdata_commit: commit,
+            tessdata,
         })
     }
 }
@@ -179,7 +223,8 @@ fn common_options() -> Vec<String> {
     }
     if cfg!(target_os = "linux") {
         // One binary for every distribution: no libstdc++/libgcc_s at run time.
-        v.push("-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc".into());
+        // `-s`: no symbol table in the shipped program (size, spike note).
+        v.push("-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc -s".into());
     }
     v
 }
@@ -597,7 +642,7 @@ pub fn ocr_build(args: &[String]) -> Result<()> {
     let base = root.join("target").join("ocr");
     let out = base.join(triple);
     let stamp = format!(
-        "tesseract {} {}\nleptonica {} {}\n",
+        "build {BUILD_REVISION}\ntesseract {} {}\nleptonica {} {}\n",
         lock.tesseract_version,
         lock.tesseract.sha256,
         lock.leptonica_version,
@@ -653,6 +698,21 @@ pub fn ocr_build(args: &[String]) -> Result<()> {
     fs::create_dir_all(stage.join("tessdata"))?;
     fs::create_dir_all(stage.join("LICENSES"))?;
     fs::copy(&built, stage.join(exe_name()))?;
+    if cfg!(target_os = "macos") {
+        // Local symbols only (`-x`): the program still runs and links the same.
+        run(
+            Command::new("strip").arg("-x").arg(stage.join(exe_name())),
+            &env,
+        )?;
+    }
+    // Keep model data an earlier `ocr-models` put there (it re-verifies it).
+    if let Ok(models) = fs::read_dir(out.join("tessdata")) {
+        for m in models.flatten() {
+            if m.path().is_file() {
+                fs::copy(m.path(), stage.join("tessdata").join(m.file_name()))?;
+            }
+        }
+    }
     copy_license(
         &tess_src,
         &["LICENSE"],

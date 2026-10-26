@@ -14,6 +14,7 @@ mod licenses;
 mod meta;
 mod nofloat;
 mod ocr_build;
+mod ocr_models;
 mod pdfium_fetch;
 mod pg_fetch;
 mod preview;
@@ -44,6 +45,8 @@ usage: cargo xtask <command>
   ocr-build [--force]
                      build the tesseract program from pinned source (ocr.lock), optional
                      dependencies off, linkage checked, into target/ocr/<triple>
+  ocr-models [--force]
+                     put the pinned tessdata_fast models (eng, osd) into target/ocr/<triple>/tessdata
   keymap-doc [--check]
                      generate docs/KEYBOARD.md and the shortcut cheat sheet from the cl-model keymap
   grid-bench         ledger grid scroll benchmark (200k rows, real shell), optimised; fails
@@ -142,6 +145,7 @@ fn main() -> Result<()> {
         Some("pg-fetch") => pg_fetch::pg_fetch(&args[1..]),
         Some("pdfium-fetch") => pdfium_fetch::pdfium_fetch(&args[1..]),
         Some("ocr-build") => ocr_build::ocr_build(&args[1..]),
+        Some("ocr-models") => ocr_models::ocr_models(&args[1..]),
         Some("preview") => preview::preview(&args[1..]),
         Some("run") => run::run(&args[1..]),
         Some("ui-check") => ui_check::ui_check(&args[1..]),
