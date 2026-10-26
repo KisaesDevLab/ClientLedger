@@ -22,6 +22,11 @@ test-support = []
 cl-core = { path = "../../crates/cl-core" }
 cl-docread = { path = "../../crates/cl-docread", features = ["worker"] }
 serde_json = "1.0.154"
+# The same versions and features as cl-docread's `worker` feature (one copy
+# in the build): page images, multi-page TIFF, PDFium. MIT OR Apache-2.0 / MIT.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+tiff = { version = "0.11.3", default-features = false, features = ["deflate", "fax", "lzw"] }
+pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_7881", "thread_safe"] }
 
 # Self-set limits before any parsing (plan D2): RLIMIT_DATA, and the
 # best-effort network namespace on Linux. MIT.

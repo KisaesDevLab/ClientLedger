@@ -10,6 +10,9 @@
 //!   kills that process, but only when its executable and start time match
 //!   what was recorded, so a recycled pid is never killed.
 
+#[cfg(windows)]
+mod win_job_memory;
+
 use crate::paths::AppPaths;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -68,6 +71,26 @@ impl TreeKiller {
             TreeKiller {
                 pgid: i32::try_from(child.id()).unwrap_or(0),
             }
+        }
+    }
+
+    /// A hard memory cap on the child (A03, Q-A03s): on Windows the job's
+    /// per-process commit limit, so an allocation past it fails at once
+    /// instead of waiting for the watchdog's next poll. Elsewhere the
+    /// watchdog (and the worker's own `RLIMIT_DATA`) is the limit, and this
+    /// returns false.
+    #[cfg_attr(not(windows), allow(clippy::unused_self))]
+    pub(crate) fn limit_memory(&self, bytes: u64) -> bool {
+        #[cfg(windows)]
+        {
+            self.job
+                .as_ref()
+                .is_some_and(|job| win_job_memory::limit_process_memory(job, bytes))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = bytes;
+            false
         }
     }
 

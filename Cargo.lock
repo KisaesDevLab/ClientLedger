@@ -882,6 +882,8 @@ dependencies = [
 name = "cl-host"
 version = "0.0.0"
 dependencies = [
+ "cl-core",
+ "cl-docread",
  "cl-host",
  "cl-pg",
  "listeners",
@@ -891,6 +893,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "win32job",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1011,8 +1014,11 @@ version = "0.0.0"
 dependencies = [
  "cl-core",
  "cl-docread",
+ "image",
  "nix",
+ "pdfium-render",
  "serde_json",
+ "tiff",
 ]
 
 [[package]]

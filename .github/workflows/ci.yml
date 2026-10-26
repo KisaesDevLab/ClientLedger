@@ -45,9 +45,25 @@ jobs:
       # skipping when it is missing (CL_PDFIUM_REQUIRE below).
       - name: Fetch pinned PDFium (hash-verified)
         run: cargo xtask pdfium-fetch
+      # Local document reading (A03): tesseract built from pinned source with
+      # every optional dependency off (minutes, once per cache key), then the
+      # pinned model data. Worker and host tests that need OCR fail instead of
+      # skipping when it is missing (CL_OCR_REQUIRE below).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/ocr
+            !target/ocr/.work
+            !target/ocr/.stage
+          key: ocr-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ocr.lock', 'xtask/src/ocr_build.rs') }}
+      - name: Build pinned tesseract (linkage checked)
+        run: cargo xtask ocr-build
+      - name: Fetch pinned OCR models (hash-verified)
+        run: cargo xtask ocr-models
       - run: cargo xtask ci
         env:
           CL_PDFIUM_REQUIRE: "1"
+          CL_OCR_REQUIRE: "1"
       # Ledger grid frame time (P10): 200k rows in the real shell, optimised,
       # p95 budget with one retry. Not under llvm-cov.
       - name: Grid scroll benchmark
@@ -85,9 +101,25 @@ jobs:
       # skipping when it is missing (CL_PDFIUM_REQUIRE below).
       - name: Fetch pinned PDFium (hash-verified)
         run: cargo xtask pdfium-fetch
+      # Local document reading (A03): tesseract built from pinned source with
+      # every optional dependency off (minutes, once per cache key), then the
+      # pinned model data. Worker and host tests that need OCR fail instead of
+      # skipping when it is missing (CL_OCR_REQUIRE below).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/ocr
+            !target/ocr/.work
+            !target/ocr/.stage
+          key: ocr-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ocr.lock', 'xtask/src/ocr_build.rs') }}
+      - name: Build pinned tesseract (linkage checked)
+        run: cargo xtask ocr-build
+      - name: Fetch pinned OCR models (hash-verified)
+        run: cargo xtask ocr-models
       - run: cargo xtask ci
         env:
           CL_PDFIUM_REQUIRE: "1"
+          CL_OCR_REQUIRE: "1"
 
   # Control-channel scenarios (P07, P10): the demo app runs in a real window and
   # the shell and grid_demo scenarios drive it in light and dark. Linux runs on every push under
@@ -201,10 +233,22 @@ jobs:
           key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
       - name: Fetch pinned PDFium
         run: cargo xtask pdfium-fetch
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/ocr
+            !target/ocr/.work
+            !target/ocr/.stage
+          key: ocr-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ocr.lock', 'xtask/src/ocr_build.rs') }}
+      - name: Build pinned tesseract (linkage checked)
+        run: cargo xtask ocr-build
+      - name: Fetch pinned OCR models (hash-verified)
+        run: cargo xtask ocr-models
       - name: Coverage summary
         run: cargo llvm-cov --workspace --exclude xtask --summary-only --fail-under-lines 80
         env:
           CL_PDFIUM_REQUIRE: "1"
+          CL_OCR_REQUIRE: "1"
 
   # Engine single executable (P01): built on every OS we ship, smoke-tested
   # against a temporary PostgreSQL, uploaded for later jobs.
