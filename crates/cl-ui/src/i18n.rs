@@ -1080,6 +1080,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.doc.count", "Documents: {n}"),
     // A02 fix pass: review findings.
     ("card.attach.wait_save", "A file is still attaching. Save again once it shows in Attachments."),
+    ("register.doc.list_failed", "Couldn't look up this transaction's documents. Move to another row and back to try again."),
 ];
 
 #[cfg(test)]

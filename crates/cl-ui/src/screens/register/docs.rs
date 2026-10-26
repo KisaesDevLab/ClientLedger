@@ -4,10 +4,16 @@
 //! one in the pop-out viewer, and while the viewer is out it follows the
 //! cursor ([`crate::windows::Screen::document`]). There is no docked pane
 //! (the grid has the room) and no shortcut. Nothing is written.
+//!
+//! Review S3: the list is asked for once the cursor has rested on a row for
+//! [`REST`] (Show document asks at once), and at most one list and one
+//! download are in flight; an answer for a row the cursor has left is
+//! dropped and the row under the cursor is asked for next. A list that
+//! failed says so instead of looking like "no documents".
 
 use std::sync::Arc;
 
-use cl_api::{AttachTo, Attachment, AttachmentId};
+use cl_api::{AttachTo, Attachment, AttachmentId, TxnType};
 use cl_core::ids::TransactionId;
 use eframe::egui::{self, Ui};
 use serde_json::{Value, json};
@@ -18,15 +24,24 @@ use crate::i18n::{t, t_with};
 use crate::widgets::pdf_viewer::DocSource;
 use crate::windows::doc_viewer::{self, DocRef, PaneRequest};
 
+/// How long the cursor rests on a row before its files are listed.
+pub(super) const REST: f64 = 0.25;
+
 /// What the register knows about the cursor row's files.
 #[derive(Default)]
 pub(super) struct RowDocs {
     /// The transaction they are for.
     pub txn: Option<TransactionId>,
-    list_task: Option<Task<Vec<Attachment>>>,
+    /// When the cursor came to it (egui seconds).
+    since: f64,
+    /// The list in flight, and the row it is for.
+    list_task: Option<(TransactionId, Task<Vec<Attachment>>)>,
     /// The files, once listed.
     pub list: Option<Vec<Attachment>>,
-    bytes_task: Option<Task<(AttachmentId, String, Vec<u8>)>>,
+    /// The list failed: shown, never taken for "no documents".
+    pub list_failed: bool,
+    /// The download in flight, and the row it is for.
+    bytes_task: Option<(TransactionId, Task<(AttachmentId, String, Vec<u8>)>)>,
     /// The first file's bytes (what the viewer shows).
     source: Option<DocSource>,
     /// "Show document" was clicked: pop out once the bytes are here.
@@ -49,51 +64,77 @@ impl RowDocs {
             "listed": self.list.is_some(),
             "count": self.count(),
             "loaded": self.source.is_some(),
+            "list_failed": self.list_failed,
         })
     }
 }
 
 impl RegisterScreen {
     /// The transaction under the cursor (`None` while it is loading).
-    fn docs_row(&self) -> Option<(cl_api::TxnType, TransactionId)> {
-        #[cfg(test)]
-        if let Some(key) = self.actions.cursor {
-            return self.model.row_for_key(key).map(|r| (r.txn_type, r.txn_id));
-        }
-        let key = self.grid.core().cursor()?.row;
-        self.model.row_for_key(key).map(|r| (r.txn_type, r.txn_id))
+    fn docs_row(&self) -> Option<(TxnType, TransactionId)> {
+        self.cursor_row().map(|r| (r.txn_type, r.txn_id))
     }
 
-    /// Each frame: list the files of a newly selected transaction, fetch
+    /// Each frame: list the files of the row the cursor rests on, fetch
     /// the first one's bytes while the viewer is out (or Show document
     /// asked), and pop the viewer out once they are here.
     pub(super) fn sync_docs(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|i| i.time);
         let row = self.docs_row();
         if row.map(|(_, id)| id) != self.docs.txn {
+            // Answers in flight finish; they are dropped when they come.
+            let list_task = self.docs.list_task.take();
+            let bytes_task = self.docs.bytes_task.take();
             self.docs = RowDocs {
                 txn: row.map(|(_, id)| id),
+                since: now,
+                list_task,
+                bytes_task,
                 ..RowDocs::default()
             };
-            if let Some((kind, id)) = row {
-                self.list_docs(AttachTo::Txn(kind, id));
+        }
+        if let Some((for_id, task)) = self.docs.list_task.as_mut()
+            && let Some(r) = task.try_take()
+        {
+            let for_id = *for_id;
+            self.docs.list_task = None;
+            if self.docs.txn == Some(for_id) {
+                match r {
+                    Ok(list) => self.docs.list = Some(list),
+                    Err(_) => self.docs.list_failed = true,
+                }
             }
         }
-        if let Some(r) = self.docs.list_task.as_mut().and_then(Task::try_take) {
-            self.docs.list_task = None;
-            self.docs.list = Some(r.unwrap_or_default());
+        if self.docs.list.is_none()
+            && !self.docs.list_failed
+            && self.docs.list_task.is_none()
+            && let Some((kind, id)) = row
+        {
+            let waited = now - self.docs.since;
+            if self.docs.pop || waited >= REST {
+                self.list_docs(id, AttachTo::Txn(kind, id));
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(REST - waited));
+            }
         }
         let wanted = self.docs.pop || doc_viewer::is_popped(ctx);
         if wanted
             && self.docs.source.is_none()
             && self.docs.bytes_task.is_none()
+            && let Some(id) = self.docs.txn
             && let Some(first) = self.docs.list.as_ref().and_then(|l| l.first())
         {
-            let (id, name) = (first.id, first.file_name.clone());
-            self.fetch_doc(id, name);
+            let (file, name) = (first.id, first.file_name.clone());
+            self.fetch_doc(id, file, name);
         }
-        if let Some(r) = self.docs.bytes_task.as_mut().and_then(Task::try_take) {
+        if let Some((for_id, task)) = self.docs.bytes_task.as_mut()
+            && let Some(r) = task.try_take()
+        {
+            let for_id = *for_id;
             self.docs.bytes_task = None;
-            if let Ok((_, name, bytes)) = r {
+            if self.docs.txn == Some(for_id)
+                && let Ok((_, name, bytes)) = r
+            {
                 self.docs.source = Some(DocSource {
                     name,
                     bytes: Arc::from(bytes),
@@ -111,7 +152,7 @@ impl RegisterScreen {
         }
     }
 
-    fn list_docs(&mut self, of: AttachTo) {
+    fn list_docs(&mut self, row: TransactionId, of: AttachTo) {
         let link = Arc::clone(&self.link);
         if let Some(demo) = link.demo_state() {
             let list = crate::company::demo::checks::attachments(&demo, of);
@@ -120,24 +161,25 @@ impl RegisterScreen {
             return;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
-            self.docs.list = Some(Vec::new());
+            self.docs.list_failed = true;
             return;
         };
-        if let Ok(p) = group.read(&session, move |s| async move {
+        match group.read(&session, move |s| async move {
             let page = cl_api::PageRequest::new(50, 0)?;
             Ok(s.attachments().list(of, page).await?.data)
         }) {
-            self.docs.list_task = Some(Task::Pending(p));
+            Ok(p) => self.docs.list_task = Some((row, Task::Pending(p))),
+            Err(_) => self.docs.list_failed = true,
         }
     }
 
-    fn fetch_doc(&mut self, id: AttachmentId, name: String) {
+    fn fetch_doc(&mut self, row: TransactionId, id: AttachmentId, name: String) {
         let link = Arc::clone(&self.link);
         if let Some(demo) = link.demo_state() {
             let r = crate::company::demo::checks::download(&demo, id);
             drop(demo);
             if let Ok(bytes) = r {
-                self.docs.bytes_task = Some(Task::ready((id, name, bytes)));
+                self.docs.bytes_task = Some((row, Task::ready((id, name, bytes))));
             }
             return;
         }
@@ -147,25 +189,35 @@ impl RegisterScreen {
         if let Ok(p) = group.read(&session, move |s| async move {
             Ok((id, name, s.attachments().download(id).await?))
         }) {
-            self.docs.bytes_task = Some(Task::Pending(p));
+            self.docs.bytes_task = Some((row, Task::Pending(p)));
         }
     }
 
+    /// Tests: a list answer in flight for `row`.
+    #[cfg(test)]
+    pub(super) fn docs_list_in_flight(&mut self, row: TransactionId, task: Task<Vec<Attachment>>) {
+        self.docs.list_task = Some((row, task));
+    }
+
     /// "Show document" (the toolbar): on when the selected transaction has
-    /// files.
+    /// files; a list that failed says so in its tooltip.
     pub(super) fn docs_button(&mut self, ui: &mut Ui) {
         let n = self.docs.count();
+        let tip = if self.docs.list_failed {
+            t("register.doc.list_failed")
+        } else if n > 0 {
+            format!(
+                "{} ({})",
+                t("register.doc.show.tip"),
+                t_with("register.doc.count", &[("n", &n.to_string())])
+            )
+        } else {
+            t("register.doc.show.tip")
+        };
         let r = ui
             .add_enabled(n > 0, egui::Button::new(t("register.doc.show")))
-            .on_hover_text(if n > 0 {
-                format!(
-                    "{} ({})",
-                    t("register.doc.show.tip"),
-                    t_with("register.doc.count", &[("n", &n.to_string())])
-                )
-            } else {
-                t("register.doc.show.tip")
-            });
+            .on_hover_text(tip.clone())
+            .on_disabled_hover_text(tip);
         if r.clicked() {
             self.show_document(ui.ctx());
         }
