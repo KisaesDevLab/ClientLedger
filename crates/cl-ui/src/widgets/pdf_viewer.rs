@@ -255,6 +255,8 @@ pub struct ViewerState {
     /// The page area last frame (for zoom steps from a fit).
     last_area: Vec2,
     want_focus: bool,
+    /// The worker's copy was closed by [`ViewerState::release_pixels`].
+    released: bool,
 }
 
 /// No file name, no pixels.
@@ -296,13 +298,39 @@ impl ViewerState {
         self.reset();
     }
 
-    /// Drop the drawn page's texture (A02: the docked form while its
-    /// document shows in the pop-out window). The document stays open; the
-    /// page is asked for again the next time the viewer is drawn.
+    /// Drop the drawn page's texture and the worker's decoded copy (A02:
+    /// the docked form while its document shows in the pop-out window;
+    /// review S2). The document, its page, zoom and turns stay; the worker
+    /// opens it again the next time the viewer is drawn. Called every
+    /// frame while popped: the worker hears once.
     pub fn release_pixels(&mut self) {
+        if !self.released
+            && self.source.is_some()
+            && let Some(w) = &self.worker
+        {
+            w.send(DocRequest::Close { doc: self.doc });
+            self.released = true;
+        }
         self.shown = None;
         self.asked = None;
         self.drop_thumbs();
+    }
+
+    /// Open the document in the worker again after [`Self::release_pixels`]
+    /// (a new number, so a late answer about the old copy is ignored).
+    fn reopen_if_released(&mut self) {
+        if !std::mem::take(&mut self.released) {
+            return;
+        }
+        let (Some(source), Some(worker)) = (&self.source, &self.worker) else {
+            return;
+        };
+        self.doc += 1;
+        self.status = Status::Loading;
+        worker.send(DocRequest::Open {
+            doc: self.doc,
+            bytes: Arc::clone(&source.bytes),
+        });
     }
 
     /// Forget the open document (the worker too), keeping the worker, the
@@ -314,6 +342,7 @@ impl ViewerState {
             w.send(DocRequest::Close { doc: self.doc });
         }
         self.doc += 1;
+        self.released = false;
         self.source = None;
         self.page = 0;
         self.pages = 0;
@@ -857,6 +886,7 @@ impl DocViewer {
     /// Draw the viewer for `state`.
     pub fn show(ui: &mut Ui, state: &mut ViewerState, tokens: &Tokens) -> ViewerEvent {
         let ctx = ui.ctx().clone();
+        state.reopen_if_released();
         state.poll(&ctx);
         let mut event = ViewerEvent::None;
         let mut focused = false;
@@ -1337,12 +1367,40 @@ mod tests {
         v.open(fixture("receipt.png"));
         assert_eq!(v.zoom(), Zoom::default());
         let _ = draw_until(&mut v, false, |v| v.state_json()["rendered"] == true);
+        assert!(v.command(CommandId::new("viewer.zoom_in")));
+        assert!(v.command(CommandId::new("viewer.rotate_cw")));
+        let (zoom, old) = (v.zoom(), v.doc);
+        // Every frame while popped: the worker hears once (S2).
+        v.release_pixels();
         v.release_pixels();
         assert!(v.shown.is_none() && v.asked.is_none());
         assert_eq!(v.state_json()["rendered"], false);
         assert!(v.source().is_some(), "the document stays open");
-        // Drawn again, the page comes back.
+        // The worker's decoded copy is gone: a page of it is unreadable.
+        let w = v.worker.as_ref().expect("worker");
+        w.send(DocRequest::Render {
+            doc: old,
+            page: 0,
+            px_width: 50,
+            rotation: Rotation::None,
+        });
+        let end = std::time::Instant::now() + Duration::from_secs(10);
+        let reply = loop {
+            if let Some(r) = w.try_recv() {
+                break r;
+            }
+            assert!(std::time::Instant::now() < end, "no reply");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert!(
+            matches!(reply, DocReply::Unreadable { doc, .. } if doc == old),
+            "{reply:?}"
+        );
+        // Drawn again, it opens again and the page comes back as it was.
         let _ = draw_until(&mut v, false, |v| v.state_json()["rendered"] == true);
+        assert!(v.doc > old, "a new number");
+        assert_eq!(v.zoom(), zoom);
+        assert_eq!(v.rotation(), Rotation::Right);
     }
 
     #[test]
