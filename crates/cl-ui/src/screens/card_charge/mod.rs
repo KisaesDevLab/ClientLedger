@@ -10,6 +10,7 @@
 //! the save maps the checked value field by field, with no arithmetic. The
 //! balance owed is the engine's, read again after every save (Q-262).
 
+mod attach;
 pub(crate) mod kit;
 mod payee;
 pub(crate) mod records;
@@ -113,6 +114,8 @@ pub struct CardChargeScreen {
     pub(crate) payee: payee::PayeeState,
     /// Save as Template and the template this form came from (P15).
     pub(crate) template: crate::screens::templates::SaveFlow,
+    /// The files on the charge and the document pane (A02, Q-A02e).
+    pub(crate) attach: attach::CardAttach,
 }
 
 /// The kinds of record this form shows: charges (expenses paid from the
@@ -158,6 +161,7 @@ impl CardChargeScreen {
             focused: None,
             payee: payee::PayeeState::default(),
             template: crate::screens::templates::SaveFlow::default(),
+            attach: attach::CardAttach::default(),
         };
         s.bus = s.link.bus().subscribe();
         s.books.start(&s.link, s.group.as_ref());
@@ -226,6 +230,7 @@ impl CardChargeScreen {
         }
         self.poll_records();
         self.poll_payee();
+        self.poll_attach();
     }
 
     /// Billable is a charge's column only; without `line-billable-v1` the
@@ -370,6 +375,7 @@ impl CardChargeScreen {
             || self.flow.busy()
             || self.records.busy()
             || self.payee.busy()
+            || self.attach.busy()
     }
 
     // ------------------------------------------------------------- saving
@@ -593,6 +599,7 @@ impl CardChargeScreen {
         }
         self.records.forget();
         self.payee.recent_for = None;
+        self.attach_saved(r.id);
         self.follow_up(intent);
         self.after_saved();
     }
@@ -626,6 +633,7 @@ impl CardChargeScreen {
             if let Some(id) = found {
                 self.template
                     .form_saved(&self.link, self.group.as_ref(), id);
+                self.attach_saved(id);
                 self.open_saved(id);
             }
         }
@@ -666,6 +674,7 @@ impl CardChargeScreen {
         self.payee.applied = false;
         self.payee.source = None;
         self.payee.dropped = false;
+        self.attach.reset();
         self.lock_columns();
         self.sync_inputs();
     }
@@ -815,6 +824,7 @@ impl CardChargeScreen {
         self.focused = None;
         self.lock_columns();
         self.sync_inputs();
+        self.attach_opened(v.record.id);
         if let Some(card) = self.card() {
             self.balances.fetch(&self.link, self.group.as_ref(), card);
         }
@@ -1208,6 +1218,7 @@ impl CardChargeScreen {
             form::hint(ui, tokens, &t("card.panel.explain"));
         });
         self.payee_panel_ui(ui, tokens);
+        self.attachments_ui(ui, tokens);
     }
 
     /// Keymap commands the grid and the closing dialog did not take.
@@ -1303,6 +1314,7 @@ impl CardChargeScreen {
             },
             "recent_charges": self.payee.recent.as_ref().map(Vec::len),
             "template": self.template.state_json(),
+            "attachments": self.attach.state_json(),
         });
         if let (Value::Object(m), Value::Object(c)) = (&mut v, self.flow.state_json(&self.link)) {
             m.extend(c);
@@ -1345,7 +1357,11 @@ impl Screen for CardChargeScreen {
     }
 
     fn scope(&self) -> Scope {
-        Scope::Form
+        if self.attach.viewer.has_focus() {
+            Scope::Viewer
+        } else {
+            Scope::Form
+        }
     }
 
     fn dirty(&self) -> bool {
@@ -1363,6 +1379,9 @@ impl Screen for CardChargeScreen {
     fn command(&mut self, id: CommandId) -> bool {
         if let Some(handled) = self.flow.closing_prompt.command(id) {
             return handled;
+        }
+        if self.attach.viewer.has_focus() && self.attach.viewer.command(id) {
+            return true;
         }
         if let Some(handled) = self.lines.command(id) {
             return handled;
@@ -1384,6 +1403,15 @@ impl Screen for CardChargeScreen {
 
     fn fixed_layout(&self) -> bool {
         true
+    }
+
+    /// The Attachments card's file (A02): the pop-out viewer follows it.
+    fn document(&self) -> Option<crate::windows::doc_viewer::DocRef> {
+        self.attach
+            .viewer
+            .source()
+            .cloned()
+            .map(crate::windows::doc_viewer::DocRef::new)
     }
 }
 

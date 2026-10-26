@@ -18,6 +18,7 @@
 //! Every engine call runs on the request queue and is polled each frame.
 
 mod dialogs;
+mod docs;
 mod edit;
 pub mod entry_row;
 pub mod filters;
@@ -196,6 +197,8 @@ pub struct RegisterScreen {
     actions: dialogs::RowActions,
     /// Saves in other windows (Q-262).
     bus: crate::data_bus::Subscription,
+    /// The selected transaction's documents (A02, Q-A02f).
+    docs: docs::RowDocs,
 }
 
 /// Watches the ledger stamp (Q-P12n): read on window focus, every
@@ -296,6 +299,7 @@ impl RegisterScreen {
             grid_room: 0.0,
             actions: dialogs::RowActions::default(),
             bus: crate::data_bus::Subscription::detached(),
+            docs: docs::RowDocs::default(),
         };
         s.bus = s.link.bus().subscribe();
         s.start_load();
@@ -1122,6 +1126,7 @@ impl Screen for RegisterScreen {
             });
         }
         self.layout = frame.end();
+        self.sync_docs(ui.ctx());
         self.request_pages();
         if empty {
             return;
@@ -1246,7 +1251,14 @@ impl Screen for RegisterScreen {
             "goto": self.goto.state(),
             "quick_report": self.report.as_ref().map(quick_report::QuickReport::state),
             "row_action": self.actions_state(),
+            "docs": self.docs.state_json(),
         })
+    }
+
+    /// The selected transaction's first document (A02): the pop-out
+    /// viewer follows the cursor.
+    fn document(&self) -> Option<crate::windows::doc_viewer::DocRef> {
+        self.row_document()
     }
 }
 

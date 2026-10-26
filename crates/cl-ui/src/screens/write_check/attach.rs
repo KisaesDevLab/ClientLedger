@@ -194,7 +194,7 @@ pub(crate) fn check_bytes(bytes: &[u8]) -> Result<(), &'static str> {
 
 /// Where "Save a copy" puts a file: the Downloads folder, else the
 /// temporary folder.
-fn copy_dir() -> PathBuf {
+pub(crate) fn copy_dir() -> PathBuf {
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
     home.map(|h| PathBuf::from(h).join("Downloads"))
         .filter(|p| p.is_dir())
