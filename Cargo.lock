@@ -882,6 +882,8 @@ dependencies = [
 name = "cl-host"
 version = "0.0.0"
 dependencies = [
+ "cl-core",
+ "cl-docread",
  "cl-host",
  "cl-pg",
  "listeners",

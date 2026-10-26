@@ -71,6 +71,17 @@ impl TreeKiller {
         }
     }
 
+    /// A hard memory cap on the child (A03, Q-A03s): on Windows the job's
+    /// per-process commit limit, so an allocation past it fails at once
+    /// instead of waiting for the watchdog's next poll. Elsewhere the
+    /// watchdog (and the worker's own `RLIMIT_DATA`) is the limit, and this
+    /// returns false.
+    #[allow(clippy::unused_self)]
+    pub(crate) fn limit_memory(&self, bytes: u64) -> bool {
+        let _ = bytes;
+        false
+    }
+
     /// Stop the child and its descendants, then reap it. On Unix the group
     /// gets `SIGTERM` and up to `grace` to leave; Windows has no equivalent
     /// for a windowless process, so the job is terminated at once.

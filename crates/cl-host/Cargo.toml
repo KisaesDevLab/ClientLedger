@@ -10,6 +10,9 @@ workspace = true
 
 [dependencies]
 cl-pg = { path = "../cl-pg" }
+cl-core = { path = "../cl-core" }
+# The reading worker's protocol and value types (A03); no parsers.
+cl-docread = { path = "../cl-docread" }
 thiserror = "2.0.21"
 tracing = "0.1.44"
 serde_json = "1.0.149"

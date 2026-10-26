@@ -193,6 +193,14 @@ impl AppPaths {
         self.root.join("run")
     }
 
+    /// Scratch folders for document reading (A03): each reading worker's
+    /// empty working folder and tesseract's per-page temporary folder,
+    /// created owner-only below this and removed after use.
+    #[must_use]
+    pub fn docread_dir(&self) -> PathBuf {
+        self.root.join("docread")
+    }
+
     /// Create the folders (owner-only permissions on Unix).
     ///
     /// # Errors
@@ -305,6 +313,105 @@ fn engine_candidates(
     out
 }
 
+/// File name of the document reading worker on this operating system.
+#[must_use]
+pub fn docread_exe_name() -> &'static str {
+    if cfg!(windows) {
+        "clientledger-docread.exe"
+    } else {
+        "clientledger-docread"
+    }
+}
+
+/// Find the document reading worker (A03): an `explicit` path alone, else
+/// `CL_DOCREAD_EXE` (absolute), else next to the running program (the
+/// installed layout, and `target/<profile>/` in a source checkout, where
+/// cargo builds every app side by side). Vetted like the engine.
+#[must_use]
+pub fn find_docread_exe(explicit: Option<&Path>) -> Option<PathBuf> {
+    if let Some(p) = explicit {
+        return vet_engine_exe(p);
+    }
+    let env = std::env::var_os("CL_DOCREAD_EXE")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute());
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    env.into_iter()
+        .chain(exe_dir.map(|d| d.join(docread_exe_name())))
+        .find_map(|c| vet_engine_exe(&c))
+}
+
+/// File name of the tesseract program on this operating system.
+#[must_use]
+pub fn tesseract_exe_name() -> &'static str {
+    if cfg!(windows) {
+        "tesseract.exe"
+    } else {
+        "tesseract"
+    }
+}
+
+/// `target/ocr/<triple>/` of the source checkout (debug builds only;
+/// `cargo xtask ocr-build` and `ocr-models`).
+fn ocr_dev_dir() -> Option<PathBuf> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    let triple = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        _ => return None,
+    };
+    Some(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/ocr")
+            .join(triple),
+    )
+}
+
+/// The folders [`find_ocr_dir`] tries, in order: `env` (`CL_OCR_PATH`, only
+/// when absolute), `<exe_dir>/ocr/`, then `dev` (debug builds). Never the
+/// working folder or `PATH`.
+fn ocr_candidates(
+    env: Option<PathBuf>,
+    exe_dir: Option<&Path>,
+    dev: Option<PathBuf>,
+) -> Vec<PathBuf> {
+    env.filter(|p| p.is_absolute())
+        .into_iter()
+        .chain(exe_dir.map(|d| d.join("ocr")))
+        .chain(dev)
+        .collect()
+}
+
+/// A folder holding a usable OCR install: the program and the English
+/// model.
+#[must_use]
+pub fn is_ocr_dir(dir: &Path) -> bool {
+    dir.join(tesseract_exe_name()).is_file()
+        && dir.join("tessdata").join("eng.traineddata").is_file()
+}
+
+/// Find the OCR folder (`tesseract` and `tessdata/`, A03 plan D1).
+#[must_use]
+pub fn find_ocr_dir() -> Option<PathBuf> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    let env = std::env::var_os("CL_OCR_PATH").map(PathBuf::from);
+    ocr_candidates(env, exe_dir.as_deref(), ocr_dev_dir())
+        .into_iter()
+        .filter(|d| is_ocr_dir(d))
+        .find_map(|d| {
+            let exe = vet_engine_exe(&d.join(tesseract_exe_name()))?;
+            exe.parent().map(Path::to_path_buf)
+        })
+}
+
 /// The candidate as an absolute path, if it is a file we are willing to run.
 fn vet_engine_exe(p: &Path) -> Option<PathBuf> {
     if !p.is_file() {
@@ -373,6 +480,28 @@ mod tests {
             assert_eq!(dev.len(), 3);
             assert!(dev[2].starts_with(dir.parent().unwrap().join("engine")));
         }
+    }
+
+    #[test]
+    fn ocr_is_never_looked_for_in_the_working_folder_or_path() {
+        let exe_dir = std::env::temp_dir().join("app");
+        let list = ocr_candidates(Some(PathBuf::from("relative/ocr")), Some(&exe_dir), None);
+        assert_eq!(
+            list,
+            [exe_dir.join("ocr")],
+            "a relative CL_OCR_PATH is ignored"
+        );
+        let chosen = std::env::temp_dir().join("chosen");
+        let list = ocr_candidates(
+            Some(chosen.clone()),
+            Some(&exe_dir),
+            Some(PathBuf::from("/dev")),
+        );
+        assert_eq!(list[0], chosen);
+        assert_eq!(list.len(), 3);
+        assert!(!is_ocr_dir(&std::env::temp_dir().join("no-such-ocr-dir")));
+        assert!(docread_exe_name().starts_with("clientledger-docread"));
+        assert!(find_docread_exe(Some(&exe_dir.join("missing"))).is_none());
     }
 
     #[test]
@@ -531,6 +660,7 @@ mod tests {
             p.host_log(),
             p.engine_log(),
             p.run_dir(),
+            p.docread_dir(),
         ] {
             assert!(path.is_absolute(), "{}", path.display());
             assert!(path.starts_with(&root), "{}", path.display());

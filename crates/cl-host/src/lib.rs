@@ -18,6 +18,7 @@ compile_error!(
 
 mod database;
 mod desktop;
+mod docread_worker;
 mod engine;
 mod error;
 mod health;
@@ -34,6 +35,10 @@ pub use database::{
     APP_DATABASE, APP_ROLE, DatabaseFactory, DatabaseParts, DatabaseService, DbEndpoint, PgService,
 };
 pub use desktop::{AdminAccount, CompanySeed, DesktopError, DesktopInfo, Initialized};
+pub use docread_worker::{
+    CouldNotRead, DocJob, DocreadConfig, DocreadHost, DocreadLimits, DocreadStats, JobOutcome,
+    OcrTools,
+};
 pub use engine::OfflineSetting;
 pub use error::{HostError, Result};
 pub use health::{HealthError, HealthReport, check_health, verify_listener};
@@ -41,7 +46,10 @@ pub use instance_lock::{
     Acquired, InstanceGuard, Request, SendError, acquire, acquire_or_focus, send,
 };
 pub use logs::{HostLog, Level, LogPolicy, PruneReport, prune_logs, tail_lines};
-pub use paths::{AppPaths, Os, engine_exe_name, find_engine_exe};
+pub use paths::{
+    AppPaths, Os, docread_exe_name, engine_exe_name, find_docread_exe, find_engine_exe,
+    find_ocr_dir, tesseract_exe_name,
+};
 pub use secrets::EngineSecrets;
 pub use supervisor::{
     Component, Endpoint, HostConfig, HostFault, HostSnapshot, HostState, HostStatus, RestartCounts,
