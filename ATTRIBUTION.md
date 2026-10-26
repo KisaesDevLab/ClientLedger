@@ -1,7 +1,7 @@
 # Attribution
 
 Every bundled font, icon, binary, and its license is listed here. The Node runtime inside the engine executable is
-added in P35 (Q-P01c).
+added in P35 (Q-P01c). Document reading (A03) adds Tesseract, Leptonica and the Tesseract model files below.
 
 | Item | Version | License | Source |
 | --- | --- | --- | --- |
@@ -62,9 +62,69 @@ with the installer (P35).
 
 **Not shipped:** poppler (`pdftoppm`, `pdftotext`, `pdfimages`) is GPL and is not part of ClientLedger. The engine
 uses `pdftotext` only as a fallback after pdf.js, and `pdftoppm` only to turn a scanned PDF (no text layer) into
-page pictures. In ClientLedger neither is needed for a text PDF; a scanned PDF is not read yet, and the app says so
-in plain words ("Reading scanned PDFs isn't available yet"). If an owner has installed poppler themselves, the
-engine may find it on their PATH; ClientLedger never installs or bundles it.
+page pictures. In ClientLedger neither is needed: since A03 the desktop reads text PDFs, scans and photos itself
+(PDFium and Tesseract below, in a separate reading program). P17's engine-side Read with AI, offered only on engines
+without document reading assist, still says "reading scanned PDFs isn't available yet" for a scan. If an owner has
+installed poppler themselves, the engine may find it on their PATH; ClientLedger never installs or bundles it.
+
+## Tesseract OCR (reading scans and photos, A03)
+
+The `clientledger-docread` reading program sends each scanned page to the `tesseract` program. Nothing here is
+committed: `cargo xtask ocr-build` downloads the sources pinned with SHA-256 in `ocr.lock` and builds them with every
+optional dependency off (no image codecs, zlib, curl, libarchive, OpenMP, training tools or graphics), and
+`cargo xtask ocr-models` downloads the model files pinned there. The output is `target/ocr/<triple>/{tesseract[.exe],
+tessdata/, LICENSES/}` in development and `ocr/` next to the app in preview builds and installers (P35). `LICENSES/`
+holds `tesseract-LICENSE.txt`, `leptonica-LICENSE.txt`, `tessdata-LICENSE.txt` and `tessdata_best-LICENSE.txt`,
+copied from the pinned sources. Models are never downloaded at run time. Licenses were read from the pinned sources
+on 2026-10-26.
+
+| Item | Version | License | Source |
+| --- | --- | --- | --- |
+| Tesseract (`tesseract` program; the legacy engine is kept for orientation detection) | 5.5.3 (tag commit 6951ffe1) | Apache-2.0 (`LICENSE`). The 5.5.3 tag has **no NOTICE file** (checked in the tag's tree and the extracted archive), so Apache-2.0 §4(d) adds nothing to carry; the source headers are Apache-2.0 throughout | https://github.com/tesseract-ocr/tesseract, GitHub tag archive `5.5.3` |
+| Leptonica (image library, linked statically into `tesseract`) | 1.87.0 | BSD-2-Clause style (`leptonica-license.txt`, Copyright (C) 2001-2020 Leptonica). `rbtree.c`/`rbtree.h` are adapted from code placed in the public domain (CC0) | https://github.com/DanBloomberg/leptonica, release asset `leptonica-1.87.0.tar.gz` |
+| `tessdata_fast` `eng.traineddata`, `osd.traineddata` | commit 87416418 | Apache-2.0 (`LICENSE`; no NOTICE file in the repository at that commit) | https://github.com/tesseract-ocr/tessdata_fast |
+| `tessdata_best` `eng.traineddata`, installed as `engbest.traineddata` (second read of low-confidence pages, Q-A03b) | commit e12c65a9 | Apache-2.0 (`LICENSE`; no NOTICE file in the repository at that commit) | https://github.com/tesseract-ocr/tessdata_best |
+| GNU libstdc++ and libgcc (Linux `tesseract` only, linked statically with `-static-libstdc++ -static-libgcc`) | as shipped by the build image's GCC (ubuntu-22.04) | GPL-3.0 with the **GCC Runtime Library Exception 3.1**: the exception allows a program compiled with GCC to carry these runtime parts under its own terms, so `tesseract` stays Apache-2.0 | https://gcc.gnu.org/onlinedocs/libstdc++/manual/license.html |
+
+On Windows the program is built with the static MSVC runtime (`MultiThreaded`) and imports only KERNEL32 and
+ADVAPI32; on macOS it links only the system's `libSystem` and `libc++`. A linkage check in `ocr-build` refuses any
+other library.
+
+Notice the Leptonica license asks for in the documentation:
+
+- Leptonica, Copyright (C) 2001-2020 Leptonica. All rights reserved. Redistributed under the BSD-2-Clause style
+  license in `ocr/LICENSES/leptonica-LICENSE.txt`.
+
+## Test fonts (never shipped, Q-A03f)
+
+`cargo xtask gen-invoices` makes the synthetic bills and receipts the reading tests use. Besides IBM Plex (above), it
+uses three fonts from the google/fonts repository at commit `e7db6ca6`, pinned by SHA-256 in `docread-fonts.lock` and
+downloaded with their `OFL.txt` into `target/docread-fonts/`. They are **never committed, bundled or shipped**; the
+committed samples in `fixtures/docs/read/` use IBM Plex only.
+
+| Item | License | Source |
+| --- | --- | --- |
+| Courier Prime (Regular, Bold) | SIL Open Font License 1.1 | https://github.com/google/fonts, `ofl/courierprime` |
+| Kalam (Regular) | SIL Open Font License 1.1 | https://github.com/google/fonts, `ofl/kalam` |
+| PT Serif (Regular, Bold; the held-out font) | SIL Open Font License 1.1 | https://github.com/google/fonts, `ofl/ptserif` |
+
+## Rust crates added for document reading (A03)
+
+All are MIT or Apache-2.0 as `cargo xtask licenses` and `cargo deny check` require; listed because they are new
+edges, read from each crate's `Cargo.toml` and license files in the registry.
+
+| Crate | Version | License | Used by |
+| --- | --- | --- | --- |
+| `unicode-normalization` | 0.1.25 | MIT OR Apache-2.0 | `cl-docread` (vendor names, NFKC) |
+| `nix` (`resource`, `sched`, `process`, `signal`) | 0.31.3 | MIT | the reading program's limits; `cl-host` (Unix) |
+| `sysinfo` (`system`) | 0.39.6 | MIT | `cl-host` memory watchdog |
+| `windows-sys` (`JobObjects`) | 0.61.2 | MIT OR Apache-2.0 | `cl-host`'s one job-limits call (Q-A03s) |
+| `pdf-writer` | 0.15.0 | MIT OR Apache-2.0 | xtask only (`gen-invoices`), not shipped |
+| `subsetter` (no default features) | 0.2.6 | MIT OR Apache-2.0 | xtask only, not shipped |
+| `skrifa` (with `read-fonts` 0.41.0, `font-types` 0.12.7) | 0.44.0 | MIT OR Apache-2.0 | xtask only (font metrics; replaces the unmaintained `ttf-parser`, RUSTSEC-2026-0192), not shipped |
+
+`pdfium-render`, `image` and `tiff` were already used by the viewer (P17, A02); the reading program uses the same
+versions and features.
 
 ## PostgreSQL notice
 

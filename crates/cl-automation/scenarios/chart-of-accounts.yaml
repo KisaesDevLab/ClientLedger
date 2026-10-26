@@ -4,7 +4,7 @@
 # closes the panel, then the window. The demo chart is synthetic; balances
 # are the demo engine's own figures, never added up by the app.
 name: chart-of-accounts
-description: Hierarchy, filter, keyboard create/edit/inactivate, used number, Account Report.
+description: Hierarchy, filter, keyboard create/edit/inactivate, used number, Account Report, card digits (A03).
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -123,5 +123,64 @@ steps:
   - screenshot: new-bank-account
   - key: Escape
   - assert_state: {key: screen.panel, equals: none}
+
+  # --- A03: "Card ends in" on a credit card account ---------------------------
+  # The demo engine has no `document-drafts-v1`, so a credit card account
+  # shows no card field. 2050 is a liability: a new account starts as one;
+  # Tab to the detail type and Down picks Credit card.
+  - type: {text: "2050"}
+  - assert_exists: {role: row, label_contains: "2050 Business Credit Card"}
+  - key: Ctrl+N
+  - key: Tab
+  - key: ArrowDown
+  - assert_state: {key: screen.card_digits_on, equals: false}
+  - assert_state: {key: screen.card_field, equals: false}
+  - assert_not_exists: {role: text_input, label: Card ends in}
+  - screenshot: card-field-hidden
+  - key: Escape
+  - key: Escape
+  - assert_state: {key: screen.panel, equals: none}
+  # With it (the demo's stand-in for the capability): keyboard only.
+  - command: dev.demo_card_digits
+  - assert_state: {key: screen.card_digits_on, equals: true}
+  - key: Ctrl+N
+  - key: Tab
+  - key: ArrowDown
+  - assert_state: {key: screen.card_field, equals: true}
+  - assert_exists: {role: text_input, label: Card ends in}
+  - key: Tab
+  - type: {text: "Fuel Card {theme}"}
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - key: Tab
+  - assert_focused: {role: text_input, label: Card ends in}
+  - type: {text: "48a1"}
+  - key: Alt+S
+  - assert_state: {key: screen.panel, equals: new}
+  - assert_state: {key: screen.problem, equals: card_digits}
+  - assert_exists: {label_contains: "exactly 4 digits"}
+  - assert_focused: {role: text_input, label: Card ends in}
+  - key: Ctrl+A
+  - type: {text: "4821"}
+  # The warning goes once the value is right (A03 UI review 6).
+  - assert_state: {key: screen.problem, equals: null}
+  - assert_not_exists: {label_contains: "exactly 4 digits"}
+  - assert_no_clipping: {}
+  - hover: {role: text_input, label: Card ends in}
+  - wait: {ms: 800}
+  - assert_exists: {role: text_input, label: Card ends in, description_contains: "reading receipts"}
+  - screenshot: card-field
+  - key: Alt+S
+  - assert_state: {key: screen.panel, equals: none}
+  - assert_state: {key: screen.note, equals: saved}
+  - assert_state: {key: screen.selected_card_set, equals: true}
+  # Tidy up for the next theme's run: the account goes inactive and the
+  # demo engine stops storing card digits again.
+  - key: Ctrl+Shift+I
+  - assert_state: {key: screen.note, equals: made_inactive}
+  - command: dev.demo_card_digits
+  - assert_state: {key: screen.card_digits_on, equals: false}
   - key: Escape
   - assert_not_exists: {role: tab, label: Chart of Accounts}

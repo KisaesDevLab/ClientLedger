@@ -7,7 +7,7 @@
 use crate::meta::Member;
 
 /// Crates that sit below `cl-ui`: they may not depend on `cl-ui` or on apps.
-const BELOW_UI: [&str; 12] = [
+const BELOW_UI: [&str; 13] = [
     "cl-core",
     "cl-api",
     "cl-pg",
@@ -20,6 +20,8 @@ const BELOW_UI: [&str; 12] = [
     "cl-automation",
     "cl-print",
     "cl-lan",
+    // A03: reading rules and the worker protocol (no I/O).
+    "cl-docread",
 ];
 
 /// Crates allowed to depend directly on the egui family.
@@ -38,7 +40,9 @@ fn is_egui_family(name: &str) -> bool {
 fn allowed_internal(name: &str) -> Option<Vec<&'static str>> {
     let below = |names: &[&'static str]| Some(names.to_vec());
     match name {
-        "cl-model" | "cl-api" | "cl-pg" | "cl-settings" | "cl-import" => below(&["cl-core"]),
+        "cl-model" | "cl-api" | "cl-pg" | "cl-settings" | "cl-import" | "cl-docread" => {
+            below(&["cl-core"])
+        }
         "cl-grid" => below(&["cl-core", "cl-model"]),
         // Everything except apps (and itself).
         "cl-ui" => Some(BELOW_UI.to_vec()),
@@ -52,11 +56,14 @@ fn allowed_internal(name: &str) -> Option<Vec<&'static str>> {
             v.push("cl-ui");
             Some(v)
         }
+        // The reading worker (A03): untrusted files, so the least it can.
+        "clientledger-docread" => below(&["cl-core", "cl-docread"]),
         // cl-core depends on nothing internal.
         "cl-core" => below(&[]),
         // Build tooling reads the command table to generate docs/KEYBOARD.md
-        // (cl-model has no egui and no I/O).
-        "xtask" => below(&["cl-model"]),
+        // (cl-model has no egui and no I/O), and the reading model for the
+        // synthetic documents' ground truth (A03 step 12).
+        "xtask" => below(&["cl-model", "cl-docread"]),
         _ => None,
     }
 }
@@ -76,7 +83,7 @@ fn allowed_dev_internal(name: &str) -> &'static [&'static str] {
 const TEST_FEATURES: [&str; 2] = ["test-support", "testing"];
 
 /// Apps are release artefacts: no edge of theirs may enable a test feature.
-const APPS: [&str; 2] = ["clientledger", "clientledger-cli"];
+const APPS: [&str; 3] = ["clientledger", "clientledger-cli", "clientledger-docread"];
 
 fn is_test_feature(f: &str) -> bool {
     // Accept `test-support`, `dep/test-support`, `dep?/test-support` and the
@@ -271,6 +278,47 @@ mod tests {
         for leaf in ["cl-model", "cl-api", "cl-pg", "cl-settings", "cl-import"] {
             assert!(check(&[m(leaf, &[("cl-core", true)])]).is_empty(), "{leaf}");
             assert_eq!(check(&[m(leaf, &[("cl-host", true)])]).len(), 1, "{leaf}");
+        }
+    }
+
+    #[test]
+    fn docread_uses_only_core_and_its_worker_only_docread() {
+        assert_eq!(
+            check(&[m("cl-docread", &[("cl-core", true)])]),
+            Vec::<String>::new()
+        );
+        for bad in ["cl-host", "cl-api", "cl-model", "cl-ui"] {
+            assert_eq!(check(&[m("cl-docread", &[(bad, true)])]).len(), 1, "{bad}");
+        }
+        assert_eq!(
+            check(&[m(
+                "clientledger-docread",
+                &[("cl-core", true), ("cl-docread", true)]
+            )]),
+            Vec::<String>::new()
+        );
+        for bad in ["cl-host", "cl-api", "cl-ui", "cl-settings", "cl-pg"] {
+            assert_eq!(
+                check(&[m("clientledger-docread", &[(bad, true)])]).len(),
+                1,
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            check(&[m("clientledger-docread", &[("egui", false)])]).len(),
+            1
+        );
+        // The worker is an app: no edge of its may enable a test feature.
+        assert_eq!(
+            check(&[dev("clientledger-docread", "cl-docread", &["test-support"])]).len(),
+            1
+        );
+        // The host and the desktop may use the reading crate.
+        for user in ["cl-host", "cl-ui"] {
+            assert!(
+                check(&[m(user, &[("cl-docread", true)])]).is_empty(),
+                "{user}"
+            );
         }
     }
 

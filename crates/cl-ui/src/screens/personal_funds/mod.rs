@@ -435,6 +435,7 @@ impl PersonalFundsScreen {
                     balance: Some(Money::ZERO),
                     created_at: None,
                     updated_at: None,
+                    card_last4: None,
                 });
             }
             drop(demo);

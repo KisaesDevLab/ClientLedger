@@ -18,6 +18,12 @@
 //! Ctrl+Shift+H include inactive, Ctrl+F find; in the panel Alt+N Save &
 //! New, Alt+S Save & Close, Esc reverts, then closes the panel.
 //!
+//! A03: a credit card account gets "Card ends in" (its last four digits,
+//! so reading a receipt can pick the card) when the engine stores them
+//! (`document-drafts-v1`). They are saved with the account in one request
+//! (a new account: right after it is created) and never logged or put in
+//! the control-channel state.
+//!
 //! Every engine call runs on the request queue and is polled each frame.
 
 pub mod model;
@@ -26,16 +32,17 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use cl_api::{
-    Account, AccountFields, AccountFilter, AccountReport, AccountUpdate, ApiError, ConflictReason,
-    EditableFields, IdempotencyKey, OrphanLabel, RecordVersion, RequestGroup, Versioned,
+    Account, AccountFields, AccountFilter, AccountReport, AccountUpdate, ApiError, CardLast4,
+    ConflictReason, EditableFields, IdempotencyKey, OrphanLabel, RecordVersion, RequestGroup,
+    Versioned,
 };
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, TenantId};
 use cl_grid::{CellPos, Grid, GridEvent, GridHeight, GridSnapshot, ModelRef, NoLookups, RowKey};
 use cl_model::forms::{AfterSave, FormState, SaveIntent, SaveStart};
 use cl_model::lists::accounts::{
-    AccountDraft, AccountKind, ChartFilter, DraftField, DraftProblem, check,
-    holds_bank_or_card_number,
+    AccountDraft, AccountKind, CardEnding, ChartFilter, DraftField, DraftProblem, check,
+    holds_bank_or_card_number, takes_card_digits,
 };
 use cl_model::{CommandId, Scope, commands};
 use eframe::egui::{self, RichText, Ui};
@@ -63,6 +70,7 @@ const F_DETAIL: u64 = 4;
 const F_DESCRIPTION: u64 = 5;
 const F_PARENT: u64 = 6;
 const F_SENSITIVE: u64 = 7;
+const F_CARD: u64 = 8;
 
 /// Width of the add/edit panel.
 const PANEL_WIDTH: f32 = 400.0;
@@ -475,6 +483,17 @@ impl ChartScreen {
         self.accounts.iter().find(|a| a.id == id)
     }
 
+    /// The engine stores "Card ends in" (`document-drafts-v1`; in the demo,
+    /// while `dev.demo_card_digits` has it on).
+    fn card_digits_on(&self) -> bool {
+        if self.link.is_demo() {
+            return self.link.demo_state().is_some_and(|d| d.card_digits);
+        }
+        self.link
+            .capabilities()
+            .has(cl_api::Capabilities::DOCUMENT_DRAFTS)
+    }
+
     fn form_dirty(&self) -> bool {
         matches!(&self.panel, Panel::Form(f) if f.form.is_dirty())
     }
@@ -697,8 +716,19 @@ impl ChartScreen {
             parent_id: checked.parent,
         };
         let sensitive = checked.sensitive;
+        // "Card ends in" (A03): only when the engine stores it and the
+        // account is a credit card; `None` clears it.
+        let card_on =
+            self.card_digits_on() && checked.detail.as_deref().is_some_and(takes_card_digits);
+        let digits = checked
+            .card_last4
+            .as_ref()
+            .and_then(|c| CardLast4::parse(c.as_str()));
         if self.link.is_demo() {
-            let saved = demo_save(&self.link, editing, existing, fields);
+            let mut saved = demo_save(&self.link, editing, existing, fields);
+            if card_on {
+                demo_set_card(&self.link, &mut saved, digits);
+            }
             let Panel::Form(panel) = &mut self.panel else {
                 return false;
             };
@@ -714,6 +744,17 @@ impl ChartScreen {
             key: Some(key.clone()),
         };
         let pending = match (editing, existing) {
+            // The digits changed: one PUT carries the form and the digits,
+            // guarded by the version the form was opened on.
+            (Some(_), Some(a)) if card_on && a.card_last4 != digits => {
+                let current = Versioned {
+                    version: RecordVersion::Fingerprint(a.fingerprint()),
+                    record: Account { fields, ..a },
+                };
+                group.write(&session, label, move |s| async move {
+                    s.accounts().set_card_last4(&current, digits, key).await
+                })
+            }
             (Some(id), Some(a)) => {
                 let version = RecordVersion::Fingerprint(a.fingerprint());
                 let update = AccountUpdate {
@@ -724,8 +765,35 @@ impl ChartScreen {
                     s.accounts().update(id, &version, &update, key).await
                 })
             }
+            // A new account: the engine takes the digits on an edit only,
+            // so they follow the create. If that second step fails the
+            // account stays saved and the window says the digits were not.
             _ => group.write(&session, label, move |s| async move {
-                s.accounts().create(&fields, key).await
+                let created = s.accounts().create(&fields, key).await?;
+                if !card_on || digits.is_none() {
+                    return Ok(created);
+                }
+                let with_card = s
+                    .accounts()
+                    .set_card_last4(&created, digits, IdempotencyKey::new())
+                    .await;
+                match with_card {
+                    Ok(a) => Ok(a),
+                    // The digits may have landed: what the engine holds is
+                    // read back, so the window says the truth (review nit).
+                    Err(ApiError::OutcomeUnknown { .. }) => Ok(s
+                        .accounts()
+                        .get(created.record.id)
+                        .await
+                        .unwrap_or_else(|_| {
+                            tracing::warn!("card digits unknown after creating an account");
+                            created
+                        })),
+                    Err(_) => {
+                        tracing::warn!("card digits not saved after creating an account");
+                        Ok(created)
+                    }
+                }
             }),
         };
         if let (Ok(p), Panel::Form(panel)) = (pending, &mut self.panel) {
@@ -736,6 +804,7 @@ impl ChartScreen {
 
     /// Takes a finished save. Returns true when it saved.
     fn poll_save(&mut self, sensitive: bool) -> bool {
+        let card_on = self.card_digits_on();
         let Panel::Form(panel) = &mut self.panel else {
             return false;
         };
@@ -749,6 +818,12 @@ impl ChartScreen {
         match result {
             Ok(saved) => {
                 let account = saved.record;
+                // A03: the digits asked for did not stick (a new account's
+                // second step failed): say so; the account itself saved.
+                let wanted = card_wanted(panel.form.current());
+                let card_missed = card_on
+                    && takes_card_digits(&panel.form.current().detail)
+                    && account.card_last4.as_ref().map(CardLast4::as_str) != wanted.as_deref();
                 let after = panel.form.save_ok(panel.form.current().clone());
                 self.store_sensitive(account.id, sensitive);
                 match self.accounts.iter_mut().find(|a| a.id == account.id) {
@@ -759,6 +834,9 @@ impl ChartScreen {
                 let accounts = std::mem::take(&mut self.accounts);
                 self.apply_accounts(accounts);
                 self.note = Some("lists.accounts.saved");
+                if card_missed {
+                    self.warn = Some("lists.accounts.card_not_saved");
+                }
                 self.publish(true);
                 self.after_save(after, Some(account.id));
                 true
@@ -1023,6 +1101,7 @@ impl ChartScreen {
 
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let numbers = self.numbers;
+        let card_on = self.card_digits_on();
         let chart = self.model.chart();
         let Panel::Form(panel) = &mut self.panel else {
             return;
@@ -1193,6 +1272,44 @@ impl ChartScreen {
                 });
                 form::hint(ui, tokens, &t("lists.accounts.form.bank_number_later"));
             }
+            // Card ends in (A03): the card's last four digits, when the
+            // engine stores them.
+            if card_on && takes_card_digits(&d.detail) {
+                ui.add_space(4.0);
+                let mut digits = d.card_last4.0.clone();
+                let tip = t("lists.accounts.form.card_last4_tip");
+                let r = ui
+                    .horizontal(|ui| {
+                        let l = ui
+                            .add(
+                                egui::Label::new(t("lists.accounts.form.card_last4"))
+                                    .selectable(false),
+                            )
+                            .on_hover_text(&tip);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut digits)
+                                .id(field_id(DraftField::Card))
+                                .char_limit(4)
+                                .desired_width(60.0),
+                        )
+                        .labelled_by(l.id)
+                        .on_hover_text(&tip)
+                    })
+                    .inner;
+                if want(DraftField::Card) {
+                    r.request_focus();
+                }
+                if r.changed() {
+                    // The warning goes once the value is right (A03 UI
+                    // review 6); a wrong value is warned about on Save.
+                    let ending = CardEnding(digits);
+                    card_typed(&mut panel.problems, &ending);
+                    panel.form.edit(F_CARD, |x| x.card_last4 = ending);
+                }
+                if enter_left(ui, &r) {
+                    save = Some(SaveIntent::SaveAndNew);
+                }
+            }
         });
         ui.add_space(6.0);
         for p in &panel.problems {
@@ -1311,6 +1428,16 @@ pub(crate) fn demo_save(
     let chart = d.as_mut().and_then(|d| d.chart.as_mut());
     let account = if let (Some(_), Some(mut a)) = (editing, existing) {
         a.fields = fields;
+        // As the engine: an account that stops being a credit card loses
+        // its card digits (A03).
+        if !a
+            .fields
+            .detail_type
+            .as_deref()
+            .is_some_and(takes_card_digits)
+        {
+            a.card_last4 = None;
+        }
         a
     } else {
         let n = chart.as_ref().map_or(0, |c| c.len());
@@ -1323,6 +1450,7 @@ pub(crate) fn demo_save(
             balance: Some(cl_core::Money::ZERO),
             created_at: Some(crate::company::demo::DemoState::now()),
             updated_at: Some(crate::company::demo::DemoState::now()),
+            card_last4: None,
         }
     };
     if let Some(chart) = chart {
@@ -1334,6 +1462,45 @@ pub(crate) fn demo_save(
     Versioned {
         version: RecordVersion::Fingerprint(account.fingerprint()),
         record: account,
+    }
+}
+
+/// Sets (or clears) a credit card account's digits in the demo chart, as
+/// the engine's `PUT` with `cardLast4` does (A03).
+fn demo_set_card(link: &CompanyLink, saved: &mut Versioned<Account>, digits: Option<CardLast4>) {
+    if !saved
+        .record
+        .fields
+        .detail_type
+        .as_deref()
+        .is_some_and(takes_card_digits)
+    {
+        return;
+    }
+    saved.record.card_last4 = digits;
+    saved.version = RecordVersion::Fingerprint(saved.record.fingerprint());
+    if let Some(mut d) = link.demo_state()
+        && let Some(chart) = d.chart.as_mut()
+        && let Some(a) = chart.iter_mut().find(|a| a.id == saved.record.id)
+    {
+        a.card_last4 = digits;
+    }
+}
+
+/// The digits a form asks for: four digits, or `None` (empty or not valid,
+/// which the checks refuse before any save).
+fn card_wanted(d: &AccountDraft) -> Option<String> {
+    d.card_last4
+        .is_valid()
+        .then(|| d.card_last4.as_str().to_string())
+}
+
+/// The owner typed in "Card ends in": a refused value's warning goes once
+/// the value is four digits or empty (A03 UI review 6). A wrong value is
+/// warned about again on Save, not while typing.
+pub(crate) fn card_typed(problems: &mut Vec<DraftProblem>, ending: &CardEnding) {
+    if ending.is_empty() || ending.is_valid() {
+        problems.retain(|p| *p != DraftProblem::CardDigits);
     }
 }
 
@@ -1517,6 +1684,14 @@ impl Screen for ChartScreen {
             "list.quick_report" => self.open_report(),
             crate::screens::register::KIND => return self.open_register(),
             "edit.find" => self.focus_search = true,
+            // Demo only (A03): the demo engine starts or stops storing
+            // "Card ends in", standing in for `document-drafts-v1`.
+            "dev.demo_card_digits" => {
+                let Some(mut d) = self.link.demo_state() else {
+                    return false;
+                };
+                d.card_digits = !d.card_digits;
+            }
             "form.save_new" | "form.save_close" => {
                 if !matches!(self.panel, Panel::Form(_)) {
                     return false;
@@ -1608,6 +1783,11 @@ impl Screen for ChartScreen {
             ),
             _ => (false, Vec::new(), false, false),
         };
+        // Whether "Card ends in" shows and whether the selected account has
+        // digits; never the digits themselves.
+        let card_on = self.card_digits_on();
+        let card_field = matches!(&self.panel, Panel::Form(p)
+            if card_on && takes_card_digits(&p.form.current().detail));
         let (report_lines, report_loaded) = match &self.panel {
             Panel::Report(r) => (r.model.len(), r.loaded),
             _ => (0, false),
@@ -1626,6 +1806,9 @@ impl Screen for ChartScreen {
             "focused": self.snap.focused,
             "selected_active": selected.map(|e| e.active),
             "selected_sensitive": selected.map(|e| e.sensitive),
+            "selected_card_set": selected.map(|e| !e.card_last4.is_empty()),
+            "card_digits_on": card_on,
+            "card_field": card_field,
             "selected_depth": depth,
             "panel": self.panel.name(),
             "dirty": form_dirty,

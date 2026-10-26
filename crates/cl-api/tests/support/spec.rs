@@ -25,7 +25,9 @@ use sha2::{Digest, Sha256};
 /// f78583e (engine PR #159) the P14 feed deposit groupings and equity
 /// roles are; since pin f3ce33fd (engine PR-A) the P17 vendor credit edit
 /// (U-84a), bill terms dates (U-86d) and payment terms list (U-86e) are;
-/// since pin a88337e3 (engine PR #177) the A01 intake settings (U-93) are.
+/// since pin a88337e3 (engine PR #177) the A01 intake settings (U-93) are;
+/// since pin 38cf97eb (engine PRs #178, #179) the A03 document draft and
+/// vendor layout routes (U-92) and the document reading assist (U-92d) are.
 pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
@@ -224,6 +226,12 @@ pub fn keyable_operations(txt: &str) -> Vec<(String, String)> {
 /// `(METHOD, route)`, sorted.
 pub fn keyable_ap_operations(txt: &str) -> Vec<(String, String)> {
     rows_of_class(txt, "keyable-ap")
+}
+
+/// The `keyable-docs` (`idempotency-docs-v1`) rows of `operations.txt`:
+/// `(METHOD, route)`, sorted.
+pub fn keyable_docs_operations(txt: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, "keyable-docs")
 }
 
 fn rows_of_class(txt: &str, class: &str) -> Vec<(String, String)> {

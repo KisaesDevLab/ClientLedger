@@ -381,6 +381,11 @@ pub enum ApiError {
     /// cl-api refused the input before sending anything.
     #[error("refused before sending ({0:?})")]
     Local(LocalValidation),
+    /// The engine refused a document draft call for a reason of its own
+    /// (A03, U-92): the file is already claimed, the draft is closed, the
+    /// convert looks like a duplicate, ...
+    #[error("document draft refused ({0:?})")]
+    DocumentDraft(crate::resources::document_drafts::DraftRefusal),
     /// The record changed, is in use, already exists, or the engine is busy.
     #[error("conflict {reason:?} ({})", code_text(code.as_ref()))]
     Conflict {
@@ -673,6 +678,26 @@ fn special_message(e: &ApiError) -> Option<(&'static str, Option<&'static str>)>
     }
 }
 
+/// Owner wording of a document draft refusal (A03, U-92).
+fn draft_message(
+    r: &crate::resources::document_drafts::DraftRefusal,
+) -> (&'static str, Option<&'static str>) {
+    use crate::resources::document_drafts::DraftRefusal;
+    match r {
+        DraftRefusal::AlreadyClaimed { .. } => (
+            "error.api.document_claimed",
+            Some("fix.api.document_claimed"),
+        ),
+        DraftRefusal::Closed { .. } => ("error.api.document_closed", Some("fix.api.reload")),
+        DraftRefusal::PossibleDuplicate { .. } => (
+            "error.api.possible_duplicate",
+            Some("fix.api.possible_duplicate"),
+        ),
+        DraftRefusal::NotADraftFile => ("error.api.document_not_draft", Some("fix.api.reload")),
+        DraftRefusal::TemplateLimit => ("error.api.template_limit", None),
+    }
+}
+
 impl OwnerFacing for ApiError {
     fn owner_message(&self) -> OwnerMessage {
         if let Some((key, fix)) = special_message(self) {
@@ -695,6 +720,7 @@ impl OwnerFacing for ApiError {
                 ),
             },
             ApiError::Local(_) => ("error.api.local", Some("fix.api.validation")),
+            ApiError::DocumentDraft(r) => draft_message(r),
             ApiError::Conflict { reason, .. } => match reason {
                 ConflictReason::Stale => ("error.api.conflict_stale", Some("fix.api.reload")),
                 ConflictReason::InUse => ("error.api.conflict_in_use", None),
@@ -911,7 +937,8 @@ fn validation(body: &EngineErrorBody) -> ValidationError {
 fn conflict(body: &EngineErrorBody) -> ApiError {
     let reason = match body.code.as_ref().map(ErrorCode::as_str) {
         Some("STALE") => ConflictReason::Stale,
-        Some("TAG_IN_USE") => ConflictReason::InUse,
+        // `ATTACHMENT_IN_USE` (U-92): a live document draft reads the file.
+        Some("TAG_IN_USE" | "ATTACHMENT_IN_USE") => ConflictReason::InUse,
         Some("EMAIL_EXISTS" | "ACCOUNT_NUMBER_EXISTS") => ConflictReason::AlreadyExists,
         Some("TAG_NUMBER_EXISTS") => ConflictReason::TagNumberTaken,
         // `BATCH_BUSY` (P15A): another batch save of the company is running,
@@ -1063,6 +1090,14 @@ pub(crate) fn map_failure(
         if let Some(e) = batch_group(status, &b) {
             return Mapped::Final(e);
         }
+    }
+    // A03 (U-92): the document draft refusals carry their details.
+    if let Some(e) = EngineErrorBody::parse(body).and_then(|b| {
+        let code = b.code.as_ref()?.as_str().to_string();
+        crate::resources::document_drafts::refusal(status, &code, b.pointer("/error/details"))
+            .map(ApiError::DocumentDraft)
+    }) {
+        return Mapped::Final(e);
     }
     // U-18: a key the engine refuses is a bug on our side, never the
     // owner's input.

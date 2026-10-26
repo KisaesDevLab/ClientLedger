@@ -282,6 +282,7 @@ impl EnterBillScreen {
             super::doc_read::BannerEvent::None => {}
             super::doc_read::BannerEvent::Accepted => self.accept_read(),
             super::doc_read::BannerEvent::Cleared => self.clear_read(),
+            super::doc_read::BannerEvent::AskAi => self.start_assist(),
             super::doc_read::BannerEvent::AddVendor => {
                 self.link
                     .push(CompanyEvent::OpenWindow(CommandId::new("vendors.center")));
@@ -1421,6 +1422,12 @@ impl EnterBillScreen {
                 self.set_kind(other);
                 true
             }
+            // With the engine's document reading assist there is one Read
+            // document entry (plan D7): the P17 command reads here too.
+            "bill.read_document" if self.read.assist_capable() => {
+                self.start_local_read();
+                true
+            }
             "bill.read_document" => {
                 let name = self.attach.viewer.source().map(|s| s.name.clone());
                 let input = super::doc_read::ReadInput {
@@ -1432,6 +1439,10 @@ impl EnterBillScreen {
                     money_style: self.money_style,
                 };
                 self.read.start(&input);
+                true
+            }
+            "bill.read_local" => {
+                self.start_local_read();
                 true
             }
             "bill.accept_read" => {
@@ -1480,6 +1491,16 @@ impl EnterBillScreen {
         }
         if self.vendor_list {
             self.vendor_list = false;
+            return true;
+        }
+        // Esc stops a reading on this computer, quietly, as Cancel does.
+        if self.read.local.job.is_some() {
+            self.read.local.cancel_job();
+            // Not from a field (from Cancel reading, whose focus egui drops
+            // on Esc): the keyboard goes back to Read document.
+            if self.focused.is_none() {
+                self.read.local.focus_read = true;
+            }
             return true;
         }
         let Some(f) = self.focused else { return false };

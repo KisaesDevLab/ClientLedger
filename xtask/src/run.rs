@@ -1,6 +1,7 @@
 //! `cargo xtask run [-- <app args>]`: make sure the engine executable, the
-//! `PostgreSQL` binaries and the `PDFium` library exist (all cached, so this is
-//! fast when nothing changed), then start the desktop app. Arguments after `--` go to
+//! `PostgreSQL` binaries, the `PDFium` library, tesseract and its models exist
+//! (all cached, so this is fast when nothing changed), build the document
+//! reading worker, then start the desktop app. Arguments after `--` go to
 //! the app, for example `cargo xtask run -- --demo`.
 
 use anyhow::{Context, Result, bail};
@@ -38,6 +39,23 @@ pub fn plan(args: &[String]) -> Result<Plan> {
     })
 }
 
+/// The checkout's OCR folder has tesseract and the English model (what
+/// `cl_host::is_ocr_dir` asks of it).
+fn ocr_ready() -> bool {
+    let Ok(root) = crate::engine::repo_root() else {
+        return false;
+    };
+    let Ok(triple) = crate::ocr_build::host_triple() else {
+        return false;
+    };
+    is_ocr_dir(&root.join("target").join("ocr").join(triple))
+}
+
+fn is_ocr_dir(dir: &std::path::Path) -> bool {
+    dir.join(crate::ocr_build::exe_name()).is_file()
+        && dir.join("tessdata").join("eng.traineddata").is_file()
+}
+
 /// Entry point.
 pub fn run(args: &[String]) -> Result<()> {
     let plan = plan(args)?;
@@ -56,6 +74,27 @@ pub fn run(args: &[String]) -> Result<()> {
         && let Err(e) = crate::pdfium_fetch::pdfium_fetch(&[])
     {
         eprintln!("run: PDFium not fetched, PDF previews will be unavailable: {e:#}");
+    }
+    // Reading documents (A03): tesseract from pinned source and its
+    // models, both cached. Without them only text PDFs are read, so a
+    // failure (no C++ tools, offline) does not stop the run.
+    // A usable OCR folder is left alone: rebuilding tesseract takes
+    // minutes.
+    if plan.prepare
+        && !ocr_ready()
+        && let Err(e) =
+            crate::ocr_build::ocr_build(&[]).and_then(|()| crate::ocr_models::ocr_models(&[]))
+    {
+        eprintln!("run: OCR not prepared, scanned documents won't be read: {e:#}");
+    }
+    // The reading worker sits next to the app; `cargo run` builds only the
+    // app (cl_host::find_docread_exe).
+    let status = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+        .args(["build", "-p", "clientledger-docread"])
+        .status()
+        .context("could not start cargo")?;
+    if !status.success() {
+        bail!("building the document reader failed ({status})");
     }
     let mut cmd = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     cmd.args(["run", "-p", "clientledger", "--"])
@@ -91,6 +130,17 @@ mod tests {
                 app_args: vec![]
             }
         );
+    }
+
+    #[test]
+    fn an_ocr_folder_needs_tesseract_and_the_english_model() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!is_ocr_dir(dir.path()));
+        std::fs::write(dir.path().join(crate::ocr_build::exe_name()), b"x").unwrap();
+        assert!(!is_ocr_dir(dir.path()), "no model yet");
+        std::fs::create_dir_all(dir.path().join("tessdata")).unwrap();
+        std::fs::write(dir.path().join("tessdata/eng.traineddata"), b"x").unwrap();
+        assert!(is_ocr_dir(dir.path()));
     }
 
     #[test]

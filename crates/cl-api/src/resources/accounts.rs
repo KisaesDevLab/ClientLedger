@@ -3,6 +3,11 @@
 //! `balance` is maintained by the engine and read-only here: no request
 //! type carries it and the client never recomputes it (NN7). DELETE
 //! deactivates (the engine refuses when the balance is not zero).
+//!
+//! A credit card account may carry the last four digits of its card
+//! (`cardLast4`, U-92, `document-drafts-v1`): the desktop picks the card
+//! account of a receipt by them (Q-A03q). They are set on their own
+//! ([`Accounts::set_card_last4`]) and never logged.
 
 use cl_core::Money;
 use cl_core::Timestamp;
@@ -133,7 +138,59 @@ pub struct Account {
     /// Last changed.
     #[serde(default)]
     pub updated_at: Option<Timestamp>,
+    /// The last four digits of a credit card account's card
+    /// (`document-drafts-v1`; `None` without it or when not set).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_last4: Option<CardLast4>,
 }
+
+/// The last four digits of a payment card (`"1234"`). `Debug` never shows
+/// them.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct CardLast4([u8; 4]);
+
+impl CardLast4 {
+    /// Four ASCII digits, or `None`.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<CardLast4> {
+        let digits: [u8; 4] = s.as_bytes().try_into().ok()?;
+        digits
+            .iter()
+            .all(u8::is_ascii_digit)
+            .then_some(CardLast4(digits))
+    }
+
+    /// The digits.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        // Only ever built from four ASCII digits.
+        std::str::from_utf8(&self.0).unwrap_or("")
+    }
+}
+
+impl TryFrom<String> for CardLast4 {
+    type Error = &'static str;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        CardLast4::parse(&s).ok_or("four digits")
+    }
+}
+
+impl From<CardLast4> for String {
+    fn from(c: CardLast4) -> String {
+        c.as_str().to_string()
+    }
+}
+
+impl std::fmt::Debug for CardLast4 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CardLast4(<redacted>)")
+    }
+}
+
+/// The detail type of a credit card account: the only one that takes
+/// card digits.
+pub const CREDIT_CARD_DETAIL_TYPE: &str = "credit_card";
 
 impl EditableFields for Account {
     const EDITABLE: &'static [&'static str] = &[
@@ -294,6 +351,59 @@ impl Accounts<'_> {
             &id.to_string(),
             expected,
             json_body(update)?,
+            key,
+        )
+        .await
+    }
+
+    /// Sets (or with `None` clears) the card digits of a credit card
+    /// account, if it is still as `current` was read (§2.5). Every other
+    /// field is sent as read, so nothing else changes.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `document-drafts-v1` and
+    /// `Local(InvalidValue)` for an account whose detail type is not
+    /// `credit_card` (nothing sent); `Conflict { Stale }`; `Validation`;
+    /// any [`ApiError`].
+    pub async fn set_card_last4(
+        &self,
+        current: &Versioned<Account>,
+        digits: Option<CardLast4>,
+        key: IdempotencyKey,
+    ) -> Result<Versioned<Account>, ApiError> {
+        if !self
+            .0
+            .client()
+            .capabilities()
+            .has(crate::wire::Capabilities::DOCUMENT_DRAFTS)
+        {
+            return Err(ApiError::Local(crate::errors::LocalValidation::Unsupported));
+        }
+        let a = &current.record;
+        if digits.is_some() && a.fields.detail_type.as_deref() != Some(CREDIT_CARD_DETAIL_TYPE) {
+            return Err(ApiError::Local(
+                crate::errors::LocalValidation::InvalidValue,
+            ));
+        }
+        let mut body = serde_json::to_value(AccountUpdate {
+            fields: a.fields.clone(),
+            is_active: a.is_active,
+        })
+        .map_err(|_| ApiError::Decode {
+            what: "request body",
+        })?;
+        if let Value::Object(m) = &mut body {
+            m.insert(
+                "cardLast4".into(),
+                digits.map_or(Value::Null, |d| Value::String(d.as_str().to_string())),
+            );
+        }
+        common::update(
+            self.0,
+            &SPEC,
+            &a.id.to_string(),
+            &current.version,
+            json_body(&body)?,
             key,
         )
         .await
@@ -492,5 +602,84 @@ mod tests {
         assert_eq!(requests(&server, "POST").await.len(), 1, "never retried");
         let e = s.accounts().get(id()).await.expect_err("missing");
         assert!(matches!(e, ApiError::NotFound { .. }));
+    }
+
+    #[test]
+    fn card_digits_parse_strictly_and_never_show() {
+        assert_eq!(
+            CardLast4::parse("4821").map(|c| c.as_str().to_string()),
+            Some("4821".into())
+        );
+        for bad in ["482", "48211", "48a1", "", "４８２１"] {
+            assert_eq!(CardLast4::parse(bad), None, "{bad}");
+        }
+        let card = ACCOUNT.replace(
+            r#""detailType":"bank""#,
+            r#""detailType":"credit_card","cardLast4":"4821""#,
+        );
+        let a: Account = serde_json::from_str(&card).expect("account");
+        assert_eq!(a.card_last4, CardLast4::parse("4821"));
+        assert!(!format!("{a:?}").contains("4821"));
+        let plain: Account = serde_json::from_str(ACCOUNT).expect("account");
+        assert_eq!(plain.card_last4, None, "older engines send none");
+        let bad = ACCOUNT.replace(r#""detailType":"bank""#, r#""cardLast4":"12""#);
+        assert!(serde_json::from_str::<Account>(&bad).is_err());
+    }
+
+    #[tokio::test]
+    async fn card_digits_are_set_with_every_other_field_as_read() {
+        let server = MockServer::start().await;
+        let card = ACCOUNT.replace(r#""detailType":"bank""#, r#""detailType":"credit_card""#);
+        let one = format!(r#"{{"account":{card}}}"#);
+        for m in ["GET", "PUT"] {
+            Mock::given(method(m))
+                .and(path(format!("/api/v1/accounts/{}", id())))
+                .respond_with(json(200, &one))
+                .mount(&server)
+                .await;
+        }
+        let s = crate::resources::testkit::session_with_caps(
+            &server,
+            &[crate::wire::Capabilities::DOCUMENT_DRAFTS],
+        )
+        .await;
+        let v = s.accounts().get(id()).await.expect("get");
+        s.accounts()
+            .set_card_last4(&v, CardLast4::parse("4821"), IdempotencyKey::new())
+            .await
+            .expect("set");
+        let put: Value =
+            serde_json::from_slice(&requests(&server, "PUT").await[0].body).expect("json");
+        assert_eq!(put["cardLast4"], "4821");
+        assert_eq!(put["name"], "Checking");
+        assert_eq!(put["detailType"], "credit_card");
+        assert!(put.get("balance").is_none());
+        s.accounts()
+            .set_card_last4(&v, None, IdempotencyKey::new())
+            .await
+            .expect("clear");
+        let put: Value =
+            serde_json::from_slice(&requests(&server, "PUT").await[1].body).expect("json");
+        assert_eq!(put["cardLast4"], Value::Null);
+
+        // Not a card account, or no capability: nothing sent.
+        let mut bank = v.clone();
+        bank.record.fields.detail_type = Some("bank".into());
+        assert_eq!(
+            s.accounts()
+                .set_card_last4(&bank, CardLast4::parse("4821"), IdempotencyKey::new())
+                .await,
+            Err(ApiError::Local(
+                crate::errors::LocalValidation::InvalidValue
+            ))
+        );
+        let off = company_session(&server);
+        assert_eq!(
+            off.accounts()
+                .set_card_last4(&v, CardLast4::parse("4821"), IdempotencyKey::new())
+                .await,
+            Err(ApiError::Local(crate::errors::LocalValidation::Unsupported))
+        );
+        assert_eq!(requests(&server, "PUT").await.len(), 2);
     }
 }

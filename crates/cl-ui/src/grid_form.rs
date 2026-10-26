@@ -140,6 +140,15 @@ impl<V: Clone + PartialEq, A: LinesAdapter<V>> GridForm<V, A> {
         self.with(lookups, Grid::reset);
     }
 
+    /// The screen replaced the lines on purpose (a document reading filled
+    /// or cleared them): the cursor stays on its line when that line is
+    /// still there, else goes to a nearby one, and nothing is said about
+    /// lines that vanished ("That line is no longer here." is for changes
+    /// the owner didn't make).
+    pub fn rebind_view(&mut self, lookups: &dyn Lookups) {
+        self.with(lookups, Grid::rebind);
+    }
+
     /// How tall the grid is from now on (a screen whose footer grows).
     pub fn set_height(&mut self, height: GridHeight) {
         self.height = height;

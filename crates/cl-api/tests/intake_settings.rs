@@ -516,6 +516,7 @@ fn export_import(h: &Harness, s: &Session, co: TenantId, omit: bool) -> TenantId
                 include_attachments: false,
                 include_audit: true,
                 omit_intake_settings: omit,
+                omit_document_drafts: false,
                 host: json!({"app": "ClientLedger", "appVersion": "test", "kind": "backup"}),
                 passphrase: passphrase.clone(),
             },
@@ -534,6 +535,7 @@ fn export_import(h: &Harness, s: &Session, co: TenantId, omit: bool) -> TenantId
             path,
             passphrase,
             scratch: false,
+            reset_document_drafts: false,
         }))
         .expect("import job");
     let st = finish_job(h, s, &job.job_id);
@@ -556,6 +558,7 @@ fn archive_keeps_folders_unless_omitted(h: &Harness) {
                     include_attachments: false,
                     include_audit: true,
                     omit_intake_settings: true,
+                    omit_document_drafts: false,
                     host: json!({"app": "ClientLedger", "kind": "transfer"}),
                     passphrase: Secret::new("intake-pending-pass"),
                 },

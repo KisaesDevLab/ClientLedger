@@ -1,0 +1,8 @@
+# The engine's `idempotency-docs-v1` route set (U-92a, engine PR #178): the
+# document draft claim and convert, each `x-idempotency: true` in its
+# openapi.json, recorded from engine main 38cf97eb (the pin since A03).
+# Append-only for this capability name. A03 covers both: each is
+# `keyable-docs` in operations.txt (`KeySet::DocsV1`), keyed only while the
+# engine advertises `idempotency-docs-v1`.
+POST /api/v1/document-drafts
+POST /api/v1/document-drafts/{id}/convert

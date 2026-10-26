@@ -123,6 +123,8 @@ impl Client {
             .set_idempotency_v1(info.capabilities.has(Capabilities::IDEMPOTENCY));
         self.exec()
             .set_idempotency_ap_v1(info.capabilities.has(Capabilities::IDEMPOTENCY_AP));
+        self.exec()
+            .set_idempotency_docs_v1(info.capabilities.has(Capabilities::IDEMPOTENCY_DOCS));
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)
     }

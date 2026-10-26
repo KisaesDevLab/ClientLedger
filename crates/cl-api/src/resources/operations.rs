@@ -40,6 +40,7 @@ impl RetryClass {
             RetryClass::PreHandlerOnly => "pre-handler-only",
             RetryClass::Keyable(KeySet::V1) => "keyable",
             RetryClass::Keyable(KeySet::ApV1) => "keyable-ap",
+            RetryClass::Keyable(KeySet::DocsV1) => "keyable-docs",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -72,6 +73,8 @@ pub enum KeySet {
     /// `idempotency-ap-v1` (U-83 to U-87): bill edit and void, vendor credit
     /// create, edit and void, bill-payment void.
     ApV1,
+    /// `idempotency-docs-v1` (U-92a): the document draft claim and convert.
+    DocsV1,
 }
 
 impl KeySet {
@@ -81,6 +84,7 @@ impl KeySet {
         match self {
             KeySet::V1 => crate::wire::Capabilities::IDEMPOTENCY,
             KeySet::ApV1 => crate::wire::Capabilities::IDEMPOTENCY_AP,
+            KeySet::DocsV1 => crate::wire::Capabilities::IDEMPOTENCY_DOCS,
         }
     }
 }
@@ -209,6 +213,19 @@ const fn keyable_ap(method: Method, route: &'static str) -> Operation {
         method,
         route,
         RetryClass::Keyable(KeySet::ApV1),
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+/// A mutation in the engine's `idempotency-docs-v1` route set (U-92a):
+/// keyed only while the engine advertises that capability.
+const fn keyable_docs(method: Method, route: &'static str) -> Operation {
+    op(
+        method,
+        route,
+        RetryClass::Keyable(KeySet::DocsV1),
         RouteKind::Session,
         TimeoutClass::Write,
         true,
@@ -731,7 +748,7 @@ pub(crate) const BILL_PAYMENT_VOID: Operation =
     keyable_ap(Method::Post, "/api/v1/bill-payments/{id}/void");
 
 // ---- A01: intake folders (engine U-93, `intake-settings-v1`) ---------------
-// Client-declared (`OUTSIDE_SPEC`) until the engine PR lands and the pin moves.
+// In the engine spec since pin a88337e3 (engine PR #177).
 
 /// The company's intake folders and their change token.
 pub(crate) const INTAKE_SETTINGS_GET: Operation = read("/api/v1/company/intake-settings");
@@ -739,6 +756,48 @@ pub(crate) const INTAKE_SETTINGS_GET: Operation = read("/api/v1/company/intake-s
 /// idempotency set: a retried full replace either matches or is `STALE`.
 pub(crate) const INTAKE_SETTINGS_PUT: Operation =
     write(Method::Put, "/api/v1/company/intake-settings");
+
+// ---- A03: document drafts and vendor layouts (engine U-92, `document-drafts-v1`)
+// In the engine spec since pin 38cf97eb (engine PR #178).
+
+/// Claims an uploaded draft file as a document draft (keyed under
+/// `idempotency-docs-v1`; 409 `DOCUMENT_ALREADY_CLAIMED`).
+pub(crate) const DOCUMENT_DRAFTS_CREATE: Operation =
+    keyable_docs(Method::Post, "/api/v1/document-drafts");
+/// Document drafts by status and kind, newest first (`view=summary`).
+pub(crate) const DOCUMENT_DRAFTS_LIST: Operation = read("/api/v1/document-drafts");
+/// One document draft with its reading.
+pub(crate) const DOCUMENT_DRAFT_GET: Operation = read("/api/v1/document-drafts/{id}");
+/// Posted records and live drafts that look like the same document.
+pub(crate) const DOCUMENT_DRAFT_DUPLICATES: Operation =
+    read("/api/v1/document-drafts/{id}/duplicates");
+/// Stores a reading or a failure (`expectedUpdatedAt`, 409 `STALE`). Not
+/// in an idempotency set: a repeat is `STALE` or stores the same reading.
+pub(crate) const DOCUMENT_DRAFT_PUT: Operation = write(Method::Put, "/api/v1/document-drafts/{id}");
+/// Discards a draft (frees the claim; an already discarded one is 200).
+pub(crate) const DOCUMENT_DRAFT_DISCARD: Operation =
+    write(Method::Post, "/api/v1/document-drafts/{id}/discard");
+/// Posts a draft as a bill, card charge, cash expense or check in one
+/// database transaction (keyed under `idempotency-docs-v1`).
+pub(crate) const DOCUMENT_DRAFT_CONVERT: Operation =
+    keyable_docs(Method::Post, "/api/v1/document-drafts/{id}/convert");
+/// The company's vendor layout templates (`?contactId=`).
+pub(crate) const VENDOR_TEMPLATES_LIST: Operation = read("/api/v1/vendor-layout-templates");
+/// Creates or replaces a vendor layout template (`expectedUpdatedAt`).
+pub(crate) const VENDOR_TEMPLATES_PUT: Operation =
+    write(Method::Put, "/api/v1/vendor-layout-templates");
+/// Deletes a vendor layout template.
+pub(crate) const VENDOR_TEMPLATE_DELETE: Operation =
+    write(Method::Delete, "/api/v1/vendor-layout-templates/{id}");
+
+// ---- A03: document reading assist (engine U-92d, `document-assist-v1`)
+// In the engine spec since pin 38cf97eb (engine PR #179).
+
+/// A second reading of a document's page text (and page images) by the
+/// company's AI provider. Nothing is stored, but it spends tokens: never
+/// retried after it may have been sent.
+pub(crate) const DOCUMENT_READING_ASSIST: Operation =
+    write(Method::Post, "/api/v1/document-reading/assist");
 
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
@@ -752,7 +811,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 188] = [
+pub const OPERATIONS: [Operation; 199] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -949,6 +1008,18 @@ pub const OPERATIONS: [Operation; 188] = [
     // A01
     INTAKE_SETTINGS_GET,
     INTAKE_SETTINGS_PUT,
+    // A03
+    DOCUMENT_DRAFTS_CREATE,
+    DOCUMENT_DRAFTS_LIST,
+    DOCUMENT_DRAFT_GET,
+    DOCUMENT_DRAFT_DUPLICATES,
+    DOCUMENT_DRAFT_PUT,
+    DOCUMENT_DRAFT_DISCARD,
+    DOCUMENT_DRAFT_CONVERT,
+    VENDOR_TEMPLATES_LIST,
+    VENDOR_TEMPLATES_PUT,
+    VENDOR_TEMPLATE_DELETE,
+    DOCUMENT_READING_ASSIST,
 ];
 
 /// Looks up a covered operation.
@@ -1029,6 +1100,8 @@ mod tests {
                 Some(KeySet::V1)
             } else if KEYABLE_AP.contains(&route) {
                 Some(KeySet::ApV1)
+            } else if KEYABLE_DOCS.contains(&route) {
+                Some(KeySet::DocsV1)
             } else {
                 None
             };
@@ -1050,8 +1123,8 @@ mod tests {
         }
         assert_eq!(
             OPERATIONS.iter().filter(|o| o.is_keyable()).count(),
-            KEYABLE.len() + KEYABLE_AP.len(),
-            "every idempotency-v1 and idempotency-ap-v1 route is covered"
+            KEYABLE.len() + KEYABLE_AP.len() + KEYABLE_DOCS.len(),
+            "every idempotency-v1, idempotency-ap-v1 and idempotency-docs-v1 route is covered"
         );
         assert_eq!(
             find(Method::Post, "/api/v1/auth/create-tenant").map(|o| o.timeout),
@@ -1097,12 +1170,23 @@ mod tests {
         ("POST", "/api/v1/bill-payments/{id}/void"),
     ];
 
+    /// The engine's `idempotency-docs-v1` route set (U-92a), as
+    /// `tests/fixtures/idempotency_docs_v1_routes.txt` records it.
+    const KEYABLE_DOCS: [(&str, &str); 2] = [
+        ("POST", "/api/v1/document-drafts"),
+        ("POST", "/api/v1/document-drafts/{id}/convert"),
+    ];
+
     #[test]
     fn key_sets_name_their_capabilities() {
         assert_eq!(KeySet::V1.capability(), "idempotency-v1");
         assert_eq!(KeySet::ApV1.capability(), "idempotency-ap-v1");
         assert_eq!(RetryClass::Keyable(KeySet::V1).as_str(), "keyable");
         assert_eq!(RetryClass::Keyable(KeySet::ApV1).as_str(), "keyable-ap");
+        assert_eq!(KeySet::DocsV1.capability(), "idempotency-docs-v1");
+        assert_eq!(RetryClass::Keyable(KeySet::DocsV1).as_str(), "keyable-docs");
+        assert_eq!(DOCUMENT_DRAFT_CONVERT.key_set(), Some(KeySet::DocsV1));
+        assert_eq!(DOCUMENT_DRAFT_PUT.key_set(), None);
         assert_eq!(BILLS_CREATE.key_set(), Some(KeySet::V1));
         assert_eq!(BILL_PUT.key_set(), Some(KeySet::ApV1));
         assert_eq!(BILL_GET.key_set(), None);
@@ -1113,7 +1197,7 @@ mod tests {
     /// reconciled after a lost reply.
     #[test]
     fn idempotency_capability_upgrades_only_keyable_routes() {
-        for set in [KeySet::V1, KeySet::ApV1] {
+        for set in [KeySet::V1, KeySet::ApV1, KeySet::DocsV1] {
             assert_eq!(
                 RetryClass::Keyable(set).effective(true),
                 RetryClass::KeyedOnce

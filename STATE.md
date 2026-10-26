@@ -1,8 +1,8 @@
 # STATE.md — ClientLedger
 
-**Current phase:** A03 — Local document reading engine (ADD-01; Next, after the A02 PR merges); then A04; then P18
-**Status:** A02 built on `phase/A02-popout-viewer`; PR open with auto-merge. A01 merged. Engine PRs #168–#177 all merged; pin a88337e3
-**Engine commit:** `a88337e3` (`main`, pinned 2026-10-25 after engine PR #177 (U-93, intake-settings-v1, migration 0232); before that `b483c02e` after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
+**Current phase:** A04 — Review queue and compare tools (ADD-01; Next, after the A03 PR merges); then A06 (ADD-02). **STOP before P18: the owner said on 2026-10-26 not to start P18 until they say so.**
+**Status:** A03 built on `phase/A03-local-reading`; PR open with auto-merge. A02 merged (PR #43). Engine PRs #178 and #179 merged; pin 38cf97eb
+**Engine commit:** `38cf97eb` (`main`, pinned 2026-10-26 after engine PRs #178 (U-92, document-drafts-v1, idempotency-docs-v1, migration 0233) and #179 (U-92d, document-assist-v1, migration 0234); before that `a88337e3` after engine PR #177 (U-93, intake-settings-v1, migration 0232); before that `b483c02e` after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
 **Last updated:** 2026-10-26
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
@@ -30,7 +30,7 @@
 | P16 | Home workspace | L | Done 2026-10-24 |
 | PR-1 | Checkpoint: core ledger process review | — | Done 2026-10-25 (fixes on `fix/PR-1`; U-18 and U-82 engine PRs open) |
 | P17 | Enter Bill, vendor credits, receipt inbox, attachment viewer | M | Done 2026-10-25 |
-| P18 | Pay Bills (checks) | M | |
+| P18 | Pay Bills (checks) | M | STOP — waits for the owner's go-ahead (2026-10-26) |
 | P19 | Form printing | L | |
 | P20 | Create Invoice | M | |
 | P21 | Receive Payment | H | |
@@ -61,9 +61,15 @@
 | --- | --- | --- | --- |
 | A01 | Mapped intake folders, a setting of each company | M | Done 2026-10-26 (manual mapped-drive / UNC share check pending the owner) |
 | A02 | Pop-out document viewer | M | Done 2026-10-26 |
-| A03 | Local document reading engine | H | Next |
-| A04 | Review queue and compare tools | M | |
+| A03 | Local document reading engine | H | Done 2026-10-26 |
+| A04 | Review queue and compare tools | M | Next |
 | A05 | Match document drafts in the Bank Feed | M | After P26 |
+
+**ADD-02 — Read a vendor statement into Match Vendor Statement** (`addenda/ADD-02-statement-reading.md`; part of the beta; owner request 2026-10-26). Scheduling: A06 runs right after A04 merges; P18 stays on hold until the owner says go.
+
+| Phase | Title | Tier | Status |
+| --- | --- | --- | --- |
+| A06 | Read a vendor statement | M | After A04 |
 
 ## Post-beta (owner may reorder, Q-39)
 
@@ -210,6 +216,18 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 7. U-77 bank-file balance and U-78 reorder alerts proposed; U-37 and U-12 amended for Home.
 8. Home's Refresh issues many engine reads per data-bus event (one per reconciled account batch plus lanes); measure before P33 LAN mode.
 
+## Follow-ups from A03
+
+1. One seen document type (PDFs without a text layer, 7 docs) clears its 85 % gate by one document; the hand-style font confuses OCR digits. Re-measure on `private-fixtures/` at the milestone review.
+2. Every Preferences save with an online AI provider re-accepts the AI notice (P09 behaviour); harmless now that the document switches are read back from the engine, but worth a P29 look.
+3. macOS has no hard memory cap for the worker (RLIMIT_DATA doesn't cover mmap); tesseract on Linux/macOS has the watchdog and CPU limit only (Q-A03c). A Rust abort on Windows can still reach WER (P37).
+4. Too-large page pictures (> 4096 px) are not sent to AI; the text goes alone and the banner says so (no downscaling yet).
+5. Held-out vendor accuracy dipped one document on scan/template-scan after the "printed name beats layout" fix; watch it.
+6. "Network off" in the bill scenario is shown by zero AI requests, not an enforced block; enforced sandboxes in P37.
+7. `omit_document_drafts` / `reset_document_drafts` are unused until P32 (transfer files).
+8. Account form create-then-set card digits has no live-engine test (the save path itself is tested live).
+9. Drafts are not created on arrival yet: A04 owns the review queue and creating drafts from the intake folders.
+
 ## Follow-ups from A02
 
 1. Screen readers don't see the pop-out window: eframe 0.37 connects AccessKit only to the main window (Q-A02n). Revisit on an eframe upgrade.
@@ -276,6 +294,22 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-26 — A03 (ADD-01) complete on `phase/A03-local-reading`; PR with auto-merge. Shipped:
+  - `cl-docread` (rules: amounts, dates, header fields, kind, line tables, reconciliation checks, vendor and card matching, vendor layout templates, duplicate keys, AI amount gate) and the sandboxed `clientledger-docread` worker started by cl-host (protocol v3). Untrusted PDFs and pictures are parsed only in the worker or tesseract.
+  - OCR: Tesseract 5.5.3 + Leptonica 1.87.0 built from pinned source by `xtask ocr-build` (no network code, linkage allowlist), `tessdata_fast` eng + osd and `tessdata_best` eng for a second read of unsure pages (`xtask ocr-models`, SHA-256 pinned); clean-up, orientation, levelling, OCR fallback for PDFs without a usable text layer.
+  - Limits: Windows job object (commit cap, one process, no WER; confined `unsafe` in cl-host), Linux/macOS watchdog + RLIMIT_CPU/CORE (+ data limit, PDEATHSIG, netns on Linux), 30 s/page, leftover sweep; `docread-netcheck` CI (strace) and static no-network checks.
+  - Enter Bill "Read document" (offline, AI off; Accept required; checks shown, never adjust; Cancel; "Couldn't read…"), one button with "Ask AI to help" behind the new cloud consents (text / pictures, off for all; P17's receipt OCR path closed); CLI `clientledger-cli read`; "Card ends in" on credit card accounts.
+  - cl-api: document drafts, vendor templates, card last 4, assist, consent switches, archive omit/reset; engine U-92 (#178) and U-92d (#179) merged, pin 38cf97eb; a88337e3 archive restores.
+  - Synthetic set (25 layouts + held-out, scans and photos) via `xtask gen-invoices` and the accuracy harness/CI gate.
+  Acceptance (addenda/ADD-01-document-intake.md A03; Q-285 as amended by the owner 2026-10-26):
+  - [x] AI off, network off: header fields ≥ 95 % on text PDFs (100 % seen and held-out) and ≥ 85 % on scans/photos (scan 95–100 %, photo 88–100 %, PDFs without a text layer 85.7–100 %), 750 documents.
+  - [x] Saved template: ≥ 98 % on text PDFs (100 %); scans/photos with a template ≥ 85 % (owner amendment).
+  - [x] Non-reconciling totals flagged, never adjusted (T10/T11 incl. AI-filled values and no-subtotal receipts).
+  - [x] Speed: text 0.1 s/page, OCR p95 ≤ 2 s/page (CI timings; owner has no minimum-hardware machine, Q-A03n).
+  - [x] Malformed or hostile files can't crash or hang the desktop (sandbox, limits, hostile fixtures, security review).
+  Reviews: plan review (process-reviewer/opus xhigh: 8 must-change, fixed in the revised plan); security reviews of the sandbox (5 Medium, fixed), U-92 (2 Medium + 10 Low, fixed) and U-92d (3 Medium + 7 Low, fixed); fresh-eyes review (2 blocking: consent display vs engine, AI-filled values unreconciled; 8 should-fix; all fixed); ui-verifier (bill scenario wait, stray grid notice, outdated AI notice, accessibility; fixed). Deviation: the reading banner uses warning colours and an Accept button (non-negotiable 4) where the mockup shows an info banner.
+  Also: ADD-02 (A06, read a vendor statement into Match Vendor Statement) added on owner request; P18 on hold by the owner.
+  Agents: scout/opus, architect/opus ×2, process-reviewer/opus xhigh, impl/opus (WP-0, A, B, C, A2 ×2, F, G, G-cloud, card last 4, sandbox fix, review fixes ×2, pin, docs), engine-impl/opus (U-92, U-92 fixes, U-92d, U-92d fixes, U-92d CI), security-review/opus ×3, review/opus, ui-verifier/opus.
 - 2026-10-26 — A02 (ADD-01) complete on `phase/A02-popout-viewer`; PR with auto-merge. Shipped:
   - Viewer formats: PDF (PDFium), JPG, PNG and multi-page TIFF (`tiff` 0.11, deflate/LZW/fax only; JPEG-in-TIFF refused before any decode, Q-A02k); zoom menu (fit page, fit width, %), rotate (view only, Q-A02b), pan, page thumbnails.
   - Pop out / Dock (button and Ctrl+Shift+D): one deferred egui viewport (Q-A02a) that follows the active form or inbox item, titled with the form's name and the company stripe; placement and zoom remembered per OS user in `doc-viewer.json`, clamped to visible monitors, brought back beside the main window when its monitor is gone (Q-A02c); closing it never touches the form. F6 moves focus between form and viewer (Q-A02g).
@@ -320,4 +354,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   - [x] Screen matches its mockup: `ui-check bill --compare` reviewed by ui-verifier, must-fix items fixed, deviations Q-P17a–Q-P17v.
   Reviews: process review of the plan (3 blocking items folded into PR-A), fresh-eyes review (AC1 live test missing + 3 should-fix, fixed), ui-verifier (4 must-fix, fixed, plus a harness zoom bug). Live contract suite 181/181 three times on b483c02e; scenarios bill (incl. 200%), receipt_inbox, statement_match, document-view, register, write_check pass light and dark. Help pages: enter-bill, receipt-inbox, statement-match, document-viewer. ADD-01 merged into the plan during the phase (A01–A04 next).
   Agents: scout/opus, architect/opus, process-review/opus, impl/opus (WP0–WP8, integration, fix passes), engine-impl/opus ×10, security-review/opus ×6, review/opus, ui-verifier/opus, docs-writer/sonnet.
-- 2026-10-25 — **ADD-01 added during the build** (between P17 and P26): mapped intake folders as a per-company setting, local document reading with no internet or AI required, review queue with compare tools, pop-out document viewer, Bank Feed matching of receipts. Phases A01–A05, decisions Q-279–Q-293, engine U-92 and U-93, checkpoint PR-A1. Completed phases unchanged; migration for P09/P17 behavior is in the addendum. IDs renumbered on apply (the bundle's Q-230–Q-244 and U-14/U-15 were taken); models per Q-294 (opus, stepping up when needed).

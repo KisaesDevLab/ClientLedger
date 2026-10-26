@@ -247,6 +247,23 @@ impl Capabilities {
     /// archive export.
     pub const INTAKE_SETTINGS: &'static str = "intake-settings-v1";
 
+    // ---- A03: document drafts (engine U-92; client-declared until the pin has it)
+    /// U-92, U-92b: `/document-drafts` (claim an uploaded draft file, list,
+    /// get, duplicates, store a reading, discard, convert into a bill, card
+    /// charge, cash expense or check), `/vendor-layout-templates`,
+    /// `cardLast4` on accounts, 409 `ATTACHMENT_IN_USE` on deleting a live
+    /// draft's file, `omitDocumentDrafts` / `resetDocumentDrafts` on tenant
+    /// archives.
+    pub const DOCUMENT_DRAFTS: &'static str = "document-drafts-v1";
+    /// U-92a: the engine replays a repeated `Idempotency-Key` on exactly
+    /// `POST /document-drafts` and `POST /document-drafts/{id}/convert`.
+    pub const IDEMPOTENCY_DOCS: &'static str = "idempotency-docs-v1";
+    /// U-92d: `POST /document-reading/assist` (a second reading of the page
+    /// text, and page images, by the company's AI provider; nothing stored)
+    /// and the company task switches `document_text_cloud` and
+    /// `document_images_cloud` (off for every company).
+    pub const DOCUMENT_ASSIST: &'static str = "document-assist-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {

@@ -8,8 +8,9 @@
 # without that capability, keyed-once (Idempotency-Key sent, retried like a
 # read with the same key, which the engine replays) with it; keyable-ap = the
 # same for the idempotency-ap-v1 route set (U-83 to U-87), keyed only while the
-# engine advertises idempotency-ap-v1. Only keyable and keyable-ap routes are
-# upgraded; never = auth and company-creation routes.
+# engine advertises idempotency-ap-v1; keyable-docs = the same for the
+# idempotency-docs-v1 route set (U-92a). Only keyable, keyable-ap and
+# keyable-docs routes are upgraded; never = auth and company-creation routes.
 #
 # Read by the cl-api tests (must match src/resources/operations.rs) and by
 # `cargo xtask api-spec`. Engine Zod sources behind these shapes, hashed into
@@ -39,6 +40,9 @@
 #! schema-source engine/packages/api/src/routes/batch.routes.ts
 #! schema-source engine/packages/api/src/routes/dashboard.routes.ts
 #! schema-source engine/packages/shared/src/schemas/payroll.ts
+#! schema-source engine/packages/shared/src/schemas/document-drafts.ts
+#! schema-source engine/packages/api/src/routes/document-drafts.routes.ts
+#! schema-source engine/packages/shared/src/schemas/document-reading.ts
 GET     /health                                 idempotent
 GET     /api/v1/desktop/info                    idempotent
 GET     /openapi.json                           idempotent
@@ -233,6 +237,20 @@ POST    /api/v1/attachments/{id}/link           pre-handler-only
 GET     /api/v1/attachments/unlinked            idempotent
 GET     /api/v1/bill-payments                   idempotent
 POST    /api/v1/bill-payments/{id}/void         keyable-ap
-# A01: intake folders (engine U-93, intake-settings-v1; client-declared until the pin has it)
+# A01: intake folders (engine U-93, intake-settings-v1; in the pin since a88337e3)
 GET     /api/v1/company/intake-settings     idempotent
 PUT     /api/v1/company/intake-settings     pre-handler-only
+# A03: document drafts and vendor layouts (engine U-92, document-drafts-v1; in the pin
+# since 38cf97eb; keyable-docs = keyed only under idempotency-docs-v1)
+POST    /api/v1/document-drafts                 keyable-docs
+GET     /api/v1/document-drafts                 idempotent
+GET     /api/v1/document-drafts/{id}            idempotent
+GET     /api/v1/document-drafts/{id}/duplicates idempotent
+PUT     /api/v1/document-drafts/{id}            pre-handler-only
+POST    /api/v1/document-drafts/{id}/discard    pre-handler-only
+POST    /api/v1/document-drafts/{id}/convert    keyable-docs
+GET     /api/v1/vendor-layout-templates         idempotent
+PUT     /api/v1/vendor-layout-templates         pre-handler-only
+DELETE  /api/v1/vendor-layout-templates/{id}    pre-handler-only
+# A03: document reading assist (engine U-92d, document-assist-v1; in the pin since 38cf97eb)
+POST    /api/v1/document-reading/assist         pre-handler-only

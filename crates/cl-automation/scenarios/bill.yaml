@@ -7,7 +7,9 @@
 # unsaved-changes question on Prev, Void, Read with AI on the story invoice
 # (the demo's canned reading: read values refused until accepted, ghost
 # accounts set with Tab) and the same bill typed by hand with reading
-# switched off (AC3).
+# switched off (AC3). Section 11 (A03) reads documents on this computer
+# with Read document (the real worker; synthetic PDFs: the story invoice,
+# fixtures/docs/bill_read_mismatch.pdf and the encrypted fixture).
 #
 # The demo plays an engine with the P17 engine work (PR-A); the pinned
 # engine's refusals (closed period without `ap-closing-v1`, no Items tab
@@ -20,7 +22,7 @@
 # synthetic demo closing-date password is "demo-close". All data is
 # synthetic.
 name: bill
-description: Mockup bill, refused mismatch, Save & New, prefill, vendor credit, closing password, Prev prompt, void, Read with AI, reading off.
+description: Mockup bill, refused mismatch, Save & New, prefill, vendor credit, closing password, Prev prompt, void, Read with AI, reading off, Read document on this computer.
 steps:
   # --- 1. The window and its toolbar -----------------------------------------
   - resize: {width: 1440, height: 940}
@@ -418,6 +420,122 @@ steps:
   - type: {text: Scenario cleanup, target: {role: text_input, label: Reason}}
   - click: {role: button, label: Void}
   - assert_state: {key: screen.last_action, equals: void}
+
+  # --- 11. Read document (A03, Q-A03l): the document is read on this
+  # computer by the sandboxed worker, with AI reading still off. Values are
+  # filled as read and wait for Accept; nothing goes to the engine and no
+  # draft is made; checks are listed and change nothing; a file that can't
+  # be read says so and the form keeps working --------------------------------
+  - click: {role: button, label: Clear}
+  - type: {text: "assets/sample/docs/midwest_inv_55871.pdf", target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.draft_files, equals: 1}
+  - assert_not_exists: {role: button, label: Read with AI}
+  - assert_state: {key: screen.read.local.requests, equals: 0}
+  - click: {role: button, label: Read document}
+  # The first read starts the worker: wait for the outcome itself.
+  - assert_state: {key: screen.read.local.outcome, equals: read, within_ms: 30000}
+  - assert_state: {key: screen.read.local.requests, equals: 1}
+  - assert_state: {key: screen.read.requests, equals: 0}
+  - assert_state: {key: screen.attachments.draft_files, equals: 1}
+  # No draft and no bill: the demo engine took no write (A03 S8).
+  - assert_state: {key: screen.writes_since_read, equals: 0}
+  - assert_state: {key: screen.read.filled_locally, equals: true}
+  - assert_state: {key: screen.read.unaccepted, equals: 6}
+  - assert_state: {key: screen.read.reconciled, equals: true}
+  - assert_state: {key: screen.has_vendor, equals: true}
+  - assert_state: {key: screen.date, equals: "2026-11-03"}
+  - assert_value: {target: {role: text_input, label: Ref. no.}, equals: "INV-55871"}
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "1,480.00"}
+  - assert_exists: {role: label, label_contains: "Filled from midwest_inv_55871.pdf"}
+  - assert_exists: {role: label, label_contains: "Read from the document", index: 0}
+  # Each read field carries its marker for screen readers; the lines the
+  # reading replaced go without "That line is no longer here."
+  - assert_exists: {role: text_input, label: Ref. no., description_contains: "Read from the document"}
+  - assert_exists: {role: text_input, label: "Amount due ($)", description_contains: "Read from the document"}
+  - assert_not_exists: {label_contains: "no longer here"}
+  - assert_exists: {role: button, label: "Accept, line 1"}
+  - assert_exists: {role: button, label: "Accept, line 2"}
+  # 11/03 could be 3 November or 11 March: shown, not changed.
+  - assert_exists: {role: label, label_contains: "could also be read day first"}
+  - assert_state: {key: screen.read.ghosts.open, equals: 2}
+  - key: Alt+S
+  - assert_state: {key: screen.read.save_refused, equals: true}
+  - assert_no_clipping:
+      ignore:
+        - {x: 212, y: 905, width: 10000, height: 200}
+  - screenshot: read-document
+  - key: Alt+A
+  - assert_state: {key: screen.read.unaccepted, equals: 0}
+  - assert_state: {key: screen.read.requests, equals: 0}
+  - click: {role: button, label: Clear}
+  # Figures that don't agree: listed, nothing fixed; an unknown vendor is
+  # offered, never added.
+  - type: {text: "fixtures/docs/bill_read_mismatch.pdf", target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.draft_files, equals: 1}
+  - click: {role: button, label: Read document}
+  # (Clear starts the new bill's reading state afresh.)
+  - assert_state: {key: screen.read.local.requests, equals: 1}
+  - assert_state: {key: screen.read.local.outcome, equals: read}
+  - assert_state: {key: screen.read.reconciled, equals: false}
+  - assert_state: {key: screen.read.unknown_vendor, equals: true}
+  - assert_state: {key: screen.has_vendor, equals: false}
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "310.00"}
+  - assert_value: {target: {role: grid_cell, label: "Amount, line 1"}, equals: "180.00"}
+  - assert_value: {target: {role: grid_cell, label: "Amount, line 2"}, equals: "120.00"}
+  - assert_state: {key: screen.writes_since_read, equals: 0}
+  - assert_exists: {role: label, label_contains: "Check these on the document"}
+  - assert_exists: {role: label, label_contains: "The lines add up to 300.00"}
+  - assert_exists: {role: button, label: Add as a new vendor?}
+  - assert_no_clipping:
+      ignore:
+        - {x: 212, y: 905, width: 10000, height: 200}
+  - screenshot: read-document-checks
+  - click: {role: button, label: Clear and type it myself}
+  - assert_state: {key: screen.read.filled, equals: false}
+  - click: {role: button, label: Clear}
+  # A password-protected PDF can't be read: plain words, manual entry goes on.
+  - type: {text: "fixtures/docs/encrypted.pdf", target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.draft_files, equals: 1}
+  - click: {role: button, label: Read document}
+  - assert_state: {key: screen.read.local.outcome, equals: protected}
+  - assert_exists: {role: label, label_contains: "Couldn't read this document"}
+  - assert_state: {key: screen.read.filled, equals: false}
+  - type: {text: "INV-TYPED", target: {role: text_input, label: Ref. no.}}
+  - assert_value: {target: {role: text_input, label: Ref. no.}, equals: "INV-TYPED"}
+  - screenshot: read-document-failed
+  - assert_state: {key: screen.read.requests, equals: 0}
+  - click: {role: button, label: Clear}
+  # A hostile PDF (broken objects, absurd counts and lengths): the worker
+  # gives up on it alone, the form keeps working, nothing is written.
+  - type: {text: "fixtures/docs/hostile_garbled.pdf", target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.draft_files, equals: 1}
+  # Read document from the keyboard: the button is disabled while reading,
+  # so the keyboard moves to Cancel reading (not to the menu bar); Esc stops
+  # the reading quietly and the keyboard goes back to Read document.
+  - focus: {role: button, label: Read document}
+  - key: Enter
+  - assert_focused: {role: button, label: Cancel reading}
+  - assert_exists: {role: label, label_contains: "Reading the document on this computer"}
+  - screenshot: read-document-cancel
+  - key: Escape
+  - assert_state: {key: screen.read.local.outcome, equals: cancelled}
+  - assert_not_exists: {role: button, label: Cancel reading}
+  - assert_not_exists: {label_contains: "Couldn't read this document"}
+  - assert_focused: {role: button, label: Read document}
+  # Read to the end.
+  - click: {role: button, label: Read document}
+  - assert_state: {key: screen.read.local.outcome, equals: unreadable, within_ms: 30000}
+  - assert_exists: {role: label, label_contains: "Couldn't read this document"}
+  - assert_state: {key: screen.read.filled, equals: false}
+  - assert_state: {key: screen.writes_since_read, equals: 0}
+  - type: {text: "INV-HAND", target: {role: text_input, label: Ref. no.}}
+  - assert_value: {target: {role: text_input, label: Ref. no.}, equals: "INV-HAND"}
+  - assert_state: {key: screen.read.requests, equals: 0}
+  - click: {role: button, label: Clear}
   # The switch back on, so the next theme's run starts the same.
   - click: {role: tab, label: Preferences}
   - click: {role: check_box, label: Read bills and receipts}

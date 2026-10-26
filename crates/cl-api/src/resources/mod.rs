@@ -17,6 +17,8 @@ pub mod company;
 pub mod contacts;
 pub mod daily_sales;
 pub mod dashboard;
+pub mod document_assist;
+pub mod document_drafts;
 pub mod export;
 pub mod feed;
 pub mod form1099;
@@ -44,6 +46,7 @@ pub mod templates;
 pub mod tenants;
 pub mod transactions;
 pub mod vendor_credits;
+pub mod vendor_templates;
 pub mod versioning;
 
 #[cfg(test)]

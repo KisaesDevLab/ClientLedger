@@ -781,6 +781,7 @@ dependencies = [
 name = "cl-api"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "cl-api",
  "cl-core",
  "cl-host",
@@ -852,6 +853,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cl-docread"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "cl-core",
+ "image",
+ "pdfium-render",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tiff",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "cl-grid"
 version = "0.0.0"
 dependencies = [
@@ -867,15 +884,19 @@ dependencies = [
 name = "cl-host"
 version = "0.0.0"
 dependencies = [
+ "cl-core",
+ "cl-docread",
  "cl-host",
  "cl-pg",
  "listeners",
  "nix",
+ "rustix 1.1.5",
  "serde_json",
  "sysinfo",
  "thiserror 2.0.21",
  "tracing",
  "win32job",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -945,6 +966,7 @@ dependencies = [
  "cl-automation",
  "cl-company",
  "cl-core",
+ "cl-docread",
  "cl-grid",
  "cl-host",
  "cl-import",
@@ -984,10 +1006,26 @@ dependencies = [
 name = "clientledger-cli"
 version = "0.0.0"
 dependencies = [
+ "chrono",
  "cl-automation",
+ "cl-core",
+ "cl-docread",
  "cl-host",
  "ctrlc",
  "serde_json",
+]
+
+[[package]]
+name = "clientledger-docread"
+version = "0.0.0"
+dependencies = [
+ "cl-core",
+ "cl-docread",
+ "image",
+ "nix",
+ "pdfium-render",
+ "serde_json",
+ "tiff",
 ]
 
 [[package]]
@@ -3263,6 +3301,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdf-writer"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5e456864a7a304047bff84977dc6fb162bd956475d40ba50b2dcecaada7f753"
+dependencies = [
+ "bitflags 2.13.2",
+ "itoa",
+ "memchr",
+ "ryu",
+]
+
+[[package]]
 name = "pdfium-render"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4326,6 +4376,15 @@ dependencies = [
  "unicode-bidi",
  "unicode-normalization",
  "unicode-properties",
+]
+
+[[package]]
+name = "subsetter"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38803281d1c23166c5ebcb455439a5d2afe711cc909cf88af72448c297756ad6"
+dependencies = [
+ "rustc-hash 2.1.3",
 ]
 
 [[package]]
@@ -5896,10 +5955,15 @@ dependencies = [
  "cargo_metadata",
  "cl-model",
  "flate2",
+ "image",
  "liblzma",
+ "pdf-writer",
+ "pdfium-render",
  "proc-macro2",
  "serde_json",
  "sha2",
+ "skrifa",
+ "subsetter",
  "syn 3.0.9",
  "tar",
  "tempfile",

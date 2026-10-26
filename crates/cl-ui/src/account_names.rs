@@ -68,6 +68,7 @@ mod tests {
             balance: None,
             created_at: None,
             updated_at: None,
+            card_last4: None,
         }
     }
 

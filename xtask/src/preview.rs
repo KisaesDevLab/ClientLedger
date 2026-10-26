@@ -1,15 +1,19 @@
 //! `cargo xtask preview`: an unsigned, portable PREVIEW build for testers
 //! (Q-253), ahead of the real installers in P35 (`cargo xtask package`).
 //!
-//! Steps: release-build `clientledger` and `clientledger-cli`, build the
-//! engine single executable, fetch the pinned `PostgreSQL`, lay out
+//! Steps: release-build `clientledger`, `clientledger-cli` and the reading
+//! worker `clientledger-docread`, build the engine single executable, fetch
+//! the pinned `PostgreSQL` and `PDFium`, build tesseract and fetch its
+//! models (A03), lay out
 //! `target/preview/ClientLedger-preview-<version>-<sha>-<os>-<arch>/`, then
 //! archive it (`.zip` on Windows and macOS, `.tar.gz` on Linux) with a
 //! `.sha256` file beside it.
 //!
 //! The folder uses the installed layout the app already searches in release
 //! builds: the engine in `engine/` next to the app (`cl_host::find_engine_exe`)
-//! and `PostgreSQL` in `pg/` next to the app (`cl_pg::PgBinaries::discover`).
+//! and `PostgreSQL` in `pg/` next to the app (`cl_pg::PgBinaries::discover`);
+//! the reading worker beside the app and tesseract in `ocr/`
+//! (`cl_host::find_docread_exe`, `cl_host::find_ocr_dir`).
 
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
@@ -78,8 +82,13 @@ pub fn checksum_line(hex: &str, file_name: &str) -> String {
 pub struct Layout {
     pub app: PathBuf,
     pub cli: PathBuf,
+    /// The document reading worker, next to the app
+    /// (`cl_host::find_docread_exe`).
+    pub docread: PathBuf,
     pub engine_dir: PathBuf,
     pub pg_dir: PathBuf,
+    /// Tesseract and `tessdata/` (`cl_host::find_ocr_dir`: `<exe_dir>/ocr`).
+    pub ocr_dir: PathBuf,
 }
 
 #[must_use]
@@ -94,8 +103,10 @@ pub fn layout(windows: bool) -> Layout {
     Layout {
         app: PathBuf::from(exe("clientledger")),
         cli: PathBuf::from(exe("clientledger-cli")),
+        docread: PathBuf::from(exe("clientledger-docread")),
         engine_dir: PathBuf::from("engine"),
         pg_dir: PathBuf::from("pg"),
+        ocr_dir: PathBuf::from("ocr"),
     }
 }
 
@@ -304,6 +315,8 @@ pub fn preview(args: &[String]) -> Result<()> {
         "clientledger",
         "-p",
         "clientledger-cli",
+        "-p",
+        "clientledger-docread",
     ])
     .current_dir(&root);
     let status = c.status().context("could not start cargo")?;
@@ -313,6 +326,10 @@ pub fn preview(args: &[String]) -> Result<()> {
     crate::engine::engine(&[]).context("building the engine failed")?;
     crate::pg_fetch::pg_fetch(&[]).context("fetching PostgreSQL failed")?;
     crate::pdfium_fetch::pdfium_fetch(&[]).context("fetching PDFium failed")?;
+    // Reading scans (A03): a build without tesseract would read text PDFs
+    // only, so it is required here as PDFium is (plan §5).
+    crate::ocr_build::ocr_build(&[]).context("building tesseract failed")?;
+    crate::ocr_models::ocr_models(&[]).context("fetching the OCR models failed")?;
 
     let name = folder_name(version, &sha, target.dir);
     let preview_dir = root.join("target").join("preview");
@@ -324,7 +341,7 @@ pub fn preview(args: &[String]) -> Result<()> {
 
     let lay = layout(cfg!(windows));
     let release = cargo_target_dir(&root).join("release");
-    for exe in [&lay.app, &lay.cli] {
+    for exe in [&lay.app, &lay.cli, &lay.docread] {
         fs::copy(release.join(exe), folder.join(exe))
             .with_context(|| format!("copy {}", exe.display()))?;
     }
@@ -347,6 +364,16 @@ pub fn preview(args: &[String]) -> Result<()> {
         &crate::pdfium_fetch::out_dir(&pdfium)?,
         &folder.join("pdfium"),
         &[crate::pdfium_fetch::STAMP],
+    )?;
+    // Tesseract, its models and their license texts: the app looks in
+    // `<exe_dir>/ocr/`.
+    copy_tree(
+        &root
+            .join("target")
+            .join("ocr")
+            .join(crate::ocr_build::host_triple()?),
+        &folder.join(&lay.ocr_dir),
+        &[crate::ocr_build::STAMP],
     )?;
     for doc in DOCS {
         fs::copy(root.join(doc), folder.join(doc)).with_context(|| format!("copy {doc}"))?;
@@ -414,6 +441,10 @@ mod tests {
         assert_eq!(w.engine_dir, PathBuf::from("engine"));
         assert_eq!(w.pg_dir, PathBuf::from("pg"));
         assert_eq!(layout(false).cli, PathBuf::from("clientledger-cli"));
+        // The reading worker next to the app, tesseract in `ocr/` (A03).
+        assert_eq!(w.docread, PathBuf::from("clientledger-docread.exe"));
+        assert_eq!(layout(false).docread, PathBuf::from("clientledger-docread"));
+        assert_eq!(w.ocr_dir, PathBuf::from("ocr"));
     }
 
     fn sample_folder(dir: &Path) -> PathBuf {

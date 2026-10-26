@@ -742,6 +742,14 @@ impl Worker {
             self.log
                 .warn("stopped an engine left over from a previous run");
         }
+        // A crash while reading may have left a reader running and its
+        // scratch folders behind (A03 security review M1, L10). The
+        // single-instance lock is held, so none of them is in use.
+        let swept = crate::docread_worker::sweep_docread_leftovers(&self.paths);
+        if swept.stopped > 0 {
+            self.log
+                .warn("stopped a document reader left over from a previous run");
+        }
         let (secrets, mut notices) = match self.load_secrets() {
             Ok(s) => s,
             Err(e) => {

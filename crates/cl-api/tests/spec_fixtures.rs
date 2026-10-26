@@ -89,26 +89,34 @@ fn every_operation_is_recorded_and_in_the_spec() {
     }
 }
 
-/// The engine's keyed route sets as recorded: `idempotency-v1` (U-18) and
-/// `idempotency-ap-v1` (U-83 to U-87), sorted and disjoint.
+/// The engine's keyed route sets as recorded: `idempotency-v1` (U-18),
+/// `idempotency-ap-v1` (U-83 to U-87) and `idempotency-docs-v1` (U-92a),
+/// sorted and disjoint.
 type Routes = Vec<(String, String)>;
 
-fn recorded_idempotency_sets() -> (Routes, Routes) {
+fn recorded_idempotency_sets() -> (Routes, Routes, Routes) {
     let v1 = spec::route_lines(&fixture("idempotency_v1_routes.txt"));
     let ap = spec::route_lines(&fixture("idempotency_ap_v1_routes.txt"));
+    let docs = spec::route_lines(&fixture("idempotency_docs_v1_routes.txt"));
     assert_eq!(v1.len(), 20, "the idempotency-v1 set has 20 routes");
     assert_eq!(ap.len(), 6, "the idempotency-ap-v1 set has 6 routes");
+    assert_eq!(docs.len(), 2, "the idempotency-docs-v1 set has 2 routes");
     assert!(
         ap.iter().all(|r| !v1.contains(r)),
         "idempotency-ap-v1 only adds routes"
     );
-    (v1, ap)
+    assert!(
+        docs.iter().all(|r| !v1.contains(r) && !ap.contains(r)),
+        "idempotency-docs-v1 only adds routes"
+    );
+    (v1, ap, docs)
 }
 
 /// The rows `operations.txt` must class `keyable` (every `idempotency-v1`
-/// route) and `keyable-ap` (every `idempotency-ap-v1` route; P17 covers all
-/// six). A route is keyed only under its own set's capability.
-fn expected_keyable() -> (Routes, Routes) {
+/// route), `keyable-ap` (every `idempotency-ap-v1` route; P17 covers all
+/// six) and `keyable-docs` (every `idempotency-docs-v1` route; A03 covers
+/// both). A route is keyed only under its own set's capability.
+fn expected_keyable() -> (Routes, Routes, Routes) {
     recorded_idempotency_sets()
 }
 
@@ -131,14 +139,16 @@ fn typed_keyable(set: cl_api::KeySet) -> Routes {
 /// No engine checkout needed.
 #[test]
 fn keyable_rows_are_the_engines_idempotency_routes() {
-    let (v1, ap) = expected_keyable();
+    let (v1, ap, docs) = expected_keyable();
     assert_eq!(spec::keyable_operations(OPERATIONS_TXT), v1);
     assert_eq!(spec::keyable_ap_operations(OPERATIONS_TXT), ap);
+    assert_eq!(spec::keyable_docs_operations(OPERATIONS_TXT), docs);
     assert_eq!(typed_keyable(cl_api::KeySet::V1), v1);
     assert_eq!(typed_keyable(cl_api::KeySet::ApV1), ap);
+    assert_eq!(typed_keyable(cl_api::KeySet::DocsV1), docs);
     assert_eq!(
         cl_api::OPERATIONS.iter().filter(|o| o.is_keyable()).count(),
-        v1.len() + ap.len()
+        v1.len() + ap.len() + docs.len()
     );
 }
 
@@ -178,22 +188,51 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
         );
         return;
     }
-    let (v1, ap) = recorded_idempotency_sets();
+    let (v1, ap, docs) = recorded_idempotency_sets();
     let mut sets = v1.clone();
     sets.extend(ap.iter().cloned());
+    // `idempotency-docs-v1` (U-92a) arrives with engine PR #178: a spec
+    // that marks none of its routes is a pin from before it (PENDING,
+    // unless `CL_API_REQUIRE_CAPS` lists the capability); one that marks
+    // any must mark exactly the recorded set.
+    let has_docs = docs.iter().any(|r| marked.contains(r));
+    if has_docs {
+        sets.extend(docs.iter().cloned());
+    } else {
+        let caps = std::env::var("CL_API_REQUIRE_CAPS").unwrap_or_default();
+        assert!(
+            !caps.split(',').any(|c| c.trim() == "idempotency-docs-v1"),
+            "CL_API_REQUIRE_CAPS lists idempotency-docs-v1 but {} marks none of its routes",
+            path.display()
+        );
+        eprintln!(
+            "PENDING(U-92a): {} marks no idempotency-docs-v1 route",
+            path.display()
+        );
+    }
     sets.sort();
     assert_eq!(marked, sets, "the engine's keyed routes changed");
     let keyable = spec::keyable_operations(OPERATIONS_TXT);
     let keyable_ap = spec::keyable_ap_operations(OPERATIONS_TXT);
+    let keyable_docs = spec::keyable_docs_operations(OPERATIONS_TXT);
     assert!(
         keyable
             .iter()
             .chain(&keyable_ap)
+            .chain(if has_docs {
+                keyable_docs.iter()
+            } else {
+                [].iter()
+            })
             .all(|r| marked.contains(r)),
         "every keyable row is marked by the engine"
     );
     assert_eq!(keyable, v1, "keyable = the idempotency-v1 set");
     assert_eq!(keyable_ap, ap, "keyable-ap = the idempotency-ap-v1 set");
+    assert_eq!(
+        keyable_docs, docs,
+        "keyable-docs = the idempotency-docs-v1 set"
+    );
 }
 
 #[test]

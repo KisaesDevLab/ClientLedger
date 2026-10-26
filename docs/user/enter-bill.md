@@ -80,25 +80,26 @@ Use **Prev** and **Next** (`Page Up` / `Page Down`) to move through saved bills.
 
 If a window says part of a bill "needs a books update", your company is on an older engine that can't save that part yet. Nothing was saved.
 
-## Read with AI
+## Read document
 
-If you turn it on, AI can read a bill for you. It never decides an amount for you to trust: you check everything.
+ClientLedger can read the attached bill for you, on this computer. It works offline and with AI turned off, and nothing is sent anywhere.
 
-**It is off until you turn it on.** In **Edit > Preferences > AI suggestions**, turn AI on and tick **Read bills and receipts**. Reading uses your own online AI key, and the notice there explains what is sent. A scanned picture of a bill is sent as an image, which can't have private details removed first.
-
-To use it:
-
-1. Attach the bill's PDF or picture.
-2. Click **Read with AI**. Nothing is sent until you click.
-3. AI fills the vendor, dates, ref. no. and amounts, but only into fields that are empty. Read values are marked. Values AI wasn't sure about are marked more strongly.
+1. Attach the bill's PDF or picture (a scan or a photo works too).
+2. Click **Read document** on the **Source document** card. Nothing happens until you click. **Cancel reading** stops it.
+3. ClientLedger fills the vendor, dates, ref. no., amounts and lines, but only into fields that are empty. Read values are marked. Values that weren't printed clearly are marked more strongly.
 4. Check them. Click **Accept these values** (`Alt+A`), or **Clear and type it myself**. Editing a read value also accepts it.
 
-You can't save while read values are still waiting for your Accept. If the lines you accepted don't match the document's total, you'll see a warning. If the document is from a vendor you haven't added, you'll see **Add as a new vendor?**, which opens your vendor list. Nothing is added on its own.
+You can't save while read values are still waiting for your Accept. If the document is from a vendor you haven't added, you'll see **Add as a new vendor?**, which opens your vendor list. Nothing is added on its own.
 
-It works on PDFs that contain text and on pictures (PNG or JPEG). **A scanned PDF** isn't supported yet: you'll see a message saying so. Attach a photo of the bill instead, or type it in.
+If the figures on the document don't agree (for example, the lines don't add up to the subtotal), the problems are listed under "Check these on the document (nothing was changed):". These checks never change a value. If the document can't be read at all, you'll see "Couldn't read this document, enter the bill by hand." The rest of the form keeps working.
 
-If AI is off, or you're offline, everything else on the screen works as normal.
+### Ask AI to help
 
+If AI suggestions are on and something couldn't be read clearly, the banner offers **Ask AI to help**. AI on this computer (Ollama) needs nothing more. An online AI service needs your company's permission first, in **Edit > Preferences > Reading documents online**. An amount AI suggests is used only when the same amount is printed on the document, and you still accept every value.
+
+See **Reading documents** for the details: what is read, every message, the checks, the online switches, and the **Card ends in** field for card receipts.
+
+If your company's books are on an older engine, you'll see **Read with AI** instead of Ask AI to help. It needs AI on, with **Read bills and receipts** ticked in **Edit > Preferences > AI suggestions**. It sends the document to your AI service, and a picture of a bill can't have private details removed first.
 ## If ClientLedger can't tell whether a save went through
 
 Sometimes the connection to your books drops at the moment you save. The screen then says **We could not confirm the save**, and saving is paused so the bill isn't entered twice.

@@ -1,0 +1,33 @@
+# Pinned OCR sources for `cargo xtask ocr-build` (A03, Q-283, plan D1).
+#
+# Tesseract (Apache-2.0) and Leptonica (BSD-2-Clause style) are built from
+# source with every optional dependency switched off (no image codecs, zlib,
+# curl, libarchive, OpenMP, training tools or graphics), then a linkage check
+# refuses any library that is not part of the operating system.
+#
+# Line format:  <source name> <sha256 of the downloaded file> <url>
+#
+# Tesseract publishes no source tarball, so its line is GitHub's archive of
+# the tag (stable since 2023); Leptonica's is its own release asset (compare
+# with the `digest` GitHub shows for the asset). Update the version lines and
+# the hashes together.
+tesseract = 5.5.3
+leptonica = 1.87.0
+tesseract 9218e62793116d42a9f6d14cd9348518b27f382096eea3d0f2d1a24616bb5884 https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.5.3.tar.gz
+leptonica c73363397f96eb1295602bf44d708a994ad42046c791bf03ea0505d829bdb6a7 https://github.com/DanBloomberg/leptonica/releases/download/1.87.0/leptonica-1.87.0.tar.gz
+
+# Model data for `cargo xtask ocr-models` (Apache-2.0): `tessdata_fast` at one
+# commit, English and orientation/script detection, plus the repository's
+# license. Bundled with the app and never fetched at run time (plan D1).
+# Every url must name the `tessdata` commit below.
+tessdata = 87416418657359cb625c412a48b6e1d6d41c29bd
+eng.traineddata 7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2 https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/eng.traineddata
+osd.traineddata 9cf5d576fcc47564f11265841e5ca839001e7e6f38ff7f7aacf46d15a96b00ff https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/osd.traineddata
+tessdata-LICENSE cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30 https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/LICENSE
+
+# `tessdata_best` English (15,400,601 bytes), installed as `engbest` (Q-A03b,
+# A03 WP-A2 round 2): pages are read with `eng+engbest`, a date that does
+# not read is re-read with `engbest`. Every url must name this commit.
+tessdata_best = e12c65a915945e4c28e237a9b52bc4a8f39a0cec
+engbest.traineddata 8280aed0782fe27257a68ea10fe7ef324ca0f8d85bd2fd145d1c2b560bcb66ba https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/e12c65a915945e4c28e237a9b52bc4a8f39a0cec/eng.traineddata
+tessdata_best-LICENSE a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9 https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/e12c65a915945e4c28e237a9b52bc4a8f39a0cec/LICENSE

@@ -10,6 +10,11 @@ workspace = true
 
 [dependencies]
 cl-automation = { path = "../../crates/cl-automation" }
+cl-core = { path = "../../crates/cl-core" }
+# A03 step 19: `read` prints the worker's reading (types only, no worker parsers).
+cl-docread = { path = "../../crates/cl-docread" }
 cl-host = { path = "../../crates/cl-host" }
+# `read`: the owner's today. MIT OR Apache-2.0 (already used by cl-ui).
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 ctrlc = "3.5.2"
 serde_json = "1.0.154"

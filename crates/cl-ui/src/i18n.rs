@@ -99,9 +99,11 @@ mod viewer;
 // A01 (one module per work package).
 mod intake;
 mod picker;
+// A03 (one module per work package).
+mod cloud_reading;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 28] = [
+const TABLES: [&[(&str, &str)]; 29] = [
     ENGLISH,
     lists::ENGLISH,
     contacts::ENGLISH,
@@ -130,6 +132,7 @@ const TABLES: [&[(&str, &str)]; 28] = [
     viewer::ENGLISH,
     intake::ENGLISH,
     picker::ENGLISH,
+    cloud_reading::ENGLISH,
 ];
 
 fn catalog() -> &'static HashMap<&'static str, &'static str> {
@@ -620,6 +623,14 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("fix.api.open_make_deposit", "Open the deposit in Make Deposit to change it."),
     ("error.api.check_printed", "This check was already printed, and this change would alter what is printed on it."),
     ("fix.api.check_printed", "Open the check in Write Check to reprint it or keep it as written."),
+    // A03 WP-F: document drafts (U-92).
+    ("error.api.document_claimed", "This document is already waiting to be entered."),
+    ("fix.api.document_claimed", "Open the one that is waiting instead of reading the same file again."),
+    ("error.api.document_closed", "This document was already entered or thrown away."),
+    ("error.api.possible_duplicate", "This looks like something you already entered."),
+    ("fix.api.possible_duplicate", "Look at the matching entries. If this is a different one, confirm it and save again."),
+    ("error.api.document_not_draft", "This file is already attached to a saved entry."),
+    ("error.api.template_limit", "This company already remembers as many document layouts as it can."),
     ("lost.title", "We could not confirm the save."),
     ("lost.body", "Save is paused so this is not entered twice. Check again, or look in the register first."),
     ("lost.check_again", "Check again"),
@@ -748,8 +759,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.ai.needs_consent_again", "AI is on, but your agreement to the notice is missing or out of date for this choice: please read it and tick \"I agree\" before saving these AI changes."),
     ("prefs.ai.needs_consent", "Read the notice and tick \"I agree\" before turning an online provider on."),
     ("prefs.ai.notice_title", "Before anything goes online"),
-    ("prefs.ai.notice_text", "With an online provider, ClientLedger sends short, redacted snippets (descriptions, payee names with numbers removed, document text) to the provider you chose, under your own account and key. Amounts are never sent and never set by AI. Account numbers, tax IDs, emails and phone numbers are removed first."),
-    ("prefs.ai.notice_images", "A scanned bill or receipt is sent as an image, which cannot be redacted: only turn on \"Read bills and receipts\" with an online provider if that is acceptable to you."),
+    ("prefs.ai.notice_text", "With an online provider, ClientLedger sends short, redacted snippets (descriptions, payee names with numbers removed) to the provider you chose, under your own account and key. Amounts are never sent and never set by AI. Account numbers, tax IDs, emails and phone numbers are removed first."),
+    ("prefs.ai.notice_images", "Bills and receipts are read on this computer. A document's text or a picture of its page goes to this provider only when you ask AI to help and have allowed it in Reading documents online. \"Also send pictures of the page\" is off until you turn it on: a picture can't have anything hidden."),
     ("prefs.ai.agree", "I agree. The date, my name and the notice version are recorded in the audit trail; the provider is noted in this company's settings."),
     ("prefs.ai.recorded_stale", "Agreement recorded on {when} for an older notice: please read and agree again."),
     ("prefs.ai.notice_local", "With Ollama nothing leaves this computer. Your agreement still records that AI is on for this company."),

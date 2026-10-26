@@ -107,6 +107,11 @@ pub struct DemoState {
     pub bills: bills::DemoBills,
     /// Intake folders as the demo engine keeps them (A01, U-93).
     pub intake: intake::DemoIntake,
+    /// A03: the demo engine stores "Card ends in" on credit card accounts
+    /// (`document-drafts-v1`). Off like every demo capability; the
+    /// developer command `dev.demo_card_digits` turns it on and off for
+    /// the Chart of Accounts scenario.
+    pub card_digits: bool,
 }
 
 /// The demo's AI switches: Preferences > AI writes them, Write Check's
@@ -120,6 +125,16 @@ pub struct DemoAi {
     pub categorization: bool,
     /// Reading bills and receipts (`receipt_ocr`) is on (P17 Read with AI).
     pub reading: bool,
+    /// A03 step 21: the demo engine offers the document reading assist
+    /// (`document-assist-v1`) to Enter Bill. Off: the demo's Enter Bill
+    /// keeps P17's Read with AI (bill.yaml sections 9 and 10); tests turn
+    /// it on.
+    pub assist: bool,
+    /// The company's consent to send document text online (Preferences ›
+    /// Reading documents online). Off, as for every company.
+    pub text_cloud: bool,
+    /// The company's consent to send document pictures online. Off.
+    pub images_cloud: bool,
 }
 
 impl Default for DemoAi {
@@ -128,6 +143,9 @@ impl Default for DemoAi {
             enabled: true,
             categorization: true,
             reading: true,
+            assist: false,
+            text_cloud: false,
+            images_cloud: false,
         }
     }
 }
@@ -204,6 +222,7 @@ impl DemoState {
             batch: batch::DemoBatches::default(),
             bills: bills::DemoBills::default(),
             intake: intake::DemoIntake::default(),
+            card_digits: false,
         }
     }
 
@@ -305,6 +324,7 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
         "aiEnabled": switches.enabled,
         "enabledTasks": {
             "categorization": switches.categorization, "receipt_ocr": switches.reading, "report_summary": true,
+            "document_text_cloud": switches.text_cloud, "document_images_cloud": switches.images_cloud,
         },
         "isStale": false,
     }))
@@ -506,6 +526,7 @@ pub fn chart() -> Vec<cl_api::Account> {
                 balance,
                 created_at: Some(DemoState::now()),
                 updated_at: Some(DemoState::now()),
+                card_last4: None,
             }
         })
         .collect()

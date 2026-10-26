@@ -160,6 +160,8 @@ pub fn ci(args: &[String]) -> Result<()> {
     step("layering", crate::run_layering());
     step("release-features", crate::run_release_features());
     step("nofloat", crate::run_nofloat());
+    step("unsafe-check", crate::run_unsafe_check());
+    step("docread-check", crate::run_docread_check());
     step(
         "keymap-doc",
         crate::keymap_doc::keymap_doc(&["--check".to_string()]),

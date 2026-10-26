@@ -45,13 +45,96 @@ jobs:
       # skipping when it is missing (CL_PDFIUM_REQUIRE below).
       - name: Fetch pinned PDFium (hash-verified)
         run: cargo xtask pdfium-fetch
+      # Local document reading (A03): tesseract built from pinned source with
+      # every optional dependency off (minutes, once per cache key), then the
+      # pinned model data. Worker and host tests that need OCR fail instead of
+      # skipping when it is missing (CL_OCR_REQUIRE below).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/ocr
+            !target/ocr/.work
+            !target/ocr/.stage
+          key: ocr-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ocr.lock', 'xtask/src/ocr_build.rs') }}
+      - name: Build pinned tesseract (linkage checked)
+        run: cargo xtask ocr-build
+      - name: Fetch pinned OCR models (hash-verified)
+        run: cargo xtask ocr-models
       - run: cargo xtask ci
         env:
           CL_PDFIUM_REQUIRE: "1"
+          CL_OCR_REQUIRE: "1"
       # Ledger grid frame time (P10): 200k rows in the real shell, optimised,
       # p95 budget with one retry. Not under llvm-cov.
       - name: Grid scroll benchmark
         run: cargo xtask grid-bench
+
+  # The reading worker and tesseract reach no network (A03 plan step 22,
+  # T16; security review M4): every reading-worker test, real PDFium and
+  # tesseract included, runs under strace, and any socket beyond loopback
+  # or a local socket fails the job. Everything is built first so cargo
+  # and rustc are not traced. `cargo xtask docread-check` (in `ci`) is the
+  # static half on every OS. Every push.
+  docread-netcheck:
+    name: docread-netcheck (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    env:
+      CL_PDFIUM_REQUIRE: "1"
+      CL_OCR_REQUIRE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+      - uses: Swatinem/rust-cache@v2
+      - name: strace
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y strace
+      - uses: actions/cache@v4
+        with:
+          path: target/pdfium/.cache
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
+      - name: Fetch pinned PDFium (hash-verified)
+        run: cargo xtask pdfium-fetch
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/ocr
+            !target/ocr/.work
+            !target/ocr/.stage
+          key: ocr-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ocr.lock', 'xtask/src/ocr_build.rs') }}
+      - name: Build pinned tesseract (linkage checked)
+        run: cargo xtask ocr-build
+      - name: Fetch pinned OCR models (hash-verified)
+        run: cargo xtask ocr-models
+      - name: Build the worker tests and the test worker (before tracing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p xtask
+          cargo build -p clientledger-docread --features test-support --target-dir target/docread-test
+          cargo test -p cl-host --test docread_worker --no-run --message-format=json > "$RUNNER_TEMP/build.json"
+          exe=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "docread_worker" and .executable != null) | .executable' \
+            "$RUNNER_TEMP/build.json" | head -n 1)
+          test -x "$exe" || { echo "::error::no docread_worker test binary"; exit 1; }
+          echo "DOCREAD_TESTS=$exe" >> "$GITHUB_ENV"
+      - name: Reading worker tests under strace
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The tests' own `cargo build` of the test worker is a no-op now;
+          # offline so cargo can't look anything up either.
+          CARGO_NET_OFFLINE=true strace -f -qq -o "$RUNNER_TEMP/net.log" \
+            -e trace=execve,socket,connect,sendto,sendmsg \
+            "$DOCREAD_TESTS" --test-threads=1
+          ./target/debug/xtask docread-netcheck "$RUNNER_TEMP/net.log"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: docread-netcheck-log
+          path: ${{ runner.temp }}/net.log
+          if-no-files-found: ignore
 
   # Pull requests only: the other two platforms (Q-114).
   other-os:
@@ -85,9 +168,76 @@ jobs:
       # skipping when it is missing (CL_PDFIUM_REQUIRE below).
       - name: Fetch pinned PDFium (hash-verified)
         run: cargo xtask pdfium-fetch
+      # Local document reading (A03): tesseract built from pinned source with
+      # every optional dependency off (minutes, once per cache key), then the
+      # pinned model data. Worker and host tests that need OCR fail instead of
+      # skipping when it is missing (CL_OCR_REQUIRE below).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/ocr
+            !target/ocr/.work
+            !target/ocr/.stage
+          key: ocr-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ocr.lock', 'xtask/src/ocr_build.rs') }}
+      - name: Build pinned tesseract (linkage checked)
+        run: cargo xtask ocr-build
+      - name: Fetch pinned OCR models (hash-verified)
+        run: cargo xtask ocr-models
       - run: cargo xtask ci
         env:
           CL_PDFIUM_REQUIRE: "1"
+          CL_OCR_REQUIRE: "1"
+
+  # Local reading accuracy (A03 plan D6, Q-285): the synthetic set (24
+  # layouts, 6 held out; pinned test fonts, never committed), read by the
+  # normal worker built optimised, scored per field and path, gated at the
+  # Q-285 minimums. Also prints the worker and tesseract memory and time
+  # peaks for this OS (step 12a). Pull requests only (OCR of ~700 pages).
+  docread-accuracy:
+    name: docread accuracy (${{ matrix.os }})
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: target/pdfium/.cache
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
+      - name: Fetch pinned PDFium (hash-verified)
+        run: cargo xtask pdfium-fetch
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/ocr
+            !target/ocr/.work
+            !target/ocr/.stage
+          key: ocr-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ocr.lock', 'xtask/src/ocr_build.rs') }}
+      - name: Build pinned tesseract (linkage checked)
+        run: cargo xtask ocr-build
+      - name: Fetch pinned OCR models (hash-verified)
+        run: cargo xtask ocr-models
+      - uses: actions/cache@v4
+        with:
+          path: target/docread-fonts
+          key: docread-fonts-${{ hashFiles('docread-fonts.lock') }}
+      - name: Synthetic documents (pinned test fonts, hash-verified)
+        run: cargo xtask gen-invoices --holdout
+      - name: Reading accuracy against Q-285
+        run: cargo xtask docread-accuracy --gate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docread-accuracy-${{ runner.os }}
+          path: target/docread-accuracy/
+          if-no-files-found: ignore
 
   # Control-channel scenarios (P07, P10): the demo app runs in a real window and
   # the shell and grid_demo scenarios drive it in light and dark. Linux runs on every push under
@@ -201,10 +351,22 @@ jobs:
           key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
       - name: Fetch pinned PDFium
         run: cargo xtask pdfium-fetch
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/ocr
+            !target/ocr/.work
+            !target/ocr/.stage
+          key: ocr-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ocr.lock', 'xtask/src/ocr_build.rs') }}
+      - name: Build pinned tesseract (linkage checked)
+        run: cargo xtask ocr-build
+      - name: Fetch pinned OCR models (hash-verified)
+        run: cargo xtask ocr-models
       - name: Coverage summary
         run: cargo llvm-cov --workspace --exclude xtask --summary-only --fail-under-lines 80
         env:
           CL_PDFIUM_REQUIRE: "1"
+          CL_OCR_REQUIRE: "1"
 
   # Engine single executable (P01): built on every OS we ship, smoke-tested
   # against a temporary PostgreSQL, uploaded for later jobs.
@@ -277,13 +439,13 @@ jobs:
           # Fail instead of skipping when the engine, PostgreSQL or engine/ are missing.
           CL_API_REQUIRE: "1"
           # Capabilities the pinned engine has (Q-P05h): a missing one fails
-          # instead of going PENDING. Pin a88337e3: engine PR-A, PR-B, U-18, U-90, U-91, U-93.
-          CL_API_REQUIRE_CAPS: "ap-closing-v1,ap-edit-v1,bill-lines-v1,bill-terms-v1,bill-received-v1,bill-ocr-v2,idempotency-v1,idempotency-ap-v1,attachments-company-v1,intake-settings-v1"
+          # instead of going PENDING. Pin 38cf97eb: engine PR-A, PR-B, U-18, U-90, U-91, U-93, U-92, U-92d.
+          CL_API_REQUIRE_CAPS: "ap-closing-v1,ap-edit-v1,bill-lines-v1,bill-terms-v1,bill-received-v1,bill-ocr-v2,idempotency-v1,idempotency-ap-v1,attachments-company-v1,intake-settings-v1,document-drafts-v1,idempotency-docs-v1,document-assist-v1"
           # Same hosted-runner override as the cl-host step above (cold start is
           # slower than the 15 s product budget on shared runners). The contract
           # harness has its own boot limit, CL_API_BOOT_BUDGET_SECS (default 90 s).
           CL_HOST_BUDGET_SECS: ${{ (runner.os == 'Windows' || (runner.os == 'macOS' && runner.arch == 'X64')) && '60' || '30' }}
-        run: cargo test -p cl-api --test contract --test contract_offline --test intake_settings --test spec_fixtures
+        run: cargo test -p cl-api --test contract --test contract_offline --test intake_settings --test contract_document_drafts --test contract_document_assist --test spec_fixtures
       - name: Practice company against the real engine (templates load, first catch-up)
         env:
           CL_API_REQUIRE: "1"
@@ -300,9 +462,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo test -p cl-api --test contract --test contract_offline --test intake_settings --test network_probe \
+          cargo test -p cl-api --test contract --test contract_offline --test intake_settings --test contract_document_drafts --test contract_document_assist --test network_probe \
             --no-run --message-format=json > "$RUNNER_TEMP/cl-api-build.json"
-          for name in network_probe contract contract_offline intake_settings; do
+          for name in network_probe contract contract_offline intake_settings contract_document_drafts contract_document_assist; do
             exe=$(jq -r --arg n "$name" \
               'select(.reason == "compiler-artifact" and .target.name == $n and .executable != null) | .executable' \
               "$RUNNER_TEMP/cl-api-build.json" | head -n 1)
@@ -330,7 +492,7 @@ jobs:
           sudo chmod -R o+rX "$GITHUB_WORKSPACE/target/pg" "$GITHUB_WORKSPACE/target/engine"
           # shellcheck disable=SC1090
           . "$RUNNER_TEMP/cl-api-exes.env"
-          sudo chmod o+rx "$network_probe" "$contract" "$contract_offline" "$intake_settings"
+          sudo chmod o+rx "$network_probe" "$contract" "$contract_offline" "$intake_settings" "$contract_document_drafts" "$contract_document_assist"
           # TCP gets a reset (the connect fails at once); everything else
           # an ICMP unreachable. Loopback stays open: the engine, PostgreSQL and
           # the client all talk over 127.0.0.1.
@@ -369,6 +531,8 @@ jobs:
           run_blocked "$contract"
           run_blocked "$contract_offline"
           run_blocked "$intake_settings"
+          run_blocked "$contract_document_drafts"
+          run_blocked "$contract_document_assist"
       - name: Remove the network block and the cltest user
         if: always() && runner.os == 'Linux'
         shell: bash

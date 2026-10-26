@@ -283,6 +283,8 @@ pub const COMMANDS: &[Command] = &[
     // Enter Bill (P17; Page Up/Down, Alt+N, Alt+S, Ctrl+M and Attach above apply too)
     cmd("bill.kind_toggle", "Switch Bill or Vendor Credit", None, 7, None, Scope::Form),
     cmd("bill.read_document", "Read with AI", None, 7, None, Scope::Form),
+    // A03: read the shown document on this computer (no AI, nothing sent)
+    cmd("bill.read_local", "Read Document", None, 7, None, Scope::Form),
     cmd("bill.accept_read", "Accept These Values", None, 7, alt('A'), Scope::Form),
     // Document preview (P17): the source-document card and its full-size tab
     cmd("viewer.zoom_in", "Zoom In on the Document", None, 8, key(Mods::CMD, Key::Equals), Scope::Viewer),
@@ -400,6 +402,12 @@ pub const DEV_COMMANDS: &[Command] = &[
     // control-channel scenario marks the demo check in front as printed to
     // reach the printed-check question.
     dev_action("dev.check_mark_printed", "Mark Check Printed (developer)"),
+    // A03: the demo engine has no `document-drafts-v1`; the Chart of
+    // Accounts scenario turns its "Card ends in" storage on and off.
+    dev_action(
+        "dev.demo_card_digits",
+        "Demo Card Digits On/Off (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).
@@ -437,6 +445,10 @@ mod tests {
         assert_eq!(find_dev("dev.grid_demo").map(|c| c.opens), Some(true));
         assert_eq!(
             find_dev("dev.check_mark_printed").map(|c| (c.opens, c.scope)),
+            Some((false, Scope::Form))
+        );
+        assert_eq!(
+            find_dev("dev.demo_card_digits").map(|c| (c.opens, c.scope)),
             Some((false, Scope::Form))
         );
         assert!(find_dev("nav.home").is_none());
@@ -794,6 +806,8 @@ mod tests {
         for (id, shortcut, scope) in [
             ("bill.kind_toggle", None, Scope::Form),
             ("bill.read_document", None, Scope::Form),
+            // A03: Read document (local) beside Read with AI.
+            ("bill.read_local", None, Scope::Form),
             ("bill.accept_read", alt('A'), Scope::Form),
             ("viewer.zoom_in", key(Mods::CMD, Key::Equals), Scope::Viewer),
             ("viewer.zoom_out", key(Mods::CMD, Key::Minus), Scope::Viewer),

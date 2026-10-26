@@ -77,6 +77,117 @@ pub fn fake_engine() -> PathBuf {
     p
 }
 
+/// The reading worker with its test hooks (`test-support`), built on demand
+/// in the dev profile into its own target folder (`<target>/docread-test`)
+/// so the normal worker is never replaced by it (plan D2 "Test hooks").
+/// Built once per test process; it must exist afterwards: this never skips.
+pub fn docread_worker() -> PathBuf {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            let exe = std::env::current_exe().unwrap();
+            let profile_dir = exe.parent().and_then(Path::parent).unwrap();
+            let target_dir = profile_dir.parent().unwrap().join("docread-test");
+            let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+            let status = std::process::Command::new(cargo)
+                .args([
+                    "build",
+                    "-p",
+                    "clientledger-docread",
+                    "--features",
+                    "test-support",
+                ])
+                .arg("--target-dir")
+                .arg(&target_dir)
+                .status()
+                .expect("run cargo build for the reading worker");
+            assert!(status.success(), "building the reading worker failed");
+            let p = target_dir.join("debug").join(cl_host::docread_exe_name());
+            assert!(p.is_file(), "reading worker not built at {}", p.display());
+            p
+        })
+        .clone()
+}
+
+/// Whether `cargo xtask pdfium-fetch` has run; `CL_PDFIUM_REQUIRE=1` makes
+/// its absence a failure.
+pub fn pdfium_present() -> bool {
+    let name = if cfg!(windows) {
+        "pdfium.dll"
+    } else if cfg!(target_os = "macos") {
+        "libpdfium.dylib"
+    } else {
+        "libpdfium.so"
+    };
+    let triple = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", _) => "x86_64-pc-windows-msvc",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("macos", _) => "x86_64-apple-darwin",
+        _ => "x86_64-unknown-linux-gnu",
+    };
+    let found = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/pdfium")
+        .join(triple)
+        .join(name)
+        .is_file();
+    assert!(
+        found || std::env::var("CL_PDFIUM_REQUIRE").as_deref() != Ok("1"),
+        "PDFium is required (CL_PDFIUM_REQUIRE=1) but was not found"
+    );
+    found
+}
+
+/// Tiny synthetic PDFs: Helvetica text on US letter pages.
+pub mod pdf {
+    use std::fmt::Write as _;
+
+    /// `s` (no parentheses or backslashes) at (`x`, `y`) points.
+    pub fn text(x: i32, y: i32, size: i32, s: &str) -> String {
+        format!("BT /F1 {size} Tf {x} {y} Td ({s}) Tj ET\n")
+    }
+
+    /// A PDF with one letter page per entry of `pages`.
+    pub fn build(pages: &[String]) -> Vec<u8> {
+        let mut objects: Vec<String> = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            format!(
+                "<< /Type /Pages /Kids [{}] /Count {} >>",
+                (0..pages.len())
+                    .map(|i| format!("{} 0 R", 4 + i * 2))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                pages.len()
+            ),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+        ];
+        for (i, c) in pages.iter().enumerate() {
+            objects.push(format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents {} 0 R >>",
+                5 + i * 2
+            ));
+            objects.push(format!("<< /Length {} >>\nstream\n{c}endstream", c.len()));
+        }
+        let mut out = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, o) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        let mut t = format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1);
+        for off in offsets {
+            let _ = writeln!(t, "{off:010} 00000 n ");
+        }
+        let _ = write!(
+            t,
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1
+        );
+        out.extend_from_slice(t.as_bytes());
+        out
+    }
+}
+
 /// Fast timings so failure paths finish in a second or two.
 pub fn quick_policy() -> RestartPolicy {
     RestartPolicy {

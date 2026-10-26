@@ -1,0 +1,39 @@
+{
+  "account_number": null,
+  "amount_paid": null,
+  "balance_due": null,
+  "card_last4": null,
+  "date": "2025-10-27",
+  "due_date": "2025-11-26",
+  "family": "invoice",
+  "font": "plex-sans",
+  "holdout": false,
+  "layout": "s16-office-discount",
+  "lines": [
+    {
+      "amount": "1980.53",
+      "description": "Toner cartridge, black",
+      "quantity": "23.000",
+      "unit_price": "86.110"
+    },
+    {
+      "amount": "375.60",
+      "description": "File folders, letter, 100 ct",
+      "quantity": "20.000",
+      "unit_price": "18.780"
+    }
+  ],
+  "pages": 1,
+  "reference": "4598943",
+  "schema": 1,
+  "seq": 1,
+  "subtotal": "2356.13",
+  "tax": "195.26",
+  "terms": "Net 30",
+  "total": "2197.97",
+  "tounicode": true,
+  "vendor": {
+    "key": "paperwise-office",
+    "name": "Paperwise Office Supply"
+  }
+}

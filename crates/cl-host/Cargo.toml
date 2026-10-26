@@ -5,11 +5,21 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[lints]
-workspace = true
+# The workspace lints, except `unsafe_code`: denied here instead of
+# forbidden, so the one module that makes the Windows job memory call
+# (src/procs/win_job_memory.rs, Q-A03s) can allow it. `cargo xtask
+# unsafe-check` fails on `unsafe` anywhere else.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
 
 [dependencies]
 cl-pg = { path = "../cl-pg" }
+cl-core = { path = "../cl-core" }
+# The reading worker's protocol and value types (A03); no parsers.
+cl-docread = { path = "../cl-docread" }
 thiserror = "2.0.21"
 tracing = "0.1.44"
 serde_json = "1.0.149"
@@ -18,9 +28,19 @@ listeners = "0.6.1"
 
 [target.'cfg(windows)'.dependencies]
 win32job = "2.0.3"
+# One SetInformationJobObject call: the per-process memory cap win32job
+# lacks (src/procs/win_job_memory.rs). MIT OR Apache-2.0.
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31.3", default-features = false, features = ["signal", "process", "user"] }
+
+# `prlimit` on tesseract (no core file, CPU and data limits; A03 security
+# review M1, M2, L4) without an `unsafe` pre_exec hook. Already in the
+# build through other crates. Apache-2.0 WITH LLVM-exception OR
+# Apache-2.0 OR MIT.
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1.1.5", default-features = false, features = ["std", "process"] }
 
 [features]
 # Test-only hooks (a fake engine's behaviour switches). Never enabled in a build users run.

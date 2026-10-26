@@ -34,6 +34,7 @@
 
 mod attach;
 pub mod doc_read;
+mod doc_read_local;
 mod form;
 pub mod items;
 mod prefill;
@@ -313,6 +314,10 @@ pub struct EnterBillScreen {
     pub(crate) accounts_loaded: bool,
     pub(crate) contacts: Vec<Contact>,
     contacts_task: Option<Task<Vec<Contact>>>,
+    /// Saved layouts and card accounts for "Read document"
+    /// (`document-drafts-v1`, A03 step 19a; empty without it).
+    pub(crate) read_context: crate::reading::service::ReadContext,
+    read_context_task: Option<Task<crate::reading::service::ReadContext>>,
     pub(crate) tags: Vec<Tag>,
     tags_task: Option<Task<Vec<Tag>>>,
     pub(crate) items_list: Vec<Item>,
@@ -428,6 +433,8 @@ impl EnterBillScreen {
             accounts_loaded: false,
             contacts: Vec::new(),
             contacts_task: None,
+            read_context: crate::reading::service::ReadContext::default(),
+            read_context_task: None,
             tags: Vec::new(),
             tags_task: None,
             items_list: Vec::new(),
@@ -643,6 +650,11 @@ impl EnterBillScreen {
             self.contacts_task = Some(Task::Pending(p));
         }
         if let Ok(p) = group.read(&session, |s| async move {
+            crate::reading::service::load_context(&s).await
+        }) {
+            self.read_context_task = Some(Task::Pending(p));
+        }
+        if let Ok(p) = group.read(&session, |s| async move {
             s.tags().list_all(&TagFilter::default()).await
         }) {
             self.tags_task = Some(Task::Pending(p));
@@ -716,6 +728,13 @@ impl EnterBillScreen {
             if let Ok(c) = r {
                 self.contacts = c;
                 lists_changed = true;
+            }
+        }
+        if let Some(r) = self.read_context_task.as_mut().and_then(Task::try_take) {
+            self.read_context_task = None;
+            // Without it the reading is rules only (S12).
+            if let Ok(c) = r {
+                self.read_context = c;
             }
         }
         if let Some(r) = self.tags_task.as_mut().and_then(Task::try_take) {
@@ -1094,6 +1113,14 @@ impl EnterBillScreen {
             "attachments": self.attach.state_json(&form),
             "panel": self.panel.state_json(),
             "read": self.read.state_json(),
+            // The demo engine's writes since the last Read document (null on
+            // a live engine): reading makes no draft and no bill (A03 S8).
+            "writes_since_read": self.link.demo_state().and_then(|d| {
+                self.read
+                    .local
+                    .writes_at_read
+                    .map(|w| d.bills.writes.saturating_sub(w))
+            }),
             "layout": self.layout.json(),
         });
         for part in [more, rest, self.closing_prompt.state_json(caps.closing)] {
@@ -1252,11 +1279,16 @@ impl EnterBillScreen {
         if *self.header.current() != form {
             self.header.edit_step(|h| *h = form);
         }
+        // The screen replaced the lines (a reading filled or cleared them):
+        // the grids follow without "That line is no longer here." (A03 UI
+        // review 1).
         if &expenses != self.expenses.value() {
             self.expenses.form_mut().edit_step(|v| *v = expenses);
+            self.expenses.lines_replaced();
         }
         if &items != self.items.value() {
             self.items.form_mut().edit_step(|v| *v = items);
+            self.items.lines_replaced();
         }
         self.sync_inputs();
     }

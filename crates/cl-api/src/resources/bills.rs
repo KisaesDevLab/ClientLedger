@@ -171,7 +171,7 @@ impl fmt::Debug for BillDraft {
 }
 
 impl BillDraft {
-    fn parts(&self, with_draft: bool) -> DocParts<'_> {
+    pub(crate) fn parts(&self, with_draft: bool) -> DocParts<'_> {
         DocParts {
             kind: ApKind::Bill,
             vendor: self.vendor,

@@ -10,6 +10,9 @@
 //!   kills that process, but only when its executable and start time match
 //!   what was recorded, so a recycled pid is never killed.
 
+#[cfg(windows)]
+mod win_job_memory;
+
 use crate::paths::AppPaths;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -30,6 +33,12 @@ pub(crate) fn prepare(cmd: &mut Command) {
     }
     #[cfg(not(any(windows, unix)))]
     let _ = cmd;
+}
+
+#[cfg(all(windows, test))]
+thread_local! {
+    /// Unit tests only: make [`TreeKiller::confine`] fail on this thread.
+    pub(crate) static FAIL_CONFINE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Owns the means to kill a child and everything it started.
@@ -58,7 +67,7 @@ impl TreeKiller {
             match job {
                 Ok(job) => TreeKiller { job: Some(job) },
                 Err(e) => {
-                    tracing::warn!("could not create a job object for the engine: {e}");
+                    tracing::warn!("could not create a job object for a child process: {e}");
                     TreeKiller { job: None }
                 }
             }
@@ -68,6 +77,35 @@ impl TreeKiller {
             TreeKiller {
                 pgid: i32::try_from(child.id()).unwrap_or(0),
             }
+        }
+    }
+
+    /// Confine a reading worker or tesseract (A03, Q-A03s; security review
+    /// M2, M3): on Windows the job's per-process commit cap of `bytes` (an
+    /// allocation past it fails at once instead of waiting for the
+    /// watchdog's next poll), one active process, and no crash reporting
+    /// (`win_job_memory`). False when there is no job or the limits could
+    /// not be set: the caller must then stop the child (fail closed,
+    /// review M5).
+    ///
+    /// Elsewhere the watchdog and the limits the worker sets on itself apply
+    /// (and, on Linux, `limit_tesseract`), and this returns false.
+    #[cfg_attr(not(windows), allow(clippy::unused_self))]
+    pub(crate) fn confine(&self, bytes: u64) -> bool {
+        #[cfg(all(windows, test))]
+        if FAIL_CONFINE.with(std::cell::Cell::get) {
+            return false;
+        }
+        #[cfg(windows)]
+        {
+            self.job
+                .as_ref()
+                .is_some_and(|job| win_job_memory::confine_job(job, bytes))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = bytes;
+            false
         }
     }
 
@@ -109,8 +147,40 @@ impl TreeKiller {
     }
 }
 
+/// Limits on a child the host started without a `pre_exec` hook (Linux,
+/// `prlimit`; security review M1, M2, L4): no core file, at most
+/// `cpu_secs` of CPU time (`SIGXCPU`, then `SIGKILL` a few seconds later)
+/// and at most `data_bytes` of private writable memory. Call before the
+/// child is given any input. False when a limit could not be set.
+///
+/// The child must not have read anything yet: tesseract waits for its
+/// page on stdin, which the host writes only after this.
+#[cfg(target_os = "linux")]
+pub(crate) fn limit_child(pid: u32, cpu_secs: u64, data_bytes: u64) -> bool {
+    use rustix::process::{Pid as RPid, Resource, Rlimit, prlimit};
+    let Some(pid) = i32::try_from(pid).ok().and_then(RPid::from_raw) else {
+        return false;
+    };
+    let set = |resource, soft: u64, hard: u64| {
+        prlimit(
+            Some(pid),
+            resource,
+            Rlimit {
+                current: Some(soft),
+                maximum: Some(hard),
+            },
+        )
+        .is_ok()
+    };
+    // Each is tried: one refused limit must not skip the others.
+    let core = set(Resource::Core, 0, 0);
+    let cpu = set(Resource::Cpu, cpu_secs, cpu_secs + 5);
+    let data = set(Resource::Data, data_bytes, data_bytes);
+    core && cpu && data
+}
+
 /// Seconds since the Unix epoch of a process start, as sysinfo reports it.
-fn process_identity(pid: u32) -> Option<(PathBuf, u64)> {
+pub(crate) fn process_identity(pid: u32) -> Option<(PathBuf, u64)> {
     let mut sys = System::new();
     let pid = Pid::from_u32(pid);
     sys.refresh_processes_specifics(
@@ -172,7 +242,7 @@ pub(crate) fn reap_stale_child(paths: &AppPaths, expected_exe: &Path) -> bool {
     kill_process(pid)
 }
 
-fn same_file(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_file(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(x), Ok(y)) => x == y,
         _ => a == b,
@@ -180,7 +250,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 /// Forcefully end one process (and, on Windows or Unix, nothing else).
-fn kill_process(pid: u32) -> bool {
+pub(crate) fn kill_process(pid: u32) -> bool {
     let mut sys = System::new();
     let p = Pid::from_u32(pid);
     sys.refresh_processes_specifics(

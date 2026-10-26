@@ -20,6 +20,7 @@
 //! Every engine call runs on the request queue and is polled each frame.
 
 pub mod ai;
+pub mod ai_cloud_reading;
 pub mod company;
 pub mod email;
 pub mod intake_folders;
@@ -73,6 +74,8 @@ pub enum Category {
     Inventory,
     /// The AI panel.
     Ai,
+    /// Reading documents with an online service (A03, Q-A03k).
+    AiCloudReading,
     /// SMTP.
     Email,
     /// Document intake: the company's intake folders (A01; shown as
@@ -86,7 +89,7 @@ pub enum Category {
 
 impl Category {
     /// Every category in list order.
-    pub const ALL: [Category; 12] = [
+    pub const ALL: [Category; 13] = [
         Category::LookAndFeel,
         Category::DatesNumbers,
         Category::Reminders,
@@ -95,6 +98,7 @@ impl Category {
         Category::SalesTax,
         Category::Inventory,
         Category::Ai,
+        Category::AiCloudReading,
         Category::Email,
         Category::ReceiptInbox,
         Category::Backups,
@@ -122,6 +126,7 @@ impl Category {
             Category::SalesTax => "prefs.cat.sales_tax",
             Category::Inventory => "prefs.cat.inventory",
             Category::Ai => "prefs.cat.ai",
+            Category::AiCloudReading => "prefs.cat.cloud_reading",
             Category::Email => "prefs.cat.email",
             Category::ReceiptInbox => "prefs.cat.intake",
             Category::Backups => "prefs.cat.backups",
@@ -141,6 +146,7 @@ impl Category {
             Category::SalesTax => "sales_tax",
             Category::Inventory => "inventory",
             Category::Ai => "ai",
+            Category::AiCloudReading => "ai_cloud_reading",
             Category::Email => "email",
             Category::ReceiptInbox => "inbox",
             Category::Backups => "backups",
@@ -159,6 +165,9 @@ impl Category {
             Category::SalesTax => "tax rate",
             Category::Inventory => "stock items cost",
             Category::Ai => "ai anthropic openai ollama key suggestions cap usage",
+            Category::AiCloudReading => {
+                "ai online cloud document reading text pictures images consent anthropic openai"
+            }
             Category::Email => "smtp email send password server",
             Category::ReceiptInbox => {
                 "receipt inbox folder photo pdf intake document bills scan scanner share network"
@@ -233,6 +242,8 @@ pub struct Edits {
     pub accounting: company::AccountingEdits,
     /// The AI panel.
     pub ai: ai::AiEdits,
+    /// Reading documents online (A03): the company's two consent switches.
+    pub cloud_reading: ai_cloud_reading::CloudReadingEdits,
     /// The Email panel.
     pub email: email::EmailEdits,
     /// The Document intake panel (the engine's folder list and this
@@ -303,6 +314,39 @@ pub struct SaveOutcome {
     pub consent: Option<ai::ConsentRecorded>,
     /// The engine accepted this intake-folder list (U-93).
     pub intake: Option<intake_folders::source::Stored>,
+    /// Reading documents online as the engine stores it after the save
+    /// (read back, A03 review B1); `None` when it couldn't be read.
+    pub cloud_reading: Option<ai_cloud_reading::CloudReadingEdits>,
+}
+
+/// Reading documents online after a save, and whether the owner is told
+/// it was turned off (A03 review B1). `prev` is what the engine held
+/// before, `sent` the owner's own change in this save, `stored` what the
+/// engine holds now. Without a read-back the engine's known rules stand:
+/// turning AI off clears both switches (revoke); otherwise the owner's
+/// change, or what was there. The message shows only when the engine went
+/// from on to off without the owner asking.
+#[must_use]
+pub fn cloud_after_save(
+    prev: ai_cloud_reading::CloudReadingEdits,
+    sent: Option<ai_cloud_reading::CloudReadingEdits>,
+    stored: Option<ai_cloud_reading::CloudReadingEdits>,
+    ai_on: bool,
+) -> (ai_cloud_reading::CloudReadingEdits, bool) {
+    let off = ai_cloud_reading::CloudReadingEdits::default();
+    let now = stored.unwrap_or_else(|| if ai_on { sent.unwrap_or(prev) } else { off });
+    (now, sent.is_none() && prev != off && now == off)
+}
+
+/// The document switches the engine stores now; `None` when the read
+/// fails (the save itself succeeded).
+pub async fn stored_cloud_reading(
+    session: &cl_api::Session,
+) -> Option<ai_cloud_reading::CloudReadingEdits> {
+    let consent = session.company_ai_disclosure().await.ok()?;
+    Some(ai_cloud_reading::CloudReadingEdits::from_consent(Some(
+        &consent,
+    )))
 }
 
 /// The Preferences window.
@@ -330,6 +374,10 @@ pub struct PreferencesScreen {
     error: Option<CompanyError>,
     status: Option<String>,
     close_after_save: bool,
+    /// The owner's own change to Reading documents online in the running
+    /// save (`None`: unchanged). An engine that turned them off otherwise
+    /// is said so, on that screen (review B1).
+    cloud_sent: Option<ai_cloud_reading::CloudReadingEdits>,
     /// The Document intake panel's reads, tests and dialogs.
     pub(crate) intake: intake_folders::IntakePanel,
     /// The fixed bars' sizes last frame (Q-265).
@@ -362,6 +410,7 @@ impl PreferencesScreen {
             bills_due_days: company_prefs.bills_due_days.to_string(),
             user,
             ai: ai::AiEdits::from_local(&company_prefs),
+            cloud_reading: ai_cloud_reading::CloudReadingEdits::default(),
             company: company_prefs,
             flags,
             backup_on_close: list.backup_on_close,
@@ -395,6 +444,7 @@ impl PreferencesScreen {
             error: None,
             status: None,
             close_after_save: false,
+            cloud_sent: None,
             intake: intake_folders::IntakePanel::default(),
             layout: crate::layout::FrameReport::default(),
             footer_w: 220.0,
@@ -487,6 +537,8 @@ impl PreferencesScreen {
             loaded.consent.as_ref(),
             base.company.ai_consent.as_ref(),
         );
+        base.cloud_reading =
+            ai_cloud_reading::CloudReadingEdits::from_consent(loaded.consent.as_ref());
         base.email
             .apply_engine(loaded.smtp.as_ref(), base.company.smtp_security);
         self.committed = base;
@@ -662,16 +714,38 @@ impl PreferencesScreen {
         // accepted (finish_save).
         let intake_put = (edits.intake != self.committed.intake)
             .then(|| (edits.intake.folders.clone(), self.intake.updated_at.clone()));
+        // Reading documents online (A03): only the owner's change, sent
+        // after the AI panel's own (whose consent accept it needs). Turning
+        // AI off clears both, as the engine's revoke does.
+        let cloud_ready = self.cloud_reading_available() == ai_cloud_reading::Availability::Ready;
+        let cloud_put = (cloud_ready && edits.cloud_reading != self.committed.cloud_reading)
+            .then(|| edits.cloud_reading.toggles());
         let mut after = edits.clone();
         after.ai.clear_typed();
         after.email.clear_typed();
         after.company = company_prefs;
+        // The document switches shown after the save are what the engine
+        // stores, read back once it answers (review B1): the engine turns
+        // them off on AI off, and on a newer AI notice only. A change sent
+        // in this same save goes after the consent, so it stands.
+        after.cloud_reading = self.committed.cloud_reading;
+        self.cloud_sent = cloud_put.is_some().then_some(edits.cloud_reading);
         if let Some(mut demo) = self.link.demo_state() {
-            // The demo engine keeps the AI switches Write Check reads.
+            // The demo engine keeps the AI switches Write Check reads, and
+            // the document switches by the engine's rules.
+            let (cloud, _) = cloud_after_save(
+                self.committed.cloud_reading,
+                self.cloud_sent,
+                None,
+                edits.ai.enabled,
+            );
             demo.ai = crate::company::demo::DemoAi {
                 enabled: edits.ai.enabled,
                 categorization: edits.ai.bank_feed,
                 reading: edits.ai.read_documents,
+                assist: demo.ai.assist,
+                text_cloud: cloud.text,
+                images_cloud: cloud.text && cloud.images,
             };
         }
         if self.link.is_demo() || self.tenant.is_none() {
@@ -712,6 +786,9 @@ impl PreferencesScreen {
                     cap_reached: plan.cap_reached,
                     consent,
                     intake,
+                    // The demo engine follows the engine's rules
+                    // (`cloud_after_save` without a read-back).
+                    cloud_reading: None,
                 },
                 after,
             );
@@ -736,6 +813,15 @@ impl PreferencesScreen {
                     .await?;
             }
             let mut outcome = plan.run(&session, secrets_for_engine).await?;
+            if let Some(toggles) = cloud_put {
+                // The engine records the change in its audit trail.
+                session
+                    .set_ai_tasks(&toggles, cl_api::IdempotencyKey::new())
+                    .await?;
+            }
+            // What the engine now stores, after the consent and the change
+            // (review B1).
+            outcome.cloud_reading = stored_cloud_reading(&session).await;
             if let Some((folders, expected)) = intake_put {
                 outcome.intake = Some(
                     intake_folders::source::engine_put(&session, &folders, expected.as_deref())
@@ -749,6 +835,13 @@ impl PreferencesScreen {
     }
 
     fn finish_save(&mut self, outcome: &SaveOutcome, mut after: Edits) {
+        let (cloud, cloud_reset) = cloud_after_save(
+            self.committed.cloud_reading,
+            self.cloud_sent.take(),
+            outcome.cloud_reading,
+            after.ai.enabled,
+        );
+        after.cloud_reading = cloud;
         let typed_intake = after.intake.clone();
         match &outcome.intake {
             Some(stored) => self.finish_intake_save(stored, &mut after),
@@ -779,7 +872,13 @@ impl PreferencesScreen {
                 });
             }
         }
-        self.status = Some(if outcome.cap_reached {
+        if cloud_reset {
+            // Shown on its own screen, off (#179 review).
+            self.category = Category::AiCloudReading;
+        }
+        self.status = Some(if cloud_reset {
+            t("prefs.cloud_reading.reset")
+        } else if outcome.cap_reached {
             t("prefs.saved_cap")
         } else if outcome.ai_waiting_engine {
             t("prefs.saved_waiting")
@@ -947,6 +1046,30 @@ impl PreferencesScreen {
         }
     }
 
+    /// Whether the Reading documents online switches can change: the
+    /// engine's assist (the demo engine keeps the switches too), the owner,
+    /// and AI on.
+    #[must_use]
+    pub fn cloud_reading_available(&self) -> ai_cloud_reading::Availability {
+        ai_cloud_reading::Availability::of(
+            self.link.is_demo()
+                || self
+                    .link
+                    .capabilities()
+                    .has(cl_api::Capabilities::DOCUMENT_ASSIST),
+            self.intake.is_admin(),
+            self.edits.ai.enabled,
+        )
+    }
+
+    /// The engine sends page pictures to an online provider at all.
+    fn cloud_vision(&self) -> bool {
+        self.loaded
+            .ai
+            .as_ref()
+            .is_some_and(AiConfig::cloud_vision_allowed)
+    }
+
     fn panel(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let caps = self.link.capabilities();
         let demo = self.link.is_demo();
@@ -970,6 +1093,17 @@ impl PreferencesScreen {
                     self.ai_test_status.as_deref(),
                 );
                 self.handle_ai_action(action);
+            }
+            Category::AiCloudReading => {
+                let available = self.cloud_reading_available();
+                let vision = self.cloud_vision();
+                ai_cloud_reading::panel(
+                    ui,
+                    tokens,
+                    &mut self.edits.cloud_reading,
+                    available,
+                    vision,
+                );
             }
             Category::Email => {
                 let action = email::panel(
@@ -1023,6 +1157,7 @@ impl PreferencesScreen {
                 });
             }
             ai::PanelAction::Test => self.test_ai(),
+            ai::PanelAction::OpenCloudReading => self.category = Category::AiCloudReading,
         }
     }
 
@@ -1308,6 +1443,11 @@ impl Screen for PreferencesScreen {
             "error": self.error.is_some(),
             "status": self.status.is_some(),
             "ai": self.edits.ai.state(&self.secrets_saved, &self.link.capabilities()),
+            "cloud_reading": ai_cloud_reading::state_json(
+                &self.edits.cloud_reading,
+                self.cloud_reading_available(),
+                self.cloud_vision(),
+            ),
             "email": self.edits.email.state(&self.secrets_saved),
             "account_numbers": self.edits.company.account_numbers,
             "intake": self.intake.state(
@@ -1417,6 +1557,102 @@ mod tests {
         }
         let s = PreferencesScreen::new(link, tenant, UserPrefs::default(), Category::Ai);
         (dir, s)
+    }
+
+    /// A03 step 21: the switches start off, the owner's change is stored,
+    /// and AI turned off (as a re-consent) turns them off again, shown on
+    /// their own screen.
+    #[test]
+    fn reading_documents_online_is_stored_and_reset() {
+        let (_d, mut s) = demo_screen(true);
+        assert_eq!(
+            s.cloud_reading_available(),
+            ai_cloud_reading::Availability::Ready
+        );
+        assert_eq!(
+            s.edits().cloud_reading,
+            ai_cloud_reading::CloudReadingEdits::default()
+        );
+        s.edits_mut().cloud_reading.text = true;
+        assert!(s.save());
+        let demo = s.link.demo_state().expect("demo").ai;
+        assert!(demo.text_cloud && !demo.images_cloud);
+        assert!(s.committed.cloud_reading.text);
+        // AI off: the engine forgets them.
+        s.select(Category::Ai);
+        s.edits_mut().ai.enabled = false;
+        assert!(s.save());
+        assert_eq!(
+            s.edits().cloud_reading,
+            ai_cloud_reading::CloudReadingEdits::default()
+        );
+        assert_eq!(s.category, Category::AiCloudReading);
+        assert_eq!(s.status, Some(t("prefs.cloud_reading.reset")));
+        assert!(!s.link.demo_state().expect("demo").ai.text_cloud);
+        // AI off: the switches can't change.
+        assert_eq!(
+            s.cloud_reading_available(),
+            ai_cloud_reading::Availability::AiOff
+        );
+    }
+
+    /// Review B1: the switches after a save are the engine's, and "turned
+    /// off" is said only when the engine went from on to off by itself.
+    #[test]
+    fn cloud_switches_after_a_save_follow_the_engine() {
+        use ai_cloud_reading::CloudReadingEdits as C;
+        let on = C {
+            text: true,
+            images: true,
+        };
+        let off = C::default();
+        // A re-consent the engine keeps them on through: on, no message.
+        assert_eq!(cloud_after_save(on, None, Some(on), true), (on, false));
+        // The engine turned them off (a newer notice): off, said so.
+        assert_eq!(cloud_after_save(on, None, Some(off), true), (off, true));
+        // The owner turned them off: no message.
+        assert_eq!(
+            cloud_after_save(on, Some(off), Some(off), true),
+            (off, false)
+        );
+        // Off before: nothing to say.
+        assert_eq!(cloud_after_save(off, None, Some(off), false), (off, false));
+        // No read-back: AI off clears them (revoke), else they stand.
+        assert_eq!(cloud_after_save(on, None, None, false), (off, true));
+        assert_eq!(cloud_after_save(on, None, None, true), (on, false));
+        let text = C {
+            text: true,
+            images: false,
+        };
+        assert_eq!(cloud_after_save(off, Some(text), None, true), (text, false));
+    }
+
+    /// Review B1: an engine that keeps the document switches on through a
+    /// re-accepted AI notice (same version) is shown as it is.
+    #[tokio::test]
+    async fn a_reconsent_the_engine_keeps_switches_through_shows_them_on() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, ResponseTemplate};
+        let server = wiremock::MockServer::start().await;
+        let company = "0b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/ai/consent/{company}/disclosure")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "companyId": company, "systemVersion": 2, "acceptedVersion": 2,
+                "acceptedAt": "2026-10-17T10:00:00.000Z", "aiEnabled": true,
+                "enabledTasks": {"receipt_ocr": true, "document_text_cloud": true,
+                    "document_images_cloud": true},
+            })))
+            .mount(&server)
+            .await;
+        let session = cl_api::testing::stub_session(server.address().port());
+        let stored = stored_cloud_reading(&session).await;
+        let on = ai_cloud_reading::CloudReadingEdits {
+            text: true,
+            images: true,
+        };
+        assert_eq!(stored, Some(on));
+        assert_eq!(cloud_after_save(on, None, stored, true), (on, false));
     }
 
     #[test]

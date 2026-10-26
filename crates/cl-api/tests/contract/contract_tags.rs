@@ -539,6 +539,7 @@ pub fn number_archive_round_trip_u75(h: &Harness) {
                 include_attachments: false,
                 include_audit: true,
                 omit_intake_settings: false,
+                omit_document_drafts: false,
                 host: json!({"app": "ClientLedger", "appVersion": "test", "kind": "backup"}),
                 passphrase: passphrase.clone(),
             },
@@ -557,6 +558,7 @@ pub fn number_archive_round_trip_u75(h: &Harness) {
             path,
             passphrase,
             scratch: false,
+            reset_document_drafts: false,
         }))
         .expect("import job");
     let st = finish_job(h, &s, &job.job_id);

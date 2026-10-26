@@ -194,6 +194,48 @@ pub fn holds_bank_or_card_number(kind: AccountKind, detail: Option<&str>) -> boo
     )
 }
 
+/// The detail type of a credit card account: the only accounts that take
+/// "Card ends in" digits (A03; the engine's rule, `document-drafts-v1`).
+pub const CREDIT_CARD_DETAIL: &str = "credit_card";
+
+/// True when an account of this detail type takes card digits.
+#[must_use]
+pub fn takes_card_digits(detail: &str) -> bool {
+    detail.trim() == CREDIT_CARD_DETAIL
+}
+
+/// The last four digits of a credit card as typed or loaded ("Card ends
+/// in", A03). Empty means none. `Debug` never shows the digits.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct CardEnding(pub String);
+
+impl CardEnding {
+    /// Exactly four ASCII digits (after trimming).
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        let t = self.0.trim();
+        t.len() == 4 && t.bytes().all(|b| b.is_ascii_digit())
+    }
+
+    /// Nothing typed.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.trim().is_empty()
+    }
+
+    /// The digits, trimmed.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.trim()
+    }
+}
+
+impl std::fmt::Debug for CardEnding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CardEnding(<redacted>)")
+    }
+}
+
 /// One account as the screen loaded it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChartEntry {
@@ -219,6 +261,9 @@ pub struct ChartEntry {
     pub sensitive: bool,
     /// The account's own balance, as the engine reported it.
     pub balance: Option<Money>,
+    /// "Card ends in" of a credit card account (A03; empty when not set or
+    /// the engine lacks `document-drafts-v1`).
+    pub card_last4: CardEnding,
 }
 
 /// One account in chart order.
@@ -637,6 +682,8 @@ pub struct AccountDraft {
     pub parent: Option<AccountId>,
     /// Sensitive (Q-157).
     pub sensitive: bool,
+    /// "Card ends in" (A03): credit card accounts only; empty clears it.
+    pub card_last4: CardEnding,
 }
 
 impl AccountDraft {
@@ -655,6 +702,7 @@ impl AccountDraft {
             description: String::new(),
             parent: None,
             sensitive: false,
+            card_last4: CardEnding::default(),
         }
     }
 
@@ -669,6 +717,7 @@ impl AccountDraft {
             description: e.description.clone().unwrap_or_default(),
             parent: e.parent,
             sensitive: e.sensitive,
+            card_last4: e.card_last4.clone(),
         }
     }
 
@@ -685,6 +734,8 @@ impl AccountDraft {
             .map(|d| (*d).to_string())
             .unwrap_or_default();
         self.parent = None;
+        // Card digits belong to a credit card account only.
+        self.card_last4 = CardEnding::default();
     }
 }
 
@@ -705,6 +756,8 @@ pub struct CheckedAccount {
     pub parent: Option<AccountId>,
     /// Sensitive.
     pub sensitive: bool,
+    /// Card digits, checked (`None`: clear, or not a credit card account).
+    pub card_last4: Option<CardEnding>,
 }
 
 /// The form field a problem belongs to.
@@ -720,6 +773,8 @@ pub enum DraftField {
     Detail,
     /// Parent.
     Parent,
+    /// "Card ends in" (A03).
+    Card,
 }
 
 /// Why a draft cannot be saved.
@@ -747,6 +802,8 @@ pub enum DraftProblem {
     ParentInactive,
     /// The type of an account with sub-accounts cannot change.
     KindHasSubaccounts,
+    /// "Card ends in" is not exactly four digits (A03).
+    CardDigits,
 }
 
 impl DraftProblem {
@@ -767,6 +824,7 @@ impl DraftProblem {
             DraftProblem::KindHasSubaccounts => {
                 TextKey("lists.accounts.problem.kind_has_subaccounts")
             }
+            DraftProblem::CardDigits => TextKey("lists.accounts.problem.card_digits"),
         }
     }
 
@@ -780,6 +838,7 @@ impl DraftProblem {
             DraftProblem::NumberTooLong | DraftProblem::NumberTaken => DraftField::Number,
             DraftProblem::DetailTooLong => DraftField::Detail,
             DraftProblem::KindHasSubaccounts => DraftField::Kind,
+            DraftProblem::CardDigits => DraftField::Card,
             DraftProblem::ParentMissing
             | DraftProblem::ParentOtherKind
             | DraftProblem::ParentLoop
@@ -846,6 +905,18 @@ pub fn check(
             Some(_) => {}
         }
     }
+    // Card digits: credit card accounts only (the engine clears them when
+    // an account stops being one); exactly four digits, or empty to clear.
+    let card = if takes_card_digits(&draft.detail) && !draft.card_last4.is_empty() {
+        if draft.card_last4.is_valid() {
+            Some(CardEnding(draft.card_last4.as_str().to_string()))
+        } else {
+            problems.push(DraftProblem::CardDigits);
+            None
+        }
+    } else {
+        None
+    };
     if !problems.is_empty() {
         return Err(problems);
     }
@@ -857,6 +928,7 @@ pub fn check(
         description: non_empty(&draft.description),
         parent: draft.parent,
         sensitive: draft.sensitive,
+        card_last4: card,
     })
 }
 

@@ -1,0 +1,51 @@
+{
+  "account_number": "2024-187518",
+  "amount_paid": null,
+  "balance_due": null,
+  "card_last4": null,
+  "date": "2025-10-02",
+  "due_date": "2025-10-23",
+  "family": "utility",
+  "font": "plex-sans",
+  "holdout": false,
+  "layout": "s05-utility-electric",
+  "lines": [
+    {
+      "amount": "627.58",
+      "description": "Energy charge",
+      "quantity": "1.000",
+      "unit_price": "627.580"
+    },
+    {
+      "amount": "25.00",
+      "description": "Customer charge",
+      "quantity": "1.000",
+      "unit_price": "25.000"
+    },
+    {
+      "amount": "23.66",
+      "description": "Fuel cost adjustment",
+      "quantity": "1.000",
+      "unit_price": "23.660"
+    },
+    {
+      "amount": "9.31",
+      "description": "Franchise fee",
+      "quantity": "1.000",
+      "unit_price": "9.310"
+    }
+  ],
+  "pages": 1,
+  "reference": "33994105",
+  "schema": 1,
+  "seq": 1,
+  "subtotal": null,
+  "tax": null,
+  "terms": null,
+  "total": "685.55",
+  "tounicode": true,
+  "vendor": {
+    "key": "ozark-valley-electric",
+    "name": "Ozark Valley Electric Cooperative"
+  }
+}

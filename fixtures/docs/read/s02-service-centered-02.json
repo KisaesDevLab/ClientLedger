@@ -1,0 +1,39 @@
+{
+  "account_number": null,
+  "amount_paid": null,
+  "balance_due": null,
+  "card_last4": null,
+  "date": "2025-12-05",
+  "due_date": "2025-12-20",
+  "family": "invoice",
+  "font": "plex-sans",
+  "holdout": false,
+  "layout": "s02-service-centered",
+  "lines": [
+    {
+      "amount": "1580.76",
+      "description": "Replace water heater element",
+      "quantity": "9.000",
+      "unit_price": "175.640"
+    },
+    {
+      "amount": "1745.40",
+      "description": "Backflow preventer test",
+      "quantity": "20.000",
+      "unit_price": "87.270"
+    }
+  ],
+  "pages": 1,
+  "reference": "21323",
+  "schema": 1,
+  "seq": 2,
+  "subtotal": "3326.16",
+  "tax": null,
+  "terms": null,
+  "total": "3326.16",
+  "tounicode": true,
+  "vendor": {
+    "key": "copperline-plumbing",
+    "name": "Copperline Plumbing & Heating"
+  }
+}
