@@ -10,7 +10,7 @@
 # 8 s, and after 5 s while something settles), so the late file shows as
 # settling first. All data is synthetic.
 name: receipt_inbox
-description: Intake inbox - migrated folder, settling then copied, HEIC, 11 MB and duplicate rows, filter, TIFF note, Discard, New check with the arrival draft, Add to a check (Processed) and to a bill in a keep-originals folder, Set up chip, Home line, 200%.
+description: Intake inbox - migrated folder, settling then copied, HEIC, 11 MB and duplicate rows, filter, TIFF preview, Discard, New check with the arrival draft, Add to a check (Processed) and to a bill in a keep-originals folder, Set up chip, Home line, 200%.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -66,12 +66,14 @@ steps:
   - click: {role: button, label: All folders}
   - assert_state: {key: screen.filter, equals: null}
 
-  # --- TIFF: taken in, its preview waits for the new viewer --------------------
+  # --- TIFF: taken in and shown in the viewer (A02) -----------------------------
   - click: {role: button, label: Galena Gravel fax.tif}
   - assert_state: {key: screen.selected_kind, equals: tiff}
-  - assert_state: {key: screen.tiff_note, equals: true}
-  - assert_exists: {label: Preview comes with the new viewer.}
+  - assert_state: {key: screen.preview.status, equals: ready}
+  - assert_state: {key: screen.preview.rendered, equals: true}
+  - assert_exists: {role: button, label: Pop out}
   - assert_exists: {role: button, label: New bill}
+  - screenshot: tiff
 
   # --- Duplicate: Discard moves it to Discarded/ (never deleted) ----------------
   - click: {role: button, label: Ozark Feed receipt (copy).png}

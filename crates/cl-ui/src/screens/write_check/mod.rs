@@ -958,7 +958,11 @@ impl Screen for WriteCheckScreen {
     }
 
     fn scope(&self) -> Scope {
-        Scope::Form
+        if self.attach.viewer.has_focus() {
+            Scope::Viewer
+        } else {
+            Scope::Form
+        }
     }
 
     fn dirty(&self) -> bool {
@@ -977,6 +981,9 @@ impl Screen for WriteCheckScreen {
         if let Some(handled) = self.closing_prompt.command(id) {
             return handled;
         }
+        if self.attach.viewer.has_focus() && self.attach.viewer.command(id) {
+            return true;
+        }
         if let Some(handled) = self.lines.command(id) {
             return handled;
         }
@@ -989,6 +996,15 @@ impl Screen for WriteCheckScreen {
 
     fn fixed_layout(&self) -> bool {
         true
+    }
+
+    /// The Attachments card's file (A02): the pop-out viewer follows it.
+    fn document(&self) -> Option<crate::windows::doc_viewer::DocRef> {
+        self.attach
+            .viewer
+            .source()
+            .cloned()
+            .map(crate::windows::doc_viewer::DocRef::new)
     }
 
     fn open_template(&mut self, t: crate::forms::template::TemplateOpen) -> bool {
@@ -1113,6 +1129,7 @@ impl WriteCheckScreen {
                 "uploading": self.attach.upload.is_some(),
                 "problem": self.attach.problem,
                 "saved_copy": self.attach.saved_to.is_some(),
+                "viewer": self.attach.viewer.state_json(),
             },
             "ai": self.suggest_json(),
             "nav_prompt": self.nav_prompt.is_some(),

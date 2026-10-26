@@ -725,7 +725,7 @@ impl WriteCheckScreen {
         self.printed = None;
         self.nav_prompt = None;
         self.prefill = super::prefill::PrefillState::default();
-        self.attach = super::attach::AttachState::default();
+        self.attach.reset();
         self.reset_suggestions();
         self.focus = Some(Field::Payee);
         self.sync_inputs();
@@ -1174,7 +1174,7 @@ impl WriteCheckScreen {
         self.history = super::HistoryView::default();
         self.void = super::VoidPrompt::default();
         self.prefill = super::prefill::PrefillState::default();
-        self.attach = super::attach::AttachState::default();
+        self.attach.reset();
         self.reset_suggestions();
         self.load_attachments();
         self.sync_inputs();

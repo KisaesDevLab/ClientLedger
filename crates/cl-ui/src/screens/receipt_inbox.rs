@@ -51,7 +51,8 @@ use crate::company::{CompanyEvent, CompanyLink, Task};
 use crate::i18n::{t, t_count, t_with};
 use crate::screens::company::form;
 use crate::theme::Tokens;
-use crate::widgets::pdf_viewer::{DocSource, DocViewer, ViewerEvent, ViewerState};
+use crate::widgets::doc_pane::DocPane;
+use crate::widgets::pdf_viewer::{DocSource, ViewerEvent, ViewerState};
 use crate::windows::{OpenPayload, Screen};
 
 pub(crate) use picker::{PickKind, PickRow};
@@ -678,13 +679,7 @@ impl ReceiptInboxScreen {
             form::inline_warning(ui, tokens, &t(key));
         }
         if self.loaded.is_some() {
-            let height = PREVIEW_HEIGHT.min(ui.available_height().max(200.0));
-            let event = ui
-                .allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
-                    ui.set_min_height(height);
-                    DocViewer::show(ui, &mut self.viewer, tokens)
-                })
-                .inner;
+            let event = preview_pane(ui, &mut self.viewer, tokens);
             match event {
                 ViewerEvent::OpenFullSize => {
                     if let Some(src) = self.viewer.source() {
@@ -702,7 +697,7 @@ impl ReceiptInboxScreen {
                         ));
                     }
                 }
-                // A02: Pop out and Dock reach the screens through widgets::doc_pane.
+                // Pop out and Dock went to the shell through the pane.
                 ViewerEvent::None | ViewerEvent::PopOut | ViewerEvent::Dock => {}
             }
             if let Some(saved) = &self.saved_copy {
@@ -885,6 +880,14 @@ impl Screen for ReceiptInboxScreen {
         self.viewer.command(id)
     }
 
+    /// The selected file (A02): the pop-out viewer follows it.
+    fn document(&self) -> Option<crate::windows::doc_viewer::DocRef> {
+        self.viewer
+            .source()
+            .cloned()
+            .map(crate::windows::doc_viewer::DocRef::new)
+    }
+
     fn state(&self) -> Value {
         if self.intake_mode {
             self.intake_state_json()
@@ -901,6 +904,20 @@ impl Screen for ReceiptInboxScreen {
 
 // ---------------------------------------------------------------------------
 // Helpers.
+
+/// The selected file in the document pane (A02): the viewer with Pop out,
+/// or one line with Dock while it shows in its own window.
+fn preview_pane(ui: &mut Ui, viewer: &mut ViewerState, tokens: &Tokens) -> ViewerEvent {
+    if crate::windows::doc_viewer::is_popped(ui.ctx()) {
+        return DocPane::show(ui, viewer, tokens);
+    }
+    let height = PREVIEW_HEIGHT.min(ui.available_height().max(200.0));
+    ui.allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
+        ui.set_min_height(height);
+        DocPane::show(ui, viewer, tokens)
+    })
+    .inner
+}
 
 /// The "Add to …" record picker's card: what was picked to attach to, and
 /// whether Cancel was clicked. `busy`: an attach is running (Attach off).
