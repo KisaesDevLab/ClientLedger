@@ -948,14 +948,10 @@ impl Intake {
         }
     }
 
-    /// The app's own folders, never watched.
+    /// The app's own folders, never watched (the probe that confirmed a
+    /// folder compared them resolved, too).
     fn app_dirs(link: &CompanyLink) -> Vec<PathBuf> {
-        let mut dirs = Vec::new();
-        if let Some(settings) = link.store().path().parent() {
-            dirs.push(settings.to_path_buf());
-        }
-        dirs.push(link.backup_dir.clone());
-        dirs
+        link.app_dirs()
     }
 
     /// Takes the engine's list: a watcher per confirmed folder, started,

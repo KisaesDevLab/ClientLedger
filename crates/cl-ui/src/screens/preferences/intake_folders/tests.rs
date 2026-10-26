@@ -395,6 +395,144 @@ fn other_roles_see_a_read_only_list() {
     assert_eq!(s.block, Some(SaveBlock::Intake(IntakeBlock::ReadOnly)));
     assert_eq!(stored(&link).folders, Vec::<IntakeFolder>::new());
     assert_eq!(s.state()["intake"]["admin"], false);
+    // Test and Add refuse too, whatever calls them (security review L5).
+    let id = s.edits.intake.folders[0].id;
+    let dirs = s.app_dirs();
+    s.intake.test(&s.edits.intake, id, &dirs);
+    assert!(!s.intake.busy(), "no test started");
+    s.intake.add = Some(AddRow {
+        name: "Receipts".to_owned(),
+        path: r"C:\Receipts".to_owned(),
+        kind: None,
+        problem: None,
+    });
+    assert_eq!(
+        s.intake.add_folder(&mut s.edits.intake, &dirs),
+        Err(IntakeBlock::ReadOnly)
+    );
+    assert_eq!(s.edits.intake.folders.len(), 1);
+}
+
+/// A folder another computer (or user) set up on a network computer names
+/// that computer plainly before anyone here tests it (security review L4).
+#[test]
+fn an_unconfirmed_network_folder_names_its_computer() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    link.demo_state().expect("demo").intake.save_elsewhere(
+        ozark(),
+        vec![unc_folder(
+            new_folder_id(),
+            "Office scans",
+            r"\\nas-07\Scans",
+        )],
+    );
+    let mut s = screen(&link);
+    let all = texts(&mut s);
+    assert!(
+        all.contains(
+            "On the network computer \"nas-07\": set on another computer or by another user."
+        ),
+        "{all}"
+    );
+    assert_eq!(unc_host(r"\\nas-07\Scans"), Some("nas-07"));
+    assert_eq!(unc_host("//nas-07/Scans"), Some("nas-07"));
+    assert_eq!(unc_host(r"C:\Scans"), None);
+    assert_eq!(unc_host(r"\\?\C:\Scans"), None);
+}
+
+/// A Test that stopped answering still runs: Test stays off until its
+/// thread is done, so a dead share never piles up threads (L4).
+#[test]
+fn test_stays_off_until_a_stuck_probe_is_done() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let folder = tempfile::tempdir().expect("f");
+    let mut s = screen(&link);
+    let id = new_folder_id();
+    s.edits.intake.folders.push(unc_folder(
+        id,
+        "Bills",
+        &folder.path().display().to_string(),
+    ));
+    let (tx, rx) = std::sync::mpsc::channel();
+    s.intake.probes.insert(
+        id,
+        Probe {
+            rx: Some(rx),
+            report: None,
+            path: s.edits.intake.folders[0].path.clone(),
+            still_trying: false,
+        },
+    );
+    tx.send(ProbeReport::not_responding()).expect("send");
+    s.poll();
+    assert!(s.intake.held(id) && !s.intake.testing(id));
+    let dirs = s.app_dirs();
+    s.intake.test(&s.edits.intake, id, &dirs);
+    assert!(
+        s.intake.probes[&id].still_trying,
+        "the stuck probe is kept, no new one"
+    );
+    drop(tx);
+    s.poll();
+    assert!(!s.intake.held(id), "done: Test is offered again");
+}
+
+/// Every folder's controls name their folder for a screen reader (UI
+/// check S4); Esc closes the Add row before the window (S5).
+#[test]
+fn controls_name_their_folder_and_esc_closes_the_add_row_first() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = link(dir.path());
+    let a = tempfile::tempdir().expect("a");
+    let mut s = screen(&link);
+    add(&mut s, "Bills", &a.path().display().to_string()).expect("add");
+    settle(&mut s);
+    let all = texts(&mut s);
+    for label in [
+        "Kind for Bills",
+        "Leave originals where they are (Bills)",
+        "Read new documents automatically (Bills)",
+        "Rename Bills",
+        "Remove Bills",
+        "Test Bills",
+    ] {
+        assert!(all.contains(label), "{label}: {all}");
+    }
+    assert!(Screen::save(&mut s));
+    s.intake.add = Some(AddRow {
+        name: "Half typed".to_owned(),
+        ..AddRow::default()
+    });
+    assert!(!s.dirty(), "the Add row isn't an edit");
+    assert!(
+        s.command(cl_model::CommandId::new("form.revert")),
+        "Esc closed the row"
+    );
+    assert!(s.intake.add.is_none());
+    assert!(
+        !s.command(cl_model::CommandId::new("form.revert")),
+        "then Esc closes the window"
+    );
+}
+
+/// "Set up on this computer" survives closing and reopening Preferences,
+/// also for a company with no record on this computer yet (UI check M2).
+#[test]
+fn a_confirmation_survives_a_reopen_without_a_company_record() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let bills = tempfile::tempdir().expect("bills");
+    let mut s = screen(&link);
+    let id = add(&mut s, "Bills", &bills.path().display().to_string()).expect("add");
+    settle(&mut s);
+    assert!(Screen::save(&mut s), "{:?}", s.block);
+    assert_eq!(s.state()["intake"]["folders"][0]["here"], true);
+    drop(s);
+    let s = screen(&link);
+    assert!(s.committed.company.intake_here.contains_key(&id));
+    assert_eq!(s.state()["intake"]["folders"][0]["here"], true);
 }
 
 #[test]

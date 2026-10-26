@@ -9,7 +9,7 @@
 # non-Admin need demo switches a scenario can't reach; unit tests cover
 # them (`intake_folders/tests.rs`).
 name: intake_folders
-description: Document intake - empty, refusals, Add and Test, kind and switches, Save, Remove; 100% and 200%.
+description: Document intake - empty, refusals, Add and Test, kind and switches, Save, reopen keeps Set up, Esc closes the Add row, Remove; 1440 and 960 px at 100% and 200%.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -67,12 +67,12 @@ steps:
   - assert_state: {key: screen.intake.folders.1.probe, equals: ok}
 
   # --- Kind, Leave originals, Auto-read ------------------------------------------
-  - click: {role: combo_box, label: Kind, index: 0}
+  - click: {role: combo_box, label: Kind for Bills}
   - click: {role: button, label: Bills}
   - assert_state: {key: screen.intake.folders.0.kind, equals: bills}
-  - click: {role: check_box, label: Leave originals where they are, index: 1}
+  - click: {role: check_box, label: Leave originals where they are (Receipts)}
   - assert_state: {key: screen.intake.folders.1.keep_originals, equals: true}
-  - assert_exists: {role: check_box, label: Read new documents automatically, index: 0}
+  - assert_exists: {role: check_box, label: Read new documents automatically (Bills)}
   - assert_exists: {label: "Reading arrives in a coming update; until then new documents wait in the inbox.", index: 0}
 
   # --- Save: the engine takes the list, this computer its confirmations ----------
@@ -85,14 +85,42 @@ steps:
   - set_zoom: {percent: 200}
   - screenshot: intake-two-folders-z200
   - set_zoom: {percent: 100}
+  # The smallest window, at 100% and 200%: the card and its Status column
+  # stay inside, Search stays whole.
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: text_input, label: Find a setting}
+  - screenshot: intake-two-folders-960
+  - set_zoom: {percent: 200}
+  - assert_exists: {role: text_input, label: Find a setting}
+  - assert_exists: {role: button, label: Save}
+  - screenshot: intake-two-folders-960-z200
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}
+
+  # --- Reopen: "Set up on this computer" is kept --------------------------------
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label: Preferences}
+  - command: edit.preferences
+  - click: {role: button, label: Document intake}
+  - assert_state: {key: screen.intake.load, equals: ready}
+  - assert_state: {key: screen.intake.folders.0.here, equals: true}
+  - assert_state: {key: screen.intake.folders.1.here, equals: true}
+  - assert_exists: {label: Set up on this computer, index: 0}
+
+  # --- Esc closes the Add row first, then the window ----------------------------
+  - click: {role: button, label: Add folder}
+  - type: {text: Half typed, target: {role: text_input, label: Name}}
+  - key: Escape
+  - assert_state: {key: screen.intake.adding, equals: false}
+  - assert_exists: {role: tab, label: Preferences}
 
   # --- Remove, with its confirm; the files stay ----------------------------------
-  - click: {role: button, label: Remove, index: 0}
+  - click: {role: button, label: Remove Bills}
   - assert_state: {key: screen.intake.removing, equals: true}
   - assert_exists: {label_contains: Files in the folder stay where they are.}
   - screenshot: intake-remove
   - click: {role: button, label: Remove folder}
-  - click: {role: button, label: Remove, index: 0}
+  - click: {role: button, label: Remove Receipts}
   - click: {role: button, label: Remove folder}
   - assert_state: {key: screen.intake.folders, equals: []}
   - click: {role: button, label: Save}

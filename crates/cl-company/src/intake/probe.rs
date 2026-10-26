@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use super::Health;
 use super::fs::{FolderFs, RealFs};
-use super::path::{classify, key_of};
+use super::path::{classify, key_of, resolved_inside};
 use super::scan::{ItemState, Stability, scan};
 
 /// How long a probe may take before it reports
@@ -59,6 +59,10 @@ pub struct ProbeReport {
     pub cloud: bool,
     /// The root's pin, stored when the folder is confirmed.
     pub canonical_key: Option<String>,
+    /// The folder, once every link, junction and short name is resolved,
+    /// is (inside) one of the app's own folders: never usable
+    /// (security review L6).
+    pub app_folder: bool,
 }
 
 /// Counts and flags only: the pin is a hash of the path, and stays out too.
@@ -69,6 +73,7 @@ impl fmt::Debug for ProbeReport {
             .field("counts", &self.counts)
             .field("writable", &self.writable)
             .field("cloud", &self.cloud)
+            .field("app_folder", &self.app_folder)
             .finish_non_exhaustive()
     }
 }
@@ -81,6 +86,7 @@ impl ProbeReport {
             writable: None,
             cloud: false,
             canonical_key: None,
+            app_folder: false,
         }
     }
 
@@ -94,7 +100,9 @@ impl ProbeReport {
     /// True when the folder can be confirmed (reachable, a folder).
     #[must_use]
     pub fn usable(&self) -> bool {
-        matches!(self.health, Health::Ok | Health::TooMany) && self.canonical_key.is_some()
+        matches!(self.health, Health::Ok | Health::TooMany)
+            && self.canonical_key.is_some()
+            && !self.app_folder
     }
 }
 
@@ -120,10 +128,32 @@ fn cloud_hint(canonical: &Path) -> bool {
 /// Probes `root` through `fs`, blocking (run it on a background thread).
 #[must_use]
 pub fn probe(fs: &dyn FolderFs, root: &Path, check_write: bool) -> ProbeReport {
+    probe_refusing(fs, root, check_write, &[])
+}
+
+/// [`probe`], refusing a root that resolves to (inside) one of `refused`
+/// (the app's own folders, resolved too): nothing in it is listed or
+/// written, and the report is not usable.
+#[must_use]
+pub fn probe_refusing(
+    fs: &dyn FolderFs,
+    root: &Path,
+    check_write: bool,
+    refused: &[PathBuf],
+) -> ProbeReport {
     let canonical = match fs.canonicalize(root) {
         Ok(c) => c,
         Err(e) => return ProbeReport::failed(classify(&e, true)),
     };
+    if refused.iter().any(|d| {
+        fs.canonicalize(d)
+            .is_ok_and(|d| resolved_inside(&canonical, &d))
+    }) {
+        return ProbeReport {
+            app_folder: true,
+            ..ProbeReport::failed(Health::Ok)
+        };
+    }
     let listing = match scan(fs, root, &mut Stability::default(), Instant::now()) {
         Ok(l) => l,
         Err(h) => return ProbeReport::failed(h),
@@ -152,6 +182,7 @@ pub fn probe(fs: &dyn FolderFs, root: &Path, check_write: bool) -> ProbeReport {
         writable,
         cloud: counts.online_only > 0 || cloud_hint(&canonical),
         canonical_key: Some(key_of(&canonical)),
+        app_folder: false,
     }
 }
 
@@ -161,6 +192,7 @@ pub fn probe_async_with(
     fs: Arc<dyn FolderFs>,
     root: PathBuf,
     check_write: bool,
+    refused: Vec<PathBuf>,
     deadline: Duration,
 ) -> Receiver<ProbeReport> {
     let (out_tx, out_rx) = mpsc::channel();
@@ -168,7 +200,7 @@ pub fn probe_async_with(
     let worker = std::thread::Builder::new()
         .name("cl-intake-probe".into())
         .spawn(move || {
-            let _ = in_tx.send(probe(&*fs, &root, check_write));
+            let _ = in_tx.send(probe_refusing(&*fs, &root, check_write, &refused));
         });
     if worker.is_err() {
         tracing::warn!("could not start an intake folder probe");
@@ -176,17 +208,28 @@ pub fn probe_async_with(
         return out_rx;
     }
     // The waiter forwards the report, or "not responding" once the deadline
-    // passed; the worker is abandoned (never joined) and its late report
-    // dropped.
+    // passed; the worker is never joined. Past the deadline the waiter keeps
+    // waiting for the worker and forwards its late report too, and the
+    // channel closes only once the worker is done: the caller starts no
+    // other probe of the folder until then (security review L4), so a
+    // dead share never piles up stuck threads.
     let waiter = std::thread::Builder::new()
         .name("cl-intake-probe-wait".into())
         .spawn({
             let out_tx = out_tx.clone();
-            move || {
-                let report = in_rx
-                    .recv_timeout(deadline)
-                    .unwrap_or_else(|_| ProbeReport::not_responding());
-                let _ = out_tx.send(report);
+            move || match in_rx.recv_timeout(deadline) {
+                Ok(report) => {
+                    let _ = out_tx.send(report);
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let _ = out_tx.send(ProbeReport::not_responding());
+                    if let Ok(late) = in_rx.recv() {
+                        let _ = out_tx.send(late);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    let _ = out_tx.send(ProbeReport::not_responding());
+                }
             }
         });
     if waiter.is_err() {
@@ -195,13 +238,20 @@ pub fn probe_async_with(
     out_rx
 }
 
-/// Probes `root` on a background thread; the receiver gets exactly one
-/// report within [`PROBE_DEADLINE`] (poll it with `try_recv` each frame).
+/// Probes `root` on a background thread (refusing the app's own
+/// folders `refused`, see [`probe_refusing`]); the receiver gets a report
+/// within [`PROBE_DEADLINE`] (poll it with `try_recv` each frame). When
+/// that report is [`Health::NotResponding`] the probe is still running: a
+/// late report may follow, and the channel disconnects once it is done.
 /// Run at most one probe per folder at a time: the caller keeps the
-/// receiver and starts no other until it answered.
+/// receiver and starts no other until it disconnected.
 #[must_use]
-pub fn probe_async(root: PathBuf, check_write: bool) -> Receiver<ProbeReport> {
-    probe_async_with(Arc::new(RealFs), root, check_write, PROBE_DEADLINE)
+pub fn probe_async(
+    root: PathBuf,
+    check_write: bool,
+    refused: Vec<PathBuf>,
+) -> Receiver<ProbeReport> {
+    probe_async_with(Arc::new(RealFs), root, check_write, refused, PROBE_DEADLINE)
 }
 
 #[cfg(test)]
@@ -294,16 +344,25 @@ mod tests {
             Arc::clone(&fs) as Arc<dyn FolderFs>,
             root.clone(),
             true,
+            Vec::new(),
             Duration::from_millis(200),
         );
         let r = rx.recv_timeout(Duration::from_secs(2)).expect("answered");
         assert_eq!(r.health, Health::NotResponding);
         assert!(started.elapsed() < Duration::from_secs(2), "not held up");
-        // Exactly one report: the late one is dropped.
-        assert!(rx.recv_timeout(Duration::from_secs(4)).is_err());
-
+        // The probe is still running: the channel stays open (the caller
+        // starts no other) until its late report, then closes.
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
         fs.heal(&root);
-        let rx = probe_async_with(fs, root, false, Duration::from_secs(5));
+        let late = rx.recv_timeout(Duration::from_secs(10)).expect("late");
+        assert_eq!(late.health, Health::Ok);
+        assert!(started.elapsed() >= Duration::from_secs(3));
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(2)),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        ));
+
+        let rx = probe_async_with(fs, root, false, Vec::new(), Duration::from_secs(5));
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(5)).expect("ok").health,
             Health::Ok
@@ -313,8 +372,45 @@ mod tests {
     #[test]
     fn the_real_probe_runs_off_thread() {
         let dir = tempfile::tempdir().expect("tmp");
-        let rx = probe_async(dir.path().to_path_buf(), true);
+        let rx = probe_async(dir.path().to_path_buf(), true, Vec::new());
         let r = rx.recv_timeout(PROBE_DEADLINE).expect("answered");
         assert_eq!((r.health, r.writable), (Health::Ok, Some(true)));
+    }
+
+    /// A folder that resolves into one of the app's own folders is
+    /// refused, also through a link or junction the typed path hides
+    /// (security review L6). Nothing in it is written.
+    #[test]
+    fn a_folder_resolving_into_an_app_folder_is_refused() {
+        let app = tempfile::tempdir().expect("tmp");
+        let pgdata = app.path().join("pgdata");
+        std::fs::create_dir_all(&pgdata).expect("dir");
+        let refused = vec![app.path().to_path_buf()];
+        let r = probe_refusing(&RealFs, &pgdata, true, &refused);
+        assert!(r.app_folder && !r.usable());
+        assert_eq!(r.writable, None, "nothing written");
+        // Through a link (a junction on Windows: no rights needed).
+        let elsewhere = tempfile::tempdir().expect("tmp");
+        let link = elsewhere.path().join("Scans");
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&pgdata, &link).is_ok();
+        #[cfg(windows)]
+        let linked = std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(&link)
+            .arg(&pgdata)
+            .output()
+            .is_ok_and(|o| o.status.success());
+        assert!(linked || !cfg!(windows), "junctions need no rights");
+        if linked {
+            let r = probe_refusing(&RealFs, &link, true, &refused);
+            assert!(r.app_folder && !r.usable(), "{r:?}");
+            assert_eq!(std::fs::read_dir(&pgdata).expect("dir").count(), 0);
+        }
+        // An ordinary folder next to it is fine.
+        let r = probe_refusing(&RealFs, elsewhere.path(), false, &refused);
+        assert!(!r.app_folder && r.usable());
     }
 }

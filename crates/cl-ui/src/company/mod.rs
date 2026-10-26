@@ -9,7 +9,7 @@
 
 pub mod demo;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use cl_api::{
@@ -118,6 +118,30 @@ impl std::fmt::Debug for CompanyLink {
 }
 
 impl CompanyLink {
+    /// ClientLedger's own folders, never an intake folder (A01, security
+    /// review L6): the settings folder, the default and the chosen backup
+    /// folders, and (with an engine) the whole app data folder, which holds
+    /// the `PostgreSQL` data, the engine's files and the logs. The demo's
+    /// folders sit beside its settings, so only its settings folder counts.
+    #[must_use]
+    pub fn app_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+        let settings = self.store.path().parent().map(Path::to_path_buf);
+        if let Some(s) = &settings {
+            dirs.push(s.clone());
+            if self.live.is_some()
+                && let Some(root) = s.parent()
+            {
+                dirs.push(root.to_path_buf());
+            }
+        }
+        dirs.push(self.backup_dir.clone());
+        if let Some(chosen) = self.store.load().ok().and_then(|l| l.backup_folder) {
+            dirs.push(chosen);
+        }
+        dirs
+    }
+
     /// The real thing: a client over the supervisor's endpoint, the request
     /// queue, and the stores under the app data folder.
     #[must_use]
