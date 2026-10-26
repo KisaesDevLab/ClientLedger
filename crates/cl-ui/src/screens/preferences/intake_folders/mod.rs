@@ -1026,7 +1026,7 @@ pub fn show(ui: &mut Ui, tokens: &Tokens, v: &mut View<'_>) -> PanelAction {
 fn folder_table(ui: &mut Ui, tokens: &Tokens, v: &View<'_>) {
     const GAP: f32 = 12.0;
     let w = ui.available_width();
-    let kind_w = 96.0_f32.min(w * 0.18);
+    let kind_w = 150.0_f32.min(w * 0.18);
     let status_w = (w * 0.3).clamp(96.0, 280.0);
     let rest = (w - kind_w - status_w - 3.0 * GAP).max(96.0);
     let name_w = (rest * 0.3).clamp(48.0, 220.0);
