@@ -57,6 +57,8 @@
 - `Ctrl+Shift+Tab` Previous Window
 - `Ctrl+Shift+O` Move Window to Its Own Window
 - `F9` Show or Hide Details
+- `Ctrl+Shift+D` Pop Out or Dock the Document
+- `F6` Move Between the Form and Its Document
 - `Ctrl++` Zoom In
 - `Ctrl+-` Zoom Out
 - `Ctrl+0` Actual Size

@@ -1062,6 +1062,15 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.days", "{n} days"),
     ("home.days.one", "1 day"),
     ("home.attention.open_aging.tip", "See your unpaid invoices grouped by how many days they are past due (the A/R aging report)."),
+    // A02 WP-B: the pop-out document viewer window and the docked pane.
+    ("docviewer.title", "{form} \u{2014} Document - ClientLedger"),
+    ("docviewer.title_empty", "Document - ClientLedger"),
+    ("docviewer.eyebrow", "Document"),
+    ("docviewer.empty", "This window has no document"),
+    ("docviewer.empty.hint", "Open a form with an attached document and it shows here."),
+    ("docviewer.dock", "Dock"),
+    ("docviewer.dock.tip", "Put the document back in the form ({keys})"),
+    ("docpane.popped", "This document is open in its own window."),
 ];
 
 #[cfg(test)]

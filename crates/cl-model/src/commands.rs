@@ -290,6 +290,10 @@ pub const COMMANDS: &[Command] = &[
     cmd("viewer.fit", "Fit the Document", None, 8, key(Mods::CMD, Key::Digit(0)), Scope::Viewer),
     cmd("viewer.page_next", "Next Page", None, 8, key(Mods::NONE, Key::PageDown), Scope::Viewer),
     cmd("viewer.page_prev", "Previous Page", None, 8, key(Mods::NONE, Key::PageUp), Scope::Viewer),
+    // Rotate is view only and has no shortcut (A02, Q-A02b, Q-A02m: Ctrl+R
+    // would shadow Receive Payment while the page has focus).
+    cmd("viewer.rotate_cw", "Rotate the Page Right", None, 8, None, Scope::Viewer),
+    cmd("viewer.rotate_ccw", "Rotate the Page Left", None, 8, None, Scope::Viewer),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
@@ -364,6 +368,9 @@ pub const COMMANDS: &[Command] = &[
     cmd("window.pop_out", "Move Window to Its Own Window", Some(Menu::Window), 1, ctrl_shift('O'), Scope::Window),
     // Collapse or expand a screen's detail panel (P16, Q-266)
     cmd("window.toggle_details", "Show or Hide Details", Some(Menu::Window), 1, key(Mods::NONE, Key::F(9)), Scope::Window),
+    // The pop-out document viewer (A02, DESIGN.md keyboard map)
+    cmd("view.toggle_doc_viewer", "Pop Out or Dock the Document", Some(Menu::Window), 1, ctrl_shift('D'), Scope::Global),
+    cmd("view.focus_doc", "Move Between the Form and Its Document", Some(Menu::Window), 1, key(Mods::NONE, Key::F(6)), Scope::Window),
     cmd("window.zoom_in", "Zoom In", Some(Menu::Window), 2, key(Mods::CMD, Key::Equals), Scope::Global),
     cmd("window.zoom_out", "Zoom Out", Some(Menu::Window), 2, key(Mods::CMD, Key::Minus), Scope::Global),
     cmd("window.zoom_reset", "Actual Size", Some(Menu::Window), 2, key(Mods::CMD, Key::Digit(0)), Scope::Global),
@@ -747,11 +754,12 @@ mod tests {
                     .map(CommandId::as_str),
                 Some("window.toggle_details")
             );
-            // Ctrl+Shift+D is free again (Q-P16n: F9).
-            assert_ne!(
+            // Ctrl+Shift+D left Details (Q-P16n: F9); the document viewer
+            // took it in A02.
+            assert_eq!(
                 km.resolve(focus, Shortcut::new(Mods::CMD_SHIFT, Key::Letter('D')))
                     .map(CommandId::as_str),
-                Some("window.toggle_details")
+                Some("view.toggle_doc_viewer")
             );
         }
         // Ko-fi in the Help menu too (Q-P16a): no shortcut, opens nothing.
@@ -823,6 +831,64 @@ mod tests {
     }
 
     #[test]
+    fn a02_viewer_commands() {
+        use crate::keymap::Keymap;
+        let toggle = find("view.toggle_doc_viewer").unwrap();
+        assert_eq!(
+            (toggle.menu, toggle.shortcut, toggle.scope),
+            (Some(Menu::Window), ctrl_shift('D'), Scope::Global)
+        );
+        let focus = find("view.focus_doc").unwrap();
+        assert_eq!(
+            (focus.menu, focus.shortcut, focus.scope),
+            (
+                Some(Menu::Window),
+                key(Mods::NONE, Key::F(6)),
+                Scope::Window
+            )
+        );
+        for c in [toggle, focus] {
+            assert!(c.palette && !c.opens && c.arrives.is_none(), "{}", c.id);
+        }
+        // Rotate: buttons and the palette only (Q-A02m).
+        for id in ["viewer.rotate_cw", "viewer.rotate_ccw"] {
+            let c = find(id).unwrap();
+            assert_eq!((c.menu, c.shortcut, c.scope), (None, None, Scope::Viewer));
+            assert!(c.palette && !c.opens, "{id}");
+        }
+        let km = Keymap::new(COMMANDS).expect("no new key clashes");
+        let at = |focus: Scope, mods: Mods, k: Key| {
+            km.resolve(focus, Shortcut::new(mods, k))
+                .map(CommandId::as_str)
+        };
+        for scope in Scope::ALL {
+            assert_eq!(
+                at(*scope, Mods::CMD_SHIFT, Key::Letter('D')),
+                Some("view.toggle_doc_viewer"),
+                "{scope:?}"
+            );
+        }
+        assert_eq!(at(Scope::Global, Mods::NONE, Key::F(6)), None);
+        for scope in [Scope::Window, Scope::Form, Scope::Grid, Scope::Viewer] {
+            assert_eq!(
+                at(scope, Mods::NONE, Key::F(6)),
+                Some("view.focus_doc"),
+                "{scope:?}"
+            );
+        }
+        // Ctrl+R stays Receive Payment while the page has focus.
+        assert_eq!(
+            at(Scope::Viewer, Mods::CMD, Key::Letter('R')),
+            Some("clients.receive_payment")
+        );
+        // The viewer's own keys still win inside it.
+        assert_eq!(
+            at(Scope::Viewer, Mods::NONE, Key::PageDown),
+            Some("viewer.page_next")
+        );
+    }
+
+    #[test]
     fn design_md_shortcuts_are_bound() {
         use crate::keymap::Keymap;
         let km = Keymap::new(COMMANDS).unwrap();
@@ -850,6 +916,8 @@ mod tests {
             ("edit.open_list", Mods::CMD, Key::Letter('L')),
             ("help.current", Mods::NONE, Key::F(1)),
             ("help.shortcuts", Mods::CMD, Key::Slash),
+            ("view.toggle_doc_viewer", Mods::CMD_SHIFT, Key::Letter('D')),
+            ("view.focus_doc", Mods::NONE, Key::F(6)),
         ];
         for (id, mods, k) in want {
             let c = find(id).unwrap();

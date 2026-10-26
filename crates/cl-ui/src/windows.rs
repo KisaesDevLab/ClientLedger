@@ -6,6 +6,8 @@
 //! viewports, the prompts) lives in `shell`. A window shows a [`Screen`];
 //! later phases add real screens, and until then a [`Placeholder`] stands in.
 
+pub mod doc_viewer;
+
 use std::collections::VecDeque;
 
 use cl_model::{CommandId, Scope, commands};
@@ -98,6 +100,13 @@ pub trait Screen {
     fn keeps_text_key(&self, ctx: &eframe::egui::Context, s: cl_model::Shortcut) -> bool {
         let _ = s;
         ctx.egui_wants_keyboard_input()
+    }
+
+    /// The document this window shows, if any (A02): the pop-out viewer
+    /// follows the window in front through it, each frame. A new
+    /// [`doc_viewer::DocKey`] opens the new document there.
+    fn document(&self) -> Option<doc_viewer::DocRef> {
+        None
     }
 }
 
