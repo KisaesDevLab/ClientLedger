@@ -249,3 +249,5 @@ POST    /api/v1/document-drafts/{id}/convert    keyable-docs
 GET     /api/v1/vendor-layout-templates         idempotent
 PUT     /api/v1/vendor-layout-templates         pre-handler-only
 DELETE  /api/v1/vendor-layout-templates/{id}    pre-handler-only
+# A03: document reading assist (engine U-92d, document-assist-v1; client-declared until the pin has it)
+POST    /api/v1/document-reading/assist         pre-handler-only

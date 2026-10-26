@@ -40,6 +40,7 @@ use crate::wire::{Capabilities, ReportAmount};
 
 /// `GET /api/v1/ai/admin/config` (the fields the app uses; key values are
 /// never in the reply).
+#[allow(clippy::struct_excessive_bools, reason = "the engine's config flags")]
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiConfig {
@@ -79,6 +80,11 @@ pub struct AiConfig {
     /// `strict`, `standard`, `permissive`.
     #[serde(default)]
     pub pii_protection_level: Option<String>,
+    /// Page pictures may go to an online provider (only together with the
+    /// `permissive` level). Read only: the desktop never turns it on
+    /// (Q-139, Q-A03v).
+    #[serde(default)]
+    pub cloud_vision_enabled: bool,
     /// Usage rows are written.
     #[serde(default)]
     pub track_usage: Option<bool>,
@@ -137,6 +143,17 @@ pub struct AiConfigUpdate {
     /// `ai-token-cap-v1`, see [`Session::update_ai_config`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub monthly_token_limit: Option<u64>,
+}
+
+impl AiConfig {
+    /// The engine sends page pictures to an online provider at all: its
+    /// privacy level is `permissive` with cloud vision on (the engine's
+    /// `assertCloudVisionAllowed`). The desktop keeps `strict` (Q-139), so
+    /// this is false unless the engine was set up otherwise.
+    #[must_use]
+    pub fn cloud_vision_allowed(&self) -> bool {
+        self.cloud_vision_enabled && self.pii_protection_level.as_deref() == Some("permissive")
+    }
 }
 
 impl AiConfigUpdate {
@@ -216,6 +233,31 @@ pub struct AiTaskToggles {
     /// Ask a question in Reports.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report_summary: Option<bool>,
+    /// A03 (U-92d, `document-assist-v1`): a document's page text may go to
+    /// an online AI service. Off for every company; `receipt_ocr` never
+    /// stands in for it (Q-A03k).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_text_cloud: Option<bool>,
+    /// A03 (U-92d): a document's page pictures may go to an online AI
+    /// service as well (they can't be redacted). Off for every company.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_images_cloud: Option<bool>,
+}
+
+impl AiTaskToggles {
+    /// True when the owner switched on sending page text online (an absent
+    /// switch is off).
+    #[must_use]
+    pub fn document_text_cloud_on(&self) -> bool {
+        self.document_text_cloud == Some(true)
+    }
+
+    /// True when the owner switched on sending page pictures online; it
+    /// needs the text switch too (the engine checks both).
+    #[must_use]
+    pub fn document_images_cloud_on(&self) -> bool {
+        self.document_text_cloud_on() && self.document_images_cloud == Some(true)
+    }
 }
 
 /// The company disclosure and consent state,
@@ -682,10 +724,13 @@ impl Session {
     }
 
     /// Sets per-task switches for the open company (Q-140). Returns the
-    /// stored switches.
+    /// stored switches. The engine writes an audit row for the change.
+    /// The two document-reading switches are sent only to an engine that
+    /// advertises `document-assist-v1` (else refused locally, nothing sent).
     ///
     /// # Errors
-    /// `NoCompanyOpen`; any [`ApiError`].
+    /// `NoCompanyOpen`; `Local(Unsupported)`; any
+    /// [`ApiError`].
     pub async fn set_ai_tasks(
         &self,
         toggles: &AiTaskToggles,
@@ -694,6 +739,14 @@ impl Session {
         #[derive(Deserialize)]
         struct W {
             tasks: AiTaskToggles,
+        }
+        if (toggles.document_text_cloud.is_some() || toggles.document_images_cloud.is_some())
+            && !self
+                .client()
+                .capabilities()
+                .has(Capabilities::DOCUMENT_ASSIST)
+        {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
         }
         let id = self.company_id()?;
         let path = AI_CONSENT_TASKS
@@ -1223,6 +1276,84 @@ mod tests {
                 .expect_err("ai off in the engine"),
             ApiError::AiUnavailable
         );
+    }
+
+    #[tokio::test]
+    async fn document_reading_switches_need_the_capability_and_go_alone() {
+        let company = crate::resources::testkit::COMPANY;
+        let both = AiTaskToggles {
+            document_text_cloud: Some(true),
+            document_images_cloud: Some(false),
+            ..AiTaskToggles::default()
+        };
+        // An engine without `document-assist-v1`: nothing is sent.
+        let server = MockServer::start().await;
+        let s = company_session(&server);
+        assert_eq!(
+            s.set_ai_tasks(&both, IdempotencyKey::new())
+                .await
+                .expect_err("gated"),
+            ApiError::Local(LocalValidation::Unsupported)
+        );
+        assert!(server.received_requests().await.expect("r").is_empty());
+        // With it: only the two switches go, and the stored ones come back.
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path(format!("/api/v1/ai/consent/{company}/tasks")))
+            .respond_with(json(
+                200,
+                r#"{"tasks":{"receipt_ocr":true,"document_text_cloud":true,"document_images_cloud":false}}"#,
+            ))
+            .mount(&server)
+            .await;
+        let s =
+            crate::resources::testkit::session_with_caps(&server, &[Capabilities::DOCUMENT_ASSIST])
+                .await;
+        let t = s
+            .set_ai_tasks(&both, IdempotencyKey::new())
+            .await
+            .expect("tasks");
+        assert!(t.document_text_cloud_on() && !t.document_images_cloud_on());
+        let body: Value =
+            serde_json::from_slice(&requests(&server, "PATCH").await[0].body).expect("json");
+        assert_eq!(
+            body,
+            serde_json::json!({"document_text_cloud": true, "document_images_cloud": false})
+        );
+        // `receipt_ocr` never stands in for either switch; pictures need text.
+        let only_ocr = AiTaskToggles {
+            receipt_ocr: Some(true),
+            document_images_cloud: Some(true),
+            ..AiTaskToggles::default()
+        };
+        assert!(!only_ocr.document_text_cloud_on() && !only_ocr.document_images_cloud_on());
+        // The other switches alone need no capability.
+        let server = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path(format!("/api/v1/ai/consent/{company}/tasks")))
+            .respond_with(json(200, r#"{"tasks":{"categorization":true}}"#))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        s.set_ai_tasks(
+            &AiTaskToggles {
+                categorization: Some(true),
+                ..AiTaskToggles::default()
+            },
+            IdempotencyKey::new(),
+        )
+        .await
+        .expect("old switches");
+    }
+
+    #[test]
+    fn cloud_vision_needs_permissive_and_the_switch() {
+        let mut c: AiConfig = serde_json::from_str(CONFIG).expect("config");
+        assert!(!c.cloud_vision_allowed(), "strict, no cloud vision");
+        c.cloud_vision_enabled = true;
+        assert!(!c.cloud_vision_allowed(), "still strict");
+        c.pii_protection_level = Some("permissive".into());
+        assert!(c.cloud_vision_allowed());
     }
 
     #[test]

@@ -255,7 +255,9 @@ pub const REVERSAL_EDITED: &str = "REVERSAL_EDITED";
 pub fn has_code(e: &ApiError, code: &str) -> bool {
     match e {
         ApiError::Validation(v) => v.code().is_some_and(|c| c.as_str() == code),
-        ApiError::Conflict { code: Some(c), .. } => c.as_str() == code,
+        ApiError::Conflict { code: Some(c), .. } | ApiError::Forbidden { code: Some(c) } => {
+            c.as_str() == code
+        }
         _ => false,
     }
 }

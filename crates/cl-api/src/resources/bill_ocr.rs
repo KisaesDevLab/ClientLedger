@@ -65,7 +65,7 @@ pub enum Confidence {
 }
 
 impl Confidence {
-    fn from_wire(s: &str) -> Option<Confidence> {
+    pub(crate) fn from_wire(s: &str) -> Option<Confidence> {
         match s {
             "high" => Some(Confidence::High),
             "medium" => Some(Confidence::Medium),
@@ -247,7 +247,7 @@ struct ReadingWire {
 }
 
 /// The text of a JSON string or number (`None` for `null`).
-fn raw_text(raw: Option<&RawValue>) -> Option<String> {
+pub(crate) fn raw_text(raw: Option<&RawValue>) -> Option<String> {
     let raw = raw?;
     let t = raw.get().trim();
     if t == "null" {
@@ -263,7 +263,7 @@ fn raw_text(raw: Option<&RawValue>) -> Option<String> {
 /// An exact decimal from document text: the engine grammar, else what an
 /// owner may type (`$1,330.00`), at most 4 decimals, never rounded; or a
 /// JSON number in exponent form.
-fn exact_decimal(s: &str) -> Option<Decimal> {
+pub(crate) fn exact_decimal(s: &str) -> Option<Decimal> {
     let s = s.trim();
     if let Ok(m) = Money::parse_wire(s) {
         return Some(m.as_decimal());
@@ -276,7 +276,7 @@ fn exact_decimal(s: &str) -> Option<Decimal> {
         .ok()
 }
 
-fn money_field(
+pub(crate) fn money_field(
     raw: Option<&RawValue>,
     field: ReadField,
     bad: &mut Vec<ReadField>,
@@ -296,7 +296,7 @@ fn money_field(
     m
 }
 
-fn quantity_field(
+pub(crate) fn quantity_field(
     raw: Option<&RawValue>,
     field: ReadField,
     bad: &mut Vec<ReadField>,
@@ -312,7 +312,11 @@ fn quantity_field(
     q
 }
 
-fn date_field(s: Option<&str>, field: ReadField, bad: &mut Vec<ReadField>) -> Option<CalendarDate> {
+pub(crate) fn date_field(
+    s: Option<&str>,
+    field: ReadField,
+    bad: &mut Vec<ReadField>,
+) -> Option<CalendarDate> {
     let s = s.map(str::trim).filter(|s| !s.is_empty())?;
     let d = CalendarDate::parse_wire(s).ok();
     if d.is_none() {
@@ -406,7 +410,7 @@ pub const PDF_RENDER_FAILED: &str = "PDF_RENDER_FAILED";
 pub const PDF_RENDER_EMPTY: &str = "PDF_RENDER_EMPTY";
 
 /// The engine's AI gates (any of these is `AiUnavailable`).
-const GATE_CODES: [&str; 4] = [
+pub(crate) const GATE_CODES: [&str; 4] = [
     "AI_DISABLED",
     "AI_DISABLED_GLOBALLY",
     "AI_FUNCTION_DISABLED",

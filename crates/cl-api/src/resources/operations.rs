@@ -790,6 +790,15 @@ pub(crate) const VENDOR_TEMPLATES_PUT: Operation =
 pub(crate) const VENDOR_TEMPLATE_DELETE: Operation =
     write(Method::Delete, "/api/v1/vendor-layout-templates/{id}");
 
+// ---- A03: document reading assist (engine U-92d, `document-assist-v1`)
+// Client-declared (`OUTSIDE_SPEC`) until the engine PR lands and the pin moves.
+
+/// A second reading of a document's page text (and page images) by the
+/// company's AI provider. Nothing is stored, but it spends tokens: never
+/// retried after it may have been sent.
+pub(crate) const DOCUMENT_READING_ASSIST: Operation =
+    write(Method::Post, "/api/v1/document-reading/assist");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -802,7 +811,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 198] = [
+pub const OPERATIONS: [Operation; 199] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1010,6 +1019,7 @@ pub const OPERATIONS: [Operation; 198] = [
     VENDOR_TEMPLATES_LIST,
     VENDOR_TEMPLATES_PUT,
     VENDOR_TEMPLATE_DELETE,
+    DOCUMENT_READING_ASSIST,
 ];
 
 /// Looks up a covered operation.

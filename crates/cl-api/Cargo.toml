@@ -8,6 +8,9 @@ description = "Typed client for the local MyBooks engine API (loopback HTTP, ses
 
 [dependencies]
 cl-core = { path = "../cl-core" }
+# Page pictures go to the document reading assist as base64 (A03 U-92d);
+# MIT OR Apache-2.0, already in the tree through cl-docread.
+base64 = { version = "0.22.1", default-features = false, features = ["std"] }
 # Plain HTTP to 127.0.0.1 only: no TLS, no system proxy, no HTTP/2, no cookie
 # jar (P05 plan §2.2, Q-P05c, Q-P05d).
 reqwest = { version = "0.13.5", default-features = false }
@@ -65,4 +68,11 @@ harness = false
 [[test]]
 name = "contract_document_drafts"
 path = "tests/contract_document_drafts.rs"
+harness = false
+
+# A03 document reading assist and its consent switches (engine U-92d): its
+# own engine, so the AI configuration it changes starts from the default.
+[[test]]
+name = "contract_document_assist"
+path = "tests/contract_document_assist.rs"
 harness = false
