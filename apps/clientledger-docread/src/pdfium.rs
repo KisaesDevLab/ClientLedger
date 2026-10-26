@@ -85,7 +85,10 @@ pub fn load() -> Option<Pdfium> {
         .filter(|c| c.is_file())
         .find_map(|c| match Pdfium::bind_to_library(&c) {
             Ok(b) => Some(Pdfium::new(b)),
-            // Bindings are process-wide (tests bind more than once).
+            // Bindings are process-wide and only tests bind more than once.
+            // `Pdfium::default` would look in the working folder first, so
+            // the worker itself never calls it.
+            #[cfg(test)]
             Err(PdfiumError::PdfiumLibraryBindingsAlreadyInitialized) => Some(Pdfium::default()),
             Err(_) => None,
         })
