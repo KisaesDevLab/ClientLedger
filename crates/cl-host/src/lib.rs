@@ -5,7 +5,13 @@
 //! This crate may spawn processes (CLAUDE.md layering rules). Secrets (the
 //! launch token, database passwords) travel only as [`cl_pg::Secret`] values
 //! and the child environment, never as command-line arguments.
-#![forbid(unsafe_code)]
+//!
+//! **One `unsafe` boundary** (A03, Q-A03s): `procs/win_job_memory.rs`
+//! makes the single `SetInformationJobObject` call for the Windows hard
+//! memory cap. The crate denies unsafe code (the workspace's `forbid` can't
+//! be relaxed in one module); `cargo xtask unsafe-check` fails on `unsafe`
+//! anywhere else.
+#![deny(unsafe_code)]
 
 // Test hooks never reach an optimised build: feature unification
 // (`--workspace --all-targets`) can switch `test-support` on for the apps,

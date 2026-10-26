@@ -10,6 +10,9 @@
 //!   kills that process, but only when its executable and start time match
 //!   what was recorded, so a recycled pid is never killed.
 
+#[cfg(windows)]
+mod win_job_memory;
+
 use crate::paths::AppPaths;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -76,10 +79,19 @@ impl TreeKiller {
     /// instead of waiting for the watchdog's next poll. Elsewhere the
     /// watchdog (and the worker's own `RLIMIT_DATA`) is the limit, and this
     /// returns false.
-    #[allow(clippy::unused_self)]
+    #[cfg_attr(not(windows), allow(clippy::unused_self))]
     pub(crate) fn limit_memory(&self, bytes: u64) -> bool {
-        let _ = bytes;
-        false
+        #[cfg(windows)]
+        {
+            self.job
+                .as_ref()
+                .is_some_and(|job| win_job_memory::limit_process_memory(job, bytes))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = bytes;
+            false
+        }
     }
 
     /// Stop the child and its descendants, then reap it. On Unix the group

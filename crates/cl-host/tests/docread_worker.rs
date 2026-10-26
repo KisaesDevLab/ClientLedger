@@ -167,6 +167,46 @@ fn the_memory_watchdog_stops_a_worker_over_its_limit() {
     assert_eq!(out[1], UNSUPPORTED);
 }
 
+/// The hard cap (Q-A03s): on Windows the job refuses commit past
+/// 1.25 × the watchdog, so a 1.5 GiB allocation fails at once (the worker
+/// aborts) instead of waiting for the next poll; elsewhere the worker's
+/// own data limit or the watchdog ends it. Either way the job could not be
+/// read and the next one is.
+#[test]
+fn a_huge_allocation_is_stopped_by_the_hard_cap() {
+    let s = Scratch::new("docread-hard-cap");
+    let mut c = config(&s);
+    // A slow watchdog: the cap must act on its own.
+    c.limits.poll = Duration::from_secs(5);
+    let mut host = DocreadHost::new(c);
+    let grow = if cfg!(windows) {
+        "commit:1536"
+    } else {
+        "rss:1536"
+    };
+    let started = Instant::now();
+    let out = host.read(&[hook(grow), junk()], today());
+    let why = could_not(&out[0]);
+    if cfg!(windows) {
+        assert_eq!(why, Some(CouldNotRead::Crashed));
+        // Two attempts, each ended by the cap, not by a 5 s poll.
+        assert!(
+            started.elapsed() < Duration::from_secs(9),
+            "{:?}",
+            started.elapsed()
+        );
+    } else {
+        assert!(
+            matches!(
+                why,
+                Some(CouldNotRead::Crashed | CouldNotRead::TooMuchMemory)
+            ),
+            "{why:?}"
+        );
+    }
+    assert_eq!(out[1], UNSUPPORTED);
+}
+
 #[test]
 fn oversized_and_garbled_frames_kill_the_worker() {
     let s = Scratch::new("docread-frames");

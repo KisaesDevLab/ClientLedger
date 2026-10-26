@@ -20,6 +20,7 @@ mod pg_fetch;
 mod preview;
 mod run;
 mod ui_check;
+mod unsafe_check;
 
 use anyhow::{Result, bail};
 
@@ -32,6 +33,7 @@ usage: cargo xtask <command>
   licenses           direct dependencies must be MIT or Apache-2.0
   layering           crate dependency rules from CLAUDE.md
   nofloat            no floating point in the money crates and cl-docread rules (syn scan)
+  unsafe-check       no `unsafe` outside cl-host's one Windows job memory call (Q-A03s)
   engine [--smoke] [--force]
                      build the engine single executable into target/engine/<target>
   engine-test [-- <vitest args>]
@@ -131,6 +133,15 @@ pub(crate) fn run_nofloat() -> Result<()> {
     )
 }
 
+pub(crate) fn run_unsafe_check() -> Result<()> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    report(
+        "unsafe-check",
+        "no unsafe code outside the one Windows job memory call",
+        &unsafe_check::check(&root)?,
+    )
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -139,6 +150,7 @@ fn main() -> Result<()> {
         Some("licenses") => run_licenses(),
         Some("layering") => run_layering(),
         Some("nofloat") => run_nofloat(),
+        Some("unsafe-check") => run_unsafe_check(),
         Some("engine") => engine::engine(&args[1..]),
         Some("engine-test") => engine_test::engine_test(&args[1..]),
         Some("api-spec") => api_spec::api_spec(&args[1..]),
