@@ -612,6 +612,11 @@ impl ReceiptInboxScreen {
         if self.view.move_failures > 0 {
             form::hint(ui, tokens, &t("inbox.move_failed"));
         }
+        // The engine keeps intake folders but this folder couldn't move
+        // over (Home counts it): say why the P17 inbox still runs.
+        if intake::existing(ui.ctx()).is_some_and(|h| h.lock().fallback()) {
+            form::hint(ui, tokens, &t("inbox.migration.blocked"));
+        }
     }
 
     fn file_list(&mut self, ui: &mut Ui, tokens: &Tokens, files: &[(InboxFile, Mark)]) {
