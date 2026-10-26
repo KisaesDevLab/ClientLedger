@@ -871,13 +871,19 @@ pub fn read_button(
     if has_document || ai {
         let busy = state.busy();
         ui.horizontal_wrapped(|ui| {
-            if has_document
-                && ui
+            if has_document {
+                let r = ui
                     .add_enabled(!busy, egui::Button::new(t("bill.read.local.button")))
-                    .on_hover_text(t("bill.read.local.button.tip"))
-                    .clicked()
-            {
-                local = true;
+                    .on_hover_text(t("bill.read.local.button.tip"));
+                if std::mem::take(&mut state.local.focus_read) && !busy {
+                    r.request_focus();
+                }
+                if r.clicked() {
+                    local = true;
+                    // The button is disabled while reading: the keyboard
+                    // goes to Cancel reading, not to the menu bar.
+                    state.local.focus_cancel = r.has_focus();
+                }
             }
             if ai
                 && ui
@@ -890,14 +896,29 @@ pub fn read_button(
         });
         if state.local.job.is_some() {
             form::progress_line(ui, tokens, &t("bill.read.local.reading"));
-            // A long scan can be stopped (review S2).
-            if ui
+            // A long scan can be stopped (review S2), with the mouse, the
+            // keyboard or Esc.
+            let r = ui
                 .button(t("bill.read.local.cancel"))
-                .on_hover_text(t("bill.read.local.cancel.tip"))
-                .clicked()
-            {
+                .on_hover_text(t("bill.read.local.cancel.tip"));
+            if std::mem::take(&mut state.local.focus_cancel) {
+                r.request_focus();
+            }
+            state.local.cancel_focused = r.has_focus();
+            if r.clicked() {
                 state.local.cancel_job();
             }
+        } else if std::mem::take(&mut state.local.cancel_focused) {
+            // The reading ended (or was cancelled) with the keyboard on
+            // Cancel reading: it goes back to Read document.
+            state.local.focus_read = true;
+            state.local.focus_cancel = false;
+            ui.ctx().request_repaint();
+        } else if state.local.focus_cancel && !local && !state.local.busy() {
+            // The reading ended (or never started) before Cancel was drawn.
+            state.local.focus_cancel = false;
+            state.local.focus_read = true;
+            ui.ctx().request_repaint();
         }
         if state.local.assist.is_some() {
             form::progress_line(ui, tokens, &t("bill.read.assist.reading"));
@@ -1065,6 +1086,17 @@ pub fn banner(
                         .wrap(),
                     );
                 }
+                // Engine #179: a picture over its limits went without the
+                // picture; the owner is told (never shrunk here, A03 D5).
+                if state.local.picture == Some(crate::reading::assist::Picture::TooLarge) {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(t("bill.read.assist.picture_too_large"))
+                                .color(tokens.text_primary),
+                        )
+                        .wrap(),
+                    );
+                }
                 if super::doc_read_local::assist_ui(ui, state, tokens) {
                     event = BannerEvent::AskAi;
                 }
@@ -1167,6 +1199,11 @@ pub(crate) fn field_mark(
     } else {
         "bill.read.mark"
     };
+    // The caption under the field is tied to it for screen readers (and
+    // the control channel): the field itself says it was read.
+    ui.ctx().accesskit_node_builder(r.id, |node| {
+        node.set_description(t(key));
+    });
     let text = RichText::new(t(key)).size(11.0).color(tokens.warn_text);
     ui.add(egui::Label::new(if low { text.strong() } else { text }).wrap());
 }
@@ -1728,14 +1765,20 @@ impl EnterBillScreen {
                         ui.label(
                             RichText::new(t("check.suggest.to_accept")).color(tokens.warn_text),
                         );
-                        if ui
-                            .button(t("check.suggest.accept"))
-                            .on_hover_text(t_with(
-                                "bill.read.ghost.accept.tip",
-                                &[("line", &line.to_string())],
-                            ))
-                            .clicked()
-                        {
+                        let r = ui.button(t("check.suggest.accept")).on_hover_text(t_with(
+                            "bill.read.ghost.accept.tip",
+                            &[("line", &line.to_string())],
+                        ));
+                        // Each line's Accept has its own name ("Accept,
+                        // line 2"), which starts with the word shown.
+                        let name = t_with(
+                            "bill.read.ghost.accept.name",
+                            &[("line", &line.to_string())],
+                        );
+                        ui.ctx().accesskit_node_builder(r.id, |node| {
+                            node.set_label(name);
+                        });
+                        if r.clicked() {
                             accept = Some(*key);
                         }
                     });

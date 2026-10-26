@@ -1300,9 +1300,11 @@ impl ChartScreen {
                     r.request_focus();
                 }
                 if r.changed() {
-                    panel
-                        .form
-                        .edit(F_CARD, |x| x.card_last4 = CardEnding(digits));
+                    // The warning goes once the value is right (A03 UI
+                    // review 6); a wrong value is warned about on Save.
+                    let ending = CardEnding(digits);
+                    card_typed(&mut panel.problems, &ending);
+                    panel.form.edit(F_CARD, |x| x.card_last4 = ending);
                 }
                 if enter_left(ui, &r) {
                     save = Some(SaveIntent::SaveAndNew);
@@ -1491,6 +1493,15 @@ fn card_wanted(d: &AccountDraft) -> Option<String> {
     d.card_last4
         .is_valid()
         .then(|| d.card_last4.as_str().to_string())
+}
+
+/// The owner typed in "Card ends in": a refused value's warning goes once
+/// the value is four digits or empty (A03 UI review 6). A wrong value is
+/// warned about again on Save, not while typing.
+pub(crate) fn card_typed(problems: &mut Vec<DraftProblem>, ending: &CardEnding) {
+    if ending.is_empty() || ending.is_valid() {
+        problems.retain(|p| *p != DraftProblem::CardDigits);
+    }
 }
 
 /// Enter left `r` and means Save & New (Q-190); with "Enter moves between

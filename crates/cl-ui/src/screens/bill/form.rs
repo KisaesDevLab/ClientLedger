@@ -1493,6 +1493,16 @@ impl EnterBillScreen {
             self.vendor_list = false;
             return true;
         }
+        // Esc stops a reading on this computer, quietly, as Cancel does.
+        if self.read.local.job.is_some() {
+            self.read.local.cancel_job();
+            // Not from a field (from Cancel reading, whose focus egui drops
+            // on Esc): the keyboard goes back to Read document.
+            if self.focused.is_none() {
+                self.read.local.focus_read = true;
+            }
+            return true;
+        }
         let Some(f) = self.focused else { return false };
         let saved = self.header.original().clone();
         let now = self.header.current();

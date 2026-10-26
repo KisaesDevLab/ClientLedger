@@ -612,6 +612,12 @@ impl ItemsGrid {
         self.form.commit_pending(&*lists).is_ok()
     }
 
+    /// The screen replaced the lines (see `GridForm::rebind_view`).
+    pub fn lines_replaced(&mut self) {
+        let lists = Arc::clone(&self.form.adapter().lists);
+        self.form.rebind_view(&*lists);
+    }
+
     /// The pickers changed.
     pub fn set_lists(&mut self, lists: Arc<ItemLists>) {
         self.form.adapter_mut().lists = lists;

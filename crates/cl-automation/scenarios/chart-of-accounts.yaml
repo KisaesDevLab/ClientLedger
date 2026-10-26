@@ -164,6 +164,9 @@ steps:
   - assert_focused: {role: text_input, label: Card ends in}
   - key: Ctrl+A
   - type: {text: "4821"}
+  # The warning goes once the value is right (A03 UI review 6).
+  - assert_state: {key: screen.problem, equals: null}
+  - assert_not_exists: {label_contains: "exactly 4 digits"}
   - assert_no_clipping: {}
   - hover: {role: text_input, label: Card ends in}
   - wait: {ms: 800}

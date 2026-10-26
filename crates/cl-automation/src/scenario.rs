@@ -27,6 +27,16 @@ use crate::inspect::{Bounds, Snapshot};
 /// How long an assertion keeps retrying before it fails.
 const ASSERT_TIMEOUT: Duration = Duration::from_secs(3);
 const ASSERT_POLL: Duration = Duration::from_millis(60);
+/// The longest `assert_state` may be told to keep asking (`within_ms`).
+pub const MAX_STATE_WAIT_MS: u64 = 120_000;
+
+/// How long an `assert_state` keeps asking: [`ASSERT_TIMEOUT`] unless the
+/// step says otherwise, never over [`MAX_STATE_WAIT_MS`].
+fn state_timeout(within_ms: Option<u64>) -> Duration {
+    within_ms.map_or(ASSERT_TIMEOUT, |ms| {
+        Duration::from_millis(ms.min(MAX_STATE_WAIT_MS))
+    })
+}
 
 /// A scenario file.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -357,6 +367,11 @@ pub enum Step {
         key: String,
         /// Expected JSON value.
         equals: Value,
+        /// How long to keep asking, in milliseconds (default 3000; at most
+        /// [`MAX_STATE_WAIT_MS`]): for work that takes a known while, such
+        /// as reading a document, instead of a fixed `wait`.
+        #[serde(default)]
+        within_ms: Option<u64>,
     },
     /// No element is cut off by the window edge, drawn over another, or
     /// showing text cut inside its own text field.
@@ -939,15 +954,20 @@ fn run_step(
                 Ok(())
             }
         }),
-        Step::AssertState { key, equals } => {
+        Step::AssertState {
+            key,
+            equals,
+            within_ms,
+        } => {
             let start = Instant::now();
+            let timeout = state_timeout(*within_ms);
             loop {
                 let state = call(t, "state", json!({}))?;
                 let got = dotted(&state, key).cloned().unwrap_or(Value::Null);
                 if &got == equals {
                     return Ok(());
                 }
-                if start.elapsed() >= ASSERT_TIMEOUT {
+                if start.elapsed() >= timeout {
                     return Err(format!("state {key} is {got}, expected {equals}"));
                 }
                 std::thread::sleep(ASSERT_POLL);
@@ -1092,6 +1112,38 @@ mod tests {
         .unwrap();
         assert_eq!(s.themes, vec!["light", "dark"]);
         assert_eq!(s.steps.len(), 7);
+    }
+
+    /// `assert_state` may wait longer for slow work (a document reading)
+    /// instead of a fixed `wait`; the default stays 3 s and the longest is
+    /// capped.
+    #[test]
+    fn assert_state_takes_an_optional_wait() {
+        let s = Scenario::parse(
+            "name: x\nsteps:\n  - assert_state: {key: a, equals: 1}\n  - assert_state: {key: a, equals: read, within_ms: 20000}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            s.steps[1],
+            Step::AssertState {
+                key: "a".into(),
+                equals: json!("read"),
+                within_ms: Some(20_000),
+            }
+        );
+        assert!(matches!(
+            s.steps[0],
+            Step::AssertState {
+                within_ms: None,
+                ..
+            }
+        ));
+        assert_eq!(state_timeout(None), ASSERT_TIMEOUT);
+        assert_eq!(state_timeout(Some(20_000)), Duration::from_secs(20));
+        assert_eq!(
+            state_timeout(Some(u64::MAX)),
+            Duration::from_millis(MAX_STATE_WAIT_MS)
+        );
     }
 
     #[test]

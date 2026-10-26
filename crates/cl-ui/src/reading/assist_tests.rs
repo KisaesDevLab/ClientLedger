@@ -218,13 +218,52 @@ fn the_text_is_the_pages_words_line_by_line() {
     assert!(text.contains("32.48"));
 }
 
+/// A PNG header saying `w` × `h` (only the header is ever read here).
+fn png_of(w: u32, h: u32) -> Vec<u8> {
+    let mut p = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    p.extend_from_slice(&w.to_be_bytes());
+    p.extend_from_slice(&h.to_be_bytes());
+    p.extend_from_slice(b"page");
+    p
+}
+
+/// Engine #179 refuses pictures over 4096 px on a side: such a PNG is
+/// never sent (nor decoded or shrunk on the desktop); the text goes alone
+/// and the reason is kept for the banner.
+#[test]
+fn a_picture_over_4096_px_is_not_sent_and_says_so() {
+    let l = local();
+    let cloud = Route::Cloud { images: true };
+    for (w, h) in [(4097, 3000), (3000, 4097), (8000, 8000)] {
+        let doc = png_of(w, h);
+        assert_eq!(picture(cloud, &doc), Picture::TooLarge, "{w}x{h}");
+        let r = request(&l, cloud, &doc);
+        assert!(r.page_images.is_empty(), "{w}x{h}");
+        assert!(r.check().is_ok(), "the text still goes");
+    }
+    assert_eq!(picture(cloud, &png_of(4096, 4096)), Picture::Sent);
+    // Over 2 MiB is too large as well.
+    let mut heavy = png_of(100, 100);
+    heavy.resize(cl_api::ASSIST_MAX_IMAGE_BYTES + 1, 0);
+    assert_eq!(picture(cloud, &heavy), Picture::TooLarge);
+    // A PNG whose header can't be read is never sent either.
+    assert_eq!(
+        picture(cloud, b"\x89PNG\r\n\x1a\nbroken"),
+        Picture::TooLarge
+    );
+    // Not allowed, or not a picture: nothing to say.
+    assert_eq!(
+        picture(Route::Cloud { images: false }, &png_of(9000, 9000)),
+        Picture::NotSent
+    );
+    assert_eq!(picture(Route::Local, &png_of(9000, 9000)), Picture::NotSent);
+    assert_eq!(picture(cloud, b"%PDF-1.7"), Picture::NotSent);
+    assert_eq!(Picture::TooLarge.key(), "too_large");
+}
+
 #[test]
 fn a_picture_goes_only_online_with_consent_and_only_a_small_png() {
-    let png = {
-        let mut p = b"\x89PNG\r\n\x1a\n".to_vec();
-        p.extend_from_slice(b"page");
-        p
-    };
+    let png = png_of(1700, 2200);
     let l = local();
     let count = |route, doc: &[u8]| request(&l, route, doc).page_images.len();
     assert_eq!(count(Route::Cloud { images: true }, &png), 1);

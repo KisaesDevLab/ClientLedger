@@ -433,9 +433,8 @@ steps:
   - assert_not_exists: {role: button, label: Read with AI}
   - assert_state: {key: screen.read.local.requests, equals: 0}
   - click: {role: button, label: Read document}
-  # The first read starts the worker: give it a moment beyond the retries.
-  - wait: {ms: 1500}
-  - assert_state: {key: screen.read.local.outcome, equals: read}
+  # The first read starts the worker: wait for the outcome itself.
+  - assert_state: {key: screen.read.local.outcome, equals: read, within_ms: 30000}
   - assert_state: {key: screen.read.local.requests, equals: 1}
   - assert_state: {key: screen.read.requests, equals: 0}
   - assert_state: {key: screen.attachments.draft_files, equals: 1}
@@ -450,6 +449,13 @@ steps:
   - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "1,480.00"}
   - assert_exists: {role: label, label_contains: "Filled from midwest_inv_55871.pdf"}
   - assert_exists: {role: label, label_contains: "Read from the document", index: 0}
+  # Each read field carries its marker for screen readers; the lines the
+  # reading replaced go without "That line is no longer here."
+  - assert_exists: {role: text_input, label: Ref. no., description_contains: "Read from the document"}
+  - assert_exists: {role: text_input, label: "Amount due ($)", description_contains: "Read from the document"}
+  - assert_not_exists: {label_contains: "no longer here"}
+  - assert_exists: {role: button, label: "Accept, line 1"}
+  - assert_exists: {role: button, label: "Accept, line 2"}
   # 11/03 could be 3 November or 11 March: shown, not changed.
   - assert_exists: {role: label, label_contains: "could also be read day first"}
   - assert_state: {key: screen.read.ghosts.open, equals: 2}
@@ -506,8 +512,23 @@ steps:
   # gives up on it alone, the form keeps working, nothing is written.
   - type: {text: "fixtures/docs/hostile_garbled.pdf", target: {role: text_input, label: File}}
   - click: {role: button, label: Attach file}
+  - assert_state: {key: screen.attachments.draft_files, equals: 1}
+  # Read document from the keyboard: the button is disabled while reading,
+  # so the keyboard moves to Cancel reading (not to the menu bar); Esc stops
+  # the reading quietly and the keyboard goes back to Read document.
+  - focus: {role: button, label: Read document}
+  - key: Enter
+  - assert_focused: {role: button, label: Cancel reading}
+  - assert_exists: {role: label, label_contains: "Reading the document on this computer"}
+  - screenshot: read-document-cancel
+  - key: Escape
+  - assert_state: {key: screen.read.local.outcome, equals: cancelled}
+  - assert_not_exists: {role: button, label: Cancel reading}
+  - assert_not_exists: {label_contains: "Couldn't read this document"}
+  - assert_focused: {role: button, label: Read document}
+  # Read to the end.
   - click: {role: button, label: Read document}
-  - wait: {ms: 1500}
+  - assert_state: {key: screen.read.local.outcome, equals: unreadable, within_ms: 30000}
   - assert_exists: {role: label, label_contains: "Couldn't read this document"}
   - assert_state: {key: screen.read.filled, equals: false}
   - assert_state: {key: screen.writes_since_read, equals: 0}

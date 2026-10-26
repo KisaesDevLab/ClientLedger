@@ -22,7 +22,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.cloud_reading.local", "If your AI runs on this computer (an Ollama model), nothing leaves it and these switches aren't needed. Ollama's cloud models (names ending in \u{201c}cloud\u{201d}) run online, so they need these switches like any online service."),
     ("prefs.cloud_reading.what", "What may be sent"),
     ("prefs.cloud_reading.text", "Send the document's text"),
-    ("prefs.cloud_reading.text_desc", "The words ClientLedger read from the page, when you choose Ask AI to help. Personal details your AI settings recognise, such as account and card numbers, are hidden first."),
+    ("prefs.cloud_reading.text_desc", "The words ClientLedger read from the page, when you choose Ask AI to help. Personal details your AI settings recognize, such as account and card numbers, are hidden first."),
     ("prefs.cloud_reading.images", "Also send pictures of the page"),
     ("prefs.cloud_reading.images_desc", "Only for a document that is itself a picture (PNG). A picture can help with a hard-to-read scan."),
     ("prefs.cloud_reading.images_warning", "A picture can't have anything hidden: everything printed on it, including names, addresses and account numbers, goes to the AI service as it is."),
@@ -36,4 +36,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.cloud_reading.link_hint", "Bills and receipts go to this service only if you allow it in"),
     ("prefs.cloud_reading.link", "Reading documents online"),
     ("prefs.cloud_reading.link_tip", "Choose whether documents may go to your AI service when you ask AI to help read them."),
+    // A03 fix2: a picture over the engine's size limit (engine #179).
+    ("bill.read.assist.picture_too_large", "The picture of this page is too large to send (more than 4096 pixels on a side, or over 2 MB), so only its text went to your AI service."),
 ];
