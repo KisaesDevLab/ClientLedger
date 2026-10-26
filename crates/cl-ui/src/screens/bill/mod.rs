@@ -1279,11 +1279,16 @@ impl EnterBillScreen {
         if *self.header.current() != form {
             self.header.edit_step(|h| *h = form);
         }
+        // The screen replaced the lines (a reading filled or cleared them):
+        // the grids follow without "That line is no longer here." (A03 UI
+        // review 1).
         if &expenses != self.expenses.value() {
             self.expenses.form_mut().edit_step(|v| *v = expenses);
+            self.expenses.lines_replaced();
         }
         if &items != self.items.value() {
             self.items.form_mut().edit_step(|v| *v = items);
+            self.items.lines_replaced();
         }
         self.sync_inputs();
     }

@@ -376,6 +376,138 @@ fn an_unknown_vendor_is_offered_never_added() {
     assert_eq!(s.header.current().vendor, None);
 }
 
+/// Draws the bill `n` times at 1440 x 940; the accessible labels and
+/// descriptions of the last frame.
+fn draw(
+    ctx: &egui::Context,
+    s: &mut EnterBillScreen,
+    n: usize,
+) -> Vec<(Option<String>, Option<String>)> {
+    let mut nodes = Vec::new();
+    for _ in 0..n {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 940.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        if let Some(u) = out.platform_output.accesskit_update {
+            nodes = u
+                .nodes
+                .into_iter()
+                .map(|(_, n)| {
+                    (
+                        n.label().map(str::to_string),
+                        n.description().map(str::to_string),
+                    )
+                })
+                .collect();
+        }
+    }
+    nodes
+}
+
+fn context() -> egui::Context {
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    ctx
+}
+
+/// A03 UI review 1 and 3: a reading that replaces the line the cursor was
+/// on says nothing about it ("That line is no longer here." is for changes
+/// the owner didn't make), and each read field carries its marker as its
+/// accessible description.
+#[test]
+fn a_reading_replaces_the_lines_quietly_and_marks_its_fields() {
+    let (_d, link) = link();
+    let mut s = with_document(
+        &link,
+        Some(service(JobOutcome::Read(Box::new(story(STORY_VENDOR))))),
+    );
+    let ctx = context();
+    draw(&ctx, &mut s, 2);
+    s.expenses.focus_first();
+    draw(&ctx, &mut s, 2);
+    let before = s
+        .expenses
+        .cursor()
+        .expect("the cursor is on the entry line");
+    read_local(&mut s);
+    let nodes = draw(&ctx, &mut s, 3);
+    assert!(
+        s.expenses.value().lines.iter().all(|l| l.key != before.row),
+        "the reading replaced the line the cursor was on"
+    );
+    assert_eq!(s.expenses.form().grid().core().notice(), None);
+    assert!(
+        !nodes
+            .iter()
+            .any(|(l, _)| l.as_deref().is_some_and(|l| l.contains("no longer here"))),
+        "{nodes:?}"
+    );
+    // Vendor, date, ref. no. and amount due: each field says it was read
+    // (one strongly, the date being unsure).
+    let marked = nodes
+        .iter()
+        .filter(|(_, d)| {
+            d.as_deref()
+                .is_some_and(|d| d.starts_with("Read from the document"))
+        })
+        .count();
+    assert!(marked >= 4, "{marked}: {nodes:?}");
+}
+
+/// A03 UI review 4: Read document from the keyboard puts the keyboard on
+/// Cancel reading; Esc stops the reading quietly; the keyboard goes back
+/// to Read document.
+#[test]
+fn the_keyboard_goes_to_cancel_and_esc_stops_the_reading() {
+    let (_d, link) = link();
+    let (tx, stopped) = std::sync::mpsc::channel();
+    let svc = Arc::new(ReadingService::start(Box::new(move || {
+        Some(Box::new(UntilCancelled(tx)) as Box<dyn Reader>)
+    })));
+    let mut s = with_document(&link, Some(svc));
+    let ctx = context();
+    let nodes = draw(&ctx, &mut s, 2);
+    assert!(
+        nodes
+            .iter()
+            .any(|(l, _)| l.as_deref() == Some("Read document"))
+    );
+    // As if Enter was pressed on the focused button.
+    s.read.local.focus_cancel = true;
+    assert!(s.form_command(cl_model::CommandId::new("bill.read_local")));
+    stopped
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the reader started");
+    draw(&ctx, &mut s, 2);
+    assert!(
+        s.read.local.cancel_focused,
+        "Cancel reading has the keyboard"
+    );
+    assert!(s.form_command(cl_model::CommandId::new("form.revert")));
+    stopped
+        .recv_timeout(Duration::from_secs(10))
+        .expect("Esc stopped the reader");
+    s.poll_read();
+    assert_eq!(s.state()["read"]["local"]["outcome"], "cancelled");
+    assert_eq!(s.read.problem, None, "a cancel shows no message");
+    draw(&ctx, &mut s, 3);
+    assert!(!s.read.local.cancel_focused);
+    assert!(
+        !s.read.local.focus_read,
+        "Read document took the keyboard back"
+    );
+}
+
 #[test]
 fn the_button_is_there_with_ai_off_and_named() {
     use crate::theme::ThemeChoice;

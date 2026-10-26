@@ -48,7 +48,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bill.read.local.reading", "Reading the document on this computer\u{2026}"),
     ("bill.read.local.banner.low", "Some values weren't printed clearly. They are marked more strongly: check those carefully."),
     ("bill.read.local.checks", "Check these on the document (nothing was changed):"),
-    ("bill.read.local.failed", "Couldn't read this document, enter the bill by hand."),
+    ("bill.read.local.failed", "Couldn't read this document. Enter the bill by hand."),
     ("bill.read.local.failed.protected", "Couldn't read this document: the PDF has a password. Enter the bill by hand."),
     ("bill.read.local.failed.too_large", "Couldn't read this document: it's too large. Enter the bill by hand."),
     ("bill.read.local.failed.unsupported", "Couldn't read this document: it isn't a PDF or a picture ClientLedger reads. Enter the bill by hand."),
@@ -77,4 +77,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bill.read.local.cancel.tip", "Stops reading this document. Nothing is filled in; you can read it again or type the bill in."),
     ("bill.read.local.total_and_balance", "The document's total is {total} and its balance due is {balance}. The bill's amount is the total: change it if you owe only the balance."),
     ("bill.read.check.second_read", "An amount read as {found} could also be {expected}. {found} was used: check it on the document."),
+    // A03 fix2: the ghost account's Accept, named for its line (screen
+    // readers and the control channel tell the lines' buttons apart).
+    ("bill.read.ghost.accept.name", "Accept, line {line}"),
 ];
