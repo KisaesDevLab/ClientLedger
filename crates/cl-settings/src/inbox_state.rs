@@ -288,7 +288,36 @@ impl InboxState {
             }
         }
         s.version = VERSION;
+        s.sanitize();
         s
+    }
+
+    /// What a file edited by hand could put in that the app never writes
+    /// (security review L9): ids that aren't UUIDs go (an entry left with
+    /// no upload but needing one is dropped, so its file is offered
+    /// again), and every cap that saving keeps holds on load too.
+    fn sanitize(&mut self) {
+        let uuid = |s: &str| cl_core::ids::parse_uuid(s).is_ok();
+        for list in self.companies.values_mut() {
+            list.retain_mut(|e| {
+                e.attachments.retain(|a| uuid(a));
+                let over = e.attachments.len().saturating_sub(MAX_UPLOADS);
+                e.attachments.drain(..over);
+                e.draft = e.draft.take().filter(|d| uuid(d));
+                e.upload_key = e.upload_key.take().filter(|k| uuid(k));
+                // Waiting for the owner means having an upload to show.
+                !(e.status == EntryStatus::Arrived && e.attachments.is_empty())
+            });
+            cap_entries(list);
+        }
+        self.companies.retain(|_, l| !l.is_empty());
+        for list in self.seen.values_mut() {
+            list.retain(|f| uuid(&f.attachment));
+            let over = list.len().saturating_sub(MAX_SEEN);
+            list.drain(..over);
+        }
+        self.seen.retain(|_, l| !l.is_empty());
+        self.fit();
     }
 
     /// The file's text.
@@ -343,12 +372,7 @@ impl InboxState {
     fn push(&mut self, company: &str, entry: InboxEntry) {
         let list = self.companies.entry(company.to_string()).or_default();
         list.push(entry);
-        while list.len() > MAX_ENTRIES {
-            // The oldest finished entry goes first; its file is only
-            // offered again. One still owing a side effect is kept.
-            let at = list.iter().position(|e| !e.status.pending()).unwrap_or(0);
-            list.remove(at);
-        }
+        cap_entries(list);
     }
 
     /// Records an upload of `file` (`attachment` is the engine's id) — the
@@ -576,6 +600,20 @@ impl InboxState {
     }
 }
 
+/// Keeps a company's entries within [`MAX_ENTRIES`]: the oldest finished
+/// entry goes first (its file is only offered again). One still owing a
+/// side effect (a move, a delete, an upload) is never dropped, even when
+/// that leaves the list over the cap; such entries are bounded by the
+/// files the folders list.
+fn cap_entries(list: &mut Vec<InboxEntry>) {
+    while list.len() > MAX_ENTRIES {
+        let Some(at) = list.iter().position(|e| !e.status.pending()) else {
+            return;
+        };
+        list.remove(at);
+    }
+}
+
 /// Why the file could not be read or written.
 #[derive(Debug, thiserror::Error)]
 #[error("inbox state could not be {action}")]
@@ -649,6 +687,12 @@ mod tests {
     use super::*;
 
     const FOLDER: &str = "7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a6b";
+    const A1: &str = "d0000000-0000-4000-8000-0000000000a1";
+    const A2: &str = "d0000000-0000-4000-8000-0000000000a2";
+    const B1: &str = "d0000000-0000-4000-8000-0000000000b1";
+    const ATT1: &str = "d0000000-0000-4000-8000-000000000a77";
+    const DRAFT1: &str = "d0000000-0000-4000-8000-00000000d001";
+    const KEY1: &str = "d0000000-0000-4000-8000-00000000c001";
 
     fn folder() -> IntakeFolderId {
         IntakeFolderId::parse(FOLDER).expect("id")
@@ -671,17 +715,17 @@ mod tests {
         let f = file(1);
         store
             .update(|s| {
-                s.record_upload(&c, &f, "a1");
-                s.record_upload(&c, &f, "a1");
-                s.record_upload(&c, &f, "a2");
+                s.record_upload(&c, &f, A1);
+                s.record_upload(&c, &f, A1);
+                s.record_upload(&c, &f, A2);
             })
             .expect("save");
         let s = store.load().expect("load");
         let e = s
             .find(&c, &f.path_hash, f.size, f.modified_ms)
             .expect("entry");
-        assert_eq!(e.attachments, ["a1", "a2"]);
-        assert_eq!(e.attachment(), Some("a2"));
+        assert_eq!(e.attachments, [A1, A2]);
+        assert_eq!(e.attachment(), Some(A2));
         assert!(!e.linked);
         assert_eq!(e.status, EntryStatus::Arrived);
         assert!(
@@ -702,19 +746,19 @@ mod tests {
     fn stale_uploads_are_dropped() {
         let mut s = InboxState::default();
         let c = company_key("t");
-        s.record_upload(&c, &file(1), "a1");
-        s.record_upload(&c, &file(1), "a2");
-        s.record_upload(&c, &file(2), "b1");
+        s.record_upload(&c, &file(1), A1);
+        s.record_upload(&c, &file(1), A2);
+        s.record_upload(&c, &file(2), B1);
         s.mark_linked(&c, &file(2));
-        s.record_seen(&c, &file(2).sha256, "b1", 1);
-        s.drop_attachment(&c, "a1");
-        assert_eq!(s.entries(&c)[0].attachments, ["a2"]);
+        s.record_seen(&c, &file(2).sha256, B1, 1);
+        s.drop_attachment(&c, A1);
+        assert_eq!(s.entries(&c)[0].attachments, [A2]);
         // A restored company without the linked upload: the file is
         // offered again instead of hidden for ever, and isn't a duplicate.
-        s.drop_attachment(&c, "b1");
+        s.drop_attachment(&c, B1);
         assert_eq!(s.entries(&c).len(), 1);
         assert!(s.seen(&c, &file(2).sha256).is_none());
-        s.drop_attachment(&c, "a2");
+        s.drop_attachment(&c, A2);
         assert!(s.companies.is_empty());
     }
 
@@ -741,8 +785,8 @@ mod tests {
         };
         store
             .update(|s| {
-                s.begin_upload(&c, Some(folder()), &f, "d", "k");
-                s.arrived(&c, &f, "a", 5);
+                s.begin_upload(&c, Some(folder()), &f, DRAFT1, KEY1);
+                s.arrived(&c, &f, A1, 5);
             })
             .expect("save");
         let text = std::fs::read_to_string(store.path()).expect("read");
@@ -785,6 +829,87 @@ mod tests {
         }
         let e = s.entries(&c).iter().find(|e| e.file.sha256 == f.sha256);
         assert_eq!(e.map(|e| e.attachments.len()), Some(MAX_UPLOADS));
+    }
+
+    /// Entries that still owe a side effect are never dropped to make
+    /// room, even when every entry does.
+    #[test]
+    fn pending_entries_are_never_dropped_for_room() {
+        let mut s = InboxState::default();
+        let c = company_key("t");
+        for n in 0..=MAX_ENTRIES {
+            let mut f = file(1);
+            f.path_hash = format!("p{n}");
+            s.begin_upload(&c, Some(folder()), &f, DRAFT1, KEY1);
+        }
+        assert_eq!(s.entries(&c).len(), MAX_ENTRIES + 1);
+        assert_eq!(s.entries(&c)[0].file.path_hash, "p0");
+    }
+
+    /// A file edited by hand can't make the inbox act on ids the app
+    /// never wrote, or hold more than the caps (security review L9).
+    #[test]
+    fn a_tampered_file_is_cleaned_on_load() {
+        let mut big = InboxState {
+            version: VERSION,
+            ..InboxState::default()
+        };
+        let c = company_key("t");
+        for n in 0..(MAX_SEEN + 3) {
+            big.seen.entry(c.clone()).or_default().push(SeenFile {
+                sha256: format!("{n:064}"),
+                attachment: A1.into(),
+                at: 1,
+            });
+        }
+        let mut one = file(1);
+        let mut entry = InboxEntry::new(Some(folder()), &one, EntryStatus::Discarding);
+        entry.attachments = (0..(MAX_UPLOADS + 4)).map(|_| A2.to_string()).collect();
+        entry.attachments.push("../../etc/passwd".into());
+        entry.attachments.push(B1.into());
+        entry.draft = Some("not a uuid".into());
+        entry.upload_key = Some(KEY1.into());
+        big.companies.entry(c.clone()).or_default().push(entry);
+        one.path_hash = "arrived-without-upload".into();
+        let mut bad = InboxEntry::new(Some(folder()), &one, EntryStatus::Arrived);
+        bad.attachments = vec!["x".into()];
+        big.companies.entry(c.clone()).or_default().push(bad);
+        for n in 0..(MAX_ENTRIES + 5) {
+            let mut dup = file(2);
+            dup.path_hash = format!("dup{n}");
+            big.companies
+                .entry(c.clone())
+                .or_default()
+                .push(InboxEntry::new(
+                    Some(folder()),
+                    &dup,
+                    EntryStatus::Duplicate,
+                ));
+        }
+        let s = InboxState::parse(&serde_json::to_string(&big).expect("json"));
+        assert_eq!(s.seen[&c].len(), MAX_SEEN);
+        let list = s.entries(&c);
+        assert_eq!(list.len(), MAX_ENTRIES);
+        let first = &list[0];
+        assert_eq!(first.status, EntryStatus::Discarding);
+        assert_eq!(first.attachments.len(), MAX_UPLOADS);
+        assert_eq!(first.attachment(), Some(B1), "the bad id is gone");
+        assert!(
+            first
+                .attachments
+                .iter()
+                .all(|a| cl_core::ids::parse_uuid(a).is_ok())
+        );
+        assert_eq!(
+            (first.draft.as_deref(), first.upload_key.as_deref()),
+            (None, Some(KEY1))
+        );
+        assert!(
+            !list
+                .iter()
+                .any(|e| e.file.path_hash == "arrived-without-upload"),
+            "nothing to show: offered again"
+        );
     }
 
     #[test]
@@ -838,8 +963,8 @@ mod tests {
           "version": 1,
           "companies": {
             "c1": [
-              {"pathHash":"p1","size":10,"modifiedMs":5,"sha256":"aa","attachments":["x1","x2"],"linked":false},
-              {"pathHash":"p2","size":11,"modifiedMs":6,"sha256":"bb","attachments":["y1"],"linked":true}
+              {"pathHash":"p1","size":10,"modifiedMs":5,"sha256":"aa","attachments":["d0000000-0000-4000-8000-0000000000a1","d0000000-0000-4000-8000-0000000000a2"],"linked":false},
+              {"pathHash":"p2","size":11,"modifiedMs":6,"sha256":"bb","attachments":["d0000000-0000-4000-8000-0000000000b1"],"linked":true}
             ]
           }
         }"#;
@@ -848,7 +973,7 @@ mod tests {
         let e = s.entries("c1");
         assert_eq!(e.len(), 2);
         assert_eq!((e[0].folder, e[0].status), (None, EntryStatus::Arrived));
-        assert_eq!(e[0].attachment(), Some("x2"));
+        assert_eq!(e[0].attachment(), Some(A2));
         assert_eq!(e[0].draft, None);
         assert_eq!((e[1].status, e[1].linked), (EntryStatus::Linked, true));
         // Saved as v2 and read back the same.
@@ -911,7 +1036,7 @@ mod tests {
         let c = company_key("t");
         let f = file(4);
         store
-            .update(|s| s.begin_upload(&c, Some(folder()), &f, "draft-1", "key-1"))
+            .update(|s| s.begin_upload(&c, Some(folder()), &f, DRAFT1, KEY1))
             .expect("save");
         // Crash: the upload reply was lost. The draft and key are there to
         // check and to retry with.
@@ -920,11 +1045,11 @@ mod tests {
         assert_eq!(e.status, EntryStatus::Uploading);
         assert_eq!(
             (e.draft.as_deref(), e.upload_key.as_deref()),
-            (Some("draft-1"), Some("key-1"))
+            (Some(DRAFT1), Some(KEY1))
         );
         assert!(s.seen(&c, &f.sha256).is_none(), "not seen until it arrived");
         store
-            .update(|s| assert!(s.arrived(&c, &f, "att-1", 77)))
+            .update(|s| assert!(s.arrived(&c, &f, ATT1, 77)))
             .expect("save");
         let s = store.load().expect("load");
         assert_eq!(
@@ -933,7 +1058,7 @@ mod tests {
         );
         assert_eq!(
             s.seen(&c, &f.sha256).map(|x| (x.attachment.as_str(), x.at)),
-            Some(("att-1", 77))
+            Some((ATT1, 77))
         );
         // The same bytes under another name: one duplicate entry.
         let mut again = f.clone();
