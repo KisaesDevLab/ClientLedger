@@ -30,10 +30,11 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, ContactId};
 use cl_docread::card::{self, CardPick};
-use cl_docread::model::{DocKind, Last4, Payment, Reading, Template};
+use cl_docread::model::{DocKind, Last4, Payment, Reading, Template, Word};
 use cl_docread::protocol::{JobFailure, JobHint};
 use cl_docread::vendor_match::{self, VendorCandidate, VendorMatch};
 use cl_host::{CouldNotRead, DocJob, DocreadConfig, DocreadHost, JobOutcome};
+use cl_model::doc_draft::PageBox;
 
 // ---- Step 19a: layouts, card accounts and claims (`document-drafts-v1`) ----
 
@@ -270,6 +271,15 @@ pub trait Reader: Send {
         }
         self.read(jobs, today)
     }
+
+    /// A04 WP-C: the words inside `request.area` (protocol 4, a region
+    /// job). Readers that can't read boxes answer
+    /// [`RegionOutcome::NotSupported`]; the worker host does once WP-R's
+    /// protocol 4 lands (F2 wires `DocreadHost`'s region job here).
+    fn read_region(&mut self, request: &RegionRequest, cancel: &Arc<AtomicBool>) -> RegionOutcome {
+        let _ = (request, cancel);
+        RegionOutcome::NotSupported
+    }
 }
 
 impl Reader for DocreadHost {
@@ -426,10 +436,20 @@ impl ReadOutcome {
     }
 }
 
-struct Message {
-    request: ReadRequest,
-    reply: Sender<ReadOutcome>,
-    cancel: Arc<AtomicBool>,
+/// One piece of work for the service thread.
+enum Message {
+    /// Read a document.
+    Read {
+        request: ReadRequest,
+        reply: Sender<ReadOutcome>,
+        cancel: Arc<AtomicBool>,
+    },
+    /// A04 WP-C: read the words inside a box (protocol 4, interactive).
+    Region {
+        request: RegionRequest,
+        reply: Sender<RegionOutcome>,
+        cancel: Arc<AtomicBool>,
+    },
 }
 
 /// A submitted reading: its answer, and a way to stop it.
@@ -515,30 +535,199 @@ impl ReadingService {
     pub fn submit_cancellable(&self, request: ReadRequest) -> ReadJob {
         let (reply, answer) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        let message = Message {
+        let message = Message::Read {
             request,
             reply,
             cancel: Arc::clone(&cancel),
         };
-        if let Err(mpsc::SendError(m)) = self.tx.send(message) {
-            let _ = m.reply.send(ReadOutcome::Failed(ReadFailure::Unavailable));
+        if let Err(mpsc::SendError(Message::Read { reply, .. })) = self.tx.send(message) {
+            let _ = reply.send(ReadOutcome::Failed(ReadFailure::Unavailable));
         }
         ReadJob {
             answer,
             cancel: ReadCancel(cancel),
         }
     }
+
+    /// A04 WP-C: reads the words inside `request.area` off this thread (a
+    /// box dragged on a scan, D4). The service takes one job at a time, so
+    /// a box sent while Read all runs is read before the next document the
+    /// batch hands it (T13). The decoding, cropping and OCR happen in the
+    /// sandboxed worker only; the desktop gets words back.
+    #[must_use]
+    pub fn submit_region(&self, request: RegionRequest) -> RegionJob {
+        let (reply, answer) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let message = Message::Region {
+            request,
+            reply,
+            cancel: Arc::clone(&cancel),
+        };
+        if let Err(mpsc::SendError(Message::Region { reply, .. })) = self.tx.send(message) {
+            let _ = reply.send(RegionOutcome::Failed(ReadFailure::Unavailable));
+        }
+        RegionJob {
+            answer,
+            cancel: ReadCancel(cancel),
+        }
+    }
+}
+
+// ---- A04 WP-C: box re-reads and the session's page words ----
+
+/// A box on one page to read again in the worker (A04 D4 "Drag a box",
+/// protocol 4). `Debug` shows the box only.
+#[derive(Clone)]
+pub struct RegionRequest {
+    /// The document's bytes.
+    pub bytes: Arc<[u8]>,
+    /// The box, on the original page (the worker applies the page's
+    /// detected turn and shear, S9).
+    pub area: PageBox,
+    /// The owner's today.
+    pub today: CalendarDate,
+}
+
+impl std::fmt::Debug for RegionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegionRequest")
+            .field("bytes", &self.bytes.len())
+            .field("area", &self.area)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The answer to a box re-read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegionOutcome {
+    /// The words found in the box, placed on the original page (`Word`'s
+    /// `Debug` shows no text).
+    Words(Vec<Word>),
+    /// This reader can't read boxes (a worker before protocol 4).
+    NotSupported,
+    /// Not read.
+    Failed(ReadFailure),
+}
+
+impl RegionOutcome {
+    /// The class logged.
+    #[must_use]
+    pub fn class(&self) -> &'static str {
+        match self {
+            RegionOutcome::Words(_) => "read",
+            RegionOutcome::NotSupported => "not_supported",
+            RegionOutcome::Failed(f) => f.class(),
+        }
+    }
+}
+
+/// A submitted box re-read: its answer, and a way to stop it.
+#[derive(Debug)]
+pub struct RegionJob {
+    /// The answer (poll it with `try_recv`).
+    pub answer: Receiver<RegionOutcome>,
+    /// Stops it.
+    pub cancel: ReadCancel,
+}
+
+impl RegionJob {
+    /// Stops the re-read (a newer pick or box replaced it).
+    pub fn cancel(&self) {
+        self.cancel.cancel();
+    }
+}
+
+/// The page words of the drafts read this session (A04 D4): at most
+/// [`cl_model::doc_draft::WORD_CACHE_DRAFTS`] readings, the least recently
+/// used dropped first. Words aren't stored with a draft; a miss reads the
+/// document again in the worker. Keyed by the engine draft id as text.
+#[derive(Default)]
+pub struct WordCache {
+    /// Most recently used last.
+    entries: Vec<(String, Arc<LocalReading>)>,
+}
+
+impl std::fmt::Debug for WordCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WordCache")
+            .field("drafts", &self.entries.len())
+            .finish()
+    }
+}
+
+impl WordCache {
+    /// Empty.
+    #[must_use]
+    pub fn new() -> WordCache {
+        WordCache::default()
+    }
+
+    /// Keeps `reading` for `draft`, dropping the least recently used over
+    /// the limit.
+    pub fn put(&mut self, draft: &str, reading: Arc<LocalReading>) {
+        self.entries.retain(|(k, _)| k != draft);
+        self.entries.push((draft.to_string(), reading));
+        let over = self
+            .entries
+            .len()
+            .saturating_sub(cl_model::doc_draft::WORD_CACHE_DRAFTS);
+        self.entries.drain(..over);
+    }
+
+    /// The reading kept for `draft` (now the most recently used).
+    pub fn get(&mut self, draft: &str) -> Option<Arc<LocalReading>> {
+        let at = self.entries.iter().position(|(k, _)| k == draft)?;
+        let e = self.entries.remove(at);
+        let r = Arc::clone(&e.1);
+        self.entries.push(e);
+        Some(r)
+    }
+
+    /// Forgets `draft` (entered, discarded).
+    pub fn forget(&mut self, draft: &str) {
+        self.entries.retain(|(k, _)| k != draft);
+    }
+
+    /// Readings kept.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Nothing kept.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// The compare tools' words from a local reading.
+#[must_use]
+pub fn doc_words(local: &LocalReading) -> crate::widgets::compare::DocWords {
+    crate::widgets::compare::DocWords {
+        pages: local.reading.words.clone(),
+    }
 }
 
 fn serve(rx: &Receiver<Message>, make: MakeReader) {
     let mut make = Some(make);
     let mut reader: Option<Box<dyn Reader>> = None;
-    while let Ok(Message {
-        request,
-        reply,
-        cancel,
-    }) = rx.recv()
-    {
+    while let Ok(message) = rx.recv() {
+        let (request, reply, cancel) = match message {
+            Message::Read {
+                request,
+                reply,
+                cancel,
+            } => (request, reply, cancel),
+            Message::Region {
+                request,
+                reply,
+                cancel,
+            } => {
+                serve_region(&mut reader, &mut make, &request, &reply, &cancel);
+                continue;
+            }
+        };
         if cancel.load(Ordering::SeqCst) {
             // Cancelled while waiting: never read.
             let _ = reply.send(ReadOutcome::Failed(ReadFailure::Cancelled));
@@ -563,6 +752,37 @@ fn serve(rx: &Receiver<Message>, make: MakeReader) {
         // The window may have closed meanwhile: nobody waits then.
         let _ = reply.send(outcome);
     }
+}
+
+/// One box re-read on the service thread (the reader is made on first use,
+/// as for a read).
+fn serve_region(
+    reader: &mut Option<Box<dyn Reader>>,
+    make: &mut Option<MakeReader>,
+    request: &RegionRequest,
+    reply: &Sender<RegionOutcome>,
+    cancel: &Arc<AtomicBool>,
+) {
+    if cancel.load(Ordering::SeqCst) {
+        let _ = reply.send(RegionOutcome::Failed(ReadFailure::Cancelled));
+        return;
+    }
+    if reader.is_none()
+        && let Some(m) = make.take()
+    {
+        *reader = m();
+    }
+    let outcome = match reader.as_mut() {
+        Some(r) => r.read_region(request, cancel),
+        None => RegionOutcome::Failed(ReadFailure::Unavailable),
+    };
+    let outcome = if cancel.load(Ordering::SeqCst) {
+        RegionOutcome::Failed(ReadFailure::Cancelled)
+    } else {
+        outcome
+    };
+    tracing::info!(outcome = outcome.class(), "box re-read");
+    let _ = reply.send(outcome);
 }
 
 /// Reads one document and adds the desktop's matches.
@@ -1105,5 +1325,136 @@ mod tests {
             sent.iter().all(|r| r.url.path() == "/api/v1/desktop/info"),
             "nothing else is fetched"
         );
+    }
+
+    // ---- A04 WP-C ----
+
+    fn region() -> RegionRequest {
+        RegionRequest {
+            bytes: Arc::from(b"%PDF-1.4".to_vec()),
+            area: PageBox::new(0, 1000, 1000, 3000, 2000).unwrap(),
+            today: today(),
+        }
+    }
+
+    fn wait_region(job: &RegionJob) -> RegionOutcome {
+        job.answer
+            .recv_timeout(Duration::from_secs(10))
+            .expect("an answer")
+    }
+
+    /// Reads boxes: one word at the box's corner; counts the boxes read.
+    struct Boxes(Arc<std::sync::atomic::AtomicU32>);
+
+    impl Reader for Boxes {
+        fn read(&mut self, jobs: &[DocJob], _today: CalendarDate) -> Vec<JobOutcome> {
+            jobs.iter()
+                .map(|_| JobOutcome::Read(Box::new(reading())))
+                .collect()
+        }
+
+        fn read_region(&mut self, request: &RegionRequest, _c: &Arc<AtomicBool>) -> RegionOutcome {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            let a = request.area;
+            RegionOutcome::Words(vec![Word {
+                text: "12.50".into(),
+                bbox: Bbox::new(a.l, a.t, a.l + 100, a.t + 100).unwrap(),
+                confidence: Confidence::HIGH,
+            }])
+        }
+    }
+
+    #[test]
+    fn a_reader_without_boxes_says_so_and_no_reader_is_unavailable() {
+        let calls = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let c = Arc::clone(&calls);
+        let s = ReadingService::start(Box::new(move || {
+            Some(Box::new(Fixed(JobOutcome::Read(Box::new(reading())), c)) as Box<dyn Reader>)
+        }));
+        assert_eq!(
+            wait_region(&s.submit_region(region())),
+            RegionOutcome::NotSupported
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "no document read for a box"
+        );
+        let none = ReadingService::start(Box::new(|| None));
+        assert_eq!(
+            wait_region(&none.submit_region(region())),
+            RegionOutcome::Failed(ReadFailure::Unavailable)
+        );
+        assert_eq!(RegionOutcome::NotSupported.class(), "not_supported");
+    }
+
+    #[test]
+    fn a_box_is_read_on_the_service_thread() {
+        let boxes = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let b = Arc::clone(&boxes);
+        let s = ReadingService::start(Box::new(
+            move || Some(Box::new(Boxes(b)) as Box<dyn Reader>),
+        ));
+        let RegionOutcome::Words(words) = wait_region(&s.submit_region(region())) else {
+            panic!("words");
+        };
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].bbox.left(), 1000);
+        // A read and a box share the one reader, in the order sent.
+        assert!(matches!(wait(&s.submit(request())), ReadOutcome::Read(_)));
+        assert_eq!(boxes.load(Ordering::SeqCst), 1);
+        let debug = format!("{:?}", region());
+        assert!(!debug.contains("PDF"), "{debug}");
+    }
+
+    #[test]
+    fn a_box_cancelled_while_queued_is_never_read() {
+        let started = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let n = Arc::clone(&started);
+        let s = ReadingService::start(Box::new(move || {
+            Some(Box::new(UntilCancelled(n)) as Box<dyn Reader>)
+        }));
+        let running = s.submit_cancellable(request());
+        let queued = s.submit_region(region());
+        while started.load(Ordering::SeqCst) == 0 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        queued.cancel();
+        running.cancel();
+        assert_eq!(
+            wait_region(&queued),
+            RegionOutcome::Failed(ReadFailure::Cancelled)
+        );
+    }
+
+    #[test]
+    fn the_word_cache_keeps_the_twenty_most_recent_drafts() {
+        let local = Arc::new(LocalReading {
+            reading: reading(),
+            vendor: None,
+            card: None,
+        });
+        let mut cache = WordCache::new();
+        assert!(cache.is_empty());
+        for i in 0..25 {
+            cache.put(&format!("d{i}"), Arc::clone(&local));
+        }
+        assert_eq!(cache.len(), cl_model::doc_draft::WORD_CACHE_DRAFTS);
+        assert!(cache.get("d0").is_none(), "the oldest went first");
+        // Using d5 keeps it past the next put.
+        assert!(cache.get("d5").is_some());
+        cache.put("new", Arc::clone(&local));
+        assert!(cache.get("d5").is_some());
+        assert!(cache.get("d6").is_none());
+        cache.put("new", Arc::clone(&local));
+        assert_eq!(
+            cache.len(),
+            cl_model::doc_draft::WORD_CACHE_DRAFTS,
+            "no duplicate"
+        );
+        cache.forget("new");
+        assert!(cache.get("new").is_none());
+        assert_eq!(format!("{cache:?}"), "WordCache { drafts: 19 }");
+        assert_eq!(doc_words(&local).pages, local.reading.words);
     }
 }

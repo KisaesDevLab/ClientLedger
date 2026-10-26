@@ -13,6 +13,12 @@
 //! The site reports the same document through
 //! [`crate::windows::Screen::document`], so the window follows it.
 //! `OpenFullSize` and `SaveCopy` come back as before for the site to handle.
+//!
+//! A04 WP-C: a form that compares sets its view on the pane's viewer
+//! (`ViewerState::set_compare`) before drawing and takes the events after
+//! (`ViewerState::take_compare_events`); the pane draws them docked, and
+//! while popped out the pop-out draws the same view from
+//! [`crate::windows::Screen::compare`] (`widgets::compare`).
 
 use eframe::egui::{Id, RichText, Ui};
 

@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 
 /// Directories scanned, relative to the repo root.
-pub const SCAN_DIRS: [&str; 5] = [
+pub const SCAN_DIRS: [&str; 6] = [
     "crates/cl-core/src",
     "crates/cl-api/src",
     // Entry rules (amounts, calculator, dates) and the grid core (Q-P10b).
@@ -28,16 +28,20 @@ pub const SCAN_DIRS: [&str; 5] = [
     "crates/cl-grid/src/core",
     // Document reading rules (A03, plan D3 "Float exemption").
     "crates/cl-docread/src",
+    // The compare tools (A04 D4, N3): click to fill turns page words into
+    // amounts; only `overlay.rs` holds their float geometry.
+    "crates/cl-ui/src/widgets/compare",
 ];
 
 /// Files inside [`SCAN_DIRS`] that may use floating point for page geometry
 /// (A03, S19). They map float coordinates to the integer `Bbox` at their
 /// boundary and may not mention money: [`check`] reports any of them that
 /// names `Money` or `rust_decimal`.
-pub const SKIP_FILES: [&str; 3] = [
+pub const SKIP_FILES: [&str; 4] = [
     "crates/cl-docread/src/pdf_text.rs",
     "crates/cl-docread/src/preprocess.rs",
     "crates/cl-docread/src/ocr_geom.rs",
+    "crates/cl-ui/src/widgets/compare/overlay.rs",
 ];
 
 /// Identifiers an exempt geometry file may not use.
@@ -421,9 +425,15 @@ mod tests {
     }
 
     #[test]
+    fn the_compare_tools_are_scanned_except_their_overlay() {
+        assert!(SCAN_DIRS.contains(&"crates/cl-ui/src/widgets/compare"));
+        assert!(SKIP_FILES.contains(&"crates/cl-ui/src/widgets/compare/overlay.rs"));
+    }
+
+    #[test]
     fn docread_is_scanned_except_its_three_geometry_files() {
         assert!(SCAN_DIRS.contains(&"crates/cl-docread/src"));
-        assert_eq!(SKIP_FILES.len(), 3);
+        assert_eq!(SKIP_FILES.len(), 4);
         let dir = std::env::temp_dir().join(format!("nofloat-docread-{}", std::process::id()));
         let src = dir.join("crates/cl-docread/src");
         std::fs::create_dir_all(&src).unwrap();

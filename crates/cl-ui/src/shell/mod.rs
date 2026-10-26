@@ -7,6 +7,7 @@
 //! place a command takes effect, so every entry point behaves alike.
 
 pub mod menu;
+pub mod outbox;
 pub mod palette;
 pub mod rail;
 pub mod shortcuts;
@@ -181,6 +182,8 @@ pub struct Shell {
     doc_viewer: crate::windows::doc_viewer::DocViewerWindow,
     /// The window the document viewer followed last.
     doc_follow: Option<WindowId>,
+    /// A04 WP-C: the pop-out's compare events, for next frame.
+    viewer_outbox: outbox::ViewerOutbox,
 }
 
 impl Shell {
@@ -230,6 +233,7 @@ impl Shell {
         let mut shell = Shell {
             doc_viewer,
             doc_follow: None,
+            viewer_outbox: outbox::ViewerOutbox::new(),
             widths,
             prompt_focused: None,
             demo: options.demo,
@@ -1158,6 +1162,9 @@ impl Shell {
 
         self.apply_company_events(Some(&ctx));
         self.doc_viewer.publish(&ctx);
+        // A04 WP-C: last frame's pop-out compare events, before the forms
+        // draw.
+        self.viewer_outbox.deliver(&mut self.windows);
         self.publish_grid_facts(&ctx, egui::ViewportId::ROOT);
         title_bar::show(ui, self, narrow, &tokens);
         menu::show(ui, self, narrow, &tokens);
@@ -1295,19 +1302,28 @@ impl Shell {
     /// pressed in its window, for the main window to run.
     fn show_doc_viewer(&mut self, ctx: &Context, tokens: &Tokens) -> Vec<CommandId> {
         let followed = self.followed_window(ctx);
-        let (doc, kind) = followed
+        let (doc, kind, compare) = followed
             .and_then(|id| self.windows.get(id))
-            .map_or((None, None), |w| (w.screen.document(), Some(w.kind)));
+            .map_or((None, None, None), |w| {
+                (w.screen.document(), Some(w.kind), w.screen.compare())
+            });
         let accent = self.accent(tokens);
-        self.doc_viewer.frame(
+        let pressed = self.doc_viewer.frame(
             ctx,
             crate::windows::doc_viewer::Follow {
                 doc,
                 kind,
                 accent,
                 keymap: &self.keymap,
+                compare,
             },
-        )
+        );
+        let events = self.doc_viewer.take_compare_events();
+        if !events.is_empty() {
+            self.viewer_outbox.push(followed, events);
+            ctx.request_repaint();
+        }
+        pressed
     }
 
     /// The pop-out document viewer's state for the control channel

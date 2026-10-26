@@ -37,6 +37,7 @@ use eframe::egui::{
 use crate::i18n::{t, t_with};
 use crate::prefs::{self, DocViewerPlacement};
 use crate::theme::Tokens;
+use crate::widgets::compare::{CompareEvent, CompareView};
 use crate::widgets::pdf_viewer::{DocSource, DocViewer, ViewerState};
 
 /// The viewer window's viewport (the control channel's `doc_viewer`).
@@ -193,6 +194,9 @@ struct PopoutShared {
     back_to_form: bool,
     dock_req: bool,
     keymap: Keymap,
+    /// A04 WP-C: the compare tools' events for the followed window, until
+    /// the shell takes them (its outbox delivers them a frame later).
+    events: Vec<CompareEvent>,
 }
 
 impl PopoutShared {
@@ -281,6 +285,9 @@ pub struct Follow<'a> {
     pub accent: Color32,
     /// The shell's keymap (cloned into the window when it changed).
     pub keymap: &'a Keymap,
+    /// A04 WP-C: the followed window's compare tools
+    /// ([`crate::windows::Screen::compare`]).
+    pub compare: Option<CompareView>,
 }
 
 /// The control channel's view of the viewer window (geometry and ids only).
@@ -372,6 +379,7 @@ impl DocViewerWindow {
                 back_to_form: false,
                 dock_req: false,
                 keymap: keymap.clone(),
+                events: Vec::new(),
             })),
             builder: None,
             frames_open: 0,
@@ -460,8 +468,18 @@ impl DocViewerWindow {
             s.focus_req = false;
             s.back_to_form = false;
             s.dock_req = false;
+            s.viewer.set_compare(None);
+            s.events.clear();
         }
         self.follows = None;
+    }
+
+    /// A04 WP-C: the compare tools' events since the last call (a word
+    /// clicked, a box dragged, a key), for the window the viewer follows.
+    pub fn take_compare_events(&mut self) -> Vec<CompareEvent> {
+        self.lock()
+            .map(|mut s| std::mem::take(&mut s.events))
+            .unwrap_or_default()
     }
 
     /// A company opened: the viewer comes back the way it was left.
@@ -571,6 +589,8 @@ impl DocViewerWindow {
                 s.keymap = follow.keymap.clone();
             }
             s.accent = follow.accent;
+            let has_doc = follow.doc.is_some();
+            s.viewer.set_compare(follow.compare.filter(|_| has_doc));
             if let Some(doc) = follow.doc {
                 s.form = if doc.owner_title.is_empty() {
                     follow
@@ -930,6 +950,14 @@ fn draw(ui: &mut egui::Ui, class: ViewportClass, shared: &Arc<Mutex<PopoutShared
                     });
                 } else {
                     let _ = DocViewer::show(ui, &mut s.viewer, &tokens);
+                    // A04 WP-C: for the followed form, through the shell.
+                    let events = s.viewer.take_compare_events();
+                    if !events.is_empty() {
+                        s.events.extend(events);
+                        // A repaint of the main window, never of this one
+                        // (Q-A02a: a deferred child repainting starves it).
+                        ctx.request_repaint_of(ViewportId::ROOT);
+                    }
                 }
             });
         });
@@ -1024,6 +1052,82 @@ mod tests {
             })
             .collect();
         assert_eq!(keys, vec![egui::Key::Escape], "only Esc is left");
+    }
+
+    /// A04 WP-C (S7, T14): the pop-out draws the followed form's compare
+    /// tools, publishes their state, and hands its events (keys included)
+    /// back for the shell's outbox; a form without them shows none.
+    #[test]
+    fn the_pop_out_draws_the_followed_forms_compare_tools() {
+        use crate::widgets::compare::{
+            self, CompareEvent, CompareFeed, CompareTarget, CompareView, FillKind, PageBox,
+            TargetKey, TargetLevel,
+        };
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/docs/receipt.png");
+        let doc = DocRef::new(DocSource {
+            name: "receipt.png".into(),
+            bytes: Arc::from(std::fs::read(path).expect("fixture")),
+        });
+        let total = TargetKey::field("amount_due");
+        let view = CompareView {
+            feed: CompareFeed {
+                targets: vec![CompareTarget {
+                    key: total,
+                    label: "Amount due".into(),
+                    spot: PageBox::new(0, 6000, 7000, 9000, 7600),
+                    level: TargetLevel::Sure,
+                    fill: Some(FillKind::Money),
+                }],
+                armed: Some(total),
+                focused: Some(total),
+                highlights: true,
+                generation: 3,
+            },
+            ..CompareView::default()
+        };
+        let keymap = Keymap::new(COMMANDS).unwrap();
+        let mut w = window();
+        w.pop_out(0.0);
+        let ctx = egui::Context::default();
+        let frame = |w: &mut DocViewerWindow, compare: Option<CompareView>| {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let _ = w.frame(
+                    ui.ctx(),
+                    Follow {
+                        doc: Some(doc.clone()),
+                        kind: Some(CommandId::new("vendors.enter_bill")),
+                        accent: Color32::RED,
+                        keymap: &keymap,
+                        compare: compare.clone(),
+                    },
+                );
+            });
+            out.textures_delta.clear();
+        };
+        let end = std::time::Instant::now() + Duration::from_secs(30);
+        while w.state(&ctx).viewer["rendered"] != true {
+            frame(&mut w, Some(view.clone()));
+            assert!(std::time::Instant::now() < end, "never drawn");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        frame(&mut w, Some(view.clone()));
+        let h = compare::highlight(&ctx);
+        assert_eq!((h.on, h.drawn), (true, 1), "{h:?}");
+        assert_eq!(h.focused.as_deref(), Some("amount_due"));
+        // Keys pressed in the window: Highlights goes back to the form.
+        assert!(w.viewer_command(CommandId::new("viewer.toggle_highlights")));
+        frame(&mut w, Some(view.clone()));
+        assert_eq!(
+            w.take_compare_events(),
+            vec![CompareEvent::ToggleHighlights]
+        );
+        assert_eq!(w.take_compare_events(), Vec::new(), "taken once");
+        // The followed window has no compare tools: none drawn.
+        frame(&mut w, None);
+        frame(&mut w, None);
+        assert_eq!(compare::highlight(&ctx), compare::HighlightState::default());
+        assert!(!w.viewer_command(CommandId::new("viewer.toggle_highlights")));
     }
 
     #[test]
