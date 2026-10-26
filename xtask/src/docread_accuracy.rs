@@ -47,6 +47,10 @@ fn parse(args: &[String]) -> Result<Options> {
             ),
         }
     }
+    if o.gate && (o.routes.is_some() || o.stress) {
+        // A gate on part of the set proves nothing (A03 review S3).
+        bail!("--gate reads the whole set: it can't be combined with --routes or --stress");
+    }
     Ok(o)
 }
 
@@ -160,9 +164,13 @@ mod tests {
 
     #[test]
     fn options_parse() {
-        let o = parse(&["--gate".into(), "--routes".into(), "scan".into()]).unwrap();
-        assert!(o.gate && !o.regen);
+        let o = parse(&["--routes".into(), "scan".into()]).unwrap();
+        assert!(!o.gate && !o.regen);
         assert_eq!(o.routes.as_deref(), Some("scan"));
+        assert!(parse(&["--gate".into()]).unwrap().gate);
+        // A gate is never run on part of the set (review S3).
+        assert!(parse(&["--gate".into(), "--routes".into(), "scan".into()]).is_err());
+        assert!(parse(&["--stress".into(), "--gate".into()]).is_err());
         assert!(parse(&["--tessdata".into()]).is_err());
         assert!(parse(&["-x".into()]).is_err());
     }
