@@ -28,7 +28,7 @@ If the folders hold more files than fit in the list, the inbox says how many mor
 
 ## Using a file
 
-Pick a file to preview it. TIFF previews are not ready yet. Then choose one of:
+Pick a file to preview it. Multi-page TIFF files show page by page; a few kinds of TIFF can't be shown (see Document viewer). Then choose one of:
 
 - **New bill**: opens Enter Bill with the file attached.
 - **Add to a bill...**: attaches it to a bill you already entered.
