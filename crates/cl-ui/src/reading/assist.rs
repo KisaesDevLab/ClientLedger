@@ -204,9 +204,18 @@ pub fn merge(
         AssistReader::SelfHosted => AiSource::Ollama,
         AssistReader::Cloud => AiSource::Cloud,
     };
-    let reading = ai_gate::merge(local.reading.clone(), &ai_reading(answer), source);
+    let mut reading = ai_gate::merge(local.reading.clone(), &ai_reading(answer), source);
     let vendor = local.vendor.or_else(|| {
-        vendor_match::match_vendor(&reading.header, reading.fingerprint.as_ref(), vendors)
+        let m = vendor_match::match_vendor(&reading.header, reading.fingerprint.as_ref(), vendors);
+        // A name that won over a past layout is checked (review S4).
+        if let Some(check) = m
+            .as_ref()
+            .and_then(|m| vendor_match::layout_check(m, &reading.header, vendors))
+            && reading.checks.len() < cl_docread::model::MAX_CHECKS
+        {
+            reading.checks.push(check);
+        }
+        m
     });
     LocalReading {
         reading,

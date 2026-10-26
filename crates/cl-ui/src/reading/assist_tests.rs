@@ -167,6 +167,7 @@ fn help_is_offered_for_empty_or_unsure_fields_only() {
         contact: contact(),
         tier: cl_docread::vendor_match::VendorTier::Name(1),
         confidence: Confidence::HIGH,
+        layout_of: None,
     });
     assert!(!needs_help(&full));
     full.reading.header.total = Some(found(m("32.48"), 3_000));

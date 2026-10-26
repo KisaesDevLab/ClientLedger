@@ -1,4 +1,5 @@
-//! The 24 synthetic layouts as data (plan D6): 18 seen and 6 held out.
+//! The 25 synthetic layouts as data (plan D6): 19 seen (one of them a
+//! layout two vendors share, review S4) and 6 held out.
 //! Vendors, addresses and phone numbers are invented; phone numbers use the
 //! 555-01xx fiction range.
 //!
@@ -278,8 +279,31 @@ const RECEIPT: Layout = Layout {
 
 /// Every layout, seen first. `holdout` ones are only written with
 /// `--holdout`.
-#[allow(clippy::too_many_lines)]
+///
+/// Two vendors may bill with the same program (A03 review S4):
+/// `s19-shared-billing` is `s01-service-classic` with another vendor.
 pub fn all() -> Vec<Layout> {
+    let mut all = listed();
+    let shared = Layout {
+        id: "s19-shared-billing",
+        vendor: Vendor {
+            key: "northfork-electric",
+            name: "Northfork Electric Service",
+            street: "925 Ridgeline Dr",
+            city: "Bentonville, AR 72712",
+            phone: Some("(479) 555-0135"),
+            web: None,
+            confusable: "Northfork Electric Supply",
+        },
+        ..all[0]
+    };
+    let seen = all.iter().take_while(|l| !l.holdout).count();
+    all.insert(seen, shared);
+    all
+}
+
+#[allow(clippy::too_many_lines)]
+fn listed() -> Vec<Layout> {
     vec![
         // ---- seen ------------------------------------------------------
         Layout {
@@ -940,15 +964,35 @@ pub fn all() -> Vec<Layout> {
 mod tests {
     use super::*;
 
+    /// Review S4: one layout is sent by two vendors; nothing else differs.
     #[test]
-    fn twenty_four_layouts_six_held_out_with_their_own_font() {
+    fn two_vendors_share_one_layout() {
         let all = all();
-        assert_eq!(all.len(), 24);
+        let find = |id: &str| *all.iter().find(|l| l.id == id).unwrap();
+        let (a, b) = (find("s01-service-classic"), find("s19-shared-billing"));
+        assert_ne!(a.vendor.key, b.vendor.key);
+        assert_ne!(a.vendor.name, b.vendor.name);
+        let plain = |l: Layout| Layout {
+            id: "",
+            vendor: BASE.vendor,
+            ..l
+        };
+        assert_eq!(plain(a), plain(b));
+        assert!(!b.holdout);
+        // Seen layouts still come first.
+        let first_held = all.iter().position(|l| l.holdout).unwrap();
+        assert!(all[first_held..].iter().all(|l| l.holdout));
+    }
+
+    #[test]
+    fn twenty_five_layouts_six_held_out_with_their_own_font() {
+        let all = all();
+        assert_eq!(all.len(), 25);
         assert_eq!(all.iter().filter(|l| l.holdout).count(), 6);
         let mut ids: Vec<&str> = all.iter().map(|l| l.id).collect();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), 24);
+        assert_eq!(ids.len(), 25);
         for l in all.iter().filter(|l| !l.holdout) {
             assert!(
                 !matches!(l.font, FontId::PtSerif | FontId::PtSerifBold)

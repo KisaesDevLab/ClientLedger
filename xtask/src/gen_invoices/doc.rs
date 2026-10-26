@@ -569,6 +569,7 @@ mod tests {
             .flat_map(|l| (1..=10).map(move |s| Doc::new(l, s, seed)))
             .filter(|d| !d.tounicode)
             .count();
-        assert_eq!(no_unicode, 8);
+        // One of them from the shared layout (review S4).
+        assert_eq!(no_unicode, 9);
     }
 }

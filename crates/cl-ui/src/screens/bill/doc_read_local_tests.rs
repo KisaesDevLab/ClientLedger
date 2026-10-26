@@ -241,6 +241,19 @@ fn lines_and_tax_against_total_names_the_lines() {
     };
     let text = super::check_text(&c, cl_core::MoneyStyle::default());
     assert!(text.contains("read as 13.00 could also be 12.00"), "{text}");
+    // Review S4: a printed name over another vendor's layout names it.
+    let c = Check {
+        rule: RuleId::new("vendor.layout"),
+        expected: Some(CheckValue::Text("Hilltop Feed".into())),
+        found: Some(CheckValue::Text("Midwest Equipment Rental".into())),
+        difference: None,
+        ..c
+    };
+    let text = super::check_text(&c, cl_core::MoneyStyle::default());
+    assert!(
+        text.contains("laid out like Hilltop Feed's bills"),
+        "{text}"
+    );
 }
 
 #[test]

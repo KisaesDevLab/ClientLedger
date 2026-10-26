@@ -72,5 +72,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // A03 fix pass (review findings).
     ("bill.read.check.lines_total", "The lines, tax and fees add up to {expected}, but the document's total is {found}."),
     ("bill.read.check.lines_total.plain", "The lines, tax and fees don't add up to the document's total."),
+    ("bill.read.check.vendor_layout", "This document is laid out like {name}'s bills, but the name printed on it is another vendor's. The printed name was used: check the vendor."),
     ("bill.read.check.second_read", "An amount read as {found} could also be {expected}. {found} was used: check it on the document."),
 ];

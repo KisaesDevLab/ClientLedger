@@ -501,6 +501,14 @@ pub(crate) fn matched(mut reading: Reading, request: &ReadRequest) -> LocalReadi
         reading.fingerprint.as_ref(),
         &request.vendors,
     );
+    // A printed name that won over a past layout is checked (review S4).
+    if let Some(check) = vendor
+        .as_ref()
+        .and_then(|m| vendor_match::layout_check(m, &reading.header, &request.vendors))
+        && reading.checks.len() < cl_docread::model::MAX_CHECKS
+    {
+        reading.checks.push(check);
+    }
     let card = match (&request.card_accounts, &reading.header.payment) {
         (Some(accounts), Some(p)) => match &p.value {
             Payment::Card { last4 } => Some(card::card_account(*last4, accounts)),
@@ -605,6 +613,28 @@ mod tests {
         // The reader is made once and reused.
         let _ = wait(&s.submit(request()));
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    /// Review S4: another vendor's saved layout, this vendor's name printed:
+    /// the name wins and the banner asks the owner to check.
+    #[test]
+    fn a_printed_name_over_a_shared_layout_is_checked() {
+        let fp = cl_docread::model::Fingerprint {
+            tokens: vec!["invoice".into(), "remit".into()],
+            aspect: 12_941,
+        };
+        let mut other = vendor();
+        other.contact = ContactId::parse("00000000-0000-0000-0000-000000000008").unwrap();
+        other.display_name = "Hilltop Feed".into();
+        other.layouts = vec![fp.clone()];
+        let mut r = reading();
+        r.fingerprint = Some(fp);
+        let mut req = request();
+        req.vendors.push(other);
+        let local = matched(r, &req);
+        assert_eq!(local.vendor.map(|v| v.contact), Some(vendor().contact));
+        assert!(local.reading.checks.iter().any(|c| c.code == CheckCode::ReadersDisagree
+            && c.rule.as_str() == "vendor.layout"));
     }
 
     #[test]

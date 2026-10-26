@@ -255,6 +255,13 @@ pub(crate) fn check_text(c: &Check, style: MoneyStyle) -> String {
         CheckCode::ReadersDisagree if c.rule.as_str() == "ocr.second-read" => {
             money_pair("bill.read.check.second_read", "bill.read.check.disagree")
         }
+        // A printed name won over another vendor's layout (review S4).
+        CheckCode::ReadersDisagree if c.rule.as_str() == "vendor.layout" => match &c.expected {
+            Some(CheckValue::Text(name)) => {
+                t_with("bill.read.check.vendor_layout", &[("name", name)])
+            }
+            _ => t("bill.read.check.disagree"),
+        },
         CheckCode::ReadersDisagree | CheckCode::AiDisagrees => t("bill.read.check.disagree"),
         CheckCode::PickTheCard => t("bill.read.check.pick_card"),
         CheckCode::LinesNotRead => t("bill.read.check.lines_not_read"),

@@ -250,6 +250,7 @@ mod tests {
                 contact: contact(),
                 tier: VendorTier::Name(1),
                 confidence: Bp::new(9_000).unwrap(),
+                layout_of: None,
             }),
             card: None,
         }

@@ -66,7 +66,9 @@ fn set_ready(set: &Path) -> bool {
         .is_some_and(|v| {
             v["holdout"].as_bool() == Some(true)
                 && v["scans"].as_bool() == Some(true)
-                && v["layouts"].as_array().is_some_and(|l| l.len() == 24)
+                && v["layouts"]
+                    .as_array()
+                    .is_some_and(|l| l.len() == crate::gen_invoices::layout_count())
         })
         && set.join("stress").join("ten-pages-scanned.pdf").is_file()
 }
