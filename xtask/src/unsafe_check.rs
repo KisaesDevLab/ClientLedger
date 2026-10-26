@@ -1,7 +1,8 @@
 //! `cargo xtask unsafe-check`: `ClientLedger`'s own code has exactly one
-//! `unsafe` boundary (A03, Q-A03s): the Windows job memory cap in
+//! `unsafe` boundary (A03, Q-A03s): the Windows job limits for the reading
+//! worker and tesseract (memory cap, one process, no crash reporting) in
 //! [`ALLOWED`], one `SetInformationJobObject` call with a `// SAFETY:`
-//! comment.
+//! comment. Adding limits to that call must not add a second block.
 //!
 //! The workspace lint `unsafe_code = "forbid"` can't be relaxed inside a
 //! crate, so cl-host denies it instead and that one module allows it. This

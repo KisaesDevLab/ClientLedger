@@ -16,6 +16,7 @@
 //! | `garble` | writes a frame that is not JSON, then hangs |
 //! | `bad-pgm` | asks for OCR of a page that is not a PGM: `Unreadable` when the host refuses it with `BadImage`, `Empty` otherwise |
 //! | `force-ocr` | reads the rest of the file (after the hook line) with every page sent to OCR |
+//! | `spawn` | tries to start a program (this one): `Unreadable` when that is refused (the Windows job allows one process), `Empty` when it started |
 //!
 //! Before `Ready`, `CL_DOCREAD_TEST_READY=hang` hangs and `=exit` exits
 //! (the host's start-up deadline tests).
@@ -40,6 +41,7 @@ pub enum Hook {
     Garble,
     BadPgm,
     ForceOcr,
+    Spawn,
 }
 
 /// The hook a document names, and the bytes after its first line.
@@ -59,6 +61,7 @@ pub fn parse(bytes: &[u8]) -> Option<(Hook, &[u8])> {
             "garble" => Hook::Garble,
             "bad-pgm" => Hook::BadPgm,
             "force-ocr" => Hook::ForceOcr,
+            "spawn" => Hook::Spawn,
             _ => return None,
         },
         Some(("commit", n)) => Hook::Commit(mib(n)?),
@@ -152,6 +155,29 @@ pub fn run(
                 reason,
             })
         }
+        Hook::Spawn => {
+            // The only `process::Command` in the worker (xtask docread-check
+            // allows it in this file only, which release builds never compile).
+            let started = std::env::current_exe().and_then(|exe| {
+                std::process::Command::new(exe)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+            });
+            let reason = match started {
+                Ok(mut child) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    JobFailure::Empty
+                }
+                Err(_) => JobFailure::Unreadable,
+            };
+            Ok(FromWorker::JobFailed {
+                job: job.job,
+                reason,
+            })
+        }
         Hook::ForceOcr => {
             let forced = Ctx {
                 pdfium: ctx.pdfium,
@@ -193,6 +219,7 @@ mod tests {
             parse(b"%CL-TEST-HOOK:force-ocr\n%PDF-1.4"),
             Some((Hook::ForceOcr, &b"%PDF-1.4"[..]))
         );
+        assert_eq!(parse(b"%CL-TEST-HOOK:spawn"), Some((Hook::Spawn, &b""[..])));
         assert_eq!(parse(b"%CL-TEST-HOOK:rss:x"), None);
         assert_eq!(parse(b"%CL-TEST-HOOK:nope"), None);
         assert_eq!(parse(b"%PDF-1.4"), None);

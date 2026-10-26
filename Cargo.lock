@@ -888,6 +888,7 @@ dependencies = [
  "cl-pg",
  "listeners",
  "nix",
+ "rustix 1.1.5",
  "serde_json",
  "sysinfo",
  "thiserror 2.0.21",

@@ -45,6 +45,17 @@ fn junk() -> DocJob {
 
 const UNSUPPORTED: JobOutcome = JobOutcome::Failed(JobFailure::UnsupportedType);
 
+/// Scratch folders and child records left in the docread folder (the
+/// empty `.pids` folder itself stays).
+fn leftovers(s: &Scratch) -> usize {
+    let dir = s.paths().docread_dir();
+    let folders = std::fs::read_dir(&dir).map_or(0, |d| {
+        d.flatten().filter(|e| e.file_name() != ".pids").count()
+    });
+    let records = std::fs::read_dir(dir.join(".pids")).map_or(0, Iterator::count);
+    folders + records
+}
+
 fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -108,7 +119,7 @@ fn plain_and_hostile_files_fail_their_own_job() {
     assert_eq!(host.stats().workers_started, 1);
     assert_eq!(host.stats().kills, 0);
     // The worker's scratch folder is gone.
-    let left = std::fs::read_dir(s.paths().docread_dir()).map_or(0, Iterator::count);
+    let left = leftovers(&s);
     assert_eq!(left, 0);
 }
 
@@ -242,6 +253,71 @@ fn a_worker_that_never_gets_ready_is_given_up_on() {
     assert_eq!(host.read(&[junk()], today()), [UNSUPPORTED]);
 }
 
+/// Security review M3: on Windows the job allows one process, so a worker
+/// can't start a second stage. Elsewhere this is not enforced yet (P37):
+/// the hook's start succeeds, which keeps the test honest about that.
+#[test]
+fn a_worker_can_start_nothing() {
+    let s = Scratch::new("docread-spawn");
+    let mut host = DocreadHost::new(config(&s));
+    let out = host.read(&[hook("spawn"), junk()], today());
+    let expected = if cfg!(windows) {
+        JobFailure::Unreadable
+    } else {
+        JobFailure::Empty
+    };
+    assert_eq!(out[0], JobOutcome::Failed(expected));
+    assert_eq!(out[1], UNSUPPORTED);
+}
+
+/// Security review M1, M2 on Linux: a live worker has no core file, a CPU
+/// limit and is not dumpable (read from `/proc`, as the kernel applies
+/// them).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_worker_runs_with_its_unix_limits() {
+    let s = Scratch::new("docread-unix-limits");
+    let mut c = config(&s);
+    c.limits.first_page = Duration::from_secs(20);
+    c.limits.kills_per_job = 1;
+    let mut host = DocreadHost::new(c);
+    let cancel = host.cancel_handle();
+    let reader = std::thread::spawn(move || host.read(&[hook("hang-load")], today()));
+    let me = std::process::id().to_string();
+    let worker = (0..100).find_map(|_| {
+        std::thread::sleep(Duration::from_millis(100));
+        std::fs::read_dir("/proc").ok()?.flatten().find_map(|e| {
+            let stat = std::fs::read_to_string(e.path().join("stat")).ok()?;
+            // `pid (comm) state ppid ...`
+            let after = stat.rsplit_once(") ")?.1;
+            let ppid = after.split_whitespace().nth(1)?;
+            (stat.contains("(clientledger-do") && ppid == me).then(|| e.path())
+        })
+    });
+    let found = worker.map(|p| std::fs::read_to_string(p.join("limits")).unwrap_or_default());
+    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = reader.join();
+    let limits = found.expect("the worker was running");
+    let row = |name: &str| {
+        limits
+            .lines()
+            .find(|l| l.starts_with(name))
+            .map(|l| l.split_whitespace().collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    // "Max core file size  0  0  bytes"
+    assert!(
+        row("Max core file size").ends_with(&["0", "0", "bytes"]),
+        "{limits}"
+    );
+    // "Max cpu time  <soft>  <hard>  seconds", both finite.
+    let cpu = row("Max cpu time");
+    assert!(
+        cpu.len() == 6 && cpu[3].parse::<u64>().is_ok() && cpu[4].parse::<u64>().is_ok(),
+        "{limits}"
+    );
+}
+
 #[test]
 fn a_missing_worker_program_is_unavailable() {
     let s = Scratch::new("docread-missing");
@@ -370,6 +446,6 @@ fn a_scanned_page_is_read_by_tesseract_with_a_scrubbed_environment() {
     assert!(words.iter().any(|w| w.text == "INVOICE"));
     assert_eq!(host.stats().ocr_pages, 1);
     assert_eq!(host.stats().ocr_failures, 0);
-    let left = std::fs::read_dir(s.paths().docread_dir()).map_or(0, Iterator::count);
+    let left = leftovers(&s);
     assert_eq!(left, 0, "per-page and worker folders are removed");
 }

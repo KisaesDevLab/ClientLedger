@@ -15,7 +15,12 @@
 //! program needs only the C library.
 //!
 //! After the build a **linkage check** (`dumpbin /dependents`, `ldd`,
-//! `otool -L`) fails on any library outside the operating system's own.
+//! `otool -L`) fails on any library outside the operating system's own,
+//! delay-loaded ones included. On Linux and macOS sockets live in the C
+//! library itself, so the check also fails on an imported socket or name
+//! lookup function (`nm`; A03 security review L8). It runs again on every
+//! `ocr-build`, also when the stamp says the build is current, and the stamp
+//! holds the program's SHA-256, so a replaced program is rebuilt.
 //!
 //! Output: `target/ocr/<triple>/{tesseract[.exe], tessdata/, LICENSES/}`.
 //! Model data (`tessdata/`) is filled by `cargo xtask ocr-models` (WP-B).
@@ -33,7 +38,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use crate::fetch_lock::{Entry, fetch_verified, key_value, parse_entry};
+use crate::fetch_lock::{Entry, fetch_verified, key_value, parse_entry, sha256_file};
 
 /// Name of the pin file at the repository root.
 pub const LOCK_FILE: &str = "ocr.lock";
@@ -331,18 +336,85 @@ pub fn parse_dumpbin(out: &str) -> Vec<String> {
         }
         if inside {
             if t.is_empty() {
-                if !libs.is_empty() {
-                    break;
-                }
                 continue;
             }
-            if t.starts_with("Summary") || t.starts_with("Image has the following delay") {
+            if t.starts_with("Summary") {
                 break;
+            }
+            // Delay-loaded libraries are checked like the others.
+            if t.starts_with("Image has the following delay") {
+                continue;
             }
             libs.push(t.to_string());
         }
     }
     libs
+}
+
+/// Functions a program may not import on Linux or macOS: sockets and name
+/// lookups (Windows keeps them in `WS2_32.dll`, which the library
+/// allowlist already refuses).
+pub const DENIED_SYMBOLS: &[&str] = &[
+    "socket",
+    "socketpair",
+    "connect",
+    "bind",
+    "listen",
+    "accept",
+    "accept4",
+    "getaddrinfo",
+    "getaddrinfo_a",
+    "gethostbyname",
+    "gethostbyname2",
+    "gethostbyname_r",
+    "gethostbyname2_r",
+    "gethostbyaddr",
+    "res_query",
+    "res_search",
+];
+
+/// Imported symbol names from `nm -D --undefined-only` (Linux) or `nm -u`
+/// (macOS) output: `U socket@GLIBC_2.2.5` / `_socket`, without the version or
+/// the leading underscore.
+#[must_use]
+pub fn parse_nm(out: &str, os: &str) -> Vec<String> {
+    out.lines()
+        .filter_map(|l| {
+            let name = l.split_whitespace().last()?;
+            let name = name.split('@').next().unwrap_or(name);
+            let name = if os == "macos" {
+                name.strip_prefix('_').unwrap_or(name)
+            } else {
+                name
+            };
+            (!name.is_empty()).then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// Imported functions of `exe` that reach the network (Linux, macOS).
+///
+/// # Errors
+/// `nm` could not run.
+pub fn symbol_violations(exe: &Path, env: &BTreeMap<String, String>) -> Result<Vec<String>> {
+    let os = std::env::consts::OS;
+    let out = match os {
+        "linux" => capture(
+            Command::new("nm").args(["-D", "--undefined-only"]).arg(exe),
+            env,
+        )?,
+        "macos" => capture(Command::new("nm").arg("-u").arg(exe), env)?,
+        _ => return Ok(Vec::new()),
+    };
+    let symbols = parse_nm(&out, os);
+    if symbols.is_empty() {
+        bail!("nm listed no imported symbols; the output format may have changed");
+    }
+    Ok(symbols
+        .into_iter()
+        .filter(|s| DENIED_SYMBOLS.contains(&s.as_str()))
+        .map(|s| format!("tesseract imports `{s}`, a network function"))
+        .collect())
 }
 
 /// Library names from `ldd` output (`statically linked` gives none).
@@ -625,6 +697,31 @@ fn copy_license(src_dir: &Path, names: &[&str], dest: &Path) -> Result<()> {
     )
 }
 
+/// Whether a stamp `found` is for these sources (`expected`) and still
+/// matches the program's SHA-256 (it ends `exe <sha256>`).
+#[must_use]
+pub fn stamp_current(found: &str, expected: &str, program: &Path) -> bool {
+    let Some(sha) = found
+        .strip_prefix(expected)
+        .and_then(|rest| rest.strip_prefix("exe "))
+        .map(str::trim)
+    else {
+        return false;
+    };
+    sha256_file(program).is_ok_and(|actual| actual == sha)
+}
+
+/// The linkage and imported-symbol checks; an error on any violation.
+fn check_linkage(exe: &Path, env: &BTreeMap<String, String>) -> Result<()> {
+    let mut violations = linkage_violations(exe, env)?;
+    violations.extend(symbol_violations(exe, env)?);
+    crate::report(
+        "ocr-linkage",
+        "tesseract links only operating-system libraries and imports no network function",
+        &violations,
+    )
+}
+
 /// Entry point for `cargo xtask ocr-build [--force]`.
 ///
 /// # Errors
@@ -648,7 +745,12 @@ pub fn ocr_build(args: &[String]) -> Result<()> {
         lock.leptonica_version,
         lock.leptonica.sha256
     );
-    if !force && fs::read_to_string(out.join(STAMP)).is_ok_and(|s| s == stamp) {
+    let program = out.join(exe_name());
+    if !force
+        && fs::read_to_string(out.join(STAMP)).is_ok_and(|s| stamp_current(&s, &stamp, &program))
+    {
+        // The linkage check runs on every `ocr-build`, a cached build too.
+        check_linkage(&program, &build_env()?)?;
         println!("ocr-build: already built in {}", out.display());
         return Ok(());
     }
@@ -686,12 +788,7 @@ pub fn ocr_build(args: &[String]) -> Result<()> {
     if !built.is_file() {
         bail!("the build produced no {}", built.display());
     }
-    let violations = linkage_violations(&built, &env)?;
-    crate::report(
-        "ocr-linkage",
-        "tesseract links only operating-system libraries",
-        &violations,
-    )?;
+    check_linkage(&built, &env)?;
 
     let stage = base.join(".stage").join(triple);
     let _ = fs::remove_dir_all(&stage);
@@ -723,6 +820,7 @@ pub fn ocr_build(args: &[String]) -> Result<()> {
         &["leptonica-license.txt", "LICENSE"],
         &stage.join("LICENSES").join("leptonica-LICENSE.txt"),
     )?;
+    let stamp = format!("{stamp}exe {}\n", sha256_file(&stage.join(exe_name()))?);
     fs::File::create(stage.join(STAMP))?.write_all(stamp.as_bytes())?;
     let _ = fs::remove_dir_all(&out);
     fs::rename(&stage, &out).context("move into target/ocr")?;
@@ -844,6 +942,24 @@ mod tests {
     fn parses_tool_output() {
         let dumpbin = "Dump of file x.exe\n\nFile Type: EXECUTABLE IMAGE\n\n  Image has the following dependencies:\n\n    KERNEL32.dll\n    ADVAPI32.dll\n\n  Summary\n\n        1000 .data\n";
         assert_eq!(parse_dumpbin(dumpbin), ["KERNEL32.dll", "ADVAPI32.dll"]);
+        // Delay-loaded libraries are listed too (review L8).
+        let delayed = "  Image has the following dependencies:\n\n    KERNEL32.dll\n\n  Image has the following delay load dependencies:\n\n    WS2_32.dll\n\n  Summary\n\n        1000 .data\n";
+        assert_eq!(parse_dumpbin(delayed), ["KERNEL32.dll", "WS2_32.dll"]);
+        assert!(!allowed_library("windows", &parse_dumpbin(delayed)[1]));
+        let nm_linux = "                 U abort@GLIBC_2.2.5\n                 w __gmon_start__\n                 U socket@GLIBC_2.2.5\n";
+        assert_eq!(
+            parse_nm(nm_linux, "linux"),
+            ["abort", "__gmon_start__", "socket"]
+        );
+        let nm_mac = "_abort\n_getaddrinfo\ndyld_stub_binder\n";
+        assert_eq!(
+            parse_nm(nm_mac, "macos"),
+            ["abort", "getaddrinfo", "dyld_stub_binder"]
+        );
+        for s in ["socket", "connect", "getaddrinfo", "gethostbyname"] {
+            assert!(DENIED_SYMBOLS.contains(&s), "{s}");
+        }
+        assert!(!DENIED_SYMBOLS.contains(&"abort"));
         let ldd = "\tlinux-vdso.so.1 (0x00007ffd)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x1)\n\t/lib64/ld-linux-x86-64.so.2 (0x2)\n";
         assert_eq!(
             parse_ldd(ldd),
@@ -858,6 +974,35 @@ mod tests {
             parse_otool(otool),
             ["/usr/lib/libc++.1.dylib", "/usr/lib/libSystem.B.dylib"]
         );
+    }
+
+    #[test]
+    fn a_stamp_holds_the_programs_hash() {
+        let dir = std::env::temp_dir().join(format!("xtask-ocr-stamp-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("tesseract");
+        fs::write(&program, b"program").unwrap();
+        let sha = sha256_file(&program).unwrap();
+        let sources = "build 2\ntesseract 5.5.3 x\n";
+        assert!(stamp_current(
+            &format!("{sources}exe {sha}\n"),
+            sources,
+            &program
+        ));
+        // Old stamps without a hash, other sources, or a replaced program.
+        assert!(!stamp_current(sources, sources, &program));
+        assert!(!stamp_current(
+            &format!("build 1\nexe {sha}\n"),
+            sources,
+            &program
+        ));
+        fs::write(&program, b"replaced").unwrap();
+        assert!(!stamp_current(
+            &format!("{sources}exe {sha}\n"),
+            sources,
+            &program
+        ));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

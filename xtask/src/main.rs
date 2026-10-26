@@ -3,6 +3,7 @@
 
 mod api_spec;
 mod ci;
+mod docread_check;
 mod engine;
 mod engine_test;
 mod fetch_lock;
@@ -33,7 +34,10 @@ usage: cargo xtask <command>
   licenses           direct dependencies must be MIT or Apache-2.0
   layering           crate dependency rules from CLAUDE.md
   nofloat            no floating point in the money crates and cl-docread rules (syn scan)
-  unsafe-check       no `unsafe` outside cl-host's one Windows job memory call (Q-A03s)
+  unsafe-check       no `unsafe` outside cl-host's one Windows job limits call (Q-A03s)
+  docread-check      the reading worker: no network-capable crate, no std::net or Command
+  docread-netcheck <strace log>
+                     fail on any network call beyond loopback in an strace log (Linux CI)
   engine [--smoke] [--force]
                      build the engine single executable into target/engine/<target>
   engine-test [-- <vitest args>]
@@ -137,8 +141,17 @@ pub(crate) fn run_unsafe_check() -> Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     report(
         "unsafe-check",
-        "no unsafe code outside the one Windows job memory call",
+        "no unsafe code outside the one Windows job limits call",
         &unsafe_check::check(&root)?,
+    )
+}
+
+pub(crate) fn run_docread_check() -> Result<()> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    report(
+        "docread-check",
+        "the reading worker has no network-capable crate, std::net or Command",
+        &docread_check::check(&root)?,
     )
 }
 
@@ -151,6 +164,8 @@ fn main() -> Result<()> {
         Some("layering") => run_layering(),
         Some("nofloat") => run_nofloat(),
         Some("unsafe-check") => run_unsafe_check(),
+        Some("docread-check") => run_docread_check(),
+        Some("docread-netcheck") => docread_check::netcheck(&args[1..]),
         Some("engine") => engine::engine(&args[1..]),
         Some("engine-test") => engine_test::engine_test(&args[1..]),
         Some("api-spec") => api_spec::api_spec(&args[1..]),

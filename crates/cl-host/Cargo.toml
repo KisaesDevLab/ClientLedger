@@ -35,6 +35,13 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Syste
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31.3", default-features = false, features = ["signal", "process", "user"] }
 
+# `prlimit` on tesseract (no core file, CPU and data limits; A03 security
+# review M1, M2, L4) without an `unsafe` pre_exec hook. Already in the
+# build through other crates. Apache-2.0 WITH LLVM-exception OR
+# Apache-2.0 OR MIT.
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1.1.5", default-features = false, features = ["std", "process"] }
+
 [features]
 # Test-only hooks (a fake engine's behaviour switches). Never enabled in a build users run.
 test-support = []

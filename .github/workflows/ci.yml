@@ -69,6 +69,73 @@ jobs:
       - name: Grid scroll benchmark
         run: cargo xtask grid-bench
 
+  # The reading worker and tesseract reach no network (A03 plan step 22,
+  # T16; security review M4): every reading-worker test, real PDFium and
+  # tesseract included, runs under strace, and any socket beyond loopback
+  # or a local socket fails the job. Everything is built first so cargo
+  # and rustc are not traced. `cargo xtask docread-check` (in `ci`) is the
+  # static half on every OS. Every push.
+  docread-netcheck:
+    name: docread-netcheck (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    env:
+      CL_PDFIUM_REQUIRE: "1"
+      CL_OCR_REQUIRE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+      - uses: Swatinem/rust-cache@v2
+      - name: strace
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y strace
+      - uses: actions/cache@v4
+        with:
+          path: target/pdfium/.cache
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
+      - name: Fetch pinned PDFium (hash-verified)
+        run: cargo xtask pdfium-fetch
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/ocr
+            !target/ocr/.work
+            !target/ocr/.stage
+          key: ocr-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ocr.lock', 'xtask/src/ocr_build.rs') }}
+      - name: Build pinned tesseract (linkage checked)
+        run: cargo xtask ocr-build
+      - name: Fetch pinned OCR models (hash-verified)
+        run: cargo xtask ocr-models
+      - name: Build the worker tests and the test worker (before tracing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p xtask
+          cargo build -p clientledger-docread --features test-support --target-dir target/docread-test
+          cargo test -p cl-host --test docread_worker --no-run --message-format=json > "$RUNNER_TEMP/build.json"
+          exe=$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "docread_worker" and .executable != null) | .executable' \
+            "$RUNNER_TEMP/build.json" | head -n 1)
+          test -x "$exe" || { echo "::error::no docread_worker test binary"; exit 1; }
+          echo "DOCREAD_TESTS=$exe" >> "$GITHUB_ENV"
+      - name: Reading worker tests under strace
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The tests' own `cargo build` of the test worker is a no-op now;
+          # offline so cargo can't look anything up either.
+          CARGO_NET_OFFLINE=true strace -f -qq -o "$RUNNER_TEMP/net.log" \
+            -e trace=execve,socket,connect,sendto,sendmsg \
+            "$DOCREAD_TESTS" --test-threads=1
+          ./target/debug/xtask docread-netcheck "$RUNNER_TEMP/net.log"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: docread-netcheck-log
+          path: ${{ runner.temp }}/net.log
+          if-no-files-found: ignore
+
   # Pull requests only: the other two platforms (Q-114).
   other-os:
     name: ci (${{ matrix.os }})

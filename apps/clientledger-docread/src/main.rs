@@ -13,7 +13,7 @@
 //! a path or document content.
 //!
 //! Exit codes: 0 stdin closed; 3 the host breached the protocol; 4 the pipe
-//! broke.
+//! broke; 5 the host was already gone at start (Linux).
 #![forbid(unsafe_code)]
 
 // Test hooks crash, hang and allocate on purpose: never in a release build.
@@ -139,6 +139,7 @@ fn serve<R: Read, W: Write>(pipe: &mut Pipe<R, W>, pdfium: Option<&Pdfium>) -> R
                     force_ocr: false,
                 };
                 for job in &jobs {
+                    limits::job_started();
                     let done = batch::run_job(&ctx, pipe, job)?;
                     pipe.finish(&done)?;
                 }
@@ -164,6 +165,9 @@ fn main() -> ExitCode {
     let applied = limits::apply();
     for line in limits::report(applied) {
         eprintln!("{line}");
+    }
+    if applied.orphaned {
+        return ExitCode::from(5);
     }
     #[cfg(feature = "test-support")]
     hooks::before_ready();
