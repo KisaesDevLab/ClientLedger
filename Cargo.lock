@@ -1003,7 +1003,10 @@ dependencies = [
 name = "clientledger-cli"
 version = "0.0.0"
 dependencies = [
+ "chrono",
  "cl-automation",
+ "cl-core",
+ "cl-docread",
  "cl-host",
  "ctrlc",
  "serde_json",
