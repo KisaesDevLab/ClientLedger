@@ -183,7 +183,7 @@ pub fn render_grey(page: &PdfPage<'_>) -> Option<GrayImage> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::test_pdf::{Page, build, text};
 
