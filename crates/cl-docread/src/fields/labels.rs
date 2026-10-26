@@ -233,6 +233,15 @@ pub fn tokens<'a>(words: impl Iterator<Item = &'a Word>) -> Vec<Token> {
     out
 }
 
+/// Symbols OCR reads for a small or blurred `#` (`RECEIPT®`, `No ©`); in a
+/// label they stand for `#` (labels only: never part of a value).
+const MISREAD_HASH: [char; 3] = ['®', '©', '£'];
+
+fn is_misread_hash(t: &str) -> bool {
+    let mut c = t.chars();
+    c.next().is_some_and(|ch| MISREAD_HASH.contains(&ch)) && c.next().is_none()
+}
+
 /// One word's canonical tokens (one or two).
 pub fn canon(text: &str) -> Vec<String> {
     let lower = text.to_lowercase();
@@ -242,10 +251,10 @@ pub fn canon(text: &str) -> Vec<String> {
     if t.is_empty() {
         return Vec::new();
     }
-    if matches!(t, "#" | "no" | "nbr" | "num" | "number" | "#:") {
+    if matches!(t, "#" | "no" | "nbr" | "num" | "number" | "#:") || is_misread_hash(t) {
         return vec!["#".into()];
     }
-    if let Some(stem) = t.strip_suffix('#')
+    if let Some(stem) = t.strip_suffix('#').or_else(|| t.strip_suffix(MISREAD_HASH))
         && !stem.is_empty()
         && stem.chars().all(char::is_alphabetic)
     {
@@ -321,6 +330,11 @@ mod tests {
         assert_eq!(canon("#20417"), ["#20417"]);
         assert_eq!(canon("(TOTAL)"), ["total"]);
         assert_eq!(canon("::").len(), 0);
+        // A misread `#` in a label.
+        assert_eq!(canon("RECEIPT®"), ["receipt", "#"]);
+        assert_eq!(canon("©"), ["#"]);
+        assert_eq!(canon("£12.40"), ["£12.40"]);
+        assert_eq!(labels("RECEIPT® R717507"), [Label::Reference(0)]);
     }
 
     #[test]
