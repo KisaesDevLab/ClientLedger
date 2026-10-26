@@ -896,15 +896,45 @@ impl Reading {
         {
             return Err(ModelError::TooLong("text"));
         }
-        let spot_pages = self
-            .checks
-            .iter()
-            .filter_map(|c| c.spot)
-            .chain(self.lines.iter().map(|l| l.amount.spot));
-        if spot_pages.into_iter().any(|s| s.page >= self.page_count) {
+        if self.spots().any(|s| s.page >= self.page_count) {
             return Err(ModelError::Spot);
         }
         Ok(())
+    }
+
+    /// Every spot in the reading: header fields, fees, line fields, checks.
+    fn spots(&self) -> impl Iterator<Item = Spot> + '_ {
+        let h = &self.header;
+        let header = [
+            h.vendor.as_ref().map(|f| f.spot),
+            h.vendor_address.as_ref().map(|f| f.spot),
+            h.vendor_phone.as_ref().map(|f| f.spot),
+            h.account_number.as_ref().map(|f| f.spot),
+            h.date.as_ref().map(|f| f.spot),
+            h.reference.as_ref().map(|f| f.spot),
+            h.terms.as_ref().map(|f| f.spot),
+            h.due_date.as_ref().map(|f| f.spot),
+            h.subtotal.as_ref().map(|f| f.spot),
+            h.tax.as_ref().map(|f| f.spot),
+            h.total.as_ref().map(|f| f.spot),
+            h.amount_paid.as_ref().map(|f| f.spot),
+            h.balance_due.as_ref().map(|f| f.spot),
+            h.payment.as_ref().map(|f| f.spot),
+        ];
+        let lines = self.lines.iter().flat_map(|l| {
+            [
+                l.description.as_ref().map(|f| f.spot),
+                l.quantity.as_ref().map(|f| f.spot),
+                l.unit_price.as_ref().map(|f| f.spot),
+                Some(l.amount.spot),
+            ]
+        });
+        header
+            .into_iter()
+            .chain(h.fees.iter().map(|f| Some(f.spot)))
+            .chain(lines)
+            .chain(self.checks.iter().map(|c| c.spot))
+            .flatten()
     }
 }
 
@@ -1079,6 +1109,21 @@ mod tests {
             bbox: Bbox::PAGE,
         });
         assert_eq!(r.validate(0), Err(ModelError::Spot));
+        let off_page = |mut f: Found<Money>| {
+            f.spot.page = 4;
+            f
+        };
+        let mut r = sample();
+        r.header.total = r.header.total.take().map(off_page);
+        assert_eq!(r.validate(0), Err(ModelError::Spot), "header spot");
+        let mut r = sample();
+        r.lines[0].unit_price = r.lines[0].unit_price.take().map(off_page);
+        assert_eq!(r.validate(0), Err(ModelError::Spot), "line spot");
+        let mut r = sample();
+        r.header
+            .fees
+            .push(off_page(found(Money::parse_wire("1").unwrap())));
+        assert_eq!(r.validate(0), Err(ModelError::Spot), "fee spot");
         let mut r = sample();
         r.lines = vec![r.lines[0].clone(); MAX_LINES + 1];
         assert_eq!(r.validate(0), Err(ModelError::TooMany("lines")));
