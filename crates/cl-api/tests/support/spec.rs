@@ -25,11 +25,10 @@ use sha2::{Digest, Sha256};
 /// f78583e (engine PR #159) the P14 feed deposit groupings and equity
 /// roles are; since pin f3ce33fd (engine PR-A) the P17 vendor credit edit
 /// (U-84a), bill terms dates (U-86d) and payment terms list (U-86e) are;
-/// since pin a88337e3 (engine PR #177) the A01 intake settings (U-93) are.
-/// The A03 document draft and vendor layout routes (U-92, engine PR #178)
-/// are client-declared until the pin has them, as is the document reading
-/// assist (U-92d, engine PR #179).
-pub const OUTSIDE_SPEC: [(&str, &str); 19] = [
+/// since pin a88337e3 (engine PR #177) the A01 intake settings (U-93) are;
+/// since pin 38cf97eb (engine PRs #178, #179) the A03 document draft and
+/// vendor layout routes (U-92) and the document reading assist (U-92d) are.
+pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -39,19 +38,6 @@ pub const OUTSIDE_SPEC: [(&str, &str); 19] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
-    // A03 (U-92, engine PR #178): until the pin moves.
-    ("POST", "/api/v1/document-drafts"),
-    ("GET", "/api/v1/document-drafts"),
-    ("GET", "/api/v1/document-drafts/{id}"),
-    ("GET", "/api/v1/document-drafts/{id}/duplicates"),
-    ("PUT", "/api/v1/document-drafts/{id}"),
-    ("POST", "/api/v1/document-drafts/{id}/discard"),
-    ("POST", "/api/v1/document-drafts/{id}/convert"),
-    ("GET", "/api/v1/vendor-layout-templates"),
-    ("PUT", "/api/v1/vendor-layout-templates"),
-    ("DELETE", "/api/v1/vendor-layout-templates/{id}"),
-    // A03 (U-92d, engine PR #179): until the pin moves.
-    ("POST", "/api/v1/document-reading/assist"),
 ];
 
 /// Lowercase hex of a SHA-256.
