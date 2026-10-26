@@ -551,12 +551,15 @@ impl ViewerState {
                     self.page = self.page.min(pages.saturating_sub(1));
                 }
                 DocReply::Protected { doc } if doc == self.doc => self.status = Status::Protected,
-                DocReply::Unreadable { doc } if doc == self.doc => {
+                DocReply::Unreadable { doc, page } if doc == self.doc => {
                     if self.status == Status::Ready && (self.shown.is_some() || self.pages > 1) {
                         // One page of a readable document: that page says
                         // so, the rest still show (A02, a TIFF page in a
-                        // colour this can't read).
-                        self.failed_page = self.asked.map(|(page, ..)| page);
+                        // colour this can't read). The reply names the page
+                        // (review S6): fast paging never marks another.
+                        if let Some(p) = page {
+                            self.failed_page = Some(p);
+                        }
                     } else if self.shown.is_none() {
                         self.status = Status::Unreadable;
                     }
@@ -1963,5 +1966,28 @@ mod tests {
         assert!(v.command(CommandId::new("viewer.page_prev")));
         h.until(&mut v, |v| v.state_json()["rendered"] == true);
         assert_eq!(v.state_json()["page_unreadable"], false);
+    }
+
+    /// Review S6: a late "unreadable" for page 2 arriving while page 1 is
+    /// asked for marks page 2, never the page on screen.
+    #[test]
+    fn an_unreadable_reply_marks_the_page_it_names() {
+        let mut h = Harness::new(vec2(640.0, 520.0));
+        let mut v = ViewerState::default();
+        v.open(DocSource {
+            name: "three.tif".into(),
+            bytes: Arc::from(super::super::doc_worker::tiff_fixtures::three_pages()),
+        });
+        h.until(&mut v, |v| v.state_json()["rendered"] == true);
+        assert_eq!(v.page(), 0);
+        let worker = v.worker.as_ref().expect("worker");
+        worker.inject_reply(DocReply::Unreadable {
+            doc: v.doc,
+            page: Some(1),
+        });
+        let _ = h.frame(&mut v, vec![]);
+        assert_eq!(v.failed_page, Some(1));
+        assert_eq!(v.state_json()["page_unreadable"], false, "page 1 still shows");
+        assert_eq!(v.state_json()["rendered"], true);
     }
 }

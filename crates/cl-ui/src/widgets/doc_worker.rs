@@ -258,10 +258,14 @@ pub enum DocReply {
         /// The document.
         doc: u64,
     },
-    /// Not a readable PDF or image (or over the decode limits).
+    /// Not a readable PDF or image (or over the decode limits), or (A02,
+    /// review S6) one page of it can't be drawn.
     Unreadable {
         /// The document.
         doc: u64,
+        /// The page asked for; `None` when the document itself can't be
+        /// opened.
+        page: Option<u32>,
     },
     /// PDFium is not on this computer: PDFs cannot be previewed.
     Unavailable {
@@ -358,6 +362,12 @@ impl DocWorker {
     #[must_use]
     pub fn try_recv(&self) -> Option<DocReply> {
         self.rx.try_recv().ok()
+    }
+
+    /// Tests: an answer as if the worker had sent it.
+    #[cfg(test)]
+    pub(crate) fn inject_reply(&self, r: DocReply) {
+        let _ = self.tx.send(r);
     }
 }
 
@@ -555,7 +565,7 @@ fn handle_request<'a>(
         } => Some(
             docs.get_mut((handle, doc))
                 .and_then(|d| render(d, doc, page, px_width, rotation, true))
-                .map_or(DocReply::Unreadable { doc }, DocReply::Rendered),
+                .map_or(DocReply::Unreadable { doc, page: Some(page) }, DocReply::Rendered),
         ),
         DocRequest::Thumb {
             doc,
@@ -583,7 +593,7 @@ fn open<'a>(
                 Ok(pdf) => {
                     let all = u32::try_from(pdf.pages().len()).unwrap_or(0);
                     if all == 0 {
-                        return (DocReply::Unreadable { doc }, None);
+                        return (DocReply::Unreadable { doc, page: None }, None);
                     }
                     let pages = all.min(MAX_PAGES);
                     (
@@ -598,7 +608,7 @@ fn open<'a>(
                 Err(PdfiumError::PdfiumLibraryInternalError(
                     PdfiumInternalError::PasswordError,
                 )) => (DocReply::Protected { doc }, None),
-                Err(_) => (DocReply::Unreadable { doc }, None),
+                Err(_) => (DocReply::Unreadable { doc, page: None }, None),
             }
         }
         Some(cl_api::FileKind::Png | cl_api::FileKind::Jpeg) => match decode_image(bytes) {
@@ -610,7 +620,7 @@ fn open<'a>(
                 },
                 Some(Doc::Image(img)),
             ),
-            None => (DocReply::Unreadable { doc }, None),
+            None => (DocReply::Unreadable { doc, page: None }, None),
         },
         Some(cl_api::FileKind::Tiff) => match tiff_doc::TiffDoc::open(bytes) {
             Some((t, truncated)) => (
@@ -621,9 +631,9 @@ fn open<'a>(
                 },
                 Some(Doc::Tiff(Box::new(t))),
             ),
-            None => (DocReply::Unreadable { doc }, None),
+            None => (DocReply::Unreadable { doc, page: None }, None),
         },
-        None => (DocReply::Unreadable { doc }, None),
+        None => (DocReply::Unreadable { doc, page: None }, None),
     }
 }
 
@@ -1046,7 +1056,7 @@ mod tests {
             px_width: 160,
             rotation: Rotation::None,
         });
-        assert_eq!(reply(&w), DocReply::Unreadable { doc: 2 });
+        assert_eq!(reply(&w), DocReply::Unreadable { doc: 2, page: Some(1) });
         w.send(DocRequest::Close { doc: 2 });
         w.send(DocRequest::Render {
             doc: 2,
@@ -1054,7 +1064,7 @@ mod tests {
             px_width: 160,
             rotation: Rotation::None,
         });
-        assert_eq!(reply(&w), DocReply::Unreadable { doc: 2 });
+        assert_eq!(reply(&w), DocReply::Unreadable { doc: 2, page: Some(0) });
         let dbg = format!(
             "{:?}",
             DocRequest::Open {
@@ -1087,7 +1097,7 @@ mod tests {
             doc: 9,
             bytes: bomb,
         });
-        assert_eq!(reply(&w), DocReply::Unreadable { doc: 9 });
+        assert_eq!(reply(&w), DocReply::Unreadable { doc: 9, page: None });
     }
 
     /// Open `bytes` on a worker without PDFium (TIFFs don't need it).
@@ -1157,7 +1167,7 @@ mod tests {
         assert_eq!(at(&seen[2], 60, 130), [0, 0, 0]);
         assert_eq!(at(&seen[2], 60, 20), [255, 255, 255]);
         // Past the last page.
-        assert_eq!(render_on(&w, 1, 3, 120), DocReply::Unreadable { doc: 1 });
+        assert_eq!(render_on(&w, 1, 3, 120), DocReply::Unreadable { doc: 1, page: Some(3) });
     }
 
     #[test]
@@ -1183,24 +1193,24 @@ mod tests {
         let w = without_pdfium();
         assert_eq!(
             open_on(&w, 1, bomb.to_vec()),
-            DocReply::Unreadable { doc: 1 }
+            DocReply::Unreadable { doc: 1, page: None }
         );
         assert_eq!(
             open_on(&w, 2, tiff_fixtures::truncated_strip()),
-            DocReply::Unreadable { doc: 2 }
+            DocReply::Unreadable { doc: 2, page: None }
         );
         assert_eq!(
             open_on(&w, 3, tiff_fixtures::lab_only()),
-            DocReply::Unreadable { doc: 3 }
+            DocReply::Unreadable { doc: 3, page: None }
         );
         assert_eq!(
             open_on(&w, 4, b"II*\0\xff\xff\xff\x7f".to_vec()),
-            DocReply::Unreadable { doc: 4 }
+            DocReply::Unreadable { doc: 4, page: None }
         );
         // BigTIFF is not taken.
         assert_eq!(
             open_on(&w, 5, b"II+\0\x08\0\0\0\x10\0\0\0\0\0\0\0".to_vec()),
-            DocReply::Unreadable { doc: 5 }
+            DocReply::Unreadable { doc: 5, page: None }
         );
     }
 
@@ -1228,7 +1238,7 @@ mod tests {
         let w = without_pdfium();
         assert_eq!(
             open_on(&w, 1, bomb.to_vec()),
-            DocReply::Unreadable { doc: 1 }
+            DocReply::Unreadable { doc: 1, page: None }
         );
         // Refused at once: 768 MiB was never allocated and filled.
         assert!(started.elapsed() < Duration::from_secs(5));
@@ -1248,7 +1258,7 @@ mod tests {
     fn an_unsupported_later_page_is_unreadable_alone() {
         let w = without_pdfium();
         assert_eq!(open_on(&w, 1, tiff_fixtures::gray_then_lab()), opened(1, 2));
-        assert_eq!(render_on(&w, 1, 1, 60), DocReply::Unreadable { doc: 1 });
+        assert_eq!(render_on(&w, 1, 1, 60), DocReply::Unreadable { doc: 1, page: Some(1) });
         assert!(matches!(render_on(&w, 1, 0, 60), DocReply::Rendered(_)));
     }
 
@@ -1576,6 +1586,6 @@ mod tests {
             doc: 6,
             bytes: Arc::from(&b"%PDF-1.7 not a real file"[..]),
         });
-        assert_eq!(reply(&w), DocReply::Unreadable { doc: 6 });
+        assert_eq!(reply(&w), DocReply::Unreadable { doc: 6, page: None });
     }
 }
