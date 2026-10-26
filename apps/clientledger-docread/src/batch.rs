@@ -6,16 +6,18 @@
 
 use crate::decode::{self, ImageError, Kind, Tiff};
 use crate::pdfium::{self, Opened};
+use crate::region;
 use crate::second_read;
 use cl_core::CalendarDate;
 use cl_docread::dates;
-use cl_docread::model::{Bbox, Confidence, MAX_PAGES, PageWords, Word, WordSource};
+use cl_docread::model::{Bbox, Confidence, MAX_PAGES, PageWords, Spot, Word, WordSource};
 use cl_docread::ocr_geom;
 use cl_docread::pdf_text::MIN_TEXT_QUALITY_BP;
+use cl_docread::pipeline::region_reading;
 use cl_docread::preprocess;
 use cl_docread::protocol::{
     BatchOptions, FromWorker, Job, JobFailure, JobId, MAX_BATCH_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES,
-    MAX_JOBS_PER_BATCH, MAX_TEMPLATES, OcrFailure, OcrMode, Tsv,
+    MAX_JOBS_PER_BATCH, MAX_TEMPLATES, OcrFailure, OcrMode, Tsv, region_ok, whole_page,
 };
 use cl_docread::tsv::{self, OcrWord, PixelBox};
 use cl_docread::{ReadInput, read};
@@ -67,13 +69,44 @@ pub struct Ctx<'a> {
 }
 
 /// Whether a batch keeps within the protocol's caps (the host splits
-/// larger sets, so a breach here is the host's fault).
+/// larger sets, so a breach here is the host's fault). A region job's box
+/// must keep the region rules (`protocol::region_ok`) and it carries no
+/// templates (version 4).
 #[must_use]
 pub fn batch_within_caps(jobs: &[Job]) -> bool {
     let total: usize = jobs.iter().map(|j| j.bytes.0.len()).sum();
     jobs.len() <= MAX_JOBS_PER_BATCH
         && total <= MAX_BATCH_DOCUMENT_BYTES
         && jobs.iter().all(|j| j.templates.len() <= MAX_TEMPLATES)
+        && jobs.iter().all(|j| {
+            j.region
+                .is_none_or(|r| region_ok(r) && j.templates.is_empty())
+        })
+}
+
+/// The pages a job reads: its region's page, or the first ten. `None`
+/// when the region's page is past the document's end.
+fn pages_to_read(job: &Job, count: u16) -> Option<std::ops::Range<u16>> {
+    match job.region {
+        None => Some(0..count.min(MAX_PAGES)),
+        Some(r) if r.page < count => Some(r.page..r.page + 1),
+        Some(_) => None,
+    }
+}
+
+/// OCR one page: the region's box only, unless the job reads whole
+/// pages or the box nearly covers the page (`protocol::whole_page`).
+fn ocr_for_job(
+    io: &mut dyn Io,
+    (job, page): (&Job, u16),
+    grey: &GrayImage,
+    today: CalendarDate,
+    disagree: &mut Vec<(u16, second_read::Disagreement<Bbox>)>,
+) -> Result<Option<Vec<Word>>, Fatal> {
+    match job.region {
+        Some(r) if !whole_page(r.bbox) => region::ocr_region(io, (job.job, page), grey, r.bbox),
+        _ => ocr_page(io, (job.job, page), grey, today, disagree),
+    }
 }
 
 fn failed(job: JobId, reason: JobFailure) -> FromWorker {
@@ -161,8 +194,11 @@ fn read_pdf(ctx: &Ctx<'_>, io: &mut dyn Io, job: &Job, bytes: &[u8]) -> Result<F
     if count == 0 {
         return Ok(failed(job.job, JobFailure::Unreadable));
     }
+    let Some(range) = pages_to_read(job, count) else {
+        return Ok(failed(job.job, JobFailure::Unreadable));
+    };
     let mut pages = Pages::default();
-    for i in 0..count.min(MAX_PAGES) {
+    for i in range {
         io.send(&FromWorker::PageStarted {
             job: job.job,
             page: i,
@@ -185,13 +221,9 @@ fn read_pdf(ctx: &Ctx<'_>, io: &mut dyn Io, job: &Job, bytes: &[u8]) -> Result<F
         }
         let ocr_words = if ctx.options.ocr {
             match pdfium::render_grey(&page) {
-                Some(grey) => ocr_page(
-                    io,
-                    (job.job, i),
-                    &grey,
-                    ctx.options.today,
-                    &mut pages.disagree,
-                )?,
+                Some(grey) => {
+                    ocr_for_job(io, (job, i), &grey, ctx.options.today, &mut pages.disagree)?
+                }
                 None => None,
             }
         } else {
@@ -225,9 +257,12 @@ fn read_images(
     if !ctx.options.ocr {
         return Ok(failed(job.job, JobFailure::NeedsOcr));
     }
+    let Some(range) = pages_to_read(job, count) else {
+        return Ok(failed(job.job, JobFailure::Unreadable));
+    };
     let mut pages = Pages::default();
     let mut too_large = false;
-    for i in 0..count.min(MAX_PAGES) {
+    for i in range {
         io.send(&FromWorker::PageStarted {
             job: job.job,
             page: i,
@@ -241,13 +276,7 @@ fn read_images(
             }
         };
         let aspect = aspect_px(grey.width(), grey.height());
-        match ocr_page(
-            io,
-            (job.job, i),
-            &grey,
-            ctx.options.today,
-            &mut pages.disagree,
-        )? {
+        match ocr_for_job(io, (job, i), &grey, ctx.options.today, &mut pages.disagree)? {
             Some(w) => pages.read.push(page_words(i, aspect, WordSource::Ocr, w)),
             None => pages.unread.push(i),
         }
@@ -391,7 +420,7 @@ fn good_read(words: &[OcrWord]) -> bool {
 
 /// Whether the words with digits (at least two letters or digits) read
 /// with a mean confidence below [`UNSURE_NUMBERS_BP`].
-fn numbers_unsure(words: &[OcrWord]) -> bool {
+pub(crate) fn numbers_unsure(words: &[OcrWord]) -> bool {
     let (sum, n) = words
         .iter()
         .filter(|w| {
@@ -407,11 +436,22 @@ fn numbers_unsure(words: &[OcrWord]) -> bool {
 /// OCR one cleaned page; `None` when it could not be read.
 fn ocr_raw(
     io: &mut dyn Io,
-    (job, page): (JobId, u16),
+    at: (JobId, u16),
     cleaned: &preprocess::Cleaned,
     mode: OcrMode,
 ) -> Result<Option<Vec<OcrWord>>, Fatal> {
-    let Ok(pgm) = preprocess::to_pgm(&cleaned.image) else {
+    ocr_raw_image(io, at, &cleaned.image, mode)
+}
+
+/// OCR one image (a cleaned page or a cut-out of one); `None` when it
+/// could not be read.
+pub(crate) fn ocr_raw_image(
+    io: &mut dyn Io,
+    (job, page): (JobId, u16),
+    image: &GrayImage,
+    mode: OcrMode,
+) -> Result<Option<Vec<OcrWord>>, Fatal> {
+    let Ok(pgm) = preprocess::to_pgm(image) else {
         return Ok(None);
     };
     let tsv = match io.ocr(job, page, pgm, mode)? {
@@ -423,7 +463,7 @@ fn ocr_raw(
             return Ok(None);
         }
     };
-    let (w, h) = cleaned.image.dimensions();
+    let (w, h) = image.dimensions();
     Ok(tsv::parse(&tsv.0, w, h).ok())
 }
 
@@ -546,7 +586,7 @@ fn reread(
 /// The quarter turns (clockwise) tesseract's orientation pass says the
 /// cleaned page needs, added to any turn already applied; `None` when it
 /// is upright, unsure, or the pass failed.
-fn orientation(
+pub(crate) fn orientation(
     io: &mut dyn Io,
     job: JobId,
     page: u16,
@@ -578,7 +618,11 @@ fn ocr_reason(r: OcrFailure) -> &'static str {
 }
 
 /// The rules over the pages read, or the job's failure when nothing was.
+/// A region job answers with its page's words in the box only.
 fn finish(ctx: &Ctx<'_>, job: &Job, count: u16, pages: &Pages) -> FromWorker {
+    if let Some(region) = job.region {
+        return finish_region(ctx, job, count, pages, region);
+    }
     if pages.read.iter().all(|p| p.words.is_empty()) {
         let reason = if pages.needed_ocr && !ctx.options.ocr {
             JobFailure::NeedsOcr
@@ -597,6 +641,28 @@ fn finish(ctx: &Ctx<'_>, job: &Job, count: u16, pages: &Pages) -> FromWorker {
     });
     second_read::add_checks(&mut reading, &pages.disagree);
     if reading.validate(job.templates.len()).is_err() {
+        eprintln!("docread: outcome: reading over a limit");
+        return failed(job.job, JobFailure::Unreadable);
+    }
+    FromWorker::JobDone {
+        job: job.job,
+        reading: Box::new(reading),
+    }
+}
+
+/// A region job's answer: the words in the box (possibly none), or the
+/// failure when its page could not be read.
+fn finish_region(ctx: &Ctx<'_>, job: &Job, count: u16, pages: &Pages, region: Spot) -> FromWorker {
+    let Some(page) = pages.read.iter().find(|p| p.page == region.page) else {
+        let reason = if pages.needed_ocr && !ctx.options.ocr {
+            JobFailure::NeedsOcr
+        } else {
+            JobFailure::Unreadable
+        };
+        return failed(job.job, reason);
+    };
+    let reading = region_reading(page, count, region.bbox);
+    if reading.validate(0).is_err() {
         eprintln!("docread: outcome: reading over a limit");
         return failed(job.job, JobFailure::Unreadable);
     }
@@ -720,6 +786,7 @@ pub(crate) mod tests {
             bytes: Bytes(bytes),
             hint: JobHint::default(),
             templates: Vec::new(),
+            region: None,
         }
     }
 
@@ -1198,5 +1265,162 @@ pub(crate) mod tests {
         )
         .unwrap();
         assert_eq!(reason(&out), Some(JobFailure::Unreadable));
+    }
+
+    fn region_job(bytes: Vec<u8>, b: (u16, u16, u16, u16)) -> Job {
+        Job {
+            region: Some(Spot {
+                page: 0,
+                bbox: Bbox::new(b.0, b.1, b.2, b.3).unwrap(),
+            }),
+            ..job(bytes)
+        }
+    }
+
+    /// Version 4: only the box is OCR'd (after the page's orientation is
+    /// asked), and the answer is that box's words and nothing else.
+    #[test]
+    fn a_region_reads_only_its_box_and_answers_with_words() {
+        let mut host = FakeHost::new(one_word);
+        let j = region_job(fixture("receipt.png"), (2_000, 3_000, 8_000, 7_000));
+        let out = run_job(&ctx(true), &mut host, &j).unwrap();
+        let FromWorker::JobDone { reading, .. } = out else {
+            panic!("{out:?}")
+        };
+        assert_eq!(host.started(), [0]);
+        assert_eq!(host.orient_calls.len(), 1, "orientation always asked");
+        assert_eq!(host.ocr_calls.len(), 1);
+        // The cut-out, not the page, went to OCR.
+        let png = decode::decode_image(&fixture("receipt.png")).unwrap();
+        let cleaned = preprocess::clean(&png);
+        let (_, w, h) = host.ocr_calls[0];
+        let (pw, ph) = cleaned.image.dimensions();
+        assert!(w < pw && h < ph, "{w}x{h} of {pw}x{ph}");
+        // The middle of the cut-out is the middle of the box.
+        let words = &reading.words[0].words;
+        assert_eq!(words.len(), 1);
+        let b = words[0].bbox;
+        let (cx, cy) = (
+            u32::midpoint(u32::from(b.left()), u32::from(b.right())),
+            u32::midpoint(u32::from(b.top()), u32::from(b.bottom())),
+        );
+        assert!(
+            cx.abs_diff(5_000) <= 250 && cy.abs_diff(5_000) <= 250,
+            "{b:?}"
+        );
+        assert!(cl_docread::pipeline::is_region_reading(
+            &reading,
+            j.region.unwrap()
+        ));
+        assert_eq!(reading.header, cl_docread::model::Header::default());
+        assert!(reading.fingerprint.is_none());
+    }
+
+    #[test]
+    fn a_region_keeps_only_words_centred_inside_it() {
+        // The word sits in the middle tenth of the cut-out; a box whose
+        // margin holds another word must not answer with it.
+        let two = |w: u32, h: u32| tsv_of(&[("inside", 95)], w, h);
+        let mut host = FakeHost::new(two);
+        let j = region_job(fixture("receipt.png"), (0, 0, 10_000, 1_000));
+        let out = run_job(&ctx(true), &mut host, &j).unwrap();
+        let FromWorker::JobDone { reading, .. } = out else {
+            panic!("{out:?}")
+        };
+        let region = j.region.unwrap().bbox;
+        assert!(
+            reading.words[0]
+                .words
+                .iter()
+                .all(|w| cl_docread::protocol::centre_in(region, w.bbox))
+        );
+    }
+
+    #[test]
+    fn a_nearly_whole_page_region_is_a_page_read() {
+        let mut host = FakeHost::new(|w, h| words(20, w, h));
+        let j = region_job(fixture("receipt.png"), (100, 100, 9_950, 9_950));
+        let out = run_job(&ctx(true), &mut host, &j).unwrap();
+        let FromWorker::JobDone { reading, .. } = out else {
+            panic!("{out:?}")
+        };
+        let png = decode::decode_image(&fixture("receipt.png")).unwrap();
+        let (pw, ph) = preprocess::clean(&png).image.dimensions();
+        assert_eq!(host.ocr_calls, [(0, pw, ph)]);
+        // A good read asks no orientation, as a full read.
+        assert_eq!(host.orient_calls.len(), 0);
+        assert!(reading.words[0].words.len() <= 20);
+        assert_eq!(reading.header, cl_docread::model::Header::default());
+    }
+
+    #[test]
+    fn a_region_that_cannot_be_read_fails_its_job() {
+        let j = region_job(fixture("receipt.png"), (2_000, 2_000, 4_000, 4_000));
+        let out = run_job(&ctx(false), &mut FakeHost::new(one_word), &j).unwrap();
+        assert_eq!(reason(&out), Some(JobFailure::NeedsOcr));
+        let mut host = FakeHost::new(|_, _| OcrAnswer::Failed(OcrFailure::TimedOut));
+        let out = run_job(&ctx(true), &mut host, &j).unwrap();
+        assert_eq!(reason(&out), Some(JobFailure::Unreadable));
+        // Nothing read in the box is an answer, not a failure.
+        let mut host = FakeHost::new(|w, h| tsv_of(&[], w, h));
+        let out = run_job(&ctx(true), &mut host, &j).unwrap();
+        let FromWorker::JobDone { reading, .. } = out else {
+            panic!("{out:?}")
+        };
+        assert_eq!(reading.words[0].words.len(), 0);
+        // A TIFF region reads only its own page.
+        let mut host = FakeHost::new(one_word);
+        let mut t = region_job(fixture("three_pages.tif"), (0, 0, 5_000, 5_000));
+        t.region = Some(Spot {
+            page: 2,
+            bbox: Bbox::new(0, 0, 5_000, 5_000).unwrap(),
+        });
+        let out = run_job(&ctx(true), &mut host, &t).unwrap();
+        assert!(matches!(out, FromWorker::JobDone { .. }), "{out:?}");
+        assert_eq!(host.started(), [2]);
+    }
+
+    #[test]
+    fn region_caps_on_a_batch() {
+        let ok = region_job(vec![1], (0, 0, 100, 100));
+        assert!(batch_within_caps(std::slice::from_ref(&ok)));
+        let small = region_job(vec![1], (0, 0, 99, 100));
+        assert!(!batch_within_caps(&[small]));
+        let mut far = ok.clone();
+        far.region = Some(Spot {
+            page: MAX_PAGES,
+            bbox: Bbox::PAGE,
+        });
+        assert!(!batch_within_caps(&[far]));
+    }
+
+    #[test]
+    fn a_region_on_a_text_pdf_takes_the_text_layer_words() {
+        with_pdfium(|c| {
+            let mut body: String = (0..30)
+                .map(|i| text(72, 760 - i * 20, 10, &format!("Widget {i} 2 x 3.00 6.00")))
+                .collect();
+            body += &text(400, 100, 12, "Total 544.82");
+            // The total's line: x 400..~490 pt of 612, about 680-695 pt down
+            // of 792.
+            let j = region_job(build(&[Page::letter(body)]), (6_000, 8_400, 9_800, 9_000));
+            let mut host = FakeHost::new(one_word);
+            let out = run_job(&c, &mut host, &j).unwrap();
+            let FromWorker::JobDone { reading, .. } = out else {
+                panic!("{out:?}")
+            };
+            assert_eq!(host.ocr_calls, []);
+            assert_eq!(host.orient_calls, []);
+            assert_eq!(reading.words[0].source, WordSource::TextLayer);
+            let got: Vec<&str> = reading.words[0]
+                .words
+                .iter()
+                .map(|w| w.text.as_str())
+                .collect();
+            assert!(
+                got.contains(&"544.82") && !got.contains(&"INVOICE"),
+                "{got:?}"
+            );
+        });
     }
 }

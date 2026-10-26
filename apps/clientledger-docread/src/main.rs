@@ -30,6 +30,7 @@ mod decode;
 mod hooks;
 mod limits;
 mod pdfium;
+mod region;
 mod second_read;
 #[cfg(test)]
 mod test_pdf;
@@ -230,6 +231,7 @@ mod tests {
             bytes: Bytes(bytes.to_vec()),
             hint: JobHint::default(),
             templates: Vec::new(),
+            region: None,
         }
     }
 
@@ -330,6 +332,73 @@ mod tests {
         garbled.extend_from_slice(b"nope!");
         assert!(matches!(run(&garbled).0, Err(Fatal::Protocol)));
         assert!(matches!(run(&[0, 0]).0, Err(Fatal::Pipe)));
+    }
+
+    fn region_job(id: u32, page: u16, b: (u16, u16, u16, u16)) -> Job {
+        Job {
+            region: Some(cl_docread::Spot {
+                page,
+                bbox: cl_docread::Bbox::new(b.0, b.1, b.2, b.3).unwrap(),
+            }),
+            ..job(id, &receipt())
+        }
+    }
+
+    /// Version 4 (A04): a region the host should never send is a breach,
+    /// before any page is touched; a good one is read.
+    #[test]
+    fn hostile_regions_end_the_worker() {
+        let breach = |j: Job| {
+            let input = frames(&[ToWorker::Batch {
+                jobs: vec![j],
+                options: options(true),
+            }]);
+            let (r, out) = run(&input);
+            (matches!(r, Err(Fatal::Protocol)), out.len())
+        };
+        // Under 1 % on a side; an empty box.
+        assert_eq!(breach(region_job(1, 0, (0, 0, 99, 5000))), (true, 1));
+        assert_eq!(breach(region_job(1, 0, (0, 0, 5000, 99))), (true, 1));
+        assert_eq!(breach(region_job(1, 0, (700, 700, 700, 700))), (true, 1));
+        // A page the worker never reads.
+        assert_eq!(breach(region_job(1, 10, (0, 0, 5000, 5000))), (true, 1));
+        assert_eq!(
+            breach(region_job(1, u16::MAX, (0, 0, 5000, 5000))),
+            (true, 1)
+        );
+        // Templates on a region job.
+        let mut with_templates = region_job(1, 0, (0, 0, 5000, 5000));
+        with_templates.templates = vec![cl_docread::Template {
+            fingerprint: cl_docread::model::Fingerprint {
+                tokens: Vec::new(),
+                aspect: 1,
+            },
+            fields: Vec::new(),
+            line_table: None,
+            samples: 1,
+        }];
+        assert_eq!(breach(with_templates), (true, 1));
+
+        // A sound region on a page past the end fails its own job only.
+        let input = frames(&[ToWorker::Batch {
+            jobs: vec![region_job(1, 3, (0, 0, 5000, 5000)), job(2, b"junk")],
+            options: options(true),
+        }]);
+        let (r, out) = run(&input);
+        assert!(r.is_ok());
+        assert_eq!(
+            &out[1..],
+            [
+                FromWorker::JobFailed {
+                    job: 1,
+                    reason: JobFailure::Unreadable
+                },
+                FromWorker::JobFailed {
+                    job: 2,
+                    reason: JobFailure::UnsupportedType
+                }
+            ]
+        );
     }
 
     #[test]

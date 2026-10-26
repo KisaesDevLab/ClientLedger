@@ -29,6 +29,12 @@
 //!   when its memory between jobs is over [`DocreadLimits::recycle_memory`];
 //! * re-validates every `Reading` (sizes, boxes, spots, template index).
 //!
+//! [`DocreadHost::read_region`] (protocol version 4, A04 D4) re-reads one
+//! box of one page through the same worker, limits and retries: the box
+//! is cut out and OCR'd in the worker, never here. Its reply must be words
+//! only, on that page, each centred in the box; anything else is a bad
+//! reply (the worker is killed).
+//!
 //! Confinement (security review M1-M5):
 //!
 //! * Windows: the worker and each tesseract run in their own job:
@@ -55,12 +61,13 @@
 use crate::paths::create_private_dir;
 use crate::procs::{self, TreeKiller};
 use cl_core::CalendarDate;
-use cl_docread::model::{MAX_PAGES, Reading, Template};
+use cl_docread::model::{MAX_PAGES, PageWords, Reading, Spot, Template};
+use cl_docread::pipeline::is_region_reading;
 use cl_docread::protocol::{
     BatchOptions, Bytes, FrameError, FromWorker, Job, JobFailure, JobHint,
     MAX_BATCH_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES, MAX_FROM_WORKER_FRAME, MAX_JOB_DONE_FRAME,
     MAX_JOBS_PER_BATCH, MAX_TEMPLATES, MAX_TO_WORKER_FRAME, MAX_TSV_BYTES, OcrFailure, OcrMode,
-    PROTOCOL_VERSION, ToWorker, Tsv, validate_pgm, write_frame,
+    PROTOCOL_VERSION, ToWorker, Tsv, region_ok, validate_pgm, write_frame,
 };
 use std::collections::{BTreeSet, VecDeque};
 use std::ffi::OsString;
@@ -219,6 +226,38 @@ impl std::fmt::Debug for DocJob {
             .field("templates", &self.templates.len())
             .finish()
     }
+}
+
+/// One box of one page to re-read (A04 D4). The file name never crosses
+/// to the worker; `Debug` shows only sizes.
+#[derive(Clone, PartialEq, Eq)]
+pub struct RegionJob {
+    pub bytes: Vec<u8>,
+    /// The page (from 0) and the box on the original page.
+    pub region: Spot,
+}
+
+impl std::fmt::Debug for RegionJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegionJob")
+            .field("bytes", &self.bytes.len())
+            .field("page", &self.region.page)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What became of a region re-read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegionOutcome {
+    /// The words centred in the box, on the original page (possibly none).
+    Words(PageWords),
+    /// The box is under 1 % of the page on a side, or the page is past the
+    /// pages read (`protocol::region_ok`): nothing was started.
+    Refused,
+    /// Not readable for a plain reason (protected, needs OCR, ...).
+    Failed(JobFailure),
+    /// The reader gave up on it.
+    CouldNotRead(CouldNotRead),
 }
 
 /// Why a document ended without a reading or a plain failure: the owner
@@ -1063,7 +1102,57 @@ impl DocreadHost {
     /// in order.
     pub fn read(&mut self, jobs: &[DocJob], today: CalendarDate) -> Vec<JobOutcome> {
         self.cancel.store(false, Ordering::Relaxed);
-        self.read_jobs(jobs, today)
+        self.read_jobs(jobs, &[], today)
+    }
+
+    /// Re-read one box of one page (blocking; protocol version 4): the
+    /// worker cuts it out of the cleaned page and OCRs it (or takes the
+    /// text layer's words). A box over 90 % of the page both ways is a
+    /// read of that page. The answer is words only.
+    pub fn read_region(&mut self, job: &RegionJob, today: CalendarDate) -> RegionOutcome {
+        self.cancel.store(false, Ordering::Relaxed);
+        self.region_jobs(job, today)
+    }
+
+    /// [`DocreadHost::read_region`] stopped by the caller's own flag (see
+    /// [`DocreadHost::read_with_cancel`]).
+    pub fn read_region_with_cancel(
+        &mut self,
+        job: &RegionJob,
+        today: CalendarDate,
+        cancel: Arc<AtomicBool>,
+    ) -> RegionOutcome {
+        let own = std::mem::replace(&mut self.cancel, cancel);
+        let out = self.region_jobs(job, today);
+        self.cancel = own;
+        out
+    }
+
+    fn region_jobs(&mut self, job: &RegionJob, today: CalendarDate) -> RegionOutcome {
+        if !region_ok(job.region) {
+            return RegionOutcome::Refused;
+        }
+        let doc = DocJob {
+            bytes: job.bytes.clone(),
+            hint: JobHint::default(),
+            templates: Vec::new(),
+        };
+        let out = self.read_jobs(std::slice::from_ref(&doc), &[Some(job.region)], today);
+        match out.into_iter().next() {
+            Some(JobOutcome::Read(r)) => {
+                // Checked in `run_batch`: words only, this page, in the box.
+                let words = r.words.into_iter().next().unwrap_or(PageWords {
+                    page: job.region.page,
+                    aspect: 0,
+                    source: cl_docread::model::WordSource::TextLayer,
+                    words: Vec::new(),
+                });
+                RegionOutcome::Words(words)
+            }
+            Some(JobOutcome::Failed(f)) => RegionOutcome::Failed(f),
+            Some(JobOutcome::CouldNotRead(c)) => RegionOutcome::CouldNotRead(c),
+            None => RegionOutcome::CouldNotRead(CouldNotRead::Cancelled),
+        }
     }
 
     /// [`DocreadHost::read`] stopped by the caller's own flag, which is
@@ -1076,12 +1165,19 @@ impl DocreadHost {
         cancel: Arc<AtomicBool>,
     ) -> Vec<JobOutcome> {
         let own = std::mem::replace(&mut self.cancel, cancel);
-        let out = self.read_jobs(jobs, today);
+        let out = self.read_jobs(jobs, &[], today);
         self.cancel = own;
         out
     }
 
-    fn read_jobs(&mut self, jobs: &[DocJob], today: CalendarDate) -> Vec<JobOutcome> {
+    /// Read `jobs`; `regions[i]` (when present) makes job `i` a region
+    /// re-read.
+    fn read_jobs(
+        &mut self,
+        jobs: &[DocJob],
+        regions: &[Option<Spot>],
+        today: CalendarDate,
+    ) -> Vec<JobOutcome> {
         let n = jobs.len();
         let mut outcomes: Vec<Option<JobOutcome>> = vec![None; n];
         let mut queue: VecDeque<usize> = VecDeque::new();
@@ -1118,7 +1214,7 @@ impl DocreadHost {
             let end = run_batch(
                 w,
                 &batch,
-                (jobs, &sending),
+                (jobs, &sending, regions),
                 options,
                 &self.config,
                 &mut self.stats,
@@ -1228,6 +1324,11 @@ fn plan_sending(job: &DocJob) -> Sending {
         bytes: Bytes(Vec::new()),
         hint: job.hint,
         templates: Vec::new(),
+        // Room for a region's box.
+        region: Some(Spot {
+            page: u16::MAX,
+            bbox: cl_docread::model::Bbox::PAGE,
+        }),
     })
     .map_or(1024, |v| v.len());
     let mut size = bare + job.bytes.len().div_ceil(3) * 4 + 1;
@@ -1292,7 +1393,7 @@ struct JobClock {
 fn run_batch(
     w: &mut Worker,
     batch: &[usize],
-    (jobs, sending): (&[DocJob], &[Sending]),
+    (jobs, sending, regions): (&[DocJob], &[Sending], &[Option<Spot>]),
     options: BatchOptions,
     config: &DocreadConfig,
     stats: &mut DocreadStats,
@@ -1312,8 +1413,10 @@ fn run_batch(
                 .take(sending[i].templates)
                 .cloned()
                 .collect(),
+            region: regions.get(i).copied().flatten(),
         })
         .collect();
+    let regions_sent: Vec<Option<Spot>> = sent.iter().map(|j| j.region).collect();
     let template_counts: Vec<usize> = sent.iter().map(|j| j.templates.len()).collect();
     if !w.send(&ToWorker::Batch {
         jobs: sent,
@@ -1372,7 +1475,9 @@ fn run_batch(
                     clock.deadline = Instant::now() + limits.per_page;
                 }
                 FromWorker::JobDone { job, reading } if job == id => {
-                    if reading.validate(template_counts[k]).is_err() {
+                    if reading.validate(template_counts[k]).is_err()
+                        || regions_sent[k].is_some_and(|r| !is_region_reading(&reading, r))
+                    {
                         return BatchEnd::Killed(k, Kill::BadReply);
                     }
                     break JobOutcome::Read(reading);
@@ -1584,6 +1689,7 @@ mod tests {
                 bytes: Bytes(jobs[0].bytes.clone()),
                 hint: jobs[0].hint,
                 templates: jobs[0].templates[..s[0].templates].to_vec(),
+                region: None,
             }],
             options: BatchOptions {
                 ocr: true,

@@ -317,3 +317,37 @@ proptest! {
         );
     }
 }
+
+#[test]
+fn a_region_reading_holds_only_the_boxs_words() {
+    let mut d = Doc::new();
+    d.text(1000, 1000, "INVOICE");
+    d.amount(9000, 8000, "544.82");
+    d.text(1000, 8000, "Total");
+    let pages = d.pages();
+    let region = Spot {
+        page: 0,
+        bbox: Bbox::new(7000, 7500, 9500, 8600).unwrap(),
+    };
+    let r = region_reading(&pages[0], 2, region.bbox);
+    let texts: Vec<&str> = r.words[0].words.iter().map(|w| w.text.as_str()).collect();
+    assert_eq!(texts, ["544.82"]);
+    assert_eq!(r.page_count, 2);
+    assert_eq!(r.pages[0].words, 1);
+    r.validate(0).unwrap();
+    assert!(is_region_reading(&r, region));
+    // Anything more than words is not a region answer.
+    let mut more = r.clone();
+    more.header.total = read(&input(&pages, &[])).header.total;
+    assert!(!is_region_reading(&more, region));
+    let mut other_page = r.clone();
+    other_page.words[0].page = 1;
+    assert!(!is_region_reading(&other_page, region));
+    let mut outside = r.clone();
+    outside.words[0].words = pages[0].words.clone();
+    assert!(!is_region_reading(&outside, region));
+    let mut fp = r.clone();
+    fp.fingerprint = templates::fingerprint(&pages);
+    assert!(!is_region_reading(&fp, region));
+    assert!(is_region_reading(&Reading::empty(Reader::Ocr, 1), region));
+}
