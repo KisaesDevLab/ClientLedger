@@ -202,7 +202,7 @@ fn a_huge_allocation_is_stopped_by_the_hard_cap() {
     let s = Scratch::new("docread-hard-cap");
     let mut c = config(&s);
     // A slow watchdog: the cap must act on its own.
-    c.limits.poll = Duration::from_secs(5);
+    c.limits.poll = Duration::from_secs(30);
     let mut host = DocreadHost::new(c);
     let grow = if cfg!(windows) {
         "commit:1536"
@@ -214,9 +214,10 @@ fn a_huge_allocation_is_stopped_by_the_hard_cap() {
     let why = could_not(&out[0]);
     if cfg!(windows) {
         assert_eq!(why, Some(CouldNotRead::Crashed));
-        // Two attempts, each ended by the cap, not by a 5 s poll.
+        // Two attempts, each ended by the cap, not by a 30 s poll. The
+        // margin covers slow worker starts on a loaded machine.
         assert!(
-            started.elapsed() < Duration::from_secs(9),
+            started.elapsed() < Duration::from_secs(25),
             "{:?}",
             started.elapsed()
         );
