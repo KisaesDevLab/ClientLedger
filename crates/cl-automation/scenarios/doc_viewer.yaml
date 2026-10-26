@@ -152,8 +152,18 @@ steps:
   - assert_exists: {role: button, label: Pop out}
   - assert_not_exists: {label: This document is open in its own window.}
   - screenshot: bill-docked-again
+  # Write Check's narrower side panel: the docked pane fits it.
+  - click: {role: tab, label_contains: Write Check}
+  - assert_state: {key: screen.screen, equals: write_check}
+  - assert_state: {key: screen.attachments.viewer.status, equals: ready}
+  - assert_state: {key: screen.attachments.viewer.rendered, equals: true}
+  - assert_exists: {role: button, label: Pop out}
+  - assert_no_clipping: {}
+  - screenshot: check-docked
 
   # --- 9. Clear both forms (nothing saved) -----------------------------------------
+  - click: {role: tab, label_contains: Enter Bill}
+  - assert_state: {key: screen.screen, equals: enter_bill}
   - click: {role: button, label: Clear}
   - assert_state: {key: screen.dirty, equals: false}
   - command: file.close_window

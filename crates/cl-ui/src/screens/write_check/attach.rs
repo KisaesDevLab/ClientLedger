@@ -29,7 +29,7 @@ use crate::widgets::doc_pane::DocPane;
 use crate::widgets::pdf_viewer::{DocSource, ViewerEvent, ViewerState};
 
 /// The pane's height on the card (the viewer's bar and a page).
-const PANE_HEIGHT: f32 = 300.0;
+const PANE_HEIGHT: f32 = 360.0;
 
 /// The check's attachments.
 #[derive(Default)]

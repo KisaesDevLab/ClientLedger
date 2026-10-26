@@ -36,7 +36,7 @@ use crate::widgets::doc_pane::DocPane;
 use crate::widgets::pdf_viewer::{DocSource, ViewerEvent, ViewerState};
 
 /// The pane's height on the card.
-const PANE_HEIGHT: f32 = 300.0;
+const PANE_HEIGHT: f32 = 360.0;
 
 /// Where a saved record of `mode` keeps its files.
 #[must_use]

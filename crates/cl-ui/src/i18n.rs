@@ -1078,7 +1078,6 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("register.doc.show", "Show document"),
     ("register.doc.show.tip", "Open the selected transaction's first attached document in its own window"),
     ("register.doc.count", "Documents: {n}"),
-    ("register.doc.loading", "Looking for documents…"),
 ];
 
 #[cfg(test)]
