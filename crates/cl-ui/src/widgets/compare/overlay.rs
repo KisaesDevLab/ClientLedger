@@ -10,6 +10,8 @@
 //! It hands the rest of the tools word indices and page boxes only, never
 //! a float.
 
+use std::sync::Arc;
+
 use eframe::egui::{
     self, Align, Color32, Pos2, Rect, Response, Role, Sense, Shape, Stroke, StrokeKind, TextureId,
     Ui, Vec2, WidgetInfo,
@@ -195,6 +197,19 @@ impl Overlay {
             self.drag_to = None;
             self.checklist = false;
             self.seen_focus = None;
+        }
+        // Other words (a re-read replaced them): a pick's indices belong to
+        // the old ones, so it goes before it can name another word.
+        let old = self.view.as_ref().and_then(|v| v.words.as_ref());
+        let new = view.as_ref().and_then(|v| v.words.as_ref());
+        let same = match (old, new) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            self.pick = None;
+            self.cursor = None;
         }
         self.view = view;
     }
@@ -817,8 +832,8 @@ mod tests {
         let s = o.state(0);
         assert_eq!(
             (s.drawn, s.words, s.picked),
-            (2, 3, 2),
-            "the last pick stays shown"
+            (2, 3, 0),
+            "another words set (a new view here) drops the pick"
         );
         assert_eq!(s.focused.as_deref(), Some("amount_due"));
         assert_eq!(s.level, Some("check_this"));
@@ -851,6 +866,10 @@ mod tests {
         );
         assert!(o.command("viewer.toggle_highlights", 0));
         assert_eq!(o.take_events(), vec![CompareEvent::ToggleHighlights]);
+        // New words (a re-read): the old indices go.
+        assert_eq!(o.state(0).cursor, Some(1));
+        o.set_view(Some(view(true)));
+        assert_eq!((o.state(0).cursor, o.state(0).picked), (None, 0));
         assert!(!o.command("viewer.next_word", 3), "a page without words");
         o.set_view(Some(view(false)));
         assert!(!o.command("viewer.fill_word", 0), "nothing armed");
