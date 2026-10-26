@@ -2,7 +2,7 @@
 //!
 //! - **AC1, live**: against the real engine and the bundled `PostgreSQL`, a
 //!   file saved into a watched temp folder is listed ready and copied into
-//!   the company as a draft attachment within 25 s (real timings: no poke),
+//!   the company as a draft attachment within 15 s (`CL_INTAKE_AC1_SECS`\n//!   on a slow runner; real timings: no poke),
 //!   then its original moves to `Processed/YYYY-MM/`. Without the engine
 //!   executable or the `PostgreSQL` binaries the test prints `SKIPPED` and
 //!   passes, unless `CL_API_REQUIRE=1`.
@@ -50,8 +50,15 @@ use cl_settings::{BackupKind, MemorySecrets, RecentStore, SecretStore};
 
 const OWNER: &str = "owner@example.com";
 
-/// AC1's budget from saving the file to the attachment being there.
-const BUDGET: Duration = Duration::from_secs(25);
+/// AC1's budget from saving the file to the attachment being there: 15 s,
+/// or `CL_INTAKE_AC1_SECS` on a slow CI runner.
+fn budget() -> Duration {
+    let secs = std::env::var("CL_INTAKE_AC1_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(15);
+    Duration::from_secs(secs)
+}
 
 fn require() -> bool {
     std::env::var("CL_API_REQUIRE").as_deref() == Ok("1")
@@ -142,7 +149,7 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     let path = folder.join("Ozark Feed bill.pdf");
     let saved = Instant::now();
     std::fs::write(&path, PDF).expect("save the file");
-    let until = saved + BUDGET;
+    let until = saved + budget();
     let ready = wait_snapshot(&h, until, |s| {
         s.listing.as_ref().is_ok_and(|l| {
             l.files
@@ -189,7 +196,7 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     assert!(in_draft.data.iter().any(|a| a.id == uploaded.id));
     let copied_after = saved.elapsed();
     assert!(
-        copied_after <= BUDGET,
+        copied_after <= budget(),
         "copied in {copied_after:?} (listed ready after {listed_after:?})"
     );
     eprintln!("AC1: listed ready after {listed_after:?}, attachment after {copied_after:?}");
@@ -363,11 +370,16 @@ async fn backup_restore_keeps_folders(
         prefs.intake_here[&folders[0].id].canonical_key, pin,
         "the pinned root is kept"
     );
+    let kept = &list.get(tenant).expect("the kept company's record").prefs;
+    assert!(
+        kept.intake_here.is_empty(),
+        "the confirmations moved: the kept company doesn't claim the same folders"
+    );
     eprintln!("AC3: backup → restore kept {} folders", back.folders.len());
 }
 
 #[test]
-fn a_saved_file_becomes_an_attachment_within_25_seconds() {
+fn a_saved_file_becomes_an_attachment_within_15_seconds() {
     let Some(engine) = engine_exe() else {
         return skip("the engine executable is missing (run `cargo xtask engine`)");
     };

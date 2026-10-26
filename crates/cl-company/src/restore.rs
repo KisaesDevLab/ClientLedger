@@ -247,6 +247,11 @@ pub async fn restore(
             p.normalize();
             p
         };
+        // This computer's intake-folder confirmations move to the restored
+        // company: left on the kept one too, both would claim the same
+        // folders and each would pause as "used by another company" (A01
+        // review S1). The kept company's folders then show "not confirmed".
+        move_confirmations(l, previous, &prefs);
         let rec = l.upsert(imported.tenant_id, &imported.name);
         rec.accent = accent;
         rec.flags = flags;
@@ -300,6 +305,20 @@ pub async fn restore(
 /// # Errors
 /// `Api` when the first rename fails for a reason other than a missing
 /// route.
+/// The restored company took this computer's intake confirmations
+/// (`restored`): the kept company `kept` gives them up.
+fn move_confirmations(
+    l: &mut RecentCompanies,
+    kept: Option<TenantId>,
+    restored: &cl_settings::CompanyPrefs,
+) {
+    if !restored.intake_here.is_empty()
+        && let Some(k) = kept.and_then(|id| l.get_mut(id))
+    {
+        k.prefs.intake_here.clear();
+    }
+}
+
 async fn swap_names(
     session: &Session,
     prev_id: TenantId,
@@ -377,6 +396,35 @@ mod tests {
         )
         .expect("zip");
         p
+    }
+
+    /// A restore on the same computer moves the intake confirmations to
+    /// the restored company; the kept one no longer claims those folders.
+    #[test]
+    fn confirmations_move_to_the_restored_company() {
+        let mut l = RecentCompanies::default();
+        let folder = cl_core::ids::IntakeFolderId::parse("7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a6b")
+            .expect("id");
+        let note = cl_settings::HereNote {
+            path_hash: "h".into(),
+            canonical_key: "k".into(),
+            since_ms: None,
+            confirmed_at: None,
+        };
+        l.upsert(id(1), "Kept")
+            .prefs
+            .intake_here
+            .insert(folder, note);
+        let restored = l.get(id(1)).expect("kept").prefs.clone();
+        move_confirmations(&mut l, Some(id(1)), &restored);
+        assert!(l.get(id(1)).expect("kept").prefs.intake_here.is_empty());
+        // Nothing to move: nothing changes.
+        l.upsert(id(2), "Other")
+            .prefs
+            .intake_here
+            .insert(folder, restored.intake_here[&folder].clone());
+        move_confirmations(&mut l, Some(id(2)), &cl_settings::CompanyPrefs::default());
+        assert_eq!(l.get(id(2)).expect("other").prefs.intake_here.len(), 1);
     }
 
     #[test]

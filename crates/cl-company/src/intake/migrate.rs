@@ -12,8 +12,8 @@
 //! 3. move the P17 inbox entries (`folder: None`) to that folder;
 //! 4. clear the legacy field.
 //!
-//! A 403, an engine without `intake-settings-v1`, or any engine error
-//! keeps the legacy field, so the P17 inbox keeps working and the caller
+//! A 403, an engine without `intake-settings-v1`, any engine error, or a
+//! folder that can't be reached to pin it (step 2) keeps the legacy field, so the P17 inbox keeps working and the caller
 //! shows a Needs attention line. **Nothing in the folder moves**; `Filed/`
 //! is untouched.
 //!
@@ -144,6 +144,13 @@ pub enum MigrationOutcome {
     /// The P17 folder can't be moved over yet (the plan said why); the
     /// legacy field is kept.
     Blocked,
+    /// Intake folder `folder` holds the P17 folder's path, but the folder
+    /// couldn't be reached to pin it: the legacy field and the P17 entries
+    /// are kept (the P17 folder keeps working) and the next run tries again.
+    Unpinned {
+        /// The folder.
+        folder: IntakeFolderId,
+    },
     /// The P17 folder is now intake folder `folder`.
     Migrated {
         /// The folder.
@@ -151,8 +158,7 @@ pub enum MigrationOutcome {
         /// It was added to the engine now (not found there already).
         added: bool,
         /// It was confirmed on this computer now (false when it already
-        /// was, or when the folder couldn't be reached to pin it: it then
-        /// waits for "Set up…").
+        /// was).
         confirmed: bool,
         /// P17 inbox entries moved to the folder.
         entries: usize,
@@ -164,6 +170,9 @@ impl fmt::Debug for MigrationOutcome {
         match self {
             MigrationOutcome::Nothing => f.write_str("Nothing"),
             MigrationOutcome::Blocked => f.write_str("Blocked"),
+            MigrationOutcome::Unpinned { folder } => {
+                f.debug_struct("Unpinned").field("folder", folder).finish()
+            }
             MigrationOutcome::Migrated {
                 folder,
                 added,
@@ -300,15 +309,16 @@ pub async fn run_migration_with(
     };
     let mut confirmed = false;
     if plan.confirm == Some(id) {
-        match pin_off_thread(PathBuf::from(&folder.path), pin_deadline).await {
-            Some(key) => {
-                local.confirm(&folder, &key)?;
-                confirmed = true;
-            }
-            None => {
-                tracing::warn!("the receipt inbox folder could not be pinned; it waits for Set up");
-            }
-        }
+        let Some(key) = pin_off_thread(PathBuf::from(&folder.path), pin_deadline).await else {
+            // The legacy field and the P17 entries stay, so the P17 folder
+            // keeps working; the next run pins it (A01 S6).
+            tracing::warn!(
+                "the receipt inbox folder could not be pinned; it is tried again next time"
+            );
+            return Ok(MigrationOutcome::Unpinned { folder: id });
+        };
+        local.confirm(&folder, &key)?;
+        confirmed = true;
     }
     let mut entries = 0;
     if let Some((store, company)) = state {
@@ -535,7 +545,7 @@ mod tests {
             sha256: "s".into(),
         };
         store
-            .update(|s| s.record_upload(&c, &f, "a1"))
+            .update(|s| s.record_upload(&c, &f, "d0000000-0000-4000-8000-0000000000a1"))
             .expect("save");
         let engine = Engine::default();
         engine
@@ -660,11 +670,25 @@ mod tests {
         assert!(local.legacy.lock().expect("lock").is_none());
     }
 
-    /// The legacy folder is gone (an unplugged drive): it is added, not
-    /// confirmed (it waits for Set up), and the legacy field is cleared.
+    /// The legacy folder is gone (an unplugged drive): it is added but
+    /// can't be pinned, so the legacy field **stays** (the P17 folder keeps
+    /// working) and nothing moves; the next run, with the drive back,
+    /// confirms it and only then clears the field (A01 review S6).
     #[test]
-    fn an_unreachable_legacy_folder_is_added_unconfirmed() {
+    fn an_unreachable_legacy_folder_keeps_the_old_setting_until_pinned() {
         let dir = tempfile::tempdir().expect("tmp");
+        let settings = tempfile::tempdir().expect("tmp");
+        let store = InboxStateStore::in_dir(settings.path());
+        let c = company_key("tenant");
+        let f = FileIdentity {
+            path_hash: "p".into(),
+            size: 1,
+            modified_ms: 1,
+            sha256: "s".into(),
+        };
+        store
+            .update(|s| s.record_upload(&c, &f, "d0000000-0000-4000-8000-0000000000a1"))
+            .expect("save");
         let gone = dir.path().join("unplugged");
         let engine = Engine::default();
         let local = Local::new(Some(&gone));
@@ -672,20 +696,75 @@ mod tests {
             .block_on(run_migration_with(
                 &engine,
                 &local,
-                None,
+                Some((&store, &c)),
+                Duration::from_secs(5),
+            ))
+            .expect("ok");
+        assert_eq!(
+            out,
+            MigrationOutcome::Unpinned {
+                folder: local.fresh
+            }
+        );
+        assert_eq!(engine.folders.lock().expect("lock").len(), 1, "added");
+        assert!(local.here.lock().expect("lock").is_empty());
+        assert!(
+            local.legacy.lock().expect("lock").is_some(),
+            "the P17 setting is kept"
+        );
+        assert_eq!(
+            store.load().expect("load").entries(&c)[0].folder,
+            None,
+            "the P17 entries stay with the P17 folder"
+        );
+        assert!(!gone.exists(), "nothing was created");
+        // The drive is back.
+        std::fs::create_dir_all(&gone).expect("dir");
+        let out = rt()
+            .block_on(run_migration_with(
+                &engine,
+                &local,
+                Some((&store, &c)),
                 Duration::from_secs(5),
             ))
             .expect("ok");
         assert!(matches!(
             out,
             MigrationOutcome::Migrated {
-                added: true,
-                confirmed: false,
+                added: false,
+                confirmed: true,
+                entries: 1,
                 ..
             }
         ));
-        assert!(local.here.lock().expect("lock").is_empty());
         assert!(local.legacy.lock().expect("lock").is_none());
-        assert!(!gone.exists(), "nothing was created");
+    }
+
+    /// The engine's refusal never reaches a log line with its text: every
+    /// error reads as fixed words (A01 review, not covered).
+    #[test]
+    fn errors_read_as_fixed_words() {
+        let all = [
+            (
+                MigrateError::Unsupported,
+                "the engine has no intake folders yet",
+            ),
+            (
+                MigrateError::Forbidden,
+                "not allowed to change intake folders",
+            ),
+            (MigrateError::Stale, "intake folders were changed elsewhere"),
+            (
+                MigrateError::Engine(ApiError::Timeout),
+                "the engine refused the intake folders",
+            ),
+            (
+                MigrateError::Local("written"),
+                "the company's preferences could not be written",
+            ),
+        ];
+        for (e, want) in all {
+            assert_eq!(e.to_string(), want);
+        }
     }
 }

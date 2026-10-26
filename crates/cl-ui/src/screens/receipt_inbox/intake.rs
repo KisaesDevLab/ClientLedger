@@ -772,7 +772,9 @@ impl Intake {
     fn migration_done(&mut self, link: &CompanyLink, r: &Result<MigrationOutcome, MigrateError>) {
         self.migration = match r {
             Ok(MigrationOutcome::Nothing) => Migration::None,
-            Ok(MigrationOutcome::Blocked) => Migration::Blocked,
+            // Not pinned yet: the P17 folder keeps working, tried again on
+            // the next open.
+            Ok(MigrationOutcome::Blocked | MigrationOutcome::Unpinned { .. }) => Migration::Blocked,
             Ok(MigrationOutcome::Migrated { .. }) => Migration::Migrated,
             Err(_) => Migration::Failed,
         };
