@@ -30,7 +30,7 @@ usage: cargo xtask <command>
   test [args]        cargo test (whole workspace unless -p is given), CL_OFFLINE_TESTS=1
   licenses           direct dependencies must be MIT or Apache-2.0
   layering           crate dependency rules from CLAUDE.md
-  nofloat            no floating point in cl-core and cl-api src (syn scan)
+  nofloat            no floating point in the money crates and cl-docread rules (syn scan)
   engine [--smoke] [--force]
                      build the engine single executable into target/engine/<target>
   engine-test [-- <vitest args>]
@@ -103,6 +103,8 @@ pub(crate) fn run_release_features() -> Result<()> {
                 "clientledger",
                 "-p",
                 "clientledger-cli",
+                "-p",
+                "clientledger-docread",
                 "--prefix",
                 "none",
             ])
@@ -121,7 +123,7 @@ pub(crate) fn run_nofloat() -> Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     report(
         "nofloat",
-        "no floating point in cl-core, cl-api, cl-model or cl-grid core",
+        "no floating point in cl-core, cl-api, cl-model, cl-grid core or cl-docread rules",
         &nofloat::check(&root)?,
     )
 }

@@ -20,13 +20,28 @@ use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 
 /// Directories scanned, relative to the repo root.
-pub const SCAN_DIRS: [&str; 4] = [
+pub const SCAN_DIRS: [&str; 5] = [
     "crates/cl-core/src",
     "crates/cl-api/src",
     // Entry rules (amounts, calculator, dates) and the grid core (Q-P10b).
     "crates/cl-model/src",
     "crates/cl-grid/src/core",
+    // Document reading rules (A03, plan D3 "Float exemption").
+    "crates/cl-docread/src",
 ];
+
+/// Files inside [`SCAN_DIRS`] that may use floating point for page geometry
+/// (A03, S19). They map float coordinates to the integer `Bbox` at their
+/// boundary and may not mention money: [`check`] reports any of them that
+/// names `Money` or `rust_decimal`.
+pub const SKIP_FILES: [&str; 3] = [
+    "crates/cl-docread/src/pdf_text.rs",
+    "crates/cl-docread/src/preprocess.rs",
+    "crates/cl-docread/src/ocr_geom.rs",
+];
+
+/// Identifiers an exempt geometry file may not use.
+const MONEY_WORDS: [&str; 5] = ["Money", "Quantity", "Rate", "rust_decimal", "Decimal"];
 
 /// One offending line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,6 +169,53 @@ pub fn scan_source(src: &str) -> Result<Vec<Finding>> {
         .collect())
 }
 
+#[derive(Default)]
+struct MoneyScan {
+    found: BTreeMap<usize, String>,
+}
+
+impl MoneyScan {
+    fn ident(&mut self, i: &proc_macro2::Ident) {
+        let s = i.to_string();
+        if MONEY_WORDS.contains(&s.as_str()) {
+            self.found.entry(i.span().start().line).or_insert(s);
+        }
+    }
+
+    fn tokens(&mut self, ts: TokenStream) {
+        for tt in ts {
+            match tt {
+                TokenTree::Group(g) => self.tokens(g.stream()),
+                TokenTree::Ident(i) => self.ident(&i),
+                TokenTree::Literal(_) | TokenTree::Punct(_) => {}
+            }
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for MoneyScan {
+    fn visit_ident(&mut self, i: &'ast proc_macro2::Ident) {
+        self.ident(i);
+    }
+
+    fn visit_macro(&mut self, m: &'ast syn::Macro) {
+        syn::visit::visit_path(self, &m.path);
+        self.tokens(m.tokens.clone());
+    }
+}
+
+/// `(line, identifier)` for every money identifier in a float-exempt file
+/// (comments and strings are not identifiers).
+///
+/// # Errors
+/// The source does not parse as Rust.
+pub fn money_in_geometry(src: &str) -> Result<Vec<(usize, String)>> {
+    let file = syn::parse_file(src).context("could not parse the file")?;
+    let mut s = MoneyScan::default();
+    s.visit_file(&file);
+    Ok(s.found.into_iter().collect())
+}
+
 /// Parsed `nofloat-allow.txt`: `(path, line)` pairs.
 ///
 /// # Errors
@@ -227,6 +289,12 @@ pub fn check(root: &Path) -> Result<Vec<String>> {
                 .to_string_lossy()
                 .replace('\\', "/");
             let src = std::fs::read_to_string(&f).with_context(|| format!("reading {rel}"))?;
+            if SKIP_FILES.contains(&rel.as_str()) {
+                out.extend(money_in_geometry(&src).with_context(|| format!("scanning {rel}"))?.into_iter().map(|(line, word)| {
+                    format!("{rel}:{line}: `{word}` in a float-exempt geometry file (keep money out of it)")
+                }));
+                continue;
+            }
             let found = scan_source(&src).with_context(|| format!("scanning {rel}"))?;
             for fi in found {
                 if !allow.iter().any(|(p, l)| *p == rel && *l == fi.line) {
@@ -350,6 +418,43 @@ mod tests {
     fn entry_rules_and_grid_core_are_scanned() {
         assert!(SCAN_DIRS.contains(&"crates/cl-model/src"));
         assert!(SCAN_DIRS.contains(&"crates/cl-grid/src/core"));
+    }
+
+    #[test]
+    fn docread_is_scanned_except_its_three_geometry_files() {
+        assert!(SCAN_DIRS.contains(&"crates/cl-docread/src"));
+        assert_eq!(SKIP_FILES.len(), 3);
+        let dir = std::env::temp_dir().join(format!("nofloat-docread-{}", std::process::id()));
+        let src = dir.join("crates/cl-docread/src");
+        std::fs::create_dir_all(&src).unwrap();
+        // Floats in an exempt file are fine; in any other docread file not.
+        std::fs::write(src.join("ocr_geom.rs"), "fn f() -> f64 {\n 1.5\n}\n").unwrap();
+        std::fs::write(src.join("fields.rs"), "fn f() -> f32 {\n 0.0\n}\n").unwrap();
+        let v = check(&dir).unwrap();
+        assert_eq!(v.len(), 2, "{v:?}");
+        assert!(
+            v.iter()
+                .all(|m| m.starts_with("crates/cl-docread/src/fields.rs:")),
+            "{v:?}"
+        );
+        // Money in an exempt file is refused, even in a macro; prose is fine.
+        std::fs::write(
+            src.join("ocr_geom.rs"),
+            "//! Money never comes here.\nuse cl_core::Money;\nfn f() { let _ = vec![rust_decimal::Decimal::ZERO]; }\n",
+        )
+        .unwrap();
+        std::fs::remove_file(src.join("fields.rs")).unwrap();
+        let v = check(&dir).unwrap();
+        assert_eq!(v.len(), 2, "{v:?}");
+        assert!(
+            v[0].starts_with("crates/cl-docread/src/ocr_geom.rs:2:"),
+            "{v:?}"
+        );
+        assert!(
+            v[1].starts_with("crates/cl-docread/src/ocr_geom.rs:3:"),
+            "{v:?}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

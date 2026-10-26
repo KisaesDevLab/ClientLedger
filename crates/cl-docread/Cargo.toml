@@ -1,0 +1,38 @@
+[package]
+name = "cl-docread"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Local document reading (A03): words, worker protocol, field and line rules, matching, templates. Rules do no I/O and use no floats."
+
+[features]
+default = []
+# The reading worker's own parsers (apps/clientledger-docread only): the PDF
+# text layer through PDFium and the image clean-up before OCR. The desktop
+# and cl-host use the rules and the protocol without them.
+worker = ["dep:pdfium-render", "dep:image", "dep:tiff"]
+
+[dependencies]
+cl-core = { path = "../cl-core" }
+# Document and page bytes cross the worker pipe as base64 strings inside the
+# JSON frames (plan D2). MIT OR Apache-2.0.
+base64 = { version = "0.22.1", default-features = false, features = ["std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+# --- `worker` feature only ---
+# The same minimal features as the A02 viewer (crates/cl-ui/Cargo.toml):
+# PNG and JPEG; multi-page TIFF with deflate, CCITT fax and LZW, no
+# JPEG-in-TIFF (review B1 of A02). MIT OR Apache-2.0 / MIT.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"], optional = true }
+tiff = { version = "0.11.3", default-features = false, features = ["deflate", "fax", "lzw"], optional = true }
+# PDF text layer with positions (plan D2). The pinned PDFium build's API;
+# no `image` feature, no V8 or XFA. MIT OR Apache-2.0.
+pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_7881", "thread_safe"], optional = true }
+
+[dev-dependencies]
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true
