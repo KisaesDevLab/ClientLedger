@@ -329,6 +329,9 @@ impl DocViewerWindow {
         let mut viewer = ViewerState::default();
         viewer.set_full_size_button(false);
         viewer.set_pop_out_button(false);
+        if let Some(z) = placement.zoom {
+            viewer.set_zoom(z);
+        }
         DocViewerWindow {
             popped: false,
             placement,
@@ -528,6 +531,7 @@ impl DocViewerWindow {
             return Vec::new();
         }
         self.follows = follow.kind;
+        let remembered = self.placement.zoom;
         let (pending, back, dock, title) = {
             let Some(mut s) = self.lock() else {
                 return Vec::new();
@@ -546,6 +550,13 @@ impl DocViewerWindow {
                     doc.owner_title
                 };
                 if s.shown != Some(doc.key) {
+                    if s.viewer.source().is_none()
+                        && let Some(z) = remembered
+                    {
+                        // Cleared (docked, or nothing to show): back to the
+                        // window's own zoom.
+                        s.viewer.set_zoom(z);
+                    }
                     s.viewer.open_keep_zoom(doc.source);
                     s.shown = Some(doc.key);
                     ctx.request_repaint_of(viewport_id());
@@ -582,13 +593,15 @@ impl DocViewerWindow {
         ctx.show_viewport_deferred(viewport_id(), builder, move |ui, class| {
             draw(ui, class, &shared);
         });
-        let closed = self
-            .lock()
-            .is_some_and(|mut s| std::mem::take(&mut s.dock_req));
+        let (closed, zoom) = self.lock().map_or((false, None), |mut s| {
+            let zoom = s.viewer.source().is_some().then(|| s.viewer.zoom());
+            (std::mem::take(&mut s.dock_req), zoom)
+        });
         if closed {
             self.dock(now);
             return pending;
         }
+        self.note_zoom(zoom, now);
         self.track(ctx, now);
         pending
     }
@@ -666,6 +679,20 @@ impl DocViewerWindow {
         }
         if differs(&next, &self.placement) {
             self.placement = next;
+            self.mark(now);
+        }
+    }
+
+    /// The window's zoom changed: remember it (written a second later).
+    fn note_zoom(&mut self, zoom: Option<crate::widgets::pdf_viewer::Zoom>, now: f64) {
+        if zoom.is_some() && zoom != self.placement.zoom {
+            // The default zoom is not worth a write until it was changed.
+            if self.placement.zoom.is_none()
+                && zoom == Some(crate::widgets::pdf_viewer::Zoom::default())
+            {
+                return;
+            }
+            self.placement.zoom = zoom;
             self.mark(now);
         }
     }
@@ -935,6 +962,7 @@ mod tests {
             inner_size: egui::vec2(700.0, 5000.0),
             monitor_size: Some(egui::vec2(1920.0, 1080.0)),
             popped: true,
+            zoom: None,
         };
         let b = w.builder("x");
         assert_eq!(b.position, Some(egui::pos2(2000.0, 50.0)));
@@ -956,5 +984,19 @@ mod tests {
         assert!(w.popped());
         w.toggle(2.0);
         assert!(!w.popped() && !w.placement().popped);
+    }
+
+    #[test]
+    fn the_zoom_is_remembered_and_restored() {
+        use crate::widgets::pdf_viewer::Zoom;
+        let mut w = window();
+        w.note_zoom(Some(Zoom::FitWidth), 1.0);
+        assert!(!w.unsaved(), "the default zoom is not a change");
+        w.note_zoom(Some(Zoom::Percent(150)), 2.0);
+        assert!(w.unsaved());
+        assert_eq!(w.placement().zoom, Some(Zoom::Percent(150)));
+        let again = DocViewerWindow::new(*w.placement(), &Keymap::new(COMMANDS).unwrap());
+        let zoom = again.lock().map(|s| s.viewer.zoom());
+        assert_eq!(zoom, Some(Zoom::Percent(150)), "a new window opens at it");
     }
 }

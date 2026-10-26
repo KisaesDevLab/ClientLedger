@@ -1547,6 +1547,9 @@ pub struct DocViewerPlacement {
     /// The viewer was in its own window when last seen; it comes back that
     /// way once a company opens.
     pub popped: bool,
+    /// The window's zoom when last changed; `None` keeps the viewer's
+    /// default (Fit width).
+    pub zoom: Option<crate::widgets::pdf_viewer::Zoom>,
 }
 
 impl Default for DocViewerPlacement {
@@ -1556,6 +1559,7 @@ impl Default for DocViewerPlacement {
             inner_size: DocViewerPlacement::DEFAULT_SIZE,
             monitor_size: None,
             popped: false,
+            zoom: None,
         }
     }
 }
@@ -1609,6 +1613,7 @@ impl DocViewerPlacement {
             .filter(|[w, h]| *w > 0.0 && *h > 0.0)
             .map(eframe::egui::Vec2::from);
         out.popped = root.get("popped").and_then(Value::as_bool) == Some(true);
+        out.zoom = root.get("zoom").and_then(zoom_from_json);
         out
     }
 
@@ -1623,6 +1628,7 @@ impl DocViewerPlacement {
             "inner_size": [self.inner_size.x, self.inner_size.y],
             "monitor_size": monitor,
             "popped": self.popped,
+            "zoom": self.zoom.map(zoom_to_json),
         }))
         .unwrap_or_default()
     }
@@ -1650,6 +1656,33 @@ impl DocViewerPlacement {
     #[must_use]
     pub fn saved_screen(&self) -> Option<eframe::egui::Rect> {
         Some(monitor_box(self.outer_pos?, self.monitor_size?))
+    }
+}
+
+/// A zoom as `doc-viewer.json` keeps it: `"fit_width"`, `"fit_page"` or a
+/// percent.
+fn zoom_to_json(z: crate::widgets::pdf_viewer::Zoom) -> serde_json::Value {
+    use crate::widgets::pdf_viewer::Zoom;
+    match z {
+        Zoom::FitWidth => serde_json::Value::from("fit_width"),
+        Zoom::FitPage => serde_json::Value::from("fit_page"),
+        Zoom::Percent(p) => serde_json::Value::from(p),
+    }
+}
+
+/// The zoom in `doc-viewer.json`; anything else (a percent outside
+/// 25-400 %) is ignored.
+fn zoom_from_json(v: &serde_json::Value) -> Option<crate::widgets::pdf_viewer::Zoom> {
+    use crate::widgets::pdf_viewer::Zoom;
+    match v {
+        serde_json::Value::String(s) if s == "fit_width" => Some(Zoom::FitWidth),
+        serde_json::Value::String(s) if s == "fit_page" => Some(Zoom::FitPage),
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .filter(|p| (25..=400).contains(p))
+            .and_then(|p| u16::try_from(p).ok())
+            .map(Zoom::Percent),
+        _ => None,
     }
 }
 
@@ -1722,6 +1755,7 @@ pub fn beside_main(
         inner_size: size,
         monitor_size: Some(monitor),
         popped: true,
+        zoom: None,
     };
     clamp_placement(&placed, screen).pos.unwrap_or(pos)
 }
@@ -1793,15 +1827,24 @@ mod doc_viewer_placement_tests {
             inner_size: vec2(700.0, 900.0),
             monitor_size: Some(vec2(1920.0, 1080.0)),
             popped: true,
+            zoom: Some(crate::widgets::pdf_viewer::Zoom::Percent(150)),
         };
         p.save(&dir).unwrap();
         assert_eq!(DocViewerPlacement::load(&dir), p);
+        for z in [
+            crate::widgets::pdf_viewer::Zoom::FitWidth,
+            crate::widgets::pdf_viewer::Zoom::FitPage,
+        ] {
+            let q = DocViewerPlacement { zoom: Some(z), ..p };
+            assert_eq!(DocViewerPlacement::parse(&q.to_text()), q);
+        }
         let text = std::fs::read_to_string(dir.join(DocViewerPlacement::FILE)).unwrap();
         for key in [
             "outer_pos",
             "inner_size",
             "monitor_size",
             "popped",
+            "zoom",
             "version",
         ] {
             assert!(text.contains(key), "{key}");
@@ -1815,7 +1858,7 @@ mod doc_viewer_placement_tests {
             DocViewerPlacement::default()
         );
         let odd = DocViewerPlacement::parse(
-            r#"{"version":1,"outer_pos":[1e9,0],"inner_size":[-5,10],"monitor_size":"x","popped":1}"#,
+            r#"{"version":1,"outer_pos":[1e9,0],"inner_size":[-5,10],"monitor_size":"x","popped":1,"zoom":9000}"#,
         );
         assert_eq!(odd, DocViewerPlacement::default(), "{odd:?}");
         let _ = std::fs::remove_dir_all(dir);
@@ -1837,6 +1880,7 @@ mod doc_viewer_placement_tests {
                 inner_size: vec2(rng.range(1.0, 9000.0), rng.range(1.0, 9000.0)),
                 monitor_size: None,
                 popped: true,
+                zoom: None,
             };
             let c = clamp_placement(&saved, screen);
             let pos = c.pos.expect("a saved position stays");
@@ -1859,6 +1903,7 @@ mod doc_viewer_placement_tests {
             inner_size: vec2(700.0, 900.0),
             monitor_size: Some(vec2(1920.0, 1080.0)),
             popped: true,
+            zoom: None,
         };
         let screen = saved.saved_screen().unwrap();
         assert_eq!(screen.min, pos2(1920.0, 0.0), "the second monitor");
@@ -1884,6 +1929,7 @@ mod doc_viewer_placement_tests {
             inner_size: vec2(600.0, 800.0),
             monitor_size: Some(vec2(2560.0, 1440.0)),
             popped: true,
+            zoom: None,
         };
         // The 2560 monitor is gone; the window still sits out at x 3000.
         let outer = Rect::from_min_size(pos2(3000.0, 100.0), vec2(616.0, 839.0));
