@@ -567,9 +567,8 @@ mod tests {
     /// The engine's validation table (`intake-settings.test.ts`), the same
     /// answer on every system.
     #[test]
-    fn engine_rule_is_the_same_on_every_system() {
+    fn engine_rule_accepts_the_same_on_every_system() {
         let long_ok = format!(r"C:\{}", "a".repeat(1021));
-        let too_long = format!(r"C:\{}", "a".repeat(1022));
         for ok in [
             r"C:\Scans\Bills",
             "c:/Users/owner/Documents/Receipts",
@@ -598,6 +597,13 @@ mod tests {
         ] {
             assert!(engine_accepts_path(ok), "{ok:?}");
         }
+    }
+
+    /// The refusals in the engine's validation table, the same on every
+    /// system.
+    #[test]
+    fn engine_rule_refuses_the_same_on_every_system() {
+        let too_long = format!(r"C:\{}", "a".repeat(1022));
         for bad in [
             "",
             too_long.as_str(),
