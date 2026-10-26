@@ -9,7 +9,7 @@
 # non-Admin need demo switches a scenario can't reach; unit tests cover
 # them (`intake_folders/tests.rs`).
 name: intake_folders
-description: Document intake - empty, refusals, Add and Test, kind and switches, Save, reopen keeps Set up, Esc closes the Add row, Remove; 1440 and 960 px at 100% and 200%.
+description: Document intake - empty, refusals, Browse (cancel and a chosen folder), Add and Test, kind and switches, Save, reopen keeps Set up, Esc closes the Add row, Remove; 1440 and 960 px at 100% and 200%.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -40,8 +40,18 @@ steps:
   - key: Ctrl+A
   - type: {text: "https://x"}
   - assert_exists: {label_contains: "A web address can't be used."}
-  - key: Ctrl+A
-  - type: {text: "{scenario_dir}/intake/Bills"}
+  # Browse (WP-D): a controlled run shows no system window; dialog_answer
+  # answers it. A cancel keeps what was typed; a chosen folder fills Folder
+  # and is checked like a typed path.
+  - assert_exists: {role: button, label: Browse for the new folder}
+  - dialog_answer: {cancel: true}
+  - click: {role: button, label: Browse for the new folder}
+  - assert_state: {key: screen.intake.browsing, equals: false}
+  - assert_value: {target: {role: text_input, label: Folder}, equals: "https://x"}
+  - dialog_answer: {paths: ["{scenario_dir}/intake/Bills"]}
+  - click: {role: button, label: Browse for the new folder}
+  # (The inspector hides a long path's value as credential-shaped, so the
+  # chosen folder shows as the refusal going away and the Test below.)
   - assert_not_exists: {label_contains: "A web address can't be used."}
   - click: {role: button, label: Add}
   - assert_state: {key: screen.intake.adding, equals: false}

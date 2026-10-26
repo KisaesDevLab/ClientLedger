@@ -298,6 +298,19 @@ pub struct ZoomParams {
     pub percent: u16,
 }
 
+/// `dialog_answer`: how the next system file or folder window the app asks
+/// for is answered (a controlled run never opens one, A01 WP-D).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DialogAnswerParams {
+    /// The chosen paths (a folder window takes the first). Empty: cancel.
+    #[serde(default)]
+    pub paths: Vec<String>,
+    /// Answer as cancelled (overrides `paths`).
+    #[serde(default)]
+    pub cancel: bool,
+}
+
 /// A parsed key chord.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeySpec {

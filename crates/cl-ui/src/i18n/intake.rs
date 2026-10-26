@@ -28,7 +28,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.intake.add", "Add folder"),
     ("prefs.intake.add.name", "Name"),
     ("prefs.intake.add.path", "Folder"),
-    ("prefs.intake.add.path_hint", "Type or paste the full path, such as C:\\Scans\\Bills, a mapped drive, or \\\\server\\share\\Bills."),
+    ("prefs.intake.add.path_hint", "Choose Browse, or type or paste the full path, such as C:\\Scans\\Bills, a mapped drive, or \\\\server\\share\\Bills."),
     ("prefs.intake.add.confirm", "Add"),
     ("prefs.intake.add.cancel", "Cancel"),
     ("prefs.intake.rename", "Rename"),

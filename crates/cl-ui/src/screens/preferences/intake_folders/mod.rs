@@ -294,6 +294,8 @@ pub struct IntakePanel {
     pub stale: bool,
     /// Pinned roots other companies on this computer confirmed (Q-A01i).
     other_keys: BTreeSet<String>,
+    /// The Add row's Browse window, while open (WP-D, Q-A01m).
+    browsing: Option<Receiver<Option<PathBuf>>>,
 }
 
 impl std::fmt::Debug for IntakePanel {
@@ -321,6 +323,7 @@ impl Default for IntakePanel {
             ask_bring_in: None,
             stale: false,
             other_keys: BTreeSet::new(),
+            browsing: None,
         }
     }
 }
@@ -430,14 +433,58 @@ impl IntakePanel {
         SAVES.fetch_add(1, Ordering::SeqCst);
     }
 
-    /// Whether any test is still running.
+    /// Whether any test (or the Browse window) is still running.
     #[must_use]
     pub fn busy(&self) -> bool {
-        self.load_task.is_some() || self.probes.values().any(|p| p.rx.is_some())
+        self.load_task.is_some()
+            || self.browsing.is_some()
+            || self.probes.values().any(|p| p.rx.is_some())
+    }
+
+    /// Browse on the Add row: opens the system folder window (off the
+    /// egui thread) at the typed folder when it reads as one, else where
+    /// the last Browse ended. Only an Admin browses.
+    pub fn browse(&mut self, ctx: &egui::Context, app_dirs: &[PathBuf]) {
+        if !self.is_admin() || self.browsing.is_some() {
+            return;
+        }
+        let Some(row) = self.add.as_ref() else {
+            return;
+        };
+        let dirs: Vec<&Path> = app_dirs.iter().map(PathBuf::as_path).collect();
+        let typed = row.path.trim();
+        let start = check_path_syntax(typed, &dirs)
+            .ok()
+            .map(|_| PathBuf::from(typed));
+        self.browsing = Some(crate::widgets::file_picker::pick_folder(
+            ctx,
+            crate::widgets::file_picker::PickUse::IntakeFolder,
+            start.as_deref(),
+        ));
+    }
+
+    /// The Browse answer, once there is one: the chosen folder fills the
+    /// Add row's Folder field (checked and tested like a typed one); a
+    /// cancel leaves the field as it was.
+    pub fn poll_browse(&mut self) {
+        let Some(chosen) = crate::widgets::file_picker::poll(&mut self.browsing) else {
+            return;
+        };
+        if let (Some(dir), Some(row)) = (chosen, self.add.as_mut()) {
+            row.path = dir.display().to_string();
+            row.problem = None;
+        }
+    }
+
+    /// The Browse window is open.
+    #[must_use]
+    pub fn browsing(&self) -> bool {
+        self.browsing.is_some()
     }
 
     /// Polls the read and the running tests.
     pub fn poll(&mut self, edits: &mut IntakeEdits, committed: &mut IntakeEdits) {
+        self.poll_browse();
         if let Some(task) = self.load_task.as_mut()
             && let Some(r) = task.poll_result()
         {
@@ -738,6 +785,7 @@ impl IntakePanel {
             "editable": self.editable(),
             "stale": self.stale,
             "adding": self.add.is_some(),
+            "browsing": self.browsing.is_some(),
             "add_problem": self.add.as_ref().and_then(|a| a.problem).map(IntakeBlock::message_key),
             "renaming": self.renaming.is_some(),
             "removing": self.removing.is_some(),
@@ -1284,6 +1332,7 @@ fn add_row(
     edits: &mut IntakeEdits,
     app_dirs: &[PathBuf],
 ) {
+    panel.poll_browse();
     let Some(mut row) = panel.add.take() else {
         if ui.button(t("prefs.intake.add")).clicked() {
             panel.add = Some(AddRow::default());
@@ -1291,8 +1340,11 @@ fn add_row(
         return;
     };
     form::field(ui, &t("prefs.intake.add.name"), &mut row.name);
-    form::field_wide(ui, &t("prefs.intake.add.path"), &mut row.path);
+    let browse = path_with_browse(ui, &mut row.path, panel.browsing());
     form::hint(ui, tokens, &t("prefs.intake.add.path_hint"));
+    if panel.browsing() {
+        form::progress_line(ui, tokens, &t("picker.waiting"));
+    }
     let mut kind = row.kind.unwrap_or(IntakeKind::Auto);
     ui.horizontal(|ui| {
         kind_combo(
@@ -1328,9 +1380,48 @@ fn add_row(
         return;
     }
     panel.add = Some(row);
+    if browse {
+        panel.browse(ui.ctx(), app_dirs);
+    }
     if add {
         let _ = panel.add_folder(edits, app_dirs);
     }
+}
+
+/// The Add row's Folder field with Browse beside it (the field takes the
+/// rest of the row; Tab goes field, then Browse). True when Browse was
+/// pressed.
+fn path_with_browse(ui: &mut Ui, path: &mut String, browsing: bool) -> bool {
+    ui.horizontal(|ui| {
+        let l = ui.add(egui::Label::new(t("prefs.intake.add.path")).selectable(false));
+        let text = t("picker.browse");
+        let galley = egui::WidgetText::from(text.as_str()).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Button,
+        );
+        let button_w = galley.size().x + 2.0 * ui.spacing().button_padding.x;
+        let field_w = (ui.available_width() - button_w - ui.spacing().item_spacing.x).max(80.0);
+        ui.add_sized(
+            [field_w, 24.0],
+            egui::TextEdit::singleline(path).hint_text(""),
+        )
+        .labelled_by(l.id);
+        let r = ui
+            .add_enabled(!browsing, egui::Button::new(text))
+            .on_hover_text(t("prefs.intake.browse.tip"));
+        let enabled = r.enabled();
+        r.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::Role::Button,
+                enabled,
+                t("prefs.intake.a11y.browse_new"),
+            )
+        });
+        r.clicked()
+    })
+    .inner
 }
 
 // Last, so the i18n catalog check reads the whole module above.

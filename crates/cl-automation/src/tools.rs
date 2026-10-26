@@ -50,6 +50,17 @@ fn target_only(name: &'static str, description: &'static str) -> Tool {
     }
 }
 
+/// `dialog_answer`'s parameters (A01 WP-D).
+fn dialog_answer_schema() -> Value {
+    object(
+        &json!({
+            "paths": {"type": "array", "items": {"type": "string"}},
+            "cancel": {"type": "boolean"}
+        }),
+        &[],
+    )
+}
+
 /// All methods, in a stable order.
 #[must_use]
 pub fn tools() -> Vec<Tool> {
@@ -138,6 +149,11 @@ pub fn tools() -> Vec<Tool> {
             ),
         },
         Tool {
+            name: "dialog_answer",
+            description: "Queue the answer for the next file or folder window the app opens (a controlled run never shows one): the chosen paths, or cancel.",
+            input_schema: dialog_answer_schema(),
+        },
+        Tool {
             name: "state",
             description: "Report window size, zoom, theme, open tabs, dialogs, and engine status.",
             input_schema: object(&json!({}), &[]),
@@ -168,7 +184,7 @@ mod tests {
         let n = names.len();
         names.dedup();
         assert_eq!(n, names.len());
-        assert_eq!(n, 15);
+        assert_eq!(n, 16);
         for tool in &t {
             assert_eq!(tool.input_schema["type"], "object", "{}", tool.name);
             assert_ne!(tool.description.len(), 0);
