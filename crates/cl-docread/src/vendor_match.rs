@@ -6,10 +6,24 @@
 //! (`ai-name-match.ts:55-95`, ambiguous → none); address breaks ties.
 //! Accounts: the vendor's default only (Q-A03r).
 //!
+//! Each tier that finds several vendors asks the address to break the tie
+//! (one vendor's billing address agrees with the document's) and otherwise
+//! passes to the next tier. Where the engine's first two name tiers take
+//! the first row in list order, this module takes a unique match only, so
+//! list order never decides (the plan's "ambiguous → none").
+//!
+//! The engine normalizes names with Unicode NFKC. This crate has no
+//! normalization tables, so [`fold_compat`] applies the compatibility
+//! mappings vendor names actually meet (full-width forms, ligatures,
+//! no-break and other spaces, superscript digits, `™`/`℠`, `…`); other
+//! characters are left as they are.
+//!
 //! **Consumer:** the desktop reading service (WP-G); the signatures here
 //! are fixed.
 
+use crate::amount::{is_js_space, js_trim};
 use crate::model::{Confidence, Fingerprint, Header};
+use crate::templates;
 use cl_core::ids::ContactId;
 use std::fmt;
 
@@ -48,6 +62,21 @@ pub enum VendorTier {
     Name(u8),
 }
 
+impl VendorTier {
+    fn bp(self) -> u16 {
+        match self {
+            VendorTier::AccountNumber => 9_500,
+            VendorTier::Phone | VendorTier::Name(1) => 9_000,
+            VendorTier::PastLayout | VendorTier::Name(2) => 8_500,
+            VendorTier::Name(3) => 7_500,
+            VendorTier::Name(_) => 6_000,
+        }
+    }
+}
+
+/// Taken off when the address had to break a tie.
+const TIE_BREAK_PENALTY: u16 = 500;
+
 /// A matched vendor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VendorMatch {
@@ -57,13 +86,487 @@ pub struct VendorMatch {
 }
 
 /// The vendor the reading is from, or `None` (the desktop offers a new
-/// vendor). Stub (step 2): always `None`.
+/// vendor).
 #[must_use]
 pub fn match_vendor(
     header: &Header,
     fingerprint: Option<&Fingerprint>,
     vendors: &[VendorCandidate],
 ) -> Option<VendorMatch> {
-    let _ = (header, fingerprint, vendors);
+    let address = header.vendor_address.as_ref().map(|a| a.value.as_str());
+    let decide = |hits: Vec<usize>, tier: VendorTier| -> Option<VendorMatch> {
+        let (index, tie_broken) = unique_or_tie_break(&hits, vendors, address)?;
+        let bp = if tie_broken {
+            tier.bp().saturating_sub(TIE_BREAK_PENALTY)
+        } else {
+            tier.bp()
+        };
+        Some(VendorMatch {
+            contact: vendors[index].contact,
+            tier,
+            confidence: Confidence::saturating(u32::from(bp)),
+        })
+    };
+    // 1. The owner's account number with the vendor.
+    if let Some(n) = header
+        .account_number
+        .as_ref()
+        .map(|a| alnum_lower(&a.value))
+        .filter(|n| n.len() >= 3)
+    {
+        let hits = indices(vendors, |v| {
+            v.account_number.as_deref().map(alnum_lower).as_deref() == Some(n.as_str())
+        });
+        if let Some(m) = decide(hits, VendorTier::AccountNumber) {
+            return Some(m);
+        }
+    }
+    // 2. Phone.
+    if let Some(p) = header
+        .vendor_phone
+        .as_ref()
+        .and_then(|p| phone_key(&p.value))
+    {
+        let hits = indices(vendors, |v| {
+            v.phone.as_deref().and_then(phone_key).as_deref() == Some(p.as_str())
+        });
+        if let Some(m) = decide(hits, VendorTier::Phone) {
+            return Some(m);
+        }
+    }
+    // 3. Past layouts: the vendors whose saved template is most similar.
+    if let Some(fp) = fingerprint {
+        let scores: Vec<u16> = vendors
+            .iter()
+            .map(|v| {
+                v.layouts
+                    .iter()
+                    .map(|l| templates::similarity(fp, l))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
+        if let Some(&best) = scores.iter().max()
+            && best >= templates::MATCH_BP
+        {
+            let hits = (0..vendors.len()).filter(|&i| scores[i] == best).collect();
+            if let Some(m) = decide(hits, VendorTier::PastLayout) {
+                return Some(m);
+            }
+        }
+    }
+    // 4. Names.
+    let target = header.vendor.as_ref().map(|v| v.value.as_str())?;
+    for (hits, tier) in name_tiers(target, vendors) {
+        if let Some(m) = decide(hits, VendorTier::Name(tier)) {
+            return Some(m);
+        }
+    }
     None
+}
+
+fn indices(vendors: &[VendorCandidate], f: impl Fn(&VendorCandidate) -> bool) -> Vec<usize> {
+    (0..vendors.len()).filter(|&i| f(&vendors[i])).collect()
+}
+
+/// One hit, or the one hit whose address agrees with the document's.
+/// `(index, tie broken)`.
+fn unique_or_tie_break(
+    hits: &[usize],
+    vendors: &[VendorCandidate],
+    address: Option<&str>,
+) -> Option<(usize, bool)> {
+    match hits {
+        [] => None,
+        [one] => Some((*one, false)),
+        _ => {
+            let doc = address?;
+            let agree: Vec<usize> = hits
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    vendors[i]
+                        .address
+                        .as_deref()
+                        .is_some_and(|a| same_address(doc, a))
+                })
+                .collect();
+            match agree.as_slice() {
+                [one] => Some((*one, true)),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// The name tiers in order, each with every vendor it matches (display or
+/// company name). Mirrors `matchByName`: the target, then the target with a
+/// leading number stripped, each exact (tier 1, or 3 when stripped) then
+/// punctuation-insensitive (tier 2, or 3); then the guarded token-subset
+/// tier (4) on targets of at least three characters.
+fn name_tiers(target: &str, vendors: &[VendorCandidate]) -> Vec<(Vec<usize>, u8)> {
+    let mut out = Vec::new();
+    if js_trim(target).is_empty() {
+        return out;
+    }
+    let names = |v: &VendorCandidate| -> Vec<String> {
+        std::iter::once(v.display_name.clone())
+            .chain(v.company_name.clone())
+            .collect()
+    };
+    let stripped = strip_leading_numeric_token(target);
+    let candidates: Vec<(&str, bool)> = if !stripped.is_empty() && stripped != target {
+        vec![(target, false), (stripped.as_str(), true)]
+    } else {
+        vec![(target, false)]
+    };
+    for (cand, was_stripped) in candidates {
+        let canon = normalize_for_match(cand);
+        out.push((
+            indices(vendors, |v| {
+                names(v).iter().any(|n| normalize_for_match(n) == canon)
+            }),
+            if was_stripped { 3 } else { 1 },
+        ));
+        let loose = normalize_loose(cand);
+        if !loose.is_empty() {
+            out.push((
+                indices(vendors, |v| {
+                    names(v).iter().any(|n| normalize_loose(n) == loose)
+                }),
+                if was_stripped { 3 } else { 2 },
+            ));
+        }
+    }
+    let loose_target = normalize_loose(if stripped.is_empty() {
+        target
+    } else {
+        &stripped
+    });
+    if loose_target.chars().count() >= 3 {
+        let tokens: Vec<&str> = loose_target.split(' ').filter(|t| !t.is_empty()).collect();
+        if !tokens.is_empty() {
+            out.push((
+                indices(vendors, |v| {
+                    names(v).iter().any(|n| {
+                        let row = normalize_loose(n);
+                        let row_tokens: Vec<&str> =
+                            row.split(' ').filter(|t| !t.is_empty()).collect();
+                        tokens.iter().all(|t| row_tokens.contains(t))
+                    })
+                }),
+                4,
+            ));
+        }
+    }
+    out
+}
+
+/// `normalizeForMatch`: NFKC (see [`fold_compat`]), lower case, trimmed,
+/// inner whitespace collapsed to one space.
+#[must_use]
+pub fn normalize_for_match(s: &str) -> String {
+    let folded = fold_compat(s).to_lowercase();
+    let mut out = String::new();
+    let mut space = false;
+    for c in js_trim(&folded).chars() {
+        if is_js_space(c) {
+            space = true;
+        } else {
+            if space {
+                out.push(' ');
+                space = false;
+            }
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// `normalizeLoose`: [`normalize_for_match`] keeping only `a-z`, `0-9` and
+/// single spaces.
+#[must_use]
+pub fn normalize_loose(s: &str) -> String {
+    let kept: String = normalize_for_match(s)
+        .chars()
+        .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == ' ')
+        .collect();
+    kept.split(' ')
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `stripLeadingNumericToken`: `/^\s*#?\d[\d.]*[\s\-–—]+/` removed, then
+/// trimmed ("6100 Office Supplies" → "Office Supplies", "401k Match"
+/// unchanged).
+#[must_use]
+pub fn strip_leading_numeric_token(s: &str) -> String {
+    let rest = s.trim_start_matches(is_js_space);
+    let rest_no_hash = rest.strip_prefix('#').unwrap_or(rest);
+    let mut chars = rest_no_hash.char_indices().peekable();
+    let stripped = match chars.next() {
+        Some((_, c)) if c.is_ascii_digit() => {
+            let mut end = rest_no_hash.len();
+            let mut seps = 0;
+            let mut in_number = true;
+            for (i, c) in chars {
+                if in_number && (c.is_ascii_digit() || c == '.') {
+                    continue;
+                }
+                in_number = false;
+                if is_js_space(c) || matches!(c, '-' | '–' | '—') {
+                    seps += 1;
+                } else {
+                    end = i;
+                    break;
+                }
+            }
+            (seps > 0).then(|| &rest_no_hash[end..])
+        }
+        _ => None,
+    };
+    js_trim(stripped.unwrap_or(s)).to_string()
+}
+
+/// The compatibility mappings of NFKC that vendor names meet; everything
+/// else unchanged.
+#[must_use]
+pub fn fold_compat(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        let code = u32::from(c);
+        match c {
+            // Full-width ASCII.
+            '\u{FF01}'..='\u{FF5E}' => {
+                if let Some(a) = char::from_u32(code - 0xFEE0) {
+                    out.push(a);
+                }
+            }
+            '\u{00A0}' | '\u{2000}'..='\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}' => {
+                out.push(' ');
+            }
+            '\u{FB00}' => out.push_str("ff"),
+            '\u{FB01}' => out.push_str("fi"),
+            '\u{FB02}' => out.push_str("fl"),
+            '\u{FB03}' => out.push_str("ffi"),
+            '\u{FB04}' => out.push_str("ffl"),
+            '\u{FB05}' | '\u{FB06}' => out.push_str("st"),
+            '\u{00B9}' => out.push('1'),
+            '\u{00B2}' => out.push('2'),
+            '\u{00B3}' => out.push('3'),
+            '\u{2122}' => out.push_str("TM"),
+            '\u{2120}' => out.push_str("SM"),
+            '\u{2026}' => out.push_str("..."),
+            '\u{2024}' => out.push('.'),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+fn alnum_lower(s: &str) -> String {
+    s.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+/// The last ten digits of a US phone number.
+fn phone_key(s: &str) -> Option<String> {
+    let digits: String = s.chars().filter(char::is_ascii_digit).collect();
+    match digits.len() {
+        10 => Some(digits),
+        11 if digits.starts_with('1') => Some(digits[1..].to_string()),
+        _ => None,
+    }
+}
+
+/// Two addresses agree when their first lines match loosely, or their ZIP
+/// codes and street numbers both match.
+fn same_address(a: &str, b: &str) -> bool {
+    let first = |s: &str| normalize_loose(s.lines().next().unwrap_or(""));
+    let (fa, fb) = (first(a), first(b));
+    if !fa.is_empty() && fa == fb {
+        return true;
+    }
+    let zip = |s: &str| -> Option<String> {
+        s.split(|c: char| !c.is_ascii_digit())
+            .rfind(|t| t.len() == 5)
+            .map(str::to_string)
+    };
+    let number = |s: &str| -> Option<String> {
+        let t = normalize_loose(s);
+        t.split(' ')
+            .next()
+            .filter(|t| t.chars().all(|c| c.is_ascii_digit()) && !t.is_empty())
+            .map(str::to_string)
+    };
+    zip(a).is_some() && zip(a) == zip(b) && number(a).is_some() && number(a) == number(b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Bbox, Found, RuleId, Spot};
+    use proptest::prelude::*;
+
+    fn id(n: u8) -> ContactId {
+        ContactId::parse(&format!("00000000-0000-4000-8000-0000000000{n:02x}")).unwrap()
+    }
+
+    fn vendor(n: u8, name: &str) -> VendorCandidate {
+        VendorCandidate {
+            contact: id(n),
+            display_name: name.into(),
+            company_name: None,
+            account_number: None,
+            phone: None,
+            address: None,
+            layouts: Vec::new(),
+        }
+    }
+
+    fn plain(v: &str) -> Found<String> {
+        Found {
+            value: v.into(),
+            spot: Spot {
+                page: 0,
+                bbox: Bbox::PAGE,
+            },
+            rule: RuleId::new("t"),
+            confidence: Confidence::HIGH,
+        }
+    }
+
+    fn header(name: &str) -> Header {
+        Header {
+            vendor: Some(plain(name)),
+            ..Header::default()
+        }
+    }
+
+    fn tier(h: &Header, vs: &[VendorCandidate]) -> Option<(ContactId, VendorTier)> {
+        match_vendor(h, None, vs).map(|m| (m.contact, m.tier))
+    }
+
+    #[test]
+    fn engine_helpers_match_ai_name_match_ts() {
+        assert_eq!(
+            normalize_for_match("  Office\u{00A0}  Supplies "),
+            "office supplies"
+        );
+        assert_eq!(
+            normalize_loose("Utilities - Electric"),
+            "utilities electric"
+        );
+        assert_eq!(
+            strip_leading_numeric_token("6100 Office Supplies"),
+            "Office Supplies"
+        );
+        assert_eq!(strip_leading_numeric_token("1099-Contractor"), "Contractor");
+        assert_eq!(strip_leading_numeric_token("#12.5 — Fees"), "Fees");
+        assert_eq!(strip_leading_numeric_token("401k Match"), "401k Match");
+        assert_eq!(strip_leading_numeric_token(" 7 "), "");
+        assert_eq!(
+            normalize_for_match("\u{FF32}iverbend \u{FB01}eld"),
+            "riverbend field"
+        );
+    }
+
+    #[test]
+    fn name_tiers_in_order() {
+        let vs = [
+            vendor(1, "Riverbend Supply Co."),
+            vendor(2, "Office Supplies"),
+            vendor(3, "Northside Electric LLC"),
+        ];
+        assert_eq!(
+            tier(&header("riverbend supply co."), &vs),
+            Some((id(1), VendorTier::Name(1)))
+        );
+        assert_eq!(
+            tier(&header("Riverbend Supply Co"), &vs),
+            Some((id(1), VendorTier::Name(2)))
+        );
+        assert_eq!(
+            tier(&header("6100 Office Supplies"), &vs),
+            Some((id(2), VendorTier::Name(3)))
+        );
+        assert_eq!(
+            tier(&header("Northside"), &vs),
+            Some((id(3), VendorTier::Name(4)))
+        );
+        assert_eq!(tier(&header("Hilltop Feed"), &vs), None);
+    }
+
+    #[test]
+    fn ambiguity_is_none_unless_the_address_breaks_it() {
+        let mut a = vendor(1, "Supply Depot");
+        let mut b = vendor(2, "Supply Depot");
+        a.address = Some("12 Elm St\nSpringfield, MO 65801".into());
+        b.address = Some("900 Oak Ave\nJoplin, MO 64801".into());
+        let vs = [a, b];
+        assert_eq!(tier(&header("Supply Depot"), &vs), None);
+        let mut h = header("Supply Depot");
+        h.vendor_address = Some(plain("12 Elm Street\nSpringfield, MO 65801"));
+        let m = match_vendor(&h, None, &vs).unwrap();
+        assert_eq!((m.contact, m.tier), (id(1), VendorTier::Name(1)));
+        assert_eq!(m.confidence.bp(), 9_000 - TIE_BREAK_PENALTY);
+        // Two vendors share "supply": the subset tier stays silent.
+        let vs = [vendor(1, "Supply Depot"), vendor(2, "Farm Supply")];
+        assert_eq!(tier(&header("Supply"), &vs), None);
+    }
+
+    #[test]
+    fn stronger_tiers_first() {
+        let mut first = vendor(1, "Riverbend Supply Co.");
+        let mut second = vendor(2, "Riverbend Supply");
+        first.account_number = Some("RB-00417".into());
+        second.phone = Some("+1 (417) 555-0142".into());
+        let fp = Fingerprint {
+            tokens: vec!["a".into(), "b".into()],
+            aspect: 12_941,
+        };
+        let mut third = vendor(3, "Something Else");
+        third.layouts = vec![fp.clone()];
+        let vs = [first, second, third];
+        let mut h = header("Riverbend Supply Co.");
+        h.account_number = Some(plain("rb00417"));
+        assert_eq!(tier(&h, &vs), Some((id(1), VendorTier::AccountNumber)));
+        h.account_number = None;
+        h.vendor_phone = Some(plain("417.555.0142"));
+        assert_eq!(tier(&h, &vs), Some((id(2), VendorTier::Phone)));
+        h.vendor_phone = None;
+        let m = match_vendor(&h, Some(&fp), &vs).unwrap();
+        assert_eq!((m.contact, m.tier), (id(3), VendorTier::PastLayout));
+        assert_eq!(tier(&h, &vs), Some((id(1), VendorTier::Name(1))));
+    }
+
+    #[test]
+    fn debug_hides_names() {
+        let text = format!("{:?}", vendor(1, "Riverbend"));
+        assert!(!text.contains("Riverbend"), "{text}");
+    }
+
+    proptest! {
+        /// A vendor list with the target's exact name always matches it at
+        /// tier 1 when the name is unique, whatever else is in the list.
+        #[test]
+        fn exact_unique_name_always_matches(
+            names in prop::collection::btree_set("[A-Z][a-z]{2,8}( [A-Z][a-z]{2,8})?", 1..8),
+            pick in any::<prop::sample::Index>(),
+        ) {
+            let names: Vec<String> = names.into_iter().collect();
+            let vs: Vec<VendorCandidate> = names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| vendor(u8::try_from(i).unwrap(), n))
+                .collect();
+            let i = pick.index(names.len());
+            let m = match_vendor(&header(&names[i].to_uppercase()), None, &vs).unwrap();
+            prop_assert_eq!(m.contact, id(u8::try_from(i).unwrap()));
+            prop_assert_eq!(m.tier, VendorTier::Name(1));
+        }
+    }
 }
