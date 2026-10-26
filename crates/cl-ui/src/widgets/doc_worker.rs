@@ -1204,6 +1204,36 @@ mod tests {
         );
     }
 
+    /// Review B1: a JPEG-in-TIFF page whose JPEG header claims 16384² is
+    /// refused by its compression before any pixel is read (no decoder is
+    /// sized from it), and the file is unreadable.
+    #[test]
+    fn a_jpeg_in_tiff_bomb_is_unreadable_without_decoding() {
+        let bomb = fixture("bomb_jpeg_tiff.tif");
+        assert!(bomb.len() < 400, "the fixture is a header, not pixels");
+        // The page passes the size check: only its compression stops it.
+        let mut d = ::tiff::decoder::Decoder::new(std::io::Cursor::new(bomb.to_vec()))
+            .expect("a TIFF");
+        assert_eq!(d.dimensions().expect("size"), (16, 16));
+        let method = d
+            .find_tag_unsigned::<u16>(::tiff::tags::Tag::Compression)
+            .expect("tag");
+        assert_eq!(method, Some(7));
+        assert!(!tiff_doc::compression_taken(7) && !tiff_doc::compression_taken(6));
+        for taken in [1, 3, 4, 5, 8, 0x80B2, 0x8005] {
+            assert!(tiff_doc::compression_taken(taken), "{taken}");
+        }
+        let started = Instant::now();
+        assert!(tiff_doc::TiffDoc::open(&bomb).is_none());
+        let w = without_pdfium();
+        assert_eq!(
+            open_on(&w, 1, bomb.to_vec()),
+            DocReply::Unreadable { doc: 1 }
+        );
+        // Refused at once: 768 MiB was never allocated and filled.
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
     #[test]
     fn a_looping_page_list_ends() {
         let w = without_pdfium();

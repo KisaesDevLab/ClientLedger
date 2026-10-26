@@ -23,9 +23,11 @@ eframe = { version = "0.37.0", default-features = false, features = ["accesskit"
 # P17 document viewer: PNG and JPEG previews (decoded with size limits).
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 # A02 document viewer: multi-page TIFF (`image` reads page 1 only; Q-A02k).
-# MIT. Default features: deflate (flate2), CCITT G4 fax (fax), JPEG-in-TIFF
-# (zune-jpeg), LZW (weezl); all MIT or Apache-2.0. One page decoded at a time.
-tiff = "0.11.3"
+# MIT. Features: deflate (flate2), CCITT G4 fax (fax), LZW (weezl); all MIT
+# or Apache-2.0. No `jpeg`: JPEG-in-TIFF sizes its buffer from the embedded
+# JPEG header, past the page-size check (review B1), so such a page is
+# unreadable. One page decoded at a time.
+tiff = { version = "0.11.3", default-features = false, features = ["deflate", "fax", "lzw"] }
 # P17 document viewer: PDF pages through PDFium, loaded at run time from a
 # checksum-pinned library (Q-13). MIT OR Apache-2.0. `pdfium_7881` is the
 # PDFium API the pinned bblanchon/pdfium-binaries `chromium/7881` build

@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 /// Compression tag values.
 const NONE: u16 = 1;
 const G4: u16 = 4;
+const MODERN_JPEG: u16 = 7;
 const PACKBITS: u16 = 32773;
 
 /// Photometric tag values.
@@ -279,6 +280,24 @@ pub(crate) fn bomb() -> Vec<u8> {
     write(&[p], false)
 }
 
+/// `bomb_jpeg_tiff.tif` (review B1): a 16 × 16 RGB page whose strip is
+/// "new JPEG" (compression 7) with a JPEG header claiming 16384 × 16384 ×
+/// 3 samples. The TIFF tags pass the size check; a JPEG decoder sized from
+/// the strip would have asked for 768 MiB.
+pub(crate) fn jpeg_bomb() -> Vec<u8> {
+    let side = 16_384u16.to_be_bytes();
+    let mut jpeg = vec![0xFF, 0xD8];
+    // SOF0: length 17, 8-bit, height, width, three components 1x1.
+    jpeg.extend_from_slice(&[0xFF, 0xC0, 0x00, 0x11, 0x08]);
+    jpeg.extend_from_slice(&side);
+    jpeg.extend_from_slice(&side);
+    jpeg.extend_from_slice(&[0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00]);
+    jpeg.extend_from_slice(&[0xFF, 0xD9]);
+    let mut p = Page::raw(16, 16, RGB, &[8, 8, 8], jpeg);
+    p.compression = MODERN_JPEG;
+    write(&[p], false)
+}
+
 /// Two pages whose list loops back to the first.
 pub(crate) fn ifd_loop() -> Vec<u8> {
     write(&[page_gray(), page_rgb()], true)
@@ -322,11 +341,12 @@ pub(crate) fn many_pages(n: usize) -> Vec<u8> {
 }
 
 /// The committed fixtures by file name.
-pub(crate) fn committed() -> [(&'static str, Vec<u8>); 3] {
+pub(crate) fn committed() -> [(&'static str, Vec<u8>); 4] {
     [
         ("three_pages.tif", three_pages()),
         ("g4_fax.tif", g4_fax()),
         ("bomb_tiff.tif", bomb()),
+        ("bomb_jpeg_tiff.tif", jpeg_bomb()),
     ]
 }
 
