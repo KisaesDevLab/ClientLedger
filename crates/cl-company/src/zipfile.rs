@@ -10,8 +10,6 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 /// Largest plaintext entry read from an archive (the envelope is tiny).
 const ENTRY_CAP: u64 = 256 * 1024;
-/// Most entry names listed (an archive has about a dozen top-level ones).
-const NAMES_CAP: usize = 64;
 
 /// Writes `entries` (name, bytes) as stored entries.
 pub(crate) fn write_stored(path: &Path, entries: &[(String, Vec<u8>)]) -> std::io::Result<()> {
@@ -47,18 +45,16 @@ pub(crate) fn read_entry(path: &Path, name: &str) -> std::io::Result<Option<Vec<
     Ok(Some(out))
 }
 
-/// Entry names in the archive.
-pub(crate) fn entry_names(path: &Path) -> std::io::Result<Vec<String>> {
+/// Whether the archive has an entry called `name` (`false` when it is not
+/// a zip). Looks the name up in the central directory instead of listing
+/// names: an engine archive holds one entry per table (well over a
+/// hundred) with `manifest.json.enc` written last.
+pub(crate) fn has_entry(path: &Path, name: &str) -> std::io::Result<bool> {
     let file = File::open(path)?;
     let Ok(archive) = ZipArchive::new(file) else {
-        return Ok(Vec::new());
+        return Ok(false);
     };
-    Ok(archive
-        .file_names()
-        .filter_map(Result::ok)
-        .map(std::borrow::Cow::into_owned)
-        .take(NAMES_CAP)
-        .collect())
+    Ok(archive.index_for_name(name).is_some())
 }
 
 #[cfg(test)]
@@ -82,11 +78,25 @@ mod tests {
             Some(b"{\"a\":1}".to_vec())
         );
         assert_eq!(read_entry(&p, "missing").expect("read"), None);
-        let mut names = entry_names(&p).expect("names");
-        names.sort();
-        assert_eq!(names, vec!["data/t.csv", "envelope.json"]);
+        assert!(has_entry(&p, "data/t.csv").expect("names"));
+        assert!(!has_entry(&p, "data/u.csv").expect("names"));
         let not_zip = dir.path().join("n.bin");
         std::fs::write(&not_zip, b"hello").expect("write");
         assert_eq!(read_entry(&not_zip, "envelope.json").expect("read"), None);
+        assert!(!has_entry(&not_zip, "envelope.json").expect("read"));
+    }
+
+    /// An engine archive: one entry per table, the manifest written last.
+    #[test]
+    fn finds_an_entry_after_many_others() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let p = dir.path().join("big.zip");
+        let mut entries: Vec<(String, Vec<u8>)> = (0..200)
+            .map(|i| (format!("data/t{i}.ndjson.enc"), Vec::new()))
+            .collect();
+        entries.insert(0, ("envelope.json".into(), b"{}".to_vec()));
+        entries.push(("manifest.json.enc".into(), b"m".to_vec()));
+        write_stored(&p, &entries).expect("write");
+        assert!(has_entry(&p, "manifest.json.enc").expect("names"));
     }
 }
