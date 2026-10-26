@@ -4,6 +4,8 @@
 
 use crate::fetch_lock::{Entry, fetch_verified, key_value, parse_entry};
 use anyhow::{Context, Result, anyhow, bail};
+use skrifa::MetadataProvider as _;
+use skrifa::instance::{LocationRef, Size};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -160,8 +162,7 @@ impl Fonts {
                 continue;
             };
             let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-            ttf_parser::Face::parse(&bytes, 0)
-                .map_err(|e| anyhow!("{}: not a font ({e})", id.file()))?;
+            skrifa::FontRef::new(&bytes).map_err(|e| anyhow!("{}: not a font ({e})", id.file()))?;
             data.insert(id, bytes);
         }
         Ok(Fonts { data })
@@ -180,8 +181,10 @@ impl Fonts {
     }
 
     /// The parsed face.
-    pub fn face(&self, id: FontId) -> Result<ttf_parser::Face<'_>> {
-        ttf_parser::Face::parse(self.bytes(id)?, 0).map_err(|e| anyhow!("{}: {e}", id.file()))
+    pub fn face(&self, id: FontId) -> Result<Face<'_>> {
+        skrifa::FontRef::new(self.bytes(id)?)
+            .map(|font| Face { font })
+            .map_err(|e| anyhow!("{}: {e}", id.file()))
     }
 
     /// Width of `text` at `size` points (no kerning; page geometry only).
@@ -189,20 +192,62 @@ impl Fonts {
         let Ok(face) = self.face(id) else {
             return 0.0;
         };
-        let upm = f32::from(face.units_per_em());
-        let units: u32 = text
-            .chars()
-            .map(|c| {
-                let g = face
-                    .glyph_index(c)
-                    .or_else(|| face.glyph_index('?'))
-                    .unwrap_or_default();
-                u32::from(face.glyph_hor_advance(g).unwrap_or(0))
+        let units: f32 = text.chars().map(|c| face.advance(face.glyph(c))).sum();
+        units * size / f32::from(face.units_per_em())
+    }
+}
+
+/// A parsed font (skrifa; metrics in font units).
+pub struct Face<'a> {
+    font: skrifa::FontRef<'a>,
+}
+
+impl Face<'_> {
+    fn metrics(&self) -> skrifa::metrics::Metrics {
+        self.font.metrics(Size::unscaled(), LocationRef::default())
+    }
+
+    pub fn units_per_em(&self) -> u16 {
+        self.metrics().units_per_em
+    }
+
+    /// The glyph for `c`, else for `?`, else `.notdef`.
+    pub fn glyph(&self, c: char) -> u16 {
+        let map = self.font.charmap();
+        map.map(c)
+            .or_else(|| map.map('?'))
+            .and_then(|g| u16::try_from(g.to_u32()).ok())
+            .unwrap_or(0)
+    }
+
+    /// Advance width of glyph `gid`.
+    pub fn advance(&self, gid: u16) -> f32 {
+        self.font
+            .glyph_metrics(Size::unscaled(), LocationRef::default())
+            .advance_width(skrifa::GlyphId::new(u32::from(gid)))
+            .unwrap_or(0.0)
+    }
+
+    /// Font bounding box: x min, y min, x max, y max.
+    pub fn bbox(&self) -> [f32; 4] {
+        self.metrics()
+            .bounds
+            .map_or([0.0, -200.0, 1000.0, 900.0], |b| {
+                [b.x_min, b.y_min, b.x_max, b.y_max]
             })
-            .sum();
-        #[allow(clippy::cast_precision_loss)]
-        let u = units as f32;
-        u * size / upm
+    }
+
+    pub fn ascender(&self) -> f32 {
+        self.metrics().ascent
+    }
+
+    pub fn descender(&self) -> f32 {
+        self.metrics().descent
+    }
+
+    pub fn cap_height(&self) -> f32 {
+        let m = self.metrics();
+        m.cap_height.unwrap_or(m.ascent)
     }
 }
 

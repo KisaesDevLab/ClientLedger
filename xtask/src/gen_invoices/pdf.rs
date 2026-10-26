@@ -78,10 +78,7 @@ pub fn write(pages: &[Page], fonts: &Fonts, to_unicode: bool, title: &str) -> Re
                     glyphs: BTreeMap::new(),
                 });
                 for c in text.chars() {
-                    let g = face
-                        .glyph_index(c)
-                        .or_else(|| face.glyph_index('?'))
-                        .map_or(0, |g| g.0);
+                    let g = face.glyph(c);
                     e.remap.remap(g);
                     e.glyphs.insert(c, g);
                 }
@@ -105,7 +102,7 @@ pub fn write(pages: &[Page], fonts: &Fonts, to_unicode: bool, title: &str) -> Re
     for (i, (id, e)) in used.iter().enumerate() {
         let face = fonts.face(*id)?;
         let upm = f32::from(face.units_per_em());
-        let scale = |v: i16| f32::from(v) * 1000.0 / upm;
+        let scale = |v: f32| v * 1000.0 / upm;
         let sub = subsetter::subset(fonts.bytes(*id)?, 0, &e.remap)
             .map_err(|err| anyhow!("subset {}: {err}", id.file()))?;
         let type0 = alloc();
@@ -133,13 +130,7 @@ pub fn write(pages: &[Page], fonts: &Fonts, to_unicode: bool, title: &str) -> Re
         let widths: Vec<f32> = e
             .remap
             .remapped_gids()
-            .map(|old| {
-                f32::from(
-                    face.glyph_hor_advance(ttf_parser::GlyphId(old))
-                        .unwrap_or(0),
-                ) * 1000.0
-                    / upm
-            })
+            .map(|old| face.advance(old) * 1000.0 / upm)
             .collect();
         let mut c = pdf.cid_font(cid);
         c.subtype(CidFontType::Type2)
@@ -149,7 +140,7 @@ pub fn write(pages: &[Page], fonts: &Fonts, to_unicode: bool, title: &str) -> Re
             .cid_to_gid_map_predefined(Name(b"Identity"));
         c.widths().consecutive(0, widths);
         c.finish();
-        let bb = face.global_bounding_box();
+        let [x0, y0, x1, y1] = face.bbox();
         let mut flags = FontFlags::NON_SYMBOLIC;
         if id.monospace() {
             flags |= FontFlags::FIXED_PITCH;
@@ -160,16 +151,11 @@ pub fn write(pages: &[Page], fonts: &Fonts, to_unicode: bool, title: &str) -> Re
         pdf.font_descriptor(desc)
             .name(Name(base.as_bytes()))
             .flags(flags)
-            .bbox(Rect::new(
-                scale(bb.x_min),
-                scale(bb.y_min),
-                scale(bb.x_max),
-                scale(bb.y_max),
-            ))
+            .bbox(Rect::new(scale(x0), scale(y0), scale(x1), scale(y1)))
             .italic_angle(0.0)
             .ascent(scale(face.ascender()))
             .descent(scale(face.descender()))
-            .cap_height(scale(face.capital_height().unwrap_or(face.ascender())))
+            .cap_height(scale(face.cap_height()))
             .stem_v(80.0)
             .font_file2(file);
         let compressed = deflate(&sub);
