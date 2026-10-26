@@ -4,8 +4,9 @@
 //!
 //! - Only on the owner's click (the button on the source-document card or
 //!   `bill.read_local`). The bytes are the preview's: nothing is fetched
-//!   and **no draft is created** (S11) — the engine's document drafts
-//!   arrive with WP-F. P17's duplicate check on save stays as it is.
+//!   and **no draft is created** (S11, Q-A03l). P17's duplicate check on
+//!   save stays as it is. With `document-drafts-v1` the company's saved
+//!   layouts and card accounts are used (step 19a).
 //! - The reading fills the **empty** fields through the same machinery as
 //!   P17's Read with AI (`cl_model::forms::doc_read::apply`): every value is
 //!   the document's own and *read, not accepted* until the owner accepts it
@@ -183,17 +184,22 @@ impl EnterBillScreen {
         self.read.job_no += 1;
         self.read.job_file.clone_from(&src.name);
         tracing::info!(job = self.read.job_no, "local document reading started");
+        // Saved layouts and card accounts come with `document-drafts-v1`
+        // (step 19a); without it the reading is rules only (S12). Nothing
+        // is claimed here: Enter Bill creates no draft (Q-A03l).
+        let (vendors, templates) = crate::reading::service::with_layouts(
+            map::vendor_candidates(&self.contacts),
+            &self.read_context.layouts,
+        );
         let request = ReadRequest {
             bytes: Arc::clone(&src.bytes),
             hint: JobHint {
                 kind: Some(IntakeKind::Bills),
             },
             today: self.today,
-            vendors: map::vendor_candidates(&self.contacts),
-            // Templates and card accounts need `document-drafts-v1` (WP-F,
-            // step 19a): rules only until then (S12).
-            templates: Vec::new(),
-            card_accounts: None,
+            vendors,
+            templates,
+            card_accounts: self.read_context.card_accounts.clone(),
         };
         self.read.local.sent += 1;
         self.read.local.outcome = None;
