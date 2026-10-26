@@ -314,6 +314,10 @@ pub struct EnterBillScreen {
     pub(crate) accounts_loaded: bool,
     pub(crate) contacts: Vec<Contact>,
     contacts_task: Option<Task<Vec<Contact>>>,
+    /// Saved layouts and card accounts for "Read document"
+    /// (`document-drafts-v1`, A03 step 19a; empty without it).
+    pub(crate) read_context: crate::reading::service::ReadContext,
+    read_context_task: Option<Task<crate::reading::service::ReadContext>>,
     pub(crate) tags: Vec<Tag>,
     tags_task: Option<Task<Vec<Tag>>>,
     pub(crate) items_list: Vec<Item>,
@@ -429,6 +433,8 @@ impl EnterBillScreen {
             accounts_loaded: false,
             contacts: Vec::new(),
             contacts_task: None,
+            read_context: crate::reading::service::ReadContext::default(),
+            read_context_task: None,
             tags: Vec::new(),
             tags_task: None,
             items_list: Vec::new(),
@@ -644,6 +650,11 @@ impl EnterBillScreen {
             self.contacts_task = Some(Task::Pending(p));
         }
         if let Ok(p) = group.read(&session, |s| async move {
+            crate::reading::service::load_context(&s).await
+        }) {
+            self.read_context_task = Some(Task::Pending(p));
+        }
+        if let Ok(p) = group.read(&session, |s| async move {
             s.tags().list_all(&TagFilter::default()).await
         }) {
             self.tags_task = Some(Task::Pending(p));
@@ -717,6 +728,13 @@ impl EnterBillScreen {
             if let Ok(c) = r {
                 self.contacts = c;
                 lists_changed = true;
+            }
+        }
+        if let Some(r) = self.read_context_task.as_mut().and_then(Task::try_take) {
+            self.read_context_task = None;
+            // Without it the reading is rules only (S12).
+            if let Ok(c) = r {
+                self.read_context = c;
             }
         }
         if let Some(r) = self.tags_task.as_mut().and_then(Task::try_take) {

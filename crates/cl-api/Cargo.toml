@@ -59,3 +59,10 @@ harness = false
 name = "intake_settings"
 path = "tests/intake_settings.rs"
 harness = false
+
+# A03 document drafts and vendor layouts (engine U-92): its own engine, so the
+# archive round trips and the loopback model stay inside a fresh budget.
+[[test]]
+name = "contract_document_drafts"
+path = "tests/contract_document_drafts.rs"
+harness = false

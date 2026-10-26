@@ -186,5 +186,15 @@
   {"method":"GET","path":"/api/v1/bill-payments","inSpec":true,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/bill-payments/{id}/void","inSpec":true,"fragmentHash":"c36a5cd7d5db64b7cc4d730b5542f420f793446ce235d3870b32f136846683da"},
   {"method":"GET","path":"/api/v1/company/intake-settings","inSpec":true,"fragmentHash":null},
-  {"method":"PUT","path":"/api/v1/company/intake-settings","inSpec":true,"fragmentHash":"7a2549fce0661c72dc3bae9ba69e53fcb048386b26f004fef32d885548a9d027"}
+  {"method":"PUT","path":"/api/v1/company/intake-settings","inSpec":true,"fragmentHash":"7a2549fce0661c72dc3bae9ba69e53fcb048386b26f004fef32d885548a9d027"},
+  {"method":"POST","path":"/api/v1/document-drafts","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/document-drafts","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/document-drafts/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/document-drafts/{id}/duplicates","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/document-drafts/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/document-drafts/{id}/discard","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/document-drafts/{id}/convert","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/vendor-layout-templates","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/vendor-layout-templates","inSpec":false,"fragmentHash":null},
+  {"method":"DELETE","path":"/api/v1/vendor-layout-templates/{id}","inSpec":false,"fragmentHash":null}
 ]

@@ -177,6 +177,7 @@ pub async fn restore(
             path,
             passphrase,
             scratch: false,
+            reset_document_drafts: false,
         })
         .await?;
     let imported = crate::backup::wait_for_job(session, &job.job_id, progress)

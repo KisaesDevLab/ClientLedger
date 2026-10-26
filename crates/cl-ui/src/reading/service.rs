@@ -13,18 +13,238 @@
 //! templates and no card match: rules only (S12). The optional AI readers
 //! (step 21) are not part of A03's local path.
 //!
+//! Step 19a (WP-F) adds what needs the engine's `document-drafts-v1`:
+//! the company's saved layouts ([`templates_of`], [`with_layouts`]), the
+//! card accounts by their last four digits ([`card_accounts_of`]), both
+//! loaded by [`load_context`], and [`claim_and_store`], which claims an
+//! uploaded draft file and stores its reading (Q-A03i). Enter Bill's "Read
+//! document" uses the layouts and card accounts but never claims (Q-A03l);
+//! A04's queue claims on arrival.
+//!
 //! Logs carry outcome classes only: never a file name, text or an amount.
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use cl_core::CalendarDate;
-use cl_core::ids::AccountId;
+use cl_core::ids::{AccountId, ContactId};
 use cl_docread::card::{self, CardPick};
-use cl_docread::model::{Last4, Payment, Reading, Template};
+use cl_docread::model::{DocKind, Last4, Payment, Reading, Template};
 use cl_docread::protocol::{JobFailure, JobHint};
 use cl_docread::vendor_match::{self, VendorCandidate, VendorMatch};
 use cl_host::{CouldNotRead, DocJob, DocreadConfig, DocreadHost, JobOutcome};
+
+// ---- Step 19a: layouts, card accounts and claims (`document-drafts-v1`) ----
+
+/// Version of the layout JSON stored in `fieldRegions`.
+const LAYOUT_VERSION: u64 = 1;
+
+/// The company's saved layouts as the reader takes them, with their
+/// vendor: each engine template's `fieldRegions.template`. A row this
+/// version can't read is left out (the rules read that document).
+#[must_use]
+pub fn templates_of(saved: &[cl_api::VendorTemplate]) -> Vec<(ContactId, Template)> {
+    saved
+        .iter()
+        .filter(|t| {
+            t.field_regions.get("v").and_then(serde_json::Value::as_u64) == Some(LAYOUT_VERSION)
+        })
+        .filter_map(|t| {
+            let raw = t.field_regions.get("template")?.clone();
+            let mut tpl: Template = serde_json::from_value(raw).ok()?;
+            tpl.samples = t.samples;
+            Some((t.contact_id, tpl))
+        })
+        .collect()
+}
+
+/// The engine row for a layout of `vendor` (A04 learns and saves them):
+/// keyed by the layout's tokens and page shape, the whole layout in
+/// `fieldRegions`. `expected` is the stored row's `updated_at` when
+/// replacing it.
+///
+/// # Errors
+/// `Decode` when the layout can't be written as JSON.
+pub fn template_upsert(
+    vendor: ContactId,
+    template: &Template,
+    expected: Option<String>,
+) -> Result<cl_api::TemplateUpsert, cl_api::ApiError> {
+    let mut parts: Vec<String> = template.fingerprint.tokens.clone();
+    parts.push(format!("aspect:{}", template.fingerprint.aspect));
+    let mut regions = serde_json::Map::new();
+    regions.insert("v".into(), serde_json::Value::from(LAYOUT_VERSION));
+    regions.insert(
+        "template".into(),
+        serde_json::to_value(template).map_err(|_| cl_api::ApiError::Decode {
+            what: "layout template",
+        })?,
+    );
+    Ok(cl_api::TemplateUpsert {
+        contact: vendor,
+        fingerprint: cl_api::layout_key(&parts),
+        field_regions: regions,
+        line_table: None,
+        samples: template.samples.max(1),
+        expected_updated_at: expected,
+    })
+}
+
+/// The vendors with their saved layouts' fingerprints (the "past layout"
+/// match), and the layouts for the reader, in one order.
+#[must_use]
+pub fn with_layouts(
+    mut vendors: Vec<VendorCandidate>,
+    layouts: &[(ContactId, Template)],
+) -> (Vec<VendorCandidate>, Vec<Template>) {
+    for v in &mut vendors {
+        v.layouts.extend(
+            layouts
+                .iter()
+                .filter(|(c, _)| *c == v.contact)
+                .map(|(_, t)| t.fingerprint.clone()),
+        );
+    }
+    let templates = layouts.iter().map(|(_, t)| t.clone()).collect();
+    (vendors, templates)
+}
+
+/// Active credit card accounts with their last four digits (Q-A03q).
+#[must_use]
+pub fn card_accounts_of(accounts: &[cl_api::Account]) -> Vec<(AccountId, Last4)> {
+    accounts
+        .iter()
+        .filter(|a| {
+            a.is_active && a.fields.detail_type.as_deref() == Some(cl_api::CREDIT_CARD_DETAIL_TYPE)
+        })
+        .filter_map(|a| Some((a.id, Last4::parse(a.card_last4?.as_str())?)))
+        .collect()
+}
+
+/// What the desktop matches a reading against, from the engine.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct ReadContext {
+    /// Saved layouts with their vendor (empty without the capability).
+    pub layouts: Vec<(ContactId, Template)>,
+    /// Card accounts; `None` without `document-drafts-v1` (no card match).
+    pub card_accounts: Option<Vec<(AccountId, Last4)>>,
+}
+
+impl std::fmt::Debug for ReadContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReadContext")
+            .field("layouts", &self.layouts.len())
+            .field("card_accounts", &self.card_accounts.as_ref().map(Vec::len))
+            .finish()
+    }
+}
+
+/// Loads the layouts and card accounts. Without `document-drafts-v1`
+/// nothing is fetched: rules only, no card match (S12).
+///
+/// # Errors
+/// Any [`cl_api::ApiError`] of the two reads.
+pub async fn load_context(session: &cl_api::Session) -> Result<ReadContext, cl_api::ApiError> {
+    if !session
+        .client()
+        .capabilities()
+        .has(cl_api::Capabilities::DOCUMENT_DRAFTS)
+    {
+        return Ok(ReadContext::default());
+    }
+    let saved = session.vendor_templates().list(None).await?;
+    let accounts = session
+        .accounts()
+        .list_all(&cl_api::AccountFilter::default())
+        .await?;
+    Ok(ReadContext {
+        layouts: templates_of(&saved),
+        card_accounts: Some(card_accounts_of(&accounts)),
+    })
+}
+
+/// The engine's kind for a reading's kind.
+#[must_use]
+pub fn draft_kind(k: DocKind) -> cl_api::DraftKind {
+    match k {
+        DocKind::Bill => cl_api::DraftKind::Bill,
+        DocKind::CardCharge => cl_api::DraftKind::CardCharge,
+        DocKind::Check => cl_api::DraftKind::Check,
+        DocKind::CashExpense => cl_api::DraftKind::CashExpense,
+        DocKind::Unknown => cl_api::DraftKind::Unknown,
+    }
+}
+
+/// A local reading as the engine stores it: the header, lines and checks
+/// as JSON (amounts as decimal strings, spots and confidences as integers),
+/// the vendor match and the duplicate-check fields. The page words are not
+/// stored.
+///
+/// # Errors
+/// `Decode` when the reading can't be written as JSON.
+pub fn draft_reading(local: &LocalReading) -> Result<cl_api::DraftReading, cl_api::ApiError> {
+    let json_err = |_| cl_api::ApiError::Decode {
+        what: "document reading",
+    };
+    let r = &local.reading;
+    let fields = match serde_json::to_value(&r.header).map_err(json_err)? {
+        serde_json::Value::Object(m) => m,
+        _ => serde_json::Map::new(),
+    };
+    let to_values = |v: serde_json::Value| match v {
+        serde_json::Value::Array(a) => a,
+        _ => Vec::new(),
+    };
+    let reader = match r.reader {
+        cl_docread::model::Reader::TextPdf => cl_api::DraftReader::TextPdf,
+        cl_docread::model::Reader::Ocr => cl_api::DraftReader::Ocr,
+        cl_docread::model::Reader::Template => cl_api::DraftReader::Template,
+    };
+    let h = &r.header;
+    Ok(cl_api::DraftReading {
+        kind: draft_kind(r.kind),
+        reader,
+        fields,
+        lines: to_values(serde_json::to_value(&r.lines).map_err(json_err)?),
+        checks: to_values(serde_json::to_value(&r.checks).map_err(json_err)?),
+        suggested_contact: local.vendor.map(|v| v.contact),
+        doc_reference: h.reference.as_ref().map(|f| f.value.clone()),
+        doc_total: h.total.as_ref().or(h.balance_due.as_ref()).map(|f| f.value),
+        doc_date: h.date.as_ref().map(|f| f.value),
+    })
+}
+
+/// Claims an uploaded draft file (`file`) as a document draft and stores
+/// what reading it gave: the reading (`ready`) or the failure class
+/// (`failed`). Keyed: a retry of the claim with `key` gets the same draft.
+///
+/// # Errors
+/// `Local(Unsupported)` without `document-drafts-v1` (nothing sent);
+/// [`cl_api::DraftRefusal::AlreadyClaimed`] naming the draft that holds
+/// the same file; any [`cl_api::ApiError`] of the claim or the save (a
+/// failed save leaves the claimed draft `new`).
+pub async fn claim_and_store(
+    session: &cl_api::Session,
+    file: cl_api::AttachmentId,
+    hint: cl_api::DraftKind,
+    outcome: &ReadOutcome,
+    key: cl_api::IdempotencyKey,
+) -> Result<cl_api::DocumentDraft, cl_api::ApiError> {
+    let drafts = session.document_drafts();
+    let draft = drafts.create(file, hint, key).await?;
+    match outcome {
+        ReadOutcome::Read(local) => {
+            drafts
+                .store_reading(draft.id, &draft.updated_at, &draft_reading(local)?)
+                .await
+        }
+        ReadOutcome::Failed(f) => {
+            drafts
+                .store_failure(draft.id, &draft.updated_at, f.class())
+                .await
+        }
+    }
+}
 
 /// Something that reads documents: the worker host, or a stand-in in
 /// tests. Blocking.
@@ -460,6 +680,248 @@ mod tests {
         assert!(
             !text.contains("Midwest") && !text.contains("1480"),
             "{text}"
+        );
+    }
+
+    // ---- Step 19a ----
+
+    /// Records how many layouts the job carried.
+    struct Seen(Arc<std::sync::Mutex<usize>>);
+    impl Reader for Seen {
+        fn read(&mut self, jobs: &[DocJob], _today: CalendarDate) -> Vec<JobOutcome> {
+            *self.0.lock().unwrap() = jobs[0].templates.len();
+            vec![JobOutcome::Read(Box::new(reading()))]
+        }
+    }
+
+    fn layout() -> Template {
+        use cl_docread::model::{FieldName, Fingerprint, TemplateField};
+        Template {
+            fingerprint: Fingerprint {
+                tokens: vec!["invoice".into(), "midwest".into(), "#".into()],
+                aspect: 12_941,
+            },
+            fields: vec![TemplateField {
+                field: FieldName::Total,
+                page: 0,
+                region: Bbox::new(7000, 8000, 9000, 8300).unwrap(),
+                label: Some("total".into()),
+            }],
+            line_table: None,
+            samples: 3,
+        }
+    }
+
+    fn saved(vendor: ContactId, t: &Template) -> cl_api::VendorTemplate {
+        let up = template_upsert(vendor, t, None).expect("upsert");
+        serde_json::from_value(serde_json::json!({
+            "id": "00000000-0000-4000-8000-0000000000b1",
+            "contactId": vendor,
+            "fingerprint": up.fingerprint,
+            "fieldRegions": up.field_regions,
+            "lineTable": null,
+            "samples": 4,
+            "updatedAt": "2026-11-04T10:00:00.000Z",
+        }))
+        .expect("engine row")
+    }
+
+    #[test]
+    fn saved_layouts_round_trip_and_reach_the_vendor_match() {
+        let v = vendor().contact;
+        let t = layout();
+        let up = template_upsert(v, &t, None).expect("upsert");
+        assert!(up.fingerprint.starts_with("l1:"));
+        assert_eq!(
+            up.fingerprint,
+            template_upsert(v, &t, None).unwrap().fingerprint,
+            "the same layout gets the same key"
+        );
+        let rows = vec![
+            saved(v, &t),
+            // A row this version can't read is left out.
+            serde_json::from_value(serde_json::json!({
+                "id": "00000000-0000-4000-8000-0000000000b2",
+                "contactId": v, "fingerprint": "l9:unknown-layout",
+                "fieldRegions": {"v": 9}, "samples": 1,
+                "updatedAt": "2026-11-04T10:00:00.000Z",
+            }))
+            .unwrap(),
+        ];
+        let layouts = templates_of(&rows);
+        assert_eq!(layouts.len(), 1);
+        assert_eq!(layouts[0].0, v);
+        assert_eq!(layouts[0].1.fields, t.fields);
+        assert_eq!(layouts[0].1.samples, 4, "the engine's sample count");
+        let (vendors, templates) = with_layouts(vec![vendor()], &layouts);
+        assert_eq!(vendors[0].layouts, vec![t.fingerprint.clone()]);
+        assert_eq!(templates.len(), 1);
+        // The layouts travel to the reader with the job.
+        let mut req = request();
+        req.vendors = vendors;
+        req.templates = templates;
+        let n = Arc::new(std::sync::Mutex::new(0));
+        let _ = read_one(&mut Seen(Arc::clone(&n)), &req);
+        assert_eq!(*n.lock().unwrap(), 1);
+    }
+
+    fn account(id: &str, detail: &str, digits: Option<&str>, active: bool) -> cl_api::Account {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "name": "Card", "accountType": "liability", "detailType": detail,
+            "accountNumber": null, "description": null, "parentId": null,
+            "isActive": active, "isSystem": false, "systemTag": null, "balance": "0.0000",
+            "cardLast4": digits,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn card_accounts_are_active_cards_with_digits() {
+        let one = "00000000-0000-0000-0000-0000000000c1";
+        let accounts = vec![
+            account(one, "credit_card", Some("4821"), true),
+            account(
+                "00000000-0000-0000-0000-0000000000c2",
+                "credit_card",
+                None,
+                true,
+            ),
+            account(
+                "00000000-0000-0000-0000-0000000000c3",
+                "credit_card",
+                Some("4821"),
+                false,
+            ),
+            account(
+                "00000000-0000-0000-0000-0000000000c4",
+                "bank",
+                Some("1111"),
+                true,
+            ),
+        ];
+        let cards = card_accounts_of(&accounts);
+        assert_eq!(
+            cards,
+            vec![(
+                AccountId::parse(one).unwrap(),
+                Last4::parse("4821").unwrap()
+            )]
+        );
+        // The pick by the printed digits.
+        let mut r = reading();
+        r.header.payment = Some(found(Payment::Card {
+            last4: Last4::parse("4821").unwrap(),
+        }));
+        let mut req = request();
+        req.card_accounts = Some(cards);
+        assert_eq!(
+            matched(r, &req).card,
+            Some(CardPick::One(AccountId::parse(one).unwrap()))
+        );
+    }
+
+    #[test]
+    fn a_reading_is_stored_as_strings_and_integers() {
+        let mut r = reading();
+        r.kind = DocKind::Bill;
+        r.header.reference = Some(found("INV-55871".to_string()));
+        r.header.date = Some(found(today()));
+        let local = matched(r, &request());
+        let d = draft_reading(&local).expect("draft reading");
+        assert_eq!(d.kind, cl_api::DraftKind::Bill);
+        assert_eq!(d.reader, cl_api::DraftReader::TextPdf);
+        assert_eq!(d.suggested_contact, Some(vendor().contact));
+        assert_eq!(d.doc_reference.as_deref(), Some("INV-55871"));
+        assert_eq!(d.doc_total, Some(Money::parse_wire("1480.00").unwrap()));
+        assert_eq!(d.doc_date, Some(today()));
+        assert_eq!(
+            d.fields["total"]["value"], "1480.0000",
+            "amounts are strings"
+        );
+        assert!(d.fields["total"]["confidence"].is_u64(), "basis points");
+    }
+
+    /// A session on `server` that learned `caps` from `/desktop/info`.
+    async fn caps_session(server: &wiremock::MockServer, caps: &[&str]) -> cl_api::Session {
+        use wiremock::matchers::{method, path};
+        wiremock::Mock::given(method("GET"))
+            .and(path("/api/v1/desktop/info"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"mode": "desktop", "initialized": true, "capabilities": caps}),
+            ))
+            .mount(server)
+            .await;
+        let s = cl_api::testing::stub_session(server.address().port());
+        s.client().desktop_info().await.expect("desktop info");
+        s
+    }
+
+    #[tokio::test]
+    async fn claim_and_store_claims_then_stores_the_reading_or_the_failure() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        const DRAFT: &str = "00000000-0000-4000-8000-0000000000d1";
+        let draft = |status: &str| {
+            serde_json::json!({"draft": {"id": DRAFT, "kind": "unknown", "status": status,
+                "contentSha256": "ab", "updatedAt": "2026-11-04T10:00:00.000Z"}})
+        };
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/document-drafts"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(draft("new")))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path(format!("/api/v1/document-drafts/{DRAFT}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(draft("ready")))
+            .mount(&server)
+            .await;
+        let s = caps_session(&server, &[cl_api::Capabilities::DOCUMENT_DRAFTS]).await;
+        let file = cl_api::AttachmentId::parse("00000000-0000-4000-8000-0000000000f1").unwrap();
+        let read = ReadOutcome::Read(Box::new(matched(reading(), &request())));
+        let d = claim_and_store(
+            &s,
+            file,
+            cl_api::DraftKind::Bill,
+            &read,
+            cl_api::IdempotencyKey::new(),
+        )
+        .await
+        .expect("stored");
+        assert_eq!(d.status, cl_api::DraftStatus::Ready);
+        claim_and_store(
+            &s,
+            file,
+            cl_api::DraftKind::Bill,
+            &ReadOutcome::Failed(ReadFailure::Protected),
+            cl_api::IdempotencyKey::new(),
+        )
+        .await
+        .expect("failure stored");
+        let puts: Vec<serde_json::Value> = server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.method.as_str() == "PUT")
+            .map(|r| serde_json::from_slice(&r.body).unwrap())
+            .collect();
+        assert_eq!(puts[0]["status"], "ready");
+        assert_eq!(puts[0]["expectedUpdatedAt"], "2026-11-04T10:00:00.000Z");
+        assert_eq!(puts[0]["docTotal"], "1480.0000");
+        assert_eq!(puts[1]["status"], "failed");
+        assert_eq!(puts[1]["failureReason"], "protected");
+    }
+
+    #[tokio::test]
+    async fn without_the_capability_the_context_is_rules_only() {
+        let server = wiremock::MockServer::start().await;
+        let s = caps_session(&server, &[]).await;
+        assert_eq!(load_context(&s).await, Ok(ReadContext::default()));
+        let sent = server.received_requests().await.unwrap();
+        assert!(
+            sent.iter().all(|r| r.url.path() == "/api/v1/desktop/info"),
+            "nothing else is fetched"
         );
     }
 }

@@ -506,6 +506,7 @@ pub fn chart() -> Vec<cl_api::Account> {
                 balance,
                 created_at: Some(DemoState::now()),
                 updated_at: Some(DemoState::now()),
+                card_last4: None,
             }
         })
         .collect()
