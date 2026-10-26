@@ -122,6 +122,12 @@ steps:
   - assert_exists: {role: label, label_contains: A key is saved in your computer's keychain}
   - assert_exists: {role: label, label_contains: Saved. Your key stays}
   - assert_not_exists: {role: label, label_contains: sk-ant-scenario}
+  # A03: documents go online only with their own consent, linked from here;
+  # "Read bills and receipts" alone sends no document or picture.
+  - assert_exists: {role: link, label: Reading documents online}
+  - assert_exists: {role: label, label_contains: "Bills and receipts are read on this computer"}
+  - assert_exists: {role: label, label_contains: "Also send pictures of the page"}
+  - assert_not_exists: {label_contains: "sent as an image"}
   - screenshot: anthropic-saved
   - click: {role: button, label: Remove key}
   - assert_state: {key: screen.ai.key_saved, equals: false}
