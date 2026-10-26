@@ -746,7 +746,10 @@ mod tests {
         let rt = learn(&first_receipt).expect("a receipt's template");
         // The next receipt is a line longer: its total moved down a row and
         // is still read from the template, next to its label.
-        let next = input(&receipt("RB-2002", "25.00", true), std::slice::from_ref(&rt));
+        let next = input(
+            &receipt("RB-2002", "25.00", true),
+            std::slice::from_ref(&rt),
+        );
         assert_eq!(next.kind, crate::model::DocKind::CardCharge);
         assert_eq!(next.reader, crate::model::Reader::Template);
         assert_eq!(next.template, Some(0));
@@ -755,7 +758,10 @@ mod tests {
         assert_eq!(total.rule.as_str(), "template");
         assert_eq!(next.header.reference.unwrap().value, "RB-2002");
         // A bill's template applies to the same vendor's card receipt.
-        let with = input(&receipt("RB-2003", "20.00", false), std::slice::from_ref(&t));
+        let with = input(
+            &receipt("RB-2003", "20.00", false),
+            std::slice::from_ref(&t),
+        );
         assert_eq!(with.template, Some(0));
         assert_eq!(with.kind, crate::model::DocKind::CardCharge);
     }
