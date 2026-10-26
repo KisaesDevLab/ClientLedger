@@ -439,6 +439,8 @@ steps:
   - assert_state: {key: screen.read.local.requests, equals: 1}
   - assert_state: {key: screen.read.requests, equals: 0}
   - assert_state: {key: screen.attachments.draft_files, equals: 1}
+  # No draft and no bill: the demo engine took no write (A03 S8).
+  - assert_state: {key: screen.writes_since_read, equals: 0}
   - assert_state: {key: screen.read.filled_locally, equals: true}
   - assert_state: {key: screen.read.unaccepted, equals: 6}
   - assert_state: {key: screen.read.reconciled, equals: true}
@@ -476,6 +478,7 @@ steps:
   - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "310.00"}
   - assert_value: {target: {role: grid_cell, label: "Amount, line 1"}, equals: "180.00"}
   - assert_value: {target: {role: grid_cell, label: "Amount, line 2"}, equals: "120.00"}
+  - assert_state: {key: screen.writes_since_read, equals: 0}
   - assert_exists: {role: label, label_contains: "Check these on the document"}
   - assert_exists: {role: label, label_contains: "The lines add up to 300.00"}
   - assert_exists: {role: button, label: Add as a new vendor?}
@@ -497,6 +500,19 @@ steps:
   - type: {text: "INV-TYPED", target: {role: text_input, label: Ref. no.}}
   - assert_value: {target: {role: text_input, label: Ref. no.}, equals: "INV-TYPED"}
   - screenshot: read-document-failed
+  - assert_state: {key: screen.read.requests, equals: 0}
+  - click: {role: button, label: Clear}
+  # A hostile PDF (broken objects, absurd counts and lengths): the worker
+  # gives up on it alone, the form keeps working, nothing is written.
+  - type: {text: "fixtures/docs/hostile_garbled.pdf", target: {role: text_input, label: File}}
+  - click: {role: button, label: Attach file}
+  - click: {role: button, label: Read document}
+  - wait: {ms: 1500}
+  - assert_exists: {role: label, label_contains: "Couldn't read this document"}
+  - assert_state: {key: screen.read.filled, equals: false}
+  - assert_state: {key: screen.writes_since_read, equals: 0}
+  - type: {text: "INV-HAND", target: {role: text_input, label: Ref. no.}}
+  - assert_value: {target: {role: text_input, label: Ref. no.}, equals: "INV-HAND"}
   - assert_state: {key: screen.read.requests, equals: 0}
   - click: {role: button, label: Clear}
   # The switch back on, so the next theme's run starts the same.

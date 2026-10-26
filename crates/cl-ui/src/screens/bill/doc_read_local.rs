@@ -92,6 +92,9 @@ pub(crate) struct LocalRead {
     pub job: Option<Receiver<ReadOutcome>>,
     /// Stops the running job (Cancel, a new bill, the window closed).
     pub cancel: Option<ReadCancel>,
+    /// The demo engine's write count when the last reading started
+    /// (control channel: reading writes nothing, A03 S8).
+    pub writes_at_read: Option<u32>,
     /// Documents sent to the reader (control channel).
     pub sent: u32,
     /// The class of the last outcome (control channel).
@@ -507,6 +510,7 @@ impl EnterBillScreen {
         self.read.local.vendors.clone_from(&request.vendors);
         self.read.local.sent += 1;
         self.read.local.outcome = None;
+        self.read.local.writes_at_read = self.link.demo_state().map(|d| d.bills.writes);
         let job = service.submit_cancellable(request);
         self.read.local.job = Some(job.answer);
         self.read.local.cancel = Some(job.cancel);
