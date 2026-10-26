@@ -1,6 +1,7 @@
 //! `cargo xtask run [-- <app args>]`: make sure the engine executable, the
-//! `PostgreSQL` binaries and the `PDFium` library exist (all cached, so this is
-//! fast when nothing changed), then start the desktop app. Arguments after `--` go to
+//! `PostgreSQL` binaries, the `PDFium` library, tesseract and its models exist
+//! (all cached, so this is fast when nothing changed), build the document
+//! reading worker, then start the desktop app. Arguments after `--` go to
 //! the app, for example `cargo xtask run -- --demo`.
 
 use anyhow::{Context, Result, bail};
@@ -56,6 +57,24 @@ pub fn run(args: &[String]) -> Result<()> {
         && let Err(e) = crate::pdfium_fetch::pdfium_fetch(&[])
     {
         eprintln!("run: PDFium not fetched, PDF previews will be unavailable: {e:#}");
+    }
+    // Reading documents (A03): tesseract from pinned source and its
+    // models, both cached. Without them only text PDFs are read, so a
+    // failure (no C++ tools, offline) does not stop the run.
+    if plan.prepare
+        && let Err(e) =
+            crate::ocr_build::ocr_build(&[]).and_then(|()| crate::ocr_models::ocr_models(&[]))
+    {
+        eprintln!("run: OCR not prepared, scanned documents won't be read: {e:#}");
+    }
+    // The reading worker sits next to the app; `cargo run` builds only the
+    // app (cl_host::find_docread_exe).
+    let status = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+        .args(["build", "-p", "clientledger-docread"])
+        .status()
+        .context("could not start cargo")?;
+    if !status.success() {
+        bail!("building the document reader failed ({status})");
     }
     let mut cmd = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     cmd.args(["run", "-p", "clientledger", "--"])

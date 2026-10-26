@@ -213,7 +213,16 @@ pub fn ui_check(args: &[String]) -> Result<()> {
 
     if plan.build {
         let status = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
-            .args(["build", "-p", "clientledger", "-p", "clientledger-cli"])
+            // The reading worker too: Read document (A03) runs it.
+            .args([
+                "build",
+                "-p",
+                "clientledger",
+                "-p",
+                "clientledger-cli",
+                "-p",
+                "clientledger-docread",
+            ])
             .status()
             .context("could not start cargo")?;
         if !status.success() {
