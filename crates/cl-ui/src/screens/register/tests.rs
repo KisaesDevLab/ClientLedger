@@ -2424,8 +2424,8 @@ fn row_documents_wait_for_the_cursor_and_say_when_the_list_failed() {
     s.sync_docs(&ctx);
     assert_eq!(s.state()["docs"]["listed"], false);
     // A's answer arrives after the cursor left it: dropped.
-    let queue = cl_api::ApiQueue::start(Arc::new(|| {}), cl_api::QueueConfig::default())
-        .expect("queue");
+    let queue =
+        cl_api::ApiQueue::start(Arc::new(|| {}), cl_api::QueueConfig::default()).expect("queue");
     let group = queue.group().expect("group");
     let session = cl_api::testing::stub_session(9);
     let one = crate::company::demo::checks::attachments(

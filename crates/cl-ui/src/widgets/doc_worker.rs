@@ -565,7 +565,13 @@ fn handle_request<'a>(
         } => Some(
             docs.get_mut((handle, doc))
                 .and_then(|d| render(d, doc, page, px_width, rotation, true))
-                .map_or(DocReply::Unreadable { doc, page: Some(page) }, DocReply::Rendered),
+                .map_or(
+                    DocReply::Unreadable {
+                        doc,
+                        page: Some(page),
+                    },
+                    DocReply::Rendered,
+                ),
         ),
         DocRequest::Thumb {
             doc,
@@ -1056,7 +1062,13 @@ mod tests {
             px_width: 160,
             rotation: Rotation::None,
         });
-        assert_eq!(reply(&w), DocReply::Unreadable { doc: 2, page: Some(1) });
+        assert_eq!(
+            reply(&w),
+            DocReply::Unreadable {
+                doc: 2,
+                page: Some(1)
+            }
+        );
         w.send(DocRequest::Close { doc: 2 });
         w.send(DocRequest::Render {
             doc: 2,
@@ -1064,7 +1076,13 @@ mod tests {
             px_width: 160,
             rotation: Rotation::None,
         });
-        assert_eq!(reply(&w), DocReply::Unreadable { doc: 2, page: Some(0) });
+        assert_eq!(
+            reply(&w),
+            DocReply::Unreadable {
+                doc: 2,
+                page: Some(0)
+            }
+        );
         let dbg = format!(
             "{:?}",
             DocRequest::Open {
@@ -1167,7 +1185,13 @@ mod tests {
         assert_eq!(at(&seen[2], 60, 130), [0, 0, 0]);
         assert_eq!(at(&seen[2], 60, 20), [255, 255, 255]);
         // Past the last page.
-        assert_eq!(render_on(&w, 1, 3, 120), DocReply::Unreadable { doc: 1, page: Some(3) });
+        assert_eq!(
+            render_on(&w, 1, 3, 120),
+            DocReply::Unreadable {
+                doc: 1,
+                page: Some(3)
+            }
+        );
     }
 
     #[test]
@@ -1222,8 +1246,8 @@ mod tests {
         let bomb = fixture("bomb_jpeg_tiff.tif");
         assert!(bomb.len() < 400, "the fixture is a header, not pixels");
         // The page passes the size check: only its compression stops it.
-        let mut d = ::tiff::decoder::Decoder::new(std::io::Cursor::new(bomb.to_vec()))
-            .expect("a TIFF");
+        let mut d =
+            ::tiff::decoder::Decoder::new(std::io::Cursor::new(bomb.to_vec())).expect("a TIFF");
         assert_eq!(d.dimensions().expect("size"), (16, 16));
         let method = d
             .find_tag_unsigned::<u16>(::tiff::tags::Tag::Compression)
@@ -1258,7 +1282,13 @@ mod tests {
     fn an_unsupported_later_page_is_unreadable_alone() {
         let w = without_pdfium();
         assert_eq!(open_on(&w, 1, tiff_fixtures::gray_then_lab()), opened(1, 2));
-        assert_eq!(render_on(&w, 1, 1, 60), DocReply::Unreadable { doc: 1, page: Some(1) });
+        assert_eq!(
+            render_on(&w, 1, 1, 60),
+            DocReply::Unreadable {
+                doc: 1,
+                page: Some(1)
+            }
+        );
         assert!(matches!(render_on(&w, 1, 0, 60), DocReply::Rendered(_)));
     }
 

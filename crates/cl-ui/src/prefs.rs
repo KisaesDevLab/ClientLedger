@@ -1938,8 +1938,8 @@ mod doc_viewer_placement_tests {
         };
         // The 2560 monitor is gone; the window still sits out at x 3000.
         let outer = Rect::from_min_size(pos2(3000.0, 100.0), vec2(616.0, 839.0));
-        let fix = gone_monitor_fix(&saved, outer, vec2(1920.0, 1080.0), root, false)
-            .expect("moved back");
+        let fix =
+            gone_monitor_fix(&saved, outer, vec2(1920.0, 1080.0), root, false).expect("moved back");
         assert_eq!(fix, pos2(1108.0, 50.0), "to the right of the main window");
         // A monitor of the saved size: left alone when it opens by itself
         // (the second monitor may well be there)...

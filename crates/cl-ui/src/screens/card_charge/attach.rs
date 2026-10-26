@@ -202,7 +202,9 @@ pub(crate) async fn move_files(s: &cl_api::Session, m: PendingMove) -> Result<()
             .data;
         let full = files.len() >= 50;
         for f in files {
-            s.attachments().link(f.id, m.to, IdempotencyKey::new()).await?;
+            s.attachments()
+                .link(f.id, m.to, IdempotencyKey::new())
+                .await?;
         }
         if !full {
             return Ok(());
@@ -845,10 +847,18 @@ mod tests {
         held.answer.send(a).expect("send");
         until_uploaded(&mut s);
         s.poll_attach();
-        assert_eq!(files_on(&link, AttachTo::Expense(id)), 2, "both on the charge");
+        assert_eq!(
+            files_on(&link, AttachTo::Expense(id)),
+            2,
+            "both on the charge"
+        );
         assert_eq!(files_on(&link, AttachTo::Draft(draft)), 0);
         assert!(!s.attach.unsettled() && !s.dirty());
-        assert_eq!(s.state()["attachments"]["count"], 0, "not shown on the new form");
+        assert_eq!(
+            s.state()["attachments"]["count"],
+            0,
+            "not shown on the new form"
+        );
     }
 
     /// Review B2: after a failed move the window asks before it closes; the
@@ -858,8 +868,8 @@ mod tests {
     fn a_failed_move_asks_before_closing_and_save_tries_again() {
         let (_d, link) = link();
         let mut s = screen(&link);
-        let id = cl_core::ids::TransactionId::parse("00000000-0000-4000-8000-0000000000aa")
-            .expect("id");
+        let id =
+            cl_core::ids::TransactionId::parse("00000000-0000-4000-8000-0000000000aa").expect("id");
         let draft = DraftKey::new();
         let _ = file_in(&link, AttachTo::Draft(draft));
         let _ = file_in(&link, AttachTo::Draft(draft));
@@ -881,7 +891,10 @@ mod tests {
         assert!(windows.get(w).is_some(), "Save keeps the window open");
         assert_eq!(files_on(&link, AttachTo::Expense(id)), 2, "moved on Save");
         assert!(!windows.get(w).expect("window").dirty());
-        assert_eq!(windows.request_close(w), crate::windows::CloseOutcome::Closed);
+        assert_eq!(
+            windows.request_close(w),
+            crate::windows::CloseOutcome::Closed
+        );
     }
 
     /// The move lists the draft from the engine and links every file it
@@ -891,8 +904,8 @@ mod tests {
         use wiremock::matchers::{method, path, path_regex};
         use wiremock::{Mock, MockServer, ResponseTemplate};
         let draft = DraftKey::new();
-        let id = cl_core::ids::TransactionId::parse("4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01")
-            .expect("id");
+        let id =
+            cl_core::ids::TransactionId::parse("4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
         let row = |n: u8| {
             format!(
                 r#"{{"id":"5c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a0{n}","tenantId":"x","fileName":"a.pdf","filePath":"/p","fileSize":17,"mimeType":"application/pdf","attachableType":"draft","attachableId":"{draft}","ocrTotal":null,"createdAt":"2026-10-20T10:00:00.000Z"}}"#
