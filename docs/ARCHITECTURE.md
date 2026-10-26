@@ -348,7 +348,7 @@ Search order for the programs (never `PATH`): `CL_DOCREAD_EXE` / `CL_OCR_PATH` (
 
 - Host → worker: `Batch` (at most 20 jobs, 10 MB a document, 500 templates); `OcrResult` / `OcrFailed` for a page; `Render`, reserved for the P37 viewer and answered `Unsupported`.
 - Worker → host: `Ready` (carries the version), `PageStarted`, `NeedOcr { mode, pgm }`, `JobDone { reading }`, `JobFailed`.
-- v2 added the OCR mode (clean-up, orientation, OCR fallback for PDFs without a usable text layer); v3 added the second read: a page whose number words average under 93 % confidence is read again with `tessdata_best`, and a date that did not read is re-read alone. A second read never changes an amount the first read found; a difference becomes a check ("could also be…").
+- v2 added the OCR mode (clean-up, orientation, OCR fallback for PDFs without a usable text layer); v3 added the second read: a page whose number words average under 93 % confidence is read again with `eng+engbest` (adding `tessdata_best`), and a date that did not read is re-read alone. A second read never changes an amount the first read found; a difference becomes a check ("could also be…").
 - Caps: PGM 32 MiB and at most 3400 × 4400 (`P5`, maxval 255, exact length; checked by the host before tesseract sees it), TSV 4 MiB, `JobDone` 4 MiB (checked before parsing). File names, contacts and accounts never cross; templates do. Only the first 10 pages are read.
 - Test hooks (`%CL-TEST-HOOK:` documents) exist only in a worker built with its `test-support` feature, which refuses to compile without debug assertions (Q-A03t).
 
@@ -373,7 +373,7 @@ Search order for the programs (never `PATH`): `CL_DOCREAD_EXE` / `CL_OCR_PATH` (
 **No network.** What holds it, and what doesn't yet:
 
 - `cargo xtask docread-check` (in `ci`, every OS) fails if `cargo tree -p clientledger-docread -e normal` contains a socket-capable crate (mio, socket2, tokio, hyper, reqwest, ureq, curl, rustls, native-tls, h2), or if `std::net` or `process::Command` appears in the worker or `cl-docread` sources outside the test hooks.
-- The tesseract build has curl off, and the linkage check denies socket imports (`socket`, `connect`, `getaddrinfo`, `WSAStartup`).
+- The tesseract build has curl off. Its linkage check refuses `WS2_32.dll` on Windows (not on the library allowlist) and, on Linux and macOS, imported socket and name-lookup functions (`socket`, `connect`, `bind`, `getaddrinfo`, `gethostbyname`, …).
 - On Linux the worker also tries `unshare(CLONE_NEWUSER | CLONE_NEWNET)`. Most current distributions refuse it (Ubuntu 24.04's AppArmor rule); the refusal is logged, not fatal.
 - The Linux `docread-netcheck` CI job runs the worker tests under `strace` and `cargo xtask docread-netcheck` fails on any socket call.
 - **Not enforced on Windows and macOS:** the worker could open a socket if PDFium were exploited. Enforced OS sandboxes (and moving the viewer into the worker) are P37.
