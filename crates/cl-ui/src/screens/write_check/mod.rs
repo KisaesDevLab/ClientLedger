@@ -908,6 +908,7 @@ pub(crate) fn problem_name(p: CheckProblem) -> &'static str {
         CheckProblem::AddressTooLong => "address_too_long",
         CheckProblem::AmountTooLarge => "amount_too_large",
         CheckProblem::TooManyLines => "too_many_lines",
+        CheckProblem::ReadNotAccepted => "read_not_accepted",
     }
 }
 

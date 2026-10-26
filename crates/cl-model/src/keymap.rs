@@ -6,7 +6,7 @@
 //! [`Shortcut`] and asks [`Keymap::resolve`].
 //!
 //! Scope rules: the innermost scope wins (`Grid` or `Viewer` over `Form`
-//! over `Window` over `Global`), so Ctrl+D can mean "Make Deposit" globally, "delete this
+//! over `Window` over `Global`; `List` over `Window`), so Ctrl+D can mean "Make Deposit" globally, "delete this
 //! transaction" inside a form and "copy down" in a grid that opted in. Two
 //! commands may not share a shortcut in the same scope ([`Keymap::new`]
 //! refuses).
@@ -40,6 +40,11 @@ pub enum Scope {
     /// zoom and Page Up/Down turn pages instead of records; the form,
     /// window and global keys still apply underneath it.
     Viewer,
+    /// While a work list that opted in to list keys (the Review Documents
+    /// queue, A04 D6) has focus. Innermost, but it sits on the window, not
+    /// on a form: J/K/Enter/Delete act on the list's rows and no form key
+    /// (Alt+S, Alt+N, Esc as revert) applies there (Q-A04b, Q-A04c).
+    List,
 }
 
 impl Scope {
@@ -50,6 +55,7 @@ impl Scope {
         Scope::Form,
         Scope::Grid,
         Scope::Viewer,
+        Scope::List,
     ];
 
     /// Heading used in `KEYBOARD.md` and the overlay.
@@ -61,6 +67,7 @@ impl Scope {
             Scope::Form => "In a form or grid",
             Scope::Grid => "In a grid",
             Scope::Viewer => "In a document preview",
+            Scope::List => "In a work list",
         }
     }
 
@@ -70,6 +77,7 @@ impl Scope {
         match self {
             Scope::Grid => &[Scope::Grid, Scope::Form, Scope::Window, Scope::Global],
             Scope::Viewer => &[Scope::Viewer, Scope::Form, Scope::Window, Scope::Global],
+            Scope::List => &[Scope::List, Scope::Window, Scope::Global],
             Scope::Form => &[Scope::Form, Scope::Window, Scope::Global],
             Scope::Window => &[Scope::Window, Scope::Global],
             Scope::Global => &[Scope::Global],
@@ -108,6 +116,12 @@ pub enum Key {
     Equals,
     /// The `-` key (zoom out).
     Minus,
+    /// The left arrow (A04: Alt+Left steps back a word in a document
+    /// preview; unmodified arrows bind nothing and stay with grids and text
+    /// fields).
+    Left,
+    /// The right arrow (A04: Alt+Right steps to the next word).
+    Right,
 }
 
 impl fmt::Display for Key {
@@ -127,6 +141,8 @@ impl fmt::Display for Key {
             Key::Comma => f.write_str(","),
             Key::Equals => f.write_str("+"),
             Key::Minus => f.write_str("-"),
+            Key::Left => f.write_str("Left"),
+            Key::Right => f.write_str("Right"),
         }
     }
 }
@@ -523,7 +539,7 @@ mod tests {
         );
         assert_eq!(Scope::Grid.title(), "In a grid");
         assert_eq!(Scope::Grid.active_from()[0], Scope::Grid);
-        assert_eq!(Scope::ALL.len(), 5);
+        assert_eq!(Scope::ALL.len(), 6);
     }
 
     #[test]
@@ -574,11 +590,111 @@ mod tests {
         );
         assert_eq!(
             at(Scope::Viewer, Mods::ALT, Key::Letter('A')),
-            Some("bill.accept_read")
+            Some("form.accept_read")
         );
         // A grid never sees viewer keys.
         assert!(!Scope::Grid.active_from().contains(&Scope::Viewer));
         assert_eq!(Scope::Viewer.title(), "In a document preview");
+    }
+
+    #[test]
+    fn list_scope_sits_on_the_window_not_on_a_form() {
+        let km = Keymap::new(COMMANDS).unwrap();
+        let at = |focus: Scope, mods: Mods, k: Key| {
+            km.resolve(focus, Shortcut::new(mods, k))
+                .map(CommandId::as_str)
+        };
+        // A04 D6: J/K/Enter/Delete act on the queue's rows.
+        assert_eq!(
+            at(Scope::List, Mods::NONE, Key::Letter('J')),
+            Some("queue.next")
+        );
+        assert_eq!(
+            at(Scope::List, Mods::NONE, Key::Letter('K')),
+            Some("queue.prev")
+        );
+        assert_eq!(at(Scope::List, Mods::NONE, Key::Enter), Some("queue.open"));
+        assert_eq!(
+            at(Scope::List, Mods::NONE, Key::Delete),
+            Some("queue.discard")
+        );
+        // Delete in other list windows still deletes the entry.
+        assert_eq!(
+            at(Scope::Window, Mods::NONE, Key::Delete),
+            Some("list.delete")
+        );
+        // Q-A04b: Alt+S (and the other form keys) are not bound in the list.
+        assert_eq!(at(Scope::List, Mods::ALT, Key::Letter('S')), None);
+        assert_eq!(at(Scope::List, Mods::ALT, Key::Letter('N')), None);
+        assert_eq!(at(Scope::List, Mods::ALT, Key::Letter('A')), None);
+        assert_eq!(at(Scope::List, Mods::NONE, Key::Escape), None);
+        // Alt+S stays Save & Close in forms.
+        assert_eq!(
+            at(Scope::Form, Mods::ALT, Key::Letter('S')),
+            Some("form.save_close")
+        );
+        // Window and global keys still work in the list.
+        assert_eq!(
+            at(Scope::List, Mods::NONE, Key::F(9)),
+            Some("window.toggle_details")
+        );
+        assert_eq!(
+            at(Scope::List, Mods::CMD, Key::Letter('K')),
+            Some("help.palette")
+        );
+        // The letters do nothing outside the list.
+        for scope in [Scope::Global, Scope::Window, Scope::Form, Scope::Grid] {
+            assert_eq!(at(scope, Mods::NONE, Key::Letter('J')), None, "{scope:?}");
+            assert_eq!(at(scope, Mods::NONE, Key::Enter), None, "{scope:?}");
+        }
+        assert_eq!(Scope::List.title(), "In a work list");
+        assert_eq!(
+            Scope::List.active_from(),
+            &[Scope::List, Scope::Window, Scope::Global]
+        );
+        assert_eq!(Scope::ALL.last(), Some(&Scope::List));
+    }
+
+    #[test]
+    fn viewer_word_keys_and_unbound_arrows() {
+        let km = Keymap::new(COMMANDS).unwrap();
+        let at = |focus: Scope, mods: Mods, k: Key| {
+            km.resolve(focus, Shortcut::new(mods, k))
+                .map(CommandId::as_str)
+        };
+        assert_eq!(
+            at(Scope::Viewer, Mods::ALT, Key::Right),
+            Some("viewer.next_word")
+        );
+        assert_eq!(
+            at(Scope::Viewer, Mods::ALT, Key::Left),
+            Some("viewer.prev_word")
+        );
+        assert_eq!(
+            at(Scope::Viewer, Mods::NONE, Key::Enter),
+            Some("viewer.fill_word")
+        );
+        // T18: arrows bind nothing elsewhere, so grids, registers and text
+        // fields keep them; plain arrows bind nothing anywhere.
+        for scope in Scope::ALL {
+            for k in [Key::Left, Key::Right] {
+                assert_eq!(at(*scope, Mods::NONE, k), None, "{scope:?}");
+                assert_eq!(at(*scope, Mods::SHIFT, k), None, "{scope:?}");
+                assert_eq!(at(*scope, Mods::CMD, k), None, "{scope:?}");
+            }
+            if *scope != Scope::Viewer {
+                assert_eq!(at(*scope, Mods::ALT, Key::Left), None, "{scope:?}");
+                assert_eq!(at(*scope, Mods::ALT, Key::Right), None, "{scope:?}");
+            }
+        }
+        assert_eq!(
+            Shortcut::new(Mods::ALT, Key::Right).to_string(),
+            "Alt+Right"
+        );
+        assert_eq!(
+            Shortcut::new(Mods::ALT, Key::Left).display(true),
+            "Option+Left"
+        );
     }
 
     #[test]

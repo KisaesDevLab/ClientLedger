@@ -285,7 +285,9 @@ pub const COMMANDS: &[Command] = &[
     cmd("bill.read_document", "Read with AI", None, 7, None, Scope::Form),
     // A03: read the shown document on this computer (no AI, nothing sent)
     cmd("bill.read_local", "Read Document", None, 7, None, Scope::Form),
-    cmd("bill.accept_read", "Accept These Values", None, 7, alt('A'), Scope::Form),
+    // A04: Accept on every form that takes a reading (Enter Bill, Record
+    // Card Charge, Write Check); was `bill.accept_read` before A04.
+    cmd("form.accept_read", "Accept These Values", None, 7, alt('A'), Scope::Form),
     // Document preview (P17): the source-document card and its full-size tab
     cmd("viewer.zoom_in", "Zoom In on the Document", None, 8, key(Mods::CMD, Key::Equals), Scope::Viewer),
     cmd("viewer.zoom_out", "Zoom Out on the Document", None, 8, key(Mods::CMD, Key::Minus), Scope::Viewer),
@@ -296,6 +298,19 @@ pub const COMMANDS: &[Command] = &[
     // would shadow Receive Payment while the page has focus).
     cmd("viewer.rotate_cw", "Rotate the Page Right", None, 8, None, Scope::Viewer),
     cmd("viewer.rotate_ccw", "Rotate the Page Left", None, 8, None, Scope::Viewer),
+    // A04 compare tools (D4): step through the page's words and fill the
+    // armed field from one (Q-A04c). Unmodified arrows stay unbound.
+    cmd("viewer.next_word", "Next Word on the Page", None, 8, key(Mods::ALT, Key::Right), Scope::Viewer),
+    cmd("viewer.prev_word", "Previous Word on the Page", None, 8, key(Mods::ALT, Key::Left), Scope::Viewer),
+    cmd("viewer.fill_word", "Fill the Field From This Word", None, 8, key(Mods::NONE, Key::Enter), Scope::Viewer),
+    cmd("viewer.toggle_highlights", "Show or Hide Highlights", None, 8, None, Scope::Viewer),
+    // A04 Review Documents queue (D6): the list's own keys. Alt+S is not
+    // bound here (Q-A04b): accepting happens in the form.
+    cmd("queue.next", "Next Document", None, 9, key(Mods::NONE, Key::Letter('J')), Scope::List),
+    cmd("queue.prev", "Previous Document", None, 9, key(Mods::NONE, Key::Letter('K')), Scope::List),
+    cmd("queue.open", "Open the Document", None, 9, key(Mods::NONE, Key::Enter), Scope::List),
+    cmd("queue.discard", "Discard the Document\u{2026}", None, 9, key(Mods::NONE, Key::Delete), Scope::List),
+    cmd("queue.read_all", "Read All Documents", None, 9, None, Scope::List),
     // Lists
     built("lists.chart_of_accounts", "Chart of Accounts", Some(Menu::Lists), 0, ctrl('A')),
     built("lists.items", "Item List", Some(Menu::Lists), 0, None),
@@ -337,6 +352,9 @@ pub const COMMANDS: &[Command] = &[
     // vendor statement match; no shortcut
     built("nav.receipt_inbox", "Receipt Inbox", Some(Menu::Vendors), 2, None),
     built("nav.statement_match", "Match Vendor Statement\u{2026}", Some(Menu::Vendors), 2, None),
+    // A04: the company-wide queue of documents waiting to be entered (D6);
+    // Home and the receipt inbox open it too. No shortcut.
+    built("vendors.review_documents", "Review Documents", Some(Menu::Vendors), 2, None),
     // P17: a document in its own tab ("Open full size"); no menu entry
     built("nav.document_view", "Document Preview", None, 2, None),
     // Banking
@@ -515,6 +533,8 @@ mod tests {
             "nav.receipt_inbox",
             "nav.statement_match",
             "nav.document_view",
+            // A04
+            "vendors.review_documents",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {
@@ -808,7 +828,7 @@ mod tests {
             ("bill.read_document", None, Scope::Form),
             // A03: Read document (local) beside Read with AI.
             ("bill.read_local", None, Scope::Form),
-            ("bill.accept_read", alt('A'), Scope::Form),
+            ("form.accept_read", alt('A'), Scope::Form),
             ("viewer.zoom_in", key(Mods::CMD, Key::Equals), Scope::Viewer),
             ("viewer.zoom_out", key(Mods::CMD, Key::Minus), Scope::Viewer),
             ("viewer.fit", key(Mods::CMD, Key::Digit(0)), Scope::Viewer),
@@ -836,7 +856,7 @@ mod tests {
         assert_eq!(
             km.resolve(Scope::Form, Shortcut::new(Mods::ALT, Key::Letter('A')))
                 .map(CommandId::as_str),
-            Some("bill.accept_read")
+            Some("form.accept_read")
         );
         assert_eq!(
             km.resolve(Scope::Global, Shortcut::new(Mods::ALT, Key::Letter('A'))),
@@ -900,6 +920,54 @@ mod tests {
             at(Scope::Viewer, Mods::NONE, Key::PageDown),
             Some("viewer.page_next")
         );
+    }
+
+    #[test]
+    fn a04_commands() {
+        use crate::keymap::Keymap;
+        let review = find("vendors.review_documents").unwrap();
+        assert_eq!(review.label, "Review Documents");
+        assert_eq!(
+            (review.menu, review.shortcut, review.scope),
+            (Some(Menu::Vendors), None, Scope::Global)
+        );
+        assert!(review.opens && review.arrives.is_none() && review.palette);
+        for (id, shortcut, scope) in [
+            ("queue.next", key(Mods::NONE, Key::Letter('J')), Scope::List),
+            ("queue.prev", key(Mods::NONE, Key::Letter('K')), Scope::List),
+            ("queue.open", key(Mods::NONE, Key::Enter), Scope::List),
+            ("queue.discard", key(Mods::NONE, Key::Delete), Scope::List),
+            ("queue.read_all", None, Scope::List),
+            (
+                "viewer.next_word",
+                key(Mods::ALT, Key::Right),
+                Scope::Viewer,
+            ),
+            ("viewer.prev_word", key(Mods::ALT, Key::Left), Scope::Viewer),
+            (
+                "viewer.fill_word",
+                key(Mods::NONE, Key::Enter),
+                Scope::Viewer,
+            ),
+            ("viewer.toggle_highlights", None, Scope::Viewer),
+            ("form.accept_read", alt('A'), Scope::Form),
+        ] {
+            let c = find(id).unwrap();
+            assert_eq!(
+                (c.menu, c.shortcut, c.scope),
+                (None, shortcut, scope),
+                "{id}"
+            );
+            assert!(c.palette && !c.opens && c.arrives.is_none(), "{id}");
+        }
+        // The old id is gone (every form handles `form.accept_read`).
+        assert!(find("bill.accept_read").is_none());
+        for mode in [
+            crate::forms::EnterMode::SaveAndNew,
+            crate::forms::EnterMode::MoveBetweenFields,
+        ] {
+            assert!(Keymap::with_mode(COMMANDS, mode).is_ok(), "{mode:?}");
+        }
     }
 
     #[test]

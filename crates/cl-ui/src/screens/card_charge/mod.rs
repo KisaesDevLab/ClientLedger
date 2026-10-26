@@ -577,7 +577,8 @@ impl CardChargeScreen {
                     };
                     self.lines.form_mut().focus(cell(k, col), &*lists);
                 }
-                CardField::Card | CardField::Date | CardField::RefNo => {}
+                // A04 draft mode: WP-F2 puts the keyboard on Accept.
+                CardField::Card | CardField::Date | CardField::RefNo | CardField::ReadBanner => {}
             }
         }
         self.problems = problems;

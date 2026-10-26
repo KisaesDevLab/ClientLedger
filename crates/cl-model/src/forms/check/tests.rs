@@ -715,3 +715,70 @@ proptest! {
         prop_assert_eq!(f.lines.used().count(), last_cents.len());
     }
 }
+
+#[test]
+fn a_draft_fills_empty_fields_and_blocks_save_until_accepted() {
+    use crate::forms::doc_read::{Confidence, DocReading, ReadField, ReadLine, ReadTarget};
+    let mut keys = RowKeyGen::new();
+    let reading = DocReading {
+        vendor: Some(contact(7)),
+        bill_date: Some(date()),
+        total: Some(money("86.40")),
+        paid_from: Some(account(1010)),
+        check_number: Some(" 4420 ".into()),
+        lines: vec![ReadLine {
+            description: "Mulch".into(),
+            amount: Some(money("86.40")),
+            account: Some(account(6350)),
+            confidence: Some(Confidence::Low),
+        }],
+        ..DocReading::default()
+    };
+    let mut f = CheckForm::new(None, None, NumberField::Proposed(4418), &mut keys);
+    let filled = apply(&reading, &mut f, &mut keys);
+    assert_eq!(
+        filled[..5],
+        [
+            ReadTarget::PaidFrom,
+            ReadTarget::CheckNumber,
+            ReadTarget::Date,
+            ReadTarget::Payee,
+            ReadTarget::Total
+        ]
+    );
+    assert_eq!(filled.len(), 6);
+    assert_eq!(f.number, NumberField::Typed("4420".into()));
+    assert_eq!(f.amount, Some(money("86.40")));
+    let line = f.lines.used().next().expect("a line").key;
+    assert_eq!(
+        f.read.state(ReadTarget::Line(line)),
+        Some(ReadField::Read {
+            level: Confidence::Low
+        })
+    );
+    assert_eq!(
+        run(&f).expect_err("not accepted"),
+        vec![CheckProblem::ReadNotAccepted]
+    );
+    assert_eq!(
+        CheckProblem::ReadNotAccepted.field(),
+        CheckField::ReadBanner
+    );
+    assert_eq!(
+        CheckProblem::ReadNotAccepted.key(),
+        TextKey("check.problem.read_not_accepted")
+    );
+    f.read.accept_all();
+    let c = run(&f).expect("accepted");
+    assert_eq!(c.number, Some(4420));
+    // A typed number, a check to print and the owner's values stay.
+    let mut typed = valid(&mut keys);
+    typed.number = NumberField::Typed("17".into());
+    assert_eq!(apply(&reading, &mut typed, &mut keys), Vec::new());
+    assert_eq!(typed.number, NumberField::Typed("17".into()));
+    let mut later = CheckForm::new(None, None, NumberField::Proposed(1), &mut keys);
+    later.set_print_later(true);
+    apply(&reading, &mut later, &mut keys);
+    assert!(later.read.state(ReadTarget::CheckNumber).is_none());
+    assert!(matches!(later.number, NumberField::ToPrint { .. }));
+}

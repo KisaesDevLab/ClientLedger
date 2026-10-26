@@ -16,6 +16,9 @@ use cl_core::{CalendarDate, Money};
 
 use crate::forms::PayeePrefill;
 use crate::forms::amount_words::MAX_CHECK_UNITS;
+use crate::forms::doc_read::{
+    Confidence, DocReading, ReadState, ReadTarget, blocks_save, read_lines,
+};
 use crate::forms::lines::{
     FormLine, FormLines, PostingLine, difference, exact_totals, lines_total, trimmed,
 };
@@ -166,6 +169,9 @@ pub struct CheckForm {
     pub lines: FormLines,
     /// A receipt uploaded before the first save.
     pub draft_attachment: Option<AttachmentRef>,
+    /// A04 draft mode: which fields came from the document and whether the
+    /// owner accepted them (empty outside draft mode).
+    pub read: ReadState,
 }
 
 impl fmt::Debug for CheckForm {
@@ -187,6 +193,7 @@ impl fmt::Debug for CheckForm {
             .field("header_tags", &self.header_tags.len())
             .field("lines", &self.lines.lines.len())
             .field("draft_attachment", &self.draft_attachment.is_some())
+            .field("read", &self.read.unaccepted().len())
             .finish()
     }
 }
@@ -222,6 +229,7 @@ impl CheckForm {
             header_tags: Vec::new(),
             lines: FormLines::from_lines(Vec::new(), keys),
             draft_attachment: None,
+            read: ReadState::default(),
         }
     }
 
@@ -389,6 +397,9 @@ pub enum CheckField {
     LineAmount(RowKey),
     /// One line's customer.
     LineCustomer(RowKey),
+    /// The banner of values read from the document (A04 draft mode): its
+    /// Accept button.
+    ReadBanner,
 }
 
 /// Why a check cannot be saved.
@@ -427,6 +438,9 @@ pub enum CheckProblem {
     AmountTooLarge,
     /// More than [`MAX_LINES`] lines.
     TooManyLines,
+    /// A04 draft mode: values read from the document are not accepted yet
+    /// (Accept, Alt+A, or edit them).
+    ReadNotAccepted,
 }
 
 impl CheckProblem {
@@ -452,6 +466,7 @@ impl CheckProblem {
             CheckProblem::AddressTooLong => TextKey("check.problem.address_too_long"),
             CheckProblem::AmountTooLarge => TextKey("check.problem.amount_too_large"),
             CheckProblem::TooManyLines => TextKey("check.problem.too_many_lines"),
+            CheckProblem::ReadNotAccepted => TextKey("check.problem.read_not_accepted"),
         }
     }
 
@@ -471,6 +486,7 @@ impl CheckProblem {
             CheckProblem::BillableNeedsCustomer(k) => CheckField::LineCustomer(k),
             CheckProblem::NumberInvalid | CheckProblem::NumberWithPrintLater => CheckField::Number,
             CheckProblem::AddressTooLong => CheckField::Address,
+            CheckProblem::ReadNotAccepted => CheckField::ReadBanner,
         }
     }
 }
@@ -599,6 +615,9 @@ pub fn check(form: &CheckForm, ctx: &CheckContext<'_>) -> Result<CheckedCheck, V
             problems.push(CheckProblem::LinesDisagree { difference });
         }
     }
+    if blocks_save(&form.read, &form.lines) {
+        problems.push(CheckProblem::ReadNotAccepted);
+    }
     if !problems.is_empty() {
         return Err(problems);
     }
@@ -621,6 +640,70 @@ pub fn check(form: &CheckForm, ctx: &CheckContext<'_>) -> Result<CheckedCheck, V
         // answer with a problem rather than panic.
         _ => Err(vec![CheckProblem::AmountMissing]),
     }
+}
+
+/// A04 draft mode: fills the empty fields of a check from `reading` and
+/// marks each one *read, not accepted* (the bill's
+/// [`crate::forms::doc_read::apply`] rules). Payee from `vendor`, date,
+/// amount from the printed `total`, the bank or cash account from
+/// `paid_from`, the printed check number over a proposed or blank one, and
+/// the lines when no line is used. The screen opens a draft on a form built
+/// with no date and no bank, and Print later off. Fields the owner already
+/// filled are left alone; nothing is computed. Returns the fields filled.
+pub fn apply(reading: &DocReading, form: &mut CheckForm, keys: &mut RowKeyGen) -> Vec<ReadTarget> {
+    let mut filled = Vec::new();
+    let level = |c: Option<Confidence>| c.unwrap_or(Confidence::Unrated);
+    let conf = reading.confidence;
+    if form.bank.is_none()
+        && let Some(a) = reading.paid_from
+    {
+        form.bank = Some(a);
+        form.read
+            .mark_read(ReadTarget::PaidFrom, level(conf.payment));
+        filled.push(ReadTarget::PaidFrom);
+    }
+    let number_free = match &form.number {
+        NumberField::Proposed(_) => true,
+        NumberField::Typed(s) => s.trim().is_empty(),
+        NumberField::ToPrint { .. } => false,
+    };
+    if number_free
+        && let Some(n) = reading.check_number.as_deref().map(str::trim)
+        && !n.is_empty()
+    {
+        form.number = NumberField::Typed(n.to_string());
+        form.read
+            .mark_read(ReadTarget::CheckNumber, level(conf.check_number));
+        filled.push(ReadTarget::CheckNumber);
+    }
+    if form.date.is_none()
+        && let Some(d) = reading.bill_date
+    {
+        form.date = Some(d);
+        form.read.mark_read(ReadTarget::Date, level(conf.bill_date));
+        filled.push(ReadTarget::Date);
+    }
+    if form.payee.is_none()
+        && let Some(v) = reading.vendor
+    {
+        form.payee = Some(v);
+        form.read.mark_read(ReadTarget::Payee, level(conf.vendor));
+        filled.push(ReadTarget::Payee);
+    }
+    if form.amount.is_none()
+        && let Some(t) = reading.total
+    {
+        form.amount = Some(t);
+        form.amount_from_lines = false;
+        form.read.mark_read(ReadTarget::Total, level(conf.total));
+        filled.push(ReadTarget::Total);
+    }
+    if form.lines.used().next().is_none()
+        && let Some(v) = read_lines(reading, keys, &mut form.read, &mut filled)
+    {
+        form.lines = v;
+    }
+    filled
 }
 
 #[cfg(test)]

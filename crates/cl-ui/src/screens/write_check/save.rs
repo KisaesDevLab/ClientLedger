@@ -247,6 +247,8 @@ impl WriteCheckScreen {
             CheckField::LineCustomer(k) => {
                 self.lines.form_mut().focus(cell(k, L_CUSTOMER), &*lists);
             }
+            // A04 draft mode (WP-F2 puts the keyboard on Accept).
+            CheckField::ReadBanner => {}
         }
     }
 

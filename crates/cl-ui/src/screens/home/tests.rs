@@ -55,6 +55,8 @@ fn the_demo_needs_attention_shows_the_mockup() {
             "bills_due",
             "payroll_unposted",
             "intake_folders",
+            // A04: counted from WP-F1 on (0 until then, so no line).
+            "documents_to_review",
             "backup"
         ])
     );

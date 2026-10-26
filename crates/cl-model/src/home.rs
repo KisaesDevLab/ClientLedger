@@ -129,6 +129,10 @@ pub enum AttentionKind {
     /// Intake folders that need the owner: not set up on this computer,
     /// missing, unreachable, not allowed, moved (A01 D6). A count only.
     IntakeFolders,
+    /// Documents waiting in Review Documents (A04 D6): the engine's `total`
+    /// of the live drafts (`new`, `ready`, `failed`), company-wide. A count
+    /// only, never amounts.
+    DocumentsToReview,
     /// Open to-dos (Q-130; U-37).
     ToDos,
     /// Items at or below their reorder point (Q-149; U-78).
@@ -142,7 +146,7 @@ pub enum AttentionKind {
 impl AttentionKind {
     /// Every kind in display order, with the company's bills window.
     #[must_use]
-    pub const fn all(bills_due_days: u16) -> [AttentionKind; 10] {
+    pub const fn all(bills_due_days: u16) -> [AttentionKind; 11] {
         [
             AttentionKind::BankWaiting,
             AttentionKind::ReconcileUnfinished,
@@ -152,6 +156,7 @@ impl AttentionKind {
             },
             AttentionKind::PayrollUnposted,
             AttentionKind::IntakeFolders,
+            AttentionKind::DocumentsToReview,
             AttentionKind::ToDos,
             AttentionKind::Reorder,
             AttentionKind::HealthCheck,
@@ -169,6 +174,7 @@ impl AttentionKind {
             AttentionKind::BillsDue { .. } => "bills_due",
             AttentionKind::PayrollUnposted => "payroll_unposted",
             AttentionKind::IntakeFolders => "intake_folders",
+            AttentionKind::DocumentsToReview => "documents_to_review",
             AttentionKind::ToDos => "todos",
             AttentionKind::Reorder => "reorder",
             AttentionKind::HealthCheck => "health_check",
@@ -199,6 +205,7 @@ impl AttentionKind {
             AttentionKind::PayrollUnposted => Some("payroll.import"),
             // Preferences, on its Document intake panel.
             AttentionKind::IntakeFolders => Some("edit.preferences"),
+            AttentionKind::DocumentsToReview => Some("vendors.review_documents"),
             AttentionKind::Backup => Some("file.backup"),
             AttentionKind::ToDos | AttentionKind::Reorder | AttentionKind::HealthCheck => None,
         }
@@ -454,6 +461,18 @@ mod tests {
         );
         assert!(AttentionItem::counted(AttentionKind::IntakeFolders, 2).needs_attention());
         assert!(!AttentionItem::counted(AttentionKind::IntakeFolders, 0).needs_attention());
+        // A04: documents waiting open Review Documents.
+        assert_eq!(all[6], AttentionKind::DocumentsToReview);
+        assert_eq!(
+            AttentionKind::DocumentsToReview.key(),
+            "documents_to_review"
+        );
+        assert!(AttentionKind::DocumentsToReview.supported());
+        assert_eq!(
+            AttentionKind::DocumentsToReview.opens(),
+            Some("vendors.review_documents")
+        );
+        assert!(AttentionItem::counted(AttentionKind::DocumentsToReview, 3).needs_attention());
         assert!(!AttentionKind::ToDos.supported());
         assert!(!AttentionKind::Reorder.supported());
         assert!(!AttentionKind::HealthCheck.supported());

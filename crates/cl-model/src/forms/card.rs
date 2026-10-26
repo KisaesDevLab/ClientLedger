@@ -19,6 +19,9 @@ use cl_core::{CalendarDate, Money};
 use crate::forms::PayeePrefill;
 use crate::forms::amount_words::MAX_CHECK_UNITS;
 use crate::forms::check::line_tag_default;
+use crate::forms::doc_read::{
+    Confidence, DocReading, ReadState, ReadTarget, blocks_save, read_lines,
+};
 use crate::forms::lines::{
     FormLine, FormLines, PostingLine, TotalsStatus, difference, exact_totals, trimmed,
 };
@@ -172,6 +175,9 @@ pub struct CardForm {
     pub header_tags: Vec<TagId>,
     /// The lines (where the money went, or came back from).
     pub lines: FormLines,
+    /// A04 draft mode: which fields came from the document and whether the
+    /// owner accepted them (empty outside draft mode).
+    pub read: ReadState,
 }
 
 impl fmt::Debug for CardForm {
@@ -187,6 +193,7 @@ impl fmt::Debug for CardForm {
             .field("memo", &!self.memo.is_empty())
             .field("header_tags", &self.header_tags.len())
             .field("lines", &self.lines.lines.len())
+            .field("read", &self.read.unaccepted().len())
             .finish()
     }
 }
@@ -207,6 +214,7 @@ impl CardForm {
             memo: String::new(),
             header_tags: Vec::new(),
             lines: FormLines::default(),
+            read: ReadState::default(),
         }
     }
 
@@ -320,6 +328,9 @@ pub enum CardField {
     Lines,
     /// One line.
     Line(RowKey),
+    /// The banner of values read from the document (A04 draft mode): its
+    /// Accept button.
+    ReadBanner,
 }
 
 /// Why a card charge or credit can't be saved.
@@ -344,6 +355,9 @@ pub enum CardProblem {
     TooManyLines,
     /// One line's issue.
     Line(RowKey, LineIssue),
+    /// A04 draft mode: values read from the document are not accepted yet
+    /// (Accept, Alt+A, or edit them).
+    ReadNotAccepted,
 }
 
 impl CardProblem {
@@ -365,6 +379,7 @@ impl CardProblem {
             CardProblem::NoLines => TextKey("card.problem.no_lines"),
             CardProblem::TooManyLines => TextKey("helper.problem.too_many_lines"),
             CardProblem::Line(_, i) => i.key(),
+            CardProblem::ReadNotAccepted => TextKey("card.problem.read_not_accepted"),
         }
     }
 
@@ -382,6 +397,7 @@ impl CardProblem {
             CardProblem::NoLines => "no_lines",
             CardProblem::TooManyLines => "too_many_lines",
             CardProblem::Line(_, i) => i.name(),
+            CardProblem::ReadNotAccepted => "read_not_accepted",
         }
     }
 
@@ -397,6 +413,7 @@ impl CardProblem {
             | CardProblem::NoLines
             | CardProblem::TooManyLines => CardField::Lines,
             CardProblem::Line(k, _) => CardField::Line(k),
+            CardProblem::ReadNotAccepted => CardField::ReadBanner,
         }
     }
 }
@@ -468,6 +485,9 @@ pub fn check(form: &CardForm, tags: &TagList) -> Result<CheckedCard, Vec<CardPro
             problems.push(CardProblem::LinesDisagree { difference });
         }
     }
+    if blocks_save(&form.read, &form.lines) {
+        problems.push(CardProblem::ReadNotAccepted);
+    }
     if !problems.is_empty() {
         return Err(problems);
     }
@@ -486,6 +506,56 @@ pub fn check(form: &CardForm, tags: &TagList) -> Result<CheckedCard, Vec<CardPro
         // Every `None` above pushed a problem.
         _ => Err(vec![CardProblem::Amount(AmountIssue::Missing)]),
     }
+}
+
+/// A04 draft mode: fills the empty fields of a card charge from `reading`
+/// and marks each one *read, not accepted* (the bill's
+/// [`crate::forms::doc_read::apply`] rules). Payee from `vendor`, date,
+/// amount from the printed `total`, the card from `paid_from`, and the
+/// lines when no line is used. The screen opens a draft on a form built
+/// with no date and no card, so the document's own fill them. Fields the
+/// owner already filled are left alone; nothing is computed. Returns the
+/// fields filled.
+pub fn apply(reading: &DocReading, form: &mut CardForm, keys: &mut RowKeyGen) -> Vec<ReadTarget> {
+    let mut filled = Vec::new();
+    let level = |c: Option<Confidence>| c.unwrap_or(Confidence::Unrated);
+    let conf = reading.confidence;
+    if form.card.is_none()
+        && let Some(a) = reading.paid_from
+    {
+        form.card = Some(a);
+        form.read
+            .mark_read(ReadTarget::PaidFrom, level(conf.payment));
+        filled.push(ReadTarget::PaidFrom);
+    }
+    if form.payee.is_none()
+        && let Some(v) = reading.vendor
+    {
+        form.payee = Some(v);
+        form.read.mark_read(ReadTarget::Payee, level(conf.vendor));
+        filled.push(ReadTarget::Payee);
+    }
+    if form.date.is_none()
+        && let Some(d) = reading.bill_date
+    {
+        form.date = Some(d);
+        form.read.mark_read(ReadTarget::Date, level(conf.bill_date));
+        filled.push(ReadTarget::Date);
+    }
+    if form.amount.is_none()
+        && let Some(t) = reading.total
+    {
+        form.amount = Some(t);
+        form.amount_from_lines = false;
+        form.read.mark_read(ReadTarget::Total, level(conf.total));
+        filled.push(ReadTarget::Total);
+    }
+    if form.lines.used().next().is_none()
+        && let Some(v) = read_lines(reading, keys, &mut form.read, &mut filled)
+    {
+        form.lines = v;
+    }
+    filled
 }
 
 /// Helpers the P14 form tests share.
@@ -701,6 +771,80 @@ mod tests {
         f.lines.lines[0].amount = Some(money("1"));
         f.leave_lines();
         assert_eq!(f.amount, Some(money("7.25")), "a typed amount stays");
+    }
+
+    #[test]
+    fn a_draft_fills_empty_fields_and_blocks_save_until_accepted() {
+        use crate::forms::doc_read::{Confidence, DocReading, ReadField, ReadLine, ReadTarget};
+        let tags = TagList::default();
+        let mut keys = RowKeyGen::new();
+        let reading = DocReading {
+            vendor: Some(contact(5)),
+            bill_date: Some(date()),
+            total: Some(money("64.10")),
+            paid_from: Some(account(2050)),
+            lines: vec![
+                ReadLine {
+                    description: "Paper".into(),
+                    amount: Some(money("40.00")),
+                    account: Some(account(6250)),
+                    confidence: Some(Confidence::High),
+                },
+                ReadLine {
+                    description: "Ink".into(),
+                    amount: Some(money("24.10")),
+                    account: Some(account(6400)),
+                    confidence: None,
+                },
+            ],
+            ..DocReading::default()
+        };
+        let mut f = CardForm::new(None, None);
+        let filled = apply(&reading, &mut f, &mut keys);
+        assert_eq!(filled.len(), 6);
+        assert_eq!(f.card, Some(account(2050)));
+        assert_eq!(f.payee, Some(contact(5)));
+        assert_eq!(f.amount, Some(money("64.10")));
+        assert_eq!(f.lines.used().count(), 2);
+        assert_eq!(
+            f.read.state(ReadTarget::Total),
+            Some(ReadField::Read {
+                level: Confidence::Unrated
+            })
+        );
+        assert_eq!(
+            check(&f, &tags).expect_err("not accepted"),
+            vec![CardProblem::ReadNotAccepted]
+        );
+        assert_eq!(CardProblem::ReadNotAccepted.name(), "read_not_accepted");
+        assert_eq!(CardProblem::ReadNotAccepted.field(), CardField::ReadBanner);
+        f.read.accept_all();
+        let c = check(&f, &tags).expect("accepted");
+        assert_eq!(c.amount, money("64.10"));
+        // A deleted read line no longer blocks Save.
+        let mut g = CardForm::new(None, None);
+        apply(&reading, &mut g, &mut keys);
+        for t in [
+            ReadTarget::PaidFrom,
+            ReadTarget::Payee,
+            ReadTarget::Date,
+            ReadTarget::Total,
+        ] {
+            g.read.edited(t);
+        }
+        let first = g.lines.lines[0].key;
+        assert!(check(&g, &tags).is_err());
+        g.lines.lines.retain(|l| l.key == first || l.is_blank());
+        g.read.edited(ReadTarget::Line(first));
+        g.amount = Some(money("40.00"));
+        assert!(check(&g, &tags).is_ok());
+        // What the owner typed stays.
+        let mut typed = charge("9.00", &[(6250, "9.00")]);
+        typed.payee = Some(contact(8));
+        let filled = apply(&reading, &mut typed, &mut keys);
+        assert!(filled.is_empty(), "{filled:?}");
+        assert_eq!(typed.amount, Some(money("9.00")));
+        assert!(check(&typed, &tags).is_ok());
     }
 
     #[test]
