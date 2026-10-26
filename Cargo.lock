@@ -852,6 +852,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cl-docread"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "cl-core",
+ "image",
+ "pdfium-render",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tiff",
+]
+
+[[package]]
 name = "cl-grid"
 version = "0.0.0"
 dependencies = [
@@ -987,6 +1002,16 @@ dependencies = [
  "cl-automation",
  "cl-host",
  "ctrlc",
+ "serde_json",
+]
+
+[[package]]
+name = "clientledger-docread"
+version = "0.0.0"
+dependencies = [
+ "cl-core",
+ "cl-docread",
+ "nix",
  "serde_json",
 ]
 

@@ -21,3 +21,11 @@ pedantic = { level = "warn", priority = -1 }
 [profile.grid-bench]
 inherits = "release"
 debug-assertions = true
+
+# `cargo xtask docread-accuracy` and `docread-bench` (A03, plan D6): the
+# reading worker and cl-host's accuracy harness, optimised, with debug
+# assertions on so test-support builds (fault-injection worker, cl-api
+# test hooks) compile under it.
+[profile.docread-bench]
+inherits = "release"
+debug-assertions = true

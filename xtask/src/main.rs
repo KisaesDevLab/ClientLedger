@@ -13,6 +13,7 @@ mod layering;
 mod licenses;
 mod meta;
 mod nofloat;
+mod ocr_build;
 mod pdfium_fetch;
 mod pg_fetch;
 mod preview;
@@ -29,7 +30,7 @@ usage: cargo xtask <command>
   test [args]        cargo test (whole workspace unless -p is given), CL_OFFLINE_TESTS=1
   licenses           direct dependencies must be MIT or Apache-2.0
   layering           crate dependency rules from CLAUDE.md
-  nofloat            no floating point in cl-core and cl-api src (syn scan)
+  nofloat            no floating point in the money crates and cl-docread rules (syn scan)
   engine [--smoke] [--force]
                      build the engine single executable into target/engine/<target>
   engine-test [-- <vitest args>]
@@ -40,6 +41,9 @@ usage: cargo xtask <command>
   pdfium-fetch [--force]
                      download the pinned PDFium library (document previews) into
                      target/pdfium/<triple>
+  ocr-build [--force]
+                     build the tesseract program from pinned source (ocr.lock), optional
+                     dependencies off, linkage checked, into target/ocr/<triple>
   keymap-doc [--check]
                      generate docs/KEYBOARD.md and the shortcut cheat sheet from the cl-model keymap
   grid-bench         ledger grid scroll benchmark (200k rows, real shell), optimised; fails
@@ -99,6 +103,8 @@ pub(crate) fn run_release_features() -> Result<()> {
                 "clientledger",
                 "-p",
                 "clientledger-cli",
+                "-p",
+                "clientledger-docread",
                 "--prefix",
                 "none",
             ])
@@ -117,7 +123,7 @@ pub(crate) fn run_nofloat() -> Result<()> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     report(
         "nofloat",
-        "no floating point in cl-core, cl-api, cl-model or cl-grid core",
+        "no floating point in cl-core, cl-api, cl-model, cl-grid core or cl-docread rules",
         &nofloat::check(&root)?,
     )
 }
@@ -135,6 +141,7 @@ fn main() -> Result<()> {
         Some("api-spec") => api_spec::api_spec(&args[1..]),
         Some("pg-fetch") => pg_fetch::pg_fetch(&args[1..]),
         Some("pdfium-fetch") => pdfium_fetch::pdfium_fetch(&args[1..]),
+        Some("ocr-build") => ocr_build::ocr_build(&args[1..]),
         Some("preview") => preview::preview(&args[1..]),
         Some("run") => run::run(&args[1..]),
         Some("ui-check") => ui_check::ui_check(&args[1..]),

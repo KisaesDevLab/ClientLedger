@@ -1,0 +1,29 @@
+[package]
+name = "clientledger-docread"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The document reading worker (A03): reads one batch of untrusted files from stdin, answers on stdout. No network code; spawns nothing; started only by cl-host."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Fault-injection hooks for cl-host's worker tests (plan D2 "Test hooks",
+# Q-A03t): a document starting `%CL-TEST-HOOK:<name>` crashes, hangs or
+# allocates on purpose. Refuses to build without debug assertions
+# (src/main.rs), and no normal dependency edge may switch it on (xtask
+# layering, release-features). Tests build the worker with it on demand.
+test-support = []
+
+[dependencies]
+cl-core = { path = "../../crates/cl-core" }
+cl-docread = { path = "../../crates/cl-docread", features = ["worker"] }
+serde_json = "1.0.154"
+
+# Self-set limits before any parsing (plan D2): RLIMIT_DATA, and the
+# best-effort network namespace on Linux. MIT.
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31.3", default-features = false, features = ["resource", "sched"] }
