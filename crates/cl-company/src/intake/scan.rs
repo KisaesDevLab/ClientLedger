@@ -24,11 +24,11 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::io::{self, Read as _};
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use super::fs::{FolderFs, links, millis, online_only, open_shared_read};
+use super::fs::{FolderFs, check_held, millis, open_plain, plain_file};
 use super::path::classify;
 use super::{FileError, Health, ReadFile, sha256_hex};
 
@@ -392,61 +392,26 @@ pub(crate) fn check_bytes(bytes: &[u8]) -> Result<(), FileError> {
         .map_err(|_| FileError::WrongType)
 }
 
-fn plain_file(path: &Path) -> Result<std::fs::Metadata, FileError> {
-    let meta = std::fs::symlink_metadata(path).map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => FileError::Gone,
-        _ => FileError::Io,
-    })?;
-    if !meta.file_type().is_file() || links(&meta) > 1 {
-        return Err(FileError::NotAFile);
-    }
-    if online_only(&meta) {
-        return Err(FileError::OnlineOnly);
-    }
-    Ok(meta)
-}
-
-/// The open handle's metadata `held` against the path's `before` (checked
-/// without following links): a plain file, not online only, the same size
-/// and modification time.
-pub(crate) fn same_file(
-    before: &std::fs::Metadata,
-    held: &std::fs::Metadata,
-) -> Result<(), FileError> {
-    if !held.file_type().is_file() {
-        return Err(FileError::NotAFile);
-    }
-    if online_only(held) {
-        return Err(FileError::OnlineOnly);
-    }
-    if held.len() != before.len() || millis(held.modified()) != millis(before.modified()) {
-        return Err(FileError::Unstable);
-    }
-    Ok(())
-}
-
 /// Reads a file for upload, checking again everything the listing said: a
 /// plain file (no link, one hard link), not online only, at most 10 MB,
 /// not empty, a PDF, PNG, JPEG or TIFF by its first bytes, not held open
 /// for writing (Windows), and unchanged while read.
 ///
+/// The file is opened without following a link and the open handle itself
+/// is checked against what was looked at ([`super::fs::open_plain`]), so a
+/// link or another file swapped in between the look and the open is never
+/// read.
+///
 /// # Errors
 /// [`FileError`].
 pub fn read_for_upload(path: &Path) -> Result<ReadFile, FileError> {
-    let before = plain_file(path)?;
+    if plain_file(path)?.len() > MAX_FILE_BYTES {
+        return Err(FileError::TooLarge);
+    }
+    let (file, before) = open_plain(path, true)?;
     if before.len() > MAX_FILE_BYTES {
         return Err(FileError::TooLarge);
     }
-    let file = open_shared_read(path).map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => FileError::Gone,
-        // A sharing violation (still being written) on Windows.
-        _ if e.raw_os_error() == Some(32) && cfg!(windows) => FileError::Unstable,
-        _ => FileError::Io,
-    })?;
-    // What was opened is checked on the open handle itself, so a file
-    // swapped in between the check and the open is noticed.
-    let held = file.metadata().map_err(|_| FileError::Io)?;
-    same_file(&before, &held)?;
     let mut bytes = Vec::new();
     (&file)
         .take(MAX_FILE_BYTES + 1)
@@ -460,7 +425,7 @@ pub fn read_for_upload(path: &Path) -> Result<ReadFile, FileError> {
         return Err(FileError::Empty);
     }
     let after = plain_file(path)?;
-    same_file(&after, &file.metadata().map_err(|_| FileError::Io)?)?;
+    check_held(&after, &file.metadata().map_err(|_| FileError::Io)?)?;
     let modified_ms = millis(after.modified());
     if after.len() != size || millis(before.modified()) != modified_ms {
         return Err(FileError::Unstable);
@@ -801,9 +766,97 @@ mod tests {
                 .and_then(|f| f.metadata())
                 .expect("meta")
         };
-        assert_eq!(same_file(&meta(&a), &meta(&a)), Ok(()));
-        assert_eq!(same_file(&meta(&a), &meta(&b)), Err(FileError::Unstable));
+        assert_eq!(check_held(&meta(&a), &meta(&a)), Ok(()));
+        assert!(check_held(&meta(&a), &meta(&b)).is_err());
         let d = std::fs::metadata(dir.path()).expect("dir");
-        assert_eq!(same_file(&meta(&a), &d), Err(FileError::NotAFile));
+        assert_eq!(check_held(&meta(&a), &d), Err(FileError::NotAFile));
+    }
+
+    /// Another file with the same size and time is still another file
+    /// (Unix: device and inode).
+    #[cfg(unix)]
+    #[test]
+    fn a_look_alike_file_is_not_the_checked_one() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let a = dir.path().join("a.pdf");
+        let b = dir.path().join("b.pdf");
+        std::fs::write(&a, PDF).expect("write");
+        std::fs::write(&b, PDF).expect("write");
+        let t = std::fs::metadata(&a).and_then(|m| m.modified()).expect("t");
+        std::fs::File::options()
+            .write(true)
+            .open(&b)
+            .and_then(|f| f.set_modified(t))
+            .expect("touch");
+        let (ma, mb) = (
+            std::fs::symlink_metadata(&a).expect("a"),
+            std::fs::symlink_metadata(&b).expect("b"),
+        );
+        assert_eq!(
+            (ma.len(), ma.modified().ok()),
+            (mb.len(), mb.modified().ok())
+        );
+        assert_eq!(check_held(&ma, &mb), Err(FileError::NotAFile));
+    }
+
+    /// A link swapped in between the look and the open is never read,
+    /// even when it points at a file that would pass every other check.
+    #[test]
+    fn a_link_swapped_in_before_the_open_is_never_read() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let outside = tempfile::tempdir().expect("tmp");
+        let secret = outside.path().join("secret.pdf");
+        std::fs::write(&secret, PDF).expect("write");
+        let p = dir.path().join("scan.pdf");
+        std::fs::write(&p, PDF).expect("write");
+        let t = std::fs::metadata(&p).and_then(|m| m.modified()).expect("t");
+        std::fs::File::options()
+            .write(true)
+            .open(&secret)
+            .and_then(|f| f.set_modified(t))
+            .expect("touch");
+        // Can this system make a file link here at all?
+        let probe = dir.path().join("probe");
+        #[cfg(unix)]
+        let can_link = std::os::unix::fs::symlink(&secret, &probe).is_ok();
+        // Needs developer mode or admin rights on Windows (CI runners have them).
+        #[cfg(windows)]
+        let can_link = std::os::windows::fs::symlink_file(&secret, &probe).is_ok();
+        if !can_link {
+            return;
+        }
+        std::fs::remove_file(&probe).expect("rm");
+        let (swap_path, swap_to) = (p.clone(), secret.clone());
+        super::super::race::set(move |stage| {
+            if stage == "opening" {
+                std::fs::remove_file(&swap_path).expect("rm");
+                #[cfg(unix)]
+                std::os::unix::fs::symlink(&swap_to, &swap_path).expect("link");
+                #[cfg(windows)]
+                std::os::windows::fs::symlink_file(&swap_to, &swap_path).expect("link");
+            }
+        });
+        let r = read_for_upload(&p);
+        super::super::race::clear();
+        assert!(
+            matches!(r, Err(FileError::NotAFile | FileError::Unstable)),
+            "{r:?}"
+        );
+    }
+
+    /// A file whose content is on this computer reads, whatever cloud
+    /// client keeps it (a hydrated `OneDrive` file is a reparse point that
+    /// is not a link). Set `CL_TEST_HYDRATED_FILE` to such a PDF or picture
+    /// to check one; without it only the plain case runs.
+    #[test]
+    fn a_hydrated_or_plain_file_reads() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let p = dir.path().join("plain.pdf");
+        std::fs::write(&p, PDF).expect("write");
+        assert_eq!(read_for_upload(&p).map(|r| r.bytes), Ok(PDF.to_vec()));
+        if let Some(h) = std::env::var_os("CL_TEST_HYDRATED_FILE") {
+            let r = read_for_upload(Path::new(&h));
+            assert!(r.is_ok(), "a hydrated cloud file reads: {r:?}");
+        }
     }
 }

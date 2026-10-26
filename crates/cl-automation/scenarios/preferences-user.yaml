@@ -88,10 +88,11 @@ steps:
   - screenshot: sales-tax
   - click: {role: button, label: Inventory}
   - assert_exists: {role: check_box, label: This company tracks inventory}
-  - click: {role: button, label: Receipt inbox}
-  - assert_exists: {role: check_box, label: Watch a folder for receipts}
-  - click: {role: check_box, label: Watch a folder for receipts}
-  - assert_exists: {role: text_input, label: Folder}
+  - click: {role: button, label: Document intake}
+  - assert_state: {key: screen.category, equals: inbox}
+  - assert_state: {key: screen.intake.load, equals: ready}
+  - assert_exists: {label: Add a folder where you save bills and receipts.}
+  - assert_exists: {role: button, label: Add folder}
   - screenshot: inbox
 
   # --- Search narrows the list ------------------------------------------
@@ -109,8 +110,6 @@ steps:
   - screenshot: inbox-minimum
   - resize: {width: 1440, height: 940}
 
-  # --- Esc: revert the inbox change, then close -------------------------------
-  - key: Escape
-  - assert_state: {key: screen.dirty, equals: false}
+  # --- Esc: nothing changed, so it closes ------------------------------------
   - key: Escape
   - assert_not_exists: {role: tab, label: Preferences}

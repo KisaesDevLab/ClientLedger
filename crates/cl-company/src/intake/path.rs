@@ -124,6 +124,17 @@ fn system_drive() -> u8 {
 /// Accepted: `C:\…` and `\\host\share\…` on Windows (either slash),
 /// `/…` elsewhere.
 ///
+/// **`WebDAV` fallback (security review L4).** The explicit `WebDAV` forms
+/// (`\\host@SSL\…`, `\\host@port\…`, `DavWWWRoot`) are refused. A plain
+/// `\\host\share` can't be told apart: Windows reaches it over SMB, and when
+/// SMB fails and the `WebClient` service runs, it may quietly try `WebDAV` over
+/// HTTP to the same host instead, an outbound web connection the path
+/// doesn't show. That is why a network folder this computer never set up
+/// names its computer plainly in Preferences (and "set on another computer
+/// or by another user"), and why nothing touches any folder until an Admin
+/// on this computer tests it. Turning the `WebClient` service off removes
+/// the fallback.
+///
 /// # Errors
 /// [`PathProblem`].
 pub fn check_path_syntax(text: &str, app_dirs: &[&Path]) -> Result<PathBuf, PathProblem> {
@@ -200,6 +211,7 @@ pub fn check_path_syntax(text: &str, app_dirs: &[&Path]) -> Result<PathBuf, Path
 /// prefixes removed, case folded on Windows), so a re-mapped drive letter
 /// or a swapped junction is noticed without keeping the path.
 pub(crate) fn key_of(canonical: &Path) -> String {
+    // Unchanged since A01 shipped pins: stored keys must keep matching.
     let text = canonical.to_string_lossy();
     let text = if cfg!(windows) {
         let t = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
@@ -216,6 +228,32 @@ pub(crate) fn key_of(canonical: &Path) -> String {
     hex(&Sha256::digest(
         format!("clientledger-intake-root:{text}").as_bytes(),
     ))
+}
+
+/// A resolved path as compared: verbatim prefixes removed, case folded and
+/// `\` as the separator on Windows, no trailing separator.
+pub(crate) fn canonical_text(canonical: &Path) -> String {
+    let text = canonical.to_string_lossy();
+    if cfg!(windows) {
+        let t = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{rest}")
+        } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+            rest.to_string()
+        } else {
+            text.into_owned()
+        };
+        t.replace('/', "\\").trim_end_matches('\\').to_lowercase()
+    } else {
+        text.trim_end_matches('/').to_string()
+    }
+}
+
+/// True when the resolved `child` is `parent` or inside it (both resolved:
+/// junctions, links and 8.3 names already followed).
+pub(crate) fn resolved_inside(child: &Path, parent: &Path) -> bool {
+    let (c, p) = (canonical_text(child), canonical_text(parent));
+    let sep = if cfg!(windows) { '\\' } else { '/' };
+    !p.is_empty() && (c == p || c.starts_with(&format!("{p}{sep}")))
 }
 
 /// [`canonical_key`] through `fs`.

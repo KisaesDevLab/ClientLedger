@@ -65,6 +65,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("inbox.upload.failed", "The file couldn't be attached. Nothing changed in your inbox; try again."),
     ("inbox.upload.unknown", "We couldn't confirm the file was attached. It stays in your inbox; check the record before trying again."),
     ("inbox.upload.mismatch", "The books didn't confirm the whole file, so it stays in your inbox. Try again."),
+    ("inbox.discard.on_record", "That document is already attached to a saved bill or check, so it was kept there."),
     ("inbox.notice.draft", "The file is on the new form. It moves to Filed when you save the form."),
     ("inbox.notice.attached", "Attached to {record}. The original moves to the Filed folder in your inbox."),
     ("inbox.attached_from", "Attached from {name} in your receipt inbox."),

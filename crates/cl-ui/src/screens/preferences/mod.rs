@@ -334,6 +334,9 @@ pub struct PreferencesScreen {
     pub(crate) intake: intake_folders::IntakePanel,
     /// The fixed bars' sizes last frame (Q-265).
     layout: crate::layout::FrameReport,
+    /// The Cancel and Save pair's width last frame (they sit right-aligned
+    /// in screen and Tab order).
+    footer_w: f32,
 }
 
 impl PreferencesScreen {
@@ -394,6 +397,7 @@ impl PreferencesScreen {
             close_after_save: false,
             intake: intake_folders::IntakePanel::default(),
             layout: crate::layout::FrameReport::default(),
+            footer_w: 220.0,
         };
         screen.start_load();
         screen.load_intake();
@@ -427,11 +431,7 @@ impl PreferencesScreen {
     }
 
     fn app_dirs(&self) -> Vec<std::path::PathBuf> {
-        let mut dirs = Vec::new();
-        if let Some(settings) = self.link.store().path().parent() {
-            dirs.push(settings.to_path_buf());
-        }
-        dirs.push(self.link.backup_dir.clone());
+        let mut dirs = self.link.app_dirs();
         let typed = self.edits.backup_folder.trim();
         if !typed.is_empty() {
             dirs.push(std::path::PathBuf::from(typed));
@@ -802,8 +802,15 @@ impl PreferencesScreen {
         let pending = std::mem::take(&mut after.intake.confirm);
         let mut here = after.company.intake_here.clone();
         here.extend(pending.clone());
-        if let Some((id, _)) = self.tenant {
+        if let Some((id, name)) = &self.tenant {
+            let id = *id;
             match self.link.store().update(|l| {
+                // A company with no record on this computer yet (the demo,
+                // or one opened before its record was written) gets one, so
+                // "Set up on this computer" survives a reopen (UI check M2).
+                if l.get(id).is_none() {
+                    l.upsert(id, name);
+                }
                 l.get_mut(id).map(|rec| {
                     rec.prefs.intake_here.extend(pending);
                     rec.prefs.retain_intake_for(&stored.folders);
@@ -1155,21 +1162,41 @@ impl Screen for PreferencesScreen {
             crate::layout::FixedFrame::begin(ui, COMMAND, crate::layout::FrameOpts::default());
         frame.top(|ui| {
             ui.add_space(6.0);
+            // Narrow (960 px at 200%): the search box takes what is left of
+            // the title row, without its visible label (its accessible name
+            // stays "Find a setting"), so it isn't cut off and the body keeps
+            // its room (UI check M1).
+            let narrow = ui.available_width() < 560.0;
             ui.horizontal(|ui| {
                 ui.heading(t("prefs.title"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let w = if narrow {
+                        (ui.available_width() - 4.0).clamp(80.0, 220.0)
+                    } else {
+                        220.0
+                    };
                     // Right to left: the input sits at the edge, its label
                     // to the left of it (the label is the accessible name).
                     let input = ui.add_sized(
-                        [220.0, 24.0],
+                        [w, 24.0],
                         egui::TextEdit::singleline(&mut self.search).hint_text(t("prefs.search")),
                     );
-                    let l = ui.add(egui::Label::new(t("prefs.search")).selectable(false));
-                    input.labelled_by(l.id);
+                    if narrow {
+                        let name = t("prefs.search");
+                        input.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::Role::TextInput, true, name.clone())
+                        });
+                    } else {
+                        let l = ui.add(egui::Label::new(t("prefs.search")).selectable(false));
+                        input.labelled_by(l.id);
+                    }
                 });
             });
         });
         frame.body(crate::layout::Body::Scroll, |ui| {
+            // The category list gives way on a narrow window so the panel
+            // keeps room (960 px at 200%).
+            let nav_w = (ui.available_width() * 0.3).clamp(130.0, 190.0);
             ui.horizontal_top(|ui| {
                 egui::Frame::new()
                     .fill(tokens.surface_subtle)
@@ -1177,7 +1204,7 @@ impl Screen for PreferencesScreen {
                     .inner_margin(egui::Margin::symmetric(8, 10))
                     .show(ui, |ui| {
                         ui.vertical(|ui| {
-                            ui.set_width(190.0);
+                            ui.set_width(nav_w);
                             self.nav(ui, &tokens);
                         });
                     });
@@ -1199,32 +1226,42 @@ impl Screen for PreferencesScreen {
             if let Some(e) = &self.error {
                 form::inline_error(ui, &tokens, e);
             }
-            if let Some(s) = &self.status {
-                ui.label(RichText::new(s).color(tokens.text_secondary));
-            }
+            // Right-aligned, but laid out left to right so Tab goes Cancel
+            // then Save, as they read on screen (UI check): the pair's
+            // width from the last frame places them. "Saved." sits on the
+            // same line, at the left, so the bar stays one row.
             ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.save_task.is_some() {
-                        form::progress_line(ui, &tokens, &t("prefs.saving"));
-                    } else {
-                        let can_save = self.loaded.done;
-                        if ui
-                            .add_enabled_ui(can_save, |ui| primary_button(ui, &t("prefs.save")))
-                            .inner
-                            .clicked()
-                        {
-                            self.save();
-                        }
+                if let Some(s) = &self.status {
+                    ui.add(
+                        egui::Label::new(RichText::new(s).color(tokens.text_secondary)).truncate(),
+                    );
+                }
+                ui.add_space((ui.available_width() - self.footer_w).max(0.0));
+                let cancel =
+                    ui.add(egui::Button::new(t("prefs.cancel")).min_size(Vec2::new(0.0, 44.0)));
+                if cancel.clicked() {
+                    self.revert();
+                    self.link
+                        .push(CompanyEvent::CloseWindow(CommandId::new(COMMAND)));
+                }
+                let last = if self.save_task.is_some() {
+                    ui.scope(|ui| form::progress_line(ui, &tokens, &t("prefs.saving")))
+                        .response
+                } else {
+                    let can_save = self.loaded.done;
+                    let save = ui
+                        .add_enabled_ui(can_save, |ui| primary_button(ui, &t("prefs.save")))
+                        .inner;
+                    if save.clicked() {
+                        self.save();
                     }
-                    if ui
-                        .add(egui::Button::new(t("prefs.cancel")).min_size(Vec2::new(0.0, 44.0)))
-                        .clicked()
-                    {
-                        self.revert();
-                        self.link
-                            .push(CompanyEvent::CloseWindow(CommandId::new(COMMAND)));
-                    }
-                });
+                    save
+                };
+                let w = last.rect.right() - cancel.rect.left();
+                if (w - self.footer_w).abs() > 0.5 {
+                    self.footer_w = w;
+                    ui.ctx().request_repaint();
+                }
             });
         });
         self.layout = frame.end();
@@ -1247,7 +1284,9 @@ impl Screen for PreferencesScreen {
                 self.save();
                 true
             }
-            "form.revert" => self.revert(),
+            // Esc closes the Add folder row (or a rename) before the
+            // window (DESIGN: Esc reverts the focused field first).
+            "form.revert" => self.intake.escape() || self.revert(),
             _ => false,
         }
     }

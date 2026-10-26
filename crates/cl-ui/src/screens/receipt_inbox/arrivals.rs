@@ -398,7 +398,8 @@ impl super::ReceiptInboxScreen {
     // Drawing.
 
     fn draw_intake(&mut self, ui: &mut Ui, tokens: &Tokens, f: &Frame) {
-        form::heading(ui, tokens, &t("inbox.title"));
+        // The window title's size, as Preferences (22/600, UI check S8).
+        ui.heading(t("inbox.title"));
         ui.horizontal_wrapped(|ui| {
             if ui
                 .button(t("inbox.check_now"))
@@ -607,17 +608,27 @@ impl super::ReceiptInboxScreen {
             let selected = self.arrivals.selected.as_ref() == Some(&key);
             let usable = pickable(r.state);
             ui.add_space(2.0);
-            let resp = ui.add_enabled(
-                usable,
-                egui::Button::selectable(
-                    selected,
-                    RichText::new(&r.file.name).color(if usable {
-                        tokens.text_primary
-                    } else {
-                        tokens.text_tertiary
-                    }),
-                ),
-            );
+            // A file that can't be picked (HEIC, too large, still
+            // arriving) stays a disabled button, but isn't faded: its name
+            // keeps at least 4.5:1 in both themes (UI check S6).
+            let resp = ui
+                .scope(|ui| {
+                    if !usable {
+                        ui.style_mut().visuals.disabled_alpha = 1.0;
+                    }
+                    ui.add_enabled(
+                        usable,
+                        egui::Button::selectable(
+                            selected,
+                            RichText::new(&r.file.name).color(if usable {
+                                tokens.text_primary
+                            } else {
+                                tokens.text_secondary
+                            }),
+                        ),
+                    )
+                })
+                .inner;
             if resp.clicked() {
                 pick = Some((*r).clone());
             }

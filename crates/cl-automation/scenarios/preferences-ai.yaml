@@ -25,7 +25,7 @@ steps:
   - assert_exists: {role: button, label: Inventory}
   - assert_exists: {role: button, label: AI suggestions}
   - assert_exists: {role: button, label: Email}
-  - assert_exists: {role: button, label: Receipt inbox}
+  - assert_exists: {role: button, label: Document intake}
   - assert_exists: {role: button, label: Backups}
   - assert_exists: {role: button, label: Updates}
   - assert_exists: {role: label, label: Where AI runs}

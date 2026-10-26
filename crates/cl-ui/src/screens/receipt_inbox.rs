@@ -497,7 +497,7 @@ impl ReceiptInboxScreen {
     // Drawing.
 
     fn draw(&mut self, ui: &mut Ui, tokens: &Tokens, files: &[(InboxFile, Mark)]) {
-        form::heading(ui, tokens, &t("inbox.title"));
+        ui.heading(t("inbox.title"));
         let h = service::handle(ui.ctx());
         let folder = h.lock().folder().clone();
         drop(h);

@@ -20,6 +20,17 @@
 //!   re-reads its folders. A 409 writes nothing locally and shows "Intake
 //!   folders were changed elsewhere. Reload to see them."
 //!
+//! - **A folder set elsewhere is named plainly.** A network folder that
+//!   came with the company but was never set up on this computer shows its
+//!   computer ("On the network computer "nas": set on another computer or
+//!   by another user"), so an Admin sees where a Test would connect before
+//!   pressing it. On Windows a `\\host\share` may also be tried over
+//!   `WebDAV` (HTTP) by the `WebClient` service when SMB fails; see
+//!   `cl_company::intake::check_path_syntax`.
+//! - **Tests never pile up.** A Test past its 15 s deadline shows "Not
+//!   responding (still trying)" and Test stays off for that folder until
+//!   the stuck thread is done.
+//!
 //! Folder names and paths are owner data: they appear on screen only,
 //! never in `state()`, `Debug` or a log line.
 
@@ -200,7 +211,9 @@ fn kind_word(k: IntakeKind) -> &'static str {
 
 /// Whether a probe passed well enough to confirm the folder.
 fn usable(r: &ProbeReport) -> bool {
-    matches!(r.health, Health::Ok | Health::TooMany | Health::Slow) && r.canonical_key.is_some()
+    matches!(r.health, Health::Ok | Health::TooMany | Health::Slow)
+        && r.canonical_key.is_some()
+        && !r.app_folder
 }
 
 /// A new folder id.
@@ -238,10 +251,14 @@ impl std::fmt::Debug for AddRow {
 /// One Test, running or answered.
 #[derive(Default)]
 struct Probe {
+    /// Open until the probe's thread is done (also past its deadline).
     rx: Option<Receiver<ProbeReport>>,
     report: Option<ProbeReport>,
     /// The path tested (a report says nothing about another path).
     path: String,
+    /// It answered "not responding" and is still running: no other Test
+    /// of the folder starts until it is done (security review L4).
+    still_trying: bool,
 }
 
 /// What the panel asks the screen to do.
@@ -434,14 +451,24 @@ impl IntakePanel {
         for (id, p) in &mut self.probes {
             if let Some(rx) = &p.rx {
                 match rx.try_recv() {
+                    // Past the deadline: shown, and the thread is waited
+                    // for before Test is offered again.
+                    Ok(report) if report.health == Health::NotResponding && !p.still_trying => {
+                        p.report = Some(report);
+                        p.still_trying = true;
+                    }
                     Ok(report) => {
                         p.report = Some(report);
                         p.rx = None;
+                        p.still_trying = false;
                         answered.push(*id);
                     }
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        p.report = Some(ProbeReport::not_responding());
+                        if p.report.is_none() {
+                            p.report = Some(ProbeReport::not_responding());
+                        }
                         p.rx = None;
+                        p.still_trying = false;
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 }
@@ -454,12 +481,17 @@ impl IntakePanel {
         }
     }
 
-    /// Runs Test on `id` (one at a time per folder).
+    /// Runs Test on `id` (one at a time per folder, also while one that
+    /// stopped answering still runs). Only an Admin tests a folder.
     pub fn test(&mut self, edits: &IntakeEdits, id: IntakeFolderId, app_dirs: &[PathBuf]) {
+        if !self.is_admin() {
+            // A backstop: the buttons are only drawn for an Admin.
+            return;
+        }
         let Some(f) = edits.folders.iter().find(|f| f.id == id) else {
             return;
         };
-        if self.probes.get(&id).is_some_and(|p| p.rx.is_some()) {
+        if self.held(id) {
             return;
         }
         let dirs: Vec<&Path> = app_dirs.iter().map(PathBuf::as_path).collect();
@@ -469,9 +501,10 @@ impl IntakePanel {
         self.probes.insert(
             id,
             Probe {
-                rx: Some(probe_async(root, !f.keep_originals)),
+                rx: Some(probe_async(root, !f.keep_originals, app_dirs.to_vec())),
                 report: None,
                 path: f.path.clone(),
+                still_trying: false,
             },
         );
     }
@@ -483,8 +516,31 @@ impl IntakePanel {
             .and_then(|p| p.report.as_ref())
     }
 
+    /// A Test is running and hasn't answered yet.
     fn testing(&self, id: IntakeFolderId) -> bool {
+        self.probes
+            .get(&id)
+            .is_some_and(|p| p.rx.is_some() && !p.still_trying)
+    }
+
+    /// A Test of `id` still runs (answered or not): no other starts.
+    fn held(&self, id: IntakeFolderId) -> bool {
         self.probes.get(&id).is_some_and(|p| p.rx.is_some())
+    }
+
+    /// Esc: closes the Add folder row or the rename in progress (their
+    /// typed text goes) before the window closes; true when it did.
+    pub fn escape(&mut self) -> bool {
+        if self.add.take().is_some() {
+            return true;
+        }
+        if self.renaming.take().is_some() {
+            return true;
+        }
+        if self.removing.take().is_some() {
+            return true;
+        }
+        false
     }
 
     /// After a passing test: confirm at once, or ask first when the folder
@@ -536,6 +592,10 @@ impl IntakePanel {
         edits: &mut IntakeEdits,
         app_dirs: &[PathBuf],
     ) -> Result<IntakeFolderId, IntakeBlock> {
+        if !self.is_admin() {
+            // A backstop: the row is only drawn for an Admin.
+            return Err(IntakeBlock::ReadOnly);
+        }
         let row = self.add.clone().unwrap_or_default();
         let name = row.name.trim().to_owned();
         let path = row.path.trim().to_owned();
@@ -755,6 +815,9 @@ fn status_text(
     if let Some(r) = panel.report(f)
         && !usable(r)
     {
+        if r.app_folder {
+            return t("prefs.intake.path.app_folder");
+        }
         return t(health_key(r.health).0);
     }
     if edits.confirm.contains_key(&f.id) {
@@ -826,9 +889,11 @@ pub struct View<'a> {
     pub app_dirs: &'a [PathBuf],
 }
 
-fn kind_combo(ui: &mut Ui, salt: egui::IdSalt, kind: &mut IntakeKind) {
+/// The Kind picker. `of`: the folder it belongs to, named in its accessible
+/// label so a screen reader tells the rows apart (`None`: the Add row).
+fn kind_combo(ui: &mut Ui, salt: egui::IdSalt, kind: &mut IntakeKind, of: Option<&str>) {
     let l = ui.add(egui::Label::new(t("prefs.intake.col.kind")).selectable(false));
-    egui::ComboBox::from_id_salt(salt)
+    let r = egui::ComboBox::from_id_salt(salt)
         .selected_text(t(kind_key(*kind)))
         .show_ui(ui, |ui| {
             for k in [IntakeKind::Bills, IntakeKind::Receipts, IntakeKind::Auto] {
@@ -836,10 +901,48 @@ fn kind_combo(ui: &mut Ui, salt: egui::IdSalt, kind: &mut IntakeKind) {
             }
         })
         .response
-        .labelled_by(l.id)
         .on_hover_text(t("prefs.intake.kind.tip"));
+    match of {
+        Some(name) => named(&r, egui::Role::ComboBox, "prefs.intake.a11y.kind", name),
+        None => {
+            r.labelled_by(l.id);
+        }
+    }
 }
 
+/// Gives `r` the accessible label `key` with the folder's `name` in it.
+fn named(r: &egui::Response, kind: egui::Role, key: &str, name: &str) {
+    let label = crate::i18n::t_with(key, &[("name", name)]);
+    let enabled = r.enabled();
+    r.widget_info(|| egui::WidgetInfo::labeled(kind, enabled, label.clone()));
+}
+
+/// A check box whose accessible label names its folder.
+fn named_checkbox(
+    ui: &mut Ui,
+    value: &mut bool,
+    text: &str,
+    key: &str,
+    name: &str,
+) -> egui::Response {
+    let r = ui.checkbox(value, text);
+    let label = crate::i18n::t_with(key, &[("name", name)]);
+    let (enabled, selected) = (r.enabled(), *value);
+    r.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, selected, label.clone())
+    });
+    r
+}
+
+/// The host of a `\\host\share…` (or `//host/share…`) path.
+#[must_use]
+pub fn unc_host(path: &str) -> Option<&str> {
+    let rest = path
+        .strip_prefix(r"\\")
+        .or_else(|| path.strip_prefix("//"))?;
+    let host = rest.split(['\\', '/']).next()?;
+    (!host.is_empty() && !host.starts_with(['?', '.'])).then_some(host)
+}
 /// Draws the Document intake panel.
 pub fn show(ui: &mut Ui, tokens: &Tokens, v: &mut View<'_>) -> PanelAction {
     let mut action = PanelAction::None;
@@ -916,48 +1019,112 @@ pub fn show(ui: &mut Ui, tokens: &Tokens, v: &mut View<'_>) -> PanelAction {
     action
 }
 
-/// The Name · Folder · Kind · Status table.
+/// The Name · Folder · Kind · Status table, sized to the card: Kind and
+/// Status take what they need (Status wraps), Name and Folder share the
+/// rest with Folder the larger, so nothing runs off the card at 960 px or
+/// 200% and a path isn't cut short where there is room.
 fn folder_table(ui: &mut Ui, tokens: &Tokens, v: &View<'_>) {
+    const GAP: f32 = 12.0;
+    let w = ui.available_width();
+    let kind_w = 150.0_f32.min(w * 0.18);
+    let status_w = (w * 0.3).clamp(96.0, 280.0);
+    let rest = (w - kind_w - status_w - 3.0 * GAP).max(96.0);
+    let name_w = (rest * 0.3).clamp(48.0, 220.0);
+    let folder_w = (rest - name_w).max(48.0);
+    let widths = [name_w, folder_w, kind_w, status_w];
+    let cell = |ui: &mut Ui, width: f32, add: &mut dyn FnMut(&mut Ui)| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_width(width);
+                add(ui);
+            },
+        );
+    };
     egui::Grid::new("prefs-intake-table")
         .num_columns(4)
         .striped(true)
-        .spacing([12.0, 6.0])
+        .spacing([GAP, 6.0])
         .show(ui, |ui| {
-            for key in [
+            for (key, width) in [
                 "prefs.intake.col.name",
                 "prefs.intake.col.folder",
                 "prefs.intake.col.kind",
                 "prefs.intake.col.status",
-            ] {
-                ui.add(
-                    egui::Label::new(RichText::new(t(key)).color(tokens.text_secondary).strong())
+            ]
+            .into_iter()
+            .zip(widths)
+            {
+                cell(ui, width, &mut |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(t(key)).color(tokens.text_secondary).strong(),
+                        )
                         .selectable(false),
-                );
+                    );
+                });
             }
             ui.end_row();
             for f in &v.edits.folders {
-                ui.add(egui::Label::new(&f.name).selectable(false));
+                cell(ui, name_w, &mut |ui| {
+                    ui.add(egui::Label::new(&f.name).truncate().selectable(false));
+                });
                 // A path under the owner's profile shows as `~` (as P17
                 // did); the whole path is on hover.
-                ui.add(
-                    egui::Label::new(crate::screens::document_view::shown_path(Path::new(
-                        &f.path,
-                    )))
-                    .truncate()
-                    .selectable(false),
-                )
-                .on_hover_text(&f.path);
-                ui.add(egui::Label::new(t(kind_key(f.default_kind))).selectable(false));
-                let status = status_text(v.panel, v.edits, v.committed, v.here, f);
-                ui.add(
-                    egui::Label::new(RichText::new(status).color(tokens.text_secondary))
+                cell(ui, folder_w, &mut |ui| {
+                    ui.add(
+                        egui::Label::new(crate::screens::document_view::shown_path(Path::new(
+                            &f.path,
+                        )))
+                        .truncate()
                         .selectable(false),
-                );
+                    )
+                    .on_hover_text(&f.path);
+                });
+                cell(ui, kind_w, &mut |ui| {
+                    ui.add(
+                        egui::Label::new(t(kind_key(f.default_kind)))
+                            .wrap()
+                            .selectable(false),
+                    );
+                });
+                let status = status_text(v.panel, v.edits, v.committed, v.here, f);
+                cell(ui, status_w, &mut |ui| {
+                    ui.add(
+                        egui::Label::new(RichText::new(&status).color(tokens.text_secondary))
+                            .wrap()
+                            .selectable(false),
+                    );
+                    // A network folder this computer never set up: its
+                    // computer is named plainly before anyone tests it
+                    // (security review L4).
+                    if let Some(host) = unc_host(&f.path).filter(|_| unconfirmed(v, f)) {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(crate::i18n::t_with(
+                                    "prefs.intake.unc_host",
+                                    &[("host", host)],
+                                ))
+                                .size(12.0)
+                                .color(tokens.warn_text),
+                            )
+                            .wrap(),
+                        );
+                    }
+                });
                 ui.end_row();
             }
         });
 }
 
+/// `f` came with the company (not added in this window) and this computer
+/// hasn't set it up, nor is about to.
+fn unconfirmed(v: &View<'_>, f: &IntakeFolder) -> bool {
+    v.committed.folders.iter().any(|c| c.id == f.id)
+        && !v.edits.confirm.contains_key(&f.id)
+        && !confirmed(v.here, f)
+}
 /// Each folder's controls under the table.
 fn folder_rows(
     ui: &mut Ui,
@@ -1011,16 +1178,30 @@ fn folder_rows(
         }
         // Kind and the switches.
         if let Some(fm) = edits.folders.iter_mut().find(|f| f.id == id) {
+            let name = fm.name.clone();
             ui.horizontal(|ui| {
                 kind_combo(
                     ui,
                     egui::IdSalt::new(("prefs-intake-kind", id)),
                     &mut fm.default_kind,
+                    Some(&name),
                 );
             });
-            ui.checkbox(&mut fm.keep_originals, t("prefs.intake.keep_originals"))
-                .on_hover_text(t("prefs.intake.keep_originals.tip"));
-            ui.checkbox(&mut fm.auto_read, t("prefs.intake.auto_read"));
+            named_checkbox(
+                ui,
+                &mut fm.keep_originals,
+                &t("prefs.intake.keep_originals"),
+                "prefs.intake.a11y.keep_originals",
+                &name,
+            )
+            .on_hover_text(t("prefs.intake.keep_originals.tip"));
+            named_checkbox(
+                ui,
+                &mut fm.auto_read,
+                &t("prefs.intake.auto_read"),
+                "prefs.intake.a11y.auto_read",
+                &name,
+            );
             form::hint(ui, tokens, &t("prefs.intake.auto_read.hint"));
         }
         // Test report.
@@ -1058,32 +1239,38 @@ fn folder_rows(
             });
             continue;
         }
-        ui.horizontal(|ui| {
-            if ui.button(t("prefs.intake.rename")).clicked() {
+        ui.horizontal_wrapped(|ui| {
+            let button = egui::Role::Button;
+            let r = ui.button(t("prefs.intake.rename"));
+            named(&r, button, "prefs.intake.a11y.rename", &f.name);
+            if r.clicked() {
                 panel.renaming = Some((id, f.name.clone()));
             }
-            if ui.button(t("prefs.intake.remove")).clicked() {
+            let r = ui.button(t("prefs.intake.remove"));
+            named(&r, button, "prefs.intake.a11y.remove", &f.name);
+            if r.clicked() {
                 panel.removing = Some(id);
             }
-            let testing = panel.testing(id);
-            if ui
-                .add_enabled(!testing, egui::Button::new(t("prefs.intake.test")))
-                .on_hover_text(t("prefs.intake.test.tip"))
-                .clicked()
-            {
+            // Not again while one still runs, even past its deadline.
+            let r = ui
+                .add_enabled(!panel.held(id), egui::Button::new(t("prefs.intake.test")))
+                .on_hover_text(t("prefs.intake.test.tip"));
+            named(&r, button, "prefs.intake.a11y.test", &f.name);
+            if r.clicked() {
                 panel.test(edits, id, app_dirs);
             }
             let can_use = !edits.confirm.contains_key(&id)
                 && !confirmed(here, &f)
                 && panel.ask_bring_in != Some(id)
                 && panel.report(&f).is_some_and(usable);
-            if can_use
-                && ui
+            if can_use {
+                let r = ui
                     .button(t("prefs.intake.use_here"))
-                    .on_hover_text(t("prefs.intake.use_here.tip"))
-                    .clicked()
-            {
-                panel.offer_confirm(edits, id);
+                    .on_hover_text(t("prefs.intake.use_here.tip"));
+                named(&r, button, "prefs.intake.a11y.use_here", &f.name);
+                if r.clicked() {
+                    panel.offer_confirm(edits, id);
+                }
             }
         });
     }
@@ -1107,17 +1294,25 @@ fn add_row(
     form::field_wide(ui, &t("prefs.intake.add.path"), &mut row.path);
     form::hint(ui, tokens, &t("prefs.intake.add.path_hint"));
     let mut kind = row.kind.unwrap_or(IntakeKind::Auto);
-    ui.horizontal(|ui| kind_combo(ui, egui::IdSalt::new("prefs-intake-add-kind"), &mut kind));
+    ui.horizontal(|ui| {
+        kind_combo(
+            ui,
+            egui::IdSalt::new("prefs-intake-add-kind"),
+            &mut kind,
+            None,
+        );
+    });
     row.kind = Some(kind);
     // Inline refusal of the path as typed (syntax only, no I/O).
     let dirs: Vec<&Path> = app_dirs.iter().map(PathBuf::as_path).collect();
     let typed = row.path.trim();
+    // A refusal is a warning, not helper text (UI check S7).
     if !typed.is_empty()
         && let Err(p) = check_path_syntax(typed, &dirs)
     {
-        form::hint(ui, tokens, &t(path_problem_key(p)));
+        form::inline_warning(ui, tokens, &t(path_problem_key(p)));
     } else if let Some(b) = row.problem {
-        form::hint(ui, tokens, &t(b.message_key()));
+        form::inline_warning(ui, tokens, &t(b.message_key()));
     }
     let mut add = false;
     let mut cancel = false;
