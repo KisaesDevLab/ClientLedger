@@ -277,13 +277,13 @@ jobs:
           # Fail instead of skipping when the engine, PostgreSQL or engine/ are missing.
           CL_API_REQUIRE: "1"
           # Capabilities the pinned engine has (Q-P05h): a missing one fails
-          # instead of going PENDING. Pin b483c02e: engine PR-A, PR-B, U-18, U-90, U-91.
-          CL_API_REQUIRE_CAPS: "ap-closing-v1,ap-edit-v1,bill-lines-v1,bill-terms-v1,bill-received-v1,bill-ocr-v2,idempotency-v1,idempotency-ap-v1,attachments-company-v1"
+          # instead of going PENDING. Pin a88337e3: engine PR-A, PR-B, U-18, U-90, U-91, U-93.
+          CL_API_REQUIRE_CAPS: "ap-closing-v1,ap-edit-v1,bill-lines-v1,bill-terms-v1,bill-received-v1,bill-ocr-v2,idempotency-v1,idempotency-ap-v1,attachments-company-v1,intake-settings-v1"
           # Same hosted-runner override as the cl-host step above (cold start is
           # slower than the 15 s product budget on shared runners). The contract
           # harness has its own boot limit, CL_API_BOOT_BUDGET_SECS (default 90 s).
           CL_HOST_BUDGET_SECS: ${{ (runner.os == 'Windows' || (runner.os == 'macOS' && runner.arch == 'X64')) && '60' || '30' }}
-        run: cargo test -p cl-api --test contract --test contract_offline --test spec_fixtures
+        run: cargo test -p cl-api --test contract --test contract_offline --test intake_settings --test spec_fixtures
       - name: Practice company against the real engine (templates load, first catch-up)
         env:
           CL_API_REQUIRE: "1"
@@ -300,9 +300,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo test -p cl-api --test contract --test contract_offline --test network_probe \
+          cargo test -p cl-api --test contract --test contract_offline --test intake_settings --test network_probe \
             --no-run --message-format=json > "$RUNNER_TEMP/cl-api-build.json"
-          for name in network_probe contract contract_offline; do
+          for name in network_probe contract contract_offline intake_settings; do
             exe=$(jq -r --arg n "$name" \
               'select(.reason == "compiler-artifact" and .target.name == $n and .executable != null) | .executable' \
               "$RUNNER_TEMP/cl-api-build.json" | head -n 1)
@@ -330,7 +330,7 @@ jobs:
           sudo chmod -R o+rX "$GITHUB_WORKSPACE/target/pg" "$GITHUB_WORKSPACE/target/engine"
           # shellcheck disable=SC1090
           . "$RUNNER_TEMP/cl-api-exes.env"
-          sudo chmod o+rx "$network_probe" "$contract" "$contract_offline"
+          sudo chmod o+rx "$network_probe" "$contract" "$contract_offline" "$intake_settings"
           # TCP gets a reset (the connect fails at once); everything else
           # an ICMP unreachable. Loopback stays open: the engine, PostgreSQL and
           # the client all talk over 127.0.0.1.
@@ -368,6 +368,7 @@ jobs:
           grep -q "network_probe: blocked OK" "$RUNNER_TEMP/network_probe.log"
           run_blocked "$contract"
           run_blocked "$contract_offline"
+          run_blocked "$intake_settings"
       - name: Remove the network block and the cltest user
         if: always() && runner.os == 'Linux'
         shell: bash
