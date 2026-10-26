@@ -34,6 +34,7 @@
 
 mod attach;
 pub mod doc_read;
+mod doc_read_local;
 mod form;
 pub mod items;
 mod prefill;
