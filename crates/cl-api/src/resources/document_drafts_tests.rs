@@ -277,7 +277,10 @@ async fn readings_over_the_engine_bounds_are_refused_before_sending() {
     let server = MockServer::start().await;
     let s = served(&server).await;
     let mut float = reading();
-    float.fields.insert("x".into(), json!(1.5));
+    float.fields.insert(
+        "x".into(),
+        serde_json::from_str::<Value>("1.5").expect("a fractional JSON number"),
+    );
     let mut big_int = reading();
     big_int.lines = vec![json!({"n": 1_000_000_001_u64})];
     let mut long = reading();
@@ -443,6 +446,10 @@ async fn convert_sends_the_forms_body_and_the_password_at_the_top() {
 }
 
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one scenario over the three posting kinds"
+)]
 async fn convert_builds_each_kind_with_the_typed_builders() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

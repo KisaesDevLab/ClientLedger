@@ -357,7 +357,10 @@ mod tests {
         let server = MockServer::start().await;
         let s = served(&server).await;
         let mut float = upsert();
-        float.field_regions.insert("x".into(), json!(0.5));
+        float.field_regions.insert(
+            "x".into(),
+            serde_json::from_str::<Value>("0.5").expect("a fractional JSON number"),
+        );
         let mut deep = upsert();
         deep.field_regions
             .insert("d".into(), json!({"a":{"b":{"c":{"d":{"e":{"f":1}}}}}}));
