@@ -41,6 +41,7 @@ impl std::fmt::Debug for Mapped {
                 &self.checks.iter().map(|c| c.code).collect::<Vec<_>>(),
             )
             .field("one_total_line", &self.one_total_line)
+            .field("balance_due", &self.balance_due.is_some())
             .finish()
     }
 }

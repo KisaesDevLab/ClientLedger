@@ -1037,16 +1037,7 @@ fn reading_accuracy_against_q285() {
         eprintln!("skipped: set CL_DOCREAD_ACCURACY=1 (cargo xtask docread-accuracy)");
         return;
     }
-    let gate = std::env::var("CL_DOCREAD_GATE").as_deref() == Ok("1");
-    if gate {
-        // A gate run reads the whole set through the worker (review S3).
-        for var in ["CL_DOCREAD_ROUTES", "CL_DOCREAD_PARTS", "CL_DOCREAD_REUSE"] {
-            assert!(
-                std::env::var_os(var).is_none_or(|v| v.is_empty()),
-                "{var} narrows or replays the set: not allowed with CL_DOCREAD_GATE=1"
-            );
-        }
-    }
+    let gate = gate_mode();
     let set = env_path("CL_DOCREAD_SET").unwrap_or_else(|| repo().join("target/docread-synth"));
     let out_dir =
         env_path("CL_DOCREAD_REPORT").unwrap_or_else(|| repo().join("target/docread-accuracy"));
@@ -1139,6 +1130,21 @@ fn reading_accuracy_against_q285() {
             failures.join("\n")
         );
     }
+}
+
+/// `CL_DOCREAD_GATE=1`. A gate run reads the whole set through the worker
+/// (review S3): anything that narrows or replays it is refused.
+fn gate_mode() -> bool {
+    let gate = std::env::var("CL_DOCREAD_GATE").as_deref() == Ok("1");
+    if gate {
+        for var in ["CL_DOCREAD_ROUTES", "CL_DOCREAD_PARTS", "CL_DOCREAD_REUSE"] {
+            assert!(
+                std::env::var_os(var).is_none_or(|v| v.is_empty()),
+                "{var} narrows or replays the set: not allowed with CL_DOCREAD_GATE=1"
+            );
+        }
+    }
+    gate
 }
 
 /// Review S3: a gate run must have documents in every group and path.

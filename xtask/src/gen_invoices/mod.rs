@@ -87,13 +87,13 @@ fn parse(args: &[String]) -> Result<Options> {
     Ok(o)
 }
 
-/// Entry point.
-#[allow(clippy::too_many_lines)]
 /// How many layouts a full set (`--holdout`) has.
 pub fn layout_count() -> usize {
     layouts::all().len()
 }
 
+/// Entry point.
+#[allow(clippy::too_many_lines)]
 pub fn gen_invoices(args: &[String]) -> Result<()> {
     let o = parse(args)?;
     if cfg!(debug_assertions)

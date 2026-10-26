@@ -604,20 +604,21 @@ mod tests {
             tokens: vec!["invoice".into(), "remit".into()],
             aspect: 12_941,
         };
-        let mut a = vendor(1, "Riverbend Supply Co.");
-        a.layouts = vec![fp.clone()];
-        let b = vendor(2, "Hilltop Feed & Seed");
-        let vs = [a, b];
+        let mut layout_owner = vendor(1, "Riverbend Supply Co.");
+        layout_owner.layouts = vec![fp.clone()];
+        let vs = [layout_owner, vendor(2, "Hilltop Feed & Seed")];
         let h = header("Hilltop Feed & Seed");
         let m = match_vendor(&h, Some(&fp), &vs).unwrap();
         assert_eq!((m.contact, m.tier), (id(2), VendorTier::Name(1)));
         assert_eq!(m.layout_of, Some(id(1)));
-        let c = layout_check(&m, &h, &vs).unwrap();
+        let check = layout_check(&m, &h, &vs).unwrap();
         assert_eq!(
-            (c.code, c.field),
+            (check.code, check.field),
             (CheckCode::ReadersDisagree, Some(FieldName::Vendor))
         );
-        assert!(matches!(&c.expected, Some(CheckValue::Text(t)) if t == "Riverbend Supply Co."));
+        assert!(
+            matches!(&check.expected, Some(CheckValue::Text(name)) if name == "Riverbend Supply Co.")
+        );
         // The layout's own vendor printed: no disagreement, no check.
         let m = match_vendor(&header("Riverbend Supply Co."), Some(&fp), &vs).unwrap();
         assert_eq!(
