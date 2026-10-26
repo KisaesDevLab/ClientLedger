@@ -227,6 +227,7 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 7. `omit_document_drafts` / `reset_document_drafts` are unused until P32 (transfer files).
 8. Account form create-then-set card digits has no live-engine test (the save path itself is tested live).
 9. Drafts are not created on arrival yet: A04 owns the review queue and creating drafts from the intake folders.
+10. Flaky on slow macOS Intel runners: `automation::bridge_tests::a_closed_window_is_forgotten` (A02) failed once on PR #44 (`before.is_ok()`); passed on re-run. Make its first inspect wait for the child window's first frame.
 
 ## Follow-ups from A02
 
