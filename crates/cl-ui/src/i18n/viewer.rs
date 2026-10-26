@@ -35,4 +35,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("viewer.empty", "No document is open here. Use Preview on an attachment, or Open full size on a preview."),
     ("viewer.preview", "Preview"),
     ("viewer.preview.tip", "Show this file in its own tab"),
+    // A02 WP-A
+    ("viewer.pop_out", "Pop out"),
+    ("viewer.pop_out.tip", "Show the document in its own window ({keys})"),
+    ("viewer.pop_out.tip_plain", "Show the document in its own window"),
 ];

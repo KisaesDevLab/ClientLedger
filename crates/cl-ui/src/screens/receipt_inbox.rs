@@ -702,7 +702,8 @@ impl ReceiptInboxScreen {
                         ));
                     }
                 }
-                ViewerEvent::None => {}
+                // A02: Pop out and Dock reach the screens through widgets::doc_pane.
+                ViewerEvent::None | ViewerEvent::PopOut | ViewerEvent::Dock => {}
             }
             if let Some(saved) = &self.saved_copy {
                 let text = match saved {

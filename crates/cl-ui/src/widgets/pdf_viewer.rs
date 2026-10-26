@@ -132,6 +132,12 @@ pub enum ViewerEvent {
     OpenFullSize,
     /// "Save a copy" (the preview is unavailable or the PDF is protected).
     SaveCopy,
+    /// "Pop out" (A02): show the document in the shell's viewer window.
+    /// Offered when [`ViewerState::set_pop_out_button`] is on.
+    PopOut,
+    /// "Dock" (A02): bring the document back into the form. Drawn by
+    /// `widgets::doc_pane` on the popped-out placeholder, not by the viewer.
+    Dock,
 }
 
 /// Where the open document is.
@@ -182,6 +188,7 @@ pub struct ViewerState {
     zoom: Zoom,
     focused: bool,
     full_size_button: bool,
+    pop_out_button: bool,
     status: Status,
     truncated: bool,
     worker: Option<DocWorker>,
@@ -223,9 +230,25 @@ impl ViewerState {
         self.source = Some(source);
     }
 
+    /// Show `source` from its first page, keeping the zoom setting (A02: the
+    /// pop-out window following a new form keeps the owner's zoom).
+    pub fn open_keep_zoom(&mut self, source: DocSource) {
+        let zoom = self.zoom;
+        self.open(source);
+        self.zoom = zoom;
+    }
+
     /// Show nothing.
     pub fn clear(&mut self) {
         self.reset();
+    }
+
+    /// Drop the drawn page's texture (A02: the docked form while its
+    /// document shows in the pop-out window). The document stays open; the
+    /// page is asked for again the next time the viewer is drawn.
+    pub fn release_pixels(&mut self) {
+        self.shown = None;
+        self.asked = None;
     }
 
     /// Forget the open document (the worker too), keeping the worker, the
@@ -293,6 +316,12 @@ impl ViewerState {
     /// Offer "Open full size" (the card does; the full-size tab does not).
     pub fn set_full_size_button(&mut self, on: bool) {
         self.full_size_button = on;
+    }
+
+    /// Offer "Pop out" (A02: the docked viewer does; the pop-out window and
+    /// the full-size tab do not). A click answers [`ViewerEvent::PopOut`].
+    pub fn set_pop_out_button(&mut self, on: bool) {
+        self.pop_out_button = on;
     }
 
     /// The zoom in effect, in percent of the page's own size (100 before
@@ -641,6 +670,19 @@ impl DocViewer {
                     event = ViewerEvent::OpenFullSize;
                 }
             }
+            if state.pop_out_button {
+                let k = keys("view.toggle_doc_viewer");
+                let tip = if k.is_empty() {
+                    t("viewer.pop_out.tip_plain")
+                } else {
+                    t_with("viewer.pop_out.tip", &[("keys", &k)])
+                };
+                let r = ui.button(t("viewer.pop_out")).on_hover_text(tip);
+                focused |= r.has_focus();
+                if r.clicked() {
+                    event = ViewerEvent::PopOut;
+                }
+            }
         });
         if state.truncated {
             ui.label(
@@ -811,6 +853,26 @@ mod tests {
     }
 
     #[test]
+    fn open_keep_zoom_keeps_the_zoom_and_release_pixels_drops_the_page() {
+        let mut v = ViewerState::default();
+        v.open(fixture("receipt.png"));
+        assert!(v.command(CommandId::new("viewer.zoom_in")));
+        let zoom = v.zoom();
+        v.open_keep_zoom(fixture("receipt.jpg"));
+        assert_eq!(v.zoom(), zoom);
+        assert_eq!(v.status(), Status::Loading);
+        v.open(fixture("receipt.png"));
+        assert_eq!(v.zoom(), Zoom::default());
+        let _ = draw_until(&mut v, false, |v| v.state_json()["rendered"] == true);
+        v.release_pixels();
+        assert!(v.shown.is_none() && v.asked.is_none());
+        assert_eq!(v.state_json()["rendered"], false);
+        assert!(v.source().is_some(), "the document stays open");
+        // Drawn again, the page comes back.
+        let _ = draw_until(&mut v, false, |v| v.state_json()["rendered"] == true);
+    }
+
+    #[test]
     fn zoom_steps_go_up_and_down_within_bounds() {
         assert_eq!(zoom_step_in(100.0), 110);
         assert_eq!(zoom_step_in(99.8), 110);
@@ -941,8 +1003,10 @@ mod tests {
     fn an_image_previews_with_its_labels() {
         let mut v = ViewerState::default();
         v.open(fixture("receipt.png"));
+        v.set_pop_out_button(true);
         let nodes = draw_until(&mut v, true, |v| v.state_json()["rendered"] == true);
         let has = |role, name: &str| nodes.iter().any(|(r, n)| *r == role && n == name);
+        assert!(has(Role::Button, "Pop out"), "{nodes:?}");
         assert!(has(Role::Image, "Preview of receipt.png"), "{nodes:?}");
         for b in [
             "Previous page",
