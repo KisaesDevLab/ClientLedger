@@ -117,6 +117,10 @@ impl<'de> Deserialize<'de> for CreatedTenant {
 
 /// What a backup contains (`POST /api/v1/tenants/{id}/archives`).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent switches of the engine's archive request"
+)]
 pub struct ArchiveRequest {
     /// Bundle attachment files.
     pub include_attachments: bool,
@@ -127,6 +131,12 @@ pub struct ArchiveRequest {
     /// transfer file (P32) never holds folder paths. Needs
     /// `intake-settings-v1`; only written when `true`.
     pub omit_intake_settings: bool,
+    /// Leave unconverted document drafts, vendor layouts and the live
+    /// drafts' files out (U-92 `omitDocumentDrafts`, Q-A03g): a transfer
+    /// file (P32) carries only what was entered. The manifest then lists
+    /// [`DOCUMENT_DRAFTS_OMITTED`] in `omitted`. Needs `document-drafts-v1`;
+    /// only written when `true`.
+    pub omit_document_drafts: bool,
     /// Opaque application metadata kept in `manifest.host` (≤ 16 KiB).
     pub host: Value,
     /// The owner's backup passphrase (never logged).
@@ -135,18 +145,34 @@ pub struct ArchiveRequest {
 
 impl Serialize for ArchiveRequest {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let fields = if self.omit_intake_settings { 5 } else { 4 };
+        let fields =
+            4 + usize::from(self.omit_intake_settings) + usize::from(self.omit_document_drafts);
         let mut st = s.serialize_struct("ArchiveRequest", fields)?;
         st.serialize_field("includeAttachments", &self.include_attachments)?;
         st.serialize_field("includeAudit", &self.include_audit)?;
         if self.omit_intake_settings {
             st.serialize_field("omitIntakeSettings", &true)?;
         }
+        if self.omit_document_drafts {
+            st.serialize_field("omitDocumentDrafts", &true)?;
+        }
         st.serialize_field("host", &self.host)?;
         st.serialize_field("passphrase", self.passphrase.expose())?;
         st.end()
     }
 }
+
+/// What an archive written with `omit_document_drafts` lists in its
+/// manifest's `omitted` (U-92): the live drafts' files (unless another
+/// exported row references them), the drafts' audit rows, the unconverted
+/// drafts, and every vendor layout. Converted drafts travel with their
+/// transactions; `card_last4` travels.
+pub const DOCUMENT_DRAFTS_OMITTED: [&str; 4] = [
+    "attachments:live-document-drafts",
+    "audit_log:document-drafts",
+    "document_drafts:unconverted",
+    "vendor_layout_templates",
+];
 
 /// Maximum `host` metadata size the engine accepts.
 pub const HOST_METADATA_MAX_BYTES: usize = 16 * 1024;
@@ -352,15 +378,23 @@ pub struct ImportRequest {
     pub passphrase: Secret,
     /// Create a scratch tenant (test-restore, E5b).
     pub scratch: bool,
+    /// Delete unconverted document drafts and every vendor layout after
+    /// the import (U-92 `resetDocumentDrafts`): set for a transfer file
+    /// from another computer. Needs `document-drafts-v1`; only written
+    /// when `true`.
+    pub reset_document_drafts: bool,
 }
 
 impl Serialize for ImportRequest {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let mut st = s.serialize_struct("ImportRequest", 3)?;
+        let mut st = s.serialize_struct("ImportRequest", 4)?;
         st.serialize_field("path", &self.path.to_string_lossy())?;
         st.serialize_field("passphrase", self.passphrase.expose())?;
         if self.scratch {
             st.serialize_field("scratch", &true)?;
+        }
+        if self.reset_document_drafts {
+            st.serialize_field("resetDocumentDrafts", &true)?;
         }
         st.end()
     }
@@ -582,8 +616,9 @@ impl Tenants<'_> {
     /// # Errors
     /// `Local(InvalidValue)` when `host` exceeds 16 KiB or the passphrase
     /// is empty, `Local(Unsupported)` for `omit_intake_settings` without
-    /// `intake-settings-v1` (nothing sent; such an engine keeps no intake
-    /// folders, so leave the flag off there); any [`ApiError`].
+    /// `intake-settings-v1` or `omit_document_drafts` without
+    /// `document-drafts-v1` (nothing sent; such an engine keeps no intake
+    /// folders or drafts, so leave the flag off there); any [`ApiError`].
     pub async fn export_archive(
         &self,
         id: TenantId,
@@ -595,6 +630,15 @@ impl Tenants<'_> {
                 .client()
                 .capabilities()
                 .has(crate::wire::Capabilities::INTAKE_SETTINGS)
+        {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
+        }
+        if request.omit_document_drafts
+            && !self
+                .0
+                .client()
+                .capabilities()
+                .has(crate::wire::Capabilities::DOCUMENT_DRAFTS)
         {
             return Err(ApiError::Local(LocalValidation::Unsupported));
         }
@@ -658,10 +702,20 @@ impl Tenants<'_> {
     ///
     /// # Errors
     /// `Local(InvalidValue)` for a relative path or empty passphrase
-    /// (nothing sent); `Validation` for a path the engine refuses; any
-    /// [`ApiError`].
+    /// (nothing sent), `Local(Unsupported)` for `reset_document_drafts`
+    /// without `document-drafts-v1`; `Validation` for a path the engine
+    /// refuses; any [`ApiError`].
     pub async fn import_archive(&self, request: &ImportRequest) -> Result<ImportJob, ApiError> {
         require_absolute_file(&request.path)?;
+        if request.reset_document_drafts
+            && !self
+                .0
+                .client()
+                .capabilities()
+                .has(crate::wire::Capabilities::DOCUMENT_DRAFTS)
+        {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
+        }
         if request.passphrase.is_empty() {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
         }
@@ -849,6 +903,7 @@ mod tests {
             include_attachments: true,
             include_audit: true,
             omit_intake_settings: false,
+            omit_document_drafts: false,
             host: serde_json::json!({"app":"ClientLedger","kind":"backup"}),
             passphrase: Secret::new("pass-canary-123"),
         };
@@ -863,7 +918,7 @@ mod tests {
         assert_eq!(body["passphrase"], "pass-canary-123");
         assert_eq!(body["host"]["kind"], "backup");
         assert!(
-            body.get("omitIntakeSettings").is_none(),
+            body.get("omitIntakeSettings").is_none() && body.get("omitDocumentDrafts").is_none(),
             "only written when set: {body}"
         );
         assert!(!format!("{req:?}").contains("pass-canary"));
@@ -890,6 +945,7 @@ mod tests {
             include_attachments: false,
             include_audit: true,
             omit_intake_settings: true,
+            omit_document_drafts: false,
             host: serde_json::json!({"app":"ClientLedger","kind":"transfer"}),
             passphrase: Secret::new("pass-canary-123"),
         };
@@ -910,6 +966,77 @@ mod tests {
         let body: Value = serde_json::from_slice(&posts[0].body).expect("json");
         assert_eq!(body["omitIntakeSettings"], true);
         assert_eq!(body["includeAudit"], true);
+    }
+
+    /// U-92: a transfer file leaves the drafts out and its import resets
+    /// them; both need `document-drafts-v1` and are written only when set.
+    #[tokio::test]
+    async fn document_drafts_omit_and_reset_need_the_capability() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v1/tenants/{TENANT}/archives")))
+            .respond_with(json(202, r#"{"jobId":"job_3","archiveId":"a-3"}"#))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/tenant-archives/import"))
+            .respond_with(json(202, r#"{"jobId":"imp_3"}"#))
+            .mount(&server)
+            .await;
+        let req = ArchiveRequest {
+            include_attachments: true,
+            include_audit: true,
+            omit_intake_settings: false,
+            omit_document_drafts: true,
+            host: serde_json::json!({"app":"ClientLedger","kind":"transfer"}),
+            passphrase: Secret::new("pass-canary-123"),
+        };
+        let abs = if cfg!(windows) {
+            PathBuf::from(r"C:\backups\co.clbackup")
+        } else {
+            PathBuf::from("/backups/co.clbackup")
+        };
+        let import = ImportRequest {
+            path: abs,
+            passphrase: Secret::new("pw"),
+            scratch: false,
+            reset_document_drafts: true,
+        };
+        let tenant = TenantId::parse(TENANT).expect("id");
+        let old = ws(&server);
+        assert_eq!(
+            old.tenants().export_archive(tenant, &req).await,
+            Err(ApiError::Local(LocalValidation::Unsupported))
+        );
+        assert_eq!(
+            old.tenants().import_archive(&import).await,
+            Err(ApiError::Local(LocalValidation::Unsupported))
+        );
+        assert!(requests(&server, "POST").await.is_empty(), "nothing sent");
+
+        let s = crate::resources::testkit::session_with_caps(
+            &server,
+            &[crate::Capabilities::DOCUMENT_DRAFTS],
+        )
+        .await;
+        s.tenants().export_archive(tenant, &req).await.expect("job");
+        s.tenants().import_archive(&import).await.expect("import");
+        let posts = requests(&server, "POST").await;
+        let export: Value = serde_json::from_slice(&posts[0].body).expect("json");
+        assert_eq!(export["omitDocumentDrafts"], true);
+        assert!(export.get("omitIntakeSettings").is_none());
+        let imported: Value = serde_json::from_slice(&posts[1].body).expect("json");
+        assert_eq!(imported["resetDocumentDrafts"], true);
+        assert_eq!(
+            DOCUMENT_DRAFTS_OMITTED,
+            [
+                "attachments:live-document-drafts",
+                "audit_log:document-drafts",
+                "document_drafts:unconverted",
+                "vendor_layout_templates",
+            ],
+            "the engine's manifest names (DESKTOP.md, Archives)"
+        );
     }
 
     #[tokio::test]
@@ -986,6 +1113,7 @@ mod tests {
                 path: abs,
                 passphrase: Secret::new("pw"),
                 scratch: false,
+                reset_document_drafts: false,
             })
             .await
             .expect("import");
@@ -1007,6 +1135,7 @@ mod tests {
                 path: PathBuf::from("relative.clbackup"),
                 passphrase: Secret::new("pw"),
                 scratch: false,
+                reset_document_drafts: false,
             })
             .await
             .expect_err("relative");

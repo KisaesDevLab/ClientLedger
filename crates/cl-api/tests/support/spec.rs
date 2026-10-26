@@ -26,7 +26,9 @@ use sha2::{Digest, Sha256};
 /// roles are; since pin f3ce33fd (engine PR-A) the P17 vendor credit edit
 /// (U-84a), bill terms dates (U-86d) and payment terms list (U-86e) are;
 /// since pin a88337e3 (engine PR #177) the A01 intake settings (U-93) are.
-pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
+/// The A03 document draft and vendor layout routes (U-92, engine PR #178)
+/// are client-declared until the pin has them.
+pub const OUTSIDE_SPEC: [(&str, &str); 18] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -36,6 +38,17 @@ pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
+    // A03 (U-92, engine PR #178): until the pin moves.
+    ("POST", "/api/v1/document-drafts"),
+    ("GET", "/api/v1/document-drafts"),
+    ("GET", "/api/v1/document-drafts/{id}"),
+    ("GET", "/api/v1/document-drafts/{id}/duplicates"),
+    ("PUT", "/api/v1/document-drafts/{id}"),
+    ("POST", "/api/v1/document-drafts/{id}/discard"),
+    ("POST", "/api/v1/document-drafts/{id}/convert"),
+    ("GET", "/api/v1/vendor-layout-templates"),
+    ("PUT", "/api/v1/vendor-layout-templates"),
+    ("DELETE", "/api/v1/vendor-layout-templates/{id}"),
 ];
 
 /// Lowercase hex of a SHA-256.
@@ -224,6 +237,12 @@ pub fn keyable_operations(txt: &str) -> Vec<(String, String)> {
 /// `(METHOD, route)`, sorted.
 pub fn keyable_ap_operations(txt: &str) -> Vec<(String, String)> {
     rows_of_class(txt, "keyable-ap")
+}
+
+/// The `keyable-docs` (`idempotency-docs-v1`) rows of `operations.txt`:
+/// `(METHOD, route)`, sorted.
+pub fn keyable_docs_operations(txt: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, "keyable-docs")
 }
 
 fn rows_of_class(txt: &str, class: &str) -> Vec<(String, String)> {

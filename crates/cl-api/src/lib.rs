@@ -52,6 +52,7 @@ pub use queue::{
 };
 pub use resources::accounts::{
     Account, AccountFields, AccountFilter, AccountSort, AccountType, AccountUpdate, Accounts,
+    CREDIT_CARD_DETAIL_TYPE, CardLast4,
 };
 pub use resources::ai::{
     AiConfig, AiConfigUpdate, AiDisclosure, AiStatus, AiTaskToggles, AiUsage, AiUsageStamp,
@@ -115,8 +116,9 @@ pub use resources::tags::{
 };
 pub use resources::tenants::{
     ArchiveFileName, ArchiveJob, ArchiveJobStatus, ArchiveRequest, ArchiveResult, CreatedTenant,
-    DeleteReceipt, DeleteRequest, HOST_METADATA_MAX_BYTES, ImportJob, ImportRequest, ImportResult,
-    ImportVerification, JobError, JobId, JobState, NewTenant, TenantSummary, Tenants,
+    DOCUMENT_DRAFTS_OMITTED, DeleteReceipt, DeleteRequest, HOST_METADATA_MAX_BYTES, ImportJob,
+    ImportRequest, ImportResult, ImportVerification, JobError, JobId, JobState, NewTenant,
+    TenantSummary, Tenants,
 };
 pub use resources::transactions::{
     AccountRoles, Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions,
@@ -221,4 +223,16 @@ pub use resources::home_queries::{
 };
 // A01: intake folders (U-93).
 pub use resources::intake::{INTAKE_FOLDERS_MAX, Intake, IntakeSettings};
+// A03: document drafts and vendor layouts (U-92).
+pub use resources::document_drafts::{
+    ATTACHMENT_IN_USE, ATTACHMENT_NOT_DRAFT, ConvertBody, ConvertedDraft, DOCUMENT_ALREADY_CLAIMED,
+    DOCUMENT_DRAFT_CLOSED, DocumentDraft, DocumentDraftId, DocumentDrafts, DraftConversion,
+    DraftKind, DraftListQuery, DraftPage, DraftReader, DraftReading, DraftRefusal, DraftStatus,
+    DuplicateMatch, MatchReason, MatchSource, POSSIBLE_DUPLICATE, TEMPLATE_LIMIT,
+    limits as draft_limits,
+};
+pub use resources::vendor_templates::{
+    TEMPLATE_LINE_TABLE_BYTES, TEMPLATE_REGIONS_BYTES, TEMPLATES_PER_COMPANY, TemplateUpsert,
+    VendorTemplate, VendorTemplateId, VendorTemplates, layout_key,
+};
 pub use wire::money_str_strict;

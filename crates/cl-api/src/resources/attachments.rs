@@ -92,6 +92,9 @@ macro_rules! uuid_id {
     };
 }
 
+/// The same id newtype for other resources (A03 document drafts).
+pub(crate) use uuid_id;
+
 uuid_id!(
     /// One stored file.
     AttachmentId

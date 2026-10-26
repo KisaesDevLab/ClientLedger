@@ -556,6 +556,7 @@ pub fn archive_export_import_e5a(h: &Harness) {
                     include_attachments: true,
                     include_audit: true,
                     omit_intake_settings: false,
+                    omit_document_drafts: false,
                     host: json!({"app": "ClientLedger", "appVersion": "test", "kind": "backup", "accent": "#3E7CB1"}),
                     passphrase: passphrase.clone(),
                 },
@@ -582,6 +583,7 @@ pub fn archive_export_import_e5a(h: &Harness) {
                 path: tampered.clone(),
                 passphrase: passphrase.clone(),
                 scratch: false,
+                reset_document_drafts: false,
             }))
             .expect("import job");
         let st = finish_job(h, &s, &job.job_id);
@@ -617,6 +619,7 @@ pub fn archive_export_import_e5a(h: &Harness) {
                 path,
                 passphrase,
                 scratch: false,
+                reset_document_drafts: false,
             }))
             .expect("import job");
         let st = finish_job(h, &s, &job.job_id);

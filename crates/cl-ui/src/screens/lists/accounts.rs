@@ -1323,6 +1323,7 @@ pub(crate) fn demo_save(
             balance: Some(cl_core::Money::ZERO),
             created_at: Some(crate::company::demo::DemoState::now()),
             updated_at: Some(crate::company::demo::DemoState::now()),
+            card_last4: None,
         }
     };
     if let Some(chart) = chart {
