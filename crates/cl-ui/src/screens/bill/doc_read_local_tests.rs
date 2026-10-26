@@ -233,6 +233,14 @@ fn lines_and_tax_against_total_names_the_lines() {
     let text = super::check_text(&c, cl_core::MoneyStyle::default());
     assert!(text.starts_with("The lines, tax and fees"), "{text}");
     assert!(text.contains("12.00") && text.contains("13.00"), "{text}");
+    // Review S1: a second OCR read's other amount is named.
+    let c = Check {
+        code: CheckCode::ReadersDisagree,
+        rule: RuleId::new("ocr.second-read"),
+        ..c
+    };
+    let text = super::check_text(&c, cl_core::MoneyStyle::default());
+    assert!(text.contains("read as 13.00 could also be 12.00"), "{text}");
 }
 
 #[test]

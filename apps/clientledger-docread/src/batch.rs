@@ -6,9 +6,10 @@
 
 use crate::decode::{self, ImageError, Kind, Tiff};
 use crate::pdfium::{self, Opened};
+use crate::second_read;
 use cl_core::CalendarDate;
 use cl_docread::dates;
-use cl_docread::model::{Confidence, MAX_PAGES, PageWords, Word, WordSource};
+use cl_docread::model::{Bbox, Confidence, MAX_PAGES, PageWords, Word, WordSource};
 use cl_docread::ocr_geom;
 use cl_docread::pdf_text::MIN_TEXT_QUALITY_BP;
 use cl_docread::preprocess;
@@ -142,6 +143,8 @@ struct Pages {
     unread: Vec<u16>,
     /// A page had nothing to read without OCR, and OCR is unavailable.
     needed_ocr: bool,
+    /// Amounts the best model's second read gave differently (page, spot).
+    disagree: Vec<(u16, second_read::Disagreement<Bbox>)>,
 }
 
 fn read_pdf(ctx: &Ctx<'_>, io: &mut dyn Io, job: &Job, bytes: &[u8]) -> Result<FromWorker, Fatal> {
@@ -182,7 +185,13 @@ fn read_pdf(ctx: &Ctx<'_>, io: &mut dyn Io, job: &Job, bytes: &[u8]) -> Result<F
         }
         let ocr_words = if ctx.options.ocr {
             match pdfium::render_grey(&page) {
-                Some(grey) => ocr_page(io, job.job, i, &grey, ctx.options.today)?,
+                Some(grey) => ocr_page(
+                    io,
+                    (job.job, i),
+                    &grey,
+                    ctx.options.today,
+                    &mut pages.disagree,
+                )?,
                 None => None,
             }
         } else {
@@ -232,7 +241,13 @@ fn read_images(
             }
         };
         let aspect = aspect_px(grey.width(), grey.height());
-        match ocr_page(io, job.job, i, &grey, ctx.options.today)? {
+        match ocr_page(
+            io,
+            (job.job, i),
+            &grey,
+            ctx.options.today,
+            &mut pages.disagree,
+        )? {
             Some(w) => pages.read.push(page_words(i, aspect, WordSource::Ocr, w)),
             None => pages.unread.push(i),
         }
@@ -272,12 +287,14 @@ fn page_words(page: u16, aspect: u32, source: WordSource, words: Vec<Word>) -> P
 /// more accurate model as well (`OcrMode::ReadBest`, Q-A03b), and a date
 /// that still does not read is read again on its own (`OcrMode::Word`).
 /// Each only replaces words read from the same pixels; nothing is guessed.
+/// The second read keeps the first read's amounts ([`second_read`]); the
+/// amounts it read differently go to `disagree`.
 fn ocr_page(
     io: &mut dyn Io,
-    job: JobId,
-    page: u16,
+    (job, page): (JobId, u16),
     grey: &GrayImage,
     today: CalendarDate,
+    disagree: &mut Vec<(u16, second_read::Disagreement<Bbox>)>,
 ) -> Result<Option<Vec<Word>>, Fatal> {
     let cleaned = preprocess::clean(grey);
     let first = ocr_raw(io, (job, page), &cleaned, OcrMode::Read)?;
@@ -298,9 +315,19 @@ fn ocr_page(
     };
     if numbers_unsure(&words)
         && let Some(better) = ocr_raw(io, (job, page), &cleaned, OcrMode::ReadBest)?
-        && !better.is_empty()
     {
-        words = better;
+        let (kept, found) = second_read::merge(words, better);
+        words = kept;
+        disagree.extend(found.into_iter().map(|d| {
+            (
+                page,
+                second_read::Disagreement {
+                    at: ocr_geom::to_page(d.at, &cleaned.transform),
+                    first: d.first,
+                    other: d.other,
+                },
+            )
+        }));
     }
     reread_dates(io, (job, page), &cleaned.image, &mut words, today)?;
     Ok(Some(
@@ -329,7 +356,7 @@ const MAX_REREADS: usize = 4;
 const REREAD_SCALES: [u32; 3] = [1, 2, 3];
 
 /// Confident words in a read.
-fn read_score(words: &[OcrWord]) -> usize {
+pub(crate) fn read_score(words: &[OcrWord]) -> usize {
     words
         .iter()
         .filter(|w| {
@@ -537,7 +564,7 @@ fn finish(ctx: &Ctx<'_>, job: &Job, count: u16, pages: &Pages) -> FromWorker {
         };
         return failed(job.job, reason);
     }
-    let reading = read(&ReadInput {
+    let mut reading = read(&ReadInput {
         pages: &pages.read,
         page_count: count,
         unread_pages: &pages.unread,
@@ -545,6 +572,7 @@ fn finish(ctx: &Ctx<'_>, job: &Job, count: u16, pages: &Pages) -> FromWorker {
         hint: job.hint,
         today: ctx.options.today,
     });
+    second_read::add_checks(&mut reading, &pages.disagree);
     if reading.validate(job.templates.len()).is_err() {
         eprintln!("docread: outcome: reading over a limit");
         return failed(job.job, JobFailure::Unreadable);
@@ -855,6 +883,46 @@ pub(crate) mod tests {
         let mut host = FakeHost::new(move |w, h| tsv_of(&sure, w, h));
         run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
         assert_eq!(host.best_calls.len(), 0);
+    }
+
+    /// Review S1: the second read never changes a first-read amount; the
+    /// other value becomes a check on the field that uses it.
+    #[test]
+    fn a_second_read_keeps_the_first_amount_and_flags_the_other() {
+        // "Total 12.40" on one line, unsure; the best model reads 12.48.
+        let line = |amount: &'static str, conf: u32| {
+            move |w: u32, h: u32| {
+                OcrAnswer::Tsv(Tsv(format!(
+                    "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n\
+                     5\t1\t1\t1\t1\t1\t{}\t{}\t{}\t{}\t96\tTotal\n\
+                     5\t1\t1\t1\t1\t2\t{}\t{}\t{}\t{}\t{conf}\t{amount}\n",
+                    w / 10,
+                    h / 2,
+                    w / 6,
+                    h / 60,
+                    w * 6 / 10,
+                    h / 2,
+                    w / 6,
+                    h / 60,
+                )))
+            }
+        };
+        let mut host = FakeHost::new(line("12.40", 70));
+        host.best = Box::new(line("12.48", 95));
+        let out = run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
+        let FromWorker::JobDone { reading, .. } = out else {
+            panic!("{out:?}")
+        };
+        assert_eq!(host.best_calls.len(), 1);
+        assert_eq!(texts(&reading), ["Total", "12.40"]);
+        let total = reading.header.total.as_ref().expect("total");
+        assert_eq!(total.value, cl_core::Money::parse_wire("12.40").unwrap());
+        let c = reading
+            .checks
+            .iter()
+            .find(|c| c.code == cl_docread::model::CheckCode::ReadersDisagree)
+            .expect("check");
+        assert_eq!(c.field, Some(cl_docread::model::FieldName::Total));
     }
 
     #[test]

@@ -30,6 +30,7 @@ mod decode;
 mod hooks;
 mod limits;
 mod pdfium;
+mod second_read;
 #[cfg(test)]
 mod test_pdf;
 
