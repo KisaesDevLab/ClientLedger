@@ -18,6 +18,9 @@
 //! keeps a quantity or price only when that is on the page too, and then
 //! passes the engine's quantity × price rule like any read line.
 //!
+//! After the merge the figures are reconciled again (`validate::check`):
+//! a total, tax or line the AI filled is checked like a read one (AC3).
+//!
 //! "Equal to a page word" means one word: two words are never joined, so
 //! a quantity next to a price can't pass as a thousands amount.
 //!
@@ -34,6 +37,7 @@ use crate::model::{
     Check, CheckCode, CheckValue, Confidence, FieldName, Found, Line, MAX_CHECKS, MAX_LINES,
     MAX_TEXT_CHARS, PageWords, Reading, RuleId, Spot,
 };
+use crate::validate;
 use crate::vendor_match::normalize_loose;
 use cl_core::{CalendarDate, Money, Quantity};
 use std::fmt;
@@ -114,25 +118,29 @@ struct Page<'a> {
 }
 
 impl Page<'_> {
-    /// The first word (reading order) whose amount equals `m`.
-    fn money_word(&self, m: Money) -> Option<(Spot, u16)> {
-        self.find_word(|t| amount::parse(t) == Some(m))
+    /// The first word (reading order) whose amount equals `m`, with the
+    /// word's own value (its scale as printed).
+    fn money_word(&self, m: Money) -> Option<(Money, Spot, u16)> {
+        self.find_word(|t| amount::parse(t).filter(|v| *v == m))
     }
 
-    fn quantity_word(&self, q: Quantity) -> Option<(Spot, u16)> {
-        self.find_word(|t| amount::parse_quantity(t) == Some(q))
+    fn quantity_word(&self, q: Quantity) -> Option<(Quantity, Spot, u16)> {
+        self.find_word(|t| amount::parse_quantity(t).filter(|v| *v == q))
     }
 
-    fn find_word(&self, pred: impl Fn(&str) -> bool) -> Option<(Spot, u16)> {
+    fn find_word<T>(&self, parse: impl Fn(&str) -> Option<T>) -> Option<(T, Spot, u16)> {
         self.words.iter().find_map(|p| {
-            p.words.iter().find(|w| pred(&w.text)).map(|w| {
-                (
-                    Spot {
-                        page: p.page,
-                        bbox: w.bbox,
-                    },
-                    w.confidence.bp(),
-                )
+            p.words.iter().find_map(|w| {
+                parse(&w.text).map(|v| {
+                    (
+                        v,
+                        Spot {
+                            page: p.page,
+                            bbox: w.bbox,
+                        },
+                        w.confidence.bp(),
+                    )
+                })
             })
         })
     }
@@ -235,6 +243,17 @@ pub fn merge(mut reading: Reading, ai: &AiReading, source: AiSource) -> Reading 
         }
         gate_lines(&mut reading, &ai.lines, &page, &rule, fill_cap, &mut checks);
         reading.checks.extend(checks);
+        // The figures the AI filled are reconciled like the rules' own
+        // (AC3): a check the worker already raised is not repeated.
+        for c in validate::check(&reading.header, &reading.lines) {
+            if !reading
+                .checks
+                .iter()
+                .any(|x| (x.code, x.field, x.line) == (c.code, c.field, c.line))
+            {
+                reading.checks.push(c);
+            }
+        }
         reading.checks.truncate(MAX_CHECKS);
     }
     reading.words = words;
@@ -297,7 +316,7 @@ fn gate_money(
             Some(local.spot),
         )),
         None => match page.money_word(ai) {
-            Some((spot, bp)) => *target = Some(filled(ai, spot, bp, rule, cap)),
+            Some((v, spot, bp)) => *target = Some(filled(v, spot, bp, rule, cap)),
             None => checks.push(disagrees(
                 Some(field),
                 None,
@@ -459,7 +478,7 @@ fn gate_lines(
     let mut added: Vec<Line> = Vec::new();
     for (i, l) in ai_lines.iter().enumerate().take(MAX_LINES) {
         let Some(a) = l.amount else { continue };
-        let Some((spot, bp)) = page.money_word(a) else {
+        let Some((a, spot, bp)) = page.money_word(a) else {
             checks.push(disagrees(
                 None,
                 u16::try_from(i).ok(),
@@ -472,11 +491,12 @@ fn gate_lines(
         let amount = filled(a, spot, bp, rule, cap);
         let quantity = l.quantity.and_then(|q| {
             page.quantity_word(q)
-                .map(|(s, b)| filled(q, s, b, rule, cap))
+                .map(|(v, s, b)| filled(v, s, b, rule, cap))
         });
-        let unit_price = l
-            .unit_price
-            .and_then(|p| page.money_word(p).map(|(s, b)| filled(p, s, b, rule, cap)));
+        let unit_price = l.unit_price.and_then(|p| {
+            page.money_word(p)
+                .map(|(v, s, b)| filled(v, s, b, rule, cap))
+        });
         let description = l.description.as_deref().map(|d| {
             let (value, dspot, dbp) = page
                 .segment_named(d)

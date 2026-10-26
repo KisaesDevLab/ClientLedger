@@ -69,4 +69,12 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bill.read.check.page_not_read", "A page couldn't be read. Check the document."),
     ("bill.read.check.pages_skipped", "Only the first 10 pages were read."),
     ("bill.read.check.kind", "It isn't clear this is a bill. Check the document."),
+    // A03 fix pass (review findings).
+    ("bill.read.check.lines_total", "The lines, tax and fees add up to {expected}, but the document's total is {found}."),
+    ("bill.read.check.lines_total.plain", "The lines, tax and fees don't add up to the document's total."),
+    ("bill.read.check.vendor_layout", "This document is laid out like {name}'s bills, but the name printed on it is another vendor's. The printed name was used: check the vendor."),
+    ("bill.read.local.cancel", "Cancel reading"),
+    ("bill.read.local.cancel.tip", "Stops reading this document. Nothing is filled in; you can read it again or type the bill in."),
+    ("bill.read.local.total_and_balance", "The document's total is {total} and its balance due is {balance}. The bill's amount is the total: change it if you owe only the balance."),
+    ("bill.read.check.second_read", "An amount read as {found} could also be {expected}. {found} was used: check it on the document."),
 ];

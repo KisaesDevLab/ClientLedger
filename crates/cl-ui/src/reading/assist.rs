@@ -5,7 +5,8 @@
 //!
 //! - **Where it runs.** A local Ollama model when the company's AI runs on
 //!   Ollama (nothing leaves this computer or network; no cloud switch is
-//!   needed). An online provider only with the company's own consent for
+//!   needed). An Ollama cloud model (name ending `:cloud` or `-cloud`)
+//!   runs on Ollama's servers: it takes the online route and its consent. An online provider only with the company's own consent for
 //!   reading documents online: the page **text** needs
 //!   `document_text_cloud`; page **pictures** need `document_images_cloud`
 //!   as well, plus the engine's cloud-vision setting (which the desktop
@@ -52,6 +53,10 @@ pub struct AssistSwitches {
     pub images_cloud: bool,
     /// The engine sends pictures to an online provider at all.
     pub cloud_vision: bool,
+    /// The provider is Ollama but its model runs on Ollama's servers
+    /// (`…:cloud`, `…-cloud`): the cloud route, with its consent (review
+    /// S5).
+    pub ollama_cloud: bool,
 }
 
 /// Where a second reading runs.
@@ -89,7 +94,7 @@ pub fn route(s: AssistSwitches) -> Result<Route, NoRoute> {
     let Some(provider) = s.provider.filter(|_| s.ai && s.reading) else {
         return Err(NoRoute::Off);
     };
-    if !provider.is_cloud() {
+    if !provider.is_cloud() && !s.ollama_cloud {
         return Ok(Route::Local);
     }
     if !s.text_cloud {
@@ -204,9 +209,18 @@ pub fn merge(
         AssistReader::SelfHosted => AiSource::Ollama,
         AssistReader::Cloud => AiSource::Cloud,
     };
-    let reading = ai_gate::merge(local.reading.clone(), &ai_reading(answer), source);
+    let mut reading = ai_gate::merge(local.reading.clone(), &ai_reading(answer), source);
     let vendor = local.vendor.or_else(|| {
-        vendor_match::match_vendor(&reading.header, reading.fingerprint.as_ref(), vendors)
+        let m = vendor_match::match_vendor(&reading.header, reading.fingerprint.as_ref(), vendors);
+        // A name that won over a past layout is checked (review S4).
+        if let Some(check) = m
+            .as_ref()
+            .and_then(|m| vendor_match::layout_check(m, &reading.header, vendors))
+            && reading.checks.len() < cl_docread::model::MAX_CHECKS
+        {
+            reading.checks.push(check);
+        }
+        m
     });
     LocalReading {
         reading,

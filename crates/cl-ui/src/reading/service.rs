@@ -24,6 +24,7 @@
 //! Logs carry outcome classes only: never a file name, text or an amount.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use cl_core::CalendarDate;
@@ -251,11 +252,39 @@ pub async fn claim_and_store(
 pub trait Reader: Send {
     /// One outcome per job, in order.
     fn read(&mut self, jobs: &[DocJob], today: CalendarDate) -> Vec<JobOutcome>;
+
+    /// [`Reader::read`], stopped when `cancel` is set (A03 review S2). A
+    /// reader that can't stop mid-read still answers nothing once
+    /// cancelled.
+    fn read_cancellable(
+        &mut self,
+        jobs: &[DocJob],
+        today: CalendarDate,
+        cancel: &Arc<AtomicBool>,
+    ) -> Vec<JobOutcome> {
+        if cancel.load(Ordering::SeqCst) {
+            return jobs
+                .iter()
+                .map(|_| JobOutcome::CouldNotRead(CouldNotRead::Cancelled))
+                .collect();
+        }
+        self.read(jobs, today)
+    }
 }
 
 impl Reader for DocreadHost {
     fn read(&mut self, jobs: &[DocJob], today: CalendarDate) -> Vec<JobOutcome> {
         DocreadHost::read(self, jobs, today)
+    }
+
+    fn read_cancellable(
+        &mut self,
+        jobs: &[DocJob],
+        today: CalendarDate,
+        cancel: &Arc<AtomicBool>,
+    ) -> Vec<JobOutcome> {
+        // The worker is killed as soon as the flag is set.
+        self.read_with_cancel(jobs, today, Arc::clone(cancel))
     }
 }
 
@@ -335,6 +364,8 @@ pub enum ReadFailure {
     GaveUp,
     /// The reader isn't installed or couldn't start.
     Unavailable,
+    /// The owner cancelled it (nothing is shown).
+    Cancelled,
 }
 
 impl ReadFailure {
@@ -349,6 +380,7 @@ impl ReadFailure {
             ReadFailure::Unreadable => "unreadable",
             ReadFailure::GaveUp => "gave_up",
             ReadFailure::Unavailable => "unavailable",
+            ReadFailure::Cancelled => "cancelled",
         }
     }
 
@@ -368,8 +400,8 @@ impl ReadFailure {
             CouldNotRead::Crashed
             | CouldNotRead::TimedOut
             | CouldNotRead::TooMuchMemory
-            | CouldNotRead::BadReply
-            | CouldNotRead::Cancelled => ReadFailure::GaveUp,
+            | CouldNotRead::BadReply => ReadFailure::GaveUp,
+            CouldNotRead::Cancelled => ReadFailure::Cancelled,
         }
     }
 }
@@ -397,6 +429,35 @@ impl ReadOutcome {
 struct Message {
     request: ReadRequest,
     reply: Sender<ReadOutcome>,
+    cancel: Arc<AtomicBool>,
+}
+
+/// A submitted reading: its answer, and a way to stop it.
+#[derive(Debug)]
+pub struct ReadJob {
+    /// The answer (poll it with `try_recv`).
+    pub answer: Receiver<ReadOutcome>,
+    /// Stops it.
+    pub cancel: ReadCancel,
+}
+
+impl ReadJob {
+    /// Stops the reading (see [`ReadCancel::cancel`]).
+    pub fn cancel(&self) {
+        self.cancel.cancel();
+    }
+}
+
+/// Stops one submitted reading.
+#[derive(Debug, Clone, Default)]
+pub struct ReadCancel(Arc<AtomicBool>);
+
+impl ReadCancel {
+    /// A queued reading is never read; a running one's worker is stopped.
+    /// The answer is then `Failed(Cancelled)`.
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
 }
 
 /// Reads documents on its own thread (see the module comment).
@@ -446,26 +507,57 @@ impl ReadingService {
     /// returned (poll it with `try_recv`).
     #[must_use]
     pub fn submit(&self, request: ReadRequest) -> Receiver<ReadOutcome> {
+        self.submit_cancellable(request).answer
+    }
+
+    /// [`ReadingService::submit`] with a Cancel (A03 review S2).
+    #[must_use]
+    pub fn submit_cancellable(&self, request: ReadRequest) -> ReadJob {
         let (reply, answer) = mpsc::channel();
-        if let Err(mpsc::SendError(m)) = self.tx.send(Message { request, reply }) {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let message = Message {
+            request,
+            reply,
+            cancel: Arc::clone(&cancel),
+        };
+        if let Err(mpsc::SendError(m)) = self.tx.send(message) {
             let _ = m.reply.send(ReadOutcome::Failed(ReadFailure::Unavailable));
         }
-        answer
+        ReadJob {
+            answer,
+            cancel: ReadCancel(cancel),
+        }
     }
 }
 
 fn serve(rx: &Receiver<Message>, make: MakeReader) {
     let mut make = Some(make);
     let mut reader: Option<Box<dyn Reader>> = None;
-    while let Ok(Message { request, reply }) = rx.recv() {
+    while let Ok(Message {
+        request,
+        reply,
+        cancel,
+    }) = rx.recv()
+    {
+        if cancel.load(Ordering::SeqCst) {
+            // Cancelled while waiting: never read.
+            let _ = reply.send(ReadOutcome::Failed(ReadFailure::Cancelled));
+            continue;
+        }
         if reader.is_none()
             && let Some(m) = make.take()
         {
             reader = m();
         }
         let outcome = match reader.as_mut() {
-            Some(r) => read_one(r.as_mut(), &request),
+            Some(r) => read_one(r.as_mut(), &request, &cancel),
             None => ReadOutcome::Failed(ReadFailure::Unavailable),
+        };
+        // A Cancel that came in while reading wins over its answer.
+        let outcome = if cancel.load(Ordering::SeqCst) {
+            ReadOutcome::Failed(ReadFailure::Cancelled)
+        } else {
+            outcome
         };
         tracing::info!(outcome = outcome.class(), "document read");
         // The window may have closed meanwhile: nobody waits then.
@@ -474,14 +566,18 @@ fn serve(rx: &Receiver<Message>, make: MakeReader) {
 }
 
 /// Reads one document and adds the desktop's matches.
-pub(crate) fn read_one(reader: &mut dyn Reader, request: &ReadRequest) -> ReadOutcome {
+pub(crate) fn read_one(
+    reader: &mut dyn Reader,
+    request: &ReadRequest,
+    cancel: &Arc<AtomicBool>,
+) -> ReadOutcome {
     let job = DocJob {
         bytes: request.bytes.to_vec(),
         hint: request.hint,
         templates: request.templates.clone(),
     };
     let outcome = reader
-        .read(std::slice::from_ref(&job), request.today)
+        .read_cancellable(std::slice::from_ref(&job), request.today, cancel)
         .into_iter()
         .next();
     match outcome {
@@ -501,6 +597,14 @@ pub(crate) fn matched(mut reading: Reading, request: &ReadRequest) -> LocalReadi
         reading.fingerprint.as_ref(),
         &request.vendors,
     );
+    // A printed name that won over a past layout is checked (review S4).
+    if let Some(check) = vendor
+        .as_ref()
+        .and_then(|m| vendor_match::layout_check(m, &reading.header, &request.vendors))
+        && reading.checks.len() < cl_docread::model::MAX_CHECKS
+    {
+        reading.checks.push(check);
+    }
     let card = match (&request.card_accounts, &reading.header.payment) {
         (Some(accounts), Some(p)) => match &p.value {
             Payment::Card { last4 } => Some(card::card_account(*last4, accounts)),
@@ -607,6 +711,84 @@ mod tests {
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
+    /// Review S4: another vendor's saved layout, this vendor's name printed:
+    /// the name wins and the banner asks the owner to check.
+    #[test]
+    fn a_printed_name_over_a_shared_layout_is_checked() {
+        let fp = cl_docread::model::Fingerprint {
+            tokens: vec!["invoice".into(), "remit".into()],
+            aspect: 12_941,
+        };
+        let mut other = vendor();
+        other.contact = ContactId::parse("00000000-0000-0000-0000-000000000008").unwrap();
+        other.display_name = "Hilltop Feed".into();
+        other.layouts = vec![fp.clone()];
+        let mut r = reading();
+        r.fingerprint = Some(fp);
+        let mut req = request();
+        req.vendors.push(other);
+        let local = matched(r, &req);
+        assert_eq!(local.vendor.map(|v| v.contact), Some(vendor().contact));
+        assert!(local.reading.checks.iter().any(|c| c.code == CheckCode::ReadersDisagree
+            && c.rule.as_str() == "vendor.layout"));
+    }
+
+    /// Reads until cancelled; counts the reads started.
+    struct UntilCancelled(Arc<std::sync::atomic::AtomicU32>);
+
+    impl Reader for UntilCancelled {
+        fn read(&mut self, _jobs: &[DocJob], _today: CalendarDate) -> Vec<JobOutcome> {
+            unreachable!("read through read_cancellable")
+        }
+
+        fn read_cancellable(
+            &mut self,
+            jobs: &[DocJob],
+            _today: CalendarDate,
+            cancel: &Arc<AtomicBool>,
+        ) -> Vec<JobOutcome> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            while !cancel.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            jobs.iter()
+                .map(|_| JobOutcome::CouldNotRead(CouldNotRead::Cancelled))
+                .collect()
+        }
+    }
+
+    /// Review S2: Cancel stops a running reading and a queued one is never
+    /// read; both answer Cancelled.
+    #[test]
+    fn cancel_stops_the_running_and_the_queued_reading() {
+        let started = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let n = Arc::clone(&started);
+        let s = ReadingService::start(Box::new(move || {
+            Some(Box::new(UntilCancelled(n)) as Box<dyn Reader>)
+        }));
+        let running = s.submit_cancellable(request());
+        let queued = s.submit_cancellable(request());
+        while started.load(Ordering::SeqCst) == 0 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        queued.cancel();
+        running.cancel();
+        assert_eq!(
+            wait(&running.answer),
+            ReadOutcome::Failed(ReadFailure::Cancelled)
+        );
+        assert_eq!(
+            wait(&queued.answer),
+            ReadOutcome::Failed(ReadFailure::Cancelled)
+        );
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            1,
+            "the queued one never started"
+        );
+        assert_eq!(ReadFailure::Cancelled.class(), "cancelled");
+    }
+
     #[test]
     fn failures_map_to_plain_classes() {
         for (job, want) in [
@@ -634,7 +816,7 @@ mod tests {
             let calls = Arc::new(std::sync::atomic::AtomicU32::new(0));
             let mut r = Fixed(job, calls);
             assert_eq!(
-                read_one(&mut r, &request()),
+                read_one(&mut r, &request(), &Arc::default()),
                 ReadOutcome::Failed(want),
                 "{want:?}"
             );
@@ -761,7 +943,7 @@ mod tests {
         req.vendors = vendors;
         req.templates = templates;
         let n = Arc::new(std::sync::Mutex::new(0));
-        let _ = read_one(&mut Seen(Arc::clone(&n)), &req);
+        let _ = read_one(&mut Seen(Arc::clone(&n)), &req, &Arc::default());
         assert_eq!(*n.lock().unwrap(), 1);
     }
 

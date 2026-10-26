@@ -57,7 +57,9 @@ use super::doc_read::{Incoming, ReadState, ReadSwitches};
 use crate::company::{CompanyLink, Task};
 use crate::i18n::{t, t_with};
 use crate::reading::assist::{self, NoRoute, Route};
-use crate::reading::{LocalReading, ReadFailure, ReadOutcome, ReadRequest, ReadingService, map};
+use crate::reading::{
+    LocalReading, ReadCancel, ReadFailure, ReadOutcome, ReadRequest, ReadingService, map,
+};
 use crate::theme::Tokens;
 
 /// What the banner offers after a reading made on this computer.
@@ -88,6 +90,11 @@ impl Offer {
 pub(crate) struct LocalRead {
     /// The running job's answer.
     pub job: Option<Receiver<ReadOutcome>>,
+    /// Stops the running job (Cancel, a new bill, the window closed).
+    pub cancel: Option<ReadCancel>,
+    /// The demo engine's write count when the last reading started
+    /// (control channel: reading writes nothing, A03 S8).
+    pub writes_at_read: Option<u32>,
     /// Documents sent to the reader (control channel).
     pub sent: u32,
     /// The class of the last outcome (control channel).
@@ -114,6 +121,16 @@ pub(crate) struct LocalRead {
     pub assist_outcome: Option<&'static str>,
 }
 
+/// A new bill or a closed window stops a reading still running (review
+/// S2): the worker is never left reading for nobody.
+impl Drop for LocalRead {
+    fn drop(&mut self) {
+        if let Some(c) = self.cancel.take() {
+            c.cancel();
+        }
+    }
+}
+
 impl LocalRead {
     pub(crate) fn busy(&self) -> bool {
         self.job.is_some() || self.assist.is_some()
@@ -131,6 +148,17 @@ impl LocalRead {
             Ok(r) => Offer::Ask(r),
             Err(NoRoute::NeedsConsent) => Offer::NeedsConsent,
             Err(NoRoute::Off | NoRoute::Unsupported) => Offer::None,
+        }
+    }
+
+    /// Cancel: the running reading is stopped and its answer ignored; no
+    /// message (A03 review S2).
+    pub(crate) fn cancel_job(&mut self) {
+        if let Some(c) = self.cancel.take() {
+            c.cancel();
+        }
+        if self.job.take().is_some() {
+            self.outcome = Some(ReadFailure::Cancelled.class());
         }
     }
 
@@ -164,6 +192,7 @@ impl LocalRead {
             Err(TryRecvError::Disconnected) => ReadOutcome::Failed(ReadFailure::Unavailable),
         };
         self.job = None;
+        self.cancel = None;
         Some(outcome)
     }
 
@@ -185,7 +214,10 @@ pub(crate) fn failure_key(f: ReadFailure) -> &'static str {
         ReadFailure::Unsupported => "bill.read.local.failed.unsupported",
         ReadFailure::NeedsOcr => "bill.read.local.failed.needs_ocr",
         ReadFailure::Unavailable => "bill.read.local.failed.unavailable",
-        ReadFailure::Unreadable | ReadFailure::GaveUp => "bill.read.local.failed",
+        // Cancelled shows nothing; the key is never used for it.
+        ReadFailure::Unreadable | ReadFailure::GaveUp | ReadFailure::Cancelled => {
+            "bill.read.local.failed"
+        }
     }
 }
 
@@ -230,6 +262,11 @@ pub(crate) fn check_text(c: &Check, style: MoneyStyle) -> String {
             "bill.read.check.lines_subtotal",
             "bill.read.check.lines_subtotal.plain",
         ),
+        // No subtotal printed: the lines stood in for it (review S6).
+        CheckCode::SubtotalTaxVsTotal if c.rule.as_str() == "validate.lines-total" => money_pair(
+            "bill.read.check.lines_total",
+            "bill.read.check.lines_total.plain",
+        ),
         CheckCode::SubtotalTaxVsTotal => money_pair(
             "bill.read.check.subtotal_total",
             "bill.read.check.subtotal_total.plain",
@@ -246,6 +283,17 @@ pub(crate) fn check_text(c: &Check, style: MoneyStyle) -> String {
         ),
         CheckCode::DateCouldBeDayFirst => t("bill.read.check.day_first"),
         CheckCode::PickedUsingTotals => t("bill.read.check.picked_total"),
+        // A second OCR read gave another amount (review S1): name it.
+        CheckCode::ReadersDisagree if c.rule.as_str() == "ocr.second-read" => {
+            money_pair("bill.read.check.second_read", "bill.read.check.disagree")
+        }
+        // A printed name won over another vendor's layout (review S4).
+        CheckCode::ReadersDisagree if c.rule.as_str() == "vendor.layout" => match &c.expected {
+            Some(CheckValue::Text(name)) => {
+                t_with("bill.read.check.vendor_layout", &[("name", name)])
+            }
+            _ => t("bill.read.check.disagree"),
+        },
         CheckCode::ReadersDisagree | CheckCode::AiDisagrees => t("bill.read.check.disagree"),
         CheckCode::PickTheCard => t("bill.read.check.pick_card"),
         CheckCode::LinesNotRead => t("bill.read.check.lines_not_read"),
@@ -411,6 +459,7 @@ impl EnterBillScreen {
             default_account: None,
             checks: m.checks,
             local: true,
+            balance_due: m.balance_due,
         });
         self.read.local.last = Some(Box::new(merged));
     }
@@ -461,7 +510,10 @@ impl EnterBillScreen {
         self.read.local.vendors.clone_from(&request.vendors);
         self.read.local.sent += 1;
         self.read.local.outcome = None;
-        self.read.local.job = Some(service.submit(request));
+        self.read.local.writes_at_read = self.link.demo_state().map(|d| d.bills.writes);
+        let job = service.submit_cancellable(request);
+        self.read.local.job = Some(job.answer);
+        self.read.local.cancel = Some(job.cancel);
     }
 
     /// Every frame: a finished local reading into the form, or its failure.
@@ -484,8 +536,11 @@ impl EnterBillScreen {
                     default_account: None,
                     checks: m.checks,
                     local: true,
+                    balance_due: m.balance_due,
                 });
             }
+            // The owner cancelled: nothing to say.
+            ReadOutcome::Failed(ReadFailure::Cancelled) => self.read.job_file.clear(),
             ReadOutcome::Failed(f) => {
                 tracing::info!(
                     job = self.read.job_no,

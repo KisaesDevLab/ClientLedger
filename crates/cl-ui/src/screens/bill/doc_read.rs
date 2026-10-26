@@ -134,6 +134,9 @@ pub struct ReadSwitches {
     pub images_cloud: bool,
     /// The engine sends pictures to an online provider at all.
     pub cloud_vision: bool,
+    /// The provider is Ollama but its model runs online (`…:cloud`,
+    /// `…-cloud`): treated as an online provider (review S5).
+    pub ollama_cloud: bool,
 }
 
 impl ReadSwitches {
@@ -172,6 +175,7 @@ impl ReadSwitches {
             text_cloud: self.text_cloud,
             images_cloud: self.images_cloud,
             cloud_vision: self.cloud_vision,
+            ollama_cloud: self.ollama_cloud,
         }
     }
 
@@ -214,10 +218,19 @@ impl ReadSwitches {
                 .or_else(|| c.fallback_chain.first().map(String::as_str))
                 .and_then(AiProvider::from_wire)
         });
+        // Either model named online is enough (the reading may use either).
+        let ollama_cloud = provider == Some(AiProvider::Ollama)
+            && config.is_some_and(|c| {
+                [&c.ocr_model, &c.categorization_model]
+                    .into_iter()
+                    .flatten()
+                    .any(|m| cl_settings::is_ollama_cloud_model(m))
+            });
         ReadSwitches {
             ai: config.is_some_and(|c| c.is_enabled) && current,
             reading: consent.is_some_and(|c| c.enabled_tasks.receipt_ocr == Some(true)),
             provider,
+            ollama_cloud,
             ..ReadSwitches::default()
         }
     }
@@ -234,6 +247,7 @@ impl ReadSwitches {
             text_cloud: ai.text_cloud,
             images_cloud: ai.text_cloud && ai.images_cloud,
             cloud_vision: false,
+            ollama_cloud: false,
         })
     }
 }
@@ -265,6 +279,8 @@ pub(crate) struct Filled {
     pub local: bool,
     /// The local reading's checks, listed on the banner (never applied).
     pub checks: Vec<cl_docread::model::Check>,
+    /// A balance due printed apart from a different total: both shown.
+    pub balance_due: Option<Money>,
 }
 
 impl std::fmt::Debug for Filled {
@@ -294,6 +310,8 @@ pub(crate) struct Incoming {
     pub checks: Vec<cl_docread::model::Check>,
     /// Read on this computer.
     pub local: bool,
+    /// A balance due printed apart from a different total.
+    pub balance_due: Option<Money>,
 }
 
 /// The values a reading put in the form.
@@ -872,6 +890,14 @@ pub fn read_button(
         });
         if state.local.job.is_some() {
             form::progress_line(ui, tokens, &t("bill.read.local.reading"));
+            // A long scan can be stopped (review S2).
+            if ui
+                .button(t("bill.read.local.cancel"))
+                .on_hover_text(t("bill.read.local.cancel.tip"))
+                .clicked()
+            {
+                state.local.cancel_job();
+            }
         }
         if state.local.assist.is_some() {
             form::progress_line(ui, tokens, &t("bill.read.assist.reading"));
@@ -1012,6 +1038,22 @@ pub fn banner(
                         .wrap(),
                     );
                 }
+            }
+            // A deposit invoice: the total and the balance due both shown.
+            if let (Some(total), Some(balance)) = (filled.total, filled.balance_due) {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(t_with(
+                            "bill.read.local.total_and_balance",
+                            &[
+                                ("total", &total.format(style)),
+                                ("balance", &balance.format(style)),
+                            ],
+                        ))
+                        .color(tokens.text_primary),
+                    )
+                    .wrap(),
+                );
             }
             // A03 step 21: the optional readers, only on the owner's click.
             if filled.local {
@@ -1184,6 +1226,7 @@ impl EnterBillScreen {
             default_account: reading.default_expense_account,
             checks: Vec::new(),
             local: false,
+            balance_due: None,
         });
     }
 
@@ -1266,6 +1309,7 @@ impl EnterBillScreen {
             terms_from_vendor,
             local: incoming.local,
             checks: incoming.checks.clone(),
+            balance_due: incoming.balance_due,
         });
         self.read.found_text = None;
         if filled.is_empty() {

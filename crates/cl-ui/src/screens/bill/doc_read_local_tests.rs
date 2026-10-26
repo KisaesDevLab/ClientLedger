@@ -100,6 +100,68 @@ fn with_document(link: &Arc<CompanyLink>, service: Option<Arc<ReadingService>>) 
     s
 }
 
+/// Reads until cancelled; says when it stopped.
+struct UntilCancelled(std::sync::mpsc::Sender<()>);
+
+impl Reader for UntilCancelled {
+    fn read(&mut self, _jobs: &[DocJob], _today: CalendarDate) -> Vec<JobOutcome> {
+        unreachable!("read through read_cancellable")
+    }
+
+    fn read_cancellable(
+        &mut self,
+        jobs: &[DocJob],
+        _today: CalendarDate,
+        cancel: &Arc<std::sync::atomic::AtomicBool>,
+    ) -> Vec<JobOutcome> {
+        let _ = self.0.send(());
+        while !cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let _ = self.0.send(());
+        jobs.iter()
+            .map(|_| JobOutcome::CouldNotRead(cl_host::CouldNotRead::Cancelled))
+            .collect()
+    }
+}
+
+/// Review S2: Cancel stops the reading with no message and the form keeps
+/// working; a new bill stops one still running.
+#[test]
+fn cancel_stops_reading_quietly() {
+    let (_d, link) = link();
+    let (tx, stopped) = std::sync::mpsc::channel();
+    let svc = Arc::new(ReadingService::start(Box::new(move || {
+        Some(Box::new(UntilCancelled(tx)) as Box<dyn Reader>)
+    })));
+    let mut s = with_document(&link, Some(Arc::clone(&svc)));
+    assert!(s.form_command(cl_model::CommandId::new("bill.read_local")));
+    assert!(s.read.local.busy());
+    stopped
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the reader started");
+    s.read.local.cancel_job();
+    stopped
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the reader stopped");
+    s.poll_read();
+    assert!(!s.read.local.busy());
+    assert_eq!(s.read.problem, None, "a cancel shows no message");
+    assert_eq!(s.state()["read"]["local"]["outcome"], "cancelled");
+    assert!(s.read.filled.is_none());
+    // The form still works, and a new reading can start.
+    assert!(s.form_command(cl_model::CommandId::new("bill.read_local")));
+    assert!(s.read.local.busy());
+    stopped
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the reader started again");
+    // A new bill stops it too.
+    s.new_bill(false);
+    stopped
+        .recv_timeout(Duration::from_secs(10))
+        .expect("stopped by the new bill");
+}
+
 fn writes(link: &Arc<CompanyLink>) -> u32 {
     link.demo_state().expect("demo").bills.writes
 }
@@ -212,6 +274,46 @@ fn checks_are_listed_and_nothing_is_fixed() {
     );
     assert!(
         text.contains("1,480.00") && text.contains("1,490.00"),
+        "{text}"
+    );
+}
+
+/// Review S6: lines + tax checked against the total says "lines", not
+/// "subtotal".
+#[test]
+fn lines_and_tax_against_total_names_the_lines() {
+    let c = Check {
+        code: CheckCode::SubtotalTaxVsTotal,
+        rule: RuleId::new("validate.lines-total"),
+        field: None,
+        line: None,
+        expected: Some(CheckValue::Money(money("12.00"))),
+        found: Some(CheckValue::Money(money("13.00"))),
+        difference: Some(money("1.00")),
+        spot: None,
+    };
+    let text = super::check_text(&c, cl_core::MoneyStyle::default());
+    assert!(text.starts_with("The lines, tax and fees"), "{text}");
+    assert!(text.contains("12.00") && text.contains("13.00"), "{text}");
+    // Review S1: a second OCR read's other amount is named.
+    let c = Check {
+        code: CheckCode::ReadersDisagree,
+        rule: RuleId::new("ocr.second-read"),
+        ..c
+    };
+    let text = super::check_text(&c, cl_core::MoneyStyle::default());
+    assert!(text.contains("read as 13.00 could also be 12.00"), "{text}");
+    // Review S4: a printed name over another vendor's layout names it.
+    let c = Check {
+        rule: RuleId::new("vendor.layout"),
+        expected: Some(CheckValue::Text("Hilltop Feed".into())),
+        found: Some(CheckValue::Text("Midwest Equipment Rental".into())),
+        difference: None,
+        ..c
+    };
+    let text = super::check_text(&c, cl_core::MoneyStyle::default());
+    assert!(
+        text.contains("laid out like Hilltop Feed's bills"),
         "{text}"
     );
 }

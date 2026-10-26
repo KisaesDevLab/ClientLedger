@@ -1113,6 +1113,14 @@ impl EnterBillScreen {
             "attachments": self.attach.state_json(&form),
             "panel": self.panel.state_json(),
             "read": self.read.state_json(),
+            // The demo engine's writes since the last Read document (null on
+            // a live engine): reading makes no draft and no bill (A03 S8).
+            "writes_since_read": self.link.demo_state().and_then(|d| {
+                self.read
+                    .local
+                    .writes_at_read
+                    .map(|w| d.bills.writes.saturating_sub(w))
+            }),
             "layout": self.layout.json(),
         });
         for part in [more, rest, self.closing_prompt.state_json(caps.closing)] {

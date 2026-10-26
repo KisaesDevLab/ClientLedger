@@ -114,6 +114,16 @@ enum Route {
 }
 
 impl Route {
+    const ALL: [Route; 7] = [
+        Route::Text,
+        Route::TextNoUnicode,
+        Route::Scan,
+        Route::Photo,
+        Route::TemplateText,
+        Route::TemplateScan,
+        Route::TemplatePhoto,
+    ];
+
     fn name(self) -> &'static str {
         match self {
             Route::Text => "text",
@@ -802,6 +812,24 @@ impl Report {
         }
     }
 
+    /// The (seen, held-out) × path groups with no document: a gate on a
+    /// subset proves nothing (review S3).
+    fn missing_groups(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for group in ["seen", "holdout"] {
+            for route in Route::ALL {
+                let docs = self
+                    .tallies
+                    .get(&(group.to_string(), route))
+                    .map_or(0, |t| t.docs);
+                if docs == 0 {
+                    out.push(format!("{group} {}", route.name()));
+                }
+            }
+        }
+        out
+    }
+
     /// Gate failures: "group route field: x.y% < n%".
     fn gate_failures(&self) -> Vec<String> {
         let mut out = Vec::new();
@@ -1009,6 +1037,7 @@ fn reading_accuracy_against_q285() {
         eprintln!("skipped: set CL_DOCREAD_ACCURACY=1 (cargo xtask docread-accuracy)");
         return;
     }
+    let gate = gate_mode();
     let set = env_path("CL_DOCREAD_SET").unwrap_or_else(|| repo().join("target/docread-synth"));
     let out_dir =
         env_path("CL_DOCREAD_REPORT").unwrap_or_else(|| repo().join("target/docread-accuracy"));
@@ -1088,13 +1117,55 @@ fn reading_accuracy_against_q285() {
         serde_json::to_string_pretty(&summary).unwrap_or_default()
     );
     let _ = std::fs::remove_dir_all(&scratch);
-    if std::env::var("CL_DOCREAD_GATE").as_deref() == Ok("1") {
+    if gate {
+        let missing = report.missing_groups();
+        assert!(
+            missing.is_empty(),
+            "the gate needs documents in every group and path; none in:\n{}",
+            missing.join("\n")
+        );
         assert!(
             failures.is_empty(),
             "Q-285 gates not met:\n{}",
             failures.join("\n")
         );
     }
+}
+
+/// `CL_DOCREAD_GATE=1`. A gate run reads the whole set through the worker
+/// (review S3): anything that narrows or replays it is refused.
+fn gate_mode() -> bool {
+    let gate = std::env::var("CL_DOCREAD_GATE").as_deref() == Ok("1");
+    if gate {
+        for var in ["CL_DOCREAD_ROUTES", "CL_DOCREAD_PARTS", "CL_DOCREAD_REUSE"] {
+            assert!(
+                std::env::var_os(var).is_none_or(|v| v.is_empty()),
+                "{var} narrows or replays the set: not allowed with CL_DOCREAD_GATE=1"
+            );
+        }
+    }
+    gate
+}
+
+/// Review S3: a gate run must have documents in every group and path.
+#[test]
+fn the_gate_names_every_empty_group() {
+    let mut report = Report::default();
+    assert_eq!(report.missing_groups().len(), 14);
+    report.tallies.insert(
+        ("seen".to_string(), Route::Scan),
+        Tally {
+            docs: 3,
+            ..Tally::default()
+        },
+    );
+    report
+        .tallies
+        .insert(("holdout".to_string(), Route::Scan), Tally::default());
+    let missing = report.missing_groups();
+    assert_eq!(missing.len(), 13);
+    assert!(!missing.contains(&"seen scan".to_string()));
+    assert!(missing.contains(&"holdout scan".to_string()));
 }
 
 fn found<T>(value: T, spot: Spot) -> Found<T> {

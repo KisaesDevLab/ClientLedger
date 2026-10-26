@@ -2,7 +2,10 @@
 //! the desktop on the extracted strings against the company's and the
 //! tenant-wide vendors (U-90). Tiers, strongest first:
 //! `vendor_account_number`; phone; past layouts (a similar fingerprint →
-//! its contact); the engine's four `matchByName` tiers
+//! its contact, unless the printed name matches one other vendor on its
+//! own: two vendors can send the same layout, so the name wins and
+//! [`layout_check`] asks the owner to check); the engine's four
+//! `matchByName` tiers
 //! (`ai-name-match.ts:55-95`, ambiguous → none); address breaks ties.
 //! Accounts: the vendor's default only (Q-A03r).
 //!
@@ -19,7 +22,10 @@
 //! are fixed.
 
 use crate::amount::{is_js_space, js_trim};
-use crate::model::{Confidence, Fingerprint, Header};
+use crate::model::{
+    Check, CheckCode, CheckValue, Confidence, FieldName, Fingerprint, Header, MAX_TEXT_CHARS,
+    RuleId,
+};
 use crate::templates;
 use cl_core::ids::ContactId;
 use std::fmt;
@@ -81,6 +87,9 @@ pub struct VendorMatch {
     pub contact: ContactId,
     pub tier: VendorTier,
     pub confidence: Confidence,
+    /// A past layout pointed at this other vendor, and the printed name
+    /// won ([`layout_check`] names it).
+    pub layout_of: Option<ContactId>,
 }
 
 /// The vendor the reading is from, or `None` (the desktop offers a new
@@ -103,6 +112,7 @@ pub fn match_vendor(
             contact: vendors[index].contact,
             tier,
             confidence: Confidence::saturating(u32::from(bp)),
+            layout_of: None,
         })
     };
     // 1. The owner's account number with the vendor.
@@ -149,18 +159,82 @@ pub fn match_vendor(
         {
             let hits = (0..vendors.len()).filter(|&i| scores[i] == best).collect();
             if let Some(m) = decide(hits, VendorTier::PastLayout) {
-                return Some(m);
+                // Two vendors may send the same layout (one billing
+                // program): a printed name that matches one other vendor
+                // wins, and the owner is asked to check (review S4).
+                return Some(match unique_by_name(header, vendors, address) {
+                    Some(mut named) if named.contact != m.contact => {
+                        named.layout_of = Some(m.contact);
+                        named
+                    }
+                    _ => m,
+                });
             }
         }
     }
     // 4. Names.
+    by_name(header, vendors, &decide)
+}
+
+fn by_name(
+    header: &Header,
+    vendors: &[VendorCandidate],
+    decide: &impl Fn(Vec<usize>, VendorTier) -> Option<VendorMatch>,
+) -> Option<VendorMatch> {
+    let target = header.vendor.as_ref().map(|v| v.value.as_str())?;
+    name_tiers(target, vendors)
+        .into_iter()
+        .find_map(|(hits, tier)| decide(hits, VendorTier::Name(tier)))
+}
+
+/// The name tiers' match when it is one vendor on its own (no address
+/// needed to break a tie); `None` otherwise.
+fn unique_by_name(
+    header: &Header,
+    vendors: &[VendorCandidate],
+    address: Option<&str>,
+) -> Option<VendorMatch> {
     let target = header.vendor.as_ref().map(|v| v.value.as_str())?;
     for (hits, tier) in name_tiers(target, vendors) {
-        if let Some(m) = decide(hits, VendorTier::Name(tier)) {
-            return Some(m);
+        match unique_or_tie_break(&hits, vendors, address) {
+            Some((index, false)) => {
+                let tier = VendorTier::Name(tier);
+                return Some(VendorMatch {
+                    contact: vendors[index].contact,
+                    tier,
+                    confidence: Confidence::saturating(u32::from(tier.bp())),
+                    layout_of: None,
+                });
+            }
+            Some((_, true)) => return None,
+            None => {}
         }
     }
     None
+}
+
+/// The check for a name that won over a past layout (review S4): the
+/// layout's vendor is named, the vendor field is marked.
+#[must_use]
+pub fn layout_check(
+    m: &VendorMatch,
+    header: &Header,
+    vendors: &[VendorCandidate],
+) -> Option<Check> {
+    let other = m.layout_of?;
+    let name = vendors.iter().find(|v| v.contact == other)?;
+    let printed = header.vendor.as_ref()?;
+    let text = |s: &str| CheckValue::Text(s.chars().take(MAX_TEXT_CHARS).collect());
+    Some(Check {
+        code: CheckCode::ReadersDisagree,
+        rule: RuleId::new("vendor.layout"),
+        field: Some(FieldName::Vendor),
+        line: None,
+        expected: Some(text(&name.display_name)),
+        found: Some(text(&printed.value)),
+        difference: None,
+        spot: Some(printed.spot),
+    })
 }
 
 fn indices(vendors: &[VendorCandidate], f: impl Fn(&VendorCandidate) -> bool) -> Vec<usize> {
@@ -510,9 +584,56 @@ mod tests {
         h.vendor_phone = Some(plain("417.555.0142"));
         assert_eq!(tier(&h, &vs), Some((id(2), VendorTier::Phone)));
         h.vendor_phone = None;
-        let m = match_vendor(&h, Some(&fp), &vs).unwrap();
-        assert_eq!((m.contact, m.tier), (id(3), VendorTier::PastLayout));
+        // A past layout wins when no printed name says otherwise.
+        let mut unnamed = h.clone();
+        unnamed.vendor = Some(plain("Hilltop Feed"));
+        let m = match_vendor(&unnamed, Some(&fp), &vs).unwrap();
+        assert_eq!(
+            (m.contact, m.tier, m.layout_of),
+            (id(3), VendorTier::PastLayout, None)
+        );
         assert_eq!(tier(&h, &vs), Some((id(1), VendorTier::Name(1))));
+    }
+
+    /// Review S4: two vendors send the same layout. The printed name that
+    /// matches one other vendor wins over the past layout, with a check
+    /// naming the layout's vendor; an ambiguous name leaves the layout.
+    #[test]
+    fn a_printed_name_beats_a_shared_layout() {
+        let fp = Fingerprint {
+            tokens: vec!["invoice".into(), "remit".into()],
+            aspect: 12_941,
+        };
+        let mut layout_owner = vendor(1, "Riverbend Supply Co.");
+        layout_owner.layouts = vec![fp.clone()];
+        let vs = [layout_owner, vendor(2, "Hilltop Feed & Seed")];
+        let h = header("Hilltop Feed & Seed");
+        let m = match_vendor(&h, Some(&fp), &vs).unwrap();
+        assert_eq!((m.contact, m.tier), (id(2), VendorTier::Name(1)));
+        assert_eq!(m.layout_of, Some(id(1)));
+        let check = layout_check(&m, &h, &vs).unwrap();
+        assert_eq!(
+            (check.code, check.field),
+            (CheckCode::ReadersDisagree, Some(FieldName::Vendor))
+        );
+        assert!(
+            matches!(&check.expected, Some(CheckValue::Text(name)) if name == "Riverbend Supply Co.")
+        );
+        // The layout's own vendor printed: no disagreement, no check.
+        let m = match_vendor(&header("Riverbend Supply Co."), Some(&fp), &vs).unwrap();
+        assert_eq!(
+            (m.contact, m.tier, m.layout_of),
+            (id(1), VendorTier::PastLayout, None)
+        );
+        assert!(layout_check(&m, &h, &vs).is_none());
+        // A name two vendors share: the layout stands.
+        let vs = [
+            vs[0].clone(),
+            vendor(2, "Hilltop Feed"),
+            vendor(3, "Hilltop Feed"),
+        ];
+        let m = match_vendor(&header("Hilltop Feed"), Some(&fp), &vs).unwrap();
+        assert_eq!((m.contact, m.layout_of), (id(1), None));
     }
 
     #[test]

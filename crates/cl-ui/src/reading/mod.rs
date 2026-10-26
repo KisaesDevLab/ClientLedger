@@ -22,7 +22,10 @@ pub mod service;
 
 use std::sync::{Arc, OnceLock};
 
-pub use service::{LocalReading, ReadFailure, ReadOutcome, ReadRequest, Reader, ReadingService};
+pub use service::{
+    LocalReading, ReadCancel, ReadFailure, ReadJob, ReadOutcome, ReadRequest, Reader,
+    ReadingService,
+};
 
 static SHARED: OnceLock<Arc<ReadingService>> = OnceLock::new();
 

@@ -47,6 +47,10 @@ fn parse(args: &[String]) -> Result<Options> {
             ),
         }
     }
+    if o.gate && (o.routes.is_some() || o.stress) {
+        // A gate on part of the set proves nothing (A03 review S3).
+        bail!("--gate reads the whole set: it can't be combined with --routes or --stress");
+    }
     Ok(o)
 }
 
@@ -62,7 +66,9 @@ fn set_ready(set: &Path) -> bool {
         .is_some_and(|v| {
             v["holdout"].as_bool() == Some(true)
                 && v["scans"].as_bool() == Some(true)
-                && v["layouts"].as_array().is_some_and(|l| l.len() == 24)
+                && v["layouts"]
+                    .as_array()
+                    .is_some_and(|l| l.len() == crate::gen_invoices::layout_count())
         })
         && set.join("stress").join("ten-pages-scanned.pdf").is_file()
 }
@@ -160,9 +166,13 @@ mod tests {
 
     #[test]
     fn options_parse() {
-        let o = parse(&["--gate".into(), "--routes".into(), "scan".into()]).unwrap();
-        assert!(o.gate && !o.regen);
+        let o = parse(&["--routes".into(), "scan".into()]).unwrap();
+        assert!(!o.gate && !o.regen);
         assert_eq!(o.routes.as_deref(), Some("scan"));
+        assert!(parse(&["--gate".into()]).unwrap().gate);
+        // A gate is never run on part of the set (review S3).
+        assert!(parse(&["--gate".into(), "--routes".into(), "scan".into()]).is_err());
+        assert!(parse(&["--stress".into(), "--gate".into()]).is_err());
         assert!(parse(&["--tessdata".into()]).is_err());
         assert!(parse(&["-x".into()]).is_err());
     }

@@ -214,9 +214,21 @@ pub fn unread_date_shape(words: &[&str], today: CalendarDate) -> bool {
             let t = w.trim_matches(|c: char| !c.is_ascii_alphanumeric());
             numeric_date_shape(t) && !reads_as_date(t, today)
         }
-        [m, d, y] => named_date_shape(m, d, y) && !reads_as_date(&words.join(" "), today),
+        [m, d, y] => {
+            named_date_shape(m, d, y)
+                && !words.iter().any(|w| money_like(w))
+                && !reads_as_date(&words.join(" "), today)
+        }
         _ => false,
     }
+}
+
+/// An amount as printed (`4.99`, `$21`, `1,200`): never part of a date
+/// read again (review S1). Plain digit runs (`21`, `2026`) parse as
+/// amounts too, so only words with a money sign or separator count.
+fn money_like(w: &str) -> bool {
+    let t = w.trim_end_matches([',', '.']);
+    t.contains(['.', ',', '$']) && crate::amount::parse(t).is_some()
 }
 
 /// Three digit groups joined by one separator, in a date's lengths:
@@ -240,7 +252,8 @@ fn numeric_date_shape(t: &str) -> bool {
 }
 
 /// A word of letters (a misread month), a one- or two-digit day and a
-/// four-character year with at least two digits.
+/// four-character year of digits with at most one misread character, never
+/// a `.` or `,` (`4.99` is an amount, review S1).
 fn named_date_shape(m: &str, d: &str, y: &str) -> bool {
     let m = m.trim_matches(|c: char| !c.is_alphanumeric());
     let d = d.trim_end_matches([',', '.']);
@@ -250,7 +263,8 @@ fn named_date_shape(m: &str, d: &str, y: &str) -> bool {
         && (1..=2).contains(&d.len())
         && d.bytes().all(|b| b.is_ascii_digit())
         && y.chars().count() == 4
-        && y.chars().filter(char::is_ascii_digit).count() >= 2
+        && !y.contains(['.', ','])
+        && y.chars().filter(char::is_ascii_digit).count() >= 3
 }
 
 fn weekday(t: &str) -> bool {
@@ -315,6 +329,16 @@ mod tests {
         assert!(!unread(&["Feb", "21", "2026"]));
         assert!(!unread(&["Net", "30", "days"]));
         assert!(!unread(&["a", "b"]));
+        // Review S1: amounts are never a year, nor part of the span.
+        assert!(unread(&["FES", "21,", "2026."]));
+        for span in [
+            ["Tax", "2", "4.99"],
+            ["Items", "12", "1,20"],
+            ["Fee", "$5", "2026"],
+            ["Item", "10", "2O2b"],
+        ] {
+            assert!(!unread(&span), "{span:?}");
+        }
         assert!(reads_as_date("04/13/26", today()));
         assert!(!reads_as_date("04/13/2625", today()), "implausible");
         assert!(!reads_as_date("64/13/26", today()));
