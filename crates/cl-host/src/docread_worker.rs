@@ -839,6 +839,12 @@ fn log_line(line: &[u8], who: &'static str, other: &mut u32) {
 // ---------------------------------------------------------------------------
 
 /// Tesseract's arguments after the input, output and model folder.
+///
+/// Pages are read as one block of text (`--psm 6`), not with tesseract's
+/// own page layout analysis (`--psm 3`): on bills and receipts its layout
+/// pass cut right-aligned amount columns into separate blocks and misread
+/// them (A03 WP-A2 round 2: seen photos' totals 88 → 95 %, scans' 93 →
+/// 95 %). The rules build lines and columns from the word boxes anyway.
 fn tesseract_args(mode: OcrMode) -> &'static [&'static str] {
     match mode {
         OcrMode::Read => &[
@@ -847,7 +853,7 @@ fn tesseract_args(mode: OcrMode) -> &'static [&'static str] {
             "--oem",
             "1",
             "--psm",
-            "3",
+            "6",
             "-c",
             "tessedit_create_tsv=1",
         ],
