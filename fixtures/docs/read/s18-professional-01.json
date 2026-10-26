@@ -1,0 +1,51 @@
+{
+  "account_number": null,
+  "amount_paid": null,
+  "balance_due": null,
+  "card_last4": null,
+  "date": "2026-01-23",
+  "due_date": "2026-02-22",
+  "family": "invoice",
+  "font": "plex-sans",
+  "holdout": false,
+  "layout": "s18-professional",
+  "lines": [
+    {
+      "amount": "940.13",
+      "description": "Monthly bookkeeping",
+      "quantity": "5.750",
+      "unit_price": "163.500"
+    },
+    {
+      "amount": "337.34",
+      "description": "Consultation",
+      "quantity": "2.000",
+      "unit_price": "168.670"
+    },
+    {
+      "amount": "456.85",
+      "description": "Year-end tax planning",
+      "quantity": "2.500",
+      "unit_price": "182.740"
+    },
+    {
+      "amount": "157.98",
+      "description": "Payroll tax filings, Q3",
+      "quantity": "1.250",
+      "unit_price": "126.380"
+    }
+  ],
+  "pages": 1,
+  "reference": "26095",
+  "schema": 1,
+  "seq": 1,
+  "subtotal": "1892.30",
+  "tax": null,
+  "terms": "Net 30",
+  "total": "1892.30",
+  "tounicode": true,
+  "vendor": {
+    "key": "whitfield-moore",
+    "name": "Whitfield & Moore CPAs, PLLC"
+  }
+}

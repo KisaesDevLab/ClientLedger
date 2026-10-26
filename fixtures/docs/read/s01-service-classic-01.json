@@ -1,0 +1,63 @@
+{
+  "account_number": null,
+  "amount_paid": null,
+  "balance_due": null,
+  "card_last4": null,
+  "date": "2026-07-10",
+  "due_date": "2026-08-09",
+  "family": "invoice",
+  "font": "plex-sans",
+  "holdout": false,
+  "layout": "s01-service-classic",
+  "lines": [
+    {
+      "amount": "242.32",
+      "description": "Install GFCI receptacles, kitchen",
+      "quantity": "3.250",
+      "unit_price": "74.560"
+    },
+    {
+      "amount": "187.65",
+      "description": "Rough-in wiring, warehouse bay 3",
+      "quantity": "2.500",
+      "unit_price": "75.060"
+    },
+    {
+      "amount": "836.28",
+      "description": "After-hours emergency labor",
+      "quantity": "5.750",
+      "unit_price": "145.440"
+    },
+    {
+      "amount": "418.05",
+      "description": "Replace 200A panel breaker",
+      "quantity": "5.000",
+      "unit_price": "83.610"
+    },
+    {
+      "amount": "98.54",
+      "description": "LED fixture install, showroom",
+      "quantity": "1.250",
+      "unit_price": "78.830"
+    },
+    {
+      "amount": "231.32",
+      "description": "Service call - diagnose tripping breaker",
+      "quantity": "2.000",
+      "unit_price": "115.660"
+    }
+  ],
+  "pages": 1,
+  "reference": "INV-72971",
+  "schema": 1,
+  "seq": 1,
+  "subtotal": "2014.16",
+  "tax": "130.92",
+  "terms": "Net 30",
+  "total": "2145.08",
+  "tounicode": true,
+  "vendor": {
+    "key": "riverbend-electric",
+    "name": "Riverbend Electric Co."
+  }
+}

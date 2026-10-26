@@ -1,0 +1,51 @@
+{
+  "account_number": null,
+  "amount_paid": "16155.25",
+  "balance_due": "16155.24",
+  "card_last4": null,
+  "date": "2026-03-01",
+  "due_date": "2026-03-16",
+  "family": "invoice",
+  "font": "plex-sans",
+  "holdout": false,
+  "layout": "s14-contractor-deposit",
+  "lines": [
+    {
+      "amount": "8735.83",
+      "description": "Tear off and replace shingles, 18 sq",
+      "quantity": "1.000",
+      "unit_price": "8735.830"
+    },
+    {
+      "amount": "11656.00",
+      "description": "Replace drip edge",
+      "quantity": "16.000",
+      "unit_price": "728.500"
+    },
+    {
+      "amount": "6160.44",
+      "description": "Dumpster and haul-off",
+      "quantity": "13.000",
+      "unit_price": "473.880"
+    },
+    {
+      "amount": "5758.22",
+      "description": "Flashing repair at chimney",
+      "quantity": "13.000",
+      "unit_price": "442.940"
+    }
+  ],
+  "pages": 1,
+  "reference": "NR-4693",
+  "schema": 1,
+  "seq": 1,
+  "subtotal": "32310.49",
+  "tax": null,
+  "terms": "Net 15",
+  "total": "32310.49",
+  "tounicode": true,
+  "vendor": {
+    "key": "northgate-roofing",
+    "name": "Northgate Roofing LLC"
+  }
+}

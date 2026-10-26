@@ -1,0 +1,81 @@
+{
+  "account_number": null,
+  "amount_paid": "97.65",
+  "balance_due": null,
+  "card_last4": "7108",
+  "date": "2026-02-12",
+  "due_date": null,
+  "family": "receipt",
+  "font": "plex-mono",
+  "holdout": false,
+  "layout": "s12-restaurant",
+  "lines": [
+    {
+      "amount": "12.86",
+      "description": "Club Sandwich",
+      "quantity": "1.000",
+      "unit_price": "12.860"
+    },
+    {
+      "amount": "8.00",
+      "description": "House Salad",
+      "quantity": "1.000",
+      "unit_price": "8.000"
+    },
+    {
+      "amount": "7.91",
+      "description": "Soup of the Day",
+      "quantity": "1.000",
+      "unit_price": "7.910"
+    },
+    {
+      "amount": "14.33",
+      "description": "Burger, Medium",
+      "quantity": "1.000",
+      "unit_price": "14.330"
+    },
+    {
+      "amount": "3.49",
+      "description": "Coffee",
+      "quantity": "1.000",
+      "unit_price": "3.490"
+    },
+    {
+      "amount": "3.05",
+      "description": "Iced Tea",
+      "quantity": "1.000",
+      "unit_price": "3.050"
+    },
+    {
+      "amount": "6.94",
+      "description": "Soup of the Day",
+      "quantity": "1.000",
+      "unit_price": "6.940"
+    },
+    {
+      "amount": "3.28",
+      "description": "Iced Tea",
+      "quantity": "1.000",
+      "unit_price": "3.280"
+    },
+    {
+      "amount": "15.69",
+      "description": "Burger, Medium",
+      "quantity": "1.000",
+      "unit_price": "15.690"
+    }
+  ],
+  "pages": 1,
+  "reference": "8120",
+  "schema": 1,
+  "seq": 2,
+  "subtotal": "75.55",
+  "tax": "8.50",
+  "terms": null,
+  "total": "97.65",
+  "tounicode": true,
+  "vendor": {
+    "key": "stone-creek-grill",
+    "name": "Stone Creek Grill"
+  }
+}

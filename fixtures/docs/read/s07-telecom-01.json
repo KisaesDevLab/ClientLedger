@@ -1,0 +1,51 @@
+{
+  "account_number": "6633-366426",
+  "amount_paid": null,
+  "balance_due": null,
+  "card_last4": null,
+  "date": "2026-04-03",
+  "due_date": "2026-04-28",
+  "family": "utility",
+  "font": "plex-sans",
+  "holdout": false,
+  "layout": "s07-telecom",
+  "lines": [
+    {
+      "amount": "116.55",
+      "description": "Business internet 300 Mbps",
+      "quantity": "1.000",
+      "unit_price": "116.550"
+    },
+    {
+      "amount": "82.21",
+      "description": "Business phone lines (3)",
+      "quantity": "1.000",
+      "unit_price": "82.210"
+    },
+    {
+      "amount": "15.00",
+      "description": "Static IP",
+      "quantity": "1.000",
+      "unit_price": "15.000"
+    },
+    {
+      "amount": "13.10",
+      "description": "Equipment rental",
+      "quantity": "1.000",
+      "unit_price": "13.100"
+    }
+  ],
+  "pages": 1,
+  "reference": "SR8171189",
+  "schema": 1,
+  "seq": 1,
+  "subtotal": null,
+  "tax": null,
+  "terms": null,
+  "total": "226.86",
+  "tounicode": true,
+  "vendor": {
+    "key": "summit-ridge-telecom",
+    "name": "Summit Ridge Telecom"
+  }
+}

@@ -1,0 +1,19 @@
+# Pinned test fonts for `cargo xtask gen-invoices` (A03 step 12, Q-A03f).
+#
+# The synthetic bills and receipts use IBM Plex (assets/fonts, already in the
+# repository) and three more OFL-1.1 fonts from the google/fonts repository at
+# one commit. These three are downloaded into target/docread-fonts, checked
+# against the SHA-256 below, and never committed or shipped. PT Serif is the
+# held-out font: only the --holdout layouts use it (plan D6, review S15).
+#
+# Line format:  <file name> <sha256 of the downloaded file> <url>
+# Every url must name the commit below.
+commit = e7db6ca603fd4862010383ff17ffd6cc4ffac1c0
+CourierPrime-Regular.ttf 72f793376f8e2841656bf21d77a5de010f2929bd6956a22ee848ad0c7eb978af https://raw.githubusercontent.com/google/fonts/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/courierprime/CourierPrime-Regular.ttf
+CourierPrime-Bold.ttf ff1f38786c849d1c41fa8e447960abdb2bd75fdfb0cfcdeb524fad65a5af3638 https://raw.githubusercontent.com/google/fonts/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/courierprime/CourierPrime-Bold.ttf
+CourierPrime-OFL.txt 9a755af092b494944c99f471be6fddd19b006a448fefdc4717e4ee0aa09a97b0 https://raw.githubusercontent.com/google/fonts/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/courierprime/OFL.txt
+Kalam-Regular.ttf 57cecb63d4608019371954274ae1d8c397764debd5b19d4a33c1efa4dc923c0b https://raw.githubusercontent.com/google/fonts/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/kalam/Kalam-Regular.ttf
+Kalam-OFL.txt f62ef357d3a1c3d27edd35a6e1ba350e8a8d13499797964eeadefbf0b3b15d1f https://raw.githubusercontent.com/google/fonts/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/kalam/OFL.txt
+PTSerif-Regular.ttf a4951fade06ff8f09b7673aa81ffb65a8cd409e24d3289a6dc670bc4dda2557a https://raw.githubusercontent.com/google/fonts/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/ptserif/PT_Serif-Web-Regular.ttf
+PTSerif-Bold.ttf 038ba7336bd7ea14f12ad155bed51a4345cac5153275d521dec3ba04021c526e https://raw.githubusercontent.com/google/fonts/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/ptserif/PT_Serif-Web-Bold.ttf
+PTSerif-OFL.txt ddf311c28ddf5a5ad9747649837346b67bed9d356789c3072bb27dbce49e514d https://raw.githubusercontent.com/google/fonts/e7db6ca603fd4862010383ff17ffd6cc4ffac1c0/ofl/ptserif/OFL.txt

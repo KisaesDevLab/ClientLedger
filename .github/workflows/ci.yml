@@ -188,6 +188,57 @@ jobs:
           CL_PDFIUM_REQUIRE: "1"
           CL_OCR_REQUIRE: "1"
 
+  # Local reading accuracy (A03 plan D6, Q-285): the synthetic set (24
+  # layouts, 6 held out; pinned test fonts, never committed), read by the
+  # normal worker built optimised, scored per field and path, gated at the
+  # Q-285 minimums. Also prints the worker and tesseract memory and time
+  # peaks for this OS (step 12a). Pull requests only (OCR of ~700 pages).
+  docread-accuracy:
+    name: docread accuracy (${{ matrix.os }})
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: target/pdfium/.cache
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pdfium-binaries.lock') }}
+      - name: Fetch pinned PDFium (hash-verified)
+        run: cargo xtask pdfium-fetch
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/ocr
+            !target/ocr/.work
+            !target/ocr/.stage
+          key: ocr-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ocr.lock', 'xtask/src/ocr_build.rs') }}
+      - name: Build pinned tesseract (linkage checked)
+        run: cargo xtask ocr-build
+      - name: Fetch pinned OCR models (hash-verified)
+        run: cargo xtask ocr-models
+      - uses: actions/cache@v4
+        with:
+          path: target/docread-fonts
+          key: docread-fonts-${{ hashFiles('docread-fonts.lock') }}
+      - name: Synthetic documents (pinned test fonts, hash-verified)
+        run: cargo xtask gen-invoices --holdout
+      - name: Reading accuracy against Q-285
+        run: cargo xtask docread-accuracy --gate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docread-accuracy-${{ runner.os }}
+          path: target/docread-accuracy/
+          if-no-files-found: ignore
+
   # Control-channel scenarios (P07, P10): the demo app runs in a real window and
   # the shell and grid_demo scenarios drive it in light and dark. Linux runs on every push under
   # Xvfb with a software Vulkan driver; Windows and macOS run on pull requests.
