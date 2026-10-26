@@ -36,6 +36,9 @@ pub mod bill;
 pub mod document_view;
 pub mod receipt_inbox;
 
+// A04: Review Documents (WP-F1 the queue, WP-F2 draft mode and attach).
+pub mod doc_review;
+
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
     deposit::make,
@@ -64,6 +67,9 @@ pub(crate) const P17_SCREENS: [crate::shell::MakeScreen; 4] = [
     receipt_inbox::make,
     document_view::make,
 ];
+
+/// Every A04 screen's `make` (the shell tries each after P17's).
+pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
 
 /// Tests: the interactive widgets in `nodes` (AccessKit) that have no
 /// accessible name (no label, `labelled_by`, value or description), as

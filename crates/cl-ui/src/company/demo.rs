@@ -11,6 +11,8 @@ pub mod checks;
 pub mod contacts;
 pub mod daily_sales;
 pub mod deposits;
+// A04 WP-D: document drafts (`document-drafts-v1`, U-95).
+pub mod drafts;
 pub mod home;
 pub mod intake;
 pub mod journal;
@@ -107,6 +109,8 @@ pub struct DemoState {
     pub bills: bills::DemoBills,
     /// Intake folders as the demo engine keeps them (A01, U-93).
     pub intake: intake::DemoIntake,
+    /// Document drafts as the demo engine keeps them (A04, WP-D).
+    pub drafts: drafts::DemoDrafts,
     /// A03: the demo engine stores "Card ends in" on credit card accounts
     /// (`document-drafts-v1`). Off like every demo capability; the
     /// developer command `dev.demo_card_digits` turns it on and off for
@@ -222,6 +226,7 @@ impl DemoState {
             batch: batch::DemoBatches::default(),
             bills: bills::DemoBills::default(),
             intake: intake::DemoIntake::default(),
+            drafts: drafts::DemoDrafts::default(),
             card_digits: false,
         }
     }

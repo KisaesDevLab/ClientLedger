@@ -10,6 +10,8 @@ use eframe::egui::{
 use crate::theme::{Tokens, styles};
 
 pub mod bar_chart;
+// A04 WP-C: the compare tools over the document viewer (A06 reuses them).
+pub mod compare;
 // A02 WP-B: the docked document pane every attachment site draws.
 pub mod doc_pane;
 // P17 (WP1): the PDF and image viewer and its worker thread.
