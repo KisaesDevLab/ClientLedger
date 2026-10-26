@@ -541,6 +541,91 @@ fn route_wanted(r: Route, want: Option<&Vec<String>>) -> bool {
     want.is_none_or(|w| w.iter().any(|x| x == r.name()))
 }
 
+// ---------------------------------------------------------------------------
+// Tuning aids (A03 WP-A2): a reading cache and the seen misses
+// ---------------------------------------------------------------------------
+
+/// `CL_DOCREAD_CACHE=<dir>` keeps every worker reading; with
+/// `CL_DOCREAD_REUSE=1` a kept reading's words go through the current rules
+/// in-process instead of the worker (rule tuning without OCR). Clear the
+/// folder after any change to the worker, clean-up or text layer. Timings
+/// of reused readings are zero, so a gate run never reuses.
+fn cache_path(part: &str, dir: &Path, file: &str) -> Option<PathBuf> {
+    let root = env_path("CL_DOCREAD_CACHE")?;
+    let layout = dir.file_name()?;
+    Some(root.join(part).join(layout).join(format!("{file}.json")))
+}
+
+fn reuse(path: &Path) -> Option<Reading> {
+    if std::env::var("CL_DOCREAD_REUSE").as_deref() != Ok("1") {
+        return None;
+    }
+    let r: Reading = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    Some(reread(&r, &[], today()))
+}
+
+fn store(path: &Path, r: &Reading) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, serde_json::to_vec(r).unwrap_or_default());
+}
+
+fn shown<T: std::fmt::Display>(v: Option<T>) -> String {
+    v.map_or_else(|| "-".to_string(), |v| v.to_string())
+}
+
+/// `CL_DOCREAD_MISSES=1`: every wrong gated field of a **seen** document
+/// (synthetic values only; never held-out or private documents).
+fn misses(docs: &[&Doc], roster: &Roster) -> String {
+    let mut s = String::from(
+        "| layout | seq | path | field | read | truth |\n| --- | --- | --- | --- | --- | --- |\n",
+    );
+    for d in docs.iter().filter(|d| !d.truth.holdout) {
+        let t = &d.truth;
+        for f in GATED {
+            let ok = d
+                .reading
+                .as_ref()
+                .is_some_and(|r| right(f, r, t, Some(roster)));
+            if ok {
+                continue;
+            }
+            let h = d.reading.as_ref().map(|r| &r.header);
+            let (got, want) = match f {
+                Field::Vendor => (
+                    shown(h.and_then(|h| h.vendor.as_ref()).map(|v| v.value.clone())),
+                    t.vendor_name.clone(),
+                ),
+                Field::Date => (
+                    shown(h.and_then(|h| h.date.as_ref()).map(|v| v.value)),
+                    shown(t.date),
+                ),
+                Field::Reference => (
+                    shown(
+                        h.and_then(|h| h.reference.as_ref())
+                            .map(|v| v.value.clone()),
+                    ),
+                    shown(t.reference.clone()),
+                ),
+                _ => (
+                    shown(h.and_then(|h| h.total.as_ref()).map(|v| v.value.to_wire())),
+                    shown(t.total.map(Money::to_wire)),
+                ),
+            };
+            let _ = writeln!(
+                s,
+                "| {} | {} | {} | {} | {got} | {want} |",
+                t.layout,
+                t.seq,
+                d.route.name(),
+                f.name()
+            );
+        }
+    }
+    s
+}
+
 /// Read every document of the synthetic set.
 fn read_set(host: &mut DocreadHost, set: &Path) -> Vec<Doc> {
     let want = wanted_routes();
@@ -581,7 +666,17 @@ fn read_set(host: &mut DocreadHost, set: &Path) -> Vec<Doc> {
                     let Ok(bytes) = std::fs::read(dir.join(&file)) else {
                         continue;
                     };
-                    let (reading, elapsed) = read_one(host, bytes);
+                    let cached = cache_path(part, &dir, &file);
+                    let (reading, elapsed) = if let Some(r) = cached.as_ref().and_then(|p| reuse(p))
+                    {
+                        (Some(r), Duration::ZERO)
+                    } else {
+                        let (reading, elapsed) = read_one(host, bytes);
+                        if let (Some(p), Some(r)) = (&cached, &reading) {
+                            store(p, r);
+                        }
+                        (reading, elapsed)
+                    };
                     out.push(Doc {
                         truth: truth.clone(),
                         route,
@@ -915,6 +1010,11 @@ fn reading_accuracy_against_q285() {
     );
     std::fs::create_dir_all(&out_dir).expect("report folder");
     std::fs::write(out_dir.join("report.md"), &md).expect("write report");
+    if std::env::var("CL_DOCREAD_MISSES").as_deref() == Ok("1") {
+        let all: Vec<&Doc> = docs.iter().chain(&templated).collect();
+        std::fs::write(out_dir.join("misses-seen.md"), misses(&all, &roster))
+            .expect("write misses");
+    }
     std::fs::write(
         out_dir.join("summary.json"),
         serde_json::to_vec_pretty(&summary).unwrap_or_default(),

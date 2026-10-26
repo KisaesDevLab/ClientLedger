@@ -37,7 +37,7 @@ impl Label {
     /// Whether the value may be the next segment on the line.
     #[must_use]
     pub fn value_may_be_next_segment(self) -> bool {
-        !matches!(self, Label::Reference(2) | Label::Party)
+        !matches!(self, Label::Party)
     }
 
     /// Whether the value may be on the line below the label.
@@ -47,7 +47,7 @@ impl Label {
             self,
             Label::Date(_)
                 | Label::Due
-                | Label::Reference(0 | 1)
+                | Label::Reference(_)
                 | Label::Terms
                 | Label::Account
                 | Label::Total(_)
@@ -87,6 +87,12 @@ const TABLE: &[(&[&str], Label)] = &[
     (&["amount", "due"], Label::AmountDue),
     (&["please", "pay"], Label::AmountDue),
     (&["pay", "this", "amount"], Label::AmountDue),
+    (&["amount", "payable"], Label::AmountDue),
+    (&["total", "payable"], Label::Total(0)),
+    (&["net", "amount"], Label::Total(1)),
+    (&["total", "premium"], Label::Total(0)),
+    (&["premium", "due"], Label::AmountDue),
+    (&["amount", "due", "now"], Label::AmountDue),
     (&["balance", "due"], Label::Balance),
     (&["balance"], Label::Balance),
     (&["remaining", "balance"], Label::Balance),
@@ -127,6 +133,10 @@ const TABLE: &[(&[&str], Label)] = &[
     (&["date", "issued"], Label::Date(0)),
     (&["date", "of", "issue"], Label::Date(0)),
     (&["transaction", "date"], Label::Date(0)),
+    (&["date", "paid"], Label::Date(0)),
+    (&["payment", "date"], Label::Date(0)),
+    (&["statement", "date"], Label::Date(0)),
+    (&["billing", "date"], Label::Date(0)),
     (&["date"], Label::Date(1)),
     (&["order", "date"], Label::Date(2)),
     (&["due", "date"], Label::Due),
@@ -143,10 +153,12 @@ const TABLE: &[(&[&str], Label)] = &[
     (&["ref", "#"], Label::Reference(0)),
     (&["ref"], Label::Reference(0)),
     (&["document", "#"], Label::Reference(0)),
-    (&["transaction", "#"], Label::Reference(1)),
-    (&["trans", "#"], Label::Reference(1)),
-    (&["order", "#"], Label::Reference(1)),
-    (&["invoice"], Label::Reference(2)),
+    (&["invoice", "id"], Label::Reference(0)),
+    (&["invoice"], Label::Reference(1)),
+    (&["#"], Label::Reference(1)),
+    (&["transaction", "#"], Label::Reference(2)),
+    (&["trans", "#"], Label::Reference(2)),
+    (&["order", "#"], Label::Reference(2)),
     (&["terms"], Label::Terms),
     (&["payment", "terms"], Label::Terms),
     (&["terms", "of", "payment"], Label::Terms),

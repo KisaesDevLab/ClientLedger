@@ -291,7 +291,8 @@ pub(crate) mod tests {
         let pdf = build(&[Page::letter(body)]);
         let (words, quality, _) = first_page_words(&p, &pdf);
         assert_eq!(words.len(), 40 * 6);
-        assert_eq!(quality, 10_000);
+        // Letters and digits score; the points in "4.00" do not.
+        assert!((9_000..10_000).contains(&quality), "{quality}");
         let Opened::Doc(doc) = open(&p, &pdf) else {
             panic!()
         };

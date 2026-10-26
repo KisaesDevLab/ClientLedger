@@ -36,7 +36,7 @@ mod test_pdf;
 use batch::{Ctx, Fatal, Io, OcrAnswer};
 use cl_docread::protocol::{
     Bytes, FrameError, FromWorker, JobFailure, JobId, MAX_FROM_WORKER_FRAME, MAX_JOB_DONE_FRAME,
-    MAX_TO_WORKER_FRAME, PROTOCOL_VERSION, ToWorker, read_frame, write_frame,
+    MAX_TO_WORKER_FRAME, OcrMode, PROTOCOL_VERSION, ToWorker, read_frame, write_frame,
 };
 use pdfium_render::prelude::Pdfium;
 use std::io::{Read, Write};
@@ -91,11 +91,18 @@ impl<R: Read, W: Write> Io for Pipe<R, W> {
         })
     }
 
-    fn ocr(&mut self, job: JobId, page: u16, pgm: Vec<u8>) -> Result<OcrAnswer, Fatal> {
+    fn ocr(
+        &mut self,
+        job: JobId,
+        page: u16,
+        pgm: Vec<u8>,
+        mode: OcrMode,
+    ) -> Result<OcrAnswer, Fatal> {
         self.send(&FromWorker::NeedOcr {
             job,
             page,
             pgm: Bytes(pgm),
+            mode,
         })?;
         loop {
             match self.read().map_err(|_| Fatal::Pipe)? {

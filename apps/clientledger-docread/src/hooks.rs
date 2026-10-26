@@ -146,7 +146,12 @@ pub fn run(
                 job: job.job,
                 page: 0,
             })?;
-            let reason = match io.ocr(job.job, 0, b"P6\n1 1\n255\n\0\0\0".to_vec())? {
+            let reason = match io.ocr(
+                job.job,
+                0,
+                b"P6\n1 1\n255\n\0\0\0".to_vec(),
+                cl_docread::protocol::OcrMode::Read,
+            )? {
                 OcrAnswer::Failed(OcrFailure::BadImage) => JobFailure::Unreadable,
                 _ => JobFailure::Empty,
             };

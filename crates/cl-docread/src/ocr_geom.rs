@@ -21,6 +21,10 @@ use crate::tsv::PixelBox;
 /// What the clean-up did to the original page image, integers only (plan
 /// D3): applied in the order crop → rotate → scale.
 ///
+/// The crop is a rectangle, or, with [`Transform::quad`], a four-sided
+/// region (a photographed sheet of paper, keystoned and turned) stretched
+/// onto a `crop_width` × `crop_height` rectangle by a perspective map.
+///
 /// Rotation turns the crop about its centre into a canvas whose centre is
 /// the crop's: the canvas is the crop's size, or its sides swapped when the
 /// rotation is an odd number of quarter turns (rounded to the nearest
@@ -30,11 +34,15 @@ pub struct Transform {
     /// The original page image's size in pixels.
     pub original_width: u32,
     pub original_height: u32,
-    /// Crop applied first, in original pixels.
+    /// Crop applied first, in original pixels (ignored with a `quad`).
     pub crop_left: u32,
     pub crop_top: u32,
     pub crop_width: u32,
     pub crop_height: u32,
+    /// The paper's corners in original pixels — top left, top right,
+    /// bottom right, bottom left — mapped onto the crop rectangle's
+    /// corners.
+    pub quad: Option<[[u32; 2]; 4]>,
     /// Rotation about the crop's centre, millidegrees clockwise (deskew and
     /// 90° turns).
     pub rotation_mdeg: i32,
@@ -56,6 +64,7 @@ impl Transform {
             crop_top: 0,
             crop_width: width,
             crop_height: height,
+            quad: None,
             rotation_mdeg: 0,
             scale: 10_000,
             ocr_width: width,
@@ -80,40 +89,159 @@ impl Transform {
         }
     }
 
-    fn angle(&self) -> f64 {
-        (f64::from(self.rotation_mdeg) / 1000.0).to_radians()
-    }
-
-    fn scale_f(&self) -> f64 {
-        f64::from(self.scale.max(1)) / 10_000.0
+    /// The point maps, computed once (sine, cosine, perspective).
+    #[must_use]
+    pub fn mapper(&self) -> Mapper {
+        let (rw, rh) = self.canvas();
+        let (sin, cos) = (f64::from(self.rotation_mdeg) / 1000.0)
+            .to_radians()
+            .sin_cos();
+        let (cw, ch) = (f64::from(self.crop_width), f64::from(self.crop_height));
+        let quad = self.quad.and_then(|q| {
+            let p = q.map(|[x, y]| (f64::from(x), f64::from(y)));
+            Homography::square_to_quad(p).map(|h| (h, h.inverse()))
+        });
+        Mapper {
+            canvas: (f64::from(rw), f64::from(rh)),
+            crop: (cw, ch),
+            origin: (f64::from(self.crop_left), f64::from(self.crop_top)),
+            sin,
+            cos,
+            scale: f64::from(self.scale.max(1)) / 10_000.0,
+            quad,
+        }
     }
 
     /// A point on the original image (pixels) to the OCR image.
     #[must_use]
     pub fn to_ocr(&self, x: f64, y: f64) -> (f64, f64) {
-        let (cw, ch) = (f64::from(self.crop_width), f64::from(self.crop_height));
-        let (rw, rh) = self.canvas();
-        let dx = x - f64::from(self.crop_left) - cw / 2.0;
-        let dy = y - f64::from(self.crop_top) - ch / 2.0;
-        let (s, c) = self.angle().sin_cos();
-        let rx = f64::from(rw) / 2.0 + dx * c - dy * s;
-        let ry = f64::from(rh) / 2.0 + dx * s + dy * c;
-        (rx * self.scale_f(), ry * self.scale_f())
+        self.mapper().to_ocr(x, y)
     }
 
     /// A point on the OCR image to the original image (pixels).
     #[must_use]
     pub fn to_original(&self, x: f64, y: f64) -> (f64, f64) {
-        let (rw, rh) = self.canvas();
-        let rx = x / self.scale_f() - f64::from(rw) / 2.0;
-        let ry = y / self.scale_f() - f64::from(rh) / 2.0;
-        let (s, c) = self.angle().sin_cos();
+        self.mapper().to_original(x, y)
+    }
+}
+
+/// A projective map of the unit square (Heckbert's square-to-quad), as
+/// the 3 × 3 matrix `[a b c; d e f; g h 1]`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Homography([f64; 9]);
+
+impl Homography {
+    /// The map taking (0,0), (1,0), (1,1), (0,1) to `p[0..4]`; `None` for a
+    /// degenerate quad.
+    #[must_use]
+    pub fn square_to_quad(p: [(f64, f64); 4]) -> Option<Homography> {
+        let [(x0, y0), (x1, y1), (x2, y2), (x3, y3)] = p;
+        let (dx1, dx2, dx3) = (x1 - x2, x3 - x2, x0 - x1 + x2 - x3);
+        let (dy1, dy2, dy3) = (y1 - y2, y3 - y2, y0 - y1 + y2 - y3);
+        let m = if dx3.abs() < 1e-9 && dy3.abs() < 1e-9 {
+            [x1 - x0, x2 - x1, x0, y1 - y0, y2 - y1, y0, 0.0, 0.0, 1.0]
+        } else {
+            let det = dx1 * dy2 - dx2 * dy1;
+            if det.abs() < 1e-12 {
+                return None;
+            }
+            let g = (dx3 * dy2 - dx2 * dy3) / det;
+            let h = (dx1 * dy3 - dx3 * dy1) / det;
+            [
+                x1 - x0 + g * x1,
+                x3 - x0 + h * x3,
+                x0,
+                y1 - y0 + g * y1,
+                y3 - y0 + h * y3,
+                y0,
+                g,
+                h,
+                1.0,
+            ]
+        };
+        let hm = Homography(m);
+        (hm.det().abs() > 1e-12 && m.iter().all(|v| v.is_finite())).then_some(hm)
+    }
+
+    fn det(&self) -> f64 {
+        let [a, b, c, d, e, f, g, h, i] = self.0;
+        a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+    }
+
+    /// The inverse map (adjugate; the scale cancels in [`Self::apply`]).
+    #[must_use]
+    pub fn inverse(&self) -> Homography {
+        let [a, b, c, d, e, f, g, h, i] = self.0;
+        Homography([
+            e * i - f * h,
+            c * h - b * i,
+            b * f - c * e,
+            f * g - d * i,
+            a * i - c * g,
+            c * d - a * f,
+            d * h - e * g,
+            b * g - a * h,
+            a * e - b * d,
+        ])
+    }
+
+    /// Map a point.
+    #[must_use]
+    pub fn apply(&self, x: f64, y: f64) -> (f64, f64) {
+        let [a, b, c, d, e, f, g, h, i] = self.0;
+        let w = g * x + h * y + i;
+        let w = if w.abs() < 1e-12 { 1e-12 } else { w };
+        ((a * x + b * y + c) / w, (d * x + e * y + f) / w)
+    }
+}
+
+/// [`Transform`]'s point maps with everything per-transform computed once
+/// (the clean-up maps every OCR pixel).
+#[derive(Debug, Clone, Copy)]
+pub struct Mapper {
+    canvas: (f64, f64),
+    crop: (f64, f64),
+    origin: (f64, f64),
+    sin: f64,
+    cos: f64,
+    scale: f64,
+    /// Unit square → paper, and back.
+    quad: Option<(Homography, Homography)>,
+}
+
+impl Mapper {
+    /// A point on the original image (pixels) to the OCR image.
+    #[must_use]
+    pub fn to_ocr(&self, x: f64, y: f64) -> (f64, f64) {
+        let (cw, ch) = self.crop;
+        let (u, v) = match &self.quad {
+            Some((_, back)) => {
+                let (s, t) = back.apply(x, y);
+                (s * cw, t * ch)
+            }
+            None => (x - self.origin.0, y - self.origin.1),
+        };
+        let (dx, dy) = (u - cw / 2.0, v - ch / 2.0);
+        let (s, c) = (self.sin, self.cos);
+        let rx = self.canvas.0 / 2.0 + dx * c - dy * s;
+        let ry = self.canvas.1 / 2.0 + dx * s + dy * c;
+        (rx * self.scale, ry * self.scale)
+    }
+
+    /// A point on the OCR image to the original image (pixels).
+    #[must_use]
+    pub fn to_original(&self, x: f64, y: f64) -> (f64, f64) {
+        let rx = x / self.scale - self.canvas.0 / 2.0;
+        let ry = y / self.scale - self.canvas.1 / 2.0;
+        let (s, c) = (self.sin, self.cos);
         let dx = rx * c + ry * s;
         let dy = -rx * s + ry * c;
-        (
-            f64::from(self.crop_left) + f64::from(self.crop_width) / 2.0 + dx,
-            f64::from(self.crop_top) + f64::from(self.crop_height) / 2.0 + dy,
-        )
+        let (cw, ch) = self.crop;
+        let (u, v) = (cw / 2.0 + dx, ch / 2.0 + dy);
+        match &self.quad {
+            Some((to, _)) if cw > 0.0 && ch > 0.0 => to.apply(u / cw, v / ch),
+            _ => (self.origin.0 + u, self.origin.1 + v),
+        }
     }
 }
 
@@ -127,7 +255,8 @@ pub fn to_page(px: PixelBox, transform: &Transform) -> Bbox {
     }
     let (l, t) = (f64::from(px.left), f64::from(px.top));
     let (r, b) = (l + f64::from(px.width), t + f64::from(px.height));
-    let corners = [(l, t), (r, t), (l, b), (r, b)].map(|(x, y)| transform.to_original(x, y));
+    let m = transform.mapper();
+    let corners = [(l, t), (r, t), (l, b), (r, b)].map(|(x, y)| m.to_original(x, y));
     let (ow, oh) = (
         f64::from(transform.original_width),
         f64::from(transform.original_height),
@@ -249,6 +378,37 @@ mod tests {
     }
 
     #[test]
+    fn a_keystoned_sheet_maps_onto_its_rectangle_and_back() {
+        // A photo 2000 × 2600 with the sheet's corners inside it, narrower
+        // at the top, turned a little.
+        let mut t = Transform::identity(2000, 2600);
+        t.quad = Some([[260, 180], [1700, 230], [1880, 2450], [90, 2400]]);
+        t.crop_width = 1800;
+        t.crop_height = 2250;
+        t.rotation_mdeg = -1_500;
+        t.scale = 12_000;
+        let (cw, ch) = t.canvas();
+        t.ocr_width = cw * 12 / 10;
+        t.ocr_height = ch * 12 / 10;
+        let m = t.mapper();
+        // The sheet's corners land on the rectangle's corners (before the
+        // turn): with no turn, exactly.
+        let mut flat = t;
+        flat.rotation_mdeg = 0;
+        flat.scale = 10_000;
+        let (x, y) = flat.to_ocr(1700.0, 230.0);
+        assert!((x - 1800.0).abs() < 1e-6 && y.abs() < 1e-6, "{x},{y}");
+        let (x, y) = flat.to_original(0.0, 2250.0);
+        assert!((x - 90.0).abs() < 1e-6 && (y - 2400.0).abs() < 1e-6);
+        for (x, y) in [(300.0, 400.0), (1000.0, 1300.0), (1800.0, 2400.0)] {
+            let (ox, oy) = m.to_ocr(x, y);
+            let (bx, by) = m.to_original(ox, oy);
+            assert!((bx - x).abs() < 1e-6 && (by - y).abs() < 1e-6, "{x},{y}");
+        }
+        assert!(Homography::square_to_quad([(0.0, 0.0); 4]).is_none());
+    }
+
+    #[test]
     fn degenerate_transforms_stay_on_the_page() {
         let mut t = Transform::identity(0, 0);
         let px = PixelBox {
@@ -273,11 +433,13 @@ mod tests {
             cw in 0u32..12_000, ch in 0u32..12_000,
             mdeg in -400_000i32..400_000,
             scale in 0u32..40_000,
+            quad in proptest::bool::ANY,
             l in 0u32..5_000, t in 0u32..5_000, w in 0u32..5_000, h in 0u32..5_000,
         ) {
             let tr = Transform {
                 original_width: ow, original_height: oh,
                 crop_left: cl, crop_top: ct, crop_width: cw, crop_height: ch,
+                quad: if quad { Some([[cl, ct], [cl + cw, ct + 7], [cl + cw + 3, ct + ch], [cl / 2, ct + ch]]) } else { None },
                 rotation_mdeg: mdeg, scale, ocr_width: 3400, ocr_height: 4400,
             };
             let b = to_page(PixelBox { left: l, top: t, width: w, height: h }, &tr);

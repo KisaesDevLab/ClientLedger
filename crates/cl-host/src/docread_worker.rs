@@ -59,7 +59,7 @@ use cl_docread::model::{MAX_PAGES, Reading, Template};
 use cl_docread::protocol::{
     BatchOptions, Bytes, FrameError, FromWorker, Job, JobFailure, JobHint,
     MAX_BATCH_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES, MAX_FROM_WORKER_FRAME, MAX_JOB_DONE_FRAME,
-    MAX_JOBS_PER_BATCH, MAX_TEMPLATES, MAX_TO_WORKER_FRAME, MAX_TSV_BYTES, OcrFailure,
+    MAX_JOBS_PER_BATCH, MAX_TEMPLATES, MAX_TO_WORKER_FRAME, MAX_TSV_BYTES, OcrFailure, OcrMode,
     PROTOCOL_VERSION, ToWorker, Tsv, validate_pgm, write_frame,
 };
 use std::collections::{BTreeSet, VecDeque};
@@ -838,10 +838,28 @@ fn log_line(line: &[u8], who: &'static str, other: &mut u32) {
 // Tesseract
 // ---------------------------------------------------------------------------
 
+/// Tesseract's arguments after the input, output and model folder.
+fn tesseract_args(mode: OcrMode) -> &'static [&'static str] {
+    match mode {
+        OcrMode::Read => &[
+            "-l",
+            "eng",
+            "--oem",
+            "1",
+            "--psm",
+            "3",
+            "-c",
+            "tessedit_create_tsv=1",
+        ],
+        // The orientation report (osd.traineddata), plain text.
+        OcrMode::Orient => &["-l", "osd", "--psm", "0"],
+    }
+}
+
 /// OCR one validated PGM page with tesseract: TSV text, or why not.
 fn run_tesseract(
     tools: &OcrTools,
-    pgm: Vec<u8>,
+    (pgm, mode): (Vec<u8>, OcrMode),
     scratch: &Path,
     limits: &DocreadLimits,
     stop: [&AtomicBool; 2],
@@ -853,16 +871,7 @@ fn run_tesseract(
         .arg("stdout")
         .arg("--tessdata-dir")
         .arg(&tools.tessdata)
-        .args([
-            "-l",
-            "eng",
-            "--oem",
-            "1",
-            "--psm",
-            "3",
-            "-c",
-            "tessedit_create_tsv=1",
-        ])
+        .args(tesseract_args(mode))
         .env_clear()
         .envs(scrubbed_env(&dir.0))
         .env("OMP_THREAD_LIMIT", "1")
@@ -1273,13 +1282,17 @@ fn run_batch(
                     clock.pages.insert(page);
                     clock.deadline = Instant::now() + limits.per_page;
                 }
-                FromWorker::NeedOcr { job, page, pgm }
-                    if job == id && clock.pages.contains(&page) =>
-                {
-                    let answer = match ocr_watching(w, (id, page), pgm.0, config, stats, cancel) {
-                        Ok(a) => a,
-                        Err(why) => return BatchEnd::Killed(k, why),
-                    };
+                FromWorker::NeedOcr {
+                    job,
+                    page,
+                    pgm,
+                    mode,
+                } if job == id && clock.pages.contains(&page) => {
+                    let answer =
+                        match ocr_watching(w, (id, page, mode), pgm.0, config, stats, cancel) {
+                            Ok(a) => a,
+                            Err(why) => return BatchEnd::Killed(k, why),
+                        };
                     if !w.send(&answer) {
                         return BatchEnd::Killed(k, Kill::Crashed);
                     }
@@ -1319,7 +1332,7 @@ fn run_batch(
 /// the worker; cancelling stops tesseract (the caller then sees it).
 fn ocr_watching(
     w: &mut Worker,
-    (job, page): (u32, u16),
+    (job, page, mode): (u32, u16, OcrMode),
     pgm: Vec<u8>,
     config: &DocreadConfig,
     stats: &mut DocreadStats,
@@ -1328,7 +1341,8 @@ fn ocr_watching(
     let stop = AtomicBool::new(false);
     let stop = &stop;
     std::thread::scope(|s| {
-        let ocr = s.spawn(move || ocr_answer(job, page, pgm, config, stats, [cancel, stop]));
+        let ocr =
+            s.spawn(move || ocr_answer((job, page, mode), pgm, config, stats, [cancel, stop]));
         let mut breach = None;
         while !ocr.is_finished() {
             if breach.is_none() && w.memory().is_some_and(|m| m > config.limits.worker_memory) {
@@ -1348,8 +1362,7 @@ fn ocr_watching(
 
 /// The host's answer to a `NeedOcr`.
 fn ocr_answer(
-    job: u32,
-    page: u16,
+    (job, page, mode): (u32, u16, OcrMode),
     pgm: Vec<u8>,
     config: &DocreadConfig,
     stats: &mut DocreadStats,
@@ -1363,9 +1376,21 @@ fn ocr_answer(
     let Some(tools) = &config.ocr else {
         return failed(OcrFailure::Unavailable);
     };
-    stats.ocr_pages += 1;
+    // Orientation passes (a poor first read) are not pages read, and a
+    // page with too little text for one is not an OCR failure.
+    let reading = mode == OcrMode::Read;
+    if reading {
+        stats.ocr_pages += 1;
+    }
     let mut peak = 0;
-    let result = run_tesseract(tools, pgm, &config.scratch, &config.limits, stop, &mut peak);
+    let result = run_tesseract(
+        tools,
+        (pgm, mode),
+        &config.scratch,
+        &config.limits,
+        stop,
+        &mut peak,
+    );
     stats.tesseract_peak_memory = stats.tesseract_peak_memory.max(peak);
     match result {
         Ok(tsv) => ToWorker::OcrResult {
@@ -1374,8 +1399,10 @@ fn ocr_answer(
             tsv: Tsv(tsv),
         },
         Err(reason) => {
-            stats.ocr_failures += 1;
-            tracing::info!(reason = ?reason, "docread: a page could not be read with OCR");
+            if reading {
+                stats.ocr_failures += 1;
+                tracing::info!(reason = ?reason, "docread: a page could not be read with OCR");
+            }
             failed(reason)
         }
     }

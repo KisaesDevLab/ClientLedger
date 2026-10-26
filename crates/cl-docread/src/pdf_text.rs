@@ -295,8 +295,8 @@ fn plausible(c: char) -> bool {
     )
 }
 
-/// How usable a text layer is, in basis points: the share of plausible
-/// characters, scaled down when the page has fewer than
+/// How usable a text layer is, in basis points: the share of letters and
+/// digits (outside the private-use area) among the characters, scaled down when the page has fewer than
 /// [`FULL_QUALITY_WORDS`] words. 0 for no words.
 #[must_use]
 pub fn text_quality(words: &[Word]) -> u16 {
@@ -304,7 +304,10 @@ pub fn text_quality(words: &[Word]) -> u16 {
     for w in words {
         for c in w.text.chars() {
             all += 1;
-            if plausible(c) {
+            // Letters and digits carry the text; a font without a text map
+            // often comes out as runs of punctuation (glyph numbers read as
+            // `!` `"` `#`…), which plausible alone would accept.
+            if plausible(c) && c.is_alphanumeric() {
                 good += 1;
             }
         }
@@ -428,6 +431,15 @@ mod tests {
         // A font without a text map: private-use glyph codes.
         let garbage: Vec<Word> = (0..30).map(|_| word("\u{E001}\u{E002}\u{FFFD}")).collect();
         assert_eq!(text_quality(&garbage), 0);
+        // Glyph numbers read as punctuation (no ToUnicode map).
+        let glyphs: Vec<Word> = (0..30).map(|_| word("!\"#$%&'()*")).collect();
+        assert!(text_quality(&glyphs) < MIN_TEXT_QUALITY_BP);
+        // A real line still scores high.
+        let real: Vec<Word> = "Invoice # INV-99476 Date 12/11/2025 Total $734.63 Riverbend Electric Co. Phone (479) 555-0142 Net 30 Description Hours Rate Amount Subtotal 689.79 Tax"
+            .split(' ')
+            .map(word)
+            .collect();
+        assert!(text_quality(&real) >= 7_500, "{}", text_quality(&real));
         // Half plausible.
         let half: Vec<Word> = (0..30).map(|_| word("ab\u{E001}\u{E002}")).collect();
         assert_eq!(text_quality(&half), 5_000);
