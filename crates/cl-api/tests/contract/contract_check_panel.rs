@@ -246,6 +246,48 @@ pub fn draft_attachment_moves_onto_the_check(h: &Harness) {
     assert_eq!(h.observer.total(), before, "nothing may be sent");
 }
 
+/// A02 (Q-A02e, Q-A02f): a card charge's draft files move onto the saved
+/// record one by one (`link`), and a register row lists its files by its
+/// transaction type and id (`AttachTo::Txn`).
+pub fn draft_files_link_onto_a_saved_record_and_list_by_type(h: &Harness) {
+    let s = &h.s1;
+    let bank = detail_account(h, s, AccountType::Asset, "bank");
+    let mulch = account(h, s, AccountType::Expense, "Link mulch");
+    let draft = DraftKey::new();
+    let up = h
+        .run(
+            s.attachments()
+                .upload_draft(draft, "receipt.pdf", PDF, key()),
+        )
+        .unwrap_or_else(|e| panic!("upload: {e}"));
+    let (check, _) = raw_check(
+        h,
+        s,
+        &json!({
+            "bankAccountId": bank, "payeeNameOnCheck": unique("Payee"),
+            "txnDate": "2026-10-21", "amount": "7.5000",
+            "lines": [{"accountId": mulch.id, "amount": "7.5000"}],
+        }),
+    );
+    let first = PageRequest::new(50, 0).expect("page");
+    let by_type = AttachTo::Txn(TxnType::Expense, check);
+    let before = h.run(s.attachments().list(by_type, first)).expect("list");
+    assert_eq!(before.total, 0, "no draft rode on this create");
+    h.run(s.attachments().link(up.id, AttachTo::Expense(check), key()))
+        .expect("link");
+    let after = h.run(s.attachments().list(by_type, first)).expect("list");
+    assert_eq!(after.total, 1, "the file is the record's");
+    assert_eq!(after.data[0].id, up.id);
+    // Linking again to the same place changes nothing.
+    h.run(s.attachments().link(up.id, AttachTo::Expense(check), key()))
+        .expect("link again");
+    let again = h.run(s.attachments().list(by_type, first)).expect("list");
+    assert_eq!(again.total, 1);
+    let left = h
+        .run(s.attachments().list(AttachTo::Draft(draft), first))
+        .expect("draft list");
+    assert_eq!(left.total, 0);
+}
 /// Rule suggestions (`rules-evaluate-v1`): no rule matches nothing; the
 /// owner's rule names its account for the check as the screen asks (money
 /// out, the payee chosen); with the company's conditional rules switched

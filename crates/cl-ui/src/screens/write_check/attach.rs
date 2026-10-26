@@ -1,5 +1,7 @@
 //! Attachments on a check: the drop zone, the file field and Browse (the
-//! system file window, A01 WP-D), the list, and "Save a copy".
+//! system file window, A01 WP-D), the list, "Save a copy", and the document
+//! pane (A02: the file just attached or previewed, else the first; the
+//! pop-out viewer follows it).
 //!
 //! Before the first save one file uploads as a draft and rides on the check
 //! create as `draftAttachmentId`; once the check is saved, files attach to
@@ -9,6 +11,7 @@
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use cl_api::{
     ATTACHMENT_MAX_BYTES, ApiError, AttachTo, Attachment, AttachmentId, DraftKey, FileKind,
@@ -22,6 +25,11 @@ use crate::company::Task;
 use crate::i18n::{t, t_with};
 use crate::screens::company::form;
 use crate::theme::Tokens;
+use crate::widgets::doc_pane::DocPane;
+use crate::widgets::pdf_viewer::{DocSource, ViewerEvent, ViewerState};
+
+/// The pane's height on the card (the viewer's bar and a page).
+const PANE_HEIGHT: f32 = 360.0;
 
 /// The check's attachments.
 #[derive(Default)]
@@ -55,6 +63,15 @@ pub(crate) struct AttachState {
     pub reading: Option<std::sync::mpsc::Receiver<FileRead>>,
     /// The Browse window, while open (A01 WP-D, Q-P13k).
     pub browsing: Option<std::sync::mpsc::Receiver<Vec<PathBuf>>>,
+    /// The name and bytes being uploaded (the pane shows them once the
+    /// engine took them).
+    uploading: Option<DocSource>,
+    /// The file the pane shows (A02).
+    pub shown: Option<AttachmentId>,
+    /// A file's bytes on their way to the pane.
+    pub pane_task: Option<Task<(AttachmentId, String, Vec<u8>)>>,
+    /// The pane's viewer.
+    pub viewer: ViewerState,
 }
 
 impl AttachState {
@@ -65,6 +82,25 @@ impl AttachState {
             || self.upload.is_some()
             || self.download.is_some()
             || self.preview.is_some()
+            || self.pane_task.is_some()
+    }
+
+    /// Another check (new, or read from the books): nothing attached,
+    /// nothing shown. The viewer's worker stays.
+    pub(crate) fn reset(&mut self) {
+        let mut viewer = std::mem::take(&mut self.viewer);
+        viewer.clear();
+        *self = AttachState {
+            viewer,
+            ..AttachState::default()
+        };
+    }
+
+    /// Show `source` (the file `id`) in the pane.
+    fn show(&mut self, id: AttachmentId, source: DocSource) {
+        self.shown = Some(id);
+        self.viewer.set_full_size_button(true);
+        self.viewer.open(source);
     }
 }
 
@@ -158,7 +194,7 @@ pub(crate) fn check_bytes(bytes: &[u8]) -> Result<(), &'static str> {
 
 /// Where "Save a copy" puts a file: the Downloads folder, else the
 /// temporary folder.
-fn copy_dir() -> PathBuf {
+pub(crate) fn copy_dir() -> PathBuf {
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
     home.map(|h| PathBuf::from(h).join("Downloads"))
         .filter(|p| p.is_dir())
@@ -312,6 +348,10 @@ impl WriteCheckScreen {
         }
         let to = self.attach_target();
         let name = name.to_string();
+        self.attach.uploading = Some(DocSource {
+            name: name.clone(),
+            bytes: Arc::from(bytes.clone()),
+        });
         let link = std::sync::Arc::clone(&self.link);
         if let Some(mut demo) = link.demo_state() {
             let r = crate::company::demo::checks::upload(&mut demo, to, &name, &bytes);
@@ -320,6 +360,7 @@ impl WriteCheckScreen {
                 self.attach.upload = Some(Task::ready(a));
                 self.poll_attach();
             } else {
+                self.attach.uploading = None;
                 self.attach.problem = Some("check.attach.failed");
             }
             return;
@@ -332,11 +373,13 @@ impl WriteCheckScreen {
             what: "orphan.check_attach",
             key: Some(key.clone()),
         };
-        match group.write(&session, label, move |s| async move {
+        if let Ok(p) = group.write(&session, label, move |s| async move {
             s.attachments().upload(to, &name, &bytes, key).await
         }) {
-            Ok(p) => self.attach.upload = Some(Task::Pending(p)),
-            Err(_) => self.attach.problem = Some("check.attach.failed"),
+            self.attach.upload = Some(Task::Pending(p));
+        } else {
+            self.attach.uploading = None;
+            self.attach.problem = Some("check.attach.failed");
         }
     }
 
@@ -356,7 +399,7 @@ impl WriteCheckScreen {
         if let Some(demo) = link.demo_state() {
             let list = crate::company::demo::checks::attachments(&demo, of);
             drop(demo);
-            self.attach.list = list;
+            self.list_arrived(list);
             return;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
@@ -399,6 +442,8 @@ impl WriteCheckScreen {
     /// (`nav.document_view`), read the same way as "Save a copy".
     pub(crate) fn preview(&mut self, id: AttachmentId, name: String) {
         self.attach.problem = None;
+        // The pane shows the previewed file too.
+        self.fetch_for_pane(id, name.clone());
         let link = std::sync::Arc::clone(&self.link);
         if let Some(demo) = link.demo_state() {
             let r = crate::company::demo::checks::download(&demo, id);
@@ -417,6 +462,55 @@ impl WriteCheckScreen {
             Ok((name, s.attachments().download(id).await?))
         }) {
             self.attach.preview = Some(Task::Pending(p));
+        }
+    }
+
+    /// The files of the check arrived: the pane keeps its file while it is
+    /// still attached, else shows the first one (or nothing).
+    fn list_arrived(&mut self, list: Vec<Attachment>) {
+        self.attach.list = list;
+        let kept = self
+            .attach
+            .shown
+            .is_some_and(|id| self.attach.list.iter().any(|a| a.id == id));
+        if kept {
+            return;
+        }
+        if let Some(first) = self.attach.list.first() {
+            let (id, name) = (first.id, first.file_name.clone());
+            self.fetch_for_pane(id, name);
+        } else {
+            self.attach.shown = None;
+            self.attach.pane_task = None;
+            self.attach.viewer.clear();
+        }
+    }
+
+    /// Reads the file `id` for the pane.
+    fn fetch_for_pane(&mut self, id: AttachmentId, name: String) {
+        if self.attach.shown == Some(id)
+            && (self.attach.pane_task.is_some() || self.attach.viewer.source().is_some())
+        {
+            return;
+        }
+        self.attach.shown = Some(id);
+        let link = std::sync::Arc::clone(&self.link);
+        if let Some(demo) = link.demo_state() {
+            let r = crate::company::demo::checks::download(&demo, id);
+            drop(demo);
+            match r {
+                Ok(bytes) => self.attach.pane_task = Some(Task::ready((id, name, bytes))),
+                Err(_) => self.attach.problem = Some("check.attach.download_failed"),
+            }
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        if let Ok(p) = group.read(&session, move |s| async move {
+            Ok((id, name, s.attachments().download(id).await?))
+        }) {
+            self.attach.pane_task = Some(Task::Pending(p));
         }
     }
 
@@ -460,9 +554,14 @@ impl WriteCheckScreen {
         }
         if let Some(r) = self.attach.upload.as_mut().and_then(Task::try_take) {
             self.attach.upload = None;
+            let source = self.attach.uploading.take();
             match r {
                 Ok(a) => {
                     self.attach.path.clear();
+                    if let Some(src) = source {
+                        self.attach.pane_task = None;
+                        self.attach.show(a.id, src);
+                    }
                     if self.editing.is_none()
                         && let Some(d) = self.attach.draft
                     {
@@ -490,7 +589,7 @@ impl WriteCheckScreen {
         if let Some(r) = self.attach.list_task.as_mut().and_then(Task::try_take) {
             self.attach.list_task = None;
             if let Ok(list) = r {
-                self.attach.list = list;
+                self.list_arrived(list);
             }
         }
         if let Some(r) = self.attach.download.as_mut().and_then(Task::try_take) {
@@ -500,6 +599,18 @@ impl WriteCheckScreen {
                     Ok(path) => self.attach.saved_to = Some(path),
                     Err(key) => self.attach.problem = Some(key),
                 },
+                Err(_) => self.attach.problem = Some("check.attach.download_failed"),
+            }
+        }
+        if let Some(r) = self.attach.pane_task.as_mut().and_then(Task::try_take) {
+            self.attach.pane_task = None;
+            match r {
+                // Only the file still wanted (the owner may have moved on).
+                Ok((id, name, bytes)) if self.attach.shown == Some(id) => {
+                    let bytes = Arc::from(bytes);
+                    self.attach.show(id, DocSource { name, bytes });
+                }
+                Ok(_) => {}
                 Err(_) => self.attach.problem = Some("check.attach.download_failed"),
             }
         }
@@ -520,8 +631,9 @@ impl WriteCheckScreen {
         self.take_dropped(ui);
         let mut attach = false;
         let mut browse = false;
-        let mut save_copy = None;
+        let mut copy_of = None;
         let mut preview = None;
+        let mut event = ViewerEvent::None;
         form::card_tight(ui, tokens, |ui| {
             ui.label(
                 RichText::new(t("check.panel.attachments"))
@@ -534,6 +646,19 @@ impl WriteCheckScreen {
                     tokens,
                     &t_with("inbox.attached_from", &[("name", name)]),
                 );
+            }
+            if self.attach.viewer.source().is_some() {
+                if crate::windows::doc_viewer::is_popped(ui.ctx()) {
+                    // Popped out: the pane is one line with Dock.
+                    event = DocPane::show(ui, &mut self.attach.viewer, tokens);
+                } else {
+                    let w = ui.available_width();
+                    ui.allocate_ui(egui::vec2(w, PANE_HEIGHT), |ui| {
+                        event = DocPane::show(ui, &mut self.attach.viewer, tokens);
+                    });
+                }
+            } else if self.attach.pane_task.is_some() {
+                form::progress_line(ui, tokens, &t("bill.source.loading"));
             }
             for a in &self.attach.list {
                 ui.horizontal_wrapped(|ui| {
@@ -553,7 +678,7 @@ impl WriteCheckScreen {
                         .on_hover_text(t("check.attach.save_copy.tip"))
                         .clicked()
                     {
-                        save_copy = Some((a.id, a.file_name.clone()));
+                        copy_of = Some((a.id, a.file_name.clone()));
                     }
                 });
             }
@@ -621,6 +746,26 @@ impl WriteCheckScreen {
                 );
             }
         });
+        match event {
+            ViewerEvent::OpenFullSize => {
+                if let Some(src) = self.attach.viewer.source().cloned() {
+                    self.link.push(crate::company::CompanyEvent::OpenWith(
+                        cl_model::CommandId::new(crate::screens::document_view::KIND),
+                        Box::new(crate::windows::OpenPayload::Document(src)),
+                    ));
+                }
+            }
+            ViewerEvent::SaveCopy => {
+                if let Some(src) = self.attach.viewer.source() {
+                    match save_copy(&copy_dir(), &src.name, &src.bytes) {
+                        Ok(path) => self.attach.saved_to = Some(path),
+                        Err(key) => self.attach.problem = Some(key),
+                    }
+                }
+            }
+            // Pop out and Dock went to the shell through the pane.
+            ViewerEvent::None | ViewerEvent::PopOut | ViewerEvent::Dock => {}
+        }
         if attach {
             let path = PathBuf::from(self.attach.path.trim().trim_matches('"'));
             self.attach_path(&path);
@@ -628,7 +773,7 @@ impl WriteCheckScreen {
         if browse {
             self.browse_attach(ui.ctx());
         }
-        if let Some((id, name)) = save_copy {
+        if let Some((id, name)) = copy_of {
             self.download(id, name);
         }
         if let Some((id, name)) = preview {

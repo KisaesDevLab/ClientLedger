@@ -215,6 +215,10 @@ fn main() -> std::process::ExitCode {
             contract_check_panel::draft_attachment_moves_onto_the_check,
         ),
         (
+            "check_panel::draft_files_link_onto_a_saved_record_and_list_by_type",
+            contract_check_panel::draft_files_link_onto_a_saved_record_and_list_by_type,
+        ),
+        (
             "check_panel::rules_evaluate",
             contract_check_panel::rules_evaluate,
         ),

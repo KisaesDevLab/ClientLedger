@@ -1071,6 +1071,13 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("docviewer.dock", "Dock"),
     ("docviewer.dock.tip", "Put the document back in the form ({keys})"),
     ("docpane.popped", "This document is open in its own window."),
+    // A02 WP-D: attachments on card charges and register items.
+    ("orphan.card_attach", "attaching a file to a card charge"),
+    ("card.attach.move_failed", "The charge is saved, but its files didn't attach to it."),
+    ("card.attach.try_again", "Attach them again"),
+    ("register.doc.show", "Show document"),
+    ("register.doc.show.tip", "Open the selected transaction's first attached document in its own window"),
+    ("register.doc.count", "Documents: {n}"),
 ];
 
 #[cfg(test)]

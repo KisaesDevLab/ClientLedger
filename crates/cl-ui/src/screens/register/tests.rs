@@ -2325,3 +2325,61 @@ fn the_ap_write_never_reaches_the_generic_routes() {
     assert_eq!(st["notice"], "register.ap.closed");
     assert_eq!(st["closing"], "idle");
 }
+
+/// A02 (Q-A02f): the selected transaction's files. A check with a file
+/// turns Show document on; it fetches the first file and asks the shell to
+/// pop the viewer out, which then follows the cursor. A row without files
+/// leaves it off. No file name in the state.
+#[test]
+fn show_document_opens_the_selected_transactions_first_file() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    settle(&mut s, None);
+    let fuel = demo_account(&link, "6100");
+    let vendor = demo_contact(&link, "Hollister Fuel Stop");
+    s.entry.form.edit_step(|d| {
+        d.payee = Some(vendor);
+        d.account = Some(fuel);
+        d.payment = Some(money("12.00"));
+    });
+    assert!(s.start_record());
+    settle(&mut s, None);
+    let key = last_key(&mut s);
+    let id = s.model.row_for_key(key).expect("row").txn_id;
+    {
+        let mut demo = link.demo_state().expect("demo");
+        crate::company::demo::checks::upload(
+            &mut demo,
+            cl_api::AttachTo::Expense(id),
+            "secret-receipt.pdf",
+            b"%PDF-1.4\n%synthetic\n",
+        )
+        .expect("upload");
+    }
+    let ctx = egui::Context::default();
+    s.actions.cursor = Some(key);
+    s.sync_docs(&ctx);
+    assert_eq!(s.state()["docs"]["count"], 1);
+    assert!(s.document().is_none(), "nothing fetched until asked");
+    s.show_document(&ctx);
+    assert!(s.document().is_some());
+    assert!(!s.state().to_string().contains("secret"));
+    // The pop-out request is waiting for the shell.
+    let doc_viewer_state = ctx.data(|d| {
+        d.get_temp::<crate::windows::doc_viewer::PaneRequest>(egui::Id::unique(
+            "cl-doc-viewer-request",
+        ))
+    });
+    assert_eq!(
+        doc_viewer_state,
+        Some(crate::windows::doc_viewer::PaneRequest::PopOut)
+    );
+    // Another row without files: nothing to show.
+    let total = s.model.total().expect("total");
+    settle(&mut s, Some(&(0..total)));
+    let other = s.model.row_key(0).expect("first row");
+    s.actions.cursor = Some(other);
+    s.sync_docs(&ctx);
+    assert_eq!(s.state()["docs"]["count"], 0);
+    assert!(s.document().is_none());
+}

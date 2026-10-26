@@ -1284,6 +1284,9 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
         "company_open": shell.company.is_some(),
         "signed_in": shell.status.user.is_some(),
         "screen": shell.active_screen_state(),
+        // A02: the pop-out viewer (geometry, ids and the viewer's flags;
+        // never a file or form name).
+        "doc_viewer": shell.doc_viewer_state(ctx).to_json(),
     })
 }
 
@@ -1907,6 +1910,10 @@ mod bridge_tests {
         assert_eq!(state["viewports"]["doc_viewer"]["width"], 400.0);
         assert!(state["viewports"]["main"]["width"].as_f64().unwrap() > 1000.0);
         assert_eq!(state["window"], state["viewports"]["main"]);
+        // A02 WP-D: the viewer's own state rides along.
+        assert_eq!(state["doc_viewer"]["popped"], false);
+        assert_eq!(state["doc_viewer"]["class"], "none");
+        assert_eq!(state["doc_viewer"]["has_doc"], false);
     }
 
     /// An unknown window name is a bad request; a known window that is not

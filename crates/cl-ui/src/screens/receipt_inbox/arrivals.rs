@@ -24,13 +24,13 @@ use serde_json::{Value, json};
 
 use super::intake::{self, FormKind, FormReady, Migration, Row, RowState};
 use super::picker::{self, PickKind, PickRow};
-use super::{ENTER_BILL, InboxDraft, PREVIEW_HEIGHT, STACK_WIDTH, WRITE_CHECK, date_of, size_text};
+use super::{ENTER_BILL, InboxDraft, STACK_WIDTH, WRITE_CHECK, date_of, size_text};
 use crate::company::{CompanyEvent, CompanyLink};
 use crate::i18n::{t, t_count, t_with};
 use crate::screens::company::form;
 use crate::screens::preferences::intake_folders;
 use crate::theme::Tokens;
-use crate::widgets::pdf_viewer::{DocSource, DocViewer, ViewerEvent};
+use crate::widgets::pdf_viewer::{DocSource, ViewerEvent};
 use crate::windows::OpenPayload;
 
 /// One folder as the window shows it.
@@ -298,13 +298,10 @@ impl super::ReceiptInboxScreen {
         };
         match result {
             Ok(read) if read.size == row.file.size && read.modified_ms == row.file.modified_ms => {
-                // TIFF previews come with the new viewer (A02).
-                if row.file.kind != DocKind::Tiff {
-                    self.viewer.open(DocSource {
-                        name: row.file.name.clone(),
-                        bytes: Arc::from(read.bytes.clone()),
-                    });
-                }
+                self.viewer.open(DocSource {
+                    name: row.file.name.clone(),
+                    bytes: Arc::from(read.bytes.clone()),
+                });
                 self.arrivals.loaded = Some((row.file.clone(), read));
             }
             Ok(_) | Err(FileError::Unstable | FileError::Changed) => {
@@ -657,16 +654,8 @@ impl super::ReceiptInboxScreen {
         if let Some(k) = self.arrivals.read_problem {
             form::inline_warning(ui, tokens, &t(k));
         }
-        if row.file.kind == DocKind::Tiff {
-            form::hint(ui, tokens, &t("inbox.tiff_preview"));
-        } else if self.arrivals.loaded.is_some() {
-            let height = PREVIEW_HEIGHT.min(ui.available_height().max(200.0));
-            let event = ui
-                .allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
-                    ui.set_min_height(height);
-                    DocViewer::show(ui, &mut self.viewer, tokens)
-                })
-                .inner;
+        if self.arrivals.loaded.is_some() {
+            let event = super::preview_pane(ui, &mut self.viewer, tokens);
             if event == ViewerEvent::OpenFullSize
                 && let Some(src) = self.viewer.source()
             {
@@ -959,7 +948,6 @@ impl super::ReceiptInboxScreen {
             "selected_folder": selected.map(|r| r.run),
             "loaded": self.arrivals.loaded.is_some(),
             "reading": self.arrivals.reading.is_some(),
-            "tiff_note": selected.is_some_and(|r| r.file.kind == DocKind::Tiff),
             "preview": self.viewer.state_json(),
             "picker": self.arrivals.picker.as_ref().map(|p| json!({
                 "kind": p.kind.as_str(),

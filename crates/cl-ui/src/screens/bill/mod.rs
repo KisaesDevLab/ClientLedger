@@ -1195,6 +1195,15 @@ impl Screen for EnterBillScreen {
         true
     }
 
+    /// The source card's file (A02): the pop-out viewer follows it.
+    fn document(&self) -> Option<crate::windows::doc_viewer::DocRef> {
+        self.attach
+            .viewer
+            .source()
+            .cloned()
+            .map(crate::windows::doc_viewer::DocRef::new)
+    }
+
     /// A saved bill or credit opened from elsewhere (the register, the
     /// vendor panel, statement match).
     fn open_record(&mut self, txn: TransactionId) -> bool {
