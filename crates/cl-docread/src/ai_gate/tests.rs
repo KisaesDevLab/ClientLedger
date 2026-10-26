@@ -53,7 +53,8 @@ fn ai_amounts_fill_only_from_page_words() {
         vendor: Some("Corner Hardware".into()),
         reference: Some("r5521".into()),
         date: Some(CalendarDate::from_ymd(2026, 7, 14).unwrap()),
-        subtotal: Some(m("30.00")),
+        // "30" equals the printed "30.00": the printed word's value is kept.
+        subtotal: Some(m("30")),
         tax: Some(m("2.48")),
         total: Some(m("32.48")),
         amount_paid: Some(m("40.00")),
@@ -68,6 +69,11 @@ fn ai_amounts_fill_only_from_page_words() {
     assert!(total.confidence.bp() <= AI_FILL);
     assert_eq!(total.spot.bbox.top(), 4000, "the word's spot");
     assert_eq!(h.subtotal.as_ref().unwrap().value, m("30"));
+    assert_eq!(
+        h.subtotal.as_ref().unwrap().value.to_wire(),
+        amount::parse("30.00").unwrap().to_wire(),
+        "the page word's value as printed"
+    );
     assert!(h.amount_paid.is_none(), "40.00 is not on the page");
     let paid_check = out
         .checks

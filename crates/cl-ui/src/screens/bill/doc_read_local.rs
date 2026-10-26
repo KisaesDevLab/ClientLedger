@@ -456,6 +456,7 @@ impl EnterBillScreen {
             default_account: None,
             checks: m.checks,
             local: true,
+            balance_due: m.balance_due,
         });
         self.read.local.last = Some(Box::new(merged));
     }
@@ -531,6 +532,7 @@ impl EnterBillScreen {
                     default_account: None,
                     checks: m.checks,
                     local: true,
+                    balance_due: m.balance_due,
                 });
             }
             // The owner cancelled: nothing to say.

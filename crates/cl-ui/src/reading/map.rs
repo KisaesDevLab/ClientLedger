@@ -8,6 +8,7 @@
 //! name that matched no vendor is kept so the form can offer a new vendor.
 
 use cl_api::{Contact, ContactType};
+use cl_core::Money;
 use cl_docread::model::{Check, CheckCode, ConfidenceBucket, Found, Reading};
 use cl_docread::vendor_match::VendorCandidate;
 use cl_model::forms::doc_read::{Confidence, DocReading, FieldConfidence, ReadLine};
@@ -25,6 +26,9 @@ pub struct Mapped {
     pub checks: Vec<Check>,
     /// The lines couldn't be read: one line of the printed total (Q-A03m).
     pub one_total_line: bool,
+    /// The balance due printed, when the document also prints a different
+    /// total (a deposit taken): the banner shows both (review nit).
+    pub balance_due: Option<Money>,
 }
 
 impl std::fmt::Debug for Mapped {
@@ -179,6 +183,10 @@ pub fn to_doc(local: &LocalReading) -> Mapped {
         unknown_vendor,
         checks: r.checks.clone(),
         one_total_line,
+        balance_due: match (&h.total, &h.balance_due) {
+            (Some(t), Some(b)) if t.value != b.value => Some(b.value),
+            _ => None,
+        },
     }
 }
 
@@ -254,6 +262,20 @@ mod tests {
             }),
             card: None,
         }
+    }
+
+    /// Review nit: a deposit invoice's total and balance due both reach the
+    /// banner; the bill's amount stays the total.
+    #[test]
+    fn a_different_balance_due_is_shown_with_the_total() {
+        let mut l = local();
+        assert_eq!(to_doc(&l).balance_due, None);
+        l.reading.header.balance_due = Some(found(money("1480.00"), 10_000));
+        assert_eq!(to_doc(&l).balance_due, None, "the same figure");
+        l.reading.header.balance_due = Some(found(money("980.00"), 10_000));
+        let m = to_doc(&l);
+        assert_eq!(m.balance_due, Some(money("980")));
+        assert_eq!(m.doc.total, Some(money("1480")));
     }
 
     #[test]

@@ -279,6 +279,8 @@ pub(crate) struct Filled {
     pub local: bool,
     /// The local reading's checks, listed on the banner (never applied).
     pub checks: Vec<cl_docread::model::Check>,
+    /// A balance due printed apart from a different total: both shown.
+    pub balance_due: Option<Money>,
 }
 
 impl std::fmt::Debug for Filled {
@@ -308,6 +310,8 @@ pub(crate) struct Incoming {
     pub checks: Vec<cl_docread::model::Check>,
     /// Read on this computer.
     pub local: bool,
+    /// A balance due printed apart from a different total.
+    pub balance_due: Option<Money>,
 }
 
 /// The values a reading put in the form.
@@ -1035,6 +1039,22 @@ pub fn banner(
                     );
                 }
             }
+            // A deposit invoice: the total and the balance due both shown.
+            if let (Some(total), Some(balance)) = (filled.total, filled.balance_due) {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(t_with(
+                            "bill.read.local.total_and_balance",
+                            &[
+                                ("total", &total.format(style)),
+                                ("balance", &balance.format(style)),
+                            ],
+                        ))
+                        .color(tokens.text_primary),
+                    )
+                    .wrap(),
+                );
+            }
             // A03 step 21: the optional readers, only on the owner's click.
             if filled.local {
                 if state.local.helped {
@@ -1206,6 +1226,7 @@ impl EnterBillScreen {
             default_account: reading.default_expense_account,
             checks: Vec::new(),
             local: false,
+            balance_due: None,
         });
     }
 
@@ -1288,6 +1309,7 @@ impl EnterBillScreen {
             terms_from_vendor,
             local: incoming.local,
             checks: incoming.checks.clone(),
+            balance_due: incoming.balance_due,
         });
         self.read.found_text = None;
         if filled.is_empty() {

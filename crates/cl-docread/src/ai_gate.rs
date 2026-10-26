@@ -118,25 +118,29 @@ struct Page<'a> {
 }
 
 impl Page<'_> {
-    /// The first word (reading order) whose amount equals `m`.
-    fn money_word(&self, m: Money) -> Option<(Spot, u16)> {
-        self.find_word(|t| amount::parse(t) == Some(m))
+    /// The first word (reading order) whose amount equals `m`, with the
+    /// word's own value (its scale as printed).
+    fn money_word(&self, m: Money) -> Option<(Money, Spot, u16)> {
+        self.find_word(|t| amount::parse(t).filter(|v| *v == m))
     }
 
-    fn quantity_word(&self, q: Quantity) -> Option<(Spot, u16)> {
-        self.find_word(|t| amount::parse_quantity(t) == Some(q))
+    fn quantity_word(&self, q: Quantity) -> Option<(Quantity, Spot, u16)> {
+        self.find_word(|t| amount::parse_quantity(t).filter(|v| *v == q))
     }
 
-    fn find_word(&self, pred: impl Fn(&str) -> bool) -> Option<(Spot, u16)> {
+    fn find_word<T>(&self, parse: impl Fn(&str) -> Option<T>) -> Option<(T, Spot, u16)> {
         self.words.iter().find_map(|p| {
-            p.words.iter().find(|w| pred(&w.text)).map(|w| {
-                (
-                    Spot {
-                        page: p.page,
-                        bbox: w.bbox,
-                    },
-                    w.confidence.bp(),
-                )
+            p.words.iter().find_map(|w| {
+                parse(&w.text).map(|v| {
+                    (
+                        v,
+                        Spot {
+                            page: p.page,
+                            bbox: w.bbox,
+                        },
+                        w.confidence.bp(),
+                    )
+                })
             })
         })
     }
@@ -312,7 +316,7 @@ fn gate_money(
             Some(local.spot),
         )),
         None => match page.money_word(ai) {
-            Some((spot, bp)) => *target = Some(filled(ai, spot, bp, rule, cap)),
+            Some((v, spot, bp)) => *target = Some(filled(v, spot, bp, rule, cap)),
             None => checks.push(disagrees(
                 Some(field),
                 None,
@@ -474,7 +478,7 @@ fn gate_lines(
     let mut added: Vec<Line> = Vec::new();
     for (i, l) in ai_lines.iter().enumerate().take(MAX_LINES) {
         let Some(a) = l.amount else { continue };
-        let Some((spot, bp)) = page.money_word(a) else {
+        let Some((a, spot, bp)) = page.money_word(a) else {
             checks.push(disagrees(
                 None,
                 u16::try_from(i).ok(),
@@ -487,11 +491,12 @@ fn gate_lines(
         let amount = filled(a, spot, bp, rule, cap);
         let quantity = l.quantity.and_then(|q| {
             page.quantity_word(q)
-                .map(|(s, b)| filled(q, s, b, rule, cap))
+                .map(|(v, s, b)| filled(v, s, b, rule, cap))
         });
-        let unit_price = l
-            .unit_price
-            .and_then(|p| page.money_word(p).map(|(s, b)| filled(p, s, b, rule, cap)));
+        let unit_price = l.unit_price.and_then(|p| {
+            page.money_word(p)
+                .map(|(v, s, b)| filled(v, s, b, rule, cap))
+        });
         let description = l.description.as_deref().map(|d| {
             let (value, dspot, dbp) = page
                 .segment_named(d)

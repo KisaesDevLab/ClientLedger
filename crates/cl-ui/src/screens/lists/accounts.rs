@@ -777,10 +777,23 @@ impl ChartScreen {
                     .accounts()
                     .set_card_last4(&created, digits, IdempotencyKey::new())
                     .await;
-                Ok(with_card.unwrap_or_else(|_| {
-                    tracing::warn!("card digits not saved after creating an account");
-                    created
-                }))
+                match with_card {
+                    Ok(a) => Ok(a),
+                    // The digits may have landed: what the engine holds is
+                    // read back, so the window says the truth (review nit).
+                    Err(ApiError::OutcomeUnknown { .. }) => Ok(s
+                        .accounts()
+                        .get(created.record.id)
+                        .await
+                        .unwrap_or_else(|_| {
+                            tracing::warn!("card digits unknown after creating an account");
+                            created
+                        })),
+                    Err(_) => {
+                        tracing::warn!("card digits not saved after creating an account");
+                        Ok(created)
+                    }
+                }
             }),
         };
         if let (Ok(p), Panel::Form(panel)) = (pending, &mut self.panel) {
