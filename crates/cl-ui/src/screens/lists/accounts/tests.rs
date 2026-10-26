@@ -527,6 +527,23 @@ fn card_ends_in_shows_only_on_credit_cards_with_the_capability() {
     assert_eq!(r.s.state()["card_digits_on"], false);
 }
 
+/// A03 UI review 6: the "exactly 4 digits" warning goes once the typed
+/// value is right (or empty), and stays while it is still wrong.
+#[test]
+fn the_card_warning_clears_once_the_value_is_valid() {
+    use DraftProblem as P;
+    use cl_model::lists::accounts::CardEnding;
+    let typed = |text: &str| {
+        let mut problems = vec![P::CardDigits, P::NameMissing];
+        super::card_typed(&mut problems, &CardEnding(text.into()));
+        problems
+    };
+    assert_eq!(typed("4821"), vec![P::NameMissing]);
+    assert_eq!(typed(""), vec![P::NameMissing]);
+    assert_eq!(typed("48a"), vec![P::CardDigits, P::NameMissing]);
+    assert_eq!(typed("482"), vec![P::CardDigits, P::NameMissing]);
+}
+
 /// A03: the digits save with the account, are refused unless four digits,
 /// clear when emptied or when the account stops being a credit card, and
 /// never reach the control-channel state.
