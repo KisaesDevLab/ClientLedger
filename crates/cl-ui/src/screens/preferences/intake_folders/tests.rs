@@ -42,7 +42,7 @@ fn screen(link: &Arc<CompanyLink>) -> PreferencesScreen {
 
 /// Waits for every running Test.
 fn settle(s: &mut PreferencesScreen) {
-    let until = Instant::now() + wp_b::PROBE_DEADLINE + Duration::from_secs(5);
+    let until = Instant::now() + cl_company::intake::PROBE_DEADLINE + Duration::from_secs(5);
     loop {
         s.poll();
         if !s.intake.busy() || Instant::now() > until {
@@ -402,7 +402,7 @@ fn a_folder_another_company_uses_on_this_computer_is_refused() {
     let dir = tempfile::tempdir().expect("tmp");
     let link = link(dir.path());
     let shared = tempfile::tempdir().expect("shared");
-    let key = wp_b::canonical_key(shared.path()).expect("key");
+    let key = cl_company::intake::canonical_key(shared.path()).expect("key");
     link.store()
         .update(|l| {
             let other = l.upsert(TenantId::parse(OTHER).expect("id"), "Other");
@@ -556,7 +556,7 @@ fn block_and_health_texts_exist() {
     for p in [
         PathProblem::Empty,
         PathProblem::TooLong,
-        PathProblem::ControlChars,
+        PathProblem::ControlCharacter,
         PathProblem::NotAbsolute,
         PathProblem::Device,
         PathProblem::Url,

@@ -24,7 +24,6 @@
 //! never in `state()`, `Debug` or a log line.
 
 pub mod source;
-pub mod wp_b;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -40,7 +39,7 @@ use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
 use self::source::{Fetched, Stored};
-use self::wp_b::{Health, PathProblem, ProbeReport};
+use cl_company::intake::{Health, PathProblem, ProbeReport, check_path_syntax, probe_async};
 use crate::company::{CompanyLink, Task};
 use crate::i18n::{t, t_count};
 use crate::screens::company::form;
@@ -150,7 +149,7 @@ pub fn path_problem_key(p: PathProblem) -> &'static str {
     match p {
         PathProblem::Empty => "prefs.intake.path.empty",
         PathProblem::TooLong => "prefs.intake.path.too_long",
-        PathProblem::ControlChars => "prefs.intake.path.control",
+        PathProblem::ControlCharacter => "prefs.intake.path.control",
         PathProblem::NotAbsolute => "prefs.intake.path.not_absolute",
         PathProblem::Device => "prefs.intake.path.device",
         PathProblem::Url => "prefs.intake.path.url",
@@ -440,16 +439,7 @@ impl IntakePanel {
                         answered.push(*id);
                     }
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        p.report = Some(ProbeReport {
-                            health: Health::NotResponding,
-                            files: 0,
-                            too_large: 0,
-                            heic: 0,
-                            online_only: 0,
-                            writable: None,
-                            cloud: false,
-                            canonical_key: None,
-                        });
+                        p.report = Some(ProbeReport::not_responding());
                         p.rx = None;
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -472,13 +462,13 @@ impl IntakePanel {
             return;
         }
         let dirs: Vec<&Path> = app_dirs.iter().map(PathBuf::as_path).collect();
-        let Ok(root) = wp_b::check_path_syntax(&f.path, &dirs) else {
+        let Ok(root) = check_path_syntax(&f.path, &dirs) else {
             return;
         };
         self.probes.insert(
             id,
             Probe {
-                rx: Some(wp_b::probe_async(root, !f.keep_originals)),
+                rx: Some(probe_async(root, !f.keep_originals)),
                 report: None,
                 path: f.path.clone(),
             },
@@ -506,7 +496,7 @@ impl IntakePanel {
         if !usable(r) {
             return;
         }
-        if r.files > BRING_IN_ASK_ABOVE {
+        if r.counts.incoming > BRING_IN_ASK_ABOVE {
             self.ask_bring_in = Some(id);
         } else {
             self.confirm(edits, id, false);
@@ -639,7 +629,7 @@ impl IntakePanel {
             if !names.insert(name.to_lowercase()) {
                 return Err(IntakeBlock::NameTaken);
             }
-            wp_b::check_path_syntax(&f.path, &dirs).map_err(IntakeBlock::Path)?;
+            check_path_syntax(&f.path, &dirs).map_err(IntakeBlock::Path)?;
             if !paths.insert(same_path_key(&f.path)) {
                 return Err(IntakeBlock::PathTaken);
             }
@@ -677,7 +667,7 @@ impl IntakePanel {
                     "pending": edits.confirm.contains_key(&f.id),
                     "testing": self.testing(f.id),
                     "probe": self.report(f).map(|r| health_key(r.health).1),
-                    "files": self.report(f).map(|r| r.files),
+                    "files": self.report(f).map(|r| r.counts.incoming),
                 })
             })
             .collect();
@@ -738,7 +728,7 @@ fn check_new(
     }
     check_name(edits, except, name)?;
     let dirs: Vec<&Path> = app_dirs.iter().map(PathBuf::as_path).collect();
-    wp_b::check_path_syntax(path, &dirs).map_err(IntakeBlock::Path)?;
+    check_path_syntax(path, &dirs).map_err(IntakeBlock::Path)?;
     let key = same_path_key(path);
     if edits
         .folders
@@ -784,15 +774,15 @@ fn report_lines(r: &ProbeReport) -> Vec<String> {
     if !usable(r) {
         return out;
     }
-    out.push(t_count("prefs.intake.test.ok", r.files, &[]));
-    if r.too_large > 0 {
-        out.push(t_count("prefs.intake.test.too_large", r.too_large, &[]));
+    out.push(t_count("prefs.intake.test.ok", r.counts.incoming, &[]));
+    if r.counts.too_large > 0 {
+        out.push(t_count("prefs.intake.test.too_large", r.counts.too_large, &[]));
     }
-    if r.heic > 0 {
-        out.push(t_count("prefs.intake.test.heic", r.heic, &[]));
+    if r.counts.not_supported > 0 {
+        out.push(t_count("prefs.intake.test.heic", r.counts.not_supported, &[]));
     }
-    if r.online_only > 0 {
-        out.push(t_count("prefs.intake.test.online_only", r.online_only, &[]));
+    if r.counts.online_only > 0 {
+        out.push(t_count("prefs.intake.test.online_only", r.counts.online_only, &[]));
     }
     if r.writable == Some(false) {
         out.push(t("prefs.intake.test.not_writable"));
@@ -1020,7 +1010,7 @@ fn folder_rows(
         }
         // Many files already there: ask first (Q-A01h).
         if panel.ask_bring_in == Some(id) {
-            let n = panel.report(&f).map_or(0, |r| r.files);
+            let n = panel.report(&f).map_or(0, |r| r.counts.incoming);
             ui.add(egui::Label::new(t_count("prefs.intake.bring_in.ask", n, &[])).wrap());
             ui.horizontal(|ui| {
                 if ui
@@ -1101,7 +1091,7 @@ fn add_row(
     let dirs: Vec<&Path> = app_dirs.iter().map(PathBuf::as_path).collect();
     let typed = row.path.trim();
     if !typed.is_empty()
-        && let Err(p) = wp_b::check_path_syntax(typed, &dirs)
+        && let Err(p) = check_path_syntax(typed, &dirs)
     {
         form::hint(ui, tokens, &t(path_problem_key(p)));
     } else if let Some(b) = row.problem {
