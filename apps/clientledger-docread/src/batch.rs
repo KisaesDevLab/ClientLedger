@@ -6,7 +6,9 @@
 
 use crate::decode::{self, ImageError, Kind, Tiff};
 use crate::pdfium::{self, Opened};
-use cl_docread::model::{MAX_PAGES, PageWords, Word, WordSource};
+use cl_core::CalendarDate;
+use cl_docread::dates;
+use cl_docread::model::{Confidence, MAX_PAGES, PageWords, Word, WordSource};
 use cl_docread::ocr_geom;
 use cl_docread::pdf_text::MIN_TEXT_QUALITY_BP;
 use cl_docread::preprocess;
@@ -14,7 +16,7 @@ use cl_docread::protocol::{
     BatchOptions, FromWorker, Job, JobFailure, JobId, MAX_BATCH_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES,
     MAX_JOBS_PER_BATCH, MAX_TEMPLATES, OcrFailure, OcrMode, Tsv,
 };
-use cl_docread::tsv;
+use cl_docread::tsv::{self, OcrWord, PixelBox};
 use cl_docread::{ReadInput, read};
 use image::GrayImage;
 use pdfium_render::prelude::Pdfium;
@@ -180,7 +182,7 @@ fn read_pdf(ctx: &Ctx<'_>, io: &mut dyn Io, job: &Job, bytes: &[u8]) -> Result<F
         }
         let ocr_words = if ctx.options.ocr {
             match pdfium::render_grey(&page) {
-                Some(grey) => ocr_page(io, job.job, i, &grey)?,
+                Some(grey) => ocr_page(io, job.job, i, &grey, ctx.options.today)?,
                 None => None,
             }
         } else {
@@ -230,7 +232,7 @@ fn read_images(
             }
         };
         let aspect = aspect_px(grey.width(), grey.height());
-        match ocr_page(io, job.job, i, &grey)? {
+        match ocr_page(io, job.job, i, &grey, ctx.options.today)? {
             Some(w) => pages.read.push(page_words(i, aspect, WordSource::Ocr, w)),
             None => pages.unread.push(i),
         }
@@ -265,67 +267,42 @@ fn page_words(page: u16, aspect: u32, source: WordSource, words: Vec<Word>) -> P
 /// side or upside down: the host then reports tesseract's orientation,
 /// and a quarter-turned page is cleaned and read again; the better read
 /// is kept (plan R2).
+///
+/// A page whose numbers read with low confidence is read again with the
+/// more accurate model as well (`OcrMode::ReadBest`, Q-A03b), and a date
+/// that still does not read is read again on its own (`OcrMode::Word`).
+/// Each only replaces words read from the same pixels; nothing is guessed.
 fn ocr_page(
     io: &mut dyn Io,
     job: JobId,
     page: u16,
     grey: &GrayImage,
+    today: CalendarDate,
 ) -> Result<Option<Vec<Word>>, Fatal> {
     let cleaned = preprocess::clean(grey);
-    let first = ocr_cleaned(io, job, page, &cleaned)?;
+    let first = ocr_raw(io, (job, page), &cleaned, OcrMode::Read)?;
     let first_score = first.as_deref().map_or(0, read_score);
-    if first.is_none() || first_score >= GOOD_READ {
-        return Ok(first);
-    }
-    let Some(quarters) = orientation(io, job, page, &cleaned)? else {
-        return Ok(first);
-    };
-    let turned = preprocess::clean_turned(grey, quarters);
-    let second = ocr_cleaned(io, job, page, &turned)?;
-    Ok(match second {
-        Some(w) if read_score(&w) > first_score => Some(w),
-        _ => first,
-    })
-}
-
-/// Confident words (at least two letters or digits, confidence ≥ 60 %)
-/// at or above which a read is not second-guessed.
-const GOOD_READ: usize = 12;
-/// Tesseract's orientation confidence needed to turn a page.
-const MIN_ORIENT_CONFIDENCE_CENTI: u32 = 200;
-
-/// Confident words in a read.
-fn read_score(words: &[Word]) -> usize {
-    words
-        .iter()
-        .filter(|w| {
-            w.confidence.bp() >= 6_000
-                && w.text.chars().filter(|c| c.is_alphanumeric()).count() >= 2
-        })
-        .count()
-}
-
-/// OCR one cleaned page; `None` when it could not be read.
-fn ocr_cleaned(
-    io: &mut dyn Io,
-    job: JobId,
-    page: u16,
-    cleaned: &preprocess::Cleaned,
-) -> Result<Option<Vec<Word>>, Fatal> {
-    let Ok(pgm) = preprocess::to_pgm(&cleaned.image) else {
-        return Ok(None);
-    };
-    let tsv = match io.ocr(job, page, pgm, OcrMode::Read)? {
-        OcrAnswer::Tsv(t) => t,
-        OcrAnswer::Failed(reason) => {
-            eprintln!("docread: outcome: ocr failed ({})", ocr_reason(reason));
-            return Ok(None);
+    let (cleaned, words) = if first.is_none() || first_score >= GOOD_READ {
+        (cleaned, first)
+    } else if let Some(quarters) = orientation(io, job, page, &cleaned)? {
+        let turned = preprocess::clean_turned(grey, quarters);
+        match ocr_raw(io, (job, page), &turned, OcrMode::Read)? {
+            Some(w) if read_score(&w) > first_score => (turned, Some(w)),
+            _ => (cleaned, first),
         }
+    } else {
+        (cleaned, first)
     };
-    let (w, h) = cleaned.image.dimensions();
-    let Ok(words) = tsv::parse(&tsv.0, w, h) else {
+    let Some(mut words) = words else {
         return Ok(None);
     };
+    if numbers_unsure(&words)
+        && let Some(better) = ocr_raw(io, (job, page), &cleaned, OcrMode::ReadBest)?
+        && !better.is_empty()
+    {
+        words = better;
+    }
+    reread_dates(io, (job, page), &cleaned.image, &mut words, today)?;
     Ok(Some(
         words
             .into_iter()
@@ -336,6 +313,184 @@ fn ocr_cleaned(
             })
             .collect(),
     ))
+}
+
+/// Confident words (at least two letters or digits, confidence ≥ 60 %)
+/// at or above which a read is not second-guessed.
+const GOOD_READ: usize = 12;
+/// Tesseract's orientation confidence needed to turn a page.
+const MIN_ORIENT_CONFIDENCE_CENTI: u32 = 200;
+/// Mean confidence of a page's words with digits below which it is read
+/// again with the more accurate model (seen scans and photos: about a
+/// third of scans and half of photos; nearly all of the best model's gain).
+const UNSURE_NUMBERS_BP: u64 = 9_300;
+/// Dates read again on their own per page, and the enlargements tried.
+const MAX_REREADS: usize = 4;
+const REREAD_SCALES: [u32; 3] = [1, 2, 3];
+
+/// Confident words in a read.
+fn read_score(words: &[OcrWord]) -> usize {
+    words
+        .iter()
+        .filter(|w| {
+            w.confidence.bp() >= 6_000
+                && w.text.chars().filter(|c| c.is_alphanumeric()).count() >= 2
+        })
+        .count()
+}
+
+/// Whether the words with digits (at least two letters or digits) read
+/// with a mean confidence below [`UNSURE_NUMBERS_BP`].
+fn numbers_unsure(words: &[OcrWord]) -> bool {
+    let (sum, n) = words
+        .iter()
+        .filter(|w| {
+            w.text.chars().filter(|c| c.is_alphanumeric()).count() >= 2
+                && w.text.chars().any(|c| c.is_ascii_digit())
+        })
+        .fold((0u64, 0u64), |(s, n), w| {
+            (s + u64::from(w.confidence.bp()), n + 1)
+        });
+    n > 0 && sum < UNSURE_NUMBERS_BP * n
+}
+
+/// OCR one cleaned page; `None` when it could not be read.
+fn ocr_raw(
+    io: &mut dyn Io,
+    (job, page): (JobId, u16),
+    cleaned: &preprocess::Cleaned,
+    mode: OcrMode,
+) -> Result<Option<Vec<OcrWord>>, Fatal> {
+    let Ok(pgm) = preprocess::to_pgm(&cleaned.image) else {
+        return Ok(None);
+    };
+    let tsv = match io.ocr(job, page, pgm, mode)? {
+        OcrAnswer::Tsv(t) => t,
+        OcrAnswer::Failed(reason) => {
+            if mode == OcrMode::Read {
+                eprintln!("docread: outcome: ocr failed ({})", ocr_reason(reason));
+            }
+            return Ok(None);
+        }
+    };
+    let (w, h) = cleaned.image.dimensions();
+    Ok(tsv::parse(&tsv.0, w, h).ok())
+}
+
+/// Read again, on their own, the dates on a page that did not read
+/// (`dates::unread_date_shape`: one numeric word, or a month word, day and
+/// year on one line). A re-read replaces the words' text only when it
+/// reads as a plausible date and has as many words; at most
+/// [`MAX_REREADS`] per page.
+fn reread_dates(
+    io: &mut dyn Io,
+    at: (JobId, u16),
+    image: &GrayImage,
+    words: &mut [OcrWord],
+    today: CalendarDate,
+) -> Result<(), Fatal> {
+    let mut tries = 0;
+    let mut i = 0;
+    while i < words.len() && tries < MAX_REREADS {
+        let one = [words[i].text.as_str()];
+        let span = if dates::unread_date_shape(&one, today) {
+            1
+        } else if i + 3 <= words.len()
+            && words[i..i + 3].iter().all(|w| same_line(w, &words[i]))
+            && dates::unread_date_shape(
+                &[
+                    words[i].text.as_str(),
+                    words[i + 1].text.as_str(),
+                    words[i + 2].text.as_str(),
+                ],
+                today,
+            )
+        {
+            3
+        } else {
+            i += 1;
+            continue;
+        };
+        tries += 1;
+        let target = &mut words[i..i + span];
+        if let Some(read) = reread(io, at, image, union_px(target), span, today)? {
+            for (w, (text, confidence)) in target.iter_mut().zip(read) {
+                w.text = text;
+                w.confidence = confidence;
+            }
+        }
+        i += span;
+    }
+    Ok(())
+}
+
+fn same_line(a: &OcrWord, b: &OcrWord) -> bool {
+    (a.block, a.paragraph, a.line) == (b.block, b.paragraph, b.line)
+}
+
+fn union_px(words: &[OcrWord]) -> PixelBox {
+    let left = words.iter().map(|w| w.px.left).min().unwrap_or(0);
+    let top = words.iter().map(|w| w.px.top).min().unwrap_or(0);
+    let right = words
+        .iter()
+        .map(|w| w.px.left.saturating_add(w.px.width))
+        .max()
+        .unwrap_or(0);
+    let bottom = words
+        .iter()
+        .map(|w| w.px.top.saturating_add(w.px.height))
+        .max()
+        .unwrap_or(0);
+    PixelBox {
+        left,
+        top,
+        width: right.saturating_sub(left),
+        height: bottom.saturating_sub(top),
+    }
+}
+
+/// One re-read of `px` per enlargement until one gives `n` words that
+/// read as a date (a single word may come back split: it is joined).
+/// `None` when none does or the host can't re-read.
+fn reread(
+    io: &mut dyn Io,
+    (job, page): (JobId, u16),
+    image: &GrayImage,
+    px: PixelBox,
+    n: usize,
+    today: CalendarDate,
+) -> Result<Option<Vec<(String, Confidence)>>, Fatal> {
+    for scale in REREAD_SCALES {
+        let Some(crop) = preprocess::reread_crop(image, px, scale) else {
+            return Ok(None);
+        };
+        let Ok(pgm) = preprocess::to_pgm(&crop) else {
+            return Ok(None);
+        };
+        let OcrAnswer::Tsv(tsv) = io.ocr(job, page, pgm, OcrMode::Word)? else {
+            return Ok(None);
+        };
+        let (w, h) = crop.dimensions();
+        let Ok(got) = tsv::parse(&tsv.0, w, h) else {
+            continue;
+        };
+        let lowest = got.iter().map(|w| w.confidence).min();
+        let read: Vec<(String, Confidence)> = if n == 1 {
+            let text: String = got.iter().map(|w| w.text.as_str()).collect();
+            lowest.map(|c| vec![(text, c)]).unwrap_or_default()
+        } else {
+            got.into_iter().map(|w| (w.text, w.confidence)).collect()
+        };
+        let joined = read
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if read.len() == n && dates::reads_as_date(&joined, today) {
+            return Ok(Some(read));
+        }
+    }
+    Ok(None)
 }
 
 /// The quarter turns (clockwise) tesseract's orientation pass says the
@@ -417,6 +572,12 @@ pub(crate) mod tests {
         pub orient_calls: Vec<(u32, u32)>,
         /// The orientation report (upright by default).
         pub orient: String,
+        /// Second reads with the best model; unavailable by default.
+        pub best_calls: Vec<(u32, u32)>,
+        pub best: Box<dyn FnMut(u32, u32) -> OcrAnswer>,
+        /// Single-value re-reads (crop sizes); failing by default.
+        pub word_calls: Vec<(u32, u32)>,
+        pub word: Box<dyn FnMut(u32, u32) -> OcrAnswer>,
     }
 
     impl FakeHost {
@@ -427,6 +588,10 @@ pub(crate) mod tests {
                 answer: Box::new(answer),
                 orient_calls: Vec::new(),
                 orient: "Rotate: 0\nOrientation confidence: 9.00\n".into(),
+                best_calls: Vec::new(),
+                best: Box::new(|_, _| OcrAnswer::Failed(OcrFailure::Unavailable)),
+                word_calls: Vec::new(),
+                word: Box::new(|_, _| OcrAnswer::Failed(OcrFailure::Crashed)),
             }
         }
 
@@ -454,12 +619,24 @@ pub(crate) mod tests {
             mode: OcrMode,
         ) -> Result<OcrAnswer, Fatal> {
             let (w, h) = validate_pgm(&pgm).map_err(|_| Fatal::Protocol)?;
-            if mode == OcrMode::Orient {
-                self.orient_calls.push((w, h));
-                return Ok(OcrAnswer::Tsv(Tsv(self.orient.clone())));
+            match mode {
+                OcrMode::Orient => {
+                    self.orient_calls.push((w, h));
+                    Ok(OcrAnswer::Tsv(Tsv(self.orient.clone())))
+                }
+                OcrMode::ReadBest => {
+                    self.best_calls.push((w, h));
+                    Ok((self.best)(w, h))
+                }
+                OcrMode::Word => {
+                    self.word_calls.push((w, h));
+                    Ok((self.word)(w, h))
+                }
+                OcrMode::Read => {
+                    self.ocr_calls.push((page, w, h));
+                    Ok((self.answer)(w, h))
+                }
             }
-            self.ocr_calls.push((page, w, h));
-            Ok((self.answer)(w, h))
         }
     }
 
@@ -612,6 +789,139 @@ pub(crate) mod tests {
         let mut host = FakeHost::new(|w, h| words(20, w, h));
         run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
         assert_eq!((host.orient_calls.len(), host.ocr_calls.len()), (0, 1));
+    }
+
+    /// TSV of `(text, confidence %)` words, one per line down the image.
+    fn tsv_of(list: &[(&str, u32)], w: u32, h: u32) -> OcrAnswer {
+        use std::fmt::Write as _;
+        let mut s = String::from(
+            "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n",
+        );
+        for (i, (text, conf)) in (0u32..).zip(list) {
+            let _ = writeln!(
+                s,
+                "5\t1\t1\t1\t{}\t1\t{}\t{}\t{}\t{}\t{conf}\t{text}",
+                i + 1,
+                w / 10,
+                (h / 40) * (i + 1),
+                w / 5,
+                h / 60
+            );
+        }
+        OcrAnswer::Tsv(Tsv(s))
+    }
+
+    fn texts(reading: &cl_docread::model::Reading) -> Vec<String> {
+        reading.words[0]
+            .words
+            .iter()
+            .map(|w| w.text.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_page_with_unsure_numbers_is_read_again_with_the_best_model() {
+        let unsure = [("Invoice", 96), ("1042", 70), ("12.40", 80), ("Total", 96)];
+        let sure = [("Invoice", 96), ("1042", 95), ("12.40", 94), ("Total", 96)];
+        let mut host = FakeHost::new(move |w, h| tsv_of(&unsure, w, h));
+        host.best = Box::new(move |w, h| tsv_of(&sure, w, h));
+        let out = run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
+        let FromWorker::JobDone { reading, .. } = out else {
+            panic!("{out:?}")
+        };
+        assert_eq!((host.ocr_calls.len(), host.best_calls.len()), (1, 1));
+        // The same image is read again, and the second read is kept.
+        assert_eq!(
+            (host.ocr_calls[0].1, host.ocr_calls[0].2),
+            host.best_calls[0]
+        );
+        let conf: Vec<u16> = reading.words[0]
+            .words
+            .iter()
+            .map(|w| w.confidence.bp())
+            .collect();
+        assert_eq!(conf, [9_600, 9_500, 9_400, 9_600]);
+
+        // Without the best model (the host can't) the first read stays.
+        let mut host = FakeHost::new(move |w, h| tsv_of(&unsure, w, h));
+        let out = run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
+        let FromWorker::JobDone { reading, .. } = out else {
+            panic!("{out:?}")
+        };
+        assert_eq!(host.best_calls.len(), 1);
+        assert_eq!(reading.words[0].words[1].confidence.bp(), 7_000);
+
+        // Confident numbers are not read again.
+        let mut host = FakeHost::new(move |w, h| tsv_of(&sure, w, h));
+        run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
+        assert_eq!(host.best_calls.len(), 0);
+    }
+
+    #[test]
+    fn a_date_that_did_not_read_is_read_again_on_its_own() {
+        let page = [
+            ("Date:", 96),
+            ("64/13/26", 93),
+            ("FES", 90),
+            ("21", 95),
+            ("2026", 95),
+            ("Total", 96),
+            ("12.40", 96),
+        ];
+        let mut host = FakeHost::new(move |w, h| {
+            // The month triple on one line.
+            let OcrAnswer::Tsv(Tsv(s)) = tsv_of(&page, w, h) else {
+                unreachable!()
+            };
+            let s = s
+                .lines()
+                .enumerate()
+                .map(|(i, l)| {
+                    if (4..=5).contains(&i) {
+                        let mut c: Vec<&str> = l.split('\t').collect();
+                        c[4] = "3";
+                        c.join("\t")
+                    } else {
+                        l.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            OcrAnswer::Tsv(Tsv(s + "\n"))
+        });
+        let mut n = 0;
+        host.word = Box::new(move |w, h| {
+            n += 1;
+            match n {
+                // The numeric date: first enlargement still wrong, second right.
+                1 => tsv_of(&[("64/13/26", 80)], w, h),
+                2 => tsv_of(&[("04/13/26", 71)], w, h),
+                // The month triple reads at once.
+                _ => tsv_of(&[("FEB", 88), ("21", 90), ("2026", 92)], w, h),
+            }
+        });
+        let out = run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
+        let FromWorker::JobDone { reading, .. } = out else {
+            panic!("{out:?}")
+        };
+        assert_eq!(host.word_calls.len(), 3);
+        // The second try was enlarged twice as much as the first.
+        assert!(host.word_calls[1].0 > host.word_calls[0].0);
+        assert_eq!(
+            texts(&reading),
+            ["Date:", "04/13/26", "FEB", "21", "2026", "Total", "12.40"]
+        );
+        assert_eq!(reading.words[0].words[1].confidence.bp(), 7_100);
+
+        // A re-read that never reads as a date changes nothing.
+        let mut host = FakeHost::new(move |w, h| tsv_of(&page[..2], w, h));
+        host.word = Box::new(|w, h| tsv_of(&[("64/13/2b", 80)], w, h));
+        let out = run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
+        let FromWorker::JobDone { reading, .. } = out else {
+            panic!("{out:?}")
+        };
+        assert_eq!(host.word_calls.len(), REREAD_SCALES.len());
+        assert_eq!(texts(&reading), ["Date:", "64/13/26"]);
     }
 
     #[test]

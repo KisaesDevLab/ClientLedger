@@ -59,8 +59,23 @@ pub struct Lock {
     pub leptonica: Entry,
     /// The `tessdata_fast` commit the model lines name (`ocr-models`).
     pub tessdata_commit: Option<String>,
+    /// The `tessdata_best` commit the `tessdata_best` model lines name.
+    pub tessdata_best_commit: Option<String>,
     /// Model data and its license (`<file name> <sha256> <url>`).
     pub tessdata: Vec<Entry>,
+}
+
+/// Where model lines may come from: `tessdata_fast` at the `tessdata`
+/// commit, or `tessdata_best` at the `tessdata_best` commit.
+const FAST_URL: &str = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/";
+const BEST_URL: &str = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/";
+
+/// A full 40-hex-digit commit hash, or an error naming `key`.
+fn commit_hash(n: usize, key: &str, v: String) -> Result<String> {
+    if v.len() != 40 || !v.bytes().all(|b| b.is_ascii_hexdigit()) {
+        bail!("{LOCK_FILE}:{n}: {key} must be a full commit hash");
+    }
+    Ok(v)
 }
 
 impl Lock {
@@ -69,11 +84,12 @@ impl Lock {
     /// # Errors
     /// A missing version or source line, a malformed line, a url that does
     /// not name the pinned version, or a model line whose url does not name
-    /// the pinned `tessdata` commit.
+    /// the pinned `tessdata` (or `tessdata_best`) commit.
     pub fn parse(text: &str) -> Result<Lock> {
         let mut tv = None;
         let mut lv = None;
         let mut commit = None;
+        let mut best_commit = None;
         let mut entries = Vec::new();
         for (n, raw) in text.lines().enumerate() {
             let line = raw.trim();
@@ -88,11 +104,12 @@ impl Lock {
                 lv = Some(v);
                 continue;
             }
+            if let Some(v) = key_value(LOCK_FILE, n + 1, line, "tessdata_best")? {
+                best_commit = Some(commit_hash(n + 1, "tessdata_best", v)?);
+                continue;
+            }
             if let Some(v) = key_value(LOCK_FILE, n + 1, line, "tessdata")? {
-                if v.len() != 40 || !v.bytes().all(|b| b.is_ascii_hexdigit()) {
-                    bail!("{LOCK_FILE}:{}: tessdata must be a full commit hash", n + 1);
-                }
-                commit = Some(v);
+                commit = Some(commit_hash(n + 1, "tessdata", v)?);
                 continue;
             }
             entries.push(parse_entry(LOCK_FILE, n + 1, line)?);
@@ -102,24 +119,24 @@ impl Lock {
             .filter(|e| e.target != "tesseract" && e.target != "leptonica")
             .cloned()
             .collect();
-        if !tessdata.is_empty() {
-            let Some(c) = &commit else {
-                bail!("{LOCK_FILE}: model lines need `tessdata = <commit>`");
+        for e in &tessdata {
+            // (lock key, repository, url prefix, pinned commit)
+            let (key, repo, base, pinned) = if e.url.starts_with(BEST_URL) {
+                ("tessdata_best", "tessdata_best", BEST_URL, &best_commit)
+            } else {
+                ("tessdata", "tessdata_fast", FAST_URL, &commit)
             };
-            for e in &tessdata {
-                if !e
-                    .url
-                    .starts_with("https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/")
-                    || !e.url.contains(&format!("/{c}/"))
-                {
-                    bail!(
-                        "{LOCK_FILE}: the {} url is not tessdata_fast at commit {c}",
-                        e.target
-                    );
-                }
-                if crate::ocr_models::install_name(&e.target).is_none() {
-                    bail!("{LOCK_FILE}: unexpected model line `{}`", e.target);
-                }
+            let Some(c) = pinned else {
+                bail!("{LOCK_FILE}: model lines need `{key} = <commit>`");
+            };
+            if !e.url.starts_with(base) || !e.url.contains(&format!("/{c}/")) {
+                bail!(
+                    "{LOCK_FILE}: the {} url is not {repo} at commit {c}",
+                    e.target
+                );
+            }
+            if crate::ocr_models::install_name(&e.target).is_none() {
+                bail!("{LOCK_FILE}: unexpected model line `{}`", e.target);
             }
         }
         let tesseract_version =
@@ -152,6 +169,7 @@ impl Lock {
             tesseract_version,
             leptonica_version,
             tessdata_commit: commit,
+            tessdata_best_commit: best_commit,
             tessdata,
         })
     }

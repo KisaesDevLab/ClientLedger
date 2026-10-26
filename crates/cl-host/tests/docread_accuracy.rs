@@ -22,12 +22,17 @@
 //! such words is not learned), then documents 2-10 are read again with
 //! every learned template of that path. The template re-read runs the
 //! rules in-process on the words the worker returned (the same
-//! `cl_docread::read` call the worker makes), so OCR is not repeated.
+//! `cl_docread::read` call the worker makes), so OCR is not repeated. On
+//! the template paths each learned template's fingerprint is on the vendor
+//! it was learned from, as A04 saves it, so `match_vendor`'s past-layout
+//! tier works as it will in the desktop.
 //!
 //! Gates (Q-285, applied to seen and held-out separately, with
 //! `CL_DOCREAD_GATE=1`): vendor, date, reference and total each ≥ 95 % on
-//! `text`, ≥ 85 % on `scan`, `photo` and `text-no-unicode`, ≥ 98 % on the
-//! template paths. Held-out results are reported as aggregates only.
+//! `text`, ≥ 85 % on `scan`, `photo`, `text-no-unicode` and the scan and
+//! photo template paths, ≥ 98 % on `template-text` (owner, 2026-10-26: the
+//! 98 % template target is for text PDFs). Held-out results are reported
+//! as aggregates only.
 //!
 //! `private-fixtures/docread/` (git-ignored, Q-72) is scored too when
 //! present: `<name>.<pdf|jpg|png|tif>` with `<name>.json` truth in the same
@@ -121,12 +126,18 @@ impl Route {
         }
     }
 
-    /// Q-285 minimum in percent.
+    /// Q-285 minimum in percent. The 98 % template target applies to text
+    /// PDFs; scans and photos read with a template are held to the scan
+    /// and photo target (owner, 2026-10-26).
     fn gate(self) -> u32 {
         match self {
             Route::Text => 95,
-            Route::TextNoUnicode | Route::Scan | Route::Photo => 85,
-            Route::TemplateText | Route::TemplateScan | Route::TemplatePhoto => 98,
+            Route::TextNoUnicode
+            | Route::Scan
+            | Route::Photo
+            | Route::TemplateScan
+            | Route::TemplatePhoto => 85,
+            Route::TemplateText => 98,
         }
     }
 
@@ -226,6 +237,23 @@ impl Roster {
             });
         }
         Some(Roster { candidates, keys })
+    }
+
+    /// The roster as the desktop builds it once templates are saved: each
+    /// learned template's fingerprint on its vendor (A04 stores a template
+    /// with the vendor of the bill it was learned from), so the past-layout
+    /// tier of `match_vendor` can work on the template paths.
+    fn with_layouts(&self, learned: &[(String, Template)]) -> Roster {
+        let mut candidates = self.candidates.clone();
+        for (key, t) in learned {
+            if let Some(i) = self.keys.iter().position(|k| k == key) {
+                candidates[i].layouts.push(t.fingerprint.clone());
+            }
+        }
+        Roster {
+            candidates,
+            keys: self.keys.clone(),
+        }
     }
 
     fn key_of(&self, header: &Header, reading: &Reading) -> Option<&str> {
@@ -577,12 +605,13 @@ fn shown<T: std::fmt::Display>(v: Option<T>) -> String {
 
 /// `CL_DOCREAD_MISSES=1`: every wrong gated field of a **seen** document
 /// (synthetic values only; never held-out or private documents).
-fn misses(docs: &[&Doc], roster: &Roster) -> String {
+fn misses<'a>(docs: &[&Doc], roster_of: impl Fn(Route) -> &'a Roster) -> String {
     let mut s = String::from(
-        "| layout | seq | path | field | read | truth |\n| --- | --- | --- | --- | --- | --- |\n",
+        "| layout | seq | path | field | read | truth | rule |\n| --- | --- | --- | --- | --- | --- | --- |\n",
     );
     for d in docs.iter().filter(|d| !d.truth.holdout) {
         let t = &d.truth;
+        let roster = roster_of(d.route);
         for f in GATED {
             let ok = d
                 .reading
@@ -592,14 +621,17 @@ fn misses(docs: &[&Doc], roster: &Roster) -> String {
                 continue;
             }
             let h = d.reading.as_ref().map(|r| &r.header);
-            let (got, want) = match f {
+            let rule = |r: Option<&RuleId>| shown(r.map(RuleId::as_str));
+            let (got, want, rule) = match f {
                 Field::Vendor => (
                     shown(h.and_then(|h| h.vendor.as_ref()).map(|v| v.value.clone())),
                     t.vendor_name.clone(),
+                    rule(h.and_then(|h| h.vendor.as_ref()).map(|v| &v.rule)),
                 ),
                 Field::Date => (
                     shown(h.and_then(|h| h.date.as_ref()).map(|v| v.value)),
                     shown(t.date),
+                    rule(h.and_then(|h| h.date.as_ref()).map(|v| &v.rule)),
                 ),
                 Field::Reference => (
                     shown(
@@ -607,15 +639,17 @@ fn misses(docs: &[&Doc], roster: &Roster) -> String {
                             .map(|v| v.value.clone()),
                     ),
                     shown(t.reference.clone()),
+                    rule(h.and_then(|h| h.reference.as_ref()).map(|v| &v.rule)),
                 ),
                 _ => (
                     shown(h.and_then(|h| h.total.as_ref()).map(|v| v.value.to_wire())),
                     shown(t.total.map(Money::to_wire)),
+                    rule(h.and_then(|h| h.total.as_ref()).map(|v| &v.rule)),
                 ),
             };
             let _ = writeln!(
                 s,
-                "| {} | {} | {} | {} | {got} | {want} |",
+                "| {} | {} | {} | {} | {got} | {want} | {rule} |",
                 t.layout,
                 t.seq,
                 d.route.name(),
@@ -629,8 +663,14 @@ fn misses(docs: &[&Doc], roster: &Roster) -> String {
 /// Read every document of the synthetic set.
 fn read_set(host: &mut DocreadHost, set: &Path) -> Vec<Doc> {
     let want = wanted_routes();
+    // `CL_DOCREAD_PARTS=seen` while tuning: held-out documents are not
+    // read at all, so no held-out number can steer a change (S15).
+    let parts = std::env::var("CL_DOCREAD_PARTS").unwrap_or_default();
     let mut out = Vec::new();
     for part in ["seen", "holdout"] {
+        if !parts.is_empty() && !parts.split(',').any(|p| p == part) {
+            continue;
+        }
         let Ok(dirs) = std::fs::read_dir(set.join(part)) else {
             continue;
         };
@@ -691,18 +731,28 @@ fn read_set(host: &mut DocreadHost, set: &Path) -> Vec<Doc> {
     out
 }
 
+/// Per template path, each learned template with the key of the vendor it
+/// was learned from.
+type Learned = BTreeMap<Route, Vec<(String, Template)>>;
+
 /// Template paths: learn from document 1 of each layout, re-read 2-10.
-fn template_docs(docs: &[Doc]) -> Vec<Doc> {
+fn template_docs(docs: &[Doc]) -> (Vec<Doc>, Learned) {
     let mut out = Vec::new();
+    let mut by_route = BTreeMap::new();
     for base in [Route::Text, Route::Scan, Route::Photo] {
         let Some(route) = base.template() else {
             continue;
         };
-        let learned: Vec<Template> = docs
+        let keyed: Vec<(String, Template)> = docs
             .iter()
             .filter(|d| d.route == base && d.truth.seq == 1)
-            .filter_map(|d| learn(d.reading.as_ref()?, &d.truth, today()))
+            .filter_map(|d| {
+                let t = learn(d.reading.as_ref()?, &d.truth, today())?;
+                Some((d.truth.vendor_key.clone(), t))
+            })
             .collect();
+        let learned: Vec<Template> = keyed.iter().map(|(_, t)| t.clone()).collect();
+        by_route.insert(route, keyed);
         for d in docs.iter().filter(|d| d.route == base && d.truth.seq > 1) {
             let t = Instant::now();
             let reading = d.reading.as_ref().map(|r| reread(r, &learned, today()));
@@ -715,7 +765,7 @@ fn template_docs(docs: &[Doc]) -> Vec<Doc> {
             });
         }
     }
-    out
+    (out, by_route)
 }
 
 #[derive(Default)]
@@ -934,6 +984,25 @@ fn read_private(host: &mut DocreadHost, report: &mut Report) -> u32 {
     n
 }
 
+/// `report.md` and `summary.json` in `out_dir`.
+fn write_report(out_dir: &Path, report: &Report, summary: &Value) {
+    let md = format!(
+        "# Reading accuracy\n\nGated fields: vendor, date, reference, total (Q-285). \
+         Held-out rows are aggregates only.\n\n{}\n## Seen layouts with wrong gated fields\n\n{}\n\
+         ## Measurements\n\n```json\n{}\n```\n",
+        report.table(),
+        report.layouts_table(),
+        serde_json::to_string_pretty(summary).unwrap_or_default()
+    );
+    std::fs::create_dir_all(out_dir).expect("report folder");
+    std::fs::write(out_dir.join("report.md"), &md).expect("write report");
+    std::fs::write(
+        out_dir.join("summary.json"),
+        serde_json::to_vec_pretty(summary).unwrap_or_default(),
+    )
+    .expect("write summary");
+}
+
 #[test]
 fn reading_accuracy_against_q285() {
     if std::env::var("CL_DOCREAD_ACCURACY").as_deref() != Ok("1") {
@@ -961,15 +1030,20 @@ fn reading_accuracy_against_q285() {
         stress_only || !docs.is_empty(),
         "the synthetic set is empty"
     );
-    let templated = if wanted_routes().is_none() {
+    let (templated, learned) = if wanted_routes().is_none() {
         template_docs(&docs)
     } else {
-        Vec::new()
+        (Vec::new(), BTreeMap::new())
     };
+    let rosters: BTreeMap<Route, Roster> = learned
+        .iter()
+        .map(|(route, keyed)| (*route, roster.with_layouts(keyed)))
+        .collect();
+    let roster_of = |route: Route| rosters.get(&route).unwrap_or(&roster);
     let mut report = Report::default();
     for d in docs.iter().chain(&templated) {
         let group = if d.truth.holdout { "holdout" } else { "seen" };
-        report.add(d, group, Some(&roster));
+        report.add(d, group, Some(roster_of(d.route)));
     }
     let private = read_private(&mut host, &mut report);
     let stress = if wanted_routes().is_none() {
@@ -996,30 +1070,18 @@ fn reading_accuracy_against_q285() {
         "kills": stats.kills,
         "ocr_pages": stats.ocr_pages,
         "ocr_failures": stats.ocr_failures,
+        "ocr_best_pages": stats.ocr_best_pages,
+        "ocr_rereads": stats.ocr_rereads,
         "timing": timing,
         "stress": stress,
         "gate_failures": failures,
     });
-    let md = format!(
-        "# Reading accuracy\n\nGated fields: vendor, date, reference, total (Q-285). \
-         Held-out rows are aggregates only.\n\n{}\n## Seen layouts with wrong gated fields\n\n{}\n\
-         ## Measurements\n\n```json\n{}\n```\n",
-        report.table(),
-        report.layouts_table(),
-        serde_json::to_string_pretty(&summary).unwrap_or_default()
-    );
-    std::fs::create_dir_all(&out_dir).expect("report folder");
-    std::fs::write(out_dir.join("report.md"), &md).expect("write report");
+    write_report(&out_dir, &report, &summary);
     if std::env::var("CL_DOCREAD_MISSES").as_deref() == Ok("1") {
         let all: Vec<&Doc> = docs.iter().chain(&templated).collect();
-        std::fs::write(out_dir.join("misses-seen.md"), misses(&all, &roster))
+        std::fs::write(out_dir.join("misses-seen.md"), misses(&all, roster_of))
             .expect("write misses");
     }
-    std::fs::write(
-        out_dir.join("summary.json"),
-        serde_json::to_vec_pretty(&summary).unwrap_or_default(),
-    )
-    .expect("write summary");
     println!("{}", report.table());
     println!(
         "{}",

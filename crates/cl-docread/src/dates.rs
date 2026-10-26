@@ -194,6 +194,65 @@ fn month(t: &str) -> Option<u32> {
     u32::try_from(pos + 1).ok()
 }
 
+/// Whether `text` reads as a plausible date (not one [`parse`] marks as
+/// far from "today").
+#[must_use]
+pub fn reads_as_date(text: &str, today: CalendarDate) -> bool {
+    parse(text, today).is_some_and(|p| p.confidence.bp() > IMPLAUSIBLE)
+}
+
+/// Whether OCR words look like a date that did not read (A03 WP-A2): one
+/// word shaped like a numeric date (`64/13/26`, `2625-11-04`), or a month
+/// word, a day and a year-like word (`FES 21 2026`, `APR 11 202¢`), that
+/// does not read as a plausible date. The worker reads such words again on
+/// their own and keeps a re-read only when it [`reads_as_date`]; nothing
+/// is guessed from the misread text.
+#[must_use]
+pub fn unread_date_shape(words: &[&str], today: CalendarDate) -> bool {
+    match words {
+        [w] => {
+            let t = w.trim_matches(|c: char| !c.is_ascii_alphanumeric());
+            numeric_date_shape(t) && !reads_as_date(t, today)
+        }
+        [m, d, y] => named_date_shape(m, d, y) && !reads_as_date(&words.join(" "), today),
+        _ => false,
+    }
+}
+
+/// Three digit groups joined by one separator, in a date's lengths:
+/// `m/d/yy`, `mm/dd/yyyy` or `yyyy-mm-dd` (not a phone number).
+fn numeric_date_shape(t: &str) -> bool {
+    let Some(sep) = t.chars().find(|c| matches!(c, '/' | '-' | '.')) else {
+        return false;
+    };
+    let parts: Vec<&str> = t.split(sep).collect();
+    if parts.len() != 3
+        || !parts
+            .iter()
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return false;
+    }
+    matches!(
+        (parts[0].len(), parts[1].len(), parts[2].len()),
+        (1..=2, 1..=2, 2 | 4) | (4, 1..=2, 1..=2)
+    )
+}
+
+/// A word of letters (a misread month), a one- or two-digit day and a
+/// four-character year with at least two digits.
+fn named_date_shape(m: &str, d: &str, y: &str) -> bool {
+    let m = m.trim_matches(|c: char| !c.is_alphanumeric());
+    let d = d.trim_end_matches([',', '.']);
+    let y = y.trim_end_matches([',', '.']);
+    (3..=9).contains(&m.chars().count())
+        && m.chars().all(char::is_alphabetic)
+        && (1..=2).contains(&d.len())
+        && d.bytes().all(|b| b.is_ascii_digit())
+        && y.chars().count() == 4
+        && y.chars().filter(char::is_ascii_digit).count() >= 2
+}
+
 fn weekday(t: &str) -> bool {
     const DAYS: [&str; 7] = [
         "monday",
@@ -223,6 +282,42 @@ mod tests {
 
     fn read(s: &str) -> Option<(CalendarDate, u16, bool)> {
         parse(s, today()).map(|p| (p.date, p.confidence.bp(), p.could_be_day_first))
+    }
+
+    #[test]
+    fn dates_that_did_not_read_are_worth_a_second_look() {
+        let unread = |w: &[&str]| unread_date_shape(w, today());
+        // Misread digits: an impossible month, day or a far-off year.
+        for w in [
+            "64/13/26",
+            "16/15/2625",
+            "2625-11-64",
+            "2026-63-07",
+            "(67/89/2026)",
+        ] {
+            assert!(unread(&[w]), "{w}");
+        }
+        assert!(unread(&["FES", "21", "2026"]));
+        assert!(unread(&["APR", "11", "202¢"]));
+        // Dates that read, and things that are not dates.
+        for w in [
+            "10/15/2025",
+            "2025-11-04",
+            "479-555-0150",
+            "800-555-0172",
+            "1-1/4",
+            "72701-1234",
+            "12.40",
+            "Total",
+        ] {
+            assert!(!unread(&[w]), "{w}");
+        }
+        assert!(!unread(&["Feb", "21", "2026"]));
+        assert!(!unread(&["Net", "30", "days"]));
+        assert!(!unread(&["a", "b"]));
+        assert!(reads_as_date("04/13/26", today()));
+        assert!(!reads_as_date("04/13/2625", today()), "implausible");
+        assert!(!reads_as_date("64/13/26", today()));
     }
 
     #[test]

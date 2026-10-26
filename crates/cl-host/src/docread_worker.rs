@@ -258,6 +258,10 @@ pub struct DocreadStats {
     pub recycles: u32,
     pub ocr_pages: u32,
     pub ocr_failures: u32,
+    /// Pages read again with the best model (`OcrMode::ReadBest`).
+    pub ocr_best_pages: u32,
+    /// Single values read again (`OcrMode::Word`).
+    pub ocr_rereads: u32,
     pub bad_images: u32,
     /// Highest worker memory seen (commit on Windows, resident elsewhere),
     /// in bytes: the process's own peak on Windows, the watchdog's samples
@@ -838,22 +842,70 @@ fn log_line(line: &[u8], who: &'static str, other: &mut u32) {
 // Tesseract
 // ---------------------------------------------------------------------------
 
-/// Tesseract's arguments after the input, output and model folder.
-fn tesseract_args(mode: OcrMode) -> &'static [&'static str] {
-    match mode {
-        OcrMode::Read => &[
+/// The `tessdata_best` English model, installed beside the fast one
+/// (`cargo xtask ocr-models`, Q-A03b).
+const BEST_MODEL: &str = "engbest.traineddata";
+
+/// Tesseract's arguments after the input, output and model folder; `best`
+/// when [`BEST_MODEL`] is installed. `None`: the host can't serve the
+/// mode (a second read without the best model).
+///
+/// Pages are read as one block of text (`--psm 6`), not with tesseract's
+/// own page layout analysis (`--psm 3`): on bills and receipts its layout
+/// pass cut right-aligned amount columns into separate blocks and misread
+/// them (A03 WP-A2 round 2: seen photos' totals 88 → 95 %, scans' 93 →
+/// 95 %). The rules build lines and columns from the word boxes anyway.
+///
+/// A page whose numbers read with low confidence is read again with both
+/// English models (`eng+engbest`: tesseract re-reads the words the fast
+/// model is unsure of with the best one and keeps the more confident
+/// reading), and a single value is re-read with the best one alone (Q-A03b).
+fn tesseract_args(mode: OcrMode, best: bool) -> Option<&'static [&'static str]> {
+    Some(match (mode, best) {
+        (OcrMode::Read, _) => &[
             "-l",
             "eng",
             "--oem",
             "1",
             "--psm",
-            "3",
+            "6",
+            "-c",
+            "tessedit_create_tsv=1",
+        ],
+        (OcrMode::ReadBest, true) => &[
+            "-l",
+            "eng+engbest",
+            "--oem",
+            "1",
+            "--psm",
+            "6",
+            "-c",
+            "tessedit_create_tsv=1",
+        ],
+        (OcrMode::ReadBest, false) => return None,
+        (OcrMode::Word, true) => &[
+            "-l",
+            "engbest",
+            "--oem",
+            "1",
+            "--psm",
+            "7",
+            "-c",
+            "tessedit_create_tsv=1",
+        ],
+        (OcrMode::Word, false) => &[
+            "-l",
+            "eng",
+            "--oem",
+            "1",
+            "--psm",
+            "7",
             "-c",
             "tessedit_create_tsv=1",
         ],
         // The orientation report (osd.traineddata), plain text.
-        OcrMode::Orient => &["-l", "osd", "--psm", "0"],
-    }
+        (OcrMode::Orient, _) => &["-l", "osd", "--psm", "0"],
+    })
 }
 
 /// OCR one validated PGM page with tesseract: TSV text, or why not.
@@ -865,13 +917,15 @@ fn run_tesseract(
     stop: [&AtomicBool; 2],
     peak: &mut u64,
 ) -> Result<String, OcrFailure> {
+    let best = tools.tessdata.join(BEST_MODEL).is_file();
+    let args = tesseract_args(mode, best).ok_or(OcrFailure::Unavailable)?;
     let dir = ScratchDir::new(scratch, "t").map_err(|_| OcrFailure::Unavailable)?;
     let mut cmd = Command::new(&tools.exe);
     cmd.arg("-")
         .arg("stdout")
         .arg("--tessdata-dir")
         .arg(&tools.tessdata)
-        .args(tesseract_args(mode))
+        .args(args)
         .env_clear()
         .envs(scrubbed_env(&dir.0))
         .env("OMP_THREAD_LIMIT", "1")
@@ -1382,6 +1436,11 @@ fn ocr_answer(
     if reading {
         stats.ocr_pages += 1;
     }
+    match mode {
+        OcrMode::ReadBest => stats.ocr_best_pages += 1,
+        OcrMode::Word => stats.ocr_rereads += 1,
+        OcrMode::Read | OcrMode::Orient => {}
+    }
     let mut peak = 0;
     let result = run_tesseract(
         tools,
@@ -1411,6 +1470,30 @@ fn ocr_answer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_best_model_is_used_only_for_second_reads() {
+        let lang = |mode, best| {
+            tesseract_args(mode, best).map(|a| {
+                let i = a.iter().position(|x| *x == "-l").unwrap();
+                (a[i + 1], a.windows(2).any(|w| w == ["--psm", "7"]))
+            })
+        };
+        // The first read is always the fast model alone, one block.
+        assert_eq!(lang(OcrMode::Read, true), Some(("eng", false)));
+        assert_eq!(lang(OcrMode::Read, false), Some(("eng", false)));
+        assert!(
+            tesseract_args(OcrMode::Read, true)
+                .unwrap()
+                .windows(2)
+                .any(|w| w == ["--psm", "6"])
+        );
+        assert_eq!(lang(OcrMode::ReadBest, true), Some(("eng+engbest", false)));
+        assert_eq!(lang(OcrMode::ReadBest, false), None, "no best model");
+        assert_eq!(lang(OcrMode::Word, true), Some(("engbest", true)));
+        assert_eq!(lang(OcrMode::Word, false), Some(("eng", true)));
+        assert_eq!(lang(OcrMode::Orient, true), Some(("osd", false)));
+    }
 
     fn job(len: usize) -> DocJob {
         DocJob {

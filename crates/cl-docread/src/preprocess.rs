@@ -28,6 +28,7 @@
 
 use crate::ocr_geom::Transform;
 use crate::protocol::{MAX_PGM_HEIGHT, MAX_PGM_WIDTH, PgmError};
+use crate::tsv::PixelBox;
 use image::GrayImage;
 use image::imageops::FilterType;
 
@@ -547,6 +548,50 @@ pub fn stretch_contrast(image: &mut GrayImage) {
     }
 }
 
+/// White border around a re-read crop, pixels.
+const REREAD_BORDER: u32 = 16;
+
+/// A word or line cut from the cleaned page `image` for a re-read
+/// (`protocol::OcrMode::Word`): its box `px` grown by a third of its
+/// height, enlarged `scale` times (1 to 4), on a white border. `None` for
+/// an empty box or a result over the OCR limit.
+#[must_use]
+pub fn reread_crop(image: &GrayImage, px: PixelBox, scale: u32) -> Option<GrayImage> {
+    let (w, h) = image.dimensions();
+    if px.width == 0 || px.height == 0 {
+        return None;
+    }
+    let pad = (px.height / 3).max(4);
+    let x0 = px.left.saturating_sub(pad).min(w);
+    let y0 = px.top.saturating_sub(pad).min(h);
+    let x1 = px.left.saturating_add(px.width).saturating_add(pad).min(w);
+    let y1 = px.top.saturating_add(px.height).saturating_add(pad).min(h);
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let (cw, ch) = (x1 - x0, y1 - y0);
+    let scale = scale.clamp(1, 4);
+    let (sw, sh) = (cw.checked_mul(scale)?, ch.checked_mul(scale)?);
+    let (ow, oh) = (sw + 2 * REREAD_BORDER, sh + 2 * REREAD_BORDER);
+    if ow > MAX_PGM_WIDTH || oh > MAX_PGM_HEIGHT {
+        return None;
+    }
+    let crop = image::imageops::crop_imm(image, x0, y0, cw, ch).to_image();
+    let crop = if scale > 1 {
+        image::imageops::resize(&crop, sw, sh, FilterType::CatmullRom)
+    } else {
+        crop
+    };
+    let mut out = GrayImage::from_pixel(ow, oh, image::Luma([255]));
+    image::imageops::overlay(
+        &mut out,
+        &crop,
+        i64::from(REREAD_BORDER),
+        i64::from(REREAD_BORDER),
+    );
+    Some(out)
+}
+
 /// The cleaned page as an 8-bit binary PGM for `NeedOcr`.
 ///
 /// # Errors
@@ -687,6 +732,42 @@ mod tests {
             assert!(img.get_pixel(x + 5, 20).0[0] >= 235, "paper at {x}");
             assert!(img.get_pixel(x.min(379), 2).0[0] <= 110, "ink at {x}");
         }
+    }
+
+    #[test]
+    fn a_reread_crop_is_the_word_enlarged_on_white() {
+        let page = lined(600, 400);
+        let px = PixelBox {
+            left: 100,
+            top: 60,
+            width: 120,
+            height: 30,
+        };
+        let c = reread_crop(&page, px, 2).unwrap();
+        // 120 + 2 × 10 padding, doubled, plus the border on both sides.
+        assert_eq!(c.dimensions(), ((120 + 20) * 2 + 32, (30 + 20) * 2 + 32));
+        assert_eq!(c.get_pixel(2, 2).0[0], 255);
+        // Clipped at the page's edge.
+        let edge = PixelBox {
+            left: 590,
+            top: 390,
+            width: 50,
+            height: 50,
+        };
+        assert!(reread_crop(&page, edge, 1).is_some());
+        // Empty, off the page, or too large to read.
+        let empty = PixelBox { width: 0, ..px };
+        assert!(reread_crop(&page, empty, 1).is_none());
+        let off = PixelBox { left: 700, ..px };
+        assert!(reread_crop(&page, off, 1).is_none());
+        let big = GrayImage::from_pixel(3_000, 3_000, image::Luma([255]));
+        let all = PixelBox {
+            left: 0,
+            top: 0,
+            width: 3_000,
+            height: 3_000,
+        };
+        assert!(reread_crop(&big, all, 3).is_none());
     }
 
     #[test]

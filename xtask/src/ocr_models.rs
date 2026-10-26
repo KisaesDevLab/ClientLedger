@@ -1,11 +1,13 @@
 //! `cargo xtask ocr-models [--force]`: put the pinned Tesseract model data
 //! into `target/ocr/<triple>/tessdata/` (A03, plan D1 "Data").
 //!
-//! `tessdata_fast` English (`eng`) and orientation/script detection (`osd`),
-//! Apache-2.0, from one commit named in `ocr.lock`, SHA-256 checked and
-//! cached in `target/ocr/.cache`. The repository's license goes to
-//! `LICENSES/tessdata-LICENSE.txt`. The app bundles these files and never
-//! downloads model data at run time.
+//! `tessdata_fast` English (`eng`) and orientation/script detection (`osd`)
+//! from one commit, and `tessdata_best` English installed as `engbest`
+//! from another (A03 WP-A2 round 2, Q-A03b: pages are read with both
+//! English models, re-reads with the best one), all Apache-2.0, named in
+//! `ocr.lock`, SHA-256 checked and cached in `target/ocr/.cache`. Each
+//! repository's license goes to `LICENSES/`. The app bundles these files
+//! and never downloads model data at run time.
 //!
 //! Run after `ocr-build` (which rebuilds the folder but keeps the models it
 //! finds there); an installed file whose hash still matches is left alone.
@@ -18,14 +20,17 @@ use crate::fetch_lock::{Entry, fetch_verified, sha256_file};
 use crate::ocr_build::{LOCK_FILE, Lock, host_triple};
 
 /// The model files a complete install has.
-pub const REQUIRED: [&str; 2] = ["eng.traineddata", "osd.traineddata"];
+pub const REQUIRED: [&str; 3] = ["eng.traineddata", "engbest.traineddata", "osd.traineddata"];
+
+/// The license lines a complete install has.
+const LICENSES: [&str; 2] = ["tessdata-LICENSE", "tessdata_best-LICENSE"];
 
 /// Where a lock line's file goes, relative to `target/ocr/<triple>/`, or
 /// `None` for a name `ocr.lock` may not use.
 #[must_use]
 pub fn install_name(target: &str) -> Option<PathBuf> {
-    if target == "tessdata-LICENSE" {
-        return Some(Path::new("LICENSES").join("tessdata-LICENSE.txt"));
+    if LICENSES.contains(&target) {
+        return Some(Path::new("LICENSES").join(format!("{target}.txt")));
     }
     let ok = target
         .strip_suffix(".traineddata")
@@ -46,7 +51,7 @@ pub fn model_entries(lock: &Lock) -> Result<Vec<(Entry, PathBuf)>> {
         };
         out.push((e.clone(), rel));
     }
-    for name in REQUIRED.iter().copied().chain(["tessdata-LICENSE"]) {
+    for name in REQUIRED.iter().chain(&LICENSES).copied() {
         if !out.iter().any(|(e, _)| e.target == name) {
             bail!("{LOCK_FILE}: no `{name}` line");
         }
@@ -95,8 +100,9 @@ pub fn ocr_models(args: &[String]) -> Result<()> {
     let out = base.join(host_triple()?);
     let written = install(&lock, &base, &out, force)?;
     println!(
-        "ocr-models: tessdata_fast {} in {} ({written} file(s) written)",
+        "ocr-models: tessdata_fast {}, tessdata_best {} in {} ({written} file(s) written)",
         lock.tessdata_commit.as_deref().unwrap_or("?"),
+        lock.tessdata_best_commit.as_deref().unwrap_or("?"),
         out.join("tessdata").display()
     );
     Ok(())
@@ -117,33 +123,50 @@ mod tests {
         ))
     }
 
+    const BEST: &str = "e12c65a915945e4c28e237a9b52bc4a8f39a0cec";
+
     fn line(name: &str, commit: &str, file: &str) -> String {
         format!(
             "{name} {SHA} https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/{commit}/{file}\n"
         )
     }
 
+    fn best_line(name: &str, commit: &str, file: &str) -> String {
+        format!(
+            "{name} {SHA} https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/{commit}/{file}\n"
+        )
+    }
+
     #[test]
-    fn the_committed_lock_pins_english_osd_and_the_license() {
+    fn the_committed_lock_pins_both_english_models_osd_and_the_licenses() {
         let root = crate::engine::repo_root().unwrap();
         let lock = Lock::parse(&fs::read_to_string(root.join(LOCK_FILE)).unwrap()).unwrap();
         let entries = model_entries(&lock).unwrap();
-        assert_eq!(entries.len(), 3);
+        assert_eq!(entries.len(), 5);
         assert_eq!(lock.tessdata_commit.as_deref().map(str::len), Some(40));
+        assert_eq!(lock.tessdata_best_commit.as_deref().map(str::len), Some(40));
         let eng = entries
             .iter()
             .find(|(e, _)| e.target == "eng.traineddata")
             .unwrap();
         assert_eq!(eng.1, Path::new("tessdata").join("eng.traineddata"));
+        let best = entries
+            .iter()
+            .find(|(e, _)| e.target == "engbest.traineddata")
+            .unwrap();
+        assert!(best.0.url.contains("/tessdata_best/"));
+        assert_eq!(best.1, Path::new("tessdata").join("engbest.traineddata"));
     }
 
     #[test]
     fn model_lines_must_name_the_pinned_commit() {
         let ok = format!(
-            "tessdata = {COMMIT}\n{}{}{}",
+            "tessdata = {COMMIT}\ntessdata_best = {BEST}\n{}{}{}{}{}",
             line("eng.traineddata", COMMIT, "eng.traineddata"),
+            best_line("engbest.traineddata", BEST, "eng.traineddata"),
             line("osd.traineddata", COMMIT, "osd.traineddata"),
             line("tessdata-LICENSE", COMMIT, "LICENSE"),
+            best_line("tessdata_best-LICENSE", BEST, "LICENSE"),
         );
         assert!(model_entries(&lock_with(&ok).unwrap()).is_ok());
         let other = "0".repeat(40);
@@ -152,9 +175,24 @@ mod tests {
             line("eng.traineddata", &other, "eng.traineddata")
         );
         assert!(lock_with(&wrong).is_err());
+        // A best model must name the tessdata_best commit, not the fast one.
+        let wrong_best = format!(
+            "tessdata = {COMMIT}\ntessdata_best = {BEST}\n{}",
+            best_line("engbest.traineddata", COMMIT, "eng.traineddata")
+        );
+        assert!(lock_with(&wrong_best).is_err());
+        let no_best_commit = format!(
+            "tessdata = {COMMIT}\n{}",
+            best_line("engbest.traineddata", BEST, "eng.traineddata")
+        );
+        assert!(lock_with(&no_best_commit).is_err());
         let no_commit = line("eng.traineddata", COMMIT, "eng.traineddata");
         assert!(lock_with(&no_commit).is_err());
         assert!(lock_with("tessdata = 8741641\n").is_err(), "short hash");
+        assert!(
+            lock_with("tessdata_best = 8741641\n").is_err(),
+            "short hash"
+        );
         let missing_osd = format!(
             "tessdata = {COMMIT}\n{}{}",
             line("eng.traineddata", COMMIT, "eng.traineddata"),
@@ -170,6 +208,10 @@ mod tests {
             Some(Path::new("tessdata").join("osd.traineddata"))
         );
         assert!(install_name("tessdata-LICENSE").is_some());
+        assert_eq!(
+            install_name("tessdata_best-LICENSE"),
+            Some(Path::new("LICENSES").join("tessdata_best-LICENSE.txt"))
+        );
         for bad in [
             "../x.traineddata",
             ".traineddata",
@@ -186,17 +228,28 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path().join("out");
         let files = [
-            ("eng.traineddata", "tessdata/eng.traineddata"),
-            ("osd.traineddata", "tessdata/osd.traineddata"),
-            ("tessdata-LICENSE", "LICENSES/tessdata-LICENSE.txt"),
+            ("eng.traineddata", "tessdata/eng.traineddata", false),
+            ("engbest.traineddata", "tessdata/engbest.traineddata", true),
+            ("osd.traineddata", "tessdata/osd.traineddata", false),
+            ("tessdata-LICENSE", "LICENSES/tessdata-LICENSE.txt", false),
+            (
+                "tessdata_best-LICENSE",
+                "LICENSES/tessdata_best-LICENSE.txt",
+                true,
+            ),
         ];
-        let mut text = format!("tessdata = {COMMIT}\n");
-        for (name, rel) in files {
+        let mut text = format!("tessdata = {COMMIT}\ntessdata_best = {BEST}\n");
+        for (name, rel, best) in files {
             let p = out.join(rel);
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(&p, name.as_bytes()).unwrap();
             let sha = sha256_file(&p).unwrap();
-            text += &line(name, COMMIT, "x").replacen(SHA, &sha, 1);
+            let l = if best {
+                best_line(name, BEST, "x")
+            } else {
+                line(name, COMMIT, "x")
+            };
+            text += &l.replacen(SHA, &sha, 1);
         }
         let lock = lock_with(&text).unwrap();
         // Nothing to download: a fetch would fail (offline tests, bad url).
