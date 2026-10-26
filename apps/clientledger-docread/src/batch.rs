@@ -278,7 +278,8 @@ fn page_words(page: u16, aspect: u32, source: WordSource, words: Vec<Word>) -> P
 /// Clean the page, ask the host for OCR, map the words back to the page.
 /// `None` when the page could not be read.
 ///
-/// A poor first read (few confident words) may be a page lying on its
+/// A poor first read ([`good_read`]: few confident words, or few for all
+/// it read) may be a page lying on its
 /// side or upside down: the host then reports tesseract's orientation,
 /// and a quarter-turned page is cleaned and read again; the better read
 /// is kept (plan R2).
@@ -299,7 +300,7 @@ fn ocr_page(
     let cleaned = preprocess::clean(grey);
     let first = ocr_raw(io, (job, page), &cleaned, OcrMode::Read)?;
     let first_score = first.as_deref().map_or(0, read_score);
-    let (cleaned, words) = if first.is_none() || first_score >= GOOD_READ {
+    let (cleaned, words) = if first.as_deref().is_none_or(good_read) {
         (cleaned, first)
     } else if let Some(quarters) = orientation(io, job, page, &cleaned)? {
         let turned = preprocess::clean_turned(grey, quarters);
@@ -343,8 +344,11 @@ fn ocr_page(
 }
 
 /// Confident words (at least two letters or digits, confidence ≥ 60 %)
-/// at or above which a read is not second-guessed.
+/// below which a read is second-guessed (see [`good_read`]).
 const GOOD_READ: usize = 12;
+/// The share of words (at least two letters or digits) that must read
+/// confidently, in percent, for a read not to be second-guessed.
+const GOOD_READ_SHARE_PCT: usize = 33;
 /// Tesseract's orientation confidence needed to turn a page.
 const MIN_ORIENT_CONFIDENCE_CENTI: u32 = 200;
 /// Mean confidence of a page's words with digits below which it is read
@@ -364,6 +368,25 @@ pub(crate) fn read_score(words: &[OcrWord]) -> usize {
                 && w.text.chars().filter(|c| c.is_alphanumeric()).count() >= 2
         })
         .count()
+}
+
+/// Whether a first read is good enough not to ask for the page's
+/// orientation: at least [`GOOD_READ`] confident words, and confident words
+/// at least [`GOOD_READ_SHARE_PCT`] of the words with two or more letters or
+/// digits.
+///
+/// The share matters: a page lying on its side reads as hundreds of short
+/// shapes ("Oo", "CO", "NNN"), and a dozen of them can come back confident.
+/// Seen on the A03 sideways test page: 3 of 60 (Windows) and 11 or more of
+/// 123 (Linux and macOS builds) against 94 of 94 once turned; the count
+/// alone let Linux and macOS skip the orientation pass.
+fn good_read(words: &[OcrWord]) -> bool {
+    let candidates = words
+        .iter()
+        .filter(|w| w.text.chars().filter(|c| c.is_alphanumeric()).count() >= 2)
+        .count();
+    let confident = read_score(words);
+    confident >= GOOD_READ && confident * 100 >= candidates * GOOD_READ_SHARE_PCT
 }
 
 /// Whether the words with digits (at least two letters or digits) read
@@ -815,6 +838,68 @@ pub(crate) mod tests {
         assert_eq!((host.orient_calls.len(), host.ocr_calls.len()), (1, 1));
         // A good first read is never second-guessed.
         let mut host = FakeHost::new(|w, h| words(20, w, h));
+        run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
+        assert_eq!((host.orient_calls.len(), host.ocr_calls.len()), (0, 1));
+    }
+
+    #[test]
+    fn a_dozen_confident_shapes_among_many_still_ask_for_the_orientation() {
+        // A page on its side read as short shapes: 12 confident among 120
+        // (the count alone passed; Linux and macOS CI, A03).
+        let shapes = |w: u32, h: u32| {
+            use std::fmt::Write as _;
+            let mut s = String::from(
+                "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n",
+            );
+            // 12 lines of 10 shapes; the first on each line confident.
+            for line in 0..12u32 {
+                for word in 0..10u32 {
+                    let (text, conf) = if word == 0 { ("Oo", 70) } else { ("oOo", 30) };
+                    let _ = writeln!(
+                        s,
+                        "5\t1\t1\t1\t{}\t{}\t{}\t{}\t{}\t{}\t{conf}\t{text}",
+                        line + 1,
+                        word + 1,
+                        (w / 11) * word + 1,
+                        (h / 14) * (line + 1),
+                        w / 15,
+                        h / 30
+                    );
+                }
+            }
+            OcrAnswer::Tsv(Tsv(s))
+        };
+        let mut n = 0;
+        let mut host = FakeHost::new(move |w, h| {
+            n += 1;
+            if n == 1 {
+                shapes(w, h)
+            } else {
+                words(20, w, h)
+            }
+        });
+        host.orient = "Rotate: 90\nOrientation confidence: 19.40\n".into();
+        let out = run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
+        let FromWorker::JobDone { reading, .. } = out else {
+            panic!("{out:?}")
+        };
+        assert_eq!((host.orient_calls.len(), host.ocr_calls.len()), (1, 2));
+        assert_eq!(reading.words[0].words.len(), 20);
+
+        // A read mostly confident is still never second-guessed.
+        let mixed = |w, h| {
+            let list: Vec<(&str, u32)> = (0..30)
+                .map(|i| {
+                    if i % 3 == 0 {
+                        ("blur", 40)
+                    } else {
+                        ("Total", 90)
+                    }
+                })
+                .collect();
+            tsv_of(&list, w, h)
+        };
+        let mut host = FakeHost::new(mixed);
         run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
         assert_eq!((host.orient_calls.len(), host.ocr_calls.len()), (0, 1));
     }
