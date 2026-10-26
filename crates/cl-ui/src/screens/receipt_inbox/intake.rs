@@ -730,6 +730,15 @@ impl Intake {
                     self.state.companies.remove(&self.company);
                     self.state.seen.remove(&self.company);
                     self.save_state();
+                    self.processed = 0;
+                    self.discarded = 0;
+                    self.move_failures = 0;
+                    self.problem = None;
+                    self.claims.clear();
+                    self.moving.clear();
+                    self.retry_at.clear();
+                    self.refused.clear();
+                    self.bring_in.clear();
                     self.runs.clear();
                     self.folders = None;
                     self.stage = Stage::Start;

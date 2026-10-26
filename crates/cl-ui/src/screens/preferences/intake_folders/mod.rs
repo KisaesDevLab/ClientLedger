@@ -897,6 +897,7 @@ pub fn show(ui: &mut Ui, tokens: &Tokens, v: &mut View<'_>) -> PanelAction {
                 tokens,
                 &mut *v.panel,
                 &mut *v.edits,
+                v.here,
                 v.app_dirs,
                 editable,
             );
@@ -936,7 +937,16 @@ fn folder_table(ui: &mut Ui, tokens: &Tokens, v: &View<'_>) {
             ui.end_row();
             for f in &v.edits.folders {
                 ui.add(egui::Label::new(&f.name).selectable(false));
-                ui.add(egui::Label::new(&f.path).truncate().selectable(false));
+                // A path under the owner's profile shows as `~` (as P17
+                // did); the whole path is on hover.
+                ui.add(
+                    egui::Label::new(crate::screens::document_view::shown_path(Path::new(
+                        &f.path,
+                    )))
+                    .truncate()
+                    .selectable(false),
+                )
+                .on_hover_text(&f.path);
                 ui.add(egui::Label::new(t(kind_key(f.default_kind))).selectable(false));
                 let status = status_text(v.panel, v.edits, v.committed, v.here, f);
                 ui.add(
@@ -954,6 +964,7 @@ fn folder_rows(
     tokens: &Tokens,
     panel: &mut IntakePanel,
     edits: &mut IntakeEdits,
+    here: &BTreeMap<IntakeFolderId, HereNote>,
     app_dirs: &[PathBuf],
     editable: bool,
 ) {
@@ -1063,6 +1074,7 @@ fn folder_rows(
                 panel.test(edits, id, app_dirs);
             }
             let can_use = !edits.confirm.contains_key(&id)
+                && !confirmed(here, &f)
                 && panel.ask_bring_in != Some(id)
                 && panel.report(&f).is_some_and(usable);
             if can_use
