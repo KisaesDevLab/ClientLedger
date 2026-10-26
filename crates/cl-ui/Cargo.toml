@@ -22,6 +22,10 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "wgpu", "wayland", "x11", "clipboard", "links"] }
 # P17 document viewer: PNG and JPEG previews (decoded with size limits).
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+# A02 document viewer: multi-page TIFF (`image` reads page 1 only; Q-A02k).
+# MIT. Default features: deflate (flate2), CCITT G4 fax (fax), JPEG-in-TIFF
+# (zune-jpeg), LZW (weezl); all MIT or Apache-2.0. One page decoded at a time.
+tiff = "0.11.3"
 # P17 document viewer: PDF pages through PDFium, loaded at run time from a
 # checksum-pinned library (Q-13). MIT OR Apache-2.0. `pdfium_7881` is the
 # PDFium API the pinned bblanchon/pdfium-binaries `chromium/7881` build
@@ -47,6 +51,9 @@ workspace = true
 
 [dev-dependencies]
 cl-api = { path = "../cl-api", features = ["test-support"] }
+# A02: the synthetic CCITT G4 fixture's encoder (the same crate `tiff`
+# decodes with). MIT.
+fax = "0.2.7"
 tempfile = "3.27.0"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6.5"

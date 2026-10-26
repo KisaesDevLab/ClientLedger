@@ -1,6 +1,7 @@
 //! The document worker (P17, plan §1 "Documents", §3 WP1): one thread that
-//! owns PDFium (`pdfium-render`, loaded at run time) and decodes PNG and
-//! JPEG with the `image` crate, so the egui thread never blocks.
+//! owns PDFium (`pdfium-render`, loaded at run time), decodes PNG and JPEG with
+//! the `image` crate and (A02) multi-page TIFF with the `tiff` crate, one page
+//! at a time (`tiff_doc`), so the egui thread never blocks.
 //!
 //! # Handoff (WP0 skeleton, WP1 filled it)
 //!
@@ -32,7 +33,7 @@
 //! never used: either would let a stray library from the working folder or
 //! the system path load. Without the library PDFs answer `Unavailable`.
 //!
-//! Limits: PDFs show at most [`MAX_PAGES`] pages; a drawn page is at most
+//! Limits: PDFs and TIFFs show at most [`MAX_PAGES`] pages; a drawn page is at most
 //! [`MAX_SIDE`] px on its long side and [`MAX_PIXELS`]; images are refused
 //! over [`MAX_IMAGE_SIDE`] px a side or [`MAX_IMAGE_ALLOC`] bytes to decode
 //! (the decoder checks the header first, so a decompression bomb never
@@ -49,6 +50,10 @@ use image::{ImageReader, Limits, RgbaImage};
 use pdfium_render::prelude::{
     PdfDocument, PdfRenderConfig, Pdfium, PdfiumError, PdfiumInternalError,
 };
+
+mod tiff_doc;
+#[cfg(test)]
+mod tiff_fixtures;
 
 /// Pages shown of a longer PDF.
 pub const MAX_PAGES: u32 = 500;
@@ -360,6 +365,8 @@ fn coalesce(batch: Vec<Job>) -> Vec<Job> {
 enum Doc<'a> {
     Pdf(PdfDocument<'a>, u32),
     Image(RgbaImage),
+    /// A TIFF (A02): pages decoded one at a time.
+    Tiff(Box<tiff_doc::TiffDoc>),
 }
 
 /// Open documents by (handle, doc), oldest first.
@@ -369,8 +376,11 @@ struct Docs<'a> {
 }
 
 impl<'a> Docs<'a> {
-    fn get(&self, key: (u64, u64)) -> Option<&Doc<'a>> {
-        self.open.iter().find(|(k, _)| *k == key).map(|(_, d)| d)
+    fn get_mut(&mut self, key: (u64, u64)) -> Option<&mut Doc<'a>> {
+        self.open
+            .iter_mut()
+            .find(|(k, _)| *k == key)
+            .map(|(_, d)| d)
     }
 
     fn insert(&mut self, key: (u64, u64), doc: Doc<'a>) {
@@ -414,14 +424,18 @@ fn handle_request<'a>(
             page,
             px_width,
         } => Some(
-            docs.get((handle, doc))
+            docs.get_mut((handle, doc))
                 .and_then(|d| render(d, doc, page, px_width))
                 .map_or(DocReply::Unreadable { doc }, DocReply::Rendered),
         ),
     }
 }
 
-fn open<'a>(pdfium: Option<&'a Pdfium>, doc: u64, bytes: &[u8]) -> (DocReply, Option<Doc<'a>>) {
+fn open<'a>(
+    pdfium: Option<&'a Pdfium>,
+    doc: u64,
+    bytes: &Arc<[u8]>,
+) -> (DocReply, Option<Doc<'a>>) {
     match cl_api::FileKind::sniff(bytes) {
         Some(cl_api::FileKind::Pdf) => {
             let Some(pdfium) = pdfium else {
@@ -460,9 +474,18 @@ fn open<'a>(pdfium: Option<&'a Pdfium>, doc: u64, bytes: &[u8]) -> (DocReply, Op
             ),
             None => (DocReply::Unreadable { doc }, None),
         },
-        // A TIFF is taken in (Q-A01n) but not shown until the new viewer
-        // (A02).
-        Some(cl_api::FileKind::Tiff) | None => (DocReply::Unreadable { doc }, None),
+        Some(cl_api::FileKind::Tiff) => match tiff_doc::TiffDoc::open(bytes) {
+            Some((t, truncated)) => (
+                DocReply::Opened {
+                    doc,
+                    pages: t.pages(),
+                    truncated,
+                },
+                Some(Doc::Tiff(Box::new(t))),
+            ),
+            None => (DocReply::Unreadable { doc }, None),
+        },
+        None => (DocReply::Unreadable { doc }, None),
     }
 }
 
@@ -482,16 +505,21 @@ pub(crate) fn decode_image(bytes: &[u8]) -> Option<RgbaImage> {
         .with_guessed_format()
         .ok()?;
     reader.limits(limits());
-    let img = reader.decode().ok()?;
-    let (w, h) = (img.width(), img.height());
+    shrink(reader.decode().ok()?.into_rgba8())
+}
+
+/// Keep a decoded picture at most [`MAX_SIDE`] on its long side and
+/// [`MAX_PIXELS`]. `None` for an empty one.
+fn shrink(img: RgbaImage) -> Option<RgbaImage> {
+    let (w, h) = img.dimensions();
     if w == 0 || h == 0 {
         return None;
     }
     let (tw, th) = fit_pixels(w, w, h)?;
     if (tw, th) == (w, h) {
-        Some(img.into_rgba8())
+        Some(img)
     } else {
-        Some(image::imageops::thumbnail(&img.into_rgba8(), tw, th))
+        Some(image::imageops::thumbnail(&img, tw, th))
     }
 }
 
@@ -530,7 +558,7 @@ fn fit_pixels(want_w: u32, w: u32, h: u32) -> Option<(u32, u32)> {
     clamp_size(want_w, w as f32, h as f32)
 }
 
-fn render(d: &Doc<'_>, doc: u64, page: u32, px_width: u32) -> Option<RenderedPage> {
+fn render(d: &mut Doc<'_>, doc: u64, page: u32, px_width: u32) -> Option<RenderedPage> {
     match d {
         Doc::Pdf(pdf, pages) => {
             if page >= *pages {
@@ -566,23 +594,31 @@ fn render(d: &Doc<'_>, doc: u64, page: u32, px_width: u32) -> Option<RenderedPag
             if page != 0 {
                 return None;
             }
-            let (w, h) = fit_pixels(px_width, img.width(), img.height())?;
-            let scaled = if (w, h) == img.dimensions() {
-                img.clone()
-            } else {
-                image::imageops::thumbnail(img, w, h)
-            };
-            Some(RenderedPage {
-                doc,
-                page,
-                width: scaled.width(),
-                height: scaled.height(),
-                rgba: scaled.into_raw(),
-                natural_width: img.width(),
-                natural_height: img.height(),
-            })
+            scale_picture(img, doc, page, px_width)
         }
+        Doc::Tiff(t) => t
+            .with_page(page, true, |img| scale_picture(img, doc, page, px_width))
+            .flatten(),
     }
+}
+
+/// A decoded picture drawn `px_width` pixels wide (within the limits).
+fn scale_picture(img: &RgbaImage, doc: u64, page: u32, px_width: u32) -> Option<RenderedPage> {
+    let (w, h) = fit_pixels(px_width, img.width(), img.height())?;
+    let scaled = if (w, h) == img.dimensions() {
+        img.clone()
+    } else {
+        image::imageops::thumbnail(img, w, h)
+    };
+    Some(RenderedPage {
+        doc,
+        page,
+        width: scaled.width(),
+        height: scaled.height(),
+        rgba: scaled.into_raw(),
+        natural_width: img.width(),
+        natural_height: img.height(),
+    })
 }
 
 /// The library's file name on this platform.
@@ -865,6 +901,164 @@ mod tests {
             bytes: bomb,
         });
         assert_eq!(reply(&w), DocReply::Unreadable { doc: 9 });
+    }
+
+    /// Open `bytes` on a worker without PDFium (TIFFs don't need it).
+    fn open_on(w: &DocWorker, doc: u64, bytes: Vec<u8>) -> DocReply {
+        w.send(DocRequest::Open {
+            doc,
+            bytes: Arc::from(bytes),
+        });
+        reply(w)
+    }
+
+    fn render_on(w: &DocWorker, doc: u64, page: u32, px_width: u32) -> DocReply {
+        w.send(DocRequest::Render {
+            doc,
+            page,
+            px_width,
+        });
+        reply(w)
+    }
+
+    fn opened(doc: u64, pages: u32) -> DocReply {
+        DocReply::Opened {
+            doc,
+            pages,
+            truncated: false,
+        }
+    }
+
+    /// The share of pixels with ink (any colour channel under half).
+    fn dark_share(p: &RenderedPage) -> f64 {
+        let px = p.rgba.as_chunks::<4>().0;
+        let dark = px.iter().filter(|c| c[0].min(c[1]).min(c[2]) < 128).count();
+        #[allow(clippy::cast_precision_loss)]
+        let share = dark as f64 / px.len() as f64;
+        share
+    }
+
+    #[test]
+    fn a_three_page_tiff_opens_and_each_page_renders_differently() {
+        let w = without_pdfium();
+        assert_eq!(
+            open_on(&w, 1, fixture("three_pages.tif").to_vec()),
+            opened(1, 3)
+        );
+        let mut seen = Vec::new();
+        for page in 0..3 {
+            let DocReply::Rendered(p) = render_on(&w, 1, page, 120) else {
+                panic!("page {page} not rendered")
+            };
+            assert_eq!((p.page, p.width, p.height), (page, 120, 160));
+            assert_eq!((p.natural_width, p.natural_height), (120, 160));
+            assert_eq!(p.rgba.len(), 120 * 160 * 4);
+            assert!(dark_share(&p) > 0.01, "page {page} looks blank");
+            seen.push(p.rgba);
+        }
+        assert!(seen[0] != seen[1] && seen[1] != seen[2] && seen[0] != seen[2]);
+        // Page 1's band is at the top, page 3's black at the bottom; page 2
+        // is red in the middle.
+        let at = |rgba: &[u8], x: usize, y: usize| {
+            let i = (y * 120 + x) * 4;
+            [rgba[i], rgba[i + 1], rgba[i + 2]]
+        };
+        assert_eq!(at(&seen[0], 60, 20), [40, 40, 40]);
+        assert_eq!(at(&seen[0], 60, 140), [255, 255, 255]);
+        assert_eq!(at(&seen[1], 60, 80), [200, 30, 30]);
+        assert_eq!(at(&seen[2], 60, 130), [0, 0, 0]);
+        assert_eq!(at(&seen[2], 60, 20), [255, 255, 255]);
+        // Past the last page.
+        assert_eq!(render_on(&w, 1, 3, 120), DocReply::Unreadable { doc: 1 });
+    }
+
+    #[test]
+    fn a_g4_fax_page_renders_black_on_white() {
+        let w = without_pdfium();
+        assert_eq!(open_on(&w, 2, fixture("g4_fax.tif").to_vec()), opened(2, 1));
+        let DocReply::Rendered(p) = render_on(&w, 2, 0, 200) else {
+            panic!("not rendered")
+        };
+        assert_eq!((p.width, p.height), (200, 100));
+        let share = dark_share(&p);
+        // Mostly white paper with some black: the right way round.
+        assert!((0.03..0.5).contains(&share), "dark share {share}");
+        let px = |x: usize, y: usize| p.rgba[(y * 200 + x) * 4];
+        assert_eq!(px(100, 10), 0, "the box edge is black");
+        assert_eq!(px(5, 5), 255, "the margin is white");
+    }
+
+    #[test]
+    fn hostile_tiffs_end_as_unreadable() {
+        let bomb = fixture("bomb_tiff.tif");
+        assert!(bomb.len() < 400, "the fixture is a header, not pixels");
+        let w = without_pdfium();
+        assert_eq!(
+            open_on(&w, 1, bomb.to_vec()),
+            DocReply::Unreadable { doc: 1 }
+        );
+        assert_eq!(
+            open_on(&w, 2, tiff_fixtures::truncated_strip()),
+            DocReply::Unreadable { doc: 2 }
+        );
+        assert_eq!(
+            open_on(&w, 3, tiff_fixtures::lab_only()),
+            DocReply::Unreadable { doc: 3 }
+        );
+        assert_eq!(
+            open_on(&w, 4, b"II*\0\xff\xff\xff\x7f".to_vec()),
+            DocReply::Unreadable { doc: 4 }
+        );
+        // BigTIFF is not taken.
+        assert_eq!(
+            open_on(&w, 5, b"II+\0\x08\0\0\0\x10\0\0\0\0\0\0\0".to_vec()),
+            DocReply::Unreadable { doc: 5 }
+        );
+    }
+
+    #[test]
+    fn a_looping_page_list_ends() {
+        let w = without_pdfium();
+        // The page that points back is where the walk stops (the tiff
+        // crate refuses it); the first page still shows.
+        let r = open_on(&w, 1, tiff_fixtures::ifd_loop());
+        assert_eq!(r, opened(1, 1));
+        assert!(matches!(render_on(&w, 1, 0, 60), DocReply::Rendered(_)));
+    }
+
+    #[test]
+    fn an_unsupported_later_page_is_unreadable_alone() {
+        let w = without_pdfium();
+        assert_eq!(open_on(&w, 1, tiff_fixtures::gray_then_lab()), opened(1, 2));
+        assert_eq!(render_on(&w, 1, 1, 60), DocReply::Unreadable { doc: 1 });
+        assert!(matches!(render_on(&w, 1, 0, 60), DocReply::Rendered(_)));
+    }
+
+    #[test]
+    fn cmyk_converts_and_long_tiffs_stop_at_the_limit() {
+        let w = without_pdfium();
+        assert_eq!(open_on(&w, 1, tiff_fixtures::cmyk()), opened(1, 1));
+        let DocReply::Rendered(p) = render_on(&w, 1, 0, 8) else {
+            panic!("not rendered")
+        };
+        assert_eq!(&p.rgba[..4], &[0, 255, 255, 255], "cyan");
+        let n = MAX_PAGES as usize + 3;
+        assert_eq!(
+            open_on(&w, 2, tiff_fixtures::many_pages(n)),
+            DocReply::Opened {
+                doc: 2,
+                pages: MAX_PAGES,
+                truncated: true
+            }
+        );
+        assert_eq!(
+            open_on(&w, 3, tiff_fixtures::many_pages(MAX_PAGES as usize)),
+            DocReply::Opened {
+                doc: 3,
+                pages: MAX_PAGES,
+                truncated: false
+            }
+        );
     }
 
     #[test]
