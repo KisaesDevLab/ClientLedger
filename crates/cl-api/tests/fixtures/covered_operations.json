@@ -55,10 +55,10 @@
   {"method":"GET","path":"/api/v1/tenants","inSpec":true,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/tenants","inSpec":true,"fragmentHash":"8da8b5f4605183f5519ef52422b1d240dcacfa07ff27502c5aed51bd7f911362"},
   {"method":"PATCH","path":"/api/v1/tenants/{id}","inSpec":true,"fragmentHash":"be138edc4cb213ffd459d59574f076e54e428cecee353d1a3699a3f995798541"},
-  {"method":"POST","path":"/api/v1/tenants/{id}/archives","inSpec":true,"fragmentHash":"63f539dd1841f3db0d687bb22b4a4519597eefc1b4ae8de4b6b03b48b813335e"},
+  {"method":"POST","path":"/api/v1/tenants/{id}/archives","inSpec":true,"fragmentHash":"8e7c65a0a430ecc3a765a446dc5eeec476bd0c9d57a5f3d72b6e8db21909192c"},
   {"method":"GET","path":"/api/v1/tenant-archives/jobs/{jobId}","inSpec":true,"fragmentHash":"5824a1cdbedf7bd811ba198597aabc1593b1ab2dc3dfcb543382a3dcbc58856f"},
   {"method":"GET","path":"/api/v1/tenant-archives/{fileName}/download","inSpec":true,"fragmentHash":"ee93fd080edc7dc8c31fbe220c5c98639d5cbfd6a1b740f0b5d6efbebf257208"},
-  {"method":"POST","path":"/api/v1/tenant-archives/import","inSpec":true,"fragmentHash":"aea8b3790405aa863883f567221bb27ae1afd7cdc0a0cb2eb1c697353cf14dc1"},
+  {"method":"POST","path":"/api/v1/tenant-archives/import","inSpec":true,"fragmentHash":"ec7ed1c29c3edefcb650f27b42e4b06a12a5f38ed79a52fcb85a6915c40deb39"},
   {"method":"POST","path":"/api/v1/tenants/{id}/delete","inSpec":false,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/desktop/recover-password","inSpec":false,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/auth/recovery-key/rotate","inSpec":false,"fragmentHash":null},
@@ -185,6 +185,6 @@
   {"method":"GET","path":"/api/v1/attachments/unlinked","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/bill-payments","inSpec":true,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/bill-payments/{id}/void","inSpec":true,"fragmentHash":"c36a5cd7d5db64b7cc4d730b5542f420f793446ce235d3870b32f136846683da"},
-  {"method":"GET","path":"/api/v1/company/intake-settings","inSpec":false,"fragmentHash":null},
-  {"method":"PUT","path":"/api/v1/company/intake-settings","inSpec":false,"fragmentHash":null}
+  {"method":"GET","path":"/api/v1/company/intake-settings","inSpec":true,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/company/intake-settings","inSpec":true,"fragmentHash":"7a2549fce0661c72dc3bae9ba69e53fcb048386b26f004fef32d885548a9d027"}
 ]

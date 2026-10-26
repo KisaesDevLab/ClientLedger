@@ -65,8 +65,7 @@ pub fn inspect_archive(path: &Path, list: &RecentCompanies) -> Result<ArchiveInf
     if env.format != ARCHIVE_FORMAT || env.format_version > MAX_FORMAT_VERSION {
         return Err(CompanyError::NotABackup);
     }
-    let names = zipfile::entry_names(path).map_err(CompanyError::io("read archive"))?;
-    if !names.iter().any(|n| n == "manifest.json.enc") {
+    if !zipfile::has_entry(path, "manifest.json.enc").map_err(CompanyError::io("read archive"))? {
         return Err(CompanyError::NotABackup);
     }
     let sha256 = sha256_file(path).map_err(CompanyError::io("hash archive"))?;

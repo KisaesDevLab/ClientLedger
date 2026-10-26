@@ -6,11 +6,11 @@
 //!   then its original moves to `Processed/YYYY-MM/`. Without the engine
 //!   executable or the `PostgreSQL` binaries the test prints `SKIPPED` and
 //!   passes, unless `CL_API_REQUIRE=1`.
-//! - **AC3, live**: backup → restore keeps the folders and this computer's
-//!   confirmations — PENDING(U-93): needs `intake-settings-v1`, which the
-//!   pinned engine doesn't have yet; the test says so and checks only that
-//!   the capability is absent (it fails once the pin has U-93, so this part
-//!   gets written then).
+//! - **AC3, live**: `cl_company::backup` → `restore` keeps the company's
+//!   folders (engine U-93, `intake-settings-v1`) and this computer's
+//!   confirmations; a folder never confirmed here stays not confirmed.
+//!   PENDING on an engine without the capability, a failure when
+//!   `CL_API_REQUIRE_CAPS` lists it.
 //! - **AC4, offline**: the migration golden — a P17 folder
 //!   (`fixtures/intake/p17-folder`: `Filed/2026-10/a.pdf` and files in the
 //!   root) is byte-for-byte the same tree after the migration and a full
@@ -44,8 +44,9 @@ use cl_core::Secret;
 use cl_core::ids::IntakeFolderId;
 use cl_core::intake::{IntakeFolder, IntakeKind};
 use cl_host::{AdminAccount, HostConfig, HostState, Supervisor};
-use cl_settings::RecentStore;
 use cl_settings::inbox_state::{FileIdentity, InboxStateStore, company_key, path_hash};
+use cl_settings::secrets::BACKUP_PASSPHRASE;
+use cl_settings::{BackupKind, MemorySecrets, RecentStore, SecretStore};
 
 const OWNER: &str = "owner@example.com";
 
@@ -129,7 +130,7 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
         other => panic!("login: {other:?}"),
     };
     let store = RecentStore::in_dir(&scratch.join("settings"));
-    cl_company::sample::load_into(&s, &store, &cl_company::backup::silent())
+    let created = cl_company::sample::load_into(&s, &store, &cl_company::backup::silent())
         .await
         .expect("a company to copy into");
 
@@ -137,7 +138,7 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     let folder = scratch.join("Bills");
     std::fs::create_dir_all(&folder).expect("folder");
     let pin = canonical_key(&folder).expect("pin");
-    let h = WatchHandle::spawn(folder_id(1), folder.clone(), pin);
+    let h = WatchHandle::spawn(folder_id(1), folder.clone(), pin.clone());
     let path = folder.join("Ozark Feed bill.pdf");
     let saved = Instant::now();
     std::fs::write(&path, PDF).expect("save the file");
@@ -225,18 +226,144 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     drop(h);
 
     // AC3: backup and restore keep the folders (engine U-93).
-    let has_intake = client
+    if client
         .capabilities()
-        .has(cl_api::Capabilities::INTAKE_SETTINGS);
-    assert!(
-        has_intake || std::env::var("CL_API_REQUIRE_CAPS").as_deref() != Ok("1"),
-        "PENDING(U-93): CL_API_REQUIRE_CAPS=1 but the engine has no intake-settings-v1"
-    );
-    eprintln!(
-        "PENDING(U-93): backup/restore keeps intake folders and local confirmations \
-         (needs intake-settings-v1; the engine has it: {has_intake})"
-    );
+        .has(cl_api::Capabilities::INTAKE_SETTINGS)
+    {
+        backup_restore_keeps_folders(&s, &store, created.tenant_id, scratch, &folder, &pin).await;
+    } else {
+        assert!(
+            !caps_required(cl_api::Capabilities::INTAKE_SETTINGS),
+            "CL_API_REQUIRE_CAPS lists intake-settings-v1 but the engine has no such capability"
+        );
+        eprintln!(
+            "PENDING(U-93): backup/restore keeps intake folders and local confirmations \
+             (needs intake-settings-v1)"
+        );
+    }
     let _ = s.logout().await;
+}
+
+/// Whether `CL_API_REQUIRE_CAPS` (`1` = all, else a comma list) requires `cap`.
+fn caps_required(cap: &str) -> bool {
+    std::env::var("CL_API_REQUIRE_CAPS")
+        .is_ok_and(|v| v.trim() == "1" || v.split(',').any(|c| c.trim() == cap))
+}
+
+/// AC3: the company's folders travel in its backup; this computer's
+/// confirmations stay local and carry over to the restored company, and a
+/// folder this computer never confirmed stays unconfirmed.
+async fn backup_restore_keeps_folders(
+    s: &cl_api::Session,
+    store: &RecentStore,
+    tenant: cl_core::ids::TenantId,
+    scratch: &Path,
+    watched: &Path,
+    pin: &str,
+) {
+    let path_text = |p: &Path| p.to_str().expect("utf-8").to_string();
+    let other = scratch.join("Receipts");
+    std::fs::create_dir_all(&other).expect("folder");
+    let folders = vec![
+        IntakeFolder {
+            id: folder_id(1),
+            name: "Bills".into(),
+            path: path_text(watched),
+            default_kind: IntakeKind::Bills,
+            auto_read: true,
+            keep_originals: false,
+        },
+        IntakeFolder {
+            id: folder_id(2),
+            name: "Receipts".into(),
+            path: path_text(&other),
+            default_kind: IntakeKind::Receipts,
+            auto_read: false,
+            keep_originals: true,
+        },
+    ];
+    let before = s.intake().get().await.expect("get");
+    assert!(before.folders.is_empty(), "a new company has no folders");
+    let saved = s
+        .intake()
+        .put(&folders, before.updated_at.as_deref())
+        .await
+        .expect("put");
+    assert_eq!(saved.folders, folders);
+    // This computer confirms the first folder only.
+    store
+        .update(|l| {
+            let rec = l.get_mut(tenant).expect("the sample's record");
+            rec.prefs.intake_here.insert(
+                folders[0].id,
+                cl_settings::HereNote {
+                    path_hash: cl_settings::path_hash(&folders[0].path),
+                    canonical_key: pin.to_string(),
+                    since_ms: None,
+                    confirmed_at: Some(cl_settings::recent::now()),
+                },
+            );
+        })
+        .expect("confirm");
+
+    let secrets = MemorySecrets::new();
+    secrets
+        .set(BACKUP_PASSPHRASE, &Secret::new("intake-backup-passphrase"))
+        .expect("passphrase");
+    let backed = cl_company::backup(
+        s,
+        store,
+        &secrets,
+        &cl_company::BackupRequest {
+            tenant_id: tenant,
+            kind: BackupKind::Backup,
+            dest_dir: scratch.join("Backups"),
+            apply_retention: false,
+        },
+        &cl_company::backup::silent(),
+    )
+    .await
+    .expect("backup");
+
+    cl_company::close_company(s).await.expect("close");
+    let restored = cl_company::restore(
+        s,
+        store,
+        &secrets,
+        &cl_company::RestoreRequest {
+            path: backed.record.path.clone(),
+            passphrase: None,
+        },
+        &cl_company::backup::silent(),
+    )
+    .await
+    .expect("restore");
+    assert_ne!(restored.new_tenant, tenant, "restored as a new company");
+    assert_eq!(restored.kept_previous, Some(tenant));
+
+    cl_company::open_company(s, store, restored.new_tenant)
+        .await
+        .expect("open the restored company");
+    let back = s.intake().get().await.expect("get restored");
+    assert_eq!(back.folders, folders, "the folders travel in the backup");
+    let list = store.load().expect("load");
+    let prefs = &list
+        .get(restored.new_tenant)
+        .expect("restored record")
+        .prefs;
+    assert!(
+        prefs.is_confirmed(&back.folders[0]),
+        "this computer's confirmation carries over"
+    );
+    assert!(
+        !prefs.is_confirmed(&back.folders[1]),
+        "a folder never confirmed here stays not confirmed"
+    );
+    assert_eq!(
+        prefs.intake_here[&folders[0].id].canonical_key, pin,
+        "the pinned root is kept"
+    );
+    eprintln!("AC3: backup → restore kept {} folders", back.folders.len());
 }
 
 #[test]
