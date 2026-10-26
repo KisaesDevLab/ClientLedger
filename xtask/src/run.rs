@@ -39,6 +39,23 @@ pub fn plan(args: &[String]) -> Result<Plan> {
     })
 }
 
+/// The checkout's OCR folder has tesseract and the English model (what
+/// `cl_host::is_ocr_dir` asks of it).
+fn ocr_ready() -> bool {
+    let Ok(root) = crate::engine::repo_root() else {
+        return false;
+    };
+    let Ok(triple) = crate::ocr_build::host_triple() else {
+        return false;
+    };
+    is_ocr_dir(&root.join("target").join("ocr").join(triple))
+}
+
+fn is_ocr_dir(dir: &std::path::Path) -> bool {
+    dir.join(crate::ocr_build::exe_name()).is_file()
+        && dir.join("tessdata").join("eng.traineddata").is_file()
+}
+
 /// Entry point.
 pub fn run(args: &[String]) -> Result<()> {
     let plan = plan(args)?;
@@ -61,7 +78,10 @@ pub fn run(args: &[String]) -> Result<()> {
     // Reading documents (A03): tesseract from pinned source and its
     // models, both cached. Without them only text PDFs are read, so a
     // failure (no C++ tools, offline) does not stop the run.
+    // A usable OCR folder is left alone: rebuilding tesseract takes
+    // minutes.
     if plan.prepare
+        && !ocr_ready()
         && let Err(e) =
             crate::ocr_build::ocr_build(&[]).and_then(|()| crate::ocr_models::ocr_models(&[]))
     {
@@ -110,6 +130,17 @@ mod tests {
                 app_args: vec![]
             }
         );
+    }
+
+    #[test]
+    fn an_ocr_folder_needs_tesseract_and_the_english_model() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!is_ocr_dir(dir.path()));
+        std::fs::write(dir.path().join(crate::ocr_build::exe_name()), b"x").unwrap();
+        assert!(!is_ocr_dir(dir.path()), "no model yet");
+        std::fs::create_dir_all(dir.path().join("tessdata")).unwrap();
+        std::fs::write(dir.path().join("tessdata/eng.traineddata"), b"x").unwrap();
+        assert!(is_ocr_dir(dir.path()));
     }
 
     #[test]
