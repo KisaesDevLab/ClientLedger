@@ -44,7 +44,7 @@
 //! money. Without PDFium a PDF shows "Preview isn't available on this
 //! computer" with Save a copy; pictures still preview.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -191,6 +191,28 @@ struct Shown {
     natural: Vec2,
 }
 
+/// A02: one thumbnail.
+struct Thumb {
+    texture: TextureHandle,
+    /// Its size in pixels.
+    size: Vec2,
+    /// The frame it was last drawn.
+    used: u64,
+}
+
+/// Thumbnail textures kept per viewer (96 px wide: about 3 MB in all).
+pub const MAX_THUMBS: usize = 64;
+/// A thumbnail's width asked of the worker, in pixels.
+const THUMB_PX: u32 = 96;
+/// The strip shows when the viewer is at least this wide (Q-A02l).
+pub const THUMB_STRIP_MIN_WIDTH: f32 = 520.0;
+/// The strip's width and one row's height, in points.
+const STRIP_W: f32 = 96.0;
+const THUMB_ROW_H: f32 = 118.0;
+/// New thumbnails asked for per frame, so a page render never queues
+/// behind a burst of them.
+const THUMB_ASKS_PER_FRAME: usize = 4;
+
 /// One viewer's state.
 #[derive(Default)]
 pub struct ViewerState {
@@ -213,6 +235,21 @@ pub struct ViewerState {
     rotations: HashMap<u32, Rotation>,
     /// A page the worker could not draw (the rest of the document shows).
     failed_page: Option<u32>,
+    /// A02: thumbnails by page (at most [`MAX_THUMBS`], the least recently
+    /// drawn go first).
+    thumbs: HashMap<u32, Thumb>,
+    /// Thumbnails asked for and not yet answered or dropped.
+    thumb_asked: HashSet<u32>,
+    /// Pages whose thumbnail can't be drawn (shown blank, not asked again).
+    thumb_failed: HashSet<u32>,
+    /// Frames drawn, for the thumbnails' least-recently-used order.
+    frame: u64,
+    /// The strip showed last frame.
+    strip_shown: bool,
+    /// The page the strip last scrolled to.
+    strip_page: Option<u32>,
+    /// The strip's scroll offset last frame, in points.
+    strip_top: f32,
     /// The page's size at 100 % (known after the first render).
     natural: Option<Vec2>,
     /// The page area last frame (for zoom steps from a fit).
@@ -265,6 +302,7 @@ impl ViewerState {
     pub fn release_pixels(&mut self) {
         self.shown = None;
         self.asked = None;
+        self.drop_thumbs();
     }
 
     /// Forget the open document (the worker too), keeping the worker, the
@@ -287,6 +325,15 @@ impl ViewerState {
         self.natural = None;
         self.rotations.clear();
         self.failed_page = None;
+        self.drop_thumbs();
+        self.strip_page = None;
+    }
+
+    /// Forget the thumbnails (their textures free as they drop).
+    fn drop_thumbs(&mut self) {
+        self.thumbs.clear();
+        self.thumb_asked.clear();
+        self.thumb_failed.clear();
     }
 
     /// The document shown.
@@ -451,6 +498,7 @@ impl ViewerState {
             "focused": self.focused,
             "rotation": self.rotation().degrees(),
             "page_unreadable": self.failed_page == Some(self.page),
+            "thumbnails": {"shown": self.strip_shown, "loaded": self.thumbs.len()},
         })
     }
 
@@ -460,6 +508,7 @@ impl ViewerState {
             return;
         };
         let mut rendered = None;
+        let mut thumbs = Vec::new();
         while let Some(r) = worker.try_recv() {
             match r {
                 DocReply::Opened {
@@ -487,12 +536,60 @@ impl ViewerState {
                     self.status = Status::Unavailable;
                 }
                 DocReply::Rendered(p) if p.doc == self.doc => rendered = Some(p),
+                DocReply::Thumb(p) if p.doc == self.doc => thumbs.push(p),
+                DocReply::NoThumb { doc, page } if doc == self.doc => {
+                    self.thumb_asked.remove(&page);
+                    self.thumb_failed.insert(page);
+                }
                 // An earlier document's answer.
                 _ => {}
             }
         }
         if let Some(p) = rendered {
             self.take_page(ctx, &p);
+        }
+        for p in thumbs {
+            self.take_thumb(ctx, &p);
+        }
+    }
+
+    /// Keep a thumbnail's texture, dropping the least recently drawn over
+    /// [`MAX_THUMBS`].
+    fn take_thumb(&mut self, ctx: &egui::Context, p: &RenderedPage) {
+        self.thumb_asked.remove(&p.page);
+        let (Ok(w), Ok(h)) = (usize::try_from(p.width), usize::try_from(p.height)) else {
+            return;
+        };
+        let max = ctx.input(|i| i.max_texture_side);
+        if p.rgba.len() != w * h * 4 || w > max || h > max {
+            return;
+        }
+        // Numbers only in the name, never the file name.
+        let texture = ctx.load_texture(
+            format!("doc-thumb-{}-{}", self.doc, p.page),
+            ColorImage::from_rgba_unmultiplied([w, h], &p.rgba),
+            TextureOptions::LINEAR,
+        );
+        #[allow(clippy::cast_precision_loss)] // At most 4096.
+        let size = Vec2::new(p.width as f32, p.height as f32);
+        self.thumbs.insert(
+            p.page,
+            Thumb {
+                texture,
+                size,
+                used: self.frame,
+            },
+        );
+        while self.thumbs.len() > MAX_THUMBS {
+            let Some(oldest) = self
+                .thumbs
+                .iter()
+                .min_by_key(|(page, t)| (t.used, **page))
+                .map(|(page, _)| *page)
+            else {
+                break;
+            };
+            self.thumbs.remove(&oldest);
         }
     }
 
@@ -902,7 +999,21 @@ impl DocViewer {
                 event = ViewerEvent::SaveCopy;
             }
         }
+        state.frame += 1;
+        state.strip_shown = state.status == Status::Ready
+            && state.pages > 1
+            && ui.available_width() >= THUMB_STRIP_MIN_WIDTH;
         match state.status {
+            Status::Ready if state.strip_shown => {
+                ui.horizontal_top(|ui| {
+                    let h = ui.available_height();
+                    ui.allocate_ui(Vec2::new(STRIP_W, h), |ui| {
+                        ui.set_min_size(Vec2::new(STRIP_W, h));
+                        focused |= Self::thumb_strip(ui, state, tokens);
+                    });
+                    ui.vertical(|ui| focused |= Self::page_area(ui, state, tokens));
+                });
+            }
             Status::Ready => focused |= Self::page_area(ui, state, tokens),
             Status::Loading | Status::Empty => {
                 ui.horizontal(|ui| {
@@ -951,6 +1062,128 @@ impl DocViewer {
         }
         state.focused = focused;
         event
+    }
+
+    /// A02: the thumbnail strip, one "Page n" button a page. Only the rows in
+    /// view are drawn and asked for. Returns true when one has the keyboard.
+    fn thumb_strip(ui: &mut Ui, state: &mut ViewerState, tokens: &Tokens) -> bool {
+        let mut focused = false;
+        let mut asks = 0;
+        let mut waiting = false;
+        let mut clicked = None;
+        let row_h = THUMB_ROW_H + ui.spacing().item_spacing.y;
+        let mut area = egui::ScrollArea::vertical()
+            .id_salt(("doc-thumbs", state.doc))
+            .auto_shrink([false, false]);
+        // Follow the page turned by key or button.
+        if state.strip_page != Some(state.page) {
+            state.strip_page = Some(state.page);
+            let top = state.strip_top;
+            #[allow(clippy::cast_precision_loss)] // At most 500 pages.
+            let y = state.page as f32 * row_h;
+            let view_h = ui.available_height();
+            if y < top || y + row_h > top + view_h {
+                area = area.vertical_scroll_offset((y - (view_h - row_h) / 2.0).max(0.0));
+            }
+        }
+        let out = area.show_rows(ui, THUMB_ROW_H, state.pages as usize, |ui, rows| {
+            for row in rows {
+                let Ok(page) = u32::try_from(row) else { break };
+                let (rect, r) =
+                    ui.allocate_exact_size(Vec2::new(STRIP_W - 16.0, THUMB_ROW_H), Sense::click());
+                let label = t_with("viewer.thumb", &[("n", &(page + 1).to_string())]);
+                r.widget_info(|| WidgetInfo::labeled(Role::Button, true, &label));
+                focused |= r.has_focus();
+                if r.clicked() {
+                    clicked = Some(page);
+                }
+                let current = page == state.page;
+                let painter = ui.painter_at(rect);
+                if current || r.hovered() {
+                    painter.rect_filled(rect, 4.0, tokens.surface_app);
+                }
+                // The picture's box above the page number.
+                let pic = Rect::from_min_size(
+                    rect.min + Vec2::new(4.0, 4.0),
+                    Vec2::new(rect.width() - 8.0, THUMB_ROW_H - 26.0),
+                );
+                if let Some(t) = state.thumbs.get_mut(&page) {
+                    t.used = state.frame;
+                    let scale = (pic.width() / t.size.x).min(pic.height() / t.size.y);
+                    let shown = Rect::from_center_size(pic.center(), t.size * scale);
+                    painter.rect_filled(shown, 0.0, Color32::WHITE);
+                    painter.image(
+                        t.texture.id(),
+                        shown,
+                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                    let stroke = if current {
+                        Stroke::new(2.0, tokens.accent)
+                    } else {
+                        Stroke::new(1.0, tokens.border_strong)
+                    };
+                    painter.rect_stroke(shown, 0.0, stroke, egui::StrokeKind::Outside);
+                } else {
+                    let blank = Rect::from_center_size(
+                        pic.center(),
+                        Vec2::new(pic.width() * 0.75, pic.height()),
+                    );
+                    painter.rect_filled(blank, 0.0, Color32::WHITE);
+                    painter.rect_stroke(
+                        blank,
+                        0.0,
+                        Stroke::new(1.0, tokens.border_strong),
+                        egui::StrokeKind::Outside,
+                    );
+                    // A page whose thumbnail can't be drawn stays blank;
+                    // the page itself says why.
+                    if !state.thumb_failed.contains(&page) {
+                        if !state.thumb_asked.contains(&page) && asks < THUMB_ASKS_PER_FRAME {
+                            if let Some(w) = &state.worker {
+                                w.send(DocRequest::Thumb {
+                                    doc: state.doc,
+                                    page,
+                                    px_width: THUMB_PX,
+                                });
+                                state.thumb_asked.insert(page);
+                            }
+                            asks += 1;
+                        }
+                        waiting = true;
+                    }
+                }
+                painter.text(
+                    egui::pos2(rect.center().x, rect.max.y - 11.0),
+                    egui::Align2::CENTER_CENTER,
+                    (page + 1).to_string(),
+                    egui::FontId::proportional(12.0),
+                    if current {
+                        tokens.text_primary
+                    } else {
+                        tokens.text_secondary
+                    },
+                );
+                if r.has_focus() {
+                    painter.rect_stroke(
+                        rect.shrink(1.0),
+                        4.0,
+                        Stroke::new(2.0, tokens.accent),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+            }
+        });
+        state.strip_top = out.state.clamped_offset().y;
+        if let Some(page) = clicked {
+            state.page = page;
+            state.strip_page = Some(page);
+            state.want_focus = true;
+        }
+        if waiting {
+            ui.ctx().request_repaint_after(Duration::from_millis(30));
+        }
+        focused
     }
 
     /// The page, scrolled when it is larger than the room. Returns true when
@@ -1306,8 +1539,10 @@ mod tests {
             v.state_json()["rendered"] == true && v.shown.as_ref().is_some_and(|s| s.page == 1)
         });
         assert!(nodes.iter().any(|(_, n)| n == "Page 2 of 2"), "{nodes:?}");
-        // Fit width here is about 95 %: the next step up.
-        assert_eq!(v.zoom(), Zoom::Percent(100));
+        // Fit width beside the thumbnail strip (A02) is about 70 %: the next
+        // step up.
+        assert_eq!(v.zoom(), Zoom::Percent(75));
+        assert_eq!(v.state_json()["thumbnails"]["shown"], true);
         assert_eq!(v.state_json()["status"], "ready");
     }
 
@@ -1535,6 +1770,88 @@ mod tests {
         );
         // The keyboard stayed on the page.
         assert_eq!(v.state_json()["focused"], true);
+    }
+
+    #[test]
+    fn thumbnails_show_each_page_and_a_click_goes_there() {
+        let mut h = Harness::new(vec2(760.0, 600.0));
+        let mut v = ViewerState::default();
+        v.set_pop_out_button(true);
+        v.open(fixture("three_pages.tif"));
+        h.until(&mut v, |v| {
+            v.state_json()["rendered"] == true && v.state_json()["thumbnails"]["loaded"] == 3
+        });
+        let s = v.state_json();
+        assert_eq!(s["thumbnails"]["shown"], true);
+        assert_eq!(s["pages"], 3);
+        for name in [
+            "Page 1",
+            "Page 2",
+            "Page 3",
+            "Rotate right",
+            "Rotate left",
+            "Pop out",
+        ] {
+            assert!(h.has(Role::Button, name), "{name}: {:?}", h.nodes);
+        }
+        assert_eq!(h.click(&mut v, Role::Button, "Page 2"), ViewerEvent::None);
+        assert_eq!(v.page(), 1);
+        h.until(&mut v, |v| v.state_json()["rendered"] == true);
+        assert!(h.nodes.iter().any(|(_, n, _)| n == "Page 2 of 3"));
+        // The keyboard went to the page, so the page keys work.
+        assert_eq!(v.state_json()["focused"], true);
+        let _ = h.click(&mut v, Role::Button, "Page 3");
+        assert_eq!(v.page(), 2);
+        // Rotating a page leaves the thumbnails upright and loaded.
+        let _ = h.click(&mut v, Role::Button, "Rotate right");
+        assert_eq!(v.state_json()["thumbnails"]["loaded"], 3);
+        // No names in the state.
+        assert!(!v.state_json().to_string().contains("three_pages"));
+        // Released pixels drop the thumbnails too.
+        v.release_pixels();
+        assert_eq!(v.state_json()["thumbnails"]["loaded"], 0);
+    }
+
+    #[test]
+    fn no_strip_when_narrow_or_one_page() {
+        let mut h = Harness::new(vec2(480.0, 600.0));
+        let mut v = ViewerState::default();
+        v.open(fixture("three_pages.tif"));
+        h.until(&mut v, |v| v.state_json()["rendered"] == true);
+        assert_eq!(v.state_json()["thumbnails"]["shown"], false);
+        assert!(!h.has(Role::Button, "Page 2"));
+        let mut h = Harness::new(vec2(760.0, 600.0));
+        let mut v = ViewerState::default();
+        v.open(fixture("receipt.png"));
+        h.until(&mut v, |v| v.state_json()["rendered"] == true);
+        assert_eq!(v.state_json()["thumbnails"]["shown"], false);
+        assert!(!h.has(Role::Button, "Page 1"));
+    }
+
+    #[test]
+    fn at_most_64_thumbnails_are_kept() {
+        let ctx = egui::Context::default();
+        let mut v = ViewerState::default();
+        for page in 0..70u32 {
+            v.frame = u64::from(page);
+            v.take_thumb(
+                &ctx,
+                &RenderedPage {
+                    doc: v.doc,
+                    page,
+                    width: 2,
+                    height: 3,
+                    rgba: vec![255; 2 * 3 * 4],
+                    natural_width: 2,
+                    natural_height: 3,
+                    rotation: Rotation::None,
+                },
+            );
+        }
+        assert_eq!(v.thumbs.len(), MAX_THUMBS);
+        // The least recently drawn went first.
+        assert!(!v.thumbs.contains_key(&0) && !v.thumbs.contains_key(&5));
+        assert!(v.thumbs.contains_key(&6) && v.thumbs.contains_key(&69));
     }
 
     #[test]

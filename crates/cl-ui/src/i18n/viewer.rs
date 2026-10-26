@@ -43,6 +43,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("viewer.rotate_left.tip", "Turn the page a quarter turn to the left, for viewing only"),
     ("viewer.rotate_right", "Rotate right"),
     ("viewer.rotate_right.tip", "Turn the page a quarter turn to the right, for viewing only"),
+    ("viewer.thumb", "Page {n}"),
     ("viewer.zoom.tip", "Choose a zoom: fit the page, fit the width, or a size"),
     ("viewer.page_unreadable", "This page can't be shown. It may be damaged or in a format the viewer doesn't read. Save a copy to open it in another program."),
 ];

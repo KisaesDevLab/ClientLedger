@@ -145,6 +145,18 @@ pub enum DocRequest {
         /// The document.
         doc: u64,
     },
+    /// A02: draw a page small for the thumbnail strip, upright. Served after
+    /// everything else that is waiting, one at a time; a newer request for
+    /// the same page supersedes a queued one. Answers `Thumb`, or `NoThumb`
+    /// when the page can't be drawn.
+    Thumb {
+        /// The document, as opened.
+        doc: u64,
+        /// Page number, from 0.
+        page: u32,
+        /// Wanted width in physical pixels.
+        px_width: u32,
+    },
 }
 
 /// Sizes only: never the bytes.
@@ -169,6 +181,16 @@ impl std::fmt::Debug for DocRequest {
                 .field("rotation", &rotation.degrees())
                 .finish(),
             DocRequest::Close { doc } => f.debug_struct("Close").field("doc", doc).finish(),
+            DocRequest::Thumb {
+                doc,
+                page,
+                px_width,
+            } => f
+                .debug_struct("Thumb")
+                .field("doc", doc)
+                .field("page", page)
+                .field("px_width", px_width)
+                .finish(),
         }
     }
 }
@@ -178,7 +200,8 @@ impl DocRequest {
         match self {
             DocRequest::Open { doc, .. }
             | DocRequest::Render { doc, .. }
-            | DocRequest::Close { doc } => *doc,
+            | DocRequest::Close { doc }
+            | DocRequest::Thumb { doc, .. } => *doc,
         }
     }
 }
@@ -247,6 +270,16 @@ pub enum DocReply {
     },
     /// A page was drawn.
     Rendered(RenderedPage),
+    /// A02: a thumbnail was drawn.
+    Thumb(RenderedPage),
+    /// A02: a thumbnail can't be drawn (the page is unreadable, or the
+    /// document is no longer open).
+    NoThumb {
+        /// The document.
+        doc: u64,
+        /// The page.
+        page: u32,
+    },
 }
 
 /// What the thread is asked: a handle's request, or a handle closing.
@@ -363,12 +396,18 @@ fn bind(lib: &Path) -> Option<Pdfium> {
 fn serve(lib: Option<&Path>, rx: &Receiver<Job>) {
     let pdfium = lib.and_then(bind);
     let mut docs = Docs::default();
-    while let Ok(first) = rx.recv() {
-        let mut batch = vec![first];
-        while let Ok(more) = rx.try_recv() {
-            batch.push(more);
+    let mut queue: Vec<Job> = Vec::new();
+    loop {
+        if queue.is_empty() {
+            match rx.recv() {
+                Ok(first) => queue.push(first),
+                Err(_) => return,
+            }
         }
-        for job in coalesce(batch) {
+        while let Ok(more) = rx.try_recv() {
+            queue.push(more);
+        }
+        for job in next_round(&mut queue) {
             match job {
                 Job::CloseHandle(h) => docs.close_handle(h),
                 Job::Req { handle, req, reply } => {
@@ -382,11 +421,35 @@ fn serve(lib: Option<&Path>, rx: &Receiver<Job>) {
     }
 }
 
+/// The jobs to run now from `queue` (coalesced), leaving the rest in it:
+/// everything but thumbnails (they are last after [`coalesce`]), else one
+/// thumbnail; the thread then looks for new requests again, so a page asked
+/// for never waits behind a strip of thumbnails.
+fn next_round(queue: &mut Vec<Job>) -> Vec<Job> {
+    *queue = coalesce(std::mem::take(queue));
+    let thumbs = queue.iter().position(is_thumb).unwrap_or(queue.len());
+    let rest = queue.split_off(thumbs.max(1).min(queue.len()));
+    std::mem::replace(queue, rest)
+}
+
+fn is_thumb(job: &Job) -> bool {
+    matches!(
+        job,
+        Job::Req {
+            req: DocRequest::Thumb { .. },
+            ..
+        }
+    )
+}
+
 /// Drop what a later job in the batch supersedes: an earlier render of the
-/// same document, anything before a re-open or a close of that document,
-/// and everything of a handle that closed.
+/// same document, an earlier thumbnail of the same page, anything before a
+/// re-open or a close of that document, and everything of a handle that
+/// closed. Thumbnails go last, in the order asked.
 fn coalesce(batch: Vec<Job>) -> Vec<Job> {
     let mut rendered = std::collections::HashSet::new();
+    let mut thumbed = std::collections::HashSet::new();
+    let mut thumbs = Vec::new();
     let mut reset = std::collections::HashSet::new();
     let mut gone = std::collections::HashSet::new();
     let mut keep = Vec::with_capacity(batch.len());
@@ -411,11 +474,18 @@ fn coalesce(batch: Vec<Job>) -> Vec<Job> {
                         reset.insert(key);
                         keep.push(job);
                     }
+                    DocRequest::Thumb { page, .. } => {
+                        if thumbed.insert((key, *page)) {
+                            thumbs.push(job);
+                        }
+                    }
                 }
             }
         }
     }
     keep.reverse();
+    thumbs.reverse();
+    keep.extend(thumbs);
     keep
 }
 
@@ -486,6 +556,15 @@ fn handle_request<'a>(
             docs.get_mut((handle, doc))
                 .and_then(|d| render(d, doc, page, px_width, rotation, true))
                 .map_or(DocReply::Unreadable { doc }, DocReply::Rendered),
+        ),
+        DocRequest::Thumb {
+            doc,
+            page,
+            px_width,
+        } => Some(
+            docs.get_mut((handle, doc))
+                .and_then(|d| render(d, doc, page, px_width, Rotation::None, false))
+                .map_or(DocReply::NoThumb { doc, page }, DocReply::Thumb),
         ),
     }
 }
@@ -1255,6 +1334,108 @@ mod tests {
         let half = render_turned(&w, 1, 1, 400, Rotation::Half);
         assert_eq!((half.width, half.height), (upright.width, upright.height));
         assert!(half.rgba != upright.rgba, "upside down differs");
+    }
+
+    fn names(jobs: Vec<Job>) -> Vec<String> {
+        jobs.into_iter()
+            .map(|j| match j {
+                Job::CloseHandle(h) => format!("close-handle {h}"),
+                Job::Req { handle, req, .. } => format!("{handle} {req:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn thumbnails_are_coalesced_and_served_after_the_page() {
+        let (tx, _rx) = channel();
+        let r = |req| Job::Req {
+            handle: 1,
+            req,
+            reply: tx.clone(),
+        };
+        let thumb = |doc, page| DocRequest::Thumb {
+            doc,
+            page,
+            px_width: 96,
+        };
+        let render = DocRequest::Render {
+            doc: 1,
+            page: 2,
+            px_width: 300,
+            rotation: Rotation::Right,
+        };
+        let mut queue = vec![
+            r(thumb(1, 0)),
+            r(thumb(1, 1)),
+            r(render),
+            r(thumb(1, 0)),
+            r(thumb(2, 0)),
+            r(DocRequest::Close { doc: 2 }),
+        ];
+        // The page first; the thumbnail of the closed document is gone and
+        // page 0's is asked once.
+        assert_eq!(
+            names(next_round(&mut queue)),
+            vec![
+                "1 Render { doc: 1, page: 2, px_width: 300, rotation: 90 }",
+                "1 Close { doc: 2 }",
+            ]
+        );
+        // Then one thumbnail a round, in the order last asked.
+        assert_eq!(
+            names(next_round(&mut queue)),
+            vec!["1 Thumb { doc: 1, page: 1, px_width: 96 }"]
+        );
+        // A page asked for meanwhile goes before the next thumbnail.
+        queue.push(r(DocRequest::Render {
+            doc: 1,
+            page: 0,
+            px_width: 300,
+            rotation: Rotation::None,
+        }));
+        assert_eq!(
+            names(next_round(&mut queue)),
+            vec!["1 Render { doc: 1, page: 0, px_width: 300, rotation: 0 }"]
+        );
+        assert_eq!(
+            names(next_round(&mut queue)),
+            vec!["1 Thumb { doc: 1, page: 0, px_width: 96 }"]
+        );
+        assert!(queue.is_empty());
+        assert!(next_round(&mut queue).is_empty());
+    }
+
+    #[test]
+    fn a_thumbnail_is_small_upright_and_keeps_the_page_cached() {
+        let w = without_pdfium();
+        assert_eq!(
+            open_on(&w, 1, fixture("three_pages.tif").to_vec()),
+            opened(1, 3)
+        );
+        let page = render_turned(&w, 1, 2, 120, Rotation::Right);
+        for p in 0..3 {
+            w.send(DocRequest::Thumb {
+                doc: 1,
+                page: p,
+                px_width: 96,
+            });
+            let DocReply::Thumb(t) = reply(&w) else {
+                panic!("no thumbnail")
+            };
+            assert_eq!((t.page, t.width, t.height), (p, 96, 128));
+            assert_eq!(t.rotation, Rotation::None);
+        }
+        // The drawn page is still the same after the thumbnails.
+        assert_eq!(render_turned(&w, 1, 2, 120, Rotation::Right), page);
+        // A page that isn't there, a document that isn't open.
+        for (doc, page) in [(1, 9), (7, 0)] {
+            w.send(DocRequest::Thumb {
+                doc,
+                page,
+                px_width: 96,
+            });
+            assert_eq!(reply(&w), DocReply::NoThumb { doc, page });
+        }
     }
 
     #[test]
