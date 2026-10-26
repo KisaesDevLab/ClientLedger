@@ -212,10 +212,7 @@ impl Runner {
 
     fn key(&mut self, args: &Value) -> IdempotencyKey {
         let label = args["key"].as_str().unwrap_or("").to_string();
-        self.keys
-            .entry(label)
-            .or_insert_with(IdempotencyKey::new)
-            .clone()
+        self.keys.entry(label).or_default().clone()
     }
 
     fn draft_id(&self, args: &Value) -> DocumentDraftId {
@@ -236,8 +233,7 @@ impl Runner {
             .get_or_insert_with(super::super::chart)
             .iter()
             .find(|a| a.fields.account_number.as_deref() == Some(number))
-            .map(|a| a.id)
-            .unwrap_or_else(|| panic!("account {number}"))
+            .map_or_else(|| panic!("account {number}"), |a| a.id)
     }
 
     fn vendor(&mut self, args: &Value) -> Option<ContactId> {
@@ -342,10 +338,7 @@ impl Runner {
     fn upload(&mut self, args: &Value) -> Outcome {
         let content = args["content"].as_str().expect("content");
         let key = match args["draftKey"].as_str() {
-            Some(label) => *self
-                .draft_keys
-                .entry(label.to_string())
-                .or_insert_with(DraftKey::new),
+            Some(label) => *self.draft_keys.entry(label.to_string()).or_default(),
             None => DraftKey::new(),
         };
         let bytes = format!("%PDF-1.4\n% {content}\n%%EOF\n");
@@ -812,11 +805,11 @@ fn a_possible_duplicate_names_the_record_and_other_drafts() {
         .find(|c| c.fields.display_name == super::super::bills::STORY_VENDOR)
         .map(|c| c.id);
     let mut posted = card(&mut s, "81.81", vendor);
-    let DemoConvertBody::CardCharge(p) = &mut posted.body else {
+    let DemoConvertBody::CardCharge(posting) = &mut posted.body else {
         panic!("card")
     };
-    p.date = date("2026-11-01");
-    let t1 = post_expense(&mut s, p, "card_charge").expect("posted");
+    posting.date = date("2026-11-01");
+    let t1 = post_expense(&mut s, posting, "card_charge").expect("posted");
     // Another live draft of the vendor with the same total.
     let f0 = upload(&mut s, DraftKey::new(), "other");
     let other = create(
@@ -839,19 +832,19 @@ fn a_possible_duplicate_names_the_record_and_other_drafts() {
         doc_date: Some(date("2026-11-02")),
     };
     store_reading(&mut s, tenant, other.id, &other.updated_at, &reading).expect("stored");
-    let f = upload(&mut s, DraftKey::new(), "dup");
-    let d = create(
+    let file = upload(&mut s, DraftKey::new(), "dup");
+    let draft = create(
         &mut s,
         tenant,
-        f,
+        file,
         DraftKind::CardCharge,
         IdempotencyKey::new(),
     )
-    .expect("d");
-    let mut c = card(&mut s, "81.81", vendor);
-    c.expected_updated_at.clone_from(&d.updated_at);
+    .expect("draft");
+    let mut conv = card(&mut s, "81.81", vendor);
+    conv.expected_updated_at.clone_from(&draft.updated_at);
     let before = s.ledger.transactions().len();
-    match convert(&mut s, tenant, d.id, &c, None, IdempotencyKey::new()) {
+    match convert(&mut s, tenant, draft.id, &conv, None, IdempotencyKey::new()) {
         Err(ApiError::DocumentDraft(DraftRefusal::PossibleDuplicate {
             matches,
             draft_matches,
@@ -873,8 +866,9 @@ fn a_possible_duplicate_names_the_record_and_other_drafts() {
             .iter()
             .any(|m| m.source == MatchSource::Transaction(t1))
     );
-    c.acknowledge = vec![t1];
-    let done = convert(&mut s, tenant, d.id, &c, None, IdempotencyKey::new()).expect("posted");
+    conv.acknowledge = vec![t1];
+    let done =
+        convert(&mut s, tenant, draft.id, &conv, None, IdempotencyKey::new()).expect("posted");
     assert_eq!(
         done.draft_matches.len(),
         1,
@@ -886,8 +880,9 @@ fn a_possible_duplicate_names_the_record_and_other_drafts() {
 fn plain_saves_leave_a_live_drafts_file_and_attach_takes_it() {
     let (mut s, tenant) = world();
     let key = DraftKey::new();
-    let f = upload(&mut s, key, "guard");
-    let d = create(&mut s, tenant, f, DraftKind::Bill, IdempotencyKey::new()).expect("d");
+    let file = upload(&mut s, key, "guard");
+    let draft =
+        create(&mut s, tenant, file, DraftKind::Bill, IdempotencyKey::new()).expect("draft");
     // A bill saved with the same draft key keeps its hands off the file.
     let vendor = s
         .contacts_mut()
@@ -908,27 +903,33 @@ fn plain_saves_leave_a_live_drafts_file_and_attach_takes_it() {
         received: true,
         draft_attachment: Some(key),
     };
-    let b = super::super::bills::create_bill(&mut s, &bill, None).expect("bill");
-    assert!(super::super::checks::attachments(&s, AttachTo::Bill(b)).is_empty());
+    let bill_id = super::super::bills::create_bill(&mut s, &bill, None).expect("bill");
+    assert_eq!(
+        super::super::checks::attachments(&s, AttachTo::Bill(bill_id)).len(),
+        0
+    );
     assert_eq!(
         super::super::checks::attachments(&s, AttachTo::Draft(key)).len(),
         1
     );
-    let a = attach(
+    let attached = attach(
         &mut s,
         tenant,
-        d.id,
-        b,
-        &d.updated_at,
+        draft.id,
+        bill_id,
+        &draft.updated_at,
         IdempotencyKey::new(),
     )
     .expect("attached");
-    assert_eq!(a.draft.kind, DraftKind::Bill, "kind unchanged");
-    assert_eq!(a.draft.converted_type.as_deref(), Some("bill"));
+    assert_eq!(attached.draft.kind, DraftKind::Bill, "kind unchanged");
+    assert_eq!(attached.draft.converted_type.as_deref(), Some("bill"));
     assert_eq!(
-        super::super::checks::attachments(&s, AttachTo::Bill(b)).len(),
+        super::super::checks::attachments(&s, AttachTo::Bill(bill_id)).len(),
         1
     );
-    // A second draft for the same record: its file is already there.
-    assert_eq!(file_type(AttachTo::Txn(TxnType::Aje, b)), "journal_entry");
+    // An adjusting entry's files are stored as `journal_entry`.
+    assert_eq!(
+        file_type(AttachTo::Txn(TxnType::Aje, bill_id)),
+        "journal_entry"
+    );
 }

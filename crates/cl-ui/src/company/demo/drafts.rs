@@ -97,6 +97,10 @@ struct Row {
 /// What a keyed request was, for the replay rule (the closing-date
 /// password is not part of it, as the engine's request hash drops it).
 #[derive(Clone, PartialEq)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "a handful of keyed requests kept in memory"
+)]
 enum Request {
     Create {
         tenant: TenantId,
@@ -235,6 +239,10 @@ impl DemoDrafts {
 // ---------------------------------------------------------------- refusals
 
 /// An engine refusal: its JSON error body, read as cl-api reads it.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "callers build the details in place"
+)]
 fn refusal(status: u16, code: &str, details: Value) -> ApiError {
     engine_refusal(
         status,
@@ -342,10 +350,13 @@ pub fn file_type(to: AttachTo) -> &'static str {
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
     Sha256::digest(bytes)
         .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+        .fold(String::with_capacity(64), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
 }
 
 // ------------------------------------------------------------- read, claim
@@ -358,6 +369,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// [`cl_api::DraftRefusal::NotADraftFile`] (filed on a record);
 /// [`cl_api::DraftRefusal::AlreadyClaimed`] (the same bytes are already a
 /// draft that is not discarded); `IdempotencyKeyReused`.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the key is taken as cl_api::DocumentDrafts takes it"
+)]
 pub fn create(
     state: &mut DemoState,
     tenant: TenantId,
@@ -452,7 +467,7 @@ pub fn list(
         .filter(|r| query.statuses.is_empty() || query.statuses.contains(&r.draft.status))
         .filter(|r| query.kind.is_none_or(|k| k == r.draft.kind))
         .collect();
-    rows.sort_by(|a, b| b.seq.cmp(&a.seq));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.seq));
     let total = rows.len() as u64;
     let drafts = rows
         .into_iter()
@@ -792,7 +807,7 @@ fn draft_matches(state: &DemoState, tenant: TenantId, p: &Probe) -> Vec<Duplicat
                 && Some(d.id) != p.except_draft
         })
         .collect();
-    rows.sort_by(|a, b| b.seq.cmp(&a.seq));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.seq));
     rows.into_iter()
         .filter_map(|r| {
             let d = &r.draft;
@@ -1074,6 +1089,10 @@ fn draft_key_of(state: &DemoState, file: Option<AttachmentId>) -> Option<String>
 /// `Conflict { Stale }`; `ClosedPeriod` / `ClosingPasswordRejected`;
 /// [`cl_api::DraftRefusal::PossibleDuplicate`]; the posting's own refusals.
 /// With `lose_next_reply`: `OutcomeUnknown` (keyed) after committing.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the key is taken as cl_api::DocumentDrafts takes it"
+)]
 pub fn convert(
     state: &mut DemoState,
     tenant: TenantId,
@@ -1192,6 +1211,10 @@ pub struct AttachedDraft {
 /// [`cl_api::DraftRefusal::NotADraftFile`] (the file is on another record);
 /// `Conflict { InUse }`. With `lose_next_reply`: `OutcomeUnknown` (keyed)
 /// after committing.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the key is taken as cl_api::DocumentDrafts takes it"
+)]
 pub fn attach(
     state: &mut DemoState,
     tenant: TenantId,
@@ -1281,7 +1304,7 @@ pub fn attach(
 /// `amount` filter, U-95 c): posted records whose total is exactly
 /// `amount`, dated `start` to `end`, optionally only those with a line on
 /// `account`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct AmountSearch {
     /// The exact total.
     pub amount: Money,
@@ -1291,6 +1314,17 @@ pub struct AmountSearch {
     pub end: CalendarDate,
     /// Only records with a line on this account.
     pub account: Option<AccountId>,
+}
+
+/// Never shows the amount (owner data).
+impl fmt::Debug for AmountSearch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AmountSearch")
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .field("account", &self.account)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The demo ledger's answer to an [`AmountSearch`], newest first: posted
