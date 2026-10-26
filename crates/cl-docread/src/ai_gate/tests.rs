@@ -269,6 +269,50 @@ proptest! {
                 prop_assert!(flagged, "{field:?}");
             }
         }
+        // Whatever the AI filled is reconciled (review B2): every check the
+        // figures now call for is there, unless the list is full.
+        if out.checks.len() < crate::model::MAX_CHECKS {
+            for c in validate::check(&out.header, &out.lines) {
+                prop_assert!(
+                    out.checks.iter().any(|x| (x.code, x.field, x.line) == (c.code, c.field, c.line)),
+                    "{:?}", c.code
+                );
+            }
+        }
         prop_assert!(out.validate(0).is_ok());
     }
+}
+
+/// Review B2: totals the AI fills from the page are reconciled like the
+/// rules' own; a check is never repeated.
+#[test]
+fn ai_filled_totals_are_reconciled() {
+    let r = read_doc(&sparse_receipt());
+    let ai = AiReading {
+        subtotal: Some(m("30.00")),
+        tax: Some(m("2.48")),
+        // Printed, but not subtotal + tax.
+        total: Some(m("30.00")),
+        confidence: Confidence::HIGH,
+        ..AiReading::default()
+    };
+    let out = merge(r, &ai, AiSource::Ollama);
+    assert_eq!(out.header.total.as_ref().unwrap().value, m("30"));
+    let c: Vec<_> = out
+        .checks
+        .iter()
+        .filter(|c| c.code == CheckCode::SubtotalTaxVsTotal)
+        .collect();
+    assert_eq!(c.len(), 1);
+    assert_eq!(c[0].difference, Some(m("-2.48")));
+    // Merging again adds no second copy.
+    let again = merge(out.clone(), &ai, AiSource::Ollama);
+    assert_eq!(
+        again
+            .checks
+            .iter()
+            .filter(|c| c.code == CheckCode::SubtotalTaxVsTotal)
+            .count(),
+        1
+    );
 }

@@ -287,5 +287,33 @@ proptest! {
             sub_delta != 0
         );
         prop_assert!(r.validate(templates.len()).is_ok());
+
+        // The same totals left empty by the rules and filled by an AI
+        // reader from the page: reconciled again, flagged the same way
+        // (review B2).
+        let h = &r.header;
+        let ai = crate::ai_gate::AiReading {
+            subtotal: h.subtotal.as_ref().map(|f| f.value),
+            tax: h.tax.as_ref().map(|f| f.value),
+            total: h.total.as_ref().map(|f| f.value),
+            confidence: Confidence::HIGH,
+            ..crate::ai_gate::AiReading::default()
+        };
+        let mut gap = r.clone();
+        gap.header.subtotal = None;
+        gap.header.tax = None;
+        gap.header.total = None;
+        gap.checks.retain(|c| !matches!(
+            c.code,
+            CheckCode::SubtotalTaxVsTotal | CheckCode::LinesVsSubtotal
+        ));
+        let out = crate::ai_gate::merge(gap, &ai, crate::ai_gate::AiSource::Ollama);
+        prop_assert!(every_amount_is_printed(&out).is_ok(), "{:?}", every_amount_is_printed(&out));
+        prop_assert_eq!(out.header.total.as_ref().map(|t| t.value), Money::parse_wire(&total).ok());
+        prop_assert!(out.checks.iter().any(|c| c.code == CheckCode::SubtotalTaxVsTotal));
+        prop_assert_eq!(
+            out.checks.iter().any(|c| c.code == CheckCode::LinesVsSubtotal),
+            sub_delta != 0
+        );
     }
 }

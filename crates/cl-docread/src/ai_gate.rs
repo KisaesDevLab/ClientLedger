@@ -18,6 +18,9 @@
 //! keeps a quantity or price only when that is on the page too, and then
 //! passes the engine's quantity × price rule like any read line.
 //!
+//! After the merge the figures are reconciled again (`validate::check`):
+//! a total, tax or line the AI filled is checked like a read one (AC3).
+//!
 //! "Equal to a page word" means one word: two words are never joined, so
 //! a quantity next to a price can't pass as a thousands amount.
 //!
@@ -34,6 +37,7 @@ use crate::model::{
     Check, CheckCode, CheckValue, Confidence, FieldName, Found, Line, MAX_CHECKS, MAX_LINES,
     MAX_TEXT_CHARS, PageWords, Reading, RuleId, Spot,
 };
+use crate::validate;
 use crate::vendor_match::normalize_loose;
 use cl_core::{CalendarDate, Money, Quantity};
 use std::fmt;
@@ -235,6 +239,17 @@ pub fn merge(mut reading: Reading, ai: &AiReading, source: AiSource) -> Reading 
         }
         gate_lines(&mut reading, &ai.lines, &page, &rule, fill_cap, &mut checks);
         reading.checks.extend(checks);
+        // The figures the AI filled are reconciled like the rules' own
+        // (AC3): a check the worker already raised is not repeated.
+        for c in validate::check(&reading.header, &reading.lines) {
+            if !reading
+                .checks
+                .iter()
+                .any(|x| (x.code, x.field, x.line) == (c.code, c.field, c.line))
+            {
+                reading.checks.push(c);
+            }
+        }
         reading.checks.truncate(MAX_CHECKS);
     }
     reading.words = words;
