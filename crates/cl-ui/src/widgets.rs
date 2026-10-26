@@ -12,6 +12,8 @@ use crate::theme::{Tokens, styles};
 pub mod bar_chart;
 // P17 (WP1): the PDF and image viewer and its worker thread.
 pub mod doc_worker;
+// A01 WP-D: the native Browse dialogs (folders and files).
+pub mod file_picker;
 pub mod pdf_viewer;
 
 /// A keyboard chip such as `Ctrl K`.

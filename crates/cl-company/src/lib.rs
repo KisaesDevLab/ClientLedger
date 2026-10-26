@@ -21,7 +21,7 @@ pub mod backup;
 pub mod delete;
 pub mod error;
 pub mod export_all;
-pub mod inbox;
+pub mod intake;
 pub mod lifecycle;
 pub mod restore;
 pub mod retention;
@@ -30,6 +30,12 @@ pub mod setup;
 pub mod templates;
 pub mod year_end;
 mod zipfile;
+
+/// The P17 receipt inbox ([`intake::legacy`]), kept with its exact types
+/// until the receipt inbox screen switches to [`intake`] (A01 WP-C).
+pub mod inbox {
+    pub use crate::intake::legacy::*;
+}
 
 pub use backup::{
     BackupOutcome, BackupRequest, HostMetadata, Progress, ProgressSink, backup, wait_for_job,

@@ -2,9 +2,12 @@
 //!
 //! - [`user_prefs`]: per-user look-and-feel and entry choices (P09).
 //! - [`company_prefs`]: company-local choices the engine has no column for
-//!   (receipt inbox, bills-due window, AI switches and cap, consent note).
+//!   (P17 receipt inbox, this computer's intake-folder confirmations,
+//!   bills-due window, AI switches and cap, consent note).
 //! - [`inbox_state`]: which receipt-inbox files were uploaded (by hash,
 //!   never by name), so a file is not offered twice (P17).
+//! - [`migrate_inbox`]: the pure plan that moves P17's single folder into
+//!   the company's intake folders (A01 D5).
 //! - [`ai`] and [`smtp`]: provider names, keychain entry names, the token
 //!   cap, the Ollama address check, and SMTP field checks.
 //! - [`recent`]: the recent-companies store, a JSON file in the app data
@@ -23,6 +26,7 @@
 pub mod ai;
 pub mod company_prefs;
 pub mod inbox_state;
+pub mod migrate_inbox;
 pub mod recent;
 pub mod secrets;
 pub mod smtp;
@@ -30,7 +34,9 @@ mod store;
 pub mod user_prefs;
 
 pub use ai::{AiLocalPrefs, AiProvider, CapCheck, OllamaUrlError, validate_ollama_url};
-pub use company_prefs::{AiConsentNote, CompanyPrefs, FolderError, check_inbox_folder};
+pub use company_prefs::{
+    AiConsentNote, CompanyPrefs, FolderError, HereNote, check_inbox_folder, path_hash,
+};
 pub use recent::{
     ACCENT_PALETTE, Accent, BackupKind, BackupRecord, CompanyFlags, CompanyRecord, FiscalCalendar,
     RecentCompanies, RecentError, RecentStore,

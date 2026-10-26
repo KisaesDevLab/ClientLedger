@@ -1,5 +1,5 @@
-//! Attachments on a check: the drop zone and file field, the list, and
-//! "Save a copy".
+//! Attachments on a check: the drop zone, the file field and Browse (the
+//! system file window, A01 WP-D), the list, and "Save a copy".
 //!
 //! Before the first save one file uploads as a draft and rides on the check
 //! create as `draftAttachmentId`; once the check is saved, files attach to
@@ -48,13 +48,19 @@ pub(crate) struct AttachState {
     /// The receipt-inbox file this new check started from (its name, for
     /// "Attached from … in your receipt inbox.", P17).
     pub from_inbox: Option<String>,
+    /// The inbox's claim on that file while this form is open (A01: the
+    /// inbox offers it to no other form until this one closes).
+    pub inbox_claim: Option<std::sync::Arc<()>>,
     /// A chosen file being read off the egui thread.
     pub reading: Option<std::sync::mpsc::Receiver<FileRead>>,
+    /// The Browse window, while open (A01 WP-D, Q-P13k).
+    pub browsing: Option<std::sync::mpsc::Receiver<Vec<PathBuf>>>,
 }
 
 impl AttachState {
     pub(crate) fn busy(&self) -> bool {
         self.reading.is_some()
+            || self.browsing.is_some()
             || self.list_task.is_some()
             || self.upload.is_some()
             || self.download.is_some()
@@ -122,6 +128,22 @@ pub(crate) fn poll_file_read(
     Some(r)
 }
 
+/// Opens the system file window for one attachment (PDF, JPEG, PNG or
+/// TIFF) off the egui thread (A01 WP-D, Q-P13k). Poll the answer with
+/// [`crate::widgets::file_picker::poll`]; the bytes are still checked and
+/// read in the background like a typed path.
+pub(crate) fn browse_for_file(ctx: &egui::Context) -> std::sync::mpsc::Receiver<Vec<PathBuf>> {
+    use crate::widgets::file_picker::{DOCUMENTS, PickUse, pick_files};
+    pick_files(ctx, PickUse::Attachment, &[DOCUMENTS], false)
+}
+
+/// The attachments' Browse button; true when pressed.
+pub(crate) fn browse_button(ui: &mut Ui, enabled: bool) -> bool {
+    ui.add_enabled(enabled, egui::Button::new(t("picker.browse")))
+        .on_hover_text(t("check.attach.browse.tip"))
+        .clicked()
+}
+
 /// The local checks on a file's bytes.
 ///
 /// # Errors
@@ -151,11 +173,7 @@ const RESERVED: [&str; 22] = [
 
 /// The extension a file of `kind` is saved with.
 fn extension(kind: FileKind) -> &'static str {
-    match kind {
-        FileKind::Pdf => "pdf",
-        FileKind::Png => "png",
-        FileKind::Jpeg => "jpg",
-    }
+    kind.extension()
 }
 
 /// A safe file stem from the engine's file name: the last path part only,
@@ -252,6 +270,7 @@ impl WriteCheckScreen {
             name: draft.file.name.clone(),
         };
         self.header.edit_step(|h| h.draft_attachment = Some(file));
+        self.attach.inbox_claim = draft.claim;
         self.attach.from_inbox = Some(draft.file.name);
         self.load_attachments();
         true
@@ -401,8 +420,22 @@ impl WriteCheckScreen {
         }
     }
 
+    /// Browse: the system file window (off the egui thread) for one PDF
+    /// or image; the chosen file is attached like a typed one.
+    pub(crate) fn browse_attach(&mut self, ctx: &egui::Context) {
+        if self.attach.browsing.is_some() {
+            return;
+        }
+        self.attach.browsing = Some(browse_for_file(ctx));
+    }
+
     /// Polls uploads, the list and downloads.
     pub(crate) fn poll_attach(&mut self) {
+        if let Some(files) = crate::widgets::file_picker::poll(&mut self.attach.browsing)
+            && let Some(path) = files.into_iter().next()
+        {
+            self.attach_path(&path);
+        }
         if let Some(r) = poll_file_read(&mut self.attach.reading) {
             match r {
                 Ok((name, bytes)) => self.upload_bytes(&name, bytes),
@@ -486,6 +519,7 @@ impl WriteCheckScreen {
     pub(crate) fn attachments_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         self.take_dropped(ui);
         let mut attach = false;
+        let mut browse = false;
         let mut save_copy = None;
         let mut preview = None;
         form::card_tight(ui, tokens, |ui| {
@@ -552,10 +586,14 @@ impl WriteCheckScreen {
                     let typed = !self.attach.path.trim().is_empty();
                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     let busy = self.attach.upload.is_some();
-                    attach = ui
-                        .add_enabled(typed && !busy, egui::Button::new(t("check.attach.add")))
-                        .clicked()
-                        || (enter && typed && !busy);
+                    let browsing = self.attach.browsing.is_some() || self.attach.reading.is_some();
+                    ui.horizontal_wrapped(|ui| {
+                        attach = ui
+                            .add_enabled(typed && !busy, egui::Button::new(t("check.attach.add")))
+                            .clicked()
+                            || (enter && typed && !busy);
+                        browse = browse_button(ui, !busy && !browsing);
+                    });
                 });
             crate::widgets::paint_dashed_border(
                 ui.painter(),
@@ -586,6 +624,9 @@ impl WriteCheckScreen {
         if attach {
             let path = PathBuf::from(self.attach.path.trim().trim_matches('"'));
             self.attach_path(&path);
+        }
+        if browse {
+            self.browse_attach(ui.ctx());
         }
         if let Some((id, name)) = save_copy {
             self.download(id, name);

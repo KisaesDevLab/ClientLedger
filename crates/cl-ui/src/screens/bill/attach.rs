@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use cl_api::{
-    ATTACHMENT_MAX_BYTES, ApiError, AttachTo, Attachment, AttachmentId, DraftKey, FileKind,
-    IdempotencyKey, LocalValidation, OrphanLabel,
+    ATTACHMENT_MAX_BYTES, ApiError, AttachTo, Attachment, AttachmentId, DraftKey, IdempotencyKey,
+    LocalValidation, OrphanLabel,
 };
 use cl_model::forms::bill::{BillForm, BillKind};
 use cl_model::forms::check::AttachmentRef;
@@ -31,7 +31,9 @@ use super::EnterBillScreen;
 use crate::company::{CompanyEvent, Task};
 use crate::i18n::{t, t_with};
 use crate::screens::company::form;
-use crate::screens::write_check::attach::{FileRead, poll_file_read, read_in_background};
+use crate::screens::write_check::attach::{
+    FileRead, browse_button, browse_for_file, poll_file_read, read_in_background,
+};
 use crate::theme::Tokens;
 use crate::widgets::pdf_viewer::{DocSource, DocViewer, ViewerEvent, ViewerState};
 
@@ -61,6 +63,9 @@ pub(crate) struct AttachState {
     pub viewer: ViewerState,
     /// The shown file came from the receipt inbox (the banner says so).
     pub from_inbox: bool,
+    /// The inbox's claim on that file while this form is open (A01: the
+    /// inbox offers it to no other form until this one closes).
+    pub inbox_claim: Option<std::sync::Arc<()>>,
     /// A plain message (i18n key) about the last attempt.
     pub problem: Option<&'static str>,
     /// Where the last copy was saved.
@@ -69,11 +74,14 @@ pub(crate) struct AttachState {
     pub focus: bool,
     /// A chosen file being read off the egui thread.
     pub reading: Option<std::sync::mpsc::Receiver<FileRead>>,
+    /// The Browse window, while open (A01 WP-D, Q-P13k).
+    pub browsing: Option<std::sync::mpsc::Receiver<Vec<PathBuf>>>,
 }
 
 impl AttachState {
     pub(crate) fn busy(&self) -> bool {
         self.reading.is_some()
+            || self.browsing.is_some()
             || self.list_task.is_some()
             || self.upload.is_some()
             || self.download.is_some()
@@ -98,6 +106,8 @@ impl AttachState {
         self.saved_to = None;
         self.focus = false;
         self.reading = None;
+        // A file chosen for the record left behind is not attached here.
+        self.browsing = None;
     }
 
     /// The control channel's view (no file names).
@@ -168,11 +178,7 @@ fn copy_dir() -> PathBuf {
 /// An i18n key for the owner.
 pub(crate) fn save_copy(dir: &Path, bytes: &[u8]) -> Result<PathBuf, &'static str> {
     let kind = cl_api::check_file(bytes).map_err(|_| "check.attach.download_wrong_type")?;
-    let ext = match kind {
-        FileKind::Pdf => "pdf",
-        FileKind::Png => "png",
-        FileKind::Jpeg => "jpg",
-    };
+    let ext = kind.extension();
     let stem = t("bill.attach.copy_name");
     for n in 1..1000 {
         let file = if n == 1 {
@@ -281,6 +287,7 @@ impl EnterBillScreen {
         };
         self.header.edit_step(|h| h.attachments.push(file));
         self.attach.from_inbox = true;
+        self.attach.inbox_claim.clone_from(&d.claim);
         self.attach.shown = Some(d.attachment);
         self.attach.viewer.set_full_size_button(true);
         self.attach.viewer.open(d.file);
@@ -349,8 +356,22 @@ impl EnterBillScreen {
         }
     }
 
+    /// Browse: the system file window (off the egui thread) for one PDF
+    /// or image; the chosen file is attached like a typed one.
+    pub(crate) fn browse_attach(&mut self, ctx: &egui::Context) {
+        if self.attach.browsing.is_some() {
+            return;
+        }
+        self.attach.browsing = Some(browse_for_file(ctx));
+    }
+
     /// Polls uploads, the list, downloads and the preview.
     pub(crate) fn poll_attach(&mut self) {
+        if let Some(files) = crate::widgets::file_picker::poll(&mut self.attach.browsing)
+            && let Some(path) = files.into_iter().next()
+        {
+            self.attach_path(&path);
+        }
         if let Some(r) = poll_file_read(&mut self.attach.reading) {
             match r {
                 Ok((name, bytes)) => self.upload_bytes(&name, bytes),
@@ -446,6 +467,7 @@ impl EnterBillScreen {
     pub(crate) fn source_card_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         self.take_dropped(ui);
         let mut attach = false;
+        let mut browse = false;
         let mut save = None;
         let mut preview = None;
         let mut event = ViewerEvent::None;
@@ -526,10 +548,14 @@ impl EnterBillScreen {
                     let typed = !self.attach.path.trim().is_empty();
                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     let busy = self.attach.upload.is_some();
-                    attach = ui
-                        .add_enabled(typed && !busy, egui::Button::new(t("check.attach.add")))
-                        .clicked()
-                        || (enter && typed && !busy);
+                    let browsing = self.attach.browsing.is_some() || self.attach.reading.is_some();
+                    ui.horizontal_wrapped(|ui| {
+                        attach = ui
+                            .add_enabled(typed && !busy, egui::Button::new(t("check.attach.add")))
+                            .clicked()
+                            || (enter && typed && !busy);
+                        browse = browse_button(ui, !busy && !browsing);
+                    });
                 });
             crate::widgets::paint_dashed_border(
                 ui.painter(),
@@ -579,6 +605,9 @@ impl EnterBillScreen {
         if attach {
             let path = PathBuf::from(self.attach.path.trim().trim_matches('"'));
             self.attach_path(&path);
+        }
+        if browse {
+            self.browse_attach(ui.ctx());
         }
         if let Some((id, name)) = save {
             self.fetch_bytes(id, name, false);

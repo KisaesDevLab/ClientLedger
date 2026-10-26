@@ -54,6 +54,7 @@ fn the_demo_needs_attention_shows_the_mockup() {
             "invoices_overdue",
             "bills_due",
             "payroll_unposted",
+            "intake_folders",
             "backup"
         ])
     );
@@ -372,6 +373,36 @@ fn attention_lines_show_dashes_and_the_later_note() {
                 kind.key()
             );
         }
+    }
+}
+
+/// A01: intake folders needing attention get one line that opens
+/// Preferences › Document intake; none shows nothing.
+#[test]
+fn intake_folders_needing_attention_show_one_line() {
+    let (_d, link) = demo_link();
+    let h = home(&link);
+    let none = attention::with_intake(h.attention(), 0);
+    assert!(
+        !attention::lines(&h, &none)
+            .iter()
+            .any(|l| l.text.contains("intake folder"))
+    );
+    for (n, text) in [
+        (1, "1 intake folder needs attention"),
+        (3, "3 intake folders need attention"),
+    ] {
+        let items = attention::with_intake(h.attention(), n);
+        assert_eq!(counted(&items, "intake_folders"), Some(n as u64));
+        let found = attention::lines(&h, &items)
+            .into_iter()
+            .find(|l| l.text == text)
+            .unwrap_or_else(|| panic!("{text}"));
+        assert_eq!(
+            found.link,
+            Some(("Open settings".to_owned(), "edit.preferences"))
+        );
+        assert!(found.link_tip.is_some());
     }
 }
 

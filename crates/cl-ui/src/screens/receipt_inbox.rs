@@ -21,11 +21,15 @@
 //! - File names are shown on screen; they are never logged, and the
 //!   control channel's state carries counts and states only.
 
+mod arrivals;
 mod demo;
+mod intake;
 mod picker;
 mod service;
 #[cfg(test)]
 mod tests;
+
+pub(crate) use intake::intake_problems;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -51,10 +55,68 @@ use crate::widgets::pdf_viewer::{DocSource, DocViewer, ViewerEvent, ViewerState}
 use crate::windows::{OpenPayload, Screen};
 
 pub(crate) use picker::{PickKind, PickRow};
-pub(crate) use service::{FAST_KINDS, Folder, Mark, badge, tick};
+pub(crate) use service::{FAST_KINDS, Folder, Mark};
 
 /// The command and window kind.
 pub const KIND: &str = "nav.receipt_inbox";
+
+/// Whether the open company's inbox runs over intake folders (A01): the
+/// engine keeps them (or the demo does), and the migration didn't fall
+/// back to P17's single folder. Otherwise P17's inbox runs as it was
+/// (Q-A01q).
+pub(crate) fn intake_active(ctx: &egui::Context, link: &CompanyLink) -> bool {
+    crate::screens::preferences::intake_folders::source::supported(link)
+        && !intake::existing(ctx).is_some_and(|h| h.lock().fallback())
+}
+
+/// One frame of the inbox: the shell calls it every frame with the open
+/// company (`fast` when the inbox or Enter Bill is in front); the inbox
+/// window calls it too. Cheap when nothing changed.
+pub(crate) fn tick(
+    ctx: &egui::Context,
+    link: &Arc<CompanyLink>,
+    tenant: Option<TenantId>,
+    today: CalendarDate,
+    fast: bool,
+) {
+    if crate::screens::preferences::intake_folders::source::supported(link) {
+        let h = intake::handle(ctx);
+        let mut s = h.lock();
+        intake::tick_service(&mut s, link, tenant, today, std::time::Instant::now());
+        let (fallback, busy) = (s.fallback(), s.busy());
+        drop(s);
+        if !fallback {
+            if tenant.is_some() {
+                // The folder threads answer on their own: look at them
+                // often enough to show a file within a second.
+                ctx.request_repaint_after(std::time::Duration::from_millis(if busy {
+                    100
+                } else {
+                    1000
+                }));
+            }
+            return;
+        }
+    }
+    service::tick(ctx, link, tenant, today, fast);
+}
+
+/// The menu's count: files waiting for the owner (0 without a company).
+#[must_use]
+pub(crate) fn badge(ctx: &egui::Context) -> usize {
+    match intake::existing(ctx) {
+        Some(h) => {
+            let s = h.lock();
+            if s.fallback() {
+                drop(s);
+                service::badge(ctx)
+            } else {
+                s.badge()
+            }
+        }
+        None => service::badge(ctx),
+    }
+}
 
 /// Enter Bill's window kind (it takes an inbox draft, WP4).
 const ENTER_BILL: &str = "vendors.enter_bill";
@@ -88,6 +150,10 @@ pub struct InboxDraft {
     pub attachment: AttachmentId,
     /// Its name and bytes, for the preview (the name is owner data).
     pub file: DocSource,
+    /// The intake inbox's claim (A01): the form keeps it while open, so the
+    /// inbox hands the file to no other form meanwhile. None from P17's
+    /// single-folder inbox.
+    pub claim: Option<std::sync::Arc<()>>,
 }
 
 /// Ids only.
@@ -161,6 +227,10 @@ pub struct ReceiptInboxScreen {
     demo_folder_used: bool,
     /// Where "Save a copy" put the selected file.
     saved_copy: Option<Result<PathBuf, &'static str>>,
+    /// The window over intake folders (A01).
+    arrivals: arrivals::Arrivals,
+    /// The last frame ran in intake mode.
+    intake_mode: bool,
 }
 
 impl ReceiptInboxScreen {
@@ -174,6 +244,7 @@ impl ReceiptInboxScreen {
         let group = link.group().and_then(Result::ok);
         let mut viewer = ViewerState::default();
         viewer.set_full_size_button(true);
+        let intake_mode = crate::screens::preferences::intake_folders::source::supported(&link);
         ReceiptInboxScreen {
             link,
             open,
@@ -191,6 +262,8 @@ impl ReceiptInboxScreen {
             view: View::default(),
             demo_folder_used: false,
             saved_copy: None,
+            arrivals: arrivals::Arrivals::default(),
+            intake_mode,
         }
     }
 
@@ -209,7 +282,7 @@ impl ReceiptInboxScreen {
             s.poke();
         }
         drop(h);
-        tick(ctx, &self.link, self.tenant(), self.today, true);
+        service::tick(ctx, &self.link, self.tenant(), self.today, true);
         let h = service::handle(ctx);
         let s = h.lock();
         let files: Vec<(InboxFile, Mark)> = s
@@ -392,6 +465,7 @@ impl ReceiptInboxScreen {
                         draft,
                         attachment: a.id,
                         file: source,
+                        claim: None,
                     })),
                 ));
                 self.notice = Some(t("inbox.notice.draft"));
@@ -423,7 +497,7 @@ impl ReceiptInboxScreen {
     // Drawing.
 
     fn draw(&mut self, ui: &mut Ui, tokens: &Tokens, files: &[(InboxFile, Mark)]) {
-        form::heading(ui, tokens, &t("inbox.title"));
+        ui.heading(t("inbox.title"));
         let h = service::handle(ui.ctx());
         let folder = h.lock().folder().clone();
         drop(h);
@@ -537,6 +611,11 @@ impl ReceiptInboxScreen {
         }
         if self.view.move_failures > 0 {
             form::hint(ui, tokens, &t("inbox.move_failed"));
+        }
+        // The engine keeps intake folders but this folder couldn't move
+        // over (Home counts it): say why the P17 inbox still runs.
+        if intake::existing(ui.ctx()).is_some_and(|h| h.lock().fallback()) {
+            form::hint(ui, tokens, &t("inbox.migration.blocked"));
         }
     }
 
@@ -686,88 +765,18 @@ impl ReceiptInboxScreen {
 
     fn picker_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let link = Arc::clone(&self.link);
-        let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
         let Some(p) = self.picker.as_mut() else {
             return;
         };
         p.refresh(&link, self.group.as_ref());
-        let mut attach: Option<PickRow> = None;
-        let mut cancel = false;
-        let kind = p.kind;
-        form::card(ui, tokens, |ui| {
-            ui.label(
-                RichText::new(t(kind.title_key()))
-                    .strong()
-                    .color(tokens.text_primary),
-            );
-            if kind == PickKind::BankTxn {
-                let current = p
-                    .account
-                    .and_then(|a| p.accounts.iter().find(|x| x.0 == a))
-                    .map(|x| x.1.clone())
-                    .unwrap_or_default();
-                let l = ui.label(t("inbox.pick.account"));
-                egui::ComboBox::from_id_salt("inbox-pick-account")
-                    .selected_text(current)
-                    .width(280.0)
-                    .show_ui(ui, |ui| {
-                        for (id, name) in &p.accounts {
-                            ui.selectable_value(&mut p.account, Some(*id), name);
-                        }
-                    })
-                    .response
-                    .labelled_by(l.id);
-            }
-            form::field_wide(ui, &t("inbox.pick.search"), &mut p.search);
-            if p.failed {
-                form::inline_warning(ui, tokens, &t("inbox.pick.failed"));
-            } else if p.busy() && !p.loaded {
-                form::progress_line(ui, tokens, &t("inbox.pick.loading"));
-            } else if p.loaded && p.rows.is_empty() {
-                form::hint(ui, tokens, &t("inbox.pick.none"));
-            }
-            for row in &p.rows {
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .add_enabled(
-                            self.upload.is_none(),
-                            egui::Button::new(t("inbox.pick.attach")),
-                        )
-                        .on_hover_text(t_with(
-                            "inbox.pick.attach.tip",
-                            &[("record", &record_text(kind, row))],
-                        ))
-                        .clicked()
-                    {
-                        attach = Some(row.clone());
-                    }
-                    ui.label(
-                        RichText::new(crate::shell::us_date(row.date))
-                            .monospace()
-                            .color(tokens.text_secondary),
-                    );
-                    if let Some(n) = &row.number {
-                        ui.label(RichText::new(n).color(tokens.text_secondary));
-                    }
-                    ui.label(
-                        RichText::new(row.payee.clone().unwrap_or_default())
-                            .color(tokens.text_primary),
-                    );
-                    if let Some(m) = row.amount {
-                        ui.label(RichText::new(m.format(style)).monospace());
-                    }
-                });
-            }
-            if ui.button(t("inbox.pick.cancel")).clicked() {
-                cancel = true;
-            }
-        });
+        let busy = self.upload.is_some();
+        let (attach, cancel) = picker_card(ui, tokens, p, busy);
         if self.upload.is_some() {
             form::progress_line(ui, tokens, &t("inbox.uploading"));
         }
         if cancel {
             self.picker = None;
-        } else if let Some(row) = attach {
+        } else if let Some((kind, row)) = attach {
             self.start_upload(Goal::Record(kind, row));
         }
     }
@@ -830,6 +839,11 @@ impl Screen for ReceiptInboxScreen {
     }
 
     fn ui(&mut self, ui: &mut Ui) {
+        self.intake_mode = intake_active(ui.ctx(), &self.link);
+        if self.intake_mode {
+            self.ui_intake(ui);
+            return;
+        }
         let tokens = Tokens::of(ui.ctx());
         let ctx = ui.ctx().clone();
         let files = self.sync(&ctx);
@@ -871,7 +885,11 @@ impl Screen for ReceiptInboxScreen {
     }
 
     fn state(&self) -> Value {
-        self.state_json()
+        if self.intake_mode {
+            self.intake_state_json()
+        } else {
+            self.state_json()
+        }
     }
 
     fn fixed_layout(&self) -> bool {
@@ -882,6 +900,85 @@ impl Screen for ReceiptInboxScreen {
 
 // ---------------------------------------------------------------------------
 // Helpers.
+
+/// The "Add to …" record picker's card: what was picked to attach to, and
+/// whether Cancel was clicked. `busy`: an attach is running (Attach off).
+fn picker_card(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    p: &mut picker::Picker,
+    busy: bool,
+) -> (Option<(PickKind, PickRow)>, bool) {
+    let style = crate::grid_env::shell_frame(ui.ctx()).money_style;
+    let mut attach: Option<PickRow> = None;
+    let mut cancel = false;
+    let kind = p.kind;
+    form::card(ui, tokens, |ui| {
+        ui.label(
+            RichText::new(t(kind.title_key()))
+                .strong()
+                .color(tokens.text_primary),
+        );
+        if kind == PickKind::BankTxn {
+            let current = p
+                .account
+                .and_then(|a| p.accounts.iter().find(|x| x.0 == a))
+                .map(|x| x.1.clone())
+                .unwrap_or_default();
+            let l = ui.label(t("inbox.pick.account"));
+            egui::ComboBox::from_id_salt("inbox-pick-account")
+                .selected_text(current)
+                .width(280.0)
+                .show_ui(ui, |ui| {
+                    for (id, name) in &p.accounts {
+                        ui.selectable_value(&mut p.account, Some(*id), name);
+                    }
+                })
+                .response
+                .labelled_by(l.id);
+        }
+        form::field_wide(ui, &t("inbox.pick.search"), &mut p.search);
+        if p.failed {
+            form::inline_warning(ui, tokens, &t("inbox.pick.failed"));
+        } else if p.busy() && !p.loaded {
+            form::progress_line(ui, tokens, &t("inbox.pick.loading"));
+        } else if p.loaded && p.rows.is_empty() {
+            form::hint(ui, tokens, &t("inbox.pick.none"));
+        }
+        for row in &p.rows {
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add_enabled(!busy, egui::Button::new(t("inbox.pick.attach")))
+                    .on_hover_text(t_with(
+                        "inbox.pick.attach.tip",
+                        &[("record", &record_text(kind, row))],
+                    ))
+                    .clicked()
+                {
+                    attach = Some(row.clone());
+                }
+                ui.label(
+                    RichText::new(crate::shell::us_date(row.date))
+                        .monospace()
+                        .color(tokens.text_secondary),
+                );
+                if let Some(n) = &row.number {
+                    ui.label(RichText::new(n).color(tokens.text_secondary));
+                }
+                ui.label(
+                    RichText::new(row.payee.clone().unwrap_or_default()).color(tokens.text_primary),
+                );
+                if let Some(m) = row.amount {
+                    ui.label(RichText::new(m.format(style)).monospace());
+                }
+            });
+        }
+        if ui.button(t("inbox.pick.cancel")).clicked() {
+            cancel = true;
+        }
+    });
+    (attach.map(|r| (kind, r)), cancel)
+}
 
 fn folder_key(
     folder: &Folder,

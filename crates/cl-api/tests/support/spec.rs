@@ -24,7 +24,8 @@ use sha2::{Digest, Sha256};
 /// PR #156) the P13 check edit and rules evaluate call are too; since pin
 /// f78583e (engine PR #159) the P14 feed deposit groupings and equity
 /// roles are; since pin f3ce33fd (engine PR-A) the P17 vendor credit edit
-/// (U-84a), bill terms dates (U-86d) and payment terms list (U-86e) are.
+/// (U-84a), bill terms dates (U-86d) and payment terms list (U-86e) are;
+/// since pin a88337e3 (engine PR #177) the A01 intake settings (U-93) are.
 pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),

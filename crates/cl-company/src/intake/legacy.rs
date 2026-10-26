@@ -1,6 +1,11 @@
-//! The receipt inbox folder (P17, plan §3 WP5, Q-54, Q-P17p): what is in
-//! the owner's inbox folder, whether each file is ready to attach, reading
-//! one for upload, and filing it away once a record holds it.
+//! The P17 receipt inbox folder (plan §3 WP5, Q-54, Q-P17p), kept with its
+//! exact types for the receipt inbox screen until it moves to the A01
+//! intake folders (WP-C); `cl_company::inbox` re-exports it. Reading for
+//! upload is the intake one ([`super::read_for_upload`]).
+//!
+//! What is in the owner's inbox folder, whether each file is ready to
+//! attach, reading one for upload, and filing it away once a record holds
+//! it.
 //!
 //! Rules this module keeps:
 //! - Plain `std::fs` polling; no watcher crate (`notify` fails the direct
@@ -27,33 +32,20 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
-use std::io::{self, Read as _, Write as _};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
-use sha2::{Digest, Sha256};
+use super::fs::{hidden, millis, online_only};
+pub use super::scan::{MAX_FILE_BYTES, MAX_LISTED, read_for_upload};
+pub use super::{FileError, ReadFile, sha256_hex};
 
-/// The largest file read (the engine's attachment limit).
-pub const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
-
-/// The most files listed.
-pub const MAX_LISTED: usize = 500;
-
-/// How long a file's size and time must stay the same before it is ready.
+/// How long a file's size and time must stay the same before it is ready
+/// (P17; intake folders use [`super::STABLE_FOR`]).
 pub const STABLE_FOR: Duration = Duration::from_secs(2);
 
 /// The sub-folder filed originals go to.
 pub const FILED_DIR: &str = "Filed";
-
-/// Windows attributes of files whose content is not on this computer.
-#[cfg(windows)]
-const ONLINE_ONLY_ATTRIBUTES: u32 = 0x0000_1000 // OFFLINE
-    | 0x0004_0000 // RECALL_ON_OPEN
-    | 0x0040_0000; // RECALL_ON_DATA_ACCESS
-
-/// Windows hidden and system attributes.
-#[cfg(windows)]
-const HIDDEN_ATTRIBUTES: u32 = 0x2 | 0x4;
 
 /// What kind of file the name says it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -182,39 +174,6 @@ pub fn named_kind(name: &str) -> Option<NamedKind> {
     }
 }
 
-fn millis(t: io::Result<SystemTime>) -> i64 {
-    t.ok()
-        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-        .and_then(|d| i64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
-}
-
-#[cfg(windows)]
-fn attributes(meta: &fs::Metadata) -> u32 {
-    use std::os::windows::fs::MetadataExt as _;
-    meta.file_attributes()
-}
-
-#[cfg(windows)]
-fn online_only(meta: &fs::Metadata) -> bool {
-    attributes(meta) & ONLINE_ONLY_ATTRIBUTES != 0
-}
-
-#[cfg(not(windows))]
-fn online_only(_meta: &fs::Metadata) -> bool {
-    false
-}
-
-#[cfg(windows)]
-fn hidden(meta: &fs::Metadata) -> bool {
-    attributes(meta) & HIDDEN_ATTRIBUTES != 0
-}
-
-#[cfg(not(windows))]
-fn hidden(_meta: &fs::Metadata) -> bool {
-    false
-}
-
 /// Lists the inbox folder (not its sub-folders; links are not followed).
 /// Every file comes back [`FileState::Settling`], [`FileState::TooLarge`]
 /// or [`FileState::OnlineOnly`]; [`Stability::apply`] decides which
@@ -332,197 +291,6 @@ impl Stability {
     }
 }
 
-/// A file read for upload.
-#[derive(Clone, PartialEq, Eq)]
-pub struct ReadFile {
-    /// Its bytes (a PDF, PNG or JPEG by its first bytes, at most 10 MB).
-    pub bytes: Vec<u8>,
-    /// Size in bytes.
-    pub size: u64,
-    /// Modified time when read, milliseconds since 1970.
-    pub modified_ms: i64,
-    /// SHA-256 of the bytes, lower-case hex.
-    pub sha256: String,
-}
-
-impl fmt::Debug for ReadFile {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReadFile")
-            .field("size", &self.size)
-            .finish_non_exhaustive()
-    }
-}
-
-/// Why a file was not read or filed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum FileError {
-    /// It is gone (moved, deleted).
-    #[error("the file is gone")]
-    Gone,
-    /// A link or not a plain file.
-    #[error("not a plain file")]
-    NotAFile,
-    /// Online only (Windows cloud placeholder).
-    #[error("the file is online only")]
-    OnlineOnly,
-    /// Over 10 MB.
-    #[error("the file is too large")]
-    TooLarge,
-    /// Empty.
-    #[error("the file is empty")]
-    Empty,
-    /// Not a PDF, PNG or JPEG by its bytes.
-    #[error("not a PDF or picture")]
-    WrongType,
-    /// It changed since it was read (different bytes).
-    #[error("the file changed")]
-    Changed,
-    /// It changed while being read.
-    #[error("the file changed while it was read")]
-    Unstable,
-    /// The file system refused.
-    #[error("the file could not be read or moved")]
-    Io,
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use fmt::Write as _;
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        let _ = write!(s, "{b:02x}");
-    }
-    s
-}
-
-/// SHA-256 of `bytes`, lower-case hex.
-#[must_use]
-pub fn sha256_hex(bytes: &[u8]) -> String {
-    hex(&Sha256::digest(bytes))
-}
-
-fn plain_file(path: &Path) -> Result<fs::Metadata, FileError> {
-    let meta = fs::symlink_metadata(path).map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => FileError::Gone,
-        _ => FileError::Io,
-    })?;
-    if !meta.file_type().is_file() {
-        return Err(FileError::NotAFile);
-    }
-    if online_only(&meta) {
-        return Err(FileError::OnlineOnly);
-    }
-    Ok(meta)
-}
-
-/// The open handle's metadata `held` against the path's `before` (checked
-/// without following links): a plain file, not online only, the same size
-/// and modification time.
-fn same_file(before: &fs::Metadata, held: &fs::Metadata) -> Result<(), FileError> {
-    if !held.file_type().is_file() {
-        return Err(FileError::NotAFile);
-    }
-    if online_only(held) {
-        return Err(FileError::OnlineOnly);
-    }
-    if held.len() != before.len() || millis(held.modified()) != millis(before.modified()) {
-        return Err(FileError::Unstable);
-    }
-    Ok(())
-}
-
-/// Reads an inbox file for upload, checking again everything the listing
-/// said: a plain file (no link), not online only, at most 10 MB, not
-/// empty, a PDF, PNG or JPEG by its first bytes, and unchanged while read.
-///
-/// # Errors
-/// [`FileError`].
-pub fn read_for_upload(path: &Path) -> Result<ReadFile, FileError> {
-    let before = plain_file(path)?;
-    if before.len() > MAX_FILE_BYTES {
-        return Err(FileError::TooLarge);
-    }
-    let file = fs::File::open(path).map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => FileError::Gone,
-        _ => FileError::Io,
-    })?;
-    // What was opened is checked on the open handle itself, so a file
-    // swapped in between the check and the open is noticed.
-    let held = file.metadata().map_err(|_| FileError::Io)?;
-    same_file(&before, &held)?;
-    let mut bytes = Vec::new();
-    (&file)
-        .take(MAX_FILE_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| FileError::Io)?;
-    let size = bytes.len() as u64;
-    if size > MAX_FILE_BYTES {
-        return Err(FileError::TooLarge);
-    }
-    if size == 0 {
-        return Err(FileError::Empty);
-    }
-    let after = plain_file(path)?;
-    same_file(&after, &file.metadata().map_err(|_| FileError::Io)?)?;
-    let modified_ms = millis(after.modified());
-    if after.len() != size || millis(before.modified()) != modified_ms {
-        return Err(FileError::Unstable);
-    }
-    cl_api::check_file(&bytes).map_err(|_| FileError::WrongType)?;
-    let sha256 = sha256_hex(&bytes);
-    Ok(ReadFile {
-        bytes,
-        size,
-        modified_ms,
-        sha256,
-    })
-}
-
-fn file_sha256(path: &Path) -> Result<String, FileError> {
-    let mut file = fs::File::open(path).map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => FileError::Gone,
-        _ => FileError::Io,
-    })?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        let n = file.read(&mut buf).map_err(|_| FileError::Io)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hex(&hasher.finalize()))
-}
-
-/// `name` with ` (n)` before its extension (`n` ≥ 2).
-fn numbered(name: &str, n: u32) -> String {
-    if n < 2 {
-        return name.to_string();
-    }
-    match name.rsplit_once('.') {
-        Some((stem, ext)) if !stem.is_empty() => format!("{stem} ({n}).{ext}"),
-        _ => format!("{name} ({n})"),
-    }
-}
-
-/// Claims a new, empty file in `dir` named `name`, or `name (2)`, … — never
-/// an existing one.
-fn reserve(dir: &Path, name: &str) -> Result<PathBuf, FileError> {
-    for n in 1..10_000 {
-        let path = dir.join(numbered(name, n));
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(_) => return Ok(path),
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(_) => return Err(FileError::Io),
-        }
-    }
-    Err(FileError::Io)
-}
-
 /// The folder a file filed in month `year`-`month` goes to.
 #[must_use]
 pub fn filed_dir(inbox: &Path, year: i32, month: u32) -> PathBuf {
@@ -530,12 +298,11 @@ pub fn filed_dir(inbox: &Path, year: i32, month: u32) -> PathBuf {
 }
 
 /// Moves the inbox file `path` to `<inbox>/Filed/<YYYY-MM>/` once a record
-/// holds its upload. The file must still be the one uploaded (SHA-256
-/// `expected`). The new name is the old one, or ` (2)`, ` (3)`, … when that
-/// is taken: nothing is ever overwritten. A rename is used when it can be;
-/// across volumes the bytes are copied, the copy is checked against
-/// `expected`, and only then is the original removed. Returns where the
-/// file is now.
+/// holds its upload, by the rules of [`super::move_handled`]: the file must
+/// still be the one uploaded (SHA-256 `expected`), nothing is ever
+/// overwritten (` (2)`, ` (3)`, …), a `Filed` that is a link is refused,
+/// and across volumes the copy is checked before the original is removed.
+/// Returns where the file is now.
 ///
 /// # Errors
 /// `Gone`, `NotAFile`, `OnlineOnly`, `Changed` (different bytes now; nothing
@@ -547,79 +314,8 @@ pub fn file_away(
     year: i32,
     month: u32,
 ) -> Result<PathBuf, FileError> {
-    plain_file(path)?;
-    if file_sha256(path)? != expected {
-        return Err(FileError::Changed);
-    }
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or(FileError::NotAFile)?
-        .to_string();
-    let dir = filed_dir(inbox, year, month);
-    make_filed_dir(inbox, &dir)?;
-    let target = reserve(&dir, &name)?;
-    // The reserved name is ours: the rename replaces only our empty file.
-    if fs::rename(path, &target).is_ok() {
-        return Ok(target);
-    }
-    match copy_verified(path, &target, expected) {
-        Ok(()) => {
-            if fs::remove_file(path).is_err() {
-                // Two copies would be filed again later: keep the original.
-                let _ = fs::remove_file(&target);
-                return Err(FileError::Io);
-            }
-            Ok(target)
-        }
-        Err(e) => {
-            let _ = fs::remove_file(&target);
-            Err(e)
-        }
-    }
-}
-
-/// Creates `<inbox>/Filed` and `dir` (its month folder) without following
-/// a link: a `Filed` or month folder that is a link (or not a folder) is
-/// refused, so a filed bill never lands outside the inbox.
-fn make_filed_dir(inbox: &Path, dir: &Path) -> Result<(), FileError> {
-    for d in [inbox.join(FILED_DIR), dir.to_path_buf()] {
-        match fs::symlink_metadata(&d) {
-            Ok(meta) if meta.file_type().is_dir() => {}
-            Ok(_) => return Err(FileError::NotAFile),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => match fs::create_dir(&d) {
-                Ok(()) => {}
-                // Made by someone else just now: check it again.
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                    let meta = fs::symlink_metadata(&d).map_err(|_| FileError::Io)?;
-                    if !meta.file_type().is_dir() {
-                        return Err(FileError::NotAFile);
-                    }
-                }
-                Err(_) => return Err(FileError::Io),
-            },
-            Err(_) => return Err(FileError::Io),
-        }
-    }
-    Ok(())
-}
-
-fn copy_verified(from: &Path, to: &Path, expected: &str) -> Result<(), FileError> {
-    let mut src = fs::File::open(from).map_err(|_| FileError::Io)?;
-    let mut dst = fs::OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(to)
-        .map_err(|_| FileError::Io)?;
-    io::copy(&mut src, &mut dst).map_err(|_| FileError::Io)?;
-    dst.flush().map_err(|_| FileError::Io)?;
-    dst.sync_all().map_err(|_| FileError::Io)?;
-    drop(dst);
-    if file_sha256(to)? == expected {
-        Ok(())
-    } else {
-        Err(FileError::Changed)
-    }
+    let parts = [FILED_DIR.to_string(), format!("{year:04}-{month:02}")];
+    super::handled::move_into(inbox, path, expected, &parts).map_err(|f| f.error)
 }
 
 #[cfg(test)]
@@ -875,36 +571,5 @@ mod tests {
             Err(FileError::NotAFile)
         );
         assert!(p.exists());
-    }
-
-    /// The open handle is checked against the path's metadata: a different
-    /// file (size or time) or a folder is refused.
-    #[test]
-    fn the_open_handle_must_be_the_checked_file() {
-        let dir = tempfile::tempdir().expect("tmp");
-        let a = write(dir.path(), "a.pdf", PDF);
-        let b = write(dir.path(), "b.pdf", b"%PDF-1.4 a longer, different file\n");
-        let meta = |p: &Path| fs::File::open(p).and_then(|f| f.metadata()).expect("meta");
-        assert_eq!(same_file(&meta(&a), &meta(&a)), Ok(()));
-        assert_eq!(same_file(&meta(&a), &meta(&b)), Err(FileError::Unstable));
-        let d = fs::metadata(dir.path()).expect("dir");
-        assert_eq!(same_file(&meta(&a), &d), Err(FileError::NotAFile));
-    }
-
-    #[test]
-    fn a_copy_is_checked_before_the_original_goes() {
-        let dir = tempfile::tempdir().expect("tmp");
-        let p = write(dir.path(), "r.pdf", PDF);
-        let to = dir.path().join("copy.pdf");
-        fs::write(&to, b"").expect("reserve");
-        assert_eq!(copy_verified(&p, &to, &sha256_hex(PDF)), Ok(()));
-        assert_eq!(fs::read(&to).expect("read"), PDF);
-        assert_eq!(
-            copy_verified(&p, &to, &sha256_hex(b"x")),
-            Err(FileError::Changed)
-        );
-        assert_eq!(numbered("a.b.pdf", 2), "a.b (2).pdf");
-        assert_eq!(numbered(".pdf", 2), ".pdf (2)");
-        assert_eq!(numbered("a.pdf", 1), "a.pdf");
     }
 }

@@ -9,8 +9,11 @@
 //!   year, default sales tax rate), `/ai/admin/config` and the consent
 //!   routes, `/company/smtp`;
 //! - *This company*, local → `cl_settings::CompanyPrefs` on the company
-//!   record (receipt inbox, bills-due days, AI switches and cap, consent
-//!   note, SMTP security) and the setup flags (Q-P08c);
+//!   record (bills-due days, AI switches and cap, consent note, SMTP
+//!   security, this computer's intake-folder confirmations) and the setup
+//!   flags (Q-P08c);
+//! - *This company*, intake folders → `/company/intake-settings` (U-93,
+//!   A01), see [`intake_folders`];
 //! - secrets (AI keys, SMTP password) → the OS keychain only, pushed to
 //!   the engine per session once `session-secrets-v1` exists (Q-P09a).
 //!
@@ -19,7 +22,7 @@
 pub mod ai;
 pub mod company;
 pub mod email;
-pub mod folders;
+pub mod intake_folders;
 pub mod user;
 
 use std::sync::Arc;
@@ -72,7 +75,8 @@ pub enum Category {
     Ai,
     /// SMTP.
     Email,
-    /// Receipt inbox folder.
+    /// Document intake: the company's intake folders (A01; shown as
+    /// "Document intake", key `inbox` kept for P17 callers).
     ReceiptInbox,
     /// Backup folder and backup on close.
     Backups,
@@ -119,7 +123,7 @@ impl Category {
             Category::Inventory => "prefs.cat.inventory",
             Category::Ai => "prefs.cat.ai",
             Category::Email => "prefs.cat.email",
-            Category::ReceiptInbox => "prefs.cat.inbox",
+            Category::ReceiptInbox => "prefs.cat.intake",
             Category::Backups => "prefs.cat.backups",
             Category::Updates => "prefs.cat.updates",
         }
@@ -156,7 +160,9 @@ impl Category {
             Category::Inventory => "stock items cost",
             Category::Ai => "ai anthropic openai ollama key suggestions cap usage",
             Category::Email => "smtp email send password server",
-            Category::ReceiptInbox => "receipt folder photo pdf inbox",
+            Category::ReceiptInbox => {
+                "receipt inbox folder photo pdf intake document bills scan scanner share network"
+            }
             Category::Backups => "backup folder close",
             Category::Updates => "update version check",
         }
@@ -229,6 +235,9 @@ pub struct Edits {
     pub ai: ai::AiEdits,
     /// The Email panel.
     pub email: email::EmailEdits,
+    /// The Document intake panel (the engine's folder list and this
+    /// window's pending confirmations).
+    pub intake: intake_folders::IntakeEdits,
 }
 
 impl std::fmt::Debug for Edits {
@@ -254,7 +263,10 @@ pub enum SaveBlock {
     BadRate,
     /// The Ollama address is not local.
     OllamaUrl(cl_settings::OllamaUrlError),
-    /// The receipt-inbox folder is not usable.
+    /// The intake folders can't be saved as they are.
+    Intake(intake_folders::IntakeBlock),
+    /// The P17 receipt-inbox folder is not usable (an engine without
+    /// intake folders, Q-A01q).
     Folder(cl_settings::FolderError),
     /// The engine's settings have not been read yet.
     NotLoaded,
@@ -272,7 +284,8 @@ impl SaveBlock {
             SaveBlock::AiNeedsConsentAgain => "prefs.ai.needs_consent_again",
             SaveBlock::BadRate => "prefs.err.rate",
             SaveBlock::OllamaUrl(_) => "prefs.ai.err_ollama_url",
-            SaveBlock::Folder(e) => folders::folder_error_key(*e),
+            SaveBlock::Intake(b) => b.message_key(),
+            SaveBlock::Folder(e) => intake_folders::legacy::folder_error_key(*e),
             SaveBlock::NotLoaded => "prefs.err.not_loaded",
         }
     }
@@ -288,6 +301,8 @@ pub struct SaveOutcome {
     pub cap_reached: bool,
     /// The engine recorded the company's consent in this save.
     pub consent: Option<ai::ConsentRecorded>,
+    /// The engine accepted this intake-folder list (U-93).
+    pub intake: Option<intake_folders::source::Stored>,
 }
 
 /// The Preferences window.
@@ -315,8 +330,13 @@ pub struct PreferencesScreen {
     error: Option<CompanyError>,
     status: Option<String>,
     close_after_save: bool,
+    /// The Document intake panel's reads, tests and dialogs.
+    pub(crate) intake: intake_folders::IntakePanel,
     /// The fixed bars' sizes last frame (Q-265).
     layout: crate::layout::FrameReport,
+    /// The Cancel and Save pair's width last frame (they sit right-aligned
+    /// in screen and Tab order).
+    footer_w: f32,
 }
 
 impl PreferencesScreen {
@@ -353,6 +373,7 @@ impl PreferencesScreen {
                 .to_string(),
             accounting: company::AccountingEdits::default(),
             email: email::EmailEdits::default(),
+            intake: intake_folders::IntakeEdits::default(),
         };
         let mut screen = PreferencesScreen {
             link,
@@ -374,10 +395,48 @@ impl PreferencesScreen {
             error: None,
             status: None,
             close_after_save: false,
+            intake: intake_folders::IntakePanel::default(),
             layout: crate::layout::FrameReport::default(),
+            footer_w: 220.0,
         };
         screen.start_load();
+        screen.load_intake();
         screen
+    }
+
+    /// Reads the intake folders and the user's role (Document intake).
+    fn load_intake(&mut self) {
+        let tenant = self.tenant.as_ref().map(|(id, _)| *id);
+        if let Some(f) = self
+            .intake
+            .start_load(&self.link, tenant, self.group.as_ref())
+        {
+            self.intake
+                .apply(f, &mut self.edits.intake, &mut self.committed.intake);
+        }
+    }
+
+    /// Reload after a 409: the engine's list replaces the typed changes.
+    fn reload_intake(&mut self) {
+        self.intake.replace_next_load();
+        self.load_intake();
+    }
+
+    /// ClientLedger's own folders, refused as intake folders: the app data
+    /// folder and the backup folders.
+    /// The engine keeps no intake folders: the P17 single receipt-inbox
+    /// folder is still chosen here (Q-A01q).
+    fn legacy_folder(&self) -> bool {
+        self.intake.load == intake_folders::LoadState::NeedsEngine
+    }
+
+    fn app_dirs(&self) -> Vec<std::path::PathBuf> {
+        let mut dirs = self.link.app_dirs();
+        let typed = self.edits.backup_folder.trim();
+        if !typed.is_empty() {
+            dirs.push(std::path::PathBuf::from(typed));
+        }
+        dirs
     }
 
     fn start_load(&mut self) {
@@ -488,11 +547,17 @@ impl PreferencesScreen {
         e.company.bills_due_days = bills;
         e.company.normalize();
         e.user.normalize();
-        if let Some(p) = e
-            .company
-            .receipt_inbox_dir
-            .as_ref()
-            .filter(|p| !p.as_os_str().is_empty())
+        self.intake
+            .validate(&e.intake, &self.committed.intake, &self.app_dirs())
+            .map_err(SaveBlock::Intake)?;
+        // An engine without intake folders keeps P17's single folder
+        // (Q-A01q), checked as P17 checked it.
+        if self.legacy_folder()
+            && let Some(p) = e
+                .company
+                .receipt_inbox_dir
+                .as_ref()
+                .filter(|p| !p.as_os_str().is_empty())
         {
             cl_settings::check_inbox_folder(p).map_err(SaveBlock::Folder)?;
         }
@@ -556,12 +621,13 @@ impl PreferencesScreen {
         if let Some((id, _)) = self.tenant {
             let flags = edits.flags;
             let prefs = company_prefs.clone();
+            let legacy = self.legacy_folder();
             if let Err(e) = self.link.store().update(|l| {
                 if let Some(rec) = l.get_mut(id) {
                     // Only the fields this screen edits: lists, the AI
                     // usage count and the consent note write theirs while
                     // Preferences is open (B3).
-                    write_owned_prefs(&prefs, &mut rec.prefs);
+                    write_owned_prefs(&prefs, &mut rec.prefs, legacy);
                     rec.flags = flags;
                 }
             }) {
@@ -589,6 +655,13 @@ impl PreferencesScreen {
         );
         let settings = edits.accounting.update_for(self.loaded.settings.as_ref());
         let smtp = edits.email.update_for(self.loaded.smtp.as_ref());
+        // Intake folders: the engine takes the whole list against the stamp
+        // it was read with. It goes last, so an earlier failure never leaves
+        // a list the engine took without the panel knowing its new stamp.
+        // This computer's confirmations are written only once it is
+        // accepted (finish_save).
+        let intake_put = (edits.intake != self.committed.intake)
+            .then(|| (edits.intake.folders.clone(), self.intake.updated_at.clone()));
         let mut after = edits.clone();
         after.ai.clear_typed();
         after.email.clear_typed();
@@ -613,11 +686,32 @@ impl PreferencesScreen {
                     .unwrap_or(1),
                 at: Some(cl_settings::recent::now()),
             });
+            let mut intake = None;
+            if let (Some((folders, expected)), Some((id, _))) = (intake_put, self.tenant.as_ref()) {
+                match intake_folders::source::demo_put(
+                    &self.link,
+                    *id,
+                    folders,
+                    expected.as_deref(),
+                ) {
+                    Ok(stored) => intake = Some(stored),
+                    Err(intake_folders::source::DemoPutError::Stale) => {
+                        // Nothing of the intake list is written here.
+                        self.intake.stale = true;
+                        return false;
+                    }
+                    Err(_) => {
+                        self.block = Some(SaveBlock::Intake(intake_folders::IntakeBlock::Refused));
+                        return false;
+                    }
+                }
+            }
             self.finish_save(
                 &SaveOutcome {
                     ai_waiting_engine: plan.waiting_engine,
                     cap_reached: plan.cap_reached,
                     consent,
+                    intake,
                 },
                 after,
             );
@@ -641,15 +735,32 @@ impl PreferencesScreen {
                     .update_smtp_settings(&u, cl_api::IdempotencyKey::new())
                     .await?;
             }
-            plan.run(&session, secrets_for_engine).await
+            let mut outcome = plan.run(&session, secrets_for_engine).await?;
+            if let Some((folders, expected)) = intake_put {
+                outcome.intake = Some(
+                    intake_folders::source::engine_put(&session, &folders, expected.as_deref())
+                        .await?,
+                );
+            }
+            Ok(outcome)
         })
         .ok();
         true
     }
 
-    fn finish_save(&mut self, outcome: &SaveOutcome, after: Edits) {
+    fn finish_save(&mut self, outcome: &SaveOutcome, mut after: Edits) {
+        let typed_intake = after.intake.clone();
+        match &outcome.intake {
+            Some(stored) => self.finish_intake_save(stored, &mut after),
+            // Not sent (unchanged, or no engine to take it): the baseline
+            // stays and any typed change stays dirty.
+            None => after.intake = self.committed.intake.clone(),
+        }
         self.committed = after;
         self.edits = self.committed.clone();
+        if outcome.intake.is_none() {
+            self.edits.intake = typed_intake;
+        }
         // The consent note is written only once the engine recorded the
         // accept, with the version it reports (S4).
         if let Some(c) = &outcome.consent {
@@ -683,6 +794,43 @@ impl PreferencesScreen {
         }
     }
 
+    /// The engine took the intake list (`stored`): this computer's new
+    /// confirmations are written now, in one store update, with those of
+    /// removed folders dropped; then the inbox service is told (A01
+    /// "Preferences save ordering").
+    fn finish_intake_save(&mut self, stored: &intake_folders::source::Stored, after: &mut Edits) {
+        let pending = std::mem::take(&mut after.intake.confirm);
+        let mut here = after.company.intake_here.clone();
+        here.extend(pending.clone());
+        if let Some((id, name)) = &self.tenant {
+            let id = *id;
+            match self.link.store().update(|l| {
+                // A company with no record on this computer yet (the demo,
+                // or one opened before its record was written) gets one, so
+                // "Set up on this computer" survives a reopen (UI check M2).
+                if l.get(id).is_none() {
+                    l.upsert(id, name);
+                }
+                l.get_mut(id).map(|rec| {
+                    rec.prefs.intake_here.extend(pending);
+                    rec.prefs.retain_intake_for(&stored.folders);
+                    rec.prefs.intake_here.clone()
+                })
+            }) {
+                Ok(Some(written)) => here = written,
+                Ok(None) => {}
+                Err(e) => self.error = Some(e.into()),
+            }
+        }
+        here.retain(|id, _| stored.folders.iter().any(|f| f.id == *id));
+        after.company.intake_here = here;
+        after.intake = intake_folders::IntakeEdits {
+            folders: stored.folders.clone(),
+            confirm: std::collections::BTreeMap::new(),
+        };
+        self.intake.saved(stored);
+    }
+
     /// Throws the edits away.
     pub fn revert(&mut self) -> bool {
         if self.edits == self.committed {
@@ -694,6 +842,8 @@ impl PreferencesScreen {
     }
 
     fn poll(&mut self) {
+        self.intake
+            .poll(&mut self.edits.intake, &mut self.committed.intake);
         if let Some(task) = self.load_task.as_mut()
             && let Some(r) = task.poll_result()
         {
@@ -717,7 +867,13 @@ impl PreferencesScreen {
                 (Err(e), _) => {
                     // The edits stay dirty; the engine's view is re-read
                     // so the next save starts from what it holds (S2).
-                    self.error = Some(e);
+                    // A 409 on the intake list is the owner's to resolve:
+                    // Reload (which replaces the typed folder changes).
+                    if intake_folders::source::is_stale(&e) {
+                        self.intake.stale = true;
+                    } else {
+                        self.error = Some(e);
+                    }
                     self.start_load();
                 }
             }
@@ -826,7 +982,24 @@ impl PreferencesScreen {
                 );
                 self.handle_email_action(action);
             }
-            Category::ReceiptInbox => folders::receipt_inbox(ui, tokens, &mut self.edits),
+            Category::ReceiptInbox => {
+                let app_dirs = self.app_dirs();
+                let action = intake_folders::show(
+                    ui,
+                    tokens,
+                    &mut intake_folders::View {
+                        panel: &mut self.intake,
+                        edits: &mut self.edits.intake,
+                        committed: &self.committed.intake,
+                        here: &self.committed.company.intake_here,
+                        legacy_dir: &mut self.edits.company.receipt_inbox_dir,
+                        app_dirs: &app_dirs,
+                    },
+                );
+                if action == intake_folders::PanelAction::Reload {
+                    self.reload_intake();
+                }
+            }
             Category::Backups => user::backups(ui, tokens, &mut self.edits),
             Category::Updates => user::updates(ui, tokens, &mut self.edits),
         }
@@ -989,21 +1162,41 @@ impl Screen for PreferencesScreen {
             crate::layout::FixedFrame::begin(ui, COMMAND, crate::layout::FrameOpts::default());
         frame.top(|ui| {
             ui.add_space(6.0);
+            // Narrow (960 px at 200%): the search box takes what is left of
+            // the title row, without its visible label (its accessible name
+            // stays "Find a setting"), so it isn't cut off and the body keeps
+            // its room (UI check M1).
+            let narrow = ui.available_width() < 560.0;
             ui.horizontal(|ui| {
                 ui.heading(t("prefs.title"));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let w = if narrow {
+                        (ui.available_width() - 4.0).clamp(80.0, 220.0)
+                    } else {
+                        220.0
+                    };
                     // Right to left: the input sits at the edge, its label
                     // to the left of it (the label is the accessible name).
                     let input = ui.add_sized(
-                        [220.0, 24.0],
+                        [w, 24.0],
                         egui::TextEdit::singleline(&mut self.search).hint_text(t("prefs.search")),
                     );
-                    let l = ui.add(egui::Label::new(t("prefs.search")).selectable(false));
-                    input.labelled_by(l.id);
+                    if narrow {
+                        let name = t("prefs.search");
+                        input.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::Role::TextInput, true, name.clone())
+                        });
+                    } else {
+                        let l = ui.add(egui::Label::new(t("prefs.search")).selectable(false));
+                        input.labelled_by(l.id);
+                    }
                 });
             });
         });
         frame.body(crate::layout::Body::Scroll, |ui| {
+            // The category list gives way on a narrow window so the panel
+            // keeps room (960 px at 200%).
+            let nav_w = (ui.available_width() * 0.3).clamp(130.0, 190.0);
             ui.horizontal_top(|ui| {
                 egui::Frame::new()
                     .fill(tokens.surface_subtle)
@@ -1011,7 +1204,7 @@ impl Screen for PreferencesScreen {
                     .inner_margin(egui::Margin::symmetric(8, 10))
                     .show(ui, |ui| {
                         ui.vertical(|ui| {
-                            ui.set_width(190.0);
+                            ui.set_width(nav_w);
                             self.nav(ui, &tokens);
                         });
                     });
@@ -1033,32 +1226,42 @@ impl Screen for PreferencesScreen {
             if let Some(e) = &self.error {
                 form::inline_error(ui, &tokens, e);
             }
-            if let Some(s) = &self.status {
-                ui.label(RichText::new(s).color(tokens.text_secondary));
-            }
+            // Right-aligned, but laid out left to right so Tab goes Cancel
+            // then Save, as they read on screen (UI check): the pair's
+            // width from the last frame places them. "Saved." sits on the
+            // same line, at the left, so the bar stays one row.
             ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.save_task.is_some() {
-                        form::progress_line(ui, &tokens, &t("prefs.saving"));
-                    } else {
-                        let can_save = self.loaded.done;
-                        if ui
-                            .add_enabled_ui(can_save, |ui| primary_button(ui, &t("prefs.save")))
-                            .inner
-                            .clicked()
-                        {
-                            self.save();
-                        }
+                if let Some(s) = &self.status {
+                    ui.add(
+                        egui::Label::new(RichText::new(s).color(tokens.text_secondary)).truncate(),
+                    );
+                }
+                ui.add_space((ui.available_width() - self.footer_w).max(0.0));
+                let cancel =
+                    ui.add(egui::Button::new(t("prefs.cancel")).min_size(Vec2::new(0.0, 44.0)));
+                if cancel.clicked() {
+                    self.revert();
+                    self.link
+                        .push(CompanyEvent::CloseWindow(CommandId::new(COMMAND)));
+                }
+                let last = if self.save_task.is_some() {
+                    ui.scope(|ui| form::progress_line(ui, &tokens, &t("prefs.saving")))
+                        .response
+                } else {
+                    let can_save = self.loaded.done;
+                    let save = ui
+                        .add_enabled_ui(can_save, |ui| primary_button(ui, &t("prefs.save")))
+                        .inner;
+                    if save.clicked() {
+                        self.save();
                     }
-                    if ui
-                        .add(egui::Button::new(t("prefs.cancel")).min_size(Vec2::new(0.0, 44.0)))
-                        .clicked()
-                    {
-                        self.revert();
-                        self.link
-                            .push(CompanyEvent::CloseWindow(CommandId::new(COMMAND)));
-                    }
-                });
+                    save
+                };
+                let w = last.rect.right() - cancel.rect.left();
+                if (w - self.footer_w).abs() > 0.5 {
+                    self.footer_w = w;
+                    ui.ctx().request_repaint();
+                }
             });
         });
         self.layout = frame.end();
@@ -1081,7 +1284,9 @@ impl Screen for PreferencesScreen {
                 self.save();
                 true
             }
-            "form.revert" => self.revert(),
+            // Esc closes the Add folder row (or a rename) before the
+            // window (DESIGN: Esc reverts the focused field first).
+            "form.revert" => self.intake.escape() || self.revert(),
             _ => false,
         }
     }
@@ -1105,6 +1310,11 @@ impl Screen for PreferencesScreen {
             "ai": self.edits.ai.state(&self.secrets_saved, &self.link.capabilities()),
             "email": self.edits.email.state(&self.secrets_saved),
             "account_numbers": self.edits.company.account_numbers,
+            "intake": self.intake.state(
+                &self.edits.intake,
+                &self.committed.intake,
+                &self.committed.company.intake_here,
+            ),
             "user": {
                 "theme": format!("{:?}", self.edits.user.theme).to_ascii_lowercase(),
                 "zoom": self.edits.user.zoom_percent,
@@ -1162,8 +1372,21 @@ pub fn make(
 /// Copies the company-local fields Preferences edits from `from` onto
 /// `to`, leaving every other field (sensitive accounts, required tag
 /// groups, the AI usage count, the consent note) as `to` has it.
-fn write_owned_prefs(from: &cl_settings::CompanyPrefs, to: &mut cl_settings::CompanyPrefs) {
-    to.receipt_inbox_dir.clone_from(&from.receipt_inbox_dir);
+///
+/// This computer's intake confirmations are not written here: they are
+/// written only after the engine accepted the intake list
+/// ([`PreferencesScreen::finish_save`]). The P17 folder is written only
+/// when `legacy` (an engine without intake folders, where it is still the
+/// inbox's folder, Q-A01q); otherwise the migration owns it, and a window
+/// left open across the migration must not bring it back.
+fn write_owned_prefs(
+    from: &cl_settings::CompanyPrefs,
+    to: &mut cl_settings::CompanyPrefs,
+    legacy: bool,
+) {
+    if legacy {
+        to.receipt_inbox_dir.clone_from(&from.receipt_inbox_dir);
+    }
     to.bills_due_days = from.bills_due_days;
     to.ai.suggest_rules = from.ai.suggest_rules;
     to.ai.monthly_token_cap = from.ai.monthly_token_cap;

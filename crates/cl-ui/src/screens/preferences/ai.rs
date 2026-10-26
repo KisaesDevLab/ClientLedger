@@ -569,6 +569,7 @@ impl AiSavePlan {
             ai_waiting_engine: self.waiting_engine,
             cap_reached: self.cap_reached,
             consent,
+            intake: None,
         })
     }
 }

@@ -22,10 +22,16 @@ tracing = "0.1.44"
 # encrypted, and Export All Data zips CSV text.
 zip = { version = "9.0.3", default-features = false }
 
+# `O_NOFOLLOW` and `ELOOP` for reading intake files without following a
+# link (A01 security review M2); already in the tree.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.190"
+
 [dev-dependencies]
 cl-api = { path = "../cl-api", features = ["test-support"] }
 # The practice-company test against the real engine (tests/practice_live.rs).
 cl-host = { path = "../cl-host" }
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 tempfile = "3.27.0"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6.5"

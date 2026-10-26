@@ -849,12 +849,10 @@ pub fn run_suite(mode: EngineMode, tests: &[(&str, TestFn)]) -> ExitCode {
             println!("    {p}");
         }
     }
-    // One file per binary, rewritten each run, for the PR body.
+    // One file per binary, rewritten each run, for the PR body: named after
+    // the test binary (`contract`, `contract-offline`, `intake-settings`).
     if let Some(dir) = target_dir() {
-        let tag = match mode {
-            EngineMode::Normal => "contract",
-            EngineMode::Offline => "contract-offline",
-        };
+        let tag = env!("CARGO_CRATE_NAME").replace('_', "-");
         let _ = std::fs::write(
             dir.join(format!("{tag}-pending.txt")),
             pending.iter().fold(String::new(), |mut acc, p| {

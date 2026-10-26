@@ -240,6 +240,13 @@ impl Capabilities {
     /// tenant-wide ones.
     pub const ATTACHMENTS_COMPANY: &'static str = "attachments-company-v1";
 
+    // ---- A01: intake folders (engine U-93; client-declared until the pin has it)
+    /// U-93: `GET`/`PUT /company/intake-settings` (the company's intake
+    /// folders, a full replace guarded by `expectedUpdatedAt`, 409 `STALE`),
+    /// paths never in audit rows, and `omitIntakeSettings` on the tenant
+    /// archive export.
+    pub const INTAKE_SETTINGS: &'static str = "intake-settings-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {

@@ -16,9 +16,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use cl_automation::actions::{
-    ClickParams, CommandParams, FocusParams, InspectParams, KeyParams, KeySpec, PasteParams,
-    ResizeParams, ScreenshotParams, ScrollParams, ScrollTo, Target, ThemeParams, TypeParams,
-    ZoomParams,
+    ClickParams, CommandParams, DialogAnswerParams, FocusParams, InspectParams, KeyParams, KeySpec,
+    PasteParams, ResizeParams, ScreenshotParams, ScrollParams, ScrollTo, Target, ThemeParams,
+    TypeParams, ZoomParams,
 };
 use cl_automation::inspect::{Bounds, Node, Snapshot, WindowInfo};
 use cl_automation::screenshot::{encode_png, write_png};
@@ -304,6 +304,8 @@ impl Bridge {
         let shared = Arc::new(Mutex::new(Shared::default()));
         // A controlled run never opens a browser: links are recorded.
         let _ = crate::links::LinkSink::install(ctx);
+        // Nor a system file window: `dialog_answer` answers them.
+        let _ = crate::widgets::file_picker::PickerHook::install(ctx);
         ctx.add_plugin(Hooks(Arc::clone(&shared)));
         ctx.enable_accesskit();
         let waker_ctx = ctx.clone();
@@ -534,6 +536,17 @@ impl Bridge {
                 }
                 shell.prefs.zoom_percent = prefs::nearest_step(p.percent);
                 self.after(Finish::Window)
+            }
+            "dialog_answer" => {
+                use crate::widgets::file_picker::{Answer, PickerHook};
+                let p = parse!(DialogAnswerParams);
+                let answer = if p.cancel || p.paths.is_empty() {
+                    Answer::Cancel
+                } else {
+                    Answer::Paths(p.paths.into_iter().map(PathBuf::from).collect())
+                };
+                PickerHook::install(ctx).answer(answer);
+                ok(json!({}))
             }
             "state" => ok(state_json(ctx, shell)),
             "quit" => {
