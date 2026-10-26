@@ -11,6 +11,8 @@ cl-api = { path = "../cl-api" }
 cl-automation = { path = "../cl-automation" }
 cl-company = { path = "../cl-company" }
 cl-core = { path = "../cl-core" }
+# A03 WP-G: the reading's types, vendor matching and card pick (Q-A03o).
+cl-docread = { path = "../cl-docread" }
 cl-grid = { path = "../cl-grid" }
 cl-host = { path = "../cl-host" }
 cl-import = { path = "../cl-import" }

@@ -1434,6 +1434,10 @@ impl EnterBillScreen {
                 self.read.start(&input);
                 true
             }
+            "bill.read_local" => {
+                self.start_local_read();
+                true
+            }
             "bill.accept_read" => {
                 self.accept_read();
                 true

@@ -471,6 +471,7 @@ impl EnterBillScreen {
         let mut browse = false;
         let mut save = None;
         let mut preview = None;
+        let mut read_local = false;
         let mut event = ViewerEvent::None;
         form::card_tight(ui, tokens, |ui| {
             ui.label(
@@ -502,7 +503,9 @@ impl EnterBillScreen {
                 tenant: self.tenant.as_ref().map(|(t, _)| *t),
                 money_style: self.money_style,
             };
-            let _ = super::doc_read::read_button(ui, &mut self.read, &input, tokens);
+            let has_document = self.attach.viewer.source().is_some();
+            read_local =
+                super::doc_read::read_button(ui, &mut self.read, &input, tokens, has_document);
             for a in &self.attach.list {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(&a.file_name).color(tokens.text_primary));
@@ -621,6 +624,9 @@ impl EnterBillScreen {
         }
         if let Some((id, name)) = preview {
             self.fetch_bytes(id, name, true);
+        }
+        if read_local {
+            self.start_local_read();
         }
     }
 }

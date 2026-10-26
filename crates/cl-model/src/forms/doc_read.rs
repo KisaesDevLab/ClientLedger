@@ -2,7 +2,8 @@
 //! WP3; non-negotiable 4).
 //!
 //! When the owner clicks **Read with AI**, the screen (WP7) maps the
-//! engine's reading into a [`DocReading`] and calls [`apply`]. Every field
+//! engine's reading into a [`DocReading`] and calls [`apply`]; **Read
+//! document** (A03) maps a reading made on this computer the same way. Every field
 //! it fills is marked [`ReadField::Read`]: *read, not accepted*. The bill
 //! cannot be saved while such a field remains ([`crate::forms::bill`]
 //! `BillProblem::ReadNotAccepted`); the owner accepts them all
@@ -175,6 +176,12 @@ pub struct FieldConfidence {
     pub reference: Option<Confidence>,
     /// Total.
     pub total: Option<Confidence>,
+    /// Payment terms (A03 local reading; the expense forms use it in A04).
+    pub terms: Option<Confidence>,
+    /// Amount paid (receipts; A04).
+    pub amount_paid: Option<Confidence>,
+    /// How it was paid (receipts; A04).
+    pub payment: Option<Confidence>,
 }
 
 /// What was read from a document, mapped from the engine's reading by the

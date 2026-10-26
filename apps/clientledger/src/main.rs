@@ -72,6 +72,9 @@ fn main() -> Result<()> {
     // Events from the UI go to <logs>/ui.log (rotating); the host keeps host.log.
     let _ = paths.ensure_dirs();
     cl_ui::logging::init(paths.logs_dir().join("ui.log"));
+    // Reading documents on this computer (A03): the worker starts on the
+    // first "Read document", demo included.
+    cl_ui::reading::install(cl_ui::reading::ReadingService::for_app(&paths));
 
     let mut shell = ShellOptions {
         store: Some(UiStore::new(paths.root().join("ui"))),

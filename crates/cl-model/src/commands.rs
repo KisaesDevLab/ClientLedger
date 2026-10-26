@@ -283,6 +283,8 @@ pub const COMMANDS: &[Command] = &[
     // Enter Bill (P17; Page Up/Down, Alt+N, Alt+S, Ctrl+M and Attach above apply too)
     cmd("bill.kind_toggle", "Switch Bill or Vendor Credit", None, 7, None, Scope::Form),
     cmd("bill.read_document", "Read with AI", None, 7, None, Scope::Form),
+    // A03: read the shown document on this computer (no AI, nothing sent)
+    cmd("bill.read_local", "Read Document", None, 7, None, Scope::Form),
     cmd("bill.accept_read", "Accept These Values", None, 7, alt('A'), Scope::Form),
     // Document preview (P17): the source-document card and its full-size tab
     cmd("viewer.zoom_in", "Zoom In on the Document", None, 8, key(Mods::CMD, Key::Equals), Scope::Viewer),
@@ -794,6 +796,8 @@ mod tests {
         for (id, shortcut, scope) in [
             ("bill.kind_toggle", None, Scope::Form),
             ("bill.read_document", None, Scope::Form),
+            // A03: Read document (local) beside Read with AI.
+            ("bill.read_local", None, Scope::Form),
             ("bill.accept_read", alt('A'), Scope::Form),
             ("viewer.zoom_in", key(Mods::CMD, Key::Equals), Scope::Viewer),
             ("viewer.zoom_out", key(Mods::CMD, Key::Minus), Scope::Viewer),

@@ -200,6 +200,10 @@ pub(crate) struct Filled {
     pub prior_date: Option<CalendarDate>,
     /// The terms came with the vendor the reading filled.
     pub terms_from_vendor: bool,
+    /// Read on this computer (A03 Read document), not by AI.
+    pub local: bool,
+    /// The local reading's checks, listed on the banner (never applied).
+    pub checks: Vec<cl_docread::model::Check>,
 }
 
 impl std::fmt::Debug for Filled {
@@ -207,8 +211,28 @@ impl std::fmt::Debug for Filled {
         f.debug_struct("Filled")
             .field("unknown_vendor", &self.unknown_vendor.is_some())
             .field("unreadable", &self.unreadable)
+            .field("local", &self.local)
+            .field("checks", &self.checks.len())
             .finish_non_exhaustive()
     }
+}
+
+/// A reading on its way into the form, from either reader: P17's Read with
+/// AI or A03's Read document. Owner data: never logged.
+pub(crate) struct Incoming {
+    /// The values, each filled as *read, not accepted*.
+    pub doc: DocReading,
+    /// The vendor's name as printed when it matched no vendor.
+    pub unknown_vendor: Option<String>,
+    /// Some figures were printed but couldn't be read exactly.
+    pub unreadable: bool,
+    /// The account the reader suggests for the lines (else the vendor's
+    /// default).
+    pub default_account: Option<AccountId>,
+    /// The local reading's checks (shown, never applied).
+    pub checks: Vec<cl_docread::model::Check>,
+    /// Read on this computer.
+    pub local: bool,
 }
 
 /// The values a reading put in the form.
@@ -251,13 +275,15 @@ pub struct ReadState {
     /// The extract job.
     job: Option<Task<Result<BillReading, ApiError>>>,
     /// The job's number (the only thing logged besides the outcome).
-    job_no: u64,
+    pub(crate) job_no: u64,
     /// Requests sent (control channel and tests: none with AI off).
     sent: u32,
     /// A finished reading waiting to be put into the form.
     done: Option<BillReading>,
     /// The file name the job is for.
-    job_file: String,
+    pub(crate) job_file: String,
+    /// Read document, on this computer (A03).
+    pub(crate) local: super::doc_read_local::LocalRead,
     /// What the last reading filled.
     pub(crate) filled: Option<Filled>,
     /// `ocr_only`: the text found (shown read-only).
@@ -390,6 +416,10 @@ pub(crate) fn doc_reading(r: &BillReading) -> DocReading {
             due_date: field("dueDate"),
             reference: field("vendorInvoiceNumber"),
             total: field("total"),
+            // The engine's reading has no confidence for these (A03 N6).
+            terms: None,
+            amount_paid: None,
+            payment: None,
         },
     }
 }
@@ -619,13 +649,32 @@ impl ReadState {
     /// True while the extract job (or a ghost request) runs.
     #[must_use]
     pub fn busy(&self) -> bool {
-        self.job.is_some() || self.switches_task.is_some() || !self.ghosts.asking.is_empty()
+        self.job.is_some()
+            || self.local.busy()
+            || self.switches_task.is_some()
+            || !self.ghosts.asking.is_empty()
+    }
+
+    /// A document is being read (by AI or on this computer).
+    #[must_use]
+    pub(crate) fn busy_reading(&self) -> bool {
+        self.job.is_some() || self.local.busy()
     }
 
     /// The control channel's view (no amounts, names or file names).
     #[must_use]
     pub fn state_json(&self) -> Value {
         let check = self.filled.as_ref().and_then(|f| f.check);
+        let local = self.filled.as_ref().filter(|f| f.local);
+        // A local reading's own checks say whether its figures agree.
+        let reconciled = match local {
+            Some(f) => Some(
+                !f.checks
+                    .iter()
+                    .any(|c| super::doc_read_local::is_sum_check(c.code)),
+            ),
+            None => check.and_then(|c| c.total_ok),
+        };
         json!({
             "busy": self.job.is_some(),
             "available": self.switches.is_some_and(ReadSwitches::open),
@@ -636,8 +685,20 @@ impl ReadState {
             "nothing_new": self.filled.as_ref().is_some_and(|f| f.nothing_new),
             "unaccepted": self.unaccepted,
             "low": self.low,
-            "reconciled": check.and_then(|c| c.total_ok),
+            "reconciled": reconciled,
             "subtotal_tax_ok": check.and_then(|c| c.subtotal_tax_ok),
+            "local": self.local.state_json(),
+            "filled_locally": local.is_some(),
+            "checks": self
+                .filled
+                .as_ref()
+                .map(|f| {
+                    f.checks
+                        .iter()
+                        .map(|c| super::doc_read_local::code_name(c.code))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
             "unknown_vendor": self.filled.as_ref().is_some_and(|f| f.unknown_vendor.is_some()),
             "unreadable": self.filled.as_ref().is_some_and(|f| f.unreadable),
             "ocr_only": self.found_text.is_some(),
@@ -653,23 +714,42 @@ impl ReadState {
     }
 }
 
-/// The Read with AI button on the source-document card. True when clicked
-/// (the reading has started then).
+/// The reading buttons on the source-document card: **Read document** (on
+/// this computer, A03) whenever a document is shown, and P17's **Read with
+/// AI** when every AI switch is on. Read with AI starts here; true when
+/// Read document was clicked (the screen starts it: it needs the shown
+/// document and the vendors).
 pub fn read_button(
     ui: &mut Ui,
     state: &mut ReadState,
     input: &ReadInput<'_>,
     tokens: &Tokens,
+    has_document: bool,
 ) -> bool {
-    let mut clicked = false;
-    if state.available(input) {
+    let mut local = false;
+    let ai = state.available(input);
+    if has_document || ai {
         let busy = state.busy();
-        let r = ui
-            .add_enabled(!busy, egui::Button::new(t("bill.read.button")))
-            .on_hover_text(t("bill.read.button.tip"));
-        if r.clicked() {
-            state.start(input);
-            clicked = true;
+        ui.horizontal_wrapped(|ui| {
+            if has_document
+                && ui
+                    .add_enabled(!busy, egui::Button::new(t("bill.read.local.button")))
+                    .on_hover_text(t("bill.read.local.button.tip"))
+                    .clicked()
+            {
+                local = true;
+            }
+            if ai
+                && ui
+                    .add_enabled(!busy, egui::Button::new(t("bill.read.button")))
+                    .on_hover_text(t("bill.read.button.tip"))
+                    .clicked()
+            {
+                state.start(input);
+            }
+        });
+        if state.local.busy() {
+            form::progress_line(ui, tokens, &t("bill.read.local.reading"));
         }
         if state.job.is_some() {
             form::progress_line(ui, tokens, &t("bill.read.reading"));
@@ -678,7 +758,7 @@ pub fn read_button(
     if let Some(key) = state.problem {
         ui.add(egui::Label::new(RichText::new(t(key)).size(12.0).color(tokens.warn_text)).wrap());
     }
-    clicked
+    local
 }
 
 /// The shortcut chip text of a command ("Alt A"), from the keymap.
@@ -748,13 +828,14 @@ pub fn banner(
                 .wrap(),
             );
             if state.low > 0 {
+                let low_key = if filled.local {
+                    "bill.read.local.banner.low"
+                } else {
+                    "bill.read.banner.low"
+                };
                 ui.add(
-                    egui::Label::new(
-                        RichText::new(t("bill.read.banner.low"))
-                            .strong()
-                            .color(tokens.warn_text),
-                    )
-                    .wrap(),
+                    egui::Label::new(RichText::new(t(low_key)).strong().color(tokens.warn_text))
+                        .wrap(),
                 );
             }
             if let Some(c) = filled.check {
@@ -786,6 +867,26 @@ pub fn banner(
                     )
                     .wrap(),
                 );
+            }
+            // A local reading's checks: shown, never applied (AC3).
+            if !filled.checks.is_empty() {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(t("bill.read.local.checks"))
+                            .strong()
+                            .color(tokens.warn_text),
+                    )
+                    .wrap(),
+                );
+                for c in &filled.checks {
+                    let text = super::doc_read_local::check_text(c, style);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("\u{2022} {text}")).color(tokens.warn_text),
+                        )
+                        .wrap(),
+                    );
+                }
             }
             if pending {
                 ui.horizontal_wrapped(|ui| {
@@ -912,6 +1013,7 @@ impl EnterBillScreen {
         if let Some(reading) = self.read.done.take() {
             self.fill_from_reading(&reading);
         }
+        self.poll_local_read();
         let refused = self
             .save
             .problems
@@ -927,12 +1029,33 @@ impl EnterBillScreen {
     /// Puts a reading into the form: empty fields only, every one read and
     /// not accepted (`doc_read::apply`).
     pub(crate) fn fill_from_reading(&mut self, reading: &BillReading) {
+        let unknown_vendor = reading
+            .vendor
+            .is_none()
+            .then(|| reading.vendor_name.clone())
+            .flatten();
+        self.fill(&Incoming {
+            doc: doc_reading(reading),
+            unknown_vendor,
+            unreadable: !reading.unreadable.is_empty(),
+            default_account: reading.default_expense_account,
+            checks: Vec::new(),
+            local: false,
+        });
+    }
+
+    /// Puts a reading (from AI or from this computer) into the form: empty
+    /// fields only, every one read and not accepted.
+    pub(crate) fn fill(&mut self, incoming: &Incoming) {
         if self.editing.as_ref().is_some_and(|e| e.read_only) {
             self.read.problem = Some("bill.read.problem.read_only");
             return;
         }
-        let doc = doc_reading(reading);
-        let check = model::reconcile(&doc);
+        let doc = &incoming.doc;
+        // A local reading's own checks speak for its figures; P17's
+        // lines-against-total compare is for the AI's reading only (a
+        // document with fees would otherwise be flagged twice).
+        let check = (!incoming.local).then(|| model::reconcile(doc));
         let mut form = self.compose();
         // A new bill's date is still the one it opened with: the
         // document's date may replace it.
@@ -943,7 +1066,7 @@ impl EnterBillScreen {
         }
         let vendor_before = form.vendor;
         let keys = &mut self.expenses.form_mut().adapter_mut().keys;
-        let filled = model::apply(&doc, &mut form, keys);
+        let filled = model::apply(doc, &mut form, keys);
         if form.date.is_none() {
             form.date = prior_date;
         }
@@ -957,11 +1080,9 @@ impl EnterBillScreen {
                 .find(|c| c.id == v)
                 .and_then(|c| c.fields.default_payment_terms.clone());
         }
-        let unknown_vendor = reading
-            .vendor
-            .is_none()
-            .then(|| reading.vendor_name.clone())
-            .flatten()
+        let unknown_vendor = incoming
+            .unknown_vendor
+            .as_deref()
             .map(|n| n.trim().to_string())
             .filter(|n| !n.is_empty() && form.vendor.is_none());
         let snapshot = Snapshot {
@@ -992,14 +1113,16 @@ impl EnterBillScreen {
         );
         self.read.filled = Some(Filled {
             file_name: std::mem::take(&mut self.read.job_file),
-            check: Some(check),
+            check,
             total: doc.total,
             unknown_vendor,
-            unreadable: !reading.unreadable.is_empty(),
+            unreadable: incoming.unreadable,
             nothing_new: filled.is_empty(),
             snapshot,
             prior_date: prior_date.filter(|_| untouched_date),
             terms_from_vendor,
+            local: incoming.local,
+            checks: incoming.checks.clone(),
         });
         self.read.found_text = None;
         if filled.is_empty() {
@@ -1013,8 +1136,8 @@ impl EnterBillScreen {
         self.refresh_terms_dates();
         // Read lines get the reading's account for the vendor (else the
         // vendor's default) as a ghost: the owner accepts it with Tab.
-        let ghost = reading
-            .default_expense_account
+        let ghost = incoming
+            .default_account
             .filter(|a| self.accounts.iter().any(|x| x.id == *a && x.is_active))
             .or_else(|| self.vendor_default_account());
         let vendor = self.vendor();
