@@ -29,8 +29,9 @@ use std::fmt;
 use std::io::{Read, Write};
 
 /// Protocol version the worker announces in `Ready`; the host refuses any
-/// other (worker and host ship together).
-pub const PROTOCOL_VERSION: u32 = 2;
+/// other (worker and host ship together). 3: `OcrMode::ReadBest` and
+/// `OcrMode::Word`.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Largest document (plan §5 "Large"): 10 MiB.
 pub const MAX_DOCUMENT_BYTES: usize = 10 * 1024 * 1024;
@@ -182,6 +183,14 @@ pub enum OcrMode {
     /// Report the page's orientation (`--psm 0`): a quarter-turned page
     /// whose first read came back poor.
     Orient,
+    /// Read the page again with the more accurate model as well (TSV): its
+    /// numbers came back with low confidence. Answered `Unavailable` when
+    /// the host has no such model (version 3).
+    ReadBest,
+    /// Read one line of text (`--psm 7`, TSV) cut from a page already
+    /// read: a value that did not read the first time is read again on
+    /// its own (version 3).
+    Word,
 }
 
 /// Why OCR of a page failed.
@@ -482,6 +491,18 @@ mod tests {
                 page: 0,
                 pgm: Bytes(encode_pgm(2, 1, &[0, 255]).unwrap()),
                 mode: OcrMode::Orient,
+            },
+            FromWorker::NeedOcr {
+                job: 7,
+                page: 0,
+                pgm: Bytes(encode_pgm(1, 1, &[255]).unwrap()),
+                mode: OcrMode::Word,
+            },
+            FromWorker::NeedOcr {
+                job: 7,
+                page: 0,
+                pgm: Bytes(encode_pgm(1, 1, &[255]).unwrap()),
+                mode: OcrMode::ReadBest,
             },
             FromWorker::JobDone {
                 job: 7,
