@@ -1,9 +1,9 @@
 # STATE.md — ClientLedger
 
-**Current phase:** A02 — Pop-out document viewer (ADD-01; Next, after the A01 PR merges); then A03–A04; then P18
-**Status:** A01 built on `phase/A01-intake-folders`; PR open with auto-merge. P17 merged (PR #41). Engine PRs #168–#177 all merged; pin a88337e3
+**Current phase:** A03 — Local document reading engine (ADD-01; Next, after the A02 PR merges); then A04; then P18
+**Status:** A02 built on `phase/A02-popout-viewer`; PR open with auto-merge. A01 merged. Engine PRs #168–#177 all merged; pin a88337e3
 **Engine commit:** `a88337e3` (`main`, pinned 2026-10-25 after engine PR #177 (U-93, intake-settings-v1, migration 0232); before that `b483c02e` after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
-**Last updated:** 2026-10-25
+**Last updated:** 2026-10-26
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
 
 ## Phase board — beta track
@@ -60,8 +60,8 @@
 | Phase | Title | Tier | Status |
 | --- | --- | --- | --- |
 | A01 | Mapped intake folders, a setting of each company | M | Done 2026-10-26 (manual mapped-drive / UNC share check pending the owner) |
-| A02 | Pop-out document viewer | M | Next |
-| A03 | Local document reading engine | H | |
+| A02 | Pop-out document viewer | M | Done 2026-10-26 |
+| A03 | Local document reading engine | H | Next |
 | A04 | Review queue and compare tools | M | |
 | A05 | Match document drafts in the Bank Feed | M | After P26 |
 
@@ -210,6 +210,15 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 7. U-77 bank-file balance and U-78 reorder alerts proposed; U-37 and U-12 amended for Home.
 8. Home's Refresh issues many engine reads per data-bus event (one per reconciled account batch plus lanes); measure before P33 LAN mode.
 
+## Follow-ups from A02
+
+1. Screen readers don't see the pop-out window: eframe 0.37 connects AccessKit only to the main window (Q-A02n). Revisit on an eframe upgrade.
+2. eframe gives no monitor origin for a child window; placement assumes monitors side by side from the origin. A second-monitor user who docks and pops before dragging loses the saved place once per session (Q-A02c).
+3. No scenario for the viewer following a register item (needs a saved transaction with a file in the demo); shell and unit tests only.
+4. Untested edge cases: PDFium missing while popped out, a reloaded form getting a new document key (409), following a P06 popped-out tab.
+5. A TIFF page can briefly hold its decoded buffer and the RGBA copy together (up to 512 MiB at the limit); the viewer window's keymap copy refreshes only on a mode change; a popped P06 tab shows "open in its own window" for a document the viewer isn't showing.
+6. Write Check's Preview still opens the document tab (document-view.yaml depends on it).
+
 ## Follow-ups from A01
 
 1. **Owner manual check pending:** add a real mapped drive and a real UNC share (`\\server\share`) as intake folders, copy a PDF into each (appears within 15 s), New bill → original in `Processed\<year-month>\`, Discard → `Discarded\`, disconnect → "unreachable" without freezing, reconnect → recovers. Automated tests cover local folders live and shares through a simulated file system only.
@@ -267,6 +276,20 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-26 — A02 (ADD-01) complete on `phase/A02-popout-viewer`; PR with auto-merge. Shipped:
+  - Viewer formats: PDF (PDFium), JPG, PNG and multi-page TIFF (`tiff` 0.11, deflate/LZW/fax only; JPEG-in-TIFF refused before any decode, Q-A02k); zoom menu (fit page, fit width, %), rotate (view only, Q-A02b), pan, page thumbnails.
+  - Pop out / Dock (button and Ctrl+Shift+D): one deferred egui viewport (Q-A02a) that follows the active form or inbox item, titled with the form's name and the company stripe; placement and zoom remembered per OS user in `doc-viewer.json`, clamped to visible monitors, brought back beside the main window when its monitor is gone (Q-A02c); closing it never touches the form. F6 moves focus between form and viewer (Q-A02g).
+  - Viewer everywhere: Enter Bill, Write Check (docked pane), receipt inbox, document tab, and new attachments on card charges (draft linked after save, save waits for uploads, Q-A02e) and register items ("Show document", Q-A02f).
+  - Control channel drives a second window (`viewport: doc_viewer` on every step, `state.doc_viewer`, per-window screenshots).
+  - HEIC research (owner, Q-292): no permissive decoder; the "save as JPG or PDF" tip stays (Q-A02d).
+  Acceptance (addenda/ADD-01-document-intake.md A02):
+  - [x] Formats, zoom, rotate, pan, thumbnails (WP-A tests; document-view scenario).
+  - [x] Pop out / Dock, one reused window following the active form, title and stripe, placement and zoom remembered, closing never affects the form (shell tests incl. two Shells on one store for restart, Q-A02j; doc_viewer scenario).
+  - [x] F6 and Ctrl+Shift+D in the keymap, Window menu and KEYBOARD.md; keymap conflict test.
+  - [x] Every attachment: bills, checks, card charges, register items (scenarios bill, write_check, card_charge, register, receipt_inbox; contract test for draft files linking onto a saved record).
+  - [x] Tests: doc_viewer scenario (pop out, follow, dock, F6, rotate, page, placement move); gone-monitor clamp (seeded 20k-case loop).
+  Reviews: fresh-eyes review (2 blocking: a JPEG-in-TIFF memory bomb and card-charge files lost when Save beat an upload; 6 should-fix), ui-verifier (toolbar overflow in narrow panels, Bill card cut off, 200% pop-out clipping, a clipping check that missed it). All fixed in one fix pass except those listed in Follow-ups from A02. ui-checks doc_viewer, bill, write_check, card_charge, register, receipt_inbox and document-view pass light and dark.
+  Agents: architect/opus, impl/opus (WP-A, WP-B, WP-C, WP-D, fix pass), review/opus, ui-verifier/opus.
 - 2026-10-26 — A01 (ADD-01) complete on `phase/A01-intake-folders`; PR with auto-merge. Shipped:
   - Intake folders as a setting of each company, stored in the engine (U-93, engine PR #177, migration 0232, security-reviewed with 10 fixes) and carried by backups; transfer files drop them (`omitIntakeSettings` / `resetIntakeSettings`).
   - Preferences › Document intake (owner-only until P29): add with **Browse…** or a typed path, rename, remove, Test, kind, "Leave originals where they are", auto-read stored for A03/A04; each computer confirms a folder before it is watched (never archived).
@@ -298,4 +321,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   Reviews: process review of the plan (3 blocking items folded into PR-A), fresh-eyes review (AC1 live test missing + 3 should-fix, fixed), ui-verifier (4 must-fix, fixed, plus a harness zoom bug). Live contract suite 181/181 three times on b483c02e; scenarios bill (incl. 200%), receipt_inbox, statement_match, document-view, register, write_check pass light and dark. Help pages: enter-bill, receipt-inbox, statement-match, document-viewer. ADD-01 merged into the plan during the phase (A01–A04 next).
   Agents: scout/opus, architect/opus, process-review/opus, impl/opus (WP0–WP8, integration, fix passes), engine-impl/opus ×10, security-review/opus ×6, review/opus, ui-verifier/opus, docs-writer/sonnet.
 - 2026-10-25 — **ADD-01 added during the build** (between P17 and P26): mapped intake folders as a per-company setting, local document reading with no internet or AI required, review queue with compare tools, pop-out document viewer, Bank Feed matching of receipts. Phases A01–A05, decisions Q-279–Q-293, engine U-92 and U-93, checkpoint PR-A1. Completed phases unchanged; migration for P09/P17 behavior is in the addendum. IDs renumbered on apply (the bundle's Q-230–Q-244 and U-14/U-15 were taken); models per Q-294 (opus, stepping up when needed).
-- 2026-10-25 — Engine pin 7b267e48 → f3ce33fd (engine main with PRs #171 U-18, #172 U-82, #173 U-83–U-87, #174 U-89) on `chore/engine-pin-main`. Live capabilities: `idempotency-v1`, `run-due-filter-v1`, `ap-closing-v1`, `ap-edit-v1`, `bill-lines-v1`, `bill-terms-v1`, `bill-received-v1`, `idempotency-ap-v1`, `bill-ocr-v2`. Engine SEA rebuilt; api-spec fixtures refreshed; the engine's keyed routes are recorded (`idempotency_v1_routes.txt`, new `idempotency_ap_v1_routes.txt`); main keys only the 20 `idempotency-v1` routes, P17 adds the A/P ones gated on `idempotency-ap-v1`. Live contract suite 162 passed with `CL_API_REQUIRE_CAPS=idempotency-v1,run-due-filter-v1,tag-number-v1,dashboard-exact-v1,merge-closing-date-v1` (the U-18 tests run for real), offline binary 6 passed (`restart::engine_dies_after_commit_is_reconciled_as_committed` now expects the keyed re-send the engine replays). Catch-up questions hold only their own templates (U-82, Q-PR1d; new `run_due::filter_holds_only_the_asked_template_u82`). An archive made on 7b267e48 restores on f3ce33fd (verified by hand: content and trial balance equal, bills `billReceived: true`). Agents: rust-implementer/opus.
