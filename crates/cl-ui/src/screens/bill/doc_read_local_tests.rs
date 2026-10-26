@@ -100,6 +100,68 @@ fn with_document(link: &Arc<CompanyLink>, service: Option<Arc<ReadingService>>) 
     s
 }
 
+/// Reads until cancelled; says when it stopped.
+struct UntilCancelled(std::sync::mpsc::Sender<()>);
+
+impl Reader for UntilCancelled {
+    fn read(&mut self, _jobs: &[DocJob], _today: CalendarDate) -> Vec<JobOutcome> {
+        unreachable!("read through read_cancellable")
+    }
+
+    fn read_cancellable(
+        &mut self,
+        jobs: &[DocJob],
+        _today: CalendarDate,
+        cancel: &Arc<std::sync::atomic::AtomicBool>,
+    ) -> Vec<JobOutcome> {
+        let _ = self.0.send(());
+        while !cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let _ = self.0.send(());
+        jobs.iter()
+            .map(|_| JobOutcome::CouldNotRead(cl_host::CouldNotRead::Cancelled))
+            .collect()
+    }
+}
+
+/// Review S2: Cancel stops the reading with no message and the form keeps
+/// working; a new bill stops one still running.
+#[test]
+fn cancel_stops_reading_quietly() {
+    let (_d, link) = link();
+    let (tx, stopped) = std::sync::mpsc::channel();
+    let svc = Arc::new(ReadingService::start(Box::new(move || {
+        Some(Box::new(UntilCancelled(tx)) as Box<dyn Reader>)
+    })));
+    let mut s = with_document(&link, Some(Arc::clone(&svc)));
+    assert!(s.form_command(cl_model::CommandId::new("bill.read_local")));
+    assert!(s.read.local.busy());
+    stopped
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the reader started");
+    s.read.local.cancel_job();
+    stopped
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the reader stopped");
+    s.poll_read();
+    assert!(!s.read.local.busy());
+    assert_eq!(s.read.problem, None, "a cancel shows no message");
+    assert_eq!(s.state()["read"]["local"]["outcome"], "cancelled");
+    assert!(s.read.filled.is_none());
+    // The form still works, and a new reading can start.
+    assert!(s.form_command(cl_model::CommandId::new("bill.read_local")));
+    assert!(s.read.local.busy());
+    stopped
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the reader started again");
+    // A new bill stops it too.
+    s.new_bill(false);
+    stopped
+        .recv_timeout(Duration::from_secs(10))
+        .expect("stopped by the new bill");
+}
+
 fn writes(link: &Arc<CompanyLink>) -> u32 {
     link.demo_state().expect("demo").bills.writes
 }

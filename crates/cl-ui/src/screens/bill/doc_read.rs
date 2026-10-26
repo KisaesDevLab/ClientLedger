@@ -886,6 +886,14 @@ pub fn read_button(
         });
         if state.local.job.is_some() {
             form::progress_line(ui, tokens, &t("bill.read.local.reading"));
+            // A long scan can be stopped (review S2).
+            if ui
+                .button(t("bill.read.local.cancel"))
+                .on_hover_text(t("bill.read.local.cancel.tip"))
+                .clicked()
+            {
+                state.local.cancel_job();
+            }
         }
         if state.local.assist.is_some() {
             form::progress_line(ui, tokens, &t("bill.read.assist.reading"));

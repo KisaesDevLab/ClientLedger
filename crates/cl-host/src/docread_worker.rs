@@ -1063,6 +1063,25 @@ impl DocreadHost {
     /// in order.
     pub fn read(&mut self, jobs: &[DocJob], today: CalendarDate) -> Vec<JobOutcome> {
         self.cancel.store(false, Ordering::Relaxed);
+        self.read_jobs(jobs, today)
+    }
+
+    /// [`DocreadHost::read`] stopped by the caller's own flag, which is
+    /// never cleared here: a flag set before the read starts cancels it at
+    /// once (the reading service's Cancel, A03 review S2).
+    pub fn read_with_cancel(
+        &mut self,
+        jobs: &[DocJob],
+        today: CalendarDate,
+        cancel: Arc<AtomicBool>,
+    ) -> Vec<JobOutcome> {
+        let own = std::mem::replace(&mut self.cancel, cancel);
+        let out = self.read_jobs(jobs, today);
+        self.cancel = own;
+        out
+    }
+
+    fn read_jobs(&mut self, jobs: &[DocJob], today: CalendarDate) -> Vec<JobOutcome> {
         let n = jobs.len();
         let mut outcomes: Vec<Option<JobOutcome>> = vec![None; n];
         let mut queue: VecDeque<usize> = VecDeque::new();
