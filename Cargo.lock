@@ -963,6 +963,7 @@ dependencies = [
  "cl-automation",
  "cl-company",
  "cl-core",
+ "cl-docread",
  "cl-grid",
  "cl-host",
  "cl-import",

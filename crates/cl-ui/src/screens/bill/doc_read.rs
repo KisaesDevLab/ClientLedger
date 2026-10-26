@@ -390,6 +390,10 @@ pub(crate) fn doc_reading(r: &BillReading) -> DocReading {
             due_date: field("dueDate"),
             reference: field("vendorInvoiceNumber"),
             total: field("total"),
+            // The engine's reading has no confidence for these (A03 N6).
+            terms: None,
+            amount_paid: None,
+            payment: None,
         },
     }
 }
