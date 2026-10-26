@@ -47,8 +47,8 @@ use cl_api::{
 };
 use cl_company::intake::{
     FileError, HandledDir, Health, IntakeEngine, IntakeFile, ItemState, Listing, LocalIntake,
-    MigrateError, MigrationOutcome, MoveJob, PlannedMigration, ReadFile, RealFs, Snapshot,
-    WatchConfig, WatchHandle, check_path_syntax, run_migration,
+    MigrateError, MigrationOutcome, MoveJob, PlannedMigration, ReadFile, RealFs, SCAN_DEADLINE,
+    Snapshot, WatchConfig, WatchHandle, check_path_syntax, run_migration,
 };
 use cl_core::CalendarDate;
 use cl_core::ids::{IntakeFolderId, TenantId};
@@ -62,6 +62,12 @@ use eframe::egui::{self, Context};
 use super::service::{Upload, upload_of};
 use crate::company::{CompanyLink, Task};
 use crate::screens::preferences::intake_folders::{self, source};
+use writer::StateWriter;
+
+mod writer;
+
+/// How long a step that must read the saved state waits for the writer.
+const FLUSH_WAIT: Duration = Duration::from_secs(5);
 
 /// How often the folder list is read again from the engine.
 pub(crate) const ENGINE_REFRESH: Duration = Duration::from_secs(60);
@@ -283,18 +289,27 @@ impl Migration {
 
 /// The one copy in flight.
 enum Copy {
-    /// An `uploading` entry left from before: is its draft there?
+    /// An `uploading` entry left from before: is its draft there? (Each
+    /// attachment in the draft with its stored size.)
     Resolving {
         identity: FileIdentity,
-        task: Task<Option<AttachmentId>>,
+        task: Task<Vec<(AttachmentId, Option<u64>)>>,
     },
-    /// Reading the file on its folder's thread.
+    /// Reading the file on its folder's thread (given up after
+    /// [`SCAN_DEADLINE`]: a hung share never stalls the other folders).
     Reading {
         folder: IntakeFolderId,
         file: IntakeFile,
         rx: Receiver<Result<ReadFile, FileError>>,
         /// The `uploading` entry this read is for (its draft is reused).
         resume: Option<FileIdentity>,
+        started: Instant,
+    },
+    /// The `uploading` entry is on its way to disk (save number `saved`);
+    /// the upload is sent once it is there (D4).
+    Saving {
+        saved: u64,
+        upload: Box<PendingUpload>,
     },
     /// Uploading.
     Uploading {
@@ -302,6 +317,25 @@ enum Copy {
         size: u64,
         task: Task<Attachment>,
     },
+}
+
+/// An upload ready to send once its entry is saved.
+struct PendingUpload {
+    identity: FileIdentity,
+    draft: DraftKey,
+    key: IdempotencyKey,
+    name: String,
+    bytes: Vec<u8>,
+    size: u64,
+}
+
+/// How a delete in flight ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JobDone {
+    /// Linked, or the engine's copy deleted (or already gone).
+    Done,
+    /// The upload turned out to be on a saved record: not deleted.
+    OnRecord,
 }
 
 /// What a link or delete in flight is for.
@@ -317,7 +351,7 @@ enum JobKind {
 
 struct Job {
     kind: JobKind,
-    task: Task<()>,
+    task: Task<JobDone>,
 }
 
 /// A form opened with an arrival's draft: the form holds the claim, the
@@ -334,6 +368,29 @@ pub(crate) struct FormReady {
     pub attachment: AttachmentId,
 }
 
+/// Who confirmed a pinned root, ordered so the first to confirm it goes
+/// first; a confirmation without a time goes last, and the tenant id
+/// breaks a tie (never both companies paused, never both watching).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Claimant {
+    at: i64,
+    tenant: TenantId,
+}
+
+impl Claimant {
+    fn of(n: &HereNote, tenant: TenantId) -> Claimant {
+        Claimant {
+            at: n
+                .confirmed_at
+                .map_or(i64::MAX, cl_core::Timestamp::unix_millis),
+            tenant,
+        }
+    }
+}
+
+/// Uploads checked against the engine (attachment id, where it is).
+type Checked = Vec<(String, Upload)>;
+
 /// The folder list and the user's role, as read.
 type FoldersRead = Result<(source::Stored, Option<String>), ApiError>;
 
@@ -345,6 +402,8 @@ pub(crate) struct Intake {
     tenant: Option<TenantId>,
     company: String,
     store: Option<InboxStateStore>,
+    /// Saves `state` off the egui thread.
+    writer: Option<StateWriter>,
     state: InboxState,
     stage: Stage,
     group: Option<RequestGroup>,
@@ -359,12 +418,22 @@ pub(crate) struct Intake {
     /// Every folder, in the engine's order.
     pub runs: Vec<Run>,
     copy: Option<Copy>,
+    /// Each upload's idempotency key, kept with its file for the session
+    /// so a retry after an unknown outcome can't land twice (by path hash).
+    upload_keys: BTreeMap<String, (FileIdentity, IdempotencyKey)>,
     jobs: Vec<Job>,
-    reconcile: Option<Task<Vec<(String, Upload)>>>,
+    /// The check in flight, with the sweep ids it took (put back when it
+    /// fails).
+    reconcile: Option<(Vec<String>, Task<Checked>)>,
     reconciled: Option<Instant>,
     bus_seen: u64,
     /// Arrived uploads still to check after the company opened.
     sweep: Vec<String>,
+    /// A sweep request failed: the next waits until then.
+    sweep_after: Option<Instant>,
+    /// Folders whose thread didn't answer a read in time: no reads there
+    /// until then (a hung share).
+    slow_until: BTreeMap<IntakeFolderId, Instant>,
     claims: BTreeMap<String, Weak<()>>,
     /// Originals whose move is queued (by path hash).
     moving: BTreeSet<String>,
@@ -401,6 +470,7 @@ impl Intake {
             tenant: None,
             company: String::new(),
             store: None,
+            writer: None,
             state: InboxState::default(),
             stage: Stage::Idle,
             group: None,
@@ -412,11 +482,14 @@ impl Intake {
             role: None,
             runs: Vec::new(),
             copy: None,
+            upload_keys: BTreeMap::new(),
             jobs: Vec::new(),
             reconcile: None,
             reconciled: None,
             bus_seen: 0,
             sweep: Vec::new(),
+            sweep_after: None,
+            slow_until: BTreeMap::new(),
             claims: BTreeMap::new(),
             moving: BTreeSet::new(),
             retry_at: BTreeMap::new(),
@@ -572,6 +645,7 @@ impl Intake {
             Some(Copy::Resolving { identity, .. } | Copy::Uploading { identity, .. }) => {
                 key.matches(identity)
             }
+            Some(Copy::Saving { upload, .. }) => key.matches(&upload.identity),
             None => false,
         }
     }
@@ -602,6 +676,8 @@ impl Intake {
     // Company open and the folder list.
 
     fn reset_company(&mut self, link: &CompanyLink, tenant: Option<TenantId>) {
+        // Dropping the old writer writes what it still holds (bounded)
+        // before the file is read again.
         *self = Intake {
             watch_config: self.watch_config,
             demo_reseed: self.demo_reseed,
@@ -612,6 +688,7 @@ impl Intake {
             .map(|t| company_key(&t.to_string()))
             .unwrap_or_default();
         self.store = link.store().path().parent().map(InboxStateStore::in_dir);
+        self.writer = self.store.clone().map(StateWriter::spawn);
         self.state = self
             .store
             .as_ref()
@@ -626,12 +703,24 @@ impl Intake {
         };
     }
 
-    fn save_state(&self) {
-        if let Some(store) = &self.store
-            && let Err(e) = store.save(&self.state)
+    /// Queues the state to be saved (off the egui thread, A01 review S8);
+    /// the save's number, `None` without a store.
+    fn save_state(&self) -> Option<u64> {
+        self.writer.as_ref().map(|w| w.save(self.state.clone()))
+    }
+
+    /// True once save number `n` is on disk.
+    fn saved(&self, n: u64) -> bool {
+        self.writer.as_ref().is_none_or(|w| w.written() >= n)
+    }
+
+    /// Waits (bounded) until every queued save is on disk: before anything
+    /// else reads or writes the file.
+    pub(crate) fn flush_state(&self) {
+        if let Some(w) = &self.writer
+            && !w.flush(FLUSH_WAIT)
         {
-            // R6: dedupe then holds for this session only.
-            tracing::warn!(error = %e, "could not save the intake inbox state");
+            tracing::warn!("the intake inbox state is still being saved");
         }
     }
 
@@ -671,6 +760,8 @@ impl Intake {
             self.stage = Stage::Running;
             return;
         }
+        // The migration reads and writes the state file itself.
+        self.flush_state();
         self.migration = Migration::Running;
         let local = PrefsLocal {
             store: link.store().clone(),
@@ -792,6 +883,7 @@ impl Intake {
             self.fallback = still_set;
         }
         // The migration moved P17 entries in the state file.
+        self.flush_state();
         self.state = self
             .store
             .as_ref()
@@ -878,23 +970,24 @@ impl Intake {
             .map(|r| r.prefs.intake_here.clone())
             .unwrap_or_default();
         // Pinned roots other companies on this computer confirmed, with
-        // when (the later-confirmed company pauses, Q-A01i).
-        let mut others: BTreeMap<String, Option<i64>> = BTreeMap::new();
+        // who goes first (the later-confirmed company pauses, Q-A01i).
+        let mut others: BTreeMap<String, Claimant> = BTreeMap::new();
         for r in recent.live().filter(|r| r.tenant_id != tenant) {
             for n in r.prefs.intake_here.values() {
                 if n.canonical_key.is_empty() {
                     continue;
                 }
-                let at = n.confirmed_at.map(cl_core::Timestamp::unix_millis);
+                let c = Claimant::of(n, r.tenant_id);
                 others
                     .entry(n.canonical_key.clone())
-                    .and_modify(|e| *e = (*e).min(at))
-                    .or_insert(at);
+                    .and_modify(|e| *e = (*e).min(c))
+                    .or_insert(c);
             }
         }
         let app_dirs = Self::app_dirs(link);
         let dirs: Vec<&Path> = app_dirs.iter().map(PathBuf::as_path).collect();
         let mut old: Vec<Run> = std::mem::take(&mut self.runs);
+        let mut stopped: Vec<IntakeFolderId> = Vec::new();
         for f in &folders {
             let mut run = match old.iter().position(|r| r.folder.id == f.id) {
                 Some(i) => old.swap_remove(i),
@@ -912,14 +1005,12 @@ impl Intake {
                 .get(&f.id)
                 .filter(|n| n.path_hash == cl_settings::path_hash(&f.path));
             run.since_ms = note.and_then(|n| n.since_ms);
+            // Exactly one company goes first, also when both were
+            // confirmed at the same moment (A01 review S1).
             let mapped = note.is_some_and(|n| {
-                others.get(&n.canonical_key).is_some_and(|other_at| {
-                    let ours = n.confirmed_at.map(cl_core::Timestamp::unix_millis);
-                    match (*other_at, ours) {
-                        (Some(o), Some(m)) => o <= m,
-                        _ => true,
-                    }
-                })
+                others
+                    .get(&n.canonical_key)
+                    .is_some_and(|first| *first < Claimant::of(n, tenant))
             });
             let want = match note {
                 None => Err(Health::NotConfirmed),
@@ -932,6 +1023,8 @@ impl Intake {
                 Ok(w) => {
                     run.blocked = None;
                     if run.watched.as_ref() != Some(&w) || run.watch.is_none() {
+                        // Moves queued on the old watcher go with it.
+                        stopped.push(f.id);
                         run.snapshot = None;
                         run.watch = Some(WatchHandle::spawn_with(
                             f.id,
@@ -944,6 +1037,9 @@ impl Intake {
                     }
                 }
                 Err(h) => {
+                    if run.watch.is_some() {
+                        stopped.push(f.id);
+                    }
                     run.blocked = Some(h);
                     run.watch = None;
                     run.watched = None;
@@ -953,7 +1049,11 @@ impl Intake {
             self.runs.push(run);
         }
         // Folders no longer listed: their watchers stop as `old` drops.
+        stopped.extend(old.iter().map(|r| r.folder.id));
         drop(old);
+        // Their queued moves are gone: queue them again on the next drive
+        // (A01 review S2).
+        self.forget_moves(&stopped);
         if self.folders.is_none() {
             // First read since the company opened: check every upload that
             // waits for the owner, paced (D4 "full sweep").
@@ -1023,6 +1123,7 @@ impl Intake {
             Some(Copy::Resolving { identity, .. } | Copy::Uploading { identity, .. }) => {
                 Some(identity.clone())
             }
+            Some(Copy::Saving { upload, .. }) => Some(upload.identity.clone()),
             Some(Copy::Reading { resume, .. }) => resume.clone(),
             None => None,
         }
@@ -1030,6 +1131,13 @@ impl Intake {
 
     fn run_of(&self, folder: Option<IntakeFolderId>) -> Option<&Run> {
         folder.and_then(|id| self.runs.iter().find(|r| r.folder.id == id))
+    }
+
+    /// False while `run`'s thread is held up by a read that timed out.
+    fn answering(&self, run: &Run, now: Instant) -> bool {
+        self.slow_until
+            .get(&run.folder.id)
+            .is_none_or(|t| now >= *t)
     }
 
     fn due(&self, path_hash: &str, now: Instant) -> bool {
@@ -1112,6 +1220,19 @@ impl Intake {
         }
     }
 
+    /// The moves queued on the watchers of `folders` are gone with them:
+    /// their entries are driven again.
+    fn forget_moves(&mut self, folders: &[IntakeFolderId]) {
+        if folders.is_empty() {
+            return;
+        }
+        for e in self.state.entries(&self.company) {
+            if e.folder.is_some_and(|id| folders.contains(&id)) {
+                self.moving.remove(&e.file.path_hash);
+            }
+        }
+    }
+
     fn deleting(&self, file: &FileIdentity) -> bool {
         self.jobs
             .iter()
@@ -1134,6 +1255,14 @@ impl Intake {
                 continue;
             };
             match d.result {
+                // Can't move as things stand (`Processed` isn't a folder, a
+                // name too long): the folder shows it and the file stays,
+                // never offered again as new (review nit).
+                Err(_) if d.denied => {
+                    self.move_failures += 1;
+                    self.retry_at.insert(d.file.path_hash.clone(), now + RETRY);
+                    tracing::warn!("an intake file can't be moved; it stays in place");
+                }
                 Ok(_) | Err(FileError::Gone | FileError::Changed | FileError::NotAFile) => {
                     let moved = d.result.is_ok();
                     if entry.status == EntryStatus::Discarding {
@@ -1179,7 +1308,9 @@ impl Intake {
             .iter()
             .filter(|e| e.status == EntryStatus::Uploading && self.due(&e.file.path_hash, now))
             .find_map(|e| {
-                let run = self.run_of(e.folder).filter(|r| r.watched())?;
+                let run = self
+                    .run_of(e.folder)
+                    .filter(|r| r.watched() && self.answering(r, now))?;
                 let f = run.listing()?.files.iter().find(|f| {
                     f.state == ItemState::Ready
                         && e.file.matches(&path_hash(&f.path), f.size, f.modified_ms)
@@ -1195,7 +1326,11 @@ impl Intake {
             return;
         }
         let mut best: Option<(i64, IntakeFolderId, IntakeFile)> = None;
-        for run in self.runs.iter().filter(|r| r.watched()) {
+        for run in self
+            .runs
+            .iter()
+            .filter(|r| r.watched() && self.answering(r, now))
+        {
             let Some(listing) = run.listing() else {
                 continue;
             };
@@ -1240,14 +1375,16 @@ impl Intake {
             file,
             rx,
             resume,
+            started: Instant::now(),
         });
     }
 
     fn start_resolve(&mut self, link: &CompanyLink, identity: FileIdentity, draft: DraftKey) {
         if let Some(demo) = link.demo_state() {
             let found = crate::company::demo::checks::attachments(&demo, AttachTo::Draft(draft))
-                .first()
-                .map(|a| a.id);
+                .iter()
+                .map(|a| (a.id, a.file_size))
+                .collect();
             drop(demo);
             self.copy = Some(Copy::Resolving {
                 identity,
@@ -1263,7 +1400,7 @@ impl Intake {
                 .attachments()
                 .list(AttachTo::Draft(draft), PageRequest::first_max())
                 .await?;
-            Ok(page.data.first().map(|a| a.id))
+            Ok(page.data.iter().map(|a| (a.id, a.file_size)).collect())
         }) {
             self.copy = Some(Copy::Resolving {
                 identity,
@@ -1279,12 +1416,26 @@ impl Intake {
         match copy {
             Copy::Resolving { identity, mut task } => match task.try_take() {
                 None => self.copy = Some(Copy::Resolving { identity, task }),
-                Some(Ok(Some(a))) => {
-                    self.state
-                        .arrived(&self.company, &identity, &a.to_string(), now_ms());
-                    self.save_state();
+                // Only a whole copy counts (A01 review S4).
+                Some(Ok(found)) if found.iter().any(|(_, s)| *s == Some(identity.size)) => {
+                    let a = found
+                        .iter()
+                        .find(|(_, s)| *s == Some(identity.size))
+                        .map(|(a, _)| *a);
+                    if let Some(a) = a {
+                        self.state
+                            .arrived(&self.company, &identity, &a.to_string(), now_ms());
+                        self.upload_keys.remove(&identity.path_hash);
+                        self.save_state();
+                    }
                 }
-                Some(Ok(None)) => {
+                Some(Ok(found)) => {
+                    if !found.is_empty() {
+                        // Only a short copy is there: the next upload gets a
+                        // fresh key, so the engine stores it anew.
+                        self.problem = Some("inbox.upload.mismatch");
+                        self.upload_keys.remove(&identity.path_hash);
+                    }
                     // Not there: read the file again and send it into the
                     // same draft.
                     let target = self
@@ -1313,18 +1464,37 @@ impl Intake {
                 file,
                 rx,
                 resume,
+                started,
             } => match rx.try_recv() {
+                Err(TryRecvError::Empty)
+                    if now.saturating_duration_since(started) >= SCAN_DEADLINE =>
+                {
+                    // A hung share: give up on this file for a while and
+                    // let the other folders go on (A01 review S5). A late
+                    // answer goes nowhere.
+                    tracing::debug!("an intake file took too long to read; trying later");
+                    self.retry_at.insert(path_hash(&file.path), now + RETRY);
+                    self.slow_until.insert(folder, now + RETRY);
+                }
                 Err(TryRecvError::Empty) => {
                     self.copy = Some(Copy::Reading {
                         folder,
                         file,
                         rx,
                         resume,
+                        started,
                     });
                 }
                 Err(TryRecvError::Disconnected) => {}
                 Ok(r) => self.read_done(link, folder, &file, resume, r, now),
             },
+            Copy::Saving { saved, upload } => {
+                if self.saved(saved) {
+                    self.send_upload(link, *upload, now);
+                } else {
+                    self.copy = Some(Copy::Saving { saved, upload });
+                }
+            }
             Copy::Uploading {
                 identity,
                 size,
@@ -1399,7 +1569,13 @@ impl Intake {
                 DraftKey::new()
             }
         };
-        let key = IdempotencyKey::new();
+        // The same file sent again this session keeps its key: after an
+        // unknown outcome the engine answers the first upload instead of
+        // storing a second one (A01 review S3).
+        let key = match self.upload_keys.get(&identity.path_hash) {
+            Some((same, k)) if *same == identity => k.clone(),
+            _ => IdempotencyKey::new(),
+        };
         // Saved before the upload is sent (D4).
         if !self.state.begin_upload(
             &self.company,
@@ -1410,10 +1586,38 @@ impl Intake {
         ) {
             return;
         }
-        self.save_state();
-        let name = file.name.clone();
-        let bytes = read.bytes;
-        let size = read.size;
+        self.upload_keys
+            .insert(identity.path_hash.clone(), (identity.clone(), key.clone()));
+        let upload = PendingUpload {
+            identity,
+            draft,
+            key,
+            name: file.name.clone(),
+            size: read.size,
+            bytes: read.bytes,
+        };
+        match self.save_state() {
+            // The upload goes once the entry is on disk.
+            Some(saved) => {
+                self.copy = Some(Copy::Saving {
+                    saved,
+                    upload: Box::new(upload),
+                });
+            }
+            None => self.send_upload(link, upload, now),
+        }
+    }
+
+    /// Sends an upload whose `uploading` entry is saved.
+    fn send_upload(&mut self, link: &CompanyLink, upload: PendingUpload, now: Instant) {
+        let PendingUpload {
+            identity,
+            draft,
+            key,
+            name,
+            bytes,
+            size,
+        } = upload;
         if let Some(mut demo) = link.demo_state() {
             let r = crate::company::demo::checks::upload(
                 &mut demo,
@@ -1459,7 +1663,6 @@ impl Intake {
             }
         }
     }
-
     fn upload_done(
         &mut self,
         identity: &FileIdentity,
@@ -1471,12 +1674,15 @@ impl Intake {
             Ok(a) if a.file_size == Some(size) && a.attachable_type == "draft" => {
                 self.state
                     .arrived(&self.company, identity, &a.id.to_string(), now_ms());
+                self.upload_keys.remove(&identity.path_hash);
                 self.save_state();
                 self.problem = None;
             }
             Ok(_) => {
                 // The engine didn't store the whole file: send it again
-                // later (the draft is resolved first).
+                // later (the draft is resolved first), under a fresh key
+                // so the short copy isn't answered again.
+                self.upload_keys.remove(&identity.path_hash);
                 self.problem = Some("inbox.upload.mismatch");
                 self.retry_at
                     .insert(identity.path_hash.clone(), now + RETRY);
@@ -1611,7 +1817,10 @@ impl Intake {
         };
         let p = group
             .write(&session, label, move |s| async move {
-                s.attachments().link(attachment, to, key).await
+                s.attachments()
+                    .link(attachment, to, key)
+                    .await
+                    .map(|()| JobDone::Done)
             })
             .map_err(|_| "inbox.upload.failed")?;
         self.jobs.push(Job {
@@ -1659,15 +1868,8 @@ impl Intake {
                 _ => {
                     // A duplicate has no copy in the engine: it is only
                     // hidden (the original stays where it is).
-                    if let Some(x) = self
-                        .state
-                        .companies
-                        .get_mut(&self.company)
-                        .and_then(|l| l.iter_mut().find(|x| x.file == *entry))
-                    {
-                        x.status = EntryStatus::Kept;
-                        x.linked = false;
-                    }
+                    self.state
+                        .set_status(&self.company, entry, EntryStatus::Kept);
                     self.save_state();
                 }
             }
@@ -1689,12 +1891,24 @@ impl Intake {
         if self.deleting(&entry) {
             return;
         }
+        // Only a copy still on its draft is deleted: one a saved bill or
+        // check holds (saved before the inbox noticed, or an older entry
+        // after the upgrade) stays with it (A01 review B1).
         if let Some(mut demo) = link.demo_state() {
-            crate::company::demo::checks::delete_attachment(&mut demo, a);
+            let done = match crate::company::demo::checks::find_attachment(&demo, a) {
+                Some(found) if upload_of(&found.attachable_type) != Upload::Draft => {
+                    JobDone::OnRecord
+                }
+                Some(_) => {
+                    crate::company::demo::checks::delete_attachment(&mut demo, a);
+                    JobDone::Done
+                }
+                None => JobDone::Done,
+            };
             drop(demo);
             self.jobs.push(Job {
                 kind: JobKind::Delete(entry, keep),
-                task: Task::ready(()),
+                task: Task::ready(done),
             });
             return;
         }
@@ -1707,8 +1921,16 @@ impl Intake {
             key: Some(key.clone()),
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
+            match s.attachments().get(a).await {
+                Ok(found) if upload_of(&found.attachable_type) != Upload::Draft => {
+                    return Ok(JobDone::OnRecord);
+                }
+                Ok(_) => {}
+                Err(ApiError::NotFound { .. }) => return Ok(JobDone::Done),
+                Err(e) => return Err(e),
+            }
             match s.attachments().delete(a, key).await {
-                Ok(()) | Err(ApiError::NotFound { .. }) => Ok(()),
+                Ok(()) | Err(ApiError::NotFound { .. }) => Ok(JobDone::Done),
                 Err(e) => Err(e),
             }
         }) {
@@ -1716,6 +1938,16 @@ impl Intake {
                 kind: JobKind::Delete(entry, keep),
                 task: Task::Pending(p),
             });
+        }
+    }
+
+    /// Forgets that the bytes of upload `attachment` were copied in.
+    fn forget_seen(&mut self, attachment: &str) {
+        if let Some(s) = self.state.seen.get_mut(&self.company) {
+            s.retain(|f| f.attachment != attachment);
+            if s.is_empty() {
+                self.state.seen.remove(&self.company);
+            }
         }
     }
 
@@ -1755,8 +1987,8 @@ impl Intake {
             };
             let job = self.jobs.swap_remove(i);
             match (job.kind, r) {
-                (JobKind::LinkRecord(entry), Ok(())) => self.handled(&entry),
-                (JobKind::LinkDraft(entry, draft, kind), Ok(())) => {
+                (JobKind::LinkRecord(entry), Ok(_)) => self.handled(&entry),
+                (JobKind::LinkDraft(entry, draft, kind), Ok(_)) => {
                     if let Some(e) = self
                         .state
                         .companies
@@ -1780,13 +2012,35 @@ impl Intake {
                         });
                     }
                 }
-                (JobKind::Delete(entry, keep), Ok(())) => {
+                (JobKind::Delete(entry, keep), Ok(JobDone::Done)) => {
+                    // Its bytes were discarded: the same file saved again
+                    // is new, not "same as a file copied on…" (review nit).
+                    let attachment = self
+                        .state
+                        .entry(&self.company, &entry)
+                        .and_then(|e| e.attachment().map(str::to_owned));
+                    if let Some(a) = attachment {
+                        self.forget_seen(&a);
+                    }
                     if keep {
                         self.state
                             .set_status(&self.company, &entry, EntryStatus::Kept);
                     } else {
                         self.state.remove(&self.company, &entry);
                     }
+                    self.save_state();
+                }
+                (JobKind::Delete(entry, keep), Ok(JobDone::OnRecord)) => {
+                    // A saved record holds it: handled, not deleted. The
+                    // original (already in `Discarded/` unless the folder
+                    // keeps it) is left where it is.
+                    let next = if keep {
+                        EntryStatus::Kept
+                    } else {
+                        EntryStatus::Linked
+                    };
+                    self.state.set_status(&self.company, &entry, next);
+                    self.problem = Some("inbox.discard.on_record");
                     self.save_state();
                 }
                 (JobKind::LinkRecord(_) | JobKind::LinkDraft(..), Err(e)) => {
@@ -1817,12 +2071,14 @@ impl Intake {
             .reconciled
             .is_none_or(|t| now.duration_since(t) >= RECONCILE_EVERY);
         let mut ids: Vec<String> = Vec::new();
+        let mut swept: Vec<String> = Vec::new();
         if !self.claims.is_empty() && (bus_moved || timer) {
             ids.extend(self.claims.keys().cloned());
         }
-        if ids.is_empty() && !self.sweep.is_empty() {
+        if ids.is_empty() && !self.sweep.is_empty() && self.sweep_after.is_none_or(|t| now >= t) {
             let n = self.sweep.len().min(SWEEP_BATCH);
-            ids.extend(self.sweep.drain(..n));
+            swept.extend(self.sweep.drain(..n));
+            ids.extend(swept.iter().cloned());
         }
         if ids.is_empty() {
             return;
@@ -1841,13 +2097,14 @@ impl Intake {
                 })
                 .collect();
             drop(demo);
-            self.reconcile = Some(Task::ready(checked));
+            self.reconcile = Some((swept, Task::ready(checked)));
             return;
         }
         let (Some(session), Some(group)) = (link.session(), self.group.as_ref()) else {
+            self.unsweep(swept);
             return;
         };
-        if let Ok(p) = group.read(&session, move |s| async move {
+        let started = group.read(&session, move |s| async move {
             let mut out = Vec::with_capacity(ids.len());
             for id in ids {
                 let u = match AttachmentId::parse(&id) {
@@ -1861,23 +2118,41 @@ impl Intake {
                 out.push((id, u));
             }
             Ok(out)
-        }) {
-            self.reconcile = Some(Task::Pending(p));
+        });
+        match started {
+            Ok(p) => self.reconcile = Some((swept, Task::Pending(p))),
+            Err(_) => self.unsweep(swept),
         }
     }
 
-    fn poll_reconcile(&mut self) {
-        let Some(r) = self.reconcile.as_mut().and_then(Task::try_take) else {
+    /// Puts uploads taken for a check back at the front of the sweep.
+    fn unsweep(&mut self, mut ids: Vec<String>) {
+        ids.append(&mut self.sweep);
+        self.sweep = ids;
+    }
+
+    fn poll_reconcile(&mut self, now: Instant) {
+        let Some(r) = self.reconcile.as_mut().and_then(|(_, t)| t.try_take()) else {
             return;
         };
-        self.reconcile = None;
+        let swept = self.reconcile.take().map(|(s, _)| s).unwrap_or_default();
+        self.reconcile_done(swept, r, now);
+    }
+
+    /// A check came back: `swept` are the sweep's uploads it took.
+    fn reconcile_done(&mut self, swept: Vec<String>, r: Result<Checked, ApiError>, now: Instant) {
         let checked = match r {
             Ok(c) => c,
             Err(e) => {
+                // The uploads it took are checked again later, never
+                // skipped (A01 review B1).
                 tracing::debug!(error = %e, "intake uploads could not be checked; retrying later");
+                self.unsweep(swept);
+                self.sweep_after = Some(now + RETRY);
                 return;
             }
         };
+        self.sweep_after = None;
         let mut changed = false;
         for (id, u) in checked {
             let entry = self
@@ -2105,7 +2380,7 @@ pub(crate) fn tick_service(
     s.poll_copy(link, now);
     s.next_copy(link, now);
     s.drive(link, now);
-    s.poll_reconcile();
+    s.poll_reconcile(now);
     s.start_reconcile(link, now);
 }
 

@@ -7,7 +7,7 @@
 # which the migration turns into "Receipts", with a PNG, the same PNG again
 # and a late PDF written in two halves 3 s apart. Files are copied in once
 # they stayed the same for two looks 5 s apart (the watcher looks every
-# 10 s, and after 5 s while something settles), so the late file shows as
+# 8 s, and after 5 s while something settles), so the late file shows as
 # settling first. All data is synthetic.
 name: receipt_inbox
 description: Intake inbox - migrated folder, settling then copied, HEIC, 11 MB and duplicate rows, filter, TIFF note, Discard, New check with the arrival draft, Add to a check (Processed) and to a bill in a keep-originals folder, Set up chip, Home line, 200%.

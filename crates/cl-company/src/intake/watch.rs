@@ -2,9 +2,10 @@
 //! folder, polling (no watcher crate passes the licence rule, and polling
 //! behaves the same on SMB and cloud folders).
 //!
-//! - Looks every [`POLL`] (10 s), and again after [`SETTLE_RECHECK`] (5 s)
+//! - Looks every [`POLL`] (8 s), and again after [`SETTLE_RECHECK`] (5 s)
 //!   while a file is settling, so a file saved at `t` is first seen by
-//!   `t + 10 s` and ready by `t + 15 s`.
+//!   `t + 8 s` and ready by `t + 13 s`: copied in within AC1's 15 s (A01
+//!   review S7; Q-A01d had 10 s, which made 15 s the earliest *ready*).
 //! - A look that takes over [`SLOW_SCAN`] doubles the interval (up to a
 //!   minute) and shows [`Health::Slow`].
 //! - A failure is shown only after two in a row (sync pauses flap); the
@@ -39,7 +40,9 @@ use super::scan::{Listing, STABLE_FOR, Stability, scan};
 use super::{FileError, Health, ReadFile};
 
 /// How often a folder is looked at.
-pub const POLL: Duration = Duration::from_secs(10);
+pub const POLL: Duration = Duration::from_secs(8);
+/// The first retry after a failure (then doubled up to [`MAX_INTERVAL`]).
+pub const BACKOFF: Duration = Duration::from_secs(10);
 /// How soon a folder is looked at again while a file settles.
 pub const SETTLE_RECHECK: Duration = Duration::from_secs(5);
 /// How long one call on a folder may run before it is "not responding".
@@ -82,7 +85,7 @@ impl Default for WatchConfig {
             slow: SLOW_SCAN,
             max_interval: MAX_INTERVAL,
             repin_every: REPIN_EVERY,
-            backoff: POLL,
+            backoff: BACKOFF,
         }
     }
 }
@@ -908,7 +911,7 @@ mod tests {
     }
 
     /// AC1 timing with a fake clock: a file saved at any moment between
-    /// two looks is first seen within 10 s and ready within 15 s.
+    /// two looks is first seen within 8 s and ready within 13 s.
     #[test]
     fn arrival_timing_with_a_fake_clock() {
         let c = WatchConfig::default();
@@ -940,6 +943,7 @@ mod tests {
                 let ready = ready_at.expect("ready").saturating_sub(written);
                 assert!(seen <= POLL, "seen after {seen:?}");
                 assert!(ready <= POLL + SETTLE_RECHECK, "ready after {ready:?}");
+                assert!(ready <= Duration::from_secs(13), "ready after {ready:?}");
             }
         }
     }

@@ -152,8 +152,11 @@ impl EntryStatus {
     /// - uploading → arrived (the upload is there), or back to duplicate
     ///   (Copy anyway that was never sent);
     /// - arrived → linked, discarding, kept;
-    /// - duplicate → uploading (Copy anyway), discarding;
-    /// - linked, discarding and kept are only left by removing the entry.
+    /// - duplicate → uploading (Copy anyway), discarding, kept (hidden in a
+    ///   folder that keeps its originals);
+    /// - discarding → linked or kept: the upload turned out to be on a
+    ///   saved record, so it is not deleted (A01 review B1);
+    /// - linked and kept are only left by removing the entry.
     #[must_use]
     pub fn can_become(self, next: EntryStatus) -> bool {
         use EntryStatus::{Arrived, Discarding, Duplicate, Kept, Linked, Uploading};
@@ -162,7 +165,8 @@ impl EntryStatus {
                 (self, next),
                 (Uploading, Arrived | Duplicate)
                     | (Arrived, Linked | Discarding | Kept)
-                    | (Duplicate, Uploading | Discarding)
+                    | (Duplicate, Uploading | Discarding | Kept)
+                    | (Discarding, Linked | Kept)
             )
     }
 
@@ -1012,6 +1016,9 @@ mod tests {
             (Arrived, Kept),
             (Duplicate, Uploading),
             (Duplicate, Discarding),
+            (Duplicate, Kept),
+            (Discarding, Linked),
+            (Discarding, Kept),
         ];
         for from in all {
             for to in all {
