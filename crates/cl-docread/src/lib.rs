@@ -14,6 +14,7 @@
 //! | [`fields`], [`kind`] | WP-A (step 9) | [`pipeline`] |
 //! | [`lines`], [`validate`] | WP-A (step 10) | [`pipeline`] |
 //! | [`vendor_match`], [`card`], [`templates`], [`dupes`], [`ai_gate`] | WP-A (step 11) | the desktop (WP-G), A04 |
+//! | [`register_match`], [`correct`] | A04 WP-R (step 4) | the desktop (A04 F2), A05 |
 //! | [`tsv`], [`ocr_geom`] | WP-B (step 5) | the worker |
 //! | `pdf_text`, `preprocess` (feature `worker`) | WP-B (steps 4, 5) | the worker |
 //!
@@ -39,6 +40,7 @@ pub mod protocol;
 pub mod ai_gate;
 pub mod amount;
 pub mod card;
+pub mod correct;
 pub mod dates;
 pub mod dupes;
 pub mod fields;
@@ -51,6 +53,7 @@ pub mod pdf_text;
 pub mod pipeline;
 #[cfg(feature = "worker")]
 pub mod preprocess;
+pub mod register_match;
 pub mod templates;
 pub mod tsv;
 pub mod validate;

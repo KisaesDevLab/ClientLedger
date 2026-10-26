@@ -9,9 +9,12 @@
 mod common;
 
 use cl_core::CalendarDate;
-use cl_docread::model::{Reader, WordSource};
-use cl_docread::protocol::{JobFailure, JobHint, MAX_DOCUMENT_BYTES};
-use cl_host::{CouldNotRead, DocJob, DocreadConfig, DocreadHost, JobOutcome, OcrTools};
+use cl_docread::model::{Bbox, Reader, Spot, WordSource};
+use cl_docread::protocol::{JobFailure, JobHint, MAX_DOCUMENT_BYTES, centre_in};
+use cl_host::{
+    CouldNotRead, DocJob, DocreadConfig, DocreadHost, JobOutcome, OcrTools, RegionJob,
+    RegionOutcome,
+};
 use common::{Scratch, pdf, pdfium_present};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -44,6 +47,16 @@ fn junk() -> DocJob {
 }
 
 const UNSUPPORTED: JobOutcome = JobOutcome::Failed(JobFailure::UnsupportedType);
+
+/// Held by the timing-sensitive hard-cap test and by the tesseract region
+/// tests (A04), so the OCR load doesn't run beside the hard cap's clock.
+static HEAVY: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn heavy() -> std::sync::MutexGuard<'static, ()> {
+    HEAVY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 /// Scratch folders and child records left in the docread folder (the
 /// empty `.pids` folder itself stays).
@@ -185,6 +198,7 @@ fn the_memory_watchdog_stops_a_worker_over_its_limit() {
 /// read and the next one is.
 #[test]
 fn a_huge_allocation_is_stopped_by_the_hard_cap() {
+    let _heavy = heavy();
     let s = Scratch::new("docread-hard-cap");
     let mut c = config(&s);
     // A slow watchdog: the cap must act on its own.
@@ -493,4 +507,215 @@ fn a_page_lying_on_its_side_is_turned_and_read() {
     assert!(b.height() > b.width(), "{b:?}");
     // Read once sideways, once turned.
     assert_eq!(host.stats().ocr_pages, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Region re-read (protocol version 4, A04 D4, T12)
+// ---------------------------------------------------------------------------
+
+fn region(bytes: Vec<u8>, page: u16, b: (u16, u16, u16, u16)) -> RegionJob {
+    RegionJob {
+        bytes,
+        region: Spot {
+            page,
+            bbox: Bbox::new(b.0, b.1, b.2, b.3).unwrap(),
+        },
+    }
+}
+
+fn region_texts(o: &RegionOutcome) -> Vec<String> {
+    match o {
+        RegionOutcome::Words(p) => p.words.iter().map(|w| w.text.clone()).collect(),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_region_under_one_percent_or_past_the_pages_is_refused_without_a_worker() {
+    let s = Scratch::new("docread-region-refused");
+    let mut host = DocreadHost::new(config(&s));
+    for job in [
+        region(text_pdf(), 0, (0, 0, 99, 5_000)),
+        region(text_pdf(), 0, (0, 0, 5_000, 99)),
+        region(text_pdf(), 10, (0, 0, 5_000, 5_000)),
+    ] {
+        assert_eq!(host.read_region(&job, today()), RegionOutcome::Refused);
+    }
+    assert_eq!(host.stats().workers_started, 0);
+    // Plain refusals as for a whole read.
+    assert_eq!(
+        host.read_region(&region(Vec::new(), 0, (0, 0, 500, 500)), today()),
+        RegionOutcome::Failed(JobFailure::Empty)
+    );
+    assert_eq!(
+        host.read_region(&region(b"junk".to_vec(), 0, (0, 0, 500, 500)), today()),
+        RegionOutcome::Failed(JobFailure::UnsupportedType)
+    );
+    // A page past the document's end fails in the worker, plainly.
+    if pdfium_present() {
+        assert_eq!(
+            host.read_region(&region(text_pdf(), 3, (0, 0, 500, 500)), today()),
+            RegionOutcome::Failed(JobFailure::Unreadable)
+        );
+    }
+    assert_eq!(host.stats().kills, 0);
+}
+
+#[test]
+fn a_region_reply_with_words_outside_the_box_kills_the_worker() {
+    let s = Scratch::new("docread-region-lie");
+    let mut host = DocreadHost::new(config(&s));
+    let lie = region(
+        b"%CL-TEST-HOOK:region-lie\n".to_vec(),
+        0,
+        (0, 0, 1_000, 1_000),
+    );
+    let out = host.read_region(&lie, today());
+    assert_eq!(out, RegionOutcome::CouldNotRead(CouldNotRead::BadReply));
+    assert_eq!(host.stats().kills, 2);
+    // The same reply to a whole read is fine: only a region job is held to
+    // words in its box.
+    let out = host.read(&[hook("region-lie")], today());
+    assert!(matches!(out[0], JobOutcome::Read(_)), "{out:?}");
+}
+
+#[test]
+fn a_worker_of_another_protocol_version_is_not_used() {
+    let s = Scratch::new("docread-region-version");
+    let mut c = config(&s);
+    c.limits.ready = Duration::from_secs(5);
+    c.test_env = vec![("CL_DOCREAD_TEST_READY".into(), "old".into())];
+    let mut host = DocreadHost::new(c);
+    let started = Instant::now();
+    let out = host.read_region(&region(junk().bytes, 0, (0, 0, 500, 500)), today());
+    assert_eq!(out, RegionOutcome::CouldNotRead(CouldNotRead::Unavailable));
+    // Refused on the version, not on the start-up deadline.
+    assert!(
+        started.elapsed() < Duration::from_secs(9),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn a_region_of_a_text_pdf_answers_with_its_words_only() {
+    if !pdfium_present() {
+        eprintln!("PDFium missing: skipped");
+        return;
+    }
+    let s = Scratch::new("docread-region-text");
+    let mut host = DocreadHost::new(config(&s));
+    // The first line ("Widget 0 2 x 3.00 6.00") sits 22-35 pt down of 792.
+    let job = region(text_pdf(), 0, (0, 200, 10_000, 480));
+    let out = host.read_region(&job, today());
+    let texts = region_texts(&out);
+    assert_eq!(texts, ["Widget", "0", "2", "x", "3.00", "6.00"]);
+    let RegionOutcome::Words(p) = &out else {
+        unreachable!()
+    };
+    assert_eq!(p.source, WordSource::TextLayer);
+    assert!(p.words.iter().all(|w| centre_in(job.region.bbox, w.bbox)));
+    // A box over 90 % both ways is the page's words.
+    let out = host.read_region(&region(text_pdf(), 0, (0, 0, 10_000, 10_000)), today());
+    assert!(region_texts(&out).len() >= 150);
+    assert_eq!(host.stats().ocr_pages, 0);
+}
+
+/// Text in a PDF drawn with matrix `m`.
+fn drawn(m: &str, x: i32, y: i32, size: i32, s: &str) -> String {
+    format!("BT /F1 {size} Tf {m} {x} {y} Tm ({s}) Tj ET\n")
+}
+
+/// The box's words through tesseract (T12): `None` when tesseract or
+/// `PDFium` is missing.
+fn ocr_region(
+    name: &str,
+    page: &str,
+    b: (u16, u16, u16, u16),
+) -> Option<(Vec<String>, cl_host::DocreadStats)> {
+    let (Some(tools), true) = (ocr_tools(), pdfium_present()) else {
+        eprintln!("tesseract or PDFium missing: skipped");
+        return None;
+    };
+    let _heavy = heavy();
+    let s = Scratch::new(name);
+    let mut c = config(&s);
+    c.ocr = Some(tools);
+    let mut host = DocreadHost::new(c);
+    let mut bytes = b"%CL-TEST-HOOK:force-ocr\n".to_vec();
+    bytes.extend_from_slice(&pdf::build(&[page.to_string()]));
+    let out = host.read_region(&region(bytes, 0, b), today());
+    let texts = region_texts(&out);
+    assert_eq!(leftovers(&s), 0);
+    Some((texts, host.stats()))
+}
+
+#[test]
+fn a_region_of_a_scan_is_cut_out_and_read() {
+    let page = pdf::text(72, 600, 24, "INVOICE") + &pdf::text(300, 500, 24, "Total 544.82");
+    // "544.82" is near x 360-440 pt, its capitals 476-500 pt up: the box
+    // holds the amount, not the label or the title.
+    let Some((texts, stats)) =
+        ocr_region("docread-region-scan", &page, (5_500, 3_400, 8_000, 4_300))
+    else {
+        return;
+    };
+    assert_eq!(texts, ["544.82"], "tesseract read {texts:?}");
+    // A read of the cut-out only (orientation asked, not a page read).
+    assert_eq!(stats.ocr_pages, 1);
+}
+
+#[test]
+fn a_region_of_a_quarter_turned_scan_is_turned_then_read() {
+    let mut page = String::new();
+    let turn = "0 1 -1 0";
+    page += &drawn(turn, 80, 72, 22, "INVOICE Riverbend Electric Co.");
+    for i in 0..14 {
+        page += &drawn(
+            turn,
+            130 + i * 30,
+            72,
+            16,
+            &format!("Install receptacles kitchen {i} hours 72.17 288.68"),
+        );
+    }
+    page += &drawn(turn, 570, 300, 18, "Total 544.82");
+    // The turned total: x 552-570 pt of 612, 300-420 pt up of 792.
+    let Some((texts, _)) = ocr_region("docread-region-turned", &page, (8_700, 4_500, 9_700, 6_400))
+    else {
+        return;
+    };
+    assert!(
+        texts.iter().any(|t| t == "544.82"),
+        "tesseract read {texts:?}"
+    );
+    assert!(!texts.iter().any(|t| t == "Riverbend"), "{texts:?}");
+}
+
+#[test]
+fn a_region_of_a_skewed_scan_is_levelled_then_read() {
+    // Every line turned 3 degrees anticlockwise, as a crooked scan.
+    let skew = "0.9986 0.0523 -0.0523 0.9986";
+    let mut page = drawn(skew, 72, 720, 22, "INVOICE Riverbend Electric Co.");
+    for i in 0..18 {
+        page += &drawn(
+            skew,
+            72,
+            660 - i * 24,
+            14,
+            &format!("Install receptacles kitchen {i} hours 72.17 288.68"),
+        );
+    }
+    page += &drawn(skew, 380, 140, 18, "Total 544.82");
+    // The total: x 380-500 pt, rising about 6 pt over its length,
+    // 140-166 pt up of 792.
+    let Some((texts, _)) = ocr_region("docread-region-skew", &page, (5_800, 7_600, 8_800, 8_500))
+    else {
+        return;
+    };
+    assert!(
+        texts.iter().any(|t| t == "544.82"),
+        "tesseract read {texts:?}"
+    );
+    assert!(!texts.iter().any(|t| t == "288.68"), "{texts:?}");
 }

@@ -14,10 +14,10 @@
 //! still yields a reading the desktop accepts.
 
 use crate::model::{
-    Check, CheckCode, DocKind, MAX_CHECKS, PageSummary, PageWords, Reader, Reading, RuleId,
-    Template, WordSource,
+    Bbox, Check, CheckCode, DocKind, MAX_CHECKS, PageSummary, PageWords, Reader, Reading, RuleId,
+    Spot, Template, WordSource,
 };
-use crate::protocol::JobHint;
+use crate::protocol::{JobHint, centre_in};
 use crate::{fields, kind, layout, lines, templates, validate};
 use cl_core::CalendarDate;
 
@@ -134,6 +134,64 @@ pub fn read(input: &ReadInput<'_>) -> Reading {
         layout::map_spots(&mut r, |page, b| layout::unlevel(b, slope_of(page)));
     }
     r
+}
+
+/// A region re-read's answer (protocol version 4, A04 D4): only `page`'s
+/// words whose centre lies in `region`, no fields, lines, checks,
+/// fingerprint or template. No rules run on it.
+#[must_use]
+pub fn region_reading(page: &PageWords, page_count: u16, region: Bbox) -> Reading {
+    let words = region_words(page, region);
+    let mut r = Reading::empty(
+        match page.source {
+            WordSource::Ocr => Reader::Ocr,
+            WordSource::TextLayer => Reader::TextPdf,
+        },
+        page_count,
+    );
+    r.pages = vec![PageSummary {
+        page: page.page,
+        source: Some(page.source),
+        words: u32::try_from(words.words.len()).unwrap_or(u32::MAX),
+    }];
+    r.words = vec![words];
+    r
+}
+
+/// `page` with only the words whose centre lies in `region`, in their
+/// order.
+#[must_use]
+pub fn region_words(page: &PageWords, region: Bbox) -> PageWords {
+    PageWords {
+        page: page.page,
+        aspect: page.aspect,
+        source: page.source,
+        words: page
+            .words
+            .iter()
+            .filter(|w| centre_in(region, w.bbox))
+            .cloned()
+            .collect(),
+    }
+}
+
+/// Whether a reading is a region re-read's answer for `region`: nothing
+/// but at most one page of words, on the region's page, every word's
+/// centre inside the box (the host's check on the worker's reply).
+#[must_use]
+pub fn is_region_reading(r: &Reading, region: Spot) -> bool {
+    r.header == crate::model::Header::default()
+        && r.lines.is_empty()
+        && r.checks.is_empty()
+        && r.fingerprint.is_none()
+        && r.template.is_none()
+        && r.kind == DocKind::Unknown
+        && r.words.len() <= 1
+        && r.pages.len() <= 1
+        && r.pages.iter().all(|p| p.page == region.page)
+        && r.words.iter().all(|p| {
+            p.page == region.page && p.words.iter().all(|w| centre_in(region.bbox, w.bbox))
+        })
 }
 
 fn page_check(code: CheckCode, page: Option<u16>) -> Check {
