@@ -1697,7 +1697,19 @@ mod tests {
             c
         };
         cmd.stdout(Stdio::null());
-        (exe.clone(), cmd.spawn().unwrap())
+        // A test thread forking at the same moment can still hold the copy's
+        // write handle; Linux then refuses to run it ("Text file busy").
+        let mut tries = 0;
+        let child = loop {
+            match cmd.spawn() {
+                Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 50 => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                other => break other.unwrap(),
+            }
+        };
+        (exe.clone(), child)
     }
 
     #[test]
