@@ -115,9 +115,11 @@ pub fn clean_turned(page: &GrayImage, quarters: i32) -> Cleaned {
                 FilterType::Triangle,
             );
         }
+        flatten_light(&mut image);
         return Cleaned { image, transform };
     }
-    let image = warp(&image, &transform);
+    let mut image = warp(&image, &transform);
+    flatten_light(&mut image);
     Cleaned { image, transform }
 }
 
@@ -398,6 +400,55 @@ pub fn skew_mdeg(image: &GrayImage) -> i32 {
     best
 }
 
+/// Even out the light: divide every pixel by the paper's brightness around
+/// it (a large-window maximum of a small copy), so shade and a grey cast
+/// become white paper and only the ink stays dark. Tesseract reads a
+/// shaded photo as a picture otherwise.
+pub fn flatten_light(image: &mut GrayImage) {
+    let (w, h) = image.dimensions();
+    if w < 32 || h < 32 {
+        return;
+    }
+    // About 1/8 of the size; the window spans a few text lines.
+    let (sw, sh) = ((w / 8).max(4), (h / 8).max(4));
+    let small = image::imageops::resize(image, sw, sh, FilterType::Triangle);
+    let r = (sw.min(sh) / 40).max(2);
+    let max_pass = |src: &GrayImage, horizontal: bool| {
+        GrayImage::from_fn(sw, sh, |x, y| {
+            let mut m = 0u8;
+            let (lo, hi) = if horizontal {
+                (x.saturating_sub(r), (x + r).min(sw - 1))
+            } else {
+                (y.saturating_sub(r), (y + r).min(sh - 1))
+            };
+            for v in lo..=hi {
+                let p = if horizontal {
+                    src.get_pixel(v, y)
+                } else {
+                    src.get_pixel(x, v)
+                };
+                m = m.max(p.0[0]);
+            }
+            image::Luma([m])
+        })
+    };
+    let bg = max_pass(&max_pass(&small, true), false);
+    let bg = image::imageops::blur(&bg, 2.0);
+    let raw = bg.as_raw();
+    let (kx, ky) = (f64::from(sw) / f64::from(w), f64::from(sh) / f64::from(h));
+    for (x, y, p) in image.enumerate_pixels_mut() {
+        let b = f64::from(bilinear(
+            raw,
+            sw,
+            sh,
+            (f64::from(x) + 0.5) * kx - 0.5,
+            (f64::from(y) + 0.5) * ky - 0.5,
+        ))
+        .max(48.0);
+        let v = (f64::from(p.0[0]) * 255.0 / b).round().clamp(0.0, 255.0);
+        p.0[0] = v as u8;
+    }
+}
 /// Resample `src` (the original page) into the OCR image `t` describes:
 /// every OCR pixel's centre mapped back to the page, bilinear, white
 /// outside the page. A large reduction first shrinks the page smoothly.
@@ -620,6 +671,21 @@ mod tests {
         // A scan (white to the edges) has no sheet to find.
         assert!(sheet(&turned(&page, 2.0, 255, 0)).is_none());
         assert!(sheet(&GrayImage::new(8, 8)).is_none());
+    }
+
+    #[test]
+    fn shade_is_flattened_to_white_paper_and_ink_stays_dark() {
+        // Paper falling from 200 to 110 left to right, ink at 30 % of it.
+        let mut img = GrayImage::from_fn(400, 300, |x, y| {
+            let paper = 200.0 - 90.0 * f64::from(x) / 400.0;
+            let ink = y % 40 < 5 && x % 50 < 30;
+            image::Luma([(if ink { paper * 0.3 } else { paper }) as u8])
+        });
+        flatten_light(&mut img);
+        for x in [10, 200, 390] {
+            assert!(img.get_pixel(x + 5, 20).0[0] >= 235, "paper at {x}");
+            assert!(img.get_pixel(x.min(379), 2).0[0] <= 110, "ink at {x}");
+        }
     }
 
     #[test]
