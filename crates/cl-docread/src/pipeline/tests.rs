@@ -248,8 +248,9 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
     /// T10 (AC3, M7): injected inconsistent totals, with and without a
-    /// template. Every output amount is a printed one, the printed total
-    /// is kept, and a check names each inconsistency.
+    /// template, on bills and card receipts. Every output amount is a
+    /// printed one, the printed total is kept, and a check names each
+    /// inconsistency.
     #[test]
     fn t10_inconsistent_totals_are_flagged_never_adjusted(
         lines in prop::collection::vec((1_i64..20, 1_i64..100_000), 1..5),
@@ -257,19 +258,27 @@ proptest! {
         sub_delta in prop_oneof![Just(0_i64), -300_i64..300],
         delta in prop_oneof![-5_000_i64..-1, 1_i64..5_000],
         with_template in any::<bool>(),
+        receipt in any::<bool>(),
     ) {
+        let card = |mut d: Doc| {
+            if receipt {
+                d.text(500, 9000, "VISA ************4821");
+            }
+            d
+        };
         let templates: Vec<Template> = if with_template {
             let (good, _) = inconsistent(&[(1, 500)], 41, 0, 0, "RB-1001");
-            let pages = good.pages();
+            let pages = card(good).pages();
             let r = read(&input(&pages, &[]));
             vec![templates::learn(&r).unwrap()]
         } else {
             Vec::new()
         };
         let (doc, total) = inconsistent(&lines, tax, sub_delta, delta, "RB-2002");
-        let pages = doc.pages();
+        let pages = card(doc).pages();
         let r = read(&input(&pages, &templates));
         prop_assert_eq!(r.reader == Reader::Template, with_template);
+        prop_assert_eq!(r.kind == DocKind::CardCharge, receipt);
         prop_assert!(every_amount_is_printed(&r).is_ok(), "{:?}", every_amount_is_printed(&r));
         prop_assert_eq!(r.header.total.as_ref().map(|t| t.value), Money::parse_wire(&total).ok());
         prop_assert!(r.checks.iter().any(|c| c.code == CheckCode::SubtotalTaxVsTotal));

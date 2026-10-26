@@ -87,18 +87,12 @@ pub fn read(input: &ReadInput<'_>) -> Reading {
     let matched = fingerprint
         .as_ref()
         .and_then(|f| templates::best_match(f, input.templates));
-    // Templates never read receipts (plan D3, WP-A2): a register receipt's
-    // length and lines change with every sale, so a saved region would
-    // win over the rules with a stale value. The rules decide the kind.
-    let rules = fields::extract(&layout, pages, None, input.today);
-    let receipt = kind::classify(&rules.header, &rules.signals, input.hint).0 != DocKind::Bill;
-    let matched = matched.filter(|_| !receipt);
+    // Any kind of document may use its vendor's template, receipts too: a
+    // labelled field's region follows its label's line (a register
+    // receipt grows with every sale), and each field falls back to the
+    // rules on validity only (M7).
     let template = matched.map(|i| &input.templates[i]);
-
-    let extracted = match template {
-        Some(t) => fields::extract(&layout, pages, Some(t), input.today),
-        None => rules,
-    };
+    let extracted = fields::extract(&layout, pages, template, input.today);
     checks.extend(extracted.checks);
     let (kind, kind_confidence) = kind::classify(&extracted.header, &extracted.signals, input.hint);
     if kind == DocKind::Unknown {

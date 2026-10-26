@@ -18,7 +18,7 @@ use crate::dates;
 use crate::fields::{self, clean_id, phone_in, terms_days};
 use crate::layout::{Layout, center2_x, join, union};
 use crate::model::{
-    Bbox, Check, ColumnBand, ColumnKind, DocKind, FieldName, Fingerprint, Found, Header, LineTable,
+    Bbox, Check, ColumnBand, ColumnKind, FieldName, Fingerprint, Found, Header, LineTable,
     MAX_FINGERPRINT_TOKENS, MAX_TEMPLATE_FIELDS, MAX_TEXT_CHARS, MAX_WORD_CHARS, PageWords,
     Reading, RuleId, Spot, Template, TemplateField, Terms, Word,
 };
@@ -363,14 +363,11 @@ fn region_words(page: &PageWords, region: Bbox) -> Vec<&Word> {
 }
 
 /// A template learned from an accepted reading (the owner's corrected
-/// values with the spots of the matching words). `None` for a receipt
-/// (any kind but a bill), without a fingerprint or without any field.
+/// values with the spots of the matching words), of any kind (a vendor's
+/// recurring receipts learn one too). `None` without a fingerprint or
+/// without any field.
 #[must_use]
 pub fn learn(reading: &Reading) -> Option<Template> {
-    // Never from a receipt: the pipeline never applies one to a receipt.
-    if reading.kind != DocKind::Bill {
-        return None;
-    }
     // Regions are learned on the levelled page, as the pipeline applies
     // them (a turned picture's words are levelled before the rules run).
     let slopes: Vec<i32> = reading
@@ -722,14 +719,21 @@ mod tests {
             CalendarDate::from_ymd(2026, 8, 2).unwrap()
         );
 
-        // Templates never read receipts: none is learned from one, and a
-        // bill's template is not applied to the same vendor's card receipt.
-        let mut receipt = second.clone();
-        receipt.text(500, 9000, "VISA ************4821");
-        let pages3 = receipt.pages();
-        let input = |templates: &[Template]| {
+        // Receipts use templates too: one is learned from a card receipt,
+        // and the vendor's template reads its next receipt, which stays a
+        // card charge (the rules decide the kind).
+        let receipt = |reference: &str, total: &str, extra_line: bool| {
+            let mut lines = vec![("Tarp", "2", "10.00", "20.00")];
+            if extra_line {
+                lines.push(("Rope", "1", "5.00", "5.00"));
+            }
+            let mut d = invoice(reference, "08/02/2026", &lines, "", "", total);
+            d.text(500, 9000, "VISA ************4821");
+            d.pages()
+        };
+        let input = |pages: &[PageWords], templates: &[Template]| {
             read(&ReadInput {
-                pages: &pages3,
+                pages,
                 page_count: 1,
                 unread_pages: &[],
                 templates,
@@ -737,12 +741,23 @@ mod tests {
                 today: today(),
             })
         };
-        let rr = input(&[]);
-        assert_eq!(rr.kind, crate::model::DocKind::CardCharge);
-        assert!(learn(&rr).is_none());
-        let with = input(std::slice::from_ref(&t));
-        assert!(with.template.is_none());
-        assert_ne!(with.reader, crate::model::Reader::Template);
+        let first_receipt = input(&receipt("RB-2001", "20.00", false), &[]);
+        assert_eq!(first_receipt.kind, crate::model::DocKind::CardCharge);
+        let rt = learn(&first_receipt).expect("a receipt's template");
+        // The next receipt is a line longer: its total moved down a row and
+        // is still read from the template, next to its label.
+        let next = input(&receipt("RB-2002", "25.00", true), std::slice::from_ref(&rt));
+        assert_eq!(next.kind, crate::model::DocKind::CardCharge);
+        assert_eq!(next.reader, crate::model::Reader::Template);
+        assert_eq!(next.template, Some(0));
+        let total = next.header.total.unwrap();
+        assert_eq!(total.value, cl_core::Money::parse_wire("25.00").unwrap());
+        assert_eq!(total.rule.as_str(), "template");
+        assert_eq!(next.header.reference.unwrap().value, "RB-2002");
+        // A bill's template applies to the same vendor's card receipt.
+        let with = input(&receipt("RB-2003", "20.00", false), std::slice::from_ref(&t));
+        assert_eq!(with.template, Some(0));
+        assert_eq!(with.kind, crate::model::DocKind::CardCharge);
     }
 
     #[test]
