@@ -218,8 +218,13 @@ impl PopoutShared {
         for s in pressed {
             match self.route(s) {
                 Route::Ignore => continue,
+                // A key the viewer doesn't act on stays with the window's
+                // buttons (A04: Enter is `viewer.fill_word`, and Enter on a
+                // focused Dock button must still dock).
                 Route::Viewer(id) => {
-                    let _ = self.viewer.command(id);
+                    if !self.viewer.command(id) {
+                        continue;
+                    }
                 }
                 Route::BackToForm => {
                     self.back_to_form = true;
