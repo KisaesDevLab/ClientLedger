@@ -2,7 +2,9 @@
 //!
 //! `cl-automation` receives requests on a loopback socket; this module answers
 //! them on the UI thread, between frames. It exists only when the app was
-//! started with `--control`. Nothing here runs otherwise.
+//! started with `--control`. Nothing here runs otherwise, except
+//! [`report_overflow`], which widgets call every frame: it keeps one pass's
+//! notes and nothing reads them without the control channel.
 //!
 //! How it works: an egui plugin sees every frame's raw input and output. It
 //! feeds scheduled events (clicks, keys, text) into the input and keeps the

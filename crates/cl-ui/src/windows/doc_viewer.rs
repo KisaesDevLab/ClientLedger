@@ -223,6 +223,13 @@ impl PopoutShared {
                 }
                 Route::BackToForm => {
                     self.back_to_form = true;
+                    // The viewer lets go of the keyboard in its window too,
+                    // so it no longer counts as focused (review S5).
+                    ctx.memory_mut(|m| {
+                        if let Some(f) = m.focused() {
+                            m.surrender_focus(f);
+                        }
+                    });
                     ctx.send_viewport_cmd_to(ViewportId::ROOT, ViewportCommand::Focus);
                 }
                 Route::Dock => self.dock_req = true,
