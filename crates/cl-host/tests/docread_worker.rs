@@ -449,3 +449,48 @@ fn a_scanned_page_is_read_by_tesseract_with_a_scrubbed_environment() {
     let left = leftovers(&s);
     assert_eq!(left, 0, "per-page and worker folders are removed");
 }
+
+/// Text turned a quarter turn anticlockwise (reads bottom to top).
+fn turned_text(x: i32, y: i32, size: i32, s: &str) -> String {
+    format!("BT /F1 {size} Tf 0 1 -1 0 {x} {y} Tm ({s}) Tj ET\n")
+}
+
+#[test]
+fn a_page_lying_on_its_side_is_turned_and_read() {
+    let (Some(tools), true) = (ocr_tools(), pdfium_present()) else {
+        eprintln!("tesseract or PDFium missing: skipped");
+        return;
+    };
+    let s = Scratch::new("docread-osd");
+    let mut c = config(&s);
+    c.ocr = Some(tools);
+    let mut host = DocreadHost::new(c);
+    let mut page = turned_text(80, 72, 22, "INVOICE Riverbend Electric Co.");
+    for i in 0..14 {
+        page += &turned_text(
+            130 + i * 30,
+            72,
+            16,
+            &format!("Install receptacles kitchen {i} hours 72.17 288.68"),
+        );
+    }
+    page += &turned_text(570, 300, 18, "Total 544.82");
+    let mut bytes = b"%CL-TEST-HOOK:force-ocr\n".to_vec();
+    bytes.extend_from_slice(&pdf::build(&[page]));
+    let out = host.read(&[doc(bytes)], today());
+    let JobOutcome::Read(r) = &out[0] else {
+        panic!("{:?}", out[0])
+    };
+    let words = &r.words[0].words;
+    let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
+    assert!(
+        texts.contains(&"544.82") && texts.contains(&"Riverbend"),
+        "tesseract read {texts:?}"
+    );
+    // Words map back onto the page as it is shown: the turned total sits
+    // in a narrow, tall box.
+    let b = words.iter().find(|w| w.text == "544.82").unwrap().bbox;
+    assert!(b.height() > b.width(), "{b:?}");
+    // Read once sideways, once turned.
+    assert_eq!(host.stats().ocr_pages, 2);
+}

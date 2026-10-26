@@ -30,7 +30,7 @@ use std::io::{Read, Write};
 
 /// Protocol version the worker announces in `Ready`; the host refuses any
 /// other (worker and host ship together).
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Largest document (plan §5 "Large"): 10 MiB.
 pub const MAX_DOCUMENT_BYTES: usize = 10 * 1024 * 1024;
@@ -172,6 +172,18 @@ impl fmt::Debug for Tsv {
     }
 }
 
+/// What the host runs tesseract for (protocol version 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OcrMode {
+    /// Read the words (TSV).
+    #[default]
+    Read,
+    /// Report the page's orientation (`--psm 0`): a quarter-turned page
+    /// whose first read came back poor.
+    Orient,
+}
+
 /// Why OCR of a page failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -197,8 +209,15 @@ pub enum FromWorker {
     /// Work on a page began (the host's per-page clock starts).
     PageStarted { job: JobId, page: u16 },
     /// Please OCR this page: an 8-bit binary PGM (`P5`, at most
-    /// [`MAX_PGM_WIDTH`] × [`MAX_PGM_HEIGHT`], maxval 255).
-    NeedOcr { job: JobId, page: u16, pgm: Bytes },
+    /// [`MAX_PGM_WIDTH`] × [`MAX_PGM_HEIGHT`], maxval 255). With
+    /// [`OcrMode::Orient`] the answer's text is tesseract's orientation
+    /// report, not TSV (version 2).
+    NeedOcr {
+        job: JobId,
+        page: u16,
+        pgm: Bytes,
+        mode: OcrMode,
+    },
     /// The job is finished.
     JobDone { job: JobId, reading: Box<Reading> },
     /// The job could not be read.
@@ -462,6 +481,7 @@ mod tests {
                 job: 7,
                 page: 0,
                 pgm: Bytes(encode_pgm(2, 1, &[0, 255]).unwrap()),
+                mode: OcrMode::Orient,
             },
             FromWorker::JobDone {
                 job: 7,
@@ -496,6 +516,7 @@ mod tests {
             job: 1,
             page: 0,
             pgm: Bytes(vec![0; 100]),
+            mode: OcrMode::Read,
         };
         let mut buf = Vec::new();
         assert!(matches!(
@@ -603,6 +624,7 @@ mod tests {
             job: u32::MAX,
             page: u16::MAX,
             pgm: Bytes(pgm),
+            mode: OcrMode::Read,
         };
         let mut buf = Vec::new();
         write_frame(&mut buf, &msg, MAX_FROM_WORKER_FRAME).unwrap();

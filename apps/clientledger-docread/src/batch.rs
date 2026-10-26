@@ -12,7 +12,7 @@ use cl_docread::pdf_text::MIN_TEXT_QUALITY_BP;
 use cl_docread::preprocess;
 use cl_docread::protocol::{
     BatchOptions, FromWorker, Job, JobFailure, JobId, MAX_BATCH_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES,
-    MAX_JOBS_PER_BATCH, MAX_TEMPLATES, OcrFailure, Tsv,
+    MAX_JOBS_PER_BATCH, MAX_TEMPLATES, OcrFailure, OcrMode, Tsv,
 };
 use cl_docread::tsv;
 use cl_docread::{ReadInput, read};
@@ -46,7 +46,13 @@ pub trait Io {
     ///
     /// # Errors
     /// The pipe broke or the host answered out of order.
-    fn ocr(&mut self, job: JobId, page: u16, pgm: Vec<u8>) -> Result<OcrAnswer, Fatal>;
+    fn ocr(
+        &mut self,
+        job: JobId,
+        page: u16,
+        pgm: Vec<u8>,
+        mode: OcrMode,
+    ) -> Result<OcrAnswer, Fatal>;
 }
 
 /// What a job needs besides its own bytes.
@@ -254,6 +260,11 @@ fn page_words(page: u16, aspect: u32, source: WordSource, words: Vec<Word>) -> P
 
 /// Clean the page, ask the host for OCR, map the words back to the page.
 /// `None` when the page could not be read.
+///
+/// A poor first read (few confident words) may be a page lying on its
+/// side or upside down: the host then reports tesseract's orientation,
+/// and a quarter-turned page is cleaned and read again; the better read
+/// is kept (plan R2).
 fn ocr_page(
     io: &mut dyn Io,
     job: JobId,
@@ -261,10 +272,50 @@ fn ocr_page(
     grey: &GrayImage,
 ) -> Result<Option<Vec<Word>>, Fatal> {
     let cleaned = preprocess::clean(grey);
+    let first = ocr_cleaned(io, job, page, &cleaned)?;
+    let first_score = first.as_deref().map_or(0, read_score);
+    if first.is_none() || first_score >= GOOD_READ {
+        return Ok(first);
+    }
+    let Some(quarters) = orientation(io, job, page, &cleaned)? else {
+        return Ok(first);
+    };
+    let turned = preprocess::clean_turned(grey, quarters);
+    let second = ocr_cleaned(io, job, page, &turned)?;
+    Ok(match second {
+        Some(w) if read_score(&w) > first_score => Some(w),
+        _ => first,
+    })
+}
+
+/// Confident words (at least two letters or digits, confidence ≥ 60 %)
+/// at or above which a read is not second-guessed.
+const GOOD_READ: usize = 12;
+/// Tesseract's orientation confidence needed to turn a page.
+const MIN_ORIENT_CONFIDENCE_CENTI: u32 = 200;
+
+/// Confident words in a read.
+fn read_score(words: &[Word]) -> usize {
+    words
+        .iter()
+        .filter(|w| {
+            w.confidence.bp() >= 6_000
+                && w.text.chars().filter(|c| c.is_alphanumeric()).count() >= 2
+        })
+        .count()
+}
+
+/// OCR one cleaned page; `None` when it could not be read.
+fn ocr_cleaned(
+    io: &mut dyn Io,
+    job: JobId,
+    page: u16,
+    cleaned: &preprocess::Cleaned,
+) -> Result<Option<Vec<Word>>, Fatal> {
     let Ok(pgm) = preprocess::to_pgm(&cleaned.image) else {
         return Ok(None);
     };
-    let tsv = match io.ocr(job, page, pgm)? {
+    let tsv = match io.ocr(job, page, pgm, OcrMode::Read)? {
         OcrAnswer::Tsv(t) => t,
         OcrAnswer::Failed(reason) => {
             eprintln!("docread: outcome: ocr failed ({})", ocr_reason(reason));
@@ -287,6 +338,30 @@ fn ocr_page(
     ))
 }
 
+/// The quarter turns (clockwise) tesseract's orientation pass says the
+/// cleaned page needs, added to any turn already applied; `None` when it
+/// is upright, unsure, or the pass failed.
+fn orientation(
+    io: &mut dyn Io,
+    job: JobId,
+    page: u16,
+    cleaned: &preprocess::Cleaned,
+) -> Result<Option<i32>, Fatal> {
+    let Ok(pgm) = preprocess::to_pgm(&cleaned.image) else {
+        return Ok(None);
+    };
+    let OcrAnswer::Tsv(report) = io.ocr(job, page, pgm, OcrMode::Orient)? else {
+        return Ok(None);
+    };
+    let Some((rotate, confidence)) = tsv::parse_orientation(&report.0) else {
+        return Ok(None);
+    };
+    if rotate == 0 || confidence < MIN_ORIENT_CONFIDENCE_CENTI {
+        return Ok(None);
+    }
+    let already = (cleaned.transform.rotation_mdeg + 45_000).div_euclid(90_000);
+    Ok(Some(already + i32::from(rotate / 90)))
+}
 fn ocr_reason(r: OcrFailure) -> &'static str {
     match r {
         OcrFailure::Unavailable => "unavailable",
@@ -331,13 +406,17 @@ pub(crate) mod tests {
     use crate::test_pdf::{Page, build, text};
     use cl_core::CalendarDate;
     use cl_docread::model::Reader;
-    use cl_docread::protocol::{Bytes, JobHint, validate_pgm};
+    use cl_docread::protocol::{Bytes, JobHint, OcrMode, validate_pgm};
 
     /// A host stand-in: records frames, answers OCR with `answer`.
     pub(crate) struct FakeHost {
         pub sent: Vec<FromWorker>,
+        /// Read calls (orientation calls are in `orient_calls`).
         pub ocr_calls: Vec<(u16, u32, u32)>,
         pub answer: Box<dyn FnMut(u32, u32) -> OcrAnswer>,
+        pub orient_calls: Vec<(u32, u32)>,
+        /// The orientation report (upright by default).
+        pub orient: String,
     }
 
     impl FakeHost {
@@ -346,6 +425,8 @@ pub(crate) mod tests {
                 sent: Vec::new(),
                 ocr_calls: Vec::new(),
                 answer: Box::new(answer),
+                orient_calls: Vec::new(),
+                orient: "Rotate: 0\nOrientation confidence: 9.00\n".into(),
             }
         }
 
@@ -365,8 +446,18 @@ pub(crate) mod tests {
             self.sent.push(msg.clone());
             Ok(())
         }
-        fn ocr(&mut self, _job: JobId, page: u16, pgm: Vec<u8>) -> Result<OcrAnswer, Fatal> {
+        fn ocr(
+            &mut self,
+            _job: JobId,
+            page: u16,
+            pgm: Vec<u8>,
+            mode: OcrMode,
+        ) -> Result<OcrAnswer, Fatal> {
             let (w, h) = validate_pgm(&pgm).map_err(|_| Fatal::Protocol)?;
+            if mode == OcrMode::Orient {
+                self.orient_calls.push((w, h));
+                return Ok(OcrAnswer::Tsv(Tsv(self.orient.clone())));
+            }
             self.ocr_calls.push((page, w, h));
             Ok((self.answer)(w, h))
         }
@@ -459,6 +550,66 @@ pub(crate) mod tests {
         let (_, ow, _) = host.ocr_calls[0];
         let png = decode::decode_image(&fixture("receipt.png")).unwrap();
         assert!(ow >= png.width());
+    }
+
+    /// TSV of `n` confident words across the image.
+    fn words(n: u32, w: u32, h: u32) -> OcrAnswer {
+        let mut s = String::from(
+            "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n",
+        );
+        for i in 0..n {
+            s.push_str(&format!(
+                "5\t1\t1\t1\t{}\t1\t{}\t{}\t{}\t{}\t95\tWord{i}\n",
+                i + 1,
+                w / 10,
+                (h / 40) * (i + 1),
+                w / 5,
+                h / 60
+            ));
+        }
+        OcrAnswer::Tsv(Tsv(s))
+    }
+
+    #[test]
+    fn a_poor_read_of_a_page_on_its_side_is_turned_and_read_again() {
+        // First read poor; the orientation pass says turn 90; the second
+        // read (of a canvas with swapped sides) is good and kept.
+        let mut n = 0;
+        let mut host = FakeHost::new(move |w, h| {
+            n += 1;
+            if n == 1 {
+                one_word(w, h)
+            } else {
+                words(20, w, h)
+            }
+        });
+        host.orient =
+            "Orientation in degrees: 270\nRotate: 90\nOrientation confidence: 4.10\n".into();
+        let out = run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
+        let FromWorker::JobDone { reading, .. } = out else {
+            panic!("{out:?}")
+        };
+        assert_eq!(host.orient_calls.len(), 1);
+        assert_eq!(host.ocr_calls.len(), 2);
+        let ((_, w1, h1), (_, w2, h2)) = (host.ocr_calls[0], host.ocr_calls[1]);
+        assert_eq!((w1, h1), (h2, w2), "the sides swap");
+        assert_eq!(reading.words[0].words.len(), 20);
+        assert!(
+            reading.words[0]
+                .words
+                .iter()
+                .all(|w| w.bbox.right() <= 10_000)
+        );
+
+        // Unsure orientation: no second read.
+        let mut host = FakeHost::new(one_word);
+        host.orient = "Rotate: 90\nOrientation confidence: 0.40\n".into();
+        run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
+        assert_eq!((host.orient_calls.len(), host.ocr_calls.len()), (1, 1));
+        // A good first read is never second-guessed.
+        let mut host = FakeHost::new(|w, h| words(20, w, h));
+        run_job(&ctx(true), &mut host, &job(fixture("receipt.png"))).unwrap();
+        assert_eq!((host.orient_calls.len(), host.ocr_calls.len()), (0, 1));
     }
 
     #[test]

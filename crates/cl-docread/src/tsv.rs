@@ -166,6 +166,47 @@ pub fn confidence(s: &str) -> Confidence {
     Confidence::saturating(whole * 100 + hundredths)
 }
 
+/// Tesseract's orientation report (`--psm 0`): the clockwise turn the page
+/// needs (0, 90, 180 or 270) and the orientation confidence in
+/// hundredths. `None` when the report lacks either.
+#[must_use]
+pub fn parse_orientation(report: &str) -> Option<(u16, u32)> {
+    let mut rotate = None;
+    let mut confidence = None;
+    for line in report.lines().take(32) {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value.trim();
+        match key.trim() {
+            "Rotate" => {
+                rotate = value
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|r| matches!(r, 0 | 90 | 180 | 270));
+            }
+            "Orientation confidence" => confidence = centi(value),
+            _ => {}
+        }
+    }
+    Some((rotate?, confidence?))
+}
+
+/// A non-negative decimal string in hundredths, truncated ("3.26" → 326).
+fn centi(s: &str) -> Option<u32> {
+    let (int, frac) = s.split_once('.').unwrap_or((s, ""));
+    if int.is_empty() || int.len() > 6 || !int.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if !frac.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let mut f: String = frac.chars().take(2).collect();
+    while f.len() < 2 {
+        f.push('0');
+    }
+    Some(int.parse::<u32>().ok()? * 100 + f.parse::<u32>().ok()?)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,5 +338,22 @@ mod tests {
         fn any_confidence_string_is_in_range(s in "\\PC{0,30}") {
             prop_assert!(confidence(&s).bp() <= 10_000);
         }
+    }
+
+    #[test]
+    fn orientation_reports() {
+        let report = "Page number: 0\nOrientation in degrees: 90\nRotate: 270\nOrientation confidence: 3.26\nScript: Latin\nScript confidence: 0.71\n";
+        assert_eq!(parse_orientation(report), Some((270, 326)));
+        assert_eq!(
+            parse_orientation("Rotate: 0\nOrientation confidence: 12\n"),
+            Some((0, 1200))
+        );
+        assert_eq!(
+            parse_orientation("Rotate: 45\nOrientation confidence: 9.1\n"),
+            None
+        );
+        assert_eq!(parse_orientation("Rotate: 90\n"), None);
+        assert_eq!(parse_orientation("garbage"), None);
+        assert_eq!(centi("-1"), None);
     }
 }
