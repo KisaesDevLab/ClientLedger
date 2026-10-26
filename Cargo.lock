@@ -1011,8 +1011,11 @@ version = "0.0.0"
 dependencies = [
  "cl-core",
  "cl-docread",
+ "image",
  "nix",
+ "pdfium-render",
  "serde_json",
+ "tiff",
 ]
 
 [[package]]

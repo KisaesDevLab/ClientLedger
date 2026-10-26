@@ -12,6 +12,8 @@
 //!
 //! Skeleton (A03 step 2): it refuses to run until step 6 lands.
 #![forbid(unsafe_code)]
+// Steps 4-5 land the parsers; the worker loop that uses them is step 6.
+#![cfg_attr(not(test), allow(dead_code))]
 
 // Test hooks crash, hang and allocate on purpose: never in a release build.
 // Tests build the worker in the dev profile (or `docread-bench`, which keeps
@@ -20,6 +22,11 @@
 compile_error!(
     "the `test-support` feature is for tests only and must not be enabled in a release build"
 );
+
+mod decode;
+mod pdfium;
+#[cfg(test)]
+mod test_pdf;
 
 use std::process::ExitCode;
 
