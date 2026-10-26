@@ -1885,7 +1885,9 @@ impl Grid {
                         };
                         let te = match ghost {
                             Some(g) => {
-                                te.hint_text(egui::RichText::new(g).color(style.placeholder))
+                                // A suggestion is text to read, not a placeholder: secondary
+                                // text keeps it at 4.5:1 or more (A03 UI review 7).
+                                te.hint_text(egui::RichText::new(g).color(style.text_secondary))
                             }
                             None => te,
                         };
@@ -2314,7 +2316,11 @@ impl Grid {
         style: &GridStyle,
         max_rows: u64,
     ) -> f32 {
-        let color = if shown.placeholder {
+        let color = if shown.placeholder && matches!(value, CellValue::Suggested { .. }) {
+            // A suggestion is read, not a placeholder: secondary text keeps
+            // it at 4.5:1 or more (A03 UI review 7).
+            style.text_secondary
+        } else if shown.placeholder {
             style.placeholder
         } else if state.contains(RowState::LOCKED) {
             style.locked_text
