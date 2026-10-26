@@ -1,0 +1,33 @@
+{
+  "account_number": null,
+  "amount_paid": "76.39",
+  "balance_due": null,
+  "card_last4": "0968",
+  "date": "2026-05-23",
+  "due_date": null,
+  "family": "invoice",
+  "font": "plex-sans",
+  "holdout": false,
+  "layout": "s15-saas-card",
+  "lines": [
+    {
+      "amount": "76.39",
+      "description": "Team plan - monthly",
+      "quantity": "1.000",
+      "unit_price": "76.390"
+    }
+  ],
+  "pages": 1,
+  "reference": "CN-2026-14676",
+  "schema": 1,
+  "seq": 3,
+  "subtotal": "76.39",
+  "tax": null,
+  "terms": null,
+  "total": "76.39",
+  "tounicode": true,
+  "vendor": {
+    "key": "cloudnest-software",
+    "name": "Cloudnest Software, Inc."
+  }
+}

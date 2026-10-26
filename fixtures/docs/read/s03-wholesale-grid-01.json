@@ -1,0 +1,51 @@
+{
+  "account_number": null,
+  "amount_paid": null,
+  "balance_due": null,
+  "card_last4": null,
+  "date": "2026-02-21",
+  "due_date": "2026-03-23",
+  "family": "invoice",
+  "font": "plex-sans",
+  "holdout": false,
+  "layout": "s03-wholesale-grid",
+  "lines": [
+    {
+      "amount": "124.00",
+      "description": "PVC pipe 2 in. x 10 ft Sch 40",
+      "quantity": "8.000",
+      "unit_price": "15.500"
+    },
+    {
+      "amount": "11.28",
+      "description": "Pipe hanger 1 in. galvanized",
+      "quantity": "12.000",
+      "unit_price": "0.940"
+    },
+    {
+      "amount": "88.90",
+      "description": "Brass shutoff valve 1/4 turn",
+      "quantity": "7.000",
+      "unit_price": "12.700"
+    },
+    {
+      "amount": "185.60",
+      "description": "Ball valve 1/2 in. full port",
+      "quantity": "16.000",
+      "unit_price": "11.600"
+    }
+  ],
+  "pages": 1,
+  "reference": "416759",
+  "schema": 1,
+  "seq": 1,
+  "subtotal": "409.78",
+  "tax": "39.95",
+  "terms": "Net 30",
+  "total": "541.20",
+  "tounicode": true,
+  "vendor": {
+    "key": "harbor-point-supply",
+    "name": "Harbor Point Supply Inc."
+  }
+}

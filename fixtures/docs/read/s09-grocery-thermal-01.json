@@ -1,0 +1,63 @@
+{
+  "account_number": null,
+  "amount_paid": "84.49",
+  "balance_due": null,
+  "card_last4": "5272",
+  "date": "2026-09-30",
+  "due_date": null,
+  "family": "receipt",
+  "font": "plex-mono",
+  "holdout": false,
+  "layout": "s09-grocery-thermal",
+  "lines": [
+    {
+      "amount": "37.50",
+      "description": "PAPER TOWELS 6PK",
+      "quantity": "3.000",
+      "unit_price": "12.500"
+    },
+    {
+      "amount": "5.89",
+      "description": "BOTTLED WATER 24PK",
+      "quantity": "1.000",
+      "unit_price": "5.890"
+    },
+    {
+      "amount": "4.54",
+      "description": "COFFEE CREAMER",
+      "quantity": "1.000",
+      "unit_price": "4.540"
+    },
+    {
+      "amount": "9.23",
+      "description": "COFFEE 12OZ",
+      "quantity": "1.000",
+      "unit_price": "9.230"
+    },
+    {
+      "amount": "13.21",
+      "description": "TRASH BAGS 30CT",
+      "quantity": "1.000",
+      "unit_price": "13.210"
+    },
+    {
+      "amount": "7.68",
+      "description": "HAND SOAP",
+      "quantity": "3.000",
+      "unit_price": "2.560"
+    }
+  ],
+  "pages": 1,
+  "reference": "5665",
+  "schema": 1,
+  "seq": 1,
+  "subtotal": "78.05",
+  "tax": "6.44",
+  "terms": null,
+  "total": "84.49",
+  "tounicode": true,
+  "vendor": {
+    "key": "freshway-market",
+    "name": "FreshWay Market #0412"
+  }
+}

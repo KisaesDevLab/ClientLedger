@@ -1,0 +1,51 @@
+{
+  "account_number": "3026-1374",
+  "amount_paid": null,
+  "balance_due": null,
+  "card_last4": null,
+  "date": "2026-04-20",
+  "due_date": "2026-05-10",
+  "family": "utility",
+  "font": "plex-sans",
+  "holdout": false,
+  "layout": "s06-utility-water",
+  "lines": [
+    {
+      "amount": "91.57",
+      "description": "Water usage",
+      "quantity": "1.000",
+      "unit_price": "91.570"
+    },
+    {
+      "amount": "56.85",
+      "description": "Sewer service",
+      "quantity": "1.000",
+      "unit_price": "56.850"
+    },
+    {
+      "amount": "14.50",
+      "description": "Base charge",
+      "quantity": "1.000",
+      "unit_price": "14.500"
+    },
+    {
+      "amount": "4.00",
+      "description": "Stormwater fee",
+      "quantity": "1.000",
+      "unit_price": "4.000"
+    }
+  ],
+  "pages": 1,
+  "reference": null,
+  "schema": 1,
+  "seq": 3,
+  "subtotal": null,
+  "tax": null,
+  "terms": null,
+  "total": "166.92",
+  "tounicode": true,
+  "vendor": {
+    "key": "millbrook-water",
+    "name": "City of Millbrook Water Dept."
+  }
+}

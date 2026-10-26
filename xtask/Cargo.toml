@@ -20,4 +20,13 @@ tar = "0.4.46"
 tempfile = "3.27.0"
 zip = { version = "9.0.3", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
+# `cargo xtask gen-invoices` (A03 step 12, Q-A03e): synthetic bills and
+# receipts as PDFs with embedded subset fonts and ToUnicode maps, and their
+# "scanned" pictures (rendered with the pinned PDFium, then degraded).
+# xtask only; never in a shipped crate. All MIT OR Apache-2.0.
+pdf-writer = "0.15.0"
+subsetter = { version = "0.2.6", default-features = false }
+ttf-parser = "0.25.1"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_7881", "thread_safe"] }
 syn = { version = "3", default-features = false, features = ["full", "visit", "parsing", "proc-macro", "derive", "clone-impls"] }
