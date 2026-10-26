@@ -64,7 +64,13 @@ fn env_path(name: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn account(h: &Harness, s: &Session, name: &str, t: AccountType, detail: Option<&str>) -> AccountId {
+fn account(
+    h: &Harness,
+    s: &Session,
+    name: &str,
+    t: AccountType,
+    detail: Option<&str>,
+) -> AccountId {
     h.run(s.accounts().create(
         &AccountFields {
             name: name.to_string(),
@@ -154,11 +160,8 @@ fn write_backup(h: &Harness) {
         .record
         .id;
     let draft = DraftKey::new();
-    h.run(
-        s.attachments()
-            .upload_draft(draft, "bill.pdf", PDF, key()),
-    )
-    .expect("upload");
+    h.run(s.attachments().upload_draft(draft, "bill.pdf", PDF, key()))
+        .expect("upload");
     let bill = h
         .run(s.bills().create(
             &BillDraft {
