@@ -1,7 +1,8 @@
 //! English text for Preferences › Document intake and its Home line (A01
 //! WP-A). Keys: `prefs.intake.*`, `prefs.cat.intake`,
 //! `home.attention.intake*`.
-//! Registered in `i18n.rs`; only A01 WP-A adds rows.
+//! Registered in `i18n.rs`; A01 WP-A's rows, then A04 WP-I's block (the
+//! intake inbox's document drafts, `inbox.*`).
 
 /// Document intake's part of the English catalog.
 #[rustfmt::skip]
@@ -109,4 +110,36 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.attention.intake_folders.name", "Intake folders"),
     ("home.attention.intake.open", "Open settings"),
     ("home.attention.intake.open.tip", "Preferences \u{203a} Document intake"),
+    // A04 WP-I: claims, Read all, follow, Add to… on claimed files.
+    ("inbox.state.claimed_elsewhere", "Being entered on another computer"),
+    ("inbox.claimed_elsewhere.detail", "Another computer has this same document waiting to be entered. When it's entered there, this file moves to Processed. Discard only moves this computer's file to the Discarded folder."),
+    ("inbox.action.discard.elsewhere.tip", "Move this computer's file to the Discarded folder. The document stays waiting on the other computer."),
+    ("inbox.discard.ask.elsewhere", "Discard this computer's file? It moves to the Discarded folder. The document stays waiting on the other computer."),
+    ("inbox.discard.ask.elsewhere.keep", "Hide this computer's file? The original stays in the folder. The document stays waiting on the other computer."),
+    ("inbox.claim.review", "This document is waiting in Vendors \u{203a} Review Documents. Open it from Review Documents to enter it."),
+    ("inbox.claim.review.hint", "Waiting in Review Documents. You can still add it to a saved bill or check, or discard it."),
+    ("inbox.claim.pending", "This file is still being added for review. Try again in a moment."),
+    ("inbox.claim.elsewhere", "Another computer has this document waiting to be entered. Enter it there, or discard this file."),
+    ("inbox.claim.forbidden", "You don't have permission to add documents for review. Ask an Admin to give you access."),
+    ("inbox.claim.gone", "This file couldn't be added for review. Remove it from the folder and save it again."),
+    ("inbox.discard.failed", "The document couldn't be discarded. Nothing moved; try again."),
+    ("inbox.discard.entered", "That document was already entered on another computer, so it wasn't discarded."),
+    ("inbox.attach.closed", "That document was already entered or discarded on another computer."),
+    ("inbox.attach.stale", "That document changed on another computer. Pick it again and try once more."),
+    ("inbox.attach.not_found", "That record isn't there any more. Pick another one."),
+    ("inbox.attach.not_attachable", "Documents can't be attached to that kind of record. Pick another one."),
+    ("inbox.attach.not_posted", "That record was voided. Pick another one."),
+    ("inbox.attach.file_gone", "This file isn't in the company any more. Discard it and save it into the folder again."),
+    ("inbox.attach.in_use", "Another document uses this file. Open it from Review Documents."),
+    ("inbox.attach.forbidden", "You don't have permission to change that record. Ask an Admin."),
+    ("inbox.read_all", "Read all"),
+    ("inbox.read_all.tip", "Read every document waiting in Review Documents on this computer. Nothing is sent online."),
+    ("inbox.read_all.progress", "Reading {n} of {total}\u{2026}"),
+    ("inbox.read_all.cancel", "Cancel reading"),
+    ("inbox.read_all.cancel.tip", "Stop reading. Documents not read yet stay waiting."),
+    ("inbox.read_all.failed", "The documents waiting to be read couldn't be listed. Try again."),
+    ("inbox.orphan.claim", "Adding an intake file for review"),
+    ("inbox.orphan.discard", "Discarding a document waiting for review"),
+    ("inbox.orphan.attach", "Attaching a document to a saved record"),
+    ("inbox.orphan.read", "Saving what was read from a document"),
 ];

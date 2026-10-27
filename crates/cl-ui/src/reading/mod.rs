@@ -17,7 +17,11 @@
 //! build their own with a stand-in reader.
 
 pub mod assist;
+// A04 WP-F2: learn on accept (layouts, card digits).
+pub mod learn;
 pub mod map;
+// A04: the reading queue's two lanes (interactive before batch).
+pub mod queue;
 pub mod service;
 
 use std::sync::{Arc, OnceLock};

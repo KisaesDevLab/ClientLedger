@@ -73,6 +73,19 @@ pub enum ReadTarget {
     /// One expense line filled from the document (its amount, memo and
     /// account). Accepted by Accept or by changing its amount only.
     Line(RowKey),
+    /// A04 draft mode: the payee of a card charge or check ("Purchased
+    /// from", "Pay to the order of").
+    Payee,
+    /// A04 draft mode: the date of a card charge or check.
+    Date,
+    /// A04 draft mode: the amount of a card charge or check (the
+    /// document's printed total).
+    Total,
+    /// A04 draft mode: the check number printed on a check.
+    CheckNumber,
+    /// A04 draft mode: the account it was paid from (the card of a card
+    /// charge, the bank or cash account of a check or cash expense).
+    PaidFrom,
 }
 
 /// Which fields came from a reading and whether the owner accepted them.
@@ -117,6 +130,21 @@ impl ReadState {
         if let Some(f) = self.fields.get_mut(&target) {
             *f = ReadField::Edited;
         }
+    }
+
+    /// Puts back a state the owner already gave `target` (A04: the same
+    /// document in another form, or the same form after Ask AI to help
+    /// filled it again). Only [`ReadField::Accepted`] and
+    /// [`ReadField::Edited`] are restored; a read state comes from a fill.
+    pub fn restore(&mut self, target: ReadTarget, state: ReadField) {
+        if matches!(state, ReadField::Accepted | ReadField::Edited) {
+            self.fields.insert(target, state);
+        }
+    }
+
+    /// Every tracked field and its state, in field order.
+    pub fn entries(&self) -> impl Iterator<Item = (ReadTarget, ReadField)> + '_ {
+        self.fields.iter().map(|(t, f)| (*t, *f))
     }
 
     /// The line `key` was deleted.
@@ -180,8 +208,11 @@ pub struct FieldConfidence {
     pub terms: Option<Confidence>,
     /// Amount paid (receipts; A04).
     pub amount_paid: Option<Confidence>,
-    /// How it was paid (receipts; A04).
+    /// How it was paid (receipts; A04): also the confidence of
+    /// [`DocReading::paid_from`].
     pub payment: Option<Confidence>,
+    /// The check number (A04).
+    pub check_number: Option<Confidence>,
 }
 
 /// What was read from a document, mapped from the engine's reading by the
@@ -205,6 +236,11 @@ pub struct DocReading {
     pub total: Option<Money>,
     /// Lines as printed.
     pub lines: Vec<ReadLine>,
+    /// A04: the account it was paid from, when the desktop matched one (the
+    /// card whose printed digits matched, Q-A03o). Card and check forms only.
+    pub paid_from: Option<AccountId>,
+    /// A04: the check number as printed (checks only).
+    pub check_number: Option<String>,
     /// Per-field confidence.
     pub confidence: FieldConfidence,
 }
@@ -217,6 +253,8 @@ impl fmt::Debug for DocReading {
             .field("reference", &self.reference.is_some())
             .field("total", &self.total.is_some())
             .field("lines", &self.lines.len())
+            .field("paid_from", &self.paid_from.is_some())
+            .field("check_number", &self.check_number.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -318,25 +356,55 @@ pub fn apply(reading: &DocReading, form: &mut BillForm, keys: &mut RowKeyGen) ->
         filled.push(ReadTarget::AmountDue);
     }
     let no_lines = form.expenses.used().next().is_none() && form.items.used().next().is_none();
-    if no_lines && !reading.lines.is_empty() {
-        let mut lines = Vec::with_capacity(reading.lines.len() + 1);
-        for l in &reading.lines {
-            let key = keys.next_key();
-            lines.push(FormLine {
-                account: l.account,
-                amount: l.amount,
-                memo: l.description.trim().to_string(),
-                ..FormLine::blank(key)
-            });
-            form.read
-                .mark_read(ReadTarget::Line(key), level(l.confidence));
-            filled.push(ReadTarget::Line(key));
-        }
-        let mut v = FormLines { lines };
-        v.ensure_entry(keys);
+    if no_lines && let Some(v) = read_lines(reading, keys, &mut form.read, &mut filled) {
         form.expenses = v;
     }
     filled
+}
+
+/// The reading's lines as form lines, each marked *read, not accepted*
+/// and pushed to `filled`; `None` when the reading has no lines. Line
+/// amounts are the printed ones (blank when not printed, never computed).
+/// Shared by the bill, card ([`crate::forms::card::apply`]) and check
+/// ([`crate::forms::check::apply`]) forms.
+pub(crate) fn read_lines(
+    reading: &DocReading,
+    keys: &mut RowKeyGen,
+    read: &mut ReadState,
+    filled: &mut Vec<ReadTarget>,
+) -> Option<FormLines> {
+    if reading.lines.is_empty() {
+        return None;
+    }
+    let mut lines = Vec::with_capacity(reading.lines.len() + 1);
+    for l in &reading.lines {
+        let key = keys.next_key();
+        lines.push(FormLine {
+            account: l.account,
+            amount: l.amount,
+            memo: l.description.trim().to_string(),
+            ..FormLine::blank(key)
+        });
+        read.mark_read(
+            ReadTarget::Line(key),
+            l.confidence.unwrap_or(Confidence::Unrated),
+        );
+        filled.push(ReadTarget::Line(key));
+    }
+    let mut v = FormLines { lines };
+    v.ensure_entry(keys);
+    Some(v)
+}
+
+/// True while a read field is not accepted. A read line counts only while
+/// it is still among `lines` (a deleted line no longer blocks Save). The
+/// card and check forms' `ReadNotAccepted` gate (A04 D2).
+#[must_use]
+pub fn blocks_save(read: &ReadState, lines: &FormLines) -> bool {
+    read.unaccepted().into_iter().any(|t| match t {
+        ReadTarget::Line(k) => lines.lines.iter().any(|l| l.key == k),
+        _ => true,
+    })
 }
 
 #[cfg(test)]
@@ -353,6 +421,29 @@ mod tests {
 
     fn contact() -> ContactId {
         ContactId::parse("00000000-0000-0000-0000-000000000005").expect("id")
+    }
+
+    #[test]
+    fn restore_puts_back_only_the_owners_states() {
+        let mut r = ReadState::default();
+        r.mark_read(ReadTarget::Total, Confidence::High);
+        r.restore(ReadTarget::Total, ReadField::Accepted);
+        r.restore(ReadTarget::Payee, ReadField::Edited);
+        r.restore(
+            ReadTarget::Date,
+            ReadField::Read {
+                level: Confidence::Low,
+            },
+        );
+        assert_eq!(r.state(ReadTarget::Total), Some(ReadField::Accepted));
+        assert_eq!(r.state(ReadTarget::Payee), Some(ReadField::Edited));
+        assert_eq!(
+            r.state(ReadTarget::Date),
+            None,
+            "a read state comes from a fill"
+        );
+        assert_eq!(r.entries().count(), 2);
+        assert_eq!(r.unaccepted(), Vec::new());
     }
 
     fn reading() -> DocReading {
@@ -378,6 +469,8 @@ mod tests {
                     confidence: Some(Confidence::Low),
                 },
             ],
+            paid_from: None,
+            check_number: None,
             confidence: FieldConfidence {
                 total: Some(Confidence::High),
                 ..FieldConfidence::default()

@@ -202,7 +202,8 @@ impl EnterBillScreen {
     /// title in a narrow window.
     fn kind_row(&mut self, ui: &mut Ui, working: bool, received_cap: bool) {
         let kind = self.kind();
-        let can_switch = !working && self.editing.is_none();
+        // A04: a draft converts as a bill only.
+        let can_switch = !working && self.editing.is_none() && self.draft.is_none();
         for (k, key) in [
             (BillKind::Bill, "bill.kind.bill"),
             (BillKind::Credit, "bill.kind.credit"),
@@ -249,11 +250,31 @@ impl EnterBillScreen {
         if self.prefill.dropped {
             form::hint(ui, tokens, &t("bill.prefill.dropped"));
         }
+        // A04 draft mode: where the values came from, Discard document.
+        let vendor_name = self.draft_vendor_name();
+        // One "Filled from" line: the reading banner below names the
+        // source while it shows (UI check item 3).
+        let reading_shown = self
+            .read
+            .filled
+            .as_ref()
+            .is_some_and(|f| self.read.unaccepted > 0 || f.nothing_new);
+        if let Some(d) = self.draft.as_mut() {
+            d.hide_source_line = reading_shown;
+        }
+        if let Some(d) = self.draft.as_mut()
+            && let crate::screens::doc_review::review::BannerClick::EnterAs(to) =
+                d.banner_ui(ui, tokens, None, vendor_name.as_deref())
+        {
+            self.enter_as(ui.ctx(), to);
+        }
         // The source-document banner: "Attached from <file> in your receipt
         // inbox" (Q-P17j, WP5's text), then the reading's values to accept
         // (WP7).
         let name = self.attach.viewer.source().map(|s| s.name.clone());
-        if let Some(n) = name.as_deref().filter(|_| self.attach.from_inbox) {
+        // In draft mode the draft banner names the document already.
+        let attached_line = self.attach.from_inbox && self.draft.is_none();
+        if let Some(n) = name.as_deref().filter(|_| attached_line) {
             egui::Frame::new()
                 .fill(tokens.info_tint)
                 .stroke(Stroke::new(1.0, tokens.border_default))
@@ -360,7 +381,10 @@ impl EnterBillScreen {
 
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
-        let enabled = self.save.task.is_none() && !self.closing_prompt.dialog_open() && !read_only;
+        let enabled = self.save.task.is_none()
+            && !self.closing_prompt.dialog_open()
+            && !read_only
+            && !self.draft_locked();
         let title = match self.kind() {
             BillKind::Bill => t("cmd.vendors.enter_bill"),
             BillKind::Credit => t("bill.title.credit"),
@@ -1445,7 +1469,7 @@ impl EnterBillScreen {
                 self.start_local_read();
                 true
             }
-            "bill.accept_read" => {
+            "form.accept_read" => {
                 self.accept_read();
                 true
             }

@@ -259,6 +259,8 @@ pub struct ViewerState {
     released: bool,
     /// Last frame the viewer was drawn wider than its room.
     overflowed: bool,
+    /// A04 WP-C: the compare tools over the page (none for most viewers).
+    compare: super::compare::overlay::Overlay,
 }
 
 /// No file name, no pixels.
@@ -358,6 +360,7 @@ impl ViewerState {
         self.failed_page = None;
         self.drop_thumbs();
         self.strip_page = None;
+        self.compare.forget_picks();
     }
 
     /// Forget the thumbnails (their textures free as they drop).
@@ -470,10 +473,68 @@ impl ViewerState {
         }
     }
 
+    /// A04 WP-C: the compare tools to draw over the page (a form in draft
+    /// mode, each frame before drawing; `None` for none). See
+    /// [`super::compare`].
+    pub fn set_compare(&mut self, view: Option<super::compare::CompareView>) {
+        self.compare.set_view(view);
+    }
+
+    /// A04 WP-C: what the compare tools asked for since the last call
+    /// (clicks on words, dragged boxes, box clicks, the check list's
+    /// buttons, Highlights) for the form to run.
+    pub fn take_compare_events(&mut self) -> Vec<super::compare::CompareEvent> {
+        self.compare.take_events()
+    }
+
+    /// A04 WP-C: what the compare tools show (`state.doc_viewer.highlight`).
+    #[must_use]
+    pub fn compare_state(&self) -> super::compare::HighlightState {
+        self.compare
+            .state(u16::try_from(self.page).unwrap_or(u16::MAX))
+    }
+
+    /// A04 WP-C: open or close the check list.
+    pub fn set_checklist(&mut self, open: bool) {
+        self.compare.set_checklist(open);
+    }
+
+    /// A texture already drawn of `page` (the page shown, else its
+    /// thumbnail), for the check list's snippets.
+    fn snippet_source(&self, page: u16) -> Option<super::compare::overlay::SnippetSource> {
+        let page = u32::from(page);
+        if let Some(s) = self.shown.as_ref().filter(|s| s.page == page) {
+            return Some(super::compare::overlay::SnippetSource {
+                texture: s.texture.id(),
+                size: s.texture.size_vec2(),
+                rotation: s.rotation,
+            });
+        }
+        self.thumbs
+            .get(&page)
+            .map(|t| super::compare::overlay::SnippetSource {
+                texture: t.texture.id(),
+                size: t.size,
+                rotation: Rotation::None,
+            })
+    }
+
     /// Run a `viewer.*` command. Returns true when handled.
     pub fn command(&mut self, id: CommandId) -> bool {
         if self.source.is_none() {
             return false;
+        }
+        // A04 WP-C: the compare tools' keys (false when there is nothing
+        // to act on, so Enter stays with a focused button).
+        if matches!(
+            id.as_str(),
+            "viewer.next_word"
+                | "viewer.prev_word"
+                | "viewer.fill_word"
+                | "viewer.toggle_highlights"
+        ) {
+            let page = u16::try_from(self.page).unwrap_or(u16::MAX);
+            return self.compare.command(id.as_str(), page);
         }
         match id.as_str() {
             "viewer.zoom_in" => {
@@ -904,6 +965,16 @@ impl DocViewer {
         let ctx = ui.ctx().clone();
         state.reopen_if_released();
         state.poll(&ctx);
+        // A04 WP-C: the form's focused field turns the viewer to its page.
+        if let Some(p) = state.compare.turn_to() {
+            let p = u32::from(p);
+            if state.pages == 0 || p < state.pages {
+                state.page = p;
+            }
+        }
+        if state.compare.left() {
+            super::compare::publish_highlight(&ctx, super::compare::HighlightState::default());
+        }
         let mut event = ViewerEvent::None;
         let mut focused = false;
         if state.source.is_none() {
@@ -1022,8 +1093,51 @@ impl DocViewer {
                     event = ViewerEvent::PopOut;
                 }
             }
+            // A04 WP-C: only while a form compares (other viewers keep
+            // their toolbar as it was).
+            if let Some(view) = state.compare.view() {
+                let on = view.feed.highlights;
+                ui.separator();
+                let r = ui
+                    .selectable_label(on, t("compare.highlights"))
+                    .on_hover_text(t("compare.highlights.tip"));
+                focused |= r.has_focus();
+                if r.clicked() {
+                    state
+                        .compare
+                        .push(super::compare::CompareEvent::ToggleHighlights);
+                }
+                let open = state.compare.checklist_open();
+                let r = ui
+                    .selectable_label(open, t("compare.checklist"))
+                    .on_hover_text(t("compare.checklist.tip"));
+                focused |= r.has_focus();
+                if r.clicked() {
+                    state.compare.set_checklist(!open);
+                }
+            }
         });
         focused |= zoom_focused;
+        // A04 WP-C: what a click on the page does now, or why it didn't.
+        let shown = state.compare.shown_note();
+        if let Some(view) = state.compare.view() {
+            let note = shown.or_else(|| {
+                (view.feed.armed.is_some() && view.words.is_none())
+                    .then_some(super::compare::CompareNote::WordsLoading)
+            });
+            let text = match (note, view.armed_label()) {
+                // Text, so `warn_text` (4.5:1), not the `warn` fill.
+                (Some(n), _) => Some((t(n.key()), tokens.warn_text)),
+                (None, Some(label)) => Some((
+                    t_with("compare.click_to_fill", &[("field", label)]),
+                    tokens.text_secondary,
+                )),
+                (None, None) => None,
+            };
+            if let Some((text, colour)) = text {
+                ui.add(egui::Label::new(RichText::new(text).size(12.0).color(colour)).wrap());
+            }
+        }
         if state.truncated {
             ui.label(
                 RichText::new(t_with(
@@ -1055,6 +1169,29 @@ impl DocViewer {
             && state.pages > 1
             && ui.available_width() >= THUMB_STRIP_MIN_WIDTH;
         match state.status {
+            Status::Ready if state.compare.checklist_open() => {
+                let sources: HashMap<u16, super::compare::overlay::SnippetSource> = state
+                    .compare
+                    .view()
+                    .map(|v| {
+                        v.feed
+                            .targets
+                            .iter()
+                            .filter_map(|t| t.spot.map(|s| s.page))
+                            .filter_map(|p| state.snippet_source(p).map(|s| (p, s)))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let snippet_of = |p: u16| sources.get(&p).copied();
+                if let Some(p) =
+                    super::compare::checklist::show(ui, &mut state.compare, &snippet_of, tokens)
+                {
+                    let p = u32::from(p);
+                    if p < state.pages {
+                        state.page = p;
+                    }
+                }
+            }
             Status::Ready if state.strip_shown => {
                 ui.horizontal_top(|ui| {
                     let h = ui.available_height();
@@ -1121,6 +1258,9 @@ impl DocViewer {
             crate::automation::report_overflow(&ctx, "document viewer", used);
         }
         state.focused = focused;
+        if state.compare.active() {
+            super::compare::publish_highlight(&ctx, state.compare_state());
+        }
         event
     }
 
@@ -1279,12 +1419,26 @@ impl DocViewer {
         let want_focus = std::mem::take(&mut state.want_focus);
         // A page the worker can't draw shows blank, not the last page.
         let failed = state.failed_page == Some(state.page);
+        // A04 WP-C: while a field is armed a drag draws a box to read; the
+        // page then pans with the scroll bars, the wheel and the arrows.
+        let boxes = state.compare.armed();
+        let (sense, source) = if boxes {
+            (
+                Sense::click_and_drag(),
+                egui::scroll_area::ScrollSource::SCROLL_BAR
+                    | egui::scroll_area::ScrollSource::MOUSE_WHEEL,
+            )
+        } else {
+            (Sense::click(), egui::scroll_area::ScrollSource::ALL)
+        };
+        let page_no = u16::try_from(state.page).unwrap_or(u16::MAX);
         egui::ScrollArea::both()
             .id_salt(("doc-viewer", state.doc))
             .auto_shrink([false, false])
             // A02: dragging the page pans it, with a mouse too.
-            .scroll_source(egui::scroll_area::ScrollSource::ALL)
+            .scroll_source(source)
             .show(ui, |ui| {
+                let drawn_turn = state.shown.as_ref().map(|s| s.rotation);
                 let (size, texture) = match &state.shown {
                     Some(s) if !failed => {
                         let aspect = s.natural.y / s.natural.x.max(1.0);
@@ -1300,7 +1454,7 @@ impl DocViewer {
                 ui.add_space(MARGIN);
                 ui.horizontal(|ui| {
                     ui.add_space(pad);
-                    let (rect, r) = ui.allocate_exact_size(size, Sense::click());
+                    let (rect, r) = ui.allocate_exact_size(size, sense);
                     if want_focus || r.clicked() {
                         r.request_focus();
                     }
@@ -1342,6 +1496,11 @@ impl DocViewer {
                     };
                     ui.painter()
                         .rect_stroke(rect, 0.0, border, egui::StrokeKind::Inside);
+                    // A04 WP-C: the compare tools over the drawn page.
+                    if texture.is_some() && state.compare.active() {
+                        let turn = drawn_turn.unwrap_or_default();
+                        state.compare.paint(ui, rect, turn, page_no, &r, tokens);
+                    }
                     r.widget_info(|| WidgetInfo::labeled(Role::Image, true, &label));
                     focused = r.has_focus();
                 });
@@ -1557,6 +1716,138 @@ mod tests {
                 (n.role(), name)
             })
             .collect()
+    }
+
+    /// A04 WP-C: the compare tools on a drawn page: the toolbar's
+    /// Highlights and Check list, named boxes, the check list's snippets
+    /// and buttons, and the control channel's highlight state. A viewer
+    /// without them keeps its toolbar as it was.
+    #[test]
+    fn the_compare_tools_draw_over_the_page() {
+        use crate::widgets::compare::{
+            self, CompareEvent, CompareFeed, CompareTarget, CompareView, FillKind, PageBox,
+            TargetKey, TargetLevel,
+        };
+        let total = TargetKey::field("amount_due");
+        let view = CompareView {
+            feed: CompareFeed {
+                targets: vec![
+                    CompareTarget {
+                        key: total,
+                        label: "Amount due".into(),
+                        spot: PageBox::new(0, 6000, 7000, 9000, 7600),
+                        level: TargetLevel::CheckThis,
+                        fill: Some(FillKind::Money),
+                    },
+                    CompareTarget {
+                        key: TargetKey::field("vendor"),
+                        label: "Vendor".into(),
+                        spot: PageBox::new(0, 500, 500, 5000, 1200),
+                        level: TargetLevel::Sure,
+                        fill: None,
+                    },
+                    CompareTarget {
+                        key: TargetKey::field("reference"),
+                        label: "Ref. no.".into(),
+                        spot: None,
+                        level: TargetLevel::NotFound,
+                        fill: Some(FillKind::Text),
+                    },
+                ],
+                armed: Some(total),
+                focused: Some(total),
+                highlights: true,
+                generation: 1,
+            },
+            values: vec!["$12.50".into(), "Ozark".into(), String::new()],
+            words: None,
+            note: None,
+        };
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        ctx.enable_accesskit();
+        let tokens = Tokens::LIGHT;
+        let mut v = ViewerState::default();
+        v.open(fixture("receipt.png"));
+        let draw = |v: &mut ViewerState| {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(640.0, 720.0))),
+                ..RawInput::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let _ = DocViewer::show(ui, v, &tokens);
+                });
+            });
+            out.textures_delta.clear();
+            out.platform_output
+                .accesskit_update
+                .map(|u| {
+                    u.nodes
+                        .iter()
+                        .filter_map(|(_, n)| n.label().map(str::to_owned))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        };
+        let end = std::time::Instant::now() + Duration::from_secs(30);
+        while v.state_json()["rendered"] != true {
+            let names = draw(&mut v);
+            assert!(!names.iter().any(|n| n == "Highlights"), "{names:?}");
+            assert!(std::time::Instant::now() < end, "never drawn");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        v.set_compare(Some(view.clone()));
+        let names = draw(&mut v);
+        for want in [
+            "Highlights",
+            "Check list",
+            "Amount due on the page",
+            "Vendor on the page",
+        ] {
+            assert!(names.iter().any(|n| n == want), "{want}: {names:?}");
+        }
+        let h = compare::highlight(&ctx);
+        assert!(h.on);
+        assert_eq!(h.drawn, 2);
+        assert_eq!(h.focused.as_deref(), Some("amount_due"));
+        assert_eq!(h.armed.as_deref(), Some("amount_due"));
+        assert_eq!(h.note, Some("words_loading"));
+        // Keys: Highlights goes to the form; no words, so no word keys.
+        assert!(v.command(CommandId::new("viewer.toggle_highlights")));
+        assert!(!v.command(CommandId::new("viewer.next_word")));
+        assert_eq!(
+            v.take_compare_events(),
+            vec![CompareEvent::ToggleHighlights]
+        );
+        // The check list: snippets from the drawn page, named buttons.
+        v.set_checklist(true);
+        let names = draw(&mut v);
+        for want in [
+            "Where Amount due was read",
+            "Where Vendor was read",
+            "Looks right: Amount due",
+            "Find on page: Amount due",
+            "Looks right: Ref. no.",
+        ] {
+            assert!(names.iter().any(|n| n == want), "{want}: {names:?}");
+        }
+        assert!(
+            !names.iter().any(|n| n == "Looks right: Vendor"),
+            "a sure field needs no look"
+        );
+        assert!(
+            !names
+                .iter()
+                .any(|n| n.contains("12.50") && n.contains("Looks"))
+        );
+        assert!(compare::highlight(&ctx).checklist);
+        // The tools leave: the default state is published once.
+        v.set_compare(None);
+        let names = draw(&mut v);
+        assert!(!names.iter().any(|n| n == "Check list"), "{names:?}");
+        assert_eq!(compare::highlight(&ctx), compare::HighlightState::default());
     }
 
     #[test]

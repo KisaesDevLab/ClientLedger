@@ -24,6 +24,8 @@
 //! `--demo` answers from `company::demo::checks`.
 
 pub(crate) mod attach;
+// A04 WP-F2: draft mode (a document from Review Documents).
+mod draft;
 mod form;
 mod panel;
 pub(crate) mod prefill;
@@ -308,6 +310,8 @@ pub struct WriteCheckScreen {
     pub(crate) lists_stale: bool,
     /// Save as Template and the template this check came from (P15).
     pub(crate) template: crate::screens::templates::SaveFlow,
+    /// A04 draft mode: the document draft this form enters (`draft.rs`).
+    pub(crate) draft: draft::CheckDraftMode,
 }
 
 /// The tag list `check` needs for the header-tag defaults.
@@ -394,6 +398,7 @@ impl WriteCheckScreen {
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,
             template: crate::screens::templates::SaveFlow::default(),
+            draft: draft::CheckDraftMode::default(),
         };
         s.bus = s.link.bus().subscribe();
         s.start_load();
@@ -875,6 +880,11 @@ impl WriteCheckScreen {
 
     /// The tab title: "Write Check · #4418", "· To print" or plain.
     fn title_text(&self) -> String {
+        // A document from Review Documents isn't a check in the books yet:
+        // its tab never shares a saved check's title (UI check item 11).
+        if self.draft.on() {
+            return t("check.title.document");
+        }
         let f = self.header.current();
         if f.print_later {
             return t("check.title.to_print");
@@ -908,6 +918,7 @@ pub(crate) fn problem_name(p: CheckProblem) -> &'static str {
         CheckProblem::AddressTooLong => "address_too_long",
         CheckProblem::AmountTooLarge => "amount_too_large",
         CheckProblem::TooManyLines => "too_many_lines",
+        CheckProblem::ReadNotAccepted => "read_not_accepted",
     }
 }
 
@@ -924,6 +935,9 @@ impl Screen for WriteCheckScreen {
         }
         self.poll();
         self.hear_changes();
+        // A04 draft mode: the draft's load, convert and questions (before
+        // the default bank, so a printed account can fill it).
+        self.poll_draft(ui.ctx());
         if self.bank().is_none()
             && self.accounts_loaded
             && let Some(bank) = self.default_bank(Some(ui.ctx()))
@@ -936,7 +950,13 @@ impl Screen for WriteCheckScreen {
         if self.inputs.rev != self.header.revision() {
             self.sync_inputs();
         }
+        self.compare_before();
         self.draw(ui);
+        self.compare_after();
+        self.track_draft_read();
+        if let Some(d) = self.draft.session.as_mut() {
+            d.dialogs_ui(ui.ctx(), self.money_style);
+        }
         // Leaving the grid (Q-P13r b).
         let in_grid = self.lines.has_focus();
         if self.in_grid && !in_grid {
@@ -981,6 +1001,9 @@ impl Screen for WriteCheckScreen {
         if let Some(handled) = self.closing_prompt.command(id) {
             return handled;
         }
+        if let Some(handled) = self.draft_command(id) {
+            return handled;
+        }
         if self.attach.viewer.has_focus() && self.attach.viewer.command(id) {
             return true;
         }
@@ -1016,8 +1039,24 @@ impl Screen for WriteCheckScreen {
     fn open_with(&mut self, payload: crate::windows::OpenPayload) -> bool {
         match payload {
             crate::windows::OpenPayload::InboxDraft(d) => self.accept_inbox_draft(d),
+            crate::windows::OpenPayload::DocumentDraft(o)
+                if o.form == cl_model::doc_draft::DraftForm::WriteCheck =>
+            {
+                self.open_draft(o);
+                true
+            }
             _ => false,
         }
+    }
+
+    /// The compare tools for the pop-out viewer (A04 D4, S7).
+    fn compare(&self) -> Option<crate::widgets::compare::CompareView> {
+        self.draft.session.as_ref().map(|d| d.compare.view())
+    }
+
+    /// The pop-out viewer's compare events (the shell's outbox).
+    fn on_viewer_event(&mut self, event: crate::widgets::compare::CompareEvent) {
+        self.on_compare_event(event);
     }
 
     /// A saved check opened from elsewhere (the register's edit of a
@@ -1043,6 +1082,11 @@ impl WriteCheckScreen {
             || self.panel.busy()
             || self.attach.busy()
             || self.suggest.busy()
+            || self
+                .draft
+                .session
+                .as_ref()
+                .is_some_and(crate::screens::doc_review::review::DraftSession::busy)
     }
 
     /// The control-channel state: flags, counts and check numbers only
@@ -1114,6 +1158,7 @@ impl WriteCheckScreen {
                 "focused": self.lines.has_focus(),
             },
             "layout": self.layout.json(),
+            "draft": self.draft_state(),
         });
         let wp7 = json!({
             "prefill": {

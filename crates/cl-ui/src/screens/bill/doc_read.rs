@@ -431,6 +431,27 @@ pub(crate) fn send_extract(
     })
 }
 
+/// Reads the owner's and the engine's switches for reading documents (the
+/// AI configuration, the company's consent and the engine's capabilities).
+///
+/// # Errors
+/// The queue refused it (full or closed).
+pub(crate) fn fetch_switches(
+    group: &RequestGroup,
+    session: &cl_api::Session,
+) -> Result<cl_api::Pending<ReadSwitches>, cl_api::QueueError> {
+    group.read(session, |s| async move {
+        let config = s.ai_config().await.ok();
+        let consent = s.company_ai_disclosure().await.ok();
+        let caps = s.client().capabilities();
+        Ok(ReadSwitches::from_engine_with(
+            config.as_ref(),
+            consent.as_ref(),
+            &caps,
+        ))
+    })
+}
+
 /// Sends Ask AI to help on the write lane, as the extract: it spends AI
 /// tokens, so a reply lost when the window closes is labelled like any
 /// other unconfirmed write.
@@ -522,6 +543,10 @@ pub(crate) fn doc_reading(r: &BillReading) -> DocReading {
                 }
             })
             .collect(),
+        // The engine's AI reading of a bill has neither (A04 adds them for
+        // the card and check forms' local readings).
+        paid_from: None,
+        check_number: None,
         confidence: FieldConfidence {
             vendor: field("vendor"),
             bill_date: field("billDate"),
@@ -532,6 +557,7 @@ pub(crate) fn doc_reading(r: &BillReading) -> DocReading {
             terms: None,
             amount_paid: None,
             payment: None,
+            check_number: None,
         },
     }
 }
@@ -627,19 +653,16 @@ impl ReadState {
             self.switches = Some(ReadSwitches::default());
             return;
         };
-        match group.read(&session, |s| async move {
-            let config = s.ai_config().await.ok();
-            let consent = s.company_ai_disclosure().await.ok();
-            let caps = s.client().capabilities();
-            Ok(ReadSwitches::from_engine_with(
-                config.as_ref(),
-                consent.as_ref(),
-                &caps,
-            ))
-        }) {
+        match fetch_switches(group, &session) {
             Ok(p) => self.switches_task = Some(Task::Pending(p)),
             Err(_) => self.switches = Some(ReadSwitches::default()),
         }
+    }
+
+    /// Starts reading the switches when they aren't known yet (A04 draft
+    /// mode: Ask AI to help is offered once the words are ready).
+    pub(crate) fn ensure_switches(&mut self, link: &Arc<CompanyLink>) {
+        let _ = self.switches(link);
     }
 
     /// Read with AI is offered for this document (never with the engine's
@@ -768,6 +791,13 @@ impl ReadState {
                     form.amount_from_lines = false;
                 }
                 ReadTarget::Line(k) => form.expenses.lines.retain(|l| l.key != k),
+                // The card and check forms' targets (A04); a bill never
+                // marks them.
+                ReadTarget::Payee
+                | ReadTarget::Date
+                | ReadTarget::Total
+                | ReadTarget::CheckNumber
+                | ReadTarget::PaidFrom => {}
             }
         }
         form.read.clear();
@@ -1108,7 +1138,7 @@ pub fn banner(
                             RichText::new(t("bill.read.accept")).strong(),
                         ))
                         .on_hover_text(t("bill.read.accept.tip"));
-                    crate::widgets::kbd(ui, &chip("bill.accept_read"));
+                    crate::widgets::kbd(ui, &chip("form.accept_read"));
                     if std::mem::take(&mut state.focus_accept) {
                         accept.request_focus();
                     }
@@ -1194,10 +1224,13 @@ pub(crate) fn field_mark(
         stroke,
         egui::StrokeKind::Outside,
     );
-    let key = if low {
-        "bill.read.mark.low"
-    } else {
-        "bill.read.mark"
+    // The same three levels the page's boxes show (UI check item 10): a
+    // value read surely is not called "check it" here while the page
+    // shows it as sure.
+    let key = match level {
+        Confidence::Low => "bill.read.mark.low",
+        Confidence::High => "bill.read.mark.sure",
+        _ => "bill.read.mark",
     };
     // The caption under the field is tied to it for screen readers (and
     // the control channel): the field itself says it was read.
@@ -1423,6 +1456,12 @@ impl EnterBillScreen {
                     // 4); Accept or typing the amount accepts it.
                     Some(l) => snap.lines.get(&k).is_none_or(|amount| l.amount != *amount),
                 },
+                // Not a bill's (A04 card and check targets).
+                ReadTarget::Payee
+                | ReadTarget::Date
+                | ReadTarget::Total
+                | ReadTarget::CheckNumber
+                | ReadTarget::PaidFrom => false,
             };
             if changed {
                 edited.push(target);
@@ -1435,7 +1474,12 @@ impl EnterBillScreen {
                 ReadTarget::DueDate => field::DUE,
                 ReadTarget::Reference => field::REFERENCE,
                 ReadTarget::AmountDue => field::AMOUNT,
-                ReadTarget::Line(_) => LINE_MARKS,
+                ReadTarget::Line(_)
+                | ReadTarget::Payee
+                | ReadTarget::Date
+                | ReadTarget::Total
+                | ReadTarget::CheckNumber
+                | ReadTarget::PaidFrom => LINE_MARKS,
             };
             self.header.edit(key, |h| h.read.edited(target));
         }

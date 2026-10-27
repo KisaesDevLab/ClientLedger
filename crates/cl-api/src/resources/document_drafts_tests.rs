@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::resources::ap_doc::BillLineDraft;
+use crate::resources::attachments::{AttachTo, DraftKey};
 use crate::resources::bank_postings::{CardChargeDraft, CheckDraft, SplitLine};
 use crate::resources::posting::ClosedPeriodAuthorization;
 use crate::resources::testkit::{company_session, json as reply, requests, session_with_caps};
@@ -728,4 +729,307 @@ fn debug_never_shows_document_data() {
         assert!(!text.contains(secret), "{text}");
     }
     assert!(text.contains(DRAFT));
+}
+
+// ------------------------------------------------------------- A04 attach
+
+async fn attach_served(server: &MockServer) -> Session {
+    session_with_caps(
+        server,
+        &[
+            Capabilities::DOCUMENT_DRAFTS,
+            Capabilities::IDEMPOTENCY_DOCS,
+            Capabilities::DOCUMENT_DRAFTS_ATTACH,
+        ],
+    )
+    .await
+}
+
+fn txn() -> TransactionId {
+    TransactionId::parse(TXN).expect("txn")
+}
+
+/// U-95: attach sends the record and the token, keyed, and reads
+/// `{draft, transaction}`.
+#[tokio::test]
+async fn attach_sends_the_record_and_the_token_keyed() {
+    let server = MockServer::start().await;
+    let attached = format!(
+        r#"{{"draft":{},"transaction":{{"id":"{TXN}","txnType":"expense","total":"33.3300"}}}}"#,
+        draft_json(
+            "converted",
+            &format!(r#","convertedTransactionId":"{TXN}","convertedType":"expense""#)
+        )
+        .replace(r#""convertedTransactionId":null,"convertedType":null,"#, "")
+    );
+    Mock::given(method("POST"))
+        .and(path(format!("{BASE}/{DRAFT}/attach")))
+        .respond_with(reply(200, &attached))
+        .mount(&server)
+        .await;
+    let s = attach_served(&server).await;
+    let key = IdempotencyKey::new();
+    let done = s
+        .document_drafts()
+        .attach(id(), txn(), TOKEN, key.clone())
+        .await
+        .expect("attached");
+    assert_eq!(done.transaction, txn());
+    assert_eq!(done.draft.status, DraftStatus::Converted);
+    assert_eq!(done.draft.converted_transaction_id, Some(txn()));
+    assert_eq!(done.draft.converted_type.as_deref(), Some("expense"));
+
+    let posts = requests(&server, "POST").await;
+    assert_eq!(posts.len(), 1);
+    let b = body_of(&posts[0]);
+    assert_eq!(b, json!({"transactionId": TXN, "expectedUpdatedAt": TOKEN}));
+    assert_eq!(
+        posts[0]
+            .headers
+            .get("idempotency-key")
+            .and_then(|v| v.to_str().ok()),
+        Some(key.as_header().as_str())
+    );
+    assert_eq!(DOCUMENT_DRAFT_ATTACH.key_set(), Some(KeySet::DocsAttachV1));
+}
+
+/// Without `document-drafts-attach-v1` (or without drafts) nothing is
+/// sent: an older engine has no attach.
+#[tokio::test]
+async fn attach_without_its_capability_sends_nothing() {
+    let server = MockServer::start().await;
+    let s = served(&server).await;
+    let e = s
+        .document_drafts()
+        .attach(id(), txn(), TOKEN, IdempotencyKey::new())
+        .await
+        .expect_err("unsupported");
+    assert_eq!(e, ApiError::Local(LocalValidation::Unsupported));
+    assert!(requests(&server, "POST").await.is_empty());
+    let server = MockServer::start().await;
+    let s = session_with_caps(&server, &[Capabilities::DOCUMENT_DRAFTS_ATTACH]).await;
+    let e = s
+        .document_drafts()
+        .attach(id(), txn(), TOKEN, IdempotencyKey::new())
+        .await
+        .expect_err("unsupported");
+    assert_eq!(e, ApiError::Local(LocalValidation::Unsupported));
+    assert!(requests(&server, "POST").await.is_empty());
+}
+
+/// A 200 that can't be read was still attached.
+#[tokio::test]
+async fn an_unreadable_attach_answer_is_saved_unreadable() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(reply(200, r#"{"draft":{"id":"nope"}}"#))
+        .mount(&server)
+        .await;
+    let s = attach_served(&server).await;
+    let e = s
+        .document_drafts()
+        .attach(id(), txn(), TOKEN, IdempotencyKey::new())
+        .await
+        .expect_err("unreadable");
+    assert!(matches!(e, ApiError::SavedUnreadable { .. }), "{e:?}");
+}
+
+/// Every U-95 refusal reads as its [`AttachProblem`].
+#[tokio::test]
+async fn every_attach_refusal_has_its_problem() {
+    let err = |code: &str, details: &str| {
+        format!(r#"{{"error":{{"message":"x","code":"{code}","details":{details}}}}}"#)
+    };
+    let cases: Vec<(u16, String, AttachProblem)> = vec![
+        (
+            409,
+            err(
+                DOCUMENT_DRAFT_CLOSED,
+                &format!(r#"{{"transactionId":"{TXN}"}}"#),
+            ),
+            AttachProblem::Closed {
+                transaction: Some(txn()),
+            },
+        ),
+        (
+            409,
+            err("STALE", &format!(r#"{{"updatedAt":"{TOKEN}"}}"#)),
+            AttachProblem::Stale,
+        ),
+        (404, err("NOT_FOUND", "null"), AttachProblem::NotFound),
+        (
+            422,
+            err(TARGET_NOT_ATTACHABLE, r#"{"txnType":"aje"}"#),
+            AttachProblem::NotAttachable,
+        ),
+        (
+            409,
+            err(TRANSACTION_NOT_POSTED, r#"{"status":"void"}"#),
+            AttachProblem::NotPosted,
+        ),
+        (
+            422,
+            err(DOCUMENT_FILE_MISSING, "null"),
+            AttachProblem::FileMissing,
+        ),
+        (
+            422,
+            err(ATTACHMENT_NOT_DRAFT, "null"),
+            AttachProblem::FileOnAnotherRecord,
+        ),
+        (
+            409,
+            err(ATTACHMENT_IN_USE, &format!(r#"{{"draftId":"{OTHER}"}}"#)),
+            AttachProblem::FileInUse,
+        ),
+        (
+            403,
+            err("PERMISSION_DENIED", "null"),
+            AttachProblem::Forbidden,
+        ),
+    ];
+    for (status, body, want) in cases {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(format!("{BASE}/{DRAFT}/attach")))
+            .respond_with(reply(status, &body))
+            .mount(&server)
+            .await;
+        let s = attach_served(&server).await;
+        let e = s
+            .document_drafts()
+            .attach(id(), txn(), TOKEN, IdempotencyKey::new())
+            .await
+            .expect_err("refused");
+        assert_eq!(attach_problem(&e), Some(want), "{status} {body}: {e:?}");
+        // The demo engine answers through `engine_refusal`: the same.
+        let v: Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(
+            attach_problem(&crate::engine_refusal(status, &v)),
+            Some(want),
+            "{body}"
+        );
+        assert_eq!(
+            requests(&server, "POST").await.len(),
+            1,
+            "a refusal is not retried"
+        );
+    }
+    assert_eq!(
+        attach_problem(&ApiError::Local(LocalValidation::Unsupported)),
+        None
+    );
+}
+
+/// U-95 c: the exact amount is a decimal string; without the capability
+/// the list refuses it and sends nothing (an older engine would drop the
+/// filter and answer every transaction).
+#[tokio::test]
+async fn the_amount_filter_is_exact_text_and_needs_its_capability() {
+    use crate::resources::transactions::{TransactionFilter, TxnStatus};
+    use crate::wire::PageRequest;
+    let filter = TransactionFilter {
+        status: Some(TxnStatus::Posted),
+        start_date: Some(CalendarDate::from_ymd(2026, 10, 27).expect("d")),
+        end_date: Some(CalendarDate::from_ymd(2026, 11, 10).expect("d")),
+        amount: Some(money("10.1")),
+        ..TransactionFilter::default()
+    };
+    let q = filter.to_query();
+    assert!(
+        q.contains(&("amount".to_string(), "10.1000".to_string())),
+        "{q:?}"
+    );
+    assert!(q.contains(&("status".to_string(), "posted".to_string())));
+    let negative = TransactionFilter {
+        amount: Some(money("-0.0001")),
+        ..TransactionFilter::default()
+    };
+    assert!(
+        negative
+            .to_query()
+            .contains(&("amount".to_string(), "-0.0001".to_string()))
+    );
+    assert!(
+        !TransactionFilter::default()
+            .to_query()
+            .iter()
+            .any(|(k, _)| k == "amount")
+    );
+    let shown = format!("{filter:?}");
+    assert!(!shown.contains("10.1"), "{shown}");
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(reply(200, r#"{"data":[],"total":0}"#))
+        .mount(&server)
+        .await;
+    let s = served(&server).await;
+    let e = s
+        .transactions()
+        .list(&filter, PageRequest::first_max())
+        .await
+        .expect_err("unsupported");
+    assert_eq!(e, ApiError::Local(LocalValidation::Unsupported));
+    assert!(
+        requests(&server, "GET")
+            .await
+            .iter()
+            .all(|r| r.url.path() != "/api/v1/transactions")
+    );
+    // Without an amount the list is as before.
+    s.transactions()
+        .list(&TransactionFilter::default(), PageRequest::first_max())
+        .await
+        .expect("plain list");
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/transactions"))
+        .respond_with(reply(200, r#"{"data":[],"total":0}"#))
+        .mount(&server)
+        .await;
+    let s = attach_served(&server).await;
+    s.transactions()
+        .list(&filter, PageRequest::first_max())
+        .await
+        .expect("listed");
+    let sent = requests(&server, "GET").await;
+    let last = sent
+        .iter()
+        .rev()
+        .find(|r| r.url.path() == "/api/v1/transactions")
+        .expect("sent");
+    assert!(
+        crate::resources::testkit::query(last).contains("amount=10.1000"),
+        "{}",
+        crate::resources::testkit::query(last)
+    );
+}
+
+/// D1 legacy re-key (A04): a file can be moved onto a fresh draft key with
+/// a plain link (`attachableType: "draft"`).
+#[tokio::test]
+async fn a_file_links_onto_a_fresh_draft_key() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("/api/v1/attachments/{FILE}/link")))
+        .respond_with(reply(200, r#"{"ok":true}"#))
+        .mount(&server)
+        .await;
+    let s = company_session(&server);
+    let k = DraftKey::new();
+    s.attachments()
+        .link(
+            AttachmentId::parse(FILE).expect("file"),
+            AttachTo::Draft(k),
+            IdempotencyKey::new(),
+        )
+        .await
+        .expect("linked");
+    let posts = requests(&server, "POST").await;
+    assert_eq!(
+        body_of(&posts[0]),
+        json!({"attachableType": "draft", "attachableId": k.to_string()})
+    );
 }

@@ -11,6 +11,8 @@
 //! balance owed is the engine's, read again after every save (Q-262).
 
 mod attach;
+// A04 WP-F2: draft mode (a document from Review Documents).
+mod draft;
 pub(crate) mod kit;
 mod payee;
 pub(crate) mod records;
@@ -116,6 +118,8 @@ pub struct CardChargeScreen {
     pub(crate) template: crate::screens::templates::SaveFlow,
     /// The files on the charge and the document pane (A02, Q-A02e).
     pub(crate) attach: attach::CardAttach,
+    /// A04 draft mode: the document draft this form enters (`draft.rs`).
+    pub(crate) draft: draft::CardDraft,
 }
 
 /// The kinds of record this form shows: charges (expenses paid from the
@@ -162,6 +166,7 @@ impl CardChargeScreen {
             payee: payee::PayeeState::default(),
             template: crate::screens::templates::SaveFlow::default(),
             attach: attach::CardAttach::default(),
+            draft: draft::CardDraft::default(),
         };
         s.bus = s.link.bus().subscribe();
         s.books.start(&s.link, s.group.as_ref());
@@ -361,8 +366,13 @@ impl CardChargeScreen {
         self.balances.fetch(&self.link, self.group.as_ref(), card);
     }
 
-    /// The tab title: "Record Card Charge" or "Record Card Credit".
+    /// The tab title: "Record Card Charge" or "Record Card Credit" (in
+    /// draft mode "Record Expense" for an expense paid from a bank or cash
+    /// account).
     fn title_text(&self) -> String {
+        if self.draft.expense {
+            return t("doc_form.expense.title");
+        }
         match self.header.current().mode {
             CardMode::Charge => t("cmd.vendors.card_charge"),
             CardMode::Credit => t("card.title.credit"),
@@ -376,6 +386,11 @@ impl CardChargeScreen {
             || self.records.busy()
             || self.payee.busy()
             || self.attach.busy()
+            || self
+                .draft
+                .session
+                .as_ref()
+                .is_some_and(crate::screens::doc_review::review::DraftSession::busy)
     }
 
     // ------------------------------------------------------------- saving
@@ -510,9 +525,14 @@ impl CardChargeScreen {
             self.flow.notice = Some("card.attach.wait_save");
             return false;
         }
-        if !self.is_dirty() {
+        // A04 draft mode: a document is entered even when nothing was
+        // typed (its checks still run).
+        if !self.is_dirty() && !self.draft.on() {
             self.follow_up(intent);
             return true;
+        }
+        if self.draft_locked() {
+            return false;
         }
         let form = self.compose();
         let checked = match check(&form, &self.books.tag_list) {
@@ -522,6 +542,10 @@ impl CardChargeScreen {
                 return false;
             }
         };
+        // A04 draft mode: Accept is the convert, never a plain posting.
+        if self.draft.on() {
+            return self.accept_draft(&checked, intent, password);
+        }
         let out = match self.outbound(&checked) {
             Ok(o) => o,
             Err(LocalValidation::LineBillableUnavailable) => {
@@ -577,7 +601,8 @@ impl CardChargeScreen {
                     };
                     self.lines.form_mut().focus(cell(k, col), &*lists);
                 }
-                CardField::Card | CardField::Date | CardField::RefNo => {}
+                // A04 draft mode: WP-F2 puts the keyboard on Accept.
+                CardField::Card | CardField::Date | CardField::RefNo | CardField::ReadBanner => {}
             }
         }
         self.problems = problems;
@@ -703,7 +728,13 @@ impl CardChargeScreen {
         let sent = match pending {
             Pending::Save(intent) => {
                 self.start_save(intent, Some(secret));
-                self.flow.task.is_some() || !self.flow.closing_prompt.dialog_open()
+                self.flow.task.is_some()
+                    || self
+                        .draft
+                        .session
+                        .as_ref()
+                        .is_some_and(|s| s.locked() || s.closed())
+                    || !self.flow.closing_prompt.dialog_open()
             }
             Pending::Void(reason) => {
                 self.flow.void_reason = reason;
@@ -927,6 +958,9 @@ impl CardChargeScreen {
         self.layout = kit::form_frame(ui, "card_charge", empty, |ui, col| match col {
             kit::Column::Top => {
                 self.toolbar(ui, &tokens);
+                if self.draft.on() {
+                    self.draft_banner(ui, &tokens);
+                }
                 match kit::messages(ui, &tokens, &mut self.flow, self.books.closing) {
                     MessageClick::SubmitClosing => self.submit_closing(),
                     MessageClick::Void => self.void_now(None),
@@ -964,23 +998,27 @@ impl CardChargeScreen {
         let mode = self.header.current().mode;
         let mut picked = None;
         let clicked = kit::toolbar(ui, tokens, idle, self.is_dirty(), |ui| {
-            ui.separator();
-            ui.add_enabled_ui(idle, |ui| {
-                if ui
-                    .radio(mode == CardMode::Charge, t("card.mode.charge"))
-                    .clicked()
-                {
-                    picked = Some(CardMode::Charge);
-                }
-                if ui
-                    .radio(mode == CardMode::Credit, t("card.mode.credit"))
-                    .on_hover_text(t("card.mode.credit.tip"))
-                    .clicked()
-                {
-                    picked = Some(CardMode::Credit);
-                }
-            });
-            self.template_slot(ui);
+            // A04 draft mode: a document posts as a charge only; Credit is
+            // hidden (Q-A04g) and there are no templates.
+            if !self.draft.on() {
+                ui.separator();
+                ui.add_enabled_ui(idle, |ui| {
+                    if ui
+                        .radio(mode == CardMode::Charge, t("card.mode.charge"))
+                        .clicked()
+                    {
+                        picked = Some(CardMode::Charge);
+                    }
+                    if ui
+                        .radio(mode == CardMode::Credit, t("card.mode.credit"))
+                        .on_hover_text(t("card.mode.credit.tip"))
+                        .clicked()
+                    {
+                        picked = Some(CardMode::Credit);
+                    }
+                });
+                self.template_slot(ui);
+            }
         });
         if let Some(cmd) = clicked {
             self.after_frame = Some(CommandId::new(cmd));
@@ -991,7 +1029,7 @@ impl CardChargeScreen {
     }
 
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        let enabled = self.flow.idle();
+        let enabled = self.flow.idle() && !self.draft_locked();
         self.card_row(ui, tokens, enabled);
         ui.add_space(10.0);
         ui.add_enabled_ui(enabled, |ui| self.header_ui(ui, tokens));
@@ -1031,10 +1069,15 @@ impl CardChargeScreen {
     }
 
     fn card_row(&mut self, ui: &mut Ui, tokens: &Tokens, enabled: bool) {
-        let cards = self.cards();
+        let cards = self.paid_from_accounts();
         let current = self.card();
         let mut picked = None;
         let title = self.title_text();
+        let label = if self.draft.expense {
+            t("doc_form.expense_paid_from")
+        } else {
+            t("card.card")
+        };
         kit::title_row(ui, tokens, "card_charge", &title, |ui| {
             kit::wrap_item(ui, "card_charge/card", |ui| {
                 ui.add_enabled_ui(enabled, |ui| {
@@ -1042,7 +1085,7 @@ impl CardChargeScreen {
                         ui,
                         tokens,
                         "card_charge/card",
-                        &t("card.card"),
+                        &label,
                         &cards,
                         current,
                         300.0,
@@ -1322,6 +1365,7 @@ impl CardChargeScreen {
             "recent_charges": self.payee.recent.as_ref().map(Vec::len),
             "template": self.template.state_json(),
             "attachments": self.attach.state_json(),
+            "draft": self.draft_state(),
         });
         if let (Value::Object(m), Value::Object(c)) = (&mut v, self.flow.state_json(&self.link)) {
             m.extend(c);
@@ -1343,10 +1387,18 @@ impl Screen for CardChargeScreen {
         }
         self.poll();
         self.hear_changes();
+        // A04 draft mode: the draft's load, convert and questions.
+        self.poll_draft(ui.ctx());
         if self.inputs.rev != self.header.revision() {
             self.sync_inputs();
         }
+        self.compare_before();
         self.draw(ui);
+        self.compare_after();
+        self.track_draft_read();
+        if let Some(d) = self.draft.session.as_mut() {
+            d.dialogs_ui(ui.ctx(), self.money_style);
+        }
         // A refused save's problems follow the owner's fixes.
         self.recheck_problems();
         let in_grid = self.lines.has_focus();
@@ -1395,6 +1447,9 @@ impl Screen for CardChargeScreen {
         if let Some(handled) = self.flow.closing_prompt.command(id) {
             return handled;
         }
+        if let Some(handled) = self.draft_command(id) {
+            return handled;
+        }
         if self.attach.viewer.has_focus() && self.attach.viewer.command(id) {
             return true;
         }
@@ -1410,6 +1465,33 @@ impl Screen for CardChargeScreen {
 
     fn open_template(&mut self, t: crate::forms::template::TemplateOpen) -> bool {
         self.fill_template(&t)
+    }
+
+    /// A04: a document draft from Review Documents (draft mode).
+    fn open_with(&mut self, payload: crate::windows::OpenPayload) -> bool {
+        match payload {
+            crate::windows::OpenPayload::DocumentDraft(o)
+                if matches!(
+                    o.form,
+                    cl_model::doc_draft::DraftForm::CardCharge
+                        | cl_model::doc_draft::DraftForm::CashExpense
+                ) =>
+            {
+                self.open_draft(o);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The compare tools for the pop-out viewer (A04 D4, S7).
+    fn compare(&self) -> Option<crate::widgets::compare::CompareView> {
+        self.draft.session.as_ref().map(|d| d.compare.view())
+    }
+
+    /// The pop-out viewer's compare events (the shell's outbox).
+    fn on_viewer_event(&mut self, event: crate::widgets::compare::CompareEvent) {
+        self.on_compare_event(event);
     }
 
     fn state(&self) -> Value {

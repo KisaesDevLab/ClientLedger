@@ -57,7 +57,9 @@ The main session is the **orchestrator**. Model routing follows the owner's rule
 
 - `opus` — the default for all non-mechanical work: `architect` and `reviewer` for every tier, `process-reviewer` (effort `xhigh` for Tier H phases and process checkpoints), implementers for every tier, engine changes of any size including posting, balances, closing dates, sales tax, inventory costing, secrets or tenant export/import, any work package involving money, posting, concurrency, data movement, backup/restore or secret handling, plus `engine-scout`, `test-writer`, `ui-verifier` and `security-reviewer`.
 - `fable` — only when the owner explicitly asks for it on a specific task; never for security review. Never choose it on your own.
-- `sonnet` — mechanical jobs only: `explorer` searches, `bookkeeper` (STATE/QUESTIONS/UPSTREAM upkeep), `ci-fixer` log triage, `docs-writer`. Never production logic, money code or reviews.
+- `sonnet` — mechanical jobs: `explorer` searches, `bookkeeper` (STATE/QUESTIONS/UPSTREAM upkeep), `ci-fixer` log triage, `docs-writer`; and since 2026-10-26 (Q-301) routine coding: control-channel scenarios, demo-backend parity, engine pin bumps, CI fixes. Never money, posting, engine or security code, plans or reviews.
+
+**Usage rules (owner 2026-10-26, Q-301):** one combined review per phase, at most 2 implementers per phase, full local CI once per phase, engine PRs merge when green, lean briefs and plans. Details in `docs/AGENTS.md` › Usage rules.
 
 Pass the model per invocation according to `docs/AGENTS.md`. Reviews are fresh-eyes: never share the implementation transcript with `reviewer` or `security-reviewer`. Fix passes after a review start a **fresh** implementer with one combined brief (findings, file:line, plan section) rather than resuming the original implementer. Escalate after two failed attempts (opus → fresh opus at effort `xhigh` with the architect re-planning → block that item and continue; the owner may then ask for Fable). Log the agents and models used in each phase's STATE.md entry.
 

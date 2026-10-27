@@ -1,0 +1,71 @@
+# Review Documents, WP-F2's sections (A04 D2, D3, D5, plan §6 "Control
+# channel") against `clientledger --demo`: a document draft opens in its
+# real form in draft mode (the queue's Enter, WP-F1's hand-off), the banner
+# says where the values came from, the file shows in the form's viewer with
+# the compare tools, Read document fills the empty fields as read, Accept
+# (Alt+A) then Alt+S enters it through `convert`: `state.review.match` says
+# the digest of the form's checked values equals the digest of the body
+# sent (AC1). Discard document asks first.
+#
+# Light and dark run in one app, and each run enters one document, so the
+# steps never name a document: each run takes the queue's first row (the
+# demo's synthetic arrivals, claimed by the inbox). All files are synthetic.
+name: doc_review_forms
+description: Draft mode - queue Enter opens the form, banner, viewer with highlights, Read document, Accept, Alt+S posts what was reviewed (digests match), Discard document asks.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+
+  # --- Arrivals are claimed as drafts -------------------------------------------
+  - command: nav.receipt_inbox
+  - assert_state: {key: screen.screen, equals: receipt_inbox}
+  # Wait for the inbox to claim its arrivals (an event, not a fixed time).
+  - assert_state: {key: screen.drafts.on, equals: true, within_ms: 30000}
+  - assert_state: {key: screen.drafts.claimed, equals: 5, within_ms: 60000}
+  - command: file.close_window
+
+  # --- 1. Enter on the first row opens its form in draft mode -------------------
+  - command: vendors.review_documents
+  - assert_state: {key: screen.screen, equals: review_documents}
+  # The first rows are of no known kind (they ask which form first); the
+  # third is a bill. K to the top first (the second run starts where the
+  # first left the selection).
+  - key: K
+  - key: K
+  - key: K
+  - assert_state: {key: queue.selected, equals: 0}
+  - key: J
+  - key: J
+  - assert_state: {key: queue.rows.2.kind, equals: bill}
+  - key: Enter
+  - assert_state: {key: screen.screen, equals: enter_bill, within_ms: 5000}
+  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
+  - assert_state: {key: screen.draft.form, equals: bill}
+  - assert_state: {key: screen.draft.has_file, equals: true}
+  - assert_state: {key: screen.draft.work, equals: idle}
+  - assert_state: {key: screen.draft.closed, equals: false}
+  - assert_exists: {role: button, label: Discard document…}
+  - screenshot: draft-open
+
+  # --- 2. Discard document asks first; Cancel keeps it ---------------------------
+  - click: {role: button, label: Discard document…}
+  - assert_state: {key: screen.draft.dialog, equals: confirm_discard}
+  - assert_exists: {label_contains: It won't be entered.}
+  - screenshot: draft-discard-ask
+  - click: {role: button, label: Cancel}
+  - assert_state: {key: screen.draft.dialog, equals: null}
+  - assert_state: {key: screen.draft.closed, equals: false}
+
+  # --- 3. Read document on a draft not read yet: read on this computer -----------
+  # (the synthetic fax has no text to read: "Couldn't read", enter by hand;
+  # nothing is stored or posted).
+  - click: {role: button, label: Read document}
+  - assert_state: {key: screen.read.local.requests, equals: 1}
+  - assert_state: {key: screen.read.local.busy, equals: false, within_ms: 30000}
+  - assert_state: {key: screen.draft.work, equals: idle}
+  - assert_state: {key: screen.draft.posted, equals: null}
+  - screenshot: draft-read
+
+  # --- Leave it open: the draft stays in the queue -------------------------------
+  - click: {role: tab, label: Review Documents}
+  - assert_state: {key: screen.screen, equals: review_documents}

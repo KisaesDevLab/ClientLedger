@@ -76,7 +76,9 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Shift+F8` | Previous Row That Needs Attention | `batch.prev_problem` |
 | `Ctrl+Page Down` | Next Section | `batch.next_section` |
 | `Ctrl+Page Up` | Previous Section | `batch.prev_section` |
-| `Alt+A` | Accept These Values | `bill.accept_read` |
+| `Alt+A` | Accept These Values | `form.accept_read` |
+| `Alt+T` | Attach to Selected Transaction | `form.attach_selected` |
+| `Alt+E` | Enter as New | `form.enter_as_new` |
 
 ## In a grid
 
@@ -94,6 +96,18 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Ctrl+0` | Fit the Document | `viewer.fit` |
 | `Page Down` | Next Page | `viewer.page_next` |
 | `Page Up` | Previous Page | `viewer.page_prev` |
+| `Alt+Right` | Next Word on the Page | `viewer.next_word` |
+| `Alt+Left` | Previous Word on the Page | `viewer.prev_word` |
+| `Enter` | Fill the Field From This Word | `viewer.fill_word` |
+
+## In a work list
+
+| Keys | Command | Id |
+| --- | --- | --- |
+| `J` | Next Document | `queue.next` |
+| `K` | Previous Document | `queue.prev` |
+| `Enter` | Open the Document | `queue.open` |
+| `Delete` | Discard the Document… | `queue.discard` |
 
 ## Always the same in forms and grids
 
@@ -157,7 +171,7 @@ Find these from the menus or with `Ctrl+K`.
 - **Edit:** Void Transaction
 - **Lists:** Item List, Tags, Terms, Payment Methods, Templates, Import or Export a List
 - **Customers:** Customers & Jobs, Daily Sales Summary, Credit Memo or Refund, Statements
-- **Vendors:** Vendors, Paid with Personal Funds, Receipt Inbox, Match Vendor Statement…
+- **Vendors:** Vendors, Paid with Personal Funds, Receipt Inbox, Match Vendor Statement…, Review Documents
 - **Banking:** Pay Yourself or Put Money In, Loan Payment, Bulk Entry, Import Bank File, Bank Feed
 - **Payroll:** Import Payroll
 - **Reports:** Reports, Profit & Loss, Balance Sheet

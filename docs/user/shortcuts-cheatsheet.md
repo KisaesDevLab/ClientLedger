@@ -86,6 +86,8 @@
 - `Ctrl+Page Down` Next Section
 - `Ctrl+Page Up` Previous Section
 - `Alt+A` Accept These Values
+- `Alt+T` Attach to Selected Transaction
+- `Alt+E` Enter as New
 - `Ctrl+N` New List Entry
 - `Ctrl+Shift+I` Make Inactive or Active Again
 - `Ctrl+Shift+H` Include Inactive Entries
@@ -104,5 +106,15 @@
 - `Ctrl+0` Fit the Document
 - `Page Down` Next Page
 - `Page Up` Previous Page
+- `Alt+Right` Next Word on the Page
+- `Alt+Left` Previous Word on the Page
+- `Enter` Fill the Field From This Word
+
+**In a work list**
+
+- `J` Next Document
+- `K` Previous Document
+- `Enter` Open the Document
+- `Delete` Discard the Document…
 
 **Dates**: `+ / -` Next / previous day; `T` Today; `M / H` First / last day of the month; `Y / R` First / last day of the year; `W / K` First / last day of the week

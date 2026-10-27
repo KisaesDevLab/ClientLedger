@@ -45,6 +45,8 @@ pub use errors::{
     FieldPath, LocalValidation, SavedEntity, UserText, ValidationError, ValidationIssue,
     is_deposit_links_dropped,
 };
+// A04 WP-D: the demo engine's refusals read as the engine's.
+pub use errors::engine_refusal;
 pub use idempotency::IdempotencyKey;
 pub use queue::{
     ApiQueue, OrphanLabel, OrphanOutcome, OrphanResult, Pending, QueueConfig, QueueError,
@@ -230,6 +232,11 @@ pub use resources::document_drafts::{
     DraftKind, DraftListQuery, DraftPage, DraftReader, DraftReading, DraftRefusal, DraftStatus,
     DuplicateMatch, MatchReason, MatchSource, POSSIBLE_DUPLICATE, TEMPLATE_LIMIT,
     limits as draft_limits,
+};
+// A04: attach a document draft to a posted record (U-95).
+pub use resources::document_drafts::{
+    AttachProblem, AttachedDraft, DOCUMENT_FILE_MISSING, TARGET_NOT_ATTACHABLE,
+    TRANSACTION_NOT_POSTED, attach_problem,
 };
 pub use resources::vendor_templates::{
     TEMPLATE_LINE_TABLE_BYTES, TEMPLATE_REGIONS_BYTES, TEMPLATES_PER_COMPANY, TemplateUpsert,

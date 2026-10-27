@@ -108,6 +108,20 @@ pub trait Screen {
     fn document(&self) -> Option<doc_viewer::DocRef> {
         None
     }
+
+    /// A04 WP-C: the compare tools the pop-out viewer draws over this
+    /// window's document, each frame (a form in draft mode answers its
+    /// `CompareTools::view`). `None`: a plain viewer.
+    fn compare(&self) -> Option<crate::widgets::compare::CompareView> {
+        None
+    }
+
+    /// A04 WP-C: an event of the compare tools in the pop-out viewer (a
+    /// word clicked, a box dragged, a target clicked, "Looks right",
+    /// Highlights), delivered through the shell's outbox the frame after.
+    /// The form runs it through `CompareTools::on_event`, as it does its
+    /// docked viewer's events.
+    fn on_viewer_event(&mut self, _event: crate::widgets::compare::CompareEvent) {}
 }
 
 /// What one screen hands another to open with (P17, [`Screen::open_with`]).
@@ -124,6 +138,10 @@ pub enum OpenPayload {
     /// ("New bill" on `vendors.enter_bill`, "New check" on
     /// `vendors.write_check`).
     InboxDraft(crate::screens::receipt_inbox::InboxDraft),
+    /// A04 WP-F2: a document draft opened in its form in draft mode
+    /// (`screens::doc_review::review::open`; Enter Bill, Record Card
+    /// Charge, Write Check).
+    DocumentDraft(crate::screens::doc_review::review::DraftOpen),
 }
 
 /// Stand-in for a screen a later phase builds.

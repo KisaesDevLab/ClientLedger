@@ -67,9 +67,16 @@ pub(crate) fn items(
                 None => count_of(counts.map(|c| &c.bills), kind),
             },
             AttentionKind::PayrollUnposted => count_of(counts.map(|c| &c.payroll), kind),
-            // Counted on this computer by the inbox service; the card puts
-            // in its count each frame ([`with_intake`]).
+            // Intake folders: counted on this computer by the inbox
+            // service; the card puts in its count each frame
+            // ([`with_intake`]).
             AttentionKind::IntakeFolders => AttentionItem::counted(kind, 0),
+            // Documents to review (A04 D6): the engine's total of live
+            // drafts ([`documents_count`]); 0 on an engine without them.
+            AttentionKind::DocumentsToReview => match data.documents.value {
+                Some(n) => AttentionItem::counted(kind, n),
+                None => AttentionItem::unknown(kind, true),
+            },
             AttentionKind::ReconcileUnfinished => match &data.reconcile.value {
                 Some(r) => AttentionItem::counted(
                     kind,
@@ -112,6 +119,34 @@ pub(crate) fn with_intake(mut items: Vec<AttentionItem>, problems: usize) -> Vec
         }
     }
     items
+}
+
+/// Home's count of documents to review (A04 D6) on the demo engine: the
+/// total of `list(status=new,ready,failed, view=summary, limit=1)`.
+///
+/// # Errors
+/// Any [`ApiError`] but `Unsupported` (no drafts: 0).
+pub(crate) fn documents_demo(
+    s: &crate::company::demo::DemoState,
+    tenant: Option<cl_core::ids::TenantId>,
+) -> Result<u64, ApiError> {
+    let Some(t) = tenant else {
+        return Ok(0);
+    };
+    crate::screens::doc_review::queue::count_of(crate::company::demo::drafts::list(
+        s,
+        t,
+        &crate::screens::doc_review::queue::count_query(),
+    ))
+}
+
+/// [`documents_demo`] on the engine.
+///
+/// # Errors
+/// As [`documents_demo`].
+pub(crate) async fn documents_count(s: cl_api::Session) -> Result<u64, ApiError> {
+    let q = crate::screens::doc_review::queue::count_query();
+    crate::screens::doc_review::queue::count_of(s.document_drafts().list(&q).await)
 }
 
 /// `days` as words: "1 day", "14 days".
@@ -211,6 +246,7 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
                     AttentionKind::ReconcileUnfinished => home.data.reconcile.error.is_some(),
                     AttentionKind::InvoicesOverdue => home.data.summary.error.is_some(),
                     AttentionKind::IntakeFolders => false,
+                    AttentionKind::DocumentsToReview => home.data.documents.error.is_some(),
                     _ => home.data.counts.value.as_ref().is_some_and(|c| match kind {
                         AttentionKind::BankWaiting => c.feed.is_err(),
                         AttentionKind::BillsDue { .. } => c.bills.is_err(),
@@ -267,6 +303,11 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
             AttentionKind::IntakeFolders => out.push(Line::task(
                 t_count("home.attention.intake", shown, &[]),
                 "home.attention.intake.open",
+                opens,
+            )),
+            AttentionKind::DocumentsToReview => out.push(Line::task(
+                t_count("home.attention.documents", shown, &[]),
+                "home.attention.review",
                 opens,
             )),
         }

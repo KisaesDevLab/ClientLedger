@@ -1446,8 +1446,65 @@ fn sample_docs() -> BTreeMap<&'static str, String> {
             "Synthetic sample document for the ClientLedger demo. Not a real invoice.",
         ),
     ]);
+    // A04 step 15: a second invoice from the same vendor in the same layout
+    // (the saved layout's banner), and a receipt that matches the demo's
+    // check 4401 (Ozark Feed & Seed, 2,318.60, 10/02/2026, after the closing
+    // date). Synthetic.
+    let second = text_pdf(&[
+        (56, 730, 20, "Midwest Equipment Rental"),
+        (56, 708, 10, "88 Industrial Pkwy, Joplin, MO 64801"),
+        (420, 730, 16, "INVOICE"),
+        (420, 708, 10, "Invoice no. INV-55902"),
+        (420, 694, 10, "Date 11/04/2026"),
+        (420, 680, 10, "Terms Net 15"),
+        (56, 650, 10, "Bill to: Ozark Ridge Landscaping LLC"),
+        (56, 636, 10, "410 Ridge Rd, Monett, MO 65708"),
+        (56, 600, 10, "Description"),
+        (480, 600, 10, "Amount"),
+        (
+            56,
+            580,
+            10,
+            "Skid steer loader, 1 day - Long Creek Marina seawall",
+        ),
+        (480, 580, 10, "685.50"),
+        (56, 564, 10, "Delivery and pickup"),
+        (480, 564, 10, "150.00"),
+        (400, 530, 12, "TOTAL"),
+        (480, 530, 12, "835.50"),
+        (
+            56,
+            90,
+            8,
+            "Synthetic sample document for the ClientLedger demo. Not a real invoice.",
+        ),
+    ]);
+    let receipt = text_pdf(&[
+        (56, 730, 20, "Ozark Feed & Seed"),
+        (56, 708, 10, "1200 Commerce Dr, Monett, MO 65605"),
+        (420, 730, 16, "RECEIPT"),
+        (420, 708, 10, "Receipt no. R-30412"),
+        (420, 694, 10, "Date 10/02/2026"),
+        (56, 640, 10, "Description"),
+        (480, 640, 10, "Amount"),
+        (56, 620, 10, "Perennials"),
+        (480, 620, 10, "1,487.35"),
+        (56, 604, 10, "Hardwood mulch"),
+        (480, 604, 10, "831.25"),
+        (400, 570, 12, "TOTAL"),
+        (480, 570, 12, "2,318.60"),
+        (56, 550, 10, "Paid by check"),
+        (
+            56,
+            90,
+            8,
+            "Synthetic sample document for the ClientLedger demo. Not a real receipt.",
+        ),
+    ]);
     let mut out = BTreeMap::new();
     out.insert("midwest_inv_55871.pdf", invoice);
+    out.insert("midwest_inv_55902.pdf", second);
+    out.insert("ozark_feed_receipt_30412.pdf", receipt);
     out
 }
 

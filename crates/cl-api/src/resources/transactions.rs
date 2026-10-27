@@ -929,7 +929,7 @@ impl TxnSort {
 }
 
 /// Filters of the transaction list (camelCase on the wire).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 #[allow(missing_docs, reason = "engine filter names")]
 pub struct TransactionFilter {
     pub txn_type: Option<TxnType>,
@@ -943,6 +943,33 @@ pub struct TransactionFilter {
     /// Memo, number, payee or amount contains (owner data: never logged).
     pub search: Option<String>,
     pub sort: Option<(TxnSort, SortDir)>,
+    /// Only transactions whose total is exactly this (A04, engine U-95,
+    /// `document-drafts-attach-v1`): compared as SQL `numeric` (`10.1` =
+    /// `10.10`, never `10.01`); records without a total (journal entries,
+    /// transfers) never match. Sent as a decimal string; without the
+    /// capability [`Transactions::list`] refuses it (an older engine would
+    /// drop the filter and answer every transaction). Owner data: never
+    /// logged.
+    pub amount: Option<Money>,
+}
+
+/// Hides the search text and the amount (owner data).
+impl std::fmt::Debug for TransactionFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransactionFilter")
+            .field("txn_type", &self.txn_type)
+            .field("status", &self.status)
+            .field("contact_id", &self.contact_id)
+            .field("account_id", &self.account_id)
+            .field("tag_id", &self.tag_id)
+            .field("basis", &self.basis)
+            .field("start_date", &self.start_date)
+            .field("end_date", &self.end_date)
+            .field("has_search", &self.search.is_some())
+            .field("sort", &self.sort)
+            .field("has_amount", &self.amount.is_some())
+            .finish()
+    }
 }
 
 impl TransactionFilter {
@@ -992,6 +1019,7 @@ impl TransactionFilter {
         );
         id("endDate", self.end_date.map(CalendarDate::to_wire), &mut q);
         q.opt_str("search", self.search.as_deref());
+        id("amount", self.amount.map(Money::to_wire), &mut q);
         q.sort(self.sort.map(|(s, d)| (s.as_str(), d)));
         q
     }
@@ -1013,12 +1041,22 @@ impl Transactions<'_> {
     /// One page of transactions.
     ///
     /// # Errors
-    /// Any [`ApiError`].
+    /// `Local(Unsupported)` for an `amount` filter without
+    /// `document-drafts-attach-v1` (nothing sent); any [`ApiError`].
     pub async fn list(
         &self,
         filter: &TransactionFilter,
         page: PageRequest,
     ) -> Result<Page<TransactionSummary>, ApiError> {
+        if filter.amount.is_some()
+            && !self
+                .0
+                .client()
+                .capabilities()
+                .has(Capabilities::DOCUMENT_DRAFTS_ATTACH)
+        {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
+        }
         common::list_page(self.0, &SPEC, filter.query(), page).await
     }
 

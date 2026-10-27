@@ -20,6 +20,10 @@ pub fn key_from_egui(key: egui::Key) -> Option<Key> {
         E::Comma => Key::Comma,
         E::Equals | E::Plus => Key::Equals,
         E::Minus => Key::Minus,
+        // A04: Alt+Left/Right step through a document's words. Plain arrows
+        // map too but bind nothing, so grids and text fields keep them.
+        E::ArrowLeft => Key::Left,
+        E::ArrowRight => Key::Right,
         E::Num0 => Key::Digit(0),
         E::Num1 => Key::Digit(1),
         E::Num2 => Key::Digit(2),
@@ -96,6 +100,16 @@ pub fn reserved_by_text_fields(s: Shortcut) -> bool {
         || (s.mods == Mods::NONE && s.key == Key::Delete)
 }
 
+/// True when `s` is a plain key a text field types or acts on: an
+/// unmodified letter or Enter (A04 S8). While a text field has focus the
+/// shell never runs such a shortcut (J/K/Enter in the Review Documents
+/// list), so typing "j" into the queue's filter types it. Shift+letter is
+/// typing too.
+#[must_use]
+pub fn typed_by_text_fields(s: Shortcut) -> bool {
+    !s.mods.command && !s.mods.alt && matches!(s.key, Key::Letter(_) | Key::Enter)
+}
+
 /// True when the platform uses Cmd and Option names.
 #[must_use]
 pub fn is_mac() -> bool {
@@ -142,6 +156,32 @@ mod tests {
         };
         assert_eq!(mods_from_egui(m, Key::Equals), Mods::CMD);
         assert_eq!(mods_from_egui(m, Key::Letter('R')), Mods::CMD_SHIFT);
+    }
+
+    #[test]
+    fn arrows_map_and_letters_type_in_text_fields() {
+        assert_eq!(key_from_egui(egui::Key::ArrowLeft), Some(Key::Left));
+        assert_eq!(key_from_egui(egui::Key::ArrowRight), Some(Key::Right));
+        // Up and Down stay with grids (no command uses them).
+        assert_eq!(key_from_egui(egui::Key::ArrowUp), None);
+        assert_eq!(key_from_egui(egui::Key::ArrowDown), None);
+        for s in [
+            Shortcut::new(Mods::NONE, Key::Letter('J')),
+            Shortcut::new(Mods::SHIFT, Key::Letter('K')),
+            Shortcut::new(Mods::NONE, Key::Enter),
+        ] {
+            assert!(typed_by_text_fields(s), "{s}");
+        }
+        for s in [
+            Shortcut::new(Mods::ALT, Key::Letter('S')),
+            Shortcut::new(Mods::CMD, Key::Letter('K')),
+            Shortcut::new(Mods::CMD, Key::Enter),
+            Shortcut::new(Mods::NONE, Key::Delete),
+            Shortcut::new(Mods::NONE, Key::PageDown),
+            Shortcut::new(Mods::ALT, Key::Right),
+        ] {
+            assert!(!typed_by_text_fields(s), "{s}");
+        }
     }
 
     #[test]

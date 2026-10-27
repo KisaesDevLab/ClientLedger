@@ -130,9 +130,7 @@ fn short_sha(root: &Path) -> Result<String> {
 }
 
 fn cargo_target_dir(root: &Path) -> PathBuf {
-    std::env::var_os("CARGO_TARGET_DIR")
-        .filter(|v| !v.is_empty())
-        .map_or_else(|| root.join("target"), PathBuf::from)
+    crate::meta::target_dir(root)
 }
 
 /// Copy a directory tree. Skips `skip` names at any depth.

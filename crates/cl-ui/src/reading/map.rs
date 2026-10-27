@@ -170,6 +170,19 @@ pub fn to_doc(local: &LocalReading) -> Mapped {
             tax: h.tax.as_ref().map(|f| f.value),
             total: total.map(|f| f.value),
             lines,
+            // A04 WP-F2: the card whose printed digits matched exactly one
+            // card account, and a printed check number (card and check
+            // forms only; the bill ignores both).
+            paid_from: match local.card {
+                Some(cl_docread::card::CardPick::One(a)) => Some(a),
+                _ => None,
+            },
+            check_number: match h.payment.as_ref().map(|p| &p.value) {
+                Some(cl_docread::model::Payment::Check { number }) => {
+                    Some(number.trim().to_string()).filter(|n| !n.is_empty())
+                }
+                _ => None,
+            },
             confidence: FieldConfidence {
                 vendor: local.vendor.map(|v| level(v.confidence)),
                 bill_date: level_of(h.date.as_ref()),
@@ -179,6 +192,12 @@ pub fn to_doc(local: &LocalReading) -> Mapped {
                 terms: level_of(h.terms.as_ref()),
                 amount_paid: level_of(h.amount_paid.as_ref()),
                 payment: level_of(h.payment.as_ref()),
+                check_number: match h.payment.as_ref() {
+                    Some(f) if matches!(f.value, cl_docread::model::Payment::Check { .. }) => {
+                        Some(level(f.confidence))
+                    }
+                    _ => None,
+                },
             },
         },
         unknown_vendor,

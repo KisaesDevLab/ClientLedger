@@ -1,0 +1,141 @@
+# Review Documents, step 15's sections (A04 AC1, D5, plan §6 "Control
+# channel") against `clientledger --demo`: a mixed intake folder worked
+# through by keyboard. Bills and a receipt were saved into the demo's intake
+# folders; the owner opens the first bill from the list (J, Enter), reads it
+# on this computer, accepts it and enters it, and `state.review.match` says
+# the digest of the values on the screen equals the digest of what was sent
+# (AC1: exactly the reviewed values were posted). The bookkeeping engine
+# learned where that vendor prints its numbers, so the second invoice of the
+# same vendor, read afterwards, says "Filled from <vendor>'s saved layout".
+# Discard (Delete, then Discard) enters nothing; the original moves to
+# Discarded/ the next time the inbox looks (within 60 s).
+#
+# Light and dark run in one app and the demo's books are shared. Closing
+# both windows at the end of each run lets the next run's `nav.receipt_inbox`
+# lay the files out again, and the demo voids what the earlier run entered,
+# so both runs start alike. All files are synthetic.
+name: doc_review_flow
+description: A mixed folder by keyboard - read, accept, enter exactly what was reviewed (digests match), the vendor's saved layout on the second invoice, Discard enters nothing and the file reaches Discarded.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+
+  # --- Arrivals are claimed as drafts -------------------------------------------
+  - command: nav.receipt_inbox
+  - assert_state: {key: screen.screen, equals: receipt_inbox}
+  # Wait for the inbox to claim its arrivals (an event, not a fixed time).
+  - assert_state: {key: screen.drafts.on, equals: true, within_ms: 30000}
+  - assert_state: {key: screen.drafts.claimed, equals: 5, within_ms: 60000}
+  - assert_state: {key: screen.drafts.claimed, equals: 5}
+  - assert_state: {key: screen.discarded, equals: 0}
+  - command: vendors.review_documents
+  - assert_state: {key: screen.screen, equals: review_documents}
+  - assert_state: {key: queue.total, equals: 5}
+  # Nothing read yet; the first row of the list is the late invoice, the
+  # fourth is the first bill, the last is the receipt.
+  - assert_state: {key: queue.rows.0.status, equals: waiting}
+  - assert_state: {key: queue.rows.3.status, equals: waiting}
+  - assert_state: {key: queue.rows.4.status, equals: waiting}
+
+  # --- 1. J, J, J, Enter: the first bill opens in its form -----------------------
+  - key: J
+  - key: J
+  - key: J
+  - assert_state: {key: queue.selected, equals: 3}
+  - assert_state: {key: queue.rows.3.kind, equals: bill}
+  - key: Enter
+  - assert_state: {key: screen.screen, equals: enter_bill, within_ms: 5000}
+  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
+  - assert_state: {key: screen.draft.has_file, equals: true}
+  - assert_state: {key: screen.draft.layout_vendor, equals: false}
+  - screenshot: first-bill-open
+
+  # --- 2. Read document on this computer; nothing is entered until Accept --------
+  - click: {role: button, label: Read document}
+  - assert_state: {key: screen.read.local.outcome, equals: read, within_ms: 30000}
+  - assert_state: {key: screen.has_vendor, equals: true}
+  - assert_state: {key: screen.draft.posted, equals: null}
+  - assert_value: {target: {role: text_input, label: Ref. no.}, equals: "INV-55871"}
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "1,480.00"}
+  - screenshot: first-bill-read
+
+  # --- 3. Accept these values (Alt+A), choose the accounts, enter it (Alt+S) -----
+  - key: Alt+A
+  - assert_state: {key: screen.read.unaccepted, equals: 0}
+  - click: {label: "Account, line 1"}
+  - type: {text: "6210"}
+  - key: Tab
+  - assert_value: {target: {label: "Account, line 1"}, equals: "6210 · Equipment rental"}
+  - click: {label: "Account, line 2"}
+  - type: {text: "6210"}
+  - key: Tab
+  - assert_value: {target: {label: "Account, line 2"}, equals: "6210 · Equipment rental"}
+  - key: Alt+S
+  # The digest of the values on the screen = the digest of the body sent.
+  - assert_state: {key: review.match, equals: true, within_ms: 5000}
+  - assert_state: {key: screen.screen, equals: review_documents, within_ms: 5000}
+  - click: {role: button, label: Refresh}
+  - assert_state: {key: queue.total, equals: 4, within_ms: 5000}
+  - screenshot: first-bill-entered
+
+  # --- 4. Read all: the second invoice of the same vendor uses its layout --------
+  - click: {role: button, label: Read all}
+  - assert_state: {key: queue.rows.0.status, equals: check_fields, within_ms: 60000}
+  - assert_state: {key: queue.rows.1.status, equals: check_fields, within_ms: 60000}
+  - assert_state: {key: queue.rows.2.status, equals: couldnt_read, within_ms: 60000}
+  - assert_state: {key: queue.rows.3.status, equals: possible_duplicate, within_ms: 60000}
+  - assert_state: {key: queue.reading, equals: null, within_ms: 60000}
+  - screenshot: queue-read
+  - key: K
+  - key: K
+  - key: K
+  - assert_state: {key: queue.selected, equals: 0}
+  - key: Enter
+  - assert_state: {key: screen.screen, equals: enter_bill, within_ms: 5000}
+  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
+  - assert_state: {key: screen.draft.layout_vendor, equals: true}
+  - assert_exists: {label_contains: "saved layout"}
+  - assert_value: {target: {role: text_input, label: Ref. no.}, equals: "INV-55902"}
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "835.50"}
+  - screenshot: second-bill-layout
+
+  # --- 5. Accept it the same way; the digests still agree ------------------------
+  - key: Alt+A
+  - assert_state: {key: screen.read.unaccepted, equals: 0}
+  - click: {label: "Account, line 1"}
+  - key: Ctrl+A
+  - type: {text: "6210"}
+  - key: Tab
+  - click: {label: "Account, line 2"}
+  - key: Ctrl+A
+  - type: {text: "6210"}
+  - key: Tab
+  - key: Alt+S
+  - assert_state: {key: review.match, equals: true, within_ms: 5000}
+  - assert_state: {key: screen.screen, equals: review_documents, within_ms: 5000}
+  - click: {role: button, label: Refresh}
+  - assert_state: {key: queue.total, equals: 3, within_ms: 5000}
+
+  # --- 6. Discard: nothing is entered, the original moves to Discarded/ ----------
+  # (the first row now is the photo of the receipt; Delete asks first).
+  - assert_state: {key: queue.selected, equals: 0}
+  - key: Delete
+  - assert_state: {key: queue.confirm_discard, equals: true}
+  - assert_exists: {label_contains: Discard this document?}
+  - click: {role: button, label: Discard}
+  - assert_state: {key: queue.confirm_discard, equals: false}
+  - click: {role: button, label: Refresh}
+  - assert_state: {key: queue.total, equals: 2, within_ms: 5000}
+  - assert_state: {key: queue.problem, equals: null}
+  - screenshot: discarded
+  # The inbox moves the file on its next look (every 30 s while it is open).
+  - click: {role: tab, label_contains: Receipt Inbox}
+  - assert_state: {key: screen.screen, equals: receipt_inbox}
+  - assert_state: {key: screen.discarded, equals: 1, within_ms: 60000}
+  - screenshot: inbox-after-discard
+
+  # --- Close both windows so the next run starts alike ---------------------------
+  - command: file.close_window
+  - click: {role: tab, label: Review Documents}
+  - command: file.close_window
+  - click: {role: tab, label: Home}

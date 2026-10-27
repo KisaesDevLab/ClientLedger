@@ -9,8 +9,10 @@
 # read with the same key, which the engine replays) with it; keyable-ap = the
 # same for the idempotency-ap-v1 route set (U-83 to U-87), keyed only while the
 # engine advertises idempotency-ap-v1; keyable-docs = the same for the
-# idempotency-docs-v1 route set (U-92a). Only keyable, keyable-ap and
-# keyable-docs routes are upgraded; never = auth and company-creation routes.
+# idempotency-docs-v1 route set (U-92a); keyable-docs-attach = the same for the
+# document-drafts-attach-v1 route set (U-95). Only keyable, keyable-ap,
+# keyable-docs and keyable-docs-attach routes are upgraded; never = auth and
+# company-creation routes.
 #
 # Read by the cl-api tests (must match src/resources/operations.rs) and by
 # `cargo xtask api-spec`. Engine Zod sources behind these shapes, hashed into
@@ -254,3 +256,6 @@ PUT     /api/v1/vendor-layout-templates         pre-handler-only
 DELETE  /api/v1/vendor-layout-templates/{id}    pre-handler-only
 # A03: document reading assist (engine U-92d, document-assist-v1; in the pin since 38cf97eb)
 POST    /api/v1/document-reading/assist         pre-handler-only
+# A04: attach a document draft (engine U-95, document-drafts-attach-v1; in the pin since
+# 4e0593c3; keyable-docs-attach = keyed only under document-drafts-attach-v1)
+POST    /api/v1/document-drafts/{id}/attach     keyable-docs-attach

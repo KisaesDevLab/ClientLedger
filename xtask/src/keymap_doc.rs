@@ -111,6 +111,7 @@ pub fn cheatsheet_md() -> String {
         ),
         ("\n**In a grid**\n\n", &[Scope::Grid][..]),
         ("\n**In a document preview**\n\n", &[Scope::Viewer][..]),
+        ("\n**In a work list**\n\n", &[Scope::List][..]),
     ] {
         out.push_str(title);
         for c in COMMANDS
@@ -216,6 +217,7 @@ mod tests {
 
     #[test]
     fn cheatsheet_is_short() {
-        assert!(cheatsheet_md().lines().count() < 120);
+        // One printed page in two columns; A04 added the viewer and work-list keys.
+        assert!(cheatsheet_md().lines().count() < 140);
     }
 }

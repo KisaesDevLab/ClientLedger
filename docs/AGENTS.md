@@ -2,6 +2,15 @@
 
 How Claude Code builds ClientLedger with subagents and the right model for each job. Subagent definitions live in `.claude/agents/`. This file covers development agents only; the in-app AI features (P09) are unrelated.
 
+## Usage rules (owner 2026-10-26, Q-301; these win over the sections below)
+
+1. **One review per phase.** One `reviewer` (opus) covering code and security together, plus `ui-verifier` for screens. No separate plan reviews and no per-PR `security-reviewer`, except: Tier H phases and process checkpoints keep the `process-reviewer` (xhigh) plan review, and engine PRs are reviewed inside the phase's combined review.
+2. **At most 2 implementers per phase**, each with a bigger, coherent work package. Fewer handoffs, cold builds and merge conflicts; no memory kills.
+3. **Sonnet for routine coding:** control-channel scenarios, demo-backend parity, docs, engine pin bumps, CI fixes. Opus stays on money, posting, engine changes, security-sensitive code, plans and reviews.
+4. **Lean orchestration:** plans ≤ 2,000 words; briefs name only the sections and files to read; agents never read whole plans or archives; the orchestrator reports to the owner at milestones or when the owner is needed, not after every event.
+5. **Full local `cargo xtask ci` once per phase**, before the PR. Work packages run clippy and targeted tests only; GitHub CI covers the three OSes.
+6. **Engine PRs merge when green** (CI passes, npm-audit excepted while it also fails on engine main) and the phase's combined review has no open findings on them. The owner gets a one-line summary.
+
 ## Principles
 
 1. **Match the model to the risk, not the size.** Code that touches money, posting, concurrency, imports, migrations, or security gets Opus for planning and review even when the diff is small. Routine UI, plumbing, and docs use Sonnet. Haiku only searches and keeps records.

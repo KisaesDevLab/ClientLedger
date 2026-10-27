@@ -27,6 +27,7 @@ use super::picker::{self, PickKind, PickRow};
 use super::{ENTER_BILL, InboxDraft, STACK_WIDTH, WRITE_CHECK, date_of, size_text};
 use crate::company::{CompanyEvent, CompanyLink};
 use crate::i18n::{t, t_count, t_with};
+use crate::reading::queue::BatchProgress;
 use crate::screens::company::form;
 use crate::screens::preferences::intake_folders;
 use crate::theme::Tokens;
@@ -61,6 +62,12 @@ pub(super) struct Frame {
     migration: Migration,
     problem: Option<&'static str>,
     ready_forms: Vec<FormReady>,
+    /// A04: the engine has document drafts (claims, Read all).
+    drafts: bool,
+    /// A04: Read all's progress.
+    reading: Option<BatchProgress>,
+    /// A04: readings stored, documents that couldn't be read.
+    read_counts: (u32, u32),
 }
 
 impl Frame {
@@ -93,6 +100,9 @@ impl Frame {
             migration: s.migration,
             problem: s.problem,
             ready_forms: std::mem::take(&mut s.ready_forms),
+            drafts: s.drafts_enabled(),
+            reading: s.read_progress(),
+            read_counts: s.read_counts(),
         }
     }
 }
@@ -139,6 +149,7 @@ fn state_key(s: RowState) -> &'static str {
         RowState::Arrived => "inbox.state.arrived",
         RowState::OnForm => "inbox.state.on_form",
         RowState::Duplicate => "inbox.state.duplicate",
+        RowState::ClaimedElsewhere => "inbox.state.claimed_elsewhere",
         RowState::Moving => "inbox.state.moving",
         RowState::BringIn => "inbox.state.bring_in",
         RowState::TooLarge => "inbox.state.too_large.intake",
@@ -153,7 +164,11 @@ fn state_key(s: RowState) -> &'static str {
 fn pickable(s: RowState) -> bool {
     matches!(
         s,
-        RowState::Arrived | RowState::OnForm | RowState::Duplicate | RowState::BringIn
+        RowState::Arrived
+            | RowState::OnForm
+            | RowState::Duplicate
+            | RowState::ClaimedElsewhere
+            | RowState::BringIn
     )
 }
 
@@ -362,6 +377,21 @@ impl super::ReceiptInboxScreen {
                 }));
             }
             Ok(None) => self.arrivals.notice = Some(t("inbox.notice.linking")),
+            // A04 WP-F2: a claimed arrival opens its draft in the form, in
+            // draft mode (never the plain save path).
+            Err("inbox.claim.review") => match intake::handle(ctx).lock().own_draft(&entry) {
+                Some(id) => crate::screens::doc_review::review::open(
+                    &self.link,
+                    crate::screens::doc_review::review::DraftOpen {
+                        id,
+                        form: match kind {
+                            FormKind::Bill => cl_model::doc_draft::DraftForm::EnterBill,
+                            FormKind::Check => cl_model::doc_draft::DraftForm::WriteCheck,
+                        },
+                    },
+                ),
+                None => self.arrivals.problem = Some("inbox.claim.review"),
+            },
             Err(k) => self.arrivals.problem = Some(k),
         }
     }
@@ -415,7 +445,40 @@ impl super::ReceiptInboxScreen {
             if f.runs.len() > 1 {
                 self.filter_combo(ui, f);
             }
+            // A04: read every document waiting to be read, on this
+            // computer (never AI).
+            if f.drafts
+                && f.reading.is_none()
+                && ui
+                    .button(t("inbox.read_all"))
+                    .on_hover_text(t("inbox.read_all.tip"))
+                    .clicked()
+            {
+                self.arrivals.notice = None;
+                if !intake::handle(ui.ctx()).lock().read_all(&self.link) {
+                    self.arrivals.problem = Some("inbox.read_all.failed");
+                }
+            }
         });
+        if let Some(p) = f.reading {
+            ui.horizontal_wrapped(|ui| {
+                form::progress_line(
+                    ui,
+                    tokens,
+                    &t_with(
+                        "inbox.read_all.progress",
+                        &[("n", &p.done.to_string()), ("total", &p.total.to_string())],
+                    ),
+                );
+                if ui
+                    .button(t("inbox.read_all.cancel"))
+                    .on_hover_text(t("inbox.read_all.cancel.tip"))
+                    .clicked()
+                {
+                    intake::handle(ui.ctx()).lock().cancel_reads();
+                }
+            });
+        }
         self.health_chips(ui, tokens, f);
         ui.add_space(6.0);
         if self.intake_empty_state(ui, tokens, f) {
@@ -681,7 +744,16 @@ impl super::ReceiptInboxScreen {
                 );
             }
             RowState::BringIn => form::hint(ui, tokens, &t("inbox.bring_in.hint")),
+            RowState::ClaimedElsewhere => {
+                form::hint(ui, tokens, &t("inbox.claimed_elsewhere.detail"));
+            }
+            RowState::Arrived if row.link == "own" => {
+                form::hint(ui, tokens, &t("inbox.claim.review.hint"));
+            }
             _ => {}
+        }
+        if let Some(k) = row.claim_problem {
+            form::inline_warning(ui, tokens, &t(k));
         }
         if self.arrivals.confirm_discard {
             self.discard_confirm(ui, tokens, f, &row);
@@ -773,6 +845,17 @@ impl super::ReceiptInboxScreen {
                     }
                 }
             }
+            // A04 M3: only this computer's file is discarded; the other
+            // computer's draft stays. No Copy anyway.
+            RowState::ClaimedElsewhere => {
+                let discard = ui
+                    .button(t("inbox.action.discard"))
+                    .on_hover_text(t("inbox.action.discard.elsewhere.tip"))
+                    .clicked();
+                if discard {
+                    self.arrivals.confirm_discard = true;
+                }
+            }
             RowState::BringIn => {
                 let bring = ui
                     .button(t("inbox.action.bring_in"))
@@ -790,16 +873,14 @@ impl super::ReceiptInboxScreen {
         let keep = Self::keep_of(f, row);
         let mut yes = false;
         let mut no = false;
+        let ask = match (row.state, keep) {
+            (RowState::ClaimedElsewhere, true) => "inbox.discard.ask.elsewhere.keep",
+            (RowState::ClaimedElsewhere, false) => "inbox.discard.ask.elsewhere",
+            (_, true) => "inbox.discard.ask.keep",
+            (_, false) => "inbox.discard.ask",
+        };
         form::card(ui, tokens, |ui| {
-            form::inline_warning(
-                ui,
-                tokens,
-                &t(if keep {
-                    "inbox.discard.ask.keep"
-                } else {
-                    "inbox.discard.ask"
-                }),
-            );
+            form::inline_warning(ui, tokens, &t(ask));
             ui.horizontal_wrapped(|ui| {
                 yes = ui.button(t("inbox.discard.yes")).clicked();
                 no = ui.button(t("inbox.discard.no")).clicked();
@@ -959,6 +1040,24 @@ impl super::ReceiptInboxScreen {
             "problem": self.arrivals.problem.or(f.problem),
             "read_problem": self.arrivals.read_problem,
             "notice": self.arrivals.notice.is_some(),
+            // A04: document drafts (counts and states only).
+            "drafts": Self::drafts_state(f, selected),
+        })
+    }
+
+    /// The control channel's `drafts` (A04 WP-I): counts and states only.
+    fn drafts_state(f: &Frame, selected: Option<&Row>) -> Value {
+        let links = |l: &str| f.rows.iter().filter(|r| r.link == l).count();
+        json!({
+            "on": f.drafts,
+            "claimed": links("own"),
+            "pending": links("claim_sent"),
+            "elsewhere": f.rows.iter().filter(|r| r.state == RowState::ClaimedElsewhere).count(),
+            "refused": f.rows.iter().filter(|r| r.claim_problem.is_some()).count(),
+            "selected_link": selected.map(|r| r.link),
+            "reading": f.reading.map(|p| json!({"n": p.done, "total": p.total})),
+            "stored": f.read_counts.0,
+            "unreadable": f.read_counts.1,
         })
     }
 }

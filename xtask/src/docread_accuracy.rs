@@ -76,8 +76,7 @@ fn set_ready(set: &Path) -> bool {
 pub fn docread_accuracy(args: &[String]) -> Result<()> {
     let o = parse(args)?;
     let root = crate::engine::repo_root()?;
-    let target =
-        std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
+    let target = crate::meta::target_dir(&root);
     let set = root.join("target").join("docread-synth");
     if o.stress {
         crate::gen_invoices::gen_invoices(&["--stress-only".to_string()])?;

@@ -183,7 +183,9 @@ impl Screen for DocumentViewScreen {
                 self.saved = None;
                 true
             }
-            OpenPayload::BillPrefill(_) | OpenPayload::InboxDraft(_) => false,
+            OpenPayload::BillPrefill(_)
+            | OpenPayload::InboxDraft(_)
+            | OpenPayload::DocumentDraft(_) => false,
         }
     }
 

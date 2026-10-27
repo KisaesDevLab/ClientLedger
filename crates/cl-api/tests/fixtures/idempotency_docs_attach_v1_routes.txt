@@ -1,0 +1,8 @@
+# The engine's `document-drafts-attach-v1` route set (U-95, engine PR #180):
+# the document draft attach, `x-idempotency: true` in its openapi.json,
+# keyed with idempotency-docs-v1's contract under its own capability name,
+# recorded from engine main 4e0593c3 (the pin since A04).
+# Append-only for this capability name. A04 covers it: `keyable-docs-attach`
+# in operations.txt (`KeySet::DocsAttachV1`), keyed only while the engine
+# advertises `document-drafts-attach-v1`.
+POST /api/v1/document-drafts/{id}/attach

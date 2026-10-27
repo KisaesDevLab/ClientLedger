@@ -247,6 +247,8 @@ impl WriteCheckScreen {
             CheckField::LineCustomer(k) => {
                 self.lines.form_mut().focus(cell(k, L_CUSTOMER), &*lists);
             }
+            // A04 draft mode (WP-F2 puts the keyboard on Accept).
+            CheckField::ReadBanner => {}
         }
     }
 
@@ -356,9 +358,14 @@ impl WriteCheckScreen {
         self.save.duplicate = None;
         self.save.stale = false;
         self.save.notice = None;
-        if !self.is_dirty() {
+        // A04 draft mode: a document is entered even when nothing was
+        // typed (its checks still run).
+        if !self.is_dirty() && !self.draft.on() {
             self.follow_up(intent);
             return true;
+        }
+        if self.draft_locked() {
+            return false;
         }
         let form = self.compose();
         let ctx = CheckContext {
@@ -403,6 +410,15 @@ impl WriteCheckScreen {
                 return false;
             }
         };
+        // A04 draft mode: Accept is the convert, never a plain posting
+        // (`posting` above was cl-api's own check of the same draft). The
+        // register search comes before any closing-date password: an
+        // attach posts nothing (Q-A04f); a convert in the closed period is
+        // refused by the engine (423) and asks then (review B1).
+        if self.draft.on() {
+            let _ = posting;
+            return self.accept_draft(&checked, draft, intent, password);
+        }
         // A change touching the closed period needs the closing-date
         // password (NN8): ask before anything is sent.
         let old = self.editing.as_ref().map(|e| e.old_date);
@@ -624,7 +640,7 @@ impl WriteCheckScreen {
         }
     }
 
-    fn closing_failed(&mut self, e: &ApiError, pending: Pending) -> bool {
+    pub(crate) fn closing_failed(&mut self, e: &ApiError, pending: Pending) -> bool {
         let supported = self.closing_supported();
         self.closing_prompt
             .failed(e, pending, supported, self.closing)
@@ -883,7 +899,13 @@ impl WriteCheckScreen {
         let sent = match pending {
             Pending::Save(intent) => {
                 self.start_save(intent, Some(secret));
-                self.save.task.is_some() || !self.closing_prompt.dialog_open()
+                self.save.task.is_some()
+                    || self
+                        .draft
+                        .session
+                        .as_ref()
+                        .is_some_and(|s| s.locked() || s.closed())
+                    || !self.closing_prompt.dialog_open()
             }
             Pending::Void(reason) => {
                 self.send_void(&reason, Some(secret));

@@ -17,11 +17,16 @@
 //! | `bad-pgm` | asks for OCR of a page that is not a PGM: `Unreadable` when the host refuses it with `BadImage`, `Empty` otherwise |
 //! | `force-ocr` | reads the rest of the file (after the hook line) with every page sent to OCR |
 //! | `spawn` | tries to start a program (this one): `Unreadable` when that is refused (the Windows job allows one process), `Empty` when it started |
+//! | `region-lie` | answers a job with a word outside its region (a region job's reply the host must refuse) |
+//! | `region-other-page` | starts the job's page, then the next one, then answers with no words (a region job's host must refuse the second start) |
+//! | `region-page-twice` | starts the job's page twice, then answers with no words (the same) |
 //!
-//! Before `Ready`, `CL_DOCREAD_TEST_READY=hang` hangs and `=exit` exits
-//! (the host's start-up deadline tests).
+//! Before `Ready`, `CL_DOCREAD_TEST_READY=hang` hangs, `=exit` exits and
+//! `=old` announces the previous protocol version, then hangs (the host's
+//! start-up tests).
 
 use crate::batch::{Ctx, Fatal, Io, OcrAnswer, run_bytes};
+use cl_docread::model::{Bbox, Confidence, PageWords, Reader, Reading, Word, WordSource};
 use cl_docread::protocol::{Bytes, FromWorker, Job, JobFailure, OcrFailure};
 use std::io::Write;
 use std::time::Duration;
@@ -42,6 +47,9 @@ pub enum Hook {
     BadPgm,
     ForceOcr,
     Spawn,
+    RegionLie,
+    RegionOtherPage,
+    RegionPageTwice,
 }
 
 /// The hook a document names, and the bytes after its first line.
@@ -62,6 +70,9 @@ pub fn parse(bytes: &[u8]) -> Option<(Hook, &[u8])> {
             "bad-pgm" => Hook::BadPgm,
             "force-ocr" => Hook::ForceOcr,
             "spawn" => Hook::Spawn,
+            "region-lie" => Hook::RegionLie,
+            "region-other-page" => Hook::RegionOtherPage,
+            "region-page-twice" => Hook::RegionPageTwice,
             _ => return None,
         },
         Some(("commit", n)) => Hook::Commit(mib(n)?),
@@ -183,21 +194,65 @@ pub fn run(
                 reason,
             })
         }
-        Hook::ForceOcr => {
-            let forced = Ctx {
-                pdfium: ctx.pdfium,
-                options: ctx.options,
-                force_ocr: true,
-            };
-            let inner = Job {
-                job: job.job,
-                bytes: Bytes(Vec::new()),
-                hint: job.hint,
-                templates: job.templates.clone(),
-            };
-            run_bytes(&forced, io, &inner, rest)
-        }
+        Hook::RegionLie => region_lie(io, job),
+        Hook::RegionOtherPage => region_restarts(io, job, 1),
+        Hook::RegionPageTwice => region_restarts(io, job, 0),
+
+        Hook::ForceOcr => force_ocr(rest, ctx, io, job),
     }
+}
+
+/// `force-ocr`: the rest of the file with every page sent to OCR.
+fn force_ocr(rest: &[u8], ctx: &Ctx<'_>, io: &mut dyn Io, job: &Job) -> Result<FromWorker, Fatal> {
+    let forced = Ctx {
+        pdfium: ctx.pdfium,
+        options: ctx.options,
+        force_ocr: true,
+    };
+    let inner = Job {
+        job: job.job,
+        bytes: Bytes(Vec::new()),
+        hint: job.hint,
+        templates: job.templates.clone(),
+        region: job.region,
+    };
+    run_bytes(&forced, io, &inner, rest)
+}
+
+/// `region-lie`: a reading whose one word covers the whole page.
+fn region_lie(io: &mut dyn Io, job: &Job) -> Result<FromWorker, Fatal> {
+    let page = job.region.map_or(0, |r| r.page);
+    io.send(&FromWorker::PageStarted { job: job.job, page })?;
+    let mut reading = Reading::empty(Reader::Ocr, page + 1);
+    reading.words = vec![PageWords {
+        page,
+        aspect: 12_941,
+        source: WordSource::Ocr,
+        words: vec![Word {
+            text: "999.99".into(),
+            bbox: Bbox::PAGE,
+            confidence: Confidence::CERTAIN,
+        }],
+    }];
+    Ok(FromWorker::JobDone {
+        job: job.job,
+        reading: Box::new(reading),
+    })
+}
+
+/// `region-other-page` (`step` 1) and `region-page-twice` (`step` 0): the
+/// job's page is started, then page + `step`, then a reading with no words.
+fn region_restarts(io: &mut dyn Io, job: &Job, step: u16) -> Result<FromWorker, Fatal> {
+    let page = job.region.map_or(0, |r| r.page);
+    io.send(&FromWorker::PageStarted { job: job.job, page })?;
+    io.send(&FromWorker::PageStarted {
+        job: job.job,
+        page: page.saturating_add(step),
+    })?;
+    Ok(FromWorker::JobDone {
+        job: job.job,
+        reading: Box::new(Reading::empty(Reader::Ocr, page.saturating_add(2))),
+    })
 }
 
 /// The start-up hook (`CL_DOCREAD_TEST_READY`).
@@ -205,6 +260,17 @@ pub fn before_ready() {
     match std::env::var("CL_DOCREAD_TEST_READY").as_deref() {
         Ok("hang") => hang(),
         Ok("exit") => std::process::exit(9),
+        Ok("old") => {
+            let mut out = std::io::stdout().lock();
+            let _ = cl_docread::protocol::write_frame(
+                &mut out,
+                &FromWorker::Ready {
+                    version: cl_docread::protocol::PROTOCOL_VERSION - 1,
+                },
+                1024,
+            );
+            hang()
+        }
         _ => {}
     }
 }
@@ -225,6 +291,18 @@ mod tests {
             Some((Hook::ForceOcr, &b"%PDF-1.4"[..]))
         );
         assert_eq!(parse(b"%CL-TEST-HOOK:spawn"), Some((Hook::Spawn, &b""[..])));
+        assert_eq!(
+            parse(b"%CL-TEST-HOOK:region-lie"),
+            Some((Hook::RegionLie, &b""[..]))
+        );
+        assert_eq!(
+            parse(b"%CL-TEST-HOOK:region-other-page\n"),
+            Some((Hook::RegionOtherPage, &b""[..]))
+        );
+        assert_eq!(
+            parse(b"%CL-TEST-HOOK:region-page-twice\n"),
+            Some((Hook::RegionPageTwice, &b""[..]))
+        );
         assert_eq!(parse(b"%CL-TEST-HOOK:rss:x"), None);
         assert_eq!(parse(b"%CL-TEST-HOOK:nope"), None);
         assert_eq!(parse(b"%PDF-1.4"), None);

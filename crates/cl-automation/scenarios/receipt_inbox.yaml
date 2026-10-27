@@ -10,7 +10,7 @@
 # 8 s, and after 5 s while something settles), so the late file shows as
 # settling first. All data is synthetic.
 name: receipt_inbox
-description: Intake inbox - migrated folder, settling then copied, HEIC, 11 MB and duplicate rows, filter, TIFF preview, Discard, New check with the arrival draft, Add to a check (Processed) and to a bill in a keep-originals folder, Set up chip, Home line, 200%.
+description: Intake inbox - migrated folder, settling then copied, HEIC, 11 MB and duplicate rows, filter, TIFF preview, Discard, claims for Review Documents (New check opens the draft in draft mode), Add to a check through attach (Processed) and to a bill in a keep-originals folder, Set up chip, Home line, 200%.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -34,12 +34,12 @@ steps:
 
   # --- Arrival: copied in once settled; the late file still settling ----------
   - wait: {ms: 7000}
-  - assert_state: {key: screen.arrived, equals: 3}
+  - assert_state: {key: screen.arrived, equals: 4}
   - assert_state: {key: screen.duplicate, equals: 1}
   - assert_state: {key: screen.too_large, equals: 1}
   - assert_state: {key: screen.not_supported, equals: 1}
   - assert_state: {key: screen.settling, equals: 1}
-  - assert_exists: {label: 4 files waiting}
+  - assert_exists: {label: 5 files waiting}
   - assert_exists: {label_contains: Save as JPG or PDF instead}
   - assert_exists: {label_contains: Too large (10 MB limit)}
   - assert_exists: {label_contains: Same as a file copied before}
@@ -47,11 +47,17 @@ steps:
   - assert_disabled: {role: button, label: Scanned statement.pdf}
   - assert_disabled: {role: button, label: Hollister Fuel photo.heic}
   - assert_enabled: {role: button, label: Midwest Equipment INV-55871.pdf}
+  # A04: every arrival is claimed for Review Documents; the duplicate isn't.
+  - assert_state: {key: screen.drafts.on, equals: true}
+  - assert_state: {key: screen.drafts.claimed, equals: 4}
+  - assert_state: {key: screen.drafts.pending, equals: 0}
+  - assert_exists: {role: button, label: Read all}
   - screenshot: inbox
   # Ready within 15 s of its last write, then copied in.
   - wait: {ms: 9000}
   - assert_state: {key: screen.settling, equals: 0}
-  - assert_state: {key: screen.arrived, equals: 4}
+  - assert_state: {key: screen.arrived, equals: 5}
+  - assert_state: {key: screen.drafts.claimed, equals: 5}
   - assert_enabled: {role: button, label: Crane Creek delivery.pdf}
   - screenshot: arrived
 
@@ -89,21 +95,23 @@ steps:
   - assert_state: {key: screen.discarded, equals: 1}
   - assert_not_exists: {role: button, label: Ozark Feed receipt (copy).png}
 
-  # --- New check takes the arrival's own draft ---------------------------------
+  # --- A claimed arrival opens from Review Documents (A04 claim gate) ----------
   - click: {role: button, label: Ozark Feed receipt.png}
   - assert_state: {key: screen.selected_state, equals: arrived}
+  - assert_state: {key: screen.drafts.selected_link, equals: own}
   - assert_state: {key: screen.loaded, equals: true}
   - assert_state: {key: screen.preview.status, equals: ready}
   - assert_exists: {role: image, label: Preview of Ozark Feed receipt.png}
+  - assert_exists: {label_contains: Waiting in Review Documents.}
   - screenshot: preview
+  # A04 WP-F2: New check opens the claimed draft in Write Check's draft
+  # mode (never the plain save path); closing it leaves the draft waiting.
   - click: {role: button, label: New check}
-  - assert_state: {key: screen.screen, equals: write_check}
-  - assert_exists: {label: Attached from Ozark Feed receipt.png in your receipt inbox.}
-  - screenshot: new-check
-  # Abandoned: the file is free again.
-  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.screen, equals: write_check, within_ms: 5000}
+  - assert_state: {key: screen.draft.form, equals: check}
+  - assert_state: {key: screen.draft.loaded, equals: true}
+  - screenshot: new-check-draft
   - command: file.close_window
-  - click: {role: tab, label_contains: Receipt Inbox}
   - assert_state: {key: screen.screen, equals: receipt_inbox}
   - assert_state: {key: screen.on_form, equals: 0}
 

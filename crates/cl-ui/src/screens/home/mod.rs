@@ -23,7 +23,7 @@
 //! something (the data bus, Q-262), and on Refresh: there is no timer, so
 //! nothing runs in the background.
 
-mod attention;
+pub(crate) mod attention;
 mod balances;
 pub(crate) mod charts;
 pub(crate) mod checklist;
@@ -176,6 +176,8 @@ pub(crate) struct HomeData {
     pub chart: Slot<Vec<charts::MonthPl>>,
     /// What the setup checklist reads from the engine.
     pub checklist: Slot<checklist::Facts>,
+    /// Documents waiting for review (A04 D6): the engine's draft total.
+    pub documents: Slot<u64>,
 }
 
 impl HomeData {
@@ -192,6 +194,7 @@ impl HomeData {
             || self.closing.loading()
             || self.chart.loading()
             || self.checklist.loading()
+            || self.documents.loading()
     }
 }
 
@@ -392,6 +395,14 @@ impl HomeScreen {
             |_| Ok(demo::checklist_facts()),
             |s| async move { checklist::read(&s).await },
         ));
+        let tenant = self.tenant.as_ref().map(|(t, _)| *t);
+        self.data.documents.start(run(
+            &self.link,
+            group,
+            None,
+            move |s| attention::documents_demo(s, tenant),
+            attention::documents_count,
+        ));
         self.poll();
     }
 
@@ -455,6 +466,7 @@ impl HomeScreen {
         self.data.closing.poll();
         self.data.chart.poll();
         self.data.checklist.poll();
+        self.data.documents.poll();
     }
 
     /// Opens the Profit & Loss of a chart month (a placeholder until P28,

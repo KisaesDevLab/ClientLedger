@@ -23,7 +23,9 @@
 
 mod arrivals;
 mod demo;
-mod intake;
+/// The intake inbox service (A01); A04 WP-F2 holds drafts and reports
+/// converts through `intake::handle`.
+pub(crate) mod intake;
 mod picker;
 mod service;
 #[cfg(test)]

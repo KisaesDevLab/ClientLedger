@@ -1310,6 +1310,15 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
         };
         viewports.insert(name.into(), placement_json(ctx, vp));
     }
+    // A02's viewer state, with A04's highlights (field names and levels
+    // only, never a value or a word).
+    let mut doc_viewer = shell.doc_viewer_state(ctx).to_json();
+    if let Value::Object(m) = &mut doc_viewer {
+        m.insert(
+            "highlight".into(),
+            crate::widgets::compare::highlight(ctx).to_json(),
+        );
+    }
     json!({
         "window": window_json(ctx, ViewportId::ROOT),
         "viewports": viewports,
@@ -1339,7 +1348,11 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
         "screen": shell.active_screen_state(),
         // A02: the pop-out viewer (geometry, ids and the viewer's flags;
         // never a file or form name).
-        "doc_viewer": shell.doc_viewer_state(ctx).to_json(),
+        "doc_viewer": doc_viewer,
+        // A04: the Review Documents queue (kinds and statuses only; null
+        // when it isn't open) and the last Accept's digests.
+        "queue": crate::screens::doc_review::queue_state(&shell.windows),
+        "review": crate::screens::doc_review::review::digests(ctx).to_json(),
     })
 }
 
@@ -1363,6 +1376,9 @@ mod tests {
         assert_eq!(key_from("F1"), Some(Key::F1));
         assert_eq!(key_from("tab"), Some(Key::Tab));
         assert_eq!(key_from("nonsense"), None);
+        // A04: `Alt+Right` steps through a document's words.
+        assert_eq!(key_from("Right"), Some(Key::ArrowRight));
+        assert_eq!(key_from("left"), Some(Key::ArrowLeft));
     }
 
     #[test]
@@ -1967,6 +1983,12 @@ mod bridge_tests {
         assert_eq!(state["doc_viewer"]["popped"], false);
         assert_eq!(state["doc_viewer"]["class"], "none");
         assert_eq!(state["doc_viewer"]["has_doc"], false);
+        // A04: highlights off, no queue open, no Accept yet.
+        assert_eq!(state["doc_viewer"]["highlight"]["on"], false);
+        assert_eq!(state["doc_viewer"]["highlight"]["focused"], Value::Null);
+        assert_eq!(state["queue"], Value::Null);
+        assert_eq!(state["review"]["form_digest"], Value::Null);
+        assert_eq!(state["review"]["posted_digest"], Value::Null);
     }
 
     /// An unknown window name is a bad request; a known window that is not

@@ -1,0 +1,46 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 731 >>
+stream
+BT /F1 20 Tf 56 730 Td (Ozark Feed & Seed) Tj ET
+BT /F1 10 Tf 56 708 Td (1200 Commerce Dr, Monett, MO 65605) Tj ET
+BT /F1 16 Tf 420 730 Td (RECEIPT) Tj ET
+BT /F1 10 Tf 420 708 Td (Receipt no. R-30412) Tj ET
+BT /F1 10 Tf 420 694 Td (Date 10/02/2026) Tj ET
+BT /F1 10 Tf 56 640 Td (Description) Tj ET
+BT /F1 10 Tf 480 640 Td (Amount) Tj ET
+BT /F1 10 Tf 56 620 Td (Perennials) Tj ET
+BT /F1 10 Tf 480 620 Td (1,487.35) Tj ET
+BT /F1 10 Tf 56 604 Td (Hardwood mulch) Tj ET
+BT /F1 10 Tf 480 604 Td (831.25) Tj ET
+BT /F1 12 Tf 400 570 Td (TOTAL) Tj ET
+BT /F1 12 Tf 480 570 Td (2,318.60) Tj ET
+BT /F1 10 Tf 56 550 Td (Paid by check) Tj ET
+BT /F1 8 Tf 56 90 Td (Synthetic sample document for the ClientLedger demo. Not a real receipt.) Tj ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1092
+%%EOF

@@ -194,9 +194,16 @@ pub fn picture(route: Route, document: &[u8]) -> Picture {
 }
 
 /// What to send: the page text and, when pictures may go and the document
-/// is one PNG within the engine's limits, that picture.
+/// is one PNG within the engine's limits, that picture. `kind`: what the
+/// owner is entering it as (Enter Bill: a bill; A04's draft forms: the
+/// form's kind).
 #[must_use]
-pub fn request(local: &LocalReading, route: Route, document: &[u8]) -> AssistRequest {
+pub fn request(
+    local: &LocalReading,
+    route: Route,
+    document: &[u8],
+    kind: DraftKind,
+) -> AssistRequest {
     let picture = picture(route, document) == Picture::Sent;
     AssistRequest {
         text: page_text(&local.reading),
@@ -205,7 +212,7 @@ pub fn request(local: &LocalReading, route: Route, document: &[u8]) -> AssistReq
         } else {
             Vec::new()
         },
-        kind_hint: Some(DraftKind::Bill),
+        kind_hint: Some(kind),
     }
 }
 

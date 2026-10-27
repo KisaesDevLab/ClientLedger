@@ -309,7 +309,7 @@ fn a_reading_fills_empty_fields_as_read_and_save_is_refused_until_accepted() {
     s.poll_read();
     assert!(s.read.focus_accept);
     // Accept (Alt+A), then the ghosts with Accept / Tab.
-    assert!(s.form_command(cl_model::CommandId::new("bill.accept_read")));
+    assert!(s.form_command(cl_model::CommandId::new("form.accept_read")));
     s.track_read();
     assert_eq!(s.state()["read"]["unaccepted"], 0);
     assert!(!s.read.focus_accept);

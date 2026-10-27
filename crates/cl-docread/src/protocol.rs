@@ -12,6 +12,18 @@
 //! then `JobDone` or `JobFailed`. `Render` is reserved for P37 and always
 //! answered `Unsupported` (Q-A03u).
 //!
+//! **Region re-read** (version 4, A04 D4, Q-A04i): a [`Job`] with a
+//! `region` reads only that box of one page. The worker renders the page
+//! at OCR resolution, cleans it up and asks for its orientation as for a
+//! full read, cuts the box out of the cleaned page, OCRs only that (or
+//! takes the text layer's words), and maps the words back onto the
+//! original page. Its `JobDone` reading carries **only words**: that
+//! page's words whose centre lies in the box, no fields, lines, checks,
+//! fingerprint or template. A box of less than [`MIN_REGION_SIDE`] on a
+//! side, a page past [`MAX_PAGES`](crate::model::MAX_PAGES) or a region
+//! job with templates is a protocol breach; a box over [`WHOLE_PAGE_SIDE`]
+//! both ways reads the whole page (its words still filtered to the box).
+//!
 //! An oversized or garbled frame is a protocol breach: the reader returns
 //! [`FrameError`] and the host kills the worker. File names, contacts and
 //! accounts never cross this pipe; `Debug` prints no document content.
@@ -19,7 +31,7 @@
 //! **Change rule.** Frozen: WP-B (worker, host) and WP-A (rules) build on it
 //! in parallel. Changes go through the orchestrator.
 
-use crate::model::{Reading, Template};
+use crate::model::{Bbox, MAX_PAGES, Reading, Spot, Template};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use cl_core::CalendarDate;
@@ -30,8 +42,15 @@ use std::io::{Read, Write};
 
 /// Protocol version the worker announces in `Ready`; the host refuses any
 /// other (worker and host ship together). 3: `OcrMode::ReadBest` and
-/// `OcrMode::Word`.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// `OcrMode::Word`. 4: `Job::region` (A04).
+pub const PROTOCOL_VERSION: u32 = 4;
+
+/// The smallest region side a re-read takes, in ten-thousandths of the
+/// page side (1 %; A04 D4).
+pub const MIN_REGION_SIDE: u16 = 100;
+/// A region wider **and** taller than this (90 % of the page) reads the
+/// whole page.
+pub const WHOLE_PAGE_SIDE: u16 = 9_000;
 
 /// Largest document (plan §5 "Large"): 10 MiB.
 pub const MAX_DOCUMENT_BYTES: usize = 10 * 1024 * 1024;
@@ -114,8 +133,11 @@ pub struct Job {
     pub bytes: Bytes,
     pub hint: JobHint,
     /// The company's vendor layout templates (at most [`MAX_TEMPLATES`]);
-    /// the reading names the one used by index.
+    /// the reading names the one used by index. Empty for a region job.
     pub templates: Vec<Template>,
+    /// Read only this box of one page (version 4; see the module comment).
+    #[serde(default)]
+    pub region: Option<Spot>,
 }
 
 impl fmt::Debug for Job {
@@ -125,8 +147,35 @@ impl fmt::Debug for Job {
             .field("bytes", &self.bytes)
             .field("hint", &self.hint)
             .field("templates", &self.templates.len())
+            .field("region", &self.region.is_some())
             .finish()
     }
+}
+
+/// Whether a region keeps the protocol's rules: a page the worker reads
+/// (below `MAX_PAGES`) and at least [`MIN_REGION_SIDE`] on each side.
+#[must_use]
+pub fn region_ok(region: Spot) -> bool {
+    region.page < MAX_PAGES
+        && region.bbox.width() >= MIN_REGION_SIDE
+        && region.bbox.height() >= MIN_REGION_SIDE
+}
+
+/// Whether a region covers nearly the whole page (both sides over
+/// [`WHOLE_PAGE_SIDE`]): the page is read whole.
+#[must_use]
+pub fn whole_page(region: Bbox) -> bool {
+    region.width() > WHOLE_PAGE_SIDE && region.height() > WHOLE_PAGE_SIDE
+}
+
+/// Whether a box's centre lies inside `region` (edges included): which
+/// words a region re-read answers with.
+#[must_use]
+pub fn centre_in(region: Bbox, b: Bbox) -> bool {
+    let cx = u32::from(b.left()) + u32::from(b.right());
+    let cy = u32::from(b.top()) + u32::from(b.bottom());
+    (u32::from(region.left()) * 2..=u32::from(region.right()) * 2).contains(&cx)
+        && (u32::from(region.top()) * 2..=u32::from(region.bottom()) * 2).contains(&cy)
 }
 
 /// Options for the whole batch.
@@ -448,6 +497,7 @@ mod tests {
                         kind: Some(IntakeKind::Bills),
                     },
                     templates: Vec::new(),
+                    region: None,
                 }],
                 options: options(),
             },
@@ -593,6 +643,7 @@ mod tests {
                 bytes: Bytes(b"Riverbend Supply".to_vec()),
                 hint: JobHint::default(),
                 templates: Vec::new(),
+                region: None,
             }],
             options: options(),
         };
@@ -607,6 +658,97 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    fn region(page: u16, l: u16, t: u16, r: u16, b: u16) -> Spot {
+        Spot {
+            page,
+            bbox: Bbox::new(l, t, r, b).unwrap(),
+        }
+    }
+
+    #[test]
+    fn region_jobs_round_trip_and_older_jobs_read_as_whole_documents() {
+        let job = Job {
+            job: 3,
+            bytes: Bytes(b"%PDF".to_vec()),
+            hint: JobHint::default(),
+            templates: Vec::new(),
+            region: Some(region(1, 100, 200, 3000, 900)),
+        };
+        let msg = ToWorker::Batch {
+            jobs: vec![job],
+            options: options(),
+        };
+        let mut buf = Vec::new();
+        write_frame(&mut buf, &msg, MAX_TO_WORKER_FRAME).unwrap();
+        let back: ToWorker = read_frame(&mut buf.as_slice(), MAX_TO_WORKER_FRAME).unwrap();
+        assert_eq!(back, msg);
+        let json = String::from_utf8(buf[4..].to_vec()).unwrap();
+        assert!(
+            json.contains(r#""region":{"page":1,"bbox":{"l":100,"t":200,"r":3000,"b":900}}"#),
+            "{json}"
+        );
+        // A job without the field is a whole-document read.
+        let plain: Job =
+            serde_json::from_str(r#"{"job":1,"bytes":"","hint":{"kind":null},"templates":[]}"#)
+                .unwrap();
+        assert_eq!(plain.region, None);
+        assert!(!format!("{msg:?}").contains("3000"), "Debug shows no box");
+    }
+
+    /// Hostile region frames: a box off the page, sides out of order, an
+    /// unknown field or a wrong type is garbled before the worker sees it.
+    #[test]
+    fn malformed_regions_are_garbled_frames() {
+        let frame_of = |region: &str| {
+            let body = format!(
+                r#"{{"type":"batch","jobs":[{{"job":1,"bytes":"","hint":{{"kind":null}},"templates":[],"region":{region}}}],"options":{{"ocr":true,"today":"2026-10-26"}}}}"#
+            );
+            let mut f = u32::try_from(body.len()).unwrap().to_be_bytes().to_vec();
+            f.extend_from_slice(body.as_bytes());
+            f
+        };
+        for bad in [
+            r#"{"page":0,"bbox":{"l":0,"t":0,"r":10001,"b":10}}"#,
+            r#"{"page":0,"bbox":{"l":500,"t":0,"r":400,"b":10}}"#,
+            r#"{"page":-1,"bbox":{"l":0,"t":0,"r":1,"b":1}}"#,
+            r#"{"page":70000,"bbox":{"l":0,"t":0,"r":1,"b":1}}"#,
+            r#"{"page":0,"bbox":{"l":0,"t":0,"r":1,"b":1},"dpi":9000}"#,
+            r#"{"page":0,"bbox":[0,0,1]}"#,
+            r#""everything""#,
+        ] {
+            let f = frame_of(bad);
+            assert!(
+                matches!(
+                    read_frame::<_, ToWorker>(&mut f.as_slice(), MAX_TO_WORKER_FRAME),
+                    Err(FrameError::Garbled)
+                ),
+                "{bad}"
+            );
+        }
+        // The same frame with a good box parses (the test frame is sound).
+        let f = frame_of(r#"{"page":0,"bbox":{"l":0,"t":0,"r":100,"b":100}}"#);
+        assert!(read_frame::<_, ToWorker>(&mut f.as_slice(), MAX_TO_WORKER_FRAME).is_ok());
+    }
+
+    #[test]
+    fn region_rules() {
+        assert!(region_ok(region(0, 0, 0, 100, 100)));
+        assert!(!region_ok(region(0, 0, 0, 99, 100)), "under 1 % wide");
+        assert!(!region_ok(region(0, 0, 0, 100, 99)), "under 1 % tall");
+        assert!(!region_ok(region(0, 5000, 5000, 5000, 5000)), "empty");
+        assert!(region_ok(region(MAX_PAGES - 1, 0, 0, 10_000, 10_000)));
+        assert!(!region_ok(region(MAX_PAGES, 0, 0, 10_000, 10_000)));
+        assert!(!region_ok(region(u16::MAX, 0, 0, 10_000, 10_000)));
+        assert!(whole_page(Bbox::PAGE));
+        assert!(whole_page(Bbox::new(400, 400, 9_500, 9_500).unwrap()));
+        assert!(!whole_page(Bbox::new(0, 0, 10_000, 9_000).unwrap()));
+        let r = Bbox::new(1000, 1000, 2000, 2000).unwrap();
+        assert!(centre_in(r, Bbox::new(900, 900, 1300, 1300).unwrap()));
+        assert!(centre_in(r, Bbox::new(1500, 1500, 2500, 2500).unwrap()));
+        assert!(!centre_in(r, Bbox::new(1700, 1700, 2500, 2500).unwrap()));
+        assert!(!centre_in(r, Bbox::new(0, 1400, 1800, 1600).unwrap()));
     }
 
     #[test]

@@ -41,6 +41,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::V1) => "keyable",
             RetryClass::Keyable(KeySet::ApV1) => "keyable-ap",
             RetryClass::Keyable(KeySet::DocsV1) => "keyable-docs",
+            RetryClass::Keyable(KeySet::DocsAttachV1) => "keyable-docs-attach",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
         }
@@ -75,6 +76,9 @@ pub enum KeySet {
     ApV1,
     /// `idempotency-docs-v1` (U-92a): the document draft claim and convert.
     DocsV1,
+    /// `document-drafts-attach-v1` (U-95): the document draft attach, keyed
+    /// with `idempotency-docs-v1`'s contract under its own capability.
+    DocsAttachV1,
 }
 
 impl KeySet {
@@ -85,6 +89,7 @@ impl KeySet {
             KeySet::V1 => crate::wire::Capabilities::IDEMPOTENCY,
             KeySet::ApV1 => crate::wire::Capabilities::IDEMPOTENCY_AP,
             KeySet::DocsV1 => crate::wire::Capabilities::IDEMPOTENCY_DOCS,
+            KeySet::DocsAttachV1 => crate::wire::Capabilities::DOCUMENT_DRAFTS_ATTACH,
         }
     }
 }
@@ -226,6 +231,19 @@ const fn keyable_docs(method: Method, route: &'static str) -> Operation {
         method,
         route,
         RetryClass::Keyable(KeySet::DocsV1),
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+/// A mutation in the engine's `document-drafts-attach-v1` route set (U-95):
+/// keyed only while the engine advertises that capability.
+const fn keyable_docs_attach(method: Method, route: &'static str) -> Operation {
+    op(
+        method,
+        route,
+        RetryClass::Keyable(KeySet::DocsAttachV1),
         RouteKind::Session,
         TimeoutClass::Write,
         true,
@@ -799,6 +817,15 @@ pub(crate) const VENDOR_TEMPLATE_DELETE: Operation =
 pub(crate) const DOCUMENT_READING_ASSIST: Operation =
     write(Method::Post, "/api/v1/document-reading/assist");
 
+// ---- A04: attach a document draft (engine U-95, `document-drafts-attach-v1`)
+// In the engine spec since pin 4e0593c3 (engine PR #180).
+
+/// Files a live draft's document on a posted transaction and closes the
+/// draft, in one database transaction (keyed under
+/// `document-drafts-attach-v1`; nothing posts).
+pub(crate) const DOCUMENT_DRAFT_ATTACH: Operation =
+    keyable_docs_attach(Method::Post, "/api/v1/document-drafts/{id}/attach");
+
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
@@ -811,7 +838,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 199] = [
+pub const OPERATIONS: [Operation; 200] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1020,6 +1047,8 @@ pub const OPERATIONS: [Operation; 199] = [
     VENDOR_TEMPLATES_PUT,
     VENDOR_TEMPLATE_DELETE,
     DOCUMENT_READING_ASSIST,
+    // A04
+    DOCUMENT_DRAFT_ATTACH,
 ];
 
 /// Looks up a covered operation.
@@ -1102,6 +1131,8 @@ mod tests {
                 Some(KeySet::ApV1)
             } else if KEYABLE_DOCS.contains(&route) {
                 Some(KeySet::DocsV1)
+            } else if KEYABLE_DOCS_ATTACH.contains(&route) {
+                Some(KeySet::DocsAttachV1)
             } else {
                 None
             };
@@ -1123,8 +1154,8 @@ mod tests {
         }
         assert_eq!(
             OPERATIONS.iter().filter(|o| o.is_keyable()).count(),
-            KEYABLE.len() + KEYABLE_AP.len() + KEYABLE_DOCS.len(),
-            "every idempotency-v1, idempotency-ap-v1 and idempotency-docs-v1 route is covered"
+            KEYABLE.len() + KEYABLE_AP.len() + KEYABLE_DOCS.len() + KEYABLE_DOCS_ATTACH.len(),
+            "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1 and document-drafts-attach-v1 route is covered"
         );
         assert_eq!(
             find(Method::Post, "/api/v1/auth/create-tenant").map(|o| o.timeout),
@@ -1177,6 +1208,11 @@ mod tests {
         ("POST", "/api/v1/document-drafts/{id}/convert"),
     ];
 
+    /// The engine's `document-drafts-attach-v1` route set (U-95), as
+    /// `tests/fixtures/idempotency_docs_attach_v1_routes.txt` records it.
+    const KEYABLE_DOCS_ATTACH: [(&str, &str); 1] =
+        [("POST", "/api/v1/document-drafts/{id}/attach")];
+
     #[test]
     fn key_sets_name_their_capabilities() {
         assert_eq!(KeySet::V1.capability(), "idempotency-v1");
@@ -1187,6 +1223,15 @@ mod tests {
         assert_eq!(RetryClass::Keyable(KeySet::DocsV1).as_str(), "keyable-docs");
         assert_eq!(DOCUMENT_DRAFT_CONVERT.key_set(), Some(KeySet::DocsV1));
         assert_eq!(DOCUMENT_DRAFT_PUT.key_set(), None);
+        assert_eq!(
+            KeySet::DocsAttachV1.capability(),
+            "document-drafts-attach-v1"
+        );
+        assert_eq!(
+            RetryClass::Keyable(KeySet::DocsAttachV1).as_str(),
+            "keyable-docs-attach"
+        );
+        assert_eq!(DOCUMENT_DRAFT_ATTACH.key_set(), Some(KeySet::DocsAttachV1));
         assert_eq!(BILLS_CREATE.key_set(), Some(KeySet::V1));
         assert_eq!(BILL_PUT.key_set(), Some(KeySet::ApV1));
         assert_eq!(BILL_GET.key_set(), None);
@@ -1197,7 +1242,12 @@ mod tests {
     /// reconciled after a lost reply.
     #[test]
     fn idempotency_capability_upgrades_only_keyable_routes() {
-        for set in [KeySet::V1, KeySet::ApV1, KeySet::DocsV1] {
+        for set in [
+            KeySet::V1,
+            KeySet::ApV1,
+            KeySet::DocsV1,
+            KeySet::DocsAttachV1,
+        ] {
             assert_eq!(
                 RetryClass::Keyable(set).effective(true),
                 RetryClass::KeyedOnce

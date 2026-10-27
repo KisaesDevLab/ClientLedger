@@ -13,6 +13,12 @@
 //! permission overrides), and the transfer manifest's `omitted` text (the
 //! archive is encrypted; its effect is checked here instead).
 //!
+//! A04 (engine U-95, `document-drafts-attach-v1`): the attach matrix (T9),
+//! the exact amount filter, and the live side of the shared draft cases
+//! (`fixtures/docs/draft-cases.json`, T16), each PENDING(U-95) without the
+//! capability (the shared cases still run their claim, store, discard and
+//! convert sections).
+//!
 //! Run: `cargo xtask engine && cargo xtask pg-fetch`, then
 //! `cargo test -p cl-api --test contract_document_drafts` (`CL_API_REQUIRE=1`
 //! in CI). Synthetic data only.
@@ -1466,6 +1472,921 @@ fn money_table_matches_the_engine(h: &Harness) {
         .expect("clean up");
 }
 
+// ------------------------------------------------------------- A04 (U-95)
+
+const U95: &str = "U-95";
+const DRAFT_CASES: &str = include_str!("../../../fixtures/docs/draft-cases.json");
+
+/// `true` with `document-drafts-v1` and `document-drafts-attach-v1`.
+/// Without the second, records PENDING(U-95) and checks today's behaviour:
+/// attach and the amount filter send nothing, and the engine has no attach
+/// route.
+fn live_attach(h: &Harness, s: &Session) -> bool {
+    if !live(h, s) {
+        return false;
+    }
+    if h.require_cap(Capabilities::DOCUMENT_DRAFTS_ATTACH, U95) {
+        return true;
+    }
+    let (_, d) = new_draft(h, s);
+    let someone = TransactionId::parse("00000000-0000-4000-8000-0000000000e1").expect("id");
+    let before = h.observer.total();
+    assert_eq!(
+        h.run(
+            s.document_drafts()
+                .attach(d.id, someone, &d.updated_at, key())
+        ),
+        Err(ApiError::Local(LocalValidation::Unsupported))
+    );
+    let filter = cl_api::TransactionFilter {
+        amount: Some(m("10.10")),
+        ..cl_api::TransactionFilter::default()
+    };
+    assert_eq!(
+        h.run(
+            s.transactions()
+                .list(&filter, cl_api::PageRequest::first_max())
+        )
+        .map(|_| ()),
+        Err(ApiError::Local(LocalValidation::Unsupported))
+    );
+    assert_eq!(
+        h.observer.total(),
+        before,
+        "nothing sent without the capability"
+    );
+    let raw = h
+        .run(s.raw(
+            Method::Post,
+            &format!("{BASE}/{}/attach", d.id),
+            &[],
+            Some(&json!({"transactionId": someone, "expectedUpdatedAt": d.updated_at})),
+        ))
+        .expect("raw");
+    assert_eq!(raw.status, 404, "{}", raw.body);
+    h.run(s.document_drafts().discard(d.id)).expect("discard");
+    false
+}
+
+/// A card charge of `amount` from `from`, posted.
+fn charge(
+    h: &Harness,
+    s: &Session,
+    from: AccountId,
+    exp: AccountId,
+    on: CalendarDate,
+    amount: &str,
+) -> TransactionId {
+    let p = BankPosting::card_charge(CardChargeDraft {
+        pay_from: from,
+        date: on,
+        number: None,
+        payee: None,
+        memo: None,
+        lines: vec![split(exp, amount)],
+    })
+    .expect("charge");
+    h.run(
+        s.transactions()
+            .create_bank_posting(&p, &PostingOptions::default(), key()),
+    )
+    .unwrap_or_else(|e| panic!("charge: {e:?}"))
+    .record
+    .id
+}
+
+fn attach(
+    h: &Harness,
+    s: &Session,
+    d: &DocumentDraft,
+    to: TransactionId,
+) -> Result<cl_api::AttachedDraft, ApiError> {
+    h.run(s.document_drafts().attach(d.id, to, &d.updated_at, key()))
+}
+
+fn file_type(h: &Harness, s: &Session, file: AttachmentId) -> (String, String) {
+    let a = h.run(s.attachments().get(file)).expect("file");
+    (a.attachable_type, a.attachable_id)
+}
+
+/// T9 (U-95 a): attach files the document on a posted bill or expense and
+/// closes the draft (kind unchanged, the record's type); the same key
+/// replays, a new key is closed, the claim stays; a stale token, a void
+/// record, another company's record, an unknown record and a discarded
+/// draft are refused and nothing moves; a live draft's file can't be
+/// linked anywhere (the guard).
+fn attach_matrix(h: &Harness) {
+    let s = &h.s1;
+    if !live_attach(h, s) {
+        return;
+    }
+    let v = vendor(h, s);
+    let exp = account(h, s, AccountType::Expense, None);
+    let card = account(h, s, AccountType::Liability, Some("credit_card"));
+    let on = date(2026, 11, 4);
+
+    // A bill posted from another draft, then a second document attached to it.
+    let (_, first) = new_draft(h, s);
+    let bill_id = convert(
+        h,
+        s,
+        &first,
+        ConvertBody::Bill(bill(v, exp, on, &unique("ATT"), "61.20")),
+    );
+    let bytes = pdf();
+    let file = upload(h, s, &bytes);
+    let d = claim(h, s, file);
+    let k = key();
+    let done = h
+        .run(
+            s.document_drafts()
+                .attach(d.id, bill_id, &d.updated_at, k.clone()),
+        )
+        .expect("attached to the bill");
+    assert_eq!(done.transaction, bill_id);
+    assert_eq!(done.draft.status, DraftStatus::Converted);
+    assert_eq!(done.draft.kind, DraftKind::Unknown, "kind unchanged");
+    assert_eq!(done.draft.converted_transaction_id, Some(bill_id));
+    assert_eq!(done.draft.converted_type.as_deref(), Some("bill"));
+    assert_eq!(
+        file_type(h, s, file),
+        ("bill".to_string(), bill_id.to_string())
+    );
+    // The same key replays; a new key is closed, naming the record.
+    let again = h
+        .run(s.document_drafts().attach(d.id, bill_id, &d.updated_at, k))
+        .expect("replay");
+    assert_eq!(again.transaction, bill_id);
+    let e = attach(h, s, &d, bill_id).expect_err("closed");
+    assert_eq!(
+        cl_api::attach_problem(&e),
+        Some(cl_api::AttachProblem::Closed {
+            transaction: Some(bill_id)
+        }),
+        "{e:?}"
+    );
+    // The claim stays (no undo, Q-A04e).
+    let copy = upload(h, s, &bytes);
+    let e = h
+        .run(s.document_drafts().create(copy, DraftKind::Unknown, key()))
+        .expect_err("still claimed");
+    assert!(is_claimed(&e, Some(d.id)), "{e:?}");
+
+    // An expense; a stale token is refused and nothing moves.
+    let t = charge(h, s, card, exp, on, "18.75");
+    let (file, d) = new_draft(h, s);
+    let read = store(h, s, &d, &reading(None, None, Some("18.75"), Some(on)));
+    let e = attach(h, s, &d, t).expect_err("stale");
+    assert_eq!(
+        cl_api::attach_problem(&e),
+        Some(cl_api::AttachProblem::Stale)
+    );
+    assert_eq!(file_type(h, s, file).0, "draft");
+    // The guard: a live draft's file can't be linked onto the record.
+    let e = h
+        .run(
+            s.attachments()
+                .link(file, AttachTo::Txn(cl_api::TxnType::Expense, t), key()),
+        )
+        .expect_err("in use");
+    assert_eq!(
+        cl_api::attach_problem(&e),
+        Some(cl_api::AttachProblem::FileInUse),
+        "{e:?}"
+    );
+    assert_eq!(file_type(h, s, file).0, "draft");
+    // Unknown and another company's records are not found.
+    let nobody = TransactionId::parse("00000000-0000-4000-8000-0000000000e9").expect("id");
+    let e = attach(h, s, &read, nobody).expect_err("unknown");
+    assert_eq!(
+        cl_api::attach_problem(&e),
+        Some(cl_api::AttachProblem::NotFound)
+    );
+    let b = h.s3();
+    let b_exp = account(h, &b, AccountType::Expense, None);
+    let b_card = account(h, &b, AccountType::Liability, Some("credit_card"));
+    let theirs = charge(h, &b, b_card, b_exp, on, "18.75");
+    let e = attach(h, s, &read, theirs).expect_err("other company");
+    assert_eq!(
+        cl_api::attach_problem(&e),
+        Some(cl_api::AttachProblem::NotFound)
+    );
+    assert_eq!(file_type(h, s, file).0, "draft");
+    // The ready draft attaches with its current token.
+    let done = attach(h, s, &read, t).expect("attached to the expense");
+    assert_eq!(done.draft.converted_type.as_deref(), Some("expense"));
+    assert_eq!(done.draft.kind, DraftKind::Bill, "the reading's kind stays");
+    assert_eq!(
+        file_type(h, s, file),
+        ("expense".to_string(), t.to_string())
+    );
+
+    // A void record is not posted.
+    let gone = charge(h, s, card, exp, on, "18.76");
+    h.run(
+        s.transactions()
+            .void(gone, "Synthetic void", &PostingOptions::default(), key()),
+    )
+    .expect("void");
+    let (file, d) = new_draft(h, s);
+    let e = attach(h, s, &d, gone).expect_err("void");
+    assert_eq!(
+        cl_api::attach_problem(&e),
+        Some(cl_api::AttachProblem::NotPosted),
+        "{e:?}"
+    );
+    assert_eq!(file_type(h, s, file).0, "draft");
+    assert_eq!(get(h, s, d.id).status, DraftStatus::New, "nothing changed");
+    // A discarded draft is closed.
+    let gone = h.run(s.document_drafts().discard(d.id)).expect("discard");
+    let e = attach(h, s, &gone, t).expect_err("discarded");
+    assert!(
+        matches!(
+            cl_api::attach_problem(&e),
+            Some(cl_api::AttachProblem::Closed { .. })
+        ),
+        "{e:?}"
+    );
+}
+
+/// U-95 c: `amount` matches the total exactly as a number (`10.1` =
+/// `10.10`, never `10.01`), posted only with `status`, within the dates,
+/// and `accountId` keeps the records with a line on that account.
+fn amount_filter_is_exact(h: &Harness) {
+    let s = &h.s1;
+    if !live_attach(h, s) {
+        return;
+    }
+    let exp = account(h, s, AccountType::Expense, None);
+    let card = account(h, s, AccountType::Liability, Some("credit_card"));
+    let bank = account(h, s, AccountType::Asset, Some("bank"));
+    let on = date(2026, 9, 14);
+    let a = charge(h, s, card, exp, on, "7310.10");
+    let b = charge(h, s, bank, exp, on, "7310.10");
+    let c = charge(h, s, card, exp, on, "7310.01");
+    let late = charge(h, s, card, exp, date(2026, 9, 30), "7310.10");
+    let search = |amount: &str, account: Option<AccountId>| -> Vec<TransactionId> {
+        let filter = cl_api::TransactionFilter {
+            amount: Some(m(amount)),
+            status: Some(cl_api::TxnStatus::Posted),
+            start_date: Some(date(2026, 9, 7)),
+            end_date: Some(date(2026, 9, 21)),
+            account_id: account,
+            ..cl_api::TransactionFilter::default()
+        };
+        let mut ids: Vec<TransactionId> = h
+            .run(
+                s.transactions()
+                    .list(&filter, cl_api::PageRequest::first_max()),
+            )
+            .expect("list")
+            .data
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        ids.sort();
+        ids
+    };
+    let mut both = vec![a, b];
+    both.sort();
+    assert_eq!(search("7310.1", None), both, "10.1 = 10.10");
+    assert_eq!(search("7310.1000", None), both);
+    assert_eq!(search("7310.01", None), vec![c], "never 10.01");
+    assert_eq!(search("7310.10", Some(card)), vec![a], "the card's only");
+    assert!(
+        !search("7310.10", None).contains(&late),
+        "the dates bound it"
+    );
+    h.run(
+        s.transactions()
+            .void(b, "Synthetic void", &PostingOptions::default(), key()),
+    )
+    .expect("void");
+    assert_eq!(search("7310.10", None), vec![a], "posted only");
+    // An amount the engine can't take as a decimal string is never sent:
+    // `Money` always writes four places.
+    let raw = h
+        .run(s.raw(
+            Method::Get,
+            "/api/v1/transactions",
+            &[("amount", "7310.10000")],
+            None,
+        ))
+        .expect("raw");
+    assert_eq!(raw.status, 400, "{}", raw.body);
+}
+
+// ------------------------------------------------- the shared draft cases
+
+/// The live side of the shared document draft cases
+/// (`fixtures/docs/draft-cases.json`, T16): the same steps and arguments
+/// as the demo runner (`cl-ui` `company/demo/drafts_tests.rs`, whose header
+/// documents them), against the engine. The cases run in tenant B (a new
+/// company per case would spend the rate-limited `create-tenant` budget)
+/// with one expense account, credit card and checking account; each case
+/// gets its own "story" vendor (so the vendor duplicate rule sees only the
+/// case's records) and its own file contents (the case's salt), and leaves
+/// no live draft, closing date or closing password behind. The amounts the
+/// cases search for appear in no other case.
+///
+/// Live differences, each with the same visible answer:
+/// - `plain_relink {file, transaction}`: the engine has no plain relink
+///   onto an existing expense (`POST /bills/:id/attach-draft` takes bills
+///   only), so the live runner saves a new bill with
+///   `draftAttachmentId` = the file's draft key (a plain caller the guard
+///   covers); `transaction` is not used. `expect.file` is checked as usual.
+/// - `set_closing_date` also sets a closing password ("right").
+/// - `search_amount` always asks for posted records (the demo leaves void
+///   ones out too).
+struct CaseWorld<'h> {
+    h: &'h Harness,
+    s: Session,
+    exp: AccountId,
+    card: AccountId,
+    bank: AccountId,
+    story: ContactId,
+    /// Added to every file's content, so the same bytes collide only
+    /// within the case (claims are per company).
+    salt: String,
+    password: Option<Secret>,
+    labels: std::collections::HashMap<String, Value>,
+    keys: std::collections::HashMap<String, IdempotencyKey>,
+    draft_keys: std::collections::HashMap<String, cl_api::DraftKey>,
+}
+
+/// What a step answered.
+struct Answer {
+    status: u16,
+    code: Option<String>,
+    draft: Option<DocumentDraft>,
+    label: Value,
+    total: Option<u64>,
+    count: Option<usize>,
+}
+
+impl Answer {
+    fn ok(status: u16, label: Value) -> Answer {
+        Answer {
+            status,
+            code: None,
+            draft: None,
+            label,
+            total: None,
+            count: None,
+        }
+    }
+
+    fn draft(status: u16, d: DocumentDraft) -> Answer {
+        let label = json!({"id": d.id, "updatedAt": d.updated_at});
+        Answer {
+            draft: Some(d),
+            ..Answer::ok(status, label)
+        }
+    }
+
+    fn of(status: u16, r: Result<DocumentDraft, ApiError>) -> Answer {
+        match r {
+            Ok(d) => Answer::draft(status, d),
+            Err(e) => Answer::err(&e),
+        }
+    }
+
+    fn err(e: &ApiError) -> Answer {
+        let (status, code) = status_of(e);
+        Answer {
+            code,
+            ..Answer::ok(status, Value::Null)
+        }
+    }
+}
+
+/// The HTTP status and code an [`ApiError`] stands for.
+fn status_of(e: &ApiError) -> (u16, Option<String>) {
+    let code = |c: &str| Some(c.to_string());
+    match e {
+        ApiError::DocumentDraft(r) => match r {
+            DraftRefusal::AlreadyClaimed { .. } => (409, code(cl_api::DOCUMENT_ALREADY_CLAIMED)),
+            DraftRefusal::Closed { .. } => (409, code(cl_api::DOCUMENT_DRAFT_CLOSED)),
+            DraftRefusal::PossibleDuplicate { .. } => (409, code(cl_api::POSSIBLE_DUPLICATE)),
+            DraftRefusal::NotADraftFile => (422, code(cl_api::ATTACHMENT_NOT_DRAFT)),
+            DraftRefusal::TemplateLimit => (409, code(cl_api::TEMPLATE_LIMIT)),
+        },
+        ApiError::Conflict { code: c, .. } => (409, c.as_ref().map(|c| c.as_str().to_string())),
+        ApiError::Validation(v) => {
+            let c = v.code().map(|c| c.as_str().to_string());
+            let status = if c.as_deref() == Some("VALIDATION_ERROR") {
+                400
+            } else {
+                422
+            };
+            (status, c)
+        }
+        ApiError::ClosedPeriod(_) | ApiError::ClosingPasswordRequired => {
+            (423, code("TB_PERIOD_LOCKED"))
+        }
+        ApiError::ClosingPasswordRejected => (403, code("CLOSING_PASSWORD_INVALID")),
+        ApiError::NotFound { code: c } => (404, c.as_ref().map(|c| c.as_str().to_string())),
+        ApiError::IdempotencyKeyReused { .. } => (422, code("IDEMPOTENCY_KEY_REUSED")),
+        ApiError::Forbidden { code: c } => (403, c.as_ref().map(|c| c.as_str().to_string())),
+        other => panic!("not an engine answer: {other:?}"),
+    }
+}
+
+impl CaseWorld<'_> {
+    fn new<'h>(h: &'h Harness, s: &Session, books: [AccountId; 3]) -> CaseWorld<'h> {
+        let [exp, card, bank] = books;
+        CaseWorld {
+            h,
+            s: s.clone(),
+            exp,
+            card,
+            bank,
+            story: vendor(h, s),
+            salt: unique("case"),
+            password: None,
+            labels: std::collections::HashMap::new(),
+            keys: std::collections::HashMap::new(),
+            draft_keys: std::collections::HashMap::new(),
+        }
+    }
+
+    /// After a case: every live draft discarded (so the next case's list
+    /// counts only its own), and the closing date and password cleared.
+    fn clean_up(&self) {
+        let (h, s) = (self.h, &self.s);
+        tidy(h, s);
+        if let Some(pw) = &self.password {
+            h.run(s.set_closing_password(Some(pw), None, key()))
+                .expect("clear the closing password");
+            h.run(s.raw_mapped(
+                Method::Put,
+                "/api/v1/company/settings",
+                Some(&json!({"lockDate": null})),
+            ))
+            .expect("clear the closing date");
+        }
+    }
+
+    /// A `$label` or `$label.field` reference, else the text itself.
+    fn text(&self, v: &Value) -> String {
+        let s = v.as_str().expect("a text argument");
+        let Some(r) = s.strip_prefix('$') else {
+            return s.to_string();
+        };
+        let (label, field) = r.split_once('.').unwrap_or((r, "id"));
+        self.labels
+            .get(label)
+            .and_then(|l| l[field].as_str())
+            .unwrap_or_else(|| panic!("unknown reference {s}"))
+            .to_string()
+    }
+
+    fn arg(&self, args: &Value, k: &str) -> String {
+        self.text(&args[k])
+    }
+
+    fn opt(&self, args: &Value, k: &str) -> Option<String> {
+        (!args[k].is_null()).then(|| self.text(&args[k]))
+    }
+
+    fn key(&mut self, args: &Value) -> IdempotencyKey {
+        let label = args["key"].as_str().unwrap_or("").to_string();
+        self.keys.entry(label).or_default().clone()
+    }
+
+    fn draft_id(&self, args: &Value) -> DocumentDraftId {
+        DocumentDraftId::parse(&self.arg(args, "draft")).expect("draft id")
+    }
+
+    fn file_id(&self, args: &Value) -> AttachmentId {
+        AttachmentId::parse(&self.arg(args, "file")).expect("file id")
+    }
+
+    fn txn_id(&self, args: &Value) -> TransactionId {
+        TransactionId::parse(&self.arg(args, "transaction")).expect("transaction id")
+    }
+
+    fn vendor(&self, args: &Value) -> Option<ContactId> {
+        match args["vendor"].as_str()? {
+            "story" => Some(self.story),
+            other => panic!("vendor {other}"),
+        }
+    }
+
+    fn day(&self, args: &Value, k: &str) -> CalendarDate {
+        CalendarDate::parse_wire(&self.arg(args, k)).expect("date")
+    }
+
+    fn body(&self, args: &Value) -> ConvertBody {
+        let on = self.day(args, "date");
+        let amount = self.arg(args, "amount");
+        let reference = self.opt(args, "reference");
+        let vendor = self.vendor(args);
+        let charge_from = |from: AccountId| {
+            BankPosting::card_charge(CardChargeDraft {
+                pay_from: from,
+                date: on,
+                number: reference.clone(),
+                payee: vendor,
+                memo: None,
+                lines: vec![split(self.exp, &amount)],
+            })
+            .expect("charge")
+        };
+        match args["kind"].as_str().expect("kind") {
+            "bill" => ConvertBody::Bill(bill(
+                vendor.expect("a bill names its vendor"),
+                self.exp,
+                on,
+                reference.as_deref().unwrap_or(""),
+                &amount,
+            )),
+            "card_charge" => ConvertBody::CardCharge(charge_from(self.card)),
+            "cash_expense" => ConvertBody::CashExpense(charge_from(self.bank)),
+            "check" => ConvertBody::Check(
+                BankPosting::check(CheckDraft {
+                    bank: self.bank,
+                    date: on,
+                    payee: vendor,
+                    payee_name: "Synthetic payee".into(),
+                    check_number: None,
+                    print_later: true,
+                    payee_address: None,
+                    memo: None,
+                    printed_memo: None,
+                    tag_ids: Vec::new(),
+                    draft_attachment: None,
+                    amount: m(&amount),
+                    lines: vec![split(self.exp, &amount)],
+                })
+                .expect("check"),
+            ),
+            other => panic!("kind {other}"),
+        }
+    }
+
+    fn password(&self, args: &Value) -> PostingOptions {
+        let pw = match args["closingPassword"].as_str() {
+            None => return PostingOptions::default(),
+            Some("right") => self.password.clone().expect("a closing password is set"),
+            Some(_) => Secret::new("not the password"),
+        };
+        PostingOptions {
+            closed_period: Some(cl_api::ClosedPeriodAuthorization::with_password(pw)),
+        }
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one arm per op of the shared vocabulary"
+    )]
+    fn run(&mut self, op: &str, args: &Value) -> Answer {
+        let h = self.h;
+        let s = self.s.clone();
+        match op {
+            "upload_draft_file" => {
+                let content = args["content"].as_str().expect("content");
+                let dk = match args["draftKey"].as_str() {
+                    Some(label) => *self.draft_keys.entry(label.to_string()).or_default(),
+                    None => cl_api::DraftKey::new(),
+                };
+                let bytes = format!("%PDF-1.4\n% {content} {}\n%%EOF\n", self.salt);
+                let a = h
+                    .run(
+                        s.attachments()
+                            .upload_draft(dk, "synthetic.pdf", bytes.as_bytes(), key()),
+                    )
+                    .expect("upload");
+                Answer::ok(201, json!({"id": a.id}))
+            }
+            "claim" => {
+                let file = self.file_id(args);
+                let hint: DraftKind =
+                    serde_json::from_value(args["kindHint"].clone()).expect("kindHint");
+                let k = self.key(args);
+                Answer::of(201, h.run(s.document_drafts().create(file, hint, k)))
+            }
+            "get" => Answer::of(200, h.run(s.document_drafts().get(self.draft_id(args)))),
+            "list" => {
+                let statuses = args["status"]
+                    .as_str()
+                    .unwrap_or("")
+                    .split(',')
+                    .filter(|x| !x.is_empty())
+                    .map(|x| serde_json::from_value(json!(x)).expect("status"))
+                    .collect();
+                let q = DraftListQuery {
+                    statuses,
+                    limit: args["limit"]
+                        .as_u64()
+                        .and_then(|l| u32::try_from(l).ok())
+                        .unwrap_or(50),
+                    ..DraftListQuery::default()
+                };
+                match h.run(s.document_drafts().list(&q)) {
+                    Ok(p) => Answer {
+                        total: Some(p.total),
+                        ..Answer::ok(200, Value::Null)
+                    },
+                    Err(e) => Answer::err(&e),
+                }
+            }
+            "store_reading" => {
+                let r = DraftReading {
+                    kind: serde_json::from_value(args["kind"].clone()).expect("kind"),
+                    reader: DraftReader::Ocr,
+                    fields: Map::new(),
+                    lines: Vec::new(),
+                    checks: Vec::new(),
+                    suggested_contact: self.vendor(args),
+                    doc_reference: self.opt(args, "docReference"),
+                    doc_total: self.opt(args, "docTotal").map(|t| m(&t)),
+                    doc_date: self
+                        .opt(args, "docDate")
+                        .map(|d| CalendarDate::parse_wire(&d).expect("date")),
+                };
+                let expected = self.arg(args, "expectedUpdatedAt");
+                Answer::of(
+                    200,
+                    h.run(
+                        s.document_drafts()
+                            .store_reading(self.draft_id(args), &expected, &r),
+                    ),
+                )
+            }
+            "store_failure" => {
+                let expected = self.arg(args, "expectedUpdatedAt");
+                let reason = self.arg(args, "reason");
+                Answer::of(
+                    200,
+                    h.run(s.document_drafts().store_failure(
+                        self.draft_id(args),
+                        &expected,
+                        &reason,
+                    )),
+                )
+            }
+            "discard" => Answer::of(200, h.run(s.document_drafts().discard(self.draft_id(args)))),
+            "convert" => {
+                let conversion = DraftConversion {
+                    body: self.body(args),
+                    expected_updated_at: self.arg(args, "expectedUpdatedAt"),
+                    acknowledge: args["acknowledge"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .map(|t| TransactionId::parse(&self.text(t)).expect("ack"))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                };
+                let opts = self.password(args);
+                let k = self.key(args);
+                match h.run(
+                    s.document_drafts()
+                        .convert(self.draft_id(args), &conversion, &opts, k),
+                ) {
+                    Ok(c) => Answer::draft(201, c.draft),
+                    Err(e) => Answer::err(&e),
+                }
+            }
+            "attach" => {
+                let expected = self.arg(args, "expectedUpdatedAt");
+                let k = self.key(args);
+                match h.run(s.document_drafts().attach(
+                    self.draft_id(args),
+                    self.txn_id(args),
+                    &expected,
+                    k,
+                )) {
+                    Ok(a) => Answer::draft(200, a.draft),
+                    Err(e) => Answer::err(&e),
+                }
+            }
+            "link_attachment" => {
+                let id = self.txn_id(args);
+                let t = h.run(s.transactions().get(id)).expect("record").record;
+                match h.run(s.attachments().link(
+                    self.file_id(args),
+                    AttachTo::Txn(t.txn_type, id),
+                    key(),
+                )) {
+                    Ok(()) => Answer::ok(200, Value::Null),
+                    Err(e) => Answer::err(&e),
+                }
+            }
+            "plain_relink" => {
+                let (kind, on) = file_type(h, &s, self.file_id(args));
+                assert_eq!(kind, "draft", "plain_relink moves a draft key");
+                let dk = cl_api::DraftKey::parse(&on).expect("draft key");
+                let mut b = bill(self.story, self.exp, date(2026, 11, 2), "", "1.00");
+                b.draft_attachment = Some(dk);
+                h.run(s.bills().create(&b, &PostingOptions::default(), key()))
+                    .unwrap_or_else(|e| panic!("plain save: {e:?}"));
+                Answer::ok(200, Value::Null)
+            }
+            "post_expense" => {
+                assert_eq!(args["payFrom"].as_str(), Some("card"), "payFrom");
+                let p = BankPosting::card_charge(CardChargeDraft {
+                    pay_from: self.card,
+                    date: self.day(args, "date"),
+                    number: self.opt(args, "reference"),
+                    payee: self.vendor(args),
+                    memo: None,
+                    lines: vec![split(self.exp, &self.arg(args, "amount"))],
+                })
+                .expect("charge");
+                let id = h
+                    .run(s.transactions().create_bank_posting(
+                        &p,
+                        &PostingOptions::default(),
+                        key(),
+                    ))
+                    .unwrap_or_else(|e| panic!("post: {e:?}"))
+                    .record
+                    .id;
+                Answer::ok(201, json!({"id": id}))
+            }
+            "void" => {
+                h.run(s.transactions().void(
+                    self.txn_id(args),
+                    "Synthetic void",
+                    &PostingOptions::default(),
+                    key(),
+                ))
+                .unwrap_or_else(|e| panic!("void: {e:?}"));
+                Answer::ok(200, Value::Null)
+            }
+            "set_closing_date" => {
+                h.run(s.raw_mapped(
+                    Method::Put,
+                    "/api/v1/company/settings",
+                    Some(&json!({"lockDate": self.arg(args, "date")})),
+                ))
+                .expect("set the closing date");
+                if self.password.is_none() {
+                    let pw = Secret::new(format!("closing-{}", key().as_header()));
+                    h.run(s.set_closing_password(None, Some(&pw), key()))
+                        .expect("set the closing password");
+                    self.password = Some(pw);
+                }
+                Answer::ok(200, Value::Null)
+            }
+            "search_amount" => {
+                let filter = cl_api::TransactionFilter {
+                    amount: Some(m(&self.arg(args, "amount"))),
+                    status: Some(cl_api::TxnStatus::Posted),
+                    start_date: Some(self.day(args, "start")),
+                    end_date: Some(self.day(args, "end")),
+                    ..cl_api::TransactionFilter::default()
+                };
+                match h.run(
+                    s.transactions()
+                        .list(&filter, cl_api::PageRequest::first_max()),
+                ) {
+                    Ok(p) => Answer {
+                        count: Some(p.data.len()),
+                        ..Answer::ok(200, Value::Null)
+                    },
+                    Err(e) => Answer::err(&e),
+                }
+            }
+            other => panic!("op {other} is not played by the live runner"),
+        }
+    }
+
+    /// Where the step's file is: `args.file`, else the draft's own file.
+    fn file_place(&self, args: &Value) -> &'static str {
+        let file = if args["file"].is_null() {
+            let d = self
+                .h
+                .run(self.s.document_drafts().get(self.draft_id(args)))
+                .expect("the draft");
+            d.attachment_id.expect("the draft's file")
+        } else {
+            self.file_id(args)
+        };
+        if file_type(self.h, &self.s, file).0 == "draft" {
+            "draft"
+        } else {
+            "moved"
+        }
+    }
+}
+
+/// Discards every live draft of the session's company.
+fn tidy(h: &Harness, s: &Session) {
+    let q = DraftListQuery {
+        statuses: vec![DraftStatus::New, DraftStatus::Ready, DraftStatus::Failed],
+        limit: 200,
+        summary: true,
+        ..DraftListQuery::default()
+    };
+    loop {
+        let page = h.run(s.document_drafts().list(&q)).expect("live drafts");
+        if page.drafts.is_empty() {
+            break;
+        }
+        for d in page.drafts {
+            h.run(s.document_drafts().discard(d.id)).expect("discard");
+        }
+    }
+}
+
+/// T16: the shared cases give the same answers on the engine as on the
+/// demo. `claim`, `store`, `discard` and `convert` need `document-drafts-v1`;
+/// `attach`, `guard` and `amount_filter` need `document-drafts-attach-v1`
+/// (PENDING(U-95) before it).
+fn shared_draft_cases(h: &Harness) {
+    let s = &h.s1;
+    if !live(h, s) {
+        return;
+    }
+    let attach_on = h.require_cap(Capabilities::DOCUMENT_DRAFTS_ATTACH, U95);
+    let v: Value = serde_json::from_str(DRAFT_CASES).expect("draft-cases.json");
+    // Tenant B, on the switcher session.
+    let runner = h.s3();
+    tidy(h, &runner);
+    let books = [
+        account(h, &runner, AccountType::Expense, None),
+        account(h, &runner, AccountType::Liability, Some("credit_card")),
+        account(h, &runner, AccountType::Asset, Some("bank")),
+    ];
+    let mut ran = 0;
+    let mut failed = Vec::new();
+    for section in [
+        "claim",
+        "store",
+        "discard",
+        "convert",
+        "attach",
+        "guard",
+        "amount_filter",
+    ] {
+        if !attach_on && matches!(section, "attach" | "guard" | "amount_filter") {
+            continue;
+        }
+        for case in v[section].as_array().expect(section) {
+            let name = case["name"].as_str().expect("name");
+            let mut w = CaseWorld::new(h, &runner, books);
+            for (i, step) in case["steps"].as_array().expect("steps").iter().enumerate() {
+                let op = step["op"].as_str().expect("op");
+                let args = &step["args"];
+                let expect = &step["expect"];
+                let at = format!("{name} step {i} ({op})");
+                let out = w.run(op, args);
+                let mut wrong = Vec::new();
+                if u64::from(out.status) != expect["status"].as_u64().expect("status") {
+                    wrong.push(format!("status {} code {:?}", out.status, out.code));
+                }
+                if let Some(code) = expect["code"].as_str()
+                    && out.code.as_deref() != Some(code)
+                {
+                    wrong.push(format!("code {:?}", out.code));
+                }
+                if let Some(st) = expect["draft_status"].as_str() {
+                    let got = out.draft.as_ref().map(|d| d.status.as_str());
+                    if got != Some(st) {
+                        wrong.push(format!("draft status {got:?}"));
+                    }
+                }
+                if let Some(t) = expect["total"].as_u64()
+                    && out.total != Some(t)
+                {
+                    wrong.push(format!("total {:?}", out.total));
+                }
+                if let Some(c) = expect["count"].as_u64()
+                    && out.count.and_then(|n| u64::try_from(n).ok()) != Some(c)
+                {
+                    wrong.push(format!("count {:?}", out.count));
+                }
+                if let Some(place) = expect["file"].as_str() {
+                    let got = w.file_place(args);
+                    if got != place {
+                        wrong.push(format!("file {got}"));
+                    }
+                }
+                if !wrong.is_empty() {
+                    failed.push(format!("{at}: {}", wrong.join(", ")));
+                    break;
+                }
+                if let Some(label) = step["as"].as_str() {
+                    w.labels.insert(label.to_string(), out.label);
+                }
+            }
+            w.clean_up();
+            ran += 1;
+        }
+    }
+    assert!(
+        failed.is_empty(),
+        "the engine answers differently from the shared cases:\n{}",
+        failed.join("\n")
+    );
+    assert!(ran >= 23, "only {ran} cases");
+    eprintln!("    shared draft cases: {ran} ran on the engine");
+}
+
 fn main() -> std::process::ExitCode {
     let tests: &[(&str, TestFn)] = &[
         ("drafts::claims", claims),
@@ -1505,6 +2426,11 @@ fn main() -> std::process::ExitCode {
             "drafts::money_table_matches_the_engine",
             money_table_matches_the_engine,
         ),
+        // A04 (U-95).
+        ("drafts::attach_matrix", attach_matrix),
+        ("drafts::amount_filter_is_exact", amount_filter_is_exact),
+        // Last: it opens a fresh company per case on the switcher session.
+        ("drafts::shared_draft_cases", shared_draft_cases),
     ];
     run_suite(EngineMode::Normal, tests)
 }

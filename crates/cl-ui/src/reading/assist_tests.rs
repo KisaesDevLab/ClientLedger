@@ -237,7 +237,7 @@ fn a_picture_over_4096_px_is_not_sent_and_says_so() {
     for (w, h) in [(4097, 3000), (3000, 4097), (8000, 8000)] {
         let doc = png_of(w, h);
         assert_eq!(picture(cloud, &doc), Picture::TooLarge, "{w}x{h}");
-        let r = request(&l, cloud, &doc);
+        let r = request(&l, cloud, &doc, DraftKind::Bill);
         assert!(r.page_images.is_empty(), "{w}x{h}");
         assert!(r.check().is_ok(), "the text still goes");
     }
@@ -265,7 +265,7 @@ fn a_picture_over_4096_px_is_not_sent_and_says_so() {
 fn a_picture_goes_only_online_with_consent_and_only_a_small_png() {
     let png = png_of(1700, 2200);
     let l = local();
-    let count = |route, doc: &[u8]| request(&l, route, doc).page_images.len();
+    let count = |route, doc: &[u8]| request(&l, route, doc, DraftKind::Bill).page_images.len();
     assert_eq!(count(Route::Cloud { images: true }, &png), 1);
     assert_eq!(count(Route::Cloud { images: false }, &png), 0);
     assert_eq!(count(Route::Local, &png), 0);
@@ -274,8 +274,14 @@ fn a_picture_goes_only_online_with_consent_and_only_a_small_png() {
         0,
         "a PDF is never rendered here"
     );
-    let r = request(&l, Route::Local, b"%PDF-1.7");
+    let r = request(&l, Route::Local, b"%PDF-1.7", DraftKind::Bill);
     assert_eq!(r.kind_hint, Some(DraftKind::Bill));
+    let r = request(&l, Route::Local, b"%PDF-1.7", DraftKind::CardCharge);
+    assert_eq!(
+        r.kind_hint,
+        Some(DraftKind::CardCharge),
+        "the draft form's kind"
+    );
     assert!(r.check().is_ok());
     assert!(!format!("{r:?}").contains("Corner"));
 }

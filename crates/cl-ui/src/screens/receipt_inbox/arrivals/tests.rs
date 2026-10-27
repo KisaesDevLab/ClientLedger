@@ -105,7 +105,7 @@ fn the_demo_window_lays_out_its_folders_and_copies_files_in() {
     let (_dir, link, ctx, mut s) = setup();
     until(&ctx, &mut s, "the demo files in", |st| {
         st["migration"] == "migrated"
-            && st["arrived"] == 3
+            && st["arrived"] == 4
             && st["duplicate"] == 1
             && st["too_large"] == 1
             && st["not_supported"] == 1
@@ -125,8 +125,8 @@ fn the_demo_window_lays_out_its_folders_and_copies_files_in() {
     assert_eq!(super::super::intake_problems(&ctx), 1);
     assert_eq!(
         super::super::badge(&ctx),
-        4,
-        "three arrivals and a duplicate"
+        5,
+        "four arrivals and a duplicate"
     );
     // No names or paths in the control channel.
     let text = st.to_string();
@@ -141,10 +141,51 @@ fn the_demo_window_lays_out_its_folders_and_copies_files_in() {
     let _ = link;
 }
 
+/// A04 claim gate: with document drafts every arrival is claimed, New
+/// check opens its draft in Write Check's draft mode (WP-F2; never the
+/// plain save path), and the state says how many are claimed.
+#[test]
+fn claimed_arrivals_open_from_review_documents() {
+    let (_dir, link, ctx, mut s) = setup();
+    until(&ctx, &mut s, "the demo files claimed", |st| {
+        st["arrived"] == 4 && st["drafts"]["claimed"] == 4
+    });
+    let st = s.state();
+    assert_eq!(st["drafts"]["on"], true, "{st}");
+    assert_eq!(st["drafts"]["pending"], 0, "{st}");
+    assert_eq!(st["drafts"]["elsewhere"], 0, "{st}");
+    let png = row(&ctx, "Ozark Feed receipt.png");
+    assert_eq!(png.link, "own");
+    s.select_row(&ctx, &png);
+    until(&ctx, &mut s, "the PNG read", |st| st["loaded"] == true);
+    let f = Frame::read(&ctx);
+    s.new_form(&ctx, &f, &png, FormKind::Check);
+    assert_eq!(s.arrivals.problem, None);
+    let events = link.drain();
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            CompanyEvent::OpenWith(_, p) if matches!(**p, OpenPayload::InboxDraft(_))
+        )),
+        "no form opened on the plain path"
+    );
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            CompanyEvent::OpenWith(_, p) if matches!(**p, OpenPayload::DocumentDraft(_))
+        )),
+        "the draft opens in draft mode"
+    );
+    // Copy anyway is still offered for the local duplicate (no claim).
+    assert_eq!(row(&ctx, "Ozark Feed receipt (copy).png").link, "none");
+}
+
 #[test]
 fn new_check_opens_with_the_arrival_draft_and_a_tiff_shows() {
     let (_dir, link, ctx, mut s) = setup();
-    until(&ctx, &mut s, "the demo files in", |st| st["arrived"] == 3);
+    // A01's path: an engine without document drafts.
+    link.demo_state().expect("demo").drafts.enabled = false;
+    until(&ctx, &mut s, "the demo files in", |st| st["arrived"] == 4);
     // TIFF (A02): it shows in the viewer like any other file.
     let tif = row(&ctx, "Galena Gravel fax.tif");
     s.select_row(&ctx, &tif);
@@ -212,7 +253,7 @@ fn every_intake_inbox_widget_has_an_accessible_name() {
     crate::fonts::install(&ctx);
     ctx.enable_accesskit();
     until(&ctx, &mut s, "the demo files in", |st| {
-        st["arrived"] == 3 && st["duplicate"] == 1
+        st["arrived"] == 4 && st["duplicate"] == 1
     });
     let check = |s: &mut super::super::ReceiptInboxScreen, what: &str| {
         let mut nodes = Vec::new();
