@@ -1,0 +1,1388 @@
+//! **Read a statement** on Match Vendor Statement (A06, ADD-02 steps 3-7,
+//! plan decisions b-g).
+//!
+//! - **The file.** Browse, a file dropped on the window, or a statement
+//!   draft opened from Review Documents (U-94). The bytes are checked as an
+//!   attachment's are (10 MB, PDF / PNG / JPEG / TIFF) and read in the
+//!   sandboxed worker as a statement job (`JobHint::statement`, up to 20
+//!   pages, Q-300). Nothing is parsed here and nothing goes online.
+//! - **The lines** go through the paste path
+//!   (`cl_model::statement_match::rows_from_read`): the box holds them as
+//!   typed lines would be, each marked "Read from the document — check
+//!   it" until accepted (one Accept for all, or line by line). Match waits
+//!   for the accept. Typing in the box makes the lines the owner's.
+//! - **The vendor** is matched against the company's vendors. One already
+//!   picked that differs is never changed: a warning says so.
+//! - **The document pane** shows the statement beside its lines; picking a
+//!   line outlines its spot on the page, and clicking a spot picks the line
+//!   (the A04 compare tools, with the read lines as targets).
+//! - **Checks** the reader raised (lines vs. balances, running balances,
+//!   dates, duplicates) are listed; nothing is adjusted (non-negotiable 6).
+//! - **Ask AI to help** as in A03, behind the same switches and consent;
+//!   it may name the vendor and the closing balance, and an AI amount is
+//!   kept only when the same figure is printed on the page (Q-A03j). The
+//!   lines are never the AI's.
+//! - **Balance line** (Q-297): the statement's closing balance beside the
+//!   books' (`/reports/vendor-statement`, exact), display only.
+//! - **Keep the statement** (Q-298): after Match, on by default, the file
+//!   is stored on the vendor with its period in the name. A statement
+//!   draft is discarded first (the engine refuses to move a file a live
+//!   draft reads), then its file is moved to the vendor.
+//!
+//! Logs carry outcome classes only; the control channel counts only.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, TryRecvError};
+
+use cl_api::{
+    ApiError, AssistSuggestion, AttachTo, AttachmentId, DocumentDraftId, DraftKind, FileKind,
+    IdempotencyKey, OrphanLabel, VendorStatementBalances,
+};
+use cl_core::ids::{ContactId, TenantId};
+use cl_core::{CalendarDate, Money, MoneyStyle};
+use cl_docread::model::{
+    Check, CheckCode, ConfidenceBucket, Found, Header, SignSource, StatementRead, Template,
+};
+use cl_docread::protocol::JobHint;
+use cl_docread::vendor_match::{self, VendorCandidate};
+use cl_model::rowkey::RowKey;
+use cl_model::statement_match::{LineColumn, ReadLine, ReadStatement, rows_from_read};
+use eframe::egui::{self, RichText, Ui};
+use serde_json::{Value, json};
+
+use super::super::doc_read::ReadSwitches;
+use super::StatementMatchScreen;
+use crate::company::Task;
+use crate::i18n::{t, t_with};
+use crate::reading::assist::{self, NoRoute, Route};
+use crate::reading::{
+    LocalReading, ReadCancel, ReadFailure, ReadOutcome, ReadRequest, ReadingService,
+};
+use crate::screens::company::form::{self, DateInput};
+use crate::screens::write_check::attach::{
+    FileRead, poll_file_read, read_file, read_in_background,
+};
+use crate::theme::Tokens;
+use crate::widgets::compare::{
+    CompareAction, CompareEnv, CompareEvent, CompareTarget, CompareTools, PageBox, TargetKey,
+    TargetLevel,
+};
+use crate::widgets::doc_pane::DocPane;
+use crate::widgets::pdf_viewer::{DocSource, ViewerState};
+
+/// The field name of a read line's target (`statement_line:3`).
+pub(crate) const LINE_TARGET: &str = "statement_line";
+
+/// "Couldn't read this statement — type or paste the lines instead."
+pub(crate) const COULDNT: &str = "statement.read.couldnt";
+
+/// The height of the docked document pane.
+const PANE_HEIGHT: f32 = 420.0;
+
+/// A statement draft opened from Review Documents (U-94).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StatementDraft {
+    /// The draft.
+    pub id: DocumentDraftId,
+    /// Its file.
+    pub attachment: Option<AttachmentId>,
+}
+
+/// What a kept statement was kept for: one file per vendor and period.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct KeepKey {
+    vendor: ContactId,
+    from: CalendarDate,
+    to: CalendarDate,
+    doc: u64,
+}
+
+/// What the books' balance was asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BalanceKey {
+    vendor: ContactId,
+    from: CalendarDate,
+    to: CalendarDate,
+}
+
+/// The statement document and its reading (owner data: shown, never
+/// logged; `Debug` is not derived).
+pub(crate) struct StatementDoc {
+    /// The document pane.
+    pub viewer: ViewerState,
+    /// Line ↔ spot highlights.
+    pub compare: CompareTools,
+    /// The document's bytes and kind.
+    pub bytes: Option<Arc<[u8]>>,
+    pub file_kind: Option<FileKind>,
+    /// Bumped for every new document (keep once per document).
+    pub doc_no: u64,
+    /// The Browse window.
+    pub picking: Option<Receiver<Vec<PathBuf>>>,
+    /// A file being read from disk.
+    pub loading: Option<Receiver<FileRead>>,
+    /// The reading in the worker.
+    pub job: Option<Receiver<ReadOutcome>>,
+    pub cancel: Option<ReadCancel>,
+    /// A service set by tests instead of the app's.
+    pub service: Option<Arc<ReadingService>>,
+    /// The company's statement layouts (`stmt:`, Q-299), for the reader.
+    pub layouts: Vec<Template>,
+    /// The last reading, with its page words.
+    pub last: Option<Box<LocalReading>>,
+    /// The read lines in the box, with their marks.
+    pub read: Option<ReadStatement>,
+    /// The read lines' spots on the page, by read line.
+    pub spots: Vec<Option<PageBox>>,
+    /// The read line picked (its spot outlined).
+    pub selected: Option<usize>,
+    /// Why the last attempt said nothing useful (i18n key).
+    pub problem: Option<&'static str>,
+    /// The statement names another vendor than the one picked.
+    pub vendor_differs: Option<String>,
+    /// The closing balance printed on the statement.
+    pub closing: Option<Money>,
+    /// The closing balance came from AI help (checked against the page).
+    pub closing_by_ai: bool,
+    /// The statement's date (else the period's end).
+    pub statement_date: Option<CalendarDate>,
+    /// The reader's checks on the statement (shown, never applied).
+    pub checks: Vec<Check>,
+    /// Statements sent to the reader; the last outcome class.
+    pub sent: u32,
+    pub outcome: Option<&'static str>,
+    /// Opened from Review Documents.
+    pub draft: Option<StatementDraft>,
+    /// The draft's file being fetched.
+    pub draft_file: Option<Task<(cl_api::DocumentDraft, Vec<u8>)>>,
+    /// The tenant (the demo engine keys drafts by it).
+    pub tenant: Option<TenantId>,
+    // ---- Ask AI to help
+    pub switches: Option<ReadSwitches>,
+    pub switches_task: Option<Task<ReadSwitches>>,
+    pub assist: Option<Task<Result<AssistSuggestion, ApiError>>>,
+    pub assist_sent: u32,
+    pub assist_outcome: Option<&'static str>,
+    pub helped: bool,
+    // ---- Keep the statement
+    /// "Save this statement with the vendor" (default on).
+    pub keep: bool,
+    pub keep_task: Option<(KeepKey, Task<()>)>,
+    pub kept: Option<KeepKey>,
+    pub keep_failed: bool,
+    pub keeps: u32,
+    // ---- The balance line
+    pub balance_task: Option<(BalanceKey, Task<Option<VendorStatementBalances>>)>,
+    pub books: Option<(BalanceKey, VendorStatementBalances)>,
+}
+
+impl Default for StatementDoc {
+    fn default() -> Self {
+        StatementDoc {
+            viewer: ViewerState::default(),
+            compare: CompareTools::new(),
+            bytes: None,
+            file_kind: None,
+            doc_no: 0,
+            picking: None,
+            loading: None,
+            job: None,
+            cancel: None,
+            service: None,
+            layouts: Vec::new(),
+            last: None,
+            read: None,
+            spots: Vec::new(),
+            selected: None,
+            problem: None,
+            vendor_differs: None,
+            closing: None,
+            closing_by_ai: false,
+            statement_date: None,
+            checks: Vec::new(),
+            sent: 0,
+            outcome: None,
+            draft: None,
+            draft_file: None,
+            tenant: None,
+            switches: None,
+            switches_task: None,
+            assist: None,
+            assist_sent: 0,
+            assist_outcome: None,
+            helped: false,
+            keep: true,
+            keep_task: None,
+            kept: None,
+            keep_failed: false,
+            keeps: 0,
+            balance_task: None,
+            books: None,
+        }
+    }
+}
+
+/// A closed window stops a reading still running.
+impl Drop for StatementDoc {
+    fn drop(&mut self) {
+        if let Some(c) = self.cancel.take() {
+            c.cancel();
+        }
+    }
+}
+
+impl StatementDoc {
+    /// Reading, fetching or helping.
+    pub(crate) fn busy(&self) -> bool {
+        self.job.is_some()
+            || self.loading.is_some()
+            || self.assist.is_some()
+            || self.draft_file.is_some()
+    }
+
+    /// Forget the reading (a new document, or Clear).
+    fn forget_reading(&mut self) {
+        if let Some(c) = self.cancel.take() {
+            c.cancel();
+        }
+        self.job = None;
+        self.last = None;
+        self.read = None;
+        self.spots.clear();
+        self.selected = None;
+        self.problem = None;
+        self.vendor_differs = None;
+        self.closing = None;
+        self.closing_by_ai = false;
+        self.statement_date = None;
+        self.checks.clear();
+        self.assist = None;
+        self.helped = false;
+        self.assist_outcome = None;
+        self.books = None;
+        self.balance_task = None;
+        self.compare.clear();
+        self.compare.set_targets(Vec::new(), Vec::new());
+        self.compare.set_words(None);
+    }
+
+    /// Everything goes (Clear).
+    pub(crate) fn reset(&mut self) {
+        self.forget_reading();
+        self.viewer.clear();
+        self.bytes = None;
+        self.file_kind = None;
+        self.picking = None;
+        self.loading = None;
+        self.draft = None;
+        self.draft_file = None;
+        self.keep = true;
+        self.keep_task = None;
+        self.kept = None;
+        self.keep_failed = false;
+    }
+
+    /// The read lines still need the owner's Accept (and the box still
+    /// holds them as read).
+    pub(crate) fn awaiting_accept(&self, box_text: &str) -> bool {
+        self.read
+            .as_ref()
+            .is_some_and(|r| r.still_read(box_text) && !r.all_accepted())
+    }
+
+    /// The control channel's view: counts and flags only.
+    pub(crate) fn state_json(&self, box_text: &str) -> Value {
+        let read = self.read.as_ref();
+        json!({
+            "document": self.bytes.is_some(),
+            "busy": self.busy(),
+            "requests": self.sent,
+            "outcome": self.outcome,
+            "problem": self.problem,
+            "lines": read.map(|r| r.marks.len()),
+            "pending": read.map(ReadStatement::pending),
+            "unsure": read.map(|r| r.marks.iter().filter(|m| m.unsure).count()),
+            "typed_over": read.is_some_and(|r| !r.still_read(box_text)),
+            "spots": self.spots.iter().filter(|s| s.is_some()).count(),
+            "selected": self.selected,
+            "vendor_differs": self.vendor_differs.is_some(),
+            "closing_read": self.closing.is_some(),
+            "closing_by_ai": self.closing_by_ai,
+            "checks": self.checks.iter().map(|c| crate::screens::bill::doc_read_local::code_name(c.code)).collect::<Vec<_>>(),
+            "draft": self.draft.is_some(),
+            "assist": {
+                "offer": self.offer().key(),
+                "requests": self.assist_sent,
+                "outcome": self.assist_outcome,
+                "helped": self.helped,
+            },
+            "keep": self.keep,
+            "kept": self.kept.is_some(),
+            "keeps": self.keeps,
+            "keep_failed": self.keep_failed,
+            "keeping": self.keep_task.is_some(),
+            "viewer": self.viewer.state_json(),
+        })
+    }
+
+    /// What "Ask AI to help" offers now.
+    pub(crate) fn offer(&self) -> super::super::doc_read_local::Offer {
+        use super::super::doc_read_local::Offer;
+        let Some(last) = self.last.as_ref() else {
+            return Offer::None;
+        };
+        if self.helped || self.busy() || !needs_help(last, self.closing.is_some()) {
+            return Offer::None;
+        }
+        let Some(s) = self.switches else {
+            return Offer::None;
+        };
+        match assist::route(s.assist_switches()) {
+            Ok(r) => Offer::Ask(r),
+            Err(NoRoute::NeedsConsent) => Offer::NeedsConsent,
+            Err(NoRoute::Off | NoRoute::Unsupported) => Offer::None,
+        }
+    }
+}
+
+/// The reading left the vendor or the closing balance out.
+fn needs_help(local: &LocalReading, closing: bool) -> bool {
+    local.vendor.is_none() || !closing
+}
+
+fn unsure<T>(f: Option<&Found<T>>) -> bool {
+    f.is_some_and(|f| f.confidence.bucket() == ConfidenceBucket::Low)
+}
+
+/// The column a read line's amount came from, in the model's words.
+fn column_of(s: SignSource) -> LineColumn {
+    match s {
+        SignSource::SingleColumn => LineColumn::Single,
+        SignSource::ChargesColumn => LineColumn::Charges,
+        SignSource::CreditsColumn => LineColumn::Credits,
+        SignSource::PaymentsColumn => LineColumn::Payments,
+    }
+}
+
+/// The reader's lines as the model's.
+#[must_use]
+pub(crate) fn read_lines(st: &StatementRead) -> Vec<ReadLine> {
+    st.lines
+        .iter()
+        .map(|l| ReadLine {
+            date: l.date.value,
+            reference: l
+                .reference
+                .as_ref()
+                .map(|r| r.value.clone())
+                .unwrap_or_default(),
+            amount: l.amount.value,
+            column: column_of(l.sign_from),
+            unsure: unsure(Some(&l.date))
+                || unsure(Some(&l.amount))
+                || unsure(l.reference.as_ref()),
+        })
+        .collect()
+}
+
+/// A spot as a compare box.
+fn spot_box(s: cl_docread::model::Spot) -> Option<PageBox> {
+    let b = s.bbox;
+    PageBox::new(s.page, b.left(), b.top(), b.right(), b.bottom())
+}
+
+/// One box over a read line: its date to its amount when both are on one
+/// page, else the amount's.
+fn line_box(l: &cl_docread::model::StatementLineRead) -> Option<PageBox> {
+    let (a, d) = (spot_box(l.amount.spot)?, spot_box(l.date.spot));
+    match d {
+        Some(d) if d.page == a.page => PageBox::new(
+            a.page,
+            a.l.min(d.l),
+            a.t.min(d.t),
+            a.r.max(d.r),
+            a.b.max(d.b),
+        ),
+        _ => Some(a),
+    }
+}
+
+/// The statement checks the owner is shown (never applied).
+fn is_statement_check(code: CheckCode) -> bool {
+    matches!(
+        code,
+        CheckCode::StmtSum
+            | CheckCode::StmtRunning
+            | CheckCode::StmtDateOutsidePeriod
+            | CheckCode::StmtDuplicateLine
+            | CheckCode::PagesSkipped
+            | CheckCode::PageNotRead
+    )
+}
+
+/// What a statement check says (owner text; shown, never logged).
+pub(crate) fn check_text(c: &Check, style: MoneyStyle) -> String {
+    let line = c
+        .line
+        .map_or_else(String::new, |l| (u32::from(l) + 1).to_string());
+    match c.code {
+        CheckCode::StmtSum => match c.difference {
+            Some(d) => t_with(
+                "statement.read.check.sum",
+                &[("difference", &d.abs().format(style))],
+            ),
+            None => t("statement.read.check.sum.plain"),
+        },
+        CheckCode::StmtRunning => t_with("statement.read.check.running", &[("line", &line)]),
+        CheckCode::StmtDateOutsidePeriod => t_with("statement.read.check.date", &[("line", &line)]),
+        CheckCode::StmtDuplicateLine => {
+            t_with("statement.read.check.duplicate", &[("line", &line)])
+        }
+        _ => super::super::doc_read_local::check_text(c, style),
+    }
+}
+
+/// The candidates' vendor for a name printed on a statement.
+fn match_name(
+    name: Option<&Found<String>>,
+    reading: &cl_docread::model::Reading,
+    vendors: &[VendorCandidate],
+) -> Option<ContactId> {
+    let header = Header {
+        vendor: name.cloned(),
+        ..Header::default()
+    };
+    vendor_match::match_vendor(&header, reading.fingerprint.as_ref(), vendors).map(|m| m.contact)
+}
+
+impl StatementMatchScreen {
+    // ------------------------------------------------------------ the file
+
+    /// Browse for a statement file.
+    pub(crate) fn browse_statement(&mut self, ctx: &egui::Context) {
+        if self.doc.picking.is_none() {
+            self.doc.picking = Some(crate::screens::write_check::attach::browse_for_file(ctx));
+        }
+    }
+
+    /// A statement file at `path` (Browse or dropped): read from disk in
+    /// the background, then read.
+    pub(crate) fn statement_path(&mut self, path: &std::path::Path) {
+        match read_in_background(path, read_file) {
+            Ok(rx) => self.doc.loading = Some(rx),
+            Err(k) => self.doc.problem = Some(k),
+        }
+    }
+
+    /// A statement's bytes (from disk, a draft, or tests): shown and read.
+    pub(crate) fn statement_bytes(&mut self, name: &str, bytes: Vec<u8>) {
+        let Ok(kind) = cl_api::check_file(&bytes) else {
+            self.doc.problem = Some("check.attach.type");
+            return;
+        };
+        self.doc.forget_reading();
+        self.doc.doc_no += 1;
+        self.doc.kept = None;
+        self.doc.keep_failed = false;
+        let bytes: Arc<[u8]> = Arc::from(bytes);
+        self.doc.bytes = Some(Arc::clone(&bytes));
+        self.doc.file_kind = Some(kind);
+        self.doc.viewer.open(DocSource {
+            name: name.to_string(),
+            bytes,
+        });
+        self.start_statement_read();
+    }
+
+    /// Files dropped on the window.
+    fn take_dropped(&mut self, ui: &Ui) {
+        let dropped = ui.ctx().input(|i| i.raw.dropped_files.clone());
+        if let Some(f) = dropped.into_iter().next() {
+            let p = f.path().to_path_buf();
+            self.statement_path(&p);
+        }
+    }
+
+    // --------------------------------------------------------- the reading
+
+    /// Sends the shown statement to the reader.
+    pub(crate) fn start_statement_read(&mut self) {
+        let Some(bytes) = self.doc.bytes.clone() else {
+            return;
+        };
+        let service = self.doc.service.clone().or_else(crate::reading::shared);
+        let Some(service) = service else {
+            self.doc.problem = Some(COULDNT);
+            self.doc.outcome = Some(ReadFailure::Unavailable.class());
+            return;
+        };
+        let request = ReadRequest {
+            bytes,
+            hint: JobHint::statement(),
+            today: self.today,
+            vendors: crate::reading::map::vendor_candidates(&self.contacts),
+            templates: self.doc.layouts.clone(),
+            card_accounts: None,
+        };
+        self.doc.sent += 1;
+        self.doc.outcome = None;
+        self.doc.problem = None;
+        tracing::info!(job = self.doc.sent, "statement reading started");
+        let job = service.submit_cancellable(request);
+        self.doc.job = Some(job.answer);
+        self.doc.cancel = Some(job.cancel);
+    }
+
+    fn take_outcome(&mut self) -> Option<ReadOutcome> {
+        let rx = self.doc.job.as_ref()?;
+        let outcome = match rx.try_recv() {
+            Ok(o) => o,
+            Err(TryRecvError::Empty) => return None,
+            Err(TryRecvError::Disconnected) => ReadOutcome::Failed(ReadFailure::Unavailable),
+        };
+        self.doc.job = None;
+        self.doc.cancel = None;
+        Some(outcome)
+    }
+
+    /// Each frame: the file, the reading, the help, the keep and the
+    /// balance, when they answer.
+    pub(crate) fn poll_statement(&mut self) {
+        if let Some(paths) = crate::widgets::file_picker::poll(&mut self.doc.picking)
+            && let Some(p) = paths.into_iter().next()
+        {
+            self.statement_path(&p);
+        }
+        if let Some(r) = poll_file_read(&mut self.doc.loading) {
+            match r {
+                Ok((name, bytes)) => self.statement_bytes(&name, bytes),
+                Err(k) => self.doc.problem = Some(k),
+            }
+        }
+        if let Some(r) = self.doc.draft_file.as_mut().and_then(Task::try_take) {
+            self.doc.draft_file = None;
+            match r {
+                Ok((draft, bytes)) => {
+                    self.doc.draft = Some(StatementDraft {
+                        id: draft.id,
+                        attachment: draft.attachment_id,
+                    });
+                    self.statement_bytes(&t("statement.read.draft_file"), bytes);
+                }
+                Err(_) => self.doc.problem = Some("statement.read.draft_failed"),
+            }
+        }
+        if let Some(outcome) = self.take_outcome() {
+            self.doc.outcome = Some(outcome.class());
+            match outcome {
+                ReadOutcome::Read(local) => self.fill_statement(local),
+                ReadOutcome::Failed(ReadFailure::Cancelled) => {}
+                ReadOutcome::Failed(f) => {
+                    tracing::info!(
+                        job = self.doc.sent,
+                        outcome = f.class(),
+                        "statement reading failed"
+                    );
+                    self.doc.problem = Some(COULDNT);
+                }
+            }
+        }
+        self.poll_statement_switches();
+        self.poll_statement_assist();
+        self.poll_keep();
+        self.poll_balance();
+    }
+
+    /// A finished reading into the form: the lines into the box (read, not
+    /// accepted), the vendor and the period when known.
+    pub(crate) fn fill_statement(&mut self, local: Box<LocalReading>) {
+        let Some(st) = local
+            .reading
+            .statement
+            .clone()
+            .filter(|s| !s.lines.is_empty())
+        else {
+            tracing::info!(
+                job = self.doc.sent,
+                outcome = "no_lines",
+                "statement reading"
+            );
+            self.doc.problem = Some(COULDNT);
+            self.doc.last = Some(local);
+            return;
+        };
+        let lines = read_lines(&st);
+        let read = rows_from_read(&lines);
+        self.text.clone_from(&read.text);
+        self.parsed = None;
+        self.outcome = None;
+        self.problem = None;
+        self.doc.read = Some(read);
+        self.doc.spots = st.lines.iter().map(line_box).collect();
+        self.doc.closing = st.closing.as_ref().map(|c| c.value);
+        self.doc.statement_date = st
+            .statement_date
+            .as_ref()
+            .or(st.period_to.as_ref())
+            .map(|d| d.value);
+        if let Some(d) = st.period_from.as_ref() {
+            self.from = DateInput::new(d.value);
+        }
+        if let Some(d) = st.period_to.as_ref().or(st.statement_date.as_ref()) {
+            self.to = DateInput::new(d.value);
+        }
+        self.doc.checks = local
+            .reading
+            .checks
+            .iter()
+            .filter(|c| is_statement_check(c.code))
+            .cloned()
+            .collect();
+        let found = local.vendor.map(|v| v.contact).or_else(|| {
+            match_name(
+                st.vendor.as_ref(),
+                &local.reading,
+                &crate::reading::map::vendor_candidates(&self.contacts),
+            )
+        });
+        self.take_vendor(found, st.vendor.as_ref().map(|v| v.value.clone()));
+        self.doc
+            .compare
+            .set_words(Some(Arc::new(crate::widgets::compare::DocWords {
+                pages: local.reading.words.clone(),
+            })));
+        self.doc.last = Some(local);
+        self.ensure_statement_switches();
+    }
+
+    /// The vendor the statement names: picked when none is; a different
+    /// one already picked stays, with a warning.
+    fn take_vendor(&mut self, found: Option<ContactId>, printed: Option<String>) {
+        let Some(found) = found.filter(|f| self.vendors.iter().any(|(id, _)| id == f)) else {
+            return;
+        };
+        match self.vendor {
+            None => self.vendor = Some(found),
+            Some(v) if v == found => {}
+            Some(_) => {
+                let name = self
+                    .vendors
+                    .iter()
+                    .find(|(id, _)| *id == found)
+                    .map(|(_, n)| n.clone())
+                    .or(printed)
+                    .unwrap_or_default();
+                self.doc.vendor_differs = Some(name);
+            }
+        }
+    }
+
+    /// Accept every read line.
+    pub(crate) fn accept_read_lines(&mut self) {
+        if let Some(r) = self.doc.read.as_mut() {
+            r.accept_all();
+        }
+    }
+
+    /// Accept the read line on box line `line`.
+    pub(crate) fn accept_read_line(&mut self, line: usize) {
+        if let Some(r) = self.doc.read.as_mut() {
+            r.accept(line);
+        }
+    }
+
+    /// Picks read line `i`: its spot is outlined and its page shown.
+    pub(crate) fn select_read_line(&mut self, i: usize) {
+        self.doc.selected = Some(i);
+        self.publish_targets();
+        self.doc
+            .compare
+            .focus(Some(TargetKey::line(LINE_TARGET, RowKey(i as u64 + 1))));
+    }
+
+    /// The read lines as compare targets, with what each shows.
+    fn publish_targets(&mut self) {
+        let Some(read) = self.doc.read.as_ref() else {
+            return;
+        };
+        let still = read.still_read(&self.text);
+        let mut targets = Vec::new();
+        let mut values = Vec::new();
+        let parsed = cl_model::statement_match::read::read_back(read, self.today);
+        for m in &read.marks {
+            let spot = self.doc.spots.get(m.source).copied().flatten();
+            targets.push(CompareTarget {
+                key: TargetKey::line(LINE_TARGET, RowKey(m.source as u64 + 1)),
+                label: t_with("statement.read.line_label", &[("n", &m.line.to_string())]),
+                spot,
+                level: if spot.is_none() {
+                    TargetLevel::NotFound
+                } else if m.unsure && !m.accepted && still {
+                    TargetLevel::CheckThis
+                } else {
+                    TargetLevel::Sure
+                },
+                fill: None,
+            });
+            values.push(
+                parsed
+                    .rows
+                    .iter()
+                    .find(|r| r.line == m.line)
+                    .map(|r| {
+                        format!(
+                            "{} {} {}",
+                            crate::shell::us_date(r.entry.date),
+                            r.entry.reference,
+                            r.entry.amount.format(self.money_style)
+                        )
+                    })
+                    .unwrap_or_default(),
+            );
+        }
+        self.doc.compare.set_targets(targets, values);
+    }
+
+    /// A compare event from the docked viewer or the pop-out.
+    pub(crate) fn on_statement_event(&mut self, event: CompareEvent) {
+        let service = self.doc.service.clone().or_else(crate::reading::shared);
+        let env = CompareEnv {
+            today: self.today,
+            service: service.as_deref(),
+            bytes: self.doc.bytes.clone(),
+        };
+        if let Some(CompareAction::Focus(key)) = self.doc.compare.on_event(event, &env)
+            && key.field == LINE_TARGET
+            && let Some(row) = key.row
+            && let Ok(i) = usize::try_from(row.0)
+            && i > 0
+        {
+            self.doc.selected = Some(i - 1);
+        }
+    }
+
+    // ------------------------------------------------------ Ask AI to help
+
+    fn ensure_statement_switches(&mut self) {
+        if let Some(s) = ReadSwitches::demo(&self.link) {
+            self.doc.switches = Some(s);
+            return;
+        }
+        if self.doc.switches.is_some() || self.doc.switches_task.is_some() {
+            return;
+        }
+        if let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) {
+            self.doc.switches_task = super::super::doc_read::fetch_switches(group, &session)
+                .ok()
+                .map(Task::Pending);
+        }
+    }
+
+    fn poll_statement_switches(&mut self) {
+        if self.link.is_demo() && self.doc.last.is_some() {
+            self.doc.switches = ReadSwitches::demo(&self.link);
+        }
+        if let Some(r) = self.doc.switches_task.as_mut().and_then(Task::try_take) {
+            self.doc.switches_task = None;
+            self.doc.switches = r.ok();
+        }
+    }
+
+    /// Ask AI to help with the reading (the owner's click).
+    pub(crate) fn start_statement_assist(&mut self) {
+        let super::super::doc_read_local::Offer::Ask(route) = self.doc.offer() else {
+            return;
+        };
+        let Some(last) = self.doc.last.as_ref() else {
+            return;
+        };
+        if matches!(route, Route::Cloud { .. })
+            && !crate::forms::suggest::under_cap(&self.link, self.doc.tenant)
+        {
+            self.doc.problem = Some("bill.read.problem.cap");
+            self.doc.assist_outcome = Some("cap");
+            return;
+        }
+        let kind = if self.link.is_demo()
+            || self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::DOCUMENT_DRAFTS_STATEMENT)
+        {
+            DraftKind::Statement
+        } else {
+            DraftKind::Unknown
+        };
+        let bytes = self.doc.bytes.clone().unwrap_or_else(|| Arc::from([]));
+        let request = assist::request(last, route, &bytes, kind);
+        tracing::info!(job = self.doc.sent, "statement assist started");
+        if self.link.is_demo() {
+            self.doc.assist_sent += 1;
+            self.doc.assist = Some(Task::ready(super::super::doc_read_local::demo_assist(
+                &self.link,
+            )));
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            self.doc.problem = Some("bill.read.problem.unreachable");
+            return;
+        };
+        match super::super::doc_read::send_assist(group, &session, request) {
+            Ok(p) => {
+                self.doc.assist_sent += 1;
+                self.doc.assist = Some(Task::Pending(p));
+            }
+            Err(_) => self.doc.problem = Some("bill.read.problem.busy"),
+        }
+    }
+
+    /// The AI's answer, merged under the gate: it may name the vendor and
+    /// the closing balance (kept only when printed on the page). The lines
+    /// stay the reader's.
+    fn poll_statement_assist(&mut self) {
+        let Some(result) = self.doc.assist.as_mut().and_then(Task::poll_result) else {
+            return;
+        };
+        self.doc.assist = None;
+        let answer = match result {
+            Ok(a) => a,
+            Err(e) => {
+                let key = super::super::doc_read_local::assist_problem(&e);
+                self.doc.problem = Some(key);
+                self.doc.assist_outcome = Some(key.rsplit('.').next().unwrap_or(key));
+                return;
+            }
+        };
+        let Some(last) = self.doc.last.clone() else {
+            return;
+        };
+        let candidates = crate::reading::map::vendor_candidates(&self.contacts);
+        // The gate runs before any value reaches the form (Q-A03j).
+        let merged = assist::merge(&last, &answer, &candidates);
+        self.doc.helped = true;
+        self.doc.assist_outcome = Some("helped");
+        if self.doc.closing.is_none()
+            && let Some(total) = merged.reading.header.total.as_ref().or(merged
+                .reading
+                .header
+                .balance_due
+                .as_ref())
+        {
+            self.doc.closing = Some(total.value);
+            self.doc.closing_by_ai = true;
+        }
+        if last.vendor.is_none() {
+            let found = merged.vendor.map(|v| v.contact).or_else(|| {
+                match_name(
+                    merged.reading.header.vendor.as_ref(),
+                    &merged.reading,
+                    &candidates,
+                )
+            });
+            self.take_vendor(found, merged.reading.header.vendor.map(|v| v.value));
+        }
+    }
+
+    // ------------------------------------------------- Keep the statement
+
+    /// Whether "Save this statement with the vendor" can be offered: a
+    /// document and a Match for a vendor.
+    pub(crate) fn keep_offered(&self) -> bool {
+        self.doc.bytes.is_some() && self.outcome.is_some()
+    }
+
+    /// After a Match, the statement is kept with the vendor when the box
+    /// is on (once per document, vendor and period).
+    pub(crate) fn keep_after_match(&mut self) {
+        if !self.doc.keep || self.doc.keep_task.is_some() {
+            return;
+        }
+        let (Some(o), Some(bytes), Some(kind)) = (
+            self.outcome.as_ref(),
+            self.doc.bytes.clone(),
+            self.doc.file_kind,
+        ) else {
+            return;
+        };
+        let key = KeepKey {
+            vendor: o.request.vendor,
+            from: o.request.from,
+            to: o.request.to,
+            doc: self.doc.doc_no,
+        };
+        if self.doc.kept == Some(key) {
+            return;
+        }
+        let name = cl_api::statement_file_name(key.from, key.to, kind);
+        let to = AttachTo::Contact(key.vendor);
+        let draft = self.doc.draft;
+        self.doc.keep_failed = false;
+        if let Some(mut demo) = self.link.demo_state() {
+            let r = keep_in_demo(&mut demo, self.doc.tenant, draft, to, &name, &bytes);
+            drop(demo);
+            self.doc.keep_task = Some((key, Task::ready(())));
+            if r.is_err() {
+                self.doc.keep_task = None;
+                self.doc.keep_failed = true;
+            }
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            self.doc.keep_failed = true;
+            return;
+        };
+        let label = OrphanLabel {
+            what: "orphan.statement_keep",
+            key: None,
+        };
+        let task = group.write(&session, label, move |s| async move {
+            match draft {
+                Some(d) => {
+                    // A live draft's file can't move: discard it first.
+                    s.document_drafts().discard(d.id).await?;
+                    let file = d.attachment.ok_or(ApiError::NotFound { code: None })?;
+                    s.attachments().link(file, to, IdempotencyKey::new()).await
+                }
+                None => s
+                    .attachments()
+                    .upload(to, &name, &bytes, IdempotencyKey::new())
+                    .await
+                    .map(|_| ()),
+            }
+        });
+        match task {
+            Ok(p) => self.doc.keep_task = Some((key, Task::Pending(p))),
+            Err(_) => self.doc.keep_failed = true,
+        }
+    }
+
+    fn poll_keep(&mut self) {
+        let done = self.doc.keep_task.as_mut().and_then(|(_, t)| t.try_take());
+        if let Some(r) = done
+            && let Some((key, _)) = self.doc.keep_task.take()
+        {
+            match r {
+                Ok(()) => {
+                    self.doc.kept = Some(key);
+                    self.doc.keeps += 1;
+                    self.doc.draft = None;
+                }
+                Err(_) => self.doc.keep_failed = true,
+            }
+        }
+    }
+
+    // ------------------------------------------------------ the balance line
+
+    /// After a Match with a read closing balance: the books' balance with
+    /// the vendor on the statement's date.
+    pub(crate) fn ask_balance(&mut self) {
+        let (Some(o), Some(_)) = (self.outcome.as_ref(), self.doc.closing) else {
+            return;
+        };
+        let to = self.doc.statement_date.unwrap_or(o.request.to);
+        let key = BalanceKey {
+            vendor: o.request.vendor,
+            from: o.request.from.min(to),
+            to,
+        };
+        if self.doc.books.is_some_and(|(k, _)| k == key)
+            || self
+                .doc
+                .balance_task
+                .as_ref()
+                .is_some_and(|(k, _)| *k == key)
+        {
+            return;
+        }
+        if self.link.is_demo() {
+            let b = super::demo_balances(key.from, key.to);
+            self.doc.balance_task = Some((key, Task::ready(b)));
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        self.doc.balance_task = group
+            .read(&session, move |s| async move {
+                s.reports()
+                    .vendor_statement_balances(key.vendor, key.from, key.to)
+                    .await
+            })
+            .ok()
+            .map(|p| (key, Task::Pending(p)));
+    }
+
+    fn poll_balance(&mut self) {
+        let done = self
+            .doc
+            .balance_task
+            .as_mut()
+            .and_then(|(_, t)| t.try_take());
+        if let Some(r) = done
+            && let Some((key, _)) = self.doc.balance_task.take()
+        {
+            self.doc.books = r.ok().flatten().map(|b| (key, b));
+        }
+    }
+
+    /// The statement's closing balance, the books' and the difference, when
+    /// both are known exactly (display only).
+    pub(crate) fn balance_line(&self) -> Option<(Money, Money, Money)> {
+        let o = self.outcome.as_ref()?;
+        let (key, books) = self.doc.books?;
+        if key.vendor != o.request.vendor {
+            return None;
+        }
+        let stmt = self.doc.closing?;
+        let diff = stmt.checked_sub(books.closing).ok()?;
+        Some((stmt, books.closing, diff))
+    }
+
+    // ------------------------------------------------------------ drawing
+
+    /// The Read a statement row: Browse, the file, the reading's state.
+    pub(crate) fn statement_file_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        self.take_dropped(ui);
+        ui.horizontal_wrapped(|ui| {
+            let busy = self.doc.busy();
+            if ui
+                .add_enabled(!busy, egui::Button::new(t("statement.read.button")))
+                .on_hover_text(t("statement.read.button.tip"))
+                .clicked()
+            {
+                self.browse_statement(ui.ctx());
+            }
+            form::hint(ui, tokens, &t("statement.read.drop_hint"));
+        });
+        if self.doc.job.is_some() || self.doc.loading.is_some() || self.doc.draft_file.is_some() {
+            ui.horizontal_wrapped(|ui| {
+                form::progress_line(ui, tokens, &t("statement.read.reading"));
+                if self.doc.job.is_some() && ui.button(t("statement.read.cancel")).clicked() {
+                    if let Some(c) = self.doc.cancel.take() {
+                        c.cancel();
+                    }
+                    self.doc.job = None;
+                    self.doc.outcome = Some(ReadFailure::Cancelled.class());
+                }
+            });
+        }
+        if let Some(k) = self.doc.problem {
+            ui.label(RichText::new(t(k)).color(tokens.warn_text));
+        }
+        if let Some(name) = &self.doc.vendor_differs {
+            ui.label(
+                RichText::new(t_with("statement.read.vendor_differs", &[("name", name)]))
+                    .color(tokens.warn_text),
+            );
+        }
+        if self.doc.assist.is_some() {
+            form::progress_line(ui, tokens, &t("statement.read.helping"));
+        }
+        let mut ask = false;
+        match self.doc.offer() {
+            super::super::doc_read_local::Offer::Ask(route) => {
+                let tip = match route {
+                    Route::Local => "bill.read.assist.button.tip.local",
+                    Route::Cloud { .. } => "bill.read.assist.button.tip.cloud",
+                };
+                ask = ui
+                    .button(t("bill.read.assist.button"))
+                    .on_hover_text(t(tip))
+                    .clicked();
+            }
+            super::super::doc_read_local::Offer::NeedsConsent => {
+                form::hint(ui, tokens, &t("bill.read.assist.consent"));
+            }
+            super::super::doc_read_local::Offer::None => {}
+        }
+        if ask {
+            self.start_statement_assist();
+        }
+    }
+
+    /// The read lines with their marks and Accept, and the checks.
+    pub(crate) fn read_lines_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let Some(read) = self.doc.read.clone() else {
+            return;
+        };
+        if !read.still_read(&self.text) {
+            form::hint(ui, tokens, &t("statement.read.typed_over"));
+            return;
+        }
+        let parsed = cl_model::statement_match::read::read_back(&read, self.today);
+        let mut accept_all = false;
+        let mut accept = None;
+        let mut select = None;
+        form::card(ui, tokens, |ui| {
+            form::heading(
+                ui,
+                tokens,
+                &t_with(
+                    "statement.read.lines",
+                    &[("n", &read.marks.len().to_string())],
+                ),
+            );
+            ui.label(
+                RichText::new(t("statement.read.check_it"))
+                    .color(tokens.text_secondary)
+                    .size(12.0),
+            );
+            if read.pending() > 0 {
+                ui.horizontal_wrapped(|ui| {
+                    accept_all =
+                        crate::widgets::primary_button(ui, &t("statement.read.accept_all"))
+                            .clicked();
+                    form::hint(
+                        ui,
+                        tokens,
+                        &t_with(
+                            "statement.read.pending",
+                            &[("n", &read.pending().to_string())],
+                        ),
+                    );
+                });
+            } else {
+                form::hint(ui, tokens, &t("statement.read.accepted"));
+            }
+            egui::ScrollArea::horizontal()
+                .id_salt("statement/read_lines")
+                .show(ui, |ui| {
+                    egui::Grid::new("statement/read_lines")
+                        .striped(true)
+                        .spacing([16.0, 4.0])
+                        .show(ui, |ui| {
+                            for k in [
+                                "statement.col.line",
+                                "statement.col.date",
+                                "statement.col.ref",
+                                "statement.col.type",
+                                "statement.col.amount",
+                                "",
+                            ] {
+                                let text = if k.is_empty() { String::new() } else { t(k) };
+                                ui.label(
+                                    RichText::new(text).size(12.0).color(tokens.text_secondary),
+                                );
+                            }
+                            ui.end_row();
+                            for m in &read.marks {
+                                let picked = self.doc.selected == Some(m.source);
+                                let n = m.line.to_string();
+                                let r = ui
+                                    .selectable_label(picked, &n)
+                                    .on_hover_text(t("statement.read.find_on_page"));
+                                if r.clicked() {
+                                    select = Some(m.source);
+                                }
+                                if let Some(row) = parsed.rows.iter().find(|r| r.line == m.line) {
+                                    Self::line_cells(ui, tokens, row, self.money_style);
+                                } else {
+                                    ui.label("");
+                                    ui.label("");
+                                    ui.label("");
+                                    ui.label(
+                                        RichText::new(t("statement.read.fix_line"))
+                                            .color(tokens.warn_text),
+                                    );
+                                }
+                                if m.accepted {
+                                    ui.label(
+                                        RichText::new(t("statement.read.line_accepted"))
+                                            .size(12.0)
+                                            .color(tokens.text_secondary),
+                                    );
+                                } else {
+                                    ui.horizontal(|ui| {
+                                        let note = if m.unsure {
+                                            RichText::new(t("statement.read.unsure"))
+                                                .color(tokens.warn_text)
+                                                .strong()
+                                        } else {
+                                            RichText::new(t("bill.read.caption"))
+                                                .color(tokens.text_secondary)
+                                        };
+                                        ui.label(note.size(12.0));
+                                        if ui
+                                            .button(t("statement.read.accept"))
+                                            .on_hover_text(t_with(
+                                                "statement.read.accept.tip",
+                                                &[("n", &n)],
+                                            ))
+                                            .clicked()
+                                        {
+                                            accept = Some(m.line);
+                                        }
+                                    });
+                                }
+                                ui.end_row();
+                            }
+                        });
+                });
+            if !self.doc.checks.is_empty() {
+                ui.add_space(4.0);
+                ui.label(RichText::new(t("statement.read.checks")).strong());
+                for c in &self.doc.checks {
+                    ui.label(
+                        RichText::new(check_text(c, self.money_style)).color(tokens.warn_text),
+                    );
+                }
+                form::hint(ui, tokens, &t("statement.read.checks.never_fixed"));
+            }
+        });
+        if accept_all {
+            self.accept_read_lines();
+        }
+        if let Some(l) = accept {
+            self.accept_read_line(l);
+        }
+        if let Some(i) = select {
+            self.select_read_line(i);
+        }
+    }
+
+    /// The document pane (docked) beside the lines.
+    pub(crate) fn statement_pane_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        if self.doc.viewer.source().is_none() {
+            return;
+        }
+        self.publish_targets();
+        let popped = crate::windows::doc_viewer::is_popped(ui.ctx());
+        if !popped {
+            self.doc.viewer.set_compare(Some(self.doc.compare.view()));
+        }
+        form::card_tight(ui, tokens, |ui| {
+            if popped {
+                DocPane::show(ui, &mut self.doc.viewer, tokens);
+            } else {
+                let w = ui.available_width();
+                ui.allocate_ui(egui::vec2(w, PANE_HEIGHT), |ui| {
+                    DocPane::show(ui, &mut self.doc.viewer, tokens);
+                });
+            }
+        });
+        for e in self.doc.viewer.take_compare_events() {
+            self.on_statement_event(e);
+        }
+    }
+
+    /// "Save this statement with the vendor", the balance line.
+    pub(crate) fn after_match_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        if let Some((stmt, books, diff)) = self.balance_line() {
+            form::card(ui, tokens, |ui| {
+                let style = self.money_style;
+                ui.label(
+                    RichText::new(t_with(
+                        "statement.balance.line",
+                        &[
+                            ("statement", &stmt.format(style)),
+                            ("books", &books.format(style)),
+                        ],
+                    ))
+                    .color(tokens.text_primary),
+                );
+                let diff_text = if diff.is_zero() {
+                    t("statement.balance.same")
+                } else {
+                    t_with(
+                        "statement.balance.difference",
+                        &[("difference", &diff.format(style))],
+                    )
+                };
+                ui.label(RichText::new(diff_text).strong());
+                if self.doc.closing_by_ai {
+                    form::hint(ui, tokens, &t("statement.balance.by_ai"));
+                }
+                form::hint(ui, tokens, &t("statement.balance.note"));
+            });
+            ui.add_space(6.0);
+        }
+        if self.keep_offered() {
+            ui.horizontal_wrapped(|ui| {
+                let before = self.doc.keep;
+                ui.checkbox(&mut self.doc.keep, t("statement.keep"))
+                    .on_hover_text(t("statement.keep.tip"));
+                if self.doc.keep && !before {
+                    self.keep_after_match();
+                }
+                if self.doc.keep_task.is_some() {
+                    form::progress_line(ui, tokens, &t("statement.keep.saving"));
+                } else if self.doc.kept.is_some() {
+                    form::hint(ui, tokens, &t("statement.keep.saved"));
+                } else if self.doc.keep_failed {
+                    ui.label(RichText::new(t("statement.keep.failed")).color(tokens.warn_text));
+                    if ui.button(t("statement.try_again")).clicked() {
+                        self.keep_after_match();
+                    }
+                }
+            });
+        }
+    }
+
+    // -------------------------------------------------- statement drafts
+
+    /// A statement draft from Review Documents: its file is fetched and
+    /// read here.
+    pub(crate) fn open_statement_draft(&mut self, id: DocumentDraftId) {
+        self.doc.reset();
+        if let Some(demo) = self.link.demo_state() {
+            let r = self
+                .doc
+                .tenant
+                .ok_or(ApiError::NoCompanyOpen)
+                .and_then(|tenant| {
+                    let d = crate::company::demo::drafts::get(&demo, tenant, id)?;
+                    let file = d.attachment_id.ok_or(ApiError::NotFound { code: None })?;
+                    let bytes = crate::company::demo::checks::download(&demo, file)?;
+                    Ok((d, bytes))
+                });
+            drop(demo);
+            if let Ok(v) = r {
+                self.doc.draft_file = Some(Task::ready(v));
+            } else {
+                self.doc.problem = Some("statement.read.draft_failed");
+            }
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            self.doc.problem = Some("statement.read.draft_failed");
+            return;
+        };
+        self.doc.draft_file = group
+            .read(&session, move |s| async move {
+                let d = s.document_drafts().get(id).await?;
+                let file = d.attachment_id.ok_or(ApiError::NotFound { code: None })?;
+                let bytes = s.attachments().download(file).await?;
+                Ok((d, bytes))
+            })
+            .ok()
+            .map(Task::Pending);
+    }
+}
+
+/// The demo engine's keep: a statement draft is discarded and its file
+/// moved to the vendor; any other file is uploaded to the vendor.
+fn keep_in_demo(
+    demo: &mut crate::company::demo::DemoState,
+    tenant: Option<TenantId>,
+    draft: Option<StatementDraft>,
+    to: AttachTo,
+    name: &str,
+    bytes: &[u8],
+) -> Result<(), ApiError> {
+    use crate::company::demo::{checks, drafts};
+    match draft {
+        Some(d) => {
+            let tenant = tenant.ok_or(ApiError::NoCompanyOpen)?;
+            drafts::discard(demo, tenant, d.id)?;
+            let file = d.attachment.ok_or(ApiError::NotFound { code: None })?;
+            checks::link_attachment(demo, file, to).map(|_| ())
+        }
+        None => checks::upload(demo, to, name, bytes).map(|_| ()),
+    }
+}
+
+#[cfg(test)]
+#[path = "read_tests.rs"]
+mod tests;

@@ -90,7 +90,10 @@ impl fmt::Debug for ReadStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ReadStatement")
             .field("lines", &self.marks.len())
-            .field("accepted", &self.marks.iter().filter(|m| m.accepted).count())
+            .field(
+                "accepted",
+                &self.marks.iter().filter(|m| m.accepted).count(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -175,11 +178,10 @@ fn kind_word(column: LineColumn) -> Option<&'static str> {
 #[must_use]
 pub fn kind_of(line: &ReadLine) -> StatementKind {
     match line.column {
-        LineColumn::Charges => StatementKind::Charge,
         LineColumn::Credits => StatementKind::Credit,
         LineColumn::Payments => StatementKind::Payment,
         LineColumn::Single if line.amount.is_negative() => StatementKind::CreditOrPayment,
-        LineColumn::Single => StatementKind::Charge,
+        LineColumn::Charges | LineColumn::Single => StatementKind::Charge,
     }
 }
 
@@ -300,7 +302,10 @@ mod tests {
         let back = read_back(&st, d(11, 4));
         assert_eq!(back.rows.len(), 1);
         assert_eq!(
-            back.bad.iter().map(|b| (b.line, b.problem)).collect::<Vec<_>>(),
+            back.bad
+                .iter()
+                .map(|b| (b.line, b.problem))
+                .collect::<Vec<_>>(),
             vec![(1, PasteProblem::Amount), (2, PasteProblem::ZeroAmount)]
         );
     }
@@ -325,6 +330,9 @@ mod tests {
         assert!(!st.still_read("typed over"));
         assert!(rows_from_read(&[]).all_accepted(), "nothing read");
         let shown = format!("{st:?} {:?}", lines[0]);
-        assert!(!shown.contains("INV") && !shown.contains("10.00"), "{shown}");
+        assert!(
+            !shown.contains("INV") && !shown.contains("10.00"),
+            "{shown}"
+        );
     }
 }

@@ -362,6 +362,15 @@ impl DocReviewScreen {
         let Some(row) = self.queue.all_rows().iter().find(|r| r.id == id) else {
             return;
         };
+        // A06: a statement opens in Match Vendor Statement, never a form.
+        if form.is_none() && row.kind == cl_model::doc_draft::DocKind::Statement {
+            self.choose = None;
+            self.link.push(CompanyEvent::OpenWith(
+                cl_model::CommandId::new(crate::screens::bill::statement_match::KIND),
+                Box::new(crate::windows::OpenPayload::StatementDraft(id)),
+            ));
+            return;
+        }
         let Some(form) = form.or_else(|| row.kind.form()) else {
             self.confirm = None;
             self.choose = Some(id);

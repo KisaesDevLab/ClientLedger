@@ -185,7 +185,8 @@ impl Screen for DocumentViewScreen {
             }
             OpenPayload::BillPrefill(_)
             | OpenPayload::InboxDraft(_)
-            | OpenPayload::DocumentDraft(_) => false,
+            | OpenPayload::DocumentDraft(_)
+            | OpenPayload::StatementDraft(_) => false,
         }
     }
 

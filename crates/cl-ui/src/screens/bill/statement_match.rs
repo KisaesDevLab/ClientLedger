@@ -68,6 +68,8 @@ const MAX_PAGES: u32 = 20;
 const PAYMENT_PAGE: u16 = 100;
 const PAYMENT_PAGES: u32 = 10;
 
+mod read;
+
 /// The statement match window for `kind`, if it is one.
 #[must_use]
 pub fn make(
@@ -294,6 +296,29 @@ fn demo_books(start: CalendarDate, end: CalendarDate) -> Books {
     books
 }
 
+/// The demo engine's vendor statement report (the stand-in for`n/// `/reports/vendor-statement`): the fixture's bills less its credits and
+/// payments, before `start` (opening) and through `end` (closing).
+#[must_use]
+pub(crate) fn demo_balances(
+    start: CalendarDate,
+    end: CalendarDate,
+) -> Option<cl_api::VendorStatementBalances> {
+    let all = demo_books(CalendarDate::from_ymd(1900, 1, 1).ok()?, end);
+    let mut opening = Money::ZERO;
+    let mut closing = Money::ZERO;
+    for b in books_items(&all, true) {
+        let signed = match b.kind {
+            StatementKind::Charge => b.amount,
+            _ => b.amount.checked_neg().ok()?,
+        };
+        closing = closing.checked_add(signed).ok()?;
+        if b.date < start {
+            opening = opening.checked_add(signed).ok()?;
+        }
+    }
+    Some(cl_api::VendorStatementBalances { opening, closing })
+}
+
 /// The statement match window.
 pub struct StatementMatchScreen {
     link: Arc<CompanyLink>,
@@ -323,6 +348,11 @@ pub struct StatementMatchScreen {
     last_handoff: Option<BillKind>,
     /// Records opened from "In your books" (control channel).
     opened: u32,
+    /// The active vendors as the engine sent them (the reader matches the
+    /// statement's vendor against them).
+    contacts: Vec<Contact>,
+    /// A06: the statement document and its reading.
+    doc: read::StatementDoc,
 }
 
 impl StatementMatchScreen {
@@ -337,7 +367,6 @@ impl StatementMatchScreen {
         open: Option<(TenantId, String)>,
         today: CalendarDate,
     ) -> StatementMatchScreen {
-        let _ = open;
         let start = today.add_months(-1).unwrap_or(today).start_of_month();
         let group = link.group().and_then(Result::ok);
         let sub = link.bus().subscribe();
@@ -362,7 +391,10 @@ impl StatementMatchScreen {
             handoffs: 0,
             last_handoff: None,
             opened: 0,
+            contacts: Vec::new(),
+            doc: read::StatementDoc::default(),
         };
+        s.doc.tenant = open.map(|(t, _)| t);
         s.load_vendors();
         s
     }
@@ -408,6 +440,7 @@ impl StatementMatchScreen {
         self.handoffs = 0;
         self.last_handoff = None;
         self.opened = 0;
+        self.doc.reset();
     }
 
     fn credit_refs(&self) -> bool {
@@ -441,6 +474,10 @@ impl StatementMatchScreen {
         }
         if rows.is_empty() {
             self.problem = Some("statement.problem.no_lines");
+            return;
+        }
+        if self.doc.awaiting_accept(&self.text) {
+            self.problem = Some("statement.problem.accept_first");
             return;
         }
         self.start_read(Request {
@@ -478,6 +515,7 @@ impl StatementMatchScreen {
             self.vendors_task = None;
             match r {
                 Ok(contacts) => {
+                    self.contacts.clone_from(&contacts);
                     let mut v: Vec<(ContactId, String)> = contacts
                         .into_iter()
                         .filter(|c| {
@@ -503,10 +541,13 @@ impl StatementMatchScreen {
                 Ok(books) => {
                     let refs = self.credit_refs();
                     self.outcome = Some(outcome(request, &books, refs));
+                    self.keep_after_match();
+                    self.ask_balance();
                 }
                 Err(_) => self.books_failed = Some(request),
             }
         }
+        self.poll_statement();
         // A bill, credit or payment saved elsewhere: read the books again.
         let changes = self.link.bus().take(&mut self.sub);
         if let Some(o) = self.outcome.as_ref()
@@ -617,6 +658,8 @@ impl StatementMatchScreen {
 
     fn input_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         form::card(ui, tokens, |ui| {
+            self.statement_file_ui(ui, tokens);
+            ui.add_space(4.0);
             let shown = self
                 .vendors
                 .iter()
@@ -673,7 +716,7 @@ impl StatementMatchScreen {
             .labelled_by(l.id);
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                let busy = self.reading.is_some();
+                let busy = self.reading.is_some() || self.doc.awaiting_accept(&self.text);
                 if ui
                     .add_enabled_ui(!busy, |ui| {
                         crate::widgets::primary_button(ui, &t("statement.match"))
@@ -948,7 +991,7 @@ impl Screen for StatementMatchScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.money_style = crate::grid_env::shell_frame(ui.ctx()).money_style;
         self.poll();
-        if self.reading.is_some() || self.vendors_task.is_some() {
+        if self.reading.is_some() || self.vendors_task.is_some() || self.doc.busy() {
             ui.ctx().request_repaint();
         }
         let tokens = Tokens::of(ui.ctx());
@@ -956,10 +999,15 @@ impl Screen for StatementMatchScreen {
         form::heading(ui, &tokens, &t("statement.heading"));
         form::hint(ui, &tokens, &t("statement.intro"));
         ui.add_space(8.0);
+        self.statement_pane_ui(ui, &tokens);
+        ui.add_space(6.0);
         self.input_ui(ui, &tokens);
+        ui.add_space(6.0);
+        self.read_lines_ui(ui, &tokens);
         ui.add_space(6.0);
         self.problems_ui(ui, &tokens);
         ui.add_space(6.0);
+        self.after_match_ui(ui, &tokens);
         self.results_ui(ui, &tokens);
         ui.add_space(12.0);
     }
@@ -1008,7 +1056,36 @@ impl Screen for StatementMatchScreen {
                 BillKind::Credit => "credit",
             }),
             "opened": self.opened,
+            "statement": self.doc.state_json(&self.text),
+            "balance_shown": self.balance_line().is_some(),
         })
+    }
+
+    fn document(&self) -> Option<crate::windows::doc_viewer::DocRef> {
+        self.doc
+            .viewer
+            .source()
+            .cloned()
+            .map(crate::windows::doc_viewer::DocRef::new)
+    }
+
+    fn compare(&self) -> Option<crate::widgets::compare::CompareView> {
+        self.doc.read.as_ref().map(|_| self.doc.compare.view())
+    }
+
+    fn on_viewer_event(&mut self, event: crate::widgets::compare::CompareEvent) {
+        self.on_statement_event(event);
+    }
+
+    /// A statement draft from Review Documents (U-94).
+    fn open_with(&mut self, payload: OpenPayload) -> bool {
+        match payload {
+            OpenPayload::StatementDraft(id) => {
+                self.open_statement_draft(id);
+                true
+            }
+            _ => false,
+        }
     }
 }
 
