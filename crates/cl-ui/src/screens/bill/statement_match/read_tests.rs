@@ -252,6 +252,8 @@ fn unreadable_statements_say_type_or_paste() {
         read(&mut s, outcome);
         assert_eq!(s.doc.problem, Some(COULDNT));
         assert!(s.text.is_empty(), "nothing filled");
+        assert!(s.doc.viewer.source().is_none(), "no blank page in the pane");
+        assert!(s.document().is_none());
         assert_eq!(
             crate::i18n::t(COULDNT),
             "Couldn't read this statement \u{2014} type or paste the lines instead."
@@ -726,6 +728,57 @@ fn no_consent_means_no_cloud_call() {
     s.start_statement_assist();
     assert_eq!(s.doc.assist_sent, 0);
     assert!(s.doc.assist.is_none(), "nothing sent");
+}
+
+/// Alt+A (`form.accept_read`) accepts the read lines, as on Enter Bill;
+/// the window takes form keys only while they wait.
+#[test]
+fn alt_a_accepts_the_read_lines() {
+    let id = cl_model::CommandId::new;
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    assert_eq!(s.scope(), cl_model::Scope::Window);
+    assert!(!s.command(id("form.accept_read")), "nothing to accept");
+    let name = vendor_name(&s);
+    read(&mut s, JobOutcome::Read(Box::new(october(&name))));
+    assert_eq!(s.scope(), cl_model::Scope::Form);
+    assert!(
+        cl_model::commands::find("form.accept_read")
+            .and_then(|c| c.shortcut)
+            .is_some(),
+        "Alt+A is bound"
+    );
+    assert!(s.command(id("form.revert")), "Esc doesn't close on a reading");
+    assert!(s.command(id("form.accept_read")));
+    assert_eq!(s.state()["statement"]["pending"], 0);
+    assert_eq!(s.scope(), cl_model::Scope::Window);
+    s.run_match();
+    s.poll();
+    assert_eq!(s.problem, None);
+    assert!(s.outcome.is_some());
+}
+
+/// Clear forgets the vendor the reading picked, and the reading itself.
+#[test]
+fn clear_forgets_the_read_vendor_and_the_reading() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let name = vendor_name(&s);
+    read(&mut s, JobOutcome::Read(Box::new(october(&name))));
+    assert!(s.vendor.is_some(), "picked from the statement");
+    s.accept_read_lines();
+    s.run_match();
+    s.poll();
+    s.clear();
+    assert_eq!(s.vendor, None);
+    assert!(s.doc.read.is_none() && s.doc.read_vendor.is_none());
+    assert!(s.text.is_empty() && s.outcome.is_none());
+    assert!(s.doc.viewer.source().is_none());
+    let st = s.state();
+    assert_eq!(st["vendor"], false);
+    assert_eq!(st["statement"]["document"], false);
+    assert_eq!(st["statement"]["lines"], serde_json::Value::Null);
+    assert_eq!(st["statement"]["vendor_differs"], false);
 }
 
 /// Only a statement date, before the From shown: From moves to that

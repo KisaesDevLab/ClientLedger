@@ -1064,6 +1064,29 @@ impl Screen for StatementMatchScreen {
         })
     }
 
+    /// Form keys while read lines wait for the owner's Accept, so Alt+A
+    /// (`form.accept_read`) accepts them as on Enter Bill; window keys
+    /// otherwise, so the box's own edit keys stay the box's.
+    fn scope(&self) -> cl_model::Scope {
+        if self.doc.awaiting_accept(&self.text) {
+            cl_model::Scope::Form
+        } else {
+            cl_model::Scope::Window
+        }
+    }
+
+    fn command(&mut self, id: CommandId) -> bool {
+        match id.as_str() {
+            "form.accept_read" if self.doc.awaiting_accept(&self.text) => {
+                self.accept_read_lines();
+                true
+            }
+            // Esc never closes the window on a reading waiting for Accept.
+            "form.revert" => self.doc.read.is_some(),
+            _ => false,
+        }
+    }
+
     fn document(&self) -> Option<crate::windows::doc_viewer::DocRef> {
         self.doc
             .viewer

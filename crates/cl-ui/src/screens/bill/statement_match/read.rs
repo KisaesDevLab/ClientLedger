@@ -52,7 +52,9 @@ use cl_docread::model::{
 use cl_docread::protocol::JobHint;
 use cl_docread::vendor_match::{self, VendorCandidate};
 use cl_model::rowkey::RowKey;
-use cl_model::statement_match::{LineColumn, PastedRow, ReadLine, ReadStatement, rows_from_read};
+use cl_model::statement_match::{
+    LineColumn, PastedRow, ReadLine, ReadStatement, StatementKind, rows_from_read,
+};
 use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
@@ -685,7 +687,7 @@ impl StatementMatchScreen {
                         outcome = f.class(),
                         "statement reading failed"
                     );
-                    self.doc.problem = Some(COULDNT);
+                    self.couldnt_read();
                 }
             }
         }
@@ -717,7 +719,7 @@ impl StatementMatchScreen {
                 outcome = "no_lines",
                 "statement reading"
             );
-            self.doc.problem = Some(COULDNT);
+            self.couldnt_read();
             self.doc.last = Some(local);
             return;
         };
@@ -772,6 +774,15 @@ impl StatementMatchScreen {
             })));
         self.doc.last = Some(local);
         self.ensure_statement_switches();
+    }
+
+    /// Nothing was read: the message says type or paste, and the pane
+    /// closes (no blank page; A06 UI review). The file itself stays, as
+    /// typed lines may still be matched and kept with it.
+    fn couldnt_read(&mut self) {
+        self.doc.problem = Some(COULDNT);
+        self.doc.viewer.clear();
+        self.doc.compare.clear();
     }
 
     /// The vendor the statement names: picked when none is; a different
@@ -1440,6 +1451,10 @@ impl StatementMatchScreen {
                     accept_all =
                         crate::widgets::primary_button(ui, &t("statement.read.accept_all"))
                             .clicked();
+                    crate::widgets::kbd(
+                        ui,
+                        &crate::screens::card_charge::kit::chip("form.accept_read"),
+                    );
                     form::hint(
                         ui,
                         tokens,
@@ -1485,7 +1500,15 @@ impl StatementMatchScreen {
                                 if let Some(row) =
                                     self.doc.read_rows.get(i).and_then(Option::as_ref)
                                 {
-                                    Self::line_cells(ui, tokens, row, self.money_style);
+                                    // Signed as the box shows it: a line
+                                    // without its kind keeps its minus.
+                                    let mut row = row.clone();
+                                    if row.entry.kind == StatementKind::CreditOrPayment
+                                        && let Ok(neg) = row.entry.amount.checked_neg()
+                                    {
+                                        row.entry.amount = neg;
+                                    }
+                                    Self::line_cells(ui, tokens, &row, self.money_style);
                                 } else {
                                     ui.label("");
                                     ui.label("");
@@ -1602,7 +1625,16 @@ impl StatementMatchScreen {
                 if self.doc.closing_by_ai {
                     form::hint(ui, tokens, &t("statement.balance.by_ai"));
                 }
-                form::hint(ui, tokens, &t("statement.balance.note"));
+                // Plain words, with the accounting term in the tooltip.
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(t("statement.balance.note"))
+                            .size(12.0)
+                            .color(tokens.text_secondary),
+                    )
+                    .wrap(),
+                )
+                .on_hover_text(t("statement.balance.note.tip"));
             });
             ui.add_space(6.0);
         }
