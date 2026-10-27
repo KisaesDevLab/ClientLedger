@@ -907,6 +907,10 @@ impl DocumentDrafts<'_> {
     /// the engine's bounds or holds a fractional JSON number (nothing
     /// sent); `Conflict { Stale }`; [`DraftRefusal::Closed`]; `NotFound`
     /// (also a vendor that is not the company's); any [`ApiError`].
+    ///
+    /// A [`DraftKind::Statement`] reading goes as `unknown` to an engine
+    /// without `document-drafts-statement-v1`, which would refuse the kind
+    /// and lose the reading (A06 review S6).
     pub async fn store_reading(
         &self,
         id: DocumentDraftId,
@@ -914,7 +918,21 @@ impl DocumentDrafts<'_> {
         reading: &DraftReading,
     ) -> Result<DocumentDraft, ApiError> {
         supported(self.0)?;
-        let body = reading.body(expected_updated_at)?;
+        let body = if reading.kind == DraftKind::Statement
+            && !self
+                .0
+                .client()
+                .capabilities()
+                .has(Capabilities::DOCUMENT_DRAFTS_STATEMENT)
+        {
+            DraftReading {
+                kind: DraftKind::Unknown,
+                ..reading.clone()
+            }
+            .body(expected_updated_at)?
+        } else {
+            reading.body(expected_updated_at)?
+        };
         self.put(id, &body).await
     }
 

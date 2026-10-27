@@ -2387,6 +2387,103 @@ fn shared_draft_cases(h: &Harness) {
     eprintln!("    shared draft cases: {ran} ran on the engine");
 }
 
+// ------------------------------------------------- A06 statement drafts
+
+const U94: &str = "U-94";
+
+/// A06 (engine U-94, `document-drafts-statement-v1`): a file claimed as a
+/// statement draft keeps the kind, its reading stores as `statement`, and
+/// "Save with the vendor" files it on the vendor the way the desktop does
+/// (review S1): the file can't be moved while the draft reads it, so a
+/// copy is uploaded to the vendor, then the draft is discarded and its own
+/// file deleted. Without the capability, records PENDING(U-94) and checks
+/// today's behaviour: the typed claim sends nothing, the engine refuses the
+/// kind, and a statement reading goes as `unknown`.
+fn statement_drafts(h: &Harness) {
+    let s = &h.s1;
+    if !live(h, s) {
+        return;
+    }
+    let mut r = reading(None, None, None, None);
+    r.kind = DraftKind::Statement;
+    if !h.require_cap(Capabilities::DOCUMENT_DRAFTS_STATEMENT, U94) {
+        let file = upload(h, s, &pdf());
+        let before = h.observer.total();
+        assert_eq!(
+            h.run(
+                s.document_drafts()
+                    .create(file, DraftKind::Statement, key())
+            ),
+            Err(ApiError::Local(LocalValidation::Unsupported))
+        );
+        assert_eq!(h.observer.total(), before, "nothing sent");
+        let raw = h
+            .run(s.raw(
+                Method::Post,
+                BASE,
+                &[],
+                Some(&json!({"attachmentId": file, "kindHint": "statement"})),
+            ))
+            .expect("raw");
+        assert_eq!(raw.status, 400, "{}", raw.body);
+        // An unhinted reading the reader took for a statement is kept.
+        let d = claim(h, s, file);
+        let stored = store(h, s, &d, &r);
+        assert_eq!(stored.kind, DraftKind::Unknown);
+        h.run(s.document_drafts().discard(d.id)).expect("discard");
+        return;
+    }
+    let bytes = pdf();
+    let file = upload(h, s, &bytes);
+    let d = h
+        .run(
+            s.document_drafts()
+                .create(file, DraftKind::Statement, key()),
+        )
+        .unwrap_or_else(|e| panic!("claim: {e:?}"));
+    assert_eq!(d.kind, DraftKind::Statement);
+    let d = store(h, s, &d, &r);
+    assert_eq!(d.kind, DraftKind::Statement);
+    assert_eq!(d.status, DraftStatus::Ready);
+    let v = vendor(h, s);
+    let to = AttachTo::Contact(v);
+    let e = h
+        .run(s.attachments().link(file, to, key()))
+        .expect_err("a live draft's file doesn't move");
+    assert!(
+        matches!(&e, ApiError::Conflict { reason: ConflictReason::InUse, code: Some(c), .. }
+            if c.as_str() == cl_api::ATTACHMENT_IN_USE),
+        "{e:?}"
+    );
+    let name = "Statement 2026-10-01 to 2026-10-31.pdf";
+    let upload_key = key();
+    let kept = h
+        .run(s.attachments().upload(to, name, &bytes, upload_key.clone()))
+        .unwrap_or_else(|e| panic!("keep: {e:?}"));
+    // Try again with the same key files nothing twice.
+    let again = h
+        .run(s.attachments().upload(to, name, &bytes, upload_key))
+        .unwrap_or_else(|e| panic!("replay: {e:?}"));
+    assert_eq!(again.id, kept.id);
+    assert_eq!(kept.attachable_type, "contact");
+    assert_eq!(kept.attachable_id, v.to_string());
+    assert_eq!(kept.file_name, name);
+    let gone = h
+        .run(s.document_drafts().discard(d.id))
+        .unwrap_or_else(|e| panic!("discard: {e:?}"));
+    assert_eq!(gone.status, DraftStatus::Discarded);
+    h.run(s.attachments().delete(file, key()))
+        .expect("a discarded draft's file deletes");
+    let on_vendor = h
+        .run(
+            s.attachments()
+                .list(to, cl_api::PageRequest::new(50, 0).expect("page")),
+        )
+        .unwrap_or_else(|e| panic!("list: {e:?}"));
+    assert_eq!(on_vendor.total, 1);
+    assert_eq!(on_vendor.data[0].id, kept.id);
+}
+
 fn main() -> std::process::ExitCode {
     let tests: &[(&str, TestFn)] = &[
         ("drafts::claims", claims),
@@ -2429,6 +2526,8 @@ fn main() -> std::process::ExitCode {
         // A04 (U-95).
         ("drafts::attach_matrix", attach_matrix),
         ("drafts::amount_filter_is_exact", amount_filter_is_exact),
+        // A06 (U-94).
+        ("drafts::statement_drafts", statement_drafts),
         // Last: it opens a fresh company per case on the switcher session.
         ("drafts::shared_draft_cases", shared_draft_cases),
     ];

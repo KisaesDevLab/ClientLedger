@@ -942,12 +942,9 @@ impl StatementMatchScreen {
             self.doc.assist_outcome = Some("cap");
             return;
         }
-        let kind = if self.link.is_demo()
-            || self
-                .link
-                .capabilities()
-                .has(cl_api::Capabilities::DOCUMENT_DRAFTS_STATEMENT)
-        {
+        let kind = if crate::screens::preferences::intake_folders::source::statements_supported(
+            &self.link,
+        ) {
             DraftKind::Statement
         } else {
             DraftKind::Unknown

@@ -465,6 +465,47 @@ fn vendor_statement_folders_need_the_capability() {
     assert!(source::statements_supported(&link));
     link.demo_state().expect("demo").intake.no_statements = true;
     assert!(!source::statements_supported(&link));
+    // Demo parity (review S6): without the capability the demo engine
+    // refuses statement claims and statement readings as the engine would.
+    {
+        use crate::company::demo::{checks, drafts};
+        let tenant =
+            cl_core::ids::TenantId::parse("d0000000-0000-4000-8000-000000000001").expect("t");
+        let mut demo = link.demo_state().expect("demo");
+        let file = checks::upload(
+            &mut demo,
+            cl_api::AttachTo::Draft(cl_api::DraftKey::new()),
+            "x.pdf",
+            PDF,
+        )
+        .expect("upload")
+        .id;
+        let claim = |demo: &mut crate::company::demo::DemoState, kind| {
+            drafts::create(demo, tenant, file, kind, cl_api::IdempotencyKey::new())
+        };
+        assert_eq!(
+            claim(&mut demo, cl_api::DraftKind::Statement).map(|_| ()),
+            Err(cl_api::ApiError::Local(
+                cl_api::LocalValidation::Unsupported
+            ))
+        );
+        let d = claim(&mut demo, cl_api::DraftKind::Unknown).expect("claim");
+        let mut local = crate::reading::LocalReading {
+            reading: october("Nobody"),
+            vendor: None,
+            card: None,
+        };
+        local.reading.kind = DocKind::Statement;
+        let r = crate::reading::service::draft_reading(&local).expect("reading");
+        assert_eq!(r.kind, cl_api::DraftKind::Statement);
+        assert!(drafts::store_reading(&mut demo, tenant, d.id, &d.updated_at, &r).is_err());
+        let unknown = cl_api::DraftReading {
+            kind: cl_api::DraftKind::Unknown,
+            ..r
+        };
+        drafts::store_reading(&mut demo, tenant, d.id, &d.updated_at, &unknown)
+            .expect("unknown is stored");
+    }
     assert_eq!(
         crate::i18n::t(kind_key(cl_core::intake::IntakeKind::Statements)),
         "Vendor statements"

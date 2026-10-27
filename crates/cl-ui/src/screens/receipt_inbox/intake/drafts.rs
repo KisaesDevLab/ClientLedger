@@ -1586,6 +1586,17 @@ impl Intake {
             ReadOutcome::Failed(f) if storable(*f) => None,
             ReadOutcome::Failed(_) => return None,
         };
+        // A reading the reader took for a statement goes as `unknown` to an
+        // engine without statement drafts, which would refuse the kind and
+        // lose the reading (review S6).
+        let statements =
+            crate::screens::preferences::intake_folders::source::statements_supported(link);
+        let reading = reading.map(|mut r| {
+            if r.kind == DraftKind::Statement && !statements {
+                r.kind = DraftKind::Unknown;
+            }
+            r
+        });
         let failure = match outcome {
             ReadOutcome::Failed(f) => f.class(),
             ReadOutcome::Read(_) => "",

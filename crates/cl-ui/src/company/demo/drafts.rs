@@ -398,6 +398,10 @@ pub fn create(
     if !state.drafts.enabled {
         return unsupported();
     }
+    // As cl-api: a statement draft needs `document-drafts-statement-v1`.
+    if kind_hint == DraftKind::Statement && state.intake.no_statements {
+        return unsupported();
+    }
     state.drafts.requests += 1;
     let request = Request::Create {
         tenant,
@@ -577,6 +581,10 @@ pub fn store_reading(
         || !bounded(&checks, l::CHECKS_BYTES)
     {
         return Err(invalid());
+    }
+    // An engine without statement drafts refuses the kind (400).
+    if reading.kind == DraftKind::Statement && state.intake.no_statements {
+        return Err(refusal(400, "VALIDATION_ERROR", Value::Null));
     }
     state.drafts.requests += 1;
     changeable(state, tenant, id, expected_updated_at)?;
