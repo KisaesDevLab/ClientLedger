@@ -251,6 +251,7 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 | Q-298 | Keep the statement. | A06 | "Save this statement with the vendor" after Match, default on; needs engine support (A06 step 0 / U-94), otherwise hidden. | Default in force |
 | Q-299 | Statement layouts. | A06 | Learned per vendor on accept, separate from the bill layout; in backups, not in transfer files (Q-A03g). | Default in force |
 | Q-300 | Statement page limit. | A06 | Up to 20 pages per statement (bills read 10); same per-page time limits. | Default in force |
+| Q-301 | **Build usage rules.** | all | Owner 2026-10-26: one combined opus review per phase (plus ui-verifier; process-reviewer only for Tier H and checkpoints); at most 2 implementers per phase; Sonnet also for routine coding (scenarios, demo parity, docs, pin bumps, CI fixes); lean briefs and plans (≤ 2,000 words), owner updates at milestones; full local CI once per phase; engine PRs merge when green. See docs/AGENTS.md › Usage rules. Amends Q-277 and Q-29. | Answered by owner 2026-10-26 |
 
 ## Owner Q&A 2026-10-19
 
