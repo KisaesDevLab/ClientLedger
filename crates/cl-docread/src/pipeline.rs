@@ -14,11 +14,11 @@
 //! still yields a reading the desktop accepts.
 
 use crate::model::{
-    Bbox, Check, CheckCode, DocKind, MAX_CHECKS, PageSummary, PageWords, Reader, Reading, RuleId,
-    Spot, Template, WordSource,
+    Bbox, Check, CheckCode, Confidence, DocKind, MAX_CHECKS, PageSummary, PageWords, Reader,
+    Reading, RuleId, Spot, Template, WordSource,
 };
 use crate::protocol::{JobHint, centre_in};
-use crate::{fields, kind, layout, lines, templates, validate};
+use crate::{fields, kind, layout, lines, statement, templates, validate};
 use cl_core::CalendarDate;
 
 /// Everything the rules need for one document.
@@ -93,6 +93,31 @@ pub fn read(input: &ReadInput<'_>) -> Reading {
     // rules on validity only (M7).
     let template = matched.map(|i| &input.templates[i]);
     let extracted = fields::extract(&layout, pages, template, input.today);
+    // A statement job always reads as a statement; an unhinted document
+    // only when it is plainly one (A06).
+    let titled = extracted.signals.statement;
+    let statement = (input.hint.statement || (input.hint.kind.is_none() && titled))
+        .then(|| statement::read(&layout, pages, &extracted.header, input.today))
+        .filter(|s| input.hint.statement || statement::is_plainly_a_statement(titled, s));
+    if let Some(s) = statement {
+        checks.extend(s.checks);
+        checks.truncate(MAX_CHECKS);
+        r.kind = DocKind::Statement;
+        r.kind_confidence =
+            Confidence::saturating(if input.hint.statement { 9_500 } else { 8_500 });
+        r.header = extracted.header;
+        r.checks = checks;
+        r.statement = Some(s.read);
+        r.fingerprint = fingerprint;
+        if extracted.template_used {
+            r.reader = Reader::Template;
+            r.template = matched.and_then(|i| u16::try_from(i).ok());
+        }
+        if turned {
+            unlevel_spots(&mut r, input.pages, &slopes);
+        }
+        return r;
+    }
     checks.extend(extracted.checks);
     let (kind, kind_confidence) = kind::classify(&extracted.header, &extracted.signals, input.hint);
     if kind == DocKind::Unknown {
@@ -124,16 +149,20 @@ pub fn read(input: &ReadInput<'_>) -> Reading {
         r.template = matched.and_then(|i| u16::try_from(i).ok());
     }
     if turned {
-        let slope_of = |page: u16| {
-            input
-                .pages
-                .iter()
-                .position(|p| p.page == page)
-                .map_or(0, |i| slopes[i])
-        };
-        layout::map_spots(&mut r, |page, b| layout::unlevel(b, slope_of(page)));
+        unlevel_spots(&mut r, input.pages, &slopes);
     }
     r
+}
+
+/// Put every spot back where the turned page shows it.
+fn unlevel_spots(r: &mut Reading, pages: &[PageWords], slopes: &[i32]) {
+    let slope_of = |page: u16| {
+        pages
+            .iter()
+            .position(|p| p.page == page)
+            .map_or(0, |i| slopes[i])
+    };
+    layout::map_spots(r, |page, b| layout::unlevel(b, slope_of(page)));
 }
 
 /// A region re-read's answer (protocol version 4, A04 D4): only `page`'s

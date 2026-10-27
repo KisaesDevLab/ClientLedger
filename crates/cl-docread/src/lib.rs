@@ -54,6 +54,7 @@ pub mod pipeline;
 #[cfg(feature = "worker")]
 pub mod preprocess;
 pub mod register_match;
+pub mod statement;
 pub mod templates;
 pub mod tsv;
 pub mod validate;

@@ -75,6 +75,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bill.read.check.stmt_period", "Line {line} is dated outside the statement period."),
     ("bill.read.check.stmt_duplicate", "Line {line} has the same date, number and amount as another line."),
     ("bill.read.check.stmt_vendor", "This statement looks like it's from a different vendor than the one chosen."),
+    ("bill.read.check.stmt_capped", "This statement has more than 2,000 lines. Only the first 2,000 were read."),
     // A03 fix pass (review findings).
     ("bill.read.check.lines_total", "The lines, tax and fees add up to {expected}, but the document's total is {found}."),
     ("bill.read.check.lines_total.plain", "The lines, tax and fees don't add up to the document's total."),

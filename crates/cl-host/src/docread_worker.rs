@@ -1408,7 +1408,7 @@ impl JobClock {
 }
 
 /// Run one batch on `w`, filling `outcomes`.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn run_batch(
     w: &mut Worker,
     batch: &[usize],
