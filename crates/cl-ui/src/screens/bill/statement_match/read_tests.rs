@@ -252,6 +252,8 @@ fn unreadable_statements_say_type_or_paste() {
         read(&mut s, outcome);
         assert_eq!(s.doc.problem, Some(COULDNT));
         assert!(s.text.is_empty(), "nothing filled");
+        assert!(s.doc.viewer.source().is_none(), "no blank page in the pane");
+        assert!(s.document().is_none());
         assert_eq!(
             crate::i18n::t(COULDNT),
             "Couldn't read this statement \u{2014} type or paste the lines instead."
@@ -726,6 +728,139 @@ fn no_consent_means_no_cloud_call() {
     s.start_statement_assist();
     assert_eq!(s.doc.assist_sent, 0);
     assert!(s.doc.assist.is_none(), "nothing sent");
+}
+
+/// Alt+A (`form.accept_read`) accepts the read lines, as on Enter Bill;
+/// the window takes form keys only while they wait.
+#[test]
+fn alt_a_accepts_the_read_lines() {
+    let id = cl_model::CommandId::new;
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    assert_eq!(s.scope(), cl_model::Scope::Window);
+    assert!(!s.command(id("form.accept_read")), "nothing to accept");
+    let name = vendor_name(&s);
+    read(&mut s, JobOutcome::Read(Box::new(october(&name))));
+    assert_eq!(s.scope(), cl_model::Scope::Form);
+    assert!(
+        cl_model::commands::find("form.accept_read")
+            .and_then(|c| c.shortcut)
+            .is_some(),
+        "Alt+A is bound"
+    );
+    assert!(
+        s.command(id("form.revert")),
+        "Esc doesn't close on a reading"
+    );
+    assert!(s.command(id("form.accept_read")));
+    assert_eq!(s.state()["statement"]["pending"], 0);
+    assert_eq!(s.scope(), cl_model::Scope::Window);
+    s.run_match();
+    s.poll();
+    assert_eq!(s.problem, None);
+    assert!(s.outcome.is_some());
+}
+
+/// Clear forgets the vendor the reading picked, and the reading itself.
+#[test]
+fn clear_forgets_the_read_vendor_and_the_reading() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let name = vendor_name(&s);
+    read(&mut s, JobOutcome::Read(Box::new(october(&name))));
+    assert!(s.vendor.is_some(), "picked from the statement");
+    s.accept_read_lines();
+    s.run_match();
+    s.poll();
+    s.clear();
+    assert_eq!(s.vendor, None);
+    assert!(s.doc.read.is_none() && s.doc.read_vendor.is_none());
+    assert!(s.text.is_empty() && s.outcome.is_none());
+    assert!(s.doc.viewer.source().is_none());
+    let st = s.state();
+    assert_eq!(st["vendor"], false);
+    assert_eq!(st["statement"]["document"], false);
+    assert_eq!(st["statement"]["lines"], serde_json::Value::Null);
+    assert_eq!(st["statement"]["vendor_differs"], false);
+}
+
+/// The screen drawn as the shell draws it at `size`: each named node's
+/// bounds (`(label, left, top, right)`).
+fn draw(s: &mut StatementMatchScreen, size: (f32, f32)) -> Vec<(String, f64, f64, f64)> {
+    use eframe::egui;
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(size.0, size.1),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        nodes = out
+            .platform_output
+            .accesskit_update
+            .map(|u| u.nodes)
+            .unwrap_or_default();
+    }
+    nodes
+        .iter()
+        .filter_map(|(_, n)| {
+            let name = n.label().or(n.value())?.to_string();
+            let b = n.bounds()?;
+            Some((name, b.x0, b.y0, b.x1))
+        })
+        .collect()
+}
+
+fn find<'a>(nodes: &'a [(String, f64, f64, f64)], name: &str) -> &'a (String, f64, f64, f64) {
+    nodes
+        .iter()
+        .find(|n| n.0 == name)
+        .unwrap_or_else(|| panic!("{name} drawn"))
+}
+
+/// Wide, the statement sits beside its lines: the page, the lines, their
+/// marks and Accept are all in view together. Narrow, it goes above them.
+#[test]
+fn the_statement_sits_beside_its_lines_when_wide() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let name = vendor_name(&s);
+    read(&mut s, JobOutcome::Read(Box::new(october(&name))));
+    let wide = draw(&mut s, (1440.0, 940.0));
+    let pane = find(&wide, "Pop out");
+    let accept = find(&wide, "Accept all lines");
+    let lines = find(&wide, "Lines read from the statement (6)");
+    assert!(
+        pane.1 > accept.3 && pane.1 > lines.3,
+        "the pane is right of the lines"
+    );
+    assert!(accept.2 < 940.0, "Accept is in view beside the page");
+    assert!(
+        wide.iter()
+            .any(|n| n.0.starts_with("Drag to share the width between the lines")),
+        "the divider is named"
+    );
+    let narrow = draw(&mut s, (900.0, 940.0));
+    let pane = find(&narrow, "Pop out");
+    let heading = find(&narrow, "Match a vendor statement");
+    assert!(
+        pane.2 > heading.2,
+        "narrow: the pane is above the form, under the heading"
+    );
+    assert!(
+        !narrow.iter().any(|n| n.0.starts_with("Drag to share")),
+        "no divider when stacked"
+    );
 }
 
 /// Only a statement date, before the From shown: From moves to that

@@ -52,7 +52,9 @@ use cl_docread::model::{
 use cl_docread::protocol::JobHint;
 use cl_docread::vendor_match::{self, VendorCandidate};
 use cl_model::rowkey::RowKey;
-use cl_model::statement_match::{LineColumn, PastedRow, ReadLine, ReadStatement, rows_from_read};
+use cl_model::statement_match::{
+    LineColumn, PastedRow, ReadLine, ReadStatement, StatementKind, rows_from_read,
+};
 use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
@@ -82,8 +84,27 @@ pub(crate) const LINE_TARGET: &str = "statement_line";
 /// "Couldn't read this statement — type or paste the lines instead."
 pub(crate) const COULDNT: &str = "statement.read.couldnt";
 
-/// The height of the docked document pane.
+/// The height of the document pane above the form (narrow windows).
 const PANE_HEIGHT: f32 = 420.0;
+
+/// From this width the document pane sits beside the lines.
+pub(crate) const SIDE_BY_SIDE: f32 = 1000.0;
+/// The pane's share of the width at first (the owner drags the divider).
+const PANE_SHARE: f32 = 0.4;
+/// The narrowest the pane and the form column get beside each other.
+const PANE_MIN: f32 = 320.0;
+const FORM_MIN: f32 = 480.0;
+/// The divider between them.
+const DIVIDER: f32 = 10.0;
+
+/// How tall the docked pane is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum PaneHeight {
+    /// Beside the lines: the column's height.
+    Beside(f32),
+    /// Above the form: its usual height, at most this.
+    Above(f32),
+}
 
 /// A statement draft opened from Review Documents (U-94).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,6 +146,8 @@ pub(crate) struct StatementDoc {
     pub viewer: ViewerState,
     /// Line ↔ spot highlights.
     pub compare: CompareTools,
+    /// The pane's share of the width beside the lines (dragged).
+    pub pane_share: f32,
     /// The document's bytes and kind.
     pub bytes: Option<Arc<[u8]>>,
     pub file_kind: Option<FileKind>,
@@ -222,6 +245,7 @@ impl Default for StatementDoc {
         StatementDoc {
             viewer: ViewerState::default(),
             compare: CompareTools::new(),
+            pane_share: PANE_SHARE,
             bytes: None,
             file_kind: None,
             doc_no: 0,
@@ -685,7 +709,7 @@ impl StatementMatchScreen {
                         outcome = f.class(),
                         "statement reading failed"
                     );
-                    self.doc.problem = Some(COULDNT);
+                    self.couldnt_read();
                 }
             }
         }
@@ -717,7 +741,7 @@ impl StatementMatchScreen {
                 outcome = "no_lines",
                 "statement reading"
             );
-            self.doc.problem = Some(COULDNT);
+            self.couldnt_read();
             self.doc.last = Some(local);
             return;
         };
@@ -772,6 +796,15 @@ impl StatementMatchScreen {
             })));
         self.doc.last = Some(local);
         self.ensure_statement_switches();
+    }
+
+    /// Nothing was read: the message says type or paste, and the pane
+    /// closes (no blank page; A06 UI review). The file itself stays, as
+    /// typed lines may still be matched and kept with it.
+    fn couldnt_read(&mut self) {
+        self.doc.problem = Some(COULDNT);
+        self.doc.viewer.clear();
+        self.doc.compare.clear();
     }
 
     /// The vendor the statement names: picked when none is; a different
@@ -1440,6 +1473,10 @@ impl StatementMatchScreen {
                     accept_all =
                         crate::widgets::primary_button(ui, &t("statement.read.accept_all"))
                             .clicked();
+                    crate::widgets::kbd(
+                        ui,
+                        &crate::screens::card_charge::kit::chip("form.accept_read"),
+                    );
                     form::hint(
                         ui,
                         tokens,
@@ -1485,7 +1522,15 @@ impl StatementMatchScreen {
                                 if let Some(row) =
                                     self.doc.read_rows.get(i).and_then(Option::as_ref)
                                 {
-                                    Self::line_cells(ui, tokens, row, self.money_style);
+                                    // Signed as the box shows it: a line
+                                    // without its kind keeps its minus.
+                                    let mut row = row.clone();
+                                    if row.entry.kind == StatementKind::CreditOrPayment
+                                        && let Ok(neg) = row.entry.amount.checked_neg()
+                                    {
+                                        row.entry.amount = neg;
+                                    }
+                                    Self::line_cells(ui, tokens, &row, self.money_style);
                                 } else {
                                     ui.label("");
                                     ui.label("");
@@ -1502,16 +1547,9 @@ impl StatementMatchScreen {
                                             .color(tokens.text_secondary),
                                     );
                                 } else {
+                                    // Accept first, so it stays in view
+                                    // beside the page; the mark after it.
                                     ui.horizontal(|ui| {
-                                        let note = if m.unsure {
-                                            RichText::new(t("statement.read.unsure"))
-                                                .color(tokens.warn_text)
-                                                .strong()
-                                        } else {
-                                            RichText::new(t("statement.read.caption"))
-                                                .color(tokens.text_secondary)
-                                        };
-                                        ui.label(note.size(12.0));
                                         if ui
                                             .button(t("statement.read.accept"))
                                             .on_hover_text(t_with(
@@ -1522,6 +1560,15 @@ impl StatementMatchScreen {
                                         {
                                             accept = Some(m.line);
                                         }
+                                        let note = if m.unsure {
+                                            RichText::new(t("statement.read.unsure"))
+                                                .color(tokens.warn_text)
+                                                .strong()
+                                        } else {
+                                            RichText::new(t("statement.read.caption"))
+                                                .color(tokens.text_secondary)
+                                        };
+                                        ui.label(note.size(12.0));
                                     });
                                 }
                                 ui.end_row();
@@ -1550,8 +1597,9 @@ impl StatementMatchScreen {
         }
     }
 
-    /// The document pane (docked) beside the lines.
-    pub(crate) fn statement_pane_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+    /// The document pane, docked (see [`PaneHeight`]), or the one-line
+    /// Dock row while popped out.
+    pub(crate) fn statement_pane_ui(&mut self, ui: &mut Ui, tokens: &Tokens, height: PaneHeight) {
         if self.doc.viewer.source().is_none() {
             return;
         }
@@ -1565,7 +1613,13 @@ impl StatementMatchScreen {
                 DocPane::show(ui, &mut self.doc.viewer, tokens);
             } else {
                 let w = ui.available_width();
-                ui.allocate_ui(egui::vec2(w, PANE_HEIGHT), |ui| {
+                let h = match height {
+                    // The card's frame takes a little of the column.
+                    PaneHeight::Beside(h) => (h - 16.0).max(200.0),
+                    PaneHeight::Above(most) => PANE_HEIGHT.min(most),
+                };
+                ui.allocate_ui(egui::vec2(w, h), |ui| {
+                    ui.set_min_height(h);
                     DocPane::show(ui, &mut self.doc.viewer, tokens);
                 });
             }
@@ -1573,6 +1627,86 @@ impl StatementMatchScreen {
         for e in self.doc.viewer.take_compare_events() {
             self.on_statement_event(e);
         }
+    }
+
+    /// The form, the read lines and the results scroll on the left; the
+    /// statement stays in view on the right, with a divider the owner
+    /// drags to share the width.
+    pub(crate) fn split_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let full = ui.available_rect_before_wrap();
+        let room = full.width() - DIVIDER;
+        let pane_w = (room * self.doc.pane_share).clamp(PANE_MIN, (room - FORM_MIN).max(PANE_MIN));
+        let form_right = full.right() - pane_w - DIVIDER;
+        let form_rect = egui::Rect::from_min_max(full.min, egui::pos2(form_right, full.bottom()));
+        let divider = egui::Rect::from_min_max(
+            egui::pos2(form_right, full.top()),
+            egui::pos2(form_right + DIVIDER, full.bottom()),
+        );
+        let pane_rect = egui::Rect::from_min_max(egui::pos2(divider.right(), full.top()), full.max);
+
+        let mut form_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("statement/form_column")
+                .max_rect(form_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        form_ui.shrink_clip_rect(form_rect);
+        egui::ScrollArea::vertical()
+            .id_salt("statement/body")
+            .auto_shrink([false, false])
+            .show(&mut form_ui, |ui| {
+                // The column's right edge stays clear of the scroll bar.
+                ui.set_max_width(ui.available_width() - 8.0);
+                self.body_ui(ui, tokens, None);
+            });
+
+        let id = ui.scope_id().with("statement/divider");
+        let r = ui.interact(divider, id, egui::Sense::drag());
+        let name = t("statement.read.divider");
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Splitter, true, &name));
+        if r.hovered() || r.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        if r.dragged()
+            && let Some(p) = r.interact_pointer_pos()
+            && room > 0.0
+        {
+            self.doc.pane_share = ((full.right() - p.x) / room).clamp(0.2, 0.8);
+        }
+        // From the keyboard too: Tab to the divider, then Left / Right.
+        if r.has_focus() {
+            let (left, right) = ui.input(|i| {
+                (
+                    i.key_pressed(egui::Key::ArrowLeft),
+                    i.key_pressed(egui::Key::ArrowRight),
+                )
+            });
+            let step = if left {
+                0.05
+            } else if right {
+                -0.05
+            } else {
+                0.0
+            };
+            self.doc.pane_share = (self.doc.pane_share + step).clamp(0.2, 0.8);
+        }
+        let stroke = if r.hovered() || r.dragged() || r.has_focus() {
+            egui::Stroke::new(2.0, tokens.accent)
+        } else {
+            ui.visuals().widgets.noninteractive.bg_stroke
+        };
+        ui.painter()
+            .vline(divider.center().x, divider.y_range(), stroke);
+
+        let mut pane_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("statement/pane_column")
+                .max_rect(pane_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        pane_ui.shrink_clip_rect(pane_rect);
+        self.statement_pane_ui(&mut pane_ui, tokens, PaneHeight::Beside(pane_rect.height()));
+        ui.advance_cursor_after_rect(full);
     }
 
     /// "Save this statement with the vendor", the balance line.
@@ -1602,7 +1736,16 @@ impl StatementMatchScreen {
                 if self.doc.closing_by_ai {
                     form::hint(ui, tokens, &t("statement.balance.by_ai"));
                 }
-                form::hint(ui, tokens, &t("statement.balance.note"));
+                // Plain words, with the accounting term in the tooltip.
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(t("statement.balance.note"))
+                            .size(12.0)
+                            .color(tokens.text_secondary),
+                    )
+                    .wrap(),
+                )
+                .on_hover_text(t("statement.balance.note.tip"));
             });
             ui.add_space(6.0);
         }

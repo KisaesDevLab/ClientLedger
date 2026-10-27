@@ -31,7 +31,7 @@ use cl_core::money::UserInput;
 use cl_core::{CalendarDate, Money};
 
 use crate::date_entry::{self, DateOrder};
-use crate::forms::bill::ref_matches;
+use crate::forms::bill::{BillKind, ref_matches};
 use crate::text::TextKey;
 
 /// The date slack of the second pass (Q-P17q).
@@ -61,6 +61,21 @@ impl StatementKind {
                 (self, other),
                 (CreditOrPayment, Credit | Payment) | (Credit | Payment, CreditOrPayment)
             )
+    }
+
+    /// What a line on the statement but not in the books can be entered
+    /// as from Match Vendor Statement: a charge a bill, a credit a vendor
+    /// credit. A payment is never entered there, and neither is a line that
+    /// may be one ([`StatementKind::CreditOrPayment`]: a negative line typed,
+    /// pasted or read without its kind), so a payment never becomes a
+    /// vendor credit (A06 UI review). The owner names the kind to create it.
+    #[must_use]
+    pub fn creates(self) -> Option<BillKind> {
+        match self {
+            StatementKind::Charge => Some(BillKind::Bill),
+            StatementKind::Credit => Some(BillKind::Credit),
+            StatementKind::Payment | StatementKind::CreditOrPayment => None,
+        }
     }
 
     /// The kind named in a pasted cell (`invoice`, `credit memo`,
