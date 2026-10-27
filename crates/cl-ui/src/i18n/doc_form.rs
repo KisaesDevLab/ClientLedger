@@ -75,5 +75,5 @@ pub const ENGLISH: &[(&str, &str)] = &[
     // mode (Q-A03j).
     ("doc_form.enter_as", "Enter this as:"),
     ("doc_form.enter_as.tip", "Opens this document in that form instead. Values you accepted or changed go with it; the rest still need Accept."),
-    ("doc_form.assist.waiting", "Ask AI to help is ready once the page is ready."),
+    ("doc_form.assist.waiting", "Available once the page has been read."),
 ];

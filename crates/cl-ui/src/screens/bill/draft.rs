@@ -39,6 +39,10 @@ use crate::screens::doc_review::review::{
 };
 use crate::widgets::compare::{CompareAction, CompareEvent, FillValue};
 
+#[cfg(test)]
+#[path = "draft_kind_ai_tests.rs"]
+mod kind_ai_tests;
+
 /// The bill field a read target is.
 fn field_of(t: ReadTarget) -> Option<Field> {
     Some(match t {

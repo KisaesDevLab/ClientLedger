@@ -1130,12 +1130,13 @@ impl DraftSession {
     /// The card account matched for `cards` when the form's card list
     /// arrives after the draft (a card charge).
     pub(crate) fn rematch_card(&mut self, cards: &[(AccountId, Last4)]) {
-        if let (Some(Stored::Read(r)), Some(d)) = (&self.stored, &self.draft)
+        // Only the card: the values may be carried or AI-helped ones.
+        if let (Some(Stored::Read(r)), Some(d)) = (&mut self.stored, &self.draft)
             && r.card.is_none()
             && let Stored::Read(again) = stored_reading(d, cards)
             && again.card.is_some()
         {
-            self.stored = Some(Stored::Read(again));
+            r.card = again.card;
         }
     }
 

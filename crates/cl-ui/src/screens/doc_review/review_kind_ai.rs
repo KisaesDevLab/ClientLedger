@@ -380,7 +380,7 @@ impl DraftSession {
         };
         // Entered, discarded or being entered meanwhile: the form's values
         // are what was sent; the answer changes nothing.
-        if self.closed() || self.locked() {
+        if self.closed() || !matches!(self.work, super::Work::Idle) {
             self.assist.outcome = Some("dropped");
             return;
         }
