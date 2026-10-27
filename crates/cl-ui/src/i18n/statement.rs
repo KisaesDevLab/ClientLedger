@@ -60,6 +60,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("statement.create_bill", "Create bill"),
     ("statement.create_credit", "Create credit"),
     ("statement.payment_hint", "Payments aren't entered from here."),
+    ("statement.credit_or_payment_hint", "A credit or a payment? Add the word credit after the amount to enter it as a vendor credit. Payments aren't entered from here."),
     ("statement.open", "Open"),
     // A06: read a statement file.
     ("statement.problem.accept_first", "Check the lines read from the statement and accept them before you match."),

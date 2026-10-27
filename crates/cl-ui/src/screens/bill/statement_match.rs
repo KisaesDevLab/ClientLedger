@@ -571,10 +571,9 @@ impl StatementMatchScreen {
         let Some(row) = o.request.rows.get(index) else {
             return;
         };
-        let kind = match row.entry.kind {
-            StatementKind::Charge => BillKind::Bill,
-            StatementKind::Credit | StatementKind::CreditOrPayment => BillKind::Credit,
-            StatementKind::Payment => return,
+        // A payment, or a line that may be one, is never entered here.
+        let Some(kind) = row.entry.kind.creates() else {
+            return;
         };
         let prefill = BillPrefill {
             kind,
@@ -858,22 +857,24 @@ impl StatementMatchScreen {
                         continue;
                     };
                     Self::line_cells(ui, tokens, row, style);
-                    let label = match row.entry.kind {
-                        StatementKind::Charge => Some("statement.create_bill"),
-                        StatementKind::Credit | StatementKind::CreditOrPayment => {
-                            Some("statement.create_credit")
-                        }
-                        StatementKind::Payment => None,
-                    };
-                    match label {
+                    match row.entry.kind.creates() {
                         Some(k) => {
+                            let k = match k {
+                                BillKind::Bill => "statement.create_bill",
+                                BillKind::Credit => "statement.create_credit",
+                            };
                             if ui.button(t(k)).clicked() {
                                 create = Some(i);
                             }
                         }
                         None => {
+                            let hint = if row.entry.kind == StatementKind::CreditOrPayment {
+                                "statement.credit_or_payment_hint"
+                            } else {
+                                "statement.payment_hint"
+                            };
                             ui.label(
-                                RichText::new(t("statement.payment_hint"))
+                                RichText::new(t(hint))
                                     .size(12.0)
                                     .color(tokens.text_secondary),
                             );
@@ -1262,7 +1263,9 @@ mod tests {
         let (_d, link) = link();
         let mut s = screen(&link);
         s.vendor = s.vendors.first().map(|v| v.0);
-        s.text = "10/03/2026,CM-1,-20.00\n10/04/2026,PMT 9,-33.00,payment\n".into();
+        s.text = "10/03/2026,CM-1,-20.00,credit\n10/04/2026,PMT 9,-33.00,payment\n\
+                  10/05/2026,PMT-48129,-44.00\n"
+            .into();
         s.run_match();
         s.poll();
         let missing = s
@@ -1272,10 +1275,15 @@ mod tests {
             .result
             .missing_in_books
             .clone();
-        assert_eq!(missing.len(), 2);
+        assert_eq!(missing.len(), 3);
         let _ = link.drain();
         s.create_from(missing[1]);
         assert!(link.drain().is_empty(), "payments are not created here");
+        s.create_from(missing[2]);
+        assert!(
+            link.drain().is_empty(),
+            "nor a negative line without its kind: it may be a payment"
+        );
         s.create_from(missing[0]);
         let events = link.drain();
         let Some(CompanyEvent::OpenWith(_, payload)) = events.first() else {
