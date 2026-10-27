@@ -217,6 +217,7 @@ mod tests {
 
     #[test]
     fn cheatsheet_is_short() {
-        assert!(cheatsheet_md().lines().count() < 120);
+        // One printed page in two columns; A04 added the viewer and work-list keys.
+        assert!(cheatsheet_md().lines().count() < 140);
     }
 }
