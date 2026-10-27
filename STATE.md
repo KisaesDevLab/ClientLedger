@@ -1,7 +1,7 @@
 # STATE.md — ClientLedger
 
-**Current phase:** A06 — Read a vendor statement (ADD-02; Next). **STOP before P18: the owner said on 2026-10-26 not to start P18 until they say so.**
-**Status:** A04 built on `phase/A04-review-queue`; PR open with auto-merge. A03 merged. Engine PRs #180 and #182 merged; pin 97d4d4cf
+**Current phase:** none — **STOP: P18 waits for the owner's go-ahead (2026-10-26).** ADD-01 A01–A04 and ADD-02 A06 are done; A05 runs right after P26.
+**Status:** A06 built on `phase/A06-statement-reading`; PR open with auto-merge. A04 merged (PR #45). Engine PR #183 (U-94) merged; pin 5a9a8700
 **Engine commit:** `5a9a8700` (`main`, pinned 2026-10-27 after engine PR #183 (U-94, document-drafts-statement-v1, migration 0235); before that `97d4d4cf` after engine PR #182 (U-97, restore verify no longer splits multi-byte characters, no migration); before that `4e0593c3` after engine PR #180 (U-95, document-drafts-attach-v1, no migration); before that `38cf97eb` after engine PRs #178 (U-92, document-drafts-v1, idempotency-docs-v1, migration 0233) and #179 (U-92d, document-assist-v1, migration 0234); before that `a88337e3` after engine PR #177 (U-93, intake-settings-v1, migration 0232); before that `b483c02e` after engine PR #176 (U-91, restore verify compares id-keyed jsonb semantically) and engine PRs #171 (idempotency-v1, migration 0229), #172 (run-due-filter-v1), #173 (ap-closing-v1, ap-edit-v1, bill-lines-v1, bill-terms-v1, bill-received-v1, idempotency-ap-v1, migration 0230), #174 (bill-ocr-v2) and #175 (attachments-company-v1, migration 0231); bump per Q-02)
 **Last updated:** 2026-10-27
 **Tiers:** H = opus implementer + architect + opus review · M = sonnet implementer + opus review · L = sonnet (see docs/AGENTS.md)
@@ -69,7 +69,7 @@
 
 | Phase | Title | Tier | Status |
 | --- | --- | --- | --- |
-| A06 | Read a vendor statement | M | Next |
+| A06 | Read a vendor statement | M | Done 2026-10-27 |
 
 ## Post-beta (owner may reorder, Q-39)
 
@@ -216,6 +216,15 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 7. U-77 bank-file balance and U-78 reorder alerts proposed; U-37 and U-12 amended for Home.
 8. Home's Refresh issues many engine reads per data-bus event (one per reconciled account batch plus lanes); measure before P33 LAN mode.
 
+## Follow-ups from A06
+
+1. Photos of statements read 79.6 % (seen) / 73.5 % (held-out) of lines right; most misses are OCR letter errors in reference numbers. Revisit at PR-A1 with `private-fixtures/`.
+2. A read still overwrites typed box text without asking; typing in the box waives the read marks.
+3. No test yet that a 20-page, 2,000-line statement fits the worker's 8 MiB reply cap; the read table isn't virtualized (redraw cost fixed, S7).
+4. Statement layouts learn header fields only (the template model has no statement column types).
+5. Live contract test `drafts::statement_drafts` ran only its PENDING path locally (engine build before U-94); CI runs it on pin 5a9a8700.
+6. Region re-read on a statement still stops at page 10.
+
 ## Follow-ups from A04
 
 1. Pointer drags (draw a box to re-read a region) can't be scripted: the automation tools click and move but can't press, drag and release. Unit tests only.
@@ -302,6 +311,19 @@ Newest first. One entry per completed phase: date, phase, summary, acceptance ch
 
 Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-log.md](docs/history/STATE-log.md). Keep at most the last four entries here; the bookkeeper moves older ones there when a phase closes.
 
+- 2026-10-27 — A06 (ADD-02) complete on `phase/A06-statement-reading`; PR with auto-merge. Shipped:
+  - `cl-docread` statement reading in the sandboxed worker (protocol v5): header (statement date, period, opening and closing), line table with the sign from its column (single / charges / credits / payments, running balance), multi-page tables, balance-forward, subtotal, total and aging rows left out (Q-296); checks for sum, running balance, period and duplicates, flagged and never adjusted; 20 pages and 2,000 lines per statement (Q-300); `stmt:` statement layouts kept apart from bill layouts (Q-A06e).
+  - Match Vendor Statement "Read a statement file" (Browse, drop, Review Documents, Vendor statements intake folders): read lines become the box's rows and go through the existing Match (Q-A06b); statement beside its lines with line ↔ spot highlights; read marks; Accept / Alt+A before Match; "Ask AI to help" suggests only vendor and closing balance, each needing "Use this…"; wrong-vendor warning; "Couldn't read this statement…".
+  - Balance line from the engine's vendor-statement report read as CSV, exact difference, display only (Q-297, Q-A06c). "Save this statement with the vendor" (contact attachment, period in the file name; from a draft: copy, discard, delete; Q-A06d).
+  - Engine U-94 (PR #183: statement draft kind, `statements` intake kind, `document-drafts-statement-v1`, migration 0235) merged; pin 5a9a8700. Synthetic statements (15 layouts, 3 held out) and the statement lines gate in `docread-accuracy`.
+  Acceptance (addenda/ADD-02-statement-reading.md A06; photos per owner amendment Q-A06h):
+  - [x] AI off, offline: lines right on text PDFs 100 % (seen and held-out), scans 96.6 % / 94.5 %, photos 79.6 % / 73.5 % (targets 95 / 85 / 75 seen, 70 held-out).
+  - [x] Totals that don't reconcile are flagged and never adjusted (property test with injected errors).
+  - [x] Read lines go through the existing Match exactly as typed lines; nothing posts without the owner (`rows_from_read` round trip incl. credits under Charges; `statement_match` scenario).
+  - [x] The statement is shown beside its lines, each line linked to its spot (scenario clicks a line and a box, light and dark).
+  - [x] A malformed or hostile file can't crash or hang the desktop (worker limits, page and line caps, reply cap tested).
+  Reviews: one combined review (2 blocking: credits under Charges became charges; save could file on the wrong vendor; 7 should-fix; all fixed except S5, settled by the owner's photo amendment), ui-verifier (statement above the lines, Create credit on a payment, and 6 more; fixed). Full local CI once; GitHub CI on the PR.
+  Agents: scout/opus, impl/opus ×2 (WP-S1 reading, WP-S2 screen), engine-impl/opus (U-94 + 3 follow-ups), review/opus, impl/opus (review fixes), ui-verifier/opus, impl/opus (screen fixes), impl/sonnet (pin bump), docs-writer/sonnet. Plan by the orchestrator (Tier M, Q-301).
 - 2026-10-27 — A04 (ADD-01) complete on `phase/A04-review-queue`; PR with auto-merge. Shipped:
   - Review queue: files from intake folders become document drafts on arrival (claim on arrival, inbox state v3, `DraftLink`); rows show kind, arrival date and file name; keyboard through the whole queue.
   - Draft → form: "Enter this as" bill, card charge or check; the form opens filled from the read with the document beside it (docked or popped out); convert or attach through `DraftSession`; HMAC digest over the request body actually sent (`ConvertBody::wire_body`).
@@ -346,17 +368,3 @@ Older entries (P00–P07, engine and planning notes) are in [docs/history/STATE-
   - [x] Tests: doc_viewer scenario (pop out, follow, dock, F6, rotate, page, placement move); gone-monitor clamp (seeded 20k-case loop).
   Reviews: fresh-eyes review (2 blocking: a JPEG-in-TIFF memory bomb and card-charge files lost when Save beat an upload; 6 should-fix), ui-verifier (toolbar overflow in narrow panels, Bill card cut off, 200% pop-out clipping, a clipping check that missed it). All fixed in one fix pass except those listed in Follow-ups from A02. ui-checks doc_viewer, bill, write_check, card_charge, register, receipt_inbox and document-view pass light and dark.
   Agents: architect/opus, impl/opus (WP-A, WP-B, WP-C, WP-D, fix pass), review/opus, ui-verifier/opus.
-- 2026-10-26 — A01 (ADD-01) complete on `phase/A01-intake-folders`; PR with auto-merge. Shipped:
-  - Intake folders as a setting of each company, stored in the engine (U-93, engine PR #177, migration 0232, security-reviewed with 10 fixes) and carried by backups; transfer files drop them (`omitIntakeSettings` / `resetIntakeSettings`).
-  - Preferences › Document intake (owner-only until P29): add with **Browse…** or a typed path, rename, remove, Test, kind, "Leave originals where they are", auto-read stored for A03/A04; each computer confirms a folder before it is watched (never archived).
-  - Watching every 8 s, one thread per folder, never blocking the screen; local, mapped-drive, UNC and cloud-sync folders; links never followed (moves by hard link, reads refuse reparse points), cloud placeholders never read, 10 MB and HEIC rows, zero-byte files hidden.
-  - Arrival copies each file into attachments (local SHA-256 duplicates), the inbox lists all folders, New bill / Add to / Discard / Copy anyway; originals move to `Processed/YYYY-MM/` or `Discarded/`, never deleted; P17 `Filed/` untouched.
-  - Folder health on the inbox and Home; migration of the P17 single folder (kept until the new folder is confirmed); engines without U-93 keep the P17 inbox.
-  - Browse for attachments on Enter Bill and Write Check (`rfd`, MIT; xdg-portal on Linux, no GTK). Restore fix for real engine backups (c9f77a5).
-  Acceptance (addenda/ADD-01-document-intake.md A01):
-  - [x] A file saved into a mapped folder appears in that company's inbox within 15 s and is copied into attachments (live `intake_live` through the `Intake` service: ready 10.1 s, attachment 10.2 s). Mapped drive and UNC share covered by simulated-file-system tests; the manual check on a real share is pending the owner (follow-up 1).
-  - [x] Originals move to `Processed/` or `Discarded/` and are never deleted (`handled.rs` tests incl. swapped-in links; scenario).
-  - [x] Folders are per company, carried by backups and excluded from transfer files (live backup/restore in `intake_live`; contract `intake_settings` 7/7 incl. `omitIntakeSettings`).
-  - [x] The old single-folder setting migrates without losing or moving any file (migration golden; legacy fallback tests).
-  Reviews: fresh-eyes review (Discard could delete a saved record's attachment + 8 should-fix, all fixed), security review (2 Medium: link-swap on move and on read, + Lows, fixed), ui-verifier (2 must-fix + 6 should-fix, fixed). Scenarios intake_folders, receipt_inbox, home, preferences-ai, preferences-user, bill, write_check pass light and dark. Help: document-intake, receipt-inbox. Decisions Q-A01a–Q-A01r; ADD-01 open questions answered by the owner (Q-283–Q-286, Q-288, Q-289, Q-292, Q-293).
-  Agents: scout/opus, architect/opus, impl/opus (C0, WP-A, WP-B, WP-C, WP-D, WP-E, pin, fix pass), engine-impl/opus ×2, security-review/opus ×2, review/opus, ui-verifier/opus, docs-writer/sonnet.
