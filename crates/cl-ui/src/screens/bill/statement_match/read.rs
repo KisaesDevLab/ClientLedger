@@ -20,8 +20,10 @@
 //!   dates, duplicates) are listed; nothing is adjusted (non-negotiable 6).
 //! - **Ask AI to help** as in A03, behind the same switches and consent;
 //!   it may name the vendor and the closing balance, and an AI amount is
-//!   kept only when the same figure is printed on the page (Q-A03j). The
-//!   lines are never the AI's.
+//!   kept only when the same figure is printed on the page (Q-A03j). Both
+//!   wait as suggestions until the owner uses them (non-negotiable 4,
+//!   review S4): the vendor picker, the balance line and the keep never
+//!   see them before. The lines are never the AI's.
 //! - **Balance line** (Q-297): the statement's closing balance beside the
 //!   books' (`/reports/vendor-statement`, exact), display only.
 //! - **Keep the statement** (Q-298): after Match, on by default, the file
@@ -164,6 +166,11 @@ pub(crate) struct StatementDoc {
     pub closing: Option<Money>,
     /// The closing balance came from AI help (checked against the page).
     pub closing_by_ai: bool,
+    /// A vendor AI help named, waiting for the owner's "Use this vendor".
+    pub suggested_vendor: Option<ContactId>,
+    /// A closing balance found after Ask AI to help, waiting for the
+    /// owner's "Use this balance"; `true` when the AI's (not the reader's).
+    pub suggested_closing: Option<(Money, bool)>,
     /// The statement's date (else the period's end).
     pub statement_date: Option<CalendarDate>,
     /// The reader's checks on the statement (shown, never applied).
@@ -228,6 +235,8 @@ impl Default for StatementDoc {
             read_vendor: None,
             closing: None,
             closing_by_ai: false,
+            suggested_vendor: None,
+            suggested_closing: None,
             statement_date: None,
             checks: Vec::new(),
             sent: 0,
@@ -286,6 +295,8 @@ impl StatementDoc {
         self.read_vendor = None;
         self.closing = None;
         self.closing_by_ai = false;
+        self.suggested_vendor = None;
+        self.suggested_closing = None;
         self.statement_date = None;
         self.checks.clear();
         self.assist = None;
@@ -345,6 +356,8 @@ impl StatementDoc {
             "vendor_differs": self.differs_from(picked),
             "closing_read": self.closing.is_some(),
             "closing_by_ai": self.closing_by_ai,
+            "vendor_suggested": self.suggested_vendor.is_some(),
+            "closing_suggested": self.suggested_closing.is_some(),
             "checks": self.checks.iter().map(|c| crate::screens::bill::doc_read_local::code_name(c.code)).collect::<Vec<_>>(),
             "draft": self.draft.is_some(),
             "layouts": self.layouts.len(),
@@ -375,7 +388,13 @@ impl StatementDoc {
         let Some(last) = self.last.as_ref() else {
             return Offer::None;
         };
-        if self.helped || self.busy() || !needs_help(last, self.closing.is_some()) {
+        if self.helped
+            || self.busy()
+            || !needs_help(
+                last,
+                self.closing.is_some() || self.suggested_closing.is_some(),
+            )
+        {
             return Offer::None;
         }
         let Some(s) = self.switches else {
@@ -981,15 +1000,15 @@ impl StatementMatchScreen {
         let merged = assist::merge(&last, &answer, &candidates);
         self.doc.helped = true;
         self.doc.assist_outcome = Some("helped");
+        let total_of = |h: &Header| h.total.as_ref().or(h.balance_due.as_ref()).map(|f| f.value);
+        // Nothing reaches the form here: what was found waits for the
+        // owner's Use (S4). An amount is the AI's only when the reader had
+        // none; the gate kept it only because it is printed on the page.
         if self.doc.closing.is_none()
-            && let Some(total) = merged.reading.header.total.as_ref().or(merged
-                .reading
-                .header
-                .balance_due
-                .as_ref())
+            && let Some(total) = total_of(&merged.reading.header)
         {
-            self.doc.closing = Some(total.value);
-            self.doc.closing_by_ai = true;
+            let by_ai = total_of(&last.reading.header).is_none();
+            self.doc.suggested_closing = Some((total, by_ai));
         }
         if last.vendor.is_none() {
             let found = merged.vendor.map(|v| v.contact).or_else(|| {
@@ -999,7 +1018,27 @@ impl StatementMatchScreen {
                     &candidates,
                 )
             });
-            self.take_vendor(found);
+            self.doc.suggested_vendor =
+                found.filter(|f| self.vendors.iter().any(|(id, _)| id == f));
+        }
+    }
+
+    /// The owner uses the vendor AI help named: it is picked, and the
+    /// statement counts as that vendor's.
+    pub(crate) fn use_suggested_vendor(&mut self) {
+        if let Some(v) = self.doc.suggested_vendor.take() {
+            self.vendor = Some(v);
+            self.doc.read_vendor = Some(v);
+        }
+    }
+
+    /// The owner uses the closing balance found with AI help: the balance
+    /// line shows it (after a Match).
+    pub(crate) fn use_suggested_closing(&mut self) {
+        if let Some((value, by_ai)) = self.doc.suggested_closing.take() {
+            self.doc.closing = Some(value);
+            self.doc.closing_by_ai = by_ai;
+            self.ask_balance();
         }
     }
 
@@ -1251,6 +1290,7 @@ impl StatementMatchScreen {
                     .color(tokens.warn_text),
             );
         }
+        self.suggestions_ui(ui, tokens);
         if self.doc.assist.is_some() {
             form::progress_line(ui, tokens, &t("statement.read.helping"));
         }
@@ -1273,6 +1313,47 @@ impl StatementMatchScreen {
         }
         if ask {
             self.start_statement_assist();
+        }
+    }
+
+    /// What Ask AI to help found, each with its Use button (S4).
+    fn suggestions_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let mut use_vendor = false;
+        let mut use_closing = false;
+        if let Some(v) = self.doc.suggested_vendor {
+            let name = self
+                .vendors
+                .iter()
+                .find(|(id, _)| *id == v)
+                .map(|(_, n)| n.clone())
+                .unwrap_or_default();
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(t_with("statement.suggest.vendor", &[("name", &name)]))
+                        .color(tokens.warn_text),
+                );
+                use_vendor = ui.button(t("statement.suggest.vendor.use")).clicked();
+            });
+        }
+        if let Some((value, by_ai)) = self.doc.suggested_closing {
+            let key = if by_ai {
+                "statement.suggest.closing.ai"
+            } else {
+                "statement.suggest.closing"
+            };
+            let amount = value.format(self.money_style);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(t_with(key, &[("amount", &amount)])).color(tokens.warn_text),
+                );
+                use_closing = ui.button(t("statement.suggest.closing.use")).clicked();
+            });
+        }
+        if use_vendor {
+            self.use_suggested_vendor();
+        }
+        if use_closing {
+            self.use_suggested_closing();
         }
     }
 

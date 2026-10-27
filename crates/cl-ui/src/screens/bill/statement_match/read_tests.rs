@@ -562,3 +562,127 @@ fn keeping_a_statement_draft_never_strands_its_file() {
         "its copy is deleted"
     );
 }
+
+/// A statement with no closing balance and an unknown vendor; its page
+/// prints `amount` and, when `story_vendor`, the demo story vendor's name.
+fn sparse_statement(story_vendor: bool, amount: &str) -> Reading {
+    let word = |x: u16, y: u16, text: &str| {
+        let w = u16::try_from(text.chars().count()).expect("len") * 110;
+        cl_docread::model::Word {
+            text: text.into(),
+            bbox: Bbox::new(x, y, x + w, y + 140).expect("box"),
+            confidence: Bp::CERTAIN,
+        }
+    };
+    let mut r = october("Nobody Known Supply");
+    if let Some(st) = r.statement.as_mut() {
+        st.closing = None;
+    }
+    let mut words = vec![word(500, 4000, "Total"), word(8500, 4000, amount)];
+    if story_vendor {
+        words.push(word(500, 300, "Midwest"));
+        words.push(word(1400, 300, "Equipment"));
+        words.push(word(2600, 300, "Rental"));
+    }
+    r.words = vec![cl_docread::model::PageWords {
+        page: 0,
+        aspect: 12_941,
+        source: cl_docread::model::WordSource::TextLayer,
+        words,
+    }];
+    r
+}
+
+fn assist_on(link: &Arc<CompanyLink>) {
+    let mut demo = link.demo_state().expect("demo");
+    demo.ai.enabled = true;
+    demo.ai.reading = true;
+    demo.ai.assist = true;
+}
+
+/// Ask AI to help (S4): the demo's answer names a vendor and a total of
+/// 1480.00. Printed on the page, the total waits as a suggestion; nothing
+/// reaches the picker, the balance line or the keep until the owner uses
+/// it, and then it is labelled as the AI's.
+#[test]
+fn ai_help_waits_for_the_owner_to_use_it() {
+    let (_d, link) = link();
+    assist_on(&link);
+    let mut s = screen(&link);
+    read(
+        &mut s,
+        JobOutcome::Read(Box::new(sparse_statement(true, "1480.00"))),
+    );
+    assert_eq!(s.vendor, None);
+    s.poll();
+    assert_eq!(s.state()["statement"]["assist"]["offer"], "local");
+    s.start_statement_assist();
+    s.poll();
+    assert_eq!(s.doc.assist_sent, 1);
+    assert_eq!(s.doc.closing, None, "not used yet");
+    assert_eq!(s.vendor, None, "the picker is untouched");
+    assert_eq!(s.state()["statement"]["closing_suggested"], true);
+    let story = s
+        .vendors
+        .iter()
+        .find(|(_, n)| n == crate::company::demo::bills::STORY_VENDOR)
+        .map(|v| v.0);
+    assert!(story.is_some(), "a demo vendor");
+    assert_eq!(s.doc.suggested_vendor, story);
+    s.use_suggested_closing();
+    assert_eq!(s.doc.closing, Some(money("1480.00")));
+    assert!(s.doc.closing_by_ai, "the AI's, and labelled so");
+    s.use_suggested_vendor();
+    assert_eq!(s.vendor, story, "picked by the owner's Use");
+    assert!(!s.vendor_differs());
+}
+
+/// The AI's amount gate (Q-A03j): a total the page doesn't print is
+/// dropped, never suggested and never used.
+#[test]
+fn an_ai_amount_not_on_the_page_is_dropped() {
+    let (_d, link) = link();
+    assist_on(&link);
+    let mut s = screen(&link);
+    read(
+        &mut s,
+        JobOutcome::Read(Box::new(sparse_statement(false, "999.99"))),
+    );
+    s.poll();
+    s.start_statement_assist();
+    s.poll();
+    assert_eq!(s.doc.assist_sent, 1);
+    assert_eq!(
+        s.doc.suggested_closing, None,
+        "invented: dropped by the gate"
+    );
+    assert_eq!(s.doc.closing, None);
+    assert!(!s.doc.closing_by_ai);
+}
+
+/// An online provider without the company's consent: Ask AI to help isn't
+/// offered and nothing is sent.
+#[test]
+fn no_consent_means_no_cloud_call() {
+    let (_d, link) = link();
+    assist_on(&link);
+    let mut s = screen(&link);
+    read(
+        &mut s,
+        JobOutcome::Read(Box::new(sparse_statement(false, "1480.00"))),
+    );
+    s.doc.switches = Some(crate::screens::bill::doc_read::ReadSwitches {
+        ai: true,
+        reading: true,
+        provider: Some(cl_settings::AiProvider::Anthropic),
+        assist: true,
+        ..crate::screens::bill::doc_read::ReadSwitches::default()
+    });
+    assert_eq!(
+        s.doc.offer(),
+        crate::screens::bill::doc_read_local::Offer::NeedsConsent
+    );
+    s.start_statement_assist();
+    assert_eq!(s.doc.assist_sent, 0);
+    assert!(s.doc.assist.is_none(), "nothing sent");
+}
