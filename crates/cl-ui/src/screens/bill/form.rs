@@ -202,7 +202,8 @@ impl EnterBillScreen {
     /// title in a narrow window.
     fn kind_row(&mut self, ui: &mut Ui, working: bool, received_cap: bool) {
         let kind = self.kind();
-        let can_switch = !working && self.editing.is_none();
+        // A04: a draft converts as a bill only.
+        let can_switch = !working && self.editing.is_none() && self.draft.is_none();
         for (k, key) in [
             (BillKind::Bill, "bill.kind.bill"),
             (BillKind::Credit, "bill.kind.credit"),
@@ -248,6 +249,11 @@ impl EnterBillScreen {
         }
         if self.prefill.dropped {
             form::hint(ui, tokens, &t("bill.prefill.dropped"));
+        }
+        // A04 draft mode: where the values came from, Discard document.
+        let vendor_name = self.draft_vendor_name();
+        if let Some(d) = self.draft.as_mut() {
+            d.banner_ui(ui, tokens, None, vendor_name.as_deref());
         }
         // The source-document banner: "Attached from <file> in your receipt
         // inbox" (Q-P17j, WP5's text), then the reading's values to accept
@@ -360,7 +366,10 @@ impl EnterBillScreen {
 
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
-        let enabled = self.save.task.is_none() && !self.closing_prompt.dialog_open() && !read_only;
+        let enabled = self.save.task.is_none()
+            && !self.closing_prompt.dialog_open()
+            && !read_only
+            && !self.draft_locked();
         let title = match self.kind() {
             BillKind::Bill => t("cmd.vendors.enter_bill"),
             BillKind::Credit => t("bill.title.credit"),

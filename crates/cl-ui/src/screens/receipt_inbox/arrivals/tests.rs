@@ -142,8 +142,8 @@ fn the_demo_window_lays_out_its_folders_and_copies_files_in() {
 }
 
 /// A04 claim gate: with document drafts every arrival is claimed, New
-/// check sends the owner to Review Documents (never the plain save path),
-/// and the state says how many are claimed.
+/// check opens its draft in Write Check's draft mode (WP-F2; never the
+/// plain save path), and the state says how many are claimed.
 #[test]
 fn claimed_arrivals_open_from_review_documents() {
     let (_dir, link, ctx, mut s) = setup();
@@ -160,13 +160,21 @@ fn claimed_arrivals_open_from_review_documents() {
     until(&ctx, &mut s, "the PNG read", |st| st["loaded"] == true);
     let f = Frame::read(&ctx);
     s.new_form(&ctx, &f, &png, FormKind::Check);
-    assert_eq!(s.arrivals.problem, Some("inbox.claim.review"));
+    assert_eq!(s.arrivals.problem, None);
+    let events = link.drain();
     assert!(
-        !link
-            .drain()
-            .into_iter()
-            .any(|e| matches!(e, CompanyEvent::OpenWith(..))),
+        !events.iter().any(|e| matches!(
+            e,
+            CompanyEvent::OpenWith(_, p) if matches!(**p, OpenPayload::InboxDraft(_))
+        )),
         "no form opened on the plain path"
+    );
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            CompanyEvent::OpenWith(_, p) if matches!(**p, OpenPayload::DocumentDraft(_))
+        )),
+        "the draft opens in draft mode"
     );
     // Copy anyway is still offered for the local duplicate (no claim).
     assert_eq!(row(&ctx, "Ozark Feed receipt (copy).png").link, "none");

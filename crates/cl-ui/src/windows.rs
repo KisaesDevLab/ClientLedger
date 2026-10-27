@@ -138,6 +138,10 @@ pub enum OpenPayload {
     /// ("New bill" on `vendors.enter_bill`, "New check" on
     /// `vendors.write_check`).
     InboxDraft(crate::screens::receipt_inbox::InboxDraft),
+    /// A04 WP-F2: a document draft opened in its form in draft mode
+    /// (`screens::doc_review::review::open`; Enter Bill, Record Card
+    /// Charge, Write Check).
+    DocumentDraft(crate::screens::doc_review::review::DraftOpen),
 }
 
 /// Stand-in for a screen a later phase builds.

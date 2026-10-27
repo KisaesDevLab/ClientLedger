@@ -421,9 +421,14 @@ impl EnterBillScreen {
         self.save.refusal = None;
         self.save.stale = false;
         self.save.notice = None;
-        if !self.is_dirty() {
+        // A04 draft mode: a document is entered even when nothing was
+        // typed (its checks still run).
+        if !self.is_dirty() && self.draft.is_none() {
             self.follow_up(intent);
             return true;
+        }
+        if self.draft_locked() {
+            return false;
         }
         let form = self.compose();
         let checked = match self.context_check(&form) {
@@ -445,6 +450,10 @@ impl EnterBillScreen {
             self.closing_prompt
                 .ask(Pending::Save(intent), true, self.closing);
             return false;
+        }
+        // A04 draft mode: Accept is the convert, never `POST /bills`.
+        if self.draft.is_some() {
+            return self.accept_draft(&checked, intent, password);
         }
         let draft = to_draft(&checked, self.attach.draft, self.caps().lines);
         let lists = Arc::clone(&self.lists);
@@ -662,7 +671,7 @@ impl EnterBillScreen {
         }
     }
 
-    fn closing_failed(&mut self, e: &ApiError, pending: Pending) -> bool {
+    pub(crate) fn closing_failed(&mut self, e: &ApiError, pending: Pending) -> bool {
         let supported = self.caps().closing;
         self.closing_prompt
             .failed(e, pending, supported, self.closing)
@@ -873,7 +882,12 @@ impl EnterBillScreen {
         let sent = match pending {
             Pending::Save(intent) => {
                 self.start_save(intent, Some(secret));
-                self.save.task.is_some() || !self.closing_prompt.dialog_open()
+                self.save.task.is_some()
+                    || self
+                        .draft
+                        .as_ref()
+                        .is_some_and(|s| s.locked() || s.closed())
+                    || !self.closing_prompt.dialog_open()
             }
             Pending::Void(reason) => {
                 self.send_void(&reason, false, Some(secret));

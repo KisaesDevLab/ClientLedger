@@ -288,6 +288,12 @@ pub const COMMANDS: &[Command] = &[
     // A04: Accept on every form that takes a reading (Enter Bill, Record
     // Card Charge, Write Check); was `bill.accept_read` before A04.
     cmd("form.accept_read", "Accept These Values", None, 7, alt('A'), Scope::Form),
+    // A04 draft mode (D2, D3): a document's form. Attach to selected and
+    // Enter as new act only while the attach dialog is up; Enter there
+    // never attaches (Q-A04e).
+    cmd("form.attach_selected", "Attach to Selected Transaction", None, 7, alt('T'), Scope::Form),
+    cmd("form.enter_as_new", "Enter as New", None, 7, alt('E'), Scope::Form),
+    cmd("form.discard_document", "Discard Document\u{2026}", None, 7, None, Scope::Form),
     // Document preview (P17): the source-document card and its full-size tab
     cmd("viewer.zoom_in", "Zoom In on the Document", None, 8, key(Mods::CMD, Key::Equals), Scope::Viewer),
     cmd("viewer.zoom_out", "Zoom Out on the Document", None, 8, key(Mods::CMD, Key::Minus), Scope::Viewer),

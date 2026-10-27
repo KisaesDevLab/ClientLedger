@@ -165,7 +165,9 @@ impl WriteCheckScreen {
             self.template_slot(ui);
             ui.separator();
             let mut later = self.header.current().print_later;
-            let can_print_later = !working && (self.editing.is_none() || self.check_edit());
+            // A04 draft mode: a check already written is never printed later.
+            let can_print_later =
+                !working && (self.editing.is_none() || self.check_edit()) && !self.draft.on();
             let r = ui
                 .add_enabled(
                     can_print_later,
@@ -188,6 +190,10 @@ impl WriteCheckScreen {
             ClosingClick::Submit => self.submit_closing(),
             ClosingClick::Cancel => self.closing_prompt.cancel(),
             ClosingClick::None => {}
+        }
+        // A04 draft mode: where the values came from, Accept, Discard.
+        if self.draft.on() {
+            self.draft_banner(ui, tokens);
         }
         if let Some(key) = self.save.notice {
             form::hint(ui, tokens, &t(key));
@@ -318,7 +324,10 @@ impl WriteCheckScreen {
 
     fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let read_only = self.editing.as_ref().is_some_and(|e| e.read_only);
-        let enabled = self.save.task.is_none() && !self.closing_prompt.dialog_open() && !read_only;
+        let enabled = self.save.task.is_none()
+            && !self.closing_prompt.dialog_open()
+            && !read_only
+            && !self.draft_locked();
         // A read-only check keeps readable text (contrast >= 4.5:1).
         header::locked_scope(ui, true, read_only, |ui| self.bank_row(ui, tokens, enabled));
         ui.add_space(10.0);

@@ -167,7 +167,7 @@ impl CardAttach {
         };
     }
 
-    fn show(&mut self, id: AttachmentId, source: DocSource) {
+    pub(crate) fn show(&mut self, id: AttachmentId, source: DocSource) {
         self.shown = Some(id);
         self.viewer.set_full_size_button(true);
         self.viewer.open(source);

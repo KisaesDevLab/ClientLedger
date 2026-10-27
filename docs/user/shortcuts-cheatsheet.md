@@ -86,6 +86,8 @@
 - `Ctrl+Page Down` Next Section
 - `Ctrl+Page Up` Previous Section
 - `Alt+A` Accept These Values
+- `Alt+T` Attach to Selected Transaction
+- `Alt+E` Enter as New
 - `Ctrl+N` New List Entry
 - `Ctrl+Shift+I` Make Inactive or Active Again
 - `Ctrl+Shift+H` Include Inactive Entries

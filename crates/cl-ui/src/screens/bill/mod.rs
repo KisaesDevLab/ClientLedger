@@ -34,7 +34,9 @@
 
 mod attach;
 pub mod doc_read;
+// A04 WP-F2: draft mode (a document from Review Documents).
 mod doc_read_local;
+mod draft;
 mod form;
 pub mod items;
 mod prefill;
@@ -385,6 +387,9 @@ pub struct EnterBillScreen {
     /// The names, accounts, tags or items changed elsewhere while the form
     /// had unsaved edits: read them again once it is clean.
     pub(crate) lists_stale: bool,
+    /// A04 draft mode: the document draft this form enters (Accept is
+    /// Save & Close / Save & New, sent to `convert`; `draft.rs`).
+    pub(crate) draft: Option<crate::screens::doc_review::review::DraftSession>,
 }
 
 /// The tag list `check` needs for the header-tag defaults.
@@ -487,6 +492,7 @@ impl EnterBillScreen {
             after_save_nav: None,
             bus: crate::data_bus::Subscription::detached(),
             lists_stale: false,
+            draft: None,
         };
         s.bus = s.link.bus().subscribe();
         s.start_load();
@@ -1026,6 +1032,10 @@ impl EnterBillScreen {
             || self.attach.busy()
             || self.panel.busy()
             || self.read.busy()
+            || self
+                .draft
+                .as_ref()
+                .is_some_and(crate::screens::doc_review::review::DraftSession::busy)
     }
 
     /// The control-channel state: flags, counts, ids and dates only (never
@@ -1122,6 +1132,7 @@ impl EnterBillScreen {
                     .map(|w| d.bills.writes.saturating_sub(w))
             }),
             "layout": self.layout.json(),
+            "draft": self.draft_state(),
         });
         for part in [more, rest, self.closing_prompt.state_json(caps.closing)] {
             if let (Value::Object(m), Value::Object(c)) = (&mut v, part) {
@@ -1153,13 +1164,20 @@ impl Screen for EnterBillScreen {
         }
         self.poll();
         self.hear_changes();
+        // A04 draft mode: the draft's load, convert and questions.
+        self.poll_draft(ui.ctx());
         if self.inputs.rev != self.header.revision() {
             self.sync_inputs();
         }
         // A finished reading fills the form (WP7): read, never accepted.
         self.poll_read();
         self.panel_tick();
+        self.compare_before();
         self.draw(ui);
+        self.compare_after();
+        if let Some(d) = self.draft.as_mut() {
+            d.dialogs_ui(ui.ctx(), self.money_style);
+        }
         // A read field the owner changed counts as accepted.
         self.track_read();
         // Leaving the lines (Q-P13r b).
@@ -1200,6 +1218,9 @@ impl Screen for EnterBillScreen {
 
     fn command(&mut self, id: CommandId) -> bool {
         if let Some(handled) = self.closing_prompt.command(id) {
+            return handled;
+        }
+        if let Some(handled) = self.draft_command(id) {
             return handled;
         }
         if self.attach.viewer.has_focus() && self.attach.viewer.command(id) {
@@ -1248,8 +1269,22 @@ impl Screen for EnterBillScreen {
                 self.take_inbox_draft(d);
                 true
             }
+            OpenPayload::DocumentDraft(o) => {
+                self.open_draft(o);
+                true
+            }
             OpenPayload::Document(_) => false,
         }
+    }
+
+    /// The compare tools for the pop-out viewer (A04 D4, S7).
+    fn compare(&self) -> Option<crate::widgets::compare::CompareView> {
+        self.draft.as_ref().map(|d| d.compare.view())
+    }
+
+    /// The pop-out viewer's compare events (the shell's outbox).
+    fn on_viewer_event(&mut self, event: crate::widgets::compare::CompareEvent) {
+        self.on_compare_event(event);
     }
 }
 
