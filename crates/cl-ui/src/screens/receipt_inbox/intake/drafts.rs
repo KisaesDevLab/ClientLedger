@@ -84,9 +84,14 @@ pub(crate) enum ClaimAnswer {
     /// 409 naming another computer's live draft of the same bytes:
     /// `duplicate` + `follows`, the extra copy deleted.
     Elsewhere(DocumentDraftId),
-    /// The winner was entered already, or 422 `ATTACHMENT_NOT_DRAFT` (the
-    /// upload is on a record): handled.
+    /// The winner (reading one of this entry's uploads) was entered
+    /// already, or 422 `ATTACHMENT_NOT_DRAFT` (the upload is on a record):
+    /// handled.
     Entered,
+    /// The winner is another computer's draft, entered already: handled,
+    /// and this entry's own upload (still on a draft key) is deleted like a
+    /// followed draft's extra copy (review L1).
+    EnteredElsewhere(DocumentDraftId),
     /// 404: the upload is gone (a restore, or drafts reset): forget it and
     /// upload again once.
     Gone,
@@ -105,6 +110,7 @@ impl ClaimAnswer {
             ClaimAnswer::Own(_) => "own",
             ClaimAnswer::Elsewhere(_) => "elsewhere",
             ClaimAnswer::Entered => "entered",
+            ClaimAnswer::EnteredElsewhere(_) => "entered_elsewhere",
             ClaimAnswer::Gone => "gone",
             ClaimAnswer::Refused => "refused",
             ClaimAnswer::Unsupported => "unsupported",
@@ -155,7 +161,7 @@ pub(crate) fn winner_answer(
                 ClaimAnswer::Retry
             }
         }
-        Ok(d) if d.status == DraftStatus::Converted => ClaimAnswer::Entered,
+        Ok(d) if d.status == DraftStatus::Converted => ClaimAnswer::EnteredElsewhere(d.id),
         Ok(d) if d.status.is_live() => ClaimAnswer::Elsewhere(d.id),
         Err(cl_api::ApiError::Forbidden { .. }) => ClaimAnswer::Refused,
         // Discarded or gone since the 409, or no answer: claim again.
@@ -744,6 +750,15 @@ impl Intake {
             }
             ClaimAnswer::Entered => {
                 self.drafts.keys.remove(&identity.path_hash);
+                self.handled(identity);
+            }
+            ClaimAnswer::EnteredElsewhere(id) => {
+                self.drafts.keys.remove(&identity.path_hash);
+                // Follows the entered draft, so `drive` deletes this
+                // entry's own extra copy (restart-safe); then handled.
+                if self.state.claimed_elsewhere(&c, identity, &id.to_string()) {
+                    self.save_state();
+                }
                 self.handled(identity);
             }
             ClaimAnswer::Gone => {
@@ -1680,8 +1695,15 @@ mod unit {
             ClaimAnswer::Elsewhere(id()),
             "no uploads: never adopted"
         );
+        // Another computer's draft, entered: our own upload is an orphan to
+        // delete (review L1); our own entered draft is plainly handled.
         let entered = Ok(draft(D1, DraftStatus::Converted, THEIRS));
-        assert_eq!(winner_answer(&entered, &ours), ClaimAnswer::Entered);
+        assert_eq!(
+            winner_answer(&entered, &ours),
+            ClaimAnswer::EnteredElsewhere(id())
+        );
+        let ours_entered = Ok(draft(D1, DraftStatus::Converted, OURS));
+        assert_eq!(winner_answer(&ours_entered, &ours), ClaimAnswer::Entered);
         let discarded = Ok(draft(D1, DraftStatus::Discarded, THEIRS));
         assert_eq!(winner_answer(&discarded, &ours), ClaimAnswer::Retry);
         assert_eq!(

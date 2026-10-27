@@ -1202,6 +1202,11 @@ impl Intake {
             if self.moving.contains(ph) || !self.due(ph, now) || self.deleting(&e.file) {
                 continue;
             }
+            // A04 (review L1): its extra copy in the engine goes first; the
+            // entry (which remembers the upload) stays until then.
+            if matches!(e.doc_draft, DraftLink::Follows(_)) && !e.attachments.is_empty() {
+                continue;
+            }
             let Some(ri) = e
                 .folder
                 .and_then(|id| self.runs.iter().position(|r| r.folder.id == id))

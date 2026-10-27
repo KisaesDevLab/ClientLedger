@@ -598,15 +598,32 @@ impl CardChargeScreen {
         s.accept(accept)
     }
 
-    /// "Remember card ending 1234": a card charge whose account has no
-    /// digits yet (Q-A04j).
+    /// "Remember card ending 1234": a card charge on a credit card account
+    /// with no digits yet (Q-A04j), and no other account already has the
+    /// printed digits (review L3: two cards with one ending would make the
+    /// card match ambiguous).
     fn card_offer(&self) -> bool {
+        let printed = self
+            .draft
+            .session
+            .as_ref()
+            .and_then(DraftSession::printed_card);
+        let taken = printed.is_some_and(|p| {
+            self.books.accounts.iter().any(|a| {
+                Some(a.id) != self.card()
+                    && a.card_last4
+                        .as_ref()
+                        .is_some_and(|d| d.as_str() == p.as_str())
+            })
+        });
         !self.draft.expense
+            && !taken
             && self.card().is_some_and(|c| {
-                self.books
-                    .accounts
-                    .iter()
-                    .any(|a| a.id == c && a.card_last4.is_none())
+                self.books.accounts.iter().any(|a| {
+                    a.id == c
+                        && a.card_last4.is_none()
+                        && a.fields.detail_type.as_deref() == Some(cl_api::CREDIT_CARD_DETAIL_TYPE)
+                })
             })
     }
 
