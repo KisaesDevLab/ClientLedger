@@ -301,6 +301,25 @@ impl std::fmt::Debug for AttachDialog {
     }
 }
 
+/// The non-empty parts joined with " · ".
+fn joined(parts: &[String]) -> String {
+    parts
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ")
+}
+
+/// The text with its first letter upper case (a row starts a sentence).
+fn capitalized(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 /// The words for a row kind.
 fn kind_key(kind: RowKind) -> &'static str {
     match kind {
@@ -535,14 +554,18 @@ impl AttachDialog {
         ui.add_space(6.0);
         // The document's own values.
         let d = &self.doc;
+        // Only the values there are, no dangling separators (UI item 7).
         let doc_line = t_with(
             "doc_review.attach.document",
-            &[
-                ("date", &Self::date(d.date)),
-                ("payee", d.payee.as_deref().unwrap_or("")),
-                ("amount", &Self::money(d.amount, style)),
-                ("account", d.account.as_deref().unwrap_or("")),
-            ],
+            &[(
+                "details",
+                &joined(&[
+                    Self::date(d.date),
+                    d.payee.clone().unwrap_or_default(),
+                    Self::money(d.amount, style),
+                    d.account.clone().unwrap_or_default(),
+                ]),
+            )],
         );
         ui.add(egui::Label::new(RichText::new(doc_line).strong()).wrap());
         ui.add_space(6.0);
@@ -554,22 +577,21 @@ impl AttachDialog {
                 Some(MatchLabel::Possible) => t("doc_review.attach.label.possible"),
                 None => String::new(),
             };
-            let status = if r.attachable {
-                t("doc_review.attach.status.posted")
-            } else {
-                t("doc_review.attach.status.info_only")
+            let status = match (r.attachable, r.kind_key) {
+                (true, _) => t("doc_review.attach.status.posted"),
+                (false, "doc_review.attach.kind.bill") => t("doc_review.attach.status.info_only"),
+                (false, _) => t("doc_review.attach.status.info_other"),
             };
-            let text = t_with(
-                "doc_review.attach.row",
-                &[
-                    ("kind", &t(r.kind_key)),
-                    ("date", &Self::date(r.date)),
-                    ("payee", r.payee.as_deref().unwrap_or("")),
-                    ("amount", &Self::money(r.amount, style)),
-                    ("status", &status),
-                    ("label", &label),
-                ],
+            let head = t_with(
+                "doc_review.attach.row.head",
+                &[("kind", &t(r.kind_key)), ("date", &Self::date(r.date))],
             );
+            let text = capitalized(&joined(&[
+                head,
+                r.payee.clone().unwrap_or_default(),
+                Self::money(r.amount, style),
+                format!("{status} {label}").trim().to_string(),
+            ]));
             let resp = ui.selectable_label(self.selected == Some(i), text);
             if focus && i == 0 {
                 resp.request_focus();
@@ -612,8 +634,9 @@ impl AttachDialog {
             if r.clicked() && !self.confirming {
                 answer = Some(DialogAnswer::EnterAsNew(self.ids()));
             }
-            // The default button: Enter on it cancels, never attaches.
-            let cancel = ui.button(t("doc_review.attach.cancel"));
+            // The default button (drawn as one, UI item 8): Enter on it
+            // cancels, never attaches.
+            let cancel = crate::widgets::primary_button(ui, &t("doc_review.attach.cancel"));
             if cancel.clicked() && !self.confirming {
                 answer = Some(DialogAnswer::Cancel);
             }
@@ -647,7 +670,7 @@ impl AttachDialog {
             if ui.button(t("doc_review.attach.confirm.attach")).clicked() {
                 answer = self.confirm();
             }
-            let cancel = ui.button(t("doc_review.attach.cancel"));
+            let cancel = crate::widgets::primary_button(ui, &t("doc_review.attach.cancel"));
             if std::mem::take(&mut self.focus_confirm_cancel) {
                 cancel.request_focus();
             }
@@ -850,6 +873,22 @@ mod tests {
         let b = AttachDialog::from_duplicates(&probe(None), &bills, true, true);
         assert!(b.rows[0].attachable);
         assert!(!b.rows[1].attachable, "same reference, another total");
+    }
+
+    /// UI check item 7: no dangling separators; a row starts upper case.
+    #[test]
+    fn rows_and_the_document_line_read_cleanly() {
+        assert_eq!(
+            joined(&[
+                "3/14/2026".into(),
+                String::new(),
+                "25.00".into(),
+                " ".into()
+            ]),
+            "3/14/2026 \u{b7} 25.00"
+        );
+        assert_eq!(capitalized("expense of 3/14"), "Expense of 3/14");
+        assert_eq!(capitalized(""), "");
     }
 
     #[test]

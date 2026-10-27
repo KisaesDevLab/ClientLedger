@@ -545,15 +545,18 @@ impl Overlay {
                             Stroke::new(width, tokens.warn),
                             StrokeKind::Outside,
                         );
-                        // S15: not by colour alone.
-                        let c = Pos2::new(r.max.x, r.min.y);
-                        painter.circle_filled(c, 7.0, tokens.warn);
+                        // S15: not by colour alone. The mark sits just left
+                        // of the box, level with it: on its top-right
+                        // corner it covered the next box on the line (UI
+                        // check item 9). Paired fill and text colours.
+                        let c = Pos2::new(r.min.x - 8.0, r.center().y);
+                        painter.circle_filled(c, 6.0, tokens.warn_badge);
                         painter.text(
                             c,
                             egui::Align2::CENTER_CENTER,
                             "?",
-                            egui::FontId::proportional(11.0),
-                            Color32::WHITE,
+                            egui::FontId::proportional(10.0),
+                            tokens.on_warn,
                         );
                     }
                     TargetLevel::NotFound => {
