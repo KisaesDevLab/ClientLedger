@@ -125,9 +125,21 @@ jobs:
           set -euo pipefail
           # The tests' own `cargo build` of the test worker is a no-op now;
           # offline so cargo can't look anything up either.
-          CARGO_NET_OFFLINE=true strace -f -qq -o "$RUNNER_TEMP/net.log" \
-            -e trace=execve,socket,connect,sendto,sendmsg \
-            "$DOCREAD_TESTS" --test-threads=1
+          # strace 5.16 (ubuntu-22.04) sometimes dies with
+          # "ptrace(PTRACE_LISTEN...): Input/output error" while a test kills
+          # a worker; that alone is retried (twice). Any other failure fails.
+          for attempt in 1 2 3; do
+            rc=0
+            CARGO_NET_OFFLINE=true strace -f -qq -o "$RUNNER_TEMP/net.log" \
+              -e trace=execve,socket,connect,sendto,sendmsg \
+              "$DOCREAD_TESTS" --test-threads=1 2> >(tee "$RUNNER_TEMP/strace-err.txt" >&2) || rc=$?
+            if [ "$rc" -eq 0 ]; then break; fi
+            if [ "$attempt" -lt 3 ] && grep -q 'ptrace(PTRACE_LISTEN' "$RUNNER_TEMP/strace-err.txt"; then
+              echo "::warning::strace PTRACE_LISTEN error (attempt $attempt); retrying"
+              continue
+            fi
+            exit "$rc"
+          done
           ./target/debug/xtask docread-netcheck "$RUNNER_TEMP/net.log"
       - uses: actions/upload-artifact@v4
         if: failure()
