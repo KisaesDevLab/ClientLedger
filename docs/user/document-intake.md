@@ -78,7 +78,7 @@ If the folder already holds files, ClientLedger brings them in, oldest first. If
 
 ## Kind
 
-**Kind** says what new files in this folder are by default: **Bills**, **Receipts**, or **Let ClientLedger decide**. You can still choose any action for a file in the inbox.
+**Kind** says what new files in this folder are by default: **Bills**, **Receipts**, **Vendor statements**, or **Let ClientLedger decide**. Files in a **Vendor statements** folder open in Match Vendor Statement, where ClientLedger reads the lines for you to check (see "Match a vendor statement"). You can still choose any action for a file in the inbox.
 
 ## Leave originals where they are
 

@@ -352,6 +352,8 @@ Search order for the programs (never `PATH`): `CL_DOCREAD_EXE` / `CL_OCR_PATH` (
 - Caps: PGM 32 MiB and at most 3400 × 4400 (`P5`, maxval 255, exact length; checked by the host before tesseract sees it), TSV 4 MiB, `JobDone` 4 MiB (checked before parsing). File names, contacts and accounts never cross; templates do. Only the first 10 pages are read.
 - Test hooks (`%CL-TEST-HOOK:` documents) exist only in a worker built with its `test-support` feature, which refuses to compile without debug assertions (Q-A03t).
 
+**Statements (A06).** A third document kind, `statement`, is read for Match Vendor Statement (Q-A06a-h, Q-297-300). Protocol v5 adds it; the worker reply limit rises from 4 to 8 MiB. Only the first 20 pages are read (bills read 10) and at most 2,000 lines are kept; the rest are left out and a check says so. Layouts learned from accepted statements use a `stmt:` fingerprint prefix: bill reads never use them and statement reads use only them, and they learn header fields only. Checks (sum, running balance, dates, duplicates) flag and never change a value. A statement from a Vendor statements folder or Review Documents is a statement draft (engine U-94, capability `document-drafts-statement-v1`): a label-only draft kind that is never converted or attached. "Save this statement with the vendor" attaches the file to the vendor as a contact attachment. The balance line reads the engine's `reports/vendor-statement` as CSV for exact amounts and is display only.
+
 **Limits** (`DocreadLimits::default()`, Q-A03c):
 
 | | Windows | Linux | macOS |
