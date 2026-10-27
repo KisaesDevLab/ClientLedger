@@ -2395,7 +2395,8 @@ const U94: &str = "U-94";
 /// statement draft keeps the kind, its reading stores as `statement`, and
 /// "Save with the vendor" files it on the vendor the way the desktop does
 /// (review S1): the file can't be moved while the draft reads it, so a
-/// copy is uploaded to the vendor, then the draft is discarded and its own
+/// copy is uploaded to the vendor (Try again looks for it there first:
+/// uploads aren't replayed by key), then the draft is discarded and its own
 /// file deleted. Without the capability, records PENDING(U-94) and checks
 /// today's behaviour: the typed claim sends nothing, the engine refuses the
 /// kind, and a statement reading goes as `unknown`.
@@ -2456,15 +2457,9 @@ fn statement_drafts(h: &Harness) {
         "{e:?}"
     );
     let name = "Statement 2026-10-01 to 2026-10-31.pdf";
-    let upload_key = key();
     let kept = h
-        .run(s.attachments().upload(to, name, &bytes, upload_key.clone()))
+        .run(s.attachments().upload(to, name, &bytes, key()))
         .unwrap_or_else(|e| panic!("keep: {e:?}"));
-    // Try again with the same key files nothing twice.
-    let again = h
-        .run(s.attachments().upload(to, name, &bytes, upload_key))
-        .unwrap_or_else(|e| panic!("replay: {e:?}"));
-    assert_eq!(again.id, kept.id);
     assert_eq!(kept.attachable_type, "contact");
     assert_eq!(kept.attachable_id, v.to_string());
     assert_eq!(kept.file_name, name);

@@ -201,8 +201,10 @@ pub(crate) struct StatementDoc {
     /// "Save this statement with the vendor" (default on).
     pub keep: bool,
     pub keep_task: Option<(KeepKey, Task<()>)>,
-    /// The keys of a keep, made once per vendor, period and document, so
-    /// Try again replays an upload that timed out but was saved (S1).
+    /// The keys of a keep, made once per vendor, period and document (S1).
+    /// Set from the first attempt on, so Try again knows it is one: it
+    /// first looks for the file already on the vendor (an upload that
+    /// timed out but was saved; the engine doesn't replay uploads by key).
     pub keep_keys: Option<(KeepKey, KeepKeys)>,
     /// The demo engine has the file on the vendor for this keep already
     /// (its upload isn't keyed).
@@ -573,6 +575,7 @@ impl StatementMatchScreen {
         // one's: it never keeps this file (review B2).
         self.outcome = None;
         self.reading = None;
+        self.books_failed = None;
         self.doc.doc_no += 1;
         self.doc.kept = None;
         self.doc.keep_failed = false;
@@ -1117,7 +1120,8 @@ impl StatementMatchScreen {
         let to = AttachTo::Contact(key.vendor);
         let draft = self.doc.draft;
         self.doc.keep_failed = false;
-        if self.doc.keep_keys.as_ref().is_none_or(|(k, _)| *k != key) {
+        let retry = self.doc.keep_keys.as_ref().is_some_and(|(k, _)| *k == key);
+        if !retry {
             self.doc.keep_keys = Some((
                 key,
                 KeepKeys {
@@ -1158,11 +1162,24 @@ impl StatementMatchScreen {
             key: None,
         };
         let task = group.write(&session, label, move |s| async move {
-            // The file is on the vendor before anything else changes; the
-            // same key on Try again replays an upload that was saved.
-            s.attachments()
-                .upload(to, &name, &bytes, keys.upload)
-                .await?;
+            // The file is on the vendor before anything else changes. On
+            // Try again, a file of this name and size already there is the
+            // last attempt's: it isn't filed twice.
+            let there = retry && {
+                let files = s
+                    .attachments()
+                    .list(to, cl_api::PageRequest::first_max())
+                    .await?;
+                files
+                    .data
+                    .iter()
+                    .any(|f| f.file_name == name && f.file_size == u64::try_from(bytes.len()).ok())
+            };
+            if !there {
+                s.attachments()
+                    .upload(to, &name, &bytes, keys.upload)
+                    .await?;
+            }
             if let Some(d) = draft {
                 // Then the draft leaves Review Documents (discard is
                 // idempotent), and its own copy of the file goes. That copy
