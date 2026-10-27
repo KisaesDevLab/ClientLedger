@@ -90,12 +90,21 @@ const PANE_HEIGHT: f32 = 420.0;
 /// From this width the document pane sits beside the lines.
 pub(crate) const SIDE_BY_SIDE: f32 = 1000.0;
 /// The pane's share of the width at first (the owner drags the divider).
-const PANE_SHARE: f32 = 0.45;
+const PANE_SHARE: f32 = 0.4;
 /// The narrowest the pane and the form column get beside each other.
 const PANE_MIN: f32 = 320.0;
 const FORM_MIN: f32 = 480.0;
 /// The divider between them.
 const DIVIDER: f32 = 10.0;
+
+/// How tall the docked pane is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum PaneHeight {
+    /// Beside the lines: the column's height.
+    Beside(f32),
+    /// Above the form: its usual height, at most this.
+    Above(f32),
+}
 
 /// A statement draft opened from Review Documents (U-94).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1538,16 +1547,9 @@ impl StatementMatchScreen {
                                             .color(tokens.text_secondary),
                                     );
                                 } else {
+                                    // Accept first, so it stays in view
+                                    // beside the page; the mark after it.
                                     ui.horizontal(|ui| {
-                                        let note = if m.unsure {
-                                            RichText::new(t("statement.read.unsure"))
-                                                .color(tokens.warn_text)
-                                                .strong()
-                                        } else {
-                                            RichText::new(t("statement.read.caption"))
-                                                .color(tokens.text_secondary)
-                                        };
-                                        ui.label(note.size(12.0));
                                         if ui
                                             .button(t("statement.read.accept"))
                                             .on_hover_text(t_with(
@@ -1558,6 +1560,15 @@ impl StatementMatchScreen {
                                         {
                                             accept = Some(m.line);
                                         }
+                                        let note = if m.unsure {
+                                            RichText::new(t("statement.read.unsure"))
+                                                .color(tokens.warn_text)
+                                                .strong()
+                                        } else {
+                                            RichText::new(t("statement.read.caption"))
+                                                .color(tokens.text_secondary)
+                                        };
+                                        ui.label(note.size(12.0));
                                     });
                                 }
                                 ui.end_row();
@@ -1586,10 +1597,9 @@ impl StatementMatchScreen {
         }
     }
 
-    /// The document pane: docked `height` tall (beside the lines: the
-    /// column's height; `None`: above the form), or the one-line Dock row
-    /// while popped out.
-    pub(crate) fn statement_pane_ui(&mut self, ui: &mut Ui, tokens: &Tokens, height: Option<f32>) {
+    /// The document pane, docked (see [`PaneHeight`]), or the one-line
+    /// Dock row while popped out.
+    pub(crate) fn statement_pane_ui(&mut self, ui: &mut Ui, tokens: &Tokens, height: PaneHeight) {
         if self.doc.viewer.source().is_none() {
             return;
         }
@@ -1603,8 +1613,11 @@ impl StatementMatchScreen {
                 DocPane::show(ui, &mut self.doc.viewer, tokens);
             } else {
                 let w = ui.available_width();
-                // The card's frame takes a little of the column.
-                let h = height.map_or(PANE_HEIGHT, |h| (h - 16.0).max(200.0));
+                let h = match height {
+                    // The card's frame takes a little of the column.
+                    PaneHeight::Beside(h) => (h - 16.0).max(200.0),
+                    PaneHeight::Above(most) => PANE_HEIGHT.min(most),
+                };
                 ui.allocate_ui(egui::vec2(w, h), |ui| {
                     ui.set_min_height(h);
                     DocPane::show(ui, &mut self.doc.viewer, tokens);
@@ -1644,7 +1657,7 @@ impl StatementMatchScreen {
             .show(&mut form_ui, |ui| {
                 // The column's right edge stays clear of the scroll bar.
                 ui.set_max_width(ui.available_width() - 8.0);
-                self.body_ui(ui, tokens, false);
+                self.body_ui(ui, tokens, None);
             });
 
         let id = ui.scope_id().with("statement/divider");
@@ -1675,7 +1688,7 @@ impl StatementMatchScreen {
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
         pane_ui.shrink_clip_rect(pane_rect);
-        self.statement_pane_ui(&mut pane_ui, tokens, Some(pane_rect.height()));
+        self.statement_pane_ui(&mut pane_ui, tokens, PaneHeight::Beside(pane_rect.height()));
         ui.advance_cursor_after_rect(full);
     }
 

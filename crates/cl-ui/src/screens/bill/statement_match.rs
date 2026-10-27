@@ -969,14 +969,14 @@ impl StatementMatchScreen {
     }
 
     /// The heading, the form, the read lines and the results; the
-    /// document pane above them when `pane_above`.
-    fn body_ui(&mut self, ui: &mut Ui, tokens: &Tokens, pane_above: bool) {
+    /// document pane above them, at most `pane_above` tall, when given.
+    fn body_ui(&mut self, ui: &mut Ui, tokens: &Tokens, pane_above: Option<f32>) {
         ui.add_space(8.0);
         form::heading(ui, tokens, &t("statement.heading"));
         form::hint(ui, tokens, &t("statement.intro"));
         ui.add_space(8.0);
-        if pane_above {
-            self.statement_pane_ui(ui, tokens, None);
+        if let Some(most) = pane_above {
+            self.statement_pane_ui(ui, tokens, read::PaneHeight::Above(most));
             ui.add_space(6.0);
         }
         self.input_ui(ui, tokens);
@@ -1032,10 +1032,13 @@ impl Screen for StatementMatchScreen {
         if docked && ui.available_width() >= read::SIDE_BY_SIDE {
             self.split_ui(ui, &tokens);
         } else {
+            // Above the form the pane is at most part of the window's
+            // height, so the form starts in view at any size and zoom.
+            let pane = (ui.available_height() * 0.6).max(160.0);
             egui::ScrollArea::both()
                 .id_salt("statement/body")
                 .auto_shrink([false, false])
-                .show(ui, |ui| self.body_ui(ui, &tokens, true));
+                .show(ui, |ui| self.body_ui(ui, &tokens, Some(pane)));
         }
     }
 

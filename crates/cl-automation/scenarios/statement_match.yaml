@@ -123,10 +123,52 @@ steps:
   - assert_state: {key: screen.to, equals: "2026-01-31"}
   - assert_exists: {role: label, label: "Lines read from the statement (4)"}
   - assert_disabled: {role: button, label: Match}
+  # The statement beside its lines (A06 UI review must-fix 1): at 1440 x 940
+  # the page, the read lines, their "check it" marks, each line's Accept,
+  # Accept all lines with its Alt+A chip and the greyed Match are on screen
+  # together, nothing cut or drawn over.
+  - assert_exists: {role: button, label: Pop out}
+  - assert_exists: {role: button, label: Accept all lines}
+  - assert_count: {target: {role: button, label: Accept}, count: 4}
+  - assert_count: {target: {role: label, label_contains: "check it"}, count: 4}
+  - assert_exists: {role: label, label: Alt A}
   - screenshot: read-statement
+  - assert_no_clipping:
+      ignore:
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        # The page itself: the line boxes of neighbouring statement lines
+        # touch by design (each is its own button over the printed line).
+        - {x: 900, y: 190, width: 520, height: 700}
+  # Line to spot: picking line 2 outlines it on the page; clicking line 4's
+  # box on the page picks line 4.
+  - click: {role: button, label: "2"}
+  - assert_state: {key: screen.statement.selected, equals: 1}
+  - screenshot: read-statement-line-picked
+  - click: {role: button, label: Line 4 on the page}
+  - assert_state: {key: screen.statement.selected, equals: 3}
+  # The read layout at the minimum window and 200%: the pane goes above the
+  # form, and nothing is drawn over anything.
+  - resize: {width: 960, height: 640}
+  - set_zoom: {percent: 200}
+  - assert_not_exists: {role: splitter, label_contains: Drag to share}
+  - screenshot: read-statement-z200
+  - assert_no_clipping:
+      ignore:
+        - {x: -4000, y: 70, width: 8480, height: 40}
+        # The window body scrolls, and so does the page inside the pane:
+        # only what lies past the body's bottom edge may be cut there.
+        - {x: 0, y: 250, width: 10000, height: 2000}
+  - scroll: {target: {role: label, label: Match a vendor statement}, to: end}
+  # (Scrolled, the read-lines table scrolls sideways inside its card by
+  # design, as the results' tables do: a screenshot, no clipping check.)
+  - screenshot: read-statement-z200-end
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}
+  - scroll: {target: {role: label, label: "Lines read from the statement (4)"}, to: start}
   - click: {role: combo_box, label: Vendor}
   - click: {role: button, label: Branson Equipment Rental}
-  - click: {role: button, label: Accept all lines}
+  # Alt+A accepts every read line, as on Enter Bill.
+  - key: Alt+A
   - assert_state: {key: screen.statement.pending, equals: 0}
   - assert_enabled: {role: button, label: Match}
   - click: {role: button, label: Match}
@@ -150,12 +192,23 @@ steps:
   - assert_state: {key: screen.last_handoff, equals: bill}
 
   # --- A06: a scanned statement (OCR in the worker) ---------------------------
+  # Clear forgets the vendor and the reading. Another vendor is picked first:
+  # the statement's layout was learned for Branson on the accept above, so
+  # the scan reads as Branson's, the picked vendor stays and a warning says
+  # so (spec step 2).
   - click: {role: button, label: Clear}
+  - assert_state: {key: screen.vendor, equals: false}
+  - assert_state: {key: screen.statement.document, equals: false}
+  - assert_state: {key: screen.statement.lines, equals: null}
+  - click: {role: combo_box, label: Vendor}
+  - click: {role: button, label: Ozark Mulch Supply}
   - type: {text: "fixtures/docs/statements/statement_scan.jpg", target: {role: text_input, label: Statement file}}
   - click: {role: button, label: Read file}
   - assert_state: {key: screen.statement.outcome, equals: read, within_ms: 180000}
   - assert_state: {key: screen.statement.problem, equals: null}
   - assert_state: {key: screen.statement.document, equals: true}
+  - assert_state: {key: screen.statement.vendor_differs, equals: true}
+  - assert_exists: {role: label, label_contains: "looks like it's from Branson Equipment Rental"}
   - screenshot: read-statement-scan
 
   # --- A06: a file that can't be read ------------------------------------------
@@ -165,6 +218,8 @@ steps:
   - assert_state: {key: screen.statement.problem, equals: statement.read.couldnt, within_ms: 60000}
   - assert_exists: {role: label, label: "Couldn't read this statement — type or paste the lines instead."}
   - assert_state: {key: screen.statement.lines, equals: null}
+  # No blank page: the pane closes.
+  - assert_not_exists: {role: button, label: Pop out}
   - screenshot: read-statement-unreadable
   - click: {role: button, label: Clear}
 
