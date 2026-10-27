@@ -1389,6 +1389,20 @@ struct JobClock {
     dispatched: Instant,
     deadline: Instant,
     pages: BTreeSet<u16>,
+    /// The box of a region job.
+    region: Option<Spot>,
+}
+
+impl JobClock {
+    /// Whether the worker may start `page` now (see [`may_start`]).
+    fn may_start(&self, page: u16) -> bool {
+        may_start(self.region, &self.pages, page)
+    }
+
+    /// A region job answered with more than the words in its box.
+    fn wrong_region(&self, reading: &Reading) -> bool {
+        self.region.is_some_and(|r| !is_region_reading(reading, r))
+    }
 }
 
 /// Run one batch on `w`, filling `outcomes`.
@@ -1419,7 +1433,6 @@ fn run_batch(
             region: regions.get(i).copied().flatten(),
         })
         .collect();
-    let regions_sent: Vec<Option<Spot>> = sent.iter().map(|j| j.region).collect();
     let template_counts: Vec<usize> = sent.iter().map(|j| j.templates.len()).collect();
     if !w.send(&ToWorker::Batch {
         jobs: sent,
@@ -1434,6 +1447,7 @@ fn run_batch(
             dispatched: now,
             deadline: now + limits.first_page,
             pages: BTreeSet::new(),
+            region: regions.get(i).copied().flatten(),
         };
         let outcome = loop {
             if cancel.load(Ordering::Relaxed) {
@@ -1457,14 +1471,7 @@ fn run_batch(
                 Err(RecvTimeoutError::Timeout) => continue,
             };
             match msg {
-                // A region job reads one page, once (security review L2):
-                // any other start is a bad reply.
-                FromWorker::PageStarted { job, page }
-                    if job == id
-                        && page < MAX_PAGES
-                        && regions_sent[k]
-                            .is_none_or(|r| r.page == page && !clock.pages.contains(&page)) =>
-                {
+                FromWorker::PageStarted { job, page } if job == id && clock.may_start(page) => {
                     clock.pages.insert(page);
                     clock.deadline = Instant::now() + limits.per_page;
                 }
@@ -1485,8 +1492,7 @@ fn run_batch(
                     clock.deadline = Instant::now() + limits.per_page;
                 }
                 FromWorker::JobDone { job, reading } if job == id => {
-                    if reading.validate(template_counts[k]).is_err()
-                        || regions_sent[k].is_some_and(|r| !is_region_reading(&reading, r))
+                    if reading.validate(template_counts[k]).is_err() || clock.wrong_region(&reading)
                     {
                         return BatchEnd::Killed(k, Kill::BadReply);
                     }
@@ -1511,6 +1517,13 @@ fn run_batch(
         }
     }
     BatchEnd::Done
+}
+
+/// Whether the worker may start `page` of a job: a page in range; for a
+/// region job only the box's page, once (security review L2). Any other
+/// start is a bad reply.
+fn may_start(region: Option<Spot>, started: &BTreeSet<u16>, page: u16) -> bool {
+    page < MAX_PAGES && region.is_none_or(|r| r.page == page && !started.contains(&page))
 }
 
 /// [`ocr_answer`] on a helper thread while this one keeps watching the
@@ -1991,6 +2004,25 @@ mod tests {
         log_line(b"thread 'main' panicked at C:\\x\\y.rs", "w", &mut other);
         log_line(b"   ", "w", &mut other);
         assert_eq!(other, 3);
+    }
+
+    /// Security review L2: a region job's worker may start only its page,
+    /// once; a whole read any page in range.
+    #[test]
+    fn a_region_job_may_start_only_its_page_once() {
+        let r = Some(Spot {
+            page: 2,
+            bbox: cl_docread::model::Bbox::PAGE,
+        });
+        let mut started = BTreeSet::new();
+        assert!(may_start(r, &started, 2));
+        assert!(!may_start(r, &started, 1));
+        assert!(!may_start(r, &started, 3));
+        started.insert(2);
+        assert!(!may_start(r, &started, 2), "twice");
+        assert!(may_start(None, &started, 2));
+        assert!(may_start(None, &started, 7));
+        assert!(!may_start(None, &started, MAX_PAGES));
     }
 
     #[test]
