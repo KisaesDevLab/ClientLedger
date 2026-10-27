@@ -35,7 +35,7 @@ Mark A06 in STATE.md like any other phase. Branch `phase/A06-statement-reading`;
 
 **Decisions:** Q-P17q, Q-283, Q-284, Q-285, Q-A03j, Q-A03k, Q-295–Q-300. **Mockup:** none; follow the shipped Match Vendor Statement screen and DESIGN.md › Document viewer until a mockup is drawn (Q-293).
 
-**Crates and files:** `crates/cl-docread/src/statement.rs` (new: statement header and line table), `crates/cl-docread/src/kind.rs` (statement kind), `crates/cl-ui/src/screens/statement_match/` (changed: Read a statement, document pane, line spots), `crates/cl-ui/src/reading/` (statement job), `crates/cl-company/src/intake/` (Vendor statements kind), `xtask/src/gen_invoices/` (synthetic statements), `fixtures/docs/read/statements/`, `crates/cl-automation/scenarios/statement_match.yaml`.
+**Crates and files:** `crates/cl-docread/src/statement.rs` (new: statement header and line table), `crates/cl-docread/src/kind.rs` (statement kind), `crates/cl-ui/src/screens/bill/statement_match.rs` (changed: Read a statement, document pane, line spots), `crates/cl-ui/src/reading/` (statement job), `crates/cl-company/src/intake/` (Vendor statements kind), `xtask/src/gen_invoices/` (synthetic statements), `fixtures/docs/read/statements/`, `crates/cl-automation/scenarios/statement_match.yaml`.
 
 **Steps**
 0. **Capability check** (engine-scout): can a statement file be kept with the vendor (an attachment on the contact, or a document draft of kind `statement`)? Can `vendor_layout_templates` hold a statement layout separate from the vendor's bill layout? Does the engine report the vendor's balance as of a date? Record gaps as U-94 (Q-220 rules if large). — `docs(upstream): A06 capability check`
