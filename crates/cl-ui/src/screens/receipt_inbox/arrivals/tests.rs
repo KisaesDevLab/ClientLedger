@@ -141,9 +141,42 @@ fn the_demo_window_lays_out_its_folders_and_copies_files_in() {
     let _ = link;
 }
 
+/// A04 claim gate: with document drafts every arrival is claimed, New
+/// check sends the owner to Review Documents (never the plain save path),
+/// and the state says how many are claimed.
+#[test]
+fn claimed_arrivals_open_from_review_documents() {
+    let (_dir, link, ctx, mut s) = setup();
+    until(&ctx, &mut s, "the demo files claimed", |st| {
+        st["arrived"] == 3 && st["drafts"]["claimed"] == 3
+    });
+    let st = s.state();
+    assert_eq!(st["drafts"]["on"], true, "{st}");
+    assert_eq!(st["drafts"]["pending"], 0, "{st}");
+    assert_eq!(st["drafts"]["elsewhere"], 0, "{st}");
+    let png = row(&ctx, "Ozark Feed receipt.png");
+    assert_eq!(png.link, "own");
+    s.select_row(&ctx, &png);
+    until(&ctx, &mut s, "the PNG read", |st| st["loaded"] == true);
+    let f = Frame::read(&ctx);
+    s.new_form(&ctx, &f, &png, FormKind::Check);
+    assert_eq!(s.arrivals.problem, Some("inbox.claim.review"));
+    assert!(
+        !link
+            .drain()
+            .into_iter()
+            .any(|e| matches!(e, CompanyEvent::OpenWith(..))),
+        "no form opened on the plain path"
+    );
+    // Copy anyway is still offered for the local duplicate (no claim).
+    assert_eq!(row(&ctx, "Ozark Feed receipt (copy).png").link, "none");
+}
+
 #[test]
 fn new_check_opens_with_the_arrival_draft_and_a_tiff_shows() {
     let (_dir, link, ctx, mut s) = setup();
+    // A01's path: an engine without document drafts.
+    link.demo_state().expect("demo").drafts.enabled = false;
     until(&ctx, &mut s, "the demo files in", |st| st["arrived"] == 3);
     // TIFF (A02): it shows in the viewer like any other file.
     let tif = row(&ctx, "Galena Gravel fax.tif");
