@@ -270,7 +270,7 @@ impl Canon {
                 lines: wire_lines(v, "accountId")?,
                 ..Canon::default()
             },
-            DraftKind::Unknown => return None,
+            DraftKind::Statement | DraftKind::Unknown => return None,
         })
     }
 }

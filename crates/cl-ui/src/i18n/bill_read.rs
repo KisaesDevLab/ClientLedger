@@ -69,6 +69,12 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bill.read.check.page_not_read", "A page couldn't be read. Check the document."),
     ("bill.read.check.pages_skipped", "Only the first 10 pages were read."),
     ("bill.read.check.kind", "It isn't clear this is a bill. Check the document."),
+    // A06: vendor statement checks (flagged, never adjusted).
+    ("bill.read.check.stmt_sum", "The lines don't add up to the closing balance less the opening balance. Check the statement."),
+    ("bill.read.check.stmt_running", "On line {line}, the running balance isn't the one before plus the line's amount."),
+    ("bill.read.check.stmt_period", "Line {line} is dated outside the statement period."),
+    ("bill.read.check.stmt_duplicate", "Line {line} has the same date, number and amount as another line."),
+    ("bill.read.check.stmt_vendor", "This statement looks like it's from a different vendor than the one chosen."),
     // A03 fix pass (review findings).
     ("bill.read.check.lines_total", "The lines, tax and fees add up to {expected}, but the document's total is {found}."),
     ("bill.read.check.lines_total.plain", "The lines, tax and fees don't add up to the document's total."),

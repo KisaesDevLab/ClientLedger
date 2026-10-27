@@ -333,7 +333,9 @@ pub fn doc_kind(k: DraftKind) -> DocKind {
         DraftKind::CardCharge => DocKind::CardCharge,
         DraftKind::Check => DocKind::Check,
         DraftKind::CashExpense => DocKind::CashExpense,
-        DraftKind::Unknown => DocKind::Unknown,
+        // A06 WP-S2: a statement draft opens Match Vendor Statement, not
+        // the review form; until then it reads as not known.
+        DraftKind::Statement | DraftKind::Unknown => DocKind::Unknown,
     }
 }
 
@@ -441,6 +443,7 @@ fn model_kind(k: DraftKind) -> cl_docread::model::DocKind {
         DraftKind::CardCharge => M::CardCharge,
         DraftKind::Check => M::Check,
         DraftKind::CashExpense => M::CashExpense,
+        DraftKind::Statement => M::Statement,
         DraftKind::Unknown => M::Unknown,
     }
 }
@@ -1189,7 +1192,7 @@ impl DraftSession {
                         if let Some(service) = crate::reading::shared() {
                             self.words_job = Some(service.submit_cancellable(ReadRequest {
                                 bytes: file.bytes,
-                                hint: cl_docread::protocol::JobHint { kind: None },
+                                hint: cl_docread::protocol::JobHint::default(),
                                 today,
                                 vendors: Vec::new(),
                                 templates: Vec::new(),
@@ -1267,6 +1270,7 @@ impl DraftSession {
             bytes: file.bytes,
             hint: cl_docread::protocol::JobHint {
                 kind: Some(cl_core::intake::IntakeKind::Receipts),
+                statement: false,
             },
             today,
             vendors,

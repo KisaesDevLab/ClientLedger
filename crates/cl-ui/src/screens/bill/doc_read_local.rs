@@ -271,6 +271,9 @@ pub(crate) fn check_text(c: &Check, style: MoneyStyle) -> String {
         (Some(expected), Some(found)) => t_with(key, &[("expected", &expected), ("found", &found)]),
         _ => t(plain),
     };
+    let line_no = c
+        .line
+        .map_or_else(String::new, |l| (u32::from(l) + 1).to_string());
     match c.code {
         CheckCode::LinesVsSubtotal => money_pair(
             "bill.read.check.lines_subtotal",
@@ -287,14 +290,9 @@ pub(crate) fn check_text(c: &Check, style: MoneyStyle) -> String {
         ),
         CheckCode::TotalPaidVsBalance => t("bill.read.check.paid_balance"),
         CheckCode::DueDateVsTerms => t("bill.read.check.due_terms"),
-        CheckCode::LineQuantityTimesPrice => t_with(
-            "bill.read.check.qty_price",
-            &[(
-                "line",
-                &c.line
-                    .map_or_else(String::new, |l| (u32::from(l) + 1).to_string()),
-            )],
-        ),
+        CheckCode::LineQuantityTimesPrice => {
+            t_with("bill.read.check.qty_price", &[("line", &line_no)])
+        }
         CheckCode::DateCouldBeDayFirst => t("bill.read.check.day_first"),
         CheckCode::PickedUsingTotals => t("bill.read.check.picked_total"),
         // A second OCR read gave another amount (review S1): name it.
@@ -314,6 +312,15 @@ pub(crate) fn check_text(c: &Check, style: MoneyStyle) -> String {
         CheckCode::PageNotRead => t("bill.read.check.page_not_read"),
         CheckCode::PagesSkipped => t("bill.read.check.pages_skipped"),
         CheckCode::KindUnclear => t("bill.read.check.kind"),
+        CheckCode::StmtSum => t("bill.read.check.stmt_sum"),
+        CheckCode::StmtRunning => t_with("bill.read.check.stmt_running", &[("line", &line_no)]),
+        CheckCode::StmtDateOutsidePeriod => {
+            t_with("bill.read.check.stmt_period", &[("line", &line_no)])
+        }
+        CheckCode::StmtDuplicateLine => {
+            t_with("bill.read.check.stmt_duplicate", &[("line", &line_no)])
+        }
+        CheckCode::StmtVendorDiffers => t("bill.read.check.stmt_vendor"),
     }
 }
 
@@ -550,6 +557,7 @@ impl EnterBillScreen {
             bytes: Arc::clone(&src.bytes),
             hint: JobHint {
                 kind: Some(IntakeKind::Bills),
+                statement: false,
             },
             today: self.today,
             vendors,

@@ -67,7 +67,7 @@ pub fn read(input: &ReadInput<'_>) -> Reading {
     for &page in input.unread_pages {
         checks.push(page_check(CheckCode::PageNotRead, Some(page)));
     }
-    if input.page_count > crate::model::MAX_PAGES {
+    if input.page_count > input.hint.max_pages() {
         checks.push(page_check(CheckCode::PagesSkipped, None));
     }
 

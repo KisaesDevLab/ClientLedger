@@ -90,7 +90,9 @@ pub const fn doc_kind(k: DraftKind) -> DocKind {
         DraftKind::CardCharge => DocKind::CardCharge,
         DraftKind::Check => DocKind::Check,
         DraftKind::CashExpense => DocKind::CashExpense,
-        DraftKind::Unknown => DocKind::Unknown,
+        // A06 WP-S2: a statement draft opens Match Vendor Statement, not
+        // the review form; until then it reads as not known.
+        DraftKind::Statement | DraftKind::Unknown => DocKind::Unknown,
     }
 }
 

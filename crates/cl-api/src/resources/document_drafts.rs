@@ -104,6 +104,9 @@ pub enum DraftKind {
     Check,
     /// A cash expense (an expense paid from cash or a bank account).
     CashExpense,
+    /// A vendor statement (U-94): label only, never converted; it is
+    /// saved with the vendor instead.
+    Statement,
     /// Not known yet.
     Unknown,
 }
@@ -117,6 +120,7 @@ impl DraftKind {
             DraftKind::CardCharge => "card_charge",
             DraftKind::Check => "check",
             DraftKind::CashExpense => "cash_expense",
+            DraftKind::Statement => "statement",
             DraftKind::Unknown => "unknown",
         }
     }

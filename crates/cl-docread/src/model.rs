@@ -43,6 +43,25 @@ pub const MAX_CHECKS: usize = 200;
 pub const MAX_FINGERPRINT_TOKENS: usize = 400;
 /// Field regions in one template.
 pub const MAX_TEMPLATE_FIELDS: usize = 64;
+/// Pages read from a vendor statement (Q-300, A06 decision g): the first
+/// twenty. A statement job says so in its `JobHint`.
+pub const MAX_STATEMENT_PAGES: u16 = 20;
+/// Lines read from one statement (A06 step 7); more is a hostile file.
+pub const MAX_STATEMENT_LINES: usize = 2_000;
+/// Rows left out of one statement's lines (balance forward, subtotals,
+/// totals, aging).
+pub const MAX_STATEMENT_LEFT_OUT: usize = 2_000;
+
+/// Pages read for a job: [`MAX_STATEMENT_PAGES`] for a statement job,
+/// [`MAX_PAGES`] for any other.
+#[must_use]
+pub const fn max_pages(statement: bool) -> u16 {
+    if statement {
+        MAX_STATEMENT_PAGES
+    } else {
+        MAX_PAGES
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Positions and confidence
@@ -599,6 +618,17 @@ pub enum CheckCode {
     PagesSkipped,
     /// The kind (bill, card charge, check, cash expense) is unclear.
     KindUnclear,
+    /// Statement: the lines don't add up to closing − opening balance.
+    StmtSum,
+    /// Statement: a running balance is not the previous one plus the line.
+    StmtRunning,
+    /// Statement: a line's date is outside the statement period.
+    StmtDateOutsidePeriod,
+    /// Statement: two lines have the same date, reference and amount.
+    StmtDuplicateLine,
+    /// Statement: the vendor read is not the vendor chosen (set by the
+    /// desktop, never by the reader).
+    StmtVendorDiffers,
 }
 
 /// A value shown in a check.
@@ -645,6 +675,164 @@ impl fmt::Debug for Check {
 }
 
 // ---------------------------------------------------------------------------
+// Vendor statements (A06)
+// ---------------------------------------------------------------------------
+
+/// Which column a statement line's amount came from: the sign follows the
+/// column, never the words on the line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SignSource {
+    /// One amount column; the printed sign is kept ("CR" and parentheses
+    /// mean negative).
+    SingleColumn,
+    /// A charges (debits, invoices) column: positive.
+    ChargesColumn,
+    /// A credits column: negative.
+    CreditsColumn,
+    /// A payments column: negative.
+    PaymentsColumn,
+}
+
+/// One statement line. `amount` is signed: a charge is positive, a credit
+/// or payment negative.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StatementLineRead {
+    pub date: Found<CalendarDate>,
+    pub reference: Option<Found<String>>,
+    pub description: Option<Found<String>>,
+    pub amount: Found<Money>,
+    pub sign_from: SignSource,
+    /// The running balance printed on the line, if any.
+    pub running: Option<Found<Money>>,
+}
+
+impl fmt::Debug for StatementLineRead {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StatementLineRead")
+            .field("date", &self.date)
+            .field("reference", &self.reference.is_some())
+            .field("description", &self.description.is_some())
+            .field("amount", &self.amount)
+            .field("sign_from", &self.sign_from)
+            .field("running", &self.running.is_some())
+            .finish()
+    }
+}
+
+/// What a row left out of the statement's lines was (Q-296).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LeftOutKind {
+    /// "Balance forward" / "Previous balance".
+    BalanceForward,
+    /// A page or section subtotal.
+    Subtotal,
+    /// A total row ("Total", "Amount due", "Closing balance").
+    Total,
+    /// An aging row (current / 30 / 60 / 90 days).
+    Aging,
+}
+
+/// A row in the table that is not a line, and where it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeftOut {
+    pub what: LeftOutKind,
+    pub spot: Spot,
+}
+
+/// What was read from a vendor statement. `None` means "not found": the
+/// reader never invents a value. Checks go in [`Reading::checks`].
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+pub struct StatementRead {
+    pub vendor: Option<Found<String>>,
+    pub account_no: Option<Found<String>>,
+    pub statement_date: Option<Found<CalendarDate>>,
+    pub period_from: Option<Found<CalendarDate>>,
+    pub period_to: Option<Found<CalendarDate>>,
+    /// Balance forward / previous balance.
+    pub opening: Option<Found<Money>>,
+    /// Closing balance / amount due.
+    pub closing: Option<Found<Money>>,
+    /// At most [`MAX_STATEMENT_LINES`].
+    pub lines: Vec<StatementLineRead>,
+    /// At most [`MAX_STATEMENT_LEFT_OUT`].
+    pub left_out: Vec<LeftOut>,
+}
+
+impl fmt::Debug for StatementRead {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut present: Vec<&str> = Vec::new();
+        for (name, has) in [
+            ("vendor", self.vendor.is_some()),
+            ("accountNo", self.account_no.is_some()),
+            ("statementDate", self.statement_date.is_some()),
+            ("periodFrom", self.period_from.is_some()),
+            ("periodTo", self.period_to.is_some()),
+            ("opening", self.opening.is_some()),
+            ("closing", self.closing.is_some()),
+        ] {
+            if has {
+                present.push(name);
+            }
+        }
+        f.debug_struct("StatementRead")
+            .field("present", &present)
+            .field("lines", &self.lines.len())
+            .field("left_out", &self.left_out.len())
+            .finish()
+    }
+}
+
+impl StatementRead {
+    /// Every spot in it.
+    fn spots(&self) -> impl Iterator<Item = Spot> + '_ {
+        let header = [
+            self.vendor.as_ref().map(|f| f.spot),
+            self.account_no.as_ref().map(|f| f.spot),
+            self.statement_date.as_ref().map(|f| f.spot),
+            self.period_from.as_ref().map(|f| f.spot),
+            self.period_to.as_ref().map(|f| f.spot),
+            self.opening.as_ref().map(|f| f.spot),
+            self.closing.as_ref().map(|f| f.spot),
+        ];
+        let lines = self.lines.iter().flat_map(|l| {
+            [
+                Some(l.date.spot),
+                l.reference.as_ref().map(|f| f.spot),
+                l.description.as_ref().map(|f| f.spot),
+                Some(l.amount.spot),
+                l.running.as_ref().map(|f| f.spot),
+            ]
+        });
+        header
+            .into_iter()
+            .chain(lines)
+            .chain(self.left_out.iter().map(|l| Some(l.spot)))
+            .flatten()
+    }
+
+    /// Every text value in it.
+    fn texts(&self) -> impl Iterator<Item = &str> + '_ {
+        [
+            self.vendor.as_ref().map(|f| f.value.as_str()),
+            self.account_no.as_ref().map(|f| f.value.as_str()),
+        ]
+        .into_iter()
+        .chain(self.lines.iter().flat_map(|l| {
+            [
+                l.reference.as_ref().map(|f| f.value.as_str()),
+                l.description.as_ref().map(|f| f.value.as_str()),
+            ]
+        }))
+        .flatten()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The reading
 // ---------------------------------------------------------------------------
 
@@ -656,6 +844,8 @@ pub enum DocKind {
     CardCharge,
     Check,
     CashExpense,
+    /// A vendor statement (A06; engine kind `statement`, label only).
+    Statement,
     Unknown,
 }
 
@@ -799,6 +989,10 @@ pub struct Reading {
     pub fingerprint: Option<Fingerprint>,
     /// Index into the batch's templates of the one applied, if any.
     pub template: Option<u16>,
+    /// What was read as a vendor statement (A06, protocol version 5): set
+    /// on a statement job or when the kind is [`DocKind::Statement`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statement: Option<StatementRead>,
 }
 
 impl fmt::Debug for Reading {
@@ -812,6 +1006,7 @@ impl fmt::Debug for Reading {
             .field("page_count", &self.page_count)
             .field("pages", &self.pages.len())
             .field("template", &self.template)
+            .field("statement", &self.statement)
             .finish_non_exhaustive()
     }
 }
@@ -832,17 +1027,19 @@ impl Reading {
             words: Vec::new(),
             fingerprint: None,
             template: None,
+            statement: None,
         }
     }
 
     /// The caps the desktop re-checks on every reading from the worker
     /// (plan D2 "Host pipes"); boxes, confidence and amounts are already
-    /// checked while parsing.
+    /// checked while parsing. `statement` says whether the job was a
+    /// statement job (twenty pages read instead of ten).
     ///
     /// # Errors
     /// The first cap exceeded.
-    pub fn validate(&self, templates_sent: usize) -> Result<(), ModelError> {
-        let pages = usize::from(MAX_PAGES);
+    pub fn validate(&self, templates_sent: usize, statement: bool) -> Result<(), ModelError> {
+        let pages = usize::from(max_pages(statement));
         if self.pages.len() > pages || self.words.len() > pages {
             return Err(ModelError::TooMany("pages"));
         }
@@ -851,6 +1048,17 @@ impl Reading {
         }
         if self.checks.len() > MAX_CHECKS {
             return Err(ModelError::TooMany("checks"));
+        }
+        if let Some(st) = &self.statement {
+            if st.lines.len() > MAX_STATEMENT_LINES {
+                return Err(ModelError::TooMany("statement lines"));
+            }
+            if st.left_out.len() > MAX_STATEMENT_LEFT_OUT {
+                return Err(ModelError::TooMany("statement rows left out"));
+            }
+            if st.texts().any(|t| t.chars().count() > MAX_TEXT_CHARS) {
+                return Err(ModelError::TooLong("text"));
+            }
         }
         for p in &self.words {
             if p.page >= self.page_count || p.words.len() > MAX_WORDS_PER_PAGE {
@@ -935,6 +1143,7 @@ impl Reading {
             .chain(lines)
             .chain(self.checks.iter().map(|c| c.spot))
             .flatten()
+            .chain(self.statement.iter().flat_map(StatementRead::spots))
     }
 }
 
@@ -1052,7 +1261,7 @@ mod tests {
         );
         let back: Reading = serde_json::from_str(&json).unwrap();
         assert_eq!(back, r);
-        back.validate(0).unwrap();
+        back.validate(0, false).unwrap();
     }
 
     #[test]
@@ -1098,35 +1307,129 @@ mod tests {
     fn validate_enforces_the_caps() {
         let mut r = sample();
         r.header.vendor = Some(found("x".repeat(MAX_TEXT_CHARS + 1)));
-        assert_eq!(r.validate(0), Err(ModelError::TooLong("text")));
+        assert_eq!(r.validate(0, false), Err(ModelError::TooLong("text")));
         let mut r = sample();
         r.template = Some(3);
-        assert_eq!(r.validate(3), Err(ModelError::Template));
-        assert_eq!(r.validate(4), Ok(()));
+        assert_eq!(r.validate(3, false), Err(ModelError::Template));
+        assert_eq!(r.validate(4, false), Ok(()));
         let mut r = sample();
         r.checks[0].spot = Some(Spot {
             page: 1,
             bbox: Bbox::PAGE,
         });
-        assert_eq!(r.validate(0), Err(ModelError::Spot));
+        assert_eq!(r.validate(0, false), Err(ModelError::Spot));
         let off_page = |mut f: Found<Money>| {
             f.spot.page = 4;
             f
         };
         let mut r = sample();
         r.header.total = r.header.total.take().map(off_page);
-        assert_eq!(r.validate(0), Err(ModelError::Spot), "header spot");
+        assert_eq!(r.validate(0, false), Err(ModelError::Spot), "header spot");
         let mut r = sample();
         r.lines[0].unit_price = r.lines[0].unit_price.take().map(off_page);
-        assert_eq!(r.validate(0), Err(ModelError::Spot), "line spot");
+        assert_eq!(r.validate(0, false), Err(ModelError::Spot), "line spot");
         let mut r = sample();
         r.header
             .fees
             .push(off_page(found(Money::parse_wire("1").unwrap())));
-        assert_eq!(r.validate(0), Err(ModelError::Spot), "fee spot");
+        assert_eq!(r.validate(0, false), Err(ModelError::Spot), "fee spot");
         let mut r = sample();
         r.lines = vec![r.lines[0].clone(); MAX_LINES + 1];
-        assert_eq!(r.validate(0), Err(ModelError::TooMany("lines")));
+        assert_eq!(r.validate(0, false), Err(ModelError::TooMany("lines")));
+    }
+
+    fn statement_sample() -> Reading {
+        let mut r = Reading::empty(Reader::TextPdf, 12);
+        r.kind = DocKind::Statement;
+        let line = StatementLineRead {
+            date: found(CalendarDate::from_ymd(2026, 9, 3).unwrap()),
+            reference: Some(found("INV-7781".to_string())),
+            description: Some(found("Hydraulic fittings".to_string())),
+            amount: found(Money::parse_wire("-318.40").unwrap()),
+            sign_from: SignSource::PaymentsColumn,
+            running: Some(found(Money::parse_wire("1204.66").unwrap())),
+        };
+        r.statement = Some(StatementRead {
+            vendor: Some(found("Cedar Valley Parts".to_string())),
+            account_no: Some(found("AC-55120".to_string())),
+            period_from: Some(found(CalendarDate::from_ymd(2026, 9, 1).unwrap())),
+            closing: Some(found(Money::parse_wire("886.26").unwrap())),
+            lines: vec![line],
+            left_out: vec![LeftOut {
+                what: LeftOutKind::Aging,
+                spot: spot(),
+            }],
+            ..StatementRead::default()
+        });
+        for page in 0..12 {
+            r.words.push(PageWords {
+                page,
+                aspect: 12_941,
+                source: WordSource::TextLayer,
+                words: Vec::new(),
+            });
+        }
+        r
+    }
+
+    #[test]
+    fn statements_debug_redacts_and_round_trip() {
+        let r = statement_sample();
+        let text = format!("{r:?}");
+        for secret in [
+            "Cedar",
+            "AC-55",
+            "INV-7781",
+            "318",
+            "1204",
+            "886",
+            "2026",
+            "Hydraulic",
+        ] {
+            assert!(!text.contains(secret), "{secret} leaked: {text}");
+        }
+        assert!(text.contains("StatementRead"), "{text}");
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("\"kind\":\"statement\""), "{json}");
+        assert!(json.contains("\"signFrom\":\"paymentsColumn\""), "{json}");
+        let back: Reading = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, r);
+        // A reading without the field (an older bill reading) parses.
+        let mut plain = sample();
+        plain.statement = None;
+        let json = serde_json::to_string(&plain).unwrap();
+        assert!(!json.contains("statement"), "{json}");
+        assert_eq!(serde_json::from_str::<Reading>(&json).unwrap(), plain);
+    }
+
+    #[test]
+    fn statement_caps() {
+        let r = statement_sample();
+        assert_eq!(r.validate(0, true), Ok(()));
+        assert_eq!(
+            r.validate(0, false),
+            Err(ModelError::TooMany("pages")),
+            "twelve pages only on a statement job"
+        );
+        let mut r = statement_sample();
+        let st = r.statement.as_mut().unwrap();
+        st.lines = vec![st.lines[0].clone(); MAX_STATEMENT_LINES + 1];
+        assert_eq!(
+            r.validate(0, true),
+            Err(ModelError::TooMany("statement lines"))
+        );
+        let mut r = statement_sample();
+        r.statement.as_mut().unwrap().lines[0].reference =
+            Some(found("x".repeat(MAX_TEXT_CHARS + 1)));
+        assert_eq!(r.validate(0, true), Err(ModelError::TooLong("text")));
+        let mut r = statement_sample();
+        r.statement.as_mut().unwrap().lines[0].amount.spot.page = 12;
+        assert_eq!(r.validate(0, true), Err(ModelError::Spot));
+        let mut r = statement_sample();
+        r.statement.as_mut().unwrap().left_out[0].spot.page = 30;
+        assert_eq!(r.validate(0, true), Err(ModelError::Spot));
+        assert_eq!(max_pages(true), 20);
+        assert_eq!(max_pages(false), 10);
     }
 
     #[test]

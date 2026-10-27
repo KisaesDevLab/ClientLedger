@@ -173,6 +173,7 @@ pub fn draft_kind(k: DocKind) -> cl_api::DraftKind {
         DocKind::CardCharge => cl_api::DraftKind::CardCharge,
         DocKind::Check => cl_api::DraftKind::Check,
         DocKind::CashExpense => cl_api::DraftKind::CashExpense,
+        DocKind::Statement => cl_api::DraftKind::Statement,
         DocKind::Unknown => cl_api::DraftKind::Unknown,
     }
 }

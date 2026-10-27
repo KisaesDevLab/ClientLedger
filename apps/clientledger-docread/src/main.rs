@@ -412,7 +412,7 @@ mod tests {
             page: 0,
             aspect: 1,
             source: cl_docread::model::WordSource::Ocr,
-            words: (0..20_000)
+            words: (0..40_000)
                 .map(|_| cl_docread::Word {
                     text: "w".repeat(200),
                     bbox: cl_docread::Bbox::PAGE,
