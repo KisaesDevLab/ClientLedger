@@ -233,6 +233,11 @@ pub use resources::document_drafts::{
     DuplicateMatch, MatchReason, MatchSource, POSSIBLE_DUPLICATE, TEMPLATE_LIMIT,
     limits as draft_limits,
 };
+// A04: attach a document draft to a posted record (U-95).
+pub use resources::document_drafts::{
+    AttachProblem, AttachedDraft, DOCUMENT_FILE_MISSING, TARGET_NOT_ATTACHABLE,
+    TRANSACTION_NOT_POSTED, attach_problem,
+};
 pub use resources::vendor_templates::{
     TEMPLATE_LINE_TABLE_BYTES, TEMPLATE_REGIONS_BYTES, TEMPLATES_PER_COMPANY, TemplateUpsert,
     VendorTemplate, VendorTemplateId, VendorTemplates, layout_key,

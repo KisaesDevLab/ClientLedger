@@ -125,6 +125,9 @@ impl Client {
             .set_idempotency_ap_v1(info.capabilities.has(Capabilities::IDEMPOTENCY_AP));
         self.exec()
             .set_idempotency_docs_v1(info.capabilities.has(Capabilities::IDEMPOTENCY_DOCS));
+        self.exec().set_idempotency_docs_attach_v1(
+            info.capabilities.has(Capabilities::DOCUMENT_DRAFTS_ATTACH),
+        );
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)
     }
