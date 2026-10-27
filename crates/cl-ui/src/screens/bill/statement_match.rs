@@ -857,28 +857,25 @@ impl StatementMatchScreen {
                         continue;
                     };
                     Self::line_cells(ui, tokens, row, style);
-                    match row.entry.kind.creates() {
-                        Some(k) => {
-                            let k = match k {
-                                BillKind::Bill => "statement.create_bill",
-                                BillKind::Credit => "statement.create_credit",
-                            };
-                            if ui.button(t(k)).clicked() {
-                                create = Some(i);
-                            }
+                    if let Some(k) = row.entry.kind.creates() {
+                        let k = match k {
+                            BillKind::Bill => "statement.create_bill",
+                            BillKind::Credit => "statement.create_credit",
+                        };
+                        if ui.button(t(k)).clicked() {
+                            create = Some(i);
                         }
-                        None => {
-                            let hint = if row.entry.kind == StatementKind::CreditOrPayment {
-                                "statement.credit_or_payment_hint"
-                            } else {
-                                "statement.payment_hint"
-                            };
-                            ui.label(
-                                RichText::new(t(hint))
-                                    .size(12.0)
-                                    .color(tokens.text_secondary),
-                            );
-                        }
+                    } else {
+                        let hint = if row.entry.kind == StatementKind::CreditOrPayment {
+                            "statement.credit_or_payment_hint"
+                        } else {
+                            "statement.payment_hint"
+                        };
+                        ui.label(
+                            RichText::new(t(hint))
+                                .size(12.0)
+                                .color(tokens.text_secondary),
+                        );
                     }
                     ui.end_row();
                 }
@@ -971,6 +968,28 @@ impl StatementMatchScreen {
         }
     }
 
+    /// The heading, the form, the read lines and the results; the
+    /// document pane above them when `pane_above`.
+    fn body_ui(&mut self, ui: &mut Ui, tokens: &Tokens, pane_above: bool) {
+        ui.add_space(8.0);
+        form::heading(ui, tokens, &t("statement.heading"));
+        form::hint(ui, tokens, &t("statement.intro"));
+        ui.add_space(8.0);
+        if pane_above {
+            self.statement_pane_ui(ui, tokens, None);
+            ui.add_space(6.0);
+        }
+        self.input_ui(ui, tokens);
+        ui.add_space(6.0);
+        self.read_lines_ui(ui, tokens);
+        ui.add_space(6.0);
+        self.problems_ui(ui, tokens);
+        ui.add_space(6.0);
+        self.after_match_ui(ui, tokens);
+        self.results_ui(ui, tokens);
+        ui.add_space(12.0);
+    }
+
     /// A books entry in a cell: its type, date and ref. no.
     fn books_text(b: &BooksItem) -> String {
         let mut s = format!(
@@ -991,6 +1010,13 @@ impl Screen for StatementMatchScreen {
         t(&format!("cmd.{KIND}"))
     }
 
+    /// The document pane sits beside the lines when there is room, so the
+    /// shell gives this screen the window's rectangle and it scrolls its
+    /// own parts (see `ui`).
+    fn fixed_layout(&self) -> bool {
+        true
+    }
+
     fn ui(&mut self, ui: &mut Ui) {
         self.money_style = crate::grid_env::shell_frame(ui.ctx()).money_style;
         self.poll();
@@ -998,21 +1024,19 @@ impl Screen for StatementMatchScreen {
             ui.ctx().request_repaint();
         }
         let tokens = Tokens::of(ui.ctx());
-        ui.add_space(8.0);
-        form::heading(ui, &tokens, &t("statement.heading"));
-        form::hint(ui, &tokens, &t("statement.intro"));
-        ui.add_space(8.0);
-        self.statement_pane_ui(ui, &tokens);
-        ui.add_space(6.0);
-        self.input_ui(ui, &tokens);
-        ui.add_space(6.0);
-        self.read_lines_ui(ui, &tokens);
-        ui.add_space(6.0);
-        self.problems_ui(ui, &tokens);
-        ui.add_space(6.0);
-        self.after_match_ui(ui, &tokens);
-        self.results_ui(ui, &tokens);
-        ui.add_space(12.0);
+        // The statement beside its lines (A06 acceptance): the page stays
+        // in view while the lines, their marks and Accept scroll beside
+        // it. Narrow, or popped out, it goes back above the form.
+        let docked =
+            self.doc.viewer.source().is_some() && !crate::windows::doc_viewer::is_popped(ui.ctx());
+        if docked && ui.available_width() >= read::SIDE_BY_SIDE {
+            self.split_ui(ui, &tokens);
+        } else {
+            egui::ScrollArea::both()
+                .id_salt("statement/body")
+                .auto_shrink([false, false])
+                .show(ui, |ui| self.body_ui(ui, &tokens, true));
+        }
     }
 
     fn state(&self) -> Value {
@@ -1407,9 +1431,8 @@ mod tests {
                         ..egui::RawInput::default()
                     };
                     let mut out = ctx.run_ui(input, |ui| {
-                        egui::CentralPanel::default().show(ui, |ui| {
-                            egui::ScrollArea::vertical().show(ui, |ui| s.ui(ui));
-                        });
+                        // As the shell draws a fixed-layout screen.
+                        egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
                     });
                     out.textures_delta.clear();
                     nodes.extend(

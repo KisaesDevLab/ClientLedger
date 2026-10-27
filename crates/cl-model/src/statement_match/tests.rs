@@ -77,7 +77,10 @@ fn only_charges_and_credits_create() {
         unsure: false,
     }]);
     let read = super::read::read_back(&read, today);
-    assert_eq!(pasted.rows[0].entry, read.rows[0].entry, "pasted and read alike");
+    assert_eq!(
+        pasted.rows[0].entry, read.rows[0].entry,
+        "pasted and read alike"
+    );
     assert_eq!(read.rows[0].entry.kind.creates(), None);
     assert_eq!(pasted.rows[1].entry.kind.creates(), Some(BillKind::Credit));
 }

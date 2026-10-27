@@ -84,8 +84,18 @@ pub(crate) const LINE_TARGET: &str = "statement_line";
 /// "Couldn't read this statement — type or paste the lines instead."
 pub(crate) const COULDNT: &str = "statement.read.couldnt";
 
-/// The height of the docked document pane.
+/// The height of the document pane above the form (narrow windows).
 const PANE_HEIGHT: f32 = 420.0;
+
+/// From this width the document pane sits beside the lines.
+pub(crate) const SIDE_BY_SIDE: f32 = 1000.0;
+/// The pane's share of the width at first (the owner drags the divider).
+const PANE_SHARE: f32 = 0.45;
+/// The narrowest the pane and the form column get beside each other.
+const PANE_MIN: f32 = 320.0;
+const FORM_MIN: f32 = 480.0;
+/// The divider between them.
+const DIVIDER: f32 = 10.0;
 
 /// A statement draft opened from Review Documents (U-94).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,6 +137,8 @@ pub(crate) struct StatementDoc {
     pub viewer: ViewerState,
     /// Line ↔ spot highlights.
     pub compare: CompareTools,
+    /// The pane's share of the width beside the lines (dragged).
+    pub pane_share: f32,
     /// The document's bytes and kind.
     pub bytes: Option<Arc<[u8]>>,
     pub file_kind: Option<FileKind>,
@@ -224,6 +236,7 @@ impl Default for StatementDoc {
         StatementDoc {
             viewer: ViewerState::default(),
             compare: CompareTools::new(),
+            pane_share: PANE_SHARE,
             bytes: None,
             file_kind: None,
             doc_no: 0,
@@ -1573,8 +1586,10 @@ impl StatementMatchScreen {
         }
     }
 
-    /// The document pane (docked) beside the lines.
-    pub(crate) fn statement_pane_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+    /// The document pane: docked `height` tall (beside the lines: the
+    /// column's height; `None`: above the form), or the one-line Dock row
+    /// while popped out.
+    pub(crate) fn statement_pane_ui(&mut self, ui: &mut Ui, tokens: &Tokens, height: Option<f32>) {
         if self.doc.viewer.source().is_none() {
             return;
         }
@@ -1588,7 +1603,10 @@ impl StatementMatchScreen {
                 DocPane::show(ui, &mut self.doc.viewer, tokens);
             } else {
                 let w = ui.available_width();
-                ui.allocate_ui(egui::vec2(w, PANE_HEIGHT), |ui| {
+                // The card's frame takes a little of the column.
+                let h = height.map_or(PANE_HEIGHT, |h| (h - 16.0).max(200.0));
+                ui.allocate_ui(egui::vec2(w, h), |ui| {
+                    ui.set_min_height(h);
                     DocPane::show(ui, &mut self.doc.viewer, tokens);
                 });
             }
@@ -1596,6 +1614,69 @@ impl StatementMatchScreen {
         for e in self.doc.viewer.take_compare_events() {
             self.on_statement_event(e);
         }
+    }
+
+    /// The form, the read lines and the results scroll on the left; the
+    /// statement stays in view on the right, with a divider the owner
+    /// drags to share the width.
+    pub(crate) fn split_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let full = ui.available_rect_before_wrap();
+        let room = full.width() - DIVIDER;
+        let pane_w = (room * self.doc.pane_share).clamp(PANE_MIN, (room - FORM_MIN).max(PANE_MIN));
+        let form_right = full.right() - pane_w - DIVIDER;
+        let form_rect = egui::Rect::from_min_max(full.min, egui::pos2(form_right, full.bottom()));
+        let divider = egui::Rect::from_min_max(
+            egui::pos2(form_right, full.top()),
+            egui::pos2(form_right + DIVIDER, full.bottom()),
+        );
+        let pane_rect = egui::Rect::from_min_max(egui::pos2(divider.right(), full.top()), full.max);
+
+        let mut form_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("statement/form_column")
+                .max_rect(form_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        form_ui.shrink_clip_rect(form_rect);
+        egui::ScrollArea::vertical()
+            .id_salt("statement/body")
+            .auto_shrink([false, false])
+            .show(&mut form_ui, |ui| {
+                // The column's right edge stays clear of the scroll bar.
+                ui.set_max_width(ui.available_width() - 8.0);
+                self.body_ui(ui, tokens, false);
+            });
+
+        let id = ui.scope_id().with("statement/divider");
+        let r = ui.interact(divider, id, egui::Sense::drag());
+        let name = t("statement.read.divider");
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Splitter, true, &name));
+        if r.hovered() || r.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        if r.dragged()
+            && let Some(p) = r.interact_pointer_pos()
+            && room > 0.0
+        {
+            self.doc.pane_share = ((full.right() - p.x) / room).clamp(0.2, 0.8);
+        }
+        let stroke = if r.hovered() || r.dragged() {
+            egui::Stroke::new(2.0, tokens.accent)
+        } else {
+            ui.visuals().widgets.noninteractive.bg_stroke
+        };
+        ui.painter()
+            .vline(divider.center().x, divider.y_range(), stroke);
+
+        let mut pane_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("statement/pane_column")
+                .max_rect(pane_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        pane_ui.shrink_clip_rect(pane_rect);
+        self.statement_pane_ui(&mut pane_ui, tokens, Some(pane_rect.height()));
+        ui.advance_cursor_after_rect(full);
     }
 
     /// "Save this statement with the vendor", the balance line.
