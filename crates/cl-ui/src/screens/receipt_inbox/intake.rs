@@ -54,7 +54,7 @@ use cl_core::CalendarDate;
 use cl_core::ids::{IntakeFolderId, TenantId};
 use cl_core::intake::IntakeFolder;
 use cl_settings::inbox_state::{
-    EntryStatus, FileIdentity, InboxState, InboxStateStore, company_key, path_hash,
+    DraftLink, EntryStatus, FileIdentity, InboxState, InboxStateStore, company_key, path_hash,
 };
 use cl_settings::{HereNote, RecentStore};
 use eframe::egui::{self, Context};
@@ -64,6 +64,7 @@ use crate::company::{CompanyLink, Task};
 use crate::screens::preferences::intake_folders::{self, source};
 use writer::StateWriter;
 
+pub(crate) mod drafts;
 mod writer;
 
 /// How long a step that must read the saved state waits for the writer.
@@ -130,6 +131,10 @@ pub(crate) enum RowState {
     OnForm,
     /// The same bytes came in before.
     Duplicate,
+    /// Another computer's document draft holds the same bytes (A04 D1):
+    /// it is entered there; here only Discard (this computer's file) is
+    /// offered.
+    ClaimedElsewhere,
     /// Handled; the original is on its way to `Processed/` or `Discarded/`.
     Moving,
     /// Older than "only files added from now on": brought in on request.
@@ -156,6 +161,7 @@ impl RowState {
             RowState::Arrived => "arrived",
             RowState::OnForm => "on_form",
             RowState::Duplicate => "duplicate",
+            RowState::ClaimedElsewhere => "claimed_elsewhere",
             RowState::Moving => "moving",
             RowState::BringIn => "bring_in",
             RowState::TooLarge => "too_large",
@@ -180,6 +186,10 @@ pub(crate) struct Row {
     pub entry: Option<FileIdentity>,
     /// Duplicate: when the first copy came in (ms since 1970).
     pub seen_at: Option<i64>,
+    /// Its document draft (A04 D1): `none`, `claim_sent`, `own`, `follows`.
+    pub link: &'static str,
+    /// Why its claim was refused (i18n key), if it was.
+    pub claim_problem: Option<&'static str>,
 }
 
 /// Kind and state only.
@@ -334,8 +344,11 @@ struct PendingUpload {
 enum JobDone {
     /// Linked, or the engine's copy deleted (or already gone).
     Done,
-    /// The upload turned out to be on a saved record: not deleted.
+    /// The upload turned out to be on a saved record: not deleted. (A
+    /// draft discard: the draft was entered already.)
     OnRecord,
+    /// A live document draft reads the upload: never deleted (A04).
+    InUse,
 }
 
 /// What a link or delete in flight is for.
@@ -347,6 +360,16 @@ enum JobKind {
     /// Deleting the engine's copy of a discarded file; `keep`: the folder
     /// leaves originals where they are (the entry becomes `kept`).
     Delete(FileIdentity, bool),
+    /// A04: a P17 upload linked alone under a fresh draft key before its
+    /// claim.
+    Rekey(FileIdentity, DraftKey),
+    /// A04: deleting this entry's own extra copy while it follows another
+    /// computer's draft (the entry and its seen hash stay).
+    DeleteCopy(FileIdentity),
+    /// A04: the engine discarding the entry's own draft (Discard).
+    DiscardDraft(FileIdentity),
+    /// A04: Add to… through the engine's attach (U-95).
+    AttachDraft(FileIdentity),
 }
 
 struct Job {
@@ -462,6 +485,10 @@ pub(crate) struct Intake {
     pub(crate) watch_config: WatchConfig,
     /// The demo lays out its folders the next time the window opens.
     demo_reseed: bool,
+    /// The engine has document drafts (A04; read every frame).
+    drafts_on: bool,
+    /// Claims, follow and reading (A04, [`drafts`]).
+    pub(crate) drafts: drafts::DraftWork,
 }
 
 impl Intake {
@@ -505,6 +532,8 @@ impl Intake {
             today: None,
             watch_config: WatchConfig::default(),
             demo_reseed: false,
+            drafts_on: false,
+            drafts: drafts::DraftWork::default(),
         }
     }
 
@@ -530,6 +559,7 @@ impl Intake {
     pub(crate) fn busy(&self) -> bool {
         self.copy.is_some()
             || !self.jobs.is_empty()
+            || self.drafts.busy()
             || self.reconcile.is_some()
             || self.folders_task.is_some()
             || matches!(self.stage, Stage::Seeding(_) | Stage::Migrating(_))
@@ -609,7 +639,13 @@ impl Intake {
                             RowState::Arrived
                         }
                     }
-                    (_, Some(EntryStatus::Duplicate)) => RowState::Duplicate,
+                    (_, Some(EntryStatus::Duplicate)) => {
+                        if entry.is_some_and(|e| matches!(e.doc_draft, DraftLink::Follows(_))) {
+                            RowState::ClaimedElsewhere
+                        } else {
+                            RowState::Duplicate
+                        }
+                    }
                     (_, Some(EntryStatus::Linked | EntryStatus::Discarding)) => RowState::Moving,
                     (ItemState::Ready, None) => {
                         if self.refused.contains(&key) {
@@ -633,6 +669,8 @@ impl Intake {
                     state,
                     entry: entry.map(|e| e.file.clone()),
                     seen_at,
+                    link: entry.map_or("none", |e| e.doc_draft.as_str()),
+                    claim_problem: self.claim_problem(&key.path_hash),
                 });
             }
         }
@@ -681,6 +719,7 @@ impl Intake {
         *self = Intake {
             watch_config: self.watch_config,
             demo_reseed: self.demo_reseed,
+            drafts: drafts::DraftWork::fresh(&self.drafts),
             ..Intake::new()
         };
         self.tenant = tenant;
@@ -830,6 +869,7 @@ impl Intake {
                     self.move_failures = 0;
                     self.problem = None;
                     self.claims.clear();
+                    self.drafts = drafts::DraftWork::fresh(&self.drafts);
                     self.moving.clear();
                     self.retry_at.clear();
                     self.refused.clear();
@@ -1104,6 +1144,8 @@ impl Intake {
         list.retain(|e| {
             e.folder != Some(id)
                 || e.status.pending() && e.status != EntryStatus::Uploading
+                // A04: its extra copy in the engine is still to delete.
+                || matches!(e.doc_draft, DraftLink::Follows(_)) && !e.attachments.is_empty()
                 || in_flight.as_ref() == Some(&e.file)
                 || keys.iter().any(|k| k.matches(&e.file))
         });
@@ -1214,6 +1256,8 @@ impl Intake {
             }
             self.save_state();
         }
+        // A04: the extra copies of files another computer's draft holds.
+        self.delete_copies(link, now);
     }
 
     /// The moves queued on the watchers of `folders` are gone with them:
@@ -1232,7 +1276,7 @@ impl Intake {
     fn deleting(&self, file: &FileIdentity) -> bool {
         self.jobs
             .iter()
-            .any(|j| matches!(&j.kind, JobKind::Delete(f, _) if f == file))
+            .any(|j| matches!(&j.kind, JobKind::Delete(f, _) | JobKind::DeleteCopy(f) if f == file))
     }
 
     fn apply_moves(&mut self, link: &CompanyLink, now: Instant) {
@@ -1732,6 +1776,19 @@ impl Intake {
         if self.on_form(&attachment.to_string()) {
             return Err("inbox.on_form.hint");
         }
+        // A04 claim gate (M2 b): a claimed arrival (or one whose claim's
+        // answer isn't known) never takes the plain save path; its draft
+        // opens from Review Documents in draft mode.
+        match &e.doc_draft {
+            DraftLink::None if !self.drafts_on => {}
+            DraftLink::Own(_) => return Err("inbox.claim.review"),
+            DraftLink::None | DraftLink::ClaimSent => {
+                return Err(self
+                    .claim_problem(&entry.path_hash)
+                    .unwrap_or("inbox.claim.pending"));
+            }
+            DraftLink::Follows(_) => return Err("inbox.claim.elsewhere"),
+        }
         if let Some(draft) = e.draft.as_deref().and_then(|d| DraftKey::parse(d).ok()) {
             return Ok(Some((draft, attachment, self.claim(attachment))));
         }
@@ -1775,6 +1832,22 @@ impl Intake {
             .ok_or("inbox.action.not_waiting")?;
         if self.on_form(&attachment.to_string()) {
             return Err("inbox.on_form.hint");
+        }
+        // A04 claim gate (M2 b): a claimed arrival goes through the
+        // engine's attach (U-95), which closes its draft in the same
+        // transaction; never a plain link.
+        match e.doc_draft.clone() {
+            DraftLink::None if !self.drafts_on => {}
+            DraftLink::Own(id) => {
+                let id = cl_api::DocumentDraftId::parse(&id).map_err(|_| "inbox.link.failed")?;
+                return self.start_attach(link, entry.clone(), id, target);
+            }
+            DraftLink::None | DraftLink::ClaimSent => {
+                return Err(self
+                    .claim_problem(&entry.path_hash)
+                    .unwrap_or("inbox.claim.pending"));
+            }
+            DraftLink::Follows(_) => return Err("inbox.claim.elsewhere"),
         }
         if link.is_demo() {
             // Each arrival owns its draft: linking the draft moves exactly
@@ -1854,6 +1927,29 @@ impl Intake {
             .ok_or("inbox.action.not_waiting")?;
         if e.attachment().is_some_and(|a| self.on_form(a)) {
             return Err("inbox.on_form.hint");
+        }
+        // A04 D2: an own draft is discarded in the engine first (a refusal
+        // stops there); a followed one is local only (M3): the other
+        // computer's draft is never touched, only this computer's file
+        // moves and its own copy goes. An unanswered claim waits, unless
+        // it was refused (then no draft was made).
+        match &e.doc_draft {
+            DraftLink::Own(id) if e.status == EntryStatus::Arrived => {
+                let id = cl_api::DocumentDraftId::parse(id).map_err(|_| "inbox.discard.failed")?;
+                return self.start_discard_draft(link, entry.clone(), id);
+            }
+            DraftLink::ClaimSent if self.claim_problem(&entry.path_hash).is_none() => {
+                return Err("inbox.claim.pending");
+            }
+            // About to be claimed: discarded through its draft once it is.
+            DraftLink::None
+                if e.status == EntryStatus::Arrived
+                    && self.drafts_on
+                    && self.claim_problem(&entry.path_hash).is_none() =>
+            {
+                return Err("inbox.claim.pending");
+            }
+            _ => {}
         }
         let attachment = e.attachment().and_then(|a| AttachmentId::parse(a).ok());
         if self.keeps_originals(e.folder) {
@@ -1954,6 +2050,10 @@ impl Intake {
             .entry(&self.company, entry)
             .filter(|e| e.status == EntryStatus::Duplicate)
             .ok_or("inbox.action.not_waiting")?;
+        // Another computer's draft holds these bytes: never copied again.
+        if e.doc_draft.is_claimed() {
+            return Err("inbox.claim.elsewhere");
+        }
         let folder = e.folder;
         let draft = DraftKey::new();
         if !self.state.begin_upload(
@@ -1974,7 +2074,7 @@ impl Intake {
         self.bring_in.insert(FileKey::of(file));
     }
 
-    fn poll_jobs(&mut self, now: Instant) {
+    fn poll_jobs(&mut self, link: &CompanyLink, now: Instant) {
         let mut i = 0;
         while i < self.jobs.len() {
             let Some(r) = self.jobs[i].task.try_take() else {
@@ -2050,7 +2150,74 @@ impl Intake {
                     tracing::debug!(error = %e, "an intake file's copy could not be deleted; retrying later");
                     self.retry_at.insert(entry.path_hash.clone(), now + RETRY);
                 }
+                (JobKind::Delete(entry, _), Ok(JobDone::InUse)) => {
+                    self.retry_at.insert(entry.path_hash.clone(), now + RETRY);
+                }
+                (kind, r) => self.draft_job_done(link, kind, r, now),
             }
+        }
+    }
+
+    /// A04 jobs (claims' re-key, extra copies, draft discard, attach).
+    fn draft_job_done(
+        &mut self,
+        link: &CompanyLink,
+        kind: JobKind,
+        r: Result<JobDone, ApiError>,
+        now: Instant,
+    ) {
+        match (kind, r) {
+            (JobKind::Rekey(entry, draft), Ok(_)) => {
+                self.state
+                    .set_draft_key(&self.company, &entry, &draft.to_string());
+                self.save_state();
+            }
+            (JobKind::Rekey(entry, _), Err(e)) => {
+                tracing::debug!(error = %e, "an intake upload could not be given its own draft; retrying later");
+                self.retry_at.insert(entry.path_hash.clone(), now + RETRY);
+            }
+            (JobKind::DeleteCopy(entry), Ok(JobDone::Done)) => {
+                // The entry and the seen hash stay: the file is never
+                // uploaded again while that draft holds it.
+                self.state.copy_deleted(&self.company, &entry);
+                self.save_state();
+            }
+            (JobKind::DeleteCopy(entry), Ok(_)) => {
+                // On a record, or read by a live draft after all: never
+                // deleted. Nothing more is owed by this entry's copy.
+                tracing::warn!("an intake file's extra copy is in use; it was not deleted");
+                self.state.copy_deleted(&self.company, &entry);
+                self.save_state();
+            }
+            (JobKind::DeleteCopy(entry), Err(e)) => {
+                tracing::debug!(error = %e, "an intake file's extra copy could not be deleted; retrying later");
+                self.retry_at.insert(entry.path_hash.clone(), now + RETRY);
+            }
+            (JobKind::DiscardDraft(entry), Ok(JobDone::OnRecord)) => {
+                // Entered on another computer before the discard.
+                self.problem = Some("inbox.discard.entered");
+                self.handled(&entry);
+            }
+            (JobKind::DiscardDraft(entry), Ok(_)) => self.draft_discarded(link, &entry),
+            (JobKind::DiscardDraft(_), Err(e)) => {
+                // Nothing moves (D2: a failed discard stops there).
+                tracing::debug!(error = %e, "an intake file's draft could not be discarded");
+                self.problem = Some("inbox.discard.failed");
+            }
+            (JobKind::AttachDraft(entry), Ok(_)) => {
+                self.attach_settled(&entry);
+                self.handled(&entry);
+            }
+            (JobKind::AttachDraft(entry), Err(e)) => {
+                if matches!(e, ApiError::OutcomeUnknown { .. }) && self.attach_lost(link, &entry) {
+                    return;
+                }
+                self.attach_settled(&entry);
+                tracing::debug!(error = %e, "an intake file could not be attached to its record");
+                self.problem = Some(drafts::attach_problem_key(&e));
+            }
+            // Plain jobs are answered in `poll_jobs`.
+            (JobKind::LinkRecord(_) | JobKind::LinkDraft(..) | JobKind::Delete(..), _) => {}
         }
     }
 
@@ -2372,12 +2539,19 @@ pub(crate) fn tick_service(
     s.poll_folders(link);
     s.take_snapshots();
     s.apply_moves(link, now);
-    s.poll_jobs(now);
+    s.poll_jobs(link, now);
     s.poll_copy(link, now);
     s.next_copy(link, now);
     s.drive(link, now);
     s.poll_reconcile(now);
     s.start_reconcile(link, now);
+    // A04: claims, follow and reading.
+    s.drafts_on = drafts::drafts_on(link);
+    s.poll_claim(link, now);
+    s.next_claim(link, now);
+    s.poll_follow(link, now);
+    s.start_follow(link, now);
+    s.drive_reads(link);
 }
 
 /// Folders that need the owner (Home's Needs attention line, A01 D6).

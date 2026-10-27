@@ -52,6 +52,9 @@ fn world() -> World {
         .expect("store");
     let mut intake = Intake::new();
     intake.watch_config = fast();
+    // A01's inbox: an engine without document drafts (A04 tests use
+    // `world_with_drafts`).
+    link.demo_state().expect("demo").drafts.enabled = false;
     World {
         dir,
         link,
@@ -60,17 +63,39 @@ fn world() -> World {
     }
 }
 
+/// The inbox over a demo engine with document drafts (A04).
+fn world_with_drafts() -> World {
+    let w = world();
+    w.link.demo_state().expect("demo").drafts.enabled = true;
+    w
+}
+
 impl World {
     /// A folder in the demo engine (confirmed here unless `here` is false).
     fn folder(&self, name: &str, keep: bool, here: bool) -> (IntakeFolder, PathBuf) {
+        self.folder_with(name, keep, here, false)
+    }
+
+    /// A folder whose new files are read automatically (`auto_read`).
+    fn folder_with(
+        &self,
+        name: &str,
+        keep: bool,
+        here: bool,
+        auto_read: bool,
+    ) -> (IntakeFolder, PathBuf) {
         let path = self.dir.path().join(name);
         std::fs::create_dir_all(&path).expect("dir");
         let f = IntakeFolder {
             id: intake_folders::new_folder_id(),
             name: name.to_owned(),
             path: path.to_string_lossy().into_owned(),
-            default_kind: IntakeKind::Auto,
-            auto_read: false,
+            default_kind: if auto_read {
+                IntakeKind::Bills
+            } else {
+                IntakeKind::Auto
+            },
+            auto_read,
             keep_originals: keep,
         };
         {
@@ -841,4 +866,666 @@ fn no_owner_data_in_debug() {
     assert!(!rows.contains("Secret"), "{rows}");
     let snap = format!("{:?}", w.intake.runs[0].snapshot);
     assert!(!snap.contains("Secret"), "{snap}");
+}
+
+// ---------------------------------------------------------------------------
+// A04 WP-I: claims, Read all, auto-read, follow, claimed elsewhere, Add to….
+
+mod drafts_flow {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use cl_api::{DocumentDraftId, DraftKind, DraftStatus};
+    use cl_docread::model::{Bbox, Confidence, Found, Reader as Source, Reading, RuleId, Spot};
+    use cl_host::{DocJob, JobOutcome};
+    use cl_settings::inbox_state::{DraftLink, InboxEntry};
+
+    use super::*;
+    use crate::company::demo::drafts as demo_drafts;
+    use crate::reading::service::{Reader, ReadingService};
+
+    const OTHER: &[u8] = b"%PDF-1.4\n%another computer's scan\n";
+
+    /// Reads every document as a bill of 12.50 (no AI, no connection).
+    struct Fixed(Arc<AtomicU32>);
+
+    impl Reader for Fixed {
+        fn read(&mut self, jobs: &[DocJob], _today: CalendarDate) -> Vec<JobOutcome> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            let mut r = Reading::empty(Source::TextPdf, 1);
+            r.kind = cl_docread::model::DocKind::Bill;
+            r.header.total = Some(Found {
+                value: cl_core::Money::parse_wire("12.50").expect("money"),
+                spot: Spot {
+                    page: 0,
+                    bbox: Bbox::new(10, 10, 20, 20).expect("box"),
+                },
+                rule: RuleId::new("test"),
+                confidence: Confidence::HIGH,
+            });
+            jobs.iter()
+                .map(|_| JobOutcome::Read(Box::new(r.clone())))
+                .collect()
+        }
+    }
+
+    fn reader(w: &mut World) -> Arc<AtomicU32> {
+        let calls = Arc::new(AtomicU32::new(0));
+        let c = Arc::clone(&calls);
+        w.intake.drafts.reader = Some(Arc::new(ReadingService::start(Box::new(move || {
+            Some(Box::new(Fixed(c)) as Box<dyn Reader>)
+        }))));
+        calls
+    }
+
+    impl World {
+        fn entry_of(&self, name: &str) -> InboxEntry {
+            let id = self.row(name).entry.expect("entry");
+            self.intake
+                .state
+                .entry(&self.intake.company, &id)
+                .cloned()
+                .expect("entry")
+        }
+
+        fn own_draft(&self, name: &str) -> DocumentDraftId {
+            match self.entry_of(name).doc_draft {
+                DraftLink::Own(id) => DocumentDraftId::parse(&id).expect("id"),
+                other => panic!("{name} owns no draft: {other:?}"),
+            }
+        }
+
+        fn draft(&self, id: DocumentDraftId) -> cl_api::DocumentDraft {
+            let demo = self.link.demo_state().expect("demo");
+            demo_drafts::get(&demo, self.tenant, id).expect("draft")
+        }
+
+        /// Another computer saved `bytes` and claimed them: its draft.
+        fn elsewhere(&self, bytes: &[u8]) -> DocumentDraftId {
+            let mut demo = self.link.demo_state().expect("demo");
+            let a = crate::company::demo::checks::upload(
+                &mut demo,
+                AttachTo::Draft(DraftKey::new()),
+                "scan.pdf",
+                bytes,
+            )
+            .expect("upload");
+            demo_drafts::create(
+                &mut demo,
+                self.tenant,
+                a.id,
+                DraftKind::Unknown,
+                IdempotencyKey::new(),
+            )
+            .expect("claim")
+            .id
+        }
+
+        /// A posted demo check to attach to.
+        fn a_check(&self) -> cl_core::ids::TransactionId {
+            let mut demo = self.link.demo_state().expect("demo");
+            super::super::super::demo::rows(
+                &mut demo,
+                crate::screens::receipt_inbox::PickKind::Check,
+                None,
+                "",
+            )[0]
+            .id
+        }
+
+        fn attach_elsewhere(&self, id: DocumentDraftId) {
+            let txn = self.a_check();
+            let mut demo = self.link.demo_state().expect("demo");
+            let token = demo_drafts::get(&demo, self.tenant, id)
+                .expect("draft")
+                .updated_at;
+            demo_drafts::attach(
+                &mut demo,
+                self.tenant,
+                id,
+                txn,
+                &token,
+                IdempotencyKey::new(),
+            )
+            .expect("attached elsewhere");
+        }
+
+        fn follow_now(&mut self) {
+            self.intake.drafts.follow_now();
+        }
+
+        fn file_exists(&self, a: AttachmentId) -> bool {
+            crate::company::demo::checks::find_attachment(&self.link.demo_state().expect("demo"), a)
+                .is_some()
+        }
+    }
+
+    fn linked(name: &'static str, link: &'static str) -> impl Fn(&Intake) -> bool {
+        move |s: &Intake| {
+            s.rows()
+                .iter()
+                .any(|r| r.file.name == name && r.link == link)
+        }
+    }
+
+    fn attachment(e: &InboxEntry) -> AttachmentId {
+        AttachmentId::parse(e.attachment().expect("upload")).expect("id")
+    }
+
+    /// Q-289: an arrival is claimed (auto-read or not); `claimSent` is on
+    /// disk before anything is sent; the claim gate keeps the plain paths
+    /// shut until the answer is known (T8).
+    #[test]
+    fn arrivals_are_claimed_and_the_claim_is_saved_before_it_is_sent() {
+        let mut w = world();
+        let (_, bills) = w.folder("Bills", false, true);
+        std::fs::write(bills.join("bill.pdf"), PDF).expect("w");
+        w.until("copied in", has("bill.pdf", RowState::Arrived));
+        w.link.demo_state().expect("demo").drafts.enabled = true;
+        w.intake.drafts_on = true;
+        let link = Arc::clone(&w.link);
+        let requests = || link.demo_state().expect("demo").drafts.requests;
+        let before = requests();
+        w.intake.next_claim(&link, Instant::now());
+        w.intake.flush_state();
+        let stored = w
+            .intake
+            .store
+            .as_ref()
+            .expect("store")
+            .load()
+            .expect("load");
+        let id = w.row("bill.pdf").entry.expect("entry");
+        assert_eq!(
+            stored
+                .entry(&w.intake.company, &id)
+                .map(|e| e.doc_draft.clone()),
+            Some(DraftLink::ClaimSent),
+            "saved first"
+        );
+        assert_eq!(requests(), before, "nothing sent before it was saved");
+        // Unknown answer: the plain paths are refused (T8).
+        assert_eq!(
+            w.intake.claim_for_form(&link, &id, FormKind::Bill).err(),
+            Some("inbox.claim.pending")
+        );
+        assert_eq!(
+            w.intake
+                .add_to(&link, &id, AttachTo::Expense(w.a_check()))
+                .err(),
+            Some("inbox.claim.pending")
+        );
+        assert_eq!(
+            w.intake.discard(&link, &id).err(),
+            Some("inbox.claim.pending")
+        );
+        w.until("claimed", linked("bill.pdf", "own"));
+        let draft = w.draft(w.own_draft("bill.pdf"));
+        let e = w.entry_of("bill.pdf");
+        assert_eq!(draft.attachment_id, Some(attachment(&e)));
+        assert_eq!(draft.status, DraftStatus::New, "not auto-read: waiting");
+        assert_eq!(draft.kind, DraftKind::Unknown, "an Auto folder asks");
+        assert_eq!(w.state_of("bill.pdf"), Some(RowState::Arrived));
+        // Claimed: New bill opens it from Review Documents, never the plain
+        // save path.
+        assert_eq!(
+            w.intake.claim_for_form(&link, &id, FormKind::Bill).err(),
+            Some("inbox.claim.review")
+        );
+    }
+
+    /// A claim whose reply was lost, then a restart: claimed again with a
+    /// fresh key and the draft it made is adopted (one draft, T4).
+    #[test]
+    fn a_restart_claims_again_and_adopts_its_own_draft() {
+        let mut w = world();
+        let (_, bills) = w.folder("Bills", false, true);
+        std::fs::write(bills.join("bill.pdf"), PDF).expect("w");
+        w.until("copied in", has("bill.pdf", RowState::Arrived));
+        let id = w.row("bill.pdf").entry.expect("entry");
+        let a = attachment(&w.entry_of("bill.pdf"));
+        // The claim was saved and sent; it committed, the reply was lost.
+        let made = {
+            let mut demo = w.link.demo_state().expect("demo");
+            demo.drafts.enabled = true;
+            demo_drafts::create(
+                &mut demo,
+                w.tenant,
+                a,
+                DraftKind::Bill,
+                IdempotencyKey::new(),
+            )
+            .expect("claim")
+            .id
+        };
+        let c = w.intake.company.clone();
+        assert!(w.intake.state.begin_claim(&c, &id));
+        w.intake.save_state();
+        w.intake.flush_state();
+        // Restart.
+        let mut fresh = Intake::new();
+        fresh.watch_config = fast();
+        w.intake = fresh;
+        w.until("adopted", linked("bill.pdf", "own"));
+        assert_eq!(w.own_draft("bill.pdf"), made);
+        let demo = w.link.demo_state().expect("demo");
+        let all =
+            demo_drafts::list(&demo, w.tenant, &cl_api::DraftListQuery::default()).expect("list");
+        assert_eq!(all.total, 1, "one draft");
+    }
+
+    /// T5: the same bytes are another computer's draft: the arrival follows
+    /// it as a duplicate, its own extra copy is deleted (entry and seen hash
+    /// kept), nothing goes up again, Copy anyway and Add to… are refused,
+    /// and the original moves once the other computer entered it.
+    #[test]
+    fn claimed_elsewhere_follows_the_other_draft_until_it_is_entered() {
+        let mut w = world_with_drafts();
+        let winner = w.elsewhere(PDF);
+        let winner_file = w.draft(winner).attachment_id.expect("file");
+        let (_, bills) = w.folder("Bills", false, true);
+        std::fs::write(bills.join("bill.pdf"), PDF).expect("w");
+        w.until(
+            "claimed elsewhere",
+            has("bill.pdf", RowState::ClaimedElsewhere),
+        );
+        let e = w.entry_of("bill.pdf");
+        assert_eq!(e.doc_draft, DraftLink::Follows(winner.to_string()));
+        assert_eq!(e.status, EntryStatus::Duplicate);
+        assert!(!e.attachments.iter().any(|a| *a == winner_file.to_string()));
+        w.until("the extra copy deleted", |s| {
+            s.state
+                .entries(&s.company)
+                .iter()
+                .all(|e| e.attachments.is_empty())
+        });
+        assert!(w.file_exists(winner_file), "the winner's file is untouched");
+        assert!(
+            w.intake
+                .state
+                .seen(&w.intake.company, &e.file.sha256)
+                .is_some()
+        );
+        for _ in 0..2 {
+            w.follow_now();
+            for _ in 0..10 {
+                w.tick();
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+        let list = w.intake.state.entries(&w.intake.company);
+        assert_eq!(list.len(), 1, "never uploaded again");
+        assert!(list[0].attachments.is_empty() && list[0].status == EntryStatus::Duplicate);
+        assert_eq!(w.state_of("bill.pdf"), Some(RowState::ClaimedElsewhere));
+        assert_eq!(w.intake.badge(), 0, "not the owner's to enter here");
+        let link = Arc::clone(&w.link);
+        assert_eq!(
+            w.intake.copy_anyway(&e.file).err(),
+            Some("inbox.claim.elsewhere")
+        );
+        assert!(
+            w.intake
+                .add_to(&link, &e.file, AttachTo::Expense(w.a_check()))
+                .is_err()
+        );
+        // Entered on the other computer: followed by id, the original moves.
+        w.attach_elsewhere(winner);
+        w.follow_now();
+        w.until("processed", |s| s.processed == 1);
+        assert!(
+            bills
+                .join("Processed")
+                .join("2026-11")
+                .join("bill.pdf")
+                .exists()
+        );
+        assert!(
+            w.file_exists(winner_file),
+            "the winner's file stays on its record"
+        );
+        w.until("forgotten", |s| s.state.entries(&s.company).is_empty());
+    }
+
+    /// M3: discarding a file another computer's draft holds moves only this
+    /// computer's file; that draft is never discarded.
+    #[test]
+    fn discarding_a_followed_file_leaves_the_other_computers_draft() {
+        let mut w = world_with_drafts();
+        let winner = w.elsewhere(PDF);
+        let (_, bills) = w.folder("Bills", false, true);
+        std::fs::write(bills.join("bill.pdf"), PDF).expect("w");
+        w.until(
+            "claimed elsewhere",
+            has("bill.pdf", RowState::ClaimedElsewhere),
+        );
+        let id = w.row("bill.pdf").entry.expect("entry");
+        let link = Arc::clone(&w.link);
+        let requests = link.demo_state().expect("demo").drafts.requests;
+        assert!(w.intake.discard(&link, &id).is_ok());
+        w.until("discarded", |s| s.discarded == 1);
+        assert!(
+            bills.join("Discarded").join("bill.pdf").exists(),
+            "never deleted"
+        );
+        assert_eq!(
+            w.draft(winner).status,
+            DraftStatus::New,
+            "still waiting there"
+        );
+        assert_eq!(
+            link.demo_state().expect("demo").drafts.requests,
+            requests,
+            "no discard sent"
+        );
+    }
+
+    /// D2: an own draft is discarded in the engine first, then the original
+    /// moves and the copy goes; a draft entered elsewhere meanwhile is
+    /// handled instead.
+    #[test]
+    fn discarding_an_own_draft_discards_it_in_the_engine_first() {
+        let mut w = world_with_drafts();
+        let (_, bills) = w.folder("Bills", false, true);
+        std::fs::write(bills.join("junk.pdf"), PDF).expect("w");
+        std::fs::write(bills.join("entered.pdf"), OTHER).expect("w");
+        w.until("claimed", |s| {
+            linked("junk.pdf", "own")(s) && linked("entered.pdf", "own")(s)
+        });
+        let junk = w.own_draft("junk.pdf");
+        let copy = attachment(&w.entry_of("junk.pdf"));
+        let link = Arc::clone(&w.link);
+        let id = w.row("junk.pdf").entry.expect("entry");
+        assert!(w.intake.discard(&link, &id).is_ok());
+        w.until("discarded", |s| s.discarded == 1);
+        assert_eq!(w.draft(junk).status, DraftStatus::Discarded);
+        assert!(bills.join("Discarded").join("junk.pdf").exists());
+        w.until("copy deleted", |s| s.state.entry(&s.company, &id).is_none());
+        assert!(!w.file_exists(copy));
+        // Entered on another computer before the owner's Discard here.
+        let entered = w.own_draft("entered.pdf");
+        w.attach_elsewhere(entered);
+        let id = w.row("entered.pdf").entry.expect("entry");
+        assert!(w.intake.discard(&link, &id).is_ok());
+        w.until("processed instead", |s| s.processed == 1);
+        assert_eq!(w.intake.problem, Some("inbox.discard.entered"));
+        assert!(
+            bills
+                .join("Processed")
+                .join("2026-11")
+                .join("entered.pdf")
+                .exists()
+        );
+    }
+
+    /// D3: Add to… on a claimed file goes through the engine's attach: the
+    /// draft closes on that record in one call (never a plain link).
+    #[test]
+    fn add_to_on_a_claimed_file_attaches_its_draft() {
+        let mut w = world_with_drafts();
+        let (_, bills) = w.folder("Bills", false, true);
+        std::fs::write(bills.join("receipt.pdf"), PDF).expect("w");
+        w.until("claimed", linked("receipt.pdf", "own"));
+        let draft = w.own_draft("receipt.pdf");
+        let file = attachment(&w.entry_of("receipt.pdf"));
+        let check = w.a_check();
+        let link = Arc::clone(&w.link);
+        let id = w.row("receipt.pdf").entry.expect("entry");
+        assert!(
+            w.intake
+                .add_to(&link, &id, AttachTo::Expense(check))
+                .is_ok()
+        );
+        w.until("processed", |s| s.processed == 1);
+        let d = w.draft(draft);
+        assert_eq!(
+            (d.status, d.converted_transaction_id),
+            (DraftStatus::Converted, Some(check))
+        );
+        let on_check = crate::company::demo::checks::find_attachment(
+            &w.link.demo_state().expect("demo"),
+            file,
+        )
+        .expect("file");
+        assert_eq!(on_check.attachable_id, check.to_string());
+        assert!(
+            bills
+                .join("Processed")
+                .join("2026-11")
+                .join("receipt.pdf")
+                .exists()
+        );
+        // An engine without attach: refused, never a plain link.
+        assert_eq!(
+            drafts::target_transaction(AttachTo::Draft(DraftKey::new())),
+            None
+        );
+    }
+
+    /// D6: followed by id; entered → Processed, discarded elsewhere →
+    /// Discarded with the copy deleted, gone (drafts reset) → claimed again
+    /// once (T6).
+    #[test]
+    fn follow_handles_entered_discarded_and_gone_drafts() {
+        let mut w = world_with_drafts();
+        let (_, bills) = w.folder("Bills", false, true);
+        std::fs::write(bills.join("a.pdf"), PDF).expect("w");
+        std::fs::write(bills.join("b.pdf"), OTHER).expect("w");
+        w.until("claimed", |s| {
+            linked("a.pdf", "own")(s) && linked("b.pdf", "own")(s)
+        });
+        let (a, b) = (w.own_draft("a.pdf"), w.own_draft("b.pdf"));
+        let b_copy = attachment(&w.entry_of("b.pdf"));
+        w.attach_elsewhere(a);
+        {
+            let mut demo = w.link.demo_state().expect("demo");
+            demo_drafts::discard(&mut demo, w.tenant, b).expect("discarded elsewhere");
+        }
+        w.follow_now();
+        w.until("moved", |s| s.processed == 1 && s.discarded == 1);
+        assert!(
+            bills
+                .join("Processed")
+                .join("2026-11")
+                .join("a.pdf")
+                .exists()
+        );
+        assert!(bills.join("Discarded").join("b.pdf").exists());
+        w.until("b's copy deleted", |s| {
+            s.state.entries(&s.company).is_empty()
+        });
+        assert!(!w.file_exists(b_copy));
+        // Gone: the engine's drafts were reset (a restore).
+        std::fs::write(bills.join("c.pdf"), b"%PDF-1.4\n%c\n").expect("w");
+        w.until("claimed", linked("c.pdf", "own"));
+        let old = w.own_draft("c.pdf");
+        w.link.demo_state().expect("demo").drafts = demo_drafts::DemoDrafts::on();
+        w.follow_now();
+        w.until("claimed again", |s| {
+            s.rows().iter().any(|r| {
+                r.file.name == "c.pdf"
+                    && r.link == "own"
+                    && s.state
+                        .entries(&s.company)
+                        .iter()
+                        .any(|e| e.doc_draft.id().is_some_and(|d| d != old.to_string()))
+            })
+        });
+        let demo = w.link.demo_state().expect("demo");
+        let all =
+            demo_drafts::list(&demo, w.tenant, &cl_api::DraftListQuery::default()).expect("list");
+        assert_eq!(all.total, 1, "claimed once, no double");
+    }
+
+    /// Auto-read folders read their arrivals locally once claimed; Read all
+    /// reads every `new` draft (another computer's too), skipping a draft
+    /// open in a form until it closes; "no reader" stores nothing.
+    #[test]
+    fn auto_read_and_read_all_read_on_this_computer() {
+        let mut w = world_with_drafts();
+        let calls = reader(&mut w);
+        let (_, auto) = w.folder_with("Auto", false, true, true);
+        let (_, plain) = w.folder("Plain", false, true);
+        std::fs::write(auto.join("auto.pdf"), PDF).expect("w");
+        w.until("auto-read", |s| s.drafts.stored == 1);
+        let d = w.draft(w.own_draft("auto.pdf"));
+        assert_eq!(d.status, DraftStatus::Ready);
+        assert_eq!(d.kind, DraftKind::Bill, "a bills folder");
+        assert_eq!(d.doc_total, cl_core::Money::parse_wire("12.50").ok());
+        // Not auto-read: waits for Read all.
+        std::fs::write(plain.join("plain.pdf"), OTHER).expect("w");
+        w.until("claimed", linked("plain.pdf", "own"));
+        let plain_draft = w.own_draft("plain.pdf");
+        let theirs = w.elsewhere(b"%PDF-1.4\n%theirs\n");
+        for _ in 0..5 {
+            w.tick();
+        }
+        assert_eq!(w.draft(plain_draft).status, DraftStatus::New);
+        // Open in a form: skipped, and read once the form closes.
+        let held = w.intake.hold_draft(theirs);
+        let link = Arc::clone(&w.link);
+        assert!(w.intake.read_all(&link));
+        w.until("plain read", |s| s.drafts.stored == 2);
+        assert_eq!(
+            w.draft(theirs).status,
+            DraftStatus::New,
+            "skipped while open"
+        );
+        assert!(w.intake.drafts.busy(), "still queued");
+        drop(held);
+        w.until("theirs read", |s| s.drafts.stored == 3);
+        assert_eq!(w.draft(theirs).status, DraftStatus::Ready);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        w.until("idle", |s| s.read_progress().is_none() && !s.drafts.busy());
+        // No reader on this computer: nothing is stored, the draft waits.
+        w.intake.drafts.reader = Some(Arc::new(ReadingService::start(Box::new(|| None))));
+        let waiting = w.elsewhere(b"%PDF-1.4\n%waiting\n");
+        assert!(w.intake.read_all(&link));
+        w.until("tried", |s| !s.drafts.busy());
+        assert_eq!(w.draft(waiting).status, DraftStatus::New);
+        assert_eq!(w.intake.read_counts(), (3, 0));
+        // Cancel before it starts: nothing read.
+        assert!(w.intake.read_all(&link));
+        w.intake.cancel_reads();
+        for _ in 0..5 {
+            w.tick();
+        }
+        assert_eq!(w.draft(waiting).status, DraftStatus::New);
+    }
+
+    /// S17 / T-crash: a convert's 201 hands the upload back; and if the app
+    /// stopped before that, the opening sweep finds it on its record.
+    #[test]
+    fn a_convert_moves_the_original_once_even_after_a_crash() {
+        let mut w = world_with_drafts();
+        let (_, bills) = w.folder("Bills", false, true);
+        std::fs::write(bills.join("a.pdf"), PDF).expect("w");
+        std::fs::write(bills.join("b.pdf"), OTHER).expect("w");
+        w.until("claimed", |s| {
+            linked("a.pdf", "own")(s) && linked("b.pdf", "own")(s)
+        });
+        let (a, b) = (w.own_draft("a.pdf"), w.own_draft("b.pdf"));
+        let a_file = attachment(&w.entry_of("a.pdf"));
+        // Entered here (the form's convert answered 201).
+        w.attach_elsewhere(a);
+        assert!(w.intake.handled_by_attachment(a_file));
+        assert!(!w.intake.handled_by_attachment(a_file), "once");
+        w.until("a processed", |s| s.processed == 1);
+        // Entered, then the app stopped before the inbox heard of it.
+        w.attach_elsewhere(b);
+        w.intake.flush_state();
+        let mut fresh = Intake::new();
+        fresh.watch_config = fast();
+        w.intake = fresh;
+        w.until("b processed after the restart", |s| s.processed == 1);
+        assert!(
+            bills
+                .join("Processed")
+                .join("2026-11")
+                .join("b.pdf")
+                .exists()
+        );
+    }
+
+    /// D1 "Legacy": a P17 upload shares its form's draft key: it is linked
+    /// alone under a fresh key before its claim, so a convert moves only it.
+    #[test]
+    fn a_p17_upload_gets_its_own_draft_key_before_its_claim() {
+        let mut w = world_with_drafts();
+        w.until("running", |s| matches!(s.stage, Stage::Running));
+        let shared = DraftKey::new();
+        let (mine, other) = {
+            let mut demo = w.link.demo_state().expect("demo");
+            let up = |demo: &mut crate::company::demo::DemoState, b: &[u8]| {
+                crate::company::demo::checks::upload(demo, AttachTo::Draft(shared), "x.pdf", b)
+                    .expect("upload")
+                    .id
+            };
+            (up(&mut demo, PDF), up(&mut demo, OTHER))
+        };
+        let file = FileIdentity {
+            path_hash: "p17".into(),
+            size: PDF.len() as u64,
+            modified_ms: 1,
+            sha256: "aa".into(),
+        };
+        let c = w.intake.company.clone();
+        w.intake.state.record_upload(&c, &file, &mine.to_string());
+        w.until("claimed", |s| {
+            matches!(
+                s.state.entry(&s.company, &file).map(|e| &e.doc_draft),
+                Some(DraftLink::Own(_))
+            )
+        });
+        let e = w.intake.state.entry(&c, &file).cloned().expect("entry");
+        let key = DraftKey::parse(e.draft.as_deref().expect("key")).expect("key");
+        assert_ne!(key, shared);
+        let demo = w.link.demo_state().expect("demo");
+        let alone: Vec<AttachmentId> =
+            crate::company::demo::checks::attachments(&demo, AttachTo::Draft(key))
+                .iter()
+                .map(|a| a.id)
+                .collect();
+        assert_eq!(alone, [mine]);
+        let left: Vec<AttachmentId> =
+            crate::company::demo::checks::attachments(&demo, AttachTo::Draft(shared))
+                .iter()
+                .map(|a| a.id)
+                .collect();
+        assert_eq!(left, [other], "the form's other file stays");
+    }
+
+    /// 404 on the claim (the upload is gone, a restore): uploaded again
+    /// once and claimed.
+    #[test]
+    fn a_claim_of_a_vanished_upload_uploads_it_again_once() {
+        let mut w = world();
+        let (_, bills) = w.folder("Bills", false, true);
+        std::fs::write(bills.join("bill.pdf"), PDF).expect("w");
+        w.until("copied in", has("bill.pdf", RowState::Arrived));
+        let gone = attachment(&w.entry_of("bill.pdf"));
+        {
+            let mut demo = w.link.demo_state().expect("demo");
+            crate::company::demo::checks::delete_attachment(&mut demo, gone);
+            demo.drafts.enabled = true;
+        }
+        w.until("claimed", linked("bill.pdf", "own"));
+        let now = attachment(&w.entry_of("bill.pdf"));
+        assert_ne!(now, gone, "uploaded again");
+        assert_eq!(w.draft(w.own_draft("bill.pdf")).attachment_id, Some(now));
+    }
+
+    /// Nothing about the file in `Debug` or the control channel's links.
+    #[test]
+    fn no_owner_data_in_draft_state() {
+        let mut w = world_with_drafts();
+        let (_, bills) = w.folder("Secret Vendor Bills", false, true);
+        std::fs::write(bills.join("Secret Vendor INV-1.pdf"), PDF).expect("w");
+        w.until("claimed", linked("Secret Vendor INV-1.pdf", "own"));
+        let rows = format!("{:?}", w.intake.rows());
+        assert!(!rows.contains("Secret"), "{rows}");
+        w.intake.flush_state();
+        let text =
+            std::fs::read_to_string(w.intake.store.as_ref().expect("store").path()).expect("state");
+        assert!(!text.contains("Secret"), "{text}");
+        assert!(text.contains("docDraft"), "{text}");
+    }
 }

@@ -209,6 +209,11 @@ pub(crate) fn apply_seed(link: &CompanyLink, tenant: cl_core::ids::TenantId, s: 
         };
         demo.intake
             .save_elsewhere(tenant, vec![bills.clone(), scanner]);
+        // Every run starts alike: the files laid out again are new, not
+        // claimed by the drafts of an earlier run (A04).
+        if demo.drafts.supported() {
+            demo.drafts = crate::company::demo::drafts::DemoDrafts::on();
+        }
         demo.companies
             .iter()
             .find(|c| c.tenant_id == tenant)
