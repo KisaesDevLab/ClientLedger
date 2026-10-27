@@ -809,7 +809,7 @@ mod tests {
         );
         assert_eq!(q.names_missing(), vec![a]);
         q.names.insert(a, "acme-invoice-0412.pdf".into());
-        assert!(q.names_missing().is_empty());
+        assert_eq!(q.names_missing(), Vec::<AttachmentId>::new());
         assert!(!format!("{q:?}").contains("acme"));
         assert!(!format!("{:?}", q.views[&id]).contains("acme"));
     }
