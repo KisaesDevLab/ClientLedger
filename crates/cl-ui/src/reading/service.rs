@@ -30,7 +30,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, ContactId};
 use cl_docread::card::{self, CardPick};
-use cl_docread::model::{DocKind, Last4, Payment, Reading, Template, Word};
+use cl_docread::model::{Bbox, DocKind, Last4, Payment, Reading, Spot, Template, Word};
 use cl_docread::protocol::{JobFailure, JobHint};
 use cl_docread::vendor_match::{self, VendorCandidate, VendorMatch};
 use cl_host::{CouldNotRead, DocJob, DocreadConfig, DocreadHost, JobOutcome};
@@ -273,9 +273,9 @@ pub trait Reader: Send {
     }
 
     /// A04 WP-C: the words inside `request.area` (protocol 4, a region
-    /// job). Readers that can't read boxes answer
-    /// [`RegionOutcome::NotSupported`]; the worker host does once WP-R's
-    /// protocol 4 lands (F2 wires `DocreadHost`'s region job here).
+    /// job), stopped when `cancel` is set. Readers that can't read boxes
+    /// answer [`RegionOutcome::NotSupported`]; the worker host reads them
+    /// in the sandboxed worker (security review M1).
     fn read_region(&mut self, request: &RegionRequest, cancel: &Arc<AtomicBool>) -> RegionOutcome {
         let _ = (request, cancel);
         RegionOutcome::NotSupported
@@ -295,6 +295,43 @@ impl Reader for DocreadHost {
     ) -> Vec<JobOutcome> {
         // The worker is killed as soon as the flag is set.
         self.read_with_cancel(jobs, today, Arc::clone(cancel))
+    }
+
+    fn read_region(&mut self, request: &RegionRequest, cancel: &Arc<AtomicBool>) -> RegionOutcome {
+        let Some(job) = host_region_job(request) else {
+            return RegionOutcome::Refused;
+        };
+        // The same flag as the service's Cancel: a newer pick or box kills
+        // the worker at once.
+        region_outcome(self.read_region_with_cancel(&job, request.today, Arc::clone(cancel)))
+    }
+}
+
+/// The host's region job for `request`: the document's bytes shared, not
+/// copied (security review M1). `None` for a box that isn't one.
+pub(crate) fn host_region_job(request: &RegionRequest) -> Option<cl_host::RegionJob> {
+    let a = request.area;
+    Some(cl_host::RegionJob {
+        bytes: Arc::clone(&request.bytes),
+        region: Spot {
+            page: a.page,
+            bbox: Bbox::new(a.l, a.t, a.r, a.b)?,
+        },
+    })
+}
+
+/// The desktop's answer for the host's (security review M1): the box's
+/// words; a box the host refused (under 1 % of the page, or a page past
+/// those read) is [`RegionOutcome::Refused`], a plain note; a plain failure
+/// or a reader that gave up is [`RegionOutcome::Failed`].
+pub(crate) fn region_outcome(outcome: cl_host::RegionOutcome) -> RegionOutcome {
+    match outcome {
+        cl_host::RegionOutcome::Words(page) => RegionOutcome::Words(page.words),
+        cl_host::RegionOutcome::Refused => RegionOutcome::Refused,
+        cl_host::RegionOutcome::Failed(f) => RegionOutcome::Failed(ReadFailure::of_job(f)),
+        cl_host::RegionOutcome::CouldNotRead(c) => {
+            RegionOutcome::Failed(ReadFailure::of_gave_up(c))
+        }
     }
 }
 
@@ -576,7 +613,8 @@ impl ReadingService {
 // ---- A04 WP-C: box re-reads and the session's page words ----
 
 /// A box on one page to read again in the worker (A04 D4 "Drag a box",
-/// protocol 4). `Debug` shows the box only.
+/// protocol 4). `Debug` shows sizes and presence only: never where the box
+/// is (security review L7).
 #[derive(Clone)]
 pub struct RegionRequest {
     /// The document's bytes.
@@ -592,7 +630,7 @@ impl std::fmt::Debug for RegionRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RegionRequest")
             .field("bytes", &self.bytes.len())
-            .field("area", &self.area)
+            .field("area", &true)
             .finish_non_exhaustive()
     }
 }
@@ -605,6 +643,9 @@ pub enum RegionOutcome {
     Words(Vec<Word>),
     /// This reader can't read boxes (a worker before protocol 4).
     NotSupported,
+    /// The reader refused the box before reading: under 1 % of the page on
+    /// a side, or on a page past those read. Nothing was started.
+    Refused,
     /// Not read.
     Failed(ReadFailure),
 }
@@ -616,6 +657,7 @@ impl RegionOutcome {
         match self {
             RegionOutcome::Words(_) => "read",
             RegionOutcome::NotSupported => "not_supported",
+            RegionOutcome::Refused => "refused",
             RegionOutcome::Failed(f) => f.class(),
         }
     }
@@ -1405,6 +1447,75 @@ mod tests {
         assert_eq!(boxes.load(Ordering::SeqCst), 1);
         let debug = format!("{:?}", region());
         assert!(!debug.contains("PDF"), "{debug}");
+        // Security review L7: where the box is never shows.
+        for coord in ["1000", "3000", "2000"] {
+            assert!(!debug.contains(coord), "{debug}");
+        }
+    }
+
+    /// Security review M1: the worker host's region job shares the bytes
+    /// and carries the box exactly; its answers map to the desktop's.
+    #[test]
+    fn the_host_region_job_shares_the_bytes_and_its_outcomes_map() {
+        let r = region();
+        let job = host_region_job(&r).unwrap();
+        assert!(Arc::ptr_eq(&job.bytes, &r.bytes), "no copy");
+        assert_eq!(job.region.page, 0);
+        assert_eq!(job.region.bbox, Bbox::new(1000, 1000, 3000, 2000).unwrap());
+        let words = vec![Word {
+            text: "12.50".into(),
+            bbox: Bbox::new(1000, 1000, 1100, 1100).unwrap(),
+            confidence: Confidence::HIGH,
+        }];
+        assert_eq!(
+            region_outcome(cl_host::RegionOutcome::Words(
+                cl_docread::model::PageWords {
+                    page: 0,
+                    aspect: 12_941,
+                    source: cl_docread::model::WordSource::Ocr,
+                    words: words.clone(),
+                }
+            )),
+            RegionOutcome::Words(words)
+        );
+        assert_eq!(
+            region_outcome(cl_host::RegionOutcome::Refused),
+            RegionOutcome::Refused
+        );
+        assert_eq!(RegionOutcome::Refused.class(), "refused");
+        assert_eq!(
+            region_outcome(cl_host::RegionOutcome::Failed(JobFailure::NeedsOcr)),
+            RegionOutcome::Failed(ReadFailure::NeedsOcr)
+        );
+        for (c, f) in [
+            (CouldNotRead::Cancelled, ReadFailure::Cancelled),
+            (CouldNotRead::Unavailable, ReadFailure::Unavailable),
+            (CouldNotRead::BadReply, ReadFailure::GaveUp),
+            (CouldNotRead::TimedOut, ReadFailure::GaveUp),
+        ] {
+            assert_eq!(
+                region_outcome(cl_host::RegionOutcome::CouldNotRead(c)),
+                RegionOutcome::Failed(f)
+            );
+        }
+    }
+
+    /// Security review M1: the worker host as the service's reader, with
+    /// no worker program: a box answers plainly (no panic, no hang).
+    #[test]
+    fn the_worker_host_reads_boxes_through_the_service() {
+        let dir = std::env::temp_dir().join(format!("cl-ui-region-host-{}", std::process::id()));
+        let paths = cl_host::AppPaths::at(&dir).unwrap();
+        let exe = dir.join("no-such-worker.exe");
+        let s = ReadingService::start(Box::new(move || {
+            let host = DocreadHost::new(DocreadConfig::new(&paths, exe, None));
+            Some(Box::new(host) as Box<dyn Reader>)
+        }));
+        assert_eq!(
+            wait_region(&s.submit_region(region())),
+            RegionOutcome::Failed(ReadFailure::Unavailable)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

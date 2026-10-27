@@ -293,12 +293,15 @@ pub struct CompareEnv<'a> {
     pub bytes: Option<Arc<[u8]>>,
 }
 
-/// A box re-read in flight: what it fills when it answers.
+/// A box re-read in flight: what it fills when it answers, and for which
+/// document (security review L1).
 struct PendingRegion {
     key: TargetKey,
     kind: FillKind,
     area: PageBox,
     job: RegionJob,
+    /// [`CompareTools::doc`] when it was sent.
+    doc: u64,
 }
 
 /// One form's compare tools (see the module comment). Plain state; the
@@ -310,6 +313,10 @@ pub struct CompareTools {
     words: Option<Arc<DocWords>>,
     note: Option<CompareNote>,
     region: Option<PendingRegion>,
+    /// Bumped whenever the document may have changed (new words,
+    /// [`CompareTools::clear`]): a box re-read sent for an earlier one is
+    /// never applied (security review L1).
+    doc: u64,
 }
 
 impl std::fmt::Debug for CompareTools {
@@ -343,6 +350,7 @@ impl CompareTools {
             words: None,
             note: None,
             region: None,
+            doc: 0,
         }
     }
 
@@ -390,7 +398,10 @@ impl CompareTools {
     }
 
     /// The page words (`None`: not known yet; picks then say "Getting the
-    /// page ready…").
+    /// page ready…"). Any change (another document's words, or this one's
+    /// arriving) cancels a box re-read in flight: its answer could belong to
+    /// another document (security review L1). The owner drags the box
+    /// again.
     pub fn set_words(&mut self, words: Option<Arc<DocWords>>) {
         let same = match (&self.words, &words) {
             (Some(a), Some(b)) => Arc::ptr_eq(a, b),
@@ -399,11 +410,24 @@ impl CompareTools {
         };
         if !same {
             self.words = words;
-            if matches!(self.note, Some(CompareNote::WordsLoading)) && self.words.is_some() {
+            self.new_doc();
+            let stale = match self.note {
+                Some(CompareNote::WordsLoading) => self.words.is_some(),
+                // The box re-read was just cancelled.
+                Some(CompareNote::ReadingBox) => true,
+                _ => false,
+            };
+            if stale {
                 self.note = None;
             }
             self.bump();
         }
+    }
+
+    /// The document may have changed: forget a box re-read in flight.
+    fn new_doc(&mut self) {
+        self.doc = self.doc.wrapping_add(1);
+        self.cancel_region();
     }
 
     /// The page words known.
@@ -424,9 +448,7 @@ impl CompareTools {
         self.arm.clear();
         self.feed.armed = None;
         self.note = None;
-        if let Some(p) = self.region.take() {
-            p.job.cancel();
-        }
+        self.new_doc();
         self.bump();
     }
 
@@ -488,7 +510,7 @@ impl CompareTools {
         match fill::fill(kind, &texts, today) {
             Ok(value) => {
                 self.set_note(None);
-                let spot = fill::spot_of(page, picked)?;
+                let spot = fill::fill_spot(kind, page, picked)?;
                 Some(CompareAction::Fill { key, value, spot })
             }
             Err(r) => {
@@ -564,6 +586,7 @@ impl CompareTools {
                     kind,
                     area,
                     job,
+                    doc: self.doc,
                 });
                 self.set_note(Some(CompareNote::ReadingBox));
                 None
@@ -589,25 +612,25 @@ impl CompareTools {
             }
         };
         let p = self.region.take()?;
+        if p.doc != self.doc {
+            // Sent for another document (L1): never applied.
+            return None;
+        }
         match outcome {
             RegionOutcome::Words(words) => {
-                // Only words the worker placed inside the box count.
-                let picked: Vec<&Word> = words
-                    .iter()
-                    .filter(|w| {
-                        PageBox::new(
-                            p.area.page,
-                            w.bbox.left(),
-                            w.bbox.top(),
-                            w.bbox.right(),
-                            w.bbox.bottom(),
-                        )
-                        .is_some_and(|b| {
-                            b.l < p.area.r && b.r > p.area.l && b.t < p.area.b && b.b > p.area.t
-                        })
-                    })
+                // Only words the worker placed with their centre inside the
+                // box count, the same rule as a text page's (L7).
+                let picked: Vec<&Word> = fill::words_in(p.area, &words)
+                    .into_iter()
+                    .filter_map(|i| words.get(i))
                     .collect();
                 self.fill_from(p.key, p.kind, p.area.page, &picked, today)
+            }
+            RegionOutcome::Refused => {
+                // Under 1 % of the page, or a page past those read: a
+                // plain note, nothing logged.
+                self.set_note(Some(CompareNote::BoxTooSmall));
+                None
             }
             RegionOutcome::NotSupported
             | RegionOutcome::Failed(crate::reading::service::ReadFailure::Unavailable) => {

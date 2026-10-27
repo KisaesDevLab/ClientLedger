@@ -14,6 +14,10 @@
 //!   [`cl_docread::dates::parse`].
 //! - **Text** joins the words with single spaces.
 //!
+//! The field's new spot ([`fill_spot`]) is the one number's own box for
+//! money (never the label or currency sign beside it, security review L5),
+//! else the box around the words picked.
+//!
 //! No floats, no geometry (`cargo xtask nofloat` scans this file).
 
 use cl_core::{CalendarDate, Money};
@@ -97,24 +101,34 @@ fn could_change_a_number(word: &str) -> bool {
 /// [`FillRefusal::NoWords`] for no words, else
 /// [`FillRefusal::NotOneAmount`].
 pub fn money(words: &[&str]) -> Result<Money, FillRefusal> {
+    money_word(words).map(|(m, _)| m)
+}
+
+/// [`money`] and the index (into `words`) of the one word it was read
+/// from. A word holding a space of any kind once trimmed (a U+FEFF between
+/// two numbers) is never an amount (security review L4).
+///
+/// # Errors
+/// As [`money`].
+pub fn money_word(words: &[&str]) -> Result<(Money, usize), FillRefusal> {
     if words.is_empty() {
         return Err(FillRefusal::NoWords);
     }
     let mut number = None;
-    for w in words {
-        let w = w.trim();
+    for (i, w) in words.iter().enumerate() {
+        let w = cl_docread::amount::js_trim(w);
         if w.chars().any(|c| c.is_ascii_digit()) {
-            if number.is_some() {
-                // Two words with digits: never joined (M4).
+            if number.is_some() || w.chars().any(cl_docread::amount::is_js_space) {
+                // Two numbers, in two words or in one: never joined (M4).
                 return Err(FillRefusal::NotOneAmount);
             }
-            number = Some(w);
+            number = Some((w, i));
         } else if !is_currency_sign(w) && could_change_a_number(w) {
             return Err(FillRefusal::NotOneAmount);
         }
     }
     number
-        .and_then(cl_docread::amount::parse)
+        .and_then(|(w, i)| cl_docread::amount::parse(w).map(|m| (m, i)))
         .ok_or(FillRefusal::NotOneAmount)
 }
 
@@ -165,6 +179,22 @@ pub fn spot_of(page: u16, words: &[&Word]) -> Option<PageBox> {
         .skip(1)
         .fold(first.bbox, |acc, w| acc.union(w.bbox));
     PageBox::new(page, b.left(), b.top(), b.right(), b.bottom())
+}
+
+/// The spot a fill of `kind` from `picked` (all on `page`) gives its field:
+/// for money the one number's own box (security review L5), else the box
+/// around every word picked. `None` when nothing was picked or a money
+/// pick isn't one amount.
+#[must_use]
+pub fn fill_spot(kind: FillKind, page: u16, picked: &[&Word]) -> Option<PageBox> {
+    match kind {
+        FillKind::Money => {
+            let texts: Vec<&str> = picked.iter().map(|w| w.text.as_str()).collect();
+            let (_, i) = money_word(&texts).ok()?;
+            spot_of(page, &[*picked.get(i)?])
+        }
+        FillKind::Date | FillKind::Text => spot_of(page, picked),
+    }
 }
 
 /// The words of `page_words` whose centre lies inside `area`, in reading
@@ -304,6 +334,54 @@ mod tests {
             "Text(..)"
         );
         assert_eq!(FillRefusal::NotOneAmount.name(), "not_one_amount");
+    }
+
+    /// Security review L4: a space of any kind inside the number word
+    /// (U+FEFF from a text layer) refuses the pick.
+    #[test]
+    fn a_number_word_with_a_space_inside_refuses() {
+        for w in [
+            "1\u{FEFF}250.00",
+            "1\u{A0}250.00",
+            "1 250.00",
+            "12.50\u{200A}1",
+        ] {
+            assert_eq!(money(&[w]), Err(FillRefusal::NotOneAmount), "{w:?}");
+            assert_eq!(money(&["$", w]), Err(FillRefusal::NotOneAmount), "{w:?}");
+        }
+        // Spaces around it are trimmed, U+FEFF too.
+        assert_eq!(money(&["\u{FEFF}12.50\u{A0}"]), Ok(m("12.50")));
+        assert_eq!(money_word(&["Total:", "$", "12.50"]), Ok((m("12.50"), 2)));
+    }
+
+    /// Security review L5: a money fill's spot is the number's own box,
+    /// not the label's or the currency sign's.
+    #[test]
+    fn a_money_spot_is_the_numbers_own_box() {
+        let label = Word {
+            text: "Total:".into(),
+            ..word(100, 100, 300, 200)
+        };
+        let sign = Word {
+            text: "$".into(),
+            ..word(320, 100, 360, 200)
+        };
+        let number = Word {
+            text: "12.50".into(),
+            ..word(380, 100, 600, 200)
+        };
+        let picked = [&label, &sign, &number];
+        assert_eq!(
+            fill_spot(FillKind::Money, 1, &picked),
+            PageBox::new(1, 380, 100, 600, 200)
+        );
+        // Text and dates still take every word picked.
+        assert_eq!(
+            fill_spot(FillKind::Text, 1, &picked),
+            PageBox::new(1, 100, 100, 600, 200)
+        );
+        assert_eq!(fill_spot(FillKind::Money, 1, &[&label]), None);
+        assert_eq!(fill_spot(FillKind::Money, 1, &[]), None);
     }
 
     fn word(l: u16, t: u16, r: u16, b: u16) -> Word {

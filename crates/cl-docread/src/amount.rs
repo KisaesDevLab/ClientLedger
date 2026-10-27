@@ -162,12 +162,14 @@ fn is_js_line_terminator(c: char) -> bool {
 
 /// JavaScript's `\s` (`WhiteSpace` + `LineTerminator`): Unicode spaces and
 /// the BOM, but not U+0085.
-pub(crate) fn is_js_space(c: char) -> bool {
+#[must_use]
+pub fn is_js_space(c: char) -> bool {
     (c.is_whitespace() && c != '\u{85}') || c == '\u{FEFF}'
 }
 
 /// `String.prototype.trim`.
-pub(crate) fn js_trim(s: &str) -> &str {
+#[must_use]
+pub fn js_trim(s: &str) -> &str {
     s.trim_matches(is_js_space)
 }
 

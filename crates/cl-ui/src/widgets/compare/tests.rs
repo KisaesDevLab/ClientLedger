@@ -142,11 +142,16 @@ fn click_to_fill_exact_cents_and_refuse_two_numbers() {
             spot: PageBox::new(0, 7300, 8000, 8000, 8400).unwrap(),
         })
     );
-    // "$" + "12.50" (Shift+click from "$").
-    assert!(matches!(
+    // "$" + "12.50" (Shift+click from "$"): the spot is the number's own
+    // box, not the sign's (security review L5).
+    assert_eq!(
         c.on_event(click(0, 2, 3), &env()),
-        Some(CompareAction::Fill { value: FillValue::Money(m), .. }) if m == Money::parse_wire("12.50").unwrap()
-    ));
+        Some(CompareAction::Fill {
+            key: TOTAL,
+            value: FillValue::Money(Money::parse_wire("12.50").unwrap()),
+            spot: PageBox::new(0, 7300, 8000, 8000, 8400).unwrap(),
+        })
+    );
     // "2" "$" "12.50": two numbers, nothing changes.
     assert_eq!(c.on_event(click(0, 1, 3), &env()), None);
     assert_eq!(
@@ -280,6 +285,141 @@ fn a_box_on_a_scan_is_read_again_and_filled_by_the_same_rule() {
     assert_eq!(c.on_event(CompareEvent::PageBox(low), &env), None);
     assert_eq!(wait(&mut c), None);
     assert_eq!(c.note(), Some(CompareNote::BoxUnavailable));
+}
+
+/// Answers every box with a word whose centre is inside and one that only
+/// overlaps its left edge; or refuses the box.
+struct EdgeReader {
+    refuse: bool,
+}
+
+impl Reader for EdgeReader {
+    fn read(&mut self, jobs: &[DocJob], _today: CalendarDate) -> Vec<JobOutcome> {
+        jobs.iter()
+            .map(|_| JobOutcome::CouldNotRead(cl_host::CouldNotRead::Unavailable))
+            .collect()
+    }
+
+    fn read_region(&mut self, request: &RegionRequest, _c: &Arc<AtomicBool>) -> RegionOutcome {
+        if self.refuse {
+            return RegionOutcome::Refused;
+        }
+        let a = request.area;
+        RegionOutcome::Words(vec![
+            // Centre left of the box: overlaps it, isn't in it.
+            word("7.00", a.l - 400, a.t, a.l + 100, a.t + 50),
+            word("12.50", a.l + 200, a.t, a.l + 400, a.t + 50),
+        ])
+    }
+}
+
+fn scan_env(service: &ReadingService) -> CompareEnv<'_> {
+    CompareEnv {
+        today: today(),
+        service: Some(service),
+        bytes: Some(Arc::from(b"scan".to_vec())),
+    }
+}
+
+/// Security review L7: a re-read word counts only when its centre is in
+/// the box (the text page's rule), so one overlapping the edge doesn't
+/// make a second number.
+#[test]
+fn a_re_read_word_counts_only_with_its_centre_in_the_box() {
+    let service = ReadingService::start(Box::new(|| {
+        Some(Box::new(EdgeReader { refuse: false }) as Box<dyn Reader>)
+    }));
+    let mut c = tools(WordSource::Ocr);
+    c.focus(Some(TOTAL));
+    let area = PageBox::new(0, 6000, 7000, 9000, 9000).unwrap();
+    assert_eq!(
+        c.on_event(CompareEvent::PageBox(area), &scan_env(&service)),
+        None
+    );
+    assert_eq!(
+        wait(&mut c),
+        Some(CompareAction::Fill {
+            key: TOTAL,
+            value: FillValue::Money(Money::parse_wire("12.50").unwrap()),
+            spot: PageBox::new(0, 6200, 7000, 6400, 7050).unwrap(),
+        })
+    );
+}
+
+/// Security review M1: a box the reader refused is a plain note.
+#[test]
+fn a_refused_box_says_so_plainly() {
+    let service = ReadingService::start(Box::new(|| {
+        Some(Box::new(EdgeReader { refuse: true }) as Box<dyn Reader>)
+    }));
+    let mut c = tools(WordSource::Ocr);
+    c.focus(Some(TOTAL));
+    let area = PageBox::new(0, 6000, 7000, 9000, 9000).unwrap();
+    assert_eq!(
+        c.on_event(CompareEvent::PageBox(area), &scan_env(&service)),
+        None
+    );
+    assert_eq!(wait(&mut c), None);
+    assert_eq!(c.note(), Some(CompareNote::BoxTooSmall));
+}
+
+/// Security review L1: a box re-read belongs to the document it was sent
+/// for. New words (another document, or this one's arriving) or a clear
+/// cancel it; an answer for an earlier document is never applied.
+#[test]
+fn a_box_re_read_never_fills_another_documents_field() {
+    let service = ReadingService::start(Box::new(|| {
+        Some(Box::new(EdgeReader { refuse: false }) as Box<dyn Reader>)
+    }));
+    let area = PageBox::new(0, 6000, 7000, 9000, 9000).unwrap();
+    // New words while it runs: cancelled, its note gone.
+    let mut c = tools(WordSource::Ocr);
+    c.focus(Some(TOTAL));
+    assert_eq!(
+        c.on_event(CompareEvent::PageBox(area), &scan_env(&service)),
+        None
+    );
+    assert!(c.reading_box());
+    c.set_words(Some(words(WordSource::Ocr)));
+    assert!(!c.reading_box());
+    assert_eq!(c.note(), None);
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(c.poll(today()), None);
+    // Words arriving for a document that had none cancel it too.
+    let mut c = CompareTools::new();
+    c.set_targets(targets(), Vec::new());
+    c.focus(Some(TOTAL));
+    assert_eq!(
+        c.on_event(CompareEvent::PageBox(area), &scan_env(&service)),
+        None
+    );
+    assert!(c.reading_box());
+    c.set_words(Some(words(WordSource::Ocr)));
+    assert!(!c.reading_box());
+    // Another draft (clear): cancelled.
+    c.focus(Some(TOTAL));
+    assert_eq!(
+        c.on_event(CompareEvent::PageBox(area), &scan_env(&service)),
+        None
+    );
+    c.clear();
+    assert!(!c.reading_box());
+    // An answer that comes back after the document changed is dropped.
+    c.focus(Some(TOTAL));
+    assert_eq!(
+        c.on_event(CompareEvent::PageBox(area), &scan_env(&service)),
+        None
+    );
+    c.doc = c.doc.wrapping_add(1);
+    std::thread::sleep(Duration::from_millis(200));
+    for _ in 0..100 {
+        if !c.reading_box() {
+            break;
+        }
+        assert_eq!(c.poll(today()), None);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!c.reading_box(), "the answer came and was dropped");
 }
 
 #[test]
