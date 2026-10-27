@@ -1224,10 +1224,13 @@ pub(crate) fn field_mark(
         stroke,
         egui::StrokeKind::Outside,
     );
-    let key = if low {
-        "bill.read.mark.low"
-    } else {
-        "bill.read.mark"
+    // The same three levels the page's boxes show (UI check item 10): a
+    // value read surely is not called "check it" here while the page
+    // shows it as sure.
+    let key = match level {
+        Confidence::Low => "bill.read.mark.low",
+        Confidence::High => "bill.read.mark.sure",
+        _ => "bill.read.mark",
     };
     // The caption under the field is tied to it for screen readers (and
     // the control channel): the field itself says it was read.
