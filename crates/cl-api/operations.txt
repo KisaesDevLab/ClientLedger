@@ -256,6 +256,6 @@ PUT     /api/v1/vendor-layout-templates         pre-handler-only
 DELETE  /api/v1/vendor-layout-templates/{id}    pre-handler-only
 # A03: document reading assist (engine U-92d, document-assist-v1; in the pin since 38cf97eb)
 POST    /api/v1/document-reading/assist         pre-handler-only
-# A04: attach a document draft (engine U-95, document-drafts-attach-v1; client-declared
-# until the pin has it; keyable-docs-attach = keyed only under document-drafts-attach-v1)
+# A04: attach a document draft (engine U-95, document-drafts-attach-v1; in the pin since
+# 4e0593c3; keyable-docs-attach = keyed only under document-drafts-attach-v1)
 POST    /api/v1/document-drafts/{id}/attach     keyable-docs-attach

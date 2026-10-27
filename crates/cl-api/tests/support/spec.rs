@@ -27,10 +27,9 @@ use sha2::{Digest, Sha256};
 /// (U-84a), bill terms dates (U-86d) and payment terms list (U-86e) are;
 /// since pin a88337e3 (engine PR #177) the A01 intake settings (U-93) are;
 /// since pin 38cf97eb (engine PRs #178, #179) the A03 document draft and
-/// vendor layout routes (U-92) and the document reading assist (U-92d) are.
-/// The A04 draft attach (U-95, engine PR #180) is client-declared until the
-/// pin has it.
-pub const OUTSIDE_SPEC: [(&str, &str); 9] = [
+/// vendor layout routes (U-92) and the document reading assist (U-92d) are;
+/// since pin 4e0593c3 (engine PR #180) the A04 draft attach (U-95) is.
+pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -40,8 +39,6 @@ pub const OUTSIDE_SPEC: [(&str, &str); 9] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
-    // A04 (U-95, engine PR #180): until the pin moves.
-    ("POST", "/api/v1/document-drafts/{id}/attach"),
 ];
 
 /// Lowercase hex of a SHA-256.

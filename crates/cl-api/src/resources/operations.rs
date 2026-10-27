@@ -818,7 +818,7 @@ pub(crate) const DOCUMENT_READING_ASSIST: Operation =
     write(Method::Post, "/api/v1/document-reading/assist");
 
 // ---- A04: attach a document draft (engine U-95, `document-drafts-attach-v1`)
-// Client-declared (`OUTSIDE_SPEC`) until the pin has it.
+// In the engine spec since pin 4e0593c3 (engine PR #180).
 
 /// Files a live draft's document on a posted transaction and closes the
 /// draft, in one database transaction (keyed under

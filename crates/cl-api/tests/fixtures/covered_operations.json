@@ -33,7 +33,7 @@
   {"method":"GET","path":"/api/v1/tags/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"PUT","path":"/api/v1/tags/{id}","inSpec":true,"fragmentHash":"6b7417b175cb4c4ed1e35e78290c06644c3e5a540702c1ae79154cf82c66c7a0"},
   {"method":"DELETE","path":"/api/v1/tags/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
-  {"method":"GET","path":"/api/v1/transactions","inSpec":true,"fragmentHash":"5b58bbbbbe3596c0cf3b1115c15a9fbb63d8d0ea41f549abe6c083296d42edc7"},
+  {"method":"GET","path":"/api/v1/transactions","inSpec":true,"fragmentHash":"9adb133506a60dbd09e3038cdbca6a135977cc7c8873003c80a36449030de8fe"},
   {"method":"POST","path":"/api/v1/transactions","inSpec":true,"fragmentHash":"70267a6f06e9ae70eecda324421ccf3f3267e3633a64750aed9fbb78fa2cc48a"},
   {"method":"GET","path":"/api/v1/transactions/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"PUT","path":"/api/v1/transactions/{id}","inSpec":true,"fragmentHash":"9999eee36483b045bd9619691c16071188d0ae4eb9d76dfbcc771b1257291c78"},
@@ -198,5 +198,5 @@
   {"method":"PUT","path":"/api/v1/vendor-layout-templates","inSpec":true,"fragmentHash":"5ff85ec42f88489844ea0a425e440d8fe3d2148276555e3100d0bceddc9fc344"},
   {"method":"DELETE","path":"/api/v1/vendor-layout-templates/{id}","inSpec":true,"fragmentHash":"dcf151b7a5a5af7c6c5b07a5066d382fc35f3cb7e5501dbe08c6eaa7b8408ab8"},
   {"method":"POST","path":"/api/v1/document-reading/assist","inSpec":true,"fragmentHash":"c5ca5e1c71e9d277973bb8bc12afaea3fcc95088afa9b40694016b69b07e2546"},
-  {"method":"POST","path":"/api/v1/document-drafts/{id}/attach","inSpec":false,"fragmentHash":null}
+  {"method":"POST","path":"/api/v1/document-drafts/{id}/attach","inSpec":true,"fragmentHash":"8ceaf18e08b2f382e191e95e8ee083ebd50561311dd9c100b50fb8f1b2c37917"}
 ]
