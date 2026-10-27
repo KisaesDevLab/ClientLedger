@@ -359,8 +359,12 @@ impl AttachDialog {
 
     /// The engine's duplicate check answered 409 `POSSIBLE_DUPLICATE`
     /// (`matches` block; other live drafts are not records and are not
-    /// listed). A bill for a bill document may take the file; for a receipt
-    /// a bill is information only; expenses follow the register rules.
+    /// listed). A row may take the file only when it is the same purchase
+    /// by the register rules (review S1): its total exactly the document's,
+    /// dated inside the search window, and of an allowed kind (a bill for a
+    /// bill document; an expense for a receipt). The engine also matches by
+    /// reference alone, ignoring total and date: such rows are shown for
+    /// information only.
     #[must_use]
     pub(crate) fn from_duplicates(
         p: &MatchProbe,
@@ -369,6 +373,7 @@ impl AttachDialog {
         attach_ok: bool,
     ) -> AttachDialog {
         let probe = p.probe();
+        let (start, end) = register_match::search_window(p.date);
         let shown = matches
             .iter()
             .filter_map(|m| {
@@ -376,12 +381,14 @@ impl AttachDialog {
                     return None;
                 };
                 let kind = RowKind::from_txn_type(m.txn_type.as_deref().unwrap_or(""));
-                // The payee gate and the kind allowlist hold here too.
-                let attachable = if kind == RowKind::Bill {
+                let kind_ok = if kind == RowKind::Bill {
                     bill_doc
                 } else {
                     kind.matchable(probe.side)
                 };
+                let same_total = m.total == Some(p.amount);
+                let in_window = m.date.is_some_and(|d| d >= start && d <= end);
+                let attachable = kind_ok && same_total && in_window;
                 Some(ShownRow {
                     id,
                     date: m.date,
@@ -796,6 +803,53 @@ mod tests {
         let bill = AttachDialog::from_duplicates(&probe(None), &[m], true, true);
         assert!(bill.rows[0].attachable);
         assert!(bill.from_engine);
+    }
+
+    /// Review S1: an engine match at another total, outside the date
+    /// window, without a total or date, or of a kind not allowed is shown
+    /// for information only; Attach can't pick it.
+    #[test]
+    fn engine_matches_attach_only_at_the_exact_total_inside_the_window() {
+        let m = |n: u8, kind: &str, d: Option<u32>, total: Option<&str>| DuplicateMatch {
+            source: MatchSource::Transaction(id(n)),
+            reason: cl_api::MatchReason::Reference,
+            txn_type: Some(kind.into()),
+            kind: None,
+            date: d.map(day),
+            total: total.map(money),
+            reference: None,
+        };
+        let matches = [
+            m(1, "expense", Some(14), Some("25.00")),
+            m(2, "expense", Some(14), Some("25.01")),
+            m(3, "expense", Some(22), Some("25.00")),
+            m(4, "expense", Some(6), Some("25.00")),
+            m(5, "expense", None, Some("25.00")),
+            m(6, "expense", Some(14), None),
+            m(7, "deposit", Some(14), Some("25.00")),
+            m(8, "journal_entry", Some(14), Some("25.00")),
+            m(9, "expense", Some(21), Some("25")),
+        ];
+        let mut d = AttachDialog::from_duplicates(&probe(None), &matches, false, true);
+        let ok: Vec<TransactionId> = d
+            .rows
+            .iter()
+            .filter(|r| r.attachable)
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(ok, vec![id(1), id(9)], "exact total, ±7 days, an expense");
+        assert_eq!(d.rows.len(), 9, "the rest are still shown");
+        d.select(1);
+        assert!(!d.ask_attach(), "a cent off can't be attached");
+        assert_eq!(d.confirm(), None);
+        // A bill document: the bill row follows the same rules.
+        let bills = [
+            m(10, "bill", Some(14), Some("25.00")),
+            m(11, "bill", Some(14), Some("2500.00")),
+        ];
+        let b = AttachDialog::from_duplicates(&probe(None), &bills, true, true);
+        assert!(b.rows[0].attachable);
+        assert!(!b.rows[1].attachable, "same reference, another total");
     }
 
     #[test]
