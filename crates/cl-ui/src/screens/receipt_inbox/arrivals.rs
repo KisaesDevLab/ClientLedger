@@ -377,6 +377,21 @@ impl super::ReceiptInboxScreen {
                 }));
             }
             Ok(None) => self.arrivals.notice = Some(t("inbox.notice.linking")),
+            // A04 WP-F2: a claimed arrival opens its draft in the form, in
+            // draft mode (never the plain save path).
+            Err("inbox.claim.review") => match intake::handle(ctx).lock().own_draft(&entry) {
+                Some(id) => crate::screens::doc_review::review::open(
+                    &self.link,
+                    crate::screens::doc_review::review::DraftOpen {
+                        id,
+                        form: match kind {
+                            FormKind::Bill => cl_model::doc_draft::DraftForm::EnterBill,
+                            FormKind::Check => cl_model::doc_draft::DraftForm::WriteCheck,
+                        },
+                    },
+                ),
+                None => self.arrivals.problem = Some("inbox.claim.review"),
+            },
             Err(k) => self.arrivals.problem = Some(k),
         }
     }

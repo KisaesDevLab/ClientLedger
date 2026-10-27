@@ -426,10 +426,6 @@ impl Intake {
 
     /// A form shows draft `draft` (F2's draft mode): batch reads skip it
     /// for as long as the form holds the returned claim (S4).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "WP-F2's draft mode holds drafts")
-    )]
     pub(crate) fn hold_draft(&mut self, draft: DocumentDraftId) -> Claim {
         let claim = Arc::new(());
         self.drafts
@@ -442,10 +438,6 @@ impl Intake {
     /// moved `attachment` onto a record (S17): its entry is handled (the
     /// original moves to `Processed/`, or is kept). False when no entry
     /// holds that upload.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "WP-F2's convert calls it after a 201")
-    )]
     pub(crate) fn handled_by_attachment(&mut self, attachment: AttachmentId) -> bool {
         let Some(e) = self
             .state
@@ -457,6 +449,45 @@ impl Intake {
         };
         self.handled(&e);
         true
+    }
+
+    /// A04 WP-F2: a draft form's **Discard document** for the upload
+    /// `attachment`. When this computer's inbox holds the arrival, it is
+    /// discarded by the inbox's own rules (D2: an own draft in the engine
+    /// first, a followed one locally only) and `Some` says how that went;
+    /// `None` when no entry holds it (the form discards the draft in the
+    /// engine itself; the computer that has the file moves it when it
+    /// follows the draft).
+    pub(crate) fn discard_by_attachment(
+        &mut self,
+        link: &CompanyLink,
+        attachment: AttachmentId,
+    ) -> Option<super::ActionResult> {
+        let file = self
+            .state
+            .by_attachment(&self.company, &attachment.to_string())
+            .filter(|e| matches!(e.status, EntryStatus::Arrived | EntryStatus::Duplicate))
+            .map(|e| e.file.clone())?;
+        Some(self.discard(link, &file))
+    }
+
+    /// A04 WP-F2: the draft this computer claimed for the entry, when it
+    /// is still waiting (New bill / New check open it in draft mode).
+    pub(crate) fn own_draft(&self, entry: &FileIdentity) -> Option<DocumentDraftId> {
+        let e = self
+            .state
+            .entry(&self.company, entry)
+            .filter(|e| e.status == EntryStatus::Arrived)?;
+        match &e.doc_draft {
+            DraftLink::Own(id) => DocumentDraftId::parse(id).ok(),
+            _ => None,
+        }
+    }
+
+    /// A04 WP-F2: a vendor's layout was learned: the next reading loads the
+    /// layouts again.
+    pub(crate) fn forget_read_context(&mut self) {
+        self.drafts.context = None;
     }
 
     // -----------------------------------------------------------------
@@ -1350,7 +1381,8 @@ impl Intake {
             return Some(Task::ready(ReadCtx {
                 vendors: crate::reading::map::vendor_candidates(&contacts),
                 context: ReadContext {
-                    layouts: Vec::new(),
+                    // A04 WP-F2: the layouts learned on accept.
+                    layouts: demo.drafts.layouts.clone(),
                     card_accounts: Some(card_accounts_of(&chart)),
                 },
             }));

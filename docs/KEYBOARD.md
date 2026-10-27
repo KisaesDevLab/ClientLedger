@@ -77,6 +77,8 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 | `Ctrl+Page Down` | Next Section | `batch.next_section` |
 | `Ctrl+Page Up` | Previous Section | `batch.prev_section` |
 | `Alt+A` | Accept These Values | `form.accept_read` |
+| `Alt+T` | Attach to Selected Transaction | `form.attach_selected` |
+| `Alt+E` | Enter as New | `form.enter_as_new` |
 
 ## In a grid
 

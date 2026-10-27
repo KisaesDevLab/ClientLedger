@@ -10,7 +10,7 @@
 # 8 s, and after 5 s while something settles), so the late file shows as
 # settling first. All data is synthetic.
 name: receipt_inbox
-description: Intake inbox - migrated folder, settling then copied, HEIC, 11 MB and duplicate rows, filter, TIFF preview, Discard, claims for Review Documents (New check sends there), Add to a check through attach (Processed) and to a bill in a keep-originals folder, Set up chip, Home line, 200%.
+description: Intake inbox - migrated folder, settling then copied, HEIC, 11 MB and duplicate rows, filter, TIFF preview, Discard, claims for Review Documents (New check opens the draft in draft mode), Add to a check through attach (Processed) and to a bill in a keep-originals folder, Set up chip, Home line, 200%.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -104,11 +104,15 @@ steps:
   - assert_exists: {role: image, label: Preview of Ozark Feed receipt.png}
   - assert_exists: {label_contains: Waiting in Review Documents.}
   - screenshot: preview
+  # A04 WP-F2: New check opens the claimed draft in Write Check's draft
+  # mode (never the plain save path); closing it leaves the draft waiting.
   - click: {role: button, label: New check}
+  - assert_state: {key: screen.screen, equals: write_check, within_ms: 5000}
+  - assert_state: {key: screen.draft.form, equals: check}
+  - assert_state: {key: screen.draft.loaded, equals: true}
+  - screenshot: new-check-draft
+  - command: file.close_window
   - assert_state: {key: screen.screen, equals: receipt_inbox}
-  - assert_state: {key: screen.problem, equals: inbox.claim.review}
-  - assert_exists: {label_contains: Open it from Review Documents to enter it.}
-  - screenshot: new-check-review
   - assert_state: {key: screen.on_form, equals: 0}
 
   # --- Add to a check: the original moves to Processed/YYYY-MM ------------------
