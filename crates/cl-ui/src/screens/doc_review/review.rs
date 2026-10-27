@@ -124,6 +124,20 @@ pub struct ReviewDigests {
     pub form_digest: Option<String>,
     /// [`digest`] of the canonical convert body sent.
     pub posted_digest: Option<String>,
+    /// After an attach on the demo engine: counts only (S3: the books
+    /// gained no record and the file is on the record picked).
+    pub attached: Option<AttachProof>,
+}
+
+/// What an attach changed in the demo's books (counts only).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct AttachProof {
+    /// Records in the books before the attach.
+    pub records_before: usize,
+    /// Records after it.
+    pub records_after: usize,
+    /// Files now filed on the record attached to.
+    pub files_on_record: usize,
 }
 
 impl ReviewDigests {
@@ -1400,6 +1414,7 @@ impl DraftSession {
         // itself. The demo engine takes the same drafts (`PostBody::demo`).
         let live = a.body.live(a.billable);
         self.digests = Some(ReviewDigests {
+            attached: None,
             form_digest: Some(a.form_digest.clone()),
             posted_digest: live
                 .as_ref()
@@ -1847,8 +1862,23 @@ impl DraftSession {
         if self.link.is_demo() {
             let out = match (self.tenant_or_err(), self.link.demo_state()) {
                 (Ok(tenant), Some(mut demo)) => {
-                    demo_drafts::attach(&mut demo, tenant, id, target, &expected, key)
-                        .map(|a| (a.draft, a.transaction))
+                    let records_before = demo.ledger.transactions().len();
+                    let out = demo_drafts::attach(&mut demo, tenant, id, target, &expected, key)
+                        .map(|a| (a.draft, a.transaction));
+                    if out.is_ok() {
+                        self.digests = Some(ReviewDigests {
+                            form_digest: None,
+                            posted_digest: None,
+                            attached: Some(AttachProof {
+                                records_before,
+                                records_after: demo.ledger.transactions().len(),
+                                files_on_record: crate::company::demo::checks::files_on(
+                                    &demo, target,
+                                ),
+                            }),
+                        });
+                    }
+                    out
                 }
                 _ => Err(ApiError::NoCompanyOpen),
             };

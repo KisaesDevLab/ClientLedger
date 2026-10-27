@@ -86,6 +86,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bill.read.mark.sure", "Read from the document"),
     // A04 fix pass: UI check item 11 (a draft check's tab).
     ("check.title.document", "Write Check \u{b7} from Review Documents"),
+    // A04 fix pass: UI check item 3 (the reading banner's source).
+    ("doc_form.banner.layout_name", "{vendor}'s saved layout"),
     // A04 fix pass: UI check item 12.
     ("doc_form.banner.unaccepted.one", "1 value was read from the document. Check it, then Accept (Alt+A)."),
     ("doc_form.credit_unavailable", "A document from Review Documents is entered as a charge here. To enter a refund or credit, discard it and enter the credit by hand."),

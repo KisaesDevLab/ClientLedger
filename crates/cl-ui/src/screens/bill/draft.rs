@@ -30,7 +30,7 @@ use super::doc_read::Incoming;
 use super::save::{Draft, to_draft};
 use super::{EnterBillScreen, Field, LastSaved, Pending};
 use crate::company::CompanyEvent;
-use crate::i18n::t;
+use crate::i18n::{t, t_with};
 use crate::reading::learn::LearnInput;
 use crate::reading::map;
 use crate::screens::doc_review::attach::MatchProbe;
@@ -243,6 +243,13 @@ impl EnterBillScreen {
             local: true,
             balance_due: m.balance_due,
         });
+        // Read with the vendor's saved layout: the one "Filled from" line
+        // (the reading banner's) names it (UI check item 3).
+        if let Some(vendor) = self.draft_vendor_name()
+            && let Some(f) = self.read.filled.as_mut()
+        {
+            f.file_name = t_with("doc_form.banner.layout_name", &[("vendor", &vendor)]);
+        }
         // The read lines, in the reading's order (their spots).
         let read = self.header.current().read.clone();
         let lines: Vec<ReadTarget> = self

@@ -552,6 +552,11 @@ fn a_receipt_already_in_the_books_is_attached_not_entered_again() {
         "{ev:?}"
     );
     assert_eq!(w.transactions(), before, "nothing posted");
+    // The control channel's proof (S3): no new record, the file is on it.
+    let proof = digests(&w.ctx).attached.expect("attach proof");
+    assert_eq!(proof.records_before, proof.records_after);
+    assert_eq!(proof.files_on_record, 1);
+    assert_eq!(digests(&w.ctx).to_json()["match"], false, "no convert ran");
     let d = demo_drafts::get(&w.demo(), w.tenant, id).expect("draft");
     assert_eq!(d.converted_transaction_id, Some(target));
     assert_eq!(s.learn.layout_outcome, None, "no learning after an attach");
