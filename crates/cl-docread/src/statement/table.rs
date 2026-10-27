@@ -472,7 +472,6 @@ pub fn read_row(
         page: page.page,
         bbox: row_box,
     };
-    let only_money_or_aging = text_words.is_empty() && !p.money.is_empty();
     if let Some(what) = left_out_kind(&texts) {
         // The row's printed amount: its balance, else its last amount.
         let value = p
@@ -541,7 +540,6 @@ pub fn read_row(
                 None => Row::Nothing,
             }
         }
-        _ if only_money_or_aging => Row::Nothing,
         _ => Row::Nothing,
     }
 }
@@ -574,11 +572,34 @@ fn line_words<'a>(layout: &Layout, pages: &'a [PageWords], li: usize) -> Vec<&'a
 /// Read every page's table.
 #[must_use]
 pub fn read(layout: &Layout, pages: &[PageWords], today: CalendarDate) -> Table {
+    let (t, found_header) = read_with(layout, pages, today, None);
+    if found_header {
+        return t;
+    }
+    // No header row read (OCR lost a shaded band): columns from the
+    // dated rows themselves.
+    match crate::statement::infer::bands(layout, pages, today) {
+        Some(b) => {
+            let (mut t, _) = read_with(layout, pages, today, Some(b));
+            t.statement_columns = false;
+            t
+        }
+        None => t,
+    }
+}
+
+fn read_with(
+    layout: &Layout,
+    pages: &[PageWords],
+    today: CalendarDate,
+    initial: Option<Vec<Band>>,
+) -> (Table, bool) {
     let mut t = Table {
         in_table: vec![false; layout.lines.len()],
         ..Table::default()
     };
-    let mut bands: Option<Vec<Band>> = None;
+    let mut found_header = false;
+    let mut bands: Option<Vec<Band>> = initial;
     for pi in 0..pages.len() {
         let page = &pages[pi];
         let mut lines: Vec<usize> = (0..layout.lines.len())
@@ -592,6 +613,7 @@ pub fn read(layout: &Layout, pages: &[PageWords], today: CalendarDate) -> Table 
             Some(k) => {
                 let li = lines[k];
                 bands = header_bands(&line_words(layout, pages, li));
+                found_header = true;
                 t.in_table[li] = true;
                 k + 1
             }
@@ -607,9 +629,16 @@ pub fn read(layout: &Layout, pages: &[PageWords], today: CalendarDate) -> Table 
         });
         let mut ended = false;
         let mut last_line_box: Option<Bbox> = None;
+        let mut dx: i32 = 0;
         for &li in &lines[start..] {
             let row = &layout.lines[li];
-            let r = read_row(page, &row.words, row.bbox, b, today);
+            // A turned or skewed page drifts sideways down the page: each
+            // dated row re-anchors the bands on its date.
+            if let Some(shift) = date_shift(page, &row.words, b, today) {
+                dx = shift;
+            }
+            let shifted = shift_bands(b, dx);
+            let r = read_row(page, &row.words, row.bbox, &shifted, today);
             match r {
                 Row::Left(lo, value) => {
                     t.in_table[li] = true;
@@ -664,5 +693,38 @@ pub fn read(layout: &Layout, pages: &[PageWords], today: CalendarDate) -> Table 
             }
         }
     }
-    t
+    (t, found_header)
+}
+
+/// How far a dated row's date sits from the date column's header (x
+/// units), when the row starts with a date near it.
+fn date_shift(
+    page: &PageWords,
+    words: &[usize],
+    bands: &[Band],
+    today: CalendarDate,
+) -> Option<i32> {
+    let date = bands.iter().find(|b| b.col == Col::Date)?;
+    let first = &page.words[*words.first()?];
+    let shift = i32::from(first.bbox.left()) - i32::from(date.left);
+    if shift.abs() > 1_000 {
+        return None;
+    }
+    (1..=words.len().min(4))
+        .any(|n| dates::parse(&join(words[..n].iter().map(|&w| &page.words[w])), today).is_some())
+        .then_some(shift)
+}
+
+/// The bands moved `dx` sideways (kept on the page).
+fn shift_bands(bands: &[Band], dx: i32) -> Vec<Band> {
+    let mv =
+        |x: u16| u16::try_from((i32::from(x) + dx).clamp(0, i32::from(Bbox::SCALE))).unwrap_or(x);
+    bands
+        .iter()
+        .map(|b| Band {
+            col: b.col,
+            left: mv(b.left),
+            right: mv(b.right),
+        })
+        .collect()
 }

@@ -14,6 +14,7 @@
 
 pub mod checks;
 pub mod header;
+pub mod infer;
 pub mod table;
 
 #[cfg(test)]

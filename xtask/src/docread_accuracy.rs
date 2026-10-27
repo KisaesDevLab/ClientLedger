@@ -5,7 +5,7 @@
 //! profile. The report lands in `target/docread-accuracy/` (never committed).
 //!
 //! It runs the statements harness too (`docread_statement_accuracy.rs`,
-//! A06: lines ≥ 95 % on text PDFs, ≥ 85 % on scans and photos);
+//! A06: lines ≥ 95 % on text PDFs, ≥ 85 % on scans, photos 75 % seen / 70 % held-out, Q-A06h);
 //! `--statements` runs only that one, report only.
 //!
 //! `--gate` fails on any Q-285 minimum not met (and on missing tesseract);
