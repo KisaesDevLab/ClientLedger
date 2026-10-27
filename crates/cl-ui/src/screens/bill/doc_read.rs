@@ -431,6 +431,27 @@ pub(crate) fn send_extract(
     })
 }
 
+/// Reads the owner's and the engine's switches for reading documents (the
+/// AI configuration, the company's consent and the engine's capabilities).
+///
+/// # Errors
+/// The queue refused it (full or closed).
+pub(crate) fn fetch_switches(
+    group: &RequestGroup,
+    session: &cl_api::Session,
+) -> Result<cl_api::Pending<ReadSwitches>, cl_api::QueueError> {
+    group.read(session, |s| async move {
+        let config = s.ai_config().await.ok();
+        let consent = s.company_ai_disclosure().await.ok();
+        let caps = s.client().capabilities();
+        Ok(ReadSwitches::from_engine_with(
+            config.as_ref(),
+            consent.as_ref(),
+            &caps,
+        ))
+    })
+}
+
 /// Sends Ask AI to help on the write lane, as the extract: it spends AI
 /// tokens, so a reply lost when the window closes is labelled like any
 /// other unconfirmed write.
@@ -632,19 +653,16 @@ impl ReadState {
             self.switches = Some(ReadSwitches::default());
             return;
         };
-        match group.read(&session, |s| async move {
-            let config = s.ai_config().await.ok();
-            let consent = s.company_ai_disclosure().await.ok();
-            let caps = s.client().capabilities();
-            Ok(ReadSwitches::from_engine_with(
-                config.as_ref(),
-                consent.as_ref(),
-                &caps,
-            ))
-        }) {
+        match fetch_switches(group, &session) {
             Ok(p) => self.switches_task = Some(Task::Pending(p)),
             Err(_) => self.switches = Some(ReadSwitches::default()),
         }
+    }
+
+    /// Starts reading the switches when they aren't known yet (A04 draft
+    /// mode: Ask AI to help is offered once the words are ready).
+    pub(crate) fn ensure_switches(&mut self, link: &Arc<CompanyLink>) {
+        let _ = self.switches(link);
     }
 
     /// Read with AI is offered for this document (never with the engine's

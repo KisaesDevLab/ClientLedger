@@ -33,10 +33,14 @@ use crate::reading::learn::{CardLearn, LearnInput};
 use crate::reading::map;
 use crate::screens::doc_review::attach::MatchProbe;
 use crate::screens::doc_review::review::{
-    self, Accept, BannerClick, BannerRead, Canon, DraftEvent, DraftOpen, DraftSession, PostBody,
-    TargetIn,
+    self, Accept, BannerClick, BannerRead, Canon, DraftEvent, DraftOpen, DraftSession, FormValues,
+    PostBody, TargetIn,
 };
 use crate::widgets::compare::{CompareAction, CompareEvent, FillValue};
+
+#[cfg(test)]
+#[path = "draft_kind_ai_tests.rs"]
+mod kind_ai_tests;
 
 /// The values a reading put in the form, to notice the owner's edits (an
 /// edit accepts that field).
@@ -212,7 +216,104 @@ impl CardChargeScreen {
                 self.close_window();
             }
             DraftEvent::Close | DraftEvent::Next(None) => self.close_window(),
+            DraftEvent::Helped => self.draft_helped(),
         }
+    }
+
+    /// The form's values for "Enter this as".
+    fn form_values(&self) -> FormValues {
+        let f = self.compose();
+        FormValues {
+            payee: f.payee,
+            date: f.date,
+            total: f.amount,
+            paid_from: f.card,
+            lines: f.lines.lines,
+            marks: f.read,
+        }
+    }
+
+    /// "Enter this as" `to`: the draft opens there with the owner's work
+    /// (a cash expense and a card charge share this window).
+    pub(crate) fn enter_as(&mut self, ctx: &egui::Context, to: DraftForm) {
+        let v = self.form_values();
+        let Some(s) = self.draft.session.as_ref() else {
+            return;
+        };
+        let Some(carry) = s.enter_as(to, &v) else {
+            return;
+        };
+        let o = DraftOpen { id: s.id, form: to };
+        review::publish_carry(ctx, carry);
+        if matches!(to, DraftForm::CardCharge | DraftForm::CashExpense) {
+            self.open_draft(o);
+        } else {
+            review::open(&self.link, o);
+            self.close_window();
+        }
+    }
+
+    /// After the fill: what "Enter this as" brought from the other form.
+    fn apply_carry(&mut self) {
+        let Some(s) = self.draft.session.as_mut() else {
+            return;
+        };
+        let Some(c) = s.take_carry() else {
+            return;
+        };
+        let rows: Vec<Option<RowKey>> = (0..c.lines.len()).map(|i| s.line_key(i)).collect();
+        let form = s.form;
+        let allowed: Vec<AccountId> = self
+            .paid_from_accounts()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        let mut v = self.form_values();
+        c.apply_to(
+            form,
+            &mut v,
+            |i| rows.get(i).copied().flatten(),
+            |a| allowed.contains(&a),
+        );
+        let mut f = self.compose();
+        if c.total.is_some() {
+            f.amount_from_lines = false;
+        }
+        f.payee = v.payee;
+        f.date = v.date;
+        f.amount = v.total;
+        f.card = v.paid_from;
+        f.read = v.marks;
+        f.lines.lines = v.lines;
+        let lines = std::mem::take(&mut f.lines);
+        self.header.load(f);
+        let lists = Arc::clone(&self.books.lists);
+        self.lines.form_mut().load(lines, &*lists);
+        self.draft.snap = Some(self.snap());
+        if let Some(card) = self.card() {
+            self.balances.fetch(&self.link, self.group.as_ref(), card);
+        }
+        self.sync_inputs();
+    }
+
+    /// Ask AI to help answered: the values not yet accepted give way to the
+    /// merged reading; what the owner accepted or changed stays, marked.
+    fn draft_helped(&mut self) {
+        let kept: Vec<(ReadTarget, ReadField)> = self
+            .header
+            .current()
+            .read
+            .entries()
+            .filter(|(_, s)| !matches!(s, ReadField::Read { .. }))
+            .collect();
+        self.clear_read();
+        self.draft_loaded();
+        let mut f = self.header.current().clone();
+        for (t, s) in kept {
+            f.read.restore(t, s);
+        }
+        self.header.load(f);
+        self.draft.snap = Some(self.snap());
     }
 
     fn close_window(&mut self) {
@@ -271,6 +372,7 @@ impl CardChargeScreen {
         }
         self.lock_columns();
         self.sync_inputs();
+        self.apply_carry();
     }
 
     fn snap(&self) -> ReadSnap {
@@ -599,6 +701,10 @@ impl CardChargeScreen {
             BannerClick::ReadDocument => {
                 let _ = s.read_document(vendors, Some(cards), today);
             }
+            BannerClick::AskAi => {
+                let _ = s.ask_ai(vendors);
+            }
+            BannerClick::EnterAs(to) => self.enter_as(ui.ctx(), to),
             BannerClick::None | BannerClick::Discard | BannerClick::TryAgain => {}
         }
     }

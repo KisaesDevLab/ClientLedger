@@ -23,6 +23,7 @@ use cl_model::forms::bill::{BillKind, CheckedBill};
 use cl_model::forms::doc_read::ReadTarget;
 use cl_model::forms::item_lines::ItemLines;
 use cl_model::forms::lines::FormLines;
+use cl_model::rowkey::RowKey;
 use eframe::egui;
 
 use super::doc_read::Incoming;
@@ -34,7 +35,7 @@ use crate::reading::learn::LearnInput;
 use crate::reading::map;
 use crate::screens::doc_review::attach::MatchProbe;
 use crate::screens::doc_review::review::{
-    self, Accept, Canon, DraftEvent, DraftOpen, DraftSession, PostBody, TargetIn,
+    self, Accept, Canon, DraftEvent, DraftOpen, DraftSession, FormValues, PostBody, TargetIn,
 };
 use crate::widgets::compare::{CompareAction, CompareEvent, FillValue};
 
@@ -97,6 +98,84 @@ impl EnterBillScreen {
         for ev in events {
             self.draft_event(ev);
         }
+        self.feed_assist();
+    }
+
+    /// Enter Bill's own Ask AI to help (A03) works on the draft too, once
+    /// the page words are ready: the stored values with the words go to
+    /// the reading's `last` (the AI amount gate needs the words).
+    fn feed_assist(&mut self) {
+        let Some(s) = self.draft.as_ref() else {
+            return;
+        };
+        if self.read.local.last.is_some() || self.read.local.helped || self.read.local.busy() {
+            return;
+        }
+        let Some(base) = s.assist_base() else {
+            return;
+        };
+        let bytes = s.file.as_ref().map(|f| Arc::clone(&f.bytes));
+        self.read.ensure_switches(&self.link);
+        self.read.local.needs_help = crate::reading::assist::needs_help(&base);
+        self.read.local.bytes = bytes;
+        self.read.local.vendors = map::vendor_candidates(&self.contacts);
+        self.read.local.helped = s.assist.helped;
+        self.read.local.last = Some(Box::new(base));
+    }
+
+    /// The form's values for "Enter this as".
+    fn form_values(&self) -> FormValues {
+        let f = self.compose();
+        FormValues {
+            payee: f.vendor,
+            date: f.date,
+            total: f.amount_due,
+            paid_from: None,
+            lines: f.expenses.lines,
+            marks: f.read,
+        }
+    }
+
+    /// "Enter this as" `to`: the draft opens in that form's window with the
+    /// owner's work.
+    pub(crate) fn enter_as(&mut self, ctx: &egui::Context, to: DraftForm) {
+        let v = self.form_values();
+        let Some(s) = self.draft.as_ref() else {
+            return;
+        };
+        let Some(carry) = s.enter_as(to, &v) else {
+            return;
+        };
+        let o = DraftOpen { id: s.id, form: to };
+        review::publish_carry(ctx, carry);
+        review::open(&self.link, o);
+        self.close_window();
+    }
+
+    /// After the fill: what "Enter this as" brought from the other form.
+    fn apply_carry(&mut self) {
+        let Some(s) = self.draft.as_mut() else {
+            return;
+        };
+        let Some(c) = s.take_carry() else {
+            return;
+        };
+        let rows: Vec<Option<RowKey>> = (0..c.lines.len()).map(|i| s.line_key(i)).collect();
+        let form = s.form;
+        let mut v = self.form_values();
+        c.apply_to(form, &mut v, |i| rows.get(i).copied().flatten(), |_| false);
+        let mut f = self.compose();
+        if c.total.is_some() {
+            f.amount_from_lines = false;
+        }
+        f.vendor = v.payee;
+        f.date = v.date;
+        f.amount_due = v.total;
+        f.read = v.marks;
+        f.expenses.lines = v.lines;
+        self.take_form(f);
+        self.refresh_terms_dates();
+        self.track_read();
     }
 
     fn draft_event(&mut self, ev: DraftEvent) {
@@ -114,7 +193,8 @@ impl EnterBillScreen {
                     self.save.error = Some(error);
                 }
             }
-            DraftEvent::Cancelled => {}
+            // Enter Bill asks AI through A03's own path (`feed_assist`).
+            DraftEvent::Cancelled | DraftEvent::Helped => {}
             DraftEvent::Reload => {
                 // The draft is read again; its Loaded refills the form.
                 self.new_bill(false);
@@ -169,6 +249,7 @@ impl EnterBillScreen {
         if let Some(s) = self.draft.as_mut() {
             s.filled(&lines);
         }
+        self.apply_carry();
     }
 
     /// The draft's file in the source card, its key the form's draft key.

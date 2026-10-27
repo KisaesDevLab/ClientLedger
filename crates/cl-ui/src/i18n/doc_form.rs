@@ -71,4 +71,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("orphan.draft_discard", "discarding a document"),
     ("orphan.layout_learn", "saving a vendor's document layout"),
     ("orphan.card_digits", "saving a card's last four digits"),
+    // A04 WP-kind-ai: "Enter this as" (Q-A04n) and Ask AI to help in draft
+    // mode (Q-A03j).
+    ("doc_form.enter_as", "Enter this as:"),
+    ("doc_form.enter_as.tip", "Opens this document in that form instead. Values you accepted or changed go with it; the rest still need Accept."),
+    ("doc_form.assist.waiting", "Ask AI to help is ready once the page is ready."),
 ];

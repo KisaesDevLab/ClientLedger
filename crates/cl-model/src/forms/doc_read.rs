@@ -132,6 +132,21 @@ impl ReadState {
         }
     }
 
+    /// Puts back a state the owner already gave `target` (A04: the same
+    /// document in another form, or the same form after Ask AI to help
+    /// filled it again). Only [`ReadField::Accepted`] and
+    /// [`ReadField::Edited`] are restored; a read state comes from a fill.
+    pub fn restore(&mut self, target: ReadTarget, state: ReadField) {
+        if matches!(state, ReadField::Accepted | ReadField::Edited) {
+            self.fields.insert(target, state);
+        }
+    }
+
+    /// Every tracked field and its state, in field order.
+    pub fn entries(&self) -> impl Iterator<Item = (ReadTarget, ReadField)> + '_ {
+        self.fields.iter().map(|(t, f)| (*t, *f))
+    }
+
     /// The line `key` was deleted.
     pub fn forget_line(&mut self, key: RowKey) {
         self.fields.remove(&ReadTarget::Line(key));
@@ -406,6 +421,29 @@ mod tests {
 
     fn contact() -> ContactId {
         ContactId::parse("00000000-0000-0000-0000-000000000005").expect("id")
+    }
+
+    #[test]
+    fn restore_puts_back_only_the_owners_states() {
+        let mut r = ReadState::default();
+        r.mark_read(ReadTarget::Total, Confidence::High);
+        r.restore(ReadTarget::Total, ReadField::Accepted);
+        r.restore(ReadTarget::Payee, ReadField::Edited);
+        r.restore(
+            ReadTarget::Date,
+            ReadField::Read {
+                level: Confidence::Low,
+            },
+        );
+        assert_eq!(r.state(ReadTarget::Total), Some(ReadField::Accepted));
+        assert_eq!(r.state(ReadTarget::Payee), Some(ReadField::Edited));
+        assert_eq!(
+            r.state(ReadTarget::Date),
+            None,
+            "a read state comes from a fill"
+        );
+        assert_eq!(r.entries().count(), 2);
+        assert_eq!(r.unaccepted(), Vec::new());
     }
 
     fn reading() -> DocReading {
