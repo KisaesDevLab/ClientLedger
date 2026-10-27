@@ -86,6 +86,7 @@
   {"method":"GET","path":"/api/v1/contacts/{id}/transactions","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"GET","path":"/api/v1/reports/customer-balance-summary","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/reports/ap-aging-summary","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/reports/vendor-statement","inSpec":true,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/practice/1099/vendors/{contactId}/profile","inSpec":true,"fragmentHash":"189e286dc6077b10e05af1535087b49b052b33ccf924f8ade9c9be08c67c0e79"},
   {"method":"PUT","path":"/api/v1/practice/1099/vendors/{contactId}/profile","inSpec":true,"fragmentHash":"e9f993417222bcfa370f00f45fa8e6438edf2cd20d9d559af4faa2aaac1570d3"},
   {"method":"GET","path":"/api/v1/tags/groups/list","inSpec":true,"fragmentHash":null},

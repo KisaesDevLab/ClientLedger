@@ -199,7 +199,7 @@ pub(crate) fn target_transaction(to: cl_api::AttachTo) -> Option<TransactionId> 
     use cl_api::AttachTo as A;
     match to {
         A::Expense(id) | A::Bill(id) | A::VendorCredit(id) | A::Txn(_, id) => Some(id),
-        A::Draft(_) => None,
+        A::Draft(_) | A::Contact(_) => None,
     }
 }
 
@@ -224,10 +224,13 @@ pub(crate) fn attach_problem_key(e: &cl_api::ApiError) -> &'static str {
 }
 
 /// The kind a folder's arrivals are claimed as: a bills folder's are
-/// bills; anything else is asked (Q-A04n).
+/// bills; a vendor statements folder's are statements (A06, U-94: the
+/// folder kind exists only with `document-drafts-statement-v1`); anything
+/// else is asked (Q-A04n).
 pub(crate) fn kind_hint(kind: Option<IntakeKind>) -> DraftKind {
     match kind {
         Some(IntakeKind::Bills) => DraftKind::Bill,
+        Some(IntakeKind::Statements) => DraftKind::Statement,
         _ => DraftKind::Unknown,
     }
 }
@@ -241,6 +244,7 @@ fn job_hint(kind: DraftKind, folder: Option<IntakeKind>) -> JobHint {
                 Some(IntakeKind::Receipts)
             }
             DraftKind::Unknown => folder,
+            DraftKind::Statement => Some(IntakeKind::Statements),
         },
     }
 }

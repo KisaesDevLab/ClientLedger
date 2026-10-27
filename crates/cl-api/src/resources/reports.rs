@@ -18,7 +18,7 @@ use crate::client::{Call, Method};
 use crate::errors::ApiError;
 use crate::resources::operations::{
     REPORT_ACCOUNT, REPORT_AP_AGING, REPORT_BALANCE_SHEET, REPORT_CUSTOMER_BALANCE,
-    REPORT_PROFIT_LOSS, REPORT_TRIAL_BALANCE,
+    REPORT_PROFIT_LOSS, REPORT_TRIAL_BALANCE, REPORT_VENDOR_STATEMENT,
 };
 use crate::resources::transactions::ReportBasis;
 use crate::session::{Session, decode};
@@ -307,6 +307,39 @@ impl Reports<'_> {
         decode(&reply, "client balance summary")
     }
 
+    /// The books' opening and closing balance with `vendor` for
+    /// `start..=end` (`/reports/vendor-statement?format=csv`, A06 balance
+    /// line, Q-297). The CSV form is read because the JSON carries
+    /// JavaScript numbers; the engine prints each balance to the cent
+    /// (`"1,234.50"`), and that text is parsed exactly into [`Money`].
+    /// `Ok(None)` when the report has no balance row this can read exactly
+    /// (the balance line is then hidden, never guessed). Journal entries
+    /// to Accounts Payable aren't in the engine's report.
+    ///
+    /// # Errors
+    /// `NoCompanyOpen`; any [`ApiError`] but "no data".
+    pub async fn vendor_statement_balances(
+        &self,
+        vendor: ContactId,
+        start: CalendarDate,
+        end: CalendarDate,
+    ) -> Result<Option<VendorStatementBalances>, ApiError> {
+        let mut call = Call::at(Method::Get, REPORT_VENDOR_STATEMENT.route());
+        call.query = vec![
+            ("vendor_id".into(), vendor.to_string()),
+            ("start_date".into(), start.to_wire()),
+            ("end_date".into(), end.to_wire()),
+            ("format".into(), "csv".into()),
+        ];
+        match self.0.send(&REPORT_VENDOR_STATEMENT, call, None).await {
+            Ok(reply) => Ok(vendor_statement_from_csv(&String::from_utf8_lossy(
+                &reply.body,
+            ))),
+            Err(ApiError::NotFound { code: None }) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     /// What is owed to each vendor on open bills as of `as_of`, by age
     /// (`/reports/ap-aging-summary`). Vendors with nothing open are left
     /// out.
@@ -401,6 +434,100 @@ impl ApAgingSummary {
             .find(|r| r.contact_id == Some(vendor))
             .map(|r| &r.total)
     }
+}
+
+/// The books' side of a vendor statement (`/reports/vendor-statement`):
+/// what was owed to the vendor before the period and at its end, exact.
+/// Display only: nothing is summed from it (NN7).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct VendorStatementBalances {
+    /// Owed before the period's first day.
+    pub opening: Money,
+    /// Owed at the end of the period's last day.
+    pub closing: Money,
+}
+
+/// Never prints the amounts.
+impl std::fmt::Debug for VendorStatementBalances {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VendorStatementBalances")
+            .finish_non_exhaustive()
+    }
+}
+
+/// CSV records: comma-separated, double-quoted cells (`""` is a quote; a
+/// quoted cell may hold commas and line breaks).
+fn csv_records(text: &str) -> Vec<Vec<String>> {
+    let mut records = Vec::new();
+    let mut record = Vec::new();
+    let mut cell = String::new();
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if quoted && chars.peek() == Some(&'"') => {
+                cell.push('"');
+                chars.next();
+            }
+            '"' => quoted = !quoted,
+            ',' if !quoted => record.push(std::mem::take(&mut cell)),
+            '\r' if !quoted => {}
+            '\n' if !quoted => {
+                record.push(std::mem::take(&mut cell));
+                records.push(std::mem::take(&mut record));
+            }
+            c => cell.push(c),
+        }
+    }
+    if !cell.is_empty() || !record.is_empty() {
+        record.push(cell);
+        records.push(record);
+    }
+    records
+}
+
+/// A balance cell as the engine prints it (`"1,234.50"`, `"-0.00"`,
+/// `"12"`): digits with optional thousands commas in their places, an
+/// optional sign and decimals, read exactly. Anything else is `None`.
+fn report_money(cell: &str) -> Option<Money> {
+    let s = cell.trim();
+    let body = s.strip_prefix('-').unwrap_or(s);
+    let (whole, frac) = body.split_once('.').unwrap_or((body, ""));
+    let groups: Vec<&str> = whole.split(',').collect();
+    let grouped_ok = match groups.as_slice() {
+        [one] => !one.is_empty(),
+        [first, rest @ ..] => (1..=3).contains(&first.len()) && rest.iter().all(|g| g.len() == 3),
+        [] => false,
+    };
+    if !grouped_ok
+        || !groups.iter().all(|g| g.bytes().all(|b| b.is_ascii_digit()))
+        || (body.contains('.') && frac.is_empty())
+    {
+        return None;
+    }
+    Money::parse_wire(&s.replace(',', "")).ok()
+}
+
+/// The opening and closing balance rows of the vendor statement CSV: the
+/// rows with no date and no type whose memo is "Opening Balance" (the
+/// first) and "Closing Balance" (the last), as the engine adds them.
+fn vendor_statement_from_csv(text: &str) -> Option<VendorStatementBalances> {
+    fn cell(r: &[String], i: usize) -> &str {
+        r.get(i).map_or("", |s| s.trim())
+    }
+    let records = csv_records(text);
+    let (head, rows) = records.split_first()?;
+    let col = |name: &str| head.iter().position(|h| h.trim() == name);
+    let (date, kind, memo, balance) = (col("Date")?, col("Type")?, col("Memo")?, col("Balance")?);
+    let summary = |r: &&Vec<String>, label: &str| {
+        cell(r, date).is_empty() && cell(r, kind).is_empty() && cell(r, memo) == label
+    };
+    let opening = rows.iter().find(|r| summary(r, "Opening Balance"))?;
+    let closing = rows.iter().rev().find(|r| summary(r, "Closing Balance"))?;
+    Some(VendorStatementBalances {
+        opening: report_money(cell(opening, balance))?,
+        closing: report_money(cell(closing, balance))?,
+    })
 }
 
 fn blank_contact<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ContactId>, D::Error> {
@@ -644,6 +771,115 @@ mod tests {
             .await
             .expect_err("a JSON number is not money");
         assert!(matches!(e, ApiError::Decode { .. }), "{e:?}");
+    }
+
+    /// The engine's vendor statement CSV: every cell quoted, balances
+    /// printed to the cent with thousands commas.
+    const STATEMENT_CSV: &str = "\"Date\",\"Type\",\"Reference\",\"Memo\",\"Charges\",\"Payments\",\"Balance\"\n\
+        \"\",\"\",\"\",\"Opening Balance\",\"\",\"\",\"1,200.00\"\n\
+        \"Thu Oct 01 2026 00:00:00 GMT-0500\",\"Bill\",\"INV-1\",\"Gravel, \"\"washed\"\"\nsecond line\",\"265.50\",\"\",\"1,465.50\"\n\
+        \"Fri Oct 02 2026 00:00:00 GMT-0500\",\"Payment\",\"1001\",\"Closing Balance\",\"\",\"1,500.00\",\"-34.50\"\n\
+        \"\",\"\",\"\",\"Closing Balance\",\"\",\"\",\"-34.50\"";
+
+    #[test]
+    fn statement_csv_reads_the_balance_rows_exactly() {
+        let b = vendor_statement_from_csv(STATEMENT_CSV).expect("balances");
+        assert_eq!(b.opening, Money::parse_wire("1200").expect("m"));
+        assert_eq!(b.closing.to_wire(), "-34.5000");
+        assert!(!format!("{b:?}").contains("34"), "no amounts in Debug");
+        // A transaction whose memo is "Closing Balance" is not the summary
+        // row (it has a date and a type); CRLF line ends read the same.
+        let crlf = STATEMENT_CSV.replace('\n', "\r\n");
+        assert_eq!(vendor_statement_from_csv(&crlf), Some(b));
+    }
+
+    #[test]
+    fn statement_csv_that_isnt_exact_is_none() {
+        for bad in [
+            "0.30000000000000004x",
+            "1e+21",
+            "1,2345.00",
+            ",100.00",
+            "12.",
+            "",
+            "NaN",
+            "'-5",
+            "12.34567",
+        ] {
+            assert_eq!(report_money(bad), None, "{bad}");
+            let csv = STATEMENT_CSV.replace("\"-34.50\"", &format!("\"{bad}\""));
+            assert_eq!(vendor_statement_from_csv(&csv), None, "{bad}");
+        }
+        for (good, wire) in [
+            ("1,234,567.89", "1234567.8900"),
+            ("-0.00", "0.0000"),
+            ("12", "12.0000"),
+            ("999", "999.0000"),
+        ] {
+            assert_eq!(
+                report_money(good).map(Money::to_wire).as_deref(),
+                Some(wire)
+            );
+        }
+        assert_eq!(vendor_statement_from_csv(""), None);
+        assert_eq!(
+            vendor_statement_from_csv("\"Date\",\"Memo\"\n\"\",\"Closing Balance\""),
+            None,
+            "no balance column"
+        );
+        let no_closing = STATEMENT_CSV.replace(
+            "\"\",\"\",\"\",\"Closing Balance\"",
+            "\"\",\"\",\"\",\"Other\"",
+        );
+        assert_eq!(vendor_statement_from_csv(&no_closing), None);
+    }
+
+    #[tokio::test]
+    async fn vendor_statement_balances_ask_for_csv() {
+        let server = MockServer::start().await;
+        let vendor = "3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02";
+        Mock::given(method("GET"))
+            .and(path("/api/v1/reports/vendor-statement"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(STATEMENT_CSV.to_owned(), "text/csv"),
+            )
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let b = s
+            .reports()
+            .vendor_statement_balances(
+                ContactId::parse(vendor).expect("id"),
+                d(2026, 10, 1),
+                d(2026, 10, 31),
+            )
+            .await
+            .expect("report")
+            .expect("balances");
+        assert_eq!(b.closing.to_wire(), "-34.5000");
+        assert_eq!(
+            query(&requests(&server, "GET").await[0]),
+            format!("vendor_id={vendor}&start_date=2026-10-01&end_date=2026-10-31&format=csv")
+        );
+    }
+
+    #[tokio::test]
+    async fn vendor_statement_no_data_is_none() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(json(404, r#"{"error":{"message":"No data to export"}}"#))
+            .mount(&server)
+            .await;
+        let none = company_session(&server)
+            .reports()
+            .vendor_statement_balances(
+                ContactId::parse("3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02").expect("id"),
+                d(2026, 10, 1),
+                d(2026, 10, 31),
+            )
+            .await
+            .expect("no data");
+        assert_eq!(none, None);
     }
 
     #[tokio::test]

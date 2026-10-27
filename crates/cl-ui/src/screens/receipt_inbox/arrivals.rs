@@ -976,6 +976,7 @@ impl super::ReceiptInboxScreen {
                         IntakeKind::Bills => "bills",
                         IntakeKind::Receipts => "receipts",
                         IntakeKind::Auto => "auto",
+                        IntakeKind::Statements => "statements",
                     },
                     "listed": f.rows.iter().filter(|x| x.run == i).count(),
                 })

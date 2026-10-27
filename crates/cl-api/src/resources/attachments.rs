@@ -18,8 +18,8 @@
 use std::fmt;
 use std::str::FromStr;
 
-use cl_core::Timestamp;
-use cl_core::ids::{IdError, TransactionId, parse_uuid};
+use cl_core::ids::{ContactId, IdError, TransactionId, parse_uuid};
+use cl_core::{CalendarDate, Timestamp};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
@@ -135,6 +135,9 @@ pub enum AttachTo {
     /// Any other saved transaction, under its transaction type (a deposit,
     /// a journal entry, …).
     Txn(TxnType, TransactionId),
+    /// A vendor or client (`contact`): a vendor statement kept with its
+    /// vendor (A06, Q-298). The statement's period travels in the file name.
+    Contact(ContactId),
 }
 
 impl AttachTo {
@@ -163,6 +166,7 @@ impl AttachTo {
                 TxnType::DailySales => "daily_sales",
                 TxnType::Aje => "aje",
             },
+            AttachTo::Contact(_) => "contact",
         }
     }
 
@@ -183,6 +187,7 @@ impl AttachTo {
             | AttachTo::VendorCredit(id)
             | AttachTo::Txn(_, id) => id.to_string(),
             AttachTo::Draft(d) => d.to_string(),
+            AttachTo::Contact(c) => c.to_string(),
         }
     }
 }
@@ -252,6 +257,19 @@ pub fn check_file(bytes: &[u8]) -> Result<FileKind, LocalValidation> {
         return Err(LocalValidation::AttachmentTooLarge);
     }
     FileKind::sniff(bytes).ok_or(LocalValidation::AttachmentType)
+}
+
+/// The stored name of a vendor statement kept with its vendor (A06,
+/// Q-298): the engine's attachments have no period column, so the period
+/// is in the name, `Statement 2026-10-01 to 2026-10-31.pdf`.
+#[must_use]
+pub fn statement_file_name(from: CalendarDate, to: CalendarDate, kind: FileKind) -> String {
+    format!(
+        "Statement {} to {}.{}",
+        from.to_wire(),
+        to.to_wire(),
+        kind.extension()
+    )
 }
 
 /// A stored file as the engine lists it (storage paths are not kept).
@@ -573,6 +591,18 @@ mod tests {
     }
 
     #[test]
+    fn a_statement_is_named_by_its_period() {
+        let d = |m, day| CalendarDate::from_ymd(2026, m, day).expect("date");
+        let name = statement_file_name(d(10, 1), d(10, 31), FileKind::Pdf);
+        assert_eq!(name, "Statement 2026-10-01 to 2026-10-31.pdf");
+        assert_eq!(safe_name(&name, FileKind::Pdf), name, "sent as is");
+        assert_eq!(
+            statement_file_name(d(9, 1), d(9, 30), FileKind::Jpeg),
+            "Statement 2026-09-01 to 2026-09-30.jpg"
+        );
+    }
+
+    #[test]
     fn names_are_made_safe_for_the_header() {
         assert_eq!(safe_name("a\"b\r\n.pdf", FileKind::Pdf), "ab.pdf");
         assert_eq!(
@@ -755,6 +785,7 @@ mod tests {
             AttachTo::VendorCredit(txn),
             AttachTo::Txn(TxnType::Deposit, txn),
             AttachTo::Draft(DraftKey::new()),
+            AttachTo::Contact(ContactId::parse(CHECK).expect("id")),
         ] {
             s.attachments()
                 .link(id, to, IdempotencyKey::new())
@@ -769,7 +800,10 @@ mod tests {
                 v["attachableType"].as_str().unwrap_or("").to_string()
             })
             .collect();
-        assert_eq!(kinds, ["bill", "vendor_credit", "deposit", "draft"]);
+        assert_eq!(
+            kinds,
+            ["bill", "vendor_credit", "deposit", "draft", "contact"]
+        );
         for t in [
             TxnType::Invoice,
             TxnType::CustomerPayment,

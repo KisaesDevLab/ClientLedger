@@ -273,6 +273,11 @@ impl Capabilities {
     /// exact total).
     pub const DOCUMENT_DRAFTS_ATTACH: &'static str = "document-drafts-attach-v1";
 
+    // ---- A06: vendor statements (engine U-94)
+    /// U-94: the label-only `statement` document draft kind (it never
+    /// converts) and the intake folder kind `statements`.
+    pub const DOCUMENT_DRAFTS_STATEMENT: &'static str = "document-drafts-statement-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {

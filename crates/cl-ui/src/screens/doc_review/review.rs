@@ -334,6 +334,7 @@ pub fn doc_kind(k: DraftKind) -> DocKind {
         DraftKind::Check => DocKind::Check,
         DraftKind::CashExpense => DocKind::CashExpense,
         DraftKind::Unknown => DocKind::Unknown,
+        DraftKind::Statement => DocKind::Statement,
     }
 }
 
@@ -441,7 +442,9 @@ fn model_kind(k: DraftKind) -> cl_docread::model::DocKind {
         DraftKind::CardCharge => M::CardCharge,
         DraftKind::Check => M::Check,
         DraftKind::CashExpense => M::CashExpense,
-        DraftKind::Unknown => M::Unknown,
+        // Until the reader knows statements (A06 WP-S1), a statement's
+        // stored reading is read as an unknown document's.
+        DraftKind::Unknown | DraftKind::Statement => M::Unknown,
     }
 }
 

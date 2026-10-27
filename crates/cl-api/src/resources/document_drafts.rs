@@ -106,6 +106,10 @@ pub enum DraftKind {
     CashExpense,
     /// Not known yet.
     Unknown,
+    /// A vendor statement (U-94, `document-drafts-statement-v1`): a label
+    /// only. It opens in Match Vendor Statement and never converts; "Save
+    /// with the vendor" moves its file to the vendor and discards it.
+    Statement,
 }
 
 impl DraftKind {
@@ -118,6 +122,7 @@ impl DraftKind {
             DraftKind::Check => "check",
             DraftKind::CashExpense => "cash_expense",
             DraftKind::Unknown => "unknown",
+            DraftKind::Statement => "statement",
         }
     }
 }
@@ -803,7 +808,9 @@ impl DocumentDrafts<'_> {
     /// with the same key gets the same draft.
     ///
     /// # Errors
-    /// `Local(Unsupported)` without `document-drafts-v1` (nothing sent);
+    /// `Local(Unsupported)` without `document-drafts-v1`, or for a
+    /// [`DraftKind::Statement`] without `document-drafts-statement-v1`
+    /// (nothing sent);
     /// [`DraftRefusal::AlreadyClaimed`] when the company already has these
     /// bytes as a draft that is not discarded; [`DraftRefusal::NotADraftFile`]
     /// for a file filed on a record; `NotFound` for another company's file;
@@ -815,6 +822,16 @@ impl DocumentDrafts<'_> {
         key: IdempotencyKey,
     ) -> Result<DocumentDraft, ApiError> {
         supported(self.0)?;
+        // A statement draft needs U-94; an older engine would refuse it.
+        if kind_hint == DraftKind::Statement
+            && !self
+                .0
+                .client()
+                .capabilities()
+                .has(Capabilities::DOCUMENT_DRAFTS_STATEMENT)
+        {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
+        }
         let body = json_body(&json!({
             "attachmentId": attachment,
             "kindHint": kind_hint,

@@ -817,6 +817,54 @@ async fn attach_without_its_capability_sends_nothing() {
     assert!(requests(&server, "POST").await.is_empty());
 }
 
+/// A statement draft needs `document-drafts-statement-v1` (U-94); with
+/// it the kind goes as `statement`.
+#[tokio::test]
+async fn a_statement_draft_needs_its_capability() {
+    let server = MockServer::start().await;
+    let s = served(&server).await;
+    let e = s
+        .document_drafts()
+        .create(
+            AttachmentId::parse(FILE).expect("file"),
+            DraftKind::Statement,
+            IdempotencyKey::new(),
+        )
+        .await
+        .expect_err("unsupported");
+    assert_eq!(e, ApiError::Local(LocalValidation::Unsupported));
+    assert!(requests(&server, "POST").await.is_empty());
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(BASE))
+        .respond_with(reply(201, &one("new")))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(
+        &server,
+        &[
+            Capabilities::DOCUMENT_DRAFTS,
+            Capabilities::DOCUMENT_DRAFTS_STATEMENT,
+        ],
+    )
+    .await;
+    s.document_drafts()
+        .create(
+            AttachmentId::parse(FILE).expect("file"),
+            DraftKind::Statement,
+            IdempotencyKey::new(),
+        )
+        .await
+        .expect("claim");
+    let posts = requests(&server, "POST").await;
+    assert_eq!(body_of(&posts[0])["kindHint"], "statement");
+    assert_eq!(
+        serde_json::from_value::<DraftKind>(serde_json::json!("statement")).expect("kind"),
+        DraftKind::Statement
+    );
+}
+
 /// A 200 that can't be read was still attached.
 #[tokio::test]
 async fn an_unreadable_attach_answer_is_saved_unreadable() {

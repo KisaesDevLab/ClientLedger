@@ -464,6 +464,9 @@ pub(crate) const REPORT_CUSTOMER_BALANCE: Operation =
     read("/api/v1/reports/customer-balance-summary");
 /// Open bill balance per vendor, by age.
 pub(crate) const REPORT_AP_AGING: Operation = read("/api/v1/reports/ap-aging-summary");
+/// One vendor's statement from the books: opening balance, activity and
+/// closing balance for a period (A06 balance line, Q-297).
+pub(crate) const REPORT_VENDOR_STATEMENT: Operation = read("/api/v1/reports/vendor-statement");
 /// A vendor's 1099 profile (W-9 on file, tax ID type, backup withholding).
 pub(crate) const VENDOR_1099_PROFILE: Operation =
     read("/api/v1/practice/1099/vendors/{contactId}/profile");
@@ -838,7 +841,7 @@ const NEVER_RETRIED: [(&str, &str); 5] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 200] = [
+pub const OPERATIONS: [Operation; 201] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -926,6 +929,7 @@ pub const OPERATIONS: [Operation; 200] = [
     CONTACT_TRANSACTIONS,
     REPORT_CUSTOMER_BALANCE,
     REPORT_AP_AGING,
+    REPORT_VENDOR_STATEMENT,
     VENDOR_1099_PROFILE,
     VENDOR_1099_PROFILE_PUT,
     TAG_GROUPS_LIST,

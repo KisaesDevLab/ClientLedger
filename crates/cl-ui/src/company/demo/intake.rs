@@ -43,6 +43,9 @@ pub struct DemoIntake {
     /// The demo engine acts as one without `intake-settings-v1` (tests:
     /// the P17 single receipt-inbox folder, Q-A01q).
     pub needs_engine: bool,
+    /// The demo engine acts as one without `document-drafts-statement-v1`
+    /// (tests: the Vendor statements folder kind is not offered, A06).
+    pub no_statements: bool,
 }
 
 impl DemoIntake {
