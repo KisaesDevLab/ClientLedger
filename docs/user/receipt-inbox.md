@@ -39,6 +39,8 @@ Pick a file to preview it. Multi-page TIFF files show page by page; a few kinds 
 
 For the "Add to" choices, find the record in the list and choose **Attach**.
 
+Documents the inbox has taken in also wait in **Vendors > Review Documents**, where you can read many at once, check them against the page and enter them. See [Review Documents](review-documents.md).
+
 ## Duplicates
 
 If a file is exactly the same as one that came in before, the inbox flags it once ("Same as a file copied on" and the date) and does not copy it in. Choose **Discard** to put it away, or **Copy anyway** to copy it in as usual.

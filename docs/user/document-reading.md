@@ -23,6 +23,8 @@ More things to know:
 - **Lines.** Each line gets the vendor's default account. Change it if you need to. If the lines can't be read clearly, you get one line for the document's total, and a note says "The lines couldn't be read, so one line has the document's total. Split it if you need to."
 - **Balance due.** If a document shows a total and a smaller balance due (for example after a deposit), the bill's amount is the total, and a note shows both so you can change it.
 
+To read many documents at once, check values against the page, click a word to fill a field, or attach a receipt to a purchase you already entered, see [Review Documents](review-documents.md).
+
 ## Checks that never change anything
 
 After reading, ClientLedger checks that the figures agree. Problems are listed under "Check these on the document (nothing was changed):". For example:
