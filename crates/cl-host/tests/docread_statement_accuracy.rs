@@ -165,6 +165,42 @@ fn score(t: &Truth, st: Option<&StatementRead>) -> (usize, usize, Vec<usize>) {
     (matched, used.iter().filter(|u| !**u).count(), missed)
 }
 
+/// Why a printed line was not read right: the first read line (not
+/// matched to another) that agrees on two of the three values names the
+/// third; otherwise the line was not read at all.
+fn why_missed(t: &Truth, st: Option<&StatementRead>, missed: &[usize]) -> Vec<&'static str> {
+    let Some(st) = st else {
+        return vec!["no reading"; missed.len()];
+    };
+    missed
+        .iter()
+        .map(|&i| {
+            let tl = &t.lines[i];
+            let refs = |l: &cl_docread::model::StatementLineRead| {
+                same_ref(
+                    l.reference.as_ref().map(|r| r.value.as_str()),
+                    tl.reference.as_deref(),
+                )
+            };
+            let found =
+                |p: &dyn Fn(&cl_docread::model::StatementLineRead) -> bool| st.lines.iter().any(p);
+            if found(&|l| {
+                l.date.value == tl.date && refs(l) && l.amount.value.abs() == tl.amount.abs()
+            }) {
+                "sign"
+            } else if found(&|l| l.date.value == tl.date && refs(l)) {
+                "amount"
+            } else if found(&|l| l.date.value == tl.date && l.amount.value == tl.amount) {
+                "reference"
+            } else if found(&|l| refs(l) && l.amount.value == tl.amount) {
+                "date"
+            } else {
+                "not read"
+            }
+        })
+        .collect()
+}
+
 #[derive(Default)]
 struct Tally {
     docs: u64,
@@ -173,6 +209,7 @@ struct Tally {
     extra: u64,
     unread: u64,
     header_right: BTreeMap<&'static str, (u64, u64)>,
+    why: BTreeMap<&'static str, u64>,
 }
 
 impl Tally {
@@ -352,6 +389,9 @@ fn statement_accuracy() {
                     t.lines += truth.lines.len() as u64;
                     t.matched += matched as u64;
                     t.extra += extra as u64;
+                    for w in why_missed(&truth, st, &missed_lines) {
+                        *t.why.entry(w).or_default() += 1;
+                    }
                     if st.is_none() {
                         t.unread += 1;
                     }
@@ -409,7 +449,7 @@ fn statement_accuracy() {
         };
         let _ = writeln!(
             table,
-            "| {part} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {part} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             route.name(),
             t.docs,
             t.lines,
@@ -421,6 +461,11 @@ fn statement_accuracy() {
             h("opening"),
             h("period"),
             h("statement date"),
+            t.why
+                .iter()
+                .map(|(k, n)| format!("{k} {n}"))
+                .collect::<Vec<_>>()
+                .join(", "),
         );
         json_rows.push(json!({
             "part": part, "route": route.name(), "statements": t.docs, "lines": t.lines,
