@@ -34,8 +34,9 @@
 //! # The control channel
 //!
 //! `state.review.form_digest` and `state.review.posted_digest` (plan §4
-//! N4): at Accept the form's checked values and the body sent are written
-//! as the same canonical text ([`Canon`]) and hashed with [`digest`]; a
+//! N4): at Accept the form's checked values and the request body as put
+//! on the wire are each written as the same canonical text ([`Canon`],
+//! two independent readings) and hashed with [`digest`]; a
 //! scenario checks they are equal (AC1: what the owner reviewed is what
 //! posted). The digest is an HMAC-SHA-256 under a random key made once per
 //! process (security review L6): a plain hash of a few values could be
@@ -54,13 +55,13 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use cl_api::{
-    ApiError, AttachmentId, BankPosting, BillDraft, CardChargeDraft, CheckDraft,
+    ApiError, AttachmentId, BankPosting, BillDraft, Capabilities, CardChargeDraft, CheckDraft,
     ClosedPeriodAuthorization, ConflictReason, ConvertBody, ConvertedDraft, DocumentDraft,
     DocumentDraftId, DraftConversion, DraftKind, DraftListQuery, DraftReader, DraftRefusal,
     DraftStatus, IdempotencyKey, LocalValidation, OrphanLabel, PostingOptions, RequestGroup,
 };
 use cl_core::ids::{AccountId, ContactId, TenantId, TransactionId};
-use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
+use cl_core::{CalendarDate, MoneyStyle, Secret};
 use cl_docread::card::card_account;
 use cl_docread::model::{Bbox, Confidence as Bp, Last4, Payment, Reader, Reading, Spot};
 use cl_docread::vendor_match::{VendorMatch, VendorTier};
@@ -92,6 +93,10 @@ use crate::windows::OpenPayload;
 #[path = "review_tests.rs"]
 mod tests;
 
+#[path = "review_canon.rs"]
+mod canon;
+pub(crate) use canon::Canon;
+
 #[path = "review_kind_ai.rs"]
 mod kind_ai;
 pub(crate) use kind_ai::{Carry, DraftAssist, FormValues, publish_carry};
@@ -119,6 +124,26 @@ pub struct ReviewDigests {
     pub form_digest: Option<String>,
     /// [`digest`] of the canonical convert body sent.
     pub posted_digest: Option<String>,
+    /// After an attach on the demo engine: counts only (S3: the books
+    /// gained no record and the file is on the record picked).
+    pub attached: Option<AttachProof>,
+}
+
+/// What an attach changed in the demo's books (counts only).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct AttachProof {
+    /// Records in the books before the attach.
+    pub records_before: usize,
+    /// Records after it.
+    pub records_after: usize,
+    /// Files filed on that record before.
+    pub files_before: usize,
+    /// Files now filed on the record attached to.
+    pub files_on_record: usize,
+    /// No record was added or removed.
+    pub books_unchanged: bool,
+    /// The record holds one more file.
+    pub file_filed: bool,
 }
 
 impl ReviewDigests {
@@ -198,121 +223,6 @@ pub fn digests(ctx: &egui::Context) -> ReviewDigests {
         .unwrap_or_default()
 }
 
-// ============================================================ canonical
-
-/// One line of the canonical text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct CanonLine {
-    account: String,
-    amount: String,
-    memo: Option<String>,
-}
-
-/// The canonical text of what posts: the same fields from the form's
-/// checked values and from the body sent, so their [`digest`]s are equal
-/// exactly when the body carries what the owner reviewed (AC1). Money is
-/// the exact wire text; ids are their text. Never logged.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct Canon {
-    kind: &'static str,
-    date: String,
-    due: Option<String>,
-    payee: Option<String>,
-    paid_from: Option<String>,
-    reference: Option<String>,
-    number: Option<u32>,
-    total: String,
-    lines: Vec<CanonLine>,
-}
-
-impl Canon {
-    /// The canonical bytes.
-    #[must_use]
-    pub(crate) fn bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
-    }
-
-    /// Its [`digest`].
-    #[must_use]
-    pub(crate) fn digest(&self) -> String {
-        digest(&self.bytes())
-    }
-
-    fn line(account: AccountId, amount: Money, memo: Option<&String>) -> CanonLine {
-        CanonLine {
-            account: account.to_string(),
-            amount: amount.to_wire(),
-            memo: memo.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
-        }
-    }
-
-    /// A checked bill (the form side).
-    #[must_use]
-    pub(crate) fn of_bill(c: &cl_model::forms::bill::CheckedBill) -> Canon {
-        let mut lines: Vec<CanonLine> = c
-            .expense_lines
-            .iter()
-            .map(|l| Canon::line(l.account, l.amount, l.memo.as_ref()))
-            .collect();
-        lines.extend(
-            c.item_lines
-                .iter()
-                .map(|l| Canon::line(l.account, l.amount, l.description.as_ref())),
-        );
-        Canon {
-            kind: "bill",
-            date: c.date.to_wire(),
-            due: c.due_date.map(CalendarDate::to_wire),
-            payee: Some(c.vendor.to_string()),
-            paid_from: None,
-            reference: c.reference.clone(),
-            number: None,
-            total: c.amount.to_wire(),
-            lines,
-        }
-    }
-
-    /// A checked card charge or cash expense (the form side).
-    #[must_use]
-    pub(crate) fn of_card(kind: DraftKind, c: &cl_model::forms::card::CheckedCard) -> Canon {
-        Canon {
-            kind: kind.as_str(),
-            date: c.date.to_wire(),
-            due: None,
-            payee: c.payee.map(|p| p.to_string()),
-            paid_from: Some(c.card.to_string()),
-            reference: c.ref_no.clone(),
-            number: None,
-            total: c.amount.to_wire(),
-            lines: c
-                .lines
-                .iter()
-                .map(|l| Canon::line(l.account, l.amount, l.memo.as_ref()))
-                .collect(),
-        }
-    }
-
-    /// A checked check (the form side).
-    #[must_use]
-    pub(crate) fn of_check(c: &cl_model::forms::check::CheckedCheck) -> Canon {
-        Canon {
-            kind: "check",
-            date: c.date.to_wire(),
-            due: None,
-            payee: Some(c.payee.to_string()),
-            paid_from: Some(c.bank.to_string()),
-            reference: None,
-            number: c.number,
-            total: c.amount.to_wire(),
-            lines: c
-                .lines
-                .iter()
-                .map(|l| Canon::line(l.account, l.amount, l.memo.as_ref()))
-                .collect(),
-        }
-    }
-}
-
 // ============================================================ post body
 
 /// What a draft is posted as: the form's own engine draft, built by its
@@ -373,56 +283,34 @@ impl PostBody {
             ),
         })
     }
+}
 
-    /// The canonical text of the body (the posted side of [`Canon`]).
-    #[must_use]
-    pub(crate) fn canon(&self) -> Canon {
-        let split = |l: &cl_api::SplitLine| Canon::line(l.account, l.amount, l.memo.as_ref());
-        match self {
-            PostBody::Bill(d) => Canon {
-                kind: "bill",
-                date: d.date.to_wire(),
-                due: d.due_date.map(CalendarDate::to_wire),
-                payee: Some(d.vendor.to_string()),
-                paid_from: None,
-                reference: d.vendor_invoice_number.clone(),
-                number: None,
-                total: d.amount_due.to_wire(),
-                lines: d
-                    .lines
-                    .iter()
-                    .map(|l| Canon::line(l.account, l.amount, l.description.as_ref()))
-                    .collect(),
-            },
-            PostBody::CardCharge(d) | PostBody::CashExpense(d) => Canon {
-                kind: self.kind().as_str(),
-                date: d.date.to_wire(),
-                due: None,
-                payee: d.payee.map(|p| p.to_string()),
-                paid_from: Some(d.pay_from.to_string()),
-                reference: d.number.clone(),
-                number: None,
-                // The posting's total is its lines' (the engine's own
-                // rule); the digest compares it with the form's checked
-                // amount, which `check()` made equal to the cent.
-                total: Money::sum(d.lines.iter().map(|l| l.amount))
-                    .map(Money::to_wire)
-                    .unwrap_or_default(),
-                lines: d.lines.iter().map(split).collect(),
-            },
-            PostBody::Check(d) => Canon {
-                kind: "check",
-                date: d.date.to_wire(),
-                due: None,
-                payee: d.payee.map(|p| p.to_string()),
-                paid_from: Some(d.bank.to_string()),
-                reference: None,
-                number: d.check_number,
-                total: d.amount.to_wire(),
-                lines: d.lines.iter().map(split).collect(),
-            },
-        }
-    }
+/// The posted side of AC1: [`Canon::of_wire`]'s digest of the `body` that
+/// `live` puts on the wire under `caps` (cl-api's own
+/// [`ConvertBody::wire_body`], the function `convert` sends); `None` when
+/// it can't be built (the digests then differ).
+fn posted_digest(kind: DraftKind, live: &ConvertBody, caps: &Capabilities) -> Option<String> {
+    let v = live.wire_body(caps).ok()?;
+    Canon::of_wire(kind, &v).map(|c| c.digest())
+}
+
+/// The capabilities a body is put on the wire with: the engine's, or what
+/// the demo engine takes for bills (lines, terms, received).
+fn wire_caps(link: &CompanyLink) -> Capabilities {
+    let Some(demo) = link.demo_state() else {
+        return link.capabilities();
+    };
+    let b = crate::company::demo::bills::caps(&demo);
+    drop(demo);
+    let names: Vec<&str> = [
+        (b.lines, Capabilities::BILL_LINES),
+        (b.terms, Capabilities::BILL_TERMS),
+        (b.received, Capabilities::BILL_RECEIVED),
+    ]
+    .into_iter()
+    .filter_map(|(on, name)| on.then_some(name))
+    .collect();
+    serde_json::from_value(json!(names)).unwrap_or_default()
 }
 
 // ============================================================ open hook
@@ -693,6 +581,11 @@ enum Work {
         accept: Box<Accept>,
         task: Task<Vec<cl_docread::register_match::RegisterRow>>,
     },
+    /// The register search failed or couldn't run (review B2): nothing
+    /// posts until the owner picks Try again or Enter as new.
+    SearchFailed {
+        accept: Box<Accept>,
+    },
     /// The attach dialog is up.
     Choosing {
         accept: Box<Accept>,
@@ -739,6 +632,7 @@ impl Work {
         match self {
             Work::Idle => "idle",
             Work::Matching { .. } => "matching",
+            Work::SearchFailed { .. } => "search_failed",
             Work::Choosing { .. } => "choosing",
             Work::Converting { .. } => "converting",
             Work::Resend { .. } => "resend",
@@ -890,6 +784,10 @@ pub(crate) struct DraftSession {
     pub note: Option<&'static str>,
     /// The record it became.
     pub posted: Option<TransactionId>,
+    /// The form shows its own "Filled from …" line this frame (Enter
+    /// Bill's reading banner): the draft banner leaves its own out, so
+    /// there is one (UI check item 3).
+    pub hide_source_line: bool,
     /// Discarded on another computer: nothing may post.
     closed_elsewhere: bool,
     /// The compare tools.
@@ -978,6 +876,7 @@ impl DraftSession {
             attach: None,
             note: None,
             posted: None,
+            hide_source_line: false,
             closed_elsewhere: false,
             compare: CompareTools::new(),
             clicked: BTreeMap::new(),
@@ -1199,7 +1098,10 @@ impl DraftSession {
             || self.words_job.is_some()
             || self.read_job.is_some()
             || self.assist.busy()
-            || !matches!(self.work, Work::Idle | Work::Done | Work::Choosing { .. })
+            || !matches!(
+                self.work,
+                Work::Idle | Work::Done | Work::Choosing { .. } | Work::SearchFailed { .. }
+            )
             || self.learn.layout.is_some()
             || self.learn.card.is_some()
             || self.discard.is_some()
@@ -1337,7 +1239,7 @@ impl DraftSession {
     /// `new` draft): its words and spots serve the compare tools and
     /// learning (the values are the form's, never stored).
     pub(crate) fn adopt_reading(&mut self, local: &LocalReading) {
-        if self.words.is_some() || !matches!(self.stored, Some(Stored::Unread)) {
+        if self.words.is_some() || !matches!(self.stored, Some(Stored::Unread | Stored::Failed)) {
             return;
         }
         self.set_words(Arc::new(local.clone()));
@@ -1353,7 +1255,8 @@ impl DraftSession {
         cards: Option<Vec<(AccountId, Last4)>>,
         today: CalendarDate,
     ) -> bool {
-        if self.read_job.is_some() || !matches!(self.stored, Some(Stored::Unread)) {
+        if self.read_job.is_some() || !matches!(self.stored, Some(Stored::Unread | Stored::Failed))
+        {
             return false;
         }
         let (Some(file), Some(service)) = (self.file.clone(), crate::reading::shared()) else {
@@ -1394,7 +1297,17 @@ impl DraftSession {
                 self.read_result = Some(local);
                 self.events.push(DraftEvent::Read);
             }
-            ReadOutcome::Failed(_) => self.note = Some("doc_form.read.failed"),
+            // The banner says "Couldn't read this document" now (UI
+            // check item 4); Read document stays for another try.
+            ReadOutcome::Failed(_) => self.read_failed(),
+        }
+    }
+
+    /// "Read document" failed (here, or Enter Bill's own): a draft not
+    /// read yet now shows as one that couldn't be read.
+    pub(crate) fn read_failed(&mut self) {
+        if matches!(self.stored, Some(Stored::Unread)) {
+            self.stored = Some(Stored::Failed);
         }
     }
 
@@ -1430,21 +1343,54 @@ impl DraftSession {
             self.send_convert(a, ack);
             return true;
         }
+        self.start_search(Box::new(a));
+        true
+    }
+
+    /// The register search for `a` (Q-282). Only an engine without attach
+    /// posts without one; a search that couldn't run or failed never posts
+    /// (review B2): the owner chooses Try again or Enter as new.
+    fn start_search(&mut self, a: Box<Accept>) {
+        use super::attach::Search;
         match super::attach::search(&self.link, self.group.as_ref(), self.tenant, &a.probe) {
-            Some(task) => {
-                self.work = Work::Matching {
-                    accept: Box::new(a),
-                    task,
-                };
+            Search::Started(task) => {
+                self.work = Work::Matching { accept: a, task };
                 self.poll_work();
             }
-            // No attach on this engine: post as before.
-            None => {
+            // No attach on this engine: post as before (the engine's own
+            // duplicate check still runs).
+            Search::Unsupported => {
                 self.matched = Some((a.body.clone(), Vec::new()));
-                self.send_convert(a, Vec::new());
+                self.send_convert(*a, Vec::new());
             }
+            Search::Failed => self.search_failed(a),
         }
-        true
+    }
+
+    fn search_failed(&mut self, accept: Box<Accept>) {
+        tracing::info!("register search failed; nothing entered");
+        self.note = Some("doc_form.match.failed");
+        self.work = Work::SearchFailed { accept };
+    }
+
+    /// After a failed search: **Enter as new**, the owner's explicit choice
+    /// (never the default button). Posts the reviewed body acknowledging
+    /// nothing; the engine's own duplicate check still runs.
+    pub(crate) fn enter_as_new(&mut self) {
+        if let Work::SearchFailed { accept } = std::mem::replace(&mut self.work, Work::Idle) {
+            self.note = None;
+            self.matched = Some((accept.body.clone(), Vec::new()));
+            self.send_convert(*accept, Vec::new());
+        }
+    }
+
+    /// After a failed search: back to the form, nothing sent.
+    fn search_back(&mut self) {
+        if matches!(self.work, Work::SearchFailed { .. }) {
+            self.work = Work::Idle;
+            self.note = None;
+            self.events.push(DraftEvent::Cancelled);
+        }
     }
 
     fn key_for(&mut self, id: Identity) -> IdempotencyKey {
@@ -1468,10 +1414,18 @@ impl DraftSession {
             expected: expected.clone(),
             ack: ack.clone(),
         });
-        // What the owner reviewed and what is sent (AC1, N4).
+        // cl-api's body (its own checks run here: nothing is sent when
+        // they fail). What the owner reviewed and what goes on the wire
+        // (AC1, N4, review S2): the posted digest reads the request body
+        // itself. The demo engine takes the same drafts (`PostBody::demo`).
+        let live = a.body.live(a.billable);
         self.digests = Some(ReviewDigests {
+            attached: None,
             form_digest: Some(a.form_digest.clone()),
-            posted_digest: Some(a.body.canon().digest()),
+            posted_digest: live
+                .as_ref()
+                .ok()
+                .and_then(|b| posted_digest(a.body.kind(), b, &wire_caps(&self.link))),
         });
         let id = self.id;
         if self.link.is_demo() {
@@ -1498,7 +1452,7 @@ impl DraftSession {
             }
             return;
         }
-        let body = match a.body.live(a.billable) {
+        let body = match live {
             Ok(b) => b,
             Err(e) => {
                 self.events.push(DraftEvent::Failed {
@@ -1584,9 +1538,15 @@ impl DraftSession {
             Work::Matching { accept, mut task } => match task.try_take() {
                 None => Work::Matching { accept, task },
                 Some(r) => {
-                    // A failed search posts as before: the engine's own
-                    // duplicate check still runs.
-                    let rows = r.unwrap_or_default();
+                    // A failed search never posts (review B2): the
+                    // engine's duplicate check skips vendor-less receipts.
+                    let rows = match r {
+                        Ok(rows) => rows,
+                        Err(_) => {
+                            self.search_failed(accept);
+                            return;
+                        }
+                    };
                     let probe = accept.probe.probe();
                     let cands = cl_docread::register_match::candidates(&probe, &rows);
                     if cands.is_empty() {
@@ -1853,11 +1813,19 @@ impl DraftSession {
         }
     }
 
-    /// Unknown outcome: **Try again** sends the identical request once more.
+    /// **Try again**: an unknown outcome sends the identical request once
+    /// more; a failed register search runs the search again.
     pub(crate) fn try_again(&mut self) {
-        if let Work::Unknown { accept, ack } = std::mem::replace(&mut self.work, Work::Idle) {
-            self.note = None;
-            self.send_convert(*accept, ack);
+        match std::mem::replace(&mut self.work, Work::Idle) {
+            Work::Unknown { accept, ack } => {
+                self.note = None;
+                self.send_convert(*accept, ack);
+            }
+            Work::SearchFailed { accept } => {
+                self.note = None;
+                self.start_search(accept);
+            }
+            other => self.work = other,
         }
     }
 
@@ -1900,8 +1868,28 @@ impl DraftSession {
         if self.link.is_demo() {
             let out = match (self.tenant_or_err(), self.link.demo_state()) {
                 (Ok(tenant), Some(mut demo)) => {
-                    demo_drafts::attach(&mut demo, tenant, id, target, &expected, key)
-                        .map(|a| (a.draft, a.transaction))
+                    use crate::company::demo::checks::files_on;
+                    let records_before = demo.ledger.transactions().len();
+                    let files_before = files_on(&demo, target);
+                    let out = demo_drafts::attach(&mut demo, tenant, id, target, &expected, key)
+                        .map(|a| (a.draft, a.transaction));
+                    if out.is_ok() {
+                        let records_after = demo.ledger.transactions().len();
+                        let files_on_record = files_on(&demo, target);
+                        self.digests = Some(ReviewDigests {
+                            form_digest: None,
+                            posted_digest: None,
+                            attached: Some(AttachProof {
+                                records_before,
+                                records_after,
+                                files_before,
+                                files_on_record,
+                                books_unchanged: records_after == records_before,
+                                file_filed: files_on_record == files_before + 1,
+                            }),
+                        });
+                    }
+                    out
                 }
                 _ => Err(ApiError::NoCompanyOpen),
             };
@@ -2246,6 +2234,20 @@ impl DraftSession {
             self.answer_dialog(false, None);
             return Some(true);
         }
+        if matches!(self.work, Work::SearchFailed { .. }) {
+            match id.as_str() {
+                // Alt+E: the explicit choice; Esc: back to the form.
+                "form.enter_as_new" => {
+                    self.enter_as_new();
+                    return Some(true);
+                }
+                "form.revert" => {
+                    self.search_back();
+                    return Some(true);
+                }
+                _ => {}
+            }
+        }
         match id.as_str() {
             "form.discard_document" if !self.closed() => {
                 self.dialog = Some(Dialog::ConfirmDiscard);
@@ -2417,6 +2419,7 @@ impl DraftSession {
                     .unwrap_or_default();
                 let line = match (&self.stored, self.layout_vendor(), vendor_name) {
                     (_, _, _) if self.load.is_some() => t("doc_form.loading"),
+                    (Some(Stored::Read(_)), _, _) if self.hide_source_line => String::new(),
                     (_, _, _) if self.load_problem.is_some() => {
                         t(self.load_problem.unwrap_or("doc_form.load.failed"))
                     }
@@ -2432,14 +2435,20 @@ impl DraftSession {
                     }
                     (None, _, _) => t("doc_form.loading"),
                 };
-                ui.add(egui::Label::new(RichText::new(line).color(tokens.text_primary)).wrap());
+                if !line.is_empty() {
+                    ui.add(egui::Label::new(RichText::new(line).color(tokens.text_primary)).wrap());
+                }
                 if let Some(r) = read
                     && r.unaccepted > 0
                 {
-                    let text = t_with(
-                        "doc_form.banner.unaccepted",
-                        &[("n", &r.unaccepted.to_string())],
-                    );
+                    let text = if r.unaccepted == 1 {
+                        t("doc_form.banner.unaccepted.one")
+                    } else {
+                        t_with(
+                            "doc_form.banner.unaccepted",
+                            &[("n", &r.unaccepted.to_string())],
+                        )
+                    };
                     ui.add(egui::Label::new(RichText::new(text).color(tokens.warn_text)).wrap());
                     ui.horizontal_wrapped(|ui| {
                         let accept = ui
@@ -2467,7 +2476,7 @@ impl DraftSession {
                     });
                 }
                 if read.is_some()
-                    && matches!(self.stored, Some(Stored::Unread))
+                    && matches!(self.stored, Some(Stored::Unread | Stored::Failed))
                     && self.file.is_some()
                 {
                     let busy = self.read_job.is_some();
@@ -2512,6 +2521,33 @@ impl DraftSession {
                 {
                     click = BannerClick::TryAgain;
                 }
+                if matches!(self.work, Work::SearchFailed { .. }) {
+                    // Try again first and focused; Enter as new is the
+                    // owner's explicit choice, never the default (B2).
+                    ui.horizontal_wrapped(|ui| {
+                        let again = ui.button(t("doc_form.try_again"));
+                        if !ui.ctx().memory(|m| m.focused().is_some()) {
+                            again.request_focus();
+                        }
+                        if again.clicked() {
+                            click = BannerClick::TryAgain;
+                        }
+                        if ui
+                            .button(t("doc_form.match.enter_new"))
+                            .on_hover_text(t("doc_form.match.enter_new.tip"))
+                            .clicked()
+                        {
+                            click = BannerClick::EnterAsNew;
+                        }
+                        crate::widgets::kbd(
+                            ui,
+                            &crate::screens::card_charge::kit::chip("form.enter_as_new"),
+                        );
+                        if ui.button(t("doc_form.match.back")).clicked() {
+                            click = BannerClick::SearchBack;
+                        }
+                    });
+                }
                 if matches!(self.work, Work::Matching { .. }) {
                     ui.label(RichText::new(t("doc_form.matching")).color(tokens.text_secondary));
                 }
@@ -2537,9 +2573,18 @@ impl DraftSession {
                                 click = BannerClick::EnterAs(f);
                             }
                         }
+                        // One row with Discard document: the lines grid
+                        // keeps its room (UI check item 3).
+                        ui.separator();
+                        if ui
+                            .add_enabled(!self.locked(), egui::Button::new(t("doc_form.discard")))
+                            .on_hover_text(t("doc_form.discard.tip"))
+                            .clicked()
+                        {
+                            click = BannerClick::Discard;
+                        }
                     });
-                }
-                if !self.closed()
+                } else if !self.closed()
                     && ui
                         .add_enabled(!self.locked(), egui::Button::new(t("doc_form.discard")))
                         .on_hover_text(t("doc_form.discard.tip"))
@@ -2552,6 +2597,8 @@ impl DraftSession {
         match click {
             BannerClick::Discard => self.ask_discard(),
             BannerClick::TryAgain => self.try_again(),
+            BannerClick::EnterAsNew => self.enter_as_new(),
+            BannerClick::SearchBack => self.search_back(),
             _ => {}
         }
         click
@@ -2752,8 +2799,13 @@ pub(crate) enum BannerClick {
     Discard,
     /// Read document (a `new` draft).
     ReadDocument,
-    /// Try again (unknown outcome; already sent).
+    /// Try again (unknown outcome, or a failed register search; already
+    /// done).
     TryAgain,
+    /// Enter as new after a failed register search (already sent).
+    EnterAsNew,
+    /// Back to the form after a failed register search (already done).
+    SearchBack,
     /// Ask AI to help (the form passes its vendors to
     /// [`DraftSession::ask_ai`]).
     AskAi,

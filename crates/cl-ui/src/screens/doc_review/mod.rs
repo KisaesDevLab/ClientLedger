@@ -125,6 +125,8 @@ pub struct DocReviewScreen {
     group: Option<RequestGroup>,
     /// The page being read.
     load: Option<Job<DraftPage>>,
+    /// The file names of a page's uploads (UI check item 5).
+    names: Option<Job<Vec<(cl_api::AttachmentId, String)>>>,
     /// When the list was last asked for.
     loaded_at: Option<Instant>,
     /// The page's first row in the engine's list.
@@ -169,6 +171,7 @@ impl DocReviewScreen {
             queue: QueueView::default(),
             group,
             load: None,
+            names: None,
             loaded_at: None,
             offset: 0,
             supported: true,
@@ -232,6 +235,7 @@ impl DocReviewScreen {
                 Err(_) => self.load_failed = true,
             }
         }
+        self.poll_names();
         self.poll_dups();
         self.start_dups();
         if let Some(r) = finished(&mut self.discard) {
@@ -244,6 +248,57 @@ impl DocReviewScreen {
             }
             self.reload();
         }
+    }
+
+    /// The file names of uploads not known yet (on screen only).
+    fn poll_names(&mut self) {
+        if let Some(r) = finished(&mut self.names) {
+            // Not read: those rows show no name (their date and status
+            // still do) and aren't asked for again on every frame.
+            let found = r.unwrap_or_else(|_| {
+                tracing::debug!("queue file names not read");
+                self.queue
+                    .names_missing()
+                    .into_iter()
+                    .map(|a| (a, String::new()))
+                    .collect()
+            });
+            self.queue.names.extend(found);
+            return;
+        }
+        if self.names.is_some() {
+            return;
+        }
+        let missing = self.queue.names_missing();
+        if missing.is_empty() {
+            return;
+        }
+        let live = missing.clone();
+        self.names = Some(run(
+            &self.link,
+            self.group.as_ref(),
+            None,
+            move |s| {
+                Ok(missing
+                    .iter()
+                    .filter_map(|a| {
+                        crate::company::demo::checks::find_attachment(s, *a)
+                            .map(|f| (*a, f.file_name))
+                    })
+                    .collect())
+            },
+            move |s| async move {
+                let mut out = Vec::new();
+                for a in live {
+                    match s.attachments().get(a).await {
+                        Ok(f) => out.push((a, f.file_name)),
+                        // Gone or unreadable: shown as "(no name)" later.
+                        Err(_) => out.push((a, String::new())),
+                    }
+                }
+                Ok(out)
+            },
+        ));
     }
 
     fn poll_dups(&mut self) {
@@ -445,6 +500,38 @@ impl DocReviewScreen {
         let mut clicked = None;
         let mut open = None;
         let rows: Vec<_> = self.queue.rows().into_iter().cloned().collect();
+        // Column headers over the cells below (UI check item 5).
+        if !rows.is_empty() {
+            let width = ui.available_width();
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 20.0), Sense::hover());
+            let p = ui.painter();
+            let font = egui::FontId::proportional(12.0);
+            let y = rect.center().y;
+            for (x, key) in [
+                (8.0, "doc_review.col.arrived"),
+                (100.0, "doc_review.col.file"),
+                (330.0, "doc_review.col.kind"),
+                (440.0, "doc_review.col.date"),
+                (540.0, "doc_review.col.reference"),
+            ] {
+                if rect.left() + x < rect.right() - 220.0 {
+                    p.text(
+                        egui::pos2(rect.left() + x, y),
+                        Align2::LEFT_CENTER,
+                        t(key),
+                        font.clone(),
+                        tokens.text_secondary,
+                    );
+                }
+            }
+            p.text(
+                egui::pos2(rect.right() - 8.0, y),
+                Align2::RIGHT_CENTER,
+                t("doc_review.col.status"),
+                font.clone(),
+                tokens.text_secondary,
+            );
+        }
         egui::ScrollArea::vertical()
             .auto_shrink([false, true])
             .max_height(ui.available_height() - 40.0)
@@ -508,12 +595,22 @@ impl DocReviewScreen {
                         left.set_right((amount_left - 12.0).max(rect.left()));
                         let clip = p.with_clip_rect(left.intersect(p.clip_rect()));
                         let at = |x: f32| egui::pos2(rect.left() + x, y);
+                        // The day it arrived and its file, so documents
+                        // not read yet can be told apart (UI check item 5;
+                        // file names on screen only).
+                        let arrived = view.arrived.map(crate::shell::us_date).unwrap_or_default();
+                        let file = view
+                            .file
+                            .and_then(|a| self.queue.names.get(&a).cloned())
+                            .unwrap_or_default();
                         let date = view.date.map(crate::shell::us_date).unwrap_or_default();
                         let cells = [
-                            (8.0, date, tokens.text_secondary),
-                            (110.0, queue::kind_words(r.kind), tokens.text_primary),
+                            (8.0, arrived, tokens.text_secondary),
+                            (100.0, file, tokens.text_primary),
+                            (330.0, queue::kind_words(r.kind), tokens.text_primary),
+                            (440.0, date, tokens.text_secondary),
                             (
-                                240.0,
+                                540.0,
                                 view.reference.unwrap_or_default(),
                                 tokens.text_primary,
                             ),

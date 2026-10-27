@@ -1113,6 +1113,44 @@ mod drafts_flow {
         assert_eq!(all.total, 1, "one draft");
     }
 
+    /// Review L1: the same bytes are another computer's draft that was
+    /// entered already: the arrival is handled and its own upload (left on
+    /// a draft key) is deleted before the original moves; the winner's
+    /// file is untouched.
+    #[test]
+    fn claimed_after_another_computer_entered_it_deletes_our_upload() {
+        let mut w = world_with_drafts();
+        let winner = w.elsewhere(PDF);
+        let winner_file = w.draft(winner).attachment_id.expect("file");
+        let target = w.a_check();
+        {
+            let mut demo = w.link.demo_state().expect("demo");
+            let d = demo_drafts::get(&demo, w.tenant, winner).expect("draft");
+            demo_drafts::attach(
+                &mut demo,
+                w.tenant,
+                winner,
+                target,
+                &d.updated_at,
+                IdempotencyKey::new(),
+            )
+            .expect("entered on the other computer");
+        }
+        let deleted =
+            crate::company::demo::checks::deleted_count(&w.link.demo_state().expect("demo"));
+        let (_, bills) = w.folder("Bills", false, true);
+        std::fs::write(bills.join("bill.pdf"), PDF).expect("w");
+        w.until("handled, its copy deleted, the original moved", |s| {
+            s.processed > 0 && s.state.entries(&s.company).is_empty()
+        });
+        assert!(w.file_exists(winner_file), "the winner's file is untouched");
+        let demo = w.link.demo_state().expect("demo");
+        assert_eq!(
+            crate::company::demo::checks::deleted_count(&demo),
+            deleted + 1,
+            "our own upload was deleted, not left on a draft key"
+        );
+    }
     /// T5: the same bytes are another computer's draft: the arrival follows
     /// it as a duplicate, its own extra copy is deleted (entry and seen hash
     /// kept), nothing goes up again, Copy anyway and Add to… are refused,

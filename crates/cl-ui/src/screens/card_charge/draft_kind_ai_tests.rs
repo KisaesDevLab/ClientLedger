@@ -155,3 +155,88 @@ fn ask_ai_refills_what_was_not_accepted_and_keeps_what_was() {
     assert_eq!(f.read.state(ReadTarget::Date), Some(ReadField::Edited));
     assert_eq!(s.draft_state()["assist"]["helped"], true);
 }
+
+/// Review L3: "Remember card ending" is offered only for a credit card
+/// account without digits, and never when another account already has the
+/// printed digits.
+#[test]
+fn remember_card_is_not_offered_when_another_account_has_the_digits() {
+    let (_d, link) = link();
+    let id = claim(&link, Some("25.10"));
+    {
+        // The document printed the card's last four.
+        let mut d = link.demo_state().expect("demo");
+        let tenant = d.open.expect("company");
+        let draft = crate::company::demo::drafts::get(&d, tenant, id).expect("draft");
+        let mut r = Reading::empty(Reader::TextPdf, 1);
+        r.kind = cl_docread::model::DocKind::CardCharge;
+        r.header.date = Some(found(day(14)));
+        r.header.payment = Some(found(cl_docread::model::Payment::Card {
+            last4: cl_docread::model::Last4::parse("4417").expect("digits"),
+        }));
+        let local = LocalReading {
+            reading: r,
+            vendor: None,
+            card: None,
+        };
+        let reading = crate::reading::service::draft_reading(&local).expect("reading");
+        crate::company::demo::drafts::store_reading(
+            &mut d,
+            tenant,
+            id,
+            &draft.updated_at,
+            &reading,
+        )
+        .expect("stored");
+    }
+    let (mut s, _ctx) = opened(&link, id);
+    let card = s.books.by_number("2050").expect("card account");
+    s.header.edit_step(|h| h.card = Some(card));
+    for a in &mut s.books.accounts {
+        if a.id == card {
+            a.card_last4 = None;
+        }
+    }
+    assert!(s.card_offer(), "a credit card without digits");
+    // Another account already has these digits.
+    let other = s.books.by_number("6210").expect("another account");
+    for a in &mut s.books.accounts {
+        if a.id == other {
+            a.card_last4 = cl_api::CardLast4::parse("4417");
+        }
+    }
+    assert!(!s.card_offer(), "two accounts with one ending");
+    for a in &mut s.books.accounts {
+        if a.id == other {
+            a.card_last4 = None;
+        }
+        if a.id == card {
+            a.fields.detail_type = Some("checking".into());
+        }
+    }
+    assert!(!s.card_offer(), "only a credit card account");
+}
+
+/// Review L4: Save in credit mode in draft mode says why; nothing is sent.
+#[test]
+fn credit_mode_in_draft_mode_says_why_and_sends_nothing() {
+    let (_d, link) = link();
+    let id = claim(&link, Some("25.10"));
+    let (mut s, _ctx) = opened(&link, id);
+    let card = s.books.by_number("2050").expect("card account");
+    let c = cl_model::forms::card::CheckedCard {
+        card,
+        mode: cl_model::forms::card::CardMode::Credit,
+        payee: None,
+        date: day(14),
+        ref_no: None,
+        amount: money("25.10"),
+        memo: None,
+        header_tags: Vec::new(),
+        lines: Vec::new(),
+    };
+    let before = link.demo_state().expect("demo").drafts.requests;
+    assert!(!s.accept_draft(&c, cl_model::forms::SaveIntent::SaveAndClose, None));
+    assert_eq!(s.flow.notice, Some("doc_form.credit_unavailable"));
+    assert_eq!(link.demo_state().expect("demo").drafts.requests, before);
+}

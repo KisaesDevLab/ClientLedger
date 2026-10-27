@@ -249,6 +249,11 @@ pub fn remember_card(
         },
         move |s| async move {
             let v = s.accounts().get(account).await?;
+            // Only a credit card account takes card digits (review L3),
+            // as the demo above.
+            if v.record.fields.detail_type.as_deref() != Some(cl_api::CREDIT_CARD_DETAIL_TYPE) {
+                return Ok(CardOutcome::Failed);
+            }
             if let Some(have) = v.record.card_last4 {
                 return Ok(CardOutcome::Kept {
                     different: have != digits,
@@ -335,16 +340,14 @@ mod tests {
             template_of(&values, &Reading::empty(Reader::TextPdf, 1), &fin, today),
             None
         );
-        let t = template_of(&values, &words, &fin, today);
-        if let Some(t) = t {
-            // Merging with itself keeps one layout.
-            let (m, replaced) = merged(t.clone(), std::slice::from_ref(&t));
-            assert_eq!(replaced, Some(0));
-            assert!(m.samples >= t.samples);
-            let (n, none) = merged(t, &[]);
-            assert_eq!(none, None);
-            assert!(n.samples >= 1);
-        }
+        let t = template_of(&values, &words, &fin, today).expect("a layout from the words");
+        // Merging with itself keeps one layout.
+        let (m, replaced) = merged(t.clone(), std::slice::from_ref(&t));
+        assert_eq!(replaced, Some(0));
+        assert!(m.samples >= t.samples);
+        let (n, none) = merged(t, &[]);
+        assert_eq!(none, None);
+        assert!(n.samples >= 1);
         assert_eq!(Learned::Stored.name(), "stored");
         assert_eq!(CardOutcome::Kept { different: true }.name(), "different");
     }

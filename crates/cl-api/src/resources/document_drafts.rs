@@ -230,6 +230,9 @@ pub struct DocumentDraft {
     /// That record's engine type (`bill`, `expense`).
     #[serde(default)]
     pub converted_type: Option<String>,
+    /// When the document arrived (the claim).
+    #[serde(default)]
+    pub created_at: Option<cl_core::Timestamp>,
     /// The draft's own change token: pass it back unchanged as
     /// `expected_updated_at`. Opaque, never parsed or reformatted.
     pub updated_at: String,
@@ -693,6 +696,17 @@ impl ConvertBody {
             ConvertBody::CashExpense(_) => DraftKind::CashExpense,
             ConvertBody::Check(_) => DraftKind::Check,
         }
+    }
+
+    /// The `body` member [`DocumentDrafts::convert`] sends for this posting
+    /// under `caps` (the same function builds both): the desktop digests it
+    /// to prove the posting carries what the owner reviewed (A04 AC1).
+    /// Owner data: never log it.
+    ///
+    /// # Errors
+    /// As [`DocumentDrafts::convert`]'s local checks (nothing is sent then).
+    pub fn wire_body(&self, caps: &Capabilities) -> Result<Value, ApiError> {
+        self.value(caps)
     }
 
     /// The kind's create body, without `draftAttachmentId` (convert moves

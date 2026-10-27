@@ -51,12 +51,18 @@ pub fn show(
                     .filter(|v| !v.trim().is_empty())
                     .cloned()
                     .unwrap_or_else(|| t("compare.checklist.empty_value"));
+                // Text colours (4.5:1 in both themes): `warn_text`, never
+                // the `warn` fill (UI check item 2).
                 let colour = match target.level {
                     TargetLevel::Sure => tokens.accent,
-                    TargetLevel::CheckThis => tokens.warn,
+                    TargetLevel::CheckThis => tokens.warn_text,
                     TargetLevel::NotFound => tokens.text_secondary,
                 };
-                ui.horizontal(|ui| {
+                // Snippet, then the field's words and its buttons in one
+                // column: a docked list is narrow, and a right-to-left
+                // block in an unbounded row drew over the values (UI
+                // check item 1).
+                ui.horizontal_top(|ui| {
                     let source = target
                         .spot
                         .and_then(|s| snippet_of(s.page).map(|src| (s, src)));
@@ -68,37 +74,46 @@ pub fn show(
                         None => overlay::snippet_space(ui),
                     }
                     ui.vertical(|ui| {
-                        ui.label(
-                            RichText::new(&target.label)
-                                .family(crate::fonts::bold())
-                                .color(tokens.text_primary),
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&target.label)
+                                    .family(crate::fonts::bold())
+                                    .color(tokens.text_primary),
+                            )
+                            .wrap(),
                         );
-                        ui.label(RichText::new(&value).color(tokens.text_primary));
+                        ui.add(
+                            egui::Label::new(RichText::new(&value).color(tokens.text_primary))
+                                .wrap(),
+                        );
                         ui.label(RichText::new(level_words(target.level)).color(colour));
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if target.spot.is_some() {
-                            let name = t_with("compare.find.named", &[("field", &target.label)]);
-                            let r = ui
-                                .button(t("compare.find"))
-                                .on_hover_text(t("compare.find.tip"));
-                            r.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
-                            if r.clicked() {
-                                turn = overlay.find(target.key);
-                                overlay.push(CompareEvent::TargetClicked(target.key));
+                        ui.horizontal_wrapped(|ui| {
+                            if target.level != TargetLevel::Sure {
+                                let name = t_with(
+                                    "compare.looks_right.named",
+                                    &[("field", &target.label)],
+                                );
+                                let r = ui
+                                    .button(t("compare.looks_right"))
+                                    .on_hover_text(t("compare.looks_right.tip"));
+                                r.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
+                                if r.clicked() {
+                                    overlay.push(CompareEvent::LooksRight(target.key));
+                                }
                             }
-                        }
-                        if target.level != TargetLevel::Sure {
-                            let name =
-                                t_with("compare.looks_right.named", &[("field", &target.label)]);
-                            let r = ui
-                                .button(t("compare.looks_right"))
-                                .on_hover_text(t("compare.looks_right.tip"));
-                            r.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
-                            if r.clicked() {
-                                overlay.push(CompareEvent::LooksRight(target.key));
+                            if target.spot.is_some() {
+                                let name =
+                                    t_with("compare.find.named", &[("field", &target.label)]);
+                                let r = ui
+                                    .button(t("compare.find"))
+                                    .on_hover_text(t("compare.find.tip"));
+                                r.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
+                                if r.clicked() {
+                                    turn = overlay.find(target.key);
+                                    overlay.push(CompareEvent::TargetClicked(target.key));
+                                }
                             }
-                        }
+                        });
                     });
                 });
                 ui.separator();

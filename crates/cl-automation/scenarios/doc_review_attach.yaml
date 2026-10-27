@@ -18,8 +18,9 @@ steps:
 
   - command: nav.receipt_inbox
   - assert_state: {key: screen.screen, equals: receipt_inbox}
-  - wait: {ms: 17000}
-  - assert_state: {key: screen.drafts.on, equals: true}
+  # Wait for the inbox to claim its arrivals (an event, not a fixed time).
+  - assert_state: {key: screen.drafts.on, equals: true, within_ms: 30000}
+  - assert_state: {key: screen.drafts.claimed, equals: 5, within_ms: 60000}
   - command: vendors.review_documents
   - assert_state: {key: queue.total, equals: 5}
 
@@ -50,11 +51,20 @@ steps:
   - key: Ctrl+A
   - type: {text: "5110"}
   - key: Tab
+  # Review B1: dated inside the closed period (the demo's books close on
+  # 09/30/2026). The register search still comes first and finds check
+  # 4401 three days later; attaching posts nothing and asks no password.
+  - click: {role: text_input, label: Date}
+  - key: Ctrl+A
+  - type: {text: "09/29/2026"}
+  - key: Tab
+  - assert_state: {key: screen.date, equals: "2026-09-29"}
   - screenshot: receipt-open
 
   # --- 3. Save asks first: the books already have it -----------------------------
   - key: Alt+S
   - assert_state: {key: screen.draft.attach.rows, equals: 1, within_ms: 5000}
+  - assert_not_exists: {role: password_input, label: Closing-date password}
   - assert_state: {key: screen.draft.attach.attachable, equals: 1}
   - assert_state: {key: screen.draft.attach.confirming, equals: false}
   - assert_exists: {label: Is this already in your books?}
@@ -83,10 +93,15 @@ steps:
   - key: Alt+T
   - assert_state: {key: screen.draft.attach.confirming, equals: true}
   - click: {role: button, label: Attach, index: 1}
+  # Review S3: the books gained no record and the file is now on check 4401
+  # (the only record offered); no closing-date password was asked.
+  - assert_state: {key: review.attached.books_unchanged, equals: true, within_ms: 5000}
+  - assert_state: {key: review.attached.file_filed, equals: true}
   - assert_state: {key: screen.screen, equals: review_documents, within_ms: 5000}
   - click: {role: button, label: Refresh}
   - assert_state: {key: queue.total, equals: 4, within_ms: 5000}
-  # Nothing was entered: no convert ran, so no digest was made.
+  # Nothing was entered: no convert ran, so no digest was made (the
+  # attach's counts replaced any earlier digest).
   - assert_state: {key: review.posted_digest, equals: null}
   - assert_state: {key: review.form_digest, equals: null}
   - screenshot: attached

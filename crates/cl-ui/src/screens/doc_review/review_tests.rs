@@ -1,7 +1,7 @@
 //! Tests of the draft session against the demo engine (A04 D2, D3, D5;
 //! T1, T2, T3, T11, T19).
 
-use cl_api::{AttachTo, DraftKey, SplitLine};
+use cl_api::{AttachTo, DraftKey};
 use cl_core::Money;
 use cl_docread::model::{Confidence as Bp2, Found, RuleId};
 
@@ -115,14 +115,18 @@ impl World {
         s
     }
 
-    fn accept(&self, amount: &str, date: CalendarDate, password: Option<&str>) -> Accept {
-        let body = CardChargeDraft {
-            pay_from: self.account("2050"),
-            date,
-            number: None,
+    /// The card form's checked values for `amount` on `date`.
+    fn checked(&self, amount: &str, date: CalendarDate) -> cl_model::forms::card::CheckedCard {
+        cl_model::forms::card::CheckedCard {
+            card: self.account("2050"),
+            mode: cl_model::forms::card::CardMode::Charge,
             payee: None,
+            date,
+            ref_no: None,
+            amount: money(amount),
             memo: None,
-            lines: vec![SplitLine {
+            header_tags: Vec::new(),
+            lines: vec![cl_model::forms::lines::PostingLine {
                 account: self.account("6210"),
                 amount: money(amount),
                 memo: None,
@@ -130,16 +134,34 @@ impl World {
                 billable: false,
                 tag: None,
             }],
-        };
-        let body = PostBody::CardCharge(body);
+        }
+    }
+
+    /// What the card form sends at Accept: the form-side digest of its
+    /// checked values and the body its own builder makes from them.
+    fn accept(&self, amount: &str, date: CalendarDate, password: Option<&str>) -> Accept {
+        let c = self.checked(amount, date);
+        Self::accept_with(
+            &c,
+            crate::screens::card_charge::CardChargeScreen::charge_draft(&c),
+            password,
+        )
+    }
+
+    fn accept_with(
+        c: &cl_model::forms::card::CheckedCard,
+        body: CardChargeDraft,
+        password: Option<&str>,
+    ) -> Accept {
+        let (amount, date) = (c.amount, c.date);
         Accept {
-            form_digest: body.canon().digest(),
-            body,
+            form_digest: Canon::of_card(DraftKind::CardCharge, c).digest(),
+            body: PostBody::CardCharge(body),
             billable: true,
             intent: SaveIntent::SaveAndClose,
             password: password.map(Secret::new),
             probe: MatchProbe {
-                amount: money(amount),
+                amount,
                 date,
                 payee: None,
                 contact: None,
@@ -305,6 +327,152 @@ fn a_closed_period_needs_the_password_then_posts() {
     assert!(ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })));
 }
 
+fn close_books_through(w: &World, through: CalendarDate) {
+    let mut d = w.demo();
+    let t = w.tenant;
+    d.companies
+        .iter_mut()
+        .find(|c| c.tenant_id == t)
+        .expect("company")
+        .closed_through = Some(through);
+}
+
+/// Review B1 (Q-A04f): a receipt dated in the closed period that is
+/// already in the books: the register search comes first and the attach
+/// needs no closing-date password (nothing posts).
+#[test]
+fn an_attach_in_the_closed_period_needs_no_password() {
+    let w = World::new();
+    let target = w.post_expense("25.00", day(13));
+    close_books_through(&w, day(30));
+    let id = w.draft("cp", "25.00", day(14));
+    let mut s = w.session(id);
+    let before = w.transactions();
+    assert!(s.accept(w.accept("25.00", day(14), None)));
+    let ev = tick(&w, &mut s);
+    assert!(
+        !ev.iter().any(|e| matches!(e, DraftEvent::Failed { .. })),
+        "no closing-date question before the search: {ev:?}"
+    );
+    let d = s.attach.as_mut().expect("the attach dialog first");
+    d.select(0);
+    assert!(d.ask_attach());
+    let answer = d.confirm().expect("confirmed");
+    s.dialog_answer(answer);
+    let ev = tick(&w, &mut s);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, DraftEvent::Attached { transaction } if *transaction == target)),
+        "{ev:?}"
+    );
+    assert!(!ev.iter().any(|e| matches!(e, DraftEvent::Failed { .. })));
+    assert_eq!(w.transactions(), before, "nothing posted");
+    assert_eq!(w.status(id), DraftStatus::Converted);
+}
+
+/// Review B1: a closed-period document with nothing in the books: the
+/// search runs, then the engine's 423 asks for the password; the resend
+/// with it does not search again and posts once.
+#[test]
+fn a_closed_period_convert_searches_first_then_asks() {
+    let w = World::new();
+    close_books_through(&w, day(30));
+    let id = w.draft("cq", "12.75", day(14));
+    let mut s = w.session(id);
+    let before = w.transactions();
+    assert!(s.accept(w.accept("12.75", day(14), None)));
+    let ev = tick(&w, &mut s);
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        DraftEvent::Failed {
+            error: ApiError::ClosedPeriod(_),
+            ..
+        }
+    )));
+    assert_eq!(w.transactions(), before);
+    // A search that would fail now proves the resend doesn't search.
+    w.demo().drafts.fail_next_search = true;
+    assert!(s.accept(w.accept("12.75", day(14), Some(DEMO_CLOSING_PASSWORD))));
+    let ev = tick(&w, &mut s);
+    assert!(
+        ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
+        "{ev:?}"
+    );
+    assert_eq!(w.transactions(), before + 1);
+}
+
+/// Review B2: a failed register search never posts; Try again searches
+/// again (and then posts when nothing matches).
+#[test]
+fn a_failed_search_never_posts_and_try_again_searches_again() {
+    let w = World::new();
+    let id = w.draft("fs", "18.20", day(14));
+    let mut s = w.session(id);
+    let before = w.transactions();
+    w.demo().drafts.fail_next_search = true;
+    assert!(s.accept(w.accept("18.20", day(14), None)));
+    let ev = tick(&w, &mut s);
+    assert!(
+        !ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
+        "{ev:?}"
+    );
+    assert_eq!(s.work.name(), "search_failed");
+    assert_eq!(s.note, Some("doc_form.match.failed"));
+    assert!(
+        s.locked(),
+        "the reviewed values can't change under the choice"
+    );
+    assert!(
+        !s.accept(w.accept("18.20", day(14), None)),
+        "Save doesn't post"
+    );
+    assert_eq!(w.transactions(), before);
+    assert_eq!(w.status(id), DraftStatus::Ready);
+    // Esc: back to the form, nothing sent.
+    assert_eq!(s.command(CommandId::new("form.revert")), Some(true));
+    assert_eq!(s.work.name(), "idle");
+    let ev = tick(&w, &mut s);
+    assert!(ev.iter().any(|e| matches!(e, DraftEvent::Cancelled)));
+    assert_eq!(w.transactions(), before);
+    // Again, failing; Try again searches and posts.
+    w.demo().drafts.fail_next_search = true;
+    assert!(s.accept(w.accept("18.20", day(14), None)));
+    assert_eq!(s.work.name(), "search_failed");
+    s.try_again();
+    let ev = tick(&w, &mut s);
+    assert!(
+        ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
+        "{ev:?}"
+    );
+    assert_eq!(w.transactions(), before + 1);
+}
+
+/// Review B2: after a failed search, Enter as new (Alt+E) is the owner's
+/// explicit choice and posts once.
+#[test]
+fn enter_as_new_after_a_failed_search_posts_once() {
+    let w = World::new();
+    let id = w.draft("fn", "44.00", day(14));
+    let mut s = w.session(id);
+    let before = w.transactions();
+    w.demo().drafts.fail_next_search = true;
+    assert!(s.accept(w.accept("44.00", day(14), None)));
+    assert_eq!(s.work.name(), "search_failed");
+    assert!(s.attach.is_none());
+    // Save & Close again (Enter on the form) doesn't choose for the owner.
+    assert!(!s.accept(w.accept("44.00", day(14), None)));
+    assert_eq!(w.transactions(), before);
+    assert_eq!(s.command(CommandId::new("form.enter_as_new")), Some(true));
+    let ev = tick(&w, &mut s);
+    assert!(
+        ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
+        "{ev:?}"
+    );
+    assert_eq!(w.transactions(), before + 1);
+    assert_eq!(w.status(id), DraftStatus::Converted);
+    assert!(!s.accept(w.accept("44.00", day(14), None)), "never twice");
+}
+
 /// T3: changed elsewhere: "Keep my values and enter" posts the reviewed
 /// body under the fresh token.
 #[test]
@@ -384,6 +552,12 @@ fn a_receipt_already_in_the_books_is_attached_not_entered_again() {
         "{ev:?}"
     );
     assert_eq!(w.transactions(), before, "nothing posted");
+    // The control channel's proof (S3): no new record, the file is on it.
+    let proof = digests(&w.ctx).attached.expect("attach proof");
+    assert_eq!(proof.records_before, proof.records_after);
+    assert_eq!(proof.files_on_record, 1);
+    assert!(proof.books_unchanged && proof.file_filed);
+    assert_eq!(digests(&w.ctx).to_json()["match"], false, "no convert ran");
     let d = demo_drafts::get(&w.demo(), w.tenant, id).expect("draft");
     assert_eq!(d.converted_transaction_id, Some(target));
     assert_eq!(s.learn.layout_outcome, None, "no learning after an attach");
@@ -460,68 +634,27 @@ fn save_and_new_finds_the_next_draft() {
     assert!(matches!(s2.dialog, Some(Dialog::Leave(_))), "dirty asks");
 }
 
+/// AC1, review S2: the posted digest reads the request body, not the
+/// form's values: a body that differs from what the form reviewed shows
+/// (here by a cent on the line; the form's own gate never lets this
+/// happen, the digest is the independent proof).
 #[test]
-fn the_canonical_text_is_the_same_from_the_form_and_the_body() {
+fn a_body_other_than_the_reviewed_one_shows_in_the_digests() {
     let w = World::new();
-    let c = cl_model::forms::card::CheckedCard {
-        card: w.account("2050"),
-        mode: cl_model::forms::card::CardMode::Charge,
-        payee: None,
-        date: day(14),
-        ref_no: None,
-        amount: money("12.50"),
-        memo: None,
-        header_tags: Vec::new(),
-        lines: vec![cl_model::forms::lines::PostingLine {
-            account: w.account("6210"),
-            amount: money("12.5"),
-            memo: None,
-            contact: None,
-            billable: false,
-            tag: None,
-        }],
-    };
-    let body = PostBody::CardCharge(CardChargeDraft {
-        pay_from: c.card,
-        date: c.date,
-        number: None,
-        payee: None,
-        memo: None,
-        lines: vec![SplitLine {
-            account: w.account("6210"),
-            amount: money("12.50"),
-            memo: None,
-            contact: None,
-            billable: false,
-            tag: None,
-        }],
-    });
-    assert_eq!(
-        Canon::of_card(DraftKind::CardCharge, &c).digest(),
-        body.canon().digest()
-    );
-    let other = PostBody::CardCharge(CardChargeDraft {
-        pay_from: c.card,
-        date: c.date,
-        number: None,
-        payee: None,
-        memo: None,
-        lines: vec![SplitLine {
-            account: w.account("6210"),
-            amount: money("12.51"),
-            memo: None,
-            contact: None,
-            billable: false,
-            tag: None,
-        }],
-    });
-    assert_ne!(
-        body.canon().digest(),
-        other.canon().digest(),
-        "a cent shows"
-    );
+    let id = w.draft("dg", "12.50", day(14));
+    let mut session = w.session(id);
+    let checked = w.checked("12.50", day(14));
+    let mut body = crate::screens::card_charge::CardChargeScreen::charge_draft(&checked);
+    body.lines[0].amount = money("12.51");
+    let mut accept = World::accept_with(&checked, body, None);
+    accept.probe.amount = money("12.51");
+    assert!(session.accept(accept));
+    let _ = tick(&w, &mut session);
+    let got = digests(&w.ctx);
+    assert!(got.form_digest.is_some() && got.posted_digest.is_some());
+    assert_ne!(got.form_digest, got.posted_digest);
+    assert_eq!(got.to_json()["match"], false);
 }
-
 /// Security review L6: keyed, stable within the run, not the plain SHA-256.
 #[test]
 fn digests_are_keyed_hex_and_stable_within_the_run() {
@@ -535,4 +668,38 @@ fn digests_are_keyed_hex_and_stable_within_the_run() {
     );
     assert_ne!(key(), &[0u8; 32]);
     assert_ne!(fallback_key(), [0u8; 32]);
+}
+
+/// UI check item 4: a failed Read document on a draft not read yet shows
+/// "Couldn't read this document"; Read document stays for another try.
+#[test]
+fn a_failed_read_shows_couldnt_read_and_can_be_tried_again() {
+    let w = World::new();
+    let id = {
+        let mut d = w.demo();
+        let a = crate::company::demo::checks::upload(
+            &mut d,
+            AttachTo::Draft(DraftKey::new()),
+            "receipt.pdf",
+            b"%PDF-1.4\n% unread\n%%EOF\n",
+        )
+        .expect("upload")
+        .id;
+        demo_drafts::create(
+            &mut d,
+            w.tenant,
+            a,
+            DraftKind::CardCharge,
+            IdempotencyKey::new(),
+        )
+        .expect("claim")
+        .id
+    };
+    let mut s = w.session(id);
+    assert_eq!(s.state_json()["stored"], "unread");
+    s.read_failed();
+    assert_eq!(s.state_json()["stored"], "failed");
+    // Only a draft not read yet changes.
+    s.read_failed();
+    assert_eq!(s.state_json()["stored"], "failed");
 }

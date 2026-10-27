@@ -880,6 +880,11 @@ impl WriteCheckScreen {
 
     /// The tab title: "Write Check · #4418", "· To print" or plain.
     fn title_text(&self) -> String {
+        // A document from Review Documents isn't a check in the books yet:
+        // its tab never shares a saved check's title (UI check item 11).
+        if self.draft.on() {
+            return t("check.title.document");
+        }
         let f = self.header.current();
         if f.print_later {
             return t("check.title.to_print");

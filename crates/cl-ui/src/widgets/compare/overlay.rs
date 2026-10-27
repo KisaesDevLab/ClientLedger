@@ -17,7 +17,10 @@ use eframe::egui::{
     Ui, Vec2, WidgetInfo,
 };
 
-use super::{CompareEvent, CompareView, HighlightState, PageBox, TargetKey, TargetLevel, key_name};
+use super::{
+    CompareEvent, CompareNote, CompareView, HighlightState, PageBox, TargetKey, TargetLevel,
+    key_name,
+};
 use crate::i18n::t_with;
 use crate::theme::Tokens;
 use crate::widgets::doc_worker::Rotation;
@@ -175,6 +178,10 @@ pub struct Overlay {
     events: Vec<CompareEvent>,
     scroll_to: Option<PageBox>,
     shown_before: bool,
+    /// Where the keyboard's word was when a refusal note first showed
+    /// (UI check item 6: moving it hides the note).
+    note_seen: bool,
+    note_cursor: Option<(u16, u32)>,
 }
 
 impl std::fmt::Debug for Overlay {
@@ -231,6 +238,27 @@ impl Overlay {
         self.view.as_ref()
     }
 
+    /// The note to show under the toolbar: the view's, except a refusal
+    /// ("That isn't an amount") once the keyboard's word moved on from
+    /// where it was when the refusal came (UI check item 6). A new pick
+    /// shows the next answer again.
+    pub fn shown_note(&mut self) -> Option<CompareNote> {
+        let note = self.view.as_ref().and_then(|v| v.note);
+        if !matches!(note, Some(CompareNote::Refused(_))) {
+            self.note_seen = false;
+            return note;
+        }
+        if !self.note_seen {
+            self.note_seen = true;
+            self.note_cursor = self.cursor;
+        }
+        if self.note_cursor == self.cursor {
+            note
+        } else {
+            None
+        }
+    }
+
     /// True when the tools are on this viewer.
     #[must_use]
     pub fn active(&self) -> bool {
@@ -257,6 +285,14 @@ impl Overlay {
 
     /// The events since the last call.
     pub fn take_events(&mut self) -> Vec<CompareEvent> {
+        // A new pick: its answer shows wherever the keyboard's word is.
+        if self
+            .events
+            .iter()
+            .any(|e| matches!(e, CompareEvent::PageClick { .. } | CompareEvent::PageBox(_)))
+        {
+            self.note_seen = false;
+        }
         std::mem::take(&mut self.events)
     }
 
@@ -509,15 +545,18 @@ impl Overlay {
                             Stroke::new(width, tokens.warn),
                             StrokeKind::Outside,
                         );
-                        // S15: not by colour alone.
-                        let c = Pos2::new(r.max.x, r.min.y);
-                        painter.circle_filled(c, 7.0, tokens.warn);
+                        // S15: not by colour alone. The mark sits just left
+                        // of the box, level with it: on its top-right
+                        // corner it covered the next box on the line (UI
+                        // check item 9). Paired fill and text colours.
+                        let c = Pos2::new(r.min.x - 8.0, r.center().y);
+                        painter.circle_filled(c, 6.0, tokens.warn_badge);
                         painter.text(
                             c,
                             egui::Align2::CENTER_CENTER,
                             "?",
-                            egui::FontId::proportional(11.0),
-                            Color32::WHITE,
+                            egui::FontId::proportional(10.0),
+                            tokens.on_warn,
                         );
                     }
                     TargetLevel::NotFound => {

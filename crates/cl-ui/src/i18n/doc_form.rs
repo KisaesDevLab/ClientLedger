@@ -76,4 +76,19 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("doc_form.enter_as", "Enter this as:"),
     ("doc_form.enter_as.tip", "Opens this document in that form instead. Values you accepted or changed go with it; the rest still need Accept."),
     ("doc_form.assist.waiting", "Available once the page has been read."),
+    // A04 fix pass: a failed register search never posts (review B2); card
+    // credit in draft mode (L4).
+    ("doc_form.match.failed", "We couldn't look for this purchase in your books, so nothing was entered. Choose Try again. If you're sure it isn't entered yet, choose Enter as new."),
+    ("doc_form.match.enter_new", "Enter as new"),
+    ("doc_form.match.enter_new.tip", "Enter this document as a new expense without looking for it in your books first."),
+    ("doc_form.match.back", "Back to the form"),
+    // A04 fix pass: UI check item 10 (a sure value's caption).
+    ("bill.read.mark.sure", "Read from the document"),
+    // A04 fix pass: UI check item 11 (a draft check's tab).
+    ("check.title.document", "Write Check \u{b7} from Review Documents"),
+    // A04 fix pass: UI check item 3 (the reading banner's source).
+    ("doc_form.banner.layout_name", "{vendor}'s saved layout"),
+    // A04 fix pass: UI check item 12.
+    ("doc_form.banner.unaccepted.one", "1 value was read from the document. Check it, then Accept (Alt+A)."),
+    ("doc_form.credit_unavailable", "A document from Review Documents is entered as a charge here. To enter a refund or credit, discard it and enter the credit by hand."),
 ];

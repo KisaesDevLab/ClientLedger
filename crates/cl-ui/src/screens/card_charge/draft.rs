@@ -492,8 +492,11 @@ impl CardChargeScreen {
         }
     }
 
-    /// Accept: the checked charge through the draft. The closing-date
-    /// password is asked first for a closed-period date (NN8).
+    /// Accept: the checked charge through the draft. The register search
+    /// comes first; the closing-date password is asked only when the
+    /// convert itself is refused for the closed period (the engine's 423,
+    /// review B1): attaching to a record already in the books posts
+    /// nothing and needs no password (Q-A04f).
     pub(crate) fn accept_draft(
         &mut self,
         c: &CheckedCard,
@@ -501,18 +504,9 @@ impl CardChargeScreen {
         password: Option<Secret>,
     ) -> bool {
         if c.mode != CardMode::Charge {
-            return false;
-        }
-        let closing = self.books.closing;
-        if password.is_none() && cl_model::closing::needs_password(None, c.date, closing) {
-            let supported = super::kit::closing_supported(&self.link);
-            if supported {
-                self.flow
-                    .closing_prompt
-                    .ask(super::Pending::Save(intent), supported, closing);
-            } else {
-                self.flow.closing_prompt.unavailable(supported, closing);
-            }
+            // Credit is hidden in draft mode (convert refuses it, Q-A04g);
+            // never a silent no-op (review L4).
+            self.flow.notice = Some("doc_form.credit_unavailable");
             return false;
         }
         let expense = self.draft.expense;
@@ -604,15 +598,32 @@ impl CardChargeScreen {
         s.accept(accept)
     }
 
-    /// "Remember card ending 1234": a card charge whose account has no
-    /// digits yet (Q-A04j).
+    /// "Remember card ending 1234": a card charge on a credit card account
+    /// with no digits yet (Q-A04j), and no other account already has the
+    /// printed digits (review L3: two cards with one ending would make the
+    /// card match ambiguous).
     fn card_offer(&self) -> bool {
+        let printed = self
+            .draft
+            .session
+            .as_ref()
+            .and_then(DraftSession::printed_card);
+        let taken = printed.is_some_and(|p| {
+            self.books.accounts.iter().any(|a| {
+                Some(a.id) != self.card()
+                    && a.card_last4
+                        .as_ref()
+                        .is_some_and(|d| d.as_str() == p.as_str())
+            })
+        });
         !self.draft.expense
+            && !taken
             && self.card().is_some_and(|c| {
-                self.books
-                    .accounts
-                    .iter()
-                    .any(|a| a.id == c && a.card_last4.is_none())
+                self.books.accounts.iter().any(|a| {
+                    a.id == c
+                        && a.card_last4.is_none()
+                        && a.fields.detail_type.as_deref() == Some(cl_api::CREDIT_CARD_DETAIL_TYPE)
+                })
             })
     }
 
@@ -705,7 +716,11 @@ impl CardChargeScreen {
                 let _ = s.ask_ai(vendors);
             }
             BannerClick::EnterAs(to) => self.enter_as(ui.ctx(), to),
-            BannerClick::None | BannerClick::Discard | BannerClick::TryAgain => {}
+            BannerClick::None
+            | BannerClick::Discard
+            | BannerClick::TryAgain
+            | BannerClick::EnterAsNew
+            | BannerClick::SearchBack => {}
         }
     }
 

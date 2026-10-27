@@ -1308,6 +1308,8 @@ impl Shell {
                 (w.screen.document(), Some(w.kind), w.screen.compare())
             });
         let accent = self.accent(tokens);
+        // What the followed window shows: its events are made against it.
+        let stamp = outbox::Stamp::of(compare.as_ref());
         let pressed = self.doc_viewer.frame(
             ctx,
             crate::windows::doc_viewer::Follow {
@@ -1320,7 +1322,7 @@ impl Shell {
         );
         let events = self.doc_viewer.take_compare_events();
         if !events.is_empty() {
-            self.viewer_outbox.push(followed, events);
+            self.viewer_outbox.push(followed, stamp.as_ref(), events);
             ctx.request_repaint();
         }
         pressed

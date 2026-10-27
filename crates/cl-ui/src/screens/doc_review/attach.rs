@@ -25,8 +25,8 @@
 //! labels and flags, never an amount, a date or a name.
 
 use cl_api::{
-    Capabilities, DuplicateMatch, MatchSource, PageRequest, RequestGroup, TransactionFilter,
-    TransactionSummary, TxnStatus,
+    ApiError, Capabilities, DuplicateMatch, LocalValidation, MatchSource, PageRequest,
+    RequestGroup, TransactionFilter, TransactionSummary, TxnStatus,
 };
 use cl_core::ids::{AccountId, ContactId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle};
@@ -118,15 +118,27 @@ fn mark_same(rows: &mut [RegisterRow], same: &[TransactionId]) {
     }
 }
 
-/// The register search for `p` (see the module comment); `None` when the
-/// engine can't attach (no `document-drafts-attach-v1`: then there is no
-/// exact filter either, and Accept posts as before).
+/// How the register search started (review B2: only an engine without the
+/// capability posts without one; a search that couldn't run never posts).
+pub(crate) enum Search {
+    /// The engine can't attach (no `document-drafts-attach-v1`: no exact
+    /// filter either); Accept posts as before, the engine's own duplicate
+    /// check still runs.
+    Unsupported,
+    /// The search runs; its answer comes in the task.
+    Started(Task<Vec<RegisterRow>>),
+    /// The search couldn't be sent (no session, the request queue refused
+    /// it, the demo failed): the owner chooses Try again or Enter as new.
+    Failed,
+}
+
+/// The register search for `p` (see the module comment and [`Search`]).
 pub(crate) fn search(
     link: &CompanyLink,
     group: Option<&RequestGroup>,
     tenant: Option<TenantId>,
     p: &MatchProbe,
-) -> Option<Task<Vec<RegisterRow>>> {
+) -> Search {
     let (start, end) = register_match::search_window(p.date);
     if let Some(mut demo) = link.demo_state() {
         let _ = tenant;
@@ -137,35 +149,42 @@ pub(crate) fn search(
             account: None,
         };
         let all = crate::company::demo::drafts::search_amount(&mut demo, &q);
-        let same = p.account.map(|a| {
-            crate::company::demo::drafts::search_amount(
+        let same = match (&all, p.account) {
+            (Ok(_), Some(a)) => Some(crate::company::demo::drafts::search_amount(
                 &mut demo,
                 &crate::company::demo::drafts::AmountSearch {
                     account: Some(a),
                     ..q
                 },
-            )
-        });
+            )),
+            _ => None,
+        };
         drop(demo);
-        let out = all.map(|rows| {
-            let same: Vec<TransactionId> = match same {
-                Some(Ok(s)) => s.iter().map(|r| r.id).collect(),
-                _ => Vec::new(),
-            };
-            let mut rows: Vec<RegisterRow> = rows.iter().filter_map(|r| row_of(r, false)).collect();
-            mark_same(&mut rows, &same);
-            rows
-        });
-        // Without drafts the demo has no exact filter: nothing found.
-        return Some(Task::ready(out.unwrap_or_default()));
+        return match (all, same) {
+            // Without drafts the demo has no exact filter.
+            (Err(ApiError::Local(LocalValidation::Unsupported)), _) => Search::Unsupported,
+            (Err(_), _) | (Ok(_), Some(Err(_))) => Search::Failed,
+            (Ok(rows), same) => {
+                let same: Vec<TransactionId> = same
+                    .and_then(Result::ok)
+                    .map(|s| s.iter().map(|r| r.id).collect())
+                    .unwrap_or_default();
+                let mut rows: Vec<RegisterRow> =
+                    rows.iter().filter_map(|r| row_of(r, false)).collect();
+                mark_same(&mut rows, &same);
+                Search::Started(Task::ready(rows))
+            }
+        };
     }
     let caps = link.capabilities();
     if !caps.has(Capabilities::DOCUMENT_DRAFTS_ATTACH) {
-        return None;
+        return Search::Unsupported;
     }
-    let (session, group) = (link.session()?, group?);
+    let (Some(session), Some(group)) = (link.session(), group) else {
+        return Search::Failed;
+    };
     let (amount, account) = (p.amount, p.account);
-    group
+    let started = group
         .read(&session, move |s| async move {
             let filter = TransactionFilter {
                 status: Some(TxnStatus::Posted),
@@ -206,7 +225,11 @@ pub(crate) fn search(
             Ok(rows)
         })
         .ok()
-        .map(Task::Pending)
+        .map(Task::Pending);
+    match started {
+        Some(task) => Search::Started(task),
+        None => Search::Failed,
+    }
 }
 
 /// One row the dialog shows (owner data: drawn, never logged).
@@ -278,6 +301,25 @@ impl std::fmt::Debug for AttachDialog {
     }
 }
 
+/// The non-empty parts joined with " · ".
+fn joined(parts: &[String]) -> String {
+    parts
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ")
+}
+
+/// The text with its first letter upper case (a row starts a sentence).
+fn capitalized(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 /// The words for a row kind.
 fn kind_key(kind: RowKind) -> &'static str {
     match kind {
@@ -336,8 +378,12 @@ impl AttachDialog {
 
     /// The engine's duplicate check answered 409 `POSSIBLE_DUPLICATE`
     /// (`matches` block; other live drafts are not records and are not
-    /// listed). A bill for a bill document may take the file; for a receipt
-    /// a bill is information only; expenses follow the register rules.
+    /// listed). A row may take the file only when it is the same purchase
+    /// by the register rules (review S1): its total exactly the document's,
+    /// dated inside the search window, and of an allowed kind (a bill for a
+    /// bill document; an expense for a receipt). The engine also matches by
+    /// reference alone, ignoring total and date: such rows are shown for
+    /// information only.
     #[must_use]
     pub(crate) fn from_duplicates(
         p: &MatchProbe,
@@ -346,6 +392,7 @@ impl AttachDialog {
         attach_ok: bool,
     ) -> AttachDialog {
         let probe = p.probe();
+        let (start, end) = register_match::search_window(p.date);
         let shown = matches
             .iter()
             .filter_map(|m| {
@@ -353,12 +400,14 @@ impl AttachDialog {
                     return None;
                 };
                 let kind = RowKind::from_txn_type(m.txn_type.as_deref().unwrap_or(""));
-                // The payee gate and the kind allowlist hold here too.
-                let attachable = if kind == RowKind::Bill {
+                let kind_ok = if kind == RowKind::Bill {
                     bill_doc
                 } else {
                     kind.matchable(probe.side)
                 };
+                let same_total = m.total == Some(p.amount);
+                let in_window = m.date.is_some_and(|d| d >= start && d <= end);
+                let attachable = kind_ok && same_total && in_window;
                 Some(ShownRow {
                     id,
                     date: m.date,
@@ -505,14 +554,18 @@ impl AttachDialog {
         ui.add_space(6.0);
         // The document's own values.
         let d = &self.doc;
+        // Only the values there are, no dangling separators (UI item 7).
         let doc_line = t_with(
             "doc_review.attach.document",
-            &[
-                ("date", &Self::date(d.date)),
-                ("payee", d.payee.as_deref().unwrap_or("")),
-                ("amount", &Self::money(d.amount, style)),
-                ("account", d.account.as_deref().unwrap_or("")),
-            ],
+            &[(
+                "details",
+                &joined(&[
+                    Self::date(d.date),
+                    d.payee.clone().unwrap_or_default(),
+                    Self::money(d.amount, style),
+                    d.account.clone().unwrap_or_default(),
+                ]),
+            )],
         );
         ui.add(egui::Label::new(RichText::new(doc_line).strong()).wrap());
         ui.add_space(6.0);
@@ -524,22 +577,21 @@ impl AttachDialog {
                 Some(MatchLabel::Possible) => t("doc_review.attach.label.possible"),
                 None => String::new(),
             };
-            let status = if r.attachable {
-                t("doc_review.attach.status.posted")
-            } else {
-                t("doc_review.attach.status.info_only")
+            let status = match (r.attachable, r.kind_key) {
+                (true, _) => t("doc_review.attach.status.posted"),
+                (false, "doc_review.attach.kind.bill") => t("doc_review.attach.status.info_only"),
+                (false, _) => t("doc_review.attach.status.info_other"),
             };
-            let text = t_with(
-                "doc_review.attach.row",
-                &[
-                    ("kind", &t(r.kind_key)),
-                    ("date", &Self::date(r.date)),
-                    ("payee", r.payee.as_deref().unwrap_or("")),
-                    ("amount", &Self::money(r.amount, style)),
-                    ("status", &status),
-                    ("label", &label),
-                ],
+            let head = t_with(
+                "doc_review.attach.row.head",
+                &[("kind", &t(r.kind_key)), ("date", &Self::date(r.date))],
             );
+            let text = capitalized(&joined(&[
+                head,
+                r.payee.clone().unwrap_or_default(),
+                Self::money(r.amount, style),
+                format!("{status} {label}").trim().to_string(),
+            ]));
             let resp = ui.selectable_label(self.selected == Some(i), text);
             if focus && i == 0 {
                 resp.request_focus();
@@ -582,8 +634,9 @@ impl AttachDialog {
             if r.clicked() && !self.confirming {
                 answer = Some(DialogAnswer::EnterAsNew(self.ids()));
             }
-            // The default button: Enter on it cancels, never attaches.
-            let cancel = ui.button(t("doc_review.attach.cancel"));
+            // The default button (drawn as one, UI item 8): Enter on it
+            // cancels, never attaches.
+            let cancel = crate::widgets::primary_button(ui, &t("doc_review.attach.cancel"));
             if cancel.clicked() && !self.confirming {
                 answer = Some(DialogAnswer::Cancel);
             }
@@ -617,7 +670,7 @@ impl AttachDialog {
             if ui.button(t("doc_review.attach.confirm.attach")).clicked() {
                 answer = self.confirm();
             }
-            let cancel = ui.button(t("doc_review.attach.cancel"));
+            let cancel = crate::widgets::primary_button(ui, &t("doc_review.attach.cancel"));
             if std::mem::take(&mut self.focus_confirm_cancel) {
                 cancel.request_focus();
             }
@@ -773,6 +826,69 @@ mod tests {
         let bill = AttachDialog::from_duplicates(&probe(None), &[m], true, true);
         assert!(bill.rows[0].attachable);
         assert!(bill.from_engine);
+    }
+
+    /// Review S1: an engine match at another total, outside the date
+    /// window, without a total or date, or of a kind not allowed is shown
+    /// for information only; Attach can't pick it.
+    #[test]
+    fn engine_matches_attach_only_at_the_exact_total_inside_the_window() {
+        let m = |n: u8, kind: &str, d: Option<u32>, total: Option<&str>| DuplicateMatch {
+            source: MatchSource::Transaction(id(n)),
+            reason: cl_api::MatchReason::Reference,
+            txn_type: Some(kind.into()),
+            kind: None,
+            date: d.map(day),
+            total: total.map(money),
+            reference: None,
+        };
+        let matches = [
+            m(1, "expense", Some(14), Some("25.00")),
+            m(2, "expense", Some(14), Some("25.01")),
+            m(3, "expense", Some(22), Some("25.00")),
+            m(4, "expense", Some(6), Some("25.00")),
+            m(5, "expense", None, Some("25.00")),
+            m(6, "expense", Some(14), None),
+            m(7, "deposit", Some(14), Some("25.00")),
+            m(8, "journal_entry", Some(14), Some("25.00")),
+            m(9, "expense", Some(21), Some("25")),
+        ];
+        let mut d = AttachDialog::from_duplicates(&probe(None), &matches, false, true);
+        let ok: Vec<TransactionId> = d
+            .rows
+            .iter()
+            .filter(|r| r.attachable)
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(ok, vec![id(1), id(9)], "exact total, ±7 days, an expense");
+        assert_eq!(d.rows.len(), 9, "the rest are still shown");
+        d.select(1);
+        assert!(!d.ask_attach(), "a cent off can't be attached");
+        assert_eq!(d.confirm(), None);
+        // A bill document: the bill row follows the same rules.
+        let bills = [
+            m(10, "bill", Some(14), Some("25.00")),
+            m(11, "bill", Some(14), Some("2500.00")),
+        ];
+        let b = AttachDialog::from_duplicates(&probe(None), &bills, true, true);
+        assert!(b.rows[0].attachable);
+        assert!(!b.rows[1].attachable, "same reference, another total");
+    }
+
+    /// UI check item 7: no dangling separators; a row starts upper case.
+    #[test]
+    fn rows_and_the_document_line_read_cleanly() {
+        assert_eq!(
+            joined(&[
+                "3/14/2026".into(),
+                String::new(),
+                "25.00".into(),
+                " ".into()
+            ]),
+            "3/14/2026 \u{b7} 25.00"
+        );
+        assert_eq!(capitalized("expense of 3/14"), "Expense of 3/14");
+        assert_eq!(capitalized(""), "");
     }
 
     #[test]

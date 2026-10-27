@@ -106,6 +106,17 @@ pub enum RowKind {
 
 impl RowKind {
     /// The kind of an engine `txnType` string.
+    ///
+    /// The engine's `txnType` has no check or card types (review L5):
+    /// checks, card charges and cash expenses all arrive as `expense`
+    /// (a check is told apart by its `checkNumber`, a card charge by the
+    /// account it is paid from), so a purchase matches through
+    /// [`RowKind::Expense`]. `check`, `credit_card_charge` and
+    /// `credit_card_credit` are kept for an engine that names them; today
+    /// they never arrive. A card credit posts as a `deposit` on the card
+    /// account, which is never a candidate: the [`DocSide::Credit`] side is
+    /// unused in A04 (Credit is hidden in draft mode) and must match card
+    /// credits by account before it is used (A06).
     #[must_use]
     pub fn from_txn_type(txn_type: &str) -> RowKind {
         match txn_type {
@@ -380,6 +391,42 @@ mod tests {
             status: RowStatus::Posted,
             same_account: false,
         }
+    }
+
+    /// Review L5: the engine reports checks and card charges as `expense`
+    /// (no `check` or card `txnType`); those match a purchase, and a card
+    /// credit (a `deposit` on the card) is never a candidate.
+    #[test]
+    fn the_engines_own_types_map_checks_and_card_charges_to_expense() {
+        let engine_types = [
+            "invoice",
+            "customer_payment",
+            "cash_sale",
+            "expense",
+            "deposit",
+            "transfer",
+            "journal_entry",
+            "credit_memo",
+            "customer_refund",
+            "bill",
+            "vendor_credit",
+            "bill_payment",
+            "daily_sales",
+            "aje",
+        ];
+        let purchase: Vec<&str> = engine_types
+            .into_iter()
+            .filter(|t| RowKind::from_txn_type(t).matchable(DocSide::Purchase))
+            .collect();
+        assert_eq!(purchase, vec!["expense"]);
+        let credit: Vec<&str> = engine_types
+            .into_iter()
+            .filter(|t| RowKind::from_txn_type(t).matchable(DocSide::Credit))
+            .collect();
+        assert!(credit.is_empty(), "the Credit side is unused in A04");
+        let mut r = row(1, "25.00", 14);
+        r.kind = RowKind::from_txn_type("expense");
+        assert_eq!(check(&probe(), &r), Ok(()), "a check arrives as expense");
     }
 
     #[test]

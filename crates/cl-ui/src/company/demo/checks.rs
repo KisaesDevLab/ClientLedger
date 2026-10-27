@@ -965,6 +965,26 @@ pub fn find_attachment(state: &DemoState, id: cl_api::AttachmentId) -> Option<cl
         .and_then(attachment)
 }
 
+/// How many files are filed on record `id` (not on a draft key): the
+/// control channel's proof that an attach filed the document there.
+#[must_use]
+pub fn files_on(state: &DemoState, id: TransactionId) -> usize {
+    let id = id.to_string();
+    state
+        .checks
+        .files
+        .iter()
+        .filter(|f| f.kind != "draft" && f.to == id)
+        .count()
+}
+
+/// Files deleted so far (tests: an orphan upload was cleaned up).
+#[cfg(test)]
+#[must_use]
+pub fn deleted_count(state: &DemoState) -> usize {
+    state.checks.deleted
+}
+
 /// `DELETE /attachments/{id}` (A01: the engine's copy of a discarded
 /// intake file). False when there is no such file.
 pub fn delete_attachment(state: &mut DemoState, id: cl_api::AttachmentId) -> bool {
