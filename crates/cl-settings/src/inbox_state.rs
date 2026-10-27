@@ -29,6 +29,16 @@
 //! id by the migration), a `linked` entry is `linked`, any other is
 //! `arrived` with its last upload.
 //!
+//! Version 3 (A04 D1) adds each entry's engine document draft
+//! ([`DraftLink`], `docDraft`, absent when there is none): the claim is
+//! saved as `claimSent` before it is sent, then the entry `own`s the draft
+//! that reads its upload, or `follows` the draft another computer made of
+//! the same bytes (the entry is then `duplicate`; its own extra copy in the
+//! engine is deleted, the entry and the seen hash are kept). Version 2
+//! files are read with no drafts (their arrivals are claimed again, and a
+//! claim already made is adopted). An older app reading a version 3 file
+//! ignores `docDraft`; it never adds a status, so it reads every entry.
+//!
 //! Nothing here names a file: paths are kept only as a SHA-256 hash.
 //!
 //! Caps: [`MAX_ENTRIES`] entries and [`MAX_SEEN`] seen hashes per company,
@@ -45,7 +55,7 @@ use sha2::{Digest, Sha256};
 use crate::store::{MAX_BYTES, read_capped, write_atomic};
 
 /// The format written.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// Entries kept per company (finished ones go first).
 pub const MAX_ENTRIES: usize = 2000;
@@ -151,9 +161,11 @@ impl EntryStatus {
     /// always allowed, so a retried step is harmless):
     /// - uploading → arrived (the upload is there), or back to duplicate
     ///   (Copy anyway that was never sent);
-    /// - arrived → linked, discarding, kept;
+    /// - arrived → linked, discarding, kept, or duplicate (another
+    ///   computer's draft holds the same bytes, A04 D1);
     /// - duplicate → uploading (Copy anyway), discarding, kept (hidden in a
-    ///   folder that keeps its originals);
+    ///   folder that keeps its originals), linked (the draft it follows
+    ///   was entered);
     /// - discarding → linked or kept: the upload turned out to be on a
     ///   saved record, so it is not deleted (A01 review B1);
     /// - linked and kept are only left by removing the entry.
@@ -164,8 +176,8 @@ impl EntryStatus {
             || matches!(
                 (self, next),
                 (Uploading, Arrived | Duplicate)
-                    | (Arrived, Linked | Discarding | Kept)
-                    | (Duplicate, Uploading | Discarding | Kept)
+                    | (Arrived, Linked | Discarding | Kept | Duplicate)
+                    | (Duplicate, Uploading | Discarding | Kept | Linked)
                     | (Discarding, Linked | Kept)
             )
     }
@@ -187,6 +199,63 @@ impl EntryStatus {
 )]
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+/// An entry's engine document draft (A04 D1, version 3). Ids are the
+/// engine's draft ids (UUID text). Claim keys are never stored: keys can't
+/// outlive the app, so a `ClaimSent` entry is claimed again after a
+/// restart with a fresh key, and the draft that claim made is adopted.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DraftLink {
+    /// No draft (the engine has no document drafts, or not claimed yet).
+    #[default]
+    None,
+    /// The claim was saved and sent; its answer isn't known yet. Treated
+    /// as claimed: the entry never takes the plain P17 paths.
+    ClaimSent,
+    /// This computer's claim: the draft reads this entry's upload.
+    Own(String),
+    /// Another computer's draft holds the same bytes; this entry (a
+    /// `duplicate`) follows it: entered there → `linked`, discarded there
+    /// → `discarding`. Its own extra copy in the engine is deleted.
+    Follows(String),
+}
+
+impl DraftLink {
+    /// True for [`DraftLink::None`].
+    #[must_use]
+    pub fn is_none(&self) -> bool {
+        *self == DraftLink::None
+    }
+
+    /// True for every link but [`DraftLink::None`]: the entry is claimed
+    /// (or its claim's answer is not known), so it never takes the plain
+    /// P17 save or link paths (M2 b).
+    #[must_use]
+    pub fn is_claimed(&self) -> bool {
+        !self.is_none()
+    }
+
+    /// The draft id of [`DraftLink::Own`] or [`DraftLink::Follows`].
+    #[must_use]
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            DraftLink::Own(id) | DraftLink::Follows(id) => Some(id),
+            DraftLink::None | DraftLink::ClaimSent => None,
+        }
+    }
+
+    /// A short name for the control channel.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DraftLink::None => "none",
+            DraftLink::ClaimSent => "claim_sent",
+            DraftLink::Own(_) => "own",
+            DraftLink::Follows(_) => "follows",
+        }
+    }
 }
 
 /// One intake file on its way into the company.
@@ -218,6 +287,9 @@ pub struct InboxEntry {
     /// The idempotency key of its upload (UUID text), reused on a retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upload_key: Option<String>,
+    /// Its engine document draft (version 3; see [`DraftLink`]).
+    #[serde(default, skip_serializing_if = "DraftLink::is_none")]
+    pub doc_draft: DraftLink,
 }
 
 impl InboxEntry {
@@ -230,6 +302,7 @@ impl InboxEntry {
             status,
             draft: None,
             upload_key: None,
+            doc_draft: DraftLink::None,
         }
     }
 
@@ -237,6 +310,16 @@ impl InboxEntry {
     #[must_use]
     pub fn attachment(&self) -> Option<&str> {
         self.attachments.last().map(String::as_str)
+    }
+
+    /// True while it still owes a side effect (an upload, a move, a delete,
+    /// a claim whose answer isn't known, or deleting its extra copy while
+    /// it follows another computer's draft): never dropped for room.
+    #[must_use]
+    pub fn owes(&self) -> bool {
+        self.status.pending()
+            || self.doc_draft == DraftLink::ClaimSent
+            || matches!(self.doc_draft, DraftLink::Follows(_)) && !self.attachments.is_empty()
     }
 
     fn set(&mut self, status: EntryStatus) {
@@ -261,7 +344,7 @@ pub struct SeenFile {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct InboxState {
-    /// Format version (1: P17; 2: A01).
+    /// Format version (1: P17; 2: A01; 3: A04 drafts).
     pub version: u32,
     /// Entries by [`company_key`].
     pub companies: BTreeMap<String, Vec<InboxEntry>>,
@@ -309,6 +392,35 @@ impl InboxState {
                 e.attachments.drain(..over);
                 e.draft = e.draft.take().filter(|d| uuid(d));
                 e.upload_key = e.upload_key.take().filter(|k| uuid(k));
+                // A draft id that isn't a UUID: an arrival is claimed again
+                // (the engine names its draft, which is adopted); anything
+                // else forgets it.
+                if e.doc_draft.id().is_some_and(|d| !uuid(d)) {
+                    e.doc_draft = if e.status == EntryStatus::Arrived {
+                        DraftLink::ClaimSent
+                    } else {
+                        DraftLink::None
+                    };
+                }
+                // Only an arrival waits for a claim's answer, and only a
+                // duplicate follows another computer's draft.
+                match (&e.doc_draft, e.status) {
+                    (DraftLink::ClaimSent, s) if s != EntryStatus::Arrived => {
+                        e.doc_draft = DraftLink::None;
+                    }
+                    (DraftLink::Follows(_), s)
+                        if !matches!(
+                            s,
+                            EntryStatus::Duplicate
+                                | EntryStatus::Linked
+                                | EntryStatus::Discarding
+                                | EntryStatus::Kept
+                        ) =>
+                    {
+                        e.doc_draft = DraftLink::None;
+                    }
+                    _ => {}
+                }
                 // Waiting for the owner means having an upload to show.
                 !(e.status == EntryStatus::Arrived && e.attachments.is_empty())
             });
@@ -419,7 +531,8 @@ impl InboxState {
         upload_key: &str,
     ) -> bool {
         if let Some(e) = self.entry_mut(company, file) {
-            if !e.status.can_become(EntryStatus::Uploading) {
+            // A copy of another computer's draft never goes up again.
+            if !e.status.can_become(EntryStatus::Uploading) || e.doc_draft.is_claimed() {
                 return false;
             }
             e.set(EntryStatus::Uploading);
@@ -491,6 +604,105 @@ impl InboxState {
             }
             _ => false,
         }
+    }
+
+    // ---- A04 D1: document drafts --------------------------------------
+
+    /// Saves, before the claim is sent, that `file`'s upload is being
+    /// claimed as a document draft. Only an arrival with no draft (or one
+    /// whose earlier claim is unanswered) is claimed; false otherwise.
+    pub fn begin_claim(&mut self, company: &str, file: &FileIdentity) -> bool {
+        match self.entry_mut(company, file) {
+            Some(e)
+                if e.status == EntryStatus::Arrived
+                    && matches!(e.doc_draft, DraftLink::None | DraftLink::ClaimSent)
+                    && !e.attachments.is_empty() =>
+            {
+                e.doc_draft = DraftLink::ClaimSent;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The claim made draft `draft` of `file`'s upload (or the engine named
+    /// the draft an earlier claim of this entry's own upload made): the
+    /// entry owns it. False when it isn't an arrival waiting for that.
+    pub fn claimed(&mut self, company: &str, file: &FileIdentity, draft: &str) -> bool {
+        match self.entry_mut(company, file) {
+            Some(e)
+                if e.status == EntryStatus::Arrived
+                    && match &e.doc_draft {
+                        DraftLink::None | DraftLink::ClaimSent => true,
+                        DraftLink::Own(id) => id == draft,
+                        DraftLink::Follows(_) => false,
+                    } =>
+            {
+                e.doc_draft = DraftLink::Own(draft.to_string());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Another computer's live draft `draft` holds the same bytes: the
+    /// arrival becomes a `duplicate` that follows it (its own copy in the
+    /// engine is deleted next; the entry and the seen hash stay). False
+    /// when it isn't an arrival waiting for its claim.
+    pub fn claimed_elsewhere(&mut self, company: &str, file: &FileIdentity, draft: &str) -> bool {
+        match self.entry_mut(company, file) {
+            Some(e)
+                if e.status == EntryStatus::Arrived
+                    && matches!(e.doc_draft, DraftLink::None | DraftLink::ClaimSent) =>
+            {
+                e.set(EntryStatus::Duplicate);
+                e.doc_draft = DraftLink::Follows(draft.to_string());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The engine no longer has the entry's draft (a restore, or drafts
+    /// reset): the link goes. An arrival is then claimed again; a
+    /// duplicate stays a plain duplicate.
+    pub fn unclaim(&mut self, company: &str, file: &FileIdentity) {
+        if let Some(e) = self.entry_mut(company, file) {
+            e.doc_draft = DraftLink::None;
+        }
+    }
+
+    /// The extra copy of an entry that follows another computer's draft
+    /// was deleted: its uploads are forgotten, the entry and the seen hash
+    /// stay. False (nothing changed) for any other entry.
+    pub fn copy_deleted(&mut self, company: &str, file: &FileIdentity) -> bool {
+        match self.entry_mut(company, file) {
+            Some(e) if matches!(e.doc_draft, DraftLink::Follows(_)) => {
+                e.attachments.clear();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// An arrival's upload now sits alone under draft key `draft` (UUID
+    /// text): a P17 upload re-keyed before its claim or its form.
+    pub fn set_draft_key(&mut self, company: &str, file: &FileIdentity, draft: &str) -> bool {
+        match self.entry_mut(company, file) {
+            Some(e) if e.status == EntryStatus::Arrived => {
+                e.draft = Some(draft.to_string());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The entry whose uploads include `attachment`.
+    #[must_use]
+    pub fn by_attachment(&self, company: &str, attachment: &str) -> Option<&InboxEntry> {
+        self.entries(company)
+            .iter()
+            .find(|e| e.attachments.iter().any(|a| a == attachment))
     }
 
     /// Forgets `file` (it moved, or it is gone).
@@ -584,7 +796,7 @@ impl InboxState {
             let Some(list) = self
                 .companies
                 .values_mut()
-                .filter(|l| l.iter().any(|e| !e.status.pending()))
+                .filter(|l| l.iter().any(|e| !e.owes()))
                 .max_by_key(|l| l.len())
             else {
                 return;
@@ -592,7 +804,7 @@ impl InboxState {
             let n = list.len().div_ceil(10);
             let mut dropped = 0;
             list.retain(|e| {
-                if dropped < n && !e.status.pending() {
+                if dropped < n && !e.owes() {
                     dropped += 1;
                     false
                 } else {
@@ -611,7 +823,7 @@ impl InboxState {
 /// files the folders list.
 fn cap_entries(list: &mut Vec<InboxEntry>) {
     while list.len() > MAX_ENTRIES {
-        let Some(at) = list.iter().position(|e| !e.status.pending()) else {
+        let Some(at) = list.iter().position(|e| !e.owes()) else {
             return;
         };
         list.remove(at);
@@ -660,7 +872,7 @@ impl InboxStateStore {
         Ok(text.map(|t| InboxState::parse(&t)).unwrap_or_default())
     }
 
-    /// Saves the state atomically as version 2, within the size cap.
+    /// Saves the state atomically as the current version, within the size cap.
     ///
     /// # Errors
     /// When the file cannot be written.
@@ -796,7 +1008,7 @@ mod tests {
         let text = std::fs::read_to_string(store.path()).expect("read");
         assert!(!text.contains("Secret"), "{text}");
         assert!(!text.contains("inbox"), "{text}");
-        assert!(text.contains("\"version\": 2"), "{text}");
+        assert!(text.contains("\"version\": 3"), "{text}");
         std::fs::write(store.path(), "not json").expect("write");
         let empty = store.load().expect("load");
         assert!(empty.companies.is_empty() && empty.seen.is_empty());
@@ -1014,9 +1226,11 @@ mod tests {
             (Arrived, Linked),
             (Arrived, Discarding),
             (Arrived, Kept),
+            (Arrived, Duplicate),
             (Duplicate, Uploading),
             (Duplicate, Discarding),
             (Duplicate, Kept),
+            (Duplicate, Linked),
             (Discarding, Linked),
             (Discarding, Kept),
         ];
@@ -1111,5 +1325,223 @@ mod tests {
                 .map(|e| e.status),
             Some(EntryStatus::Discarding)
         );
+    }
+
+    // ---- A04 D1: version 3 ---------------------------------------------
+
+    const DRAFT_A: &str = "d0000000-0000-4000-8000-0000000dd0a1";
+    const DRAFT_B: &str = "d0000000-0000-4000-8000-0000000dd0b1";
+
+    fn arrived(s: &mut InboxState, c: &str, f: &FileIdentity) {
+        assert!(s.begin_upload(c, Some(folder()), f, DRAFT1, KEY1));
+        assert!(s.arrived(c, f, ATT1, 9));
+    }
+
+    /// The claim is saved before it is sent; its answer makes the entry own
+    /// the draft, or follow another computer's (a duplicate), and every
+    /// step survives a restart.
+    #[test]
+    fn claims_are_saved_and_survive_a_restart() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let store = InboxStateStore::in_dir(dir.path());
+        let c = company_key("t");
+        let (one, two) = (file(1), file(2));
+        store
+            .update(|s| {
+                arrived(s, &c, &one);
+                assert!(s.begin_upload(&c, Some(folder()), &two, DRAFT1, KEY1));
+                assert!(s.arrived(&c, &two, A2, 9));
+                assert!(s.begin_claim(&c, &one));
+                assert!(s.begin_claim(&c, &two));
+            })
+            .expect("save");
+        // Crash before either answer: both are still being claimed (never
+        // the plain P17 paths), and the cap keeps them.
+        let s = store.load().expect("load");
+        for f in [&one, &two] {
+            let e = s.entry(&c, f).expect("entry");
+            assert_eq!(e.doc_draft, DraftLink::ClaimSent);
+            assert!(e.doc_draft.is_claimed() && e.owes());
+        }
+        store
+            .update(|s| {
+                assert!(s.begin_claim(&c, &one), "claimed again after a restart");
+                assert!(s.claimed(&c, &one, DRAFT_A));
+                assert!(s.claimed(&c, &one, DRAFT_A), "the same answer again");
+                assert!(!s.claimed(&c, &one, DRAFT_B), "never another draft");
+                assert!(!s.begin_claim(&c, &one), "owned: no new claim");
+                assert!(s.claimed_elsewhere(&c, &two, DRAFT_B));
+                assert!(!s.claimed(&c, &two, DRAFT_B), "follows, never owns");
+            })
+            .expect("save");
+        let s = store.load().expect("load");
+        let e1 = s.entry(&c, &one).expect("one");
+        assert_eq!(
+            (e1.status, &e1.doc_draft),
+            (EntryStatus::Arrived, &DraftLink::Own(DRAFT_A.into()))
+        );
+        assert!(!e1.owes());
+        let e2 = s.entry(&c, &two).expect("two");
+        assert_eq!(
+            (e2.status, &e2.doc_draft),
+            (EntryStatus::Duplicate, &DraftLink::Follows(DRAFT_B.into()))
+        );
+        assert!(e2.owes(), "its extra copy is still to delete");
+        // Copy anyway never sends a followed file up again.
+        let mut s = s;
+        assert!(!s.begin_upload(&c, Some(folder()), &two, "d", "k"));
+        assert!(!s.copy_deleted(&c, &one), "only a follower's copy");
+        assert!(s.copy_deleted(&c, &two));
+        let e2 = s.entry(&c, &two).expect("two");
+        assert!(e2.attachments.is_empty() && !e2.owes());
+        assert!(s.seen(&c, &two.sha256).is_some(), "still seen");
+        // Entered on the other computer: the original moves.
+        assert!(s.set_status(&c, &two, EntryStatus::Linked));
+        assert_eq!(
+            s.by_attachment(&c, ATT1).map(|e| e.file.clone()),
+            Some(one.clone())
+        );
+        s.unclaim(&c, &one);
+        assert_eq!(
+            s.entry(&c, &one).map(|e| e.doc_draft.clone()),
+            Some(DraftLink::None)
+        );
+        assert!(s.set_draft_key(&c, &one, DRAFT_B));
+        assert_eq!(
+            s.entry(&c, &one).and_then(|e| e.draft.as_deref()),
+            Some(DRAFT_B)
+        );
+    }
+
+    #[test]
+    fn only_arrivals_with_an_upload_are_claimed() {
+        let mut s = InboxState::default();
+        let c = company_key("t");
+        assert!(s.begin_upload(&c, Some(folder()), &file(1), DRAFT1, KEY1));
+        assert!(!s.begin_claim(&c, &file(1)), "not arrived yet");
+        assert!(s.mark_duplicate(&c, Some(folder()), &file(2)));
+        assert!(!s.begin_claim(&c, &file(2)), "a local duplicate");
+        assert!(!s.claimed_elsewhere(&c, &file(2), DRAFT_A));
+        assert!(!s.begin_claim(&c, &file(3)), "no entry");
+    }
+
+    /// T17: a version 2 file reads with no drafts; the text written names
+    /// the link only when there is one, and reads back the same.
+    #[test]
+    fn version_2_files_are_upgraded_to_3() {
+        let v2 = r#"{"version":2,"companies":{"c":[
+          {"pathHash":"p","size":1,"modifiedMs":1,"sha256":"s","status":"arrived",
+           "attachments":["d0000000-0000-4000-8000-0000000000a1"],
+           "draft":"d0000000-0000-4000-8000-00000000d001",
+           "folder":"7f3a2c10-5b6d-4e8f-9a0b-1c2d3e4f5a6b"}]}}"#;
+        let mut s = InboxState::parse(v2);
+        assert_eq!(s.version, VERSION);
+        let e = &s.entries("c")[0];
+        assert_eq!(
+            (e.status, &e.doc_draft),
+            (EntryStatus::Arrived, &DraftLink::None)
+        );
+        assert!(!s.to_text().contains("docDraft"), "none: not written");
+        let f = e.file.clone();
+        assert!(s.begin_claim("c", &f));
+        let text = s.to_text();
+        assert!(text.contains("\"docDraft\": \"claimSent\""), "{text}");
+        assert!(s.claimed("c", &f, DRAFT_A));
+        let text = s.to_text();
+        assert!(text.contains(DRAFT_A), "{text}");
+        assert_eq!(InboxState::parse(&text), s);
+    }
+
+    /// T17: an older app (A01, version 2) reads a version 3 file: every
+    /// entry and status survives; it only doesn't see the drafts.
+    #[test]
+    fn an_older_app_reads_version_3() {
+        /// The A01 entry, as that app declares it (no `docDraft`).
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct V2Entry {
+            #[serde(flatten)]
+            file: FileIdentity,
+            #[serde(default)]
+            attachments: Vec<String>,
+            #[serde(default)]
+            status: EntryStatus,
+        }
+        #[derive(Deserialize)]
+        struct V2State {
+            version: u32,
+            companies: BTreeMap<String, Vec<V2Entry>>,
+        }
+        let mut s = InboxState::default();
+        let c = company_key("t");
+        let (one, two) = (file(1), file(2));
+        arrived(&mut s, &c, &one);
+        assert!(s.begin_upload(&c, Some(folder()), &two, DRAFT1, KEY1));
+        assert!(s.arrived(&c, &two, A2, 9));
+        assert!(s.begin_claim(&c, &one) && s.claimed(&c, &one, DRAFT_A));
+        assert!(s.begin_claim(&c, &two) && s.claimed_elsewhere(&c, &two, DRAFT_B));
+        s.version = VERSION;
+        let old: V2State = serde_json::from_str(&s.to_text()).expect("an A01 app reads it");
+        assert_eq!(old.version, 3);
+        let list = &old.companies[&c];
+        assert_eq!(list.len(), 2);
+        assert_eq!(
+            list.iter()
+                .map(|e| (e.file.clone(), e.status))
+                .collect::<Vec<_>>(),
+            [(one, EntryStatus::Arrived), (two, EntryStatus::Duplicate)]
+        );
+        assert_eq!(list[0].attachments, [ATT1]);
+    }
+
+    /// A file edited by hand: a draft id that isn't a UUID is claimed again
+    /// (an arrival) or forgotten; links on the wrong status go.
+    #[test]
+    fn tampered_links_are_cleaned() {
+        let mut s = InboxState::default();
+        let c = company_key("t");
+        for n in 1..=4 {
+            arrived(&mut s, &c, &file(n));
+        }
+        let list = s.companies.get_mut(&c).expect("list");
+        list[0].doc_draft = DraftLink::Own("../etc".into());
+        list[1].doc_draft = DraftLink::Follows("x".into());
+        list[1].set(EntryStatus::Duplicate);
+        list[2].doc_draft = DraftLink::Follows(DRAFT_A.into());
+        list[3].doc_draft = DraftLink::ClaimSent;
+        list[3].set(EntryStatus::Linked);
+        s.version = VERSION;
+        let s = InboxState::parse(&s.to_text());
+        let links: Vec<DraftLink> = s.entries(&c).iter().map(|e| e.doc_draft.clone()).collect();
+        assert_eq!(
+            links,
+            [
+                DraftLink::ClaimSent,
+                DraftLink::None,
+                DraftLink::None,
+                DraftLink::None
+            ]
+        );
+        assert_eq!(DraftLink::Own(DRAFT_A.into()).id(), Some(DRAFT_A));
+        assert_eq!(DraftLink::ClaimSent.as_str(), "claim_sent");
+    }
+
+    /// Entries waiting for a claim's answer are kept like any other
+    /// entry that owes a side effect.
+    #[test]
+    fn unanswered_claims_are_never_dropped_for_room() {
+        let mut s = InboxState::default();
+        let c = company_key("t");
+        let mut first = file(1);
+        first.path_hash = "claiming".into();
+        arrived(&mut s, &c, &first);
+        assert!(s.begin_claim(&c, &first));
+        for n in 0..=MAX_ENTRIES {
+            let mut f = file(2);
+            f.path_hash = format!("p{n}");
+            s.record_upload(&c, &f, A1);
+        }
+        assert_eq!(s.entries(&c).len(), MAX_ENTRIES);
+        assert_eq!(s.entries(&c)[0].file.path_hash, "claiming");
     }
 }
