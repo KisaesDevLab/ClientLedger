@@ -534,5 +534,8 @@ pub fn match_lines(
     }
 }
 
+pub mod read;
+pub use read::{LineColumn, ReadLine, ReadMark, ReadStatement, rows_from_read};
+
 #[cfg(test)]
 mod tests;
