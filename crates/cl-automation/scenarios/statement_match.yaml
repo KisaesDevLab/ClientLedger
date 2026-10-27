@@ -101,6 +101,73 @@ steps:
   - set_zoom: {percent: 100}
   - resize: {width: 1440, height: 940}
 
+  # --- A06: read a statement file (the real worker, AI off) -------------------
+  # A synthetic text-PDF statement (fixtures/docs/statements, made by
+  # `xtask gen-invoices`): four lines, read on this computer into the box,
+  # marked until accepted; Match waits for the accept. The statement's
+  # vendor is invented, so the vendor is picked by hand. Its January lines
+  # are not in the demo's October books: all four are missing, and Create
+  # bill hands one over. The balance line shows the statement's closing
+  # balance beside the books' (display only); Save with the vendor keeps
+  # the file on the vendor once.
+  - click: {role: button, label: Clear}
+  - type: {text: "fixtures/docs/statements/statement_text.pdf", target: {role: text_input, label: Statement file}}
+  - click: {role: button, label: Read file}
+  - assert_state: {key: screen.statement.outcome, equals: read, within_ms: 180000}
+  - assert_state: {key: screen.statement.problem, equals: null}
+  - assert_state: {key: screen.statement.lines, equals: 4}
+  - assert_state: {key: screen.statement.pending, equals: 4}
+  - assert_state: {key: screen.statement.spots, equals: 4}
+  - assert_state: {key: screen.statement.closing_read, equals: true}
+  - assert_state: {key: screen.from, equals: "2026-01-01"}
+  - assert_state: {key: screen.to, equals: "2026-01-31"}
+  - assert_exists: {role: label, label: "Lines read from the statement (4)"}
+  - assert_disabled: {role: button, label: Match}
+  - screenshot: read-statement
+  - click: {role: combo_box, label: Vendor}
+  - click: {role: button, label: Branson Equipment Rental}
+  - click: {role: button, label: Accept all lines}
+  - assert_state: {key: screen.statement.pending, equals: 0}
+  - assert_enabled: {role: button, label: Match}
+  - click: {role: button, label: Match}
+  - assert_state: {key: screen.problem, equals: null}
+  - assert_state: {key: screen.rows, equals: 4}
+  - assert_state: {key: screen.result.missing_in_books, equals: [1, 2, 3, 4]}
+  - assert_state: {key: screen.balance_shown, equals: true}
+  - assert_state: {key: screen.statement.kept, equals: true}
+  - assert_state: {key: screen.statement.keeps, equals: 1}
+  - assert_exists: {role: label, label_contains: "Statement says you owe"}
+  - assert_exists: {role: check_box, label: Save this statement with the vendor}
+  - assert_exists: {role: label, label: Saved with the vendor.}
+  - scroll: {target: {role: label, label: "Lines read from the statement (4)"}, to: end}
+  - screenshot: read-statement-matched
+  - click: {role: button, label: Create bill, index: 0}
+  - assert_state: {key: screen.screen, equals: enter_bill}
+  - command: file.close_window
+  - click_if_present: {role: button, label: Discard changes}
+  - click: {role: tab, label_contains: Match Vendor Statement}
+  - assert_state: {key: screen.screen, equals: statement_match}
+  - assert_state: {key: screen.last_handoff, equals: bill}
+
+  # --- A06: a scanned statement (OCR in the worker) ---------------------------
+  - click: {role: button, label: Clear}
+  - type: {text: "fixtures/docs/statements/statement_scan.jpg", target: {role: text_input, label: Statement file}}
+  - click: {role: button, label: Read file}
+  - assert_state: {key: screen.statement.outcome, equals: read, within_ms: 180000}
+  - assert_state: {key: screen.statement.problem, equals: null}
+  - assert_state: {key: screen.statement.document, equals: true}
+  - screenshot: read-statement-scan
+
+  # --- A06: a file that can't be read ------------------------------------------
+  - click: {role: button, label: Clear}
+  - type: {text: "fixtures/docs/hostile_garbled.pdf", target: {role: text_input, label: Statement file}}
+  - click: {role: button, label: Read file}
+  - assert_state: {key: screen.statement.problem, equals: statement.read.couldnt, within_ms: 60000}
+  - assert_exists: {role: label, label: "Couldn't read this statement — type or paste the lines instead."}
+  - assert_state: {key: screen.statement.lines, equals: null}
+  - screenshot: read-statement-unreadable
+  - click: {role: button, label: Clear}
+
   # --- Close (nothing to save) ------------------------------------------------------
   - command: file.close_window
   - click: {role: tab, label: Home}

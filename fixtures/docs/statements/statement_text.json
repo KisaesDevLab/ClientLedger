@@ -1,0 +1,48 @@
+{
+  "account_number": "838-7493",
+  "closing": "5707.37",
+  "holdout": false,
+  "kind": "statement",
+  "layout": "st01-classic-single",
+  "lines": [
+    {
+      "amount": "-1945.95",
+      "date": "2026-01-05",
+      "reference": "PMT-48129",
+      "running": "1448.75"
+    },
+    {
+      "amount": "1334.79",
+      "date": "2026-01-21",
+      "reference": "INV-63891",
+      "running": "2783.54"
+    },
+    {
+      "amount": "2521.82",
+      "date": "2026-01-29",
+      "reference": "INV-42968",
+      "running": "5305.36"
+    },
+    {
+      "amount": "402.01",
+      "date": "2026-01-31",
+      "reference": "INV-34876",
+      "running": "5707.37"
+    }
+  ],
+  "opening": "3394.70",
+  "pages": 1,
+  "period_from": "2026-01-01",
+  "period_to": "2026-01-31",
+  "pictures": [
+    "scan.jpg",
+    "photo.jpg"
+  ],
+  "schema": 1,
+  "seq": 2,
+  "statement_date": "2026-02-03",
+  "vendor": {
+    "key": "cedar-valley",
+    "name": "Cedar Valley Parts Co."
+  }
+}

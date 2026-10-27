@@ -120,6 +120,8 @@ pub(crate) struct StatementDoc {
     pub doc_no: u64,
     /// The Browse window.
     pub picking: Option<Receiver<Vec<PathBuf>>>,
+    /// A file path typed in (owner data; never logged).
+    pub path_text: String,
     /// A file being read from disk.
     pub loading: Option<Receiver<FileRead>>,
     /// The reading in the worker.
@@ -190,6 +192,7 @@ impl Default for StatementDoc {
             file_kind: None,
             doc_no: 0,
             picking: None,
+            path_text: String::new(),
             loading: None,
             job: None,
             cancel: None,
@@ -283,6 +286,7 @@ impl StatementDoc {
         self.bytes = None;
         self.file_kind = None;
         self.picking = None;
+        self.path_text.clear();
         self.loading = None;
         self.draft = None;
         self.draft_file = None;
@@ -1133,6 +1137,27 @@ impl StatementMatchScreen {
             }
             form::hint(ui, tokens, &t("statement.read.drop_hint"));
         });
+        let mut read_typed = false;
+        ui.horizontal_wrapped(|ui| {
+            let l = ui.add(egui::Label::new(t("statement.read.file")).selectable(false));
+            let r = ui
+                .add(egui::TextEdit::singleline(&mut self.doc.path_text).desired_width(320.0))
+                .labelled_by(l.id);
+            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let busy = self.doc.busy();
+            read_typed = (ui
+                .add_enabled(
+                    !busy && !self.doc.path_text.trim().is_empty(),
+                    egui::Button::new(t("statement.read.file_button")),
+                )
+                .clicked()
+                || enter)
+                && !self.doc.path_text.trim().is_empty();
+        });
+        if read_typed {
+            let p = PathBuf::from(self.doc.path_text.trim());
+            self.statement_path(&p);
+        }
         if self.doc.job.is_some() || self.doc.loading.is_some() || self.doc.draft_file.is_some() {
             ui.horizontal_wrapped(|ui| {
                 form::progress_line(ui, tokens, &t("statement.read.reading"));
@@ -1277,7 +1302,7 @@ impl StatementMatchScreen {
                                                 .color(tokens.warn_text)
                                                 .strong()
                                         } else {
-                                            RichText::new(t("bill.read.caption"))
+                                            RichText::new(t("statement.read.caption"))
                                                 .color(tokens.text_secondary)
                                         };
                                         ui.label(note.size(12.0));
