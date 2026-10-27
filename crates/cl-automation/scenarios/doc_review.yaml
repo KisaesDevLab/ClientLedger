@@ -29,14 +29,14 @@ steps:
   - command: vendors.review_documents
   - assert_state: {key: screen.screen, equals: review_documents}
   - assert_state: {key: queue.supported, equals: true}
-  - assert_state: {key: queue.total, equals: 4}
+  - assert_state: {key: queue.total, equals: 5}
   - assert_state: {key: queue.selected, equals: 0}
   - assert_state: {key: queue.rows.0.status, equals: waiting}
   - assert_state: {key: queue.rows.3.status, equals: waiting}
   - assert_state: {key: queue.rows.0.selected, equals: true}
   - assert_state: {key: queue.reading, equals: null}
-  - assert_exists: {label: 4 documents waiting}
-  - assert_exists: {role: button, label_contains: "document 1 of 4, Waiting to be read"}
+  - assert_exists: {label: 5 documents waiting}
+  - assert_exists: {role: button, label_contains: "document 1 of 5, Waiting to be read"}
   - assert_exists: {role: button, label: Read all}
   - assert_exists: {role: text_input, label: Filter}
   - assert_exists: {label_contains: J and K move through the list.}
@@ -48,7 +48,9 @@ steps:
   - key: J
   - key: J
   - key: J
-  - assert_state: {key: queue.selected, equals: 3}
+  - key: J
+  - assert_state: {key: queue.selected, equals: 4}
+  - key: K
   - key: K
   - assert_state: {key: queue.selected, equals: 2}
   - assert_state: {key: queue.rows.2.selected, equals: true}
@@ -62,7 +64,7 @@ steps:
   - screenshot: queue-discard-ask
   - click: {role: button, label: Keep it}
   - assert_state: {key: queue.confirm_discard, equals: false}
-  - assert_state: {key: queue.total, equals: 4}
+  - assert_state: {key: queue.total, equals: 5}
   - assert_state: {key: queue.selected, equals: 2}
 
   # --- 4. The filter: j and k are typed, not moves (T18) ------------------------
@@ -77,13 +79,13 @@ steps:
   - key: Ctrl+A
   - key: Backspace
   - assert_state: {key: queue.filtered, equals: false}
-  - assert_state: {key: queue.total, equals: 4}
+  - assert_state: {key: queue.total, equals: 5}
 
   # --- 6. Home's Needs attention counts them -------------------------------------
   - click: {role: tab, label: Home}
   - click: {role: button, label: Refresh}
   - wait: {ms: 500}
-  - assert_exists: {label_contains: 4 documents to review}
+  - assert_exists: {label_contains: 5 documents to review}
   - screenshot: home-documents
 
   # --- 200% ----------------------------------------------------------------------

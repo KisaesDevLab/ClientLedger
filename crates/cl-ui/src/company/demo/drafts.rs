@@ -162,6 +162,10 @@ pub struct DemoDrafts {
     /// `vendor_document_templates`), learned on accept and used by the
     /// inbox's reading. No amounts.
     pub layouts: Vec<(ContactId, cl_docread::model::Template)>,
+    /// Records the converts posted (not the ones attach filed on), so the
+    /// demo's inbox can void them when it lays its files out again: every
+    /// scenario run starts with the books as found (A04 step 15).
+    pub created: Vec<TransactionId>,
 }
 
 impl fmt::Debug for DemoDrafts {
@@ -1160,6 +1164,7 @@ pub fn convert(
         ));
     }
     let txn = post(state, body, password)?;
+    state.drafts.created.push(txn);
     let to = match body {
         DemoConvertBody::Bill(_) => AttachTo::Bill(txn),
         _ => AttachTo::Expense(txn),

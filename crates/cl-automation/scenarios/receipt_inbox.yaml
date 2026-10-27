@@ -34,12 +34,12 @@ steps:
 
   # --- Arrival: copied in once settled; the late file still settling ----------
   - wait: {ms: 7000}
-  - assert_state: {key: screen.arrived, equals: 3}
+  - assert_state: {key: screen.arrived, equals: 4}
   - assert_state: {key: screen.duplicate, equals: 1}
   - assert_state: {key: screen.too_large, equals: 1}
   - assert_state: {key: screen.not_supported, equals: 1}
   - assert_state: {key: screen.settling, equals: 1}
-  - assert_exists: {label: 4 files waiting}
+  - assert_exists: {label: 5 files waiting}
   - assert_exists: {label_contains: Save as JPG or PDF instead}
   - assert_exists: {label_contains: Too large (10 MB limit)}
   - assert_exists: {label_contains: Same as a file copied before}
@@ -49,15 +49,15 @@ steps:
   - assert_enabled: {role: button, label: Midwest Equipment INV-55871.pdf}
   # A04: every arrival is claimed for Review Documents; the duplicate isn't.
   - assert_state: {key: screen.drafts.on, equals: true}
-  - assert_state: {key: screen.drafts.claimed, equals: 3}
+  - assert_state: {key: screen.drafts.claimed, equals: 4}
   - assert_state: {key: screen.drafts.pending, equals: 0}
   - assert_exists: {role: button, label: Read all}
   - screenshot: inbox
   # Ready within 15 s of its last write, then copied in.
   - wait: {ms: 9000}
   - assert_state: {key: screen.settling, equals: 0}
-  - assert_state: {key: screen.arrived, equals: 4}
-  - assert_state: {key: screen.drafts.claimed, equals: 4}
+  - assert_state: {key: screen.arrived, equals: 5}
+  - assert_state: {key: screen.drafts.claimed, equals: 5}
   - assert_enabled: {role: button, label: Crane Creek delivery.pdf}
   - screenshot: arrived
 

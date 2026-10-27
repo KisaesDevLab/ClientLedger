@@ -1,0 +1,48 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 915 >>
+stream
+BT /F1 20 Tf 56 730 Td (Midwest Equipment Rental) Tj ET
+BT /F1 10 Tf 56 708 Td (88 Industrial Pkwy, Joplin, MO 64801) Tj ET
+BT /F1 16 Tf 420 730 Td (INVOICE) Tj ET
+BT /F1 10 Tf 420 708 Td (Invoice no. INV-55902) Tj ET
+BT /F1 10 Tf 420 694 Td (Date 11/04/2026) Tj ET
+BT /F1 10 Tf 420 680 Td (Terms Net 15) Tj ET
+BT /F1 10 Tf 56 650 Td (Bill to: Ozark Ridge Landscaping LLC) Tj ET
+BT /F1 10 Tf 56 636 Td (410 Ridge Rd, Monett, MO 65708) Tj ET
+BT /F1 10 Tf 56 600 Td (Description) Tj ET
+BT /F1 10 Tf 480 600 Td (Amount) Tj ET
+BT /F1 10 Tf 56 580 Td (Skid steer loader, 1 day - Long Creek Marina seawall) Tj ET
+BT /F1 10 Tf 480 580 Td (685.50) Tj ET
+BT /F1 10 Tf 56 564 Td (Delivery and pickup) Tj ET
+BT /F1 10 Tf 480 564 Td (150.00) Tj ET
+BT /F1 12 Tf 400 530 Td (TOTAL) Tj ET
+BT /F1 12 Tf 480 530 Td (835.50) Tj ET
+BT /F1 8 Tf 56 90 Td (Synthetic sample document for the ClientLedger demo. Not a real invoice.) Tj ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1276
+%%EOF
