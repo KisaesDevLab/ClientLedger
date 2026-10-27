@@ -7,9 +7,9 @@
 #    searches the register first (nothing matches), then the engine refuses
 #    the closed date and the closing-date password is asked; with it the
 #    bill posts once.
-# 2. The second invoice "Enter this as" a card charge: Record Card Charge,
+# 2. The late invoice (no kind yet: the chooser) as a card charge: Record Card Charge,
 #    the card picked, posted.
-# 3. The fax "Enter this as" a check: Write Check, typed by hand, posted.
+# 3. The receipt photo as a check: Write Check, typed by hand, posted.
 #
 # Light and dark run in one app; the demo voids what the earlier run
 # entered when the inbox lays its files out again, and both windows close at
@@ -77,21 +77,21 @@ steps:
   - screenshot: closed-period-entered
 
   # --- 2. The second invoice as a card charge ---------------------------------
+  # (its kind isn't known: "What is this document?" asks first).
   - key: K
   - key: K
   - key: K
   - assert_state: {key: queue.selected, equals: 0}
   - key: Enter
-  - assert_state: {key: screen.screen, equals: enter_bill, within_ms: 5000}
-  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
-  - click: {role: button, label: Read document}
-  - assert_state: {key: screen.read.local.outcome, equals: read, within_ms: 30000}
-  - key: Alt+A
-  - assert_state: {key: screen.read.unaccepted, equals: 0}
+  - assert_exists: {label: What is this document?}
   - click: {role: button, label: A card charge}
   - assert_state: {key: screen.screen, equals: card_charge, within_ms: 5000}
   - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
   - assert_state: {key: screen.draft.form, equals: card_charge}
+  - click: {role: button, label: Read document}
+  - assert_state: {key: screen.draft.stored, equals: read, within_ms: 30000}
+  - screenshot: card-charge-read
+  - key: Alt+A
   - click: {role: combo_box, label: Card}
   - click: {role: button, label: "2050 · Business Credit Card"}
   - click: {label: "Account, line 1"}
@@ -109,33 +109,39 @@ steps:
   - click: {role: button, label: Refresh}
   - assert_state: {key: queue.total, equals: 3, within_ms: 5000}
 
-  # --- 3. The fax as a check, typed by hand -------------------------------------
+  # --- 3. The receipt photo as a check, typed by hand ---------------------------
   - key: K
   - key: K
   - key: K
   - assert_state: {key: queue.selected, equals: 0}
   - key: Enter
-  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
-  - click: {role: button, label: A check I wrote}
+  - assert_exists: {label: What is this document?}
+  - click: {role: button, label: A check already written}
   - assert_state: {key: screen.screen, equals: write_check, within_ms: 5000}
   - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
   - assert_state: {key: screen.draft.form, equals: check}
   - assert_exists: {role: tab, label_contains: "from Review Documents"}
   - type: {text: Hollister Fuel, target: {role: text_input, label: Pay to the order of}}
   - key: Tab
+  # Nothing was read: the date is the owner's too.
+  - click: {role: text_input, label: Date}
+  - key: Ctrl+A
+  - type: {text: "11/03/2026"}
+  - key: Tab
+  - assert_state: {key: screen.date, equals: "2026-11-03"}
   - type: {text: "42.75", target: {role: text_input, label: "Amount ($)"}}
   - key: Tab
   - click: {label: "Account, line 1"}
   - key: Ctrl+A
   - type: {text: "6100"}
   - key: Tab
-  - click: {role: grid_cell, label: "Amount, line 1"}
-  - key: Ctrl+A
-  - type: {text: "42.75"}
-  - key: Tab
+  # One line follows the check amount (Q-P13r).
+  - assert_value: {target: {label: "Amount, line 1"}, equals: "42.75"}
   - screenshot: check-draft
   - key: Alt+S
   - assert_state: {key: review.match, equals: true, within_ms: 5000}
+  - assert_not_exists: {role: tab, label_contains: "from Review Documents"}
+  - click: {role: tab, label: Review Documents}
   - assert_state: {key: screen.screen, equals: review_documents, within_ms: 5000}
   - click: {role: button, label: Refresh}
   - assert_state: {key: queue.total, equals: 2, within_ms: 5000}
