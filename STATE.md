@@ -225,6 +225,8 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 5. Live contract test `drafts::statement_drafts` ran only its PENDING path locally (engine build before U-94); CI runs it on pin 5a9a8700.
 6. Region re-read on a statement still stops at page 10.
 
+7. CI `docread-netcheck`: strace 5.16 on ubuntu-22.04 sometimes dies with "ptrace(PTRACE_LISTEN...): Input/output error" while a test kills a worker (PR #45, #46); the step retries that error only. Move the job to a newer strace (ubuntu-24.04) when convenient.
+
 ## Follow-ups from A04
 
 1. Pointer drags (draw a box to re-read a region) can't be scripted: the automation tools click and move but can't press, drag and release. Unit tests only.
