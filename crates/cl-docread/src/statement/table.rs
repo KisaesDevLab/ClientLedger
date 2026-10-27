@@ -142,6 +142,9 @@ pub fn header_bands(words: &[&Word]) -> Option<Vec<Band>> {
     let mut bands: Vec<Band> = Vec::new();
     let mut covered = 0;
     let mut i = 0;
+    // An unknown word just before a column word belongs to its header
+    // ("Pro #", "Trans #"): the column starts there.
+    let mut unknown_left: Option<u16> = None;
     while i < tokens.len() {
         let best = COLUMN_WORDS
             .iter()
@@ -152,14 +155,21 @@ pub fn header_bands(words: &[&Word]) -> Option<Vec<Band>> {
             .max_by_key(|(ws, _)| ws.len());
         if let Some((ws, col)) = best {
             let bbox = union(tokens[i..i + ws.len()].iter().map(|t| words[t.word].bbox))?;
+            let left = match unknown_left {
+                Some(l) if bbox.left().saturating_sub(l) <= 1_000 => l,
+                _ => bbox.left(),
+            };
             bands.push(Band {
                 col: *col,
-                left: bbox.left(),
+                left,
                 right: bbox.right(),
             });
             covered += ws.len();
             i += ws.len();
+            unknown_left = None;
         } else {
+            let left = words[tokens[i].word].bbox.left();
+            unknown_left = Some(unknown_left.map_or(left, |l| l.min(left)));
             i += 1;
         }
     }

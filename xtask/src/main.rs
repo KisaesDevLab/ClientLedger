@@ -59,12 +59,15 @@ usage: cargo xtask <command>
                      generate docs/KEYBOARD.md and the shortcut cheat sheet from the cl-model keymap
   grid-bench         ledger grid scroll benchmark (200k rows, real shell), optimised; fails
                      when p95 frame time is over 8 ms (AccessKit off) or 12 ms (on), one retry
-  gen-invoices [--holdout] [--no-scans] [--samples] [--out DIR] [--layouts id,id]
-                     synthetic bills and receipts with ground truth for the reading harness into
-                     target/docread-synth (A03); --samples refreshes fixtures/docs/read
-  docread-accuracy [--gate] [--regen] [--stress] [--tessdata DIR] [--routes text,scan,photo]
-                     reading accuracy per field and path, measured memory and time, into
-                     target/docread-accuracy; --gate fails below the Q-285 minimums
+  gen-invoices [--holdout] [--no-scans] [--samples] [--statements-only] [--out DIR]
+               [--layouts id,id]
+                     synthetic bills, receipts (A03) and vendor statements (A06) with ground
+                     truth into target/docread-synth; --samples refreshes fixtures/docs/read
+  docread-accuracy [--gate] [--regen] [--stress] [--statements] [--tessdata DIR]
+                   [--routes text,scan,photo]
+                     reading accuracy per field and path (statements: lines read), measured
+                     memory and time, into target/docread-accuracy; --gate fails below the
+                     Q-285 and A06 minimums
   gen-sample [--check]
                      write fixtures/sample/ozark_ridge (the practice company, Q-219); --check verifies
   run [--no-prepare] [-- <app args>]
