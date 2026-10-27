@@ -76,4 +76,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("doc_form.enter_as", "Enter this as:"),
     ("doc_form.enter_as.tip", "Opens this document in that form instead. Values you accepted or changed go with it; the rest still need Accept."),
     ("doc_form.assist.waiting", "Available once the page has been read."),
+    // A04 fix pass: a failed register search never posts (review B2); card
+    // credit in draft mode (L4).
+    ("doc_form.match.failed", "We couldn't look for this purchase in your books, so nothing was entered. Choose Try again. If you're sure it isn't entered yet, choose Enter as new."),
+    ("doc_form.match.enter_new", "Enter as new"),
+    ("doc_form.match.enter_new.tip", "Enter this document as a new expense without looking for it in your books first."),
+    ("doc_form.match.back", "Back to the form"),
+    ("doc_form.credit_unavailable", "A document from Review Documents is entered as a charge here. To enter a refund or credit, discard it and enter the credit by hand."),
 ];

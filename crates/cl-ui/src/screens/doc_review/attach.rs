@@ -25,8 +25,8 @@
 //! labels and flags, never an amount, a date or a name.
 
 use cl_api::{
-    Capabilities, DuplicateMatch, MatchSource, PageRequest, RequestGroup, TransactionFilter,
-    TransactionSummary, TxnStatus,
+    ApiError, Capabilities, DuplicateMatch, LocalValidation, MatchSource, PageRequest,
+    RequestGroup, TransactionFilter, TransactionSummary, TxnStatus,
 };
 use cl_core::ids::{AccountId, ContactId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle};
@@ -118,15 +118,27 @@ fn mark_same(rows: &mut [RegisterRow], same: &[TransactionId]) {
     }
 }
 
-/// The register search for `p` (see the module comment); `None` when the
-/// engine can't attach (no `document-drafts-attach-v1`: then there is no
-/// exact filter either, and Accept posts as before).
+/// How the register search started (review B2: only an engine without the
+/// capability posts without one; a search that couldn't run never posts).
+pub(crate) enum Search {
+    /// The engine can't attach (no `document-drafts-attach-v1`: no exact
+    /// filter either); Accept posts as before, the engine's own duplicate
+    /// check still runs.
+    Unsupported,
+    /// The search runs; its answer comes in the task.
+    Started(Task<Vec<RegisterRow>>),
+    /// The search couldn't be sent (no session, the request queue refused
+    /// it, the demo failed): the owner chooses Try again or Enter as new.
+    Failed,
+}
+
+/// The register search for `p` (see the module comment and [`Search`]).
 pub(crate) fn search(
     link: &CompanyLink,
     group: Option<&RequestGroup>,
     tenant: Option<TenantId>,
     p: &MatchProbe,
-) -> Option<Task<Vec<RegisterRow>>> {
+) -> Search {
     let (start, end) = register_match::search_window(p.date);
     if let Some(mut demo) = link.demo_state() {
         let _ = tenant;
@@ -137,35 +149,42 @@ pub(crate) fn search(
             account: None,
         };
         let all = crate::company::demo::drafts::search_amount(&mut demo, &q);
-        let same = p.account.map(|a| {
-            crate::company::demo::drafts::search_amount(
+        let same = match (&all, p.account) {
+            (Ok(_), Some(a)) => Some(crate::company::demo::drafts::search_amount(
                 &mut demo,
                 &crate::company::demo::drafts::AmountSearch {
                     account: Some(a),
                     ..q
                 },
-            )
-        });
+            )),
+            _ => None,
+        };
         drop(demo);
-        let out = all.map(|rows| {
-            let same: Vec<TransactionId> = match same {
-                Some(Ok(s)) => s.iter().map(|r| r.id).collect(),
-                _ => Vec::new(),
-            };
-            let mut rows: Vec<RegisterRow> = rows.iter().filter_map(|r| row_of(r, false)).collect();
-            mark_same(&mut rows, &same);
-            rows
-        });
-        // Without drafts the demo has no exact filter: nothing found.
-        return Some(Task::ready(out.unwrap_or_default()));
+        return match (all, same) {
+            // Without drafts the demo has no exact filter.
+            (Err(ApiError::Local(LocalValidation::Unsupported)), _) => Search::Unsupported,
+            (Err(_), _) | (Ok(_), Some(Err(_))) => Search::Failed,
+            (Ok(rows), same) => {
+                let same: Vec<TransactionId> = same
+                    .and_then(Result::ok)
+                    .map(|s| s.iter().map(|r| r.id).collect())
+                    .unwrap_or_default();
+                let mut rows: Vec<RegisterRow> =
+                    rows.iter().filter_map(|r| row_of(r, false)).collect();
+                mark_same(&mut rows, &same);
+                Search::Started(Task::ready(rows))
+            }
+        };
     }
     let caps = link.capabilities();
     if !caps.has(Capabilities::DOCUMENT_DRAFTS_ATTACH) {
-        return None;
+        return Search::Unsupported;
     }
-    let (session, group) = (link.session()?, group?);
+    let (Some(session), Some(group)) = (link.session(), group) else {
+        return Search::Failed;
+    };
     let (amount, account) = (p.amount, p.account);
-    group
+    let started = group
         .read(&session, move |s| async move {
             let filter = TransactionFilter {
                 status: Some(TxnStatus::Posted),
@@ -206,7 +225,11 @@ pub(crate) fn search(
             Ok(rows)
         })
         .ok()
-        .map(Task::Pending)
+        .map(Task::Pending);
+    match started {
+        Some(task) => Search::Started(task),
+        None => Search::Failed,
+    }
 }
 
 /// One row the dialog shows (owner data: drawn, never logged).

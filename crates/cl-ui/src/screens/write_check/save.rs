@@ -410,6 +410,15 @@ impl WriteCheckScreen {
                 return false;
             }
         };
+        // A04 draft mode: Accept is the convert, never a plain posting
+        // (`posting` above was cl-api's own check of the same draft). The
+        // register search comes before any closing-date password: an
+        // attach posts nothing (Q-A04f); a convert in the closed period is
+        // refused by the engine (423) and asks then (review B1).
+        if self.draft.on() {
+            let _ = posting;
+            return self.accept_draft(&checked, draft, intent, password);
+        }
         // A change touching the closed period needs the closing-date
         // password (NN8): ask before anything is sent.
         let old = self.editing.as_ref().map(|e| e.old_date);
@@ -422,12 +431,6 @@ impl WriteCheckScreen {
                 self.closing_prompt.unavailable(supported, self.closing);
             }
             return false;
-        }
-        // A04 draft mode: Accept is the convert, never a plain posting
-        // (`posting` above was cl-api's own check of the same draft).
-        if self.draft.on() {
-            let _ = posting;
-            return self.accept_draft(&checked, draft, intent, password);
         }
         // Lock the form while the save runs (the grid commits again).
         let lists = Arc::clone(&self.lists);

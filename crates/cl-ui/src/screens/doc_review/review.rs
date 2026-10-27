@@ -693,6 +693,11 @@ enum Work {
         accept: Box<Accept>,
         task: Task<Vec<cl_docread::register_match::RegisterRow>>,
     },
+    /// The register search failed or couldn't run (review B2): nothing
+    /// posts until the owner picks Try again or Enter as new.
+    SearchFailed {
+        accept: Box<Accept>,
+    },
     /// The attach dialog is up.
     Choosing {
         accept: Box<Accept>,
@@ -739,6 +744,7 @@ impl Work {
         match self {
             Work::Idle => "idle",
             Work::Matching { .. } => "matching",
+            Work::SearchFailed { .. } => "search_failed",
             Work::Choosing { .. } => "choosing",
             Work::Converting { .. } => "converting",
             Work::Resend { .. } => "resend",
@@ -1199,7 +1205,10 @@ impl DraftSession {
             || self.words_job.is_some()
             || self.read_job.is_some()
             || self.assist.busy()
-            || !matches!(self.work, Work::Idle | Work::Done | Work::Choosing { .. })
+            || !matches!(
+                self.work,
+                Work::Idle | Work::Done | Work::Choosing { .. } | Work::SearchFailed { .. }
+            )
             || self.learn.layout.is_some()
             || self.learn.card.is_some()
             || self.discard.is_some()
@@ -1430,21 +1439,54 @@ impl DraftSession {
             self.send_convert(a, ack);
             return true;
         }
+        self.start_search(Box::new(a));
+        true
+    }
+
+    /// The register search for `a` (Q-282). Only an engine without attach
+    /// posts without one; a search that couldn't run or failed never posts
+    /// (review B2): the owner chooses Try again or Enter as new.
+    fn start_search(&mut self, a: Box<Accept>) {
+        use super::attach::Search;
         match super::attach::search(&self.link, self.group.as_ref(), self.tenant, &a.probe) {
-            Some(task) => {
-                self.work = Work::Matching {
-                    accept: Box::new(a),
-                    task,
-                };
+            Search::Started(task) => {
+                self.work = Work::Matching { accept: a, task };
                 self.poll_work();
             }
-            // No attach on this engine: post as before.
-            None => {
+            // No attach on this engine: post as before (the engine's own
+            // duplicate check still runs).
+            Search::Unsupported => {
                 self.matched = Some((a.body.clone(), Vec::new()));
-                self.send_convert(a, Vec::new());
+                self.send_convert(*a, Vec::new());
             }
+            Search::Failed => self.search_failed(a),
         }
-        true
+    }
+
+    fn search_failed(&mut self, accept: Box<Accept>) {
+        tracing::info!("register search failed; nothing entered");
+        self.note = Some("doc_form.match.failed");
+        self.work = Work::SearchFailed { accept };
+    }
+
+    /// After a failed search: **Enter as new**, the owner's explicit choice
+    /// (never the default button). Posts the reviewed body acknowledging
+    /// nothing; the engine's own duplicate check still runs.
+    pub(crate) fn enter_as_new(&mut self) {
+        if let Work::SearchFailed { accept } = std::mem::replace(&mut self.work, Work::Idle) {
+            self.note = None;
+            self.matched = Some((accept.body.clone(), Vec::new()));
+            self.send_convert(*accept, Vec::new());
+        }
+    }
+
+    /// After a failed search: back to the form, nothing sent.
+    fn search_back(&mut self) {
+        if matches!(self.work, Work::SearchFailed { .. }) {
+            self.work = Work::Idle;
+            self.note = None;
+            self.events.push(DraftEvent::Cancelled);
+        }
     }
 
     fn key_for(&mut self, id: Identity) -> IdempotencyKey {
@@ -1584,9 +1626,15 @@ impl DraftSession {
             Work::Matching { accept, mut task } => match task.try_take() {
                 None => Work::Matching { accept, task },
                 Some(r) => {
-                    // A failed search posts as before: the engine's own
-                    // duplicate check still runs.
-                    let rows = r.unwrap_or_default();
+                    // A failed search never posts (review B2): the
+                    // engine's duplicate check skips vendor-less receipts.
+                    let rows = match r {
+                        Ok(rows) => rows,
+                        Err(_) => {
+                            self.search_failed(accept);
+                            return;
+                        }
+                    };
                     let probe = accept.probe.probe();
                     let cands = cl_docread::register_match::candidates(&probe, &rows);
                     if cands.is_empty() {
@@ -1853,11 +1901,19 @@ impl DraftSession {
         }
     }
 
-    /// Unknown outcome: **Try again** sends the identical request once more.
+    /// **Try again**: an unknown outcome sends the identical request once
+    /// more; a failed register search runs the search again.
     pub(crate) fn try_again(&mut self) {
-        if let Work::Unknown { accept, ack } = std::mem::replace(&mut self.work, Work::Idle) {
-            self.note = None;
-            self.send_convert(*accept, ack);
+        match std::mem::replace(&mut self.work, Work::Idle) {
+            Work::Unknown { accept, ack } => {
+                self.note = None;
+                self.send_convert(*accept, ack);
+            }
+            Work::SearchFailed { accept } => {
+                self.note = None;
+                self.start_search(accept);
+            }
+            other => self.work = other,
         }
     }
 
@@ -2246,6 +2302,20 @@ impl DraftSession {
             self.answer_dialog(false, None);
             return Some(true);
         }
+        if matches!(self.work, Work::SearchFailed { .. }) {
+            match id.as_str() {
+                // Alt+E: the explicit choice; Esc: back to the form.
+                "form.enter_as_new" => {
+                    self.enter_as_new();
+                    return Some(true);
+                }
+                "form.revert" => {
+                    self.search_back();
+                    return Some(true);
+                }
+                _ => {}
+            }
+        }
         match id.as_str() {
             "form.discard_document" if !self.closed() => {
                 self.dialog = Some(Dialog::ConfirmDiscard);
@@ -2512,6 +2582,33 @@ impl DraftSession {
                 {
                     click = BannerClick::TryAgain;
                 }
+                if matches!(self.work, Work::SearchFailed { .. }) {
+                    // Try again first and focused; Enter as new is the
+                    // owner's explicit choice, never the default (B2).
+                    ui.horizontal_wrapped(|ui| {
+                        let again = ui.button(t("doc_form.try_again"));
+                        if !ui.ctx().memory(|m| m.focused().is_some()) {
+                            again.request_focus();
+                        }
+                        if again.clicked() {
+                            click = BannerClick::TryAgain;
+                        }
+                        if ui
+                            .button(t("doc_form.match.enter_new"))
+                            .on_hover_text(t("doc_form.match.enter_new.tip"))
+                            .clicked()
+                        {
+                            click = BannerClick::EnterAsNew;
+                        }
+                        crate::widgets::kbd(
+                            ui,
+                            &crate::screens::card_charge::kit::chip("form.enter_as_new"),
+                        );
+                        if ui.button(t("doc_form.match.back")).clicked() {
+                            click = BannerClick::SearchBack;
+                        }
+                    });
+                }
                 if matches!(self.work, Work::Matching { .. }) {
                     ui.label(RichText::new(t("doc_form.matching")).color(tokens.text_secondary));
                 }
@@ -2552,6 +2649,8 @@ impl DraftSession {
         match click {
             BannerClick::Discard => self.ask_discard(),
             BannerClick::TryAgain => self.try_again(),
+            BannerClick::EnterAsNew => self.enter_as_new(),
+            BannerClick::SearchBack => self.search_back(),
             _ => {}
         }
         click
@@ -2752,8 +2851,13 @@ pub(crate) enum BannerClick {
     Discard,
     /// Read document (a `new` draft).
     ReadDocument,
-    /// Try again (unknown outcome; already sent).
+    /// Try again (unknown outcome, or a failed register search; already
+    /// done).
     TryAgain,
+    /// Enter as new after a failed register search (already sent).
+    EnterAsNew,
+    /// Back to the form after a failed register search (already done).
+    SearchBack,
     /// Ask AI to help (the form passes its vendors to
     /// [`DraftSession::ask_ai`]).
     AskAi,

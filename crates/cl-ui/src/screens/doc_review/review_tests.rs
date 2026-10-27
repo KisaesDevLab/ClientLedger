@@ -305,6 +305,152 @@ fn a_closed_period_needs_the_password_then_posts() {
     assert!(ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })));
 }
 
+fn close_books_through(w: &World, through: CalendarDate) {
+    let mut d = w.demo();
+    let t = w.tenant;
+    d.companies
+        .iter_mut()
+        .find(|c| c.tenant_id == t)
+        .expect("company")
+        .closed_through = Some(through);
+}
+
+/// Review B1 (Q-A04f): a receipt dated in the closed period that is
+/// already in the books: the register search comes first and the attach
+/// needs no closing-date password (nothing posts).
+#[test]
+fn an_attach_in_the_closed_period_needs_no_password() {
+    let w = World::new();
+    let target = w.post_expense("25.00", day(13));
+    close_books_through(&w, day(30));
+    let id = w.draft("cp", "25.00", day(14));
+    let mut s = w.session(id);
+    let before = w.transactions();
+    assert!(s.accept(w.accept("25.00", day(14), None)));
+    let ev = tick(&w, &mut s);
+    assert!(
+        !ev.iter().any(|e| matches!(e, DraftEvent::Failed { .. })),
+        "no closing-date question before the search: {ev:?}"
+    );
+    let d = s.attach.as_mut().expect("the attach dialog first");
+    d.select(0);
+    assert!(d.ask_attach());
+    let answer = d.confirm().expect("confirmed");
+    s.dialog_answer(answer);
+    let ev = tick(&w, &mut s);
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, DraftEvent::Attached { transaction } if *transaction == target)),
+        "{ev:?}"
+    );
+    assert!(!ev.iter().any(|e| matches!(e, DraftEvent::Failed { .. })));
+    assert_eq!(w.transactions(), before, "nothing posted");
+    assert_eq!(w.status(id), DraftStatus::Converted);
+}
+
+/// Review B1: a closed-period document with nothing in the books: the
+/// search runs, then the engine's 423 asks for the password; the resend
+/// with it does not search again and posts once.
+#[test]
+fn a_closed_period_convert_searches_first_then_asks() {
+    let w = World::new();
+    close_books_through(&w, day(30));
+    let id = w.draft("cq", "12.75", day(14));
+    let mut s = w.session(id);
+    let before = w.transactions();
+    assert!(s.accept(w.accept("12.75", day(14), None)));
+    let ev = tick(&w, &mut s);
+    assert!(ev.iter().any(|e| matches!(
+        e,
+        DraftEvent::Failed {
+            error: ApiError::ClosedPeriod(_),
+            ..
+        }
+    )));
+    assert_eq!(w.transactions(), before);
+    // A search that would fail now proves the resend doesn't search.
+    w.demo().drafts.fail_next_search = true;
+    assert!(s.accept(w.accept("12.75", day(14), Some(DEMO_CLOSING_PASSWORD))));
+    let ev = tick(&w, &mut s);
+    assert!(
+        ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
+        "{ev:?}"
+    );
+    assert_eq!(w.transactions(), before + 1);
+}
+
+/// Review B2: a failed register search never posts; Try again searches
+/// again (and then posts when nothing matches).
+#[test]
+fn a_failed_search_never_posts_and_try_again_searches_again() {
+    let w = World::new();
+    let id = w.draft("fs", "18.20", day(14));
+    let mut s = w.session(id);
+    let before = w.transactions();
+    w.demo().drafts.fail_next_search = true;
+    assert!(s.accept(w.accept("18.20", day(14), None)));
+    let ev = tick(&w, &mut s);
+    assert!(
+        !ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
+        "{ev:?}"
+    );
+    assert_eq!(s.work.name(), "search_failed");
+    assert_eq!(s.note, Some("doc_form.match.failed"));
+    assert!(
+        s.locked(),
+        "the reviewed values can't change under the choice"
+    );
+    assert!(
+        !s.accept(w.accept("18.20", day(14), None)),
+        "Save doesn't post"
+    );
+    assert_eq!(w.transactions(), before);
+    assert_eq!(w.status(id), DraftStatus::Ready);
+    // Esc: back to the form, nothing sent.
+    assert_eq!(s.command(CommandId::new("form.revert")), Some(true));
+    assert_eq!(s.work.name(), "idle");
+    let ev = tick(&w, &mut s);
+    assert!(ev.iter().any(|e| matches!(e, DraftEvent::Cancelled)));
+    assert_eq!(w.transactions(), before);
+    // Again, failing; Try again searches and posts.
+    w.demo().drafts.fail_next_search = true;
+    assert!(s.accept(w.accept("18.20", day(14), None)));
+    assert_eq!(s.work.name(), "search_failed");
+    s.try_again();
+    let ev = tick(&w, &mut s);
+    assert!(
+        ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
+        "{ev:?}"
+    );
+    assert_eq!(w.transactions(), before + 1);
+}
+
+/// Review B2: after a failed search, Enter as new (Alt+E) is the owner's
+/// explicit choice and posts once.
+#[test]
+fn enter_as_new_after_a_failed_search_posts_once() {
+    let w = World::new();
+    let id = w.draft("fn", "44.00", day(14));
+    let mut s = w.session(id);
+    let before = w.transactions();
+    w.demo().drafts.fail_next_search = true;
+    assert!(s.accept(w.accept("44.00", day(14), None)));
+    assert_eq!(s.work.name(), "search_failed");
+    assert!(s.attach.is_none());
+    // Save & Close again (Enter on the form) doesn't choose for the owner.
+    assert!(!s.accept(w.accept("44.00", day(14), None)));
+    assert_eq!(w.transactions(), before);
+    assert_eq!(s.command(CommandId::new("form.enter_as_new")), Some(true));
+    let ev = tick(&w, &mut s);
+    assert!(
+        ev.iter().any(|e| matches!(e, DraftEvent::Posted { .. })),
+        "{ev:?}"
+    );
+    assert_eq!(w.transactions(), before + 1);
+    assert_eq!(w.status(id), DraftStatus::Converted);
+    assert!(!s.accept(w.accept("44.00", day(14), None)), "never twice");
+}
+
 /// T3: changed elsewhere: "Keep my values and enter" posts the reviewed
 /// body under the fresh token.
 #[test]

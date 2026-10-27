@@ -444,16 +444,19 @@ impl EnterBillScreen {
         if password.is_none() && !self.with_panel(|p, input| p.clear_to_save(input, intent)) {
             return false;
         }
+        // A04 draft mode: Accept is the convert, never `POST /bills`. The
+        // register search comes before any closing-date password: an
+        // attach posts nothing (Q-A04f); a convert in the closed period is
+        // refused by the engine (423) and asks then (review B1).
+        if self.draft.is_some() {
+            return self.accept_draft(&checked, intent, password);
+        }
         // A change touching the closed period needs the closing-date
         // password (NN8): ask before anything is sent.
         if checked.needs_closing_password && password.is_none() {
             self.closing_prompt
                 .ask(Pending::Save(intent), true, self.closing);
             return false;
-        }
-        // A04 draft mode: Accept is the convert, never `POST /bills`.
-        if self.draft.is_some() {
-            return self.accept_draft(&checked, intent, password);
         }
         let draft = to_draft(&checked, self.attach.draft, self.caps().lines);
         let lists = Arc::clone(&self.lists);

@@ -470,7 +470,11 @@ impl WriteCheckScreen {
                 let _ = s.ask_ai(vendors);
             }
             BannerClick::EnterAs(to) => self.enter_as(ui.ctx(), to),
-            BannerClick::None | BannerClick::Discard | BannerClick::TryAgain => {}
+            BannerClick::None
+            | BannerClick::Discard
+            | BannerClick::TryAgain
+            | BannerClick::EnterAsNew
+            | BannerClick::SearchBack => {}
         }
     }
 

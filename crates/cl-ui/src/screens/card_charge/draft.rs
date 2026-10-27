@@ -492,8 +492,11 @@ impl CardChargeScreen {
         }
     }
 
-    /// Accept: the checked charge through the draft. The closing-date
-    /// password is asked first for a closed-period date (NN8).
+    /// Accept: the checked charge through the draft. The register search
+    /// comes first; the closing-date password is asked only when the
+    /// convert itself is refused for the closed period (the engine's 423,
+    /// review B1): attaching to a record already in the books posts
+    /// nothing and needs no password (Q-A04f).
     pub(crate) fn accept_draft(
         &mut self,
         c: &CheckedCard,
@@ -501,18 +504,9 @@ impl CardChargeScreen {
         password: Option<Secret>,
     ) -> bool {
         if c.mode != CardMode::Charge {
-            return false;
-        }
-        let closing = self.books.closing;
-        if password.is_none() && cl_model::closing::needs_password(None, c.date, closing) {
-            let supported = super::kit::closing_supported(&self.link);
-            if supported {
-                self.flow
-                    .closing_prompt
-                    .ask(super::Pending::Save(intent), supported, closing);
-            } else {
-                self.flow.closing_prompt.unavailable(supported, closing);
-            }
+            // Credit is hidden in draft mode (convert refuses it, Q-A04g);
+            // never a silent no-op (review L4).
+            self.flow.notice = Some("doc_form.credit_unavailable");
             return false;
         }
         let expense = self.draft.expense;
@@ -705,7 +699,11 @@ impl CardChargeScreen {
                 let _ = s.ask_ai(vendors);
             }
             BannerClick::EnterAs(to) => self.enter_as(ui.ctx(), to),
-            BannerClick::None | BannerClick::Discard | BannerClick::TryAgain => {}
+            BannerClick::None
+            | BannerClick::Discard
+            | BannerClick::TryAgain
+            | BannerClick::EnterAsNew
+            | BannerClick::SearchBack => {}
         }
     }
 

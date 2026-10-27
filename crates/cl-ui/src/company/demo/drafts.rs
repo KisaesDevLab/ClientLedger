@@ -158,6 +158,9 @@ pub struct DemoDrafts {
     /// The next keyed request answers 409 `IDEMPOTENCY_IN_PROGRESS`
     /// (nothing done).
     pub busy_next: bool,
+    /// The next [`search_amount`] fails (`Timeout`, nothing read): tests
+    /// that a failed register search never posts (review B2).
+    pub fail_next_search: bool,
     /// A04 WP-F2: the vendors' saved layouts (the demo's
     /// `vendor_document_templates`), learned on accept and used by the
     /// inbox's reading. No amounts.
@@ -1343,13 +1346,16 @@ impl fmt::Debug for AmountSearch {
 ///
 /// # Errors
 /// `Local(Unsupported)` without drafts (the filter comes with
-/// `document-drafts-attach-v1`).
+/// `document-drafts-attach-v1`); `Timeout` once after `fail_next_search`.
 pub fn search_amount(
     state: &mut DemoState,
     q: &AmountSearch,
 ) -> Result<Vec<TransactionSummary>, ApiError> {
     if !state.drafts.enabled {
         return unsupported();
+    }
+    if std::mem::take(&mut state.drafts.fail_next_search) {
+        return Err(ApiError::Timeout);
     }
     let chart = state.chart.get_or_insert_with(super::chart).clone();
     let number = q.account.and_then(|a| {
