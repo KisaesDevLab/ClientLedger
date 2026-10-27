@@ -1332,29 +1332,31 @@ impl Intake {
             total: p.total,
         });
         let job = q.job;
-        self.drafts.step = Some(match self.drafts.context.clone() {
-            Some(_) => ReadStep::Fetch(job, self.fetch(link, job.draft)),
-            None => ReadStep::Context(job, self.load_ctx(link)),
-        });
+        // No session to ask (signed out): the job is dropped, the draft
+        // stays waiting to be read.
+        self.drafts.step = match self.drafts.context.clone() {
+            Some(_) => self.fetch(link, job.draft).map(|t| ReadStep::Fetch(job, t)),
+            None => self.load_ctx(link).map(|t| ReadStep::Context(job, t)),
+        };
     }
 
-    fn load_ctx(&self, link: &CompanyLink) -> Task<ReadCtx> {
+    fn load_ctx(&self, link: &CompanyLink) -> Option<Task<ReadCtx>> {
         if let Some(mut demo) = link.demo_state() {
             let chart = demo
                 .chart
                 .get_or_insert_with(crate::company::demo::chart)
                 .clone();
             let contacts = demo.contacts_mut().clone();
-            return Task::ready(ReadCtx {
+            return Some(Task::ready(ReadCtx {
                 vendors: crate::reading::map::vendor_candidates(&contacts),
                 context: ReadContext {
                     layouts: Vec::new(),
                     card_accounts: Some(card_accounts_of(&chart)),
                 },
-            });
+            }));
         }
         let (Some(session), Some(group)) = (link.session(), self.group.as_ref()) else {
-            return Task::Ready(None);
+            return None;
         };
         match group.read(&session, |s| async move {
             let contacts = s.contacts().list_all(&ContactFilter::default()).await?;
@@ -1364,12 +1366,12 @@ impl Intake {
                 context,
             })
         }) {
-            Ok(p) => Task::Pending(p),
-            Err(_) => Task::Ready(None),
+            Ok(p) => Some(Task::Pending(p)),
+            Err(_) => None,
         }
     }
 
-    fn fetch(&self, link: &CompanyLink, id: DocumentDraftId) -> Task<Fetched> {
+    fn fetch(&self, link: &CompanyLink, id: DocumentDraftId) -> Option<Task<Fetched>> {
         let cap = usize::try_from(MAX_DOWNLOAD_BYTES).unwrap_or(usize::MAX);
         if let (Some(demo), Some(tenant)) = (link.demo_state(), self.tenant) {
             let out = match crate::company::demo::drafts::get(&demo, tenant, id) {
@@ -1379,10 +1381,10 @@ impl Intake {
                 }),
                 _ => None,
             };
-            return Task::ready(out);
+            return Some(Task::ready(out));
         }
         let (Some(session), Some(group)) = (link.session(), self.group.as_ref()) else {
-            return Task::Ready(None);
+            return None;
         };
         match group.read(&session, move |s| async move {
             let d = match s.document_drafts().get(id).await {
@@ -1413,8 +1415,8 @@ impl Intake {
             let fits = bytes.len() <= cap;
             Ok(Some(Box::new((d, fits.then_some(bytes)))))
         }) {
-            Ok(p) => Task::Pending(p),
-            Err(_) => Task::Ready(None),
+            Ok(p) => Some(Task::Pending(p)),
+            Err(_) => None,
         }
     }
 
@@ -1424,7 +1426,7 @@ impl Intake {
                 None => Some(ReadStep::Context(job, task)),
                 Some(Ok(ctx)) => {
                     self.drafts.context = Some(ctx);
-                    Some(ReadStep::Fetch(job, self.fetch(link, job.draft)))
+                    self.fetch(link, job.draft).map(|t| ReadStep::Fetch(job, t))
                 }
                 Some(Err(e)) => {
                     tracing::debug!(error = %e, "the vendors to read against could not be loaded");
