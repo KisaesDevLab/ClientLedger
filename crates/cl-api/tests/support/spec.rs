@@ -28,7 +28,9 @@ use sha2::{Digest, Sha256};
 /// since pin a88337e3 (engine PR #177) the A01 intake settings (U-93) are;
 /// since pin 38cf97eb (engine PRs #178, #179) the A03 document draft and
 /// vendor layout routes (U-92) and the document reading assist (U-92d) are.
-pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
+/// The A04 draft attach (U-95, engine PR #180) is client-declared until the
+/// pin has it.
+pub const OUTSIDE_SPEC: [(&str, &str); 9] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -38,6 +40,8 @@ pub const OUTSIDE_SPEC: [(&str, &str); 8] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
+    // A04 (U-95, engine PR #180): until the pin moves.
+    ("POST", "/api/v1/document-drafts/{id}/attach"),
 ];
 
 /// Lowercase hex of a SHA-256.
@@ -232,6 +236,12 @@ pub fn keyable_ap_operations(txt: &str) -> Vec<(String, String)> {
 /// `(METHOD, route)`, sorted.
 pub fn keyable_docs_operations(txt: &str) -> Vec<(String, String)> {
     rows_of_class(txt, "keyable-docs")
+}
+
+/// The `keyable-docs-attach` (`document-drafts-attach-v1`) rows of
+/// `operations.txt`: `(METHOD, route)`, sorted.
+pub fn keyable_docs_attach_operations(txt: &str) -> Vec<(String, String)> {
+    rows_of_class(txt, "keyable-docs-attach")
 }
 
 fn rows_of_class(txt: &str, class: &str) -> Vec<(String, String)> {

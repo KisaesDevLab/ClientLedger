@@ -23,6 +23,10 @@
 //!   closing-date password goes at the top level only (U-15). Posted
 //!   records that look like the same document refuse the convert with
 //!   [`DraftRefusal::PossibleDuplicate`] until the owner acknowledges them.
+//! - **Attach** ([`DocumentDrafts::attach`], A04, engine U-95,
+//!   `document-drafts-attach-v1`) files the draft's document on a record
+//!   that is already posted and closes the draft; nothing posts. Without
+//!   that capability it answers `Local(Unsupported)` and sends nothing.
 //! - Without `document-drafts-v1` nothing is sent and every call answers
 //!   `Local(Unsupported)` (S12: the desktop reads with its rules only).
 //! - Document data (references, totals, names, the reading) is owner data:
@@ -44,8 +48,9 @@ use crate::resources::attachments::{AttachmentId, uuid_id};
 use crate::resources::bank_postings::{BankPosting, BankPostingKind};
 use crate::resources::bills::BillDraft;
 use crate::resources::operations::{
-    DOCUMENT_DRAFT_CONVERT, DOCUMENT_DRAFT_DISCARD, DOCUMENT_DRAFT_DUPLICATES, DOCUMENT_DRAFT_GET,
-    DOCUMENT_DRAFT_PUT, DOCUMENT_DRAFTS_CREATE, DOCUMENT_DRAFTS_LIST, Operation,
+    DOCUMENT_DRAFT_ATTACH, DOCUMENT_DRAFT_CONVERT, DOCUMENT_DRAFT_DISCARD,
+    DOCUMENT_DRAFT_DUPLICATES, DOCUMENT_DRAFT_GET, DOCUMENT_DRAFT_PUT, DOCUMENT_DRAFTS_CREATE,
+    DOCUMENT_DRAFTS_LIST, Operation,
 };
 use crate::resources::posting::{PostingOptions, posting_body};
 use crate::resources::versioning::saved_unreadable;
@@ -454,6 +459,84 @@ pub const TEMPLATE_LIMIT: &str = "TEMPLATE_LIMIT";
 /// 409 on `DELETE /attachments/{id}` of a file a live draft reads
 /// (`Conflict { InUse }`, `details.draftId`): discard the draft first.
 pub const ATTACHMENT_IN_USE: &str = "ATTACHMENT_IN_USE";
+
+/// 422 on attach (U-95): the record is a type files can't be filed on, or
+/// an adjusting entry the user can't reach (`Validation`, this code).
+pub const TARGET_NOT_ATTACHABLE: &str = "TARGET_NOT_ATTACHABLE";
+/// 409 on attach (U-95): the record is void or a draft
+/// (`Conflict { Unspecified }`, this code, `details.status`).
+pub const TRANSACTION_NOT_POSTED: &str = "TRANSACTION_NOT_POSTED";
+/// 422 on attach (U-95): the draft's file was deleted (`Validation`, this
+/// code).
+pub const DOCUMENT_FILE_MISSING: &str = "DOCUMENT_FILE_MISSING";
+
+/// Why the engine refused an attach (U-95), read from the [`ApiError`] the
+/// call answered. Every U-95 refusal maps onto the ordinary errors (so the
+/// demo engine, which answers through [`crate::engine_refusal`], gives the
+/// same ones); this names them for the screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttachProblem {
+    /// [`DraftRefusal::Closed`]: converted, attached or discarded already
+    /// (`transaction` is the record it went to).
+    Closed {
+        /// The record it was posted as or attached to.
+        transaction: Option<TransactionId>,
+    },
+    /// `Conflict { Stale }`: the draft changed since it was read.
+    Stale,
+    /// `NotFound`: the draft or the record is gone, or is another
+    /// company's.
+    NotFound,
+    /// 422 [`TARGET_NOT_ATTACHABLE`].
+    NotAttachable,
+    /// 409 [`TRANSACTION_NOT_POSTED`]: void (or a draft record).
+    NotPosted,
+    /// 422 [`DOCUMENT_FILE_MISSING`]: the draft's file was deleted.
+    FileMissing,
+    /// [`DraftRefusal::NotADraftFile`]: the file is filed on another record.
+    FileOnAnotherRecord,
+    /// 409 [`ATTACHMENT_IN_USE`] (`Conflict { InUse }`): another live draft
+    /// reads the file.
+    FileInUse,
+    /// 403: the user may not change the draft's kind or the record.
+    Forbidden,
+}
+
+/// The [`AttachProblem`] an attach error stands for; `None` for errors
+/// that are not refusals of the attach itself (network, session, a busy
+/// key, an unknown outcome).
+#[must_use]
+pub fn attach_problem(e: &ApiError) -> Option<AttachProblem> {
+    use crate::errors::ConflictReason;
+    let code =
+        |c: Option<&crate::errors::ErrorCode>, want: &str| c.is_some_and(|c| c.as_str() == want);
+    Some(match e {
+        ApiError::DocumentDraft(DraftRefusal::Closed { transaction }) => AttachProblem::Closed {
+            transaction: *transaction,
+        },
+        ApiError::DocumentDraft(DraftRefusal::NotADraftFile) => AttachProblem::FileOnAnotherRecord,
+        ApiError::Conflict {
+            reason: ConflictReason::Stale,
+            ..
+        } => AttachProblem::Stale,
+        ApiError::Conflict {
+            reason: ConflictReason::InUse,
+            ..
+        } => AttachProblem::FileInUse,
+        ApiError::Conflict { code: c, .. } if code(c.as_ref(), TRANSACTION_NOT_POSTED) => {
+            AttachProblem::NotPosted
+        }
+        ApiError::Validation(v) if code(v.code(), TARGET_NOT_ATTACHABLE) => {
+            AttachProblem::NotAttachable
+        }
+        ApiError::Validation(v) if code(v.code(), DOCUMENT_FILE_MISSING) => {
+            AttachProblem::FileMissing
+        }
+        ApiError::NotFound { .. } => AttachProblem::NotFound,
+        ApiError::Forbidden { .. } => AttachProblem::Forbidden,
+        _ => return None,
+    })
+}
 
 /// The refusal an engine error body names, if any (`code`, `details`).
 pub(crate) fn refusal(status: u16, code: &str, details: Option<&Value>) -> Option<DraftRefusal> {
@@ -886,6 +969,80 @@ impl DocumentDrafts<'_> {
         let reply = self.0.send(&DOCUMENT_DRAFT_CONVERT, call, None).await?;
         converted_from(&reply.body).map_err(saved_unreadable)
     }
+
+    /// Files the draft's document on a record that is already posted
+    /// instead of posting a new one (U-95, Q-282): in one database
+    /// transaction the draft's file moves onto `transaction` and the draft
+    /// is closed as `Converted` into it (its kind unchanged). Nothing posts,
+    /// so no closing-date password is asked for. There is no undo (Q-A04e).
+    /// Keyed under `document-drafts-attach-v1`: a retry with the same key
+    /// after it committed gets the same answer.
+    ///
+    /// # Errors
+    /// Nothing is sent for `Local(Unsupported)` (no `document-drafts-v1` or
+    /// no `document-drafts-attach-v1`: an older engine has no attach, and a
+    /// plain link would let the draft post the same document again). From
+    /// the engine, read with [`attach_problem`]:
+    /// [`DraftRefusal::Closed`], `Conflict { Stale }`, `NotFound` (the
+    /// draft or the record is gone or another company's), `Validation`
+    /// [`TARGET_NOT_ATTACHABLE`] or [`DOCUMENT_FILE_MISSING`], `Conflict`
+    /// [`TRANSACTION_NOT_POSTED`], [`DraftRefusal::NotADraftFile`],
+    /// `Forbidden`; and any [`ApiError`] (`OutcomeUnknown { keyed }` after a
+    /// lost reply: retry with the same key). A 2xx whose answer can't be
+    /// read is `SavedUnreadable` (it was attached).
+    pub async fn attach(
+        &self,
+        id: DocumentDraftId,
+        transaction: TransactionId,
+        expected_updated_at: &str,
+        key: IdempotencyKey,
+    ) -> Result<AttachedDraft, ApiError> {
+        attach_supported(self.0)?;
+        let body = json_body(&json!({
+            "transactionId": transaction,
+            "expectedUpdatedAt": expected_updated_at,
+        }))?;
+        let mut call = at(&DOCUMENT_DRAFT_ATTACH, id).json_body(body);
+        call.idempotency_key = Some(key);
+        let reply = self.0.send(&DOCUMENT_DRAFT_ATTACH, call, None).await?;
+        attached_from(&reply.body).map_err(saved_unreadable)
+    }
+}
+
+/// An attached draft (`{draft, transaction}`, U-95).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttachedDraft {
+    /// The draft, now `Converted` into the record (`converted_type` is the
+    /// record's type: `aje` for an adjusting entry, whose files are stored
+    /// as `journal_entry`).
+    pub draft: DocumentDraft,
+    /// The record that now has the document.
+    pub transaction: TransactionId,
+}
+
+/// `Ok` with `document-drafts-v1` and `document-drafts-attach-v1`, else
+/// `Local(Unsupported)`.
+pub(crate) fn attach_supported(s: &Session) -> Result<(), ApiError> {
+    supported(s)?;
+    if s.client()
+        .capabilities()
+        .has(Capabilities::DOCUMENT_DRAFTS_ATTACH)
+    {
+        Ok(())
+    } else {
+        Err(ApiError::Local(LocalValidation::Unsupported))
+    }
+}
+
+/// Reads an attach answer `{draft, transaction}`.
+pub(crate) fn attached_from(body: &[u8]) -> Result<AttachedDraft, ApiError> {
+    let c = converted_from(body).map_err(|_| ApiError::Decode {
+        what: "attached draft",
+    })?;
+    Ok(AttachedDraft {
+        draft: c.draft,
+        transaction: c.transaction,
+    })
 }
 
 /// Reads a convert answer `{draft, transaction, draftMatches}`.

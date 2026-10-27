@@ -197,5 +197,6 @@
   {"method":"GET","path":"/api/v1/vendor-layout-templates","inSpec":true,"fragmentHash":"a65ff447b7076b24d0ae970df964f8c4961a34c1921ebf755514eebdc48d8774"},
   {"method":"PUT","path":"/api/v1/vendor-layout-templates","inSpec":true,"fragmentHash":"5ff85ec42f88489844ea0a425e440d8fe3d2148276555e3100d0bceddc9fc344"},
   {"method":"DELETE","path":"/api/v1/vendor-layout-templates/{id}","inSpec":true,"fragmentHash":"dcf151b7a5a5af7c6c5b07a5066d382fc35f3cb7e5501dbe08c6eaa7b8408ab8"},
-  {"method":"POST","path":"/api/v1/document-reading/assist","inSpec":true,"fragmentHash":"c5ca5e1c71e9d277973bb8bc12afaea3fcc95088afa9b40694016b69b07e2546"}
+  {"method":"POST","path":"/api/v1/document-reading/assist","inSpec":true,"fragmentHash":"c5ca5e1c71e9d277973bb8bc12afaea3fcc95088afa9b40694016b69b07e2546"},
+  {"method":"POST","path":"/api/v1/document-drafts/{id}/attach","inSpec":false,"fragmentHash":null}
 ]

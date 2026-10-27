@@ -264,6 +264,15 @@ impl Capabilities {
     /// `document_images_cloud` (off for every company).
     pub const DOCUMENT_ASSIST: &'static str = "document-assist-v1";
 
+    // ---- A04: attach a document draft (engine U-95)
+    /// U-95: `POST /document-drafts/{id}/attach` (file a live draft's
+    /// document on a posted transaction; keyed with `idempotency-docs-v1`'s
+    /// contract under this name), the live-draft file guard on every plain
+    /// draft-key relink with 409 `ATTACHMENT_IN_USE` on
+    /// `POST /attachments/{id}/link`, and `GET /transactions?amount=` (an
+    /// exact total).
+    pub const DOCUMENT_DRAFTS_ATTACH: &'static str = "document-drafts-attach-v1";
+
     /// True when the engine advertises `name`.
     #[must_use]
     pub fn has(&self, name: &str) -> bool {
