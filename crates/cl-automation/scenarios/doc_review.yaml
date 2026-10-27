@@ -1,0 +1,97 @@
+# Review Documents (A04 D6, plan §6 "Control channel") against
+# `clientledger --demo`. WP-F1's section: the queue itself. Opening the
+# receipt inbox lays the demo's synthetic intake folders out and claims each
+# arrival as a document draft (A04 WP-I); the queue lists them company-wide.
+# The rows here are not read yet ("Waiting to be read"); the read statuses
+# (Ready, Check these fields, Possible duplicate, Couldn't read), Accept
+# through the forms and the discard that moves the file are step 15's
+# sections (ui-verifier), which add read fixtures. Unit tests cover every
+# status and the discard on the demo engine (`doc_review/tests.rs`).
+#
+# Light and dark run in one app: nothing here changes the books or the
+# queue (Delete is answered "Keep it"), so both runs start alike. The second
+# run's arrivals are the same files, already claimed, so the queue keeps the
+# first run's four drafts. All files are synthetic.
+name: doc_review
+description: Review Documents queue - drafts claimed by the inbox, status in words, J/K selection, Delete asks and Keep it keeps, filter, the kind of each row, Home's count, 200%.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+
+  # --- Arrivals are claimed as drafts -------------------------------------------
+  - command: nav.receipt_inbox
+  - assert_state: {key: screen.screen, equals: receipt_inbox}
+  - wait: {ms: 17000}
+  - assert_state: {key: screen.drafts.on, equals: true}
+  - command: file.close_window
+
+  # --- 1. The queue: status in words, newest first -------------------------------
+  - command: vendors.review_documents
+  - assert_state: {key: screen.screen, equals: review_documents}
+  - assert_state: {key: queue.supported, equals: true}
+  - assert_state: {key: queue.total, equals: 4}
+  - assert_state: {key: queue.selected, equals: 0}
+  - assert_state: {key: queue.rows.0.status, equals: waiting}
+  - assert_state: {key: queue.rows.3.status, equals: waiting}
+  - assert_state: {key: queue.rows.0.selected, equals: true}
+  - assert_state: {key: queue.reading, equals: null}
+  - assert_exists: {label: 4 documents waiting}
+  - assert_exists: {role: button, label_contains: "document 1 of 4, Waiting to be read"}
+  - assert_exists: {role: button, label: Read all}
+  - assert_exists: {role: text_input, label: Filter}
+  - assert_exists: {label_contains: J and K move through the list.}
+  - screenshot: queue
+
+  # --- 2. J/K move; the ends hold -------------------------------------------------
+  - key: J
+  - assert_state: {key: queue.selected, equals: 1}
+  - key: J
+  - key: J
+  - key: J
+  - assert_state: {key: queue.selected, equals: 3}
+  - key: K
+  - assert_state: {key: queue.selected, equals: 2}
+  - assert_state: {key: queue.rows.2.selected, equals: true}
+  - screenshot: queue-selected
+
+  # --- 3. Delete asks; Keep it keeps ---------------------------------------------
+  - key: Delete
+  - assert_state: {key: queue.confirm_discard, equals: true}
+  - assert_exists: {label_contains: Discard this document?}
+  - assert_exists: {role: button, label: Discard}
+  - screenshot: queue-discard-ask
+  - click: {role: button, label: Keep it}
+  - assert_state: {key: queue.confirm_discard, equals: false}
+  - assert_state: {key: queue.total, equals: 4}
+  - assert_state: {key: queue.selected, equals: 2}
+
+  # --- 4. The filter: j and k are typed, not moves (T18) ------------------------
+  - click: {role: text_input, label: Filter}
+  - type: {text: jk}
+  - assert_state: {key: queue.filtered, equals: true}
+  - assert_state: {key: queue.rows, equals: []}
+  - assert_exists: {label: No documents match the filter.}
+  - key: Ctrl+A
+  - type: {text: waiting}
+  - assert_state: {key: queue.selected, equals: 0}
+  - key: Ctrl+A
+  - key: Backspace
+  - assert_state: {key: queue.filtered, equals: false}
+  - assert_state: {key: queue.total, equals: 4}
+
+  # --- 6. Home's Needs attention counts them -------------------------------------
+  - click: {role: tab, label: Home}
+  - click: {role: button, label: Refresh}
+  - wait: {ms: 500}
+  - assert_exists: {label_contains: 4 documents to review}
+  - screenshot: home-documents
+
+  # --- 200% ----------------------------------------------------------------------
+  - click: {role: tab, label: Review Documents}
+  - set_zoom: {percent: 200}
+  - screenshot: queue-z200
+  - set_zoom: {percent: 100}
+
+  # --- Close ---------------------------------------------------------------------
+  - command: file.close_window
+  - click: {role: tab, label: Home}
