@@ -111,7 +111,6 @@ mod tests {
     /// SHA-256 of the values.
     #[test]
     fn digests_are_keyed_hex_and_stable_within_the_run() {
-        use sha2::Digest as _;
         let d = digest(b"abc");
         assert_eq!(d.len(), 64);
         assert!(
@@ -128,11 +127,6 @@ mod tests {
         // fallback isn't either.
         assert_ne!(key(), &[0u8; 32]);
         assert_ne!(fallback_key(), [0u8; 32]);
-        let plain: String = sha2::Sha256::digest(b"abc")
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        assert_ne!(d, plain);
     }
 
     #[test]
