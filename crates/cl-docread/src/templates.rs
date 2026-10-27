@@ -24,6 +24,40 @@ use crate::model::{
 };
 use cl_core::{CalendarDate, Money};
 
+/// Engine layout keys of vendor **statement** layouts start with this
+/// (A06 decision e, Q-299). Bill reads never get a statement layout and
+/// statement reads get only statement layouts: the two sets are kept
+/// apart by the key, with no engine change.
+pub const STATEMENT_KEY_PREFIX: &str = "stmt:";
+
+/// Whether an engine layout key is a statement layout's.
+#[must_use]
+pub fn is_statement_key(key: &str) -> bool {
+    key.starts_with(STATEMENT_KEY_PREFIX)
+}
+
+/// The statement layout key for a layout key (idempotent).
+#[must_use]
+pub fn statement_key(key: &str) -> String {
+    if is_statement_key(key) {
+        key.to_string()
+    } else {
+        format!("{STATEMENT_KEY_PREFIX}{key}")
+    }
+}
+
+/// The layouts a job may use: statement layouts for a statement job,
+/// the others for any other job. `layouts` pairs each layout with its
+/// engine key.
+#[must_use]
+pub fn for_job<T: Clone>(layouts: &[(String, T)], statement: bool) -> Vec<T> {
+    layouts
+        .iter()
+        .filter(|(key, _)| is_statement_key(key) == statement)
+        .map(|(_, t)| t.clone())
+        .collect()
+}
+
 /// Jaccard similarity at which a template applies, in basis points.
 pub const MATCH_BP: u16 = 6_000;
 /// Fingerprint words come from above this line of page 1 (35 %).
@@ -628,6 +662,20 @@ pub fn merge(saved: &Template, sample: &Template) -> Template {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn statement_layouts_are_kept_apart_by_key() {
+        assert_eq!(statement_key("l1:ab12"), "stmt:l1:ab12");
+        assert_eq!(statement_key("stmt:l1:ab12"), "stmt:l1:ab12");
+        assert!(is_statement_key("stmt:l1:ab12") && !is_statement_key("l1:ab12"));
+        let all = vec![
+            ("l1:aa".to_string(), 1),
+            ("stmt:l1:bb".to_string(), 2),
+            ("l1:cc".to_string(), 3),
+        ];
+        assert_eq!(for_job(&all, false), [1, 3]);
+        assert_eq!(for_job(&all, true), [2]);
+    }
     use crate::pipeline::testdoc::{Doc, invoice};
     use crate::pipeline::{ReadInput, read};
     use crate::protocol::JobHint;

@@ -25,6 +25,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.intake.kind.bills", "Bills"),
     ("prefs.intake.kind.receipts", "Receipts"),
     ("prefs.intake.kind.auto", "Let ClientLedger decide"),
+    ("prefs.intake.kind.statements", "Vendor statements"),
     ("prefs.intake.kind.tip", "What new files in this folder become unless you pick otherwise"),
     ("prefs.intake.add", "Add folder"),
     ("prefs.intake.add.name", "Name"),

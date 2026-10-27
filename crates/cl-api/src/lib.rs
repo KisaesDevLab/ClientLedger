@@ -100,7 +100,7 @@ pub use resources::register::{
 pub use resources::reports::{
     AccountReport, AccountReportLine, ApAgingSummary, ApAgingVendor, BalanceSheet,
     BalanceSheetEntry, CustomerBalanceRow, CustomerBalanceSummary, ProfitLoss, ReportDate, Reports,
-    TrialBalance, TrialBalanceRow,
+    TrialBalance, TrialBalanceRow, VendorStatementBalances,
 };
 pub use resources::sales::{BillLine, InvoiceLine, NewBill, NewInvoice, Posted};
 pub use resources::session_secrets::{
@@ -142,7 +142,7 @@ pub use resources::ai::{
 pub use resources::ap_void::ApVoids;
 pub use resources::attachments::{
     ATTACHMENT_MAX_BYTES, AttachTo, Attachment, AttachmentId, Attachments, DraftKey, FileKind,
-    check_file,
+    check_file, statement_file_name,
 };
 pub use resources::bills::{Bills, OpenBill, VendorSummary};
 

@@ -10,7 +10,7 @@ use crate::region;
 use crate::second_read;
 use cl_core::CalendarDate;
 use cl_docread::dates;
-use cl_docread::model::{Bbox, Confidence, MAX_PAGES, PageWords, Spot, Word, WordSource};
+use cl_docread::model::{Bbox, Confidence, PageWords, Spot, Word, WordSource};
 use cl_docread::ocr_geom;
 use cl_docread::pdf_text::MIN_TEXT_QUALITY_BP;
 use cl_docread::pipeline::region_reading;
@@ -84,11 +84,12 @@ pub fn batch_within_caps(jobs: &[Job]) -> bool {
         })
 }
 
-/// The pages a job reads: its region's page, or the first ten. `None`
+/// The pages a job reads: its region's page, or the first ten (twenty
+/// for a statement). `None`
 /// when the region's page is past the document's end.
 fn pages_to_read(job: &Job, count: u16) -> Option<std::ops::Range<u16>> {
     match job.region {
-        None => Some(0..count.min(MAX_PAGES)),
+        None => Some(0..count.min(job.hint.max_pages())),
         Some(r) if r.page < count => Some(r.page..r.page + 1),
         Some(_) => None,
     }
@@ -640,7 +641,10 @@ fn finish(ctx: &Ctx<'_>, job: &Job, count: u16, pages: &Pages) -> FromWorker {
         today: ctx.options.today,
     });
     second_read::add_checks(&mut reading, &pages.disagree);
-    if reading.validate(job.templates.len()).is_err() {
+    if reading
+        .validate(job.templates.len(), job.hint.statement)
+        .is_err()
+    {
         eprintln!("docread: outcome: reading over a limit");
         return failed(job.job, JobFailure::Unreadable);
     }
@@ -662,7 +666,7 @@ fn finish_region(ctx: &Ctx<'_>, job: &Job, count: u16, pages: &Pages, region: Sp
         return failed(job.job, reason);
     };
     let reading = region_reading(page, count, region.bbox);
-    if reading.validate(0).is_err() {
+    if reading.validate(0, false).is_err() {
         eprintln!("docread: outcome: reading over a limit");
         return failed(job.job, JobFailure::Unreadable);
     }
@@ -677,7 +681,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::test_pdf::{Page, build, text};
     use cl_core::CalendarDate;
-    use cl_docread::model::Reader;
+    use cl_docread::model::{MAX_PAGES, Reader};
     use cl_docread::protocol::{Bytes, JobHint, OcrMode, validate_pgm};
 
     /// A host stand-in: records frames, answers OCR with `answer`.

@@ -54,6 +54,37 @@ fn kinds_parse_and_pair() {
     assert!(!CreditOrPayment.compatible(Charge));
 }
 
+/// Only a charge or a credit can be created; a payment, or a negative line
+/// without its kind (typed, pasted or read alike), creates nothing.
+#[test]
+fn only_charges_and_credits_create() {
+    use crate::forms::bill::BillKind;
+    assert_eq!(Charge.creates(), Some(BillKind::Bill));
+    assert_eq!(Credit.creates(), Some(BillKind::Credit));
+    assert_eq!(Payment.creates(), None);
+    assert_eq!(CreditOrPayment.creates(), None);
+    let today = CalendarDate::from_ymd(2026, 11, 4).expect("date");
+    let pasted = parse_paste(
+        "10/15/2026\tPMT-48129\t-1945.95\n10/16/2026\tCM-1\t-20.00\tcredit\n",
+        DateOrder::Mdy,
+        today,
+    );
+    let read = super::rows_from_read(&[super::ReadLine {
+        date: CalendarDate::from_ymd(2026, 10, 15).expect("date"),
+        reference: "PMT-48129".into(),
+        amount: Money::parse_wire("-1945.95").expect("money"),
+        column: super::LineColumn::Single,
+        unsure: false,
+    }]);
+    let read = super::read::read_back(&read, today);
+    assert_eq!(
+        pasted.rows[0].entry, read.rows[0].entry,
+        "pasted and read alike"
+    );
+    assert_eq!(read.rows[0].entry.kind.creates(), None);
+    assert_eq!(pasted.rows[1].entry.kind.creates(), Some(BillKind::Credit));
+}
+
 #[test]
 fn parse_paste_tabs_commas_quotes_and_bad_rows() {
     let text = "Date,Ref,Amount\n\

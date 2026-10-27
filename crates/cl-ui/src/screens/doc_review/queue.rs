@@ -91,6 +91,7 @@ pub const fn doc_kind(k: DraftKind) -> DocKind {
         DraftKind::Check => DocKind::Check,
         DraftKind::CashExpense => DocKind::CashExpense,
         DraftKind::Unknown => DocKind::Unknown,
+        DraftKind::Statement => DocKind::Statement,
     }
 }
 

@@ -23,6 +23,10 @@ pub enum IntakeKind {
     Receipts,
     /// Let the document reader decide per file (`"auto"`).
     Auto,
+    /// Vendor statements (`"statements"`, A06, Q-A06f): files open in Match
+    /// Vendor Statement instead of becoming bill drafts. Offered only when
+    /// the engine advertises `document-drafts-statement-v1` (U-94).
+    Statements,
 }
 
 /// One intake folder, as stored in the engine.
@@ -84,6 +88,7 @@ mod tests {
             (IntakeKind::Bills, "bills"),
             (IntakeKind::Receipts, "receipts"),
             (IntakeKind::Auto, "auto"),
+            (IntakeKind::Statements, "statements"),
         ] {
             assert_eq!(serde_json::to_value(kind).unwrap(), json!(s));
             assert_eq!(

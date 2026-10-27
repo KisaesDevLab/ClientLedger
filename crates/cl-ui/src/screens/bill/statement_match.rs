@@ -68,6 +68,8 @@ const MAX_PAGES: u32 = 20;
 const PAYMENT_PAGE: u16 = 100;
 const PAYMENT_PAGES: u32 = 10;
 
+mod read;
+
 /// The statement match window for `kind`, if it is one.
 #[must_use]
 pub fn make(
@@ -294,6 +296,30 @@ fn demo_books(start: CalendarDate, end: CalendarDate) -> Books {
     books
 }
 
+/// The demo engine's vendor statement report (the stand-in for
+/// `/reports/vendor-statement`): the fixture's bills less its credits and
+/// payments, before `start` (opening) and through `end` (closing).
+#[must_use]
+pub(crate) fn demo_balances(
+    start: CalendarDate,
+    end: CalendarDate,
+) -> Option<cl_api::VendorStatementBalances> {
+    let all = demo_books(CalendarDate::from_ymd(1900, 1, 1).ok()?, end);
+    let mut opening = Money::ZERO;
+    let mut closing = Money::ZERO;
+    for b in books_items(&all, true) {
+        let signed = match b.kind {
+            StatementKind::Charge => b.amount,
+            _ => b.amount.checked_neg().ok()?,
+        };
+        closing = closing.checked_add(signed).ok()?;
+        if b.date < start {
+            opening = opening.checked_add(signed).ok()?;
+        }
+    }
+    Some(cl_api::VendorStatementBalances { opening, closing })
+}
+
 /// The statement match window.
 pub struct StatementMatchScreen {
     link: Arc<CompanyLink>,
@@ -323,6 +349,11 @@ pub struct StatementMatchScreen {
     last_handoff: Option<BillKind>,
     /// Records opened from "In your books" (control channel).
     opened: u32,
+    /// The active vendors as the engine sent them (the reader matches the
+    /// statement's vendor against them).
+    contacts: Vec<Contact>,
+    /// A06: the statement document and its reading.
+    doc: read::StatementDoc,
 }
 
 impl StatementMatchScreen {
@@ -337,7 +368,6 @@ impl StatementMatchScreen {
         open: Option<(TenantId, String)>,
         today: CalendarDate,
     ) -> StatementMatchScreen {
-        let _ = open;
         let start = today.add_months(-1).unwrap_or(today).start_of_month();
         let group = link.group().and_then(Result::ok);
         let sub = link.bus().subscribe();
@@ -362,8 +392,12 @@ impl StatementMatchScreen {
             handoffs: 0,
             last_handoff: None,
             opened: 0,
+            contacts: Vec::new(),
+            doc: read::StatementDoc::default(),
         };
+        s.doc.tenant = open.map(|(t, _)| t);
         s.load_vendors();
+        s.load_statement_layouts();
         s
     }
 
@@ -408,6 +442,7 @@ impl StatementMatchScreen {
         self.handoffs = 0;
         self.last_handoff = None;
         self.opened = 0;
+        self.doc.reset();
     }
 
     fn credit_refs(&self) -> bool {
@@ -441,6 +476,10 @@ impl StatementMatchScreen {
         }
         if rows.is_empty() {
             self.problem = Some("statement.problem.no_lines");
+            return;
+        }
+        if self.doc.awaiting_accept(&self.text) {
+            self.problem = Some("statement.problem.accept_first");
             return;
         }
         self.start_read(Request {
@@ -478,6 +517,7 @@ impl StatementMatchScreen {
             self.vendors_task = None;
             match r {
                 Ok(contacts) => {
+                    self.contacts.clone_from(&contacts);
                     let mut v: Vec<(ContactId, String)> = contacts
                         .into_iter()
                         .filter(|c| {
@@ -503,10 +543,13 @@ impl StatementMatchScreen {
                 Ok(books) => {
                     let refs = self.credit_refs();
                     self.outcome = Some(outcome(request, &books, refs));
+                    self.keep_after_match();
+                    self.ask_balance();
                 }
                 Err(_) => self.books_failed = Some(request),
             }
         }
+        self.poll_statement();
         // A bill, credit or payment saved elsewhere: read the books again.
         let changes = self.link.bus().take(&mut self.sub);
         if let Some(o) = self.outcome.as_ref()
@@ -528,10 +571,9 @@ impl StatementMatchScreen {
         let Some(row) = o.request.rows.get(index) else {
             return;
         };
-        let kind = match row.entry.kind {
-            StatementKind::Charge => BillKind::Bill,
-            StatementKind::Credit | StatementKind::CreditOrPayment => BillKind::Credit,
-            StatementKind::Payment => return,
+        // A payment, or a line that may be one, is never entered here.
+        let Some(kind) = row.entry.kind.creates() else {
+            return;
         };
         let prefill = BillPrefill {
             kind,
@@ -617,6 +659,8 @@ impl StatementMatchScreen {
 
     fn input_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         form::card(ui, tokens, |ui| {
+            self.statement_file_ui(ui, tokens);
+            ui.add_space(4.0);
             let shown = self
                 .vendors
                 .iter()
@@ -673,7 +717,7 @@ impl StatementMatchScreen {
             .labelled_by(l.id);
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                let busy = self.reading.is_some();
+                let busy = self.reading.is_some() || self.doc.awaiting_accept(&self.text);
                 if ui
                     .add_enabled_ui(!busy, |ui| {
                         crate::widgets::primary_button(ui, &t("statement.match"))
@@ -813,26 +857,25 @@ impl StatementMatchScreen {
                         continue;
                     };
                     Self::line_cells(ui, tokens, row, style);
-                    let label = match row.entry.kind {
-                        StatementKind::Charge => Some("statement.create_bill"),
-                        StatementKind::Credit | StatementKind::CreditOrPayment => {
-                            Some("statement.create_credit")
+                    if let Some(k) = row.entry.kind.creates() {
+                        let k = match k {
+                            BillKind::Bill => "statement.create_bill",
+                            BillKind::Credit => "statement.create_credit",
+                        };
+                        if ui.button(t(k)).clicked() {
+                            create = Some(i);
                         }
-                        StatementKind::Payment => None,
-                    };
-                    match label {
-                        Some(k) => {
-                            if ui.button(t(k)).clicked() {
-                                create = Some(i);
-                            }
-                        }
-                        None => {
-                            ui.label(
-                                RichText::new(t("statement.payment_hint"))
-                                    .size(12.0)
-                                    .color(tokens.text_secondary),
-                            );
-                        }
+                    } else {
+                        let hint = if row.entry.kind == StatementKind::CreditOrPayment {
+                            "statement.credit_or_payment_hint"
+                        } else {
+                            "statement.payment_hint"
+                        };
+                        ui.label(
+                            RichText::new(t(hint))
+                                .size(12.0)
+                                .color(tokens.text_secondary),
+                        );
                     }
                     ui.end_row();
                 }
@@ -925,6 +968,28 @@ impl StatementMatchScreen {
         }
     }
 
+    /// The heading, the form, the read lines and the results; the
+    /// document pane above them, at most `pane_above` tall, when given.
+    fn body_ui(&mut self, ui: &mut Ui, tokens: &Tokens, pane_above: Option<f32>) {
+        ui.add_space(8.0);
+        form::heading(ui, tokens, &t("statement.heading"));
+        form::hint(ui, tokens, &t("statement.intro"));
+        ui.add_space(8.0);
+        if let Some(most) = pane_above {
+            self.statement_pane_ui(ui, tokens, read::PaneHeight::Above(most));
+            ui.add_space(6.0);
+        }
+        self.input_ui(ui, tokens);
+        ui.add_space(6.0);
+        self.read_lines_ui(ui, tokens);
+        ui.add_space(6.0);
+        self.problems_ui(ui, tokens);
+        ui.add_space(6.0);
+        self.after_match_ui(ui, tokens);
+        self.results_ui(ui, tokens);
+        ui.add_space(12.0);
+    }
+
     /// A books entry in a cell: its type, date and ref. no.
     fn books_text(b: &BooksItem) -> String {
         let mut s = format!(
@@ -945,23 +1010,36 @@ impl Screen for StatementMatchScreen {
         t(&format!("cmd.{KIND}"))
     }
 
+    /// The document pane sits beside the lines when there is room, so the
+    /// shell gives this screen the window's rectangle and it scrolls its
+    /// own parts (see `ui`).
+    fn fixed_layout(&self) -> bool {
+        true
+    }
+
     fn ui(&mut self, ui: &mut Ui) {
         self.money_style = crate::grid_env::shell_frame(ui.ctx()).money_style;
         self.poll();
-        if self.reading.is_some() || self.vendors_task.is_some() {
+        if self.reading.is_some() || self.vendors_task.is_some() || self.doc.busy() {
             ui.ctx().request_repaint();
         }
         let tokens = Tokens::of(ui.ctx());
-        ui.add_space(8.0);
-        form::heading(ui, &tokens, &t("statement.heading"));
-        form::hint(ui, &tokens, &t("statement.intro"));
-        ui.add_space(8.0);
-        self.input_ui(ui, &tokens);
-        ui.add_space(6.0);
-        self.problems_ui(ui, &tokens);
-        ui.add_space(6.0);
-        self.results_ui(ui, &tokens);
-        ui.add_space(12.0);
+        // The statement beside its lines (A06 acceptance): the page stays
+        // in view while the lines, their marks and Accept scroll beside
+        // it. Narrow, or popped out, it goes back above the form.
+        let docked =
+            self.doc.viewer.source().is_some() && !crate::windows::doc_viewer::is_popped(ui.ctx());
+        if docked && ui.available_width() >= read::SIDE_BY_SIDE {
+            self.split_ui(ui, &tokens);
+        } else {
+            // Above the form the pane is at most part of the window's
+            // height, so the form starts in view at any size and zoom.
+            let pane = (ui.available_height() * 0.6).max(160.0);
+            egui::ScrollArea::both()
+                .id_salt("statement/body")
+                .auto_shrink([false, false])
+                .show(ui, |ui| self.body_ui(ui, &tokens, Some(pane)));
+        }
     }
 
     fn state(&self) -> Value {
@@ -1008,7 +1086,59 @@ impl Screen for StatementMatchScreen {
                 BillKind::Credit => "credit",
             }),
             "opened": self.opened,
+            "statement": self.doc.state_json(&self.text, self.vendor),
+            "balance_shown": self.balance_line().is_some(),
         })
+    }
+
+    /// Form keys while read lines wait for the owner's Accept, so Alt+A
+    /// (`form.accept_read`) accepts them as on Enter Bill; window keys
+    /// otherwise, so the box's own edit keys stay the box's.
+    fn scope(&self) -> cl_model::Scope {
+        if self.doc.awaiting_accept(&self.text) {
+            cl_model::Scope::Form
+        } else {
+            cl_model::Scope::Window
+        }
+    }
+
+    fn command(&mut self, id: CommandId) -> bool {
+        match id.as_str() {
+            "form.accept_read" if self.doc.awaiting_accept(&self.text) => {
+                self.accept_read_lines();
+                true
+            }
+            // Esc never closes the window on a reading waiting for Accept.
+            "form.revert" => self.doc.read.is_some(),
+            _ => false,
+        }
+    }
+
+    fn document(&self) -> Option<crate::windows::doc_viewer::DocRef> {
+        self.doc
+            .viewer
+            .source()
+            .cloned()
+            .map(crate::windows::doc_viewer::DocRef::new)
+    }
+
+    fn compare(&self) -> Option<crate::widgets::compare::CompareView> {
+        self.doc.read.as_ref().map(|_| self.doc.compare.view())
+    }
+
+    fn on_viewer_event(&mut self, event: crate::widgets::compare::CompareEvent) {
+        self.on_statement_event(event);
+    }
+
+    /// A statement draft from Review Documents (U-94).
+    fn open_with(&mut self, payload: OpenPayload) -> bool {
+        match payload {
+            OpenPayload::StatementDraft(id) => {
+                self.open_statement_draft(id);
+                true
+            }
+            _ => false,
+        }
     }
 }
 
@@ -1183,7 +1313,9 @@ mod tests {
         let (_d, link) = link();
         let mut s = screen(&link);
         s.vendor = s.vendors.first().map(|v| v.0);
-        s.text = "10/03/2026,CM-1,-20.00\n10/04/2026,PMT 9,-33.00,payment\n".into();
+        s.text = "10/03/2026,CM-1,-20.00,credit\n10/04/2026,PMT 9,-33.00,payment\n\
+                  10/05/2026,PMT-48129,-44.00\n"
+            .into();
         s.run_match();
         s.poll();
         let missing = s
@@ -1193,10 +1325,15 @@ mod tests {
             .result
             .missing_in_books
             .clone();
-        assert_eq!(missing.len(), 2);
+        assert_eq!(missing.len(), 3);
         let _ = link.drain();
         s.create_from(missing[1]);
         assert!(link.drain().is_empty(), "payments are not created here");
+        s.create_from(missing[2]);
+        assert!(
+            link.drain().is_empty(),
+            "nor a negative line without its kind: it may be a payment"
+        );
         s.create_from(missing[0]);
         let events = link.drain();
         let Some(CompanyEvent::OpenWith(_, payload)) = events.first() else {
@@ -1297,9 +1434,8 @@ mod tests {
                         ..egui::RawInput::default()
                     };
                     let mut out = ctx.run_ui(input, |ui| {
-                        egui::CentralPanel::default().show(ui, |ui| {
-                            egui::ScrollArea::vertical().show(ui, |ui| s.ui(ui));
-                        });
+                        // As the shell draws a fixed-layout screen.
+                        egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
                     });
                     out.textures_delta.clear();
                     nodes.extend(

@@ -334,6 +334,7 @@ pub fn doc_kind(k: DraftKind) -> DocKind {
         DraftKind::Check => DocKind::Check,
         DraftKind::CashExpense => DocKind::CashExpense,
         DraftKind::Unknown => DocKind::Unknown,
+        DraftKind::Statement => DocKind::Statement,
     }
 }
 
@@ -441,6 +442,7 @@ fn model_kind(k: DraftKind) -> cl_docread::model::DocKind {
         DraftKind::CardCharge => M::CardCharge,
         DraftKind::Check => M::Check,
         DraftKind::CashExpense => M::CashExpense,
+        DraftKind::Statement => M::Statement,
         DraftKind::Unknown => M::Unknown,
     }
 }
@@ -1189,7 +1191,7 @@ impl DraftSession {
                         if let Some(service) = crate::reading::shared() {
                             self.words_job = Some(service.submit_cancellable(ReadRequest {
                                 bytes: file.bytes,
-                                hint: cl_docread::protocol::JobHint { kind: None },
+                                hint: cl_docread::protocol::JobHint::default(),
                                 today,
                                 vendors: Vec::new(),
                                 templates: Vec::new(),
@@ -1267,6 +1269,7 @@ impl DraftSession {
             bytes: file.bytes,
             hint: cl_docread::protocol::JobHint {
                 kind: Some(cl_core::intake::IntakeKind::Receipts),
+                statement: false,
             },
             today,
             vendors,
@@ -2020,7 +2023,7 @@ impl DraftSession {
             match (template, l.vendor) {
                 (Some(tpl), Some(vendor)) => {
                     self.learn.layout =
-                        learn::save_layout(&self.link, self.group.as_ref(), vendor, tpl);
+                        learn::save_layout(&self.link, self.group.as_ref(), vendor, tpl, false);
                     if self.learn.layout.is_none() {
                         self.learn.layout_outcome = Some(Learned::Failed);
                     }

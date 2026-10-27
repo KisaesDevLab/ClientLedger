@@ -144,6 +144,7 @@ mod tests {
             &s,
             JobHint {
                 kind: Some(IntakeKind::Bills),
+                statement: false,
             },
         );
         assert_eq!(bills, (DocKind::Bill, Confidence::saturating(9_000)));
@@ -152,6 +153,7 @@ mod tests {
             &s,
             JobHint {
                 kind: Some(IntakeKind::Receipts),
+                statement: false,
             },
         );
         assert_eq!(receipts.0, DocKind::Bill);

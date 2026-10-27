@@ -175,6 +175,43 @@ fn statuses_keys_and_refresh_on_the_demo() {
 /// Enter publishes the hand-off and opens the form's window; a draft of
 /// unknown kind asks first, with no default (Q-A04n).
 #[test]
+fn a_statement_opens_in_match_vendor_statement() {
+    let (_dir, link) = link();
+    let stmt = claim(&link, 9, DraftKind::Statement);
+    let mut s = screen(&link);
+    let ctx = egui::Context::default();
+    frame(&mut s, &ctx);
+    let _ = link.drain();
+    assert_eq!(s.queue.selected(), Some(stmt.id));
+    assert!(s.command(CommandId::new("queue.open")));
+    frame(&mut s, &ctx);
+    assert_eq!(s.state()["queue"]["choose_kind"], false, "no chooser");
+    let events = link.drain();
+    let [CompanyEvent::OpenWith(kind, payload)] = events.as_slice() else {
+        panic!("one OpenWith, {} events", events.len());
+    };
+    assert_eq!(kind.as_str(), crate::screens::bill::statement_match::KIND);
+    assert!(matches!(
+        payload.as_ref(),
+        crate::windows::OpenPayload::StatementDraft(id) if *id == stmt.id
+    ));
+    // The window reads the draft's file, and Save with the vendor moves it
+    // there after discarding the draft (the engine refuses to move a file a
+    // live draft reads).
+    let t = tenant(&link);
+    let mut m = crate::screens::bill::statement_match::StatementMatchScreen::new(
+        Arc::clone(&link),
+        Some((t, "Demo".into())),
+        today(),
+    );
+    m.poll();
+    assert!(m.open_with(crate::windows::OpenPayload::StatementDraft(stmt.id)));
+    m.poll();
+    assert_eq!(m.state()["statement"]["document"], true);
+    assert_eq!(m.state()["statement"]["draft"], true);
+}
+
+#[test]
 fn enter_hands_the_draft_to_its_form() {
     let (_dir, link) = link();
     let bill = claim(&link, 1, DraftKind::Bill);

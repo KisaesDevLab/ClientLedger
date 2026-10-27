@@ -200,6 +200,7 @@ pub fn kind_key(k: IntakeKind) -> &'static str {
         IntakeKind::Bills => "prefs.intake.kind.bills",
         IntakeKind::Receipts => "prefs.intake.kind.receipts",
         IntakeKind::Auto => "prefs.intake.kind.auto",
+        IntakeKind::Statements => "prefs.intake.kind.statements",
     }
 }
 
@@ -208,6 +209,7 @@ fn kind_word(k: IntakeKind) -> &'static str {
         IntakeKind::Bills => "bills",
         IntakeKind::Receipts => "receipts",
         IntakeKind::Auto => "auto",
+        IntakeKind::Statements => "statements",
     }
 }
 
@@ -298,6 +300,8 @@ pub struct IntakePanel {
     other_keys: BTreeSet<String>,
     /// The Add row's Browse window, while open (WP-D, Q-A01m).
     browsing: Option<Receiver<Option<PathBuf>>>,
+    /// Folders may be of the kind Vendor statements (A06, U-94).
+    pub statements: bool,
 }
 
 impl std::fmt::Debug for IntakePanel {
@@ -326,6 +330,7 @@ impl Default for IntakePanel {
             stale: false,
             other_keys: BTreeSet::new(),
             browsing: None,
+            statements: false,
         }
     }
 }
@@ -369,6 +374,7 @@ impl IntakePanel {
             })
             .filter(|k| !k.is_empty())
             .collect();
+        self.statements = source::statements_supported(link);
         if !source::supported(link) {
             self.load = LoadState::NeedsEngine;
             return None;
@@ -954,13 +960,29 @@ pub struct View<'a> {
 
 /// The Kind picker. `of`: the folder it belongs to, named in its accessible
 /// label so a screen reader tells the rows apart (`None`: the Add row).
-fn kind_combo(ui: &mut Ui, salt: egui::IdSalt, kind: &mut IntakeKind, of: Option<&str>) {
+/// Vendor statements is offered when `statements` (the engine keeps
+/// statement drafts) or when the folder already is one.
+fn kind_combo(
+    ui: &mut Ui,
+    salt: egui::IdSalt,
+    kind: &mut IntakeKind,
+    of: Option<&str>,
+    statements: bool,
+) {
+    let offer_statements = statements || *kind == IntakeKind::Statements;
     let l = ui.add(egui::Label::new(t("prefs.intake.col.kind")).selectable(false));
     let r = egui::ComboBox::from_id_salt(salt)
         .selected_text(t(kind_key(*kind)))
         .show_ui(ui, |ui| {
             for k in [IntakeKind::Bills, IntakeKind::Receipts, IntakeKind::Auto] {
                 ui.selectable_value(kind, k, t(kind_key(k)));
+            }
+            if offer_statements {
+                ui.selectable_value(
+                    kind,
+                    IntakeKind::Statements,
+                    t(kind_key(IntakeKind::Statements)),
+                );
             }
         })
         .response
@@ -1201,6 +1223,7 @@ fn folder_rows(
     if !editable {
         return;
     }
+    let statements = panel.statements;
     let ids: Vec<IntakeFolderId> = edits.folders.iter().map(|f| f.id).collect();
     for id in ids {
         ui.add_space(8.0);
@@ -1248,6 +1271,7 @@ fn folder_rows(
                     egui::IdSalt::new(("prefs-intake-kind", id)),
                     &mut fm.default_kind,
                     Some(&name),
+                    statements,
                 );
             });
             named_checkbox(
@@ -1367,6 +1391,7 @@ fn add_row(
             egui::IdSalt::new("prefs-intake-add-kind"),
             &mut kind,
             None,
+            panel.statements,
         );
     });
     row.kind = Some(kind);

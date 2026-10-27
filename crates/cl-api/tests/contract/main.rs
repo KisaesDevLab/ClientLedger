@@ -648,6 +648,10 @@ fn main() -> std::process::ExitCode {
             contract_bills::vendor_summary_moves_by_the_total_live,
         ),
         (
+            "bills::vendor_statement_balance_and_kept_file_live",
+            contract_bills::vendor_statement_balance_and_kept_file_live,
+        ),
+        (
             "bills::void_refused_when_paid_live",
             contract_bills::void_refused_when_paid_live,
         ),

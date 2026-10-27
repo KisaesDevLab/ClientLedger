@@ -54,6 +54,19 @@ pub fn supported(link: &CompanyLink) -> bool {
     }
 }
 
+/// Whether folders may be of the kind Vendor statements (A06, Q-A06f):
+/// the engine keeps statement drafts (`document-drafts-statement-v1`,
+/// U-94). The demo can, unless a test turned it off.
+#[must_use]
+pub fn statements_supported(link: &CompanyLink) -> bool {
+    match link.demo_state() {
+        Some(demo) => !demo.intake.no_statements,
+        None => link
+            .capabilities()
+            .has(cl_api::Capabilities::DOCUMENT_DRAFTS_STATEMENT),
+    }
+}
+
 /// The engine's folders (`GET /company/intake-settings`).
 ///
 /// # Errors

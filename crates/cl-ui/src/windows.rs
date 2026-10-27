@@ -142,6 +142,9 @@ pub enum OpenPayload {
     /// (`screens::doc_review::review::open`; Enter Bill, Record Card
     /// Charge, Write Check).
     DocumentDraft(crate::screens::doc_review::review::DraftOpen),
+    /// A06: a statement draft (U-94) opened in Match Vendor Statement
+    /// (`nav.statement_match`), its file read there.
+    StatementDraft(cl_api::DocumentDraftId),
 }
 
 /// Stand-in for a screen a later phase builds.

@@ -104,7 +104,7 @@ fn words_and_unread_pages_are_carried_through() {
             CheckCode::LinesNotRead
         ]
     );
-    r.validate(0).unwrap();
+    r.validate(0, false).unwrap();
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn reads_an_invoice_end_to_end() {
     assert!(r.fingerprint.is_some());
     assert_eq!(r.template, None);
     every_amount_is_printed(&r).unwrap();
-    r.validate(0).unwrap();
+    r.validate(0, false).unwrap();
 }
 
 #[test]
@@ -167,7 +167,7 @@ fn a_saved_template_is_applied_and_named() {
         Money::parse_wire("5.41").unwrap()
     );
     assert!(r.checks.is_empty(), "{:?}", r.checks);
-    r.validate(ts.len()).unwrap();
+    r.validate(ts.len(), false).unwrap();
 }
 
 #[test]
@@ -195,7 +195,7 @@ fn checks_are_capped() {
     let r = read(&input(&pages, &[]));
     assert_eq!(r.lines.len(), 240);
     assert_eq!(r.checks.len(), crate::model::MAX_CHECKS);
-    r.validate(0).unwrap();
+    r.validate(0, false).unwrap();
 }
 #[test]
 fn hint_and_kind_unclear() {
@@ -286,7 +286,7 @@ proptest! {
             r.checks.iter().any(|c| c.code == CheckCode::LinesVsSubtotal),
             sub_delta != 0
         );
-        prop_assert!(r.validate(templates.len()).is_ok());
+        prop_assert!(r.validate(templates.len(), false).is_ok());
 
         // The same totals left empty by the rules and filled by an AI
         // reader from the page: reconciled again, flagged the same way
@@ -334,7 +334,7 @@ fn a_region_reading_holds_only_the_boxs_words() {
     assert_eq!(texts, ["544.82"]);
     assert_eq!(r.page_count, 2);
     assert_eq!(r.pages[0].words, 1);
-    r.validate(0).unwrap();
+    r.validate(0, false).unwrap();
     assert!(is_region_reading(&r, region));
     // Anything more than words is not a region answer.
     let mut more = r.clone();

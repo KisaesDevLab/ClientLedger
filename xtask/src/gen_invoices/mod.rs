@@ -29,6 +29,7 @@ mod pdf;
 mod render;
 mod rng;
 mod scan;
+mod statements;
 mod values;
 
 use anyhow::{Context, Result, bail};
@@ -50,6 +51,7 @@ struct Options {
     scans: bool,
     samples: bool,
     stress_only: bool,
+    statements_only: bool,
     only: Option<Vec<String>>,
 }
 
@@ -60,6 +62,7 @@ fn parse(args: &[String]) -> Result<Options> {
         scans: true,
         samples: false,
         stress_only: false,
+        statements_only: false,
         only: None,
     };
     let mut it = args.iter();
@@ -69,6 +72,7 @@ fn parse(args: &[String]) -> Result<Options> {
             "--no-scans" => o.scans = false,
             "--samples" => o.samples = true,
             "--stress-only" => o.stress_only = true,
+            "--statements-only" => o.statements_only = true,
             "--out" => o.out = Some(PathBuf::from(it.next().context("--out needs a folder")?)),
             "--layouts" => {
                 o.only = Some(
@@ -80,7 +84,7 @@ fn parse(args: &[String]) -> Result<Options> {
                 );
             }
             other => bail!(
-                "unknown option `{other}`\nusage: cargo xtask gen-invoices [--holdout] [--no-scans] [--samples] [--stress-only] [--out DIR] [--layouts id,id]"
+                "unknown option `{other}`\nusage: cargo xtask gen-invoices [--holdout] [--no-scans] [--samples] [--stress-only] [--statements-only] [--out DIR] [--layouts id,id]"
             ),
         }
     }
@@ -122,7 +126,7 @@ pub fn gen_invoices(args: &[String]) -> Result<()> {
         })
         .copied()
         .collect();
-    if chosen.is_empty() {
+    if chosen.is_empty() && !o.statements_only {
         bail!("no layout matches");
     }
     let renderer = if o.scans {
@@ -139,12 +143,20 @@ pub fn gen_invoices(args: &[String]) -> Result<()> {
         println!("gen-invoices: {n} stress documents in {}", out.display());
         return Ok(());
     }
+    let seed = rng::Rng::new(SEED);
+    let (n, ids) = write_statements(&o, &out, &fonts, renderer.as_ref(), &seed)?;
+    println!(
+        "gen-invoices: {n} files for {} statement layouts",
+        ids.len()
+    );
+    if o.statements_only {
+        return Ok(());
+    }
     // A fresh set: an old held-out folder must not linger after a seen-only run.
     for part in ["seen", "holdout"] {
         let _ = std::fs::remove_dir_all(out.join(part));
     }
     std::fs::create_dir_all(&out)?;
-    let seed = rng::Rng::new(SEED);
     let written = std::sync::atomic::AtomicUsize::new(0);
     let errors = std::sync::Mutex::new(Vec::<String>::new());
     let next = std::sync::atomic::AtomicUsize::new(0);
@@ -427,6 +439,77 @@ fn write_stress(
         .context("encode the largest picture")?;
     std::fs::write(dir.join("picture-at-decode-cap.jpg"), buf)?;
     Ok(6)
+}
+
+/// Write the statement set (A06 step 5) into `<out>/statements/`; returns
+/// the files written and the layouts chosen.
+fn write_statements(
+    o: &Options,
+    out: &Path,
+    fonts: &fonts::Fonts,
+    renderer: Option<&scan::Renderer>,
+    seed: &rng::Rng,
+) -> Result<(usize, Vec<&'static str>)> {
+    let chosen: Vec<statements::Layout> = statements::all()
+        .into_iter()
+        .filter(|l| o.holdout || !l.holdout)
+        .filter(|l| {
+            o.only
+                .as_ref()
+                .is_none_or(|ids| ids.iter().any(|i| i == l.id))
+        })
+        .collect();
+    let dir = out.join("statements");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
+    let written = std::sync::atomic::AtomicUsize::new(0);
+    let errors = std::sync::Mutex::new(Vec::<String>::new());
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism()
+        .map_or(2, std::num::NonZero::get)
+        .clamp(1, 4);
+    std::thread::scope(|s| {
+        for _ in 0..threads {
+            s.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(l) = chosen.get(i) else { break };
+                    match statements::write_layout(l, out, fonts, renderer, seed) {
+                        Ok(n) => {
+                            written.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        Err(e) => errors
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .push(format!("{}: {e:#}", l.id)),
+                    }
+                }
+            });
+        }
+    });
+    let errors = errors
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !errors.is_empty() {
+        bail!("{}", errors.join("\n"));
+    }
+    let ids: Vec<&'static str> = chosen.iter().map(|l| l.id).collect();
+    std::fs::write(
+        dir.join("set.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema": 1,
+            "seed": format!("{SEED:#x}"),
+            "holdout": o.holdout,
+            "scans": o.scans,
+            "layouts": ids,
+        }))?,
+    )?;
+    Ok((written.into_inner(), ids))
+}
+
+/// How many statement layouts a full set (`--holdout`) has.
+pub fn statement_layout_count() -> usize {
+    statements::all().len()
 }
 
 #[cfg(test)]

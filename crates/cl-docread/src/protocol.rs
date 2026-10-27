@@ -42,8 +42,9 @@ use std::io::{Read, Write};
 
 /// Protocol version the worker announces in `Ready`; the host refuses any
 /// other (worker and host ship together). 3: `OcrMode::ReadBest` and
-/// `OcrMode::Word`. 4: `Job::region` (A04).
-pub const PROTOCOL_VERSION: u32 = 4;
+/// `OcrMode::Word`. 4: `Job::region` (A04). 5: statements (A06):
+/// `JobHint::statement`, `Reading::statement`, `DocKind::Statement`.
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// The smallest region side a re-read takes, in ten-thousandths of the
 /// page side (1 %; A04 D4).
@@ -67,8 +68,9 @@ pub const MAX_TO_WORKER_FRAME: usize = 64 * 1024 * 1024;
 pub const MAX_PGM_BYTES: usize = 32 * 1024 * 1024;
 /// Largest tesseract TSV the host passes back.
 pub const MAX_TSV_BYTES: usize = 4 * 1024 * 1024;
-/// Largest `JobDone` frame.
-pub const MAX_JOB_DONE_FRAME: usize = 4 * 1024 * 1024;
+/// Largest `JobDone` frame (a twenty-page statement with its words and
+/// up to 2,000 lines fits).
+pub const MAX_JOB_DONE_FRAME: usize = 8 * 1024 * 1024;
 /// Largest worker → host frame of any kind: a `NeedOcr` page in base64.
 pub const MAX_FROM_WORKER_FRAME: usize = MAX_PGM_BYTES / 3 * 4 + 64 * 1024;
 /// Largest OCR page: width.
@@ -121,6 +123,28 @@ impl<'de> Deserialize<'de> for Bytes {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct JobHint {
     pub kind: Option<IntakeKind>,
+    /// Read as a vendor statement (version 5, A06): up to
+    /// [`MAX_STATEMENT_PAGES`](crate::model::MAX_STATEMENT_PAGES) pages and
+    /// the reading's `statement` filled in.
+    #[serde(default)]
+    pub statement: bool,
+}
+
+impl JobHint {
+    /// A statement job's hint.
+    #[must_use]
+    pub const fn statement() -> JobHint {
+        JobHint {
+            kind: None,
+            statement: true,
+        }
+    }
+
+    /// Pages this job reads: twenty for a statement, ten otherwise.
+    #[must_use]
+    pub const fn max_pages(self) -> u16 {
+        crate::model::max_pages(self.statement)
+    }
 }
 
 /// One document to read.
@@ -495,6 +519,7 @@ mod tests {
                     bytes: Bytes(b"%PDF-1.7 secret".to_vec()),
                     hint: JobHint {
                         kind: Some(IntakeKind::Bills),
+                        statement: false,
                     },
                     templates: Vec::new(),
                     region: None,

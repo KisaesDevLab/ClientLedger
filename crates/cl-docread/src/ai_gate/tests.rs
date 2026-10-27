@@ -84,7 +84,7 @@ fn ai_amounts_fill_only_from_page_words() {
     assert_eq!(h.reference.as_ref().unwrap().value, "R-5521");
     assert_eq!(h.date.as_ref().unwrap().spot.bbox.top(), 1000);
     every_amount_is_printed(&out).unwrap();
-    out.validate(0).unwrap();
+    out.validate(0, false).unwrap();
 }
 
 #[test]
@@ -285,7 +285,7 @@ proptest! {
                 );
             }
         }
-        prop_assert!(out.validate(0).is_ok());
+        prop_assert!(out.validate(0, false).is_ok());
     }
 }
 

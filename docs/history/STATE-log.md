@@ -2,6 +2,20 @@
 
 Older STATE.md log entries, newest first. Read only when you need the history of a past phase; `STATE.md` keeps the current board and the last few entries.
 
+- 2026-10-26 — A01 (ADD-01) complete on `phase/A01-intake-folders`; PR with auto-merge. Shipped:
+  - Intake folders as a setting of each company, stored in the engine (U-93, engine PR #177, migration 0232, security-reviewed with 10 fixes) and carried by backups; transfer files drop them (`omitIntakeSettings` / `resetIntakeSettings`).
+  - Preferences › Document intake (owner-only until P29): add with **Browse…** or a typed path, rename, remove, Test, kind, "Leave originals where they are", auto-read stored for A03/A04; each computer confirms a folder before it is watched (never archived).
+  - Watching every 8 s, one thread per folder, never blocking the screen; local, mapped-drive, UNC and cloud-sync folders; links never followed (moves by hard link, reads refuse reparse points), cloud placeholders never read, 10 MB and HEIC rows, zero-byte files hidden.
+  - Arrival copies each file into attachments (local SHA-256 duplicates), the inbox lists all folders, New bill / Add to / Discard / Copy anyway; originals move to `Processed/YYYY-MM/` or `Discarded/`, never deleted; P17 `Filed/` untouched.
+  - Folder health on the inbox and Home; migration of the P17 single folder (kept until the new folder is confirmed); engines without U-93 keep the P17 inbox.
+  - Browse for attachments on Enter Bill and Write Check (`rfd`, MIT; xdg-portal on Linux, no GTK). Restore fix for real engine backups (c9f77a5).
+  Acceptance (addenda/ADD-01-document-intake.md A01):
+  - [x] A file saved into a mapped folder appears in that company's inbox within 15 s and is copied into attachments (live `intake_live` through the `Intake` service: ready 10.1 s, attachment 10.2 s). Mapped drive and UNC share covered by simulated-file-system tests; the manual check on a real share is pending the owner (follow-up 1).
+  - [x] Originals move to `Processed/` or `Discarded/` and are never deleted (`handled.rs` tests incl. swapped-in links; scenario).
+  - [x] Folders are per company, carried by backups and excluded from transfer files (live backup/restore in `intake_live`; contract `intake_settings` 7/7 incl. `omitIntakeSettings`).
+  - [x] The old single-folder setting migrates without losing or moving any file (migration golden; legacy fallback tests).
+  Reviews: fresh-eyes review (Discard could delete a saved record's attachment + 8 should-fix, all fixed), security review (2 Medium: link-swap on move and on read, + Lows, fixed), ui-verifier (2 must-fix + 6 should-fix, fixed). Scenarios intake_folders, receipt_inbox, home, preferences-ai, preferences-user, bill, write_check pass light and dark. Help: document-intake, receipt-inbox. Decisions Q-A01a–Q-A01r; ADD-01 open questions answered by the owner (Q-283–Q-286, Q-288, Q-289, Q-292, Q-293).
+  Agents: scout/opus, architect/opus, impl/opus (C0, WP-A, WP-B, WP-C, WP-D, WP-E, pin, fix pass), engine-impl/opus ×2, security-review/opus ×2, review/opus, ui-verifier/opus, docs-writer/sonnet.
 - 2026-10-25 — P17 complete on `phase/P17-enter-bill`; PR with auto-merge. Shipped:
   - Enter Bill / vendor credit (one form): terms with discount and due dates from the engine (owner overrides kept), expense and item lines (qty × cost exact), Customer / Job, Billable, tags, Bill received, prefill and the vendor's default account, attachments with preview, Prev/Next, void and delete with the closing-date password, the unknown-save rule (14th posting form) and keyed A/P routes (`idempotency-ap-v1`).
   - PDF and image viewer (PDFium via `pdfium-render`, fetched and checksum-pinned by `xtask pdfium-fetch`; worker thread, decode limits) and a full-size document tab.

@@ -52,6 +52,9 @@ pub enum DocKind {
     CashExpense,
     /// Not known: the owner chooses (Q-A04n).
     Unknown,
+    /// A vendor statement (A06, U-94): opens in Match Vendor Statement, never
+    /// converts, and is not one of the chooser's kinds.
+    Statement,
 }
 
 impl DocKind {
@@ -73,12 +76,14 @@ impl DocKind {
             DocKind::Check => "check",
             DocKind::CashExpense => "cash_expense",
             DocKind::Unknown => "unknown",
+            DocKind::Statement => "statement",
         }
     }
 
     /// The form a draft of this kind opens in; `None` for
     /// [`DocKind::Unknown`], which opens the "What is this document?"
-    /// chooser with no default (Q-A04n).
+    /// chooser with no default (Q-A04n), and for [`DocKind::Statement`],
+    /// which opens Match Vendor Statement instead (A06).
     #[must_use]
     pub const fn form(self) -> Option<DraftForm> {
         match self {
@@ -86,7 +91,7 @@ impl DocKind {
             DocKind::CardCharge => Some(DraftForm::CardCharge),
             DocKind::Check => Some(DraftForm::WriteCheck),
             DocKind::CashExpense => Some(DraftForm::CashExpense),
-            DocKind::Unknown => None,
+            DocKind::Unknown | DocKind::Statement => None,
         }
     }
 }

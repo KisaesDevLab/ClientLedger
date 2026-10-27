@@ -199,7 +199,7 @@ pub(crate) fn target_transaction(to: cl_api::AttachTo) -> Option<TransactionId> 
     use cl_api::AttachTo as A;
     match to {
         A::Expense(id) | A::Bill(id) | A::VendorCredit(id) | A::Txn(_, id) => Some(id),
-        A::Draft(_) => None,
+        A::Draft(_) | A::Contact(_) => None,
     }
 }
 
@@ -224,10 +224,13 @@ pub(crate) fn attach_problem_key(e: &cl_api::ApiError) -> &'static str {
 }
 
 /// The kind a folder's arrivals are claimed as: a bills folder's are
-/// bills; anything else is asked (Q-A04n).
+/// bills; a vendor statements folder's are statements (A06, U-94: the
+/// folder kind exists only with `document-drafts-statement-v1`); anything
+/// else is asked (Q-A04n).
 pub(crate) fn kind_hint(kind: Option<IntakeKind>) -> DraftKind {
     match kind {
         Some(IntakeKind::Bills) => DraftKind::Bill,
+        Some(IntakeKind::Statements) => DraftKind::Statement,
         _ => DraftKind::Unknown,
     }
 }
@@ -235,12 +238,14 @@ pub(crate) fn kind_hint(kind: Option<IntakeKind>) -> DraftKind {
 /// What the reader is told the document is.
 fn job_hint(kind: DraftKind, folder: Option<IntakeKind>) -> JobHint {
     JobHint {
+        statement: kind == DraftKind::Statement,
         kind: match kind {
             DraftKind::Bill => Some(IntakeKind::Bills),
             DraftKind::CardCharge | DraftKind::Check | DraftKind::CashExpense => {
                 Some(IntakeKind::Receipts)
             }
             DraftKind::Unknown => folder,
+            DraftKind::Statement => Some(IntakeKind::Statements),
         },
     }
 }
@@ -1398,6 +1403,7 @@ impl Intake {
                 context: ReadContext {
                     // A04 WP-F2: the layouts learned on accept.
                     layouts: demo.drafts.layouts.clone(),
+                    statement_layouts: demo.drafts.statement_layouts.clone(),
                     card_accounts: Some(card_accounts_of(&chart)),
                 },
             }));
@@ -1544,10 +1550,12 @@ impl Intake {
         };
         let service = self.drafts.reader.clone().or_else(crate::reading::shared)?;
         let ctx = self.drafts.context.clone()?;
-        let (vendors, templates) = with_layouts(ctx.vendors, &ctx.context.layouts);
+        let hint = job_hint(draft.kind, job.folder);
+        // A statement reads with the statement layouts only (review S2).
+        let (vendors, templates) = with_layouts(ctx.vendors, ctx.context.layouts_for(&hint));
         let request = ReadRequest {
             bytes: Arc::from(bytes),
-            hint: job_hint(draft.kind, job.folder),
+            hint,
             today: self.today.unwrap_or_else(crate::shell::today),
             vendors,
             templates,
@@ -1578,6 +1586,17 @@ impl Intake {
             ReadOutcome::Failed(f) if storable(*f) => None,
             ReadOutcome::Failed(_) => return None,
         };
+        // A reading the reader took for a statement goes as `unknown` to an
+        // engine without statement drafts, which would refuse the kind and
+        // lose the reading (review S6).
+        let statements =
+            crate::screens::preferences::intake_folders::source::statements_supported(link);
+        let reading = reading.map(|mut r| {
+            if r.kind == DraftKind::Statement && !statements {
+                r.kind = DraftKind::Unknown;
+            }
+            r
+        });
         let failure = match outcome {
             ReadOutcome::Failed(f) => f.class(),
             ReadOutcome::Read(_) => "",
