@@ -1,0 +1,129 @@
+# Review Documents, step 15's compare section (A04 AC2, D4, T14) against
+# `clientledger --demo`: click to fill. A form field takes the keyboard (its
+# box on the page is outlined), the owner moves along the page's words
+# (Alt+Left / Alt+Right) and fills the field from the word (Enter), docked
+# beside the form and popped out into its own window, with the keys sent to
+# whichever window has the document. The amount is read from the word as
+# printed, to the cent: 1,480.00 stays 1,480.00. Nothing is entered; the
+# form is left as it was found. The pointer-only parts (a click on a word, a
+# drag on a scan, a refused two-number pick) are covered by unit tests
+# (`widgets/compare`); the control channel has no pointer position on a page.
+#
+# Light and dark run in one app; both windows are closed at the end so the
+# next run lays its files out again. All files are synthetic.
+name: doc_compare
+description: Click to fill from the document's words - the amount keeps its exact cents, docked and popped out; the field's box is outlined and the check list opens.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+
+  - command: nav.receipt_inbox
+  - assert_state: {key: screen.screen, equals: receipt_inbox}
+  - wait: {ms: 17000}
+  - assert_state: {key: screen.drafts.on, equals: true}
+  - command: vendors.review_documents
+  - assert_state: {key: queue.total, equals: 5}
+  - key: J
+  - key: J
+  - key: J
+  - key: Enter
+  - assert_state: {key: screen.screen, equals: enter_bill, within_ms: 5000}
+  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
+  - click: {role: button, label: Read document}
+  - assert_state: {key: screen.read.local.outcome, equals: read, within_ms: 30000}
+  - assert_state: {key: screen.draft.words, equals: true, within_ms: 10000}
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "1,480.00"}
+  - click: {role: text_input, label: "Amount due ($)"}
+  - assert_state: {key: doc_viewer.highlight.armed, equals: amount_due}
+  - assert_state: {key: doc_viewer.highlight.focused, equals: amount_due}
+  - assert_state: {key: doc_viewer.highlight.on, equals: true}
+  - screenshot: compare-docked
+
+  # --- 1. Docked: change the amount, then fill it from the page's word -------------
+  - key: Ctrl+A
+  - type: {text: "1.00"}
+  - key: Tab
+  - click: {role: text_input, label: "Amount due ($)"}
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "1.00"}
+  - assert_state: {key: screen.draft.clicked, equals: 0}
+  # The keyboard goes to the document (F6); Alt+Left starts from its last word
+  # and walks back to the amount of the TOTAL line.
+  - key: F6
+  - key: Alt+Left
+  - key: Alt+Left
+  - key: Alt+Left
+  - key: Alt+Left
+  - key: Alt+Left
+  - key: Alt+Left
+  - key: Alt+Left
+  - key: Alt+Left
+  - key: Alt+Left
+  - key: Alt+Left
+  - key: Alt+Left
+  - key: Alt+Left
+  - assert_state: {key: doc_viewer.highlight.cursor, equals: 47}
+  - assert_state: {key: doc_viewer.highlight.armed, equals: amount_due}
+  - key: Enter
+  # Exact cents: the word on the page, as printed.
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "1,480.00"}
+  - assert_state: {key: screen.draft.clicked, equals: 1}
+  - assert_state: {key: doc_viewer.highlight.note, equals: null}
+  - screenshot: compare-docked-filled
+
+  # --- 2. A word that isn't an amount fills nothing ---------------------------------
+  # (the word before it is "TOTAL", a label, never an amount).
+  - click: {role: text_input, label: "Amount due ($)"}
+  - key: Ctrl+A
+  - type: {text: "2.00"}
+  - key: Tab
+  - click: {role: text_input, label: "Amount due ($)"}
+  - key: F6
+  - key: Alt+Left
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "2.00"}
+  - key: Enter
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "2.00"}
+  - assert_state: {key: doc_viewer.highlight.note, equals: not_one_amount}
+  - screenshot: compare-refused
+
+  # --- 3. Popped out: the same, with the keys sent to the document's own window ----
+  - click: {role: text_input, label: "Amount due ($)"}
+  - click: {role: button, label: Pop out}
+  - assert_exists: {role: button, label: Dock, viewport: doc_viewer}
+  - assert_state: {key: doc_viewer.highlight.armed, equals: amount_due}
+  - key: {key: F6, viewport: doc_viewer}
+  - key: {key: Alt+Left, viewport: doc_viewer}
+  - key: {key: Alt+Left, viewport: doc_viewer}
+  - key: {key: Alt+Left, viewport: doc_viewer}
+  - key: {key: Alt+Left, viewport: doc_viewer}
+  - key: {key: Alt+Left, viewport: doc_viewer}
+  - key: {key: Alt+Left, viewport: doc_viewer}
+  - key: {key: Alt+Left, viewport: doc_viewer}
+  - key: {key: Alt+Left, viewport: doc_viewer}
+  - key: {key: Alt+Left, viewport: doc_viewer}
+  - key: {key: Alt+Left, viewport: doc_viewer}
+  - key: {key: Alt+Left, viewport: doc_viewer}
+  - key: {key: Alt+Left, viewport: doc_viewer}
+  - assert_state: {key: doc_viewer.highlight.cursor, equals: 47}
+  - screenshot: {name: compare-popped, viewport: doc_viewer}
+  - key: {key: Enter, viewport: doc_viewer}
+  - assert_value: {target: {role: text_input, label: "Amount due ($)"}, equals: "1,480.00"}
+  - assert_state: {key: screen.draft.clicked, equals: 1}
+  - screenshot: compare-popped-filled
+  - command: view.toggle_doc_viewer
+  - assert_state: {key: doc_viewer.popped, equals: false}
+
+  # --- 4. The check list lists each field against the document -----------------
+  - click: {role: button, label: Check list}
+  - assert_state: {key: doc_viewer.highlight.checklist, equals: true}
+  - screenshot: compare-checklist
+  - click: {role: button, label: Check list}
+  - assert_state: {key: doc_viewer.highlight.checklist, equals: false}
+
+  # --- Leave the form as found, close both windows -----------------------------
+  - command: file.close_window
+  - click_if_present: {role: button, label: Discard changes}
+  - click: {role: tab, label: Review Documents}
+  - command: file.close_window
+  - click: {role: tab, label_contains: Receipt Inbox}
+  - command: file.close_window
+  - click: {role: tab, label: Home}

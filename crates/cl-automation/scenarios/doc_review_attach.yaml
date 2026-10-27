@@ -1,0 +1,98 @@
+# Review Documents, step 15's attach section (A04 AC3, D3) against
+# `clientledger --demo`: a receipt for a purchase the books already have is
+# attached to that record instead of entered a second time. The demo's
+# receipt (Ozark Feed & Seed, 756.30, 08/27/2026) matches its check 4401, so
+# the queue calls it a possible duplicate. Accept and Save open "Is this
+# already in your books?"; Enter never attaches (it is Cancel); only a pick
+# plus the confirmation does, and then no new record is entered.
+#
+# Light and dark run in one app: the receipt is attached to the check in
+# each run (the demo keeps the earlier run's file on it, which doesn't stop a
+# second one). Both windows are closed at the end so the next run lays its
+# files out again. All files are synthetic.
+name: doc_review_attach
+description: A receipt already in the register - possible duplicate, the match dialog, Enter never attaches, pick plus confirm attaches the document and enters nothing new.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+
+  - command: nav.receipt_inbox
+  - assert_state: {key: screen.screen, equals: receipt_inbox}
+  - wait: {ms: 17000}
+  - assert_state: {key: screen.drafts.on, equals: true}
+  - command: vendors.review_documents
+  - assert_state: {key: queue.total, equals: 5}
+
+  # --- 1. The list calls it a possible duplicate ---------------------------------
+  - click: {role: button, label: Read all}
+  - assert_state: {key: queue.rows.4.status, equals: possible_duplicate, within_ms: 60000}
+  - assert_state: {key: queue.reading, equals: null, within_ms: 60000}
+  - assert_exists: {role: button, label_contains: "document 5 of 5, Possible duplicate"}
+  - key: J
+  - key: J
+  - key: J
+  - key: J
+  - assert_state: {key: queue.selected, equals: 4}
+  - screenshot: possible-duplicate
+
+  # --- 2. Enter opens it; accept the values, choose the accounts -----------------
+  - key: Enter
+  - assert_state: {key: screen.screen, equals: enter_bill, within_ms: 5000}
+  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
+  - assert_state: {key: screen.has_vendor, equals: true}
+  - key: Alt+A
+  - assert_state: {key: screen.read.unaccepted, equals: 0}
+  - click: {label: "Account, line 1"}
+  - key: Ctrl+A
+  - type: {text: "5100"}
+  - key: Tab
+  - click: {label: "Account, line 2"}
+  - key: Ctrl+A
+  - type: {text: "5110"}
+  - key: Tab
+  - screenshot: receipt-open
+
+  # --- 3. Save asks first: the books already have it -----------------------------
+  - key: Alt+S
+  - assert_state: {key: screen.draft.attach.rows, equals: 1, within_ms: 5000}
+  - assert_state: {key: screen.draft.attach.attachable, equals: 1}
+  - assert_state: {key: screen.draft.attach.confirming, equals: false}
+  - assert_exists: {label: Is this already in your books?}
+  - screenshot: attach-dialog
+
+  # --- 4. Enter never attaches: it picks a row, or it is Cancel -------------------
+  - key: Enter
+  - assert_state: {key: screen.draft.posted, equals: null}
+  - assert_state: {key: screen.draft.attach.confirming, equals: false}
+  - assert_state: {key: screen.draft.attach.selected, equals: 0}
+  - assert_state: {key: screen.draft.work, equals: choosing}
+  - screenshot: attach-picked
+
+  # --- 5. Attach to selected asks again; Enter there is Cancel --------------------
+  - key: Alt+T
+  - assert_state: {key: screen.draft.attach.confirming, equals: true}
+  - assert_exists: {label_contains: "Attach this document to the"}
+  - assert_exists: {label_contains: "It won't be entered as a new one."}
+  - screenshot: attach-confirm
+  - key: Enter
+  - assert_state: {key: screen.draft.attach.confirming, equals: false}
+  - assert_state: {key: screen.draft.posted, equals: null}
+  - assert_state: {key: screen.draft.work, equals: choosing}
+
+  # --- 6. Pick plus confirm: the document goes on the check, nothing new ---------
+  - key: Alt+T
+  - assert_state: {key: screen.draft.attach.confirming, equals: true}
+  - click: {role: button, label: Attach, index: 1}
+  - assert_state: {key: screen.screen, equals: review_documents, within_ms: 5000}
+  - click: {role: button, label: Refresh}
+  - assert_state: {key: queue.total, equals: 4, within_ms: 5000}
+  # Nothing was entered: no convert ran, so no digest was made.
+  - assert_state: {key: review.posted_digest, equals: null}
+  - assert_state: {key: review.form_digest, equals: null}
+  - screenshot: attached
+
+  # --- Close both windows so the next run starts alike ---------------------------
+  - command: file.close_window
+  - click: {role: tab, label_contains: Receipt Inbox}
+  - command: file.close_window
+  - click: {role: tab, label: Home}
