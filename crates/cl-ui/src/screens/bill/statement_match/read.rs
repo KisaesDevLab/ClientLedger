@@ -52,7 +52,7 @@ use cl_docread::model::{
 use cl_docread::protocol::JobHint;
 use cl_docread::vendor_match::{self, VendorCandidate};
 use cl_model::rowkey::RowKey;
-use cl_model::statement_match::{LineColumn, ReadLine, ReadStatement, rows_from_read};
+use cl_model::statement_match::{LineColumn, PastedRow, ReadLine, ReadStatement, rows_from_read};
 use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
@@ -151,6 +151,12 @@ pub(crate) struct StatementDoc {
     pub last: Option<Box<LocalReading>>,
     /// The read lines in the box, with their marks.
     pub read: Option<ReadStatement>,
+    /// Each mark's line as the paste reader reads it back, by mark: read
+    /// once per reading, not every frame (review S7).
+    pub read_rows: Vec<Option<PastedRow>>,
+    /// What the compare targets were last published for (pending lines,
+    /// still as read): unchanged, they aren't built again.
+    pub published: Option<(usize, bool)>,
     /// The read lines' spots on the page, by read line.
     pub spots: Vec<Option<PageBox>>,
     /// The read line picked (its spot outlined).
@@ -229,6 +235,8 @@ impl Default for StatementDoc {
             learned: None,
             last: None,
             read: None,
+            read_rows: Vec::new(),
+            published: None,
             spots: Vec::new(),
             selected: None,
             problem: None,
@@ -289,6 +297,8 @@ impl StatementDoc {
         self.job = None;
         self.last = None;
         self.read = None;
+        self.read_rows.clear();
+        self.published = None;
         self.spots.clear();
         self.selected = None;
         self.problem = None;
@@ -445,6 +455,21 @@ pub(crate) fn read_lines(st: &StatementRead) -> Vec<ReadLine> {
                 || unsure(Some(&l.amount))
                 || unsure(l.reference.as_ref()),
         })
+        .collect()
+}
+
+/// Each mark's line read back as the paste reader reads it (by mark).
+fn read_rows_of(read: &ReadStatement, today: CalendarDate) -> Vec<Option<PastedRow>> {
+    let parsed = cl_model::statement_match::read::read_back(read, today);
+    let mut by_line: Vec<Option<PastedRow>> = vec![None; read.marks.len() + 1];
+    for r in parsed.rows {
+        if let Some(slot) = by_line.get_mut(r.line) {
+            *slot = Some(r);
+        }
+    }
+    read.marks
+        .iter()
+        .map(|m| by_line.get_mut(m.line).and_then(Option::take))
         .collect()
 }
 
@@ -699,6 +724,8 @@ impl StatementMatchScreen {
         self.parsed = None;
         self.outcome = None;
         self.problem = None;
+        self.doc.read_rows = read_rows_of(&read, self.today);
+        self.doc.published = None;
         self.doc.read = Some(read);
         self.doc.spots = st.lines.iter().map(line_box).collect();
         self.doc.closing = st.closing.as_ref().map(|c| c.value);
@@ -845,10 +872,14 @@ impl StatementMatchScreen {
             return;
         };
         let still = read.still_read(&self.text);
-        let mut targets = Vec::new();
-        let mut values = Vec::new();
-        let parsed = cl_model::statement_match::read::read_back(read, self.today);
-        for m in &read.marks {
+        let key = (read.pending(), still);
+        if self.doc.published == Some(key) {
+            return;
+        }
+        self.doc.published = Some(key);
+        let mut targets = Vec::with_capacity(read.marks.len());
+        let mut values = Vec::with_capacity(read.marks.len());
+        for (i, m) in read.marks.iter().enumerate() {
             let spot = self.doc.spots.get(m.source).copied().flatten();
             targets.push(CompareTarget {
                 key: TargetKey::line(LINE_TARGET, RowKey(m.source as u64 + 1)),
@@ -864,10 +895,10 @@ impl StatementMatchScreen {
                 fill: None,
             });
             values.push(
-                parsed
-                    .rows
-                    .iter()
-                    .find(|r| r.line == m.line)
+                self.doc
+                    .read_rows
+                    .get(i)
+                    .and_then(Option::as_ref)
                     .map(|r| {
                         format!(
                             "{} {} {}",
@@ -1363,7 +1394,6 @@ impl StatementMatchScreen {
             form::hint(ui, tokens, &t("statement.read.typed_over"));
             return;
         }
-        let parsed = cl_model::statement_match::read::read_back(&read, self.today);
         let mut accept_all = false;
         let mut accept = None;
         let mut select = None;
@@ -1419,7 +1449,7 @@ impl StatementMatchScreen {
                                 );
                             }
                             ui.end_row();
-                            for m in &read.marks {
+                            for (i, m) in read.marks.iter().enumerate() {
                                 let picked = self.doc.selected == Some(m.source);
                                 let n = m.line.to_string();
                                 let r = ui
@@ -1428,7 +1458,9 @@ impl StatementMatchScreen {
                                 if r.clicked() {
                                     select = Some(m.source);
                                 }
-                                if let Some(row) = parsed.rows.iter().find(|r| r.line == m.line) {
+                                if let Some(row) =
+                                    self.doc.read_rows.get(i).and_then(Option::as_ref)
+                                {
                                     Self::line_cells(ui, tokens, row, self.money_style);
                                 } else {
                                     ui.label("");
