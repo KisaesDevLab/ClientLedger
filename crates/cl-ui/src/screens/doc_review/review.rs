@@ -34,8 +34,9 @@
 //! # The control channel
 //!
 //! `state.review.form_digest` and `state.review.posted_digest` (plan §4
-//! N4): at Accept the form's checked values and the body sent are written
-//! as the same canonical text ([`Canon`]) and hashed with [`digest`]; a
+//! N4): at Accept the form's checked values and the request body as put
+//! on the wire are each written as the same canonical text ([`Canon`],
+//! two independent readings) and hashed with [`digest`]; a
 //! scenario checks they are equal (AC1: what the owner reviewed is what
 //! posted). The digest is an HMAC-SHA-256 under a random key made once per
 //! process (security review L6): a plain hash of a few values could be
@@ -54,13 +55,13 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use cl_api::{
-    ApiError, AttachmentId, BankPosting, BillDraft, CardChargeDraft, CheckDraft,
+    ApiError, AttachmentId, BankPosting, BillDraft, Capabilities, CardChargeDraft, CheckDraft,
     ClosedPeriodAuthorization, ConflictReason, ConvertBody, ConvertedDraft, DocumentDraft,
     DocumentDraftId, DraftConversion, DraftKind, DraftListQuery, DraftReader, DraftRefusal,
     DraftStatus, IdempotencyKey, LocalValidation, OrphanLabel, PostingOptions, RequestGroup,
 };
 use cl_core::ids::{AccountId, ContactId, TenantId, TransactionId};
-use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
+use cl_core::{CalendarDate, MoneyStyle, Secret};
 use cl_docread::card::card_account;
 use cl_docread::model::{Bbox, Confidence as Bp, Last4, Payment, Reader, Reading, Spot};
 use cl_docread::vendor_match::{VendorMatch, VendorTier};
@@ -91,6 +92,10 @@ use crate::windows::OpenPayload;
 #[cfg(test)]
 #[path = "review_tests.rs"]
 mod tests;
+
+#[path = "review_canon.rs"]
+mod canon;
+pub(crate) use canon::Canon;
 
 #[path = "review_kind_ai.rs"]
 mod kind_ai;
@@ -198,121 +203,6 @@ pub fn digests(ctx: &egui::Context) -> ReviewDigests {
         .unwrap_or_default()
 }
 
-// ============================================================ canonical
-
-/// One line of the canonical text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct CanonLine {
-    account: String,
-    amount: String,
-    memo: Option<String>,
-}
-
-/// The canonical text of what posts: the same fields from the form's
-/// checked values and from the body sent, so their [`digest`]s are equal
-/// exactly when the body carries what the owner reviewed (AC1). Money is
-/// the exact wire text; ids are their text. Never logged.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct Canon {
-    kind: &'static str,
-    date: String,
-    due: Option<String>,
-    payee: Option<String>,
-    paid_from: Option<String>,
-    reference: Option<String>,
-    number: Option<u32>,
-    total: String,
-    lines: Vec<CanonLine>,
-}
-
-impl Canon {
-    /// The canonical bytes.
-    #[must_use]
-    pub(crate) fn bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_default()
-    }
-
-    /// Its [`digest`].
-    #[must_use]
-    pub(crate) fn digest(&self) -> String {
-        digest(&self.bytes())
-    }
-
-    fn line(account: AccountId, amount: Money, memo: Option<&String>) -> CanonLine {
-        CanonLine {
-            account: account.to_string(),
-            amount: amount.to_wire(),
-            memo: memo.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
-        }
-    }
-
-    /// A checked bill (the form side).
-    #[must_use]
-    pub(crate) fn of_bill(c: &cl_model::forms::bill::CheckedBill) -> Canon {
-        let mut lines: Vec<CanonLine> = c
-            .expense_lines
-            .iter()
-            .map(|l| Canon::line(l.account, l.amount, l.memo.as_ref()))
-            .collect();
-        lines.extend(
-            c.item_lines
-                .iter()
-                .map(|l| Canon::line(l.account, l.amount, l.description.as_ref())),
-        );
-        Canon {
-            kind: "bill",
-            date: c.date.to_wire(),
-            due: c.due_date.map(CalendarDate::to_wire),
-            payee: Some(c.vendor.to_string()),
-            paid_from: None,
-            reference: c.reference.clone(),
-            number: None,
-            total: c.amount.to_wire(),
-            lines,
-        }
-    }
-
-    /// A checked card charge or cash expense (the form side).
-    #[must_use]
-    pub(crate) fn of_card(kind: DraftKind, c: &cl_model::forms::card::CheckedCard) -> Canon {
-        Canon {
-            kind: kind.as_str(),
-            date: c.date.to_wire(),
-            due: None,
-            payee: c.payee.map(|p| p.to_string()),
-            paid_from: Some(c.card.to_string()),
-            reference: c.ref_no.clone(),
-            number: None,
-            total: c.amount.to_wire(),
-            lines: c
-                .lines
-                .iter()
-                .map(|l| Canon::line(l.account, l.amount, l.memo.as_ref()))
-                .collect(),
-        }
-    }
-
-    /// A checked check (the form side).
-    #[must_use]
-    pub(crate) fn of_check(c: &cl_model::forms::check::CheckedCheck) -> Canon {
-        Canon {
-            kind: "check",
-            date: c.date.to_wire(),
-            due: None,
-            payee: Some(c.payee.to_string()),
-            paid_from: Some(c.bank.to_string()),
-            reference: None,
-            number: c.number,
-            total: c.amount.to_wire(),
-            lines: c
-                .lines
-                .iter()
-                .map(|l| Canon::line(l.account, l.amount, l.memo.as_ref()))
-                .collect(),
-        }
-    }
-}
-
 // ============================================================ post body
 
 /// What a draft is posted as: the form's own engine draft, built by its
@@ -373,56 +263,34 @@ impl PostBody {
             ),
         })
     }
+}
 
-    /// The canonical text of the body (the posted side of [`Canon`]).
-    #[must_use]
-    pub(crate) fn canon(&self) -> Canon {
-        let split = |l: &cl_api::SplitLine| Canon::line(l.account, l.amount, l.memo.as_ref());
-        match self {
-            PostBody::Bill(d) => Canon {
-                kind: "bill",
-                date: d.date.to_wire(),
-                due: d.due_date.map(CalendarDate::to_wire),
-                payee: Some(d.vendor.to_string()),
-                paid_from: None,
-                reference: d.vendor_invoice_number.clone(),
-                number: None,
-                total: d.amount_due.to_wire(),
-                lines: d
-                    .lines
-                    .iter()
-                    .map(|l| Canon::line(l.account, l.amount, l.description.as_ref()))
-                    .collect(),
-            },
-            PostBody::CardCharge(d) | PostBody::CashExpense(d) => Canon {
-                kind: self.kind().as_str(),
-                date: d.date.to_wire(),
-                due: None,
-                payee: d.payee.map(|p| p.to_string()),
-                paid_from: Some(d.pay_from.to_string()),
-                reference: d.number.clone(),
-                number: None,
-                // The posting's total is its lines' (the engine's own
-                // rule); the digest compares it with the form's checked
-                // amount, which `check()` made equal to the cent.
-                total: Money::sum(d.lines.iter().map(|l| l.amount))
-                    .map(Money::to_wire)
-                    .unwrap_or_default(),
-                lines: d.lines.iter().map(split).collect(),
-            },
-            PostBody::Check(d) => Canon {
-                kind: "check",
-                date: d.date.to_wire(),
-                due: None,
-                payee: d.payee.map(|p| p.to_string()),
-                paid_from: Some(d.bank.to_string()),
-                reference: None,
-                number: d.check_number,
-                total: d.amount.to_wire(),
-                lines: d.lines.iter().map(split).collect(),
-            },
-        }
-    }
+/// The posted side of AC1: [`Canon::of_wire`]'s digest of the `body` that
+/// `live` puts on the wire under `caps` (cl-api's own
+/// [`ConvertBody::wire_body`], the function `convert` sends); `None` when
+/// it can't be built (the digests then differ).
+fn posted_digest(kind: DraftKind, live: &ConvertBody, caps: &Capabilities) -> Option<String> {
+    let v = live.wire_body(caps).ok()?;
+    Canon::of_wire(kind, &v).map(|c| c.digest())
+}
+
+/// The capabilities a body is put on the wire with: the engine's, or what
+/// the demo engine takes for bills (lines, terms, received).
+fn wire_caps(link: &CompanyLink) -> Capabilities {
+    let Some(demo) = link.demo_state() else {
+        return link.capabilities();
+    };
+    let b = crate::company::demo::bills::caps(&demo);
+    drop(demo);
+    let names: Vec<&str> = [
+        (b.lines, Capabilities::BILL_LINES),
+        (b.terms, Capabilities::BILL_TERMS),
+        (b.received, Capabilities::BILL_RECEIVED),
+    ]
+    .into_iter()
+    .filter_map(|(on, name)| on.then_some(name))
+    .collect();
+    serde_json::from_value(json!(names)).unwrap_or_default()
 }
 
 // ============================================================ open hook
@@ -1510,10 +1378,17 @@ impl DraftSession {
             expected: expected.clone(),
             ack: ack.clone(),
         });
-        // What the owner reviewed and what is sent (AC1, N4).
+        // cl-api's body (its own checks run here: nothing is sent when
+        // they fail). What the owner reviewed and what goes on the wire
+        // (AC1, N4, review S2): the posted digest reads the request body
+        // itself. The demo engine takes the same drafts (`PostBody::demo`).
+        let live = a.body.live(a.billable);
         self.digests = Some(ReviewDigests {
             form_digest: Some(a.form_digest.clone()),
-            posted_digest: Some(a.body.canon().digest()),
+            posted_digest: live
+                .as_ref()
+                .ok()
+                .and_then(|b| posted_digest(a.body.kind(), b, &wire_caps(&self.link))),
         });
         let id = self.id;
         if self.link.is_demo() {
@@ -1540,7 +1415,7 @@ impl DraftSession {
             }
             return;
         }
-        let body = match a.body.live(a.billable) {
+        let body = match live {
             Ok(b) => b,
             Err(e) => {
                 self.events.push(DraftEvent::Failed {

@@ -47,6 +47,10 @@ pub mod vendor_panel;
 #[cfg(test)]
 mod tests;
 
+/// The bill's own builder, for the A04 review digest tests (form → body).
+#[cfg(test)]
+pub(crate) use save::{Draft as BillBody, to_draft as bill_body};
+
 use std::sync::Arc;
 
 use cl_api::{

@@ -1,7 +1,7 @@
 //! Tests of the draft session against the demo engine (A04 D2, D3, D5;
 //! T1, T2, T3, T11, T19).
 
-use cl_api::{AttachTo, DraftKey, SplitLine};
+use cl_api::{AttachTo, DraftKey};
 use cl_core::Money;
 use cl_docread::model::{Confidence as Bp2, Found, RuleId};
 
@@ -115,14 +115,18 @@ impl World {
         s
     }
 
-    fn accept(&self, amount: &str, date: CalendarDate, password: Option<&str>) -> Accept {
-        let body = CardChargeDraft {
-            pay_from: self.account("2050"),
-            date,
-            number: None,
+    /// The card form's checked values for `amount` on `date`.
+    fn checked(&self, amount: &str, date: CalendarDate) -> cl_model::forms::card::CheckedCard {
+        cl_model::forms::card::CheckedCard {
+            card: self.account("2050"),
+            mode: cl_model::forms::card::CardMode::Charge,
             payee: None,
+            date,
+            ref_no: None,
+            amount: money(amount),
             memo: None,
-            lines: vec![SplitLine {
+            header_tags: Vec::new(),
+            lines: vec![cl_model::forms::lines::PostingLine {
                 account: self.account("6210"),
                 amount: money(amount),
                 memo: None,
@@ -130,16 +134,34 @@ impl World {
                 billable: false,
                 tag: None,
             }],
-        };
-        let body = PostBody::CardCharge(body);
+        }
+    }
+
+    /// What the card form sends at Accept: the form-side digest of its
+    /// checked values and the body its own builder makes from them.
+    fn accept(&self, amount: &str, date: CalendarDate, password: Option<&str>) -> Accept {
+        let c = self.checked(amount, date);
+        Self::accept_with(
+            &c,
+            crate::screens::card_charge::CardChargeScreen::charge_draft(&c),
+            password,
+        )
+    }
+
+    fn accept_with(
+        c: &cl_model::forms::card::CheckedCard,
+        body: CardChargeDraft,
+        password: Option<&str>,
+    ) -> Accept {
+        let (amount, date) = (c.amount, c.date);
         Accept {
-            form_digest: body.canon().digest(),
-            body,
+            form_digest: Canon::of_card(DraftKind::CardCharge, c).digest(),
+            body: PostBody::CardCharge(body),
             billable: true,
             intent: SaveIntent::SaveAndClose,
             password: password.map(Secret::new),
             probe: MatchProbe {
-                amount: money(amount),
+                amount,
                 date,
                 payee: None,
                 contact: None,
@@ -606,68 +628,27 @@ fn save_and_new_finds_the_next_draft() {
     assert!(matches!(s2.dialog, Some(Dialog::Leave(_))), "dirty asks");
 }
 
+/// AC1, review S2: the posted digest reads the request body, not the
+/// form's values: a body that differs from what the form reviewed shows
+/// (here by a cent on the line; the form's own gate never lets this
+/// happen, the digest is the independent proof).
 #[test]
-fn the_canonical_text_is_the_same_from_the_form_and_the_body() {
+fn a_body_other_than_the_reviewed_one_shows_in_the_digests() {
     let w = World::new();
-    let c = cl_model::forms::card::CheckedCard {
-        card: w.account("2050"),
-        mode: cl_model::forms::card::CardMode::Charge,
-        payee: None,
-        date: day(14),
-        ref_no: None,
-        amount: money("12.50"),
-        memo: None,
-        header_tags: Vec::new(),
-        lines: vec![cl_model::forms::lines::PostingLine {
-            account: w.account("6210"),
-            amount: money("12.5"),
-            memo: None,
-            contact: None,
-            billable: false,
-            tag: None,
-        }],
-    };
-    let body = PostBody::CardCharge(CardChargeDraft {
-        pay_from: c.card,
-        date: c.date,
-        number: None,
-        payee: None,
-        memo: None,
-        lines: vec![SplitLine {
-            account: w.account("6210"),
-            amount: money("12.50"),
-            memo: None,
-            contact: None,
-            billable: false,
-            tag: None,
-        }],
-    });
-    assert_eq!(
-        Canon::of_card(DraftKind::CardCharge, &c).digest(),
-        body.canon().digest()
-    );
-    let other = PostBody::CardCharge(CardChargeDraft {
-        pay_from: c.card,
-        date: c.date,
-        number: None,
-        payee: None,
-        memo: None,
-        lines: vec![SplitLine {
-            account: w.account("6210"),
-            amount: money("12.51"),
-            memo: None,
-            contact: None,
-            billable: false,
-            tag: None,
-        }],
-    });
-    assert_ne!(
-        body.canon().digest(),
-        other.canon().digest(),
-        "a cent shows"
-    );
+    let id = w.draft("dg", "12.50", day(14));
+    let mut session = w.session(id);
+    let checked = w.checked("12.50", day(14));
+    let mut body = crate::screens::card_charge::CardChargeScreen::charge_draft(&checked);
+    body.lines[0].amount = money("12.51");
+    let mut accept = World::accept_with(&checked, body, None);
+    accept.probe.amount = money("12.51");
+    assert!(session.accept(accept));
+    let _ = tick(&w, &mut session);
+    let got = digests(&w.ctx);
+    assert!(got.form_digest.is_some() && got.posted_digest.is_some());
+    assert_ne!(got.form_digest, got.posted_digest);
+    assert_eq!(got.to_json()["match"], false);
 }
-
 /// Security review L6: keyed, stable within the run, not the plain SHA-256.
 #[test]
 fn digests_are_keyed_hex_and_stable_within_the_run() {

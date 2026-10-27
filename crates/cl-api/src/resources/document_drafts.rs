@@ -695,6 +695,17 @@ impl ConvertBody {
         }
     }
 
+    /// The `body` member [`DocumentDrafts::convert`] sends for this posting
+    /// under `caps` (the same function builds both): the desktop digests it
+    /// to prove the posting carries what the owner reviewed (A04 AC1).
+    /// Owner data: never log it.
+    ///
+    /// # Errors
+    /// As [`DocumentDrafts::convert`]'s local checks (nothing is sent then).
+    pub fn wire_body(&self, caps: &Capabilities) -> Result<Value, ApiError> {
+        self.value(caps)
+    }
+
     /// The kind's create body, without `draftAttachmentId` (convert moves
     /// the draft's own file) and the expense's `txnType`.
     fn value(&self, caps: &Capabilities) -> Result<Value, ApiError> {
