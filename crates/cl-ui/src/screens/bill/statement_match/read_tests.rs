@@ -191,6 +191,13 @@ fn a_read_statement_fills_the_box_and_waits_for_accept() {
     s.accept_read_line(1);
     assert_eq!(s.state()["statement"]["pending"], 5);
     s.accept_read_lines();
+    assert!(
+        matches!(
+            s.state()["statement"]["learned"].as_str(),
+            Some("stored" | "nothing")
+        ),
+        "the statement layout learns on accept"
+    );
     s.run_match();
     s.poll();
     assert_eq!(s.problem, None);
@@ -364,4 +371,26 @@ fn state_carries_no_amounts_names_or_refs() {
     ] {
         assert!(!shown.contains(secret), "{secret} in {shown}");
     }
+}
+
+/// The Vendor statements folder kind needs `document-drafts-statement-v1`
+/// (the demo has it unless a test turns it off); its files are claimed as
+/// statement drafts and read as statements.
+#[test]
+fn vendor_statement_folders_need_the_capability() {
+    use crate::screens::preferences::intake_folders::{kind_key, source};
+    let (_d, link) = link();
+    assert!(source::statements_supported(&link));
+    link.demo_state().expect("demo").intake.no_statements = true;
+    assert!(!source::statements_supported(&link));
+    assert_eq!(
+        crate::i18n::t(kind_key(cl_core::intake::IntakeKind::Statements)),
+        "Vendor statements"
+    );
+    assert_eq!(
+        crate::screens::receipt_inbox::intake::drafts::kind_hint(Some(
+            cl_core::intake::IntakeKind::Statements
+        )),
+        cl_api::DraftKind::Statement
+    );
 }

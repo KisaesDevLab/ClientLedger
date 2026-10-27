@@ -46,8 +46,20 @@ const LAYOUT_VERSION: u64 = 1;
 /// version can't read is left out (the rules read that document).
 #[must_use]
 pub fn templates_of(saved: &[cl_api::VendorTemplate]) -> Vec<(ContactId, Template)> {
+    layouts_of(saved, false)
+}
+
+/// The company's vendor **statement** layouts (`stmt:` keys, A06 Q-299):
+/// a statement job gets only these, a bill job never.
+#[must_use]
+pub fn statement_templates_of(saved: &[cl_api::VendorTemplate]) -> Vec<(ContactId, Template)> {
+    layouts_of(saved, true)
+}
+
+fn layouts_of(saved: &[cl_api::VendorTemplate], statement: bool) -> Vec<(ContactId, Template)> {
     saved
         .iter()
+        .filter(|t| cl_docread::templates::is_statement_key(&t.fingerprint) == statement)
         .filter(|t| {
             t.field_regions.get("v").and_then(serde_json::Value::as_u64) == Some(LAYOUT_VERSION)
         })
@@ -109,6 +121,20 @@ pub fn with_layouts(
     }
     let templates = layouts.iter().map(|(_, t)| t.clone()).collect();
     (vendors, templates)
+}
+
+/// [`template_upsert`] for a statement layout: its key starts `stmt:`.
+///
+/// # Errors
+/// As [`template_upsert`].
+pub fn statement_template_upsert(
+    vendor: ContactId,
+    template: &Template,
+    expected: Option<String>,
+) -> Result<cl_api::TemplateUpsert, cl_api::ApiError> {
+    let mut up = template_upsert(vendor, template, expected)?;
+    up.fingerprint = cl_docread::templates::statement_key(&up.fingerprint);
+    Ok(up)
 }
 
 /// Active credit card accounts with their last four digits (Q-A03q).

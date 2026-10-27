@@ -143,17 +143,23 @@ impl CardOutcome {
 }
 
 /// Stores `template` under `vendor` (merged with its closest saved layout).
-/// The task answers `Ok` once stored; `None`: nothing could be sent.
+/// `statement`: a vendor statement layout (`stmt:` key, A06 Q-299), kept
+/// apart from the vendor's bill layouts. The task answers `Ok` once
+/// stored; `None`: nothing could be sent.
 pub fn save_layout(
     link: &CompanyLink,
     group: Option<&RequestGroup>,
     vendor: ContactId,
     template: Template,
+    statement: bool,
 ) -> Option<Task<()>> {
     if let Some(mut demo) = link.demo_state() {
-        let mine: Vec<(usize, Template)> = demo
-            .drafts
-            .layouts
+        let list = if statement {
+            &mut demo.drafts.statement_layouts
+        } else {
+            &mut demo.drafts.layouts
+        };
+        let mine: Vec<(usize, Template)> = list
             .iter()
             .enumerate()
             .filter(|(_, (c, _))| *c == vendor)
@@ -162,8 +168,8 @@ pub fn save_layout(
         let saved: Vec<Template> = mine.iter().map(|(_, t)| t.clone()).collect();
         let (t, replaced) = merged(template, &saved);
         match replaced.and_then(|i| mine.get(i)).map(|(at, _)| *at) {
-            Some(at) => demo.drafts.layouts[at] = (vendor, t),
-            None => demo.drafts.layouts.push((vendor, t)),
+            Some(at) => list[at] = (vendor, t),
+            None => list.push((vendor, t)),
         }
         return Some(Task::ready(()));
     }
@@ -179,20 +185,27 @@ pub fn save_layout(
             // One more merge after a 409 STALE, then give up.
             for _ in 0..2 {
                 let rows = s.vendor_templates().list(Some(vendor)).await?;
-                let parsed = super::service::templates_of(&rows);
+                let parsed = if statement {
+                    super::service::statement_templates_of(&rows)
+                } else {
+                    super::service::templates_of(&rows)
+                };
+                let upsert_of = if statement {
+                    super::service::statement_template_upsert
+                } else {
+                    super::service::template_upsert
+                };
                 let saved: Vec<Template> = parsed.iter().map(|(_, t)| t.clone()).collect();
                 let (t, replaced) = merged((*template).clone(), &saved);
                 // The row replaced, when the merged layout keeps its key.
                 let expected = replaced.and_then(|i| {
-                    let key = super::service::template_upsert(vendor, &t, None)
-                        .ok()?
-                        .fingerprint;
+                    let key = upsert_of(vendor, &t, None).ok()?.fingerprint;
                     rows.iter()
                         .find(|r| r.fingerprint == key)
                         .map(|r| r.updated_at.clone())
                         .filter(|_| i < saved.len())
                 });
-                let upsert = super::service::template_upsert(vendor, &t, expected)?;
+                let upsert = upsert_of(vendor, &t, expected)?;
                 match s.vendor_templates().put(&upsert).await {
                     Ok(_) => return Ok(()),
                     Err(ApiError::Conflict {

@@ -165,6 +165,9 @@ pub struct DemoDrafts {
     /// `vendor_document_templates`), learned on accept and used by the
     /// inbox's reading. No amounts.
     pub layouts: Vec<(ContactId, cl_docread::model::Template)>,
+    /// A06: the vendors' statement layouts (`stmt:` keys), apart from
+    /// their bill layouts (Q-299).
+    pub statement_layouts: Vec<(ContactId, cl_docread::model::Template)>,
     /// Records the converts posted (not the ones attach filed on), so the
     /// demo's inbox can void them when it lays its files out again: every
     /// scenario run starts with the books as found (A04 step 15).

@@ -2023,7 +2023,7 @@ impl DraftSession {
             match (template, l.vendor) {
                 (Some(tpl), Some(vendor)) => {
                     self.learn.layout =
-                        learn::save_layout(&self.link, self.group.as_ref(), vendor, tpl);
+                        learn::save_layout(&self.link, self.group.as_ref(), vendor, tpl, false);
                     if self.learn.layout.is_none() {
                         self.learn.layout_outcome = Some(Learned::Failed);
                     }

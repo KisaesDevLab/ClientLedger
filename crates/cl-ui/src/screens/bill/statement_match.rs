@@ -396,6 +396,7 @@ impl StatementMatchScreen {
         };
         s.doc.tenant = open.map(|(t, _)| t);
         s.load_vendors();
+        s.load_statement_layouts();
         s
     }
 

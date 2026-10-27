@@ -128,7 +128,11 @@ pub(crate) struct StatementDoc {
     /// A service set by tests instead of the app's.
     pub service: Option<Arc<ReadingService>>,
     /// The company's statement layouts (`stmt:`, Q-299), for the reader.
-    pub layouts: Vec<Template>,
+    pub layouts: Vec<(ContactId, Template)>,
+    pub layouts_task: Option<Task<Vec<(ContactId, Template)>>>,
+    /// Learning the vendor's statement layout on accept (class only).
+    pub learn_task: Option<Task<()>>,
+    pub learned: Option<&'static str>,
     /// The last reading, with its page words.
     pub last: Option<Box<LocalReading>>,
     /// The read lines in the box, with their marks.
@@ -191,6 +195,9 @@ impl Default for StatementDoc {
             cancel: None,
             service: None,
             layouts: Vec::new(),
+            layouts_task: None,
+            learn_task: None,
+            learned: None,
             last: None,
             read: None,
             spots: Vec::new(),
@@ -262,6 +269,8 @@ impl StatementDoc {
         self.assist_outcome = None;
         self.books = None;
         self.balance_task = None;
+        self.learned = None;
+        self.learn_task = None;
         self.compare.clear();
         self.compare.set_targets(Vec::new(), Vec::new());
         self.compare.set_words(None);
@@ -311,6 +320,8 @@ impl StatementDoc {
             "closing_by_ai": self.closing_by_ai,
             "checks": self.checks.iter().map(|c| crate::screens::bill::doc_read_local::code_name(c.code)).collect::<Vec<_>>(),
             "draft": self.draft.is_some(),
+            "layouts": self.layouts.len(),
+            "learned": self.learned,
             "assist": {
                 "offer": self.offer().key(),
                 "requests": self.assist_sent,
@@ -517,12 +528,19 @@ impl StatementMatchScreen {
             self.doc.outcome = Some(ReadFailure::Unavailable.class());
             return;
         };
+        if let Some(demo) = self.link.demo_state() {
+            self.doc.layouts.clone_from(&demo.drafts.statement_layouts);
+        }
+        let (vendors, templates) = crate::reading::service::with_layouts(
+            crate::reading::map::vendor_candidates(&self.contacts),
+            &self.doc.layouts,
+        );
         let request = ReadRequest {
             bytes,
             hint: JobHint::statement(),
             today: self.today,
-            vendors: crate::reading::map::vendor_candidates(&self.contacts),
-            templates: self.doc.layouts.clone(),
+            vendors,
+            templates,
             card_accounts: None,
         };
         self.doc.sent += 1;
@@ -587,6 +605,14 @@ impl StatementMatchScreen {
                     self.doc.problem = Some(COULDNT);
                 }
             }
+        }
+        if let Some(r) = self.doc.layouts_task.as_mut().and_then(Task::try_take) {
+            self.doc.layouts_task = None;
+            self.doc.layouts = r.unwrap_or_default();
+        }
+        if let Some(r) = self.doc.learn_task.as_mut().and_then(Task::try_take) {
+            self.doc.learn_task = None;
+            self.doc.learned = Some(if r.is_ok() { "stored" } else { "failed" });
         }
         self.poll_statement_switches();
         self.poll_statement_assist();
@@ -683,6 +709,7 @@ impl StatementMatchScreen {
         if let Some(r) = self.doc.read.as_mut() {
             r.accept_all();
         }
+        self.learn_on_accept();
     }
 
     /// Accept the read line on box line `line`.
@@ -690,6 +717,56 @@ impl StatementMatchScreen {
         if let Some(r) = self.doc.read.as_mut() {
             r.accept(line);
         }
+        self.learn_on_accept();
+    }
+
+    /// Every line accepted: the vendor's statement layout learns this
+    /// document (Q-299, `stmt:` key), once per reading.
+    fn learn_on_accept(&mut self) {
+        if self.doc.learned.is_some()
+            || !self
+                .doc
+                .read
+                .as_ref()
+                .is_some_and(ReadStatement::all_accepted)
+        {
+            return;
+        }
+        let (Some(vendor), Some(last)) = (self.vendor, self.doc.last.as_ref()) else {
+            return;
+        };
+        let Some(tpl) = cl_docread::templates::learn(&last.reading) else {
+            self.doc.learned = Some("nothing");
+            return;
+        };
+        self.doc.learned = Some("saving");
+        self.doc.learn_task =
+            crate::reading::learn::save_layout(&self.link, self.group.as_ref(), vendor, tpl, true);
+        if self.doc.learn_task.is_none() {
+            self.doc.learned = Some("failed");
+        }
+    }
+
+    /// The company's statement layouts (`document-drafts-v1`).
+    pub(crate) fn load_statement_layouts(&mut self) {
+        if self.link.is_demo()
+            || !self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::DOCUMENT_DRAFTS)
+        {
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        self.doc.layouts_task = group
+            .read(&session, |s| async move {
+                let rows = s.vendor_templates().list(None).await?;
+                Ok(crate::reading::service::statement_templates_of(&rows))
+            })
+            .ok()
+            .map(Task::Pending);
     }
 
     /// Picks read line `i`: its spot is outlined and its page shown.
