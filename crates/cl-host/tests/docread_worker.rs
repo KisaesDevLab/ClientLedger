@@ -201,8 +201,12 @@ fn a_huge_allocation_is_stopped_by_the_hard_cap() {
     let _heavy = heavy();
     let s = Scratch::new("docread-hard-cap");
     let mut c = config(&s);
-    // A slow watchdog: the cap must act on its own.
-    c.limits.poll = Duration::from_secs(30);
+    // A slow watchdog on Windows: the job object cap must act on its own.
+    // macOS has no hard memory cap (A03 follow-up 3), so there the watchdog
+    // keeps its normal pace and ends the worker.
+    if cfg!(windows) {
+        c.limits.poll = Duration::from_secs(30);
+    }
     let mut host = DocreadHost::new(c);
     let grow = if cfg!(windows) {
         "commit:1536"
