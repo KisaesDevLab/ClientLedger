@@ -974,6 +974,8 @@ dependencies = [
  "cl-settings",
  "eframe",
  "fax",
+ "getrandom 0.4.3",
+ "hmac",
  "image",
  "pdfium-render",
  "rfd",
