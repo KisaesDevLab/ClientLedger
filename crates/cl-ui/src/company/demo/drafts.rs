@@ -440,6 +440,7 @@ pub fn create(
         doc_date: None,
         converted_transaction_id: None,
         converted_type: None,
+        created_at: Some(DemoState::now()),
         updated_at,
     };
     let seq = state.drafts.seq;

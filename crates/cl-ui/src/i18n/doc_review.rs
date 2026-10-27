@@ -25,6 +25,13 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("doc_review.attach.intro", "These records have the same amount and a date close to this document's. If one of them is this purchase, attach the document to it instead of entering it again."),
     ("doc_review.attach.intro.engine", "These records look like the same document. If one of them is this purchase, attach the document to it instead of entering it again."),
     ("doc_review.attach.document", "This document: {details}"),
+    // A04 fix pass: the queue's columns (UI check item 5).
+    ("doc_review.col.arrived", "Arrived"),
+    ("doc_review.col.file", "File"),
+    ("doc_review.col.kind", "Kind"),
+    ("doc_review.col.date", "Document date"),
+    ("doc_review.col.reference", "Ref. no."),
+    ("doc_review.col.status", "Status"),
     ("doc_review.attach.row.head", "{kind} of {date}"),
     ("doc_review.attach.status.info_other", "shown for information only"),
     ("doc_review.attach.label.strong", "(close match)"),

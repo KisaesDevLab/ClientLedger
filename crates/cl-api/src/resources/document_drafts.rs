@@ -230,6 +230,9 @@ pub struct DocumentDraft {
     /// That record's engine type (`bill`, `expense`).
     #[serde(default)]
     pub converted_type: Option<String>,
+    /// When the document arrived (the claim).
+    #[serde(default)]
+    pub created_at: Option<cl_core::Timestamp>,
     /// The draft's own change token: pass it back unchanged as
     /// `expected_updated_at`. Opaque, never parsed or reformatted.
     pub updated_at: String,

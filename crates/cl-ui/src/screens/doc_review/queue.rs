@@ -24,6 +24,7 @@
 
 use std::collections::HashMap;
 
+use cl_api::AttachmentId;
 use cl_api::{
     ApiError, DocumentDraft, DocumentDraftId, DraftKind, DraftListQuery, DraftPage, DraftStatus,
     DuplicateMatch, LocalValidation, MatchSource,
@@ -175,6 +176,10 @@ pub struct RowView {
     pub reference: Option<String>,
     /// Its total as read.
     pub total: Option<Money>,
+    /// The day it arrived (UI check item 5).
+    pub arrived: Option<CalendarDate>,
+    /// Its file (the name is fetched once, [`QueueView::names`]).
+    pub file: Option<AttachmentId>,
 }
 
 impl std::fmt::Debug for RowView {
@@ -189,6 +194,11 @@ impl RowView {
             date: d.doc_date,
             reference: d.doc_reference.clone(),
             total: d.doc_total,
+            arrived: d.created_at.and_then(|t| {
+                let local = t.as_utc().with_timezone(&chrono::Local).date_naive();
+                CalendarDate::from_naive(local).ok()
+            }),
+            file: d.attachment_id,
         }
     }
 }
@@ -220,6 +230,9 @@ pub struct QueueView {
     pub(crate) views: HashMap<DocumentDraftId, RowView>,
     /// The filter as typed (owner text, never in the state).
     pub(crate) filter: String,
+    /// File names by upload (owner data: on screen only, never in the
+    /// state, a log or `Debug`).
+    pub(crate) names: HashMap<AttachmentId, String>,
     /// Duplicate answers by draft and change token.
     dup_cache: HashMap<(DocumentDraftId, String), DuplicateCheck>,
     /// The last key or button the window hasn't carried out yet.
@@ -316,6 +329,20 @@ impl QueueView {
         self.total = total;
         let ids = self.ids();
         self.cursor.refresh(&ids);
+    }
+
+    /// Uploads of this page whose file name isn't known yet.
+    #[must_use]
+    pub fn names_missing(&self) -> Vec<AttachmentId> {
+        let mut out: Vec<AttachmentId> = self
+            .views
+            .values()
+            .filter_map(|v| v.file)
+            .filter(|a| !self.names.contains_key(a))
+            .collect();
+        out.sort_by_key(ToString::to_string);
+        out.dedup();
+        out
     }
 
     /// A page from the engine.
@@ -764,5 +791,26 @@ mod tests {
         let p = page_query(50);
         assert_eq!((p.limit, p.offset, p.summary), (QUEUE_PAGE, 50, false));
         assert_eq!(p.statuses, QUEUE_STATUSES.to_vec());
+    }
+
+    /// UI check item 5: a page's file names are fetched once, shown on
+    /// screen only, never in `Debug` or the state.
+    #[test]
+    fn file_names_are_fetched_once_and_kept_out_of_the_state() {
+        let a = AttachmentId::parse("a0000000-0000-4000-8000-000000000001").expect("id");
+        let id = DocumentDraftId::parse("d0000000-0000-4000-8000-dd0000000001").expect("id");
+        let mut q = QueueView::default();
+        q.views.insert(
+            id,
+            RowView {
+                file: Some(a),
+                ..RowView::default()
+            },
+        );
+        assert_eq!(q.names_missing(), vec![a]);
+        q.names.insert(a, "acme-invoice-0412.pdf".into());
+        assert!(q.names_missing().is_empty());
+        assert!(!format!("{q:?}").contains("acme"));
+        assert!(!format!("{:?}", q.views[&id]).contains("acme"));
     }
 }
