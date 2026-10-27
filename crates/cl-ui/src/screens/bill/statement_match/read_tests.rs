@@ -847,7 +847,7 @@ fn the_statement_sits_beside_its_lines_when_wide() {
     assert!(accept.2 < 940.0, "Accept is in view beside the page");
     assert!(
         wide.iter()
-            .any(|n| n.0 == "Drag to share the width between the lines and the statement"),
+            .any(|n| n.0.starts_with("Drag to share the width between the lines")),
         "the divider is named"
     );
     let narrow = draw(&mut s, (900.0, 940.0));

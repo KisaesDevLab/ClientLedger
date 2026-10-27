@@ -1673,7 +1673,24 @@ impl StatementMatchScreen {
         {
             self.doc.pane_share = ((full.right() - p.x) / room).clamp(0.2, 0.8);
         }
-        let stroke = if r.hovered() || r.dragged() {
+        // From the keyboard too: Tab to the divider, then Left / Right.
+        if r.has_focus() {
+            let (left, right) = ui.input(|i| {
+                (
+                    i.key_pressed(egui::Key::ArrowLeft),
+                    i.key_pressed(egui::Key::ArrowRight),
+                )
+            });
+            let step = if left {
+                0.05
+            } else if right {
+                -0.05
+            } else {
+                0.0
+            };
+            self.doc.pane_share = (self.doc.pane_share + step).clamp(0.2, 0.8);
+        }
+        let stroke = if r.hovered() || r.dragged() || r.has_focus() {
             egui::Stroke::new(2.0, tokens.accent)
         } else {
             ui.visuals().widgets.noninteractive.bg_stroke

@@ -87,7 +87,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("statement.read.caption", "Read from the document \u{2014} check it"),
     ("statement.read.unsure", "Not sure \u{2014} check it"),
     ("statement.read.find_on_page", "Show this line on the statement"),
-    ("statement.read.divider", "Drag to share the width between the lines and the statement"),
+    ("statement.read.divider", "Drag to share the width between the lines and the statement (or Left and Right arrows)"),
     ("statement.read.fix_line", "This line needs fixing in the box"),
     ("statement.read.line_label", "Line {n}"),
     ("statement.read.typed_over", "You changed the lines in the box, so they are yours now."),
