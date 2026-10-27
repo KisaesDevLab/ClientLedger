@@ -12,7 +12,7 @@
 //! lines matching nothing are reported as extra, not gated.
 //!
 //! Gates (`CL_DOCREAD_GATE=1`, seen and held-out separately): ≥ 95 % of
-//! lines on `text` PDFs, ≥ 85 % on `scan` and on `photo`. Header values
+//! lines on `text` PDFs, ≥ 85 % on `scan`, ≥ 75 % (seen) and ≥ 70 % (held-out) on `photo` (owner, Q-A06h). Header values
 //! (opening, closing, period, statement date) are reported only.
 //!
 //! `CL_DOCREAD_CACHE` / `CL_DOCREAD_REUSE` work as in
@@ -61,11 +61,14 @@ impl Route {
         }
     }
 
-    /// The minimum share of lines read, in per cent.
-    fn gate(self) -> u64 {
+    /// The minimum share of lines read, in per cent. Photos: owner
+    /// amendment 2026-10-27 (Q-A06h), 75 % seen and 70 % held-out.
+    fn gate(self, part: &str) -> u64 {
         match self {
             Route::Text => 95,
-            Route::Scan | Route::Photo => 85,
+            Route::Scan => 85,
+            Route::Photo if part == "holdout" => 70,
+            Route::Photo => 75,
         }
     }
 }
@@ -475,12 +478,12 @@ fn statement_accuracy() {
             "part": part, "route": route.name(), "statements": t.docs, "lines": t.lines,
             "matched": t.matched, "extra": t.extra, "unread": t.unread,
         }));
-        if t.pct() < route.gate() {
+        if t.pct() < route.gate(part) {
             failures.push(format!(
                 "{part} {}: {} % of statement lines read, needs {} %",
                 route.name(),
                 t.pct_tenths(),
-                route.gate()
+                route.gate(part)
             ));
         }
     }
@@ -501,7 +504,7 @@ fn statement_accuracy() {
     });
     let md = format!(
         "# Statement reading accuracy (A06)\n\nA line is right when its date, reference and \
-         signed amount are all right. Gates: text ≥ 95 %, scan and photo ≥ 85 %, seen and \
+         signed amount are all right. Gates: text ≥ 95 %, scan ≥ 85 %, photo ≥ 75 % seen and ≥ 70 % held-out, seen and \
          held-out separately.\n\n{table}\n## Seen misses\n\n{misses}\n"
     );
     std::fs::create_dir_all(&out_dir).expect("report folder");
