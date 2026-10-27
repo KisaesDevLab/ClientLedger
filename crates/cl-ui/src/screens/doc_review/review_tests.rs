@@ -556,6 +556,7 @@ fn a_receipt_already_in_the_books_is_attached_not_entered_again() {
     let proof = digests(&w.ctx).attached.expect("attach proof");
     assert_eq!(proof.records_before, proof.records_after);
     assert_eq!(proof.files_on_record, 1);
+    assert!(proof.books_unchanged && proof.file_filed);
     assert_eq!(digests(&w.ctx).to_json()["match"], false, "no convert ran");
     let d = demo_drafts::get(&w.demo(), w.tenant, id).expect("draft");
     assert_eq!(d.converted_transaction_id, Some(target));

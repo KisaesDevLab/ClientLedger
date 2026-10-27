@@ -1,0 +1,148 @@
+# Review Documents, the fix pass's posting sections (A04 AC1, review B1 and
+# S3) against `clientledger --demo`: a document posts through each of its
+# forms and `state.review.match` says the digest of the form's checked
+# values equals the digest of the request body on the wire.
+#
+# 1. A bill dated in the closed period (the demo closes 09/30/2026): Save
+#    searches the register first (nothing matches), then the engine refuses
+#    the closed date and the closing-date password is asked; with it the
+#    bill posts once.
+# 2. The second invoice "Enter this as" a card charge: Record Card Charge,
+#    the card picked, posted.
+# 3. The fax "Enter this as" a check: Write Check, typed by hand, posted.
+#
+# Light and dark run in one app; the demo voids what the earlier run
+# entered when the inbox lays its files out again, and both windows close at
+# the end. Waits are on events (state), never fixed times. All files are
+# synthetic.
+name: doc_review_post
+description: A closed-period bill (search first, then the password), a card charge and a check entered from documents through their own forms, each posting exactly what was reviewed (digests match).
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+
+  - command: nav.receipt_inbox
+  - assert_state: {key: screen.screen, equals: receipt_inbox}
+  - assert_state: {key: screen.drafts.on, equals: true, within_ms: 30000}
+  - assert_state: {key: screen.drafts.claimed, equals: 5, within_ms: 60000}
+  - command: vendors.review_documents
+  - assert_state: {key: screen.screen, equals: review_documents}
+  - assert_state: {key: queue.total, equals: 5, within_ms: 5000}
+
+  # --- 1. A bill in the closed period ---------------------------------------------
+  - key: K
+  - key: K
+  - key: K
+  - key: K
+  - key: J
+  - key: J
+  - key: J
+  - assert_state: {key: queue.selected, equals: 3}
+  - assert_state: {key: queue.rows.3.kind, equals: bill}
+  - key: Enter
+  - assert_state: {key: screen.screen, equals: enter_bill, within_ms: 5000}
+  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
+  - click: {role: button, label: Read document}
+  - assert_state: {key: screen.read.local.outcome, equals: read, within_ms: 30000}
+  - key: Alt+A
+  - assert_state: {key: screen.read.unaccepted, equals: 0}
+  - click: {label: "Account, line 1"}
+  - key: Ctrl+A
+  - type: {text: "6210"}
+  - key: Tab
+  - click: {label: "Account, line 2"}
+  - key: Ctrl+A
+  - type: {text: "6210"}
+  - key: Tab
+  - click: {role: text_input, label: Date}
+  - key: Ctrl+A
+  - type: {text: "09/15/2026"}
+  - key: Tab
+  - assert_state: {key: screen.date, equals: "2026-09-15"}
+  - key: Alt+S
+  # The search ran (one Accept) and found nothing; then the closed date.
+  - assert_state: {key: screen.closing, equals: asking, within_ms: 5000}
+  - assert_state: {key: screen.draft.attach, equals: null}
+  - assert_state: {key: screen.draft.accepts, equals: 1}
+  - assert_state: {key: screen.draft.posted, equals: null}
+  - assert_exists: {role: password_input, label: Closing-date password}
+  - screenshot: closed-period-password
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: demo-close}
+  - click: {role: button, label: Change}
+  - assert_state: {key: review.match, equals: true, within_ms: 5000}
+  - assert_state: {key: screen.screen, equals: review_documents, within_ms: 5000}
+  - click: {role: button, label: Refresh}
+  - assert_state: {key: queue.total, equals: 4, within_ms: 5000}
+  - screenshot: closed-period-entered
+
+  # --- 2. The second invoice as a card charge ---------------------------------
+  - key: K
+  - key: K
+  - key: K
+  - assert_state: {key: queue.selected, equals: 0}
+  - key: Enter
+  - assert_state: {key: screen.screen, equals: enter_bill, within_ms: 5000}
+  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
+  - click: {role: button, label: Read document}
+  - assert_state: {key: screen.read.local.outcome, equals: read, within_ms: 30000}
+  - key: Alt+A
+  - assert_state: {key: screen.read.unaccepted, equals: 0}
+  - click: {role: button, label: A card charge}
+  - assert_state: {key: screen.screen, equals: card_charge, within_ms: 5000}
+  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
+  - assert_state: {key: screen.draft.form, equals: card_charge}
+  - click: {role: combo_box, label: Card}
+  - click: {role: button, label: "2050 · Business Credit Card"}
+  - click: {label: "Account, line 1"}
+  - key: Ctrl+A
+  - type: {text: "6210"}
+  - key: Tab
+  - click: {label: "Account, line 2"}
+  - key: Ctrl+A
+  - type: {text: "6210"}
+  - key: Tab
+  - screenshot: card-charge-draft
+  - key: Alt+S
+  - assert_state: {key: review.match, equals: true, within_ms: 5000}
+  - assert_state: {key: screen.screen, equals: review_documents, within_ms: 5000}
+  - click: {role: button, label: Refresh}
+  - assert_state: {key: queue.total, equals: 3, within_ms: 5000}
+
+  # --- 3. The fax as a check, typed by hand -------------------------------------
+  - key: K
+  - key: K
+  - key: K
+  - assert_state: {key: queue.selected, equals: 0}
+  - key: Enter
+  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
+  - click: {role: button, label: A check I wrote}
+  - assert_state: {key: screen.screen, equals: write_check, within_ms: 5000}
+  - assert_state: {key: screen.draft.loaded, equals: true, within_ms: 5000}
+  - assert_state: {key: screen.draft.form, equals: check}
+  - assert_exists: {role: tab, label_contains: "from Review Documents"}
+  - type: {text: Hollister Fuel, target: {role: text_input, label: Pay to the order of}}
+  - key: Tab
+  - type: {text: "42.75", target: {role: text_input, label: "Amount ($)"}}
+  - key: Tab
+  - click: {label: "Account, line 1"}
+  - key: Ctrl+A
+  - type: {text: "6100"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Amount, line 1"}
+  - key: Ctrl+A
+  - type: {text: "42.75"}
+  - key: Tab
+  - screenshot: check-draft
+  - key: Alt+S
+  - assert_state: {key: review.match, equals: true, within_ms: 5000}
+  - assert_state: {key: screen.screen, equals: review_documents, within_ms: 5000}
+  - click: {role: button, label: Refresh}
+  - assert_state: {key: queue.total, equals: 2, within_ms: 5000}
+  - screenshot: posted-three
+
+  # --- Close both windows so the next run starts alike ---------------------------
+  - command: file.close_window
+  - click: {role: tab, label_contains: Receipt Inbox}
+  - command: file.close_window
+  - click: {role: tab, label: Home}

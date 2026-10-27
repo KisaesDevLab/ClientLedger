@@ -136,8 +136,14 @@ pub struct AttachProof {
     pub records_before: usize,
     /// Records after it.
     pub records_after: usize,
+    /// Files filed on that record before.
+    pub files_before: usize,
     /// Files now filed on the record attached to.
     pub files_on_record: usize,
+    /// No record was added or removed.
+    pub books_unchanged: bool,
+    /// The record holds one more file.
+    pub file_filed: bool,
 }
 
 impl ReviewDigests {
@@ -1862,19 +1868,24 @@ impl DraftSession {
         if self.link.is_demo() {
             let out = match (self.tenant_or_err(), self.link.demo_state()) {
                 (Ok(tenant), Some(mut demo)) => {
+                    use crate::company::demo::checks::files_on;
                     let records_before = demo.ledger.transactions().len();
+                    let files_before = files_on(&demo, target);
                     let out = demo_drafts::attach(&mut demo, tenant, id, target, &expected, key)
                         .map(|a| (a.draft, a.transaction));
                     if out.is_ok() {
+                        let records_after = demo.ledger.transactions().len();
+                        let files_on_record = files_on(&demo, target);
                         self.digests = Some(ReviewDigests {
                             form_digest: None,
                             posted_digest: None,
                             attached: Some(AttachProof {
                                 records_before,
-                                records_after: demo.ledger.transactions().len(),
-                                files_on_record: crate::company::demo::checks::files_on(
-                                    &demo, target,
-                                ),
+                                records_after,
+                                files_before,
+                                files_on_record,
+                                books_unchanged: records_after == records_before,
+                                file_filed: files_on_record == files_before + 1,
                             }),
                         });
                     }

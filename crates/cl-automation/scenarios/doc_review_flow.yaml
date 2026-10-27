@@ -23,8 +23,9 @@ steps:
   # --- Arrivals are claimed as drafts -------------------------------------------
   - command: nav.receipt_inbox
   - assert_state: {key: screen.screen, equals: receipt_inbox}
-  - wait: {ms: 17000}
-  - assert_state: {key: screen.drafts.on, equals: true}
+  # Wait for the inbox to claim its arrivals (an event, not a fixed time).
+  - assert_state: {key: screen.drafts.on, equals: true, within_ms: 30000}
+  - assert_state: {key: screen.drafts.claimed, equals: 5, within_ms: 60000}
   - assert_state: {key: screen.drafts.claimed, equals: 5}
   - assert_state: {key: screen.discarded, equals: 0}
   - command: vendors.review_documents
