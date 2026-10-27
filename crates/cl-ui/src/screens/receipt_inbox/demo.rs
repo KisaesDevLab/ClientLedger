@@ -67,6 +67,14 @@ pub(crate) fn seed(dir: &Path) {
 /// A synthetic one-page invoice.
 const INVOICE_PDF: &[u8] =
     include_bytes!("../../../../../assets/sample/docs/midwest_inv_55871.pdf");
+/// A04 step 15: a synthetic one-page invoice from the same vendor as
+/// `INVOICE_PDF`, in the same layout (the saved layout learns from the first).
+const INVOICE_PDF_2: &[u8] =
+    include_bytes!("../../../../../assets/sample/docs/midwest_inv_55902.pdf");
+/// A04 step 15: a synthetic one-page receipt that matches the demo ledger's
+/// check 4401 (Ozark Feed & Seed, 2,318.60, 10/02/2026).
+const RECEIPT_PDF: &[u8] =
+    include_bytes!("../../../../../assets/sample/docs/ozark_feed_receipt_30412.pdf");
 /// A synthetic one-page CCITT G4 fax (A02: TIFFs show in the viewer).
 const FAX_TIFF: &[u8] = include_bytes!("../../../../../fixtures/docs/g4_fax.tif");
 /// A synthetic iPhone photo header (never read: HEIC isn't taken).
@@ -74,13 +82,16 @@ const PHOTO_HEIC: &[u8] = b"\0\0\0\x18ftypheic\0\0\0\0mif1heicsynthetic";
 
 /// The demo's intake files: folder (0 Bills, 1 Receipts), name, bytes,
 /// hours old.
-pub(crate) const INTAKE_SEED: [(usize, &str, &[u8], u64); 5] = [
+pub(crate) const INTAKE_SEED: [(usize, &str, &[u8], u64); 6] = [
     (0, "Midwest Equipment INV-55871.pdf", INVOICE_PDF, 5),
     (0, "Galena Gravel fax.tif", FAX_TIFF, 4),
     (0, "Hollister Fuel photo.heic", PHOTO_HEIC, 4),
     (1, "Ozark Feed receipt.png", RECEIPT_PNG, 2),
     // The same bytes again, an hour later: listed once as a duplicate.
     (1, "Ozark Feed receipt (copy).png", RECEIPT_PNG, 1),
+    // A04 step 15: a readable receipt that matches check 4401 (oldest, so the
+    // rows above keep their places in the review queue).
+    (1, "Ozark Feed & Seed receipt.pdf", RECEIPT_PDF, 6),
 ];
 
 /// An 11 MB scan in Bills (listed, never read).
@@ -165,7 +176,7 @@ pub(crate) fn seed_intake(base: PathBuf) -> std::sync::mpsc::Receiver<Seeded> {
             {
                 return;
             }
-            let (first, second) = BILL_PDF.split_at(BILL_PDF.len() / 2);
+            let (first, second) = INVOICE_PDF_2.split_at(INVOICE_PDF_2.len() / 2);
             std::thread::sleep(LATE_FIRST);
             let _ = std::fs::write(&late, first);
             std::thread::sleep(LATE_SECOND);
@@ -212,6 +223,13 @@ pub(crate) fn apply_seed(link: &CompanyLink, tenant: cl_core::ids::TenantId, s: 
         // Every run starts alike: the files laid out again are new, not
         // claimed by the drafts of an earlier run (A04).
         if demo.drafts.supported() {
+            // What the earlier run's drafts posted is voided, so the books
+            // are as found (a duplicate rule never sees it). Attached
+            // documents stay on their records.
+            let made = std::mem::take(&mut demo.drafts.created);
+            for txn in made {
+                let _ = demo.ledger.void(txn);
+            }
             demo.drafts = crate::company::demo::drafts::DemoDrafts::on();
         }
         demo.companies
