@@ -321,6 +321,7 @@ pub(crate) fn check_text(c: &Check, style: MoneyStyle) -> String {
             t_with("bill.read.check.stmt_duplicate", &[("line", &line_no)])
         }
         CheckCode::StmtVendorDiffers => t("bill.read.check.stmt_vendor"),
+        CheckCode::StmtLinesCapped => t("bill.read.check.stmt_capped"),
     }
 }
 

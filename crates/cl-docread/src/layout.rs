@@ -461,6 +461,25 @@ pub fn map_spots(r: &mut crate::model::Reading, f: impl Fn(u16, Bbox) -> Bbox) {
             fix(s);
         }
     }
+    if let Some(st) = &mut r.statement {
+        opt(&mut st.vendor, &fix);
+        opt(&mut st.account_no, &fix);
+        opt(&mut st.statement_date, &fix);
+        opt(&mut st.period_from, &fix);
+        opt(&mut st.period_to, &fix);
+        opt(&mut st.opening, &fix);
+        opt(&mut st.closing, &fix);
+        for l in &mut st.lines {
+            fix(&mut l.date.spot);
+            opt(&mut l.reference, &fix);
+            opt(&mut l.description, &fix);
+            fix(&mut l.amount.spot);
+            opt(&mut l.running, &fix);
+        }
+        for lo in &mut st.left_out {
+            fix(&mut lo.spot);
+        }
+    }
 }
 #[cfg(test)]
 mod tests {

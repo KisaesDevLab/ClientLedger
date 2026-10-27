@@ -629,6 +629,9 @@ pub enum CheckCode {
     /// Statement: the vendor read is not the vendor chosen (set by the
     /// desktop, never by the reader).
     StmtVendorDiffers,
+    /// Statement: more lines than are read (A06 step 7); the rest were
+    /// left off.
+    StmtLinesCapped,
 }
 
 /// A value shown in a check.

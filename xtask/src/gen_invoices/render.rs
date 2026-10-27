@@ -6,21 +6,21 @@ use super::layouts::{Col, Family, Header, Layout, Meta, Paid};
 use super::pdf::{Item, Page};
 use super::values::{DateFmt, money, quantity, rate};
 
-const LETTER_W: f32 = 612.0;
-const LETTER_H: f32 = 792.0;
-const MARGIN: f32 = 48.0;
+pub(super) const LETTER_W: f32 = 612.0;
+pub(super) const LETTER_H: f32 = 792.0;
+pub(super) const MARGIN: f32 = 48.0;
 /// Rows below this on a letter page go to the next page.
 const PAGE_BOTTOM: f32 = LETTER_H - 120.0;
 
-struct Canvas<'f> {
+pub(super) struct Canvas<'f> {
     fonts: &'f Fonts,
-    pages: Vec<Page>,
+    pub(super) pages: Vec<Page>,
     width: f32,
     height: f32,
 }
 
 impl<'f> Canvas<'f> {
-    fn new(fonts: &'f Fonts, width: f32, height: f32) -> Canvas<'f> {
+    pub(super) fn new(fonts: &'f Fonts, width: f32, height: f32) -> Canvas<'f> {
         Canvas {
             fonts,
             pages: vec![Page {
@@ -40,7 +40,7 @@ impl<'f> Canvas<'f> {
         }
     }
 
-    fn new_page(&mut self) {
+    pub(super) fn new_page(&mut self) {
         self.pages.push(Page {
             width: self.width,
             height: self.height,
@@ -49,7 +49,7 @@ impl<'f> Canvas<'f> {
         });
     }
 
-    fn text(&mut self, x: f32, y: f32, size: f32, font: FontId, s: &str) {
+    pub(super) fn text(&mut self, x: f32, y: f32, size: f32, font: FontId, s: &str) {
         if s.is_empty() {
             return;
         }
@@ -62,17 +62,17 @@ impl<'f> Canvas<'f> {
         });
     }
 
-    fn right(&mut self, right: f32, y: f32, size: f32, font: FontId, s: &str) {
+    pub(super) fn right(&mut self, right: f32, y: f32, size: f32, font: FontId, s: &str) {
         let w = self.fonts.width(font, s, size);
         self.text(right - w, y, size, font, s);
     }
 
-    fn center(&mut self, cx: f32, y: f32, size: f32, font: FontId, s: &str) {
+    pub(super) fn center(&mut self, cx: f32, y: f32, size: f32, font: FontId, s: &str) {
         let w = self.fonts.width(font, s, size);
         self.text(cx - w / 2.0, y, size, font, s);
     }
 
-    fn rule(&mut self, x1: f32, y: f32, x2: f32, width: f32) {
+    pub(super) fn rule(&mut self, x1: f32, y: f32, x2: f32, width: f32) {
         self.push(Item::Line {
             x1,
             y1: y,
@@ -82,7 +82,7 @@ impl<'f> Canvas<'f> {
         });
     }
 
-    fn boxed(&mut self, x: f32, y: f32, w: f32, h: f32) {
+    pub(super) fn boxed(&mut self, x: f32, y: f32, w: f32, h: f32) {
         for (a, b, c, d) in [
             (x, y, x + w, y),
             (x, y + h, x + w, y + h),
@@ -99,7 +99,7 @@ impl<'f> Canvas<'f> {
         }
     }
 
-    fn shade(&mut self, x: f32, y: f32, w: f32, h: f32, gray: f32) {
+    pub(super) fn shade(&mut self, x: f32, y: f32, w: f32, h: f32, gray: f32) {
         self.push(Item::Fill { x, y, w, h, gray });
     }
 }
