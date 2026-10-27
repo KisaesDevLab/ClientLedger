@@ -663,3 +663,37 @@ fn digests_are_keyed_hex_and_stable_within_the_run() {
     assert_ne!(key(), &[0u8; 32]);
     assert_ne!(fallback_key(), [0u8; 32]);
 }
+
+/// UI check item 4: a failed Read document on a draft not read yet shows
+/// "Couldn't read this document"; Read document stays for another try.
+#[test]
+fn a_failed_read_shows_couldnt_read_and_can_be_tried_again() {
+    let w = World::new();
+    let id = {
+        let mut d = w.demo();
+        let a = crate::company::demo::checks::upload(
+            &mut d,
+            AttachTo::Draft(DraftKey::new()),
+            "receipt.pdf",
+            b"%PDF-1.4\n% unread\n%%EOF\n",
+        )
+        .expect("upload")
+        .id;
+        demo_drafts::create(
+            &mut d,
+            w.tenant,
+            a,
+            DraftKind::CardCharge,
+            IdempotencyKey::new(),
+        )
+        .expect("claim")
+        .id
+    };
+    let mut s = w.session(id);
+    assert_eq!(s.state_json()["stored"], "unread");
+    s.read_failed();
+    assert_eq!(s.state_json()["stored"], "failed");
+    // Only a draft not read yet changes.
+    s.read_failed();
+    assert_eq!(s.state_json()["stored"], "failed");
+}

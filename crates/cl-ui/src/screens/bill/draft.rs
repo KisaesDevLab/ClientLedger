@@ -97,6 +97,9 @@ impl EnterBillScreen {
         // A Read document of a `new` draft lends its words and spots.
         if let Some(last) = self.read.local.last.as_deref() {
             s.adopt_reading(last);
+        } else if self.read.problem.is_some() {
+            // Its Read document failed: the banner says so (UI item 4).
+            s.read_failed();
         }
         let events = s.tick(ctx, &cards, today);
         for ev in events {

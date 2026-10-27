@@ -252,6 +252,16 @@ impl EnterBillScreen {
         }
         // A04 draft mode: where the values came from, Discard document.
         let vendor_name = self.draft_vendor_name();
+        // One "Filled from" line: the reading banner below names the
+        // source while it shows (UI check item 3).
+        let reading_shown = self
+            .read
+            .filled
+            .as_ref()
+            .is_some_and(|f| self.read.unaccepted > 0 || f.nothing_new);
+        if let Some(d) = self.draft.as_mut() {
+            d.hide_source_line = reading_shown;
+        }
         if let Some(d) = self.draft.as_mut()
             && let crate::screens::doc_review::review::BannerClick::EnterAs(to) =
                 d.banner_ui(ui, tokens, None, vendor_name.as_deref())
@@ -262,7 +272,9 @@ impl EnterBillScreen {
         // inbox" (Q-P17j, WP5's text), then the reading's values to accept
         // (WP7).
         let name = self.attach.viewer.source().map(|s| s.name.clone());
-        if let Some(n) = name.as_deref().filter(|_| self.attach.from_inbox) {
+        // In draft mode the draft banner names the document already.
+        let attached_line = self.attach.from_inbox && self.draft.is_none();
+        if let Some(n) = name.as_deref().filter(|_| attached_line) {
             egui::Frame::new()
                 .fill(tokens.info_tint)
                 .stroke(Stroke::new(1.0, tokens.border_default))

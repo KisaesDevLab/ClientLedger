@@ -764,6 +764,10 @@ pub(crate) struct DraftSession {
     pub note: Option<&'static str>,
     /// The record it became.
     pub posted: Option<TransactionId>,
+    /// The form shows its own "Filled from …" line this frame (Enter
+    /// Bill's reading banner): the draft banner leaves its own out, so
+    /// there is one (UI check item 3).
+    pub hide_source_line: bool,
     /// Discarded on another computer: nothing may post.
     closed_elsewhere: bool,
     /// The compare tools.
@@ -852,6 +856,7 @@ impl DraftSession {
             attach: None,
             note: None,
             posted: None,
+            hide_source_line: false,
             closed_elsewhere: false,
             compare: CompareTools::new(),
             clicked: BTreeMap::new(),
@@ -1214,7 +1219,7 @@ impl DraftSession {
     /// `new` draft): its words and spots serve the compare tools and
     /// learning (the values are the form's, never stored).
     pub(crate) fn adopt_reading(&mut self, local: &LocalReading) {
-        if self.words.is_some() || !matches!(self.stored, Some(Stored::Unread)) {
+        if self.words.is_some() || !matches!(self.stored, Some(Stored::Unread | Stored::Failed)) {
             return;
         }
         self.set_words(Arc::new(local.clone()));
@@ -1230,7 +1235,8 @@ impl DraftSession {
         cards: Option<Vec<(AccountId, Last4)>>,
         today: CalendarDate,
     ) -> bool {
-        if self.read_job.is_some() || !matches!(self.stored, Some(Stored::Unread)) {
+        if self.read_job.is_some() || !matches!(self.stored, Some(Stored::Unread | Stored::Failed))
+        {
             return false;
         }
         let (Some(file), Some(service)) = (self.file.clone(), crate::reading::shared()) else {
@@ -1271,7 +1277,17 @@ impl DraftSession {
                 self.read_result = Some(local);
                 self.events.push(DraftEvent::Read);
             }
-            ReadOutcome::Failed(_) => self.note = Some("doc_form.read.failed"),
+            // The banner says "Couldn't read this document" now (UI
+            // check item 4); Read document stays for another try.
+            ReadOutcome::Failed(_) => self.read_failed(),
+        }
+    }
+
+    /// "Read document" failed (here, or Enter Bill's own): a draft not
+    /// read yet now shows as one that couldn't be read.
+    pub(crate) fn read_failed(&mut self) {
+        if matches!(self.stored, Some(Stored::Unread)) {
+            self.stored = Some(Stored::Failed);
         }
     }
 
@@ -2362,6 +2378,7 @@ impl DraftSession {
                     .unwrap_or_default();
                 let line = match (&self.stored, self.layout_vendor(), vendor_name) {
                     (_, _, _) if self.load.is_some() => t("doc_form.loading"),
+                    (Some(Stored::Read(_)), _, _) if self.hide_source_line => String::new(),
                     (_, _, _) if self.load_problem.is_some() => {
                         t(self.load_problem.unwrap_or("doc_form.load.failed"))
                     }
@@ -2377,14 +2394,20 @@ impl DraftSession {
                     }
                     (None, _, _) => t("doc_form.loading"),
                 };
-                ui.add(egui::Label::new(RichText::new(line).color(tokens.text_primary)).wrap());
+                if !line.is_empty() {
+                    ui.add(egui::Label::new(RichText::new(line).color(tokens.text_primary)).wrap());
+                }
                 if let Some(r) = read
                     && r.unaccepted > 0
                 {
-                    let text = t_with(
-                        "doc_form.banner.unaccepted",
-                        &[("n", &r.unaccepted.to_string())],
-                    );
+                    let text = if r.unaccepted == 1 {
+                        t("doc_form.banner.unaccepted.one")
+                    } else {
+                        t_with(
+                            "doc_form.banner.unaccepted",
+                            &[("n", &r.unaccepted.to_string())],
+                        )
+                    };
                     ui.add(egui::Label::new(RichText::new(text).color(tokens.warn_text)).wrap());
                     ui.horizontal_wrapped(|ui| {
                         let accept = ui
@@ -2412,7 +2435,7 @@ impl DraftSession {
                     });
                 }
                 if read.is_some()
-                    && matches!(self.stored, Some(Stored::Unread))
+                    && matches!(self.stored, Some(Stored::Unread | Stored::Failed))
                     && self.file.is_some()
                 {
                     let busy = self.read_job.is_some();
@@ -2509,9 +2532,18 @@ impl DraftSession {
                                 click = BannerClick::EnterAs(f);
                             }
                         }
+                        // One row with Discard document: the lines grid
+                        // keeps its room (UI check item 3).
+                        ui.separator();
+                        if ui
+                            .add_enabled(!self.locked(), egui::Button::new(t("doc_form.discard")))
+                            .on_hover_text(t("doc_form.discard.tip"))
+                            .clicked()
+                        {
+                            click = BannerClick::Discard;
+                        }
                     });
-                }
-                if !self.closed()
+                } else if !self.closed()
                     && ui
                         .add_enabled(!self.locked(), egui::Button::new(t("doc_form.discard")))
                         .on_hover_text(t("doc_form.discard.tip"))

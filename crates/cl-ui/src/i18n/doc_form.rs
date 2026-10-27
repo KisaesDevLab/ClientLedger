@@ -82,5 +82,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("doc_form.match.enter_new", "Enter as new"),
     ("doc_form.match.enter_new.tip", "Enter this document as a new expense without looking for it in your books first."),
     ("doc_form.match.back", "Back to the form"),
+    // A04 fix pass: UI check item 12.
+    ("doc_form.banner.unaccepted.one", "1 value was read from the document. Check it, then Accept (Alt+A)."),
     ("doc_form.credit_unavailable", "A document from Review Documents is entered as a charge here. To enter a refund or credit, discard it and enter the credit by hand."),
 ];
