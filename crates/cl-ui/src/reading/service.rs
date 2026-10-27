@@ -792,7 +792,7 @@ pub(crate) fn read_one(
     cancel: &Arc<AtomicBool>,
 ) -> ReadOutcome {
     let job = DocJob {
-        bytes: request.bytes.to_vec(),
+        bytes: Arc::clone(&request.bytes),
         hint: request.hint,
         templates: request.templates.clone(),
     };

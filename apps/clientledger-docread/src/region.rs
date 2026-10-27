@@ -24,7 +24,9 @@ use image::GrayImage;
 use image::imageops::FilterType;
 
 /// White border around the cut-out, pixels (tesseract reads text that
-/// touches the image edge poorly).
+/// touches the image edge poorly). Narrowed on a side where the cut-out is
+/// so wide (or tall) that the full border would pass the OCR limit: a box
+/// across a whole 3400 px page is still read (security review L3).
 const BORDER: u32 = 16;
 /// Least margin added around the box on the cleaned page, pixels. The
 /// margin is wider across (a twelfth of the page) than down (a hundredth),
@@ -50,6 +52,16 @@ pub(crate) struct Cut {
     pub height: u32,
     /// Enlargement (1 to [`MAX_ENLARGE`]).
     pub scale: u32,
+    /// White border left and right, and above and below, pixels (at most
+    /// [`BORDER`]).
+    pub border_x: u32,
+    pub border_y: u32,
+}
+
+/// The border that fits beside `side` pixels within `max` (at most
+/// [`BORDER`]; 0 when `side` alone fills it).
+fn border_for(side: u32, max: u32) -> u32 {
+    (max.saturating_sub(side) / 2).min(BORDER)
 }
 
 /// OCR the part of the page `grey` inside `region` (ten-thousandths of the
@@ -159,10 +171,12 @@ pub(crate) fn cut_box(cleaned: &Cleaned, region: Bbox) -> Option<Cut> {
         width,
         height,
         scale,
+        border_x: border_for(width.saturating_mul(scale), MAX_PGM_WIDTH),
+        border_y: border_for(height.saturating_mul(scale), MAX_PGM_HEIGHT),
     })
 }
 
-/// The cut-out, enlarged, on a white [`BORDER`]; `None` when it would be
+/// The cut-out, enlarged, on its white border; `None` when it would be
 /// over the OCR limit.
 pub(crate) fn cut_out(image: &GrayImage, cut: Cut) -> Option<GrayImage> {
     let (iw, ih) = image.dimensions();
@@ -177,7 +191,8 @@ pub(crate) fn cut_out(image: &GrayImage, cut: Cut) -> Option<GrayImage> {
         cut.width.checked_mul(cut.scale)?,
         cut.height.checked_mul(cut.scale)?,
     );
-    let (ow, oh) = (sw.checked_add(2 * BORDER)?, sh.checked_add(2 * BORDER)?);
+    let (bx, by) = (cut.border_x.min(BORDER), cut.border_y.min(BORDER));
+    let (ow, oh) = (sw.checked_add(2 * bx)?, sh.checked_add(2 * by)?);
     if ow > MAX_PGM_WIDTH || oh > MAX_PGM_HEIGHT {
         return None;
     }
@@ -189,25 +204,26 @@ pub(crate) fn cut_out(image: &GrayImage, cut: Cut) -> Option<GrayImage> {
         crop
     };
     let mut out = GrayImage::from_pixel(ow, oh, image::Luma([255]));
-    image::imageops::overlay(&mut out, &crop, i64::from(BORDER), i64::from(BORDER));
+    image::imageops::overlay(&mut out, &crop, i64::from(bx), i64::from(by));
     Some(out)
 }
 
 /// A word's box on the cut-out back onto the cleaned page.
 pub(crate) fn back(px: PixelBox, cut: Cut) -> PixelBox {
     let s = cut.scale.max(1);
-    let left = px.left.saturating_sub(BORDER) / s;
-    let top = px.top.saturating_sub(BORDER) / s;
+    let (bx, by) = (cut.border_x.min(BORDER), cut.border_y.min(BORDER));
+    let left = px.left.saturating_sub(bx) / s;
+    let top = px.top.saturating_sub(by) / s;
     let right = px
         .left
         .saturating_add(px.width)
-        .saturating_sub(BORDER)
+        .saturating_sub(bx)
         .div_ceil(s)
         .min(cut.width);
     let bottom = px
         .top
         .saturating_add(px.height)
-        .saturating_sub(BORDER)
+        .saturating_sub(by)
         .div_ceil(s)
         .min(cut.height);
     let (left, top) = (left.min(right), top.min(bottom));
@@ -276,6 +292,8 @@ mod tests {
             width: 300,
             height: 40,
             scale: 2,
+            border_x: BORDER,
+            border_y: BORDER,
         };
         let px = PixelBox {
             left: BORDER + 20,
@@ -324,6 +342,8 @@ mod tests {
             width: 10,
             height: 10,
             scale: 1,
+            border_x: BORDER,
+            border_y: BORDER,
         };
         assert!(cut_out(&img, base).is_some());
         assert!(cut_out(&img, Cut { width: 0, ..base }).is_none());
@@ -348,7 +368,41 @@ mod tests {
                 }
             )
             .is_none(),
-            "the border would pass the OCR limit"
+            "a full border would pass the OCR limit"
         );
+    }
+
+    /// Security review L3: a box across a whole page at the OCR limit is
+    /// cut out with a narrower border, and its words map back.
+    #[test]
+    fn a_box_across_a_page_at_the_ocr_limit_is_still_read() {
+        let c = cleaned(MAX_PGM_WIDTH, MAX_PGM_HEIGHT);
+        // Full width, a fifth of the height.
+        let cut = cut_box(&c, Bbox::new(0, 4_000, 10_000, 6_000).unwrap()).unwrap();
+        assert_eq!((cut.left, cut.width), (0, MAX_PGM_WIDTH));
+        assert_eq!(cut.border_x, 0);
+        assert_eq!(cut.border_y, BORDER);
+        let img = cut_out(&c.image, cut).unwrap();
+        assert_eq!(img.width(), MAX_PGM_WIDTH);
+        assert!(img.height() <= MAX_PGM_HEIGHT);
+        let px = PixelBox {
+            left: 100,
+            top: BORDER + 10,
+            width: 50,
+            height: 20,
+        };
+        let b = back(px, cut);
+        assert_eq!((b.left, b.top), (100, cut.top + 10));
+        // Nearly the width: the border narrows to what fits.
+        let c = cleaned(MAX_PGM_WIDTH - 10, 3_000);
+        let cut = cut_box(&c, Bbox::new(0, 4_000, 10_000, 5_000).unwrap()).unwrap();
+        assert_eq!(cut.border_x, 5);
+        assert!(cut_out(&c.image, cut).is_some());
+        // A box across a page within the limit both ways: the whole page
+        // tall is refused only by the 90 % rule upstream, never here.
+        let c = cleaned(MAX_PGM_WIDTH, MAX_PGM_HEIGHT);
+        let cut = cut_box(&c, Bbox::new(0, 0, 10_000, 10_000).unwrap()).unwrap();
+        assert_eq!((cut.border_x, cut.border_y), (0, 0));
+        assert!(cut_out(&c.image, cut).is_some());
     }
 }

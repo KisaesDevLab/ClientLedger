@@ -18,6 +18,8 @@
 //! | `force-ocr` | reads the rest of the file (after the hook line) with every page sent to OCR |
 //! | `spawn` | tries to start a program (this one): `Unreadable` when that is refused (the Windows job allows one process), `Empty` when it started |
 //! | `region-lie` | answers a job with a word outside its region (a region job's reply the host must refuse) |
+//! | `region-other-page` | starts the job's page, then the next one, then answers with no words (a region job's host must refuse the second start) |
+//! | `region-page-twice` | starts the job's page twice, then answers with no words (the same) |
 //!
 //! Before `Ready`, `CL_DOCREAD_TEST_READY=hang` hangs, `=exit` exits and
 //! `=old` announces the previous protocol version, then hangs (the host's
@@ -46,6 +48,8 @@ pub enum Hook {
     ForceOcr,
     Spawn,
     RegionLie,
+    RegionOtherPage,
+    RegionPageTwice,
 }
 
 /// The hook a document names, and the bytes after its first line.
@@ -67,6 +71,8 @@ pub fn parse(bytes: &[u8]) -> Option<(Hook, &[u8])> {
             "force-ocr" => Hook::ForceOcr,
             "spawn" => Hook::Spawn,
             "region-lie" => Hook::RegionLie,
+            "region-other-page" => Hook::RegionOtherPage,
+            "region-page-twice" => Hook::RegionPageTwice,
             _ => return None,
         },
         Some(("commit", n)) => Hook::Commit(mib(n)?),
@@ -189,6 +195,8 @@ pub fn run(
             })
         }
         Hook::RegionLie => region_lie(io, job),
+        Hook::RegionOtherPage => region_restarts(io, job, 1),
+        Hook::RegionPageTwice => region_restarts(io, job, 0),
 
         Hook::ForceOcr => force_ocr(rest, ctx, io, job),
     }
@@ -232,6 +240,21 @@ fn region_lie(io: &mut dyn Io, job: &Job) -> Result<FromWorker, Fatal> {
     })
 }
 
+/// `region-other-page` (`step` 1) and `region-page-twice` (`step` 0): the
+/// job's page is started, then page + `step`, then a reading with no words.
+fn region_restarts(io: &mut dyn Io, job: &Job, step: u16) -> Result<FromWorker, Fatal> {
+    let page = job.region.map_or(0, |r| r.page);
+    io.send(&FromWorker::PageStarted { job: job.job, page })?;
+    io.send(&FromWorker::PageStarted {
+        job: job.job,
+        page: page.saturating_add(step),
+    })?;
+    Ok(FromWorker::JobDone {
+        job: job.job,
+        reading: Box::new(Reading::empty(Reader::Ocr, page.saturating_add(2))),
+    })
+}
+
 /// The start-up hook (`CL_DOCREAD_TEST_READY`).
 pub fn before_ready() {
     match std::env::var("CL_DOCREAD_TEST_READY").as_deref() {
@@ -271,6 +294,14 @@ mod tests {
         assert_eq!(
             parse(b"%CL-TEST-HOOK:region-lie"),
             Some((Hook::RegionLie, &b""[..]))
+        );
+        assert_eq!(
+            parse(b"%CL-TEST-HOOK:region-other-page\n"),
+            Some((Hook::RegionOtherPage, &b""[..]))
+        );
+        assert_eq!(
+            parse(b"%CL-TEST-HOOK:region-page-twice\n"),
+            Some((Hook::RegionPageTwice, &b""[..]))
         );
         assert_eq!(parse(b"%CL-TEST-HOOK:rss:x"), None);
         assert_eq!(parse(b"%CL-TEST-HOOK:nope"), None);

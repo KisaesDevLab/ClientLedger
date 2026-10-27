@@ -555,7 +555,7 @@ fn host(scratch: &Path) -> Option<DocreadHost> {
 
 fn read_one(host: &mut DocreadHost, bytes: Vec<u8>) -> (Option<Reading>, Duration) {
     let job = DocJob {
-        bytes,
+        bytes: bytes.into(),
         hint: JobHint::default(),
         templates: Vec::new(),
     };

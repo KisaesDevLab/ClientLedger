@@ -209,10 +209,12 @@ impl DocreadConfig {
     }
 }
 
-/// One document to read. File names never cross to the worker.
+/// One document to read. File names never cross to the worker. The bytes
+/// are shared (`Arc`): the desktop's copy is handed over without copying;
+/// the one copy made is the frame sent to the worker.
 #[derive(Clone, PartialEq, Eq)]
 pub struct DocJob {
-    pub bytes: Vec<u8>,
+    pub bytes: Arc<[u8]>,
     pub hint: JobHint,
     /// The company's layout templates (at most `MAX_TEMPLATES` are sent).
     pub templates: Vec<Template>,
@@ -232,7 +234,8 @@ impl std::fmt::Debug for DocJob {
 /// to the worker; `Debug` shows only sizes.
 #[derive(Clone, PartialEq, Eq)]
 pub struct RegionJob {
-    pub bytes: Vec<u8>,
+    /// Shared with the desktop's copy (no copy until the frame is built).
+    pub bytes: Arc<[u8]>,
     /// The page (from 0) and the box on the original page.
     pub region: Spot,
 }
@@ -1133,7 +1136,7 @@ impl DocreadHost {
             return RegionOutcome::Refused;
         }
         let doc = DocJob {
-            bytes: job.bytes.clone(),
+            bytes: Arc::clone(&job.bytes),
             hint: JobHint::default(),
             templates: Vec::new(),
         };
@@ -1405,7 +1408,7 @@ fn run_batch(
         .iter()
         .map(|&i| Job {
             job: u32::try_from(i).unwrap_or(u32::MAX),
-            bytes: Bytes(jobs[i].bytes.clone()),
+            bytes: Bytes(jobs[i].bytes.to_vec()),
             hint: jobs[i].hint,
             templates: jobs[i]
                 .templates
@@ -1454,7 +1457,14 @@ fn run_batch(
                 Err(RecvTimeoutError::Timeout) => continue,
             };
             match msg {
-                FromWorker::PageStarted { job, page } if job == id && page < MAX_PAGES => {
+                // A region job reads one page, once (security review L2):
+                // any other start is a bad reply.
+                FromWorker::PageStarted { job, page }
+                    if job == id
+                        && page < MAX_PAGES
+                        && regions_sent[k]
+                            .is_none_or(|r| r.page == page && !clock.pages.contains(&page)) =>
+                {
                     clock.pages.insert(page);
                     clock.deadline = Instant::now() + limits.per_page;
                 }
@@ -1621,7 +1631,7 @@ mod tests {
 
     fn job(len: usize) -> DocJob {
         DocJob {
-            bytes: vec![1; len],
+            bytes: vec![1; len].into(),
             hint: JobHint::default(),
             templates: Vec::new(),
         }
@@ -1665,7 +1675,7 @@ mod tests {
         // Review L6: a 10 MB document whose templates alone are over the
         // frame cap, then a 1 MB one.
         let doc = DocJob {
-            bytes: vec![7; MAX_DOCUMENT_BYTES],
+            bytes: vec![7; MAX_DOCUMENT_BYTES].into(),
             hint: JobHint::default(),
             templates: vec![huge_template(); 120],
         };
@@ -1686,7 +1696,7 @@ mod tests {
         let batch = ToWorker::Batch {
             jobs: vec![Job {
                 job: 0,
-                bytes: Bytes(jobs[0].bytes.clone()),
+                bytes: Bytes(jobs[0].bytes.to_vec()),
                 hint: jobs[0].hint,
                 templates: jobs[0].templates[..s[0].templates].to_vec(),
                 region: None,
@@ -1986,7 +1996,7 @@ mod tests {
     #[test]
     fn debug_shows_no_document_bytes() {
         let j = DocJob {
-            bytes: b"Riverbend".to_vec(),
+            bytes: b"Riverbend".to_vec().into(),
             hint: JobHint::default(),
             templates: Vec::new(),
         };
