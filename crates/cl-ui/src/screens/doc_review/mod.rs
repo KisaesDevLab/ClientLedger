@@ -282,7 +282,15 @@ impl DocReviewScreen {
 
     /// Carries out the key or button the list recorded.
     fn act(&mut self, ctx: &egui::Context) {
-        match self.queue.action.take() {
+        let action = self.queue.action.take();
+        // While the confirm card or the chooser asks, Enter and Delete
+        // belong to its buttons: the list opens and discards nothing.
+        if (self.confirm.is_some() || self.choose.is_some())
+            && matches!(action, Some(QueueAction::Open(_) | QueueAction::Discard(_)))
+        {
+            return;
+        }
+        match action {
             Some(QueueAction::Open(id)) => self.open(ctx, id, None),
             Some(QueueAction::Discard(id)) => {
                 self.choose = None;
@@ -463,6 +471,42 @@ impl DocReviewScreen {
                         }
                         let font = egui::FontId::proportional(13.0);
                         let y = rect.center().y;
+                        // Status at the right edge, the amount before it,
+                        // and the date, kind and reference in what's left
+                        // (clipped, so nothing runs over at 200%).
+                        let mut status = t(r.status().key().0);
+                        if r.duplicate == cl_model::doc_draft::DuplicateCheck::Checking {
+                            status = format!("{status} \u{b7} {}", t("doc_review.checking"));
+                        }
+                        let status_color = match r.status() {
+                            cl_model::doc_draft::QueueStatus::Ready => tokens.text_primary,
+                            cl_model::doc_draft::QueueStatus::WaitingToBeRead => {
+                                tokens.text_secondary
+                            }
+                            _ => tokens.warn_text,
+                        };
+                        let status = p.layout_no_wrap(status, font.clone(), status_color);
+                        let status_left = rect.right() - 8.0 - status.size().x;
+                        p.galley(
+                            egui::pos2(status_left, y - status.size().y / 2.0),
+                            status,
+                            status_color,
+                        );
+                        let amount = view.total.map(|m| m.format(style)).unwrap_or_default();
+                        let amount = p.layout_no_wrap(
+                            amount,
+                            egui::FontId::monospace(13.0),
+                            tokens.text_primary,
+                        );
+                        let amount_left = status_left - 24.0 - amount.size().x;
+                        p.galley(
+                            egui::pos2(amount_left, y - amount.size().y / 2.0),
+                            amount,
+                            tokens.text_primary,
+                        );
+                        let mut left = rect;
+                        left.set_right((amount_left - 12.0).max(rect.left()));
+                        let clip = p.with_clip_rect(left.intersect(p.clip_rect()));
                         let at = |x: f32| egui::pos2(rect.left() + x, y);
                         let date = view.date.map(crate::shell::us_date).unwrap_or_default();
                         let cells = [
@@ -475,34 +519,8 @@ impl DocReviewScreen {
                             ),
                         ];
                         for (x, text, color) in cells {
-                            p.text(at(x), Align2::LEFT_CENTER, text, font.clone(), color);
+                            clip.text(at(x), Align2::LEFT_CENTER, text, font.clone(), color);
                         }
-                        let amount = view.total.map(|m| m.format(style)).unwrap_or_default();
-                        p.text(
-                            at(width.min(560.0) - 8.0),
-                            Align2::RIGHT_CENTER,
-                            amount,
-                            egui::FontId::monospace(13.0),
-                            tokens.text_primary,
-                        );
-                        let mut status = t(r.status().key().0);
-                        if r.duplicate == cl_model::doc_draft::DuplicateCheck::Checking {
-                            status = format!("{status} \u{b7} {}", t("doc_review.checking"));
-                        }
-                        let status_color = match r.status() {
-                            cl_model::doc_draft::QueueStatus::Ready => tokens.text_primary,
-                            cl_model::doc_draft::QueueStatus::WaitingToBeRead => {
-                                tokens.text_secondary
-                            }
-                            _ => tokens.warn_text,
-                        };
-                        p.text(
-                            at(width.min(560.0) + 16.0),
-                            Align2::LEFT_CENTER,
-                            status,
-                            font,
-                            status_color,
-                        );
                     }
                     if resp.double_clicked() {
                         open = Some(r.id);

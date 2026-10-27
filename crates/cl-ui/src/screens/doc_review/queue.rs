@@ -206,7 +206,7 @@ pub enum QueueAction {
 }
 
 /// The list's rows and selection.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct QueueView {
     /// The rows of this page, newest first.
     pub(crate) rows: Vec<QueueRow<DocumentDraftId>>,
@@ -224,6 +224,20 @@ pub struct QueueView {
     dup_cache: HashMap<(DocumentDraftId, String), DuplicateCheck>,
     /// The last key or button the window hasn't carried out yet.
     pub(crate) action: Option<QueueAction>,
+}
+
+/// Counts and positions only: the filter is owner text.
+impl std::fmt::Debug for QueueView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueueView")
+            .field("rows", &self.rows.len())
+            .field("selected", &self.cursor.position(&self.ids()))
+            .field("total", &self.total)
+            .field("reading", &self.reading)
+            .field("filtered", &!self.filter.trim().is_empty())
+            .field("action", &self.action)
+            .finish_non_exhaustive()
+    }
 }
 
 impl QueueView {
@@ -710,9 +724,14 @@ mod tests {
         let s = q.state().to_string();
         assert!(!s.contains("jk") && !s.contains("INV") && !s.contains("12.5"));
         assert_eq!(q.state()["filtered"], true);
+        q.set_filter("INV-7");
+        let debug = format!("{q:?}");
+        assert!(
+            debug.contains("filtered: true") && !debug.contains("INV"),
+            "{debug}"
+        );
         q.set_filter("");
         assert_eq!(q.selected(), Some(id(1)));
-        assert!(format!("{q:?}").contains("RowView"));
         assert!(!format!("{q:?}").contains("INV-7"), "Debug says nothing");
     }
 

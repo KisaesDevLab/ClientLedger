@@ -336,3 +336,27 @@ fn home_counts_documents_to_review() {
         "3 documents to review"
     );
 }
+
+/// Enter or Delete pressed on the confirm card's or the chooser's buttons
+/// open and discard nothing from the list behind them.
+#[test]
+fn keys_wait_while_a_card_asks() {
+    let (_dir, link) = link();
+    let bill = claim(&link, 1, DraftKind::Bill);
+    let mut s = screen(&link);
+    let ctx = egui::Context::default();
+    frame(&mut s, &ctx);
+    let _ = link.drain();
+    s.confirm = Some(bill.id);
+    assert!(s.command(CommandId::new("queue.open")));
+    frame(&mut s, &ctx);
+    assert_eq!(link.drain().len(), 0, "nothing opened");
+    assert_eq!(take_open(&ctx, DraftForm::EnterBill), None);
+    assert_eq!(s.confirm, Some(bill.id), "the card still asks");
+    s.confirm = None;
+    s.choose = Some(bill.id);
+    assert!(s.command(CommandId::new("queue.discard")));
+    frame(&mut s, &ctx);
+    assert_eq!(s.state()["queue"]["confirm_discard"], false);
+    assert_eq!(s.state()["queue"]["choose_kind"], true);
+}
