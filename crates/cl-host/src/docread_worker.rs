@@ -209,10 +209,12 @@ impl DocreadConfig {
     }
 }
 
-/// One document to read. File names never cross to the worker.
+/// One document to read. File names never cross to the worker. The bytes
+/// are shared (`Arc`): the desktop's copy is handed over without copying;
+/// the one copy made is the frame sent to the worker.
 #[derive(Clone, PartialEq, Eq)]
 pub struct DocJob {
-    pub bytes: Vec<u8>,
+    pub bytes: Arc<[u8]>,
     pub hint: JobHint,
     /// The company's layout templates (at most `MAX_TEMPLATES` are sent).
     pub templates: Vec<Template>,
@@ -232,7 +234,8 @@ impl std::fmt::Debug for DocJob {
 /// to the worker; `Debug` shows only sizes.
 #[derive(Clone, PartialEq, Eq)]
 pub struct RegionJob {
-    pub bytes: Vec<u8>,
+    /// Shared with the desktop's copy (no copy until the frame is built).
+    pub bytes: Arc<[u8]>,
     /// The page (from 0) and the box on the original page.
     pub region: Spot,
 }
@@ -1133,7 +1136,7 @@ impl DocreadHost {
             return RegionOutcome::Refused;
         }
         let doc = DocJob {
-            bytes: job.bytes.clone(),
+            bytes: Arc::clone(&job.bytes),
             hint: JobHint::default(),
             templates: Vec::new(),
         };
@@ -1386,6 +1389,20 @@ struct JobClock {
     dispatched: Instant,
     deadline: Instant,
     pages: BTreeSet<u16>,
+    /// The box of a region job.
+    region: Option<Spot>,
+}
+
+impl JobClock {
+    /// Whether the worker may start `page` now (see [`may_start`]).
+    fn may_start(&self, page: u16) -> bool {
+        may_start(self.region, &self.pages, page)
+    }
+
+    /// A region job answered with more than the words in its box.
+    fn wrong_region(&self, reading: &Reading) -> bool {
+        self.region.is_some_and(|r| !is_region_reading(reading, r))
+    }
 }
 
 /// Run one batch on `w`, filling `outcomes`.
@@ -1405,7 +1422,7 @@ fn run_batch(
         .iter()
         .map(|&i| Job {
             job: u32::try_from(i).unwrap_or(u32::MAX),
-            bytes: Bytes(jobs[i].bytes.clone()),
+            bytes: Bytes(jobs[i].bytes.to_vec()),
             hint: jobs[i].hint,
             templates: jobs[i]
                 .templates
@@ -1416,7 +1433,6 @@ fn run_batch(
             region: regions.get(i).copied().flatten(),
         })
         .collect();
-    let regions_sent: Vec<Option<Spot>> = sent.iter().map(|j| j.region).collect();
     let template_counts: Vec<usize> = sent.iter().map(|j| j.templates.len()).collect();
     if !w.send(&ToWorker::Batch {
         jobs: sent,
@@ -1431,6 +1447,7 @@ fn run_batch(
             dispatched: now,
             deadline: now + limits.first_page,
             pages: BTreeSet::new(),
+            region: regions.get(i).copied().flatten(),
         };
         let outcome = loop {
             if cancel.load(Ordering::Relaxed) {
@@ -1454,7 +1471,7 @@ fn run_batch(
                 Err(RecvTimeoutError::Timeout) => continue,
             };
             match msg {
-                FromWorker::PageStarted { job, page } if job == id && page < MAX_PAGES => {
+                FromWorker::PageStarted { job, page } if job == id && clock.may_start(page) => {
                     clock.pages.insert(page);
                     clock.deadline = Instant::now() + limits.per_page;
                 }
@@ -1475,8 +1492,7 @@ fn run_batch(
                     clock.deadline = Instant::now() + limits.per_page;
                 }
                 FromWorker::JobDone { job, reading } if job == id => {
-                    if reading.validate(template_counts[k]).is_err()
-                        || regions_sent[k].is_some_and(|r| !is_region_reading(&reading, r))
+                    if reading.validate(template_counts[k]).is_err() || clock.wrong_region(&reading)
                     {
                         return BatchEnd::Killed(k, Kill::BadReply);
                     }
@@ -1501,6 +1517,13 @@ fn run_batch(
         }
     }
     BatchEnd::Done
+}
+
+/// Whether the worker may start `page` of a job: a page in range; for a
+/// region job only the box's page, once (security review L2). Any other
+/// start is a bad reply.
+fn may_start(region: Option<Spot>, started: &BTreeSet<u16>, page: u16) -> bool {
+    page < MAX_PAGES && region.is_none_or(|r| r.page == page && !started.contains(&page))
 }
 
 /// [`ocr_answer`] on a helper thread while this one keeps watching the
@@ -1621,7 +1644,7 @@ mod tests {
 
     fn job(len: usize) -> DocJob {
         DocJob {
-            bytes: vec![1; len],
+            bytes: vec![1; len].into(),
             hint: JobHint::default(),
             templates: Vec::new(),
         }
@@ -1665,7 +1688,7 @@ mod tests {
         // Review L6: a 10 MB document whose templates alone are over the
         // frame cap, then a 1 MB one.
         let doc = DocJob {
-            bytes: vec![7; MAX_DOCUMENT_BYTES],
+            bytes: vec![7; MAX_DOCUMENT_BYTES].into(),
             hint: JobHint::default(),
             templates: vec![huge_template(); 120],
         };
@@ -1686,7 +1709,7 @@ mod tests {
         let batch = ToWorker::Batch {
             jobs: vec![Job {
                 job: 0,
-                bytes: Bytes(jobs[0].bytes.clone()),
+                bytes: Bytes(jobs[0].bytes.to_vec()),
                 hint: jobs[0].hint,
                 templates: jobs[0].templates[..s[0].templates].to_vec(),
                 region: None,
@@ -1983,10 +2006,29 @@ mod tests {
         assert_eq!(other, 3);
     }
 
+    /// Security review L2: a region job's worker may start only its page,
+    /// once; a whole read any page in range.
+    #[test]
+    fn a_region_job_may_start_only_its_page_once() {
+        let r = Some(Spot {
+            page: 2,
+            bbox: cl_docread::model::Bbox::PAGE,
+        });
+        let mut started = BTreeSet::new();
+        assert!(may_start(r, &started, 2));
+        assert!(!may_start(r, &started, 1));
+        assert!(!may_start(r, &started, 3));
+        started.insert(2);
+        assert!(!may_start(r, &started, 2), "twice");
+        assert!(may_start(None, &started, 2));
+        assert!(may_start(None, &started, 7));
+        assert!(!may_start(None, &started, MAX_PAGES));
+    }
+
     #[test]
     fn debug_shows_no_document_bytes() {
         let j = DocJob {
-            bytes: b"Riverbend".to_vec(),
+            bytes: b"Riverbend".to_vec().into(),
             hint: JobHint::default(),
             templates: Vec::new(),
         };

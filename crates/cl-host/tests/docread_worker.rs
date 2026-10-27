@@ -31,7 +31,7 @@ fn config(s: &Scratch) -> DocreadConfig {
 
 fn doc(bytes: Vec<u8>) -> DocJob {
     DocJob {
-        bytes,
+        bytes: bytes.into(),
         hint: JobHint::default(),
         templates: Vec::new(),
     }
@@ -516,7 +516,7 @@ fn a_page_lying_on_its_side_is_turned_and_read() {
 
 fn region(bytes: Vec<u8>, page: u16, b: (u16, u16, u16, u16)) -> RegionJob {
     RegionJob {
-        bytes,
+        bytes: bytes.into(),
         region: Spot {
             page,
             bbox: Bbox::new(b.0, b.1, b.2, b.3).unwrap(),
@@ -580,6 +580,32 @@ fn a_region_reply_with_words_outside_the_box_kills_the_worker() {
     assert!(matches!(out[0], JobOutcome::Read(_)), "{out:?}");
 }
 
+/// Security review L2: a region job's worker may start only the box's
+/// page, once; another page or a second start is a bad reply.
+#[test]
+fn a_region_job_that_starts_another_page_or_twice_kills_the_worker() {
+    let s = Scratch::new("docread-region-pages");
+    let mut host = DocreadHost::new(config(&s));
+    for name in ["region-other-page", "region-page-twice"] {
+        let before = host.stats().kills;
+        let job = region(
+            format!("%CL-TEST-HOOK:{name}\n").into_bytes(),
+            0,
+            (0, 0, 1_000, 1_000),
+        );
+        let out = host.read_region(&job, today());
+        assert_eq!(
+            out,
+            RegionOutcome::CouldNotRead(CouldNotRead::BadReply),
+            "{name}"
+        );
+        assert_eq!(host.stats().kills - before, 2, "{name}");
+        // A whole read may start pages as it likes.
+        let out = host.read(&[hook(name)], today());
+        assert!(matches!(out[0], JobOutcome::Read(_)), "{name}: {out:?}");
+    }
+}
+
 #[test]
 fn a_worker_of_another_protocol_version_is_not_used() {
     let s = Scratch::new("docread-region-version");
@@ -588,7 +614,7 @@ fn a_worker_of_another_protocol_version_is_not_used() {
     c.test_env = vec![("CL_DOCREAD_TEST_READY".into(), "old".into())];
     let mut host = DocreadHost::new(c);
     let started = Instant::now();
-    let out = host.read_region(&region(junk().bytes, 0, (0, 0, 500, 500)), today());
+    let out = host.read_region(&region(junk().bytes.to_vec(), 0, (0, 0, 500, 500)), today());
     assert_eq!(out, RegionOutcome::CouldNotRead(CouldNotRead::Unavailable));
     // Refused on the version, not on the start-up deadline.
     assert!(
@@ -664,6 +690,39 @@ fn a_region_of_a_scan_is_cut_out_and_read() {
     assert_eq!(texts, ["544.82"], "tesseract read {texts:?}");
     // A read of the cut-out only (orientation asked, not a page read).
     assert_eq!(stats.ocr_pages, 1);
+}
+
+/// Security review M1: the desktop's path — a box dragged on a scan, read
+/// through the real worker with the reading service's own Cancel flag
+/// (`read_region_with_cancel`); a flag already set answers Cancelled.
+#[test]
+fn a_box_dragged_on_a_scan_is_read_with_the_services_cancel_flag() {
+    let (Some(tools), true) = (ocr_tools(), pdfium_present()) else {
+        eprintln!("tesseract or PDFium missing: skipped");
+        return;
+    };
+    let _heavy = heavy();
+    let s = Scratch::new("docread-region-cancel-flag");
+    let mut c = config(&s);
+    c.ocr = Some(tools);
+    let mut host = DocreadHost::new(c);
+    let page = pdf::text(72, 600, 24, "INVOICE") + &pdf::text(300, 500, 24, "Total 544.82");
+    let mut bytes = b"%CL-TEST-HOOK:force-ocr\n".to_vec();
+    bytes.extend_from_slice(&pdf::build(&[page]));
+    let job = region(bytes, 0, (5_500, 3_400, 8_000, 4_300));
+    let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let out = host.read_region_with_cancel(&job, today(), std::sync::Arc::clone(&flag));
+    assert_eq!(region_texts(&out), ["544.82"]);
+    let RegionOutcome::Words(p) = &out else {
+        unreachable!()
+    };
+    assert_eq!(p.page, 0);
+    assert!(p.words.iter().all(|w| centre_in(job.region.bbox, w.bbox)));
+    // The service's flag set (a newer pick replaced this box): nothing read.
+    flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    let out = host.read_region_with_cancel(&job, today(), flag);
+    assert_eq!(out, RegionOutcome::CouldNotRead(CouldNotRead::Cancelled));
+    assert_eq!(leftovers(&s), 0);
 }
 
 #[test]

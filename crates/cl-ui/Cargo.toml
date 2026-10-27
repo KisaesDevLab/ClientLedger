@@ -22,6 +22,11 @@ cl-settings = { path = "../cl-settings" }
 # allowlist. The UI embeds IBM Plex (OFL, ATTRIBUTION.md) instead.
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "wgpu", "wayland", "x11", "clipboard", "links"] }
+# A04 security review L6: the review digests are an HMAC-SHA-256 under a
+# per-process random key. Both MIT OR Apache-2.0 and already in the tree
+# (hmac via postgres-protocol; getrandom in cl-pg and cl-automation).
+getrandom = "0.4.3"
+hmac = "0.13.0"
 # P17 document viewer: PNG and JPEG previews (decoded with size limits).
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 # A02 document viewer: multi-page TIFF (`image` reads page 1 only; Q-A02k).

@@ -152,7 +152,7 @@ fn read(opts: &Options) -> Result<Reading, String> {
         .ok_or("The reading program (clientledger-docread) wasn't found next to this one.")?;
     let mut host = DocreadHost::new(DocreadConfig::new(&paths, exe, OcrTools::find()));
     let job = DocJob {
-        bytes,
+        bytes: bytes.into(),
         hint: JobHint::default(),
         templates: Vec::new(),
     };
