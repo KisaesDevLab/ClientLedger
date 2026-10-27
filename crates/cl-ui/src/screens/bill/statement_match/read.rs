@@ -145,8 +145,11 @@ pub(crate) struct StatementDoc {
     pub selected: Option<usize>,
     /// Why the last attempt said nothing useful (i18n key).
     pub problem: Option<&'static str>,
-    /// The statement names another vendor than the one picked.
-    pub vendor_differs: Option<String>,
+    /// The company vendor the statement names (the reader's match, or an
+    /// AI suggestion the owner accepted). The wrong-vendor warning, the
+    /// keep and the layout learning all compare the picked vendor with it,
+    /// every time (review B2).
+    pub read_vendor: Option<ContactId>,
     /// The closing balance printed on the statement.
     pub closing: Option<Money>,
     /// The closing balance came from AI help (checked against the page).
@@ -206,7 +209,7 @@ impl Default for StatementDoc {
             spots: Vec::new(),
             selected: None,
             problem: None,
-            vendor_differs: None,
+            read_vendor: None,
             closing: None,
             closing_by_ai: false,
             statement_date: None,
@@ -262,7 +265,7 @@ impl StatementDoc {
         self.spots.clear();
         self.selected = None;
         self.problem = None;
-        self.vendor_differs = None;
+        self.read_vendor = None;
         self.closing = None;
         self.closing_by_ai = false;
         self.statement_date = None;
@@ -305,7 +308,7 @@ impl StatementDoc {
     }
 
     /// The control channel's view: counts and flags only.
-    pub(crate) fn state_json(&self, box_text: &str) -> Value {
+    pub(crate) fn state_json(&self, box_text: &str, picked: Option<ContactId>) -> Value {
         let read = self.read.as_ref();
         json!({
             "document": self.bytes.is_some(),
@@ -319,7 +322,7 @@ impl StatementDoc {
             "typed_over": read.is_some_and(|r| !r.still_read(box_text)),
             "spots": self.spots.iter().filter(|s| s.is_some()).count(),
             "selected": self.selected,
-            "vendor_differs": self.vendor_differs.is_some(),
+            "vendor_differs": self.differs_from(picked),
             "closing_read": self.closing.is_some(),
             "closing_by_ai": self.closing_by_ai,
             "checks": self.checks.iter().map(|c| crate::screens::bill::doc_read_local::code_name(c.code)).collect::<Vec<_>>(),
@@ -339,6 +342,11 @@ impl StatementDoc {
             "keeping": self.keep_task.is_some(),
             "viewer": self.viewer.state_json(),
         })
+    }
+
+    /// The statement names a company vendor other than `picked`.
+    pub(crate) fn differs_from(&self, picked: Option<ContactId>) -> bool {
+        self.read_vendor.is_some_and(|v| picked != Some(v))
     }
 
     /// What "Ask AI to help" offers now.
@@ -497,6 +505,10 @@ impl StatementMatchScreen {
             return;
         };
         self.doc.forget_reading();
+        // A Match made (or running) for the last document is not this
+        // one's: it never keeps this file (review B2).
+        self.outcome = None;
+        self.reading = None;
         self.doc.doc_no += 1;
         self.doc.kept = None;
         self.doc.keep_failed = false;
@@ -676,7 +688,7 @@ impl StatementMatchScreen {
                 &crate::reading::map::vendor_candidates(&self.contacts),
             )
         });
-        self.take_vendor(found, st.vendor.as_ref().map(|v| v.value.clone()));
+        self.take_vendor(found);
         self.doc
             .compare
             .set_words(Some(Arc::new(crate::widgets::compare::DocWords {
@@ -687,25 +699,29 @@ impl StatementMatchScreen {
     }
 
     /// The vendor the statement names: picked when none is; a different
-    /// one already picked stays, with a warning.
-    fn take_vendor(&mut self, found: Option<ContactId>, printed: Option<String>) {
+    /// one already picked stays, and the warning shows while they differ.
+    fn take_vendor(&mut self, found: Option<ContactId>) {
         let Some(found) = found.filter(|f| self.vendors.iter().any(|(id, _)| id == f)) else {
             return;
         };
-        match self.vendor {
-            None => self.vendor = Some(found),
-            Some(v) if v == found => {}
-            Some(_) => {
-                let name = self
-                    .vendors
-                    .iter()
-                    .find(|(id, _)| *id == found)
-                    .map(|(_, n)| n.clone())
-                    .or(printed)
-                    .unwrap_or_default();
-                self.doc.vendor_differs = Some(name);
-            }
+        self.doc.read_vendor = Some(found);
+        if self.vendor.is_none() {
+            self.vendor = Some(found);
         }
+    }
+
+    /// The statement names another company vendor than the one picked now.
+    pub(crate) fn vendor_differs(&self) -> bool {
+        self.doc.differs_from(self.vendor)
+    }
+
+    /// The name of the vendor the statement names, for the warning.
+    fn read_vendor_name(&self) -> Option<String> {
+        let v = self.doc.read_vendor?;
+        self.vendors
+            .iter()
+            .find(|(id, _)| *id == v)
+            .map(|(_, n)| n.clone())
     }
 
     /// Accept every read line.
@@ -727,7 +743,9 @@ impl StatementMatchScreen {
     /// Every line accepted: the vendor's statement layout learns this
     /// document (Q-299, `stmt:` key), once per reading.
     fn learn_on_accept(&mut self) {
+        // Never under a vendor the statement doesn't name (review S3).
         if self.doc.learned.is_some()
+            || self.vendor_differs()
             || !self
                 .doc
                 .read
@@ -961,7 +979,7 @@ impl StatementMatchScreen {
                     &candidates,
                 )
             });
-            self.take_vendor(found, merged.reading.header.vendor.map(|v| v.value));
+            self.take_vendor(found);
         }
     }
 
@@ -976,9 +994,7 @@ impl StatementMatchScreen {
     /// After a Match, the statement is kept with the vendor when the box
     /// is on (once per document, vendor and period).
     pub(crate) fn keep_after_match(&mut self) {
-        // A statement that names another vendor is never filed by itself:
-        // the owner ticks the box again after checking the warning.
-        if !self.doc.keep || self.doc.keep_task.is_some() || self.doc.vendor_differs.is_some() {
+        if !self.doc.keep || self.doc.keep_task.is_some() {
             return;
         }
         let (Some(o), Some(bytes), Some(kind)) = (
@@ -995,6 +1011,12 @@ impl StatementMatchScreen {
             doc: self.doc.doc_no,
         };
         if self.doc.kept == Some(key) {
+            return;
+        }
+        // A statement that names another vendor than the Match's is never
+        // filed on it, whatever started the keep (review B2). Picking the
+        // statement's vendor and matching again keeps it.
+        if self.doc.read_vendor.is_some_and(|v| v != key.vendor) {
             return;
         }
         let name = cl_api::statement_file_name(key.from, key.to, kind);
@@ -1175,9 +1197,10 @@ impl StatementMatchScreen {
         if let Some(k) = self.doc.problem {
             ui.label(RichText::new(t(k)).color(tokens.warn_text));
         }
-        if let Some(name) = &self.doc.vendor_differs {
+        if self.vendor_differs() {
+            let name = self.read_vendor_name().unwrap_or_default();
             ui.label(
-                RichText::new(t_with("statement.read.vendor_differs", &[("name", name)]))
+                RichText::new(t_with("statement.read.vendor_differs", &[("name", &name)]))
                     .color(tokens.warn_text),
             );
         }

@@ -296,7 +296,8 @@ fn demo_books(start: CalendarDate, end: CalendarDate) -> Books {
     books
 }
 
-/// The demo engine's vendor statement report (the stand-in for`n/// `/reports/vendor-statement`): the fixture's bills less its credits and
+/// The demo engine's vendor statement report (the stand-in for
+/// `/reports/vendor-statement`): the fixture's bills less its credits and
 /// payments, before `start` (opening) and through `end` (closing).
 #[must_use]
 pub(crate) fn demo_balances(
@@ -1057,7 +1058,7 @@ impl Screen for StatementMatchScreen {
                 BillKind::Credit => "credit",
             }),
             "opened": self.opened,
-            "statement": self.doc.state_json(&self.text),
+            "statement": self.doc.state_json(&self.text, self.vendor),
             "balance_shown": self.balance_line().is_some(),
         })
     }

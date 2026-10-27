@@ -274,6 +274,83 @@ fn another_vendor_on_the_statement_changes_nothing_and_warns() {
     s.poll();
     assert!(s.outcome.is_some());
     assert_eq!(s.state()["statement"]["kept"], false, "not filed by itself");
+    // Re-ticking the box doesn't file it on the other vendor either.
+    s.doc.keep = false;
+    s.doc.keep = true;
+    s.keep_after_match();
+    s.poll();
+    assert_eq!(s.state()["statement"]["kept"], false);
+    // Picking the statement's vendor clears the warning; its Match keeps.
+    let named = s.vendors.first().map(|v| v.0);
+    s.vendor = named;
+    assert_eq!(s.state()["statement"]["vendor_differs"], false);
+    s.run_match();
+    s.poll();
+    assert_eq!(
+        s.state()["statement"]["kept"],
+        true,
+        "kept on the named vendor"
+    );
+    assert_eq!(files_on(&link, named.expect("vendor")), 1);
+    assert_eq!(files_on(&link, other), 0);
+}
+
+fn files_on(link: &Arc<CompanyLink>, vendor: cl_core::ids::ContactId) -> usize {
+    crate::company::demo::checks::attachments(
+        &link.demo_state().expect("demo"),
+        cl_api::AttachTo::Contact(vendor),
+    )
+    .len()
+}
+
+/// The reader picks the vendor; the owner then picks another and matches:
+/// nothing is filed, the warning shows, and no layout is learned (B2, S3).
+#[test]
+fn a_vendor_changed_after_the_read_is_never_filed_on() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let name = vendor_name(&s);
+    read(&mut s, JobOutcome::Read(Box::new(october(&name))));
+    let named = s.vendor.expect("picked by the reader");
+    let other = s.vendors.get(1).map(|v| v.0).expect("two demo vendors");
+    s.vendor = Some(other);
+    assert_eq!(s.state()["statement"]["vendor_differs"], true);
+    s.accept_read_lines();
+    assert_eq!(
+        s.state()["statement"]["learned"],
+        json!(null),
+        "not learned"
+    );
+    s.run_match();
+    s.poll();
+    assert!(s.outcome.is_some());
+    assert_eq!(s.state()["statement"]["kept"], false);
+    assert_eq!(files_on(&link, other), 0);
+    assert_eq!(files_on(&link, named), 0);
+}
+
+/// A Match for one statement never files the next one: loading a new file
+/// drops the Match, and a books change afterwards reads nothing again (B2).
+#[test]
+fn a_new_file_after_a_match_is_not_kept_by_a_later_reread() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let name = vendor_name(&s);
+    read(&mut s, JobOutcome::Read(Box::new(october(&name))));
+    let vendor = s.vendor.expect("vendor");
+    s.accept_read_lines();
+    s.run_match();
+    s.poll();
+    assert_eq!(files_on(&link, vendor), 1, "the first statement is kept");
+    read(&mut s, JobOutcome::Failed(JobFailure::Unreadable));
+    assert!(s.outcome.is_none(), "the old Match is gone");
+    let _ = link.drain();
+    link.bus().publish(crate::data_bus::Change::Bills(vendor));
+    s.poll();
+    s.poll();
+    assert!(s.reading.is_none(), "nothing read again");
+    assert_eq!(s.state()["statement"]["kept"], false);
+    assert_eq!(files_on(&link, vendor), 1, "the second file is not filed");
 }
 
 #[test]
