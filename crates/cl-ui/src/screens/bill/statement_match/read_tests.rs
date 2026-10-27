@@ -274,6 +274,83 @@ fn another_vendor_on_the_statement_changes_nothing_and_warns() {
     s.poll();
     assert!(s.outcome.is_some());
     assert_eq!(s.state()["statement"]["kept"], false, "not filed by itself");
+    // Re-ticking the box doesn't file it on the other vendor either.
+    s.doc.keep = false;
+    s.doc.keep = true;
+    s.keep_after_match();
+    s.poll();
+    assert_eq!(s.state()["statement"]["kept"], false);
+    // Picking the statement's vendor clears the warning; its Match keeps.
+    let named = s.vendors.first().map(|v| v.0);
+    s.vendor = named;
+    assert_eq!(s.state()["statement"]["vendor_differs"], false);
+    s.run_match();
+    s.poll();
+    assert_eq!(
+        s.state()["statement"]["kept"],
+        true,
+        "kept on the named vendor"
+    );
+    assert_eq!(files_on(&link, named.expect("vendor")), 1);
+    assert_eq!(files_on(&link, other), 0);
+}
+
+fn files_on(link: &Arc<CompanyLink>, vendor: cl_core::ids::ContactId) -> usize {
+    crate::company::demo::checks::attachments(
+        &link.demo_state().expect("demo"),
+        cl_api::AttachTo::Contact(vendor),
+    )
+    .len()
+}
+
+/// The reader picks the vendor; the owner then picks another and matches:
+/// nothing is filed, the warning shows, and no layout is learned (B2, S3).
+#[test]
+fn a_vendor_changed_after_the_read_is_never_filed_on() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let name = vendor_name(&s);
+    read(&mut s, JobOutcome::Read(Box::new(october(&name))));
+    let named = s.vendor.expect("picked by the reader");
+    let other = s.vendors.get(1).map(|v| v.0).expect("two demo vendors");
+    s.vendor = Some(other);
+    assert_eq!(s.state()["statement"]["vendor_differs"], true);
+    s.accept_read_lines();
+    assert_eq!(
+        s.state()["statement"]["learned"],
+        json!(null),
+        "not learned"
+    );
+    s.run_match();
+    s.poll();
+    assert!(s.outcome.is_some());
+    assert_eq!(s.state()["statement"]["kept"], false);
+    assert_eq!(files_on(&link, other), 0);
+    assert_eq!(files_on(&link, named), 0);
+}
+
+/// A Match for one statement never files the next one: loading a new file
+/// drops the Match, and a books change afterwards reads nothing again (B2).
+#[test]
+fn a_new_file_after_a_match_is_not_kept_by_a_later_reread() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let name = vendor_name(&s);
+    read(&mut s, JobOutcome::Read(Box::new(october(&name))));
+    let vendor = s.vendor.expect("vendor");
+    s.accept_read_lines();
+    s.run_match();
+    s.poll();
+    assert_eq!(files_on(&link, vendor), 1, "the first statement is kept");
+    read(&mut s, JobOutcome::Failed(JobFailure::Unreadable));
+    assert!(s.outcome.is_none(), "the old Match is gone");
+    let _ = link.drain();
+    link.bus().publish(crate::data_bus::Change::Bills(vendor));
+    s.poll();
+    s.poll();
+    assert!(s.reading.is_none(), "nothing read again");
+    assert_eq!(s.state()["statement"]["kept"], false);
+    assert_eq!(files_on(&link, vendor), 1, "the second file is not filed");
 }
 
 #[test]
@@ -388,6 +465,47 @@ fn vendor_statement_folders_need_the_capability() {
     assert!(source::statements_supported(&link));
     link.demo_state().expect("demo").intake.no_statements = true;
     assert!(!source::statements_supported(&link));
+    // Demo parity (review S6): without the capability the demo engine
+    // refuses statement claims and statement readings as the engine would.
+    {
+        use crate::company::demo::{checks, drafts};
+        let tenant =
+            cl_core::ids::TenantId::parse("d0000000-0000-4000-8000-000000000001").expect("t");
+        let mut demo = link.demo_state().expect("demo");
+        let file = checks::upload(
+            &mut demo,
+            cl_api::AttachTo::Draft(cl_api::DraftKey::new()),
+            "x.pdf",
+            PDF,
+        )
+        .expect("upload")
+        .id;
+        let claim = |demo: &mut crate::company::demo::DemoState, kind| {
+            drafts::create(demo, tenant, file, kind, cl_api::IdempotencyKey::new())
+        };
+        assert_eq!(
+            claim(&mut demo, cl_api::DraftKind::Statement).map(|_| ()),
+            Err(cl_api::ApiError::Local(
+                cl_api::LocalValidation::Unsupported
+            ))
+        );
+        let d = claim(&mut demo, cl_api::DraftKind::Unknown).expect("claim");
+        let mut local = crate::reading::LocalReading {
+            reading: october("Nobody"),
+            vendor: None,
+            card: None,
+        };
+        local.reading.kind = DocKind::Statement;
+        let r = crate::reading::service::draft_reading(&local).expect("reading");
+        assert_eq!(r.kind, cl_api::DraftKind::Statement);
+        assert!(drafts::store_reading(&mut demo, tenant, d.id, &d.updated_at, &r).is_err());
+        let unknown = cl_api::DraftReading {
+            kind: cl_api::DraftKind::Unknown,
+            ..r
+        };
+        drafts::store_reading(&mut demo, tenant, d.id, &d.updated_at, &unknown)
+            .expect("unknown is stored");
+    }
     assert_eq!(
         crate::i18n::t(kind_key(cl_core::intake::IntakeKind::Statements)),
         "Vendor statements"
@@ -398,4 +516,232 @@ fn vendor_statement_folders_need_the_capability() {
         )),
         cl_api::DraftKind::Statement
     );
+}
+
+/// Keep from a statement draft (S1): the file goes on the vendor first,
+/// then the draft is discarded and its own copy deleted. A failed discard
+/// leaves the draft in Review Documents and the file on the vendor; Try
+/// again finishes without a second copy.
+#[test]
+fn keeping_a_statement_draft_never_strands_its_file() {
+    use crate::company::demo::{checks, drafts};
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let name = vendor_name(&s);
+    let tenant =
+        cl_core::ids::TenantId::parse("d0000000-0000-4000-8000-000000000001").expect("tenant");
+    s.doc.tenant = Some(tenant);
+    let (file, id) = {
+        let mut demo = link.demo_state().expect("demo");
+        let file = checks::upload(
+            &mut demo,
+            cl_api::AttachTo::Draft(cl_api::DraftKey::new()),
+            "intake.pdf",
+            PDF,
+        )
+        .expect("upload")
+        .id;
+        let d = drafts::create(
+            &mut demo,
+            tenant,
+            file,
+            cl_api::DraftKind::Statement,
+            cl_api::IdempotencyKey::new(),
+        )
+        .expect("claim");
+        (file, d.id)
+    };
+    s.doc.service = Some(service(JobOutcome::Read(Box::new(october(&name)))));
+    s.open_statement_draft(id);
+    let start = Instant::now();
+    while s.doc.draft_file.is_some() || s.doc.job.is_some() || s.doc.read.is_none() {
+        assert!(start.elapsed() < Duration::from_secs(20), "the draft reads");
+        std::thread::sleep(Duration::from_millis(5));
+        s.poll();
+    }
+    assert_eq!(s.state()["statement"]["draft"], true);
+    let vendor = s.vendor.expect("vendor");
+    s.accept_read_lines();
+    // The discard fails: the file is already on the vendor, the draft stays.
+    link.demo_state().expect("demo").drafts.enabled = false;
+    s.run_match();
+    s.poll();
+    assert_eq!(s.state()["statement"]["keep_failed"], true);
+    assert_eq!(s.state()["statement"]["kept"], false);
+    assert_eq!(files_on(&link, vendor), 1, "the file is on the vendor");
+    link.demo_state().expect("demo").drafts.enabled = true;
+    {
+        let demo = link.demo_state().expect("demo");
+        let d = drafts::get(&demo, tenant, id).expect("draft");
+        assert_eq!(
+            d.status,
+            cl_api::DraftStatus::New,
+            "still in Review Documents"
+        );
+        assert!(checks::find_attachment(&demo, file).is_some());
+    }
+    // Try again: no second copy, the draft goes, its own copy goes.
+    s.keep_after_match();
+    s.poll();
+    assert_eq!(s.state()["statement"]["kept"], true);
+    assert_eq!(s.state()["statement"]["draft"], false);
+    assert_eq!(files_on(&link, vendor), 1, "one copy on the vendor");
+    let demo = link.demo_state().expect("demo");
+    let names: Vec<String> = checks::attachments(&demo, cl_api::AttachTo::Contact(vendor))
+        .into_iter()
+        .map(|a| a.file_name)
+        .collect();
+    assert_eq!(
+        names,
+        ["Statement 2026-10-01 to 2026-10-31.pdf"],
+        "named by its period"
+    );
+    let d = drafts::get(&demo, tenant, id).expect("draft");
+    assert_eq!(d.status, cl_api::DraftStatus::Discarded);
+    assert!(
+        checks::find_attachment(&demo, file).is_none(),
+        "its copy is deleted"
+    );
+}
+
+/// A statement with no closing balance and an unknown vendor; its page
+/// prints `amount` and, when `story_vendor`, the demo story vendor's name.
+fn sparse_statement(story_vendor: bool, amount: &str) -> Reading {
+    let word = |x: u16, y: u16, text: &str| {
+        let w = u16::try_from(text.chars().count()).expect("len") * 110;
+        cl_docread::model::Word {
+            text: text.into(),
+            bbox: Bbox::new(x, y, x + w, y + 140).expect("box"),
+            confidence: Bp::CERTAIN,
+        }
+    };
+    let mut r = october("Nobody Known Supply");
+    if let Some(st) = r.statement.as_mut() {
+        st.closing = None;
+    }
+    let mut words = vec![word(500, 4000, "Total"), word(8500, 4000, amount)];
+    if story_vendor {
+        words.push(word(500, 300, "Midwest"));
+        words.push(word(1400, 300, "Equipment"));
+        words.push(word(2600, 300, "Rental"));
+    }
+    r.words = vec![cl_docread::model::PageWords {
+        page: 0,
+        aspect: 12_941,
+        source: cl_docread::model::WordSource::TextLayer,
+        words,
+    }];
+    r
+}
+
+fn assist_on(link: &Arc<CompanyLink>) {
+    let mut demo = link.demo_state().expect("demo");
+    demo.ai.enabled = true;
+    demo.ai.reading = true;
+    demo.ai.assist = true;
+}
+
+/// Ask AI to help (S4): the demo's answer names a vendor and a total of
+/// 1480.00. Printed on the page, the total waits as a suggestion; nothing
+/// reaches the picker, the balance line or the keep until the owner uses
+/// it, and then it is labelled as the AI's.
+#[test]
+fn ai_help_waits_for_the_owner_to_use_it() {
+    let (_d, link) = link();
+    assist_on(&link);
+    let mut s = screen(&link);
+    read(
+        &mut s,
+        JobOutcome::Read(Box::new(sparse_statement(true, "1480.00"))),
+    );
+    assert_eq!(s.vendor, None);
+    s.poll();
+    assert_eq!(s.state()["statement"]["assist"]["offer"], "local");
+    s.start_statement_assist();
+    s.poll();
+    assert_eq!(s.doc.assist_sent, 1);
+    assert_eq!(s.doc.closing, None, "not used yet");
+    assert_eq!(s.vendor, None, "the picker is untouched");
+    assert_eq!(s.state()["statement"]["closing_suggested"], true);
+    let story = s
+        .vendors
+        .iter()
+        .find(|(_, n)| n == crate::company::demo::bills::STORY_VENDOR)
+        .map(|v| v.0);
+    assert!(story.is_some(), "a demo vendor");
+    assert_eq!(s.doc.suggested_vendor, story);
+    s.use_suggested_closing();
+    assert_eq!(s.doc.closing, Some(money("1480.00")));
+    assert!(s.doc.closing_by_ai, "the AI's, and labelled so");
+    s.use_suggested_vendor();
+    assert_eq!(s.vendor, story, "picked by the owner's Use");
+    assert!(!s.vendor_differs());
+}
+
+/// The AI's amount gate (Q-A03j): a total the page doesn't print is
+/// dropped, never suggested and never used.
+#[test]
+fn an_ai_amount_not_on_the_page_is_dropped() {
+    let (_d, link) = link();
+    assist_on(&link);
+    let mut s = screen(&link);
+    read(
+        &mut s,
+        JobOutcome::Read(Box::new(sparse_statement(false, "999.99"))),
+    );
+    s.poll();
+    s.start_statement_assist();
+    s.poll();
+    assert_eq!(s.doc.assist_sent, 1);
+    assert_eq!(
+        s.doc.suggested_closing, None,
+        "invented: dropped by the gate"
+    );
+    assert_eq!(s.doc.closing, None);
+    assert!(!s.doc.closing_by_ai);
+}
+
+/// An online provider without the company's consent: Ask AI to help isn't
+/// offered and nothing is sent.
+#[test]
+fn no_consent_means_no_cloud_call() {
+    let (_d, link) = link();
+    assist_on(&link);
+    let mut s = screen(&link);
+    read(
+        &mut s,
+        JobOutcome::Read(Box::new(sparse_statement(false, "1480.00"))),
+    );
+    s.doc.switches = Some(crate::screens::bill::doc_read::ReadSwitches {
+        ai: true,
+        reading: true,
+        provider: Some(cl_settings::AiProvider::Anthropic),
+        assist: true,
+        ..crate::screens::bill::doc_read::ReadSwitches::default()
+    });
+    assert_eq!(
+        s.doc.offer(),
+        crate::screens::bill::doc_read_local::Offer::NeedsConsent
+    );
+    s.start_statement_assist();
+    assert_eq!(s.doc.assist_sent, 0);
+    assert!(s.doc.assist.is_none(), "nothing sent");
+}
+
+/// Only a statement date, before the From shown: From moves to that
+/// month's first day, never after To.
+#[test]
+fn a_lone_statement_date_never_leaves_from_after_to() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let name = vendor_name(&s);
+    let mut r = october(&name);
+    if let Some(st) = r.statement.as_mut() {
+        st.period_from = None;
+        st.period_to = None;
+        st.statement_date = Some(found(d(8, 31), 10_000, 0));
+    }
+    read(&mut s, JobOutcome::Read(Box::new(r)));
+    assert_eq!(s.to.value, Some(d(8, 31)));
+    assert_eq!(s.from.value, Some(d(8, 1)));
 }

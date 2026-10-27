@@ -865,6 +865,39 @@ async fn a_statement_draft_needs_its_capability() {
     );
 }
 
+/// A reading of a statement goes as `unknown` to an engine without
+/// `document-drafts-statement-v1` (it would refuse the kind), and as
+/// `statement` with it (A06 review S6).
+#[tokio::test]
+async fn a_statement_reading_needs_its_capability_or_goes_as_unknown() {
+    let mut r = reading();
+    r.kind = DraftKind::Statement;
+    for (caps, kind) in [
+        (&[Capabilities::DOCUMENT_DRAFTS][..], "unknown"),
+        (
+            &[
+                Capabilities::DOCUMENT_DRAFTS,
+                Capabilities::DOCUMENT_DRAFTS_STATEMENT,
+            ][..],
+            "statement",
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path(format!("{BASE}/{DRAFT}")))
+            .respond_with(reply(200, &one("ready")))
+            .mount(&server)
+            .await;
+        let s = session_with_caps(&server, caps).await;
+        s.document_drafts()
+            .store_reading(id(), TOKEN, &r)
+            .await
+            .expect("stored");
+        let puts = requests(&server, "PUT").await;
+        assert_eq!(body_of(&puts[0])["kind"], kind);
+    }
+}
+
 /// A 200 that can't be read was still attached.
 #[tokio::test]
 async fn an_unreadable_attach_answer_is_saved_unreadable() {

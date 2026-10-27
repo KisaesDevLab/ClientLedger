@@ -109,4 +109,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("statement.keep.saved", "Saved with the vendor."),
     ("statement.keep.failed", "Couldn't save the statement with the vendor."),
     ("orphan.statement_keep", "saving a statement with its vendor"),
+    // A06 review S4: what AI help (or the bill rules) found waits for the owner.
+    ("statement.suggest.vendor", "AI help suggests this statement is from {name}. Check it, then use it."),
+    ("statement.suggest.vendor.use", "Use this vendor"),
+    ("statement.suggest.closing.ai", "AI help read the closing balance as {amount}, and the same figure is printed on the page. Check it, then use it."),
+    ("statement.suggest.closing", "The closing balance looks like {amount}. Check it, then use it."),
+    ("statement.suggest.closing.use", "Use this balance"),
 ];

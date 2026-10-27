@@ -20,14 +20,19 @@
 //!   dates, duplicates) are listed; nothing is adjusted (non-negotiable 6).
 //! - **Ask AI to help** as in A03, behind the same switches and consent;
 //!   it may name the vendor and the closing balance, and an AI amount is
-//!   kept only when the same figure is printed on the page (Q-A03j). The
-//!   lines are never the AI's.
+//!   kept only when the same figure is printed on the page (Q-A03j). Both
+//!   wait as suggestions until the owner uses them (non-negotiable 4,
+//!   review S4): the vendor picker, the balance line and the keep never
+//!   see them before. The lines are never the AI's.
 //! - **Balance line** (Q-297): the statement's closing balance beside the
 //!   books' (`/reports/vendor-statement`, exact), display only.
 //! - **Keep the statement** (Q-298): after Match, on by default, the file
-//!   is stored on the vendor with its period in the name. A statement
-//!   draft is discarded first (the engine refuses to move a file a live
-//!   draft reads), then its file is moved to the vendor.
+//!   is stored on the vendor with its period in the name. For a statement
+//!   draft the file is uploaded to the vendor first, then the draft is
+//!   discarded and its own copy deleted (review S1): a failure at any step
+//!   leaves the file findable, on the vendor or still in Review Documents.
+//!   The engine refuses to move a file a live draft reads, so moving it
+//!   would have to discard first and could strand it.
 //!
 //! Logs carry outcome classes only; the control channel counts only.
 
@@ -47,7 +52,7 @@ use cl_docread::model::{
 use cl_docread::protocol::JobHint;
 use cl_docread::vendor_match::{self, VendorCandidate};
 use cl_model::rowkey::RowKey;
-use cl_model::statement_match::{LineColumn, ReadLine, ReadStatement, rows_from_read};
+use cl_model::statement_match::{LineColumn, PastedRow, ReadLine, ReadStatement, rows_from_read};
 use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
@@ -98,6 +103,13 @@ pub(crate) struct KeepKey {
     doc: u64,
 }
 
+/// The idempotency keys of one keep.
+#[derive(Clone)]
+pub(crate) struct KeepKeys {
+    upload: IdempotencyKey,
+    delete: IdempotencyKey,
+}
+
 /// What the books' balance was asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BalanceKey {
@@ -139,18 +151,32 @@ pub(crate) struct StatementDoc {
     pub last: Option<Box<LocalReading>>,
     /// The read lines in the box, with their marks.
     pub read: Option<ReadStatement>,
+    /// Each mark's line as the paste reader reads it back, by mark: read
+    /// once per reading, not every frame (review S7).
+    pub read_rows: Vec<Option<PastedRow>>,
+    /// What the compare targets were last published for (pending lines,
+    /// still as read): unchanged, they aren't built again.
+    pub published: Option<(usize, bool)>,
     /// The read lines' spots on the page, by read line.
     pub spots: Vec<Option<PageBox>>,
     /// The read line picked (its spot outlined).
     pub selected: Option<usize>,
     /// Why the last attempt said nothing useful (i18n key).
     pub problem: Option<&'static str>,
-    /// The statement names another vendor than the one picked.
-    pub vendor_differs: Option<String>,
+    /// The company vendor the statement names (the reader's match, or an
+    /// AI suggestion the owner accepted). The wrong-vendor warning, the
+    /// keep and the layout learning all compare the picked vendor with it,
+    /// every time (review B2).
+    pub read_vendor: Option<ContactId>,
     /// The closing balance printed on the statement.
     pub closing: Option<Money>,
     /// The closing balance came from AI help (checked against the page).
     pub closing_by_ai: bool,
+    /// A vendor AI help named, waiting for the owner's "Use this vendor".
+    pub suggested_vendor: Option<ContactId>,
+    /// A closing balance found after Ask AI to help, waiting for the
+    /// owner's "Use this balance"; `true` when the AI's (not the reader's).
+    pub suggested_closing: Option<(Money, bool)>,
     /// The statement's date (else the period's end).
     pub statement_date: Option<CalendarDate>,
     /// The reader's checks on the statement (shown, never applied).
@@ -175,6 +201,14 @@ pub(crate) struct StatementDoc {
     /// "Save this statement with the vendor" (default on).
     pub keep: bool,
     pub keep_task: Option<(KeepKey, Task<()>)>,
+    /// The keys of a keep, made once per vendor, period and document (S1).
+    /// Set from the first attempt on, so Try again knows it is one: it
+    /// first looks for the file already on the vendor (an upload that
+    /// timed out but was saved; the engine doesn't replay uploads by key).
+    pub keep_keys: Option<(KeepKey, KeepKeys)>,
+    /// The demo engine has the file on the vendor for this keep already
+    /// (its upload isn't keyed).
+    pub keep_uploaded: Option<KeepKey>,
     pub kept: Option<KeepKey>,
     pub keep_failed: bool,
     pub keeps: u32,
@@ -203,12 +237,16 @@ impl Default for StatementDoc {
             learned: None,
             last: None,
             read: None,
+            read_rows: Vec::new(),
+            published: None,
             spots: Vec::new(),
             selected: None,
             problem: None,
-            vendor_differs: None,
+            read_vendor: None,
             closing: None,
             closing_by_ai: false,
+            suggested_vendor: None,
+            suggested_closing: None,
             statement_date: None,
             checks: Vec::new(),
             sent: 0,
@@ -224,6 +262,8 @@ impl Default for StatementDoc {
             helped: false,
             keep: true,
             keep_task: None,
+            keep_keys: None,
+            keep_uploaded: None,
             kept: None,
             keep_failed: false,
             keeps: 0,
@@ -259,12 +299,16 @@ impl StatementDoc {
         self.job = None;
         self.last = None;
         self.read = None;
+        self.read_rows.clear();
+        self.published = None;
         self.spots.clear();
         self.selected = None;
         self.problem = None;
-        self.vendor_differs = None;
+        self.read_vendor = None;
         self.closing = None;
         self.closing_by_ai = false;
+        self.suggested_vendor = None;
+        self.suggested_closing = None;
         self.statement_date = None;
         self.checks.clear();
         self.assist = None;
@@ -292,6 +336,8 @@ impl StatementDoc {
         self.draft_file = None;
         self.keep = true;
         self.keep_task = None;
+        self.keep_keys = None;
+        self.keep_uploaded = None;
         self.kept = None;
         self.keep_failed = false;
     }
@@ -305,7 +351,7 @@ impl StatementDoc {
     }
 
     /// The control channel's view: counts and flags only.
-    pub(crate) fn state_json(&self, box_text: &str) -> Value {
+    pub(crate) fn state_json(&self, box_text: &str, picked: Option<ContactId>) -> Value {
         let read = self.read.as_ref();
         json!({
             "document": self.bytes.is_some(),
@@ -319,9 +365,11 @@ impl StatementDoc {
             "typed_over": read.is_some_and(|r| !r.still_read(box_text)),
             "spots": self.spots.iter().filter(|s| s.is_some()).count(),
             "selected": self.selected,
-            "vendor_differs": self.vendor_differs.is_some(),
+            "vendor_differs": self.differs_from(picked),
             "closing_read": self.closing.is_some(),
             "closing_by_ai": self.closing_by_ai,
+            "vendor_suggested": self.suggested_vendor.is_some(),
+            "closing_suggested": self.suggested_closing.is_some(),
             "checks": self.checks.iter().map(|c| crate::screens::bill::doc_read_local::code_name(c.code)).collect::<Vec<_>>(),
             "draft": self.draft.is_some(),
             "layouts": self.layouts.len(),
@@ -341,13 +389,24 @@ impl StatementDoc {
         })
     }
 
+    /// The statement names a company vendor other than `picked`.
+    pub(crate) fn differs_from(&self, picked: Option<ContactId>) -> bool {
+        self.read_vendor.is_some_and(|v| picked != Some(v))
+    }
+
     /// What "Ask AI to help" offers now.
     pub(crate) fn offer(&self) -> super::super::doc_read_local::Offer {
         use super::super::doc_read_local::Offer;
         let Some(last) = self.last.as_ref() else {
             return Offer::None;
         };
-        if self.helped || self.busy() || !needs_help(last, self.closing.is_some()) {
+        if self.helped
+            || self.busy()
+            || !needs_help(
+                last,
+                self.closing.is_some() || self.suggested_closing.is_some(),
+            )
+        {
             return Offer::None;
         }
         let Some(s) = self.switches else {
@@ -398,6 +457,21 @@ pub(crate) fn read_lines(st: &StatementRead) -> Vec<ReadLine> {
                 || unsure(Some(&l.amount))
                 || unsure(l.reference.as_ref()),
         })
+        .collect()
+}
+
+/// Each mark's line read back as the paste reader reads it (by mark).
+fn read_rows_of(read: &ReadStatement, today: CalendarDate) -> Vec<Option<PastedRow>> {
+    let parsed = cl_model::statement_match::read::read_back(read, today);
+    let mut by_line: Vec<Option<PastedRow>> = vec![None; read.marks.len() + 1];
+    for r in parsed.rows {
+        if let Some(slot) = by_line.get_mut(r.line) {
+            *slot = Some(r);
+        }
+    }
+    read.marks
+        .iter()
+        .map(|m| by_line.get_mut(m.line).and_then(Option::take))
         .collect()
 }
 
@@ -497,6 +571,11 @@ impl StatementMatchScreen {
             return;
         };
         self.doc.forget_reading();
+        // A Match made (or running) for the last document is not this
+        // one's: it never keeps this file (review B2).
+        self.outcome = None;
+        self.reading = None;
+        self.books_failed = None;
         self.doc.doc_no += 1;
         self.doc.kept = None;
         self.doc.keep_failed = false;
@@ -648,6 +727,8 @@ impl StatementMatchScreen {
         self.parsed = None;
         self.outcome = None;
         self.problem = None;
+        self.doc.read_rows = read_rows_of(&read, self.today);
+        self.doc.published = None;
         self.doc.read = Some(read);
         self.doc.spots = st.lines.iter().map(line_box).collect();
         self.doc.closing = st.closing.as_ref().map(|c| c.value);
@@ -661,6 +742,13 @@ impl StatementMatchScreen {
         }
         if let Some(d) = st.period_to.as_ref().or(st.statement_date.as_ref()) {
             self.to = DateInput::new(d.value);
+        }
+        // Only a statement date before the shown From: the period is that
+        // date's month, never From after To (review, low).
+        if let (Some(from), Some(to)) = (self.from.value, self.to.value)
+            && from > to
+        {
+            self.from = DateInput::new(to.start_of_month());
         }
         self.doc.checks = local
             .reading
@@ -676,7 +764,7 @@ impl StatementMatchScreen {
                 &crate::reading::map::vendor_candidates(&self.contacts),
             )
         });
-        self.take_vendor(found, st.vendor.as_ref().map(|v| v.value.clone()));
+        self.take_vendor(found);
         self.doc
             .compare
             .set_words(Some(Arc::new(crate::widgets::compare::DocWords {
@@ -687,25 +775,29 @@ impl StatementMatchScreen {
     }
 
     /// The vendor the statement names: picked when none is; a different
-    /// one already picked stays, with a warning.
-    fn take_vendor(&mut self, found: Option<ContactId>, printed: Option<String>) {
+    /// one already picked stays, and the warning shows while they differ.
+    fn take_vendor(&mut self, found: Option<ContactId>) {
         let Some(found) = found.filter(|f| self.vendors.iter().any(|(id, _)| id == f)) else {
             return;
         };
-        match self.vendor {
-            None => self.vendor = Some(found),
-            Some(v) if v == found => {}
-            Some(_) => {
-                let name = self
-                    .vendors
-                    .iter()
-                    .find(|(id, _)| *id == found)
-                    .map(|(_, n)| n.clone())
-                    .or(printed)
-                    .unwrap_or_default();
-                self.doc.vendor_differs = Some(name);
-            }
+        self.doc.read_vendor = Some(found);
+        if self.vendor.is_none() {
+            self.vendor = Some(found);
         }
+    }
+
+    /// The statement names another company vendor than the one picked now.
+    pub(crate) fn vendor_differs(&self) -> bool {
+        self.doc.differs_from(self.vendor)
+    }
+
+    /// The name of the vendor the statement names, for the warning.
+    fn read_vendor_name(&self) -> Option<String> {
+        let v = self.doc.read_vendor?;
+        self.vendors
+            .iter()
+            .find(|(id, _)| *id == v)
+            .map(|(_, n)| n.clone())
     }
 
     /// Accept every read line.
@@ -727,7 +819,9 @@ impl StatementMatchScreen {
     /// Every line accepted: the vendor's statement layout learns this
     /// document (Q-299, `stmt:` key), once per reading.
     fn learn_on_accept(&mut self) {
+        // Never under a vendor the statement doesn't name (review S3).
         if self.doc.learned.is_some()
+            || self.vendor_differs()
             || !self
                 .doc
                 .read
@@ -788,10 +882,14 @@ impl StatementMatchScreen {
             return;
         };
         let still = read.still_read(&self.text);
-        let mut targets = Vec::new();
-        let mut values = Vec::new();
-        let parsed = cl_model::statement_match::read::read_back(read, self.today);
-        for m in &read.marks {
+        let key = (read.pending(), still);
+        if self.doc.published == Some(key) {
+            return;
+        }
+        self.doc.published = Some(key);
+        let mut targets = Vec::with_capacity(read.marks.len());
+        let mut values = Vec::with_capacity(read.marks.len());
+        for (i, m) in read.marks.iter().enumerate() {
             let spot = self.doc.spots.get(m.source).copied().flatten();
             targets.push(CompareTarget {
                 key: TargetKey::line(LINE_TARGET, RowKey(m.source as u64 + 1)),
@@ -807,10 +905,10 @@ impl StatementMatchScreen {
                 fill: None,
             });
             values.push(
-                parsed
-                    .rows
-                    .iter()
-                    .find(|r| r.line == m.line)
+                self.doc
+                    .read_rows
+                    .get(i)
+                    .and_then(Option::as_ref)
                     .map(|r| {
                         format!(
                             "{} {} {}",
@@ -885,12 +983,9 @@ impl StatementMatchScreen {
             self.doc.assist_outcome = Some("cap");
             return;
         }
-        let kind = if self.link.is_demo()
-            || self
-                .link
-                .capabilities()
-                .has(cl_api::Capabilities::DOCUMENT_DRAFTS_STATEMENT)
-        {
+        let kind = if crate::screens::preferences::intake_folders::source::statements_supported(
+            &self.link,
+        ) {
             DraftKind::Statement
         } else {
             DraftKind::Unknown
@@ -943,15 +1038,15 @@ impl StatementMatchScreen {
         let merged = assist::merge(&last, &answer, &candidates);
         self.doc.helped = true;
         self.doc.assist_outcome = Some("helped");
+        let total_of = |h: &Header| h.total.as_ref().or(h.balance_due.as_ref()).map(|f| f.value);
+        // Nothing reaches the form here: what was found waits for the
+        // owner's Use (S4). An amount is the AI's only when the reader had
+        // none; the gate kept it only because it is printed on the page.
         if self.doc.closing.is_none()
-            && let Some(total) = merged.reading.header.total.as_ref().or(merged
-                .reading
-                .header
-                .balance_due
-                .as_ref())
+            && let Some(total) = total_of(&merged.reading.header)
         {
-            self.doc.closing = Some(total.value);
-            self.doc.closing_by_ai = true;
+            let by_ai = total_of(&last.reading.header).is_none();
+            self.doc.suggested_closing = Some((total, by_ai));
         }
         if last.vendor.is_none() {
             let found = merged.vendor.map(|v| v.contact).or_else(|| {
@@ -961,7 +1056,27 @@ impl StatementMatchScreen {
                     &candidates,
                 )
             });
-            self.take_vendor(found, merged.reading.header.vendor.map(|v| v.value));
+            self.doc.suggested_vendor =
+                found.filter(|f| self.vendors.iter().any(|(id, _)| id == f));
+        }
+    }
+
+    /// The owner uses the vendor AI help named: it is picked, and the
+    /// statement counts as that vendor's.
+    pub(crate) fn use_suggested_vendor(&mut self) {
+        if let Some(v) = self.doc.suggested_vendor.take() {
+            self.vendor = Some(v);
+            self.doc.read_vendor = Some(v);
+        }
+    }
+
+    /// The owner uses the closing balance found with AI help: the balance
+    /// line shows it (after a Match).
+    pub(crate) fn use_suggested_closing(&mut self) {
+        if let Some((value, by_ai)) = self.doc.suggested_closing.take() {
+            self.doc.closing = Some(value);
+            self.doc.closing_by_ai = by_ai;
+            self.ask_balance();
         }
     }
 
@@ -976,9 +1091,7 @@ impl StatementMatchScreen {
     /// After a Match, the statement is kept with the vendor when the box
     /// is on (once per document, vendor and period).
     pub(crate) fn keep_after_match(&mut self) {
-        // A statement that names another vendor is never filed by itself:
-        // the owner ticks the box again after checking the warning.
-        if !self.doc.keep || self.doc.keep_task.is_some() || self.doc.vendor_differs.is_some() {
+        if !self.doc.keep || self.doc.keep_task.is_some() {
             return;
         }
         let (Some(o), Some(bytes), Some(kind)) = (
@@ -997,13 +1110,42 @@ impl StatementMatchScreen {
         if self.doc.kept == Some(key) {
             return;
         }
+        // A statement that names another vendor than the Match's is never
+        // filed on it, whatever started the keep (review B2). Picking the
+        // statement's vendor and matching again keeps it.
+        if self.doc.read_vendor.is_some_and(|v| v != key.vendor) {
+            return;
+        }
         let name = cl_api::statement_file_name(key.from, key.to, kind);
         let to = AttachTo::Contact(key.vendor);
         let draft = self.doc.draft;
         self.doc.keep_failed = false;
+        let retry = self.doc.keep_keys.as_ref().is_some_and(|(k, _)| *k == key);
+        if !retry {
+            self.doc.keep_keys = Some((
+                key,
+                KeepKeys {
+                    upload: IdempotencyKey::new(),
+                    delete: IdempotencyKey::new(),
+                },
+            ));
+        }
+        let Some(keys) = self.doc.keep_keys.as_ref().map(|(_, k)| k.clone()) else {
+            return;
+        };
         if let Some(mut demo) = self.link.demo_state() {
-            let r = keep_in_demo(&mut demo, self.doc.tenant, draft, to, &name, &bytes);
+            let mut uploaded = self.doc.keep_uploaded == Some(key);
+            let r = keep_in_demo(
+                &mut demo,
+                self.doc.tenant,
+                draft,
+                (to, &name, &bytes),
+                &mut uploaded,
+            );
             drop(demo);
+            if uploaded {
+                self.doc.keep_uploaded = Some(key);
+            }
             self.doc.keep_task = Some((key, Task::ready(())));
             if r.is_err() {
                 self.doc.keep_task = None;
@@ -1020,19 +1162,37 @@ impl StatementMatchScreen {
             key: None,
         };
         let task = group.write(&session, label, move |s| async move {
-            match draft {
-                Some(d) => {
-                    // A live draft's file can't move: discard it first.
-                    s.document_drafts().discard(d.id).await?;
-                    let file = d.attachment.ok_or(ApiError::NotFound { code: None })?;
-                    s.attachments().link(file, to, IdempotencyKey::new()).await
-                }
-                None => s
+            // The file is on the vendor before anything else changes. On
+            // Try again, a file of this name and size already there is the
+            // last attempt's: it isn't filed twice.
+            let there = retry && {
+                let files = s
                     .attachments()
-                    .upload(to, &name, &bytes, IdempotencyKey::new())
-                    .await
-                    .map(|_| ()),
+                    .list(to, cl_api::PageRequest::first_max())
+                    .await?;
+                files
+                    .data
+                    .iter()
+                    .any(|f| f.file_name == name && f.file_size == u64::try_from(bytes.len()).ok())
+            };
+            if !there {
+                s.attachments()
+                    .upload(to, &name, &bytes, keys.upload)
+                    .await?;
             }
+            if let Some(d) = draft {
+                // Then the draft leaves Review Documents (discard is
+                // idempotent), and its own copy of the file goes. That copy
+                // is the same bytes as the vendor's: failing to delete it
+                // loses nothing.
+                s.document_drafts().discard(d.id).await?;
+                if let Some(file) = d.attachment
+                    && s.attachments().delete(file, keys.delete).await.is_err()
+                {
+                    tracing::info!(outcome = "copy_left", "statement draft file");
+                }
+            }
+            Ok(())
         });
         match task {
             Ok(p) => self.doc.keep_task = Some((key, Task::Pending(p))),
@@ -1175,12 +1335,14 @@ impl StatementMatchScreen {
         if let Some(k) = self.doc.problem {
             ui.label(RichText::new(t(k)).color(tokens.warn_text));
         }
-        if let Some(name) = &self.doc.vendor_differs {
+        if self.vendor_differs() {
+            let name = self.read_vendor_name().unwrap_or_default();
             ui.label(
-                RichText::new(t_with("statement.read.vendor_differs", &[("name", name)]))
+                RichText::new(t_with("statement.read.vendor_differs", &[("name", &name)]))
                     .color(tokens.warn_text),
             );
         }
+        self.suggestions_ui(ui, tokens);
         if self.doc.assist.is_some() {
             form::progress_line(ui, tokens, &t("statement.read.helping"));
         }
@@ -1206,6 +1368,47 @@ impl StatementMatchScreen {
         }
     }
 
+    /// What Ask AI to help found, each with its Use button (S4).
+    fn suggestions_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let mut use_vendor = false;
+        let mut use_closing = false;
+        if let Some(v) = self.doc.suggested_vendor {
+            let name = self
+                .vendors
+                .iter()
+                .find(|(id, _)| *id == v)
+                .map(|(_, n)| n.clone())
+                .unwrap_or_default();
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(t_with("statement.suggest.vendor", &[("name", &name)]))
+                        .color(tokens.warn_text),
+                );
+                use_vendor = ui.button(t("statement.suggest.vendor.use")).clicked();
+            });
+        }
+        if let Some((value, by_ai)) = self.doc.suggested_closing {
+            let key = if by_ai {
+                "statement.suggest.closing.ai"
+            } else {
+                "statement.suggest.closing"
+            };
+            let amount = value.format(self.money_style);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(t_with(key, &[("amount", &amount)])).color(tokens.warn_text),
+                );
+                use_closing = ui.button(t("statement.suggest.closing.use")).clicked();
+            });
+        }
+        if use_vendor {
+            self.use_suggested_vendor();
+        }
+        if use_closing {
+            self.use_suggested_closing();
+        }
+    }
+
     /// The read lines with their marks and Accept, and the checks.
     pub(crate) fn read_lines_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let Some(read) = self.doc.read.clone() else {
@@ -1215,7 +1418,6 @@ impl StatementMatchScreen {
             form::hint(ui, tokens, &t("statement.read.typed_over"));
             return;
         }
-        let parsed = cl_model::statement_match::read::read_back(&read, self.today);
         let mut accept_all = false;
         let mut accept = None;
         let mut select = None;
@@ -1271,7 +1473,7 @@ impl StatementMatchScreen {
                                 );
                             }
                             ui.end_row();
-                            for m in &read.marks {
+                            for (i, m) in read.marks.iter().enumerate() {
                                 let picked = self.doc.selected == Some(m.source);
                                 let n = m.line.to_string();
                                 let r = ui
@@ -1280,7 +1482,9 @@ impl StatementMatchScreen {
                                 if r.clicked() {
                                     select = Some(m.source);
                                 }
-                                if let Some(row) = parsed.rows.iter().find(|r| r.line == m.line) {
+                                if let Some(row) =
+                                    self.doc.read_rows.get(i).and_then(Option::as_ref)
+                                {
                                     Self::line_cells(ui, tokens, row, self.money_style);
                                 } else {
                                     ui.label("");
@@ -1465,26 +1669,29 @@ impl StatementMatchScreen {
     }
 }
 
-/// The demo engine's keep: a statement draft is discarded and its file
-/// moved to the vendor; any other file is uploaded to the vendor.
+/// The demo engine's keep, in the live order: the file is uploaded to the
+/// vendor (once: `uploaded` says it is there already), then a statement
+/// draft is discarded and its own copy deleted.
 fn keep_in_demo(
     demo: &mut crate::company::demo::DemoState,
     tenant: Option<TenantId>,
     draft: Option<StatementDraft>,
-    to: AttachTo,
-    name: &str,
-    bytes: &[u8],
+    (to, name, bytes): (AttachTo, &str, &[u8]),
+    uploaded: &mut bool,
 ) -> Result<(), ApiError> {
     use crate::company::demo::{checks, drafts};
-    match draft {
-        Some(d) => {
-            let tenant = tenant.ok_or(ApiError::NoCompanyOpen)?;
-            drafts::discard(demo, tenant, d.id)?;
-            let file = d.attachment.ok_or(ApiError::NotFound { code: None })?;
-            checks::link_attachment(demo, file, to).map(|_| ())
-        }
-        None => checks::upload(demo, to, name, bytes).map(|_| ()),
+    if !*uploaded {
+        checks::upload(demo, to, name, bytes)?;
+        *uploaded = true;
     }
+    if let Some(d) = draft {
+        let tenant = tenant.ok_or(ApiError::NoCompanyOpen)?;
+        drafts::discard(demo, tenant, d.id)?;
+        if let Some(file) = d.attachment {
+            checks::delete_attachment(demo, file);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

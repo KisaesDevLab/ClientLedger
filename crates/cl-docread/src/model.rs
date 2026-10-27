@@ -1053,6 +1053,10 @@ impl Reading {
             return Err(ModelError::TooMany("checks"));
         }
         if let Some(st) = &self.statement {
+            // Statement lines come only with a statement reading (review).
+            if self.kind != DocKind::Statement {
+                return Err(ModelError::Kind);
+            }
             if st.lines.len() > MAX_STATEMENT_LINES {
                 return Err(ModelError::TooMany("statement lines"));
             }
@@ -1167,6 +1171,8 @@ pub enum ModelError {
     Template,
     #[error("a spot names a page the document does not have")]
     Spot,
+    #[error("statement lines on a reading that isn't a statement")]
+    Kind,
 }
 
 #[cfg(test)]

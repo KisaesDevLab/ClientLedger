@@ -1403,6 +1403,7 @@ impl Intake {
                 context: ReadContext {
                     // A04 WP-F2: the layouts learned on accept.
                     layouts: demo.drafts.layouts.clone(),
+                    statement_layouts: demo.drafts.statement_layouts.clone(),
                     card_accounts: Some(card_accounts_of(&chart)),
                 },
             }));
@@ -1549,10 +1550,12 @@ impl Intake {
         };
         let service = self.drafts.reader.clone().or_else(crate::reading::shared)?;
         let ctx = self.drafts.context.clone()?;
-        let (vendors, templates) = with_layouts(ctx.vendors, &ctx.context.layouts);
+        let hint = job_hint(draft.kind, job.folder);
+        // A statement reads with the statement layouts only (review S2).
+        let (vendors, templates) = with_layouts(ctx.vendors, ctx.context.layouts_for(&hint));
         let request = ReadRequest {
             bytes: Arc::from(bytes),
-            hint: job_hint(draft.kind, job.folder),
+            hint,
             today: self.today.unwrap_or_else(crate::shell::today),
             vendors,
             templates,
@@ -1583,6 +1586,17 @@ impl Intake {
             ReadOutcome::Failed(f) if storable(*f) => None,
             ReadOutcome::Failed(_) => return None,
         };
+        // A reading the reader took for a statement goes as `unknown` to an
+        // engine without statement drafts, which would refuse the kind and
+        // lose the reading (review S6).
+        let statements =
+            crate::screens::preferences::intake_folders::source::statements_supported(link);
+        let reading = reading.map(|mut r| {
+            if r.kind == DraftKind::Statement && !statements {
+                r.kind = DraftKind::Unknown;
+            }
+            r
+        });
         let failure = match outcome {
             ReadOutcome::Failed(f) => f.class(),
             ReadOutcome::Read(_) => "",

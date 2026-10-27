@@ -154,6 +154,9 @@ pub fn card_accounts_of(accounts: &[cl_api::Account]) -> Vec<(AccountId, Last4)>
 pub struct ReadContext {
     /// Saved layouts with their vendor (empty without the capability).
     pub layouts: Vec<(ContactId, Template)>,
+    /// Saved statement layouts (`stmt:` keys, A06 Q-299): a statement job
+    /// reads with only these, a bill job never (review S2).
+    pub statement_layouts: Vec<(ContactId, Template)>,
     /// Card accounts; `None` without `document-drafts-v1` (no card match).
     pub card_accounts: Option<Vec<(AccountId, Last4)>>,
 }
@@ -162,6 +165,7 @@ impl std::fmt::Debug for ReadContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReadContext")
             .field("layouts", &self.layouts.len())
+            .field("statement_layouts", &self.statement_layouts.len())
             .field("card_accounts", &self.card_accounts.as_ref().map(Vec::len))
             .finish()
     }
@@ -187,8 +191,22 @@ pub async fn load_context(session: &cl_api::Session) -> Result<ReadContext, cl_a
         .await?;
     Ok(ReadContext {
         layouts: templates_of(&saved),
+        statement_layouts: statement_templates_of(&saved),
         card_accounts: Some(card_accounts_of(&accounts)),
     })
+}
+
+impl ReadContext {
+    /// The layouts a job reads with: statement layouts for a statement
+    /// job, the bill layouts otherwise; never both (Q-299).
+    #[must_use]
+    pub fn layouts_for(&self, hint: &JobHint) -> &[(ContactId, Template)] {
+        if hint.statement {
+            &self.statement_layouts
+        } else {
+            &self.layouts
+        }
+    }
 }
 
 /// The engine's kind for a reading's kind.
@@ -1234,6 +1252,30 @@ mod tests {
         let n = Arc::new(std::sync::Mutex::new(0));
         let _ = read_one(&mut Seen(Arc::clone(&n)), &req, &Arc::default());
         assert_eq!(*n.lock().unwrap(), 1);
+    }
+
+    /// A statement job reads with the statement layouts only, a bill job
+    /// with the bill layouts only (A06 review S2, Q-299).
+    #[test]
+    fn a_job_reads_with_the_layouts_of_its_kind() {
+        let v = vendor().contact;
+        let bill = layout();
+        let mut stmt = layout();
+        stmt.fingerprint.tokens.push("statement".into());
+        let mut stmt_row = saved(v, &stmt);
+        stmt_row.fingerprint = cl_docread::templates::statement_key(&stmt_row.fingerprint);
+        let rows = vec![saved(v, &bill), stmt_row];
+        let ctx = ReadContext {
+            layouts: templates_of(&rows),
+            statement_layouts: statement_templates_of(&rows),
+            card_accounts: None,
+        };
+        let bills = ctx.layouts_for(&JobHint::default());
+        assert_eq!(bills.len(), 1);
+        assert_eq!(bills[0].1.fingerprint, bill.fingerprint);
+        let stmts = ctx.layouts_for(&JobHint::statement());
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0].1.fingerprint, stmt.fingerprint);
     }
 
     fn account(id: &str, detail: &str, digits: Option<&str>, active: bool) -> cl_api::Account {

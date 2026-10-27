@@ -184,6 +184,66 @@ fn three_columns_take_the_sign_from_the_column() {
     assert!(r.checks.is_empty(), "{:?}", r.checks);
 }
 
+/// A credit printed in the charges column keeps its minus: parentheses,
+/// a leading minus and "CR" all read negative (review B1).
+#[test]
+fn a_credit_in_the_charges_column_stays_negative() {
+    let mut d = Doc::new();
+    letterhead(&mut d);
+    d.text(6000, 1500, "Previous Balance: 0.00");
+    d.text(500, 3000, "Date");
+    d.text(1800, 3000, "Invoice #");
+    d.text(3200, 3000, "Description");
+    d.amount(6200, 3000, "Charges");
+    d.amount(7300, 3000, "Payments");
+    d.amount(9500, 3000, "Balance");
+    let rows = [
+        ("09/02/2026", "10234", "100.00", "100.00"),
+        ("09/05/2026", "CM-1", "(25.00)", "75.00"),
+        ("09/06/2026", "CM-2", "-5.00", "70.00"),
+        ("09/07/2026", "CM-3", "10.00 CR", "60.00"),
+    ];
+    let mut y = 3200;
+    for (date, r, amt, bal) in rows {
+        d.text(500, y, date);
+        d.text(1800, y, r);
+        d.text(3200, y, "Line");
+        d.amount(6200, y, amt);
+        d.amount(9500, y, bal);
+        y += 200;
+    }
+    d.text(3200, y + 100, "Amount Due");
+    d.amount(9500, y + 100, "60.00");
+    let pages = d.pages();
+    let r = read_pages(&pages, JobHint::statement());
+    let st = r.statement.unwrap();
+    let got: Vec<(Money, SignSource)> = st
+        .lines
+        .iter()
+        .map(|l| (l.amount.value, l.sign_from))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (money("100"), SignSource::ChargesColumn),
+            (money("-25"), SignSource::ChargesColumn),
+            (money("-5"), SignSource::ChargesColumn),
+            (money("-10"), SignSource::ChargesColumn),
+        ]
+    );
+    assert!(r.checks.is_empty(), "{:?}", r.checks);
+}
+
+/// The worker contract: statement lines only on a statement reading.
+#[test]
+fn statement_lines_need_a_statement_kind() {
+    let pages = single_column().pages();
+    let mut r = read_pages(&pages, JobHint::statement());
+    r.validate(0, true).unwrap();
+    r.kind = DocKind::Bill;
+    assert_eq!(r.validate(0, true), Err(crate::model::ModelError::Kind));
+}
+
 fn table_page(d: &mut Doc, header: bool, rows: &[(&str, &str, &str)], start_y: u16) -> u16 {
     if header {
         d.text(500, start_y, "Date");
