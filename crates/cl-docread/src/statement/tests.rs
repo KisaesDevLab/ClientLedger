@@ -581,3 +581,56 @@ proptest! {
         }
     }
 }
+
+/// OCR lost the header row (a shaded band on a photo): the columns come
+/// from the dated rows, and a split statement's columns from the balance.
+#[test]
+fn a_table_without_a_readable_header_row() {
+    let mut d = Doc::new();
+    letterhead(&mut d);
+    let rows = [
+        ("09/01/2026", "", "Previous Balance", "", "", "500.00"),
+        ("09/02/2026", "INV-1", "Sales", "300.00", "", "800.00"),
+        ("09/05/2026", "CK-77", "Payment", "", "200.00", "600.00"),
+        ("09/08/2026", "INV-2", "Sales", "50.00", "", "650.00"),
+        ("09/09/2026", "CM-3", "Return", "", "25.00", "625.00"),
+    ];
+    let mut y = 3200;
+    for (date, r, desc, charge, pay, bal) in rows {
+        d.text(500, y, date);
+        d.text(2000, y, r);
+        d.text(3500, y, desc);
+        if !charge.is_empty() {
+            d.amount(6600, y, charge);
+        }
+        if !pay.is_empty() {
+            d.amount(7900, y, pay);
+        }
+        d.amount(9500, y, bal);
+        y += 200;
+    }
+    let r = read_pages(&d.pages(), JobHint::statement());
+    let st = r.statement.unwrap();
+    let got: Vec<(Money, SignSource)> = st
+        .lines
+        .iter()
+        .map(|l| (l.amount.value, l.sign_from))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (money("300"), SignSource::ChargesColumn),
+            (money("-200"), SignSource::PaymentsColumn),
+            (money("50"), SignSource::ChargesColumn),
+            (money("-25"), SignSource::PaymentsColumn),
+        ]
+    );
+    assert_eq!(st.lines[1].reference.as_ref().unwrap().value, "CK-77");
+    assert_eq!(st.opening.as_ref().unwrap().value, money("500"));
+    assert!(r.checks.is_empty(), "{:?}", r.checks);
+    // Not enough to go on without the header: unhinted, it isn't a statement.
+    assert_eq!(
+        read_pages(&d.pages(), JobHint::default()).kind,
+        DocKind::Bill
+    );
+}

@@ -572,11 +572,34 @@ fn line_words<'a>(layout: &Layout, pages: &'a [PageWords], li: usize) -> Vec<&'a
 /// Read every page's table.
 #[must_use]
 pub fn read(layout: &Layout, pages: &[PageWords], today: CalendarDate) -> Table {
+    let (t, found_header) = read_with(layout, pages, today, None);
+    if found_header {
+        return t;
+    }
+    // No header row read (OCR lost a shaded band): columns from the
+    // dated rows themselves.
+    match crate::statement::infer::bands(layout, pages, today) {
+        Some(b) => {
+            let (mut t, _) = read_with(layout, pages, today, Some(b));
+            t.statement_columns = false;
+            t
+        }
+        None => t,
+    }
+}
+
+fn read_with(
+    layout: &Layout,
+    pages: &[PageWords],
+    today: CalendarDate,
+    initial: Option<Vec<Band>>,
+) -> (Table, bool) {
     let mut t = Table {
         in_table: vec![false; layout.lines.len()],
         ..Table::default()
     };
-    let mut bands: Option<Vec<Band>> = None;
+    let mut found_header = false;
+    let mut bands: Option<Vec<Band>> = initial;
     for pi in 0..pages.len() {
         let page = &pages[pi];
         let mut lines: Vec<usize> = (0..layout.lines.len())
@@ -590,6 +613,7 @@ pub fn read(layout: &Layout, pages: &[PageWords], today: CalendarDate) -> Table 
             Some(k) => {
                 let li = lines[k];
                 bands = header_bands(&line_words(layout, pages, li));
+                found_header = true;
                 t.in_table[li] = true;
                 k + 1
             }
@@ -669,7 +693,7 @@ pub fn read(layout: &Layout, pages: &[PageWords], today: CalendarDate) -> Table 
             }
         }
     }
-    t
+    (t, found_header)
 }
 
 /// How far a dated row's date sits from the date column's header (x

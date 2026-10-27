@@ -190,7 +190,11 @@ fn why_missed(t: &Truth, st: Option<&StatementRead>, missed: &[usize]) -> Vec<&'
                 "sign"
             } else if found(&|l| l.date.value == tl.date && refs(l)) {
                 "amount"
-            } else if found(&|l| l.date.value == tl.date && l.amount.value == tl.amount) {
+            } else if st
+                .lines
+                .iter()
+                .any(|l| l.date.value == tl.date && l.amount.value == tl.amount)
+            {
                 "reference"
             } else if found(&|l| refs(l) && l.amount.value == tl.amount) {
                 "date"
