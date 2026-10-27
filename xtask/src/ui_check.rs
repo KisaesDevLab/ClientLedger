@@ -72,7 +72,7 @@ fn root() -> PathBuf {
 }
 
 fn target_dir() -> PathBuf {
-    std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root().join("target"), PathBuf::from)
+    crate::meta::target_dir(&root())
 }
 
 fn exe(name: &str) -> PathBuf {

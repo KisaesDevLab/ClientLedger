@@ -91,3 +91,20 @@ pub fn load() -> Result<Vec<Member>> {
     members.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(members)
 }
+
+/// The build directory cargo really uses: `CARGO_TARGET_DIR`, else the
+/// `build.target-dir` from any cargo config (a machine may share one across
+/// worktrees), else `<root>/target`.
+pub fn target_dir(root: &std::path::Path) -> std::path::PathBuf {
+    if let Some(dir) = std::env::var_os("CARGO_TARGET_DIR").filter(|v| !v.is_empty()) {
+        return dir.into();
+    }
+    MetadataCommand::new()
+        .manifest_path(root.join("Cargo.toml"))
+        .no_deps()
+        .exec()
+        .map_or_else(
+            |_| root.join("target"),
+            |m| m.target_directory.into_std_path_buf(),
+        )
+}
