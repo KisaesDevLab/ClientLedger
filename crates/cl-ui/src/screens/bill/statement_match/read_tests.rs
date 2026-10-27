@@ -727,3 +727,21 @@ fn no_consent_means_no_cloud_call() {
     assert_eq!(s.doc.assist_sent, 0);
     assert!(s.doc.assist.is_none(), "nothing sent");
 }
+
+/// Only a statement date, before the From shown: From moves to that
+/// month's first day, never after To.
+#[test]
+fn a_lone_statement_date_never_leaves_from_after_to() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let name = vendor_name(&s);
+    let mut r = october(&name);
+    if let Some(st) = r.statement.as_mut() {
+        st.period_from = None;
+        st.period_to = None;
+        st.statement_date = Some(found(d(8, 31), 10_000, 0));
+    }
+    read(&mut s, JobOutcome::Read(Box::new(r)));
+    assert_eq!(s.to.value, Some(d(8, 31)));
+    assert_eq!(s.from.value, Some(d(8, 1)));
+}

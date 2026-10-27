@@ -234,6 +234,16 @@ fn a_credit_in_the_charges_column_stays_negative() {
     assert!(r.checks.is_empty(), "{:?}", r.checks);
 }
 
+/// The worker contract: statement lines only on a statement reading.
+#[test]
+fn statement_lines_need_a_statement_kind() {
+    let pages = single_column().pages();
+    let mut r = read_pages(&pages, JobHint::statement());
+    r.validate(0, true).unwrap();
+    r.kind = DocKind::Bill;
+    assert_eq!(r.validate(0, true), Err(crate::model::ModelError::Kind));
+}
+
 fn table_page(d: &mut Doc, header: bool, rows: &[(&str, &str, &str)], start_y: u16) -> u16 {
     if header {
         d.text(500, start_y, "Date");

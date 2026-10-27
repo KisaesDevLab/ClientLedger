@@ -740,6 +740,13 @@ impl StatementMatchScreen {
         if let Some(d) = st.period_to.as_ref().or(st.statement_date.as_ref()) {
             self.to = DateInput::new(d.value);
         }
+        // Only a statement date before the shown From: the period is that
+        // date's month, never From after To (review, low).
+        if let (Some(from), Some(to)) = (self.from.value, self.to.value)
+            && from > to
+        {
+            self.from = DateInput::new(to.start_of_month());
+        }
         self.doc.checks = local
             .reading
             .checks
