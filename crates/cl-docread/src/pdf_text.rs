@@ -141,7 +141,7 @@ pub fn page_words(page: &PdfPage<'_>) -> Vec<Word> {
         let Some(ch) = c.unicode_char() else {
             continue;
         };
-        if ch.is_whitespace() {
+        if breaks_word(ch) {
             boxes.push(CharBox {
                 ch: ' ',
                 left: 0.0,
@@ -158,6 +158,29 @@ pub fn page_words(page: &PdfPage<'_>) -> Vec<Word> {
     words_from_chars(&boxes)
 }
 
+/// A character that ends a word and is never part of one: any space
+/// (JavaScript's `\s`, so U+FEFF too), a control character, or an invisible
+/// format character (soft hyphen, zero-width and joiner characters,
+/// direction marks and controls, the BOM). A format character inside
+/// "1<U+FEFF>250.00" must not join two numbers into one (security review
+/// L4).
+fn breaks_word(c: char) -> bool {
+    c.is_whitespace()
+        || c.is_control()
+        || matches!(
+            c,
+            '\u{00AD}'
+                | '\u{061C}'
+                | '\u{180E}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{206F}'
+                | '\u{FEFF}'
+                | '\u{FFF9}'..='\u{FFFB}'
+        )
+}
+
 /// Group characters (in content order; `' '` separates) into words and put
 /// the words in reading order: lines top to bottom, words left to right.
 #[must_use]
@@ -167,7 +190,7 @@ pub fn words_from_chars(chars: &[CharBox]) -> Vec<Word> {
     let mut open = false;
     let mut last: Option<CharBox> = None;
     for c in chars {
-        if c.ch.is_whitespace() || c.ch.is_control() {
+        if breaks_word(c.ch) {
             open = false;
             continue;
         }
@@ -359,6 +382,18 @@ mod tests {
         let inv = &words[0];
         assert_eq!(inv.bbox, Bbox::new(1000, 1000, 1695, 1200).unwrap());
         assert_eq!(inv.confidence, Confidence::CERTAIN);
+    }
+
+    /// Security review L4: an invisible format character between two
+    /// numbers splits them; it is never kept in a word.
+    #[test]
+    fn format_characters_split_words_and_are_dropped() {
+        for sep in ['\u{FEFF}', '\u{200B}', '\u{2060}', '\u{00AD}', '\u{202E}'] {
+            let text = format!("1{sep}250.00");
+            let words = words_from_chars(&line(&text, 0.0, 0.0));
+            assert_eq!(texts(&words), ["1", "250.00"], "{sep:?}");
+        }
+        assert!(!breaks_word('a') && !breaks_word('$') && !breaks_word('-'));
     }
 
     #[test]

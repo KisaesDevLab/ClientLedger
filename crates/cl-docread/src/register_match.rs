@@ -11,8 +11,15 @@
 //! * its date is within [`DATE_WINDOW_DAYS`] days of the document's, either
 //!   way;
 //! * it is posted (not void, deleted or a draft);
-//! * it is not a bill or a bill payment (bills are matched by reference
-//!   through the engine's duplicate check, Q-A04d);
+//! * its type is one the document could have been entered as (an
+//!   **allowlist**, security review M2: an attach can't be undone, Q-A04e):
+//!   an expense, a check or a card charge for a bill or a receipt
+//!   ([`DocSide::Purchase`]); a card credit only for a credit or a refund
+//!   ([`DocSide::Credit`]). Deposits, journal entries, transfers, invoices,
+//!   bills, bill payments and any type not known here are never offered
+//!   (bills are matched by reference through the engine's duplicate check,
+//!   Q-A04d; journal entries are left out entirely rather than offered as
+//!   Possible: a receipt is never entered as one);
 //! * the **payee gate** passes: when both the document and the row name a
 //!   known contact and they differ, the row is never offered (M5). A row
 //!   with no contact (a bank-feed expense) stays a candidate.
@@ -52,6 +59,19 @@ pub struct Probe {
     pub payee: Option<String>,
     /// The contact the owner chose, if any (the payee gate).
     pub contact: Option<ContactId>,
+    /// Whether the document is a purchase or a credit/refund (which row
+    /// types it may be attached to).
+    pub side: DocSide,
+}
+
+/// Which way the document's money went (security review M2).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum DocSide {
+    /// A bill or a receipt: money paid out.
+    #[default]
+    Purchase,
+    /// A credit memo or a refund: money coming back.
+    Credit,
 }
 
 impl fmt::Debug for Probe {
@@ -59,6 +79,7 @@ impl fmt::Debug for Probe {
         f.debug_struct("Probe")
             .field("payee", &self.payee.is_some())
             .field("contact", &self.contact.is_some())
+            .field("side", &self.side)
             .finish_non_exhaustive()
     }
 }
@@ -70,14 +91,16 @@ pub enum RowKind {
     Check,
     CardCharge,
     CardCredit,
+    /// Never a candidate (security review M2).
     Deposit,
+    /// Never a candidate (security review M2).
     JournalEntry,
     /// Matched by reference through the engine's duplicate check, never
     /// here (Q-A04d).
     Bill,
     /// Never a candidate (Q-A04d, review N6).
     BillPayment,
-    /// Any other type (invoices, transfers, ...).
+    /// Any other type (invoices, transfers, ...): never a candidate.
     Other,
 }
 
@@ -98,10 +121,19 @@ impl RowKind {
         }
     }
 
-    /// Whether rows of this kind may be offered at all.
+    /// Whether rows of this kind may be offered for a document of `side`
+    /// (an allowlist: anything not named here is never offered).
     #[must_use]
-    pub const fn matchable(self) -> bool {
-        !matches!(self, RowKind::Bill | RowKind::BillPayment)
+    pub const fn matchable(self, side: DocSide) -> bool {
+        match side {
+            DocSide::Purchase => {
+                matches!(
+                    self,
+                    RowKind::Expense | RowKind::Check | RowKind::CardCharge
+                )
+            }
+            DocSide::Credit => matches!(self, RowKind::CardCredit),
+        }
     }
 }
 
@@ -190,7 +222,7 @@ pub enum Excluded {
     Date,
     /// Not posted.
     Status,
-    /// A bill or a bill payment.
+    /// A type the document can't be attached to (see [`RowKind::matchable`]).
     Kind,
     /// Both name a known contact and they differ (M5).
     OtherContact,
@@ -210,7 +242,7 @@ pub fn check(probe: &Probe, row: &RegisterRow) -> Result<(), Excluded> {
     if row.status != RowStatus::Posted {
         return Err(Excluded::Status);
     }
-    if !row.kind.matchable() {
+    if !row.kind.matchable(probe.side) {
         return Err(Excluded::Kind);
     }
     if let (Some(a), Some(b)) = (probe.contact, row.contact)
@@ -333,6 +365,7 @@ mod tests {
             date: day(14),
             payee: Some("Riverbend Supply".into()),
             contact: Some(cid(1)),
+            side: DocSide::Purchase,
         }
     }
 
@@ -372,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn only_posted_expenses_checks_and_card_rows_are_offered() {
+    fn only_posted_expenses_checks_and_card_charges_are_offered_for_a_purchase() {
         let p = probe();
         for (status, ok) in [
             (RowStatus::Posted, true),
@@ -389,8 +422,38 @@ mod tests {
             ("expense", true),
             ("check", true),
             ("credit_card_charge", true),
-            ("deposit", true),
-            ("journal_entry", true),
+            ("credit_card_credit", false),
+            ("deposit", false),
+            ("journal_entry", false),
+            ("transfer", false),
+            ("invoice", false),
+            ("bill", false),
+            ("bill_payment", false),
+            ("something_new", false),
+        ] {
+            let mut r = row(1, "25", 14);
+            r.kind = RowKind::from_txn_type(kind);
+            let want = if ok { Ok(()) } else { Err(Excluded::Kind) };
+            assert_eq!(check(&p, &r), want, "{kind}");
+        }
+        assert_eq!(RowStatus::from_wire("void"), RowStatus::Void);
+        assert_eq!(RowKind::from_txn_type("invoice"), RowKind::Other);
+        assert_eq!(RowKind::from_txn_type("transfer"), RowKind::Other);
+    }
+
+    #[test]
+    fn a_credit_or_refund_is_offered_card_credits_only() {
+        let mut p = probe();
+        p.side = DocSide::Credit;
+        for (kind, ok) in [
+            ("credit_card_credit", true),
+            ("credit_card_charge", false),
+            ("expense", false),
+            ("check", false),
+            ("deposit", false),
+            ("journal_entry", false),
+            ("transfer", false),
+            ("invoice", false),
             ("bill", false),
             ("bill_payment", false),
         ] {
@@ -398,8 +461,21 @@ mod tests {
             r.kind = RowKind::from_txn_type(kind);
             assert_eq!(check(&p, &r).is_ok(), ok, "{kind}");
         }
-        assert_eq!(RowStatus::from_wire("void"), RowStatus::Void);
-        assert_eq!(RowKind::from_txn_type("invoice"), RowKind::Other);
+    }
+
+    #[test]
+    fn transfers_and_invoices_of_the_same_amount_are_never_candidates() {
+        let p = probe();
+        let mut transfer = row(1, "25", 14);
+        transfer.kind = RowKind::from_txn_type("transfer");
+        transfer.same_account = true;
+        let mut invoice = row(2, "25", 14);
+        invoice.kind = RowKind::from_txn_type("invoice");
+        invoice.contact = Some(cid(1));
+        let expense = row(3, "25", 14);
+        let got = candidates(&p, &[transfer, invoice, expense]);
+        let ids: Vec<TransactionId> = got.iter().map(|c| c.id).collect();
+        assert_eq!(ids, [tid(3)]);
     }
 
     #[test]

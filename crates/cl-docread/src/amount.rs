@@ -10,24 +10,35 @@
 //! One place where the result differs from the engine's string: five or
 //! more decimals (`1.23456`) pass `normalizeBillMoney` but not the engine's
 //! money columns; [`parse`] refuses them rather than round
-//! (`Money::parse_wire` → `TooPrecise`). The shared case table lives in
+//! (`Money::parse_wire` → `TooPrecise`). A second: [`parse`] and
+//! [`parse_quantity`] read one page **word**, so a space left inside it
+//! after trimming (a U+FEFF a text layer put between two numbers) refuses
+//! it instead of joining the numbers (security review L4); [`normalize`]
+//! keeps the engine's behaviour. The shared case table lives in
 //! `fixtures/docs/rule-cases.json` so the contract test can run it against
 //! the live engine too (review N4).
 
 use cl_core::{Money, Quantity};
 
-/// The amount printed in `text`, or `None` when it is not exactly one
-/// unambiguous amount.
+/// The amount printed in `text` (one page word), or `None` when it is not
+/// exactly one unambiguous amount. A space inside the word (after
+/// trimming) refuses it: two numbers are never joined into one.
 #[must_use]
 pub fn parse(text: &str) -> Option<Money> {
-    Money::parse_wire(&normalize(text)?).ok()
+    Money::parse_wire(&normalize(one_word(text)?)?).ok()
 }
 
 /// A quantity printed in `text` (a line item's "Qty"), through the same
-/// normalization as [`parse`], or `None`.
+/// normalization and word rule as [`parse`], or `None`.
 #[must_use]
 pub fn parse_quantity(text: &str) -> Option<Quantity> {
-    Quantity::parse_wire(&normalize(text)?).ok()
+    Quantity::parse_wire(&normalize(one_word(text)?)?).ok()
+}
+
+/// `text` when, trimmed, it holds no space of any kind (JavaScript's `\s`,
+/// which includes U+FEFF).
+fn one_word(text: &str) -> Option<&str> {
+    (!js_trim(text).chars().any(is_js_space)).then_some(text)
 }
 
 /// The engine's `normalizeBillMoney` for a string: a plain decimal string
@@ -217,6 +228,28 @@ pub(crate) mod tests {
         assert_eq!(parse_quantity("1,200"), Quantity::parse_wire("1200").ok());
         assert_eq!(parse_quantity("123456789"), None, "8 integer digits");
         assert_eq!(parse_quantity("2 ea"), None);
+        assert_eq!(parse_quantity("1\u{FEFF}2"), None);
+    }
+
+    /// Security review L4: a space of any kind inside one word never joins
+    /// two numbers (the engine's `normalize` still strips it).
+    #[test]
+    fn a_word_with_a_space_inside_is_not_an_amount() {
+        for w in [
+            "1\u{FEFF}250.00",
+            "1\u{A0}250.00",
+            "1 250.00",
+            "$ 12.50",
+            "12.50\u{2009}3",
+        ] {
+            assert_eq!(parse(w), None, "{w:?}");
+        }
+        assert_eq!(normalize("1\u{FEFF}250.00").as_deref(), Some("1250.00"));
+        // Spaces around the word are trimmed as before.
+        assert_eq!(
+            parse("\u{FEFF} 12.50 \u{A0}"),
+            Some(Money::parse_wire("12.50").unwrap())
+        );
     }
 
     proptest! {
