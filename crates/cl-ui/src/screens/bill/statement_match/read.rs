@@ -25,9 +25,12 @@
 //! - **Balance line** (Q-297): the statement's closing balance beside the
 //!   books' (`/reports/vendor-statement`, exact), display only.
 //! - **Keep the statement** (Q-298): after Match, on by default, the file
-//!   is stored on the vendor with its period in the name. A statement
-//!   draft is discarded first (the engine refuses to move a file a live
-//!   draft reads), then its file is moved to the vendor.
+//!   is stored on the vendor with its period in the name. For a statement
+//!   draft the file is uploaded to the vendor first, then the draft is
+//!   discarded and its own copy deleted (review S1): a failure at any step
+//!   leaves the file findable, on the vendor or still in Review Documents.
+//!   The engine refuses to move a file a live draft reads, so moving it
+//!   would have to discard first and could strand it.
 //!
 //! Logs carry outcome classes only; the control channel counts only.
 
@@ -96,6 +99,13 @@ pub(crate) struct KeepKey {
     from: CalendarDate,
     to: CalendarDate,
     doc: u64,
+}
+
+/// The idempotency keys of one keep.
+#[derive(Clone)]
+pub(crate) struct KeepKeys {
+    upload: IdempotencyKey,
+    delete: IdempotencyKey,
 }
 
 /// What the books' balance was asked for.
@@ -178,6 +188,12 @@ pub(crate) struct StatementDoc {
     /// "Save this statement with the vendor" (default on).
     pub keep: bool,
     pub keep_task: Option<(KeepKey, Task<()>)>,
+    /// The keys of a keep, made once per vendor, period and document, so
+    /// Try again replays an upload that timed out but was saved (S1).
+    pub keep_keys: Option<(KeepKey, KeepKeys)>,
+    /// The demo engine has the file on the vendor for this keep already
+    /// (its upload isn't keyed).
+    pub keep_uploaded: Option<KeepKey>,
     pub kept: Option<KeepKey>,
     pub keep_failed: bool,
     pub keeps: u32,
@@ -227,6 +243,8 @@ impl Default for StatementDoc {
             helped: false,
             keep: true,
             keep_task: None,
+            keep_keys: None,
+            keep_uploaded: None,
             kept: None,
             keep_failed: false,
             keeps: 0,
@@ -295,6 +313,8 @@ impl StatementDoc {
         self.draft_file = None;
         self.keep = true;
         self.keep_task = None;
+        self.keep_keys = None;
+        self.keep_uploaded = None;
         self.kept = None;
         self.keep_failed = false;
     }
@@ -1023,9 +1043,31 @@ impl StatementMatchScreen {
         let to = AttachTo::Contact(key.vendor);
         let draft = self.doc.draft;
         self.doc.keep_failed = false;
+        if self.doc.keep_keys.as_ref().is_none_or(|(k, _)| *k != key) {
+            self.doc.keep_keys = Some((
+                key,
+                KeepKeys {
+                    upload: IdempotencyKey::new(),
+                    delete: IdempotencyKey::new(),
+                },
+            ));
+        }
+        let Some(keys) = self.doc.keep_keys.as_ref().map(|(_, k)| k.clone()) else {
+            return;
+        };
         if let Some(mut demo) = self.link.demo_state() {
-            let r = keep_in_demo(&mut demo, self.doc.tenant, draft, to, &name, &bytes);
+            let mut uploaded = self.doc.keep_uploaded == Some(key);
+            let r = keep_in_demo(
+                &mut demo,
+                self.doc.tenant,
+                draft,
+                (to, &name, &bytes),
+                &mut uploaded,
+            );
             drop(demo);
+            if uploaded {
+                self.doc.keep_uploaded = Some(key);
+            }
             self.doc.keep_task = Some((key, Task::ready(())));
             if r.is_err() {
                 self.doc.keep_task = None;
@@ -1042,19 +1084,24 @@ impl StatementMatchScreen {
             key: None,
         };
         let task = group.write(&session, label, move |s| async move {
-            match draft {
-                Some(d) => {
-                    // A live draft's file can't move: discard it first.
-                    s.document_drafts().discard(d.id).await?;
-                    let file = d.attachment.ok_or(ApiError::NotFound { code: None })?;
-                    s.attachments().link(file, to, IdempotencyKey::new()).await
+            // The file is on the vendor before anything else changes; the
+            // same key on Try again replays an upload that was saved.
+            s.attachments()
+                .upload(to, &name, &bytes, keys.upload)
+                .await?;
+            if let Some(d) = draft {
+                // Then the draft leaves Review Documents (discard is
+                // idempotent), and its own copy of the file goes. That copy
+                // is the same bytes as the vendor's: failing to delete it
+                // loses nothing.
+                s.document_drafts().discard(d.id).await?;
+                if let Some(file) = d.attachment
+                    && s.attachments().delete(file, keys.delete).await.is_err()
+                {
+                    tracing::info!(outcome = "copy_left", "statement draft file");
                 }
-                None => s
-                    .attachments()
-                    .upload(to, &name, &bytes, IdempotencyKey::new())
-                    .await
-                    .map(|_| ()),
             }
+            Ok(())
         });
         match task {
             Ok(p) => self.doc.keep_task = Some((key, Task::Pending(p))),
@@ -1488,26 +1535,29 @@ impl StatementMatchScreen {
     }
 }
 
-/// The demo engine's keep: a statement draft is discarded and its file
-/// moved to the vendor; any other file is uploaded to the vendor.
+/// The demo engine's keep, in the live order: the file is uploaded to the
+/// vendor (once: `uploaded` says it is there already), then a statement
+/// draft is discarded and its own copy deleted.
 fn keep_in_demo(
     demo: &mut crate::company::demo::DemoState,
     tenant: Option<TenantId>,
     draft: Option<StatementDraft>,
-    to: AttachTo,
-    name: &str,
-    bytes: &[u8],
+    (to, name, bytes): (AttachTo, &str, &[u8]),
+    uploaded: &mut bool,
 ) -> Result<(), ApiError> {
     use crate::company::demo::{checks, drafts};
-    match draft {
-        Some(d) => {
-            let tenant = tenant.ok_or(ApiError::NoCompanyOpen)?;
-            drafts::discard(demo, tenant, d.id)?;
-            let file = d.attachment.ok_or(ApiError::NotFound { code: None })?;
-            checks::link_attachment(demo, file, to).map(|_| ())
-        }
-        None => checks::upload(demo, to, name, bytes).map(|_| ()),
+    if !*uploaded {
+        checks::upload(demo, to, name, bytes)?;
+        *uploaded = true;
     }
+    if let Some(d) = draft {
+        let tenant = tenant.ok_or(ApiError::NoCompanyOpen)?;
+        drafts::discard(demo, tenant, d.id)?;
+        if let Some(file) = d.attachment {
+            checks::delete_attachment(demo, file);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

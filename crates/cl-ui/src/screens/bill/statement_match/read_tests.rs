@@ -476,3 +476,89 @@ fn vendor_statement_folders_need_the_capability() {
         cl_api::DraftKind::Statement
     );
 }
+
+/// Keep from a statement draft (S1): the file goes on the vendor first,
+/// then the draft is discarded and its own copy deleted. A failed discard
+/// leaves the draft in Review Documents and the file on the vendor; Try
+/// again finishes without a second copy.
+#[test]
+fn keeping_a_statement_draft_never_strands_its_file() {
+    use crate::company::demo::{checks, drafts};
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let name = vendor_name(&s);
+    let tenant =
+        cl_core::ids::TenantId::parse("d0000000-0000-4000-8000-000000000001").expect("tenant");
+    s.doc.tenant = Some(tenant);
+    let (file, id) = {
+        let mut demo = link.demo_state().expect("demo");
+        let file = checks::upload(
+            &mut demo,
+            cl_api::AttachTo::Draft(cl_api::DraftKey::new()),
+            "intake.pdf",
+            PDF,
+        )
+        .expect("upload")
+        .id;
+        let d = drafts::create(
+            &mut demo,
+            tenant,
+            file,
+            cl_api::DraftKind::Statement,
+            cl_api::IdempotencyKey::new(),
+        )
+        .expect("claim");
+        (file, d.id)
+    };
+    s.doc.service = Some(service(JobOutcome::Read(Box::new(october(&name)))));
+    s.open_statement_draft(id);
+    let start = Instant::now();
+    while s.doc.draft_file.is_some() || s.doc.job.is_some() || s.doc.read.is_none() {
+        assert!(start.elapsed() < Duration::from_secs(20), "the draft reads");
+        std::thread::sleep(Duration::from_millis(5));
+        s.poll();
+    }
+    assert_eq!(s.state()["statement"]["draft"], true);
+    let vendor = s.vendor.expect("vendor");
+    s.accept_read_lines();
+    // The discard fails: the file is already on the vendor, the draft stays.
+    link.demo_state().expect("demo").drafts.enabled = false;
+    s.run_match();
+    s.poll();
+    assert_eq!(s.state()["statement"]["keep_failed"], true);
+    assert_eq!(s.state()["statement"]["kept"], false);
+    assert_eq!(files_on(&link, vendor), 1, "the file is on the vendor");
+    link.demo_state().expect("demo").drafts.enabled = true;
+    {
+        let demo = link.demo_state().expect("demo");
+        let d = drafts::get(&demo, tenant, id).expect("draft");
+        assert_eq!(
+            d.status,
+            cl_api::DraftStatus::New,
+            "still in Review Documents"
+        );
+        assert!(checks::find_attachment(&demo, file).is_some());
+    }
+    // Try again: no second copy, the draft goes, its own copy goes.
+    s.keep_after_match();
+    s.poll();
+    assert_eq!(s.state()["statement"]["kept"], true);
+    assert_eq!(s.state()["statement"]["draft"], false);
+    assert_eq!(files_on(&link, vendor), 1, "one copy on the vendor");
+    let demo = link.demo_state().expect("demo");
+    let names: Vec<String> = checks::attachments(&demo, cl_api::AttachTo::Contact(vendor))
+        .into_iter()
+        .map(|a| a.file_name)
+        .collect();
+    assert_eq!(
+        names,
+        ["Statement 2026-10-01 to 2026-10-31.pdf"],
+        "named by its period"
+    );
+    let d = drafts::get(&demo, tenant, id).expect("draft");
+    assert_eq!(d.status, cl_api::DraftStatus::Discarded);
+    assert!(
+        checks::find_attachment(&demo, file).is_none(),
+        "its copy is deleted"
+    );
+}
