@@ -976,7 +976,9 @@ impl StatementMatchScreen {
     /// After a Match, the statement is kept with the vendor when the box
     /// is on (once per document, vendor and period).
     pub(crate) fn keep_after_match(&mut self) {
-        if !self.doc.keep || self.doc.keep_task.is_some() {
+        // A statement that names another vendor is never filed by itself:
+        // the owner ticks the box again after checking the warning.
+        if !self.doc.keep || self.doc.keep_task.is_some() || self.doc.vendor_differs.is_some() {
             return;
         }
         let (Some(o), Some(bytes), Some(kind)) = (

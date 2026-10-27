@@ -269,6 +269,11 @@ fn another_vendor_on_the_statement_changes_nothing_and_warns() {
     read(&mut s, JobOutcome::Read(Box::new(october(&name))));
     assert_eq!(s.vendor, Some(other), "unchanged");
     assert_eq!(s.state()["statement"]["vendor_differs"], true);
+    s.accept_read_lines();
+    s.run_match();
+    s.poll();
+    assert!(s.outcome.is_some());
+    assert_eq!(s.state()["statement"]["kept"], false, "not filed by itself");
 }
 
 #[test]
