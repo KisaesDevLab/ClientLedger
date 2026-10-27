@@ -75,7 +75,8 @@ pub(crate) enum Offer {
 }
 
 impl Offer {
-    fn key(self) -> &'static str {
+    /// The control channel's name.
+    pub(crate) fn key(self) -> &'static str {
         match self {
             Offer::None => "none",
             Offer::Ask(Route::Local) => "local",
@@ -409,7 +410,7 @@ impl EnterBillScreen {
             .bytes
             .clone()
             .unwrap_or_else(|| Arc::from([]));
-        let request = assist::request(&last, route, &bytes);
+        let request = assist::request(&last, route, &bytes, cl_api::DraftKind::Bill);
         self.read.local.picture = Some(assist::picture(route, &bytes));
         self.read.job_no += 1;
         tracing::info!(job = self.read.job_no, "document assist started");
@@ -461,6 +462,18 @@ impl EnterBillScreen {
         let merged = assist::merge(&last, &answer, &self.read.local.vendors);
         self.read.local.assist_outcome = Some("helped");
         self.read.local.helped = true;
+        // A04 draft mode: what the owner accepted or changed keeps its mark
+        // (spots, learning and "Enter this as" read it).
+        let kept: Vec<_> = if self.draft.is_some() {
+            self.header
+                .current()
+                .read
+                .entries()
+                .filter(|(_, s)| !matches!(s, cl_model::forms::doc_read::ReadField::Read { .. }))
+                .collect()
+        } else {
+            Vec::new()
+        };
         // The reading's unaccepted values give way to the merged reading;
         // what the owner typed, changed or accepted stays.
         self.clear_read();
@@ -475,6 +488,30 @@ impl EnterBillScreen {
             local: true,
             balance_due: m.balance_due,
         });
+        if self.draft.is_some() {
+            // The read lines, in the merged reading's order (their spots).
+            let read = self.header.current().read.clone();
+            let lines: Vec<cl_model::forms::doc_read::ReadTarget> = self
+                .expenses
+                .value()
+                .lines
+                .iter()
+                .map(|l| cl_model::forms::doc_read::ReadTarget::Line(l.key))
+                .filter(|t| read.state(*t).is_some())
+                .collect();
+            if let Some(s) = self.draft.as_mut() {
+                s.adopt_help(&merged);
+                s.filled(&lines);
+            }
+        }
+        if !kept.is_empty() {
+            let mut f = self.compose();
+            for (t, s) in kept {
+                f.read.restore(t, s);
+            }
+            self.take_form(f);
+            self.track_read();
+        }
         self.read.local.last = Some(Box::new(merged));
     }
 

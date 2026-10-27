@@ -35,7 +35,7 @@
 mod attach;
 pub mod doc_read;
 // A04 WP-F2: draft mode (a document from Review Documents).
-mod doc_read_local;
+pub(crate) mod doc_read_local;
 mod draft;
 mod form;
 pub mod items;

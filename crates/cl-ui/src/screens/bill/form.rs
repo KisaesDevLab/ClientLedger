@@ -252,8 +252,11 @@ impl EnterBillScreen {
         }
         // A04 draft mode: where the values came from, Discard document.
         let vendor_name = self.draft_vendor_name();
-        if let Some(d) = self.draft.as_mut() {
-            d.banner_ui(ui, tokens, None, vendor_name.as_deref());
+        if let Some(d) = self.draft.as_mut()
+            && let crate::screens::doc_review::review::BannerClick::EnterAs(to) =
+                d.banner_ui(ui, tokens, None, vendor_name.as_deref())
+        {
+            self.enter_as(ui.ctx(), to);
         }
         // The source-document banner: "Attached from <file> in your receipt
         // inbox" (Q-P17j, WP5's text), then the reading's values to accept

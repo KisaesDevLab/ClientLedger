@@ -32,8 +32,8 @@ use crate::reading::learn::LearnInput;
 use crate::reading::map;
 use crate::screens::doc_review::attach::MatchProbe;
 use crate::screens::doc_review::review::{
-    self, Accept, BannerClick, BannerRead, Canon, DraftEvent, DraftOpen, DraftSession, PostBody,
-    TargetIn,
+    self, Accept, BannerClick, BannerRead, Canon, DraftEvent, DraftOpen, DraftSession, FormValues,
+    PostBody, TargetIn,
 };
 use crate::widgets::compare::{CompareAction, CompareEvent, FillValue};
 
@@ -170,6 +170,7 @@ impl WriteCheckScreen {
                 self.close_window();
             }
             DraftEvent::Close | DraftEvent::Next(None) => self.close_window(),
+            DraftEvent::Helped => self.draft_helped(),
         }
     }
 
@@ -217,6 +218,7 @@ impl WriteCheckScreen {
         }
         self.draft.snap = Some(self.snap());
         self.sync_inputs();
+        self.apply_carry();
     }
 
     fn snap(&self) -> ReadSnap {
@@ -464,8 +466,97 @@ impl WriteCheckScreen {
             BannerClick::ReadDocument => {
                 let _ = s.read_document(vendors, None, today);
             }
+            BannerClick::AskAi => {
+                let _ = s.ask_ai(vendors);
+            }
+            BannerClick::EnterAs(to) => self.enter_as(ui.ctx(), to),
             BannerClick::None | BannerClick::Discard | BannerClick::TryAgain => {}
         }
+    }
+
+    /// The form's values for "Enter this as".
+    fn form_values(&self) -> FormValues {
+        let f = self.compose();
+        FormValues {
+            payee: f.payee,
+            date: f.date,
+            total: f.amount,
+            paid_from: f.bank,
+            lines: f.lines.lines,
+            marks: f.read,
+        }
+    }
+
+    /// "Enter this as" `to`: the draft opens in that form's window with the
+    /// owner's work.
+    pub(crate) fn enter_as(&mut self, ctx: &egui::Context, to: DraftForm) {
+        let v = self.form_values();
+        let Some(s) = self.draft.session.as_ref() else {
+            return;
+        };
+        let Some(carry) = s.enter_as(to, &v) else {
+            return;
+        };
+        let o = DraftOpen { id: s.id, form: to };
+        review::publish_carry(ctx, carry);
+        review::open(&self.link, o);
+        self.close_window();
+    }
+
+    /// After the fill: what "Enter this as" brought from the other form.
+    fn apply_carry(&mut self) {
+        let Some(s) = self.draft.session.as_mut() else {
+            return;
+        };
+        let Some(c) = s.take_carry() else {
+            return;
+        };
+        let rows: Vec<Option<RowKey>> = (0..c.lines.len()).map(|i| s.line_key(i)).collect();
+        let form = s.form;
+        let allowed: Vec<AccountId> = self.bank_accounts().into_iter().map(|a| a.id).collect();
+        let mut v = self.form_values();
+        c.apply_to(
+            form,
+            &mut v,
+            |i| rows.get(i).copied().flatten(),
+            |a| allowed.contains(&a),
+        );
+        let mut f = self.compose();
+        if c.total.is_some() {
+            f.amount_from_lines = false;
+        }
+        f.payee = v.payee;
+        f.date = v.date;
+        f.amount = v.total;
+        f.bank = v.paid_from;
+        f.read = v.marks;
+        f.lines.lines = v.lines;
+        let lines = std::mem::take(&mut f.lines);
+        self.header.load(f);
+        let lists = Arc::clone(&self.lists);
+        self.lines.form_mut().load(lines, &*lists);
+        self.draft.snap = Some(self.snap());
+        self.sync_inputs();
+    }
+
+    /// Ask AI to help answered: the values not yet accepted give way to the
+    /// merged reading; what the owner accepted or changed stays, marked.
+    fn draft_helped(&mut self) {
+        let kept: Vec<(ReadTarget, ReadField)> = self
+            .header
+            .current()
+            .read
+            .entries()
+            .filter(|(_, s)| !matches!(s, ReadField::Read { .. }))
+            .collect();
+        self.clear_read();
+        self.draft_loaded();
+        let mut f = self.header.current().clone();
+        for (t, s) in kept {
+            f.read.restore(t, s);
+        }
+        self.header.load(f);
+        self.draft.snap = Some(self.snap());
     }
 
     // ------------------------------------------------------------ compare

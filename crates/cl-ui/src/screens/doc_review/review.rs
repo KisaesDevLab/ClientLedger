@@ -92,6 +92,10 @@ use crate::windows::OpenPayload;
 #[path = "review_tests.rs"]
 mod tests;
 
+#[path = "review_kind_ai.rs"]
+mod kind_ai;
+pub(crate) use kind_ai::{Carry, DraftAssist, FormValues, publish_carry};
+
 /// A file larger than this is not downloaded for the form (the engine's
 /// own attachment limit).
 const MAX_FILE_BYTES: usize = 10 * 1024 * 1024;
@@ -804,6 +808,10 @@ pub(crate) enum DraftEvent {
     /// Open this draft next (Save & New, Page Up/Down), or close when
     /// there is none.
     Next(Option<DraftOpen>),
+    /// Ask AI to help answered: the values not yet accepted give way to
+    /// the merged reading ([`DraftSession::take_fill`]); accepted and
+    /// changed values stay.
+    Helped,
 }
 
 /// Learning's state (D5).
@@ -907,6 +915,15 @@ pub(crate) struct DraftSession {
     resends: (u8, u8),
     /// The attach's key: (target, change token, key).
     attach_key: Option<(TransactionId, String, IdempotencyKey)>,
+    /// Ask AI to help (card and check forms).
+    pub assist: DraftAssist,
+    /// What "Enter this as" brought from the other form (taken on the
+    /// first frame, applied after the fill).
+    carry: Option<Carry>,
+    /// The first frame looked for a carry.
+    carry_looked: bool,
+    /// The form opened with a carry (control channel).
+    carried: Option<usize>,
 }
 
 impl std::fmt::Debug for DraftSession {
@@ -977,6 +994,10 @@ impl DraftSession {
             accepts: 0,
             resends: (0, 0),
             attach_key: None,
+            assist: DraftAssist::default(),
+            carry: None,
+            carry_looked: false,
+            carried: None,
         };
         s.start_load();
         s
@@ -1068,6 +1089,7 @@ impl DraftSession {
         }
         self.stored = Some(stored_reading(&l.draft, cards));
         self.draft = Some(l.draft);
+        self.carried_values();
         if l.file.is_some() {
             self.file = l.file;
         }
@@ -1108,12 +1130,13 @@ impl DraftSession {
     /// The card account matched for `cards` when the form's card list
     /// arrives after the draft (a card charge).
     pub(crate) fn rematch_card(&mut self, cards: &[(AccountId, Last4)]) {
-        if let (Some(Stored::Read(r)), Some(d)) = (&self.stored, &self.draft)
+        // Only the card: the values may be carried or AI-helped ones.
+        if let (Some(Stored::Read(r)), Some(d)) = (&mut self.stored, &self.draft)
             && r.card.is_none()
             && let Stored::Read(again) = stored_reading(d, cards)
             && again.card.is_some()
         {
-            self.stored = Some(Stored::Read(again));
+            r.card = again.card;
         }
     }
 
@@ -1175,6 +1198,7 @@ impl DraftSession {
         self.load.is_some()
             || self.words_job.is_some()
             || self.read_job.is_some()
+            || self.assist.busy()
             || !matches!(self.work, Work::Idle | Work::Done | Work::Choosing { .. })
             || self.learn.layout.is_some()
             || self.learn.card.is_some()
@@ -1201,6 +1225,12 @@ impl DraftSession {
             self.claim = Some(h.lock().hold_draft(self.id));
         }
         self.queue = queue_order(ctx);
+        // "Enter this as" left the owner's work for this form (first frame
+        // only: the window it came from never takes it back).
+        if !std::mem::replace(&mut self.carry_looked, true) {
+            self.carry = kind_ai::take_carry(ctx, self.id, self.form);
+            self.carried = self.carry.as_ref().map(Carry::kept);
+        }
         if let Some(r) = self.load.as_mut().and_then(Task::try_take) {
             self.load = None;
             match r {
@@ -1210,6 +1240,7 @@ impl DraftSession {
         }
         self.poll_words(ctx, today);
         self.poll_read();
+        self.poll_assist();
         self.poll_work();
         self.poll_learn(today);
         self.poll_discard(ctx);
@@ -2459,6 +2490,11 @@ impl DraftSession {
                         RichText::new(t("compare.note.words_loading")).color(tokens.text_secondary),
                     );
                 }
+                // Ask AI to help (card and check forms; Enter Bill has
+                // A03's own on its reading banner).
+                if read.is_some() && self.assist_banner(ui, tokens) {
+                    click = BannerClick::AskAi;
+                }
                 if let Some(digits) = self
                     .printed_card()
                     .filter(|_| read.is_some_and(|r| r.card_offer))
@@ -2484,6 +2520,24 @@ impl DraftSession {
                     Work::Converting { .. } | Work::Resend { .. } | Work::Refetch { .. }
                 ) {
                     ui.label(RichText::new(t("doc_form.entering")).color(tokens.text_secondary));
+                }
+                if !self.closed() && self.draft.is_some() {
+                    // "Enter this as" (Q-A04n): the other forms.
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(
+                            RichText::new(t("doc_form.enter_as")).color(tokens.text_secondary),
+                        );
+                        for f in DraftForm::ALL {
+                            if f != self.form
+                                && ui
+                                    .add_enabled(!self.locked(), egui::Button::new(t(form_key(f))))
+                                    .on_hover_text(t("doc_form.enter_as.tip"))
+                                    .clicked()
+                            {
+                                click = BannerClick::EnterAs(f);
+                            }
+                        }
+                    });
                 }
                 if !self.closed()
                     && ui
@@ -2668,6 +2722,8 @@ impl DraftSession {
                 "layout": self.learn.layout_outcome.map(Learned::name),
                 "card": self.learn.card_outcome.map(CardOutcome::name),
             },
+            "assist": self.assist_json(),
+            "carried": self.carried,
         })
     }
 }
@@ -2698,6 +2754,11 @@ pub(crate) enum BannerClick {
     ReadDocument,
     /// Try again (unknown outcome; already sent).
     TryAgain,
+    /// Ask AI to help (the form passes its vendors to
+    /// [`DraftSession::ask_ai`]).
+    AskAi,
+    /// "Enter this as" this form (the form builds the [`Carry`]).
+    EnterAs(DraftForm),
 }
 
 /// One form field for the compare tools.
