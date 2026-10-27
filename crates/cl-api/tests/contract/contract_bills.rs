@@ -183,6 +183,55 @@ pub fn vendor_summary_moves_by_the_total_live(h: &Harness) {
     assert_eq!(found.rows[0].total, Some(m("1480.0000")));
 }
 
+/// A06 (Q-297, Q-298): the vendor statement report's CSV gives the books'
+/// opening and closing balance exactly, and a statement file is kept on
+/// the vendor (`attachableType: "contact"`) with its period in the name.
+pub fn vendor_statement_balance_and_kept_file_live(h: &Harness) {
+    let s = &h.s1;
+    let rental = account(h, s, AccountType::Expense, "Statement rental");
+    let delivery = account(h, s, AccountType::Expense, "Statement freight");
+    let v = vendor(h, s);
+    // One bill before the period (opening) and one in it.
+    let mut before = mockup_bill(v, rental.id, delivery.id, &unique("INV").replace(' ', "-"));
+    before.date = date(2026, 9, 20);
+    h.run(s.bills().create(&before, &PostingOptions::default(), key()))
+        .expect("bill before");
+    h.run(s.bills().create(
+        &mockup_bill(v, rental.id, delivery.id, &unique("INV").replace(' ', "-")),
+        &PostingOptions::default(),
+        key(),
+    ))
+    .expect("bill in the period");
+    let b = h
+        .run(
+            s.reports()
+                .vendor_statement_balances(v, date(2026, 11, 1), date(2026, 11, 30)),
+        )
+        .unwrap_or_else(|e| panic!("report: {e:?}"))
+        .expect("balances read exactly");
+    assert_eq!(b.opening, m("1480.00"));
+    assert_eq!(b.closing, m("2960.00"));
+
+    let name =
+        cl_api::statement_file_name(date(2026, 11, 1), date(2026, 11, 30), cl_api::FileKind::Pdf);
+    let kept = h
+        .run(
+            s.attachments()
+                .upload(AttachTo::Contact(v), &name, PDF, key()),
+        )
+        .unwrap_or_else(|e| panic!("upload: {e:?}"));
+    assert_eq!(kept.attachable_type, "contact");
+    assert_eq!(kept.attachable_id, v.to_string());
+    assert_eq!(kept.file_name, name);
+    let listed = h
+        .run(
+            s.attachments()
+                .list(AttachTo::Contact(v), PageRequest::new(50, 0).expect("page")),
+        )
+        .expect("list");
+    assert!(listed.data.iter().any(|a| a.id == kept.id));
+}
+
 /// U-84d: a voided unpaid bill leaves the vendor summary (PENDING until the
 /// pin carries `ap-edit-v1`; the pinned engine still counts it, plan R7).
 pub fn void_bill_drops_from_summary_u84(h: &Harness) {
