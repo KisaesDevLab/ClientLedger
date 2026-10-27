@@ -14,6 +14,8 @@ Each row shows the kind of document (Bill, Card charge, Check, Expense, or Not s
 - **Possible duplicate**: a record with the same amount and a close date is already in your books. See "Attach a receipt to something already in your books" below.
 - **Couldn't read**: the document can't be read. Open it and enter it by hand.
 
+A document from a **Vendor statements** intake folder is a vendor's statement. Opening it takes you to Match Vendor Statement instead of a bill form.
+
 The list shows 50 documents a page. Use **Filter** to narrow it by kind, status or number, and **Refresh** to look again.
 
 ## Keys
