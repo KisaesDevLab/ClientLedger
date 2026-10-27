@@ -6,7 +6,8 @@
 //!
 //! The sign comes from the column, never from the words on the line: a
 //! single amount column keeps the printed sign ("CR", a trailing minus and
-//! parentheses mean negative); a charges column keeps what is printed; a
+//! parentheses mean negative); a charges column keeps what is printed,
+//! so a credit printed there (minus, parentheses or "CR") stays negative; a
 //! credits or payments column is always negative.
 //!
 //! Balance forward, subtotals, totals and aging rows are left out of the
@@ -514,7 +515,10 @@ pub fn read_row(
                 return Row::Nothing;
             };
             let value = match sign_from {
-                SignSource::SingleColumn if cr => m.abs().checked_neg().unwrap_or(m),
+                // "CR" means negative in a charges column too (review B1).
+                SignSource::SingleColumn | SignSource::ChargesColumn if cr => {
+                    m.abs().checked_neg().unwrap_or(m)
+                }
                 SignSource::SingleColumn | SignSource::ChargesColumn => m,
                 SignSource::CreditsColumn | SignSource::PaymentsColumn => {
                     m.abs().checked_neg().unwrap_or(m)

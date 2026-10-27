@@ -180,7 +180,11 @@ pub fn kind_of(line: &ReadLine) -> StatementKind {
     match line.column {
         LineColumn::Credits => StatementKind::Credit,
         LineColumn::Payments => StatementKind::Payment,
-        LineColumn::Single if line.amount.is_negative() => StatementKind::CreditOrPayment,
+        // A negative under Charges (printed "(25.00)", "-25.00" or "CR")
+        // is a credit, never a charge: it reads as a single signed column.
+        LineColumn::Single | LineColumn::Charges if line.amount.is_negative() => {
+            StatementKind::CreditOrPayment
+        }
         LineColumn::Charges | LineColumn::Single => StatementKind::Charge,
     }
 }
@@ -199,8 +203,12 @@ pub fn rows_from_read(lines: &[ReadLine]) -> ReadStatement {
             l.date.year()
         );
         let amount = match l.column {
-            // A single column keeps its sign: the paste reader's rule.
-            LineColumn::Single if l.amount.is_negative() => format!("-{}", amount_text(l.amount)),
+            // A single column keeps its sign: the paste reader's rule. A
+            // negative charge is written the same way, with no kind word, so
+            // it reads back as a credit or payment (never a positive charge).
+            LineColumn::Single | LineColumn::Charges if l.amount.is_negative() => {
+                format!("-{}", amount_text(l.amount))
+            }
             _ => amount_text(l.amount),
         };
         text.push_str(&date);
@@ -208,7 +216,12 @@ pub fn rows_from_read(lines: &[ReadLine]) -> ReadStatement {
         text.push_str(&cell_text(&l.reference));
         text.push('\t');
         text.push_str(&amount);
-        if let Some(k) = kind_word(l.column) {
+        let word = if l.column == LineColumn::Charges && l.amount.is_negative() {
+            None
+        } else {
+            kind_word(l.column)
+        };
+        if let Some(k) = word {
             text.push('\t');
             text.push_str(k);
         }
@@ -265,6 +278,7 @@ mod tests {
             line("", "-75.00", LineColumn::Single),
             line("A\tB\nC", "0.01", LineColumn::Single),
             line("INV-9", "999999999.99", LineColumn::Charges),
+            line("CM-8", "-25.00", LineColumn::Charges),
         ];
         let st = rows_from_read(&lines);
         let back = read_back(&st, d(11, 4));
@@ -286,6 +300,28 @@ mod tests {
         assert_eq!(back.rows[3].entry.kind, StatementKind::Charge);
         assert_eq!(back.rows[4].entry.kind, StatementKind::CreditOrPayment);
         assert_eq!(back.rows[5].entry.reference, "A B C");
+        // A credit printed under Charges stays a credit (review B1).
+        assert_eq!(back.rows[7].entry.kind, StatementKind::CreditOrPayment);
+        assert_eq!(back.rows[7].entry.amount, money("25.00"));
+    }
+
+    /// Charges 100.00 and (25.00) against a closing of 75.00: the box
+    /// holds one charge of 100 and one credit of 25, never 125 of charges.
+    #[test]
+    fn a_credit_under_charges_is_not_a_charge() {
+        let lines = vec![
+            line("INV-1", "100.00", LineColumn::Charges),
+            line("CM-1", "-25.00", LineColumn::Charges),
+        ];
+        let back = read_back(&rows_from_read(&lines), d(11, 4));
+        let charges: Vec<_> = back
+            .rows
+            .iter()
+            .filter(|r| r.entry.kind == StatementKind::Charge)
+            .collect();
+        assert_eq!(charges.len(), 1);
+        assert_eq!(charges[0].entry.amount, money("100.00"));
+        assert_eq!(back.rows[1].entry.kind, StatementKind::CreditOrPayment);
     }
 
     /// What the paste format can't hold exactly comes back as a bad row:
