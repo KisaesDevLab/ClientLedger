@@ -158,6 +158,10 @@ pub struct DemoDrafts {
     /// The next keyed request answers 409 `IDEMPOTENCY_IN_PROGRESS`
     /// (nothing done).
     pub busy_next: bool,
+    /// A04 WP-F2: the vendors' saved layouts (the demo's
+    /// `vendor_document_templates`), learned on accept and used by the
+    /// inbox's reading. No amounts.
+    pub layouts: Vec<(ContactId, cl_docread::model::Template)>,
 }
 
 impl fmt::Debug for DemoDrafts {
@@ -166,6 +170,7 @@ impl fmt::Debug for DemoDrafts {
             .field("enabled", &self.enabled)
             .field("drafts", &self.rows.len())
             .field("keys", &self.keys.len())
+            .field("layouts", &self.layouts.len())
             .finish_non_exhaustive()
     }
 }
