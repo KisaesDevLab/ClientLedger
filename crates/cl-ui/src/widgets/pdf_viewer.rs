@@ -1119,13 +1119,15 @@ impl DocViewer {
         });
         focused |= zoom_focused;
         // A04 WP-C: what a click on the page does now, or why it didn't.
+        let shown = state.compare.shown_note();
         if let Some(view) = state.compare.view() {
-            let note = view.note.or_else(|| {
+            let note = shown.or_else(|| {
                 (view.feed.armed.is_some() && view.words.is_none())
                     .then_some(super::compare::CompareNote::WordsLoading)
             });
             let text = match (note, view.armed_label()) {
-                (Some(n), _) => Some((t(n.key()), tokens.warn)),
+                // Text, so `warn_text` (4.5:1), not the `warn` fill.
+                (Some(n), _) => Some((t(n.key()), tokens.warn_text)),
                 (None, Some(label)) => Some((
                     t_with("compare.click_to_fill", &[("field", label)]),
                     tokens.text_secondary,
