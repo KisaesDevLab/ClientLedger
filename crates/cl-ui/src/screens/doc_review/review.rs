@@ -442,9 +442,8 @@ fn model_kind(k: DraftKind) -> cl_docread::model::DocKind {
         DraftKind::CardCharge => M::CardCharge,
         DraftKind::Check => M::Check,
         DraftKind::CashExpense => M::CashExpense,
-        // Until the reader knows statements (A06 WP-S1), a statement's
-        // stored reading is read as an unknown document's.
-        DraftKind::Unknown | DraftKind::Statement => M::Unknown,
+        DraftKind::Statement => M::Statement,
+        DraftKind::Unknown => M::Unknown,
     }
 }
 
@@ -1192,7 +1191,7 @@ impl DraftSession {
                         if let Some(service) = crate::reading::shared() {
                             self.words_job = Some(service.submit_cancellable(ReadRequest {
                                 bytes: file.bytes,
-                                hint: cl_docread::protocol::JobHint { kind: None },
+                                hint: cl_docread::protocol::JobHint::default(),
                                 today,
                                 vendors: Vec::new(),
                                 templates: Vec::new(),
@@ -1270,6 +1269,7 @@ impl DraftSession {
             bytes: file.bytes,
             hint: cl_docread::protocol::JobHint {
                 kind: Some(cl_core::intake::IntakeKind::Receipts),
+                statement: false,
             },
             today,
             vendors,

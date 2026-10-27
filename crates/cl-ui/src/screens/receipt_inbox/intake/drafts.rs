@@ -238,6 +238,7 @@ pub(crate) fn kind_hint(kind: Option<IntakeKind>) -> DraftKind {
 /// What the reader is told the document is.
 fn job_hint(kind: DraftKind, folder: Option<IntakeKind>) -> JobHint {
     JobHint {
+        statement: kind == DraftKind::Statement,
         kind: match kind {
             DraftKind::Bill => Some(IntakeKind::Bills),
             DraftKind::CardCharge | DraftKind::Check | DraftKind::CashExpense => {

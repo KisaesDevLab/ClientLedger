@@ -61,7 +61,7 @@
 use crate::paths::create_private_dir;
 use crate::procs::{self, TreeKiller};
 use cl_core::CalendarDate;
-use cl_docread::model::{MAX_PAGES, PageWords, Reading, Spot, Template};
+use cl_docread::model::{MAX_STATEMENT_PAGES, PageWords, Reading, Spot, Template};
 use cl_docread::pipeline::is_region_reading;
 use cl_docread::protocol::{
     BatchOptions, Bytes, FrameError, FromWorker, Job, JobFailure, JobHint,
@@ -125,7 +125,7 @@ pub struct DocreadLimits {
     /// Each page: from its `PageStarted`, or from the host's OCR answer.
     pub per_page: Duration,
     /// The job ceiling's fixed part: ceiling = this + pages started (at
-    /// most ten) × `per_page`.
+    /// most ten, twenty for a statement) × `per_page`.
     pub job_base: Duration,
     /// One tesseract run.
     pub ocr_page: Duration,
@@ -171,7 +171,7 @@ impl DocreadLimits {
     /// The job ceiling once `pages` pages have started.
     #[must_use]
     pub fn job_ceiling(&self, pages: usize) -> Duration {
-        let n = u32::try_from(pages.clamp(1, usize::from(MAX_PAGES))).unwrap_or(1);
+        let n = u32::try_from(pages.clamp(1, usize::from(MAX_STATEMENT_PAGES))).unwrap_or(1);
         self.job_base + self.per_page * n
     }
 
@@ -1389,6 +1389,8 @@ struct JobClock {
     dispatched: Instant,
     deadline: Instant,
     pages: BTreeSet<u16>,
+    /// Pages the job may read (`JobHint::max_pages`).
+    max_pages: u16,
     /// The box of a region job.
     region: Option<Spot>,
 }
@@ -1396,7 +1398,7 @@ struct JobClock {
 impl JobClock {
     /// Whether the worker may start `page` now (see [`may_start`]).
     fn may_start(&self, page: u16) -> bool {
-        may_start(self.region, &self.pages, page)
+        may_start(self.region, &self.pages, page, self.max_pages)
     }
 
     /// A region job answered with more than the words in its box.
@@ -1447,6 +1449,7 @@ fn run_batch(
             dispatched: now,
             deadline: now + limits.first_page,
             pages: BTreeSet::new(),
+            max_pages: jobs[i].hint.max_pages(),
             region: regions.get(i).copied().flatten(),
         };
         let outcome = loop {
@@ -1492,7 +1495,10 @@ fn run_batch(
                     clock.deadline = Instant::now() + limits.per_page;
                 }
                 FromWorker::JobDone { job, reading } if job == id => {
-                    if reading.validate(template_counts[k]).is_err() || clock.wrong_region(&reading)
+                    if reading
+                        .validate(template_counts[k], jobs[i].hint.statement)
+                        .is_err()
+                        || clock.wrong_region(&reading)
                     {
                         return BatchEnd::Killed(k, Kill::BadReply);
                     }
@@ -1522,8 +1528,8 @@ fn run_batch(
 /// Whether the worker may start `page` of a job: a page in range; for a
 /// region job only the box's page, once (security review L2). Any other
 /// start is a bad reply.
-fn may_start(region: Option<Spot>, started: &BTreeSet<u16>, page: u16) -> bool {
-    page < MAX_PAGES && region.is_none_or(|r| r.page == page && !started.contains(&page))
+fn may_start(region: Option<Spot>, started: &BTreeSet<u16>, page: u16, max_pages: u16) -> bool {
+    page < max_pages && region.is_none_or(|r| r.page == page && !started.contains(&page))
 }
 
 /// [`ocr_answer`] on a helper thread while this one keeps watching the
@@ -1617,6 +1623,7 @@ fn ocr_answer(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cl_docread::model::MAX_PAGES;
 
     #[test]
     fn the_best_model_is_used_only_for_second_reads() {
@@ -1761,7 +1768,7 @@ mod tests {
             read_worker_frame(&mut &only_head[..]),
             Err(FrameError::TooLarge { max: 4096, .. })
         ));
-        // A `JobDone` over 4 MiB likewise (only its head is sent here).
+        // A `JobDone` over the cap likewise (only its head is sent here).
         let len = u32::try_from(MAX_JOB_DONE_FRAME + 1).unwrap();
         let mut big = len.to_be_bytes().to_vec();
         big.extend_from_slice(br#"{"type":"jobDone","job":1,"#);
@@ -1985,11 +1992,11 @@ mod tests {
     }
 
     #[test]
-    fn the_job_ceiling_grows_per_page_up_to_ten() {
+    fn the_job_ceiling_grows_per_page_up_to_twenty() {
         let l = DocreadLimits::default();
         assert_eq!(l.job_ceiling(0), Duration::from_secs(60));
         assert_eq!(l.job_ceiling(3), Duration::from_secs(120));
-        assert_eq!(l.job_ceiling(50), Duration::from_secs(330));
+        assert_eq!(l.job_ceiling(50), Duration::from_secs(630));
         assert_eq!(l.hard_cap(l.worker_memory), 1280 * MIB);
     }
 
@@ -2015,14 +2022,18 @@ mod tests {
             bbox: cl_docread::model::Bbox::PAGE,
         });
         let mut started = BTreeSet::new();
-        assert!(may_start(r, &started, 2));
-        assert!(!may_start(r, &started, 1));
-        assert!(!may_start(r, &started, 3));
+        assert!(may_start(r, &started, 2, MAX_PAGES));
+        assert!(!may_start(r, &started, 1, MAX_PAGES));
+        assert!(!may_start(r, &started, 3, MAX_PAGES));
         started.insert(2);
-        assert!(!may_start(r, &started, 2), "twice");
-        assert!(may_start(None, &started, 2));
-        assert!(may_start(None, &started, 7));
-        assert!(!may_start(None, &started, MAX_PAGES));
+        assert!(!may_start(r, &started, 2, MAX_PAGES), "twice");
+        assert!(may_start(None, &started, 2, MAX_PAGES));
+        assert!(may_start(None, &started, 7, MAX_PAGES));
+        assert!(!may_start(None, &started, MAX_PAGES, MAX_PAGES));
+        // A statement job reads twenty pages (A06).
+        let statement = JobHint::statement().max_pages();
+        assert!(may_start(None, &started, MAX_PAGES, statement));
+        assert!(!may_start(None, &started, MAX_STATEMENT_PAGES, statement));
     }
 
     #[test]
