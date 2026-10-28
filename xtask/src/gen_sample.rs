@@ -111,8 +111,8 @@ struct Line {
     memo: Option<&'static str>,
     /// Line tag name (story lines only).
     tag: Option<&'static str>,
-    /// `Customer:Job` the line is for (story lines only).
-    job: Option<&'static str>,
+    /// `Customer:Project` the line is for (story lines only).
+    project: Option<&'static str>,
 }
 
 #[derive(Clone, Debug)]
@@ -139,22 +139,22 @@ fn line(account: &'static str, debit: i64, credit: i64) -> Line {
         credit,
         memo: None,
         tag: None,
-        job: None,
+        project: None,
     }
 }
 
 /// A Write Check story expense line: a debit with a memo, the Install tag
-/// and, optionally, the job it is for.
+/// and, optionally, the project it is for.
 fn story_line(
     account: &'static str,
     debit: i64,
     memo: &'static str,
-    job: Option<&'static str>,
+    project: Option<&'static str>,
 ) -> Line {
     Line {
         memo: Some(memo),
         tag: Some(STORY_TAG),
-        job,
+        project,
         ..line(account, debit, 0)
     }
 }
@@ -184,7 +184,7 @@ const ACCOUNTS: &[(&str, &str, &str, &str)] = &[
     ("5090", "Materials", "cogs", ""),
     ("5100", "Plants", "cogs", ""),
     ("5110", "Mulch & stone", "cogs", ""),
-    ("5200", "Job Supplies and Materials", "cogs", ""),
+    ("5200", "Project Supplies and Materials", "cogs", ""),
     ("6000", "Advertising and Marketing", "expense", ""),
     ("6050", "Bank and Merchant Fees", "expense", ""),
     ("6100", "Fuel", "expense", ""),
@@ -213,10 +213,10 @@ const STORY_VENDOR_STAND_IN: &str = "Persimmon Hill Plants";
 /// The tag on every story line; "Crew A" is the second story tag.
 const STORY_TAG: &str = "Install";
 const STORY_TAGS: &[(&str, Option<&str>)] = &[(STORY_TAG, None), ("Crew A", Some("Crew"))];
-/// The job the story lines are for.
+/// The project the story lines are for.
 const STORY_CUSTOMER: &str = "Hollister Family Trust";
-const STORY_JOB_NAME: &str = "Fall bed install";
-const STORY_JOB: &str = "Hollister Family Trust:Fall bed install";
+const STORY_PROJECT_NAME: &str = "Fall bed install";
+const STORY_PROJECT: &str = "Hollister Family Trust:Fall bed install";
 /// Prior checks to the story vendor on 1010: number, date, plants, mulch.
 const STORY_CHECKS: &[(u32, Day, i64, i64)] = &[
     (4380, Day(2026, 8, 27), 49_180, 26_450),
@@ -391,7 +391,7 @@ fn pick_vendor(rng: &mut Rng) -> &'static str {
 /// Pushed before the plugs, which absorb them, so every design figure stays.
 fn push_story(txns: &mut Vec<Txn>, bill_seq: &mut u32) {
     for &(number, date, plants, mulch) in STORY_CHECKS {
-        let job = (number == 4401).then_some(STORY_JOB);
+        let project = (number == 4401).then_some(STORY_PROJECT);
         txns.push(Txn {
             date,
             kind: "check",
@@ -399,7 +399,7 @@ fn push_story(txns: &mut Vec<Txn>, bill_seq: &mut u32) {
             contact: Some(STORY_VENDOR.into()),
             memo: "Plants and mulch".into(),
             lines: vec![
-                story_line("5100", plants, "Perennials", job),
+                story_line("5100", plants, "Perennials", project),
                 story_line("5110", mulch, "Hardwood mulch", None),
                 line("1010", 0, plants + mulch),
             ],
@@ -418,7 +418,7 @@ fn push_story(txns: &mut Vec<Txn>, bill_seq: &mut u32) {
         contact: Some(STORY_VENDOR.into()),
         memo: "Fall bed plants and mulch".into(),
         lines: vec![
-            story_line("5100", plants, "Perennials", Some(STORY_JOB)),
+            story_line("5100", plants, "Perennials", Some(STORY_PROJECT)),
             story_line("5110", mulch, "Hardwood mulch", None),
             line(AP, 0, plants + mulch),
         ],
@@ -1299,7 +1299,7 @@ fn render(fx: &Fixture) -> BTreeMap<&'static str, String> {
             "defaultExpenseAccount": "5110"
         }],
         "tags": STORY_TAGS.iter().map(|(name, group)| json!({"name": name, "group": group})).collect::<Vec<_>>(),
-        "jobs": [{"customer": STORY_CUSTOMER, "name": STORY_JOB_NAME}],
+        "projects": [{"customer": STORY_CUSTOMER, "name": STORY_PROJECT_NAME}],
         "bank": {
             "lastFileDate": "2026-11-03",
             "lastFileBalance": cents(BANK_FILE_1010),
@@ -1337,7 +1337,7 @@ fn render(fx: &Fixture) -> BTreeMap<&'static str, String> {
                 "attachment": t.attachment,
                 "lines": t.lines.iter().map(|l| {
                     let mut v = json!({"account": l.account, "debit": cents(l.debit), "credit": cents(l.credit)});
-                    for (key, value) in [("memo", l.memo), ("tag", l.tag), ("job", l.job)] {
+                    for (key, value) in [("memo", l.memo), ("tag", l.tag), ("project", l.project)] {
                         if let Some(value) = value {
                             v[key] = json!(value);
                         }

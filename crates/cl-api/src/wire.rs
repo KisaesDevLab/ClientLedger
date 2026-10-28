@@ -34,7 +34,7 @@ impl Capabilities {
     pub const TENANTS_LIST: &'static str = "tenants-list-v1";
     /// U-15 closing-date password.
     pub const CLOSING_PASSWORD: &'static str = "closing-password-v1";
-    /// E5a tenant archives (export job, import, rename).
+    /// E5a tenant archives (export project, import, rename).
     pub const TENANT_ARCHIVE: &'static str = "tenant-archive-v1";
     /// E5b safe tenant delete.
     pub const TENANT_DELETE: &'static str = "tenant-delete-v1";
@@ -58,11 +58,11 @@ impl Capabilities {
     pub const ACCOUNT_SENSITIVE: &'static str = "account-sensitive-v1";
     /// U-34 masked bank/card number with an audited Admin reveal.
     pub const ACCOUNT_MASKED_NUMBER: &'static str = "account-masked-number-v1";
-    /// U-35 jobs under a client (status, type, start and end dates).
-    pub const CONTACT_JOBS: &'static str = "contact-jobs-v1";
+    /// U-35 projects under a client (status, type, start and end dates).
+    pub const CONTACT_PROJECTS: &'static str = "contact-projects-v1";
     /// U-36 several ship-to addresses (one default) and contact people.
     pub const CONTACT_ADDRESSES: &'static str = "contact-addresses-v1";
-    /// U-37 dated notes and to-dos on contacts and jobs.
+    /// U-37 dated notes and to-dos on contacts and projects.
     pub const CONTACT_NOTES: &'static str = "contact-notes-v1";
     /// U-38 the engine's open balance on each contact read.
     pub const CONTACT_OPEN_BALANCE: &'static str = "contact-open-balance-v1";

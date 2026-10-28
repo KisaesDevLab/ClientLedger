@@ -707,7 +707,7 @@ pub fn contact_transactions(
 }
 
 /// One transaction as `GET /transactions/{id}` answers it, with a story
-/// line's job as its customer (prefill copies it).
+/// line's project as its customer (prefill copies it).
 #[must_use]
 pub fn transaction(state: &mut DemoState, id: TransactionId) -> Option<cl_api::Transaction> {
     let chart = chart(state);
@@ -730,18 +730,18 @@ pub fn transaction(state: &mut DemoState, id: TransactionId) -> Option<cl_api::T
         }
         return Some(txn);
     }
-    // A story line names its job: the job's customer is a demo contact.
+    // A story line names its project: the project's customer is a demo contact.
     let sample = state
         .ledger
         .transactions()
         .into_iter()
         .find(|t| DemoLedger::id_of(t) == id)?;
     for (l, s) in txn.lines.iter_mut().zip(&sample.lines) {
-        if let Some(job) = &s.job {
-            let customer = job.split(':').next().unwrap_or(job);
+        if let Some(project) = &s.project {
+            let customer = project.split(':').next().unwrap_or(project);
             l.contact_id = contacts
                 .iter()
-                .find(|c| c.fields.display_name == *job || c.fields.display_name == customer)
+                .find(|c| c.fields.display_name == *project || c.fields.display_name == customer)
                 .map(|c| c.id);
         }
     }

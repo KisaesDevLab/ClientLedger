@@ -1,4 +1,4 @@
-//! Picker cells (accounts, names, items, Client:Job; P10 plan Rev 2 §2.8).
+//! Picker cells (accounts, names, items, Client:Project; P10 plan Rev 2 §2.8).
 //!
 //! The editor is the single-line text editor. Typing ranks the list
 //! (`cl_model::lookup` through `Lookups::suggest`) into a type-ahead popup.

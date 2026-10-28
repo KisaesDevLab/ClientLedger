@@ -270,7 +270,7 @@ fn groups_with_one_per_line_and_required_account_types() {
     assert_eq!(r.state("panel"), "new_group");
     r.group_form()
         .form
-        .edit(super::F_NAME, |d| d.name = "Job Type".into());
+        .edit(super::F_NAME, |d| d.name = "Project Type".into());
     r.group_form()
         .form
         .edit(super::F_SINGLE, |d| d.single = true);
@@ -294,7 +294,7 @@ fn groups_with_one_per_line_and_required_account_types() {
     r.s.open_group(None);
     r.group_form()
         .form
-        .edit(super::F_NAME, |d| d.name = "job type".into());
+        .edit(super::F_NAME, |d| d.name = "project type".into());
     assert!(!r.s.save_panel(SaveIntent::SaveAndClose));
     assert_eq!(r.group_form().problems, vec![TagProblem::GroupNameTaken]);
     r.cmd("form.revert");

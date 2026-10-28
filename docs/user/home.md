@@ -4,7 +4,7 @@ Home is the screen you start from. Open it any time with `Alt+H` or from the **W
 
 ## The four lanes
 
-Each lane groups four jobs. Click a job, or press the shortcut shown next to it. A job whose screen isn't built yet opens a short "arrives in a later update" window.
+Each lane groups four tasks. Click a task, or press the shortcut shown next to it. A task whose screen isn't built yet opens a short "arrives in a later update" window.
 
 - **Money in:** Create Invoice, Receive Payment, Sales Receipt, Make Deposit.
 - **Money out:** Enter Bill, Pay Bills, Write Check, Record Card Charge.

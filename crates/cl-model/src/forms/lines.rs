@@ -26,7 +26,7 @@ pub struct FormLine {
     pub amount: Option<Money>,
     /// Memo.
     pub memo: String,
-    /// Customer (or customer job) the line is for.
+    /// Customer (or customer project) the line is for.
     pub customer: Option<ContactId>,
     /// Billable to the customer.
     pub billable: bool,

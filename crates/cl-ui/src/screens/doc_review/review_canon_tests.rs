@@ -64,7 +64,7 @@ fn line(acct: u8, amount: &str, memo: Option<&str>) -> PostingLine {
 
 /// Two lines that use every line field: a memo, a customer billed, a tag.
 fn lines() -> Vec<PostingLine> {
-    let mut billed = line(11, "40.10", Some("Paint for the Ruiz job"));
+    let mut billed = line(11, "40.10", Some("Paint for the Ruiz project"));
     billed.contact = Some(contact(7));
     billed.billable = true;
     billed.tag = Some(tag(1));

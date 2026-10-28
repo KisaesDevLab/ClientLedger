@@ -1,5 +1,5 @@
 //! The grid demo's split lines: a check with Account, Amount, Memo,
-//! Service date, Client:Job, Billable and Tags lines (all synthetic), and
+//! Service date, Client:Project, Billable and Tags lines (all synthetic), and
 //! the lists its pickers use.
 
 use std::borrow::Cow;
@@ -18,8 +18,8 @@ use crate::grid_form::LinesAdapter;
 
 /// Account list.
 pub const ACCOUNTS: ListId = ListId(1);
-/// Client:Job list.
-pub const JOBS: ListId = ListId(2);
+/// Client:Project list.
+pub const PROJECTS: ListId = ListId(2);
 /// Tag list.
 pub const TAG_LIST: ListId = ListId(3);
 
@@ -31,8 +31,8 @@ pub const AMOUNT: ColumnId = ColumnId(2);
 pub const MEMO: ColumnId = ColumnId(3);
 /// Service date column.
 pub const SERVICE_DATE: ColumnId = ColumnId(4);
-/// Client:Job column.
-pub const JOB: ColumnId = ColumnId(5);
+/// Client:Project column.
+pub const PROJECT: ColumnId = ColumnId(5);
 /// Billable column.
 pub const BILLABLE: ColumnId = ColumnId(6);
 /// Tags column.
@@ -51,7 +51,7 @@ const ACCOUNT_LIST: &[(u64, &str)] = &[
     (6400, "Subcontractors"),
 ];
 
-const JOB_LIST: &[(u64, &str)] = &[
+const PROJECT_LIST: &[(u64, &str)] = &[
     (1001, "Hollister Family"),
     (1002, "Hollister Family:Fall cleanup"),
     (1003, "Ridgeview HOA"),
@@ -91,9 +91,9 @@ pub struct DemoLine {
     pub memo: String,
     /// Service date.
     pub date: Option<CalendarDate>,
-    /// Client:Job.
-    pub job: Pick,
-    /// Billable to the job.
+    /// Client:Project.
+    pub project: Pick,
+    /// Billable to the project.
     pub billable: bool,
     /// Tags.
     pub tags: Vec<TagChip>,
@@ -109,7 +109,7 @@ impl DemoLine {
             amount: None,
             memo: String::new(),
             date: None,
-            job: Pick::None,
+            project: Pick::None,
             billable: false,
             tags: Vec::new(),
         }
@@ -134,7 +134,7 @@ pub struct DemoCheck {
 /// The lists, ranked by `cl_model::lookup`.
 pub struct DemoLists {
     accounts: LookupIndex,
-    jobs: LookupIndex,
+    projects: LookupIndex,
 }
 
 impl Default for DemoLists {
@@ -153,7 +153,7 @@ impl Default for DemoLists {
         };
         DemoLists {
             accounts: entries(ACCOUNT_LIST, true),
-            jobs: entries(JOB_LIST, false),
+            projects: entries(PROJECT_LIST, false),
         }
     }
 }
@@ -165,8 +165,8 @@ fn account_label(id: u64) -> Option<String> {
         .map(|(i, n)| format!("{i} \u{b7} {n}"))
 }
 
-fn job_label(id: u64) -> Option<String> {
-    JOB_LIST
+fn project_label(id: u64) -> Option<String> {
+    PROJECT_LIST
         .iter()
         .find(|(i, _)| *i == id)
         .map(|(_, n)| (*n).to_string())
@@ -187,7 +187,7 @@ impl DemoLists {
     fn index(&self, list: ListId) -> Option<&LookupIndex> {
         match list {
             ACCOUNTS => Some(&self.accounts),
-            JOBS => Some(&self.jobs),
+            PROJECTS => Some(&self.projects),
             _ => None,
         }
     }
@@ -195,7 +195,7 @@ impl DemoLists {
     fn label(list: ListId, id: u64) -> Option<String> {
         match list {
             ACCOUNTS => account_label(id),
-            JOBS => job_label(id),
+            PROJECTS => project_label(id),
             TAG_LIST => tag(id).map(|t| t.label),
             _ => None,
         }
@@ -319,10 +319,10 @@ pub fn spec() -> GridSpec {
             )
         },
         column(
-            JOB,
-            TextKey("dev.grid_demo.col.job"),
+            PROJECT,
+            TextKey("dev.grid_demo.col.project"),
             CellKind::Picker {
-                list: JOBS,
+                list: PROJECTS,
                 add_new: true,
             },
             (120, 190, 2),
@@ -439,7 +439,7 @@ impl RowModel for View<'_> {
         if index + 1 == self.lines().len() && l.is_blank() {
             s = s | RowState::ENTRY;
         }
-        if matches!(l.account, Pick::Unresolved(_)) || matches!(l.job, Pick::Unresolved(_)) {
+        if matches!(l.account, Pick::Unresolved(_)) || matches!(l.project, Pick::Unresolved(_)) {
             s = s | RowState::ERROR;
         }
         s
@@ -453,7 +453,7 @@ impl RowModel for View<'_> {
             AMOUNT => l.amount.map_or(CellValue::Empty, CellValue::Money),
             MEMO => CellValue::Text(Cow::Borrowed(&l.memo)),
             SERVICE_DATE => l.date.map_or(CellValue::Empty, CellValue::Date),
-            JOB => pick_value(&l.job, JOBS),
+            PROJECT => pick_value(&l.project, PROJECTS),
             BILLABLE => CellValue::Bool(l.billable),
             TAGS => CellValue::Tags(&l.tags),
             _ => CellValue::Empty,
@@ -495,7 +495,7 @@ impl EditableModel for View<'_> {
             };
             ok = match (pos.col, value) {
                 (ACCOUNT, v) => set_pick(&mut l.account, v),
-                (JOB, v) => set_pick(&mut l.job, v),
+                (PROJECT, v) => set_pick(&mut l.project, v),
                 (AMOUNT, CellInput::Money(m)) => {
                     l.amount = Some(m);
                     true
@@ -591,8 +591,10 @@ impl EditableModel for View<'_> {
         if !matches!(l.account, Pick::Id(_)) {
             problems.push(CellProblem::new(TextKey("dev.grid_demo.need_account")).at(ACCOUNT));
         }
-        if l.billable && !matches!(l.job, Pick::Id(_)) {
-            problems.push(CellProblem::new(TextKey("dev.grid_demo.billable_needs_job")).at(JOB));
+        if l.billable && !matches!(l.project, Pick::Id(_)) {
+            problems.push(
+                CellProblem::new(TextKey("dev.grid_demo.billable_needs_project")).at(PROJECT),
+            );
         }
         if !problems.is_empty() {
             return RecordOutcome::Invalid(problems);
@@ -631,7 +633,7 @@ pub fn lines_total(check: &DemoCheck) -> Option<Money> {
 }
 
 /// The check's rules: every used line has an account, Billable needs a
-/// Client:Job, and the lines total equals the check amount.
+/// Client:Project, and the lines total equals the check amount.
 #[must_use]
 pub fn validate(check: &DemoCheck) -> Vec<GridProblem> {
     let mut out = Vec::new();
@@ -644,12 +646,12 @@ pub fn validate(check: &DemoCheck) -> Vec<GridProblem> {
                 col: Some(ACCOUNT),
             });
         }
-        if l.billable && !matches!(l.job, Pick::Id(_)) {
+        if l.billable && !matches!(l.project, Pick::Id(_)) {
             out.push(GridProblem {
-                key: TextKey("dev.grid_demo.billable_needs_job"),
+                key: TextKey("dev.grid_demo.billable_needs_project"),
                 fix: None,
                 row: Some(l.key),
-                col: Some(JOB),
+                col: Some(PROJECT),
             });
         }
     }
@@ -690,11 +692,11 @@ mod tests {
         assert_eq!(a[0].id, 5100);
         assert_eq!(a[0].label, "5100 \u{b7} Materials:Plants");
         assert_eq!(l.exact(ACCOUNTS, "6200").map(|s| s.id), Some(6200));
-        let LookupResult::Ready(j) = l.suggest(JOBS, "Holl", 5) else {
+        let LookupResult::Ready(j) = l.suggest(PROJECTS, "Holl", 5) else {
             panic!("ready");
         };
         assert_eq!(j[0].id, 1001);
-        let LookupResult::Ready(f) = l.suggest(JOBS, "Fall", 5) else {
+        let LookupResult::Ready(f) = l.suggest(PROJECTS, "Fall", 5) else {
             panic!("ready");
         };
         assert_eq!(f[0].id, 1002);
@@ -745,7 +747,7 @@ mod tests {
     }
 
     #[test]
-    fn rules_balance_and_billable_job() {
+    fn rules_balance_and_billable_project() {
         let mut st = LinesState::new();
         let mut check = st.new_check();
         assert!(!balanced(&check));
@@ -755,8 +757,8 @@ mod tests {
         check.lines[0].billable = true;
         let p = validate(&check);
         assert_eq!(p.len(), 1);
-        assert_eq!(p[0].key, TextKey("dev.grid_demo.billable_needs_job"));
-        check.lines[0].job = Pick::Id(1002);
+        assert_eq!(p[0].key, TextKey("dev.grid_demo.billable_needs_project"));
+        check.lines[0].project = Pick::Id(1002);
         assert_eq!(validate(&check), Vec::new());
         check.amount = Some(money("10.01"));
         assert_eq!(

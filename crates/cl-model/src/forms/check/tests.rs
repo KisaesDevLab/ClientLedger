@@ -35,7 +35,7 @@ fn date() -> CalendarDate {
     CalendarDate::from_ymd(2026, 10, 20).expect("date")
 }
 
-/// Groups: "Job" (one per line, order 1) with tags 11 "Install", 12
+/// Groups: "Project" (one per line, order 1) with tags 11 "Install", 12
 /// "Maintenance"; "Crew" (one per line, order 2) with 21 "Crew A"; tag 31
 /// "Promo" ungrouped.
 fn tags() -> TagList {
@@ -58,7 +58,7 @@ fn tags() -> TagList {
         usage: None,
     };
     TagList::new(
-        vec![g(2, "Crew", 2), g(1, "Job", 1)],
+        vec![g(2, "Crew", 2), g(1, "Project", 1)],
         vec![
             t(31, "Promo", None),
             t(21, "Crew A", Some(2)),
@@ -600,7 +600,7 @@ fn tag_defaults_one_per_line_in_group_order() {
         line_tag_default(&[tag(21)], Some(tag(12)), &list),
         Some(tag(12))
     );
-    // Otherwise the first header tag in group order (Job before Crew).
+    // Otherwise the first header tag in group order (Project before Crew).
     assert_eq!(
         line_tag_default(&[tag(21), tag(11)], None, &list),
         Some(tag(11))

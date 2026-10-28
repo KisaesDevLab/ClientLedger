@@ -105,7 +105,7 @@ Bill → vendor credit → Pay Bills (discounts, credits, partials) → check pr
 **Crates and files:** `crates/cl-ui/src/screens/invoice/{form.rs,billable_costs.rs,side_panels.rs,email.rs}`, `crates/cl-model/src/forms/invoice.rs`, `crates/cl-settings/src/email_templates.rs`.
 
 **Steps**
-1. Form per DESIGN.md (client:job, ship-to choice Q-128, tags, terms/due, P.O. no., lines with optional service date Q-198, multi-line descriptions Q-200, tax, message, totals). — `feat(invoice): form`
+1. Form per DESIGN.md (client:project, ship-to choice Q-128, tags, terms/due, P.O. no., lines with optional service date Q-198, multi-line descriptions Q-200, tax, message, totals). — `feat(invoice): form`
 2. Price levels and discount/subtotal items applied automatically (Q-58); no line discounts (Q-199). — `feat(invoice): pricing`
 3. Add billable costs with client markup; source captions. — `feat(invoice): billable costs`
 4. Email via SMTP when online (recipients from contact roles Q-129, invoice PDF only Q-164, editable templates Q-163); otherwise Outbox or save PDF; sent tracking (Q-165); no pay links (Q-68) and no dunning (Q-162). — `feat(invoice): email and sent tracking`

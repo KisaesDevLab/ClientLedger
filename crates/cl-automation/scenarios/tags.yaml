@@ -60,7 +60,7 @@ steps:
   - focus: {role: button, label: New group}
   - key: Space
   - assert_state: {key: screen.panel, equals: new_group}
-  - type: {text: "Job Type {theme}"}
+  - type: {text: "Project Type {theme}"}
   - key: Tab
   - type: {text: Install or repair}
   - key: Tab
@@ -133,7 +133,7 @@ steps:
   - assert_not_exists: {role: row, label_contains: "Hardscape"}
 
   # --- Delete the group again (its tags would stay, ungrouped) ---------------
-  - focus: {role: button, label_contains: "Edit group Job Type"}
+  - focus: {role: button, label_contains: "Edit group Project Type"}
   - key: Space
   - assert_state: {key: screen.panel, equals: edit_group}
   - focus: {role: button, label: Delete group}

@@ -113,7 +113,7 @@ fn main() -> std::process::ExitCode {
             "contacts::vendor_1099_profile",
             contract_contacts::vendor_1099_profile,
         ),
-        ("contacts::jobs_u35", contract_contacts::jobs_u35),
+        ("contacts::projects_u35", contract_contacts::projects_u35),
         ("contacts::addresses_u36", contract_contacts::addresses_u36),
         ("contacts::notes_u37", contract_contacts::notes_u37),
         (

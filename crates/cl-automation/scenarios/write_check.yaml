@@ -86,7 +86,7 @@ steps:
   - type: {text: "Acct 7712 · perennials and mulch"}
 
   # --- 5. Lines that disagree: nothing is saved -------------------------------
-  # Line 1 keeps the prefilled customer (the demo lists have no jobs yet,
+  # Line 1 keeps the prefilled customer (the demo lists have no projects yet,
   # U-35) and is marked billable.
   - click: {role: grid_cell, label: "Amount, line 1"}
   - type: {text: "842.15"}
@@ -396,6 +396,6 @@ compare:
   - type: {text: "Acct 7712 · perennials and mulch"}
   - key: Tab
   - assert_value: {target: {role: text_input, label: "Amount ($)"}, equals: "1,286.40"}
-  - assert_value: {target: {role: grid_cell, label: "Customer / Job, line 1"}, equals: "Hollister Family Trust"}
+  - assert_value: {target: {role: grid_cell, label: "Customer / Project, line 1"}, equals: "Hollister Family Trust"}
   - assert_state: {key: screen.totals, equals: balanced}
   - assert_state: {key: screen.ai.chip, equals: true}

@@ -74,7 +74,7 @@ pub struct ItemLine {
     pub amount: Option<Money>,
     /// The account the line posts to (required, D5).
     pub account: Option<AccountId>,
-    /// Customer (or customer job) the line is for.
+    /// Customer (or customer project) the line is for.
     pub customer: Option<ContactId>,
     /// Billable to the customer.
     pub billable: bool,

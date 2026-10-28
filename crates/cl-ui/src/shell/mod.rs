@@ -57,7 +57,7 @@ pub struct CompanyBanner {
 /// Counts shown next to rail entries. `None` hides the count.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RailCounts {
-    /// Clients and jobs.
+    /// Clients and projects.
     pub clients: Option<u32>,
     /// Vendors.
     pub vendors: Option<u32>,

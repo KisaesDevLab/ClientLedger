@@ -793,7 +793,7 @@ impl DemoLedger {
                 credit: l.credit,
                 memo: l.memo.clone(),
                 tag: None,
-                job: None,
+                project: None,
             });
         }
         let (id, cleared) = if let Some(t) = existing {

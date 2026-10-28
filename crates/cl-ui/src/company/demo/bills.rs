@@ -34,8 +34,8 @@ use super::register::{DemoJournal, DemoLedger, DemoLine, check_closing};
 
 /// The story vendor of the Enter Bill mockup.
 pub const STORY_VENDOR: &str = "Midwest Equipment Rental";
-/// The story customer of the Enter Bill bill (no jobs in the demo, Q-P13h).
-/// The mockup's "Table Rock Marina" is the Clients & Jobs scenario's new
+/// The story customer of the Enter Bill bill (no projects in the demo, Q-P13h).
+/// The mockup's "Table Rock Marina" is the Clients & Projects scenario's new
 /// client (P11), so the sample's own marina client stands in.
 pub const STORY_CUSTOMER: &str = "Long Creek Marina";
 /// The story vendor's default expense account (6210 · Equipment rental).

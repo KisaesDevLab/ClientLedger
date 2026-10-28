@@ -1,7 +1,7 @@
 {
   "id": "contractor",
   "name": "Contractor / trades",
-  "description": "Builders, remodelers, electricians, plumbers, HVAC, landscapers who do jobs.",
+  "description": "Builders, remodelers, electricians, plumbers, HVAC, landscapers who do projects.",
   "notes": "ClientLedger starter chart (Q-49): synthetic, original names. Numbers avoid the engine system accounts (10100, 10150, 10200, 20100, 20900, 30000, 30120), which every company gets from the engine. The requires field marks accounts added only when that feature is on at setup.",
   "accounts": [
     {
@@ -128,7 +128,7 @@
     },
     {
       "number": "5050",
-      "name": "Job Materials",
+      "name": "Project Materials",
       "type": "cogs"
     },
     {
@@ -139,7 +139,7 @@
     },
     {
       "number": "5150",
-      "name": "Job Labor",
+      "name": "Project Labor",
       "type": "cogs"
     },
     {

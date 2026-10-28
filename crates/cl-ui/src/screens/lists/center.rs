@@ -1,13 +1,13 @@
-//! The Client center ("Clients & Jobs") and the Vendor center (P11 steps
+//! The Client center ("Clients & Projects") and the Vendor center (P11 steps
 //! 2-3): one window per role over the same contact records. A contact
 //! with both roles (Q-77) is listed in both. Each center is a list on the
 //! ledger grid beside a detail pane (details, open balance, recent
-//! transactions, jobs, notes) or the add/edit panel, plus make inactive /
+//! transactions, projects, notes) or the add/edit panel, plus make inactive /
 //! active again and merge.
 //!
 //! The engine owns the contacts. A contact's open balance is the engine's
 //! figure from its client balance or vendor aging report, never added up
-//! here (non-negotiable 7; a per-contact field is U-38). Jobs (U-35),
+//! here (non-negotiable 7; a per-contact field is U-38). Projects (U-35),
 //! several ship-to addresses and contact people (U-36), dated notes and
 //! to-dos (U-37) and recording a paper W-9 (U-44) wait for the engine and
 //! say so in plain words. Attaching files to a contact is not offered yet.
@@ -86,14 +86,14 @@ const ALL: u16 = 500;
 enum Tab {
     Details,
     Transactions,
-    Jobs,
+    Projects,
     Notes,
 }
 
 impl Tab {
     fn of(role: Role) -> &'static [Tab] {
         match role {
-            Role::Client => &[Tab::Details, Tab::Transactions, Tab::Jobs, Tab::Notes],
+            Role::Client => &[Tab::Details, Tab::Transactions, Tab::Projects, Tab::Notes],
             Role::Vendor => &[Tab::Details, Tab::Transactions, Tab::Notes],
         }
     }
@@ -102,7 +102,7 @@ impl Tab {
         match self {
             Tab::Details => "center.tab.details",
             Tab::Transactions => "center.tab.transactions",
-            Tab::Jobs => "center.tab.jobs",
+            Tab::Projects => "center.tab.projects",
             Tab::Notes => "center.tab.notes",
         }
     }
@@ -111,7 +111,7 @@ impl Tab {
         match self {
             Tab::Details => "details",
             Tab::Transactions => "transactions",
-            Tab::Jobs => "jobs",
+            Tab::Projects => "projects",
             Tab::Notes => "notes",
         }
     }
@@ -1190,9 +1190,9 @@ impl CenterScreen {
             .show(ui, |ui| match self.tab {
                 Tab::Details => self.details_tab(ui, tokens, &c),
                 Tab::Transactions => self.transactions_tab(ui, tokens),
-                Tab::Jobs => {
-                    pane::section(ui, tokens, &t("center.tab.jobs"));
-                    pane::pending(ui, tokens, &t("center.jobs.later"));
+                Tab::Projects => {
+                    pane::section(ui, tokens, &t("center.tab.projects"));
+                    pane::pending(ui, tokens, &t("center.projects.later"));
                 }
                 Tab::Notes => {
                     pane::section(ui, tokens, &t("center.notes.title"));
@@ -1743,7 +1743,7 @@ impl Screen for CenterScreen {
                 Panel::Merge(m) => m.closing.state_json(self.merge_closing),
                 _ => Value::Null,
             },
-            "jobs_available": false,
+            "projects_available": false,
             "attachments_available": false,
             "details_collapsed": self.details.collapsed && !self.panel_forced_open(),
             "details_remembered": self.details.collapsed,

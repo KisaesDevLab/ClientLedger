@@ -1,4 +1,4 @@
-//! English text for contacts and the Customers & Jobs and Vendors lists (P11 steps
+//! English text for contacts and the Customers & Projects and Vendors lists (P11 steps
 //! 2-3).
 
 /// The contacts' part of the English catalog.
@@ -27,7 +27,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("contacts.problem.expense_account_invalid", "That expense account is gone or isn't an expense account. Pick another one."),
     ("contacts.problem.vendor_account_too_long", "That account number is too long. Keep it under 50 characters."),
     ("contacts.problem.tax_id_invalid", "A tax ID has nine digits, like 12-3456789 or 123-45-6789. Check it, or leave it blank."),
-    // Customers & Jobs and Vendors lists (screens/lists/center.rs)
+    // Customers & Projects and Vendors lists (screens/lists/center.rs)
     ("center.loading", "Loading the list\u{2026}"),
     ("center.new_client", "New customer"),
     ("center.new_vendor", "New vendor"),
@@ -62,7 +62,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("center.pane.none", "Pick someone in the list to see their details."),
     ("center.tab.details", "Details"),
     ("center.tab.transactions", "Transactions"),
-    ("center.tab.jobs", "Jobs"),
+    ("center.tab.projects", "Projects"),
     ("center.tab.notes", "Notes"),
     ("center.balance.client", "Open balance"),
     ("center.balance.client_source", "From the customer balance report in your books."),
@@ -99,7 +99,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("center.profile.loading", "Loading the 1099 details\u{2026}"),
     ("center.ship_to.later", "One ship-to address for now. Several, with a default, arrive in a later update."),
     ("center.people.later", "Contact people with roles aren't available yet. Use the person and email fields for now."),
-    ("center.jobs.later", "Jobs aren't available yet. Until they are, record work for the customer itself."),
+    ("center.projects.later", "Projects aren't available yet. Until they are, record work for the customer itself."),
     ("center.notes.title", "Notes"),
     ("center.notes.empty", "No notes. Edit the customer or vendor to add some."),
     ("center.todos.title", "To-dos"),
@@ -144,7 +144,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("center.form.roles", "Roles"),
     ("center.form.is_client", "Customer"),
     ("center.form.is_vendor", "Vendor"),
-    ("center.form.both_hint", "Listed in both Customers & Jobs and Vendors."),
+    ("center.form.both_hint", "Listed in both Customers & Projects and Vendors."),
     ("center.form.needs_role", "Keep at least one role: customer, vendor or both."),
     ("center.form.terms", "Terms"),
     ("center.form.no_terms", "No default terms"),

@@ -201,7 +201,7 @@ fn tag_check() {
 fn group_check() {
     let l = sample();
     let mut d = GroupDraft {
-        name: "Job type".into(),
+        name: "Project type".into(),
         single: true,
         ..GroupDraft::default()
     };

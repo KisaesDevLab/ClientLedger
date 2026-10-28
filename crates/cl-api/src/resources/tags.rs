@@ -538,7 +538,7 @@ pub(crate) mod tests {
     use wiremock::{Mock, MockServer};
 
     pub(crate) const TAG: &str = r#"{"id":"5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
-        "name":"Canary Job","color":null,"groupId":null,"description":null,"isActive":true,
+        "name":"Canary Project","color":null,"groupId":null,"description":null,"isActive":true,
         "usageCount":0,"sortOrder":0,"createdAt":"2026-10-01T10:00:00.000Z"}"#;
 
     fn fields(number: Option<&str>) -> TagFields {
@@ -722,7 +722,7 @@ pub(crate) mod tests {
         let f = TagFilter {
             group_id: Some(TagGroupId::parse("6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("g")),
             is_active: Some(true),
-            search: Some("job".into()),
+            search: Some("project".into()),
         };
         let pairs: Vec<String> = f
             .to_query()
@@ -734,7 +734,7 @@ pub(crate) mod tests {
             [
                 "group_id=6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
                 "is_active=true",
-                "search=job"
+                "search=project"
             ]
         );
     }
@@ -760,7 +760,7 @@ pub(crate) mod tests {
         Mock::given(method("DELETE"))
             .respond_with(json(
                 409,
-                r#"{"error":{"message":"in use","code":"TAG_IN_USE","details":{"tagName":"Canary Job"}}}"#,
+                r#"{"error":{"message":"in use","code":"TAG_IN_USE","details":{"tagName":"Canary Project"}}}"#,
             ))
             .mount(&server)
             .await;
@@ -777,7 +777,7 @@ pub(crate) mod tests {
             .await
             .expect("list");
         assert_eq!(page.total, 1);
-        assert_eq!(page.data[0].fields.name, "Canary Job");
+        assert_eq!(page.data[0].fields.name, "Canary Project");
         assert_eq!(
             query(&requests(&server, "GET").await[0]),
             "is_active=false&limit=500&offset=0"
@@ -807,7 +807,7 @@ pub(crate) mod tests {
                 ..
             }
         ));
-        assert!(!format!("{used:?} {used}").contains("Canary Job"));
+        assert!(!format!("{used:?} {used}").contains("Canary Project"));
     }
 
     #[tokio::test]

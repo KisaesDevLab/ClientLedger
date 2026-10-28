@@ -196,7 +196,7 @@ fn plan_examples() {
     let first = |q: &str| ix.rank(q, 1).first().map(|r| r.id);
     assert_eq!(first("51"), Some(2), "5100 before 5110");
     assert_eq!(first("5110"), Some(1), "exact number first");
-    assert_eq!(first("Holl"), Some(4), "the customer before its job");
+    assert_eq!(first("Holl"), Some(4), "the customer before its project");
     assert_eq!(first("Fall"), Some(3));
     assert_eq!(first("Mulch"), Some(1));
 }

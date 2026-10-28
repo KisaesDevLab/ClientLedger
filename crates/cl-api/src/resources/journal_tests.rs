@@ -569,9 +569,9 @@ async fn master_data_create_is_found_by_exact_name_and_delete_by_absence() {
         .respond_with(json(
             200,
             r#"{"tags":[
-              {"id":"5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","name":"Canary Job","color":null,
+              {"id":"5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","name":"Canary Project","color":null,
                "groupId":null,"description":null,"isActive":true,"createdAt":"2199-01-01T00:00:00.000Z"},
-              {"id":"5b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","name":"Canary Job 2","isActive":true}],
+              {"id":"5b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","name":"Canary Project 2","isActive":true}],
               "total":2,"limit":500,"offset":0}"#,
         ))
         .mount(&server)
@@ -585,7 +585,7 @@ async fn master_data_create_is_found_by_exact_name_and_delete_by_absence() {
         .and(path("/api/v1/tags/5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01"))
         .respond_with(json(
             200,
-            r#"{"tag":{"id":"5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","name":"Canary Job",
+            r#"{"tag":{"id":"5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","name":"Canary Project",
                "color":null,"groupId":null,"description":"read by id","isActive":true}}"#,
         ))
         .up_to_n_times(1)
@@ -598,7 +598,7 @@ async fn master_data_create_is_found_by_exact_name_and_delete_by_absence() {
         .mount(&server)
         .await;
     let fields = TagFields {
-        name: "Canary Job".into(),
+        name: "Canary Project".into(),
         color: None,
         group_id: None,
         description: None,
@@ -609,7 +609,7 @@ async fn master_data_create_is_found_by_exact_name_and_delete_by_absence() {
         .create(&fields, IdempotencyKey::new())
         .await
         .expect("committed");
-    assert_eq!(tag.record.fields.name, "Canary Job");
+    assert_eq!(tag.record.fields.name, "Canary Project");
     assert_eq!(
         tag.record.fields.description.as_deref(),
         Some("read by id"),
@@ -619,7 +619,7 @@ async fn master_data_create_is_found_by_exact_name_and_delete_by_absence() {
     let search = requests(&server, "GET").await;
     assert_eq!(
         search[0].url.query(),
-        Some("search=Canary+Job&limit=500&offset=0")
+        Some("search=Canary+Project&limit=500&offset=0")
     );
     s.tags()
         .delete(
@@ -643,13 +643,13 @@ async fn master_data_candidate_with_other_fields_is_unknown_not_retried() {
         .and(path("/api/v1/tags"))
         .respond_with(json(
             200,
-            r##"{"tags":[{"id":"5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","name":"Canary Job",
+            r##"{"tags":[{"id":"5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","name":"Canary Project",
                 "color":"#ff0000","isActive":true}],"total":1}"##,
         ))
         .mount(&server)
         .await;
     let fields = TagFields {
-        name: "Canary Job".into(),
+        name: "Canary Project".into(),
         color: None,
         group_id: None,
         description: None,
@@ -820,7 +820,7 @@ async fn master_data_reconciliation_stops_at_a_switch() {
         .mount(&server)
         .await;
     let fields = TagFields {
-        name: "Canary Job".into(),
+        name: "Canary Project".into(),
         color: None,
         group_id: None,
         description: None,

@@ -20,7 +20,7 @@ const BANK: &str = "2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
 const PLANTS: &str = "2b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
 const MULCH: &str = "2c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
 const PAYEE: &str = "4a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
-const JOB: &str = "4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+const PROJECT: &str = "4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
 const INSTALL: &str = "3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
 const CREW: &str = "3b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
 const MEMO: &str = "Acct 7712 · perennials and mulch";
@@ -65,7 +65,7 @@ fn story() -> CheckDraft {
         amount: m("1286.40"),
         lines: vec![
             SplitLine {
-                contact: Some(ContactId::parse(JOB).expect("job")),
+                contact: Some(ContactId::parse(PROJECT).expect("project")),
                 billable: true,
                 tag: Some(TagId::parse(INSTALL).expect("tag")),
                 ..line(PLANTS, "842.15")
@@ -125,7 +125,7 @@ fn the_golden_check_record_parses_exactly() {
     );
     assert!(r.txn.lines[0].is_billable);
     assert_eq!(r.txn.lines[0].billed_status, Some(BilledStatus::Unbilled));
-    assert_eq!(r.txn.lines[0].contact_id, ContactId::parse(JOB).ok());
+    assert_eq!(r.txn.lines[0].contact_id, ContactId::parse(PROJECT).ok());
     assert!(!r.txn.lines[2].is_billable);
     // Debug: ids, number and status only.
     let shown = format!("{r:?}");

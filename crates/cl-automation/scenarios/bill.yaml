@@ -625,4 +625,4 @@ compare:
   - click: {role: button, label: Attach file}
   - assert_state: {key: screen.attachments.draft_files, equals: 1}
   - assert_state: {key: screen.totals, equals: balanced}
-  - assert_value: {target: {role: grid_cell, label: "Customer / Job, line 1"}, equals: "Long Creek Marina"}
+  - assert_value: {target: {role: grid_cell, label: "Customer / Project, line 1"}, equals: "Long Creek Marina"}
