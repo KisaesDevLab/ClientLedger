@@ -1,6 +1,6 @@
 # Tag numbers
 
-A tag can have a number. This is handy if you already number your jobs, classes or locations. Add it in the **Tag number** box when you create or edit a tag under **Lists > Tags**.
+A tag can have a number. This is handy if you already number your projects, classes or locations. Add it in the **Tag number** box when you create or edit a tag under **Lists > Tags**.
 
 - The number is optional.
 - It can be up to 20 characters, letters or digits.

@@ -36,7 +36,7 @@ The dates are worked out from the terms and the bill date. To use your own date,
 
 Lines go on one of two tabs. Each tab shows its own total.
 
-- **Expenses** lines: pick an account, enter the amount, and add a memo if you like. On each line you can also pick a **Customer / Job**, tick **Billable** (so you can bill that customer for it later), and add a tag. A billable line needs a customer.
+- **Expenses** lines: pick an account, enter the amount, and add a memo if you like. On each line you can also pick a **Customer / Project**, tick **Billable** (so you can bill that customer for it later), and add a tag. A billable line needs a customer.
 - **Items** lines: pick the item, then enter the **Qty** and the **Cost**. The line amount is quantity times cost, so you change the quantity or the cost, not the amount.
 
 Use `Ctrl+Insert` to add a line and `Ctrl+Delete` to remove one. A bill can have up to 500 lines.

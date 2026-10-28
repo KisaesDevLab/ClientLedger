@@ -12,14 +12,14 @@
 | --- | --- | --- | --- | --- |
 | H | L | P12–P24 | rust-implementer (opus; work packages by report family) | reviewer (opus), ui-verifier |
 
-**Decisions:** Q-44, Q-53, Q-65, Q-73, Q-104, Q-105, Q-107, Q-157, Q-172, Q-207, Q-270, Q-271. **Engine:** report endpoints (filters, columns by period/tag/client/job, basis, drill-down ids), budgets, duplicate finder query.
+**Decisions:** Q-44, Q-53, Q-65, Q-73, Q-104, Q-105, Q-107, Q-157, Q-172, Q-207, Q-270, Q-271. **Engine:** report endpoints (filters, columns by period/tag/client/project, basis, drill-down ids), budgets, duplicate finder query.
 
 **Mockup:** `docs/design/mockups/Reports.html` and `docs/design/screenshots/Reports.png`.
 
 **Crates and files:** `crates/cl-ui/src/screens/reports/{window.rs,filters.rs,columns.rs,drill.rs,memorized.rs,export.rs,ask.rs,budgets.rs,catalog.rs}`, `crates/cl-print/src/reports.rs`, `fixtures/golden/*.csv`.
 
 **Steps**
-1. Report window: date presets incl. 4-4-5; accrual/cash toggle; columns by period/tag/client/job; filters (account, name, tag, amount, cleared, type, adjusting flag Q-207); sort; collapse/expand. — `feat(reports): window`
+1. Report window: date presets incl. 4-4-5; accrual/cash toggle; columns by period/tag/client/project; filters (account, name, tag, amount, cleared, type, adjusting flag Q-207); sort; collapse/expand. — `feat(reports): window`
 2. Extra columns: % of income, prior period $ and %, YTD (Q-104); fixed aging buckets (Q-105). — `feat(reports): columns`
 3. Drill-down to transaction detail and source form; sensitive accounts hidden by role (Q-157, enforced in P29). — `feat(reports): drill-down`
 4. Memorized reports and groups; export Excel (permissive crate, numbers as numbers), CSV, PDF with full header (Q-107); print. — `feat(reports): memorize and export`
