@@ -1,5 +1,5 @@
 # Write Check, the seven P14 forms, Make Journal Entry, Templates, Templates
-# Due, the Template dialog (P15), Bulk Entry (P15A), Customers & Jobs and
+# Due, the Template dialog (P15), Bulk Entry (P15A), Customers & Projects and
 # Vendors (P16) at the minimum window (960 x 640) at 200% zoom
 # (480 x 320 points): the shared header wraps (toolbar note, title above the
 # picker), label+input groups move whole to the next line, and nothing is
@@ -107,7 +107,7 @@ steps:
   - click: {role: button, label: Clear}
   - assert_state: {key: screen.last_action, equals: clear}
   - command: file.close_window
-  # Customers & Jobs and Vendors (P16): the title and toolbar stay at the
+  # Customers & Projects and Vendors (P16): the title and toolbar stay at the
   # top (scrolling on their own at this height), the list keeps its
   # headings and three rows, and the details panel sits beside it.
   - command: clients.center

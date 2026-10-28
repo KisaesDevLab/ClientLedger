@@ -12,11 +12,11 @@
 //! The fixture also carries the Write Check mockup story (P13 WP0): the
 //! vendor Ozark Feed & Seed with its address, default account 5110 and an
 //! open bill, the accounts Materials:Plants (5100) and Materials:Mulch &
-//! stone (5110), the tags Install and Crew A, the job Hollister Family
+//! stone (5110), the tags Install and Crew A, the project Hollister Family
 //! Trust:Fall bed install, and 1010 checks numbered up to 4417 so the next
 //! check is 4418. The loader creates the vendor details and line memos;
-//! sub-account parents, tags and jobs are demo-only until the engine
-//! import takes them (jobs need U-35).
+//! sub-account parents, tags and projects are demo-only until the engine
+//! import takes them (projects need U-35).
 //!
 //! And the P14 money story: two customer payments posted Dr Payments
 //! Clearing (10150) / Cr A/R so the engine lists them as waiting to be
@@ -100,12 +100,12 @@ pub struct SampleTag {
     pub group: Option<String>,
 }
 
-/// One fixture job (Q-235: a job belongs to a customer).
+/// One fixture project (Q-235: a project belongs to a customer).
 #[derive(Clone, Debug, Deserialize)]
-pub struct SampleJob {
+pub struct SampleProject {
     /// Customer name.
     pub customer: String,
-    /// Job name.
+    /// Project name.
     pub name: String,
 }
 
@@ -241,9 +241,9 @@ pub struct SampleCompany {
     /// Tags.
     #[serde(default)]
     pub tags: Vec<SampleTag>,
-    /// Jobs.
+    /// Projects.
     #[serde(default)]
-    pub jobs: Vec<SampleJob>,
+    pub projects: Vec<SampleProject>,
     /// Bank-file facts.
     pub bank: SampleBank,
     /// Engine system accounts.
@@ -268,9 +268,9 @@ pub struct SampleLine {
     /// Tag name.
     #[serde(default)]
     pub tag: Option<String>,
-    /// `Customer:Job` the line is for.
+    /// `Customer:Project` the line is for.
     #[serde(default)]
-    pub job: Option<String>,
+    pub project: Option<String>,
 }
 
 /// One fixture transaction.
@@ -1260,7 +1260,7 @@ mod tests {
         assert!(tags.contains(&"Install") && tags.contains(&"Crew A"));
         assert!(
             s.company
-                .jobs
+                .projects
                 .iter()
                 .any(|j| j.customer == "Hollister Family Trust" && j.name == "Fall bed install")
         );

@@ -22,7 +22,7 @@ use serde::Deserialize;
 pub enum StarterChart {
     /// Consultants, service trades, professionals.
     GeneralService,
-    /// Builders and trades that do jobs.
+    /// Builders and trades that do projects.
     Contractor,
     /// Shops and online stores.
     Retail,

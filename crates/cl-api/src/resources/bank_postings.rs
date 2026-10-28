@@ -72,7 +72,7 @@ pub struct SplitLine {
     pub amount: Money,
     /// Line memo (owner data: never logged).
     pub memo: Option<String>,
-    /// Line customer: a deposit's customer, or the customer (job) a check
+    /// Line customer: a deposit's customer, or the customer (project) a check
     /// line is for (`line-billable-v1`).
     pub contact: Option<ContactId>,
     /// The check line is billable to `contact` (`line-billable-v1`; needs

@@ -2,7 +2,7 @@
 //! Splits panel and Write Check's Expenses tab edit the same
 //! [`FormLines`] value on the `line_entry` grid preset.
 //!
-//! The columns are Account · Amount · Memo · Customer / Job · Billable · Tags;
+//! The columns are Account · Amount · Memo · Customer / Project · Billable · Tags;
 //! a [`LinesSpec`] says which of the optional ones a screen shows and what
 //! they are called. The register keeps its P12 columns (Account · Amount ·
 //! Memo · Customer · Tag, one tag per line through a picker, Q-233) through
@@ -44,7 +44,7 @@ pub const L_ACCOUNT: ColumnId = ColumnId(1);
 pub const L_AMOUNT: ColumnId = ColumnId(2);
 /// Memo.
 pub const L_MEMO: ColumnId = ColumnId(3);
-/// Customer (or customer job).
+/// Customer (or customer project).
 pub const L_CUSTOMER: ColumnId = ColumnId(4);
 /// Tag (one per line, Q-233).
 pub const L_TAG: ColumnId = ColumnId(5);
@@ -62,7 +62,7 @@ const SAVING: TextKey = TextKey("grid.form.saving");
 pub trait LineLists: Lookups {
     /// The accounts list.
     const ACCOUNTS: ListId;
-    /// The customers (and jobs) list.
+    /// The customers (and projects) list.
     const CUSTOMERS: ListId;
     /// The tags list.
     const TAGS: ListId;
@@ -100,7 +100,7 @@ pub struct LineHeaders {
     pub amount: TextKey,
     /// Memo.
     pub memo: TextKey,
-    /// Customer / Job.
+    /// Customer / Project.
     pub customer: TextKey,
     /// Billable.
     pub billable: TextKey,
@@ -127,7 +127,7 @@ pub struct LinesSpec {
     pub grid_id: &'static str,
     /// The grid's accessible label (i18n key).
     pub label: &'static str,
-    /// The Customer / Job column.
+    /// The Customer / Project column.
     pub customer: bool,
     /// The Billable column (a checkbox).
     pub billable: bool,
@@ -230,7 +230,7 @@ impl LinesSpec {
     };
 
     /// Make Journal Entry (P15): Account · Debit · Credit · Memo · Name
-    /// (customers, jobs, vendors and other names, Q-P15o; the screen fills
+    /// (customers, projects, vendors and other names, Q-P15o; the screen fills
     /// the list) · Tags (one chip per line, Q-233). Both amount columns
     /// take zero or more ([`SIDE_MONEY`]).
     pub const JOURNAL: LinesSpec = LinesSpec {
@@ -257,7 +257,7 @@ impl LinesSpec {
     };
 
     /// Every column (Write Check's Expenses tab): Account · Amount · Memo ·
-    /// Customer / Job · Billable · Tags (one chip per line).
+    /// Customer / Project · Billable · Tags (one chip per line).
     #[must_use]
     pub const fn all(grid_id: &'static str, label: &'static str) -> LinesSpec {
         LinesSpec {
@@ -271,7 +271,7 @@ impl LinesSpec {
                 account: TextKey("lines.col.account"),
                 amount: TextKey("lines.col.amount"),
                 memo: TextKey("lines.col.memo"),
-                customer: TextKey("lines.col.customer_job"),
+                customer: TextKey("lines.col.customer_project"),
                 billable: TextKey("lines.col.billable"),
                 tags: TextKey("lines.col.tags"),
                 credit: TextKey("lines.col.credit"),
@@ -395,7 +395,7 @@ pub struct LinesState<L> {
     pub keys: RowKeyGen,
     /// Picker lists.
     pub lists: Arc<L>,
-    /// Columns the owner can't change right now (e.g. Customer / Job and
+    /// Columns the owner can't change right now (e.g. Customer / Project and
     /// Billable without `line-billable-v1`).
     pub locked: Vec<ColumnId>,
     tag_chips: bool,

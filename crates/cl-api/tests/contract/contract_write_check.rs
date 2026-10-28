@@ -37,7 +37,7 @@ pub(crate) struct Books {
     plants: AccountId,
     mulch: AccountId,
     vendor: ContactId,
-    job: ContactId,
+    project: ContactId,
 }
 
 fn contact(h: &Harness, s: &Session, t: ContactType, name: &str) -> ContactId {
@@ -60,7 +60,7 @@ pub(crate) fn books(h: &Harness, s: &Session) -> Books {
         plants: account(h, s, AccountType::Expense, "Materials:Plants").id,
         mulch: account(h, s, AccountType::Expense, "Materials:Mulch & stone").id,
         vendor: contact(h, s, ContactType::Vendor, "Feed & Seed"),
-        job: contact(h, s, ContactType::Customer, "Family Trust:Fall bed install"),
+        project: contact(h, s, ContactType::Customer, "Family Trust:Fall bed install"),
     }
 }
 
@@ -75,7 +75,7 @@ fn split(account: AccountId, amount: &str) -> SplitLine {
     }
 }
 
-/// The mockup check; the first line is billable to the job when the engine
+/// The mockup check; the first line is billable to the project when the engine
 /// takes line customers.
 pub(crate) fn story(
     b: &Books,
@@ -99,7 +99,7 @@ pub(crate) fn story(
         amount: m("1286.40"),
         lines: vec![
             SplitLine {
-                contact: billable.then_some(b.job),
+                contact: billable.then_some(b.project),
                 billable,
                 ..split(b.plants, "842.15")
             },
@@ -167,7 +167,7 @@ pub fn gl_effect(h: &Harness) {
     assert_eq!(got.version, made.version);
     if billable {
         let first = &got.record.lines[0];
-        assert_eq!(first.contact_id, Some(b.job));
+        assert_eq!(first.contact_id, Some(b.project));
         assert!(first.is_billable);
         assert_eq!(first.billed_status, Some(cl_api::BilledStatus::Unbilled));
         assert!(!got.record.lines[2].is_billable, "the bank line");

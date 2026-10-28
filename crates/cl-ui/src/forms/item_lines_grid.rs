@@ -4,7 +4,7 @@
 //! `GridForm::begin_save` like every grid form.
 //!
 //! cl-grid's `line_entry` preset with Item · Description · Qty · Cost ·
-//! Amount · Account · Customer / Job · Billable · Tags over
+//! Amount · Account · Customer / Project · Billable · Tags over
 //! `cl_model::forms::item_lines` (WP3). Amount is computed and read-only
 //! when Qty and Cost are both set (D6): `cost × qty` rounded half away from
 //! zero to cents, through `ItemLine::set_qty` / `set_rate`; the grid never
@@ -47,7 +47,7 @@ pub const I_COST: ColumnId = ColumnId(14);
 pub const I_AMOUNT: ColumnId = ColumnId(15);
 /// Account (D5).
 pub const I_ACCOUNT: ColumnId = ColumnId(16);
-/// Customer / Job.
+/// Customer / Project.
 pub const I_CUSTOMER: ColumnId = ColumnId(17);
 /// Billable.
 pub const I_BILLABLE: ColumnId = ColumnId(18);
@@ -258,7 +258,7 @@ pub fn grid_spec() -> GridSpec {
             empty: Some(TextKey("lines.empty")),
             ..column(
                 I_CUSTOMER,
-                "lines.col.customer_job",
+                "lines.col.customer_project",
                 picker(NAMES),
                 (110, 150, 1),
             )

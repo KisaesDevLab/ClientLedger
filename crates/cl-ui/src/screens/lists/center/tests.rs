@@ -501,12 +501,16 @@ fn quick_report_loads_every_transaction_and_tabs_say_what_waits() {
     assert_eq!(r.s.state()["history_all"], true);
     let total = r.s.state()["history_total"].as_u64().expect("total");
     assert_eq!(r.s.state()["history_rows"].as_u64(), Some(total));
-    r.s.tab = Tab::Jobs;
+    r.s.tab = Tab::Projects;
     r.frames(1);
-    assert_eq!(r.s.state()["jobs_available"], false);
+    assert_eq!(r.s.state()["projects_available"], false);
     r.cmd("form.revert");
     assert_eq!(r.s.state()["tab"], "details");
-    assert_eq!(Tab::of(Role::Vendor).len(), 3, "no jobs tab for vendors");
+    assert_eq!(
+        Tab::of(Role::Vendor).len(),
+        3,
+        "no projects tab for vendors"
+    );
 }
 
 #[test]
@@ -641,7 +645,7 @@ fn toggle_details_hides_the_details_and_a_new_window_remembers() {
     assert_eq!(r.s.state()["details_collapsed"], false);
     assert!(r.s.command(CommandId::new("window.toggle_details")));
     assert_eq!(r.s.state()["details_remembered"], true);
-    // A new Vendors window reads the choice; Customers & Jobs has its own.
+    // A new Vendors window reads the choice; Customers & Projects has its own.
     r.s = r.other(Role::Vendor);
     r.frames(2);
     assert_eq!(r.s.state()["details_collapsed"], true);

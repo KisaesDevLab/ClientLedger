@@ -216,10 +216,10 @@ pub fn vendor_1099_profile(h: &Harness) {
     );
 }
 
-/// U-35: a client has no jobs today (`parentId` on a contact is dropped).
-pub fn jobs_u35(h: &Harness) {
+/// U-35: a client has no projects today (`parentId` on a contact is dropped).
+pub fn projects_u35(h: &Harness) {
     let s = &h.s1;
-    let client = contact(h, s, ContactType::Customer, "Job parent");
+    let client = contact(h, s, ContactType::Customer, "Project parent");
     let raw = h
         .run(s.raw(
             Method::Post,
@@ -229,13 +229,13 @@ pub fn jobs_u35(h: &Harness) {
                 "contactType": "customer",
                 "displayName": unique("Spring cleanup"),
                 "parentId": client.id,
-                "jobStatus": "in_progress",
+                "projectStatus": "in_progress",
             })),
         ))
         .expect("raw");
     assert_eq!(raw.status, 201, "{}", raw.body);
     let made = &raw.body["contact"];
-    if h.require_cap(Capabilities::CONTACT_JOBS, "U-35") {
+    if h.require_cap(Capabilities::CONTACT_PROJECTS, "U-35") {
         assert_eq!(made["parentId"], json!(client.id));
     } else {
         assert!(made["parentId"].is_null(), "not stored today: {made}");

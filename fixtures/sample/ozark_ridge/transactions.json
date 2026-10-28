@@ -29257,8 +29257,8 @@
           "account": "5100",
           "credit": "0.00",
           "debit": "1487.35",
-          "job": "Hollister Family Trust:Fall bed install",
           "memo": "Perennials",
+          "project": "Hollister Family Trust:Fall bed install",
           "tag": "Install"
         },
         {
@@ -29704,8 +29704,8 @@
           "account": "5100",
           "credit": "0.00",
           "debit": "842.15",
-          "job": "Hollister Family Trust:Fall bed install",
           "memo": "Perennials",
+          "project": "Hollister Family Trust:Fall bed install",
           "tag": "Install"
         },
         {

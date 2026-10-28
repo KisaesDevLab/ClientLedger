@@ -408,7 +408,10 @@ fn picking_the_payee_copies_the_last_check_but_never_an_amount() {
         Some(money("1286.40")),
         "the check amount is not touched"
     );
-    assert!(used[0].customer.is_some(), "the job's customer is copied");
+    assert!(
+        used[0].customer.is_some(),
+        "the project's customer is copied"
+    );
     assert!(used.iter().all(|l| l.tag.is_some()), "line tags are copied");
     assert!(f.address.contains("1200 Commerce Dr"), "{:?}", f.address);
     assert_eq!(s.focus, Some(Field::Amount));
@@ -813,7 +816,7 @@ fn the_draft_is_the_checked_check_field_by_field() {
     let account = AccountId::parse("00000000-0000-0000-0000-000000005100").expect("id");
     let bank = AccountId::parse("00000000-0000-0000-0000-000000001010").expect("id");
     let payee = ContactId::parse("00000000-0000-0000-0000-000000000007").expect("id");
-    let job = ContactId::parse("00000000-0000-0000-0000-000000000009").expect("id");
+    let project = ContactId::parse("00000000-0000-0000-0000-000000000009").expect("id");
     let tag = TagId::parse("00000000-0000-0000-0000-000000000003").expect("id");
     let c = CheckedCheck {
         bank,
@@ -830,7 +833,7 @@ fn the_draft_is_the_checked_check_field_by_field() {
             account,
             amount: money("1286.40"),
             memo: Some("Perennials".into()),
-            contact: Some(job),
+            contact: Some(project),
             billable: true,
             tag: Some(tag),
         }],
@@ -857,7 +860,7 @@ fn the_draft_is_the_checked_check_field_by_field() {
             account,
             amount: money("1286.40"),
             memo: Some("Perennials".into()),
-            contact: Some(job),
+            contact: Some(project),
             billable: true,
             tag: Some(tag),
         }]
@@ -1179,9 +1182,9 @@ fn without_line_billable_no_line_customer_is_copied_or_sent() {
     // A line customer that got onto the form anyway: refused here with a
     // plain message, nothing sent.
     fill(&mut s, "10.00", &[("5110", "10.00")]);
-    let job = contact(&s, "Hollister Family Trust");
+    let project = contact(&s, "Hollister Family Trust");
     s.lines.form_mut().edit_step(|v| {
-        v.lines[0].customer = Some(job);
+        v.lines[0].customer = Some(project);
         v.lines[0].billable = true;
     });
     let before = writes(&link);
@@ -1196,9 +1199,9 @@ fn a_check_with_a_line_customer_is_read_only_without_line_billable() {
     let (_d, link) = link();
     let mut s = screen(&link);
     fill(&mut s, "10.00", &[("5110", "10.00")]);
-    let job = contact(&s, "Hollister Family Trust");
+    let project = contact(&s, "Hollister Family Trust");
     s.lines.form_mut().edit_step(|v| {
-        v.lines[0].customer = Some(job);
+        v.lines[0].customer = Some(project);
         v.lines[0].billable = true;
     });
     assert!(s.start_save(SaveIntent::SaveAndNew, None));

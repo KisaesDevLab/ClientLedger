@@ -248,11 +248,11 @@ fn bodies_carry_exact_strings_and_explicit_tags() {
     }
 }
 
-const JOB: &str = "4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+const PROJECT: &str = "4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
 const TAG2: &str = "3b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
 const DRAFT: &str = "5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
 
-/// The mockup check (P13): 4418, 842.15 (billable to a job) + 444.25.
+/// The mockup check (P13): 4418, 842.15 (billable to a project) + 444.25.
 fn story_draft() -> CheckDraft {
     CheckDraft {
         check_number: Some(4418),
@@ -268,7 +268,7 @@ fn story_draft() -> CheckDraft {
         amount: m("1286.40"),
         lines: vec![
             SplitLine {
-                contact: Some(ContactId::parse(JOB).expect("job")),
+                contact: Some(ContactId::parse(PROJECT).expect("project")),
                 billable: true,
                 tag: Some(TagId::parse(TAG).expect("tag")),
                 ..split(EXP, "842.15", None)
@@ -292,7 +292,7 @@ fn a_full_check_body_carries_every_check_field_as_strings() {
     assert_eq!(v["tagIds"], serde_json::json!([TAG, TAG2]), "deduplicated");
     assert_eq!(v["draftAttachmentId"], DRAFT);
     assert_eq!(v["lines"][0]["amount"], "842.1500");
-    assert_eq!(v["lines"][0]["contactId"], JOB);
+    assert_eq!(v["lines"][0]["contactId"], PROJECT);
     assert_eq!(v["lines"][0]["isBillable"], true);
     assert_eq!(v["lines"][1]["amount"], "444.2500");
     assert!(v["lines"][1].get("contactId").is_none(), "only when set");
@@ -319,7 +319,7 @@ fn a_full_check_body_carries_every_check_field_as_strings() {
     }
     // The expense path (no `check-edit-v1`) keeps the line customer too.
     let u = p.update_value();
-    assert_eq!(u["lines"][0]["contactId"], JOB);
+    assert_eq!(u["lines"][0]["contactId"], PROJECT);
     assert_eq!(u["lines"][0]["isBillable"], true);
     // Not a check: no PUT /checks body.
     let tr = BankPosting::transfer(transfer_draft()).expect("transfer");
@@ -366,7 +366,7 @@ fn a_billable_line_is_part_of_the_fingerprint() {
     let q = BankPosting::check_with(plain, true).expect("check");
     assert_ne!(p.created_fingerprint(), q.created_fingerprint());
     // As the engine stores it (`GET /transactions/{id}`, line-billable-v1).
-    let mut line0 = sl(0, EXP, "842.1500", "0.0000", None, Some(TAG), Some(JOB));
+    let mut line0 = sl(0, EXP, "842.1500", "0.0000", None, Some(TAG), Some(PROJECT));
     line0["isBillable"] = Value::Bool(true);
     line0["billedStatus"] = Value::String("unbilled".into());
     let mut bank = sl(2, BANK, "0.0000", "1286.4000", None, None, None);

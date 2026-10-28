@@ -216,7 +216,7 @@ pub struct BillLineDraft {
     /// Cost per unit, zero or more, up to 4 decimals; needs a quantity
     /// (`bill-lines-v1`).
     pub unit_price: Option<Money>,
-    /// The customer (job) the line is for (`bill-lines-v1`).
+    /// The customer (project) the line is for (`bill-lines-v1`).
     pub customer: Option<ContactId>,
     /// Billable to `customer` (`bill-lines-v1`; needs the customer).
     pub billable: bool,
@@ -695,7 +695,7 @@ pub struct BillRecordLine {
     pub description: Option<String>,
     /// Tag.
     pub tag: Option<TagId>,
-    /// Customer (job).
+    /// Customer (project).
     pub customer: Option<ContactId>,
     /// Billable to the customer.
     pub billable: bool,

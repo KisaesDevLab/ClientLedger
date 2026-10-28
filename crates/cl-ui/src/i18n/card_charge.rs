@@ -42,7 +42,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("helper.date", "Date"),
     ("helper.memo", "Memo"),
     ("helper.amount", "Amount"),
-    ("helper.lines.billable_later", "Customer / Job and Billable are available after the next engine update."),
+    ("helper.lines.billable_later", "Customer / Project and Billable are available after the next engine update."),
     ("helper.line_billable_unavailable", "Customers and billable marks on lines need the next engine update. Remove them from the lines to save. Nothing was saved."),
     ("helper.totals.balanced", "Lines total {total} = amount \u{2713}"),
     ("helper.totals.remaining", "{amount} left to assign"),

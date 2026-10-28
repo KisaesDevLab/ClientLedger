@@ -84,7 +84,7 @@ pub enum CellKind {
     Amount(AmountRules),
     /// A date with the date keys.
     Date,
-    /// An account, name, item or Client:Job picker.
+    /// An account, name, item or Client:Project picker.
     Picker {
         /// Which list.
         list: ListId,

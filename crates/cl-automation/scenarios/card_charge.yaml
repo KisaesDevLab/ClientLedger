@@ -39,7 +39,7 @@ steps:
   - key: Tab
   - assert_value: {target: {role: text_input, label: Purchased from}, equals: "Hollister Fuel Stop"}
   - assert_state: {key: screen.prefill.applied, equals: true}
-  - assert_value: {target: {label: "Account, line 1"}, equals: "5200 · Job Supplies and Materials"}
+  - assert_value: {target: {label: "Account, line 1"}, equals: "5200 · Project Supplies and Materials"}
   - assert_value: {target: {label: "Amount, line 1"}, equals: ""}
   - type: {text: "64.20", target: {role: text_input, label: Amount}}
   - key: Tab

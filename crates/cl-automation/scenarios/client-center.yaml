@@ -1,6 +1,6 @@
-# Customers & Jobs (P11 steps 2-3) against `clientledger --demo`: the list
+# Customers & Projects (P11 steps 2-3) against `clientledger --demo`: the list
 # with a customer that is also a vendor, the detail pane (open balance from
-# the customer balance report, recent transactions, Jobs and Notes tabs that
+# the customer balance report, recent transactions, Projects and Notes tabs that
 # say what isn't available yet), Include inactive, Transaction Report, and a
 # keyboard-only create (a used name refused), edit with Esc revert, and
 # make inactive. The demo data is synthetic; balances are the demo
@@ -12,11 +12,11 @@ steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
   - command: clients.center
-  - assert_exists: {role: tab, label: Customers & Jobs}
+  - assert_exists: {role: tab, label: Customers & Projects}
   - assert_state: {key: screen.screen, equals: client_center}
   - assert_state: {key: screen.loaded, equals: true}
   - assert_state: {key: screen.balances_loaded, equals: true}
-  - assert_state: {key: screen.jobs_available, equals: false}
+  - assert_state: {key: screen.projects_available, equals: false}
   - assert_state: {key: screen.focused, equals: true}
   - assert_exists: {role: row, label_contains: "Blue Eye Feed Co, Customer and vendor"}
   - assert_not_exists: {role: row, label_contains: "Galena Gravel"}
@@ -51,11 +51,11 @@ steps:
   - key: Escape
   - assert_state: {key: screen.tab, equals: details}
 
-  # --- Jobs and Notes say what isn't available yet ----------------------------
-  - click: {role: tab, label: Jobs}
-  - assert_state: {key: screen.tab, equals: jobs}
-  - assert_exists: {label_contains: "Jobs aren't available yet"}
-  - screenshot: jobs
+  # --- Projects and Notes say what isn't available yet ----------------------------
+  - click: {role: tab, label: Projects}
+  - assert_state: {key: screen.tab, equals: projects}
+  - assert_exists: {label_contains: "Projects aren't available yet"}
+  - screenshot: projects
   - click: {role: tab, label: Notes}
   - assert_exists: {label_contains: "Gate code at the clubhouse"}
   - assert_exists: {label_contains: "to-dos aren't available yet"}
@@ -121,10 +121,10 @@ steps:
   - key: Ctrl+Shift+H
   - assert_state: {key: screen.show_inactive, equals: false}
   - key: Escape
-  - assert_not_exists: {role: tab, label: Customers & Jobs}
+  - assert_not_exists: {role: tab, label: Customers & Projects}
 
   # --- Hide the details panel (F9, Q-P16n, Q-266) ----------------------------
-  # Remembered per screen: hidden here, it is hidden when Customers & Jobs
+  # Remembered per screen: hidden here, it is hidden when Customers & Projects
   # opens again; the edge button shows it (and leaves it shown for the next
   # run).
   - command: clients.center
@@ -136,7 +136,7 @@ steps:
   - assert_no_clipping: {}
   - screenshot: details-hidden
   - key: Escape
-  - assert_not_exists: {role: tab, label: Customers & Jobs}
+  - assert_not_exists: {role: tab, label: Customers & Projects}
   - command: clients.center
   - assert_state: {key: screen.details_collapsed, equals: true}
   - assert_exists: {role: button, label: Show details}
@@ -144,4 +144,4 @@ steps:
   - assert_state: {key: screen.details_collapsed, equals: false}
   - assert_exists: {role: button, label: Hide details}
   - key: Escape
-  - assert_not_exists: {role: tab, label: Customers & Jobs}
+  - assert_not_exists: {role: tab, label: Customers & Projects}

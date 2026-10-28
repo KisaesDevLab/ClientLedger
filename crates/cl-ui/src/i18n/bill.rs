@@ -101,7 +101,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bill.items.col.qty", "Qty"),
     ("bill.items.col.cost", "Cost"),
     ("bill.items.amount_computed", "The amount is quantity times cost. Change the quantity or the cost."),
-    ("bill.lines.detail_later", "Customer / Job and Billable on bill lines, and item lines, arrive with a books update."),
+    ("bill.lines.detail_later", "Customer / Project and Billable on bill lines, and item lines, arrive with a books update."),
     ("bill.totals.balanced", "Lines total = amount due \u{2713}"),
     ("bill.totals.remaining", "{amount} left to assign"),
     ("bill.totals.over", "The lines are {amount} more than the amount due"),

@@ -195,7 +195,7 @@ pub fn items(h: &Harness) {
 pub fn tags(h: &Harness) {
     let s = &h.s1;
     let fields = TagFields {
-        name: unique("Job"),
+        name: unique("Project"),
         color: Some("#336699".into()),
         group_id: None,
         description: Some("contract".into()),

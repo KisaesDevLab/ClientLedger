@@ -164,7 +164,7 @@ pub fn card_charge_and_credit(h: &Harness) {
     let card = detail_account(h, s, AccountType::Liability, "credit_card");
     let supplies = account(h, s, AccountType::Expense, "Card supplies").id;
     let fuel = account(h, s, AccountType::Expense, "Card fuel").id;
-    let job = contact(h, s, ContactType::Customer, "Card job");
+    let project = contact(h, s, ContactType::Customer, "Card project");
     let vendor = contact(h, s, ContactType::Vendor, "Card vendor");
     let billable = h.require_cap(Capabilities::LINE_BILLABLE, "line-billable-v1");
     let on = date(2026, 11, 4);
@@ -178,7 +178,7 @@ pub fn card_charge_and_credit(h: &Harness) {
             memo: Some(unique("card charge")),
             lines: vec![
                 SplitLine {
-                    contact: billable.then_some(job),
+                    contact: billable.then_some(project),
                     billable,
                     ..split(supplies, "40.10")
                 },
@@ -195,7 +195,7 @@ pub fn card_charge_and_credit(h: &Harness) {
         assert!(
             t.lines
                 .iter()
-                .any(|l| l.contact_id == Some(job) && l.is_billable),
+                .any(|l| l.contact_id == Some(project) && l.is_billable),
             "the line keeps its customer and billable mark"
         );
     }

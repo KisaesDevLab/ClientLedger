@@ -703,7 +703,7 @@ impl EnterBillScreen {
         self.inputs.rev = u64::MAX;
     }
 
-    /// Customer / Job and Billable are read-only without `bill-lines-v1`,
+    /// Customer / Project and Billable are read-only without `bill-lines-v1`,
     /// and never billable on a credit (process review S2).
     pub(crate) fn apply_locks(&mut self) {
         let lines = self.caps().lines;

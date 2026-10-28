@@ -82,7 +82,7 @@
     },
     {
       "detail": null,
-      "name": "Job Supplies and Materials",
+      "name": "Project Supplies and Materials",
       "number": "5200",
       "type": "cogs"
     },
@@ -303,14 +303,14 @@
     "transactions": 1512
   },
   "fiscalYearStartMonth": 1,
-  "jobs": [
+  "legalName": "Ozark Ridge Landscaping LLC",
+  "name": "Ozark Ridge Landscaping LLC",
+  "projects": [
     {
       "customer": "Hollister Family Trust",
       "name": "Fall bed install"
     }
   ],
-  "legalName": "Ozark Ridge Landscaping LLC",
-  "name": "Ozark Ridge Landscaping LLC",
   "storyDate": "2026-11-04",
   "systemAccounts": {
     "accountsPayable": "20100",

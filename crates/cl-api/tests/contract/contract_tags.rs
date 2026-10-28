@@ -224,7 +224,7 @@ pub fn group_reorder_u41(h: &Harness) {
 /// group's earlier tags); the UI enforces Q-179 itself.
 pub fn single_select_u41(h: &Harness) {
     let s = &h.s1;
-    let g = group(h, "Job type", true);
+    let g = group(h, "Project type", true);
     let a = tag(h, "Install", Some(g.id));
     let b = tag(h, "Repair", Some(g.id));
     let both = json!({"tagIds": [a.id.to_string(), b.id.to_string()]});

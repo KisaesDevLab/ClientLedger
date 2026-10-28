@@ -8,9 +8,9 @@
 //! 2. [`MatchTier::Number`]: the account number starts with the query
 //!    (`51` finds `5100` and `5110`), ties by number (5100 first);
 //! 3. [`MatchTier::NamePrefix`]: the full name starts with it, ties by the
-//!    shorter name (`Holl` offers `Hollister Family` before its job);
+//!    shorter name (`Holl` offers `Hollister Family` before its project);
 //! 4. [`MatchTier::SegmentPrefix`]: a later `Parent:Child` segment starts
-//!    with it (`Mulch` finds `Materials:Mulch & stone`, `Fall` the job);
+//!    with it (`Mulch` finds `Materials:Mulch & stone`, `Fall` the project);
 //! 5. [`MatchTier::WordPrefix`]: a later word starts with it (`stone`);
 //! 6. [`MatchTier::Substring`]: it appears anywhere in the name.
 //!
@@ -342,7 +342,7 @@ mod tests {
         assert_eq!(
             ids(&ix, "Holl"),
             [(2, MatchTier::NamePrefix), (1, MatchTier::NamePrefix)],
-            "the customer before its job"
+            "the customer before its project"
         );
         assert_eq!(ids(&ix, "fall"), [(1, MatchTier::SegmentPrefix)]);
         assert_eq!(

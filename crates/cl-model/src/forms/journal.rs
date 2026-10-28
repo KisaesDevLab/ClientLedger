@@ -258,7 +258,7 @@ pub fn apply_balance(lines: &mut FormLines, key: RowKey) -> bool {
 /// What a name is, for the A/R-A/P rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct NameKind {
-    /// A customer or a customer's job.
+    /// A customer or a customer's project.
     pub customer: bool,
     /// A vendor.
     pub vendor: bool,

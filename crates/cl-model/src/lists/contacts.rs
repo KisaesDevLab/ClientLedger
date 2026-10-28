@@ -6,7 +6,7 @@
 //! expense account, Q-192, and its 1099 fields, Q-53).
 //!
 //! No amounts live here: a contact's open balance is the engine's figure
-//! from its balance reports, shown as sent (non-negotiable 7). Jobs (U-35),
+//! from its balance reports, shown as sent (non-negotiable 7). Projects (U-35),
 //! several ship-to addresses and contact people (U-36) and dated notes and
 //! to-dos (U-37) wait for the engine; until then a contact has one ship-to
 //! address and one notes field. There are no credit limits (Q-131).
@@ -47,7 +47,7 @@ pub const NOTES_MAX: usize = 4000;
 /// Which center a contact is looked at from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
-    /// Clients & Jobs (the engine's customers).
+    /// Clients & Projects (the engine's customers).
     Client,
     /// Vendors.
     Vendor,
