@@ -218,6 +218,7 @@ fn later_set(marked: &Routes, set: &Routes, cap: &str, item: &str, path: &Path) 
 }
 
 #[test]
+#[allow(clippy::too_many_lines, reason = "one check per keyed route set")]
 fn engine_idempotency_marks_equal_the_keyable_rows() {
     let path = std::env::var_os("CL_ENGINE_OPENAPI")
         .map_or_else(|| repo_root().join("engine/openapi.json"), PathBuf::from);

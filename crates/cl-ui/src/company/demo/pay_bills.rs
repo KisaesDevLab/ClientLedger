@@ -877,16 +877,16 @@ mod tests {
         );
         // Void one To be printed payment: it leaves the queue, and a print
         // naming it is refused as void.
-        let (a, b) = (paid[0].id, paid[1].id);
+        let (gone, kept) = (paid[0].id, paid[1].id);
         let pw = Secret::new(super::super::register::DEMO_CLOSING_PASSWORD);
-        void(&mut s, a, Some(&pw)).expect("void");
-        assert_eq!(queued(&mut s), vec![b]);
-        assert_eq!(get(&s, a).and_then(|r| r.print_status), None);
+        void(&mut s, gone, Some(&pw)).expect("void");
+        assert_eq!(queued(&mut s), vec![kept]);
+        assert_eq!(get(&s, gone).and_then(|r| r.print_status), None);
         let e = printing::print(
             &mut s,
             &cl_api::PrintChecks {
                 bank_account: bank,
-                checks: vec![a],
+                checks: vec![gone],
                 starting_number: 9001,
                 format: cl_api::CheckFormat::Voucher,
             },
@@ -901,26 +901,26 @@ mod tests {
         // other goes back, the void one is skipped.
         let other = printing::check_queue(&mut s, bank)
             .into_iter()
-            .find(|c| c.id != b)
+            .find(|c| c.id != kept)
             .map(|c| c.id)
             .expect("another queued check");
         printing::print(
             &mut s,
             &cl_api::PrintChecks {
                 bank_account: bank,
-                checks: vec![other, b],
+                checks: vec![other, kept],
                 starting_number: 9001,
                 format: cl_api::CheckFormat::Voucher,
             },
             None,
         )
         .expect("print");
-        void(&mut s, b, Some(&pw)).expect("void printed");
-        let r = printing::requeue(&mut s, &[other, b], &[DemoState::today()], Some(&pw))
+        void(&mut s, kept, Some(&pw)).expect("void printed");
+        let r = printing::requeue(&mut s, &[other, kept], &[DemoState::today()], Some(&pw))
             .expect("requeue");
         assert_eq!(r.checks.len(), 1);
         assert_eq!(r.checks[0].id, other);
-        assert_eq!(r.skipped, vec![b]);
+        assert_eq!(r.skipped, vec![kept]);
     }
 
     /// The mockup's list, figures and run through the demo engine.
