@@ -1,17 +1,17 @@
-//! Document numbers (Q-94, Q-P19f): an optional prefix and a number that
-//! counts up, keeping its leading zeros (`INV-0099` → `INV-0100`). A number
-//! already used is a warning, not a block: the owner may keep it.
-//!
-//! Duplicates compare the trimmed text without regard to letter case, so
-//! `inv-0100` duplicates `INV-0100`, but `INV-100` does not (it is a
-//! different string, as the engine stores it).
+//! Document numbers (Q-94, Q-P19f), following the engine's rules
+//! (U-111, `document-numbers-v1`): a number is the type's prefix followed by
+//! a plain integer (`INV-` + 100 = `INV-100`, no zero padding), and a
+//! duplicate is the same text (case matters; surrounding spaces don't). When
+//! the engine offers `GET /document-numbers/next`, its `next` is the number
+//! to use ([`suggest_next`]); these helpers only cover engines without it.
+//! A duplicate is a warning, not a block: the owner may keep the number.
 
 /// A number split into its prefix and trailing digits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocNumber {
     /// Everything before the trailing digits (may be empty).
     pub prefix: String,
-    /// The trailing digits (may be empty), leading zeros kept.
+    /// The trailing digits (may be empty), as typed.
     pub digits: String,
 }
 
@@ -33,15 +33,16 @@ impl DocNumber {
     }
 }
 
-/// `prefix` followed by `number` padded with zeros to `width` digits.
+/// `prefix` followed by `number` (`INV-` + 7 = `INV-7`), as the engine
+/// formats it.
 #[must_use]
-pub fn format_number(prefix: &str, number: u64, width: usize) -> String {
-    format!("{prefix}{number:0width$}")
+pub fn format_number(prefix: &str, number: u64) -> String {
+    format!("{prefix}{number}")
 }
 
-/// The number after `last`: its trailing digits plus one, same prefix,
-/// same width unless the count needs another digit (`A-99` → `A-100`).
-/// `None` when `last` has no trailing digits or they would overflow.
+/// The number after `last`: the same prefix and its trailing integer plus
+/// one (`INV-0099` → `INV-100`). `None` when `last` has no trailing digits
+/// or they would overflow.
 #[must_use]
 pub fn next_number(last: &str) -> Option<String> {
     let d = DocNumber::parse(last);
@@ -49,13 +50,18 @@ pub fn next_number(last: &str) -> Option<String> {
         return None;
     }
     let n: u64 = d.digits.parse().ok()?;
-    Some(format_number(&d.prefix, n.checked_add(1)?, d.digits.len()))
+    Some(format_number(&d.prefix, n.checked_add(1)?))
 }
 
-/// The first number for a type with a prefix and nothing used yet.
+/// The number to offer: the engine's `next` when the engine has
+/// `document-numbers-v1`, else the number after the last one used, else
+/// none (the owner types it, Q-P19f).
 #[must_use]
-pub fn first_number(prefix: &str, start: u64, width: usize) -> String {
-    format_number(prefix, start, width)
+pub fn suggest_next(engine_next: Option<&str>, last: Option<&str>) -> Option<String> {
+    match engine_next.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(n) => Some(n.to_string()),
+        None => last.and_then(next_number),
+    }
 }
 
 /// What is wrong with a number the owner is about to save.
@@ -68,20 +74,21 @@ pub enum NumberWarning {
     },
 }
 
-/// Warn when `candidate` matches one of `existing` (trimmed, ignoring
-/// letter case). Blank numbers are never duplicates.
+/// Warn when `candidate` is the same text as one of `existing` (surrounding
+/// spaces ignored, case kept, as the engine compares). Blank numbers are
+/// never duplicates.
 #[must_use]
 pub fn check_duplicate<'a, I>(candidate: &str, existing: I) -> Option<NumberWarning>
 where
     I: IntoIterator<Item = &'a str>,
 {
-    let c = candidate.trim().to_lowercase();
+    let c = candidate.trim();
     if c.is_empty() {
         return None;
     }
     existing
         .into_iter()
-        .find(|e| e.trim().to_lowercase() == c)
+        .find(|e| e.trim() == c)
         .map(|e| NumberWarning::Duplicate {
             existing: e.trim().to_string(),
         })
@@ -120,42 +127,55 @@ mod tests {
     }
 
     #[test]
-    fn next_keeps_prefix_and_leading_zeros() {
-        assert_eq!(next_number("INV-0099").as_deref(), Some("INV-0100"));
+    fn next_is_prefix_plus_integer_like_the_engine() {
+        assert_eq!(next_number("INV-0099").as_deref(), Some("INV-100"));
         assert_eq!(next_number("INV-9999").as_deref(), Some("INV-10000"));
         assert_eq!(next_number("1001").as_deref(), Some("1002"));
-        assert_eq!(next_number("SR 007").as_deref(), Some("SR 008"));
-        assert_eq!(next_number("A-2026-0009").as_deref(), Some("A-2026-0010"));
+        assert_eq!(next_number("SR 007").as_deref(), Some("SR 8"));
+        assert_eq!(next_number("A-2026-9").as_deref(), Some("A-2026-10"));
         assert_eq!(next_number("ABC"), None);
         assert_eq!(next_number("18446744073709551615"), None);
-        assert_eq!(format_number("CM-", 7, 4), "CM-0007");
-        assert_eq!(format_number("", 12345, 3), "12345");
-        assert_eq!(first_number("INV-", 1, 4), "INV-0001");
+        assert_eq!(format_number("CM-", 7), "CM-7");
+        assert_eq!(format_number("", 12345), "12345");
     }
 
     #[test]
-    fn duplicates_are_warned_ignoring_case_and_spaces() {
-        let used = ["INV-0100", "INV-0101", " 1002 "];
+    fn the_engines_next_wins_when_offered() {
         assert_eq!(
-            check_duplicate("inv-0100", used),
+            suggest_next(Some("INV-0100"), Some("INV-41")).as_deref(),
+            Some("INV-0100")
+        );
+        assert_eq!(
+            suggest_next(Some(" "), Some("INV-41")).as_deref(),
+            Some("INV-42")
+        );
+        assert_eq!(
+            suggest_next(None, Some("INV-41")).as_deref(),
+            Some("INV-42")
+        );
+        assert_eq!(suggest_next(None, None), None);
+    }
+
+    #[test]
+    fn duplicates_are_the_same_text() {
+        let used = ["INV-100", "INV-101", " 1002 "];
+        assert_eq!(
+            check_duplicate(" INV-100", used),
             Some(NumberWarning::Duplicate {
-                existing: "INV-0100".into()
+                existing: "INV-100".into()
             })
         );
-        assert!(check_duplicate(" 1002", used).is_some());
-        assert_eq!(check_duplicate("INV-100", used), None);
-        assert_eq!(check_duplicate("INV-0102", used), None);
+        assert!(check_duplicate("1002", used).is_some());
+        assert_eq!(check_duplicate("inv-100", used), None);
+        assert_eq!(check_duplicate("INV-0100", used), None);
         assert_eq!(check_duplicate("  ", used), None);
     }
 
     #[test]
     fn next_free_skips_numbers_typed_by_hand() {
-        let used = ["INV-0100", "INV-0101", "INV-0102"];
-        assert_eq!(
-            next_free("INV-0099", &used, 10).as_deref(),
-            Some("INV-0103")
-        );
-        assert_eq!(next_free("INV-0099", &used, 2), None);
+        let used = ["INV-100", "INV-101", "INV-102"];
+        assert_eq!(next_free("INV-99", &used, 10).as_deref(), Some("INV-103"));
+        assert_eq!(next_free("INV-99", &used, 2), None);
         assert_eq!(next_free("X", &used, 10), None);
     }
 }

@@ -53,13 +53,51 @@ impl Font {
         matches!(self, Font::Mono)
     }
 
-    pub(crate) fn bytes(self) -> &'static [u8] {
+    /// The font file (for printers that load the fonts themselves, such as
+    /// the Windows print path).
+    #[must_use]
+    pub fn bytes(self) -> &'static [u8] {
         match self {
             Font::Sans => SANS_REGULAR,
             Font::SansSemiBold => SANS_SEMIBOLD,
             Font::SansBold => SANS_BOLD,
             Font::Mono => MONO_REGULAR,
         }
+    }
+
+    /// The family name the font file declares (name ID 1, what Windows
+    /// font selection matches): `IBM Plex Sans`, `IBM Plex Sans SmBld`.
+    #[must_use]
+    pub fn family_name(self) -> String {
+        skrifa::FontRef::new(self.bytes())
+            .ok()
+            .and_then(|f| {
+                f.localized_strings(skrifa::string::StringId::FAMILY_NAME)
+                    .english_or_first()
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| self.ps_name().to_string())
+    }
+
+    /// The weight class the font file declares (400, 600, 700).
+    #[must_use]
+    pub fn weight(self) -> u16 {
+        let w = skrifa::FontRef::new(self.bytes()).map_or(400.0, |f| f.attributes().weight.value());
+        // Weight classes are 1..=1000, so the conversion is exact.
+        let mut out = 0u16;
+        while f32::from(out) + 0.5 < w && out < 1000 {
+            out += 1;
+        }
+        out
+    }
+
+    /// The advance of `c` at `size_pt`, in millimetres.
+    #[must_use]
+    pub fn advance_mm(self, c: char, size_pt: f32) -> f32 {
+        let Ok(face) = self.face() else {
+            return 0.0;
+        };
+        face.advance(face.glyph(c)) * size_pt / f32::from(face.units_per_em()) * MM_PER_PT
     }
 
     /// The parsed face.
@@ -158,6 +196,19 @@ mod tests {
             let a = f.ascent_mm(10.0);
             assert!(a > 2.5 && a < 4.0, "{f:?} ascent {a}");
         }
+    }
+
+    #[test]
+    fn family_names_and_weights_come_from_the_files() {
+        assert_eq!(Font::Sans.family_name(), "IBM Plex Sans");
+        assert_eq!(Font::SansBold.family_name(), "IBM Plex Sans");
+        assert_eq!(Font::SansSemiBold.family_name(), "IBM Plex Sans SmBld");
+        assert_eq!(Font::Mono.family_name(), "IBM Plex Mono");
+        assert_eq!(Font::Sans.weight(), 400);
+        assert_eq!(Font::SansSemiBold.weight(), 600);
+        assert_eq!(Font::SansBold.weight(), 700);
+        let w: f32 = "Total".chars().map(|c| Font::Sans.advance_mm(c, 10.0)).sum();
+        assert!((w - Font::Sans.width_mm("Total", 10.0)).abs() < 0.001);
     }
 
     #[test]
