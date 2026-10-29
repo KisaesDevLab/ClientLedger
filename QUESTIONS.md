@@ -16,7 +16,7 @@ Owner Q&A held 2026-10-11 answered most of the original list; those rows record 
 | Q-07 | Direct Rust deps: MIT or Apache-2.0 only. Transitive deps may also use BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, Boost 1.0, Apache-2.0 WITH LLVM-exception. Bundled fonts: SIL OFL 1.1. | P00 onward |
 | Q-08 | **No licensing system.** No keys, activation, entitlements, or grace periods. (Original P09 removed.) | — |
 | Q-09 | **No paid tiers or seat limits** in ClientLedger, including LAN multi-user. | P33 |
-| Q-10 | **Checks only** in v1. No ACH. | P13, P18 |
+| Q-10 | **Checks only** in v1. No ACH. Pay Bills may also pay by credit card (owner 2026-10-28, Q-P18d). | P13, P18 |
 | Q-14 | **Pre-printed check stock only** in v1; no MICR line. PDF generation with a permissive crate; OS print hand-off (default below remains for the print mechanism). | P19 |
 | Q-15 | **No app-level encryption at rest**; setup guide recommends BitLocker, FileVault, or LUKS. | P38 |
 | Q-18 | **Average-cost inventory only** in beta; assemblies post-beta (P42); no lots, serials, bins, or FIFO. | P24, P42 |
@@ -541,12 +541,12 @@ Phase-specific decisions (`Q-Pxx…`) of completed phases (P00–P09) are in [do
 | Q-P17t | Ghost accounts on bill lines | P17 | Read lines get the vendor's usual account; other lines ask the engine's suggestion then AI; a ghost is taken only by Tab or Accept (Q-P10w). No bank rules (a bill has no bank account). | Default in force |
 | Q-P17u | "Add as a new vendor?" after a reading | P17 | Opens the vendor list (not a prefilled vendor form) for now; follow-up. | Default in force |
 | Q-P17v | Shell text | P17 | Status bar "Ctrl Insert" (Q-P13n); menu "Customers & Projects" (Q-P16u); "Receipt Inbox" and "Match Vendor Statement…" in the Vendors menu (the inbox with a count), not rail entries. (Q-302) | Default in force |
-| Q-P18a | Discount account | P18 | Company setting `billDiscountAccountId` (U-101); the Set Discount dialog has a Discount account picker defaulting to it; if unset when a discount is taken, the dialog asks for one and saves it as the default. | Default in force |
-| Q-P18b | Pay Bills totals row | P18 | Amt due totals every listed bill (the mockup's 7,471.90 includes the unselected 640.00); Discount, Credits and Amt to pay total the selected bills only. | Default in force |
+| Q-P18a | Discount account | P18 | Company setting `billDiscountAccountId` (U-101); the Set Discount dialog has a Discount account picker defaulting to it; if unset when a discount is taken, the dialog asks for one and saves it as the default. | Answered by owner 2026-10-28 |
+| Q-P18b | Pay Bills totals row | P18 | Every column (Amt due, Discount, Credits, Amt to pay) totals the selected bills only; the mockup's Amt due total (7,471.90, which counts an unselected bill) becomes 6,831.90 (deviation listed in the PR). | Answered by owner 2026-10-28 |
 | Q-P18c | Ending balance after | P18 | The engine's account balance minus the selected cash total, shown as a preview before paying (not a re-derived balance); after paying, the engine's balance is read again. | Default in force |
-| Q-P18d | Payment method | P18 | Check only (Q-10); the mockup's Card and Bank transfer options are not built (deviation listed in the PR). | Default in force |
+| Q-P18d | Payment method | P18 | Check and Credit card (owner 2026-10-28; amends Q-10 for Pay Bills). Credit card pays from a credit-card account (engine method `credit_card`), no check number or print queue, optional reference; the card balance owed goes up. Bank transfer is not built (deviation listed in the PR). | Answered by owner 2026-10-28 |
 | Q-P18e | Check numbers on Pay Bills | P18 | "To be printed" (default, Q-246) queues the checks for P19; "Assign check numbers" sends the first number (Q-P13m rule) and the engine numbers one check per vendor in order (U-103). | Default in force |
-| Q-P18f | Changing a bill payment | P18 | The engine can't edit a bill payment; OpenRecord on a bill payment opens a read-only view with Void; to change it, void and pay again. | Default in force |
+| Q-P18f | Changing a bill payment | P18 | The engine can't edit a bill payment; OpenRecord on a bill payment opens a read-only view with Void; to change it, void and pay again. | Answered by owner 2026-10-28 |
 | Q-P18g | Bills changed by someone else while Pay Bills is open | P18 | Until U-105 the engine answers "exceeds balance due" (400); the screen reloads the list and says the bills changed. | Default in force |
 | Q-P18h | Bills not received | P18 | Not listed (the engine leaves them out, Q-P17i). | Default in force |
 | Q-A01a | Where intake folders live | A01 | In the engine (`companies.intake_settings`, U-93), saved with the company and its backups; transfer files drop them (`omitIntakeSettings`, set by P32). Reverses P09's exclusion of the folder path from backups (Q-287). | Answered by owner 2026-10-25 |
