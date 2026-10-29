@@ -218,6 +218,11 @@ fn the_rules_refuse_what_the_engine_would() {
         f.plan(true, true),
         Err(vec![PayProblem::Negative(tid(NURSERY))])
     );
+    // N4: fractions of a cent name the bill.
+    f.set_cash(tid(NURSERY), m("100.005"));
+    let e = f.plan(true, true).expect_err("sub-cent");
+    assert_eq!(e, vec![PayProblem::SubCent(tid(NURSERY))]);
+    assert_eq!(e[0].bill(), Some(tid(NURSERY)));
     // A credit used beyond what it has.
     f.set_cash(tid(NURSERY), m("100.00"));
     f.set_credits(tid(NURSERY), vec![(tid(CM114), m("250.01"))]);
