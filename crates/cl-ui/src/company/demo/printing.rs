@@ -8,9 +8,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use cl_api::{
-    ApiError, CheckFormat, CheckLayout, DocType, DocumentNumber, FormFooters, LocalValidation,
-    MarkedPrinted, PrintChecks, PrintedBatch, QueuedCheck, QueuedCheckKind, QueuedForm,
-    RequeuedCheck, SpoiledNumber, SpoiledReason,
+    ApiError, CheckLayout, DocType, DocumentNumber, FormFooters, LocalValidation, MarkedPrinted,
+    PrintChecks, PrintedBatch, QueuedCheck, QueuedCheckKind, QueuedForm, RequeuedCheck,
+    SpoiledNumber, SpoiledReason,
 };
 use cl_core::ids::{AccountId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
@@ -453,19 +453,10 @@ pub fn reset(state: &mut DemoState) {
     state.printing = DemoPrinting::default();
 }
 
-/// The check style a format answers to.
-#[must_use]
-pub fn style_of(format: CheckFormat) -> cl_print::CheckStyle {
-    match format {
-        CheckFormat::Standard => cl_print::CheckStyle::Standard,
-        CheckFormat::ZFold => cl_print::CheckStyle::ZFold,
-        CheckFormat::Voucher | CheckFormat::CheckMiddle => cl_print::CheckStyle::Voucher,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cl_api::CheckFormat;
 
     fn bank(s: &mut DemoState) -> AccountId {
         demo_bank(s).expect("bank")

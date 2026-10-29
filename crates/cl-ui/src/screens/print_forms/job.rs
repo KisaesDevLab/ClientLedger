@@ -13,7 +13,9 @@ use cl_api::{BillPaymentRecord, DocType, QueuedCheck, QueuedForm, Transaction};
 use cl_core::Money;
 use cl_print::checks::StubLine;
 use cl_print::forms::{Column, TotalRow};
-use cl_print::{CheckData, CheckLabels, CompanyInfo, Document, FormDoc, StubBill, StubCredit};
+use cl_print::{
+    CheckData, CheckLabels, CompanyInfo, Document, FormDoc, FormLabels, StubBill, StubCredit,
+};
 
 use crate::i18n::t;
 
@@ -260,6 +262,72 @@ pub(crate) fn check_labels() -> CheckLabels {
     }
 }
 
+/// The fixed words on forms, from the catalog (CLAUDE.md: every
+/// user-visible string goes through `i18n`).
+#[must_use]
+pub(crate) fn form_labels() -> FormLabels {
+    // `page_of` keeps its `{page}`/`{pages}` placeholders: cl-print fills
+    // them, so the raw catalog text is read rather than `t_with`.
+    FormLabels {
+        invoice: t("print.kind.invoice"),
+        sales_receipt: t("print.kind.sales_receipt"),
+        credit_memo: t("print.kind.credit_memo"),
+        statement: t("print.kind.statement"),
+        deposit_summary: t("print.pdf.deposit_summary"),
+        bill_to: t("print.pdf.bill_to"),
+        sold_to: t("print.pdf.sold_to"),
+        customer: t("print.pdf.customer"),
+        number: t("print.pdf.number"),
+        date: t("print.pdf.date"),
+        due_date: t("print.pdf.due_date"),
+        terms: t("print.pdf.terms"),
+        po_number: t("print.pdf.po_number"),
+        payment_method: t("print.pdf.payment_method"),
+        reference: t("print.pdf.reference"),
+        statement_date: t("print.pdf.statement_date"),
+        deposit_to: t("print.pdf.deposit_to"),
+        description: t("print.pdf.description"),
+        quantity: t("print.pdf.quantity"),
+        rate: t("print.pdf.rate"),
+        amount: t("print.pdf.amount"),
+        received_from: t("print.pdf.received_from"),
+        memo: t("print.pdf.memo"),
+        check_no: t("print.pdf.check_no"),
+        transaction: t("print.pdf.transaction"),
+        balance: t("print.pdf.balance"),
+        balance_forward: t("print.pdf.balance_forward"),
+        subtotal: t("print.pdf.subtotal"),
+        tax: t("print.pdf.tax"),
+        total: t("print.pdf.total"),
+        payments: t("print.pdf.payments"),
+        balance_due: t("print.pdf.balance_due"),
+        total_credit: t("print.pdf.total_credit"),
+        remaining_credit: t("print.pdf.remaining_credit"),
+        deposit_subtotal: t("print.pdf.deposit_subtotal"),
+        cash_back: t("print.pdf.cash_back"),
+        deposit_total: t("print.pdf.deposit_total"),
+        amount_due: t("print.pdf.amount_due"),
+        current: t("print.pdf.current"),
+        days_1_30: t("print.pdf.days_1_30"),
+        days_31_60: t("print.pdf.days_31_60"),
+        days_61_90: t("print.pdf.days_61_90"),
+        over_90: t("print.pdf.over_90"),
+        continued: t("print.pdf.continued"),
+        page_of: t("print.pdf.page_of"),
+    }
+}
+
+/// The check style the PDF uses for the engine's check format.
+#[must_use]
+pub(crate) fn style_of(format: cl_api::CheckFormat) -> cl_print::CheckStyle {
+    use cl_api::CheckFormat;
+    match format {
+        CheckFormat::Standard => cl_print::CheckStyle::Standard,
+        CheckFormat::ZFold => cl_print::CheckStyle::ZFold,
+        CheckFormat::Voucher | CheckFormat::CheckMiddle => cl_print::CheckStyle::Voucher,
+    }
+}
+
 /// The form's title word.
 #[must_use]
 pub(crate) fn kind_word(kind: DocType) -> String {
@@ -400,6 +468,31 @@ mod tests {
         assert_eq!(doc.pages.len(), 1);
         let pdf = cl_print::render(&doc).expect("pdf");
         assert!(pdf.starts_with(b"%PDF"));
+    }
+
+    #[test]
+    fn form_labels_come_from_the_catalog() {
+        let l = form_labels();
+        // Every word is a catalog text, not a missing key.
+        assert_eq!(l.deposit_summary, "Deposit Summary");
+        assert_eq!(l.cash_back, "Less cash back");
+        assert!(!l.over_90.starts_with("print."));
+        // cl-print fills the page placeholders itself.
+        assert!(l.page_of.contains("{page}") && l.page_of.contains("{pages}"));
+        // English matches cl-print's defaults word for word.
+        assert_eq!(l, FormLabels::default());
+    }
+
+    #[test]
+    fn styles_follow_the_engine_format() {
+        assert_eq!(
+            style_of(cl_api::CheckFormat::ZFold),
+            cl_print::CheckStyle::ZFold
+        );
+        assert_eq!(
+            style_of(cl_api::CheckFormat::CheckMiddle),
+            cl_print::CheckStyle::Voucher
+        );
     }
 
     #[test]

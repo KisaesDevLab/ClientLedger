@@ -510,7 +510,7 @@ impl PrintFormsScreen {
 
     fn check_options(&self, layout: CheckLayout) -> CheckOptions {
         CheckOptions {
-            style: crate::company::demo::printing::style_of(layout.format),
+            style: job::style_of(layout.format),
             offset: self.offset(),
             show_company: layout.print_company_block,
             company: self.setup.company.clone(),
@@ -710,7 +710,8 @@ impl PrintFormsScreen {
                 let addresses = data.iter().map(|c| c.address.clone()).collect();
                 let first = data.first().map(|c| c.number.clone()).unwrap_or_default();
                 match cl_print::layout_checks(&data, &self.check_options(self.layout)) {
-                    Ok(doc) => {
+                    Ok(mut doc) => {
+                        doc.title = t("print.file.checks");
                         let name = cl_print::pdf_file_name(&t("print.file.checks"), &first, "");
                         self.show_preview(PreviewKind::Checks, doc, name, addresses);
                     }
@@ -725,7 +726,7 @@ impl PrintFormsScreen {
                         company: self.setup.company.clone(),
                         logo: self.logo.clone(),
                         footer: self.setup.footers.resolved_for(f.kind).to_string(),
-                        labels: cl_print::FormLabels::default(),
+                        labels: job::form_labels(),
                     };
                     match cl_print::layout_form(&job::form_doc(f, l), &style) {
                         Ok(d) => docs.push(d),
@@ -766,7 +767,8 @@ impl PrintFormsScreen {
             logo: self.logo.clone(),
         };
         match cl_print::layout_envelopes(&addresses, &opts) {
-            Ok(doc) => {
+            Ok(mut doc) => {
+                doc.title = t("print.file.envelopes");
                 let name = cl_print::pdf_file_name(&t("print.file.envelopes"), "", "");
                 self.show_preview(PreviewKind::Envelopes, doc, name, addresses);
             }
@@ -781,7 +783,8 @@ impl PrintFormsScreen {
             own: true,
         });
         match cl_print::alignment_test(&opts) {
-            Ok(doc) => {
+            Ok(mut doc) => {
+                doc.title = t("print.file.alignment_title");
                 let name = cl_print::pdf_file_name(&t("print.file.alignment"), "", "");
                 self.show_preview(PreviewKind::Alignment, doc, name, Vec::new());
             }
@@ -1812,9 +1815,7 @@ fn named_box(ui: &mut Ui, on: &mut bool, name: &str) -> egui::Response {
     let r = ui.checkbox(on, "").on_hover_text(t("print.pick.tip"));
     let label = t_with("print.pick", &[("name", name)]);
     let value = *on;
-    r.widget_info(|| {
-        egui::WidgetInfo::selected(egui::Role::CheckBox, true, value, label.clone())
-    });
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, value, label.clone()));
     r
 }
 
