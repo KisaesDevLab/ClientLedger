@@ -18,6 +18,8 @@
 //!   inventory) (Q-P08a, Q-P08c).
 //! - [`printer_prefs`]: per-printer check alignment offsets and the last
 //!   printer used for checks and forms (P19), on this computer only.
+//! - [`unconfirmed_checks`]: printed check batches not yet confirmed, so
+//!   the Needs-attention reminder survives a restart (P19, Q-P19n).
 //! - [`secrets`]: a small keychain-backed secret store for the backup
 //!   passphrase (Q-P02i). Secrets never touch the JSON file.
 //!
@@ -34,6 +36,7 @@ pub mod recent;
 pub mod secrets;
 pub mod smtp;
 mod store;
+pub mod unconfirmed_checks;
 pub mod user_prefs;
 
 pub use ai::{
@@ -49,6 +52,9 @@ pub use recent::{
 };
 pub use secrets::{KeyringSecrets, MemorySecrets, SecretError, SecretStore};
 pub use smtp::{SmtpFieldError, SmtpForm, SmtpSecurity};
+pub use unconfirmed_checks::{
+    UnconfirmedBatch, UnconfirmedCheck, UnconfirmedChecks, UnconfirmedChecksStore,
+};
 pub use user_prefs::{
     DateFormat, DateWarnings, NegativeStyle, StartScreen, ThemeChoice, UpdateCheck, UserPrefs,
     UserPrefsStore,

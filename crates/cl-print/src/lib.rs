@@ -37,7 +37,8 @@ pub use image::{Logo, LogoProblem};
 pub use layout::{Align, Document, Page, PageSize, Rect, ResolvedPage, Run, TextBox, resolve};
 pub use pdf::{render, render_resolved};
 pub use print_queue::{
-    Confirmation, DocKind, PrintQueue, PrintRun, QueueError, RunOutcome, RunState,
+    Confirmation, DocKind, PendingChecks, PrintQueue, PrintRun, QueueError, RecordPrint,
+    RequeueCall, RunOutcome, RunState,
 };
 
 /// Why a document could not be laid out or rendered.

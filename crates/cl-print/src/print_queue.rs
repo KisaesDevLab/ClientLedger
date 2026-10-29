@@ -1,26 +1,39 @@
-//! The Print later queue and a print run's state (Q-55, Q-P19b, Q-P19t,
-//! Q-P19ab). No I/O: the UI drives it and calls the engine with what it
+//! The Print later queue and a print run's state (Q-55, Q-P19b, Q-P19n,
+//! Q-P19t, Q-P19ab). No I/O: the UI drives it and makes the engine calls it
 //! returns.
 //!
-//! One queue for every printable type. Checks are the type that gets its
-//! numbers at print time: the owner picks the first number, the run numbers
-//! the checks in order, and after printing asks "Did all checks print
-//! correctly?". Forms (invoices, sales receipts, credit memos) already have
-//! their numbers; a printed form simply leaves the queue.
+//! One queue for every printable type. Forms (invoices, sales receipts,
+//! credit memos) already have their numbers; a printed form leaves the
+//! queue ([`PrintRun::sent`]).
 //!
-//! Answers:
-//! - **All printed** — every check keeps its number and leaves the queue.
-//! - **First bad number N** — checks numbered N and after go back to the
-//!   queue to print again with new numbers (the engine's requeue, U-106; the
-//!   payment stays). Their old numbers are listed so the UI can log them as
-//!   reprinted; owner 2026-10-29: those numbers are **not** blocked and may
-//!   be used again.
-//! - **Closed without an answer** — the run becomes [`RunState::Unconfirmed`]:
-//!   the checks count as printed and Home shows a Needs-attention reminder
-//!   until the owner answers.
+//! Checks get their numbers at print time:
 //!
-//! Reprinting one check (Q-P19ab) is the same path: [`PrintQueue::requeue`]
-//! puts it back with its old number, and the next run numbers it afresh.
+//! 1. [`PrintQueue::start_run`] numbers the chosen checks from the first
+//!    number the owner picked; the preview shows them.
+//! 2. The owner clicks **Print**: [`PrintRun::record_print`] gives the one
+//!    `POST /checks/print` call (check ids in order, starting number) that
+//!    records the numbers with the engine **before anything is printed**.
+//! 3. When the engine accepted it, [`PrintRun::recorded`] returns the
+//!    [`PendingChecks`] the UI saves on this computer
+//!    (`cl_settings::UnconfirmedChecks`), so the Needs-attention reminder
+//!    survives a restart; the UI then sends the pages to the printer and
+//!    asks "Did all checks print correctly?". If the engine refused
+//!    (`409 CHECK_NUMBER_IN_USE`, closed period), [`PrintRun::record_failed`]
+//!    goes back to the preview.
+//! 4. The answer ([`PrintRun::confirm`]):
+//!    - **All printed** — nothing more to call; the saved batch is cleared.
+//!    - **First bad number N** — one `POST /checks/requeue` for N and every
+//!      later check ([`RequeueCall`]): the engine clears their numbers, logs
+//!      them as spoiled (U-106; reusable, owner 2026-10-29) and they wait to
+//!      print again. The payment stays.
+//!    - **Closed without an answer** ([`PrintRun::dismissed`]) — the checks
+//!      stay printed with their numbers; the saved batch keeps Home's
+//!      reminder until the owner answers, now or after a restart
+//!      ([`PrintRun::unconfirmed`]).
+//!
+//! Reprinting one printed check (Q-P19ab) is the same requeue:
+//! [`PrintQueue::requeue`] puts it back with its old number, and the next
+//! run numbers it afresh.
 
 /// A printable document type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -72,7 +85,7 @@ pub enum QueueError {
     /// The bad number is not one this run printed.
     #[error("that number was not part of this print run")]
     NotInRun,
-    /// The step does not fit the run's state.
+    /// The step does not fit the run's state or type.
     #[error("this print run is not waiting for that step")]
     WrongState,
 }
@@ -120,8 +133,8 @@ impl<Id: Clone + PartialEq> PrintQueue<Id> {
         }
     }
 
-    /// Put a printed check back to print again; `old_number` is the number
-    /// it printed with (listed as reprinted when the next run confirms).
+    /// Put a printed check back to print again (after the engine's
+    /// requeue); `old_number` is the number it printed with.
     pub fn requeue(&mut self, id: Id, kind: DocKind, old_number: Option<u64>) {
         self.entries.retain(|e| e.id != id);
         self.entries.push(QueueEntry {
@@ -186,15 +199,15 @@ impl<Id: Clone + PartialEq> PrintQueue<Id> {
         })
     }
 
-    /// Apply a finished run: printed documents leave the queue; checks to
-    /// print again stay, remembering the number they printed with.
+    /// Apply a finished run: printed documents leave the queue; requeued
+    /// checks stay (or come back), remembering the number they printed with.
     pub fn apply(&mut self, outcome: &RunOutcome<Id>) {
         for p in &outcome.printed {
             self.remove(&p.id);
         }
-        for r in &outcome.reprint {
-            if let Some(e) = self.entries.iter_mut().find(|e| e.id == r.id) {
-                e.previous_number = r.old_number;
+        if let Some(r) = &outcome.requeue {
+            for (id, old) in r.check_ids.iter().zip(&r.old_numbers) {
+                self.requeue(id.clone(), DocKind::Check, Some(*old));
             }
         }
     }
@@ -214,15 +227,17 @@ pub struct RunItem<Id> {
 /// Where a run is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunState {
-    /// Numbered and shown in the preview; nothing sent yet.
+    /// Numbered and shown in the preview; nothing recorded or sent.
     Ready,
-    /// Checks sent to the printer; "Did all checks print correctly?" is
-    /// showing.
+    /// Checks: the `POST /checks/print` call is out.
+    Recording,
+    /// Checks: numbers recorded, pages sent, "Did all checks print
+    /// correctly?" showing.
     AwaitingConfirmation,
-    /// The question was closed without an answer: the checks count as
-    /// printed, and Home reminds the owner (Needs attention).
+    /// Checks: the question was closed without an answer; they stay
+    /// printed and Home reminds the owner (Needs attention).
     Unconfirmed,
-    /// Answered (or a form run that printed).
+    /// Answered, or a form run that printed.
     Done,
 }
 
@@ -236,7 +251,35 @@ pub enum Confirmation {
     FirstBad(u64),
 }
 
-/// A document that printed.
+/// `POST /checks/print`: record the numbers with the engine. The engine
+/// numbers `check_ids` in order from `starting_number`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordPrint<Id> {
+    /// Checks in print order.
+    pub check_ids: Vec<Id>,
+    /// The first number.
+    pub starting_number: u64,
+}
+
+/// `POST /checks/requeue`: send these checks back to print again. The
+/// engine logs `old_numbers` as spoiled (reusable).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequeueCall<Id> {
+    /// The checks to print again.
+    pub check_ids: Vec<Id>,
+    /// The numbers they printed with, same order.
+    pub old_numbers: Vec<u64>,
+}
+
+/// A check batch recorded with the engine and not yet confirmed, for the
+/// UI to save on this computer (`cl_settings::UnconfirmedChecks`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingChecks<Id> {
+    /// Each check and the number it printed with, in print order.
+    pub checks: Vec<(Id, u64)>,
+}
+
+/// A document that printed and keeps its number.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Printed<Id> {
     /// The document.
@@ -245,25 +288,16 @@ pub struct Printed<Id> {
     pub number: Option<u64>,
 }
 
-/// A check going back to the queue.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Reprint<Id> {
-    /// The check.
-    pub id: Id,
-    /// The number it printed with, to log as reprinted (not blocked).
-    pub old_number: Option<u64>,
-}
-
-/// What a finished run means for the books and the queue.
+/// What a finished run means for the engine and the queue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunOutcome<Id> {
-    /// Printed and done: the UI records these numbers with the engine.
+    /// Printed and keeping their numbers (already recorded for checks).
     pub printed: Vec<Printed<Id>>,
-    /// Back to the queue to print again with new numbers.
-    pub reprint: Vec<Reprint<Id>>,
+    /// The requeue call to make, when checks must print again.
+    pub requeue: Option<RequeueCall<Id>>,
     /// The first number to offer for the next run of checks: one past the
-    /// last number used (pre-printed stock moves on), though any number,
-    /// including a reprinted one, may be chosen.
+    /// last number used (pre-printed stock moves on); any number, including
+    /// a spoiled one, may still be chosen.
     pub next_first_number: Option<u64>,
 }
 
@@ -276,6 +310,24 @@ pub struct PrintRun<Id> {
 }
 
 impl<Id: Clone + PartialEq> PrintRun<Id> {
+    /// A saved, unanswered check batch, after a restart: answer it with
+    /// [`PrintRun::confirm`].
+    #[must_use]
+    pub fn unconfirmed(checks: Vec<(Id, u64)>) -> PrintRun<Id> {
+        PrintRun {
+            kind: DocKind::Check,
+            items: checks
+                .into_iter()
+                .map(|(id, n)| RunItem {
+                    id,
+                    number: Some(n),
+                    previous_number: None,
+                })
+                .collect(),
+            state: RunState::Unconfirmed,
+        }
+    }
+
     /// The documents and their numbers, in print order.
     #[must_use]
     pub fn items(&self) -> &[RunItem<Id>] {
@@ -297,28 +349,83 @@ impl<Id: Clone + PartialEq> PrintRun<Id> {
     /// True while Home should show the Needs-attention reminder.
     #[must_use]
     pub fn needs_attention(&self) -> bool {
-        self.state == RunState::Unconfirmed
+        matches!(
+            self.state,
+            RunState::AwaitingConfirmation | RunState::Unconfirmed
+        )
     }
 
-    /// The documents went to the printer. Checks then wait for the
-    /// question; forms are done and returned as printed.
+    fn numbers(&self) -> Vec<(Id, u64)> {
+        self.items
+            .iter()
+            .filter_map(|i| i.number.map(|n| (i.id.clone(), n)))
+            .collect()
+    }
+
+    /// The owner clicked Print on a check run: the engine call that records
+    /// the numbers. Make it before sending anything to the printer.
     ///
     /// # Errors
-    /// [`QueueError::WrongState`] unless the run is [`RunState::Ready`].
-    pub fn sent(&mut self) -> Result<Option<RunOutcome<Id>>, QueueError> {
-        if self.state != RunState::Ready {
+    /// [`QueueError::WrongState`] for forms or a run not in the preview.
+    pub fn record_print(&mut self) -> Result<RecordPrint<Id>, QueueError> {
+        if !self.kind.numbered_at_print() || self.state != RunState::Ready {
             return Err(QueueError::WrongState);
         }
-        if self.kind.numbered_at_print() {
-            self.state = RunState::AwaitingConfirmation;
-            Ok(None)
-        } else {
-            self.state = RunState::Done;
-            Ok(Some(self.outcome(self.items.len())))
-        }
+        let starting_number = self
+            .items
+            .first()
+            .and_then(|i| i.number)
+            .ok_or(QueueError::WrongState)?;
+        self.state = RunState::Recording;
+        Ok(RecordPrint {
+            check_ids: self.items.iter().map(|i| i.id.clone()).collect(),
+            starting_number,
+        })
     }
 
-    /// The question was closed without an answer.
+    /// The engine refused the numbers: back to the preview (pick another
+    /// first number or fix the closing date, then Print again).
+    ///
+    /// # Errors
+    /// [`QueueError::WrongState`] unless the call was out.
+    pub fn record_failed(&mut self) -> Result<(), QueueError> {
+        if self.state != RunState::Recording {
+            return Err(QueueError::WrongState);
+        }
+        self.state = RunState::Ready;
+        Ok(())
+    }
+
+    /// The engine recorded the numbers: save the returned batch, send the
+    /// pages to the printer and ask "Did all checks print correctly?".
+    ///
+    /// # Errors
+    /// [`QueueError::WrongState`] unless the call was out.
+    pub fn recorded(&mut self) -> Result<PendingChecks<Id>, QueueError> {
+        if self.state != RunState::Recording {
+            return Err(QueueError::WrongState);
+        }
+        self.state = RunState::AwaitingConfirmation;
+        Ok(PendingChecks {
+            checks: self.numbers(),
+        })
+    }
+
+    /// A form run went to the printer: done, and the forms leave the queue.
+    ///
+    /// # Errors
+    /// [`QueueError::WrongState`] for checks (use
+    /// [`PrintRun::record_print`]) or a run not in the preview.
+    pub fn sent(&mut self) -> Result<RunOutcome<Id>, QueueError> {
+        if self.kind.numbered_at_print() || self.state != RunState::Ready {
+            return Err(QueueError::WrongState);
+        }
+        self.state = RunState::Done;
+        Ok(self.outcome(self.items.len()))
+    }
+
+    /// The question was closed without an answer: the checks stay printed
+    /// and the saved batch stays.
     ///
     /// # Errors
     /// [`QueueError::WrongState`] unless it was showing.
@@ -330,7 +437,8 @@ impl<Id: Clone + PartialEq> PrintRun<Id> {
         Ok(())
     }
 
-    /// The owner answered (now, or later from the reminder).
+    /// The owner answered (now, or later from the reminder). Make the
+    /// returned requeue call, if any, then clear the saved batch.
     ///
     /// # Errors
     /// [`QueueError::WrongState`] unless the run is waiting for an answer;
@@ -357,6 +465,10 @@ impl<Id: Clone + PartialEq> PrintRun<Id> {
     /// The first `good` items printed; the rest print again.
     fn outcome(&self, good: usize) -> RunOutcome<Id> {
         let (ok, bad) = self.items.split_at(good.min(self.items.len()));
+        let requeue = (!bad.is_empty()).then(|| RequeueCall {
+            check_ids: bad.iter().map(|i| i.id.clone()).collect(),
+            old_numbers: bad.iter().filter_map(|i| i.number).collect(),
+        });
         RunOutcome {
             printed: ok
                 .iter()
@@ -365,13 +477,7 @@ impl<Id: Clone + PartialEq> PrintRun<Id> {
                     number: i.number,
                 })
                 .collect(),
-            reprint: bad
-                .iter()
-                .map(|i| Reprint {
-                    id: i.id.clone(),
-                    old_number: i.number,
-                })
-                .collect(),
+            requeue,
             next_first_number: self
                 .items
                 .iter()
@@ -396,6 +502,18 @@ mod tests {
         q
     }
 
+    /// Start, record and send a check run.
+    fn printed_run(
+        q: &PrintQueue<&'static str>,
+        ids: &[&'static str],
+        first: u64,
+    ) -> PrintRun<&'static str> {
+        let mut run = q.start_run(DocKind::Check, ids, Some(first)).unwrap();
+        run.record_print().unwrap();
+        run.recorded().unwrap();
+        run
+    }
+
     #[test]
     fn a_check_run_numbers_in_order_from_the_first_number() {
         let q = queue();
@@ -409,6 +527,7 @@ mod tests {
             [("c2", Some(1001)), ("c1", Some(1002)), ("c3", Some(1003))]
         );
         assert_eq!(run.state(), RunState::Ready);
+        assert!(!run.needs_attention());
     }
 
     #[test]
@@ -437,13 +556,47 @@ mod tests {
     }
 
     #[test]
-    fn all_printed_removes_the_checks_from_the_queue() {
-        let mut q = queue();
+    fn print_records_the_numbers_with_the_engine_before_anything_prints() {
+        let q = queue();
         let mut run = q
-            .start_run(DocKind::Check, &["c1", "c2"], Some(500))
+            .start_run(DocKind::Check, &["c2", "c1"], Some(500))
             .unwrap();
-        assert_eq!(run.sent().unwrap(), None);
+        assert_eq!(
+            run.confirm(Confirmation::AllPrinted),
+            Err(QueueError::WrongState)
+        );
+        assert_eq!(run.recorded(), Err(QueueError::WrongState));
+        let call = run.record_print().unwrap();
+        assert_eq!(
+            call,
+            RecordPrint {
+                check_ids: vec!["c2", "c1"],
+                starting_number: 500
+            }
+        );
+        assert_eq!(run.state(), RunState::Recording);
+        assert_eq!(run.record_print(), Err(QueueError::WrongState));
+        let pending = run.recorded().unwrap();
+        assert_eq!(pending.checks, [("c2", 500), ("c1", 501)]);
         assert_eq!(run.state(), RunState::AwaitingConfirmation);
+        assert!(run.needs_attention());
+    }
+
+    #[test]
+    fn a_refused_record_goes_back_to_the_preview() {
+        let q = queue();
+        let mut run = q.start_run(DocKind::Check, &["c1"], Some(7)).unwrap();
+        assert_eq!(run.record_failed(), Err(QueueError::WrongState));
+        run.record_print().unwrap();
+        run.record_failed().unwrap();
+        assert_eq!(run.state(), RunState::Ready);
+        assert!(run.record_print().is_ok());
+    }
+
+    #[test]
+    fn all_printed_needs_no_more_calls_and_removes_the_checks() {
+        let mut q = queue();
+        let mut run = printed_run(&q, &["c1", "c2"], 500);
         let out = run.confirm(Confirmation::AllPrinted).unwrap();
         assert_eq!(
             out.printed,
@@ -458,7 +611,7 @@ mod tests {
                 }
             ]
         );
-        assert_eq!(out.reprint.len(), 0);
+        assert_eq!(out.requeue, None);
         assert_eq!(out.next_first_number, Some(502));
         q.apply(&out);
         assert!(!q.contains(&"c1") && !q.contains(&"c2") && q.contains(&"c3"));
@@ -470,35 +623,25 @@ mod tests {
     }
 
     #[test]
-    fn first_bad_number_sends_it_and_later_checks_back_with_their_old_numbers_listed() {
+    fn first_bad_number_gives_one_requeue_call_for_it_and_later_checks() {
         let mut q = queue();
-        let mut run = q
-            .start_run(DocKind::Check, &["c1", "c2", "c3", "c4"], Some(1001))
-            .unwrap();
-        run.sent().unwrap();
+        let mut run = printed_run(&q, &["c1", "c2", "c3", "c4"], 1001);
         let out = run.confirm(Confirmation::FirstBad(1003)).unwrap();
         assert_eq!(
             out.printed.iter().map(|p| p.id).collect::<Vec<_>>(),
             ["c1", "c2"]
         );
         assert_eq!(
-            out.reprint,
-            [
-                Reprint {
-                    id: "c3",
-                    old_number: Some(1003)
-                },
-                Reprint {
-                    id: "c4",
-                    old_number: Some(1004)
-                }
-            ]
+            out.requeue,
+            Some(RequeueCall {
+                check_ids: vec!["c3", "c4"],
+                old_numbers: vec![1003, 1004]
+            })
         );
         assert_eq!(out.next_first_number, Some(1005));
         q.apply(&out);
         assert!(q.contains(&"c3") && q.contains(&"c4") && !q.contains(&"c1"));
-        // The reprint gets new numbers; any number may be chosen, including
-        // a reprinted one (not blocked).
+        // Spoiled numbers are not blocked: any first number may be chosen.
         let again = q
             .start_run(DocKind::Check, &["c3", "c4"], Some(1003))
             .unwrap();
@@ -508,26 +651,16 @@ mod tests {
     }
 
     #[test]
-    fn first_bad_equal_to_the_first_number_reprints_everything() {
-        let mut run = queue()
-            .start_run(DocKind::Check, &["c1", "c2"], Some(7))
-            .unwrap();
-        run.sent().unwrap();
+    fn first_bad_equal_to_the_first_number_requeues_everything() {
+        let mut run = printed_run(&queue(), &["c1", "c2"], 7);
         let out = run.confirm(Confirmation::FirstBad(7)).unwrap();
         assert_eq!(out.printed.len(), 0);
-        assert_eq!(out.reprint.len(), 2);
+        assert_eq!(out.requeue.unwrap().check_ids, ["c1", "c2"]);
     }
 
     #[test]
     fn a_bad_number_outside_the_run_is_refused_and_the_run_still_waits() {
-        let mut run = queue()
-            .start_run(DocKind::Check, &["c1", "c2"], Some(7))
-            .unwrap();
-        assert_eq!(
-            run.confirm(Confirmation::AllPrinted),
-            Err(QueueError::WrongState)
-        );
-        run.sent().unwrap();
+        let mut run = printed_run(&queue(), &["c1", "c2"], 7);
         assert_eq!(
             run.confirm(Confirmation::FirstBad(9)),
             Err(QueueError::NotInRun)
@@ -541,17 +674,23 @@ mod tests {
     }
 
     #[test]
-    fn closing_without_an_answer_leaves_the_run_unconfirmed_until_answered() {
-        let mut run = queue().start_run(DocKind::Check, &["c1"], Some(7)).unwrap();
+    fn closing_without_an_answer_keeps_the_reminder_across_a_restart() {
+        let q = queue();
+        let mut run = q.start_run(DocKind::Check, &["c1", "c2"], Some(7)).unwrap();
         assert_eq!(run.dismissed(), Err(QueueError::WrongState));
-        run.sent().unwrap();
+        run.record_print().unwrap();
+        let pending = run.recorded().unwrap();
         run.dismissed().unwrap();
         assert_eq!(run.state(), RunState::Unconfirmed);
         assert!(run.needs_attention());
-        assert_eq!(run.sent(), Err(QueueError::WrongState));
-        let out = run.confirm(Confirmation::AllPrinted).unwrap();
-        assert_eq!(out.printed.len(), 1);
-        assert!(!run.needs_attention());
+        // After a restart the saved batch rebuilds the run.
+        let mut resumed = PrintRun::unconfirmed(pending.checks.clone());
+        assert_eq!(resumed.state(), RunState::Unconfirmed);
+        assert!(resumed.needs_attention());
+        assert_eq!(resumed.record_print(), Err(QueueError::WrongState));
+        let out = resumed.confirm(Confirmation::FirstBad(8)).unwrap();
+        assert_eq!(out.requeue.unwrap().old_numbers, [8]);
+        assert!(!resumed.needs_attention());
     }
 
     #[test]
@@ -560,8 +699,8 @@ mod tests {
         q.requeue("c9", DocKind::Check, Some(2040));
         assert_eq!(q.entries()[0].previous_number, Some(2040));
         let mut run = q.start_run(DocKind::Check, &["c9"], Some(2051)).unwrap();
-        assert_eq!(run.items()[0].number, Some(2051));
-        run.sent().unwrap();
+        assert_eq!(run.record_print().unwrap().starting_number, 2051);
+        run.recorded().unwrap();
         let out = run.confirm(Confirmation::AllPrinted).unwrap();
         q.apply(&out);
         assert_eq!(q.entries().len(), 0);
@@ -576,13 +715,17 @@ mod tests {
             .start_run(DocKind::Invoice, &["inv1", "inv2"], None)
             .unwrap();
         assert!(run.items().iter().all(|i| i.number.is_none()));
-        let out = run.sent().unwrap().unwrap();
+        assert_eq!(run.record_print(), Err(QueueError::WrongState));
+        let out = run.sent().unwrap();
         assert_eq!(run.state(), RunState::Done);
         assert_eq!(out.printed.len(), 2);
+        assert_eq!(out.requeue, None);
         assert_eq!(out.next_first_number, None);
         q.apply(&out);
         assert_eq!(q.of_kind(DocKind::Invoice).count(), 0);
         assert_eq!(q.of_kind(DocKind::Check).count(), 4);
+        let mut checks = q.start_run(DocKind::Check, &["c1"], Some(1)).unwrap();
+        assert_eq!(checks.sent(), Err(QueueError::WrongState));
         q.remove(&"c4");
         assert_eq!(q.of_kind(DocKind::Check).count(), 3);
         assert!(
