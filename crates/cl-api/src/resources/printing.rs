@@ -267,6 +267,8 @@ pub struct PrintedBatch {
 pub const CHECK_NOT_ON_BANK_ACCOUNT: &str = "CHECK_NOT_ON_BANK_ACCOUNT";
 /// 400 on requeue: a hand-written check (never printed here).
 pub const CHECK_NOT_PRINTED: &str = "CHECK_NOT_PRINTED";
+/// 400 on print (U-115): the check is void.
+pub const CHECK_VOID: &str = "CHECK_VOID";
 /// 400 on requeue or reprint: the check's bank account can't be found.
 pub const CHECK_BANK_ACCOUNT_UNKNOWN: &str = "CHECK_BANK_ACCOUNT_UNKNOWN";
 
@@ -283,6 +285,9 @@ pub enum PrintProblem {
     QueueChanged,
     /// A hand-written check can't be reprinted.
     NotPrinted,
+    /// A check in the run was voided (`CHECK_VOID`, U-115): it is no longer
+    /// in the queue and can't be printed.
+    Voided,
 }
 
 /// Classifies a refusal of the print calls.
@@ -299,7 +304,8 @@ pub fn print_problem(e: &ApiError) -> Option<PrintProblem> {
     match code {
         CHECK_NUMBER_IN_USE => Some(PrintProblem::NumberInUse),
         CHECK_NOT_PRINTED => Some(PrintProblem::NotPrinted),
-        CHECK_NOT_ON_BANK_ACCOUNT | CHECK_BANK_ACCOUNT_UNKNOWN | "CHECK_VOID" | "" => {
+        CHECK_VOID => Some(PrintProblem::Voided),
+        CHECK_NOT_ON_BANK_ACCOUNT | CHECK_BANK_ACCOUNT_UNKNOWN | "" => {
             Some(PrintProblem::QueueChanged)
         }
         _ => None,
@@ -328,21 +334,54 @@ struct RequeuedRow {
     bank_account_id: Option<AccountId>,
 }
 
-fn requeued_from(reply: &crate::client::EngineReply) -> Result<Vec<RequeuedCheck>, ApiError> {
+/// What a requeue or batch reprint did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Requeued {
+    /// The checks sent back to the queue.
+    pub checks: Vec<RequeuedCheck>,
+    /// Checks the engine left alone because they are void or deleted (U-117;
+    /// empty from engines before it, which refuse the whole set instead).
+    pub skipped: Vec<TransactionId>,
+}
+
+fn requeued_from(reply: &crate::client::EngineReply) -> Result<Requeued, ApiError> {
+    #[derive(Deserialize)]
+    struct Skipped {
+        id: TransactionId,
+    }
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum SkippedRow {
+        Id(TransactionId),
+        Row(Skipped),
+    }
     #[derive(Deserialize)]
     struct W {
         #[serde(default)]
         checks: Vec<RequeuedRow>,
+        #[serde(default)]
+        skipped: Vec<SkippedRow>,
     }
     let w: W = decode(reply, "requeued checks")?;
-    Ok(w.checks
-        .into_iter()
-        .map(|r| RequeuedCheck {
-            id: r.id,
-            spoiled_number: r.spoiled_check_number,
-            bank_account: r.bank_account_id,
-        })
-        .collect())
+    Ok(Requeued {
+        checks: w
+            .checks
+            .into_iter()
+            .map(|r| RequeuedCheck {
+                id: r.id,
+                spoiled_number: r.spoiled_check_number,
+                bank_account: r.bank_account_id,
+            })
+            .collect(),
+        skipped: w
+            .skipped
+            .into_iter()
+            .map(|s| match s {
+                SkippedRow::Id(id) => id,
+                SkippedRow::Row(r) => r.id,
+            })
+            .collect(),
+    })
 }
 
 /// Why a number was spoiled.
@@ -731,9 +770,10 @@ impl Printing<'_> {
         Ok((settings, layout))
     }
 
-    /// Saves `bank`'s check style. `PUT /checks/settings` replaces the whole
-    /// `layouts` map, so the stored map is read first and only `bank`'s
-    /// entry changes (the bank details in the settings are never read).
+    /// Saves `bank`'s check style. Only `bank`'s entry of `layouts` is sent
+    /// (PR-2 S3, U-117): the engine merges the keys it is sent under a lock,
+    /// so there is no read-merge-write here that could race another save or
+    /// a print run's counter.
     ///
     /// # Errors
     /// `Local(Unsupported)` without `check-reprint-audit-v1` (nothing
@@ -745,16 +785,7 @@ impl Printing<'_> {
         layout: CheckLayout,
     ) -> Result<(), ApiError> {
         require(self.0, Capabilities::CHECK_REPRINT_AUDIT)?;
-        let call = Call::at(Method::Get, CHECK_SETTINGS.route());
-        let reply = self.0.send(&CHECK_SETTINGS, call, None).await?;
-        let v: Value = serde_json::from_slice(&reply.body).map_err(|_| ApiError::Decode {
-            what: "check settings",
-        })?;
-        let mut layouts = v
-            .pointer("/settings/layouts")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
+        let mut layouts = serde_json::Map::new();
         layouts.insert(
             bank.to_string(),
             json!({
@@ -822,7 +853,7 @@ impl Printing<'_> {
         &self,
         checks: &[TransactionId],
         opts: &PostingOptions,
-    ) -> Result<Vec<RequeuedCheck>, ApiError> {
+    ) -> Result<Requeued, ApiError> {
         if checks.is_empty() {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
         }
@@ -842,7 +873,7 @@ impl Printing<'_> {
         &self,
         batch: Uuid,
         opts: &PostingOptions,
-    ) -> Result<Vec<RequeuedCheck>, ApiError> {
+    ) -> Result<Requeued, ApiError> {
         let body = posting_body(self.0, json!({}), opts)?;
         let call = Call::new(
             Method::Post,

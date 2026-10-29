@@ -126,7 +126,7 @@ pub fn check_print_cycle(h: &Harness) {
     let r = h
         .run(s.printing().requeue(&[b], &PostingOptions::default()))
         .expect("requeue");
-    assert_eq!(r[0].spoiled_number, Some(1002));
+    assert_eq!(r.checks[0].spoiled_number, Some(1002));
     let spoiled = h.run(s.printing().spoiled(Some(bank))).expect("spoiled");
     let sp = spoiled.iter().find(|x| x.check == b).expect("logged");
     assert_eq!((sp.number, sp.reason), (1002, SpoiledReason::Requeue));
@@ -144,7 +144,8 @@ pub fn check_print_cycle(h: &Harness) {
         )
         .expect("reprint batch");
     assert!(
-        r.iter()
+        r.checks
+            .iter()
             .any(|x| x.id == a && x.spoiled_number == Some(1001))
     );
     let after = h.run(s.accounts().get(bank)).expect("bank").record.balance;
@@ -216,7 +217,7 @@ pub fn reprint_closed_period(h: &Harness) {
     let r = h
         .run(s.printing().requeue(&[id], &with(&pw)))
         .expect("with the password");
-    assert_eq!(r[0].spoiled_number, Some(2001));
+    assert_eq!(r.checks[0].spoiled_number, Some(2001));
     assert!(
         !h.run(s.set_closing_password(Some(&pw), None, key()))
             .expect("clear password")

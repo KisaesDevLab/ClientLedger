@@ -172,11 +172,11 @@ pub use resources::bills::{
 };
 pub use resources::contacts::{SuggestSource, SuggestedAccount};
 pub use resources::printing::{
-    CHECK_BANK_ACCOUNT_UNKNOWN, CHECK_NOT_ON_BANK_ACCOUNT, CHECK_NOT_PRINTED, CheckFormat,
-    CheckLayout, ClaimedNumber, DocType, DocumentNumber, DocumentNumberUpdate,
+    CHECK_BANK_ACCOUNT_UNKNOWN, CHECK_NOT_ON_BANK_ACCOUNT, CHECK_NOT_PRINTED, CHECK_VOID,
+    CheckFormat, CheckLayout, ClaimedNumber, DocType, DocumentNumber, DocumentNumberUpdate,
     DocumentNumberWarning, FormFooters, MAX_FOOTER_CHARS, MAX_LOGO_UPLOAD_BYTES, MAX_MARK_PRINTED,
     MAX_NEXT_NUMBER, MAX_PREFIX_CHARS, MarkedPrinted, PrintChecks, PrintProblem, PrintedBatch,
-    Printing, QueuedCheck, QueuedCheckKind, QueuedForm, RequeuedCheck, SpoiledNumber,
+    Printing, QueuedCheck, QueuedCheckKind, QueuedForm, Requeued, RequeuedCheck, SpoiledNumber,
     SpoiledReason, number_warnings, print_problem, print_queue_from_json,
 };
 pub use resources::rules::{RULE_DESCRIPTION_MAX_CHARS, RuleMatch, RuleQuery, Rules};

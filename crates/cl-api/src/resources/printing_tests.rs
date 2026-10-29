@@ -186,9 +186,10 @@ async fn requeue_and_reprint_carry_the_closing_password_and_read_spoiled_numbers
         .requeue(&[tid(C1), tid(C2)], &opts)
         .await
         .expect("requeue");
-    assert_eq!(r[0].spoiled_number, Some(1002));
-    assert_eq!(r[0].bank_account, Some(bank()));
-    assert_eq!(r[1].spoiled_number, None);
+    assert_eq!(r.checks[0].spoiled_number, Some(1002));
+    assert_eq!(r.checks[0].bank_account, Some(bank()));
+    assert_eq!(r.checks[1].spoiled_number, None);
+    assert!(r.skipped.is_empty(), "older engines send no skipped list");
     let body = body_of(&server, "POST", 0).await;
     assert_eq!(body["checkIds"], serde_json::json!([C1, C2]));
     assert_eq!(body["closingPassword"], "pw");
@@ -198,13 +199,37 @@ async fn requeue_and_reprint_carry_the_closing_password_and_read_spoiled_numbers
         .reprint_batch(batch, &PostingOptions::default())
         .await
         .expect("reprint");
-    assert_eq!(r.len(), 2);
+    assert_eq!(r.checks.len(), 2);
     let body = body_of(&server, "POST", 1).await;
     assert!(body.get("closingPassword").is_none());
     assert_eq!(
         s.printing().requeue(&[], &PostingOptions::default()).await,
         Err(ApiError::Local(LocalValidation::InvalidValue))
     );
+}
+
+/// PR-2 S2 (U-117): a requeue skips void checks and lists them (as ids or
+/// rows).
+#[tokio::test]
+async fn a_requeue_reads_the_skipped_checks() {
+    let server = MockServer::start().await;
+    let reply = format!(
+        r#"{{"checks":[{{"id":"{C1}","spoiledCheckNumber":1001}}],
+            "skipped":["{C2}",{{"id":"{C1}","reason":"void"}}]}}"#
+    );
+    Mock::given(method("POST"))
+        .and(path("/api/v1/checks/requeue"))
+        .respond_with(json(200, &reply))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(&server, &[]).await;
+    let r = s
+        .printing()
+        .requeue(&[tid(C1), tid(C2)], &PostingOptions::default())
+        .await
+        .expect("requeue");
+    assert_eq!(r.checks.len(), 1);
+    assert_eq!(r.skipped, vec![tid(C2), tid(C1)]);
 }
 
 #[tokio::test]
@@ -260,7 +285,7 @@ async fn refusals_of_requeue_are_classified() {
 }
 
 #[tokio::test]
-async fn a_check_style_change_keeps_the_other_accounts_styles() {
+async fn a_check_style_change_sends_only_that_accounts_style() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/api/v1/checks/settings"))
@@ -296,8 +321,14 @@ async fn a_check_style_change_keeps_the_other_accounts_styles() {
         )
         .await
         .expect("put");
+    let gets = requests(&server, "GET").await.len();
+    assert_eq!(gets, 2, "no read before the save (S3)");
     let body = body_of(&server, "PUT", 0).await;
-    assert_eq!(body["layouts"][OTHER_BANK]["format"], "z_fold");
+    assert!(
+        body["layouts"].get(OTHER_BANK).is_none(),
+        "only this account's entry"
+    );
+    assert_eq!(body["layouts"].as_object().map(Map::len), Some(1));
     assert_eq!(body["layouts"][BANK]["format"], "voucher");
     assert_eq!(body["layouts"][BANK]["printCompanyBlock"], false);
     assert!(body.get("routingNumber").is_none(), "only layouts is sent");
