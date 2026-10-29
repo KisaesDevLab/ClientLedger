@@ -774,6 +774,25 @@ impl WriteCheckScreen {
         {
             self.fetch_bank_facts();
         }
+        // A print run numbered (or requeued) checks: the saved check in
+        // front is read again so it shows its number, its printed state
+        // and Reprint check (B2). Never over unsaved edits or a question.
+        let touched = changes.printing
+            || self
+                .editing
+                .as_ref()
+                .is_some_and(|e| changes.ledger_touches(e.bank));
+        if touched
+            && self.editing.is_some()
+            && !self.is_dirty()
+            && self.save.task.is_none()
+            && self.printed.is_none()
+            && self.nav_prompt.is_none()
+            && !self.void.open
+            && self.load_task.is_none()
+        {
+            self.reload();
+        }
         if changes.ledger_any() || changes.contacts {
             self.refresh_panel();
         }

@@ -791,6 +791,40 @@ fn a_printed_check_edit_asks_reprint_or_keep_the_number() {
     assert_eq!(s.state()["last_saved"]["print_status"], "queue");
 }
 
+/// B2: a print run numbers the saved check in front; the form reads it
+/// again and shows the number, the printed state and Reprint check.
+#[test]
+fn a_print_run_refreshes_the_saved_check_in_front() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    s.hear_changes();
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    s.set_print_later(true);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.navigate(true);
+    s.poll();
+    assert_eq!(s.state()["edit_print_status"], "queue");
+    let (id, bank) = s.editing.as_ref().map(|e| (e.id, e.bank)).expect("editing");
+    {
+        let mut d = link.demo_state().expect("demo");
+        let n = crate::company::demo::printing::layout(&mut d, bank).0.expect("next");
+        assert_eq!(n, 4418);
+        let req = cl_api::PrintChecks {
+            bank_account: bank,
+            checks: vec![id],
+            starting_number: n,
+            format: cl_api::CheckFormat::Voucher,
+        };
+        crate::company::demo::printing::print(&mut d, &req, None).expect("print");
+    }
+    link.bus().publish(crate::data_bus::Change::Printing);
+    s.hear_changes();
+    s.poll();
+    assert_eq!(s.state()["edit_print_status"], "printed");
+    assert_eq!(s.state()["number"], 4418);
+    assert!(!s.can_print_now(), "a printed check reprints instead");
+}
+
 /// The demo-only `dev.check_mark_printed` (the scenario's way to the
 /// printed-check question before P19): only a saved check, then the edit
 /// asks.

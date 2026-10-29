@@ -47,6 +47,30 @@ fn checks_preview_then_print_records_numbers_and_all_printed_clears_them() {
     assert_eq!(s.first_number, (first + 2).to_string());
 }
 
+/// B1 (Q-94): a first number already used in the register is refused in
+/// plain words before any page is laid out, and the next free one offered.
+#[test]
+fn a_used_first_number_warns_and_offers_the_next_free_one() {
+    let (_d, mut s) = screen(false);
+    let next: u64 = s.first_number.parse().expect("the next number");
+    assert_eq!(next, 4418, "the register's next check number");
+    s.first_number = "4417".into();
+    s.preview_checks();
+    s.poll();
+    assert!(s.preview.is_none());
+    assert_eq!(s.problem, Some(PrintProblem::NumberInUse));
+    assert_eq!(s.offer, Some(4418));
+    s.take_offer();
+    assert_eq!(s.first_number, "4418");
+    assert_eq!(s.problem, None);
+    s.preview_checks();
+    s.poll();
+    assert!(s.preview.is_some());
+    // Esc goes back to the list.
+    assert!(s.command(CommandId::new("form.revert")));
+    assert!(s.preview.is_none());
+}
+
 #[test]
 fn a_first_bad_number_sends_it_and_later_checks_back() {
     let (_d, mut s) = screen(false);
@@ -103,13 +127,23 @@ fn a_used_first_number_is_refused_and_the_preview_stays() {
     s.poll();
     s.answer(true);
     s.poll();
-    // The remaining check, from a number already used.
-    s.first_number = used;
+    // The remaining check, from a number already used: refused before the
+    // preview, the next free number offered.
+    s.first_number.clone_from(&used);
+    s.preview_checks();
+    s.poll();
+    assert_eq!(s.problem, Some(PrintProblem::NumberInUse));
+    let after: u64 = used.parse::<u64>().expect("n") + 1;
+    assert_eq!(s.offer, Some(after));
+    assert!(s.preview.is_none());
+    // As against the engine (used numbers unknown): the 409 at Print.
+    s.used.clear();
     s.preview_checks();
     s.poll();
     s.print_clicked();
     s.poll();
     assert_eq!(s.problem, Some(PrintProblem::NumberInUse));
+    assert_eq!(s.offer, Some(after));
     assert!(!s.asking);
     assert!(s.preview.is_some());
 }

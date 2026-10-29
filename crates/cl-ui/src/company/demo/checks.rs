@@ -462,25 +462,24 @@ pub fn set_printed(state: &mut DemoState, id: TransactionId, number: Option<u64>
     } else {
         PrintStatus::Queue
     };
-    match state.checks.info.get_mut(&id) {
-        Some(i) => i.print_status = status,
-        None => {
-            let payee_name = transaction(state, id)
-                .and_then(|t| t.contact_name)
-                .unwrap_or_default();
-            state.checks.info.insert(
-                id,
-                CheckInfo {
-                    print_status: status,
-                    payee_name,
-                    address: None,
-                    printed_memo: None,
-                    tag_ids: Vec::new(),
-                    lines: Vec::new(),
-                },
-            );
-        }
+    if let Some(i) = state.checks.info.get_mut(&id) {
+        i.print_status = status;
+        return true;
     }
+    let payee_name = transaction(state, id)
+        .and_then(|t| t.contact_name)
+        .unwrap_or_default();
+    state.checks.info.insert(
+        id,
+        CheckInfo {
+            print_status: status,
+            payee_name,
+            address: None,
+            printed_memo: None,
+            tag_ids: Vec::new(),
+            lines: Vec::new(),
+        },
+    );
     true
 }
 

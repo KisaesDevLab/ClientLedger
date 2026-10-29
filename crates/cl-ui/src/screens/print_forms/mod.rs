@@ -168,6 +168,9 @@ pub(crate) struct Queue {
     checks: Vec<QueuedCheck>,
     next: Option<u64>,
     layout: CheckLayout,
+    /// Check numbers already used on the account (the demo knows them; the
+    /// engine refuses a used one with `CHECK_NUMBER_IN_USE`).
+    used: BTreeSet<u64>,
 }
 
 /// The pages' data, read for a preview.
@@ -233,6 +236,11 @@ pub struct PrintFormsScreen {
     write_rx: Option<Receiver<bool>>,
     pub(crate) error: Option<ApiError>,
     pub(crate) problem: Option<PrintProblem>,
+    /// The next free first number offered with a number-in-use warning
+    /// (Q-94).
+    pub(crate) offer: Option<u64>,
+    offer_task: Option<Task<Option<u64>>>,
+    used: BTreeSet<u64>,
     pub(crate) notice: Option<&'static str>,
     preselect: Vec<TransactionId>,
     /// Reprint check: preview it once it is back in the queue.
@@ -361,6 +369,9 @@ impl PrintFormsScreen {
             write_rx: None,
             error: None,
             problem: None,
+            offer: None,
+            offer_task: None,
+            used: BTreeSet::new(),
             notice: None,
             preselect: Vec::new(),
             reprint: None,
@@ -449,11 +460,13 @@ impl PrintFormsScreen {
         if let Some(mut d) = self.link.demo_state() {
             let checks = crate::company::demo::printing::check_queue(&mut d, bank);
             let (next, layout) = crate::company::demo::printing::layout(&mut d, bank);
+            let used = crate::company::demo::printing::used_numbers_of(&mut d, bank);
             drop(d);
             self.queue_task = Some(Task::ready(Queue {
                 checks,
                 next,
                 layout,
+                used,
             }));
             return;
         }
@@ -467,6 +480,7 @@ impl PrintFormsScreen {
                 checks,
                 next: settings.next_for(bank).map(u64::from),
                 layout,
+                used: BTreeSet::new(),
             })
         }) {
             self.queue_task = Some(Task::Pending(p));
@@ -563,6 +577,17 @@ impl PrintFormsScreen {
             queue.add(c.id, DocKind::Check);
         }
         let ids: Vec<_> = picked.iter().map(|c| c.id).collect();
+        // A first number that runs into a used one is refused before any
+        // page is laid out (Q-94); the next free one is offered.
+        if let Some(first) = self.first() {
+            let count = ids.len() as u64;
+            let free = crate::company::demo::printing::next_free(&self.used, first, count);
+            if free != first {
+                self.problem = Some(PrintProblem::NumberInUse);
+                self.offer = Some(free);
+                return;
+            }
+        }
         match queue.start_run(DocKind::Check, &ids, self.first()) {
             Ok(run) => {
                 self.run = Some(run);
@@ -970,11 +995,54 @@ impl PrintFormsScreen {
                     .failed(&e, Locked::Record, supported, self.setup.closing)
                 {
                     self.problem = cl_api::print_problem(&e);
+                    if self.problem == Some(PrintProblem::NumberInUse) {
+                        self.find_free_number();
+                    }
                     if self.problem.is_none() {
                         self.error = Some(e);
                     }
                 }
             }
+        }
+    }
+
+    /// The engine refused a used number: offer the next free first number
+    /// (the demo knows every used number; the engine's next number for the
+    /// account otherwise).
+    fn find_free_number(&mut self) {
+        let Some(bank) = self.run_bank else {
+            return;
+        };
+        let count = self.picked.len() as u64;
+        let first = self.first().unwrap_or(1);
+        if let Some(mut d) = self.link.demo_state() {
+            let used = crate::company::demo::printing::used_numbers_of(&mut d, bank);
+            drop(d);
+            self.offer = Some(crate::company::demo::printing::next_free(
+                &used, first, count,
+            ));
+            self.used = used;
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            return;
+        };
+        if let Ok(p) = group.read(&session, move |s| async move {
+            let (settings, _) = s.printing().check_layout(bank).await?;
+            Ok(settings
+                .next_for(bank)
+                .map(u64::from)
+                .filter(|n| *n > first))
+        }) {
+            self.offer_task = Some(Task::Pending(p));
+        }
+    }
+
+    /// Use the offered first number.
+    pub(crate) fn take_offer(&mut self) {
+        if let Some(n) = self.offer.take() {
+            self.first_number = n.to_string();
+            self.problem = None;
         }
     }
 
@@ -1087,6 +1155,9 @@ impl PrintFormsScreen {
                     .failed(&e, pending, supported, self.setup.closing)
                 {
                     self.problem = cl_api::print_problem(&e);
+                    if self.problem == Some(PrintProblem::NumberInUse) {
+                        self.find_free_number();
+                    }
                     if self.problem.is_none() {
                         self.error = Some(e);
                     }
@@ -1243,6 +1314,7 @@ impl PrintFormsScreen {
     fn clear_messages(&mut self) {
         self.error = None;
         self.problem = None;
+        self.offer = None;
         self.notice = None;
     }
 
@@ -1307,6 +1379,7 @@ impl PrintFormsScreen {
                         self.first_number = q.next.map(|n| n.to_string()).unwrap_or_default();
                     }
                     self.layout = q.layout;
+                    self.used = q.used;
                     self.setup_style = q.layout.format;
                     self.setup_block = q.layout.print_company_block;
                     self.checks = q.checks;
@@ -1341,6 +1414,10 @@ impl PrintFormsScreen {
                     self.error = Some(e);
                 }
             }
+        }
+        if let Some(r) = self.offer_task.as_mut().and_then(Task::try_take) {
+            self.offer_task = None;
+            self.offer = r.ok().flatten();
         }
         if let Some(r) = self.record_task.as_mut().and_then(Task::try_take) {
             self.record_task = None;
@@ -1422,6 +1499,7 @@ impl PrintFormsScreen {
             || self.requeue_task.is_some()
             || self.mark_task.is_some()
             || self.layout_task.is_some()
+            || self.offer_task.is_some()
             || self.printers_rx.is_some()
             || self.job.is_some()
             || self.save_rx.is_some()
@@ -1464,6 +1542,7 @@ impl PrintFormsScreen {
             "closing": self.closing_prompt.state_json(kit::closing_supported(&self.link)),
             "notice": self.notice,
             "problem": self.problem.map(|p| format!("{p:?}")),
+            "offer": self.offer,
             "error": self.error.is_some(),
         })
     }
@@ -1483,28 +1562,37 @@ impl PrintFormsScreen {
             ClosingClick::Cancel => self.closing_prompt.cancel(),
             ClosingClick::None => {}
         }
+        // Oldest first: what went to the printer, then what came after.
+        if let Some(s) = self.sent {
+            form::hint(ui, &tokens, &t(s.key()));
+        }
         if let Some(k) = self.notice {
             form::hint(ui, &tokens, &t(k));
         }
         if let Some(p) = self.problem {
-            form::inline_warning(
-                ui,
-                &tokens,
-                &t(match p {
-                    PrintProblem::NumberInUse => "print.problem.number_in_use",
-                    PrintProblem::QueueChanged => "print.problem.queue_changed",
-                    PrintProblem::NotPrinted => "print.problem.not_printed",
-                }),
-            );
+            let text = match (p, self.offer) {
+                (PrintProblem::NumberInUse, Some(n)) => t_with(
+                    "print.problem.number_in_use_offer",
+                    &[("next", &n.to_string())],
+                ),
+                (PrintProblem::NumberInUse, None) => t("print.problem.number_in_use"),
+                (PrintProblem::QueueChanged, _) => t("print.problem.queue_changed"),
+                (PrintProblem::NotPrinted, _) => t("print.problem.not_printed"),
+            };
+            form::inline_warning(ui, &tokens, &text);
+            if let Some(n) = self.offer.filter(|_| p == PrintProblem::NumberInUse)
+                && ui
+                    .button(t_with("print.problem.use_next", &[("next", &n.to_string())]))
+                    .clicked()
+            {
+                self.take_offer();
+            }
         }
         if let Some(e) = &self.error {
             form::inline_error(ui, &tokens, e);
         }
         if self.logo_notice {
             form::inline_warning(ui, &tokens, &t("print.logo_notice"));
-        }
-        if let Some(s) = self.sent {
-            form::hint(ui, &tokens, &t(s.key()));
         }
         if self.asking {
             self.confirm_ui(ui, &tokens);
@@ -1616,7 +1704,7 @@ impl PrintFormsScreen {
                 ui.label("");
                 ui.label(RichText::new(t("print.col.date")).strong());
                 ui.label(RichText::new(t("print.col.payee")).strong());
-                ui.label(RichText::new(t("print.col.amount")).strong());
+                amount_head(ui);
                 ui.end_row();
                 for c in &self.checks {
                     let mut on = self.picked.contains(&c.id);
@@ -1629,10 +1717,7 @@ impl PrintFormsScreen {
                     }
                     ui.label(crate::shell::us_date(c.date));
                     ui.label(&c.payee);
-                    ui.label(
-                        RichText::new(c.amount.format(style))
-                            .text_style(egui::TextStyle::Monospace),
-                    );
+                    amount_cell(ui, &c.amount.format(style));
                     ui.end_row();
                 }
             });
@@ -1669,7 +1754,7 @@ impl PrintFormsScreen {
                 ui.label(RichText::new(t("print.col.number")).strong());
                 ui.label(RichText::new(t("print.col.date")).strong());
                 ui.label(RichText::new(t("print.col.customer")).strong());
-                ui.label(RichText::new(t("print.col.amount")).strong());
+                amount_head(ui);
                 ui.end_row();
                 for f in &self.forms {
                     let mut on = self.forms_picked.contains(&f.id);
@@ -1684,10 +1769,7 @@ impl PrintFormsScreen {
                     ui.label(f.number.clone().unwrap_or_default());
                     ui.label(crate::shell::us_date(f.date));
                     ui.label(f.customer.clone().unwrap_or_default());
-                    ui.label(
-                        RichText::new(f.total.map(|m| m.format(style)).unwrap_or_default())
-                            .text_style(egui::TextStyle::Monospace),
-                    );
+                    amount_cell(ui, &f.total.map(|m| m.format(style)).unwrap_or_default());
                     ui.end_row();
                 }
             });
@@ -1771,17 +1853,20 @@ impl PrintFormsScreen {
             Some("print") => self.print_clicked(),
             Some("save") => self.save_pdf(ui.ctx()),
             Some("envelopes") => self.preview_envelopes(),
-            Some("back") => {
-                self.preview = None;
-                if self
-                    .run
-                    .as_ref()
-                    .is_some_and(|r| r.state() == cl_print::RunState::Ready)
-                {
-                    self.run = None;
-                }
-            }
+            Some("back") => self.close_preview(),
             _ => {}
+        }
+    }
+
+    /// Back from the preview to the list.
+    pub(crate) fn close_preview(&mut self) {
+        self.preview = None;
+        if self
+            .run
+            .as_ref()
+            .is_some_and(|r| r.state() == cl_print::RunState::Ready)
+        {
+            self.run = None;
         }
     }
 
@@ -1900,6 +1985,27 @@ fn named_box(ui: &mut Ui, on: &mut bool, name: &str) -> egui::Response {
     r
 }
 
+/// Width of the queue's amount column (amounts right-aligned, DESIGN.md).
+const AMOUNT_W: f32 = 110.0;
+
+fn amount_head(ui: &mut Ui) {
+    let h = ui.spacing().interact_size.y;
+    ui.allocate_ui_with_layout(
+        egui::vec2(AMOUNT_W, h),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| ui.label(RichText::new(t("print.col.amount")).strong()),
+    );
+}
+
+fn amount_cell(ui: &mut Ui, text: &str) {
+    let h = ui.spacing().interact_size.y;
+    ui.allocate_ui_with_layout(
+        egui::vec2(AMOUNT_W, h),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| ui.label(RichText::new(text).text_style(egui::TextStyle::Monospace)),
+    );
+}
+
 fn style_key(f: CheckFormat) -> &'static str {
     match f {
         CheckFormat::Standard => "print.style.standard",
@@ -1960,6 +2066,12 @@ impl Screen for PrintFormsScreen {
                 } else {
                     self.preview_forms();
                 }
+                true
+            }
+            // Esc: the preview goes back to the list (never while the
+            // "did they print?" question waits).
+            "form.revert" if self.preview.is_some() && !self.asking => {
+                self.close_preview();
                 true
             }
             // Demo only: the scenario runs light, then dark.

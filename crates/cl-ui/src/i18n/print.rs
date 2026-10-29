@@ -47,6 +47,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("print.sent.failed", "Printing didn't work. Use Save PDF and print the file."),
     ("print.sent.bad_printer", "That printer's name can't be used. Choose another printer."),
     ("print.problem.number_in_use", "One of those check numbers is already used on this account. Enter another first number."),
+    ("print.problem.number_in_use_offer", "One of those check numbers is already used on this account. The next free number is {next}."),
+    ("print.problem.use_next", "Use {next}"),
     ("print.problem.queue_changed", "The checks waiting to print changed. Go back to the list and try again."),
     ("print.problem.not_printed", "A hand-written check can't be reprinted here."),
     ("print.problem.stub", "A check's stub doesn't add up to the check amount, so it wasn't printed. Open the check and fix its lines."),
