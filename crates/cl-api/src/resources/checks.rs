@@ -60,6 +60,10 @@ pub enum PrintStatus {
     Queue,
     /// Printed, with the number it printed with.
     Printed,
+    /// A check that is in no print state: the engine cleared its status
+    /// when it was voided while waiting to print (U-115). Not printable;
+    /// local only, never sent back.
+    Unqueued,
     /// A status this version does not know (shown, never sent back).
     Other(String),
 }
@@ -76,22 +80,31 @@ impl PrintStatus {
         }
     }
 
-    /// The engine's text.
+    /// The engine's text; `None` for [`PrintStatus::Unqueued`] (the engine
+    /// sends no status).
     #[must_use]
-    pub fn as_wire(&self) -> &str {
+    pub fn as_wire(&self) -> Option<&str> {
         match self {
-            PrintStatus::HandWritten => "hand_written",
-            PrintStatus::Queue => "queue",
-            PrintStatus::Printed => "printed",
-            PrintStatus::Other(s) => s,
+            PrintStatus::HandWritten => Some("hand_written"),
+            PrintStatus::Queue => Some("queue"),
+            PrintStatus::Printed => Some("printed"),
+            PrintStatus::Unqueued => None,
+            PrintStatus::Other(s) => Some(s),
         }
     }
 
+    /// Whether the check can still go to print (it waits in the queue).
+    #[must_use]
+    pub fn is_printable(&self) -> bool {
+        *self == PrintStatus::Queue
+    }
+
     /// The kind an edit decides (hashed in the fingerprint): `numbered`
-    /// for hand-written and printed checks, otherwise the status itself.
-    fn kind(&self) -> &str {
+    /// for hand-written and printed checks, otherwise the status itself
+    /// (`null` for an unqueued check, as the engine sends it).
+    fn kind(&self) -> Option<&str> {
         match self {
-            PrintStatus::HandWritten | PrintStatus::Printed => KIND_NUMBERED,
+            PrintStatus::HandWritten | PrintStatus::Printed => Some(KIND_NUMBERED),
             other => other.as_wire(),
         }
     }
@@ -102,7 +115,10 @@ const KIND_QUEUE: &str = "queue";
 
 impl Serialize for PrintStatus {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(self.as_wire())
+        match self.as_wire() {
+            Some(w) => s.serialize_str(w),
+            None => s.serialize_none(),
+        }
     }
 }
 
@@ -144,6 +160,10 @@ impl fmt::Debug for CheckRecord {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CheckWire {
+    /// U-115: the record is a check even when its print status is null
+    /// (voided while queued).
+    #[serde(default)]
+    is_check: Option<bool>,
     #[serde(default)]
     check_number: Option<u32>,
     #[serde(default)]
@@ -163,18 +183,72 @@ struct TagRef {
     id: TagId,
 }
 
+/// What a print run left on one check ([`Checks::print_state`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckPrintState {
+    /// Its number, if any.
+    pub check_number: Option<u32>,
+    /// Its print status; `None` for a check voided while queued (U-115) or a
+    /// record that is not a check.
+    pub print_status: Option<PrintStatus>,
+    /// Voided (or deleted): not a check that printed.
+    pub void: bool,
+    /// The print run that numbered it, when the engine sends it.
+    pub print_batch_id: Option<String>,
+}
+
+impl CheckPrintState {
+    /// The engine recorded `number` for this check in a print run and it
+    /// still stands (not void).
+    #[must_use]
+    pub fn recorded_as(&self, number: u64) -> bool {
+        !self.void
+            && self.print_status == Some(PrintStatus::Printed)
+            && self.check_number.map(u64::from) == Some(number)
+    }
+}
+
+fn print_state_from(body: &[u8]) -> Result<CheckPrintState, ApiError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Wire {
+        #[serde(default)]
+        check_number: Option<u32>,
+        #[serde(default)]
+        print_status: Option<String>,
+        #[serde(default)]
+        status: Option<String>,
+        #[serde(default)]
+        print_batch_id: Option<String>,
+    }
+    let decode = || ApiError::Decode {
+        what: "check print state",
+    };
+    let v: Value = serde_json::from_slice(body).map_err(|_| decode())?;
+    let t = v.get("transaction").ok_or_else(decode)?;
+    let w = Wire::deserialize(t).map_err(|_| decode())?;
+    Ok(CheckPrintState {
+        check_number: w.check_number,
+        print_status: w.print_status.as_deref().map(PrintStatus::from_wire),
+        void: matches!(w.status.as_deref(), Some("void" | "deleted")),
+        print_batch_id: w.print_batch_id,
+    })
+}
+
 /// Reads the same object twice: once as the [`Transaction`], once for the
-/// check fields. A record without a print status is not a check.
+/// check fields. A record is a check when it has a print status or the
+/// engine marks it `isCheck`; a check with no print status (voided while
+/// queued, U-115) reads as [`PrintStatus::Unqueued`].
 impl<'de> Deserialize<'de> for CheckRecord {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = Value::deserialize(d)?;
         let txn = Transaction::deserialize(&v).map_err(|_| de::Error::custom("transaction"))?;
         let w = CheckWire::deserialize(&v).map_err(|_| de::Error::custom("check fields"))?;
-        let print_status = w
-            .print_status
-            .as_deref()
-            .map(PrintStatus::from_wire)
-            .ok_or_else(|| de::Error::custom("not a check"))?;
+        let print_status = match (w.print_status.as_deref(), w.is_check) {
+            (Some(s), _) => PrintStatus::from_wire(s),
+            (None, Some(true)) => PrintStatus::Unqueued,
+            (None, _) => return Err(de::Error::custom("not a check")),
+        };
         Ok(CheckRecord {
             txn,
             check_number: w.check_number,
@@ -196,7 +270,7 @@ impl<'de> Deserialize<'de> for CheckRecord {
 fn with_check_fields(
     mut txn: Value,
     number: Option<u32>,
-    kind: &str,
+    kind: Option<&str>,
     payee_name: &str,
     payee_address: Option<&str>,
     printed_memo: Option<&str>,
@@ -204,7 +278,7 @@ fn with_check_fields(
     let empty_is_null = |s: Option<&str>| s.filter(|v| !v.is_empty()).map(str::to_string);
     if let Value::Object(map) = &mut txn {
         map.insert("checkNumber".into(), json!(number));
-        map.insert("printStatus".into(), Value::String(kind.to_string()));
+        map.insert("printStatus".into(), json!(kind));
         map.insert(
             "payeeNameOnCheck".into(),
             Value::String(payee_name.to_string()),
@@ -262,9 +336,9 @@ fn requested_fingerprint(
     printed: Option<PrintedCheckChange>,
 ) -> [u8; 32] {
     let (number, kind) = if d.print_later || printed == Some(PrintedCheckChange::Reprint) {
-        (None, KIND_QUEUE)
+        (None, Some(KIND_QUEUE))
     } else {
-        (d.check_number, KIND_NUMBERED)
+        (d.check_number, Some(KIND_NUMBERED))
     };
     fingerprint_of(&with_check_fields(
         posting.editable_value(false),
@@ -371,7 +445,10 @@ pub fn checks_from_json(body: &[u8]) -> Result<Vec<CheckSummary>, ApiError> {
                     .filter(|n| !n.is_empty())
                     .or(r.contact_name),
                 amount,
-                print_status: PrintStatus::from_wire(r.print_status.as_deref().unwrap_or("")),
+                print_status: r
+                    .print_status
+                    .as_deref()
+                    .map_or(PrintStatus::Unqueued, PrintStatus::from_wire),
                 status: r.status,
             })
         })
@@ -563,6 +640,34 @@ impl Checks<'_> {
             "transaction",
         )
         .await
+    }
+
+    /// What a print run left on one check, read loosely so a void check
+    /// (print status cleared, U-115) or a record that is not a check still
+    /// answers (PR-2 B2 read-back). `None` when the record is gone.
+    ///
+    /// # Errors
+    /// `Decode` when the answer has no transaction; any [`ApiError`] but
+    /// `NotFound`.
+    pub async fn print_state(
+        &self,
+        id: TransactionId,
+    ) -> Result<Option<CheckPrintState>, ApiError> {
+        let path = format!("/api/v1/transactions/{id}");
+        let reply = match self
+            .0
+            .send(
+                &TXN_GET,
+                Call::new(Method::Get, TXN_GET.route(), path),
+                None,
+            )
+            .await
+        {
+            Ok(r) => r,
+            Err(ApiError::NotFound { .. }) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        print_state_from(&reply.body).map(Some)
     }
 
     /// Checks drawn on `bank` (all banks when `None`) dated within

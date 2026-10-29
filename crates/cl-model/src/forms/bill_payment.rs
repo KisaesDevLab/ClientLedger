@@ -142,6 +142,8 @@ pub enum PayProblem {
     CreditOverused(TransactionId),
     /// A discount needs the engine update (`bill-discounts-v1`).
     DiscountNeedsUpdate(TransactionId),
+    /// An amount on a bill has fractions of a cent (N4).
+    SubCent(TransactionId),
     /// The amounts add up beyond what money can hold.
     TooLarge,
 }
@@ -158,6 +160,7 @@ impl PayProblem {
             PayProblem::NothingApplied(_) => "paybills.problem.nothing_applied",
             PayProblem::CreditOverused(_) => "paybills.problem.credit_overused",
             PayProblem::DiscountNeedsUpdate(_) => "paybills.problem.discount_needs_update",
+            PayProblem::SubCent(_) => "paybills.problem.sub_cent",
             PayProblem::TooLarge => "paybills.problem.too_large",
         })
     }
@@ -169,6 +172,7 @@ impl PayProblem {
             PayProblem::Negative(b)
             | PayProblem::MoreThanDue(b)
             | PayProblem::NothingApplied(b)
+            | PayProblem::SubCent(b)
             | PayProblem::DiscountNeedsUpdate(b) => Some(b),
             _ => None,
         }
@@ -733,6 +737,16 @@ impl PayBillsForm {
                 || self.credits_on(b).iter().any(|(_, m)| m.is_negative())
             {
                 problems.push(PayProblem::Negative(b));
+                continue;
+            }
+            // N4: the engine takes whole cents only; name the bill here
+            // rather than refuse the whole run when it is sent.
+            let sub_cent = |m: Money| m.as_decimal().round_dp(2) != m.as_decimal();
+            if sub_cent(cash)
+                || sub_cent(discount)
+                || self.credits_on(b).iter().any(|(_, m)| sub_cent(*m))
+            {
+                problems.push(PayProblem::SubCent(b));
                 continue;
             }
             let Ok(applied) = add(cash, discount).and_then(|x| add(x, credit)) else {

@@ -232,6 +232,13 @@ pub struct PayBillsScreen {
     sent: Option<(Vec<TransactionId>, SentPay)>,
     /// The pay whose outcome is unknown, until the list tells.
     pub(crate) pending: Option<SentPay>,
+    /// The last pay sent and its closing-date password, for the same-key
+    /// resend after a lost reply on a keyed engine (S7; memory only).
+    resend: Option<(PayBillsRequest, Option<Secret>)>,
+    /// The keyed resend went out once already.
+    resent: bool,
+    /// Lost twice on a keyed engine: Look again resends under the key.
+    keyed_unknown: bool,
     /// The first check number last proposed (a typed one is kept).
     proposed_number: Option<String>,
     pub(crate) problems: Vec<PayProblem>,
@@ -336,6 +343,9 @@ impl PayBillsScreen {
             error: None,
             notice: None,
             unknown: false,
+            resend: None,
+            resent: false,
+            keyed_unknown: false,
             last_paid: None,
             to_print: Vec::new(),
             paid_count: 0,
@@ -641,9 +651,14 @@ impl PayBillsScreen {
         self.form.clear();
         self.key = None;
         self.sent = None;
+        self.resend = None;
         self.unknown = false;
         self.dialog = None;
         self.last_paid = None;
+        // Which checks it queued is not known from the list (an unkeyed
+        // engine): nothing stale from an earlier pay is offered to print;
+        // they wait in File > Print Forms.
+        self.to_print.clear();
         self.paid_count += 1;
         self.notice = Some("paybills.unknown.went_through");
         self.fetch_account_facts();
@@ -792,6 +807,19 @@ impl PayBillsScreen {
             req.bills.iter().map(|b| b.bill).collect(),
             SentPay::of(&req, &self.form),
         ));
+        self.resend = Some((req.clone(), password.clone()));
+        self.resent = false;
+        self.send_pay(req, password, key)
+    }
+
+    /// Sends the pay (again, under the same key, after a lost reply on an
+    /// engine that replays it, S7).
+    fn send_pay(
+        &mut self,
+        req: PayBillsRequest,
+        password: Option<Secret>,
+        key: IdempotencyKey,
+    ) -> bool {
         let link = Arc::clone(&self.link);
         if let Some(local) = self.local.as_mut() {
             let r = local.pay(&link, &req, password.as_ref(), &key);
@@ -841,6 +869,8 @@ impl PayBillsScreen {
         self.closing_prompt.saved();
         self.key = None;
         self.unknown = false;
+        self.keyed_unknown = false;
+        self.resend = None;
         self.pending = None;
         let bills: usize = payments
             .iter()
@@ -869,6 +899,32 @@ impl PayBillsScreen {
     pub(crate) fn pay_failed(&mut self, e: ApiError) {
         if !crate::screens::register::keeps_key(&e) {
             self.key = None;
+        }
+        // S7: the engine replays this key (`idempotency-pay-bills-v1`): the
+        // identical pay goes again under the same key and its answer is the
+        // first one's (nothing posts twice). No guessing from the list.
+        if let ApiError::OutcomeUnknown {
+            keyed: true,
+            idempotency_key: Some(lost),
+            ..
+        } = &e
+        {
+            let same = self.key.as_ref().is_some_and(|(_, k)| k == lost);
+            if same
+                && !self.resent
+                && let Some((req, password)) = self.resend.clone()
+            {
+                self.resent = true;
+                self.send_pay(req, password, lost.clone());
+                return;
+            }
+            // Sent twice without an answer: wait for the owner's Look
+            // again, which sends it once more under the same key.
+            self.sent = None;
+            self.pending = None;
+            self.keyed_unknown = true;
+            self.unknown = true;
+            return;
         }
         let sent = self.sent.take();
         self.pending = if matches!(e, ApiError::OutcomeUnknown { .. }) {
@@ -913,6 +969,17 @@ impl PayBillsScreen {
     /// again and paying is allowed (the same key goes with the same pay).
     pub(crate) fn recheck(&mut self) {
         self.unknown = false;
+        if std::mem::take(&mut self.keyed_unknown)
+            && let (Some((req, password)), Some((_, key))) = (self.resend.clone(), self.key.clone())
+        {
+            // S7: a keyed engine answers the same pay again; no guess.
+            self.sent = Some((
+                req.bills.iter().map(|b| b.bill).collect(),
+                SentPay::of(&req, &self.form),
+            ));
+            self.send_pay(req, password, key);
+            return;
+        }
         self.load_list();
         self.fetch_account_facts();
     }

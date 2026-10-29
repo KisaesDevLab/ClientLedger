@@ -467,10 +467,47 @@ impl BillPaymentView {
                 } else if send {
                     self.send_void(None);
                 }
-            } else if ui.button(t("billpay.void")).clicked() {
-                self.void_open = true;
+            } else {
+                ui.horizontal(|ui| {
+                    if ui.button(t("billpay.void")).clicked() {
+                        self.void_open = true;
+                    }
+                    // S6 (Q-P19ab): a printed check reprints with the next
+                    // number, preview first; Print Forms asks for the
+                    // closing-date password when its date is closed.
+                    if self.can_reprint()
+                        && ui
+                            .button(t("print.check.reprint"))
+                            .on_hover_text(t("print.check.reprint.tip"))
+                            .clicked()
+                    {
+                        self.reprint();
+                    }
+                });
             }
         }
+    }
+
+    /// A posted check payment that printed can be reprinted.
+    pub(crate) fn can_reprint(&self) -> bool {
+        self.shown.as_ref().is_some_and(|s| {
+            let r = &s.viewed.record;
+            r.status != TxnStatus::Void && r.print_status.as_deref() == Some("printed")
+        })
+    }
+
+    /// Reprint the check: Print Forms sends it back to the queue (its old
+    /// number noted as spoiled) and previews it with the next number.
+    pub(crate) fn reprint(&mut self) -> bool {
+        let Some(s) = self.shown.as_ref().filter(|_| self.can_reprint()) else {
+            return false;
+        };
+        let r = &s.viewed.record;
+        self.link.push(CompanyEvent::OpenWith(
+            CommandId::new(crate::screens::print_forms::KIND),
+            Box::new(crate::windows::OpenPayload::ReprintCheck(r.id, r.txn_date)),
+        ));
+        true
     }
 }
 
@@ -522,6 +559,7 @@ impl Screen for BillPaymentView {
             "credits": r.map(|r| r.credit_applications.len()),
             "void_open": self.void_open,
             "voided": self.voided,
+            "can_reprint": self.can_reprint(),
             "error": self.error.is_some(),
         });
         if let (Value::Object(m), Value::Object(c)) = (&mut v, self.closing_prompt.state_json(true))
@@ -585,6 +623,68 @@ mod tests {
             (rows[1].cash, rows[1].discount, rows[1].credit),
             (Money::ZERO, Money::ZERO, m("80.00"))
         );
+    }
+
+    /// PR-2 S6: a printed bill-payment check offers Reprint check, which
+    /// opens Print Forms with the check (as Write Check does); one waiting
+    /// to print does not.
+    #[test]
+    fn a_printed_payment_check_reprints_through_print_forms() {
+        use crate::company::demo::{pay_bills, printing};
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(CompanyLink::demo(dir.path()));
+        let bank = account_id(1010);
+        let paid = link
+            .demo_state()
+            .map(|mut d| {
+                let filter = cl_api::PayableFilter {
+                    payment_date: Some(crate::company::demo::DemoState::today()),
+                    ..cl_api::PayableFilter::default()
+                };
+                let list = pay_bills::payable(&mut d, &filter);
+                let req = cl_api::PayBillsRequest {
+                    bank_account: bank,
+                    date: crate::company::demo::DemoState::today(),
+                    bills: vec![cl_api::BillToPay {
+                        bill: list.bills[0].id,
+                        cash: m("100.00"),
+                        discount: Money::ZERO,
+                    }],
+                    credits: Vec::new(),
+                    discount_account: None,
+                    method: cl_api::PayMethod::Check(cl_api::CheckNumbering::PrintLater),
+                    memo: None,
+                };
+                pay_bills::pay(&mut d, &req, None).expect("paid")[0].id
+            })
+            .expect("demo");
+        let mut v = BillPaymentView::new(Arc::clone(&link));
+        assert!(v.open_record(paid));
+        assert!(!v.can_reprint(), "waiting to print: nothing to reprint");
+        let _ = link.drain();
+        if let Some(mut d) = link.demo_state() {
+            printing::print(
+                &mut d,
+                &cl_api::PrintChecks {
+                    bank_account: bank,
+                    checks: vec![paid],
+                    starting_number: 9101,
+                    format: cl_api::CheckFormat::Voucher,
+                },
+                None,
+            )
+            .expect("print");
+        }
+        assert!(v.open_record(paid));
+        assert_eq!(v.state()["can_reprint"], true);
+        assert!(v.reprint());
+        let events = link.drain();
+        let reprint = events.iter().any(|e| {
+            matches!(e, CompanyEvent::OpenWith(k, p)
+                if k.as_str() == crate::screens::print_forms::KIND
+                    && matches!(**p, crate::windows::OpenPayload::ReprintCheck(id, _) if id == paid))
+        });
+        assert!(reprint, "Print Forms opens with the check");
     }
 
     /// Review (Low): "Paid from" is the bank or card line, never the

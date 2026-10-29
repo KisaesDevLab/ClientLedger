@@ -30,6 +30,8 @@ struct Seen {
     discount_default: Option<AccountId>,
     /// The list it answers (tests change it between reads).
     list: Option<PayableList>,
+    /// Pays whose reply is lost on a keyed engine (S7), from the next.
+    lose_keyed: u32,
 }
 
 /// The mockup's list: five bills, 7781 with the engine's 4.37, the Table
@@ -127,6 +129,15 @@ impl LocalPayBills for Fake {
         s.pays.push(req.clone());
         s.keys.push(key.clone());
         s.passwords += usize::from(password.is_some());
+        if s.lose_keyed > 0 {
+            s.lose_keyed -= 1;
+            return Err(ApiError::OutcomeUnknown {
+                request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000004")
+                    .expect("id"),
+                idempotency_key: Some(key.clone()),
+                keyed: true,
+            });
+        }
         if let Some(e) = self.refuse.take() {
             return Err(e);
         }
@@ -591,4 +602,44 @@ fn debug_shows_no_typed_amounts() {
     };
     let shown = format!("{d:?} {c:?}");
     assert!(!shown.contains("4.37") && !shown.contains("250"), "{shown}");
+}
+
+/// PR-2 S7: a lost reply on an engine that replays the pay's key: the
+/// identical pay goes again under the same key and the replay's answer is
+/// used (paid once, the checks to print known); no guess from the list.
+#[test]
+fn a_lost_reply_on_a_keyed_engine_resends_under_the_same_key() {
+    let (_d, mut s, seen) = screen(None);
+    seen.lock().expect("seen").lose_keyed = 1;
+    s.form.set_cash(bill(5), m("1000.00"));
+    let _ = s.start_pay(None);
+    {
+        let seen = seen.lock().expect("seen");
+        assert_eq!(seen.pays.len(), 2);
+        assert_eq!(seen.pays[0], seen.pays[1], "the same pay");
+        assert_eq!(seen.keys[0], seen.keys[1], "under the same key");
+    }
+    let st = s.state();
+    assert_eq!(st["unknown"], false);
+    assert_eq!(st["pending"], false, "no guess from the list");
+    assert_eq!(st["paid_count"], 1);
+    assert_eq!(s.to_print, vec![bill(5)], "the check to print is known");
+}
+
+/// PR-2 S7: lost twice on a keyed engine: blocked until Look again, which
+/// sends the same pay under the same key once more.
+#[test]
+fn lost_twice_on_a_keyed_engine_look_again_resends() {
+    let (_d, mut s, seen) = screen(None);
+    seen.lock().expect("seen").lose_keyed = 2;
+    s.form.set_cash(bill(5), m("1000.00"));
+    assert!(!s.start_pay(None));
+    assert_eq!(s.state()["unknown"], true);
+    assert_eq!(s.state()["pending"], false);
+    assert!(!s.start_pay(None), "blocked");
+    s.recheck();
+    let seen = seen.lock().expect("seen");
+    assert_eq!(seen.pays.len(), 3);
+    assert!(seen.keys.iter().all(|k| *k == seen.keys[0]));
+    assert_eq!(s.state()["paid_count"], 1);
 }

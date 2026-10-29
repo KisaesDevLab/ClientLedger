@@ -663,8 +663,10 @@ pub fn print_queue(
         .pay_bills
         .payments
         .iter()
+        // Void payments left the queue when voided (U-115); only posted
+        // ones with cash to pay print (U-117: no $0 check).
         .filter(|p| p.bank == bank && p.print_later && !printed(p.id))
-        .filter(|p| !state.ledger.is_void(p.id))
+        .filter(|p| !state.ledger.is_void(p.id) && p.cash.is_positive())
         .map(|p| {
             let vendor = contacts.iter().find(|c| c.id == p.vendor);
             // The engine sends the vendor's billing address (U-107).
@@ -787,6 +789,10 @@ pub fn void(
     }
     check_closing(closing(state), &[p.date], password)?;
     state.ledger.void(id)?;
+    // As the fixed engine (U-115): a void payment leaves the print queue.
+    if let Some(q) = state.pay_bills.payments.iter_mut().find(|q| q.id == id) {
+        q.print_later = false;
+    }
     for (bill, cash, discount) in &p.bills {
         let credit = Money::sum(p.credits.iter().filter(|c| c.1 == *bill).map(|c| c.2))
             .unwrap_or(Money::ZERO);
@@ -820,6 +826,102 @@ pub fn reset(state: &mut DemoState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// PR-2 B1, S1, S2 (U-115, U-117) as the fixed engine: a vendor paid
+    /// by a discount alone gets no $0 check; a voided To be printed payment leaves the
+    /// queue and printing it is refused as void; a requeue with a voided
+    /// check sends the others back and reports the void one.
+    #[test]
+    fn voids_leave_the_print_queue_and_no_zero_check_is_queued() {
+        use crate::company::demo::printing;
+        let mut s = DemoState::new();
+        let filter = PayableFilter {
+            due_on_or_before: CalendarDate::from_ymd(2026, 11, 11).ok(),
+            payment_date: Some(DemoState::today()),
+            ..PayableFilter::default()
+        };
+        let list = payable(&mut s, &filter);
+        let bank = super::super::account_id(1010);
+        let pick = |i: usize, cash: &str, discount: &str| cl_api::BillToPay {
+            bill: list.bills[i].id,
+            cash: m(cash),
+            discount: m(discount),
+        };
+        // 7781 is paid by its discount alone: nothing to pay by check.
+        let req = PayBillsRequest {
+            bank_account: bank,
+            date: DemoState::today(),
+            bills: vec![
+                pick(0, "100.00", "0"),
+                pick(1, "200.00", "0"),
+                pick(3, "0", "4.37"),
+            ],
+            credits: Vec::new(),
+            discount_account: Some(super::super::account_id(5200)),
+            method: PayMethod::Check(CheckNumbering::PrintLater),
+            memo: None,
+        };
+        let paid = pay(&mut s, &req, None).expect("paid");
+        assert_eq!(paid.len(), 3);
+        let queued = |s: &mut DemoState| -> Vec<TransactionId> {
+            printing::check_queue(s, bank)
+                .into_iter()
+                .filter(|c| paid.iter().any(|p| p.id == c.id))
+                .map(|c| c.id)
+                .collect()
+        };
+        assert_eq!(
+            queued(&mut s).len(),
+            2,
+            "the discount-only vendor has no $0 check"
+        );
+        // Void one To be printed payment: it leaves the queue, and a print
+        // naming it is refused as void.
+        let (gone, kept) = (paid[0].id, paid[1].id);
+        let pw = Secret::new(super::super::register::DEMO_CLOSING_PASSWORD);
+        void(&mut s, gone, Some(&pw)).expect("void");
+        assert_eq!(queued(&mut s), vec![kept]);
+        assert_eq!(get(&s, gone).and_then(|r| r.print_status), None);
+        let e = printing::print(
+            &mut s,
+            &cl_api::PrintChecks {
+                bank_account: bank,
+                checks: vec![gone],
+                starting_number: 9001,
+                format: cl_api::CheckFormat::Voucher,
+            },
+            None,
+        )
+        .expect_err("void");
+        assert_eq!(
+            cl_api::print_problem(&e),
+            Some(cl_api::PrintProblem::Voided)
+        );
+        // Print it with another check, void it, requeue the batch: the
+        // other goes back, the void one is skipped.
+        let other = printing::check_queue(&mut s, bank)
+            .into_iter()
+            .find(|c| c.id != kept)
+            .map(|c| c.id)
+            .expect("another queued check");
+        printing::print(
+            &mut s,
+            &cl_api::PrintChecks {
+                bank_account: bank,
+                checks: vec![other, kept],
+                starting_number: 9001,
+                format: cl_api::CheckFormat::Voucher,
+            },
+            None,
+        )
+        .expect("print");
+        void(&mut s, kept, Some(&pw)).expect("void printed");
+        let r = printing::requeue(&mut s, &[other, kept], &[DemoState::today()], Some(&pw))
+            .expect("requeue");
+        assert_eq!(r.checks.len(), 1);
+        assert_eq!(r.checks[0].id, other);
+        assert_eq!(r.skipped, vec![kept]);
+    }
 
     /// The mockup's list, figures and run through the demo engine.
     #[test]

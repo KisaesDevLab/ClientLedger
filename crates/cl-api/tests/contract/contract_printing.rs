@@ -54,6 +54,17 @@ fn print(
     checks: Vec<TransactionId>,
     first: u64,
 ) -> Result<cl_api::PrintedBatch, ApiError> {
+    print_keyed(h, s, bank, checks, first, cl_api::IdempotencyKey::new())
+}
+
+pub(crate) fn print_keyed(
+    h: &Harness,
+    s: &Session,
+    bank: AccountId,
+    checks: Vec<TransactionId>,
+    first: u64,
+    k: cl_api::IdempotencyKey,
+) -> Result<cl_api::PrintedBatch, ApiError> {
     h.run(s.printing().print_checks(
         &PrintChecks {
             bank_account: bank,
@@ -62,7 +73,128 @@ fn print(
             format: CheckFormat::Voucher,
         },
         &PostingOptions::default(),
+        k,
     ))
+}
+
+/// Whether `id` waits in `bank`'s print queue.
+pub(crate) fn in_queue(h: &Harness, s: &Session, bank: AccountId, id: TransactionId) -> bool {
+    h.run(s.printing().check_queue(Some(bank)))
+        .expect("print queue")
+        .iter()
+        .any(|r| r.id == id)
+}
+
+/// PR-2 U-115: a written check marked To be printed and then voided leaves
+/// the print queue and print refuses it with `CHECK_VOID`; it is still
+/// listed as a void check. (U-115 has no capability of its own: the pin's
+/// `idempotency-check-print-v1` names it.)
+pub fn voided_check_leaves_the_queue_u115(h: &Harness) {
+    if !h.require_cap(Capabilities::IDEMPOTENCY_CHECK_PRINT, "U-115") {
+        return;
+    }
+    let s = &h.s1;
+    let bank = detail_account(h, s, AccountType::Asset, "bank");
+    let id = queued(h, s, bank, date(2026, 11, 9));
+    assert!(in_queue(h, s, bank, id));
+    h.run(
+        s.transactions()
+            .void(id, "contract clean-up", &PostingOptions::default(), key()),
+    )
+    .expect("void");
+    assert!(!in_queue(h, s, bank, id), "a void check leaves the queue");
+    let e = print(h, s, bank, vec![id], 6101).expect_err("void");
+    assert_eq!(print_problem(&e), Some(PrintProblem::Voided), "{e:?}");
+    // The strict check reader expects a print status; the loose read-back
+    // reader answers for a void check (PR-2 B2).
+    let st = h
+        .run(s.checks().print_state(id))
+        .expect("read back")
+        .expect("the record stays");
+    assert!(st.void, "void");
+    assert_eq!(st.check_number, None, "never numbered");
+}
+
+/// PR-2: a voided check still reads as a check. Voided while queued (U-115
+/// clears its print status) it reads as `Unqueued`; voided after printing
+/// it keeps its number and `Printed`. Both read as void.
+pub fn voided_checks_read_back(h: &Harness) {
+    if !h.require_cap(Capabilities::IDEMPOTENCY_CHECK_PRINT, "U-115") {
+        return;
+    }
+    let s = &h.s1;
+    let bank = detail_account(h, s, AccountType::Asset, "bank");
+    let void = |id| {
+        h.run(
+            s.transactions()
+                .void(id, "contract clean-up", &PostingOptions::default(), key()),
+        )
+        .expect("void");
+    };
+
+    let queued_id = queued(h, s, bank, date(2026, 11, 10));
+    void(queued_id);
+    let c = h
+        .run(s.checks().get(queued_id))
+        .unwrap_or_else(|e| panic!("get voided queued check: {e:?}"));
+    assert_eq!(c.record.txn.status, cl_api::TxnStatus::Void);
+    assert_eq!(c.record.print_status, cl_api::PrintStatus::Unqueued);
+    assert!(!c.record.print_status.is_printable());
+    assert_eq!(c.record.check_number, None);
+
+    let printed_id = queued(h, s, bank, date(2026, 11, 10));
+    print(h, s, bank, vec![printed_id], 6301).expect("print");
+    void(printed_id);
+    let c = h
+        .run(s.checks().get(printed_id))
+        .unwrap_or_else(|e| panic!("get voided printed check: {e:?}"));
+    assert_eq!(c.record.txn.status, cl_api::TxnStatus::Void);
+    assert_eq!(c.record.print_status, cl_api::PrintStatus::Printed);
+    assert_eq!(c.record.check_number, Some(6301));
+}
+
+/// PR-2 U-116: the same key twice is one print run: the replay returns the
+/// first batch and the counter moves once.
+pub fn keyed_print_replays_u116(h: &Harness) {
+    if !h.require_cap(Capabilities::IDEMPOTENCY_CHECK_PRINT, "U-116") {
+        return;
+    }
+    let s = &h.s1;
+    let bank = detail_account(h, s, AccountType::Asset, "bank");
+    let a = queued(h, s, bank, date(2026, 11, 9));
+    let k = key();
+    let first = print_keyed(h, s, bank, vec![a], 6201, k.clone()).expect("print");
+    let again = print_keyed(h, s, bank, vec![a], 6201, k).expect("replay");
+    assert_eq!(again.batch_id, first.batch_id, "the first batch comes back");
+    assert_eq!(again.checks_printed, first.checks_printed);
+    let (settings, _) = h.run(s.printing().check_layout(bank)).expect("layout");
+    assert_eq!(settings.next_for(bank), Some(6202), "numbered once");
+}
+
+/// PR-2 U-117: a requeue that names a void check sends the others back and
+/// reports the void one as skipped.
+pub fn requeue_skips_void_u117(h: &Harness) {
+    if !h.require_cap(Capabilities::IDEMPOTENCY_CHECK_PRINT, "U-117") {
+        return;
+    }
+    let s = &h.s1;
+    let bank = detail_account(h, s, AccountType::Asset, "bank");
+    let a = queued(h, s, bank, date(2026, 11, 9));
+    let b = queued(h, s, bank, date(2026, 11, 9));
+    print(h, s, bank, vec![a, b], 6301).expect("print");
+    h.run(
+        s.transactions()
+            .void(a, "contract clean-up", &PostingOptions::default(), key()),
+    )
+    .expect("void");
+    let r = h
+        .run(s.printing().requeue(&[a, b], &PostingOptions::default()))
+        .expect("requeue");
+    assert_eq!(r.skipped, vec![a], "the void check is skipped");
+    assert_eq!(r.checks.len(), 1);
+    assert_eq!(r.checks[0].id, b);
+    assert!(in_queue(h, s, bank, b), "b is back in the queue");
+    assert!(!in_queue(h, s, bank, a));
 }
 
 /// U-106, U-107, U-109.
@@ -126,7 +258,7 @@ pub fn check_print_cycle(h: &Harness) {
     let r = h
         .run(s.printing().requeue(&[b], &PostingOptions::default()))
         .expect("requeue");
-    assert_eq!(r[0].spoiled_number, Some(1002));
+    assert_eq!(r.checks[0].spoiled_number, Some(1002));
     let spoiled = h.run(s.printing().spoiled(Some(bank))).expect("spoiled");
     let sp = spoiled.iter().find(|x| x.check == b).expect("logged");
     assert_eq!((sp.number, sp.reason), (1002, SpoiledReason::Requeue));
@@ -144,7 +276,8 @@ pub fn check_print_cycle(h: &Harness) {
         )
         .expect("reprint batch");
     assert!(
-        r.iter()
+        r.checks
+            .iter()
             .any(|x| x.id == a && x.spoiled_number == Some(1001))
     );
     let after = h.run(s.accounts().get(bank)).expect("bank").record.balance;
@@ -216,7 +349,7 @@ pub fn reprint_closed_period(h: &Harness) {
     let r = h
         .run(s.printing().requeue(&[id], &with(&pw)))
         .expect("with the password");
-    assert_eq!(r[0].spoiled_number, Some(2001));
+    assert_eq!(r.checks[0].spoiled_number, Some(2001));
     assert!(
         !h.run(s.set_closing_password(Some(&pw), None, key()))
             .expect("clear password")

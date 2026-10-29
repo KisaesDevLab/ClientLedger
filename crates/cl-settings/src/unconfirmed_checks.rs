@@ -3,6 +3,11 @@
 //! reminder survives a restart, and cleared when the owner answers "Did all
 //! checks print correctly?". Stored in `unconfirmed-checks.json` in the app
 //! data folder; ids and check numbers only (no payees or amounts).
+//!
+//! PR-2 B2: the batch is saved as an **intent** (the checks, the numbers
+//! planned and the run's key) *before* `POST /checks/print` is sent, so a
+//! lost reply or a crash leaves a record to read back; it becomes a printed
+//! batch once the engine's numbers are known.
 
 use crate::store::{read_capped, write_atomic};
 use serde::{Deserialize, Serialize};
@@ -23,6 +28,19 @@ pub struct UnconfirmedCheck {
     pub number: u64,
 }
 
+/// Where a saved batch is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BatchState {
+    /// The engine recorded the numbers; waiting for "Did all checks print
+    /// correctly?" (files from before PR-2 are all this).
+    #[default]
+    Printed,
+    /// About to be sent, or sent without an answer: the numbers are planned,
+    /// not known to be recorded. Read back before anything else (B2).
+    Intent,
+}
+
 /// One printed batch waiting for an answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnconfirmedBatch {
@@ -34,6 +52,16 @@ pub struct UnconfirmedBatch {
     pub printed_at: String,
     /// The checks, in print order.
     pub checks: Vec<UnconfirmedCheck>,
+    /// Printed, or only intended (B2).
+    #[serde(default)]
+    pub state: BatchState,
+    /// The print run's key (its `Idempotency-Key`), set on an intent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
+    /// The check stock sent (`CheckFormat` wire name), so a resend under
+    /// the key is the identical request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
 }
 
 /// Every unanswered batch.
@@ -82,7 +110,52 @@ impl UnconfirmedChecks {
             .filter(move |b| b.company_id == company_id)
     }
 
-    /// True while Home should show the reminder for the company.
+    /// The company's printed batches (not intents), oldest first.
+    pub fn printed_for<'a>(
+        &'a self,
+        company_id: &'a str,
+    ) -> impl Iterator<Item = &'a UnconfirmedBatch> + 'a {
+        self.for_company(company_id)
+            .filter(|b| b.state == BatchState::Printed)
+    }
+
+    /// The company's intents (to read back), oldest first.
+    pub fn intents_for<'a>(
+        &'a self,
+        company_id: &'a str,
+    ) -> impl Iterator<Item = &'a UnconfirmedBatch> + 'a {
+        self.for_company(company_id)
+            .filter(|b| b.state == BatchState::Intent)
+    }
+
+    /// The engine recorded the intent `key`'s numbers for `recorded` (check
+    /// ids): it becomes a printed batch of those checks; the others leave it.
+    /// False when there is no such intent.
+    pub fn promote(&mut self, company_id: &str, key: &str, recorded: &[&str]) -> bool {
+        let Some(b) = self.batches.iter_mut().find(|b| {
+            b.company_id == company_id
+                && b.state == BatchState::Intent
+                && b.client_key.as_deref() == Some(key)
+        }) else {
+            return false;
+        };
+        b.checks.retain(|c| recorded.contains(&c.check_id.as_str()));
+        b.state = BatchState::Printed;
+        self.normalize();
+        true
+    }
+
+    /// Nothing of the intent `key` was recorded: forget it.
+    pub fn drop_intent(&mut self, company_id: &str, key: &str) {
+        self.batches.retain(|b| {
+            !(b.company_id == company_id
+                && b.state == BatchState::Intent
+                && b.client_key.as_deref() == Some(key))
+        });
+    }
+
+    /// True while Home should show the reminder for the company (an intent
+    /// counts: Print Forms reads it back when opened).
     #[must_use]
     pub fn needs_attention(&self, company_id: &str) -> bool {
         self.for_company(company_id).next().is_some()
@@ -158,7 +231,41 @@ mod tests {
                     number: *n,
                 })
                 .collect(),
+            state: BatchState::Printed,
+            client_key: None,
+            format: None,
         }
+    }
+
+    /// B2: an intent is saved before the print is sent; promoted to the
+    /// checks the engine recorded, or dropped when none were; it counts for
+    /// the reminder and an old file (no state) reads as printed.
+    #[test]
+    fn an_intent_is_promoted_or_dropped_by_its_key() {
+        let mut u = UnconfirmedChecks::default();
+        let mut i = batch("co1", &[("c1", 1001), ("c2", 1002)]);
+        i.state = BatchState::Intent;
+        i.client_key = Some("k1".into());
+        u.add(i.clone());
+        assert!(u.needs_attention("co1"));
+        assert_eq!(u.intents_for("co1").count(), 1);
+        assert_eq!(u.printed_for("co1").count(), 0);
+        assert!(!u.promote("co1", "other", &["c1"]));
+        assert!(u.promote("co1", "k1", &["c1"]), "partial");
+        let b = u.printed_for("co1").next().expect("printed");
+        assert_eq!(b.checks.len(), 1);
+        assert_eq!(b.checks[0].number, 1001);
+        assert_eq!(u.intents_for("co1").count(), 0);
+        u.add(i);
+        u.drop_intent("co1", "k1");
+        assert_eq!(u.intents_for("co1").count(), 0);
+        assert_eq!(u.printed_for("co1").count(), 1, "the printed one stays");
+        let old = UnconfirmedChecks::parse(
+            r#"{"batches":[{"company_id":"co1","bank_account_id":"b","printed_at":"x","checks":[{"check_id":"c","number":5}]}]}"#,
+        );
+        assert_eq!(old.batches[0].state, BatchState::Printed);
+        let text = u.to_text();
+        assert_eq!(UnconfirmedChecks::parse(&text), u);
     }
 
     #[test]

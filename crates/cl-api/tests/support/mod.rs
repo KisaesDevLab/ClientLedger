@@ -290,8 +290,39 @@ impl Drop for Scratch {
     }
 }
 
-/// The workspace `target/` directory (for the PENDING list).
+/// The workspace `target/` directory (the built engine, the PENDING list).
+/// Asked of `cargo metadata` (`target_directory`): a `build-dir` in the
+/// cargo config puts the test binary outside it. Falls back to the
+/// nearest ancestor of the test binary named `target`. Computed once.
 fn target_dir() -> Option<PathBuf> {
+    static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| metadata_target_dir().or_else(ancestor_target_dir))
+        .clone()
+}
+
+fn metadata_target_dir() -> Option<PathBuf> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let out = std::process::Command::new(cargo)
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--no-deps",
+            "--offline",
+        ])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let dir = PathBuf::from(v.get("target_directory")?.as_str()?);
+    dir.is_dir().then_some(dir)
+}
+
+fn ancestor_target_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     exe.ancestors()
         .find(|d| d.file_name().is_some_and(|n| n == "target"))

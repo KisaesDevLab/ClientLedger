@@ -108,6 +108,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("paybills.problem.nothing_applied", "A ticked bill has nothing to pay. Enter an amount or untick it."),
     ("paybills.problem.credit_overused", "A credit is used for more than it has left. Lower it in Set credits."),
     ("paybills.problem.discount_needs_update", "Taking a discount needs a books update. Set the discount to zero."),
+    ("paybills.problem.sub_cent", "This bill has an amount with fractions of a cent. Use whole cents."),
     ("paybills.problem.too_large", "The amounts are too large."),
     ("paybills.problem.date_missing", "Enter the payment date."),
     ("paybills.problem.bad_value", "Enter an amount, like 214.07."),

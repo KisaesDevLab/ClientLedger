@@ -511,7 +511,12 @@ impl WriteCheckScreen {
                     Ok(Saved {
                         id,
                         number: v.record.check_number,
-                        print_status: v.record.print_status.as_wire().to_string(),
+                        print_status: v
+                            .record
+                            .print_status
+                            .as_wire()
+                            .unwrap_or_default()
+                            .to_string(),
                         txn_version: v.transaction_version(),
                         version: Some(v.version),
                         date: v.record.txn.txn_date,
@@ -575,7 +580,12 @@ impl WriteCheckScreen {
         Ok(Saved {
             id,
             number: got.record.check_number,
-            print_status: got.record.print_status.as_wire().to_string(),
+            print_status: got
+                .record
+                .print_status
+                .as_wire()
+                .unwrap_or_default()
+                .to_string(),
             txn_version: got.transaction_version(),
             version: Some(got.version),
             date: got.record.txn.txn_date,

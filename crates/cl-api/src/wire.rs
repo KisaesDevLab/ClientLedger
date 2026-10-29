@@ -288,6 +288,9 @@ impl Capabilities {
     pub const BILL_DISCOUNTS: &'static str = "bill-discounts-v1";
     /// U-102: `Idempotency-Key` on `POST /bill-payments`.
     pub const IDEMPOTENCY_PAY_BILLS: &'static str = "idempotency-pay-bills-v1";
+    /// The engine replays an `Idempotency-Key` on `POST /checks/print`
+    /// (U-116, PR-2 B2): a resend after a lost reply returns the first batch.
+    pub const IDEMPOTENCY_CHECK_PRINT: &'static str = "idempotency-check-print-v1";
     /// U-103: `checkNumber` (the first number) on a check run that is not
     /// printed later; one consecutive number per vendor, 409
     /// `CHECK_NUMBER_IN_USE`.

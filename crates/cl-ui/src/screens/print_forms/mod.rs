@@ -12,6 +12,13 @@
 //! logged as spoiled and reusable); a check in a closed period asks for the
 //! closing-date password (Q-P19ac).
 //!
+//! PR-2 B2: the intended batch (ids, planned numbers, the run's key) is saved
+//! before `POST /checks/print` goes. A lost reply is resent under the same
+//! key when the engine replays it (`idempotency-check-print-v1`); otherwise,
+//! and for an intent found on open, each check is read back: recorded, the
+//! run continues; none, the intent goes; some, those are asked about. No new
+//! run starts while the numbers are out.
+//!
 //! Printer Setup (`file.printer_setup`) opens the same window on its setup
 //! card: the printer's alignment offset in millimetres (this computer,
 //! Q-P19g), the plain-paper ruler test (Q-P19p), and the bank account's
@@ -29,8 +36,8 @@ use std::sync::mpsc::Receiver;
 
 use cl_api::{
     Account, AccountFilter, ApiError, Capabilities, CheckFormat, CheckLayout,
-    ClosedPeriodAuthorization, FormFooters, OrphanLabel, PostingOptions, PrintChecks, PrintProblem,
-    PrintedBatch, QueuedCheck, QueuedForm, RequestGroup, RequeuedCheck,
+    ClosedPeriodAuthorization, FormFooters, IdempotencyKey, OrphanLabel, PostingOptions,
+    PrintChecks, PrintProblem, PrintedBatch, QueuedCheck, QueuedForm, RequestGroup, Requeued,
 };
 use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
@@ -40,7 +47,7 @@ use cl_print::{
     PrintRun,
 };
 use cl_settings::{
-    PrintKind, PrinterPrefs, PrinterPrefsStore, UnconfirmedBatch, UnconfirmedCheck,
+    BatchState, PrintKind, PrinterPrefs, PrinterPrefsStore, UnconfirmedBatch, UnconfirmedCheck,
     UnconfirmedChecksStore,
 };
 use eframe::egui::{self, RichText, Ui};
@@ -152,6 +159,23 @@ pub(crate) enum Locked {
     Requeue(Vec<TransactionId>),
 }
 
+/// A print run on its way to the engine (B2): saved as an intent first.
+pub(crate) struct Intent {
+    key: IdempotencyKey,
+    req: PrintChecks,
+    planned: Vec<(TransactionId, u64)>,
+    password: Option<Secret>,
+    /// The same-key resend after a lost reply went out.
+    resent: bool,
+}
+
+/// A read-back in progress: the intent's key, its planned numbers, and
+/// whether this window sent it (else it was found on open).
+type Readback = (String, Vec<(TransactionId, u64)>, bool);
+
+/// A read-back's answer per check (recorded or not); `None`: undecided (S-b).
+type Decided = Option<Vec<(TransactionId, bool)>>;
+
 /// Read once.
 #[derive(Clone, Default)]
 pub(crate) struct Setup {
@@ -222,7 +246,14 @@ pub struct PrintFormsScreen {
     run_dates: Vec<CalendarDate>,
     run_bank: Option<AccountId>,
     record_task: Option<Task<PrintedBatch>>,
-    requeue_task: Option<Task<Vec<RequeuedCheck>>>,
+    intent: Option<Intent>,
+    readback_task: Option<Task<Decided>>,
+    readback: Option<Readback>,
+    /// Saved intents whose read-back could not decide this session (their
+    /// keys): skipped by [`Self::recover_intents`] until the window opens
+    /// again; the first one offers "Forget this print".
+    pub(crate) unresolved: Vec<String>,
+    requeue_task: Option<Task<Requeued>>,
     requeue_ids: Vec<TransactionId>,
     mark_task: Option<Task<cl_api::MarkedPrinted>>,
     job: Option<Receiver<Sent>>,
@@ -286,6 +317,113 @@ fn address_lines(p: &cl_api::CompanyProfileUpdate) -> Vec<String> {
         out.push(last);
     }
     out
+}
+
+/// The first number to offer after the engine refused `first` as used
+/// (N3): the engine's next number when it is past `first`, else the number
+/// after `first` (the engine's next is at or below a used number, so the
+/// next free one is further on; a second refusal moves on again).
+pub(crate) fn offer_after(engine_next: Option<u64>, first: u64) -> u64 {
+    engine_next
+        .filter(|n| *n > first)
+        .unwrap_or_else(|| first.saturating_add(1))
+}
+
+/// After this answer to `POST /checks/print` the engine may have recorded
+/// the run (PR-2 #3): its outcome is read back and the saved intent kept
+/// until then. False only for a refusal that recorded nothing (the input,
+/// the closed period, the password, permissions, a refusal before sending).
+pub(crate) fn keeps_key(e: &ApiError) -> bool {
+    !matches!(
+        e,
+        ApiError::Validation(_)
+            | ApiError::Local(_)
+            | ApiError::Conflict { .. }
+            | ApiError::ClosedPeriod(_)
+            | ApiError::ClosingPasswordRejected
+            | ApiError::ClosingPasswordRequired
+            | ApiError::ClosingPasswordOwnerRequired
+            | ApiError::ClosingPasswordRateLimited { .. }
+            | ApiError::Unauthorized(_)
+            | ApiError::Forbidden { .. }
+            | ApiError::NotFound { .. }
+            | ApiError::Unsupported { .. }
+            | ApiError::NoCompanyOpen
+            | ApiError::RateLimited { .. }
+            | ApiError::PayloadTooLarge
+            | ApiError::Protocol { .. }
+            | ApiError::OfflineUnavailable { .. }
+            | ApiError::FeatureNotEnabled { .. }
+    )
+}
+
+/// Which planned checks the engine recorded, from each check's state read
+/// back (`None`: the record is gone). Recorded: it carries its planned
+/// number, prints as printed, is not void, and was numbered by this run (a
+/// check with no batch was not numbered by a print run).
+///
+/// This run's batch: the only one the checks name, or, when they name more
+/// than one (a check reprinted alone later under its old number), the one
+/// more than half of the planned checks name. With no such majority the run
+/// can't be told apart and the answer is `None` (undecided: the saved run
+/// waits for the next open or "Forget this print").
+pub(crate) fn decide_readback(
+    planned: &[(TransactionId, u64)],
+    states: &[Option<cl_api::CheckPrintState>],
+) -> Decided {
+    let as_planned = |n: u64, s: &Option<cl_api::CheckPrintState>| {
+        s.as_ref()
+            .filter(|s| s.recorded_as(n) && s.print_batch_id.is_some())
+            .and_then(|s| s.print_batch_id.clone())
+    };
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for b in planned
+        .iter()
+        .zip(states)
+        .filter_map(|((_, n), s)| as_planned(*n, s))
+    {
+        match counts.iter_mut().find(|(x, _)| *x == b) {
+            Some((_, c)) => *c += 1,
+            None => counts.push((b, 1)),
+        }
+    }
+    let batch = match counts.as_slice() {
+        [] => None,
+        [(only, _)] => Some(only.clone()),
+        many => Some(
+            many.iter()
+                .find(|(_, c)| c.saturating_mul(2) > planned.len())?
+                .0
+                .clone(),
+        ),
+    };
+    Some(
+        planned
+            .iter()
+            .zip(states)
+            .map(|((id, n), s)| (*id, batch.is_some() && as_planned(*n, s) == batch))
+            .collect(),
+    )
+}
+
+/// A check that may print: never a $0.00 one (S1; engines before U-117
+/// queue one for a vendor paid by credits or a discount alone).
+pub(crate) fn printable(c: &QueuedCheck) -> bool {
+    c.amount.is_positive()
+}
+
+/// The checks ticked when the queue loads: every printable one, or the
+/// printable ones of `preselect` (Print from a form).
+pub(crate) fn default_picks(
+    checks: &[QueuedCheck],
+    preselect: &[TransactionId],
+) -> BTreeSet<TransactionId> {
+    checks
+        .iter()
+        .filter(|c| printable(c))
+        .filter(|c| preselect.is_empty() || preselect.contains(&c.id))
+        .map(|c| c.id)
+        .collect()
 }
 
 fn banks_of(accounts: &[Account]) -> Vec<(AccountId, String)> {
@@ -356,6 +494,10 @@ impl PrintFormsScreen {
             run_dates: Vec::new(),
             run_bank: None,
             record_task: None,
+            intent: None,
+            readback_task: None,
+            readback: None,
+            unresolved: Vec::new(),
             requeue_task: None,
             requeue_ids: Vec::new(),
             mark_task: None,
@@ -387,6 +529,7 @@ impl PrintFormsScreen {
         s.sync_offset_fields();
         s.unanswered = s.read_unanswered();
         s.start_setup();
+        s.recover_intents();
         s.poll();
         s
     }
@@ -554,7 +697,7 @@ impl PrintFormsScreen {
     pub(crate) fn picked_checks(&self) -> Vec<QueuedCheck> {
         self.checks
             .iter()
-            .filter(|c| self.picked.contains(&c.id))
+            .filter(|c| self.picked.contains(&c.id) && printable(c))
             .cloned()
             .collect()
     }
@@ -578,6 +721,16 @@ impl PrintFormsScreen {
     /// Preview the ticked checks: number them from the first number, read
     /// their stubs, lay them out.
     pub(crate) fn preview_checks(&mut self) {
+        // B2: never a new run while the last one's numbers are out, nor
+        // while "Did all checks print correctly?" waits for its answer.
+        if self.recording() {
+            self.notice = Some("print.busy_recording");
+            return;
+        }
+        if self.asking {
+            self.notice = Some("print.answer_first");
+            return;
+        }
         self.clear_messages();
         let picked = self.picked_checks();
         let mut queue = PrintQueue::new();
@@ -936,104 +1089,424 @@ impl PrintFormsScreen {
         }
     }
 
+    /// The check numbers are being recorded or read back: nothing may
+    /// replace the run until the answer is in (B2).
+    pub(crate) fn recording(&self) -> bool {
+        self.record_task.is_some() || self.readback_task.is_some() || self.intent.is_some()
+    }
+
     fn record(&mut self, password: Option<Secret>) {
+        if self.recording() {
+            self.notice = Some("print.busy_recording");
+            return;
+        }
         let (Some(run), Some(bank)) = (self.run.as_mut(), self.run_bank) else {
             return;
         };
         let Ok(call) = run.record_print() else {
             return;
         };
+        let planned: Vec<(TransactionId, u64)> = call
+            .check_ids
+            .iter()
+            .zip(call.starting_number..)
+            .map(|(id, n)| (*id, n))
+            .collect();
         let req = PrintChecks {
             bank_account: bank,
             checks: call.check_ids,
             starting_number: call.starting_number,
             format: self.layout.format,
         };
-        let demo = self
-            .link
-            .demo_state()
-            .map(|mut d| crate::company::demo::printing::print(&mut d, &req, password.as_ref()));
+        // B2: the batch is on this computer before anything is sent, so a
+        // lost reply or a crash can be read back.
+        let key = IdempotencyKey::new();
+        // PR-2 #4: no record of the run on this computer, nothing sent.
+        if self.save_intent(&key, &req, &planned).is_err() {
+            if let Some(run) = self.run.as_mut() {
+                let _ = run.record_failed();
+            }
+            self.notice = Some("print.intent_unsaved");
+            return;
+        }
+        self.intent = Some(Intent {
+            key,
+            req,
+            planned,
+            password,
+            resent: false,
+        });
+        self.send_record();
+    }
+
+    /// Saves the intended batch (ids, planned numbers, the run's key).
+    /// `Err` when it could not be saved (no store, no company, or the write
+    /// failed): the run must not be sent.
+    fn save_intent(
+        &self,
+        key: &IdempotencyKey,
+        req: &PrintChecks,
+        planned: &[(TransactionId, u64)],
+    ) -> Result<(), ()> {
+        let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) else {
+            tracing::warn!("no place to save the intended check batch; nothing sent");
+            return Err(());
+        };
+        let mut all = store.load();
+        all.add(UnconfirmedBatch {
+            company_id: company,
+            bank_account_id: req.bank_account.to_string(),
+            printed_at: chrono::Utc::now().to_rfc3339(),
+            checks: planned
+                .iter()
+                .map(|(id, n)| UnconfirmedCheck {
+                    check_id: id.to_string(),
+                    number: *n,
+                })
+                .collect(),
+            state: BatchState::Intent,
+            client_key: Some(key.to_string()),
+            format: Some(req.format.as_wire().to_string()),
+        });
+        store.save(&all).map_err(|_| {
+            tracing::warn!("the intended check batch could not be saved; nothing sent");
+        })
+    }
+
+    /// Sends the intent's print run (again under the same key after a lost
+    /// reply on an engine that replays it).
+    fn send_record(&mut self) {
+        let Some(i) = self.intent.as_ref() else {
+            return;
+        };
+        let (req, password, key) = (i.req.clone(), i.password.clone(), i.key.clone());
+        let demo = self.link.demo_state().map(|mut d| {
+            crate::company::demo::printing::print_keyed(
+                &mut d,
+                &req,
+                password.as_ref(),
+                &key.to_string(),
+            )
+        });
         if let Some(r) = demo {
             self.recorded(r);
             return;
         }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            self.recorded(Err(ApiError::NoCompanyOpen));
             return;
         };
         let label = OrphanLabel {
             what: "orphan.print_checks",
-            key: None,
+            key: Some(key.clone()),
         };
         let r = group.write(&session, label, move |s| async move {
-            s.printing().print_checks(&req, &options(password)).await
+            s.printing()
+                .print_checks(&req, &options(password), key)
+                .await
         });
         match r {
             Ok(p) => self.record_task = Some(Task::Pending(p)),
-            Err(_) => {
-                if let Some(run) = self.run.as_mut() {
-                    let _ = run.record_failed();
-                }
-            }
+            // Not queued, so not sent: a plain refusal.
+            Err(_) => self.recorded(Err(ApiError::Local(cl_api::LocalValidation::InvalidValue))),
         }
     }
 
     fn recorded(&mut self, r: Result<PrintedBatch, ApiError>) {
-        let Some(run) = self.run.as_mut() else {
+        let Some(mut intent) = self.intent.take() else {
+            // Never dropped quietly: the batch stays saved as an intent and
+            // is read back when Print Forms opens again.
+            tracing::warn!("a check print answer came with no print run waiting");
             return;
         };
         match r {
             Ok(_) => {
-                self.closing_prompt.saved();
-                let Ok(pending) = run.recorded() else {
-                    return;
-                };
-                if let (Some(store), Some(company), Some(bank)) =
-                    (&self.unconfirmed, self.company_key(), self.run_bank)
-                {
-                    let mut all = store.load();
-                    all.add(UnconfirmedBatch {
-                        company_id: company,
-                        bank_account_id: bank.to_string(),
-                        printed_at: chrono::Utc::now().to_rfc3339(),
-                        checks: pending
-                            .checks
-                            .iter()
-                            .map(|(id, n)| UnconfirmedCheck {
-                                check_id: id.to_string(),
-                                number: *n,
-                            })
-                            .collect(),
-                    });
-                    if store.save(&all).is_err() {
-                        tracing::warn!("the printed batch could not be saved");
-                    }
-                }
-                self.printing_changed();
-                self.remember_printer(PrintKind::Checks);
-                self.send_to_printer("checks", 1);
-                self.asking = true;
-                self.first_bad.clear();
-                self.link
-                    .bus()
-                    .publish(crate::data_bus::Change::ledger(self.run_bank));
+                let all: Vec<TransactionId> = intent.planned.iter().map(|(id, _)| *id).collect();
+                self.record_succeeded(&intent.key.to_string(), &intent.planned, &all);
+            }
+            // The engine replays the key: the same request again, once.
+            Err(ApiError::OutcomeUnknown { keyed: true, .. }) if !intent.resent => {
+                intent.resent = true;
+                self.intent = Some(intent);
+                self.send_record();
+            }
+            // After the keyed resend any answer but success leaves the first
+            // send's outcome open; so does an error that may have recorded
+            // (PR-2 #3): read back.
+            Err(e) if intent.resent || keeps_key(&e) => {
+                self.start_readback(intent.key.to_string(), intent.planned.clone(), true);
             }
             Err(e) => {
-                let _ = run.record_failed();
+                if let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) {
+                    let mut all = store.load();
+                    all.drop_intent(&company, &intent.key.to_string());
+                    if store.save(&all).is_err() {
+                        tracing::warn!("the intended check batch could not be cleared");
+                    }
+                }
+                if let Some(run) = self.run.as_mut() {
+                    let _ = run.record_failed();
+                }
                 let supported = kit::closing_supported(&self.link);
                 if !self
                     .closing_prompt
                     .failed(&e, Locked::Record, supported, self.setup.closing)
                 {
                     self.problem = cl_api::print_problem(&e);
-                    if self.problem == Some(PrintProblem::NumberInUse) {
-                        self.find_free_number();
-                    }
-                    if self.problem.is_none() {
-                        self.error = Some(e);
+                    match self.problem {
+                        Some(PrintProblem::NumberInUse) => self.find_free_number(),
+                        // B1: a voided check left the queue; the list is
+                        // read again without it.
+                        Some(PrintProblem::Voided) => {
+                            self.preview = None;
+                            self.run = None;
+                            self.load_queue();
+                        }
+                        Some(_) => {}
+                        None => self.error = Some(e),
                     }
                 }
             }
         }
+    }
+
+    /// The engine has these checks' numbers (`recorded`, a subset of
+    /// `planned` after a partial read-back): the saved intent becomes the
+    /// printed batch. All of them: the pages go to the printer and the
+    /// question shows. Some: nothing is sent (the preview has pages for
+    /// checks without numbers) and the question asks about those.
+    fn record_succeeded(
+        &mut self,
+        key: &str,
+        planned: &[(TransactionId, u64)],
+        recorded: &[TransactionId],
+    ) {
+        self.closing_prompt.saved();
+        if let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) {
+            let mut all = store.load();
+            let ids: Vec<String> = recorded.iter().map(ToString::to_string).collect();
+            let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+            all.promote(&company, key, &refs);
+            if store.save(&all).is_err() {
+                tracing::warn!("the printed batch could not be saved");
+                // Not read back again this session (no second question).
+                self.unresolved.push(key.to_string());
+            }
+        }
+        let whole = recorded.len() == planned.len();
+        let in_session = self
+            .run
+            .as_ref()
+            .is_some_and(|r| r.state() == cl_print::RunState::Recording);
+        if whole && in_session {
+            if let Some(run) = self.run.as_mut() {
+                let _ = run.recorded();
+            }
+            self.remember_printer(PrintKind::Checks);
+            self.send_to_printer("checks", 1);
+            self.asking = true;
+            self.first_bad.clear();
+        } else if in_session {
+            let subset: Vec<(TransactionId, u64)> = planned
+                .iter()
+                .filter(|(id, _)| recorded.contains(id))
+                .copied()
+                .collect();
+            self.preview = None;
+            self.run = Some(PrintRun::unconfirmed(subset));
+            self.asking = true;
+            self.first_bad.clear();
+            self.notice = Some("print.recover.partial");
+        }
+        self.printing_changed();
+        self.link
+            .bus()
+            .publish(crate::data_bus::Change::ledger(self.run_bank));
+        if !in_session {
+            // After a restart: the reminder's question for what printed.
+            self.reopen_question();
+            if !whole {
+                self.notice = Some("print.recover.partial");
+            }
+        }
+    }
+
+    /// Reads back each planned check's number and print state (B2): were
+    /// the numbers recorded?
+    fn start_readback(
+        &mut self,
+        key: String,
+        planned: Vec<(TransactionId, u64)>,
+        in_session: bool,
+    ) {
+        self.notice = Some("print.recover.checking");
+        self.readback = Some((key, planned.clone(), in_session));
+        if let Some(d) = self.link.demo_state() {
+            let states: Vec<Option<cl_api::CheckPrintState>> = planned
+                .iter()
+                .map(|(id, _)| crate::company::demo::printing::print_state(&d, *id))
+                .collect();
+            drop(d);
+            self.readback_task = Some(Task::ready(decide_readback(&planned, &states)));
+            return;
+        }
+        let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
+            self.readback_task = None;
+            self.readback_failed();
+            return;
+        };
+        // Decided per check (PR-2 B2): a check that is gone, void or no
+        // longer a check is not recorded; only an engine that can't answer
+        // leaves the whole run unknown.
+        if let Ok(p) = group.read(&session, move |s| async move {
+            let mut states = Vec::with_capacity(planned.len());
+            for (id, _) in &planned {
+                states.push(s.checks().print_state(*id).await?);
+            }
+            Ok(decide_readback(&planned, &states))
+        }) {
+            self.readback_task = Some(Task::Pending(p));
+        } else {
+            self.readback_task = None;
+            self.readback_failed();
+        }
+    }
+
+    /// The read-back answered: continue as recorded, drop the intent, or
+    /// treat the recorded part as printed.
+    fn read_back(&mut self, found: &[(TransactionId, bool)]) {
+        let Some((key, planned, in_session)) = self.readback.take() else {
+            return;
+        };
+        let recorded: Vec<TransactionId> = found
+            .iter()
+            .filter(|(_, r)| *r)
+            .map(|(id, _)| *id)
+            .collect();
+        if recorded.is_empty() && in_session {
+            // S-a: this read-back follows an unknown outcome (a lost reply,
+            // or a resend that gave up while the first send was still in
+            // progress), so the first send may still record the numbers:
+            // the saved run stays undecided and the next open reads it back.
+            self.preview = None;
+            self.run = None;
+            if !self.unresolved.contains(&key) {
+                self.unresolved.push(key);
+            }
+            self.notice = Some("print.recover.not_yet");
+            self.printing_changed();
+        } else if recorded.is_empty() {
+            if let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) {
+                let mut all = store.load();
+                all.drop_intent(&company, &key);
+                if store.save(&all).is_err() {
+                    tracing::warn!("the intended check batch could not be cleared");
+                    // Not read back again this session (no loop).
+                    self.unresolved.push(key.clone());
+                }
+            }
+            // On the next open the first send has long finished: nothing
+            // recorded means nothing printed.
+            self.printing_changed();
+            self.notice = None;
+        } else {
+            self.notice = None;
+            self.record_succeeded(&key, &planned, &recorded);
+        }
+        if !self.asking {
+            self.recover_intents();
+        }
+    }
+
+    /// The read-back could not be made: the intent stays saved (read back
+    /// on the next open, or forgotten by the owner) and nothing more is sent
+    /// for this run; the other saved intents are still read back.
+    fn readback_failed(&mut self) {
+        let Some((key, _, in_session)) = self.readback.take() else {
+            return;
+        };
+        if in_session {
+            self.preview = None;
+            self.run = None;
+        }
+        if !self.unresolved.contains(&key) {
+            self.unresolved.push(key);
+        }
+        self.notice = Some("print.recover.unknown");
+        self.recover_intents();
+    }
+
+    /// The first saved intent the read-back could not decide: its key and
+    /// planned numbers (for "Forget this print").
+    pub(crate) fn stuck_intent(&self) -> Option<(String, Vec<u64>)> {
+        let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) else {
+            return None;
+        };
+        let all = store.load();
+        all.intents_for(&company).find_map(|b| {
+            let key = b.client_key.clone()?;
+            self.unresolved
+                .contains(&key)
+                .then(|| (key, b.checks.iter().map(|c| c.number).collect()))
+        })
+    }
+
+    /// "Forget this print": the owner drops an intent the read-back could
+    /// not decide (owner 2026-10-29, Q-PR2d). Logged; Home's reminder
+    /// clears when nothing else waits.
+    pub(crate) fn forget_intent(&mut self, key: &str) {
+        // Never while the question is open: the answer may resolve it.
+        if self.recording() || self.asking {
+            return;
+        }
+        if let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) {
+            let mut all = store.load();
+            all.drop_intent(&company, key);
+            if store.save(&all).is_err() {
+                tracing::warn!("the forgotten check batch could not be cleared");
+                self.notice = Some("print.recover.forget_failed");
+                return;
+            }
+        }
+        // No numbers or names at info level: the key is a random id.
+        tracing::info!(
+            intent = key,
+            "owner forgot a check print whose outcome was unknown"
+        );
+        self.unresolved.retain(|k| k != key);
+        self.notice = Some("print.recover.forgotten");
+        self.printing_changed();
+    }
+
+    /// Read back every saved intent left by a lost reply or a crash, oldest
+    /// first, one at a time (each answer starts the next); intents that
+    /// could not be decided this session wait for "Forget this print" or
+    /// the next open.
+    pub(crate) fn recover_intents(&mut self) {
+        if self.recording() || self.asking {
+            return;
+        }
+        let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) else {
+            return;
+        };
+        let all = store.load();
+        let Some(b) = all.intents_for(&company).find(|b| {
+            b.client_key
+                .as_ref()
+                .is_some_and(|k| !self.unresolved.contains(k))
+        }) else {
+            return;
+        };
+        let Some(key) = b.client_key.clone() else {
+            return;
+        };
+        let planned: Vec<(TransactionId, u64)> = b
+            .checks
+            .iter()
+            .filter_map(|c| Some((TransactionId::parse(&c.check_id).ok()?, c.number)))
+            .collect();
+        self.run_bank = AccountId::parse(&b.bank_account_id).ok();
+        self.start_readback(key, planned, false);
     }
 
     /// The engine refused a used number: offer the next free first number
@@ -1043,7 +1516,7 @@ impl PrintFormsScreen {
         let Some(bank) = self.run_bank else {
             return;
         };
-        let count = self.picked.len() as u64;
+        let count = self.picked_checks().len() as u64;
         let first = self.first().unwrap_or(1);
         if let Some(mut d) = self.link.demo_state() {
             let used = crate::company::demo::printing::used_numbers_of(&mut d, bank);
@@ -1059,20 +1532,30 @@ impl PrintFormsScreen {
         };
         if let Ok(p) = group.read(&session, move |s| async move {
             let (settings, _) = s.printing().check_layout(bank).await?;
-            Ok(settings
-                .next_for(bank)
-                .map(u64::from)
-                .filter(|n| *n > first))
+            Ok(Some(offer_after(
+                settings.next_for(bank).map(u64::from),
+                first,
+            )))
         }) {
             self.offer_task = Some(Task::Pending(p));
         }
     }
 
-    /// Use the offered first number.
+    /// Use the offered first number: the run and the preview are numbered
+    /// again from it, so Print records exactly the number shown (N3).
     pub(crate) fn take_offer(&mut self) {
         if let Some(n) = self.offer.take() {
             self.first_number = n.to_string();
             self.problem = None;
+            let ready = self
+                .run
+                .as_ref()
+                .is_some_and(|r| r.state() == cl_print::RunState::Ready);
+            if ready {
+                self.preview = None;
+                self.run = None;
+                self.preview_checks();
+            }
         }
     }
 
@@ -1105,6 +1588,8 @@ impl PrintFormsScreen {
                     self.run = None;
                     self.notice = Some("print.confirm.done");
                     self.load_queue();
+                    // The next saved intent, if any, is read back now.
+                    self.recover_intents();
                 }
             }
             Err(_) => self.notice = Some("print.confirm.bad_number"),
@@ -1121,6 +1606,7 @@ impl PrintFormsScreen {
         self.notice = Some("print.confirm.later_note");
         self.printing_changed();
         self.load_queue();
+        self.recover_intents();
     }
 
     fn resolve(&mut self, ids: &[TransactionId]) {
@@ -1160,15 +1646,22 @@ impl PrintFormsScreen {
         }
     }
 
-    fn requeued(&mut self, r: Result<Vec<RequeuedCheck>, ApiError>) {
+    fn requeued(&mut self, r: Result<Requeued, ApiError>) {
         match r {
-            Ok(_) => {
+            Ok(done) => {
                 self.closing_prompt.saved();
-                let ids = std::mem::take(&mut self.requeue_ids);
+                // Every id asked for is answered: sent back, or skipped by
+                // the engine because it is void (S2, U-117).
+                let mut ids = std::mem::take(&mut self.requeue_ids);
+                ids.extend(done.skipped.iter().copied());
                 self.resolve(&ids);
                 self.preview = None;
                 self.run = None;
-                self.notice = Some("print.confirm.requeued");
+                self.notice = Some(if done.skipped.is_empty() {
+                    "print.confirm.requeued"
+                } else {
+                    "print.confirm.skipped"
+                });
                 if let Some(id) = self.reprint.take() {
                     self.preselect = vec![id];
                 }
@@ -1176,6 +1669,7 @@ impl PrintFormsScreen {
                     .bus()
                     .publish(crate::data_bus::Change::ledger(self.run_bank));
                 self.load_queue();
+                self.recover_intents();
             }
             Err(e) => {
                 let supported = kit::closing_supported(&self.link);
@@ -1233,11 +1727,14 @@ impl PrintFormsScreen {
     /// Reopen the question for the oldest unanswered batch (Home's
     /// reminder, or after a restart).
     pub(crate) fn reopen_question(&mut self) {
+        if self.recording() {
+            return;
+        }
         let (Some(store), Some(company)) = (&self.unconfirmed, self.company_key()) else {
             return;
         };
         let all = store.load();
-        let Some(b) = all.for_company(&company).next() else {
+        let Some(b) = all.printed_for(&company).next() else {
             return;
         };
         let checks: Vec<(TransactionId, u64)> = b
@@ -1396,15 +1893,13 @@ impl PrintFormsScreen {
                         }
                         self.preselect.clear();
                     }
-                    self.picked = if self.preselect.is_empty() {
-                        q.checks.iter().map(|c| c.id).collect()
-                    } else {
-                        q.checks
-                            .iter()
-                            .filter(|c| self.preselect.contains(&c.id))
-                            .map(|c| c.id)
-                            .collect()
-                    };
+                    self.picked = default_picks(&q.checks, &self.preselect);
+                    // Only a $0.00 check was asked for (S1): nothing to
+                    // print, said plainly; the request is not kept.
+                    if !self.preselect.is_empty() && self.picked.is_empty() {
+                        self.preselect.clear();
+                        self.notice = Some("print.nothing_picked");
+                    }
                     if self.first_number.trim().is_empty() || self.run.is_none() {
                         self.first_number = q.next.map(|n| n.to_string()).unwrap_or_default();
                     }
@@ -1413,7 +1908,7 @@ impl PrintFormsScreen {
                     self.setup_style = q.layout.format;
                     self.setup_block = q.layout.print_company_block;
                     self.checks = q.checks;
-                    if !self.preselect.is_empty() && !self.picked.is_empty() {
+                    if !self.preselect.is_empty() && !self.picked.is_empty() && !self.recording() {
                         self.preselect.clear();
                         self.preview_checks();
                     }
@@ -1452,6 +1947,14 @@ impl PrintFormsScreen {
         if let Some(r) = self.record_task.as_mut().and_then(Task::try_take) {
             self.record_task = None;
             self.recorded(r);
+        }
+        if let Some(r) = self.readback_task.as_mut().and_then(Task::try_take) {
+            self.readback_task = None;
+            match r {
+                Ok(Some(found)) => self.read_back(&found),
+                // S-b: the checks name batches with no majority: undecided.
+                Ok(None) | Err(_) => self.readback_failed(),
+            }
         }
         if let Some(r) = self.requeue_task.as_mut().and_then(Task::try_take) {
             self.requeue_task = None;
@@ -1514,7 +2017,7 @@ impl PrintFormsScreen {
             && self.loaded
             && self.setup_task.is_none()
             && !self.asking
-            && self.record_task.is_none()
+            && !self.recording()
         {
             self.preview_deposit();
         }
@@ -1526,6 +2029,7 @@ impl PrintFormsScreen {
             || self.forms_task.is_some()
             || self.build_task.is_some()
             || self.record_task.is_some()
+            || self.readback_task.is_some()
             || self.requeue_task.is_some()
             || self.mark_task.is_some()
             || self.layout_task.is_some()
@@ -1565,6 +2069,7 @@ impl PrintFormsScreen {
             "asking": self.asking,
             "sent": self.sent.map(Sent::wire),
             "unanswered": self.has_unanswered(),
+            "unresolved": self.unresolved.len(),
             "setup_open": self.setup_open,
             "offset": [self.offset_x, self.offset_y],
             "logo": self.logo.is_some(),
@@ -1599,6 +2104,25 @@ impl PrintFormsScreen {
         if let Some(k) = self.notice {
             form::hint(ui, &tokens, &t(k));
         }
+        // Q-PR2d: an intent the read-back could not decide can be forgotten.
+        if !self.unresolved.is_empty()
+            && !self.recording()
+            && let Some((key, numbers)) = self.stuck_intent()
+        {
+            let range = match (numbers.iter().min(), numbers.iter().max()) {
+                (Some(a), Some(b)) if a != b => format!("{a}\u{2013}{b}"),
+                (Some(a), _) => a.to_string(),
+                _ => String::new(),
+            };
+            form::inline_warning(
+                ui,
+                &tokens,
+                &t_with("print.recover.stuck", &[("range", &range)]),
+            );
+            if !self.asking && ui.button(t("print.recover.forget")).clicked() {
+                self.forget_intent(&key);
+            }
+        }
         if let Some(p) = self.problem {
             let text = match (p, self.offer) {
                 (PrintProblem::NumberInUse, Some(n)) => t_with(
@@ -1608,6 +2132,7 @@ impl PrintFormsScreen {
                 (PrintProblem::NumberInUse, None) => t("print.problem.number_in_use"),
                 (PrintProblem::QueueChanged, _) => t("print.problem.queue_changed"),
                 (PrintProblem::NotPrinted, _) => t("print.problem.not_printed"),
+                (PrintProblem::Voided, _) => t("print.problem.voided"),
             };
             form::inline_warning(ui, &tokens, &text);
             if let Some(n) = self.offer.filter(|_| p == PrintProblem::NumberInUse)
@@ -1740,8 +2265,15 @@ impl PrintFormsScreen {
                 amount_head(ui);
                 ui.end_row();
                 for c in &self.checks {
+                    // S1: a $0.00 check (credits or a discount paid it all)
+                    // never prints; it can't be ticked and says why.
+                    let printable = printable(c);
                     let mut on = self.picked.contains(&c.id);
-                    if named_box(ui, &mut on, &c.payee).changed() {
+                    let changed = ui
+                        .add_enabled_ui(printable, |ui| named_box(ui, &mut on, &c.payee))
+                        .inner
+                        .changed();
+                    if changed {
                         if on {
                             self.picked.insert(c.id);
                         } else {
@@ -1751,6 +2283,11 @@ impl PrintFormsScreen {
                     ui.label(crate::shell::us_date(c.date));
                     ui.label(&c.payee);
                     amount_cell(ui, &c.amount.format(style));
+                    if !printable {
+                        ui.label(
+                            RichText::new(t("print.zero_amount")).color(tokens.text_secondary),
+                        );
+                    }
                     ui.end_row();
                 }
             });
@@ -2143,6 +2680,12 @@ impl Screen for PrintFormsScreen {
         if let OpenPayload::PrintChecks(ids) = payload {
             self.preselect = ids;
             self.tab = Tab::Checks;
+            // B2: the run whose numbers are out stays; the checks wait
+            // (previewed once the answer is in and the list is read).
+            if self.recording() {
+                self.notice = Some("print.busy_recording");
+                return true;
+            }
             if self.loaded && self.setup_task.is_none() {
                 // Look from the first bank account on (see `poll`).
                 if let Some((first, _)) = self.setup.banks.first() {
@@ -2164,6 +2707,10 @@ impl Screen for PrintFormsScreen {
         }
         if let OpenPayload::ReprintCheck(id, date) = payload {
             self.tab = Tab::Checks;
+            if self.recording() {
+                self.notice = Some("print.busy_recording");
+                return true;
+            }
             self.run_dates = vec![date];
             self.reprint = Some(id);
             self.requeue(vec![id], None);

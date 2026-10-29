@@ -2,6 +2,34 @@
 
 Older STATE.md log entries, newest first. Read only when you need the history of a past phase; `STATE.md` keeps the current board and the last few entries.
 
+- 2026-10-27 — A04 (ADD-01) complete on `phase/A04-review-queue`; PR with auto-merge. Shipped:
+  - Review queue: files from intake folders become document drafts on arrival (claim on arrival, inbox state v3, `DraftLink`); rows show kind, arrival date and file name; keyboard through the whole queue.
+  - Draft → form: "Enter this as" bill, card charge or check; the form opens filled from the read with the document beside it (docked or popped out); convert or attach through `DraftSession`; HMAC digest over the request body actually sent (`ConvertBody::wire_body`).
+  - Compare tools: highlights linking each filled field to its spot on the page, click to fill, the check list; one "Filled from" banner naming a saved layout.
+  - Duplicates: the register is searched before any closing-date password; a failed search never posts (Try again / Enter as new / Back); an engine match attaches only at the exact total, ±7 days and an allowed kind (`register_match` allowlist by `Probe.side`); attach never changes the books.
+  - Reading in the worker gained a region re-read (protocol v4); "Ask AI to help" in drafts; vendor layouts learned on accept; demo drafts backend.
+  - Engine PRs #180 (U-95, document-drafts-attach-v1) and #182 (U-97, archive reader splits no multi-byte characters) merged; pin 97d4d4cf.
+  Acceptance (addenda/ADD-01-document-intake.md A04):
+  - [x] A folder of mixed bills and receipts is read and worked through by keyboard, each accepted draft posting exactly what was reviewed (`doc_review_flow`, `doc_review_post` light and dark; form-to-body digest tests for bill, card and check).
+  - [x] Every filled field links to its spot in the docked and popped-out viewer; click to fill works (compare unit tests, `doc_compare`; pointer drags not scriptable, see follow-ups).
+  - [x] No duplicate expense for a receipt already in the register (`doc_review_attach`: closed-period attach adds no record, the file lands on check 4401).
+  Reviews: plan review (opus), security reviews of U-95 and protocol 4 (2 Medium + 7 Low, fixed), combined review (2 blocking: closing password before the register search, failed search posts; 5 should-fix, 6 low; all fixed), ui-verifier (12 items, fixed).
+  Also: xtask finds the shared build dir through cargo metadata; usage rules Q-301 in force from this phase; owner answered A06's balance line (CSV report amounts) and U-94 (go).
+  Agents: scout/opus, architect/opus, impl/opus (WPs, fix pass), engine-impl/opus (U-95, U-97), security-review/opus ×2, review/opus, ui-verifier/opus, docs-writer/sonnet.
+- 2026-10-26 — A02 (ADD-01) complete on `phase/A02-popout-viewer`; PR with auto-merge. Shipped:
+  - Viewer formats: PDF (PDFium), JPG, PNG and multi-page TIFF (`tiff` 0.11, deflate/LZW/fax only; JPEG-in-TIFF refused before any decode, Q-A02k); zoom menu (fit page, fit width, %), rotate (view only, Q-A02b), pan, page thumbnails.
+  - Pop out / Dock (button and Ctrl+Shift+D): one deferred egui viewport (Q-A02a) that follows the active form or inbox item, titled with the form's name and the company stripe; placement and zoom remembered per OS user in `doc-viewer.json`, clamped to visible monitors, brought back beside the main window when its monitor is gone (Q-A02c); closing it never touches the form. F6 moves focus between form and viewer (Q-A02g).
+  - Viewer everywhere: Enter Bill, Write Check (docked pane), receipt inbox, document tab, and new attachments on card charges (draft linked after save, save waits for uploads, Q-A02e) and register items ("Show document", Q-A02f).
+  - Control channel drives a second window (`viewport: doc_viewer` on every step, `state.doc_viewer`, per-window screenshots).
+  - HEIC research (owner, Q-292): no permissive decoder; the "save as JPG or PDF" tip stays (Q-A02d).
+  Acceptance (addenda/ADD-01-document-intake.md A02):
+  - [x] Formats, zoom, rotate, pan, thumbnails (WP-A tests; document-view scenario).
+  - [x] Pop out / Dock, one reused window following the active form, title and stripe, placement and zoom remembered, closing never affects the form (shell tests incl. two Shells on one store for restart, Q-A02j; doc_viewer scenario).
+  - [x] F6 and Ctrl+Shift+D in the keymap, Window menu and KEYBOARD.md; keymap conflict test.
+  - [x] Every attachment: bills, checks, card charges, register items (scenarios bill, write_check, card_charge, register, receipt_inbox; contract test for draft files linking onto a saved record).
+  - [x] Tests: doc_viewer scenario (pop out, follow, dock, F6, rotate, page, placement move); gone-monitor clamp (seeded 20k-case loop).
+  Reviews: fresh-eyes review (2 blocking: a JPEG-in-TIFF memory bomb and card-charge files lost when Save beat an upload; 6 should-fix), ui-verifier (toolbar overflow in narrow panels, Bill card cut off, 200% pop-out clipping, a clipping check that missed it). All fixed in one fix pass except those listed in Follow-ups from A02. ui-checks doc_viewer, bill, write_check, card_charge, register, receipt_inbox and document-view pass light and dark.
+  Agents: architect/opus, impl/opus (WP-A, WP-B, WP-C, WP-D, fix pass), review/opus, ui-verifier/opus.
 - 2026-10-26 — A03 (ADD-01) complete on `phase/A03-local-reading`; PR with auto-merge. Shipped:
   - `cl-docread` (rules: amounts, dates, header fields, kind, line tables, reconciliation checks, vendor and card matching, vendor layout templates, duplicate keys, AI amount gate) and the sandboxed `clientledger-docread` worker started by cl-host (protocol v3). Untrusted PDFs and pictures are parsed only in the worker or tesseract.
   - OCR: Tesseract 5.5.3 + Leptonica 1.87.0 built from pinned source by `xtask ocr-build` (no network code, linkage allowlist), `tessdata_fast` eng + osd and `tessdata_best` eng for a second read of unsure pages (`xtask ocr-models`, SHA-256 pinned); clean-up, orientation, levelling, OCR fallback for PDFs without a usable text layer.
